@@ -159,3 +159,37 @@ body {
 .theme-transition * {
   transition: background-color 200ms ease, border-color 200ms ease, color 200ms ease;
 }
+
+@keyframes fadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.results-enter {
+  animation: fadeSlideIn 260ms ease-out;
+}
+
+.raw-json-panel .raw-json-content {
+  grid-template-rows: 0fr;
+}
+
+.raw-json-panel[open] .raw-json-content {
+  grid-template-rows: 1fr;
+  margin-top: 0.5rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .results-enter {
+    animation: none;
+  }
+
+  .raw-json-panel .raw-json-content {
+    transition: none;
+  }
+}
