@@ -1,0 +1,18 @@
+name: PSA Ingest Cron
+
+on:
+  schedule:
+    - cron: "17 * * * *" # every hour at minute 17 (UTC)
+  workflow_dispatch: {}
+
+jobs:
+  call-ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call ingest endpoint
+        run: |
+          curl -sS -X POST "${{ secrets.INGEST_URL }}" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "x-vercel-protection-bypass: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}" \
+            -H "Content-Type: application/json" \
+            --data "{}"
