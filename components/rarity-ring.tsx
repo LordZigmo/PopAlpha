@@ -1,0 +1,45 @@
+import { useEffect, useState } from "react";
+
+export default function RarityRing({ score, compact = false }: { score: number | null; compact?: boolean }) {
+  const normalized = score === null ? 0 : Math.max(0, Math.min(100, score));
+  const ringRadius = compact ? 30 : 42;
+  const size = compact ? 82 : 110;
+  const center = size / 2;
+  const circumference = 2 * Math.PI * ringRadius;
+  const [revealed, setRevealed] = useState(false);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setRevealed(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, [score]);
+
+  const strokeOffset = revealed ? circumference * (1 - normalized / 100) : circumference;
+
+  return (
+    <div className={`glass density-card rounded-[var(--radius-card)] border-app border p-[var(--space-card)] ${compact ? "ring-compact" : ""}`}>
+      <p className="text-muted text-xs font-semibold uppercase tracking-[0.14em]">Scarcity Index</p>
+      <div className="mt-3 flex items-center gap-4">
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0">
+          <circle cx={center} cy={center} r={ringRadius} fill="none" stroke="var(--color-border)" strokeWidth={compact ? 8 : 9} />
+          <circle
+            cx={center}
+            cy={center}
+            r={ringRadius}
+            fill="none"
+            stroke="var(--color-accent)"
+            strokeWidth={compact ? 8 : 9}
+            strokeLinecap="round"
+            strokeDasharray={circumference}
+            strokeDashoffset={strokeOffset}
+            transform={`rotate(-90 ${center} ${center})`}
+            className="ring-meter"
+          />
+        </svg>
+        <div>
+          <p className="text-app text-2xl font-semibold tabular-nums">{score === null ? "—" : normalized}</p>
+          <p className="text-muted text-xs">0–100 heuristic (lower pop = higher rarity)</p>
+        </div>
+      </div>
+    </div>
+  );
+}

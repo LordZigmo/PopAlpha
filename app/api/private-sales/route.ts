@@ -10,6 +10,7 @@ type PrivateSaleRow = {
   currency: string;
   sold_at: string;
   fees: number | null;
+  payment_method: string | null;
   notes: string | null;
   created_at: string;
 };
@@ -33,7 +34,7 @@ export async function GET(req: Request) {
     const supabase = getServerSupabaseClient();
     const { data, error } = await supabase
       .from("private_sales")
-      .select("id, cert, price, currency, sold_at, fees, notes, created_at")
+      .select("id, cert, price, currency, sold_at, fees, payment_method, notes, created_at")
       .eq("cert", cert)
       .order("sold_at", { ascending: false })
       .returns<PrivateSaleRow[]>();
@@ -60,6 +61,7 @@ export async function POST(req: Request) {
   const cert = typeof payload.cert === "string" ? payload.cert.trim() : "";
   const soldAt = typeof payload.sold_at === "string" ? payload.sold_at.trim() : "";
   const currency = typeof payload.currency === "string" && payload.currency.trim() ? payload.currency.trim() : "USD";
+  const paymentMethod = typeof payload.payment_method === "string" && payload.payment_method.trim() ? payload.payment_method.trim() : null;
   const notes = typeof payload.notes === "string" && payload.notes.trim() ? payload.notes.trim() : null;
   const price = parseNumber(payload.price);
   const fees = payload.fees === null || payload.fees === undefined || payload.fees === "" ? null : parseNumber(payload.fees);
@@ -91,9 +93,10 @@ export async function POST(req: Request) {
         currency,
         sold_at: soldAt,
         fees,
+        payment_method: paymentMethod,
         notes,
       })
-      .select("id, cert, price, currency, sold_at, fees, notes, created_at")
+      .select("id, cert, price, currency, sold_at, fees, payment_method, notes, created_at")
       .single<PrivateSaleRow>();
 
     if (error) {
