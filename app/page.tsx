@@ -1,6 +1,7 @@
 "use client";
 
 import CertDetailsCard from "@/components/cert-details-card";
+import CertSkeleton from "@/components/cert-skeleton";
 import RawJsonPanel from "@/components/raw-json-panel";
 import { FormEvent, useState } from "react";
 import type { CertificateResponse } from "@/lib/psa/client";
@@ -48,11 +49,13 @@ export default function Home() {
 
   return (
     <main className="app-shell">
-      <div className="mx-auto max-w-4xl px-6 py-10">
-        <header className="mb-6">
-          <h1 className="text-3xl font-semibold text-neutral-900 dark:text-neutral-100">PopAlpha PSA Cert Lookup</h1>
+      <div className="mx-auto max-w-5xl px-6 py-12">
+        <header className="mb-7">
+          <h1 className="text-3xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-100 sm:text-4xl">
+            PopAlpha PSA Cert Lookup
+          </h1>
           <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-300">
-            Enter a PSA cert number. We check cache first, then fetch from PSA only when needed.
+            Enter a PSA cert number and review identity, scarcity, and provenance in one polished view.
           </p>
         </header>
 
@@ -61,19 +64,21 @@ export default function Home() {
             value={cert}
             onChange={(event) => setCert(event.target.value)}
             placeholder="Example: 12345678"
-            className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-base text-neutral-900 placeholder:text-neutral-400 focus:border-neutral-500 focus:outline-none dark:border-neutral-700 dark:bg-neutral-900/70 dark:text-neutral-100 dark:placeholder:text-neutral-500"
+            className="w-full rounded-xl border border-neutral-300 bg-white/85 px-4 py-2.5 text-base text-neutral-900 placeholder:text-neutral-400 transition focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-400/50 dark:border-neutral-700 dark:bg-neutral-900/70 dark:text-neutral-100 dark:placeholder:text-neutral-500 dark:focus:border-neutral-500 dark:focus:ring-neutral-500/40"
           />
           <button
             type="submit"
             disabled={loading}
-            className="rounded-lg border border-neutral-300 bg-neutral-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-neutral-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-neutral-700 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
+            className="rounded-xl border border-neutral-300 bg-neutral-900 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-neutral-700 focus:outline-none focus:ring-2 focus:ring-neutral-400/60 disabled:cursor-not-allowed disabled:opacity-60 dark:border-neutral-700 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200 dark:focus:ring-neutral-500/40"
           >
             {loading ? "Searching…" : "Search"}
           </button>
         </form>
 
+        {loading ? <CertSkeleton /> : null}
+
         {result ? (
-          <section className="mt-6">
+          <section className="results-enter mt-6">
             {result.ok && result.cert && result.data ? (
               <>
                 <CertDetailsCard
