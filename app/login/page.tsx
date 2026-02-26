@@ -36,16 +36,16 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center p-6 bg-neutral-50 text-neutral-900 dark:bg-neutral-950 dark:text-neutral-50">
-      <div className="w-full max-w-md rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
+    <main className="app-shell min-h-screen flex items-center justify-center p-6 text-app">
+      <div className="card w-full max-w-md rounded-2xl p-6">
         <div className="mb-5">
           <h1 className="text-3xl font-semibold tracking-tight">PopAlpha</h1>
-          <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-300">
+          <p className="text-muted mt-1 text-sm">
             Login via magic link.
           </p>
 
           {/* TEMP DEBUG — remove after redirect works */}
-          <p className="mt-2 text-xs text-neutral-500 break-all">
+          <p className="text-muted mt-2 break-all text-xs">
             Redirect: {redirectTo || "(empty)"}
           </p>
         </div>
@@ -59,24 +59,21 @@ export default function LoginPage() {
               placeholder="you@example.com"
               type="email"
               required
-              className="w-full rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm outline-none
-                         focus:ring-2 focus:ring-neutral-300 dark:border-neutral-800 dark:bg-neutral-950 dark:focus:ring-neutral-700"
+              className="input-themed w-full rounded-xl px-3 py-2 text-sm"
             />
           </div>
 
           <button
             type="submit"
             disabled={sending}
-            className="w-full rounded-xl bg-neutral-900 px-4 py-2.5 text-sm font-medium text-white
-                       hover:bg-neutral-800 disabled:opacity-60 disabled:cursor-not-allowed
-                       dark:bg-neutral-200 dark:text-neutral-900 dark:hover:bg-neutral-300"
+            className="btn-accent w-full rounded-xl px-4 py-2.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60"
           >
             {sending ? "Sending…" : "Send magic link"}
           </button>
         </form>
 
         {status && (
-          <p className="mt-4 text-sm text-neutral-700 dark:text-neutral-200">
+          <p className="text-app mt-4 text-sm">
             {status}
           </p>
         )}

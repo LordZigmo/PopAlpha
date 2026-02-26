@@ -58,7 +58,7 @@ export default function CallbackClient() {
 
   return (
     <div className="min-h-screen flex items-center justify-center p-8">
-      <div className="text-sm text-neutral-600 dark:text-neutral-300">
+      <div className="text-muted text-sm">
         Signing you in…
       </div>
     </div>
