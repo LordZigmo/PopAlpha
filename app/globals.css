@@ -1,0 +1,161 @@
+@import "tailwindcss";
+
+/* Tailwind v4: make `dark:` respond to the `.dark` class we toggle */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ===== Premium theme tokens ===== */
+:root {
+  /* page gradient anchors */
+  --bg0: #fbfbfc;
+  --bg1: #f6f7fb;
+  --fg: #0a0a0b;
+
+  /* surfaces */
+  --card: rgba(255, 255, 255, 0.92);
+  --card-border: rgba(10, 10, 11, 0.14);
+
+  --glass: rgba(255, 255, 255, 0.85);
+  --glass-border: rgba(10, 10, 11, 0.14);
+
+  /* shadows */
+  --shadow: 0 10px 30px rgba(10, 10, 11, 0.10);
+}
+
+/* IMPORTANT: no prefers-color-scheme media query here.
+   Dark mode is controlled ONLY via the `.dark` class. */
+.dark {
+  --bg0: #07080b;
+  --bg1: #0b0c10;
+  --fg: #f5f6f7;
+
+  --card: rgba(18, 18, 22, 0.62);
+  --card-border: rgba(255, 255, 255, 0.10);
+
+  --glass: rgba(14, 14, 18, 0.55);
+  --glass-border: rgba(255, 255, 255, 0.12);
+
+  --shadow: 0 12px 34px rgba(0, 0, 0, 0.55);
+}
+
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+body {
+  color: var(--fg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* ===== App background (gradient + subtle vignette + noise) ===== */
+.app-shell {
+  position: relative;
+  min-height: 100vh;
+  background:
+    radial-gradient(900px circle at 20% -10%, rgba(99, 102, 241, 0.12), transparent 55%),
+    radial-gradient(800px circle at 90% 0%, rgba(16, 185, 129, 0.10), transparent 60%),
+    radial-gradient(900px circle at 40% 120%, rgba(59, 130, 246, 0.10), transparent 60%),
+    linear-gradient(180deg, var(--bg0), var(--bg1));
+}
+
+.dark .app-shell {
+  background:
+    radial-gradient(900px circle at 20% -10%, rgba(99, 102, 241, 0.18), transparent 55%),
+    radial-gradient(800px circle at 90% 0%, rgba(16, 185, 129, 0.14), transparent 60%),
+    radial-gradient(900px circle at 40% 120%, rgba(59, 130, 246, 0.16), transparent 60%),
+    linear-gradient(180deg, var(--bg0), var(--bg1));
+}
+
+/* noise overlay (very subtle, makes it feel "designed") */
+.app-shell::before {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  opacity: 0.06;
+  mix-blend-mode: soft-light;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.55'/%3E%3C/svg%3E");
+}
+
+.dark .app-shell::before {
+  opacity: 0.10;
+}
+
+/* ===== Glass + card primitives ===== */
+.glass {
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* ===== Glow + lift ===== */
+.glow-card {
+  position: relative;
+  isolation: isolate;
+}
+
+.glow-card::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: 1.75rem;
+  z-index: -1;
+  opacity: 0;
+  transition: opacity 250ms ease;
+  background: radial-gradient(700px circle at 50% -20%, rgba(0, 0, 0, 0.10), transparent 60%);
+}
+
+.dark .glow-card::after {
+  background: radial-gradient(700px circle at 50% -20%, rgba(255, 255, 255, 0.12), transparent 60%);
+}
+
+.glow-card:hover::after {
+  opacity: 1;
+}
+
+.lift {
+  transition: transform 200ms ease, box-shadow 200ms ease, border-color 200ms ease;
+}
+
+.lift:hover {
+  transform: translateY(-2px);
+}
+
+/* ===== Positive P/L accent ===== */
+@keyframes glowPulse {
+  0% { box-shadow: 0 0 0 rgba(16, 185, 129, 0); }
+  50% { box-shadow: 0 0 28px rgba(16, 185, 129, 0.18); }
+  100% { box-shadow: 0 0 0 rgba(16, 185, 129, 0); }
+}
+
+.pulse-positive {
+  animation: glowPulse 2.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lift { transition: none; }
+  .pulse-positive { animation: none; }
+  .glow-card::after { transition: none; }
+}
+
+/* Smooth theme transitions only when toggling (ThemeProvider adds/removes briefly) */
+.theme-transition,
+.theme-transition * {
+  transition: background-color 200ms ease, border-color 200ms ease, color 200ms ease;
+}
