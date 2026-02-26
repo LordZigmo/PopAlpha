@@ -23,7 +23,7 @@ cp .env.example .env.local
 
 > Use `.env.local` for local development. That file is ignored by git and should stay on your machine.
 
-### 2) Fill in the required values
+### 2) Fill in the required values (for Next.js, use `.env.local`)
 
 Open `.env.local` and set these values:
 
@@ -109,8 +109,23 @@ If required server env vars are missing, expected error shape:
 ```json
 {
   "ok": false,
-  "error": "Server configuration error: missing Supabase server environment variables. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY."
+  "error": "Server configuration error: Missing required environment variable: SUPABASE_SERVICE_ROLE_KEY. Add it to your local env file and restart the dev server."
 }
 ```
 
 Run the same curl twice; second call should typically return `"cache_hit": true` if within 24 hours.
+
+
+## If you still see a server configuration error
+
+Check these 4 things in order:
+
+1. **File name/location**: your env file must be exactly `.env.local` in the project root (same folder as `package.json`).
+2. **Required server vars are present**:
+   - `SUPABASE_URL` (required for server routes)
+   - `SUPABASE_SERVICE_ROLE_KEY` (required, server-only)
+   - `NEXT_PUBLIC_SUPABASE_URL` is optional fallback only
+3. **You restarted the dev server** after editing `.env.local` (stop `npm run dev`, then start again).
+4. **No quotes or extra spaces** around values (example: `SUPABASE_URL=https://...`, not `SUPABASE_URL="https://..."`).
+
+Tip: server routes prefer `SUPABASE_URL`. If it is missing, code can fall back to `NEXT_PUBLIC_SUPABASE_URL`, but you should still set `SUPABASE_URL` explicitly for reliable local dev.
