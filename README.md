@@ -23,7 +23,7 @@ cp .env.example .env.local
 
 > Use `.env.local` for local development. That file is ignored by git and should stay on your machine.
 
-### 2) Fill in the required values
+### 2) Fill in the required values (for Next.js, use `.env.local`)
 
 Open `.env.local` and set these values:
 
@@ -122,8 +122,9 @@ Check these 4 things in order:
 
 1. **File name/location**: your env file must be exactly `.env.local` in the project root (same folder as `package.json`).
 2. **Required server vars are present**:
-   - `SUPABASE_URL` (project URL)
-   - `SUPABASE_SERVICE_ROLE_KEY` (service_role key)
+   - `SUPABASE_URL` (required for server routes)
+   - `SUPABASE_SERVICE_ROLE_KEY` (required, server-only)
+   - `NEXT_PUBLIC_SUPABASE_URL` is optional fallback only
 3. **You restarted the dev server** after editing `.env.local` (stop `npm run dev`, then start again).
 4. **No quotes or extra spaces** around values (example: `SUPABASE_URL=https://...`, not `SUPABASE_URL="https://..."`).
 
