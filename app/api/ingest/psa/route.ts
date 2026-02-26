@@ -14,8 +14,15 @@ export async function POST(req: Request) {
   }
 
   if (auth !== `Bearer ${secret}`) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json(
+      { ok: false, error: "Unauthorized" },
+      { status: 401 }
+    );
   }
 
-  return NextResponse.json({ ok: true, message: "PSA ingest stub OK" });
+  return NextResponse.json({
+    ok: true,
+    message: "PSA ingest stub OK",
+    now: new Date().toISOString(),
+  });
 }
