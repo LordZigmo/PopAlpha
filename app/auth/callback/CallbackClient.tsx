@@ -6,33 +6,33 @@ export default function CallbackClient() {
   useEffect(() => {
     (async () => {
       const { supabase } = await import("@/lib/supabaseClient");
+      const url = new URL(window.location.href);
 
-      // 1) If the URL has a hash token (#access_token=...), this will store the session.
-      // 2) If there's no token, it won't crash; we’ll just fall through.
-      try {
-        // @ts-expect-error getSessionFromUrl exists in supabase-js v2
-        const { data, error } = await supabase.auth.getSessionFromUrl({
-          storeSession: true,
-        });
-
-        if (error) {
-          // If it fails, send them to login
-          window.location.replace("/login");
-          return;
-        }
-
-        // If session exists after consuming URL, go to portfolio
-        if (data?.session) {
+      // If Supabase uses PKCE, you'll get ?code=...
+      const code = url.searchParams.get("code");
+      if (code) {
+        // exchanges code for a session and stores it
+        const { error } = await supabase.auth.exchangeCodeForSession(code);
+        if (!error) {
           window.location.replace("/portfolio");
           return;
         }
-      } catch {
-        // If method doesn't exist (rare), fallback to login
         window.location.replace("/login");
         return;
       }
 
-      // If nothing was in the URL, go to login
+      // Otherwise magic links often use #access_token=...
+      // This reads hash tokens and stores session
+      // @ts-expect-error supported by supabase-js v2
+      const { data, error } = await supabase.auth.getSessionFromUrl({
+        storeSession: true,
+      });
+
+      if (!error && data?.session) {
+        window.location.replace("/portfolio");
+        return;
+      }
+
       window.location.replace("/login");
     })();
   }, []);
