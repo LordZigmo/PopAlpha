@@ -16,25 +16,6 @@ function toErrorMessage(error: unknown): string {
   return String(error);
 }
 
-async function markRunFailed(
-  supabase: ReturnType<typeof createClient>,
-  runId: number,
-  errorText: string,
-  counters: IngestCounters
-): Promise<void> {
-  await supabase
-    .from("ingest_runs")
-    .update({
-      status: "failed",
-      ended_at: new Date().toISOString(),
-      items_fetched: counters.itemsFetched,
-      items_upserted: counters.itemsUpserted,
-      items_failed: counters.itemsFailed,
-      error_text: errorText,
-    })
-    .eq("id", runId);
-}
-
 export async function POST(req: Request) {
   const cronSecret = process.env.CRON_SECRET;
   const auth = req.headers.get("authorization") ?? "";
@@ -178,7 +159,17 @@ export async function POST(req: Request) {
   } catch (fatalError) {
     const errorMessage = toErrorMessage(fatalError);
 
-    await markRunFailed(supabase, run.id, errorMessage, counters);
+    await supabase
+      .from("ingest_runs")
+      .update({
+        status: "failed",
+        ended_at: new Date().toISOString(),
+        items_fetched: counters.itemsFetched,
+        items_upserted: counters.itemsUpserted,
+        items_failed: counters.itemsFailed,
+        error_text: errorMessage,
+      })
+      .eq("id", run.id);
 
     return NextResponse.json({ ok: false, error: errorMessage, run_id: run.id }, { status: 500 });
   }
