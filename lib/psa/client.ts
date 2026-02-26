@@ -1,11 +1,11 @@
-const PSA_BASE_URL = "https://api.psacard.com";
+const DEFAULT_PSA_BASE_URL = "https://api.psacard.com";
 // PSA Public API docs: GET /publicapi/cert/GetByCertNumber/{certNo}
 const CERTIFICATE_ENDPOINT_TEMPLATE = "/publicapi/cert/GetByCertNumber/{certNo}";
 
 const MAX_ATTEMPTS = 3;
 const INITIAL_BACKOFF_MS = 500;
 
-type ParsedCertificate = {
+export type ParsedCertificate = {
   cert_no: string;
   grade: string | null;
   label: string | null;
@@ -16,7 +16,7 @@ type ParsedCertificate = {
   image_url: string | null;
 };
 
-type CertificateResponse = {
+export type CertificateResponse = {
   parsed: ParsedCertificate;
   raw: unknown;
 };
@@ -61,7 +61,8 @@ function normalizePayload(raw: Record<string, unknown>): Record<string, unknown>
 }
 
 function buildCertificateUrl(certNo: string): string {
-  return `${PSA_BASE_URL}${CERTIFICATE_ENDPOINT_TEMPLATE.replace("{certNo}", encodeURIComponent(certNo))}`;
+  const baseUrl = (process.env.PSA_BASE_URL ?? DEFAULT_PSA_BASE_URL).replace(/\/$/, "");
+  return `${baseUrl}${CERTIFICATE_ENDPOINT_TEMPLATE.replace("{certNo}", encodeURIComponent(certNo))}`;
 }
 
 export async function getCertificate(certNo: string): Promise<CertificateResponse> {
