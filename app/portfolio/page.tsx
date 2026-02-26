@@ -34,6 +34,17 @@ function money(n: number) {
   });
 }
 
+function formatDate(dateString: string | null) {
+  if (!dateString) return "Unknown date";
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return "Unknown date";
+  return date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 export default function PortfolioPage() {
   const [loading, setLoading] = useState(true);
   const [email, setEmail] = useState<string | null>(null);
@@ -43,12 +54,10 @@ export default function PortfolioPage() {
   const [marketPrices, setMarketPrices] = useState<Record<string, number>>({});
   const [expanded, setExpanded] = useState<string | null>(null);
 
-  // Add Lot modal
   const [addOpen, setAddOpen] = useState(false);
   const [addErr, setAddErr] = useState<string | null>(null);
   const [addSaving, setAddSaving] = useState(false);
 
-  // form fields
   const [cardId, setCardId] = useState<string>("");
   const [grade, setGrade] = useState<string>("RAW");
   const [qty, setQty] = useState<number>(1);
@@ -91,7 +100,8 @@ export default function PortfolioPage() {
           avgCost: 0,
         });
       }
-      const g = grouped.get(key)!;
+      const g = grouped.get(key);
+      if (!g) continue;
       g.lots.push(h);
       g.totalQty += h.qty;
       g.costBasis += h.qty * Number(h.price_paid_usd);
@@ -120,6 +130,53 @@ export default function PortfolioPage() {
   const totalPnL = totalMarket - totalCost;
   const totalPct = totalCost > 0 ? (totalPnL / totalCost) * 100 : 0;
 
+  const salesHistory = useMemo(() => {
+    return [...holdings]
+      .sort((a, b) => {
+        const ad = a.acquired_on ? new Date(a.acquired_on).getTime() : 0;
+        const bd = b.acquired_on ? new Date(b.acquired_on).getTime() : 0;
+        return bd - ad;
+      })
+      .slice(0, 8)
+      .map((lot) => {
+        const key = `${lot.card_id}::${lot.grade}`;
+        const marketPrice = marketPrices[key] ?? 0;
+        const costEach = Number(lot.price_paid_usd);
+        return {
+          ...lot,
+          title: cardById.get(lot.card_id)?.name ?? "Unknown card",
+          spread: marketPrice - costEach,
+          marketPrice,
+        };
+      });
+  }, [holdings, marketPrices, cardById]);
+
+  const psaStats = useMemo(() => {
+    let totalUnits = 0;
+    let gradedUnits = 0;
+    let psa10Units = 0;
+    let psa9Units = 0;
+
+    for (const h of holdings) {
+      totalUnits += h.qty;
+      if (h.grade === "PSA10") psa10Units += h.qty;
+      if (h.grade === "PSA9") psa9Units += h.qty;
+      if (h.grade.startsWith("PSA")) gradedUnits += h.qty;
+    }
+
+    const psa10Rate = gradedUnits > 0 ? (psa10Units / gradedUnits) * 100 : 0;
+    const gradingCoverage = totalUnits > 0 ? (gradedUnits / totalUnits) * 100 : 0;
+
+    return {
+      totalUnits,
+      gradedUnits,
+      psa10Units,
+      psa9Units,
+      psa10Rate,
+      gradingCoverage,
+    };
+  }, [holdings]);
+
   async function loadAll() {
     setLoading(true);
 
@@ -141,7 +198,6 @@ export default function PortfolioPage() {
     const list = (cardsData ?? []) as Card[];
     setCards(list);
 
-    // default selected card
     if (!cardId && list.length > 0) setCardId(list[0].id);
 
     const { data: holdData } = await supabase
@@ -170,7 +226,6 @@ export default function PortfolioPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // close modal on ESC
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setAddOpen(false);
@@ -183,7 +238,6 @@ export default function PortfolioPage() {
     setAddErr(null);
     if (!cardId && cards.length > 0) setCardId(cards[0].id);
     setAddOpen(true);
-    // focus the modal container next tick
     setTimeout(() => modalRef.current?.focus(), 0);
   }
 
@@ -236,7 +290,6 @@ export default function PortfolioPage() {
       return;
     }
 
-    // reset lightweight fields; keep card/grade for speed
     setQty(1);
     setPricePaid(pricePaid);
     setAcquiredOn("");
@@ -250,260 +303,207 @@ export default function PortfolioPage() {
   if (loading) return <div className="p-8">Loading...</div>;
 
   const pnlClass = totalPnL >= 0 ? "text-emerald-600" : "text-rose-600";
-  const pnlBadge =
-    totalPnL >= 0
-      ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20"
-      : "bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/20";
 
   return (
-    <div className="app-shell">
-      {/* Sticky glass header */}
-      <div className="sticky top-0 z-40">
-        <div className="glass mx-auto max-w-[1020px] px-4 sm:px-6 py-4 mt-4 rounded-3xl">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-2xl grid place-items-center font-semibold text-sm bg-neutral-900 text-white dark:bg-neutral-200 dark:text-neutral-900">
-                  PA
-                </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <h1 className="text-lg sm:text-xl font-semibold leading-tight">
-                      PopAlpha
-                    </h1>
-                    <span className="text-[11px] px-2 py-0.5 rounded-full border border-neutral-200/70 dark:border-neutral-800/70 text-neutral-600 dark:text-neutral-300 bg-white/60 dark:bg-neutral-900/50">
-                      TCG anchor
-                    </span>
-                  </div>
-                  <p className="text-xs sm:text-sm text-neutral-500 dark:text-neutral-400 truncate">
-                    {email}
-                  </p>
-                </div>
+    <div className="app-shell px-4 py-6 sm:px-6 lg:px-10">
+      <div className="mx-auto max-w-[1200px] rounded-[2rem] border border-white/20 bg-[#2f2555] p-3 sm:p-5 shadow-[0_35px_80px_rgba(0,0,0,0.55)]">
+        <div className="relative overflow-hidden rounded-[1.8rem] border border-white/20 bg-gradient-to-br from-[#a441d6] via-[#6e4ac6] to-[#2f74d0] p-5 sm:p-7">
+          <div className="absolute -left-16 -top-16 h-64 w-64 rounded-full bg-orange-400/20 blur-3xl" />
+          <div className="absolute -right-20 -bottom-20 h-72 w-72 rounded-full bg-sky-300/20 blur-3xl" />
+
+          <div className="relative z-10 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-xl bg-white/20 grid place-items-center font-bold">PA</div>
+              <div>
+                <p className="text-xs text-white/75">Sales Command Center</p>
+                <p className="font-semibold">PopAlpha Portfolio</p>
               </div>
             </div>
-
             <div className="flex items-center gap-2">
               <SettingsMenu />
+              <button
+                onClick={openAddLot}
+                className="rounded-xl bg-white/20 px-4 py-2 text-sm font-medium hover:bg-white/30 transition"
+              >
+                Add lot
+              </button>
               <button
                 onClick={async () => {
                   await supabase.auth.signOut();
                   window.location.href = "/login";
                 }}
-                className="text-sm px-4 py-2 rounded-2xl bg-neutral-900 text-white hover:bg-neutral-800 transition
-                           dark:bg-neutral-200 dark:text-neutral-900 dark:hover:bg-neutral-300"
+                className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-[#2b2553] hover:bg-white/90 transition"
               >
                 Sign out
               </button>
             </div>
           </div>
 
-          {/* mini subheader */}
-          <div className="mt-4 flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
-            <span>Portfolio</span>
-            <span>Updated from snapshots</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Content */}
-      <div className="mx-auto max-w-[1020px] px-4 sm:px-6 py-6 space-y-6 pb-24">
-        {/* KPI row */}
-        <div className="grid sm:grid-cols-3 gap-4">
-          <div className="glow-card lift card rounded-3xl p-5">
-            <p className="text-xs font-medium tracking-wide text-neutral-500 dark:text-neutral-400">
-              COST BASIS
-            </p>
-            <p className="mt-2 text-2xl font-semibold">${money(totalCost)}</p>
-            <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
-              What you’ve paid (total)
-            </p>
-          </div>
-
-          <div className="glow-card lift card rounded-3xl p-5">
-            <p className="text-xs font-medium tracking-wide text-neutral-500 dark:text-neutral-400">
-              MARKET VALUE
-            </p>
-            <p className="mt-2 text-2xl font-semibold">${money(totalMarket)}</p>
-            <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
-              TCGplayer snapshot
-            </p>
-          </div>
-
-          <div
-            className={`glow-card lift card rounded-3xl p-5 ${
-              totalPnL >= 0 ? "pulse-positive" : ""
-            }`}
-          >
-            <p className="text-xs font-medium tracking-wide text-neutral-500 dark:text-neutral-400">
-              P / L
-            </p>
-            <div className="mt-2 flex items-baseline gap-2">
-              <p className={`text-2xl font-semibold ${pnlClass}`}>
-                ${money(totalPnL)}
-              </p>
-              <span className={`text-xs px-2 py-1 rounded-full border ${pnlBadge}`}>
-                {totalPct.toFixed(2)}%
-              </span>
-            </div>
-            <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
-              Unrealized
-            </p>
-          </div>
-        </div>
-
-        {/* Positions list */}
-        <div className="card rounded-3xl overflow-hidden">
-          <div className="px-5 py-4 border-b border-neutral-200/70 dark:border-neutral-800/70 flex items-center justify-between">
-            <div>
-              <h2 className="text-lg font-semibold">Positions</h2>
-              <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                Tap a card to expand lots
-              </p>
-            </div>
-            <span className="text-xs text-neutral-500 dark:text-neutral-400">
-              {positions.length} position{positions.length === 1 ? "" : "s"}
-            </span>
-          </div>
-
-          <div className="p-3 sm:p-4 space-y-3">
-            {positions.map((p) => {
-              const market = marketPrices[p.key] ?? 0;
-              const marketValue = market * p.totalQty;
-              const pnl = marketValue - p.costBasis;
-              const pnlPct = p.costBasis > 0 ? (pnl / p.costBasis) * 100 : 0;
-
-              const c = cardById.get(p.card_id);
-              const title = c ? c.name : p.card_id;
-              const subtitle = c ? `${c.set} • ${c.year}` : "—";
-
-              const rowPnlClass = pnl >= 0 ? "text-emerald-600" : "text-rose-600";
-
-              return (
-                <div
-                  key={p.key}
-                  className="glow-card lift rounded-3xl overflow-hidden border border-neutral-200/70 dark:border-neutral-800/70 bg-white/55 dark:bg-neutral-900/40"
-                >
-                  <button
-                    onClick={() => setExpanded(expanded === p.key ? null : p.key)}
-                    className="w-full text-left px-4 py-4 hover:bg-white/40 dark:hover:bg-neutral-900/60 transition"
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <div className="font-semibold truncate">{title}</div>
-                          <span className="text-[11px] px-2 py-0.5 rounded-full border border-neutral-200/70 dark:border-neutral-800/70 text-neutral-600 dark:text-neutral-300 bg-white/50 dark:bg-neutral-900/40">
-                            {p.grade}
-                          </span>
-                        </div>
-                        <div className="mt-1 text-xs text-neutral-500 dark:text-neutral-400 truncate">
-                          {subtitle}
-                        </div>
-                      </div>
-
-                      <div className="text-right shrink-0">
-                        <div className={`text-sm font-semibold ${rowPnlClass}`}>
-                          ${money(pnl)}{" "}
-                          <span className="text-xs">({pnlPct.toFixed(1)}%)</span>
-                        </div>
-                        <div className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
-                          {p.totalQty} × {market ? `$${money(market)}` : "—"}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
-                      <div className="rounded-2xl bg-white/45 dark:bg-neutral-900/40 border border-neutral-200/60 dark:border-neutral-800/60 p-2">
-                        <div className="text-neutral-500 dark:text-neutral-400">
-                          Avg Paid
-                        </div>
-                        <div className="mt-1 font-medium">${money(p.avgCost)}</div>
-                      </div>
-                      <div className="rounded-2xl bg-white/45 dark:bg-neutral-900/40 border border-neutral-200/60 dark:border-neutral-800/60 p-2">
-                        <div className="text-neutral-500 dark:text-neutral-400">
-                          Cost
-                        </div>
-                        <div className="mt-1 font-medium">${money(p.costBasis)}</div>
-                      </div>
-                      <div className="rounded-2xl bg-white/45 dark:bg-neutral-900/40 border border-neutral-200/60 dark:border-neutral-800/60 p-2">
-                        <div className="text-neutral-500 dark:text-neutral-400">
-                          Market
-                        </div>
-                        <div className="mt-1 font-medium">
-                          {market ? `$${money(marketValue)}` : "—"}
-                        </div>
-                      </div>
-                    </div>
-                  </button>
-
-                  {expanded === p.key && (
-                    <div className="px-4 pb-4 pt-0 border-t border-neutral-200/70 dark:border-neutral-800/70 bg-white/35 dark:bg-neutral-950/25">
-                      <div className="pt-3 text-[11px] font-semibold tracking-wide text-neutral-500 dark:text-neutral-400">
-                        LOTS
-                      </div>
-
-                      <div className="mt-2 space-y-2">
-                        {p.lots.map((lot) => (
-                          <div
-                            key={lot.id}
-                            className="flex items-center justify-between gap-3 rounded-2xl border border-neutral-200/70 bg-white/60 p-3
-                                       dark:border-neutral-800/70 dark:bg-neutral-900/55"
-                          >
-                            <div className="text-sm">
-                              <span className="font-medium">{lot.qty}×</span> @ $
-                              {money(Number(lot.price_paid_usd))}
-                              {lot.venue ? (
-                                <span className="ml-2 text-xs text-neutral-500 dark:text-neutral-400">
-                                  • {lot.venue}
-                                </span>
-                              ) : null}
-                            </div>
-                            <div className="text-xs text-neutral-500 dark:text-neutral-400">
-                              {lot.acquired_on ?? "—"}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+          <div className="relative z-10 mt-6 grid gap-4 lg:grid-cols-[1.4fr_1fr]">
+            <div className="rounded-3xl border border-white/20 bg-black/20 p-5">
+              <p className="text-sm text-white/80">Collection Performance</p>
+              <div className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+                <div>
+                  <p className="text-white/60">Total Cost</p>
+                  <p className="mt-1 text-xl font-semibold">${money(totalCost)}</p>
                 </div>
-              );
-            })}
-
-            {positions.length === 0 && (
-              <div className="px-4 py-10 text-center text-sm text-neutral-500 dark:text-neutral-400">
-                No positions yet.
+                <div>
+                  <p className="text-white/60">Market Value</p>
+                  <p className="mt-1 text-xl font-semibold">${money(totalMarket)}</p>
+                </div>
+                <div>
+                  <p className="text-white/60">Unrealized P/L</p>
+                  <p className={`mt-1 text-xl font-semibold ${pnlClass}`}>${money(totalPnL)}</p>
+                </div>
+                <div>
+                  <p className="text-white/60">P/L %</p>
+                  <p className={`mt-1 text-xl font-semibold ${pnlClass}`}>{totalPct.toFixed(2)}%</p>
+                </div>
               </div>
-            )}
+              <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
+                <div className="rounded-2xl border border-white/20 bg-white/10 p-3">
+                  <p className="text-xs text-white/70">PSA Graded Units</p>
+                  <p className="mt-1 text-2xl font-semibold">{psaStats.gradedUnits}</p>
+                </div>
+                <div className="rounded-2xl border border-white/20 bg-white/10 p-3">
+                  <p className="text-xs text-white/70">PSA10 Count</p>
+                  <p className="mt-1 text-2xl font-semibold">{psaStats.psa10Units}</p>
+                </div>
+                <div className="rounded-2xl border border-white/20 bg-white/10 p-3 col-span-2 sm:col-span-1">
+                  <p className="text-xs text-white/70">PSA10 Rate</p>
+                  <p className="mt-1 text-2xl font-semibold">{psaStats.psa10Rate.toFixed(1)}%</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-white/20 bg-black/20 p-5">
+              <p className="text-sm text-white/70">Account Snapshot</p>
+              <h2 className="mt-2 text-3xl font-bold leading-tight">{email ?? "Signed in user"}</h2>
+              <div className="mt-4 space-y-3 text-sm">
+                <div className="rounded-2xl border border-white/20 bg-white/10 p-3 flex items-center justify-between">
+                  <span className="text-white/70">Sales History Rows</span>
+                  <span className="font-semibold">{salesHistory.length}</span>
+                </div>
+                <div className="rounded-2xl border border-white/20 bg-white/10 p-3 flex items-center justify-between">
+                  <span className="text-white/70">Total Units</span>
+                  <span className="font-semibold">{psaStats.totalUnits}</span>
+                </div>
+                <div className="rounded-2xl border border-white/20 bg-white/10 p-3 flex items-center justify-between">
+                  <span className="text-white/70">Grading Coverage</span>
+                  <span className="font-semibold">{psaStats.gradingCoverage.toFixed(1)}%</span>
+                </div>
+                <div className="rounded-2xl border border-white/20 bg-white/10 p-3 flex items-center justify-between">
+                  <span className="text-white/70">PSA9 Count</span>
+                  <span className="font-semibold">{psaStats.psa9Units}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="relative z-10 mt-6 rounded-3xl border border-white/20 bg-black/20 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold">Sales History</h3>
+                <p className="text-xs text-white/65">Most recent lot activity with PSA-aware spread tracking.</p>
+              </div>
+              <span className="text-xs text-white/70">Latest 8 rows</span>
+            </div>
+
+            <div className="mt-4 overflow-x-auto">
+              <table className="min-w-full text-left text-sm">
+                <thead className="text-xs uppercase text-white/65">
+                  <tr>
+                    <th className="py-2 pr-4">Date</th>
+                    <th className="py-2 pr-4">Card</th>
+                    <th className="py-2 pr-4">Grade</th>
+                    <th className="py-2 pr-4">Qty</th>
+                    <th className="py-2 pr-4">Cost / Unit</th>
+                    <th className="py-2 pr-4">Market / Unit</th>
+                    <th className="py-2 pr-4">Spread</th>
+                    <th className="py-2">Venue</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {salesHistory.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="py-5 text-center text-white/65">
+                        No sales history yet. Click <span className="font-semibold">Add lot</span> to create your first row.
+                      </td>
+                    </tr>
+                  ) : (
+                    salesHistory.map((row) => (
+                      <tr key={row.id} className="border-t border-white/10">
+                        <td className="py-3 pr-4">{formatDate(row.acquired_on)}</td>
+                        <td className="py-3 pr-4">{row.title}</td>
+                        <td className="py-3 pr-4">{row.grade}</td>
+                        <td className="py-3 pr-4">{row.qty}</td>
+                        <td className="py-3 pr-4">${money(Number(row.price_paid_usd))}</td>
+                        <td className="py-3 pr-4">${money(row.marketPrice)}</td>
+                        <td className={`py-3 pr-4 font-semibold ${row.spread >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
+                          {row.spread >= 0 ? "+" : ""}${money(row.spread)}
+                        </td>
+                        <td className="py-3">{row.venue ?? "-"}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="relative z-10 mt-4 rounded-3xl border border-white/20 bg-black/20 p-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold">Positions</h3>
+              <span className="text-xs text-white/70">{positions.length} tracked</span>
+            </div>
+            <div className="mt-3 space-y-2">
+              {positions.map((p) => {
+                const market = marketPrices[p.key] ?? 0;
+                const marketValue = market * p.totalQty;
+                const pnl = marketValue - p.costBasis;
+                const c = cardById.get(p.card_id);
+                return (
+                  <div key={p.key} className="rounded-2xl border border-white/15 bg-white/5">
+                    <button
+                      onClick={() => setExpanded(expanded === p.key ? null : p.key)}
+                      className="w-full px-4 py-3 text-left"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="font-semibold">{c?.name ?? p.card_id}</p>
+                          <p className="text-xs text-white/65">{c ? `${c.set} • ${c.year}` : "Card"} • {p.grade}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-sm">Qty {p.totalQty}</p>
+                          <p className={`text-sm font-semibold ${pnl >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
+                            {pnl >= 0 ? "+" : ""}${money(pnl)}
+                          </p>
+                        </div>
+                      </div>
+                    </button>
+                    {expanded === p.key && (
+                      <div className="border-t border-white/10 px-4 py-3 text-xs text-white/80">
+                        Avg cost ${money(p.avgCost)} • Market ${money(market)} • Basis ${money(p.costBasis)}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Floating Action Button */}
-      <button
-        onClick={openAddLot}
-        className="fixed bottom-6 right-6 z-50 h-12 px-4 rounded-2xl flex items-center gap-2
-                   bg-neutral-900 text-white shadow-xl hover:bg-neutral-800 transition
-                   dark:bg-neutral-200 dark:text-neutral-900 dark:hover:bg-neutral-300"
-        aria-label="Add lot"
-      >
-        <span className="text-lg leading-none">＋</span>
-        <span className="text-sm font-medium">Add Lot</span>
-      </button>
-
-      {/* Add Lot Modal (bottom sheet on mobile, dialog on desktop) */}
       {addOpen && (
         <div
           className="fixed inset-0 z-[60]"
           aria-hidden={false}
           onMouseDown={(e) => {
-            // click outside closes
             if (e.target === e.currentTarget) setAddOpen(false);
           }}
         >
-          {/* Backdrop */}
           <div className="absolute inset-0 bg-black/30 backdrop-blur-[2px]" />
 
-          {/* Sheet/Dialog */}
           <div className="absolute inset-x-0 bottom-0 sm:inset-0 sm:flex sm:items-center sm:justify-center">
             <div
               ref={modalRef}
@@ -512,22 +512,17 @@ export default function PortfolioPage() {
               aria-modal="true"
               className="relative w-full sm:max-w-lg outline-none"
             >
-              <div
-                className="glass rounded-t-3xl sm:rounded-3xl px-5 py-5 sm:p-6
-                           border border-neutral-200/50 dark:border-neutral-800/60
-                           translate-y-0"
-              >
+              <div className="glass rounded-t-3xl sm:rounded-3xl px-5 py-5 sm:p-6 border border-neutral-200/50 dark:border-neutral-800/60 translate-y-0">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <h3 className="text-lg font-semibold">Add Lot</h3>
                     <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
-                      Creates a purchase lot under an existing card + grade.
+                      This creates a new row in your sales history and position tracking.
                     </p>
                   </div>
                   <button
                     onClick={() => setAddOpen(false)}
-                    className="h-9 w-9 rounded-2xl grid place-items-center
-                               hover:bg-neutral-100/70 dark:hover:bg-neutral-800/60 transition"
+                    className="h-9 w-9 rounded-2xl grid place-items-center hover:bg-neutral-100/70 dark:hover:bg-neutral-800/60 transition"
                     aria-label="Close"
                   >
                     ✕
@@ -542,16 +537,11 @@ export default function PortfolioPage() {
 
                 <form onSubmit={addLot} className="mt-5 space-y-4">
                   <div className="space-y-2">
-                    <label className="text-xs font-medium text-neutral-600 dark:text-neutral-300">
-                      Card
-                    </label>
+                    <label className="text-xs font-medium text-neutral-600 dark:text-neutral-300">Card</label>
                     <select
                       value={cardId}
                       onChange={(e) => setCardId(e.target.value)}
-                      className="w-full rounded-2xl px-3 py-3 text-sm
-                                 bg-white/70 dark:bg-neutral-900/50
-                                 border border-neutral-200/70 dark:border-neutral-800/70
-                                 focus:outline-none focus:ring-2 focus:ring-neutral-900/20 dark:focus:ring-white/15"
+                      className="w-full rounded-2xl px-3 py-3 text-sm bg-white/70 dark:bg-neutral-900/50 border border-neutral-200/70 dark:border-neutral-800/70 focus:outline-none focus:ring-2 focus:ring-neutral-900/20 dark:focus:ring-white/15"
                     >
                       {cards.map((c) => (
                         <option key={c.id} value={c.id}>
@@ -563,16 +553,11 @@ export default function PortfolioPage() {
 
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-2">
-                      <label className="text-xs font-medium text-neutral-600 dark:text-neutral-300">
-                        Grade
-                      </label>
+                      <label className="text-xs font-medium text-neutral-600 dark:text-neutral-300">Grade</label>
                       <select
                         value={grade}
                         onChange={(e) => setGrade(e.target.value)}
-                        className="w-full rounded-2xl px-3 py-3 text-sm
-                                   bg-white/70 dark:bg-neutral-900/50
-                                   border border-neutral-200/70 dark:border-neutral-800/70
-                                   focus:outline-none focus:ring-2 focus:ring-neutral-900/20 dark:focus:ring-white/15"
+                        className="w-full rounded-2xl px-3 py-3 text-sm bg-white/70 dark:bg-neutral-900/50 border border-neutral-200/70 dark:border-neutral-800/70 focus:outline-none focus:ring-2 focus:ring-neutral-900/20 dark:focus:ring-white/15"
                       >
                         <option value="RAW">RAW</option>
                         <option value="PSA9">PSA9</option>
@@ -581,68 +566,48 @@ export default function PortfolioPage() {
                     </div>
 
                     <div className="space-y-2">
-                      <label className="text-xs font-medium text-neutral-600 dark:text-neutral-300">
-                        Qty
-                      </label>
+                      <label className="text-xs font-medium text-neutral-600 dark:text-neutral-300">Qty</label>
                       <input
                         type="number"
                         min={1}
                         value={qty}
                         onChange={(e) => setQty(Number(e.target.value))}
-                        className="w-full rounded-2xl px-3 py-3 text-sm
-                                   bg-white/70 dark:bg-neutral-900/50
-                                   border border-neutral-200/70 dark:border-neutral-800/70
-                                   focus:outline-none focus:ring-2 focus:ring-neutral-900/20 dark:focus:ring-white/15"
+                        className="w-full rounded-2xl px-3 py-3 text-sm bg-white/70 dark:bg-neutral-900/50 border border-neutral-200/70 dark:border-neutral-800/70 focus:outline-none focus:ring-2 focus:ring-neutral-900/20 dark:focus:ring-white/15"
                       />
                     </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-2">
-                      <label className="text-xs font-medium text-neutral-600 dark:text-neutral-300">
-                        Price paid (per unit)
-                      </label>
+                      <label className="text-xs font-medium text-neutral-600 dark:text-neutral-300">Price paid (per unit)</label>
                       <input
                         type="number"
                         min={0}
                         step="0.01"
                         value={pricePaid}
                         onChange={(e) => setPricePaid(Number(e.target.value))}
-                        className="w-full rounded-2xl px-3 py-3 text-sm
-                                   bg-white/70 dark:bg-neutral-900/50
-                                   border border-neutral-200/70 dark:border-neutral-800/70
-                                   focus:outline-none focus:ring-2 focus:ring-neutral-900/20 dark:focus:ring-white/15"
+                        className="w-full rounded-2xl px-3 py-3 text-sm bg-white/70 dark:bg-neutral-900/50 border border-neutral-200/70 dark:border-neutral-800/70 focus:outline-none focus:ring-2 focus:ring-neutral-900/20 dark:focus:ring-white/15"
                       />
                     </div>
 
                     <div className="space-y-2">
-                      <label className="text-xs font-medium text-neutral-600 dark:text-neutral-300">
-                        Acquired on (optional)
-                      </label>
+                      <label className="text-xs font-medium text-neutral-600 dark:text-neutral-300">Acquired on (optional)</label>
                       <input
                         type="date"
                         value={acquiredOn}
                         onChange={(e) => setAcquiredOn(e.target.value)}
-                        className="w-full rounded-2xl px-3 py-3 text-sm
-                                   bg-white/70 dark:bg-neutral-900/50
-                                   border border-neutral-200/70 dark:border-neutral-800/70
-                                   focus:outline-none focus:ring-2 focus:ring-neutral-900/20 dark:focus:ring-white/15"
+                        className="w-full rounded-2xl px-3 py-3 text-sm bg-white/70 dark:bg-neutral-900/50 border border-neutral-200/70 dark:border-neutral-800/70 focus:outline-none focus:ring-2 focus:ring-neutral-900/20 dark:focus:ring-white/15"
                       />
                     </div>
                   </div>
 
                   <div className="space-y-2">
-                    <label className="text-xs font-medium text-neutral-600 dark:text-neutral-300">
-                      Venue (optional)
-                    </label>
+                    <label className="text-xs font-medium text-neutral-600 dark:text-neutral-300">Venue (optional)</label>
                     <input
                       value={venue}
                       onChange={(e) => setVenue(e.target.value)}
                       placeholder="eBay, local shop, WhatNot…"
-                      className="w-full rounded-2xl px-3 py-3 text-sm
-                                 bg-white/70 dark:bg-neutral-900/50
-                                 border border-neutral-200/70 dark:border-neutral-800/70
-                                 focus:outline-none focus:ring-2 focus:ring-neutral-900/20 dark:focus:ring-white/15"
+                      className="w-full rounded-2xl px-3 py-3 text-sm bg-white/70 dark:bg-neutral-900/50 border border-neutral-200/70 dark:border-neutral-800/70 focus:outline-none focus:ring-2 focus:ring-neutral-900/20 dark:focus:ring-white/15"
                     />
                   </div>
 
@@ -650,8 +615,7 @@ export default function PortfolioPage() {
                     <button
                       type="button"
                       onClick={() => setAddOpen(false)}
-                      className="px-4 py-3 rounded-2xl text-sm border border-neutral-200/70 bg-white/60 hover:bg-white/80 transition
-                                 dark:border-neutral-800/70 dark:bg-neutral-900/50 dark:hover:bg-neutral-900/70"
+                      className="px-4 py-3 rounded-2xl text-sm border border-neutral-200/70 bg-white/60 hover:bg-white/80 transition dark:border-neutral-800/70 dark:bg-neutral-900/50 dark:hover:bg-neutral-900/70"
                     >
                       Cancel
                     </button>
@@ -659,21 +623,14 @@ export default function PortfolioPage() {
                     <button
                       type="submit"
                       disabled={addSaving}
-                      className="px-5 py-3 rounded-2xl text-sm font-medium bg-neutral-900 text-white hover:bg-neutral-800 transition
-                                 disabled:opacity-60 disabled:cursor-not-allowed
-                                 dark:bg-neutral-200 dark:text-neutral-900 dark:hover:bg-neutral-300"
+                      className="px-5 py-3 rounded-2xl text-sm font-medium bg-neutral-900 text-white hover:bg-neutral-800 transition disabled:opacity-60 disabled:cursor-not-allowed dark:bg-neutral-200 dark:text-neutral-900 dark:hover:bg-neutral-300"
                     >
                       {addSaving ? "Saving…" : "Add Lot"}
                     </button>
                   </div>
                 </form>
-
-                <div className="mt-4 text-[11px] text-neutral-500 dark:text-neutral-400">
-                  Tip: Keep the same card selected while entering multiple lots.
-                </div>
               </div>
 
-              {/* iOS-style grab handle (mobile only) */}
               <div className="sm:hidden absolute -top-3 left-1/2 -translate-x-1/2 h-1.5 w-12 rounded-full bg-white/60 dark:bg-neutral-800/80" />
             </div>
           </div>
