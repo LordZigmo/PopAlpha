@@ -48,7 +48,7 @@ export async function POST(req: Request) {
   // 1️⃣ Create ingest run record
   const { data: run, error: runError } = await supabase
     .from("ingest_runs")
-    .insert({ source: "psa", status: "started" })
+    .insert({ source: "psa", job: "psa_ingest", status: "started" })
     .select()
     .single();
 
