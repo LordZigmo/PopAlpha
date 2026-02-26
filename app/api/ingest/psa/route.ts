@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { getCertificate } from "@/lib/psa/client";
+import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import { getRequiredEnv } from "@/lib/env";
 
 export const runtime = "nodejs";
 
@@ -17,45 +18,32 @@ function toErrorMessage(error: unknown): string {
 }
 
 export async function POST(req: Request) {
-  const cronSecret = process.env.CRON_SECRET;
-  const auth = req.headers.get("authorization") ?? "";
-
-  if (!cronSecret) {
-    return NextResponse.json(
-      { ok: false, error: "Missing CRON_SECRET env var" },
-      { status: 500 }
-    );
+  let cronSecret: string;
+  try {
+    cronSecret = getRequiredEnv("CRON_SECRET");
+  } catch {
+    return NextResponse.json({ ok: false, error: "Missing CRON_SECRET env var" }, { status: 500 });
   }
 
+  const auth = req.headers.get("authorization") ?? "";
   if (auth !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  const supabaseUrl = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!supabaseUrl) {
+  let supabase;
+  try {
+    supabase = getServerSupabaseClient();
+  } catch (error) {
+    const details = error instanceof Error ? error.message : "Missing server Supabase environment configuration.";
     return NextResponse.json(
       {
         ok: false,
-        error:
-          "Missing Supabase URL env var. Set SUPABASE_URL or NEXT_PUBLIC_SUPABASE_URL in Vercel.",
+        error: `Server configuration error: ${details}`,
       },
       { status: 500 }
     );
   }
 
-  if (!serviceKey) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "Missing SUPABASE_SERVICE_ROLE_KEY env var in Vercel (server-only).",
-      },
-      { status: 500 }
-    );
-  }
-
-  const supabase = createClient(supabaseUrl, serviceKey);
   const counters: IngestCounters = {
     itemsFetched: 0,
     itemsUpserted: 0,

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { type SupabaseClient } from "@supabase/supabase-js";
 import { getCertificate, type CertificateResponse } from "@/lib/psa/client";
+import { getServerSupabaseClient } from "@/lib/supabaseServer";
 
 export const runtime = "nodejs";
 
@@ -22,7 +23,7 @@ function sanitizeCert(cert: string | null): string {
 }
 
 async function logLookup(params: {
-  supabase: SupabaseClient<any, "public", any>;
+  supabase: SupabaseClient;
   cert: string;
   cacheHit: boolean;
   status: "success" | "error";
@@ -46,21 +47,19 @@ export async function GET(req: Request) {
     );
   }
 
-  const supabaseUrl = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!supabaseUrl || !serviceKey) {
+  let supabase: SupabaseClient;
+  try {
+    supabase = getServerSupabaseClient();
+  } catch (error) {
+    const details = error instanceof Error ? error.message : "Missing server Supabase environment configuration.";
     return NextResponse.json(
       {
         ok: false,
-        error:
-          "Missing server Supabase env vars. Set SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL) and SUPABASE_SERVICE_ROLE_KEY.",
+        error: `Server configuration error: ${details}`,
       },
       { status: 500 }
     );
   }
-
-  const supabase = createClient(supabaseUrl, serviceKey);
 
   try {
     const { data: cachedRow, error: cacheReadError } = await supabase
