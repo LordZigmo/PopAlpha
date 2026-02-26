@@ -4,37 +4,56 @@ import { useEffect } from "react";
 
 export default function CallbackClient() {
   useEffect(() => {
+    let cleanup: (() => void) | undefined;
+    let timeout: number | undefined;
+
     (async () => {
       const { supabase } = await import("@/lib/supabaseClient");
+
+      const go = (path: string) => window.location.replace(path);
+
+      // 1) If session already exists, we're done.
+      const { data: sess } = await supabase.auth.getSession();
+      if (sess.session) {
+        go("/portfolio");
+        return;
+      }
+
       const url = new URL(window.location.href);
 
-      // If Supabase uses PKCE, you'll get ?code=...
+      // 2) If PKCE code exists, exchange it.
       const code = url.searchParams.get("code");
       if (code) {
-        // exchanges code for a session and stores it
         const { error } = await supabase.auth.exchangeCodeForSession(code);
         if (!error) {
-          window.location.replace("/portfolio");
+          go("/portfolio");
           return;
         }
-        window.location.replace("/login");
+        go("/login");
         return;
       }
 
-      // Otherwise magic links often use #access_token=...
-      // This reads hash tokens and stores session
-      // @ts-expect-error supported by supabase-js v2
-      const { data, error } = await supabase.auth.getSessionFromUrl({
-        storeSession: true,
+      // 3) Otherwise, wait briefly for Supabase to finish storing session
+      const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+        if (event === "SIGNED_IN") {
+          go("/portfolio");
+        }
       });
 
-      if (!error && data?.session) {
-        window.location.replace("/portfolio");
-        return;
-      }
+      cleanup = () => sub.subscription.unsubscribe();
 
-      window.location.replace("/login");
+      // Fail-safe: if nothing happens, bounce to login (or portfolio)
+      timeout = window.setTimeout(async () => {
+        const { data: sess2 } = await supabase.auth.getSession();
+        if (sess2.session) go("/portfolio");
+        else go("/login");
+      }, 4000);
     })();
+
+    return () => {
+      if (cleanup) cleanup();
+      if (timeout) window.clearTimeout(timeout);
+    };
   }, []);
 
   return (
