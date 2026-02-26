@@ -23,6 +23,8 @@ type PrivateSale = {
   created_at: string;
 };
 
+type TabKey = "overview" | "market" | "private" | "raw";
+
 function normalizeRaw(raw: unknown): Record<string, unknown> {
   if (!raw || typeof raw !== "object") return {};
 

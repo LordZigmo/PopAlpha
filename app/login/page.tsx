@@ -2,18 +2,14 @@
 
 import { useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import { getSiteUrl } from "@/lib/site-url";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<string>("");
   const [sending, setSending] = useState(false);
 
-  const redirectTo =
-    process.env.NEXT_PUBLIC_SITE_URL
-      ? `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`
-      : typeof window !== "undefined"
-        ? `${window.location.origin}/auth/callback`
-        : "";
+  const redirectTo = `${getSiteUrl()}/auth/callback`;
 
   async function sendLink(e: React.FormEvent) {
     e.preventDefault();

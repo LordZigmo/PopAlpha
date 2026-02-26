@@ -47,10 +47,16 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=<your_supabase_anon_key>
 # Existing app secrets (used by other routes)
 CRON_SECRET=<any-long-random-string>
 ADMIN_SECRET=<any-long-random-string>
-NEXT_PUBLIC_SITE_URL=http://localhost:3000
+NEXT_PUBLIC_SITE_URL=https://popalpha.app
 ```
 
 ### 3) Where to get each value
+
+Production domain is **https://popalpha.app**.
+For local development, you can either:
+- set `NEXT_PUBLIC_SITE_URL=http://localhost:3000`, or
+- leave it unset and the app will safely fall back to localhost in development.
+
 
 If you do not already have these values:
 - **PSA_ACCESS_TOKEN**: You must get this from your PSA developer/account portal.
