@@ -32,10 +32,11 @@ export default function ThemeToggle() {
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        className="btn-ghost inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold"
+        className="btn-ghost inline-flex h-10 w-10 items-center justify-center rounded-full text-sm"
+        aria-label="Theme toggle"
+        title="Theme toggle"
       >
-        <span>🎨</span>
-        <span>Theme</span>
+        <span aria-hidden>🎨</span>
       </button>
 
       {open ? (
