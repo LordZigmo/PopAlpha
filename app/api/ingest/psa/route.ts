@@ -1,7 +1,39 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { getCertificate } from "@/lib/psa/client";
 
 export const runtime = "nodejs";
+
+type IngestCounters = {
+  itemsFetched: number;
+  itemsUpserted: number;
+  itemsFailed: number;
+  firstError: string | null;
+};
+
+function toErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
+async function markRunFailed(
+  supabase: ReturnType<typeof createClient>,
+  runId: number,
+  errorText: string,
+  counters: IngestCounters
+): Promise<void> {
+  await supabase
+    .from("ingest_runs")
+    .update({
+      status: "failed",
+      ended_at: new Date().toISOString(),
+      items_fetched: counters.itemsFetched,
+      items_upserted: counters.itemsUpserted,
+      items_failed: counters.itemsFailed,
+      error_text: errorText,
+    })
+    .eq("id", runId);
+}
 
 export async function POST(req: Request) {
   const cronSecret = process.env.CRON_SECRET;
@@ -18,7 +50,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  // ✅ Accept either naming convention
   const supabaseUrl = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -44,8 +75,13 @@ export async function POST(req: Request) {
   }
 
   const supabase = createClient(supabaseUrl, serviceKey);
+  const counters: IngestCounters = {
+    itemsFetched: 0,
+    itemsUpserted: 0,
+    itemsFailed: 0,
+    firstError: null,
+  };
 
-  // 1️⃣ Create ingest run record
   const { data: run, error: runError } = await supabase
     .from("ingest_runs")
     .insert({ source: "psa", job: "psa_ingest", status: "started" })
@@ -59,22 +95,91 @@ export async function POST(req: Request) {
     );
   }
 
-  // 2️⃣ Mark success (stub for now)
-  const { error: updError } = await supabase
-    .from("ingest_runs")
-    .update({ status: "success", ended_at: new Date().toISOString() })
-    .eq("id", run.id);
+  try {
+    if (!process.env.PSA_ACCESS_TOKEN) {
+      throw new Error("Missing PSA_ACCESS_TOKEN env var (server-only).");
+    }
 
-  if (updError) {
-    return NextResponse.json(
-      { ok: false, error: `Update ingest_runs failed: ${updError.message}` },
-      { status: 500 }
-    );
+    const { data: seeds, error: seedsError } = await supabase
+      .from("psa_seed_certs")
+      .select("cert_no")
+      .eq("enabled", true)
+      .limit(20);
+
+    if (seedsError) {
+      throw new Error(`Failed loading psa_seed_certs: ${seedsError.message}`);
+    }
+
+    for (const seed of seeds ?? []) {
+      try {
+        const { parsed, raw } = await getCertificate(seed.cert_no);
+        counters.itemsFetched += 1;
+
+        const { error: upsertError } = await supabase.from("psa_certificates").upsert(
+          {
+            cert_no: parsed.cert_no,
+            grade: parsed.grade,
+            label: parsed.label,
+            year: parsed.year,
+            set_name: parsed.set_name,
+            subject: parsed.subject,
+            variety: parsed.variety,
+            image_url: parsed.image_url,
+            last_seen_at: new Date().toISOString(),
+            raw_payload: raw,
+          },
+          { onConflict: "cert_no" }
+        );
+
+        if (upsertError) {
+          throw new Error(`Upsert psa_certificates failed for ${seed.cert_no}: ${upsertError.message}`);
+        }
+
+        counters.itemsUpserted += 1;
+      } catch (itemError) {
+        counters.itemsFailed += 1;
+        if (!counters.firstError) counters.firstError = toErrorMessage(itemError);
+      }
+    }
+
+    const attempted = (seeds ?? []).length;
+    const allFailed = attempted > 0 && counters.itemsFailed === attempted;
+
+    const finalStatus = allFailed ? "failed" : "success";
+
+    const { error: updateError } = await supabase
+      .from("ingest_runs")
+      .update({
+        status: finalStatus,
+        ended_at: new Date().toISOString(),
+        items_fetched: counters.itemsFetched,
+        items_upserted: counters.itemsUpserted,
+        items_failed: counters.itemsFailed,
+        error_text: counters.firstError,
+      })
+      .eq("id", run.id);
+
+    if (updateError) {
+      return NextResponse.json(
+        { ok: false, error: `Update ingest_runs failed: ${updateError.message}` },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({
+      ok: finalStatus === "success",
+      run_id: run.id,
+      status: finalStatus,
+      items_fetched: counters.itemsFetched,
+      items_upserted: counters.itemsUpserted,
+      items_failed: counters.itemsFailed,
+      error_text: counters.firstError,
+    });
+  } catch (fatalError) {
+    const errorMessage = toErrorMessage(fatalError);
+
+    await markRunFailed(supabase, run.id, errorMessage, counters);
+
+    return NextResponse.json({ ok: false, error: errorMessage, run_id: run.id }, { status: 500 });
   }
-
-  return NextResponse.json({
-    ok: true,
-    message: "PSA ingest recorded successfully",
-    run_id: run.id,
-  });
 }
