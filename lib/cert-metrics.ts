@@ -34,7 +34,32 @@ export function getDerivedMetrics(totalPopulationValue: unknown, populationHighe
 
   const scarcityScore =
     totalPopulation !== null && totalPopulation >= 0
-      ? clamp(Math.round((100 / (1 + Math.log10(totalPopulation + 1))) * 0.7), 0, 100)
+      ? (() => {
+          const pop = totalPopulation;
+
+          // Population-first buckets (psychologically matches collector intuition):
+          // <100 => very scarce, 100-1000 => scarce/moderate, >5000 => common.
+          let baseScore: number;
+          if (pop < 100) {
+            baseScore = 100 - Math.log10(pop + 1) * 9; // ~82 to 100
+          } else if (pop < 1000) {
+            baseScore = 80 - (Math.log10(pop) - 2) * 30; // 50 to 80
+          } else if (pop < 5000) {
+            baseScore = 50 - ((pop - 1000) / 4000) * 12; // 38 to 50
+          } else {
+            baseScore = 38 - Math.log10(pop / 5000 + 1) * 15; // <40
+          }
+
+          // Small tier-based nudge to align score with tier status/share.
+          let adjusted = baseScore;
+          if (topGrade) {
+            adjusted += 7;
+          } else if (topTierShare !== null) {
+            adjusted += (topTierShare - 0.5) * 16;
+          }
+
+          return clamp(Math.round(adjusted), 0, 100);
+        })()
       : null;
 
   const higherShare =
