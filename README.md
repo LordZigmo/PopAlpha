@@ -11,6 +11,10 @@ This repo includes a simple end-to-end cert lookup flow:
 - Supabase cache table (`psa_cert_cache`) with 24-hour TTL behavior.
 - Supabase lookup logs (`psa_cert_lookup_logs`) for observability.
 
+- Private sales API (server routes):
+  - `GET /api/private-sales?cert=<CERT_NO>`
+  - `POST /api/private-sales`
+
 ## Local environment setup (beginner-friendly)
 
 ### 1) Create your local env file
@@ -67,11 +71,12 @@ Any time you edit `.env.local`, **restart** your dev server so Next.js picks up 
 
 ## Database migration
 
-Run your normal Supabase migration workflow so this SQL is applied:
+Run your normal Supabase migration workflow so these SQL files are applied:
 
 - `supabase/migrations/20260226123000_psa_cert_lookup_cache.sql`
+- `supabase/migrations/20260226150000_private_sales.sql`
 
-It creates:
+They create:
 - `public.psa_cert_cache(cert text primary key, data jsonb, fetched_at timestamptz)`
 - `public.psa_cert_lookup_logs(id, cert, cache_hit, status, error_message, created_at)`
 
@@ -137,12 +142,28 @@ Check these 4 things in order:
 Tip: server routes prefer `SUPABASE_URL`. If it is missing, code can fall back to `NEXT_PUBLIC_SUPABASE_URL`, but you should still set `SUPABASE_URL` explicitly for reliable local dev.
 
 
-## Deploy environment variable guidance (Vercel)
+## Quick feature test checklist
 
-Set these in Vercel Project Settings → Environment Variables:
+1. **Deep-link search**
+   - Open `http://localhost:3000/?cert=12345678`.
+   - The page should auto-run lookup for that cert.
+   - Click the **Copy link** icon and paste somewhere to confirm URL includes `?cert=...`.
 
-- **Production**: `NEXT_PUBLIC_SITE_URL=https://popalpha.app`
-- **Preview**: leave `NEXT_PUBLIC_SITE_URL` unset (recommended) so previews can use `VERCEL_URL` automatically
-- **Development**: `NEXT_PUBLIC_SITE_URL=http://localhost:3000` (optional; fallback also works if unset)
+2. **Watchlist (localStorage)**
+   - After a cert loads, click the bookmark icon.
+   - You should see a toast saying it was saved/removed and a watch status pill in the header.
+   - Refresh the page: saved state should persist for that browser profile.
 
-This keeps production canonical metadata correct while allowing preview URLs to render with the preview origin.
+3. **Private Sales tab**
+   - Open **Private Sales** tab.
+   - Add a sale with date + price (fees/notes optional).
+   - Confirm the new sale appears in the list (newest first).
+   - API quick checks:
+     ```bash
+     curl "http://localhost:3000/api/private-sales?cert=12345678"
+     ```
+
+4. **Market calculator tab**
+   - Open **Market** tab.
+   - Enter offer price and fee percentages.
+   - Confirm private net, eBay net, difference, and recommendation update.
