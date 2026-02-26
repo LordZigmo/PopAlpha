@@ -47,6 +47,11 @@ function firstString(payload: Record<string, unknown>, keys: string[]): string |
 }
 
 function normalizePayload(raw: Record<string, unknown>): Record<string, unknown> {
+  const psaCert = raw.PSACert;
+  if (psaCert && typeof psaCert === "object") {
+    return psaCert as Record<string, unknown>;
+  }
+
   const result = raw.Result;
   if (result && typeof result === "object") {
     return result as Record<string, unknown>;
@@ -58,6 +63,31 @@ function normalizePayload(raw: Record<string, unknown>): Record<string, unknown>
   }
 
   return raw;
+}
+
+function parseCertificate(raw: Record<string, unknown>, fallbackCertNo: string): ParsedCertificate {
+  const normalized = normalizePayload(raw);
+
+  const parsed: ParsedCertificate = {
+    cert_no: firstString(normalized, ["CertNumber", "cert_no", "certNo"]) ?? fallbackCertNo,
+    grade: firstString(normalized, ["GradeDescription", "CardGrade", "grade", "Grade"]),
+    label: firstString(normalized, ["LabelType", "label", "Label", "certLabel"]),
+    year: parseYear(normalized.Year ?? normalized.year),
+    set_name: firstString(normalized, ["Brand", "Category", "set_name", "setName", "SetName"]),
+    subject: firstString(normalized, ["Subject", "subject", "player"]),
+    variety: firstString(normalized, ["Variety", "variety"]),
+    image_url: firstString(normalized, ["ImageURL", "ImageUrl", "image_url", "imageUrl"]),
+  };
+
+  if (process.env.NODE_ENV !== "production" && normalized !== raw) {
+    if (!parsed.grade || parsed.year === null) {
+      console.warn(
+        `[psa] Parsed certificate is missing grade/year for cert ${parsed.cert_no}. Check PSA payload mapping.`
+      );
+    }
+  }
+
+  return parsed;
 }
 
 function buildCertificateUrl(certNo: string): string {
@@ -106,17 +136,7 @@ export async function getCertificate(certNo: string): Promise<CertificateRespons
       }
 
       const raw = (await response.json()) as Record<string, unknown>;
-      const normalized = normalizePayload(raw);
-      const parsed: ParsedCertificate = {
-        cert_no: certNo,
-        grade: firstString(normalized, ["grade", "Grade"]),
-        label: firstString(normalized, ["label", "Label", "certLabel"]),
-        year: parseYear(normalized.year ?? normalized.Year),
-        set_name: firstString(normalized, ["set_name", "setName", "SetName"]),
-        subject: firstString(normalized, ["subject", "Subject", "player"]),
-        variety: firstString(normalized, ["variety", "Variety"]),
-        image_url: firstString(normalized, ["image_url", "imageUrl", "ImageURL"]),
-      };
+      const parsed = parseCertificate(raw, certNo);
 
       return { parsed, raw };
     } catch (error) {
@@ -135,3 +155,8 @@ export async function getCertificate(certNo: string): Promise<CertificateRespons
     `PSA request failed for cert ${certNo} after ${MAX_ATTEMPTS} attempts: ${String(lastError)}`
   );
 }
+
+export const __private__ = {
+  normalizePayload,
+  parseCertificate,
+};

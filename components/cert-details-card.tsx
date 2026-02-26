@@ -14,6 +14,11 @@ function normalizeRaw(raw: unknown): Record<string, unknown> {
   if (!raw || typeof raw !== "object") return {};
 
   const payload = raw as Record<string, unknown>;
+  const psaCert = payload.PSACert;
+  if (psaCert && typeof psaCert === "object") {
+    return psaCert as Record<string, unknown>;
+  }
+
   const result = payload.Result;
   if (result && typeof result === "object") {
     return result as Record<string, unknown>;
@@ -76,8 +81,8 @@ function SourceBadge({ source, cacheHit, fetchedAt }: { source?: string; cacheHi
 export default function CertDetailsCard({ cert, data, source, cacheHit, fetchedAt }: CertDetailsCardProps) {
   const rawPayload = normalizeRaw(data.raw);
 
-  const grade = firstValue(rawPayload, ["GradeDescription", "CardGrade", "grade", "Grade", "Card Grade"]) ?? data.parsed.grade;
-  const year = firstValue(rawPayload, ["Year", "year"]) ?? data.parsed.year;
+  const grade = data.parsed.grade ?? firstValue(rawPayload, ["GradeDescription", "CardGrade", "grade", "Grade", "Card Grade"]);
+  const year = data.parsed.year ?? firstValue(rawPayload, ["Year", "year"]);
   const brand = firstValue(rawPayload, ["Brand", "brand"]);
   const setSignal = [
     firstValue(rawPayload, ["Subject", "subject"]) ?? data.parsed.subject,
