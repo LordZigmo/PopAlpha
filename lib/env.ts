@@ -29,3 +29,12 @@ export function getRequiredEnvs(names: string[]): Record<string, string> {
 
   return values;
 }
+
+export function getServerConfigErrorMessage(error: unknown): string {
+  const details =
+    error instanceof Error
+      ? error.message
+      : "Missing server Supabase environment configuration. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.";
+
+  return `Server configuration error: ${details}`;
+}

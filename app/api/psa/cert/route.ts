@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { type SupabaseClient } from "@supabase/supabase-js";
 import { getCertificate, type CertificateResponse } from "@/lib/psa/client";
 import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import { getServerConfigErrorMessage } from "@/lib/env";
 
 export const runtime = "nodejs";
 
@@ -51,11 +52,10 @@ export async function GET(req: Request) {
   try {
     supabase = getServerSupabaseClient();
   } catch (error) {
-    const details = error instanceof Error ? error.message : "Missing server Supabase environment configuration.";
     return NextResponse.json(
       {
         ok: false,
-        error: `Server configuration error: ${details}`,
+        error: getServerConfigErrorMessage(error),
       },
       { status: 500 }
     );

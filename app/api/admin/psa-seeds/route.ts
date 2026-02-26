@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getServerSupabaseClient } from "@/lib/supabaseServer";
-import { getRequiredEnv } from "@/lib/env";
+import { getRequiredEnv, getServerConfigErrorMessage } from "@/lib/env";
 
 export const runtime = "nodejs";
 
@@ -49,11 +49,10 @@ export async function POST(req: Request) {
   try {
     supabase = getServerSupabaseClient();
   } catch (error) {
-    const details = error instanceof Error ? error.message : "Missing server Supabase environment configuration.";
     return NextResponse.json(
       {
         ok: false,
-        error: `Server configuration error: ${details}`,
+        error: getServerConfigErrorMessage(error),
       },
       { status: 500 }
     );
