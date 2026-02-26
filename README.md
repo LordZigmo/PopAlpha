@@ -43,10 +43,16 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=<your_supabase_anon_key>
 # Existing app secrets (used by other routes)
 CRON_SECRET=<any-long-random-string>
 ADMIN_SECRET=<any-long-random-string>
-NEXT_PUBLIC_SITE_URL=http://localhost:3000
+NEXT_PUBLIC_SITE_URL=https://popalpha.app
 ```
 
 ### 3) Where to get each value
+
+Production domain is **https://popalpha.app**.
+For local development, you can either:
+- set `NEXT_PUBLIC_SITE_URL=http://localhost:3000`, or
+- leave it unset and the app will safely fall back to localhost in development.
+
 
 If you do not already have these values:
 - **PSA_ACCESS_TOKEN**: You must get this from your PSA developer/account portal.
@@ -129,3 +135,14 @@ Check these 4 things in order:
 4. **No quotes or extra spaces** around values (example: `SUPABASE_URL=https://...`, not `SUPABASE_URL="https://..."`).
 
 Tip: server routes prefer `SUPABASE_URL`. If it is missing, code can fall back to `NEXT_PUBLIC_SUPABASE_URL`, but you should still set `SUPABASE_URL` explicitly for reliable local dev.
+
+
+## Deploy environment variable guidance (Vercel)
+
+Set these in Vercel Project Settings → Environment Variables:
+
+- **Production**: `NEXT_PUBLIC_SITE_URL=https://popalpha.app`
+- **Preview**: leave `NEXT_PUBLIC_SITE_URL` unset (recommended) so previews can use `VERCEL_URL` automatically
+- **Development**: `NEXT_PUBLIC_SITE_URL=http://localhost:3000` (optional; fallback also works if unset)
+
+This keeps production canonical metadata correct while allowing preview URLs to render with the preview origin.
