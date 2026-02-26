@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { getCertificate, type CertificateResponse } from "@/lib/psa/client";
 
 export const runtime = "nodejs";
@@ -22,7 +22,7 @@ function sanitizeCert(cert: string | null): string {
 }
 
 async function logLookup(params: {
-  supabase: ReturnType<typeof createClient>;
+  supabase: SupabaseClient<any, "public", any>;
   cert: string;
   cacheHit: boolean;
   status: "success" | "error";
