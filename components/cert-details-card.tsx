@@ -73,10 +73,10 @@ function toNumber(value: DisplayValue): number | null {
 
 function StatCard({ label, value, sublabel }: { label: string; value: string; sublabel?: string }) {
   return (
-    <div className="rounded-2xl border border-neutral-300/80 bg-white/50 p-4 dark:border-neutral-700/90 dark:bg-neutral-900/40">
-      <p className="text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400">{label}</p>
-      <p className="mt-2 text-3xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-100">{value}</p>
-      {sublabel ? <p className="mt-1 text-xs text-neutral-600 dark:text-neutral-300">{sublabel}</p> : null}
+    <div className="border-app bg-surface rounded-2xl border p-4">
+      <p className="text-muted text-xs font-medium uppercase tracking-wide">{label}</p>
+      <p className="mt-2 text-3xl font-semibold tracking-tight text-app">{value}</p>
+      {sublabel ? <p className="text-muted mt-1 text-xs">{sublabel}</p> : null}
     </div>
   );
 }
@@ -108,10 +108,10 @@ export default function CertDetailsCard({ cert, data, source, cacheHit, fetchedA
         <div className="space-y-5">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500 dark:text-neutral-400">Grade</p>
-              <p className="mt-2 text-5xl font-semibold tracking-tight text-neutral-950 dark:text-neutral-50 sm:text-6xl">{display(grade)}</p>
-              <p className="mt-3 text-base text-neutral-800 dark:text-neutral-200">{title}</p>
-              <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">Cert #{cert}</p>
+              <p className="text-muted text-xs font-semibold uppercase tracking-[0.18em]">Grade</p>
+              <p className="text-app mt-2 text-5xl font-semibold tracking-tight sm:text-6xl">{display(grade)}</p>
+              <p className="text-app mt-3 text-base">{title}</p>
+              <p className="text-muted mt-1 text-sm">Cert #{cert}</p>
             </div>
 
             {typeof imageUrl === "string" && imageUrl ? (
@@ -119,30 +119,30 @@ export default function CertDetailsCard({ cert, data, source, cacheHit, fetchedA
               <img
                 src={imageUrl}
                 alt={`PSA cert ${cert} thumbnail`}
-                className="h-24 w-24 rounded-xl border border-neutral-300/80 object-cover shadow-sm dark:border-neutral-700"
+                className="border-app h-24 w-24 rounded-xl border object-cover shadow-sm"
               />
             ) : null}
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <span className="rounded-full border border-neutral-300/80 bg-white/70 px-3 py-1 text-xs font-medium text-neutral-700 dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-200">
+            <span className="border-app bg-surface-soft text-app rounded-full border px-3 py-1 text-xs font-medium">
               Category: {display(category)}
             </span>
-            <span className="rounded-full border border-neutral-300/80 bg-white/70 px-3 py-1 text-xs font-medium text-neutral-700 dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-200">
+            <span className="border-app bg-surface-soft text-app rounded-full border px-3 py-1 text-xs font-medium">
               Label: {display(labelType)}
             </span>
           </div>
 
-          <div className="rounded-2xl border border-neutral-300/80 bg-white/45 p-4 dark:border-neutral-700 dark:bg-neutral-900/35">
-            <p className="text-xs font-medium uppercase tracking-[0.14em] text-neutral-500 dark:text-neutral-400">Provenance</p>
+          <div className="border-app bg-surface rounded-2xl border p-4">
+            <p className="text-muted text-xs font-medium uppercase tracking-[0.14em]">Provenance</p>
             <div className="mt-3 flex flex-wrap items-center gap-2 text-xs sm:text-sm">
-              <span className="rounded-full border border-neutral-300/80 bg-white/75 px-2.5 py-1 font-medium text-neutral-700 dark:border-neutral-700 dark:bg-neutral-900/70 dark:text-neutral-200">
+              <span className="border-app bg-surface-soft text-app rounded-full border px-2.5 py-1 font-medium">
                 Source: {source === "cache" ? "cache" : "psa fresh"}
               </span>
-              <span className="rounded-full border border-neutral-300/80 bg-white/75 px-2.5 py-1 font-medium text-neutral-700 dark:border-neutral-700 dark:bg-neutral-900/70 dark:text-neutral-200">
+              <span className="border-app bg-surface-soft text-app rounded-full border px-2.5 py-1 font-medium">
                 Cache hit: {cacheHit ? "true" : "false"}
               </span>
-              <span className="rounded-full border border-neutral-300/80 bg-white/75 px-2.5 py-1 font-medium text-neutral-700 dark:border-neutral-700 dark:bg-neutral-900/70 dark:text-neutral-200">
+              <span className="border-app bg-surface-soft text-app rounded-full border px-2.5 py-1 font-medium">
                 Fetched: {formatDate(fetchedAt)}
               </span>
             </div>
@@ -152,19 +152,19 @@ export default function CertDetailsCard({ cert, data, source, cacheHit, fetchedA
         <div className="space-y-3">
           <StatCard label="Total Population" value={display(totalPopulation)} sublabel="Total graded examples" />
           <StatCard label="Higher Population" value={display(populationHigher)} sublabel="Examples above this grade" />
-          <div className="rounded-2xl border border-neutral-300/80 bg-white/50 p-4 dark:border-neutral-700/90 dark:bg-neutral-900/40">
-            <p className="text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400">Rarity Insight</p>
+          <div className="border-app bg-surface rounded-2xl border p-4">
+            <p className="text-muted text-xs font-medium uppercase tracking-wide">Rarity Insight</p>
             <p
               className={`mt-3 inline-flex rounded-full border px-3 py-1 text-sm font-semibold ${
                 topGrade
-                  ? "border-emerald-300/80 bg-emerald-100/80 text-emerald-800 dark:border-emerald-700/80 dark:bg-emerald-950/60 dark:text-emerald-200"
-                  : "border-neutral-300/80 bg-white/85 text-neutral-700 dark:border-neutral-700 dark:bg-neutral-900/70 dark:text-neutral-200"
+                  ? "badge-positive"
+                  : "border-app bg-surface-soft text-app"
               }`}
             >
               {topGrade ? "Top grade / None higher" : `Higher: ${display(populationHigher)}`}
             </p>
             {topGrade && totalCount !== null ? (
-              <p className="mt-2 text-xs text-emerald-700 dark:text-emerald-300">This cert sits at the highest recorded PSA tier.</p>
+              <p className="text-positive mt-2 text-xs">This cert sits at the highest recorded PSA tier.</p>
             ) : null}
           </div>
         </div>

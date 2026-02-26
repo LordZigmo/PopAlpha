@@ -1,5 +1,5 @@
 function SkeletonLine({ className }: { className: string }) {
-  return <div className={`animate-pulse rounded-md bg-neutral-200/90 dark:bg-neutral-800/80 ${className}`} />;
+  return <div className={`animate-pulse rounded-md bg-surface-soft ${className}`} />;
 }
 
 export default function CertSkeleton() {
@@ -18,15 +18,15 @@ export default function CertSkeleton() {
         </div>
 
         <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-1">
-          <div className="rounded-2xl border border-neutral-300/70 p-4 dark:border-neutral-700/80">
+          <div className="border-app rounded-2xl border p-4">
             <SkeletonLine className="h-3 w-28" />
             <SkeletonLine className="mt-3 h-8 w-16" />
           </div>
-          <div className="rounded-2xl border border-neutral-300/70 p-4 dark:border-neutral-700/80">
+          <div className="border-app rounded-2xl border p-4">
             <SkeletonLine className="h-3 w-24" />
             <SkeletonLine className="mt-3 h-8 w-14" />
           </div>
-          <div className="rounded-2xl border border-neutral-300/70 p-4 dark:border-neutral-700/80">
+          <div className="border-app rounded-2xl border p-4">
             <SkeletonLine className="h-3 w-36" />
             <SkeletonLine className="mt-3 h-8 w-32 rounded-full" />
           </div>
