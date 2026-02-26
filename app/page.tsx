@@ -1,6 +1,9 @@
 "use client";
 
+import CertDetailsCard from "@/components/cert-details-card";
+import RawJsonPanel from "@/components/raw-json-panel";
 import { FormEvent, useState } from "react";
+import type { CertificateResponse } from "@/lib/psa/client";
 
 type LookupResponse = {
   ok: boolean;
@@ -8,7 +11,7 @@ type LookupResponse = {
   cache_hit?: boolean;
   fetched_at?: string;
   source?: string;
-  data?: unknown;
+  data?: CertificateResponse;
   error?: string;
 };
 
@@ -44,70 +47,54 @@ export default function Home() {
   }
 
   return (
-    <main style={{ maxWidth: 900, margin: "0 auto", padding: 24, fontFamily: "system-ui, sans-serif" }}>
-      <h1 style={{ fontSize: 32, marginBottom: 8 }}>PopAlpha PSA Cert Lookup</h1>
-      <p style={{ marginTop: 0, opacity: 0.8 }}>
-        Enter a PSA cert number. The server checks Supabase cache first, then calls PSA only when needed.
-      </p>
+    <main className="app-shell">
+      <div className="mx-auto max-w-4xl px-6 py-10">
+        <header className="mb-6">
+          <h1 className="text-3xl font-semibold text-neutral-900 dark:text-neutral-100">PopAlpha PSA Cert Lookup</h1>
+          <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-300">
+            Enter a PSA cert number. We check cache first, then fetch from PSA only when needed.
+          </p>
+        </header>
 
-      <form onSubmit={onSubmit} style={{ display: "flex", gap: 8, marginTop: 16 }}>
-        <input
-          value={cert}
-          onChange={(event) => setCert(event.target.value)}
-          placeholder="Example: 12345678"
-          style={{ flex: 1, padding: "10px 12px", fontSize: 16 }}
-        />
-        <button type="submit" disabled={loading} style={{ padding: "10px 14px", fontSize: 16 }}>
-          {loading ? "Searching…" : "Search"}
-        </button>
-      </form>
+        <form onSubmit={onSubmit} className="card flex flex-col gap-3 rounded-2xl p-4 sm:flex-row">
+          <input
+            value={cert}
+            onChange={(event) => setCert(event.target.value)}
+            placeholder="Example: 12345678"
+            className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-base text-neutral-900 placeholder:text-neutral-400 focus:border-neutral-500 focus:outline-none dark:border-neutral-700 dark:bg-neutral-900/70 dark:text-neutral-100 dark:placeholder:text-neutral-500"
+          />
+          <button
+            type="submit"
+            disabled={loading}
+            className="rounded-lg border border-neutral-300 bg-neutral-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-neutral-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-neutral-700 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
+          >
+            {loading ? "Searching…" : "Search"}
+          </button>
+        </form>
 
-      {result && (
-        <section
-          style={{
-            marginTop: 20,
-            border: "1px solid #ddd",
-            borderRadius: 8,
-            padding: 16,
-            background: "#fafafa",
-          }}
-        >
-          <h2 style={{ marginTop: 0, fontSize: 20 }}>Result</h2>
-          {result.ok ? (
-            <>
-              <p style={{ margin: "4px 0" }}>
-                <strong>Cert:</strong> {result.cert}
-              </p>
-              <p style={{ margin: "4px 0" }}>
-                <strong>Source:</strong> {result.source} {result.cache_hit ? "(cache hit)" : "(fresh fetch)"}
-              </p>
-              <p style={{ margin: "4px 0" }}>
-                <strong>Fetched at:</strong> {result.fetched_at}
-              </p>
-            </>
-          ) : (
-            <p style={{ color: "#b00020", margin: "4px 0" }}>
-              <strong>Error:</strong> {result.error}
-            </p>
-          )}
-
-          <details style={{ marginTop: 12 }}>
-            <summary style={{ cursor: "pointer" }}>Raw JSON</summary>
-            <pre
-              style={{
-                marginTop: 10,
-                overflowX: "auto",
-                background: "#fff",
-                border: "1px solid #e5e5e5",
-                borderRadius: 6,
-                padding: 12,
-              }}
-            >
-              {JSON.stringify(result, null, 2)}
-            </pre>
-          </details>
-        </section>
-      )}
+        {result ? (
+          <section className="mt-6">
+            {result.ok && result.cert && result.data ? (
+              <>
+                <CertDetailsCard
+                  cert={result.cert}
+                  data={result.data}
+                  source={result.source}
+                  cacheHit={result.cache_hit}
+                  fetchedAt={result.fetched_at}
+                />
+                <RawJsonPanel value={result} />
+              </>
+            ) : (
+              <div className="card rounded-2xl border-rose-300/70 p-5 dark:border-rose-600/60">
+                <h2 className="text-lg font-semibold text-rose-700 dark:text-rose-300">Lookup failed</h2>
+                <p className="mt-2 text-sm text-rose-700/90 dark:text-rose-200">{result.error ?? "Unknown error"}</p>
+                <RawJsonPanel value={result} />
+              </div>
+            )}
+          </section>
+        ) : null}
+      </div>
     </main>
   );
 }
