@@ -8,6 +8,7 @@ import ProceedsCalculator from "@/components/proceeds-calculator";
 import PrivateSalesForm, { type SaleFormState } from "@/components/private-sales-form";
 import PrivateSalesList, { type PrivateSale } from "@/components/private-sales-list";
 import { getDerivedMetrics } from "@/lib/cert-metrics";
+import { buildPsaCertUrl } from "@/lib/psa/cert-url";
 
 type CertDetailsCardProps = {
   cert: string;
@@ -50,6 +51,15 @@ function display(value: DisplayValue): string {
   if (value === null || value === undefined) return "—";
   const next = String(value).trim();
   return next === "" ? "—" : next;
+}
+
+function isLikelyUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 function dateToInput(value: string): string {
@@ -150,11 +160,14 @@ export default function CertDetailsCard({
     "ImageUrlLarge",
     "ImageURLLarge",
     "FrontImageLarge",
+    "BackImageLarge",
     "CardImageLarge",
     "PictureUrlLarge",
+    "SecureScanUrl",
     "ImageURL",
     "ImageUrl",
     "FrontImage",
+    "BackImage",
     "CardImage",
     "PictureUrl",
     "ImageUrlSmall",
@@ -287,6 +300,9 @@ export default function CertDetailsCard({
           ? "badge-negative"
           : "border-app text-muted bg-surface-soft";
   const positionInsight = getPositionInsight(metrics.totalPopulation, metrics.populationHigher, metrics.scarcityScore);
+  const hasPsaScan = typeof imageUrl === "string" && imageUrl.trim() !== "" && isLikelyUrl(imageUrl);
+  const imageUrlString = hasPsaScan ? imageUrl : "";
+  const psaCertUrl = buildPsaCertUrl(cert);
 
   return (
     <section className="glass glow-card lift density-panel rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
@@ -301,18 +317,29 @@ export default function CertDetailsCard({
               <p className="text-app mt-3 text-base">{title}</p>
             </div>
             <div className="flex shrink-0 items-start gap-3">
-              <div className="glass relative h-24 w-[4.35rem] overflow-hidden rounded-[var(--radius-input)] border-app border bg-surface-soft">
-                {typeof imageUrl === "string" && imageUrl.trim() !== "" ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={imageUrl}
-                    alt="PSA cert asset"
-                    className="h-full w-full object-cover"
-                    loading="lazy"
-                  />
-                ) : (
-                  <div className="h-full w-full bg-[radial-gradient(circle_at_20%_12%,color-mix(in_srgb,var(--color-accent)_26%,transparent),transparent_56%),linear-gradient(165deg,color-mix(in_srgb,var(--color-surface-soft)_88%,transparent),color-mix(in_srgb,var(--color-border)_36%,transparent))]" />
-                )}
+              <div className="w-[4.35rem] shrink-0">
+                <div className="glass relative h-24 w-[4.35rem] overflow-hidden rounded-[var(--radius-input)] border-app border bg-surface-soft">
+                  {hasPsaScan ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={imageUrlString}
+                      alt="PSA cert asset"
+                      className="h-full w-full object-cover"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div className="h-full w-full bg-[radial-gradient(circle_at_20%_12%,color-mix(in_srgb,var(--color-accent)_26%,transparent),transparent_56%),linear-gradient(165deg,color-mix(in_srgb,var(--color-surface-soft)_88%,transparent),color-mix(in_srgb,var(--color-border)_36%,transparent))]" />
+                  )}
+                </div>
+                <a
+                  href={psaCertUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="btn-ghost mt-2 block rounded-[var(--radius-input)] border px-2 py-1 text-center text-[11px] font-semibold"
+                >
+                  View on PSA
+                </a>
+                {!hasPsaScan ? <p className="text-muted mt-1 text-[11px]">PSA scans unavailable for this cert</p> : null}
               </div>
               <div className="w-[11.5rem]">
                 <RarityRing score={metrics.scarcityScore} compact />
@@ -324,6 +351,9 @@ export default function CertDetailsCard({
             <span className="border-app rounded-full border px-3 py-1">Cert #{cert}</span>
             <span className="border-app rounded-full border px-3 py-1">Category: {display(category)}</span>
             <span className="border-app rounded-full border px-3 py-1">Label: {display(labelType)}</span>
+            <span className={`rounded-full border px-3 py-1 ${hasPsaScan ? "badge-positive" : "border-app text-muted bg-surface-soft"}`}>
+              PSA scan: {hasPsaScan ? "available" : "unavailable"}
+            </span>
             {onToggleWatchlist ? (
               <button
                 type="button"

@@ -38,10 +38,27 @@ function asString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
+function isLikelyUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 function firstString(payload: Record<string, unknown>, keys: string[]): string | null {
   for (const key of keys) {
     const value = asString(payload[key]);
     if (value) return value;
+  }
+  return null;
+}
+
+function firstUrl(payload: Record<string, unknown>, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = asString(payload[key]);
+    if (value && isLikelyUrl(value)) return value;
   }
   return null;
 }
@@ -70,20 +87,51 @@ function pickImageUrl(payload: Record<string, unknown>): string | null {
     "ImageUrlLarge",
     "ImageURLLarge",
     "FrontImageLarge",
+    "BackImageLarge",
     "CardImageLarge",
     "PictureUrlLarge",
+    "SecureScanUrl",
     "ImageURL",
     "ImageUrl",
     "FrontImage",
+    "BackImage",
     "CardImage",
     "PictureUrl",
     "ImageUrlSmall",
     "ImageURLSmall",
   ];
-  return firstString(payload, preferredKeys);
+  return firstUrl(payload, preferredKeys);
+}
+
+function logImageDiagnostics(raw: Record<string, unknown>, certNo: string) {
+  if (process.env.NODE_ENV === "production") return;
+
+  const psaCertRaw = raw.PSACert;
+  const psaCert = psaCertRaw && typeof psaCertRaw === "object" ? (psaCertRaw as Record<string, unknown>) : {};
+  const keys = Object.keys(psaCert);
+  const imageKeysFound = keys.filter((key) => /image|photo|pic|uri|media|scan/i.test(key));
+  const sampleValues: Record<string, unknown> = {};
+  for (const key of imageKeysFound) {
+    const value = psaCert[key];
+    if (typeof value === "string") {
+      sampleValues[key] = value.slice(0, 180);
+    } else if (value !== undefined) {
+      sampleValues[key] = value;
+    }
+  }
+
+  console.info(
+    "[psa:image-diagnostic]",
+    JSON.stringify({
+      cert: certNo,
+      imageKeysFound,
+      sampleValues,
+    })
+  );
 }
 
 function parseCertificate(raw: Record<string, unknown>, fallbackCertNo: string): ParsedCertificate {
+  logImageDiagnostics(raw, fallbackCertNo);
   const normalized = normalizePayload(raw);
 
   const parsed: ParsedCertificate = {
