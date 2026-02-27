@@ -35,6 +35,7 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const hideNav = pathname.startsWith("/login") || pathname.startsWith("/auth/callback");
+  const showFloatingNav = pathname.startsWith("/cert/");
 
   if (hideNav) return <>{children}</>;
 
@@ -42,25 +43,29 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="app-chrome">
-      <div className="hidden lg:flex fixed right-4 top-4 z-50 items-center gap-2">
-        <NavItem href="/" label="Lookup" active={isActive("/")} compact />
-        <NavItem href="/watchlist" label="Watchlist" active={isActive("/watchlist")} compact />
-        <NavItem href="/portfolio" label="Portfolio" active={isActive("/portfolio")} compact />
-        <ThemeToggle />
-      </div>
+      {showFloatingNav ? (
+        <div className="hidden lg:flex fixed right-4 top-4 z-50 items-center gap-2">
+          <NavItem href="/" label="Lookup" active={isActive("/")} compact />
+          <NavItem href="/watchlist" label="Watchlist" active={isActive("/watchlist")} compact />
+          <NavItem href="/portfolio" label="Portfolio" active={isActive("/portfolio")} compact />
+          <ThemeToggle />
+        </div>
+      ) : null}
 
-      <div className="lg:hidden fixed left-3 top-3 z-50 flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => setMobileOpen((v) => !v)}
-          className="btn-ghost rounded-[var(--radius-input)] border px-3 py-2 text-xs font-semibold"
-        >
-          Menu
-        </button>
-        <ThemeToggle />
-      </div>
+      {showFloatingNav ? (
+        <div className="lg:hidden fixed left-3 top-3 z-50 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setMobileOpen((v) => !v)}
+            className="btn-ghost rounded-[var(--radius-input)] border px-3 py-2 text-xs font-semibold"
+          >
+            Menu
+          </button>
+          <ThemeToggle />
+        </div>
+      ) : null}
 
-      {mobileOpen ? (
+      {showFloatingNav && mobileOpen ? (
         <div className="fixed inset-0 z-40 bg-black/30 lg:hidden">
           <aside className="glass ml-3 mt-14 w-56 rounded-[var(--radius-panel)] border-app border p-3">
             <nav className="space-y-2">

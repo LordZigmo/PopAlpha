@@ -47,7 +47,7 @@ export default function WatchlistPage() {
               {entries.map((entry) => (
                 <li key={`${entry.cert}-${entry.saved_at}`}>
                   <Link
-                    href={`/?cert=${encodeURIComponent(entry.cert)}`}
+                    href={`/cert/${encodeURIComponent(entry.cert)}`}
                     className="btn-ghost block rounded-[var(--radius-input)] border px-3 py-2"
                   >
                     <p className="text-app text-sm font-semibold">Cert #{entry.cert}</p>
