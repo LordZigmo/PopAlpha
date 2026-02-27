@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import CardWatchlistButton from "@/components/card-watchlist-button";
 
 type CanonicalCardRow = {
   slug: string;
@@ -49,7 +50,10 @@ export default async function CardPage({
         </Link>
 
         <section className="mt-3 glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
-          <p className="text-app text-2xl font-semibold">{data.canonical_name}</p>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-app text-2xl font-semibold">{data.canonical_name}</p>
+            <CardWatchlistButton slug={data.slug} title={data.canonical_name} />
+          </div>
           <p className="text-muted mt-1 text-sm">{subtitle(data)}</p>
         </section>
 
@@ -59,10 +63,22 @@ export default async function CardPage({
             <span className="btn-ghost rounded-full border px-3 py-1.5 text-xs font-semibold">PSA 10</span>
             <span className="btn-ghost rounded-full border px-3 py-1.5 text-xs font-semibold">TAG 10</span>
           </div>
-          <p className="text-muted mt-4 text-sm">Instrument panels will populate here as pricing integrations are enabled.</p>
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            <div className="rounded-[var(--radius-card)] border-app border bg-surface-soft/55 p-[var(--space-card)]">
+              <p className="text-app text-sm font-semibold">Raw</p>
+              <p className="text-muted mt-1 text-xs">Baseline listing data will appear here.</p>
+            </div>
+            <div className="rounded-[var(--radius-card)] border-app border bg-surface-soft/55 p-[var(--space-card)]">
+              <p className="text-app text-sm font-semibold">PSA 10</p>
+              <p className="text-muted mt-1 text-xs">Comp stack for PSA 10 tier will be shown here.</p>
+            </div>
+            <div className="rounded-[var(--radius-card)] border-app border bg-surface-soft/55 p-[var(--space-card)]">
+              <p className="text-app text-sm font-semibold">TAG 10</p>
+              <p className="text-muted mt-1 text-xs">TAG 10 comparables will appear when enabled.</p>
+            </div>
+          </div>
         </section>
       </div>
     </main>
   );
 }
-

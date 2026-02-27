@@ -3,6 +3,7 @@ import { type SupabaseClient } from "@supabase/supabase-js";
 import { getCertificate, type CertificateResponse } from "@/lib/psa/client";
 import { getServerSupabaseClient } from "@/lib/supabaseServer";
 import { buildSnapshotParsed, hashSnapshotParsed } from "@/lib/psa/snapshot";
+import { measureAsync } from "@/lib/perf";
 
 export const runtime = "nodejs";
 
@@ -142,7 +143,7 @@ export async function GET(req: Request) {
       }
     }
 
-    const freshData = await getCertificate(cert);
+    const freshData = await measureAsync("cert.fetch.psa", { cert }, () => getCertificate(cert));
     const fetchedAt = new Date().toISOString();
 
     const { error: upsertError } = await supabase.from("psa_cert_cache").upsert(

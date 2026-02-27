@@ -3,6 +3,8 @@ import "./globals.css";
 import { ThemeProvider } from "./theme-provider";
 import AppChrome from "@/components/app-chrome";
 import { getSiteUrl } from "@/lib/site-url";
+import { Analytics } from "@vercel/analytics/react";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 
 const siteUrl = getSiteUrl();
 
@@ -38,6 +40,8 @@ export default function RootLayout({
         <ThemeProvider>
           <AppChrome>{children}</AppChrome>
         </ThemeProvider>
+        <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   );
