@@ -16,6 +16,20 @@ type CanonicalCardRow = {
   variant: string | null;
 };
 
+type CardPrintingRow = {
+  id: string;
+  set_name: string | null;
+  set_code: string | null;
+  year: number | null;
+  card_number: string;
+  language: string;
+  finish: "NON_HOLO" | "HOLO" | "REVERSE_HOLO" | "ALT_HOLO" | "UNKNOWN";
+  finish_detail: string | null;
+  edition: "UNLIMITED" | "FIRST_EDITION" | "UNKNOWN";
+  stamp: string | null;
+  rarity: string | null;
+};
+
 function subtitle(row: CanonicalCardRow): string {
   const bits: string[] = [];
   if (row.year) bits.push(String(row.year));
@@ -26,12 +40,26 @@ function subtitle(row: CanonicalCardRow): string {
   return bits.join(" • ");
 }
 
+function finishLabel(finish: CardPrintingRow["finish"]): string {
+  const map: Record<CardPrintingRow["finish"], string> = {
+    NON_HOLO: "Non-Holo",
+    HOLO: "Holo",
+    REVERSE_HOLO: "Reverse Holo",
+    ALT_HOLO: "Alt Holo",
+    UNKNOWN: "Unknown",
+  };
+  return map[finish];
+}
+
 export default async function CardPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{ printing?: string }>;
 }) {
   const { slug } = await params;
+  const { printing } = await searchParams;
   const supabase = getServerSupabaseClient();
 
   const { data } = await supabase
@@ -43,6 +71,17 @@ export default async function CardPage({
   if (!data) {
     notFound();
   }
+
+  const { data: printingsData } = await supabase
+    .from("card_printings")
+    .select("id, set_name, set_code, year, card_number, language, finish, finish_detail, edition, stamp, rarity")
+    .eq("canonical_slug", slug)
+    .order("year", { ascending: true })
+    .order("set_name", { ascending: true })
+    .order("card_number", { ascending: true });
+
+  const printings = (printingsData ?? []) as CardPrintingRow[];
+  const selectedPrintingId = typeof printing === "string" ? printing : "";
 
   return (
     <main className="app-shell">
@@ -72,6 +111,35 @@ export default async function CardPage({
             </div>
           </div>
           <p className="text-muted mt-1 text-sm">{subtitle(data)}</p>
+        </section>
+
+        <section className="mt-4 glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
+          <p className="text-app text-sm font-semibold uppercase tracking-[0.12em]">Printings</p>
+          {printings.length === 0 ? (
+            <p className="text-muted mt-2 text-sm">No printings imported yet.</p>
+          ) : (
+            <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+              {printings.map((printingRow) => (
+                <li
+                  key={printingRow.id}
+                  className={`rounded-[var(--radius-card)] border p-[var(--space-card)] ${
+                    selectedPrintingId === printingRow.id ? "border-app badge-positive" : "border-app bg-surface-soft/55"
+                  }`}
+                >
+                  <p className="text-app text-sm font-semibold">
+                    {printingRow.language} • {printingRow.set_name ?? "Unknown set"} • #{printingRow.card_number}
+                  </p>
+                  <p className="text-muted mt-1 text-xs">
+                    {finishLabel(printingRow.finish)}
+                    {printingRow.finish_detail ? ` • ${printingRow.finish_detail}` : ""}
+                    {printingRow.edition !== "UNKNOWN" ? ` • ${printingRow.edition === "FIRST_EDITION" ? "1st Edition" : "Unlimited"}` : ""}
+                    {printingRow.stamp ? ` • ${printingRow.stamp}` : ""}
+                  </p>
+                  <p className="text-muted mt-2 text-[11px]">Missing label? We are refining print-level labeling continuously.</p>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
 
         <section className="mt-4 glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">

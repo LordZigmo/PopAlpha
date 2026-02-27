@@ -15,6 +15,11 @@ This repo includes a simple end-to-end cert lookup flow:
   - `GET /api/private-sales?cert=<CERT_NO>`
   - `POST /api/private-sales`
 
+## Printing labels
+
+Printings are the unit for holo/reverse/edition labels.
+Canonical cards group identities, while `card_printings` carries label-correct finish and edition metadata.
+
 ## Local environment setup (beginner-friendly)
 
 ### 1) Create your local env file

@@ -22,8 +22,25 @@ type CanonicalCardRow = {
   variant: string | null;
 };
 
+type PrintingRow = {
+  id: string;
+  canonical_slug: string;
+  set_name: string | null;
+  card_number: string;
+  language: string;
+  finish: "NON_HOLO" | "HOLO" | "REVERSE_HOLO" | "ALT_HOLO" | "UNKNOWN";
+  finish_detail: string | null;
+  edition: "UNLIMITED" | "FIRST_EDITION" | "UNKNOWN";
+  stamp: string | null;
+};
+
+type GroupedSearchRow = {
+  canonical: CanonicalCardRow;
+  printings: PrintingRow[];
+};
+
 type SearchResultBundle = {
-  rows: CanonicalCardRow[];
+  rows: GroupedSearchRow[];
   total: number;
   page: number;
   totalPages: number;
@@ -44,6 +61,20 @@ function rowSubtitle(row: CanonicalCardRow): string {
   if (row.card_number) bits.push(`#${row.card_number}`);
   if (row.variant) bits.push(row.variant);
   if (row.language) bits.push(row.language);
+  return bits.join(" • ");
+}
+
+function printingChipLabel(printing: PrintingRow): string {
+  const finishMap: Record<PrintingRow["finish"], string> = {
+    NON_HOLO: "Non-Holo",
+    HOLO: "Holo",
+    REVERSE_HOLO: "Reverse Holo",
+    ALT_HOLO: "Alt Holo",
+    UNKNOWN: "Unknown",
+  };
+  const bits: string[] = [finishMap[printing.finish]];
+  if (printing.edition === "FIRST_EDITION") bits.push("1st Ed");
+  if (printing.stamp) bits.push(printing.stamp);
   return bits.join(" • ");
 }
 
@@ -72,75 +103,129 @@ async function runBroadSearch(params: {
     broadOrParts.push(`year.eq.${yearValue}`);
   }
 
-  let startsCountQuery = supabase
+  let startsDataQuery = supabase
     .from("canonical_cards")
-    .select("slug", { count: "exact", head: true })
-    .ilike("canonical_name", startsPattern);
+    .select(fields)
+    .ilike("canonical_name", startsPattern)
+    .order("canonical_name", { ascending: true })
+    .limit(300);
 
-  let containsCountQuery = supabase
+  let containsDataQuery = supabase
     .from("canonical_cards")
-    .select("slug", { count: "exact", head: true })
+    .select(fields)
     .or(broadOrParts.join(","))
     .not("canonical_name", "ilike", startsPattern);
 
+  containsDataQuery = containsDataQuery.order("canonical_name", { ascending: true }).limit(400);
+
+  const printOrParts = [
+    `set_name.ilike.${containsPattern}`,
+    `card_number.ilike.${containsPattern}`,
+    `finish.ilike.${containsPattern}`,
+    `finish_detail.ilike.${containsPattern}`,
+    `edition.ilike.${containsPattern}`,
+    `stamp.ilike.${containsPattern}`,
+    `rarity.ilike.${containsPattern}`,
+    `language.ilike.${containsPattern}`,
+  ];
+  if (yearValue !== null) printOrParts.push(`year.eq.${yearValue}`);
+
+  let printingQuery = supabase
+    .from("card_printings")
+    .select("id, canonical_slug, set_name, card_number, language, finish, finish_detail, edition, stamp")
+    .or(printOrParts.join(","))
+    .order("canonical_slug", { ascending: true })
+    .limit(500);
+
   if (lang !== "ALL") {
-    startsCountQuery = startsCountQuery.ilike("language", lang);
-    containsCountQuery = containsCountQuery.ilike("language", lang);
+    startsDataQuery = startsDataQuery.ilike("language", lang);
+    containsDataQuery = containsDataQuery.ilike("language", lang);
+    printingQuery = printingQuery.ilike("language", lang);
   }
   if (setFilter) {
-    startsCountQuery = startsCountQuery.ilike("set_name", `%${setFilter}%`);
-    containsCountQuery = containsCountQuery.ilike("set_name", `%${setFilter}%`);
+    startsDataQuery = startsDataQuery.ilike("set_name", `%${setFilter}%`);
+    containsDataQuery = containsDataQuery.ilike("set_name", `%${setFilter}%`);
+    printingQuery = printingQuery.ilike("set_name", `%${setFilter}%`);
   }
 
-  const [{ count: startsCountRaw }, { count: containsCountRaw }] = await Promise.all([
-    startsCountQuery,
-    containsCountQuery,
+  const [{ data: startsRowsRaw }, { data: containsRowsRaw }, { data: matchedPrintingsRaw }] = await Promise.all([
+    startsDataQuery,
+    containsDataQuery,
+    printingQuery,
   ]);
 
-  const startsCount = startsCountRaw ?? 0;
-  const containsCount = containsCountRaw ?? 0;
-  const total = startsCount + containsCount;
+  const startsRows = (startsRowsRaw ?? []) as CanonicalCardRow[];
+  const containsRows = (containsRowsRaw ?? []) as CanonicalCardRow[];
+  const matchedPrintings = (matchedPrintingsRaw ?? []) as PrintingRow[];
+
+  const priorityBySlug = new Map<string, number>();
+  const canonicalBySlug = new Map<string, CanonicalCardRow>();
+
+  for (const row of startsRows) {
+    priorityBySlug.set(row.slug, Math.max(priorityBySlug.get(row.slug) ?? 0, 3));
+    canonicalBySlug.set(row.slug, row);
+  }
+  for (const row of containsRows) {
+    priorityBySlug.set(row.slug, Math.max(priorityBySlug.get(row.slug) ?? 0, 2));
+    canonicalBySlug.set(row.slug, row);
+  }
+  for (const printing of matchedPrintings) {
+    priorityBySlug.set(printing.canonical_slug, Math.max(priorityBySlug.get(printing.canonical_slug) ?? 0, 1));
+  }
+
+  const orderedSlugs = Array.from(priorityBySlug.keys()).sort((a, b) => {
+    const priorityA = priorityBySlug.get(a) ?? 0;
+    const priorityB = priorityBySlug.get(b) ?? 0;
+    if (priorityA !== priorityB) return priorityB - priorityA;
+    const nameA = canonicalBySlug.get(a)?.canonical_name ?? a;
+    const nameB = canonicalBySlug.get(b)?.canonical_name ?? b;
+    return nameA.localeCompare(nameB);
+  });
+
+  const total = orderedSlugs.length;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const boundedPage = Math.min(page, totalPages);
   const offset = (boundedPage - 1) * PAGE_SIZE;
-
-  const rows: CanonicalCardRow[] = [];
-
-  if (offset < startsCount) {
-    const startsEnd = Math.min(offset + PAGE_SIZE - 1, startsCount - 1);
-    let startsDataQuery = supabase
+  const pageSlugs = orderedSlugs.slice(offset, offset + PAGE_SIZE);
+  const missingSlugs = pageSlugs.filter((slug) => !canonicalBySlug.has(slug));
+  if (missingSlugs.length > 0) {
+    const { data: missingRows } = await supabase
       .from("canonical_cards")
       .select(fields)
-      .ilike("canonical_name", startsPattern)
-      .order("canonical_name", { ascending: true })
-      .range(offset, startsEnd);
-
-    if (lang !== "ALL") startsDataQuery = startsDataQuery.ilike("language", lang);
-    if (setFilter) startsDataQuery = startsDataQuery.ilike("set_name", `%${setFilter}%`);
-
-    const { data: startsRows } = await startsDataQuery;
-    rows.push(...((startsRows ?? []) as CanonicalCardRow[]));
+      .in("slug", missingSlugs);
+    for (const row of (missingRows ?? []) as CanonicalCardRow[]) {
+      canonicalBySlug.set(row.slug, row);
+    }
   }
 
-  if (rows.length < PAGE_SIZE) {
-    const containsOffset = Math.max(offset - startsCount, 0);
-    const needed = PAGE_SIZE - rows.length;
-    const containsEnd = containsOffset + needed - 1;
+  let pagePrintingsQuery = supabase
+    .from("card_printings")
+    .select("id, canonical_slug, set_name, card_number, language, finish, finish_detail, edition, stamp")
+    .in("canonical_slug", pageSlugs)
+    .order("set_name", { ascending: true })
+    .order("card_number", { ascending: true });
 
-    let containsDataQuery = supabase
-      .from("canonical_cards")
-      .select(fields)
-      .or(broadOrParts.join(","))
-      .not("canonical_name", "ilike", startsPattern)
-      .order("canonical_name", { ascending: true })
-      .range(containsOffset, containsEnd);
-
-    if (lang !== "ALL") containsDataQuery = containsDataQuery.ilike("language", lang);
-    if (setFilter) containsDataQuery = containsDataQuery.ilike("set_name", `%${setFilter}%`);
-
-    const { data: containsRows } = await containsDataQuery;
-    rows.push(...((containsRows ?? []) as CanonicalCardRow[]));
+  if (lang !== "ALL") pagePrintingsQuery = pagePrintingsQuery.ilike("language", lang);
+  if (setFilter) pagePrintingsQuery = pagePrintingsQuery.ilike("set_name", `%${setFilter}%`);
+  const { data: pagePrintingsRaw } = await pagePrintingsQuery;
+  const pagePrintings = (pagePrintingsRaw ?? []) as PrintingRow[];
+  const printingsBySlug = new Map<string, PrintingRow[]>();
+  for (const printing of pagePrintings) {
+    const current = printingsBySlug.get(printing.canonical_slug) ?? [];
+    current.push(printing);
+    printingsBySlug.set(printing.canonical_slug, current);
   }
+
+  const rows: GroupedSearchRow[] = pageSlugs
+    .map((slug) => {
+      const canonical = canonicalBySlug.get(slug);
+      if (!canonical) return null;
+      return {
+        canonical,
+        printings: printingsBySlug.get(slug) ?? [],
+      };
+    })
+    .filter((row): row is GroupedSearchRow => row !== null);
 
   return {
     rows,
@@ -193,6 +278,27 @@ export default async function SearchPage({
   }
 
   const supabase = getServerSupabaseClient();
+
+  const { data: printingAliasRow } = await measureAsync("search.printing_alias", { q }, async () =>
+    supabase
+      .from("printing_aliases")
+      .select("printing_id")
+      .ilike("alias", q)
+      .limit(1)
+      .maybeSingle<{ printing_id: string }>()
+  );
+
+  if (printingAliasRow?.printing_id) {
+    const { data: printingRow } = await supabase
+      .from("card_printings")
+      .select("canonical_slug")
+      .eq("id", printingAliasRow.printing_id)
+      .maybeSingle<{ canonical_slug: string }>();
+
+    if (printingRow?.canonical_slug) {
+      redirect(`/cards/${encodeURIComponent(printingRow.canonical_slug)}?printing=${encodeURIComponent(printingAliasRow.printing_id)}`);
+    }
+  }
 
   const { data: aliasRow } = await measureAsync("search.alias", { q }, async () =>
     supabase
@@ -268,14 +374,23 @@ export default async function SearchPage({
           ) : (
             <ul className="divide-y divide-[color:var(--color-border)]">
               {result.rows.map((row) => (
-                <li key={row.slug}>
+                <li key={row.canonical.slug}>
                   <Link
-                    href={`/cards/${encodeURIComponent(row.slug)}`}
+                    href={`/cards/${encodeURIComponent(row.canonical.slug)}`}
                     className="flex items-center justify-between gap-3 py-3"
                   >
                     <div className="min-w-0">
-                      <p className="text-app truncate text-sm font-semibold">{row.canonical_name}</p>
-                      <p className="text-muted truncate text-xs">{rowSubtitle(row)}</p>
+                      <p className="text-app truncate text-sm font-semibold">{row.canonical.canonical_name}</p>
+                      <p className="text-muted truncate text-xs">{rowSubtitle(row.canonical)}</p>
+                      {row.printings.length > 0 ? (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {row.printings.slice(0, 4).map((printing) => (
+                            <span key={printing.id} className="border-app rounded-full border px-2 py-0.5 text-[11px] text-muted">
+                              {printingChipLabel(printing)}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
                     <span className="text-muted text-xs font-semibold">View</span>
                   </Link>
