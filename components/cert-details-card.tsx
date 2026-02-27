@@ -120,6 +120,38 @@ function getPositionInsight(
   return "Balanced population profile";
 }
 
+function getMarketPosition(totalPopulation: number | null, populationHigher: number | null) {
+  if (totalPopulation === null || populationHigher === null || totalPopulation <= 0) {
+    return { percentHigher: null as number | null, label: "Insufficient distribution data" };
+  }
+
+  const percentHigher = (populationHigher / totalPopulation) * 100;
+  if (populationHigher === 0) return { percentHigher, label: "Price Discovery Tier" };
+  if (percentHigher < 10) return { percentHigher, label: "Top percentile grade" };
+  if (percentHigher < 40) return { percentHigher, label: "Upper tier grade" };
+  if (percentHigher < 70) return { percentHigher, label: "Mid distribution grade" };
+  return { percentHigher, label: "High supply grade" };
+}
+
+function getSupplyPressure(totalPopulation: number | null, populationHigher: number | null) {
+  if (totalPopulation === null || populationHigher === null || totalPopulation <= 0) {
+    return { ratio: null as number | null, label: "Unknown", tone: "neutral" as "positive" | "warning" | "negative" | "neutral" };
+  }
+
+  const ratio = populationHigher / totalPopulation;
+  if (ratio < 0.1) return { ratio, label: "Low supply pressure", tone: "positive" as const };
+  if (ratio < 0.4) return { ratio, label: "Moderate supply pressure", tone: "warning" as const };
+  return { ratio, label: "High supply pressure", tone: "negative" as const };
+}
+
+function getLiquidityTier(totalPopulation: number | null): string {
+  if (totalPopulation === null) return "Unknown";
+  if (totalPopulation < 10) return "Ultra thin market";
+  if (totalPopulation < 100) return "Thin market";
+  if (totalPopulation < 5000) return "Moderate liquidity";
+  return "High liquidity";
+}
+
 export default function CertDetailsCard({
   cert,
   data,
@@ -300,9 +332,20 @@ export default function CertDetailsCard({
           ? "badge-negative"
           : "border-app text-muted bg-surface-soft";
   const positionInsight = getPositionInsight(metrics.totalPopulation, metrics.populationHigher, metrics.scarcityScore);
+  const marketPosition = getMarketPosition(metrics.totalPopulation, metrics.populationHigher);
+  const supplyPressure = getSupplyPressure(metrics.totalPopulation, metrics.populationHigher);
+  const liquidityTier = getLiquidityTier(metrics.totalPopulation);
   const hasPsaScan = typeof imageUrl === "string" && imageUrl.trim() !== "" && isLikelyUrl(imageUrl);
   const imageUrlString = hasPsaScan ? imageUrl : "";
   const psaCertUrl = buildPsaCertUrl(cert);
+  const pressureClass =
+    supplyPressure.tone === "positive"
+      ? "badge-positive"
+      : supplyPressure.tone === "warning"
+        ? "border-app text-app bg-surface-soft"
+        : supplyPressure.tone === "negative"
+          ? "badge-negative"
+          : "border-app text-muted bg-surface-soft";
 
   return (
     <section className="glass glow-card lift density-panel rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
@@ -447,18 +490,40 @@ export default function CertDetailsCard({
         {activeTab === "market" ? (
           <div className="mt-4 grid gap-4 lg:grid-cols-2">
             <ProceedsCalculator />
-            <div className="rounded-[var(--radius-card)] border-app border bg-surface-soft/55 p-[var(--space-card)]">
-              <p className="text-app text-sm font-semibold">Market Context</p>
-              <div className="mt-3 space-y-2 text-sm">
-                <p className="text-muted">
-                  Fair Value: <span className="font-semibold">—</span> <span className="text-xs">(coming soon)</span>
+            <div className="grid gap-3">
+              <div className="rounded-[var(--radius-card)] border-app border bg-surface-soft/55 p-[var(--space-card)]">
+                <p className="text-muted text-xs font-semibold uppercase tracking-[0.12em]">Market Position</p>
+                <p className="text-app mt-2 text-lg font-semibold">{marketPosition.label}</p>
+                <p className="text-muted mt-1 text-sm">
+                  Percent higher:{" "}
+                  <span className="text-app font-semibold tabular-nums">
+                    {marketPosition.percentHigher === null
+                      ? "—"
+                      : `${Number.isInteger(marketPosition.percentHigher)
+                          ? marketPosition.percentHigher
+                          : marketPosition.percentHigher.toFixed(1).replace(/\.0$/, "")}%`}
+                  </span>
                 </p>
-                <p className="text-muted">
-                  Volatility: <span className="font-semibold">—</span> <span className="text-xs">(coming soon)</span>
+              </div>
+
+              <div className="rounded-[var(--radius-card)] border-app border bg-surface-soft/55 p-[var(--space-card)]">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-muted text-xs font-semibold uppercase tracking-[0.12em]">Supply Pressure</p>
+                  <span className={`rounded-full border px-2 py-0.5 text-xs ${pressureClass}`}>{supplyPressure.label}</span>
+                </div>
+                <p className="text-muted mt-2 text-sm">
+                  {supplyPressure.ratio === null
+                    ? "Not enough population data to assess pressure."
+                    : `Higher-pop ratio indicates ${supplyPressure.label.toLowerCase()} for this grade band.`}
                 </p>
-                <p className="text-muted">
-                  Avg days to sell: <span className="font-semibold">—</span> <span className="text-xs">(coming soon)</span>
-                </p>
+              </div>
+
+              <div className="rounded-[var(--radius-card)] border-app border bg-surface-soft/55 p-[var(--space-card)]">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-muted text-xs font-semibold uppercase tracking-[0.12em]">Liquidity Tier</p>
+                  <span className="rounded-full border border-app bg-surface px-2 py-0.5 text-xs text-app">{liquidityTier}</span>
+                </div>
+                <p className="text-muted mt-2 text-sm">Derived from total graded population and current scarcity profile.</p>
               </div>
             </div>
           </div>
