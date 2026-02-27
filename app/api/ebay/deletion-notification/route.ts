@@ -3,25 +3,26 @@ import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-function getEndpointUrl(req: Request): string {
-  const url = new URL(req.url);
-  return `${url.origin}${url.pathname}`;
-}
-
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const challengeCode = url.searchParams.get("challenge_code")?.trim() ?? "";
   const verificationToken = process.env.EBAY_VERIFICATION_TOKEN?.trim() ?? "";
+  const publicBaseUrl = process.env.PUBLIC_BASE_URL?.trim() ?? "";
 
   if (!challengeCode) {
     return NextResponse.json({ ok: false, error: "Missing challenge_code query param." }, { status: 400 });
   }
 
   if (!verificationToken) {
-    return NextResponse.json({ ok: false, error: "Missing EBAY_VERIFICATION_TOKEN." }, { status: 500 });
+    return NextResponse.json({ ok: false, error: "Missing EBAY_VERIFICATION_TOKEN." }, { status: 400 });
   }
 
-  const endpoint = getEndpointUrl(req);
+  if (!publicBaseUrl) {
+    return NextResponse.json({ ok: false, error: "Missing PUBLIC_BASE_URL." }, { status: 400 });
+  }
+
+  // This URL must match exactly what is configured in the eBay portal (no trailing slash).
+  const endpoint = `${publicBaseUrl.replace(/\/+$/, "")}/api/ebay/deletion-notification`;
   const challengeResponse = createHash("sha256")
     .update(challengeCode)
     .update(verificationToken)
@@ -42,4 +43,3 @@ export async function POST(req: Request) {
   console.log("[ebay.deletion-notification] received", payload);
   return NextResponse.json({ received: true });
 }
-
