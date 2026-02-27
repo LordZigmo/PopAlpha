@@ -81,6 +81,10 @@ Local dataset importer:
 node scripts/import-pokemon-tcg-data-local.mjs
 ```
 
+Search suggest endpoint (manual check):
+- `GET /api/search/suggest?q=pikachu`
+- Returns up to 8 canonical cards and up to 5 decks.
+
 ## Local environment setup (beginner-friendly)
 
 ### 1) Create your local env file

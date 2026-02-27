@@ -62,6 +62,12 @@ type VariantChipRow = {
   edition: "UNLIMITED" | "FIRST_EDITION" | "UNKNOWN";
 };
 
+type DeckRow = {
+  id: string;
+  name: string;
+  format: string | null;
+};
+
 const PAGE_SIZE = 25;
 
 function toPositiveInt(value: string | undefined, fallback: number): number {
@@ -364,18 +370,6 @@ export default async function SearchPage({
 
   const supabase = getServerSupabaseClient();
 
-  const { data: aliasRow } = await measureAsync("search.alias", { q: qNormalized }, async () =>
-    supabase
-      .from("card_aliases")
-      .select("canonical_slug")
-      .eq("alias", qNormalized)
-      .limit(1)
-      .maybeSingle<{ canonical_slug: string }>()
-  );
-  if (aliasRow?.canonical_slug) {
-    redirect(`/c/${encodeURIComponent(aliasRow.canonical_slug)}`);
-  }
-
   const { data: printingAliasRow } = await measureAsync("search.printing_alias", { q: qNormalized }, async () =>
     supabase
       .from("printing_aliases")
@@ -395,6 +389,30 @@ export default async function SearchPage({
     if (printingRow?.canonical_slug) {
       redirect(`/c/${encodeURIComponent(printingRow.canonical_slug)}?printing=${encodeURIComponent(printingAliasRow.printing_id)}`);
     }
+  }
+
+  const { data: aliasRow } = await measureAsync("search.alias", { q: qNormalized }, async () =>
+    supabase
+      .from("card_aliases")
+      .select("canonical_slug")
+      .eq("alias", qNormalized)
+      .limit(1)
+      .maybeSingle<{ canonical_slug: string }>()
+  );
+  if (aliasRow?.canonical_slug) {
+    redirect(`/c/${encodeURIComponent(aliasRow.canonical_slug)}`);
+  }
+
+  const { data: deckAliasRow } = await measureAsync("search.deck_alias", { q: qNormalized }, async () =>
+    supabase
+      .from("deck_aliases")
+      .select("deck_id")
+      .eq("alias", qNormalized)
+      .limit(1)
+      .maybeSingle<{ deck_id: string }>()
+  );
+  if (deckAliasRow?.deck_id) {
+    redirect(`/d/${encodeURIComponent(deckAliasRow.deck_id)}`);
   }
 
   if (parsedNumber) {
@@ -444,6 +462,14 @@ export default async function SearchPage({
     setFilter,
     parsedNumber,
   });
+
+  const { data: deckRowsRaw } = await supabase
+    .from("decks")
+    .select("id, name, format")
+    .ilike("name", `%${qNormalized}%`)
+    .order("name", { ascending: true })
+    .limit(25);
+  const deckRows = (deckRowsRaw ?? []) as DeckRow[];
 
   let cardsQuery = supabase
     .from("cards")
@@ -567,6 +593,27 @@ export default async function SearchPage({
               )}
             </div>
           </div>
+        </section>
+
+        <section className="mt-4 glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
+          <p className="text-app text-sm font-semibold uppercase tracking-[0.12em]">Deck Matches</p>
+          {deckRows.length === 0 ? (
+            <p className="text-muted mt-2 text-sm">No deck matches.</p>
+          ) : (
+            <ul className="mt-3 divide-y divide-[color:var(--color-border)]">
+              {deckRows.map((deck) => (
+                <li key={deck.id}>
+                  <Link href={`/d/${encodeURIComponent(deck.id)}`} className="flex items-center justify-between gap-3 py-3">
+                    <div className="min-w-0">
+                      <p className="text-app truncate text-sm font-semibold">{deck.name}</p>
+                      <p className="text-muted truncate text-xs">{deck.format ?? "Format unknown"}</p>
+                    </div>
+                    <span className="text-muted text-xs font-semibold">View</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
 
         <section className="mt-4 glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
