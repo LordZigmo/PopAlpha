@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { type SupabaseClient } from "@supabase/supabase-js";
 import { getCertificate, type CertificateResponse } from "@/lib/psa/client";
 import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import { buildSnapshotParsed, hashSnapshotParsed } from "@/lib/psa/snapshot";
 
 export const runtime = "nodejs";
 
@@ -35,6 +36,51 @@ async function logLookup(params: {
     status: params.status,
     error_message: params.errorMessage,
   });
+}
+
+async function writeSnapshot(params: {
+  supabase: SupabaseClient;
+  cert: string;
+  source: string;
+  fetchedAt: string;
+  data: CertificateResponse;
+}) {
+  const snapshotParsed = buildSnapshotParsed(params.data);
+  const snapshotHash = hashSnapshotParsed(snapshotParsed);
+
+  const { error: snapshotError } = await params.supabase.from("psa_cert_snapshots").upsert(
+    {
+      cert: params.cert,
+      fetched_at: params.fetchedAt,
+      source: params.source,
+      parsed: snapshotParsed,
+      raw: params.data.raw,
+      hash: snapshotHash,
+    },
+    {
+      onConflict: "cert,hash",
+      ignoreDuplicates: true,
+    }
+  );
+
+  if (snapshotError) {
+    throw new Error(`Failed writing psa_cert_snapshots: ${snapshotError.message}`);
+  }
+
+  const { error: eventError } = await params.supabase.from("market_events").insert({
+    asset_type: "psa_cert",
+    asset_ref: params.cert,
+    source: params.source,
+    event_type: "psa_fetch",
+    occurred_at: params.fetchedAt,
+    metadata: {
+      snapshot_hash: snapshotHash,
+    },
+  });
+
+  if (eventError) {
+    throw new Error(`Failed writing market_events: ${eventError.message}`);
+  }
 }
 
 export async function GET(req: Request) {
@@ -111,6 +157,14 @@ export async function GET(req: Request) {
     if (upsertError) {
       throw new Error(`Failed upserting psa_cert_cache: ${upsertError.message}`);
     }
+
+    await writeSnapshot({
+      supabase,
+      cert,
+      source: "psa",
+      fetchedAt,
+      data: freshData,
+    });
 
     await logLookup({
       supabase,

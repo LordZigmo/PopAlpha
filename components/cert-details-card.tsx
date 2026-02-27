@@ -21,7 +21,13 @@ type CertDetailsCardProps = {
 };
 
 type DisplayValue = string | number | null | undefined;
-type TabKey = "overview" | "market" | "private" | "raw";
+type TabKey = "overview" | "activity" | "market" | "private" | "raw";
+type ActivityEvent = {
+  type: string;
+  summary: string;
+  occurred_at: string;
+  details: Record<string, unknown>;
+};
 
 function normalizeRaw(raw: unknown): Record<string, unknown> {
   if (!raw || typeof raw !== "object") return {};
@@ -69,6 +75,17 @@ function formatShare(value: number | null): string {
   return `${Number.isInteger(n) ? String(n) : n.toFixed(1).replace(/\.0$/, "")}%`;
 }
 
+function formatTimestamp(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "—";
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(parsed);
+}
+
 function getLiquiditySignal(totalPopulation: number | null): "High liquidity" | "Moderate" | "Thin" | "Unknown" {
   if (totalPopulation === null) return "Unknown";
   if (totalPopulation > 10000) return "High liquidity";
@@ -108,6 +125,10 @@ export default function CertDetailsCard({
   const [salesError, setSalesError] = useState<string | null>(null);
   const [saleToast, setSaleToast] = useState<string | null>(null);
   const [saleSubmitting, setSaleSubmitting] = useState(false);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityError, setActivityError] = useState<string | null>(null);
+  const [activityEvents, setActivityEvents] = useState<ActivityEvent[]>([]);
+  const [historyCount, setHistoryCount] = useState<number | null>(null);
   const [saleForm, setSaleForm] = useState<SaleFormState>({
     soldAt: dateToInput(new Date().toISOString()),
     price: "",
@@ -131,6 +152,7 @@ export default function CertDetailsCard({
 
   const tabs: Array<{ key: TabKey; label: string }> = [
     { key: "overview", label: "Overview" },
+    { key: "activity", label: "Activity" },
     { key: "market", label: "Market" },
     { key: "private", label: "Private Sales" },
     { key: "raw", label: "Raw Data" },
@@ -152,9 +174,36 @@ export default function CertDetailsCard({
     }
   }, [cert]);
 
+  const loadActivity = useCallback(async () => {
+    setActivityLoading(true);
+    setActivityError(null);
+    try {
+      const response = await fetch(`/api/psa/cert/activity?cert=${encodeURIComponent(cert)}&limit=20`);
+      const payload = (await response.json()) as {
+        ok: boolean;
+        snapshot_count?: number;
+        events?: ActivityEvent[];
+        error?: string;
+      };
+      if (!response.ok || !payload.ok) throw new Error(payload.error ?? "Failed to load activity.");
+      setHistoryCount(payload.snapshot_count ?? 0);
+      setActivityEvents(payload.events ?? []);
+    } catch (error) {
+      setActivityError(String(error));
+      setHistoryCount(0);
+      setActivityEvents([]);
+    } finally {
+      setActivityLoading(false);
+    }
+  }, [cert]);
+
   useEffect(() => {
     if (activeTab === "private") void loadPrivateSales();
   }, [activeTab, loadPrivateSales]);
+
+  useEffect(() => {
+    void loadActivity();
+  }, [loadActivity]);
 
   useEffect(() => {
     if (!saleToast) return;
@@ -266,6 +315,9 @@ export default function CertDetailsCard({
             <span className="border-app rounded-full border px-2 py-1 text-muted">
               Cache: {cacheHit ? "Hit" : "Miss"}
             </span>
+            <span className="border-app rounded-full border px-2 py-1 text-muted">
+              History: {historyCount === null ? "…" : historyCount}
+            </span>
           </div>
         </article>
 
@@ -342,6 +394,26 @@ export default function CertDetailsCard({
                 </p>
               </div>
             </div>
+          </div>
+        ) : null}
+
+        {activeTab === "activity" ? (
+          <div className="mt-4 rounded-[var(--radius-card)] border-app border bg-surface-soft/55 p-[var(--space-card)]">
+            {activityLoading ? <p className="text-muted text-sm">Loading activity…</p> : null}
+            {!activityLoading && activityError ? <p className="text-negative text-sm">{activityError}</p> : null}
+            {!activityLoading && !activityError && activityEvents.length === 0 ? (
+              <p className="text-muted text-sm">No historical changes recorded yet.</p>
+            ) : null}
+            {!activityLoading && !activityError && activityEvents.length > 0 ? (
+              <ol className="space-y-3">
+                {activityEvents.map((event, index) => (
+                  <li key={`${event.type}-${event.occurred_at}-${index}`} className="rounded-[var(--radius-card)] border-app border bg-surface/70 px-3 py-2">
+                    <p className="text-app text-sm font-semibold">{event.summary}</p>
+                    <p className="text-muted mt-1 text-xs">{formatTimestamp(event.occurred_at)}</p>
+                  </li>
+                ))}
+              </ol>
+            ) : null}
           </div>
         ) : null}
 
