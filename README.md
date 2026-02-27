@@ -20,6 +20,12 @@ This repo includes a simple end-to-end cert lookup flow:
 Printings are the unit for holo/reverse/edition labels.
 Canonical cards group identities, while `card_printings` carries label-correct finish and edition metadata.
 
+For Pokemon TCG ingestion, label normalization is rule-driven via `label_normalization_rules`.
+To patch mislabels without a full re-import, insert or update higher-priority rules (lower `priority` value wins) for:
+- `match_type='variant_key'` (most common for `tcgplayer.prices` keys)
+- `match_type='rarity'` / `subtype`
+- `match_type='name_regex'` / `set_regex` for targeted cleanup
+
 ## Local environment setup (beginner-friendly)
 
 ### 1) Create your local env file

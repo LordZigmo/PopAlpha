@@ -46,6 +46,22 @@ type SearchResultBundle = {
   totalPages: number;
 };
 
+type IdentityCardRow = {
+  id: string;
+  slug: string;
+  name: string;
+  set: string;
+  year: number;
+  number: string;
+  image_url: string | null;
+};
+
+type VariantChipRow = {
+  card_id: string;
+  finish: "NON_HOLO" | "HOLO" | "REVERSE_HOLO" | "ALT_HOLO" | "UNKNOWN";
+  edition: "UNLIMITED" | "FIRST_EDITION" | "UNKNOWN";
+};
+
 const PAGE_SIZE = 25;
 
 function toPositiveInt(value: string | undefined, fallback: number): number {
@@ -320,6 +336,34 @@ export default async function SearchPage({
     setFilter,
   });
 
+  let cardsQuery = supabase
+    .from("cards")
+    .select("id, slug, name, set, year, number, image_url")
+    .or(`name.ilike.%${q}%,set.ilike.%${q}%,number.ilike.%${q}%`)
+    .order("name", { ascending: true })
+    .limit(25);
+  if (setFilter) cardsQuery = cardsQuery.ilike("set", `%${setFilter}%`);
+  const { data: cardRowsRaw } = await cardsQuery;
+  const cardRows = (cardRowsRaw ?? []) as IdentityCardRow[];
+  const cardIds = cardRows.map((row) => row.id);
+  let variantRows: VariantChipRow[] = [];
+  if (cardIds.length > 0) {
+    const { data: variantsRaw } = await supabase
+      .from("card_variants")
+      .select("card_id, finish, edition")
+      .in("card_id", cardIds);
+    variantRows = (variantsRaw ?? []) as VariantChipRow[];
+  }
+
+  const chipsByCardId = new Map<string, string[]>();
+  for (const variant of variantRows) {
+    const chips = chipsByCardId.get(variant.card_id) ?? [];
+    if (variant.finish === "HOLO" && !chips.includes("Holo")) chips.push("Holo");
+    if (variant.finish === "REVERSE_HOLO" && !chips.includes("Reverse")) chips.push("Reverse");
+    if (variant.edition === "FIRST_EDITION" && !chips.includes("1st Ed")) chips.push("1st Ed");
+    chipsByCardId.set(variant.card_id, chips.slice(0, 3));
+  }
+
   const startIndex = result.total === 0 ? 0 : (result.page - 1) * PAGE_SIZE + 1;
   const endIndex = result.total === 0 ? 0 : startIndex + result.rows.length - 1;
 
@@ -363,6 +407,41 @@ export default async function SearchPage({
               Apply
             </button>
           </form>
+        </section>
+
+        <section className="mt-4 glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
+          <p className="text-app text-sm font-semibold uppercase tracking-[0.12em]">Card DB Matches</p>
+          {cardRows.length === 0 ? (
+            <p className="text-muted mt-2 text-sm">No direct card matches.</p>
+          ) : (
+            <ul className="mt-3 divide-y divide-[color:var(--color-border)]">
+              {cardRows.map((card) => (
+                <li key={card.id}>
+                  <Link
+                    href={`/c/${encodeURIComponent(card.slug)}`}
+                    className="flex items-center justify-between gap-3 py-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-app truncate text-sm font-semibold">{card.name}</p>
+                      <p className="text-muted truncate text-xs">
+                        {card.year || "—"} • {card.set} • #{card.number}
+                      </p>
+                      {(chipsByCardId.get(card.id) ?? []).length > 0 ? (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {(chipsByCardId.get(card.id) ?? []).slice(0, 3).map((chip) => (
+                            <span key={`${card.id}-${chip}`} className="border-app rounded-full border px-2 py-0.5 text-[11px] text-muted">
+                              {chip}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                    <span className="text-muted text-xs font-semibold">View</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
 
         <section className="mt-4 glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
