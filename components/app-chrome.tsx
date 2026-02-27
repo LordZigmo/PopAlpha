@@ -5,12 +5,24 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import ThemeToggle from "@/components/theme-toggle";
 
-function NavItem({ href, label, active, onClick }: { href: string; label: string; active: boolean; onClick?: () => void }) {
+function NavItem({
+  href,
+  label,
+  active,
+  onClick,
+  compact = false,
+}: {
+  href: string;
+  label: string;
+  active: boolean;
+  onClick?: () => void;
+  compact?: boolean;
+}) {
   return (
     <Link
       href={href}
       onClick={onClick}
-      className={`block rounded-[var(--radius-input)] border px-3 py-2 text-sm transition ${
+      className={`block rounded-[var(--radius-input)] border ${compact ? "px-3 py-2 text-xs" : "px-3 py-2 text-sm"} transition ${
         active ? "btn-accent" : "btn-ghost"
       }`}
     >
@@ -30,19 +42,12 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="app-chrome">
-      <aside className="app-sidebar hidden lg:flex">
-        <div className="glass h-full w-full border-r border-app p-4">
-          <div className="flex items-center justify-between">
-            <p className="text-app text-sm font-semibold tracking-[0.16em] uppercase">PopAlpha</p>
-            <ThemeToggle />
-          </div>
-          <nav className="mt-5 space-y-2">
-            <NavItem href="/" label="Cert Lookup" active={isActive("/")} />
-            <NavItem href="/watchlist" label="Watchlist" active={isActive("/watchlist")} />
-            <NavItem href="/portfolio" label="Portfolio" active={isActive("/portfolio")} />
-          </nav>
-        </div>
-      </aside>
+      <div className="hidden lg:flex fixed right-4 top-4 z-50 items-center gap-2">
+        <NavItem href="/" label="Lookup" active={isActive("/")} compact />
+        <NavItem href="/watchlist" label="Watchlist" active={isActive("/watchlist")} compact />
+        <NavItem href="/portfolio" label="Portfolio" active={isActive("/portfolio")} compact />
+        <ThemeToggle />
+      </div>
 
       <div className="lg:hidden fixed left-3 top-3 z-50 flex items-center gap-2">
         <button
@@ -57,9 +62,8 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
 
       {mobileOpen ? (
         <div className="fixed inset-0 z-40 bg-black/30 lg:hidden">
-          <aside className="glass h-full w-64 border-r border-app p-4">
-            <p className="text-app text-sm font-semibold tracking-[0.16em] uppercase">PopAlpha</p>
-            <nav className="mt-5 space-y-2">
+          <aside className="glass ml-3 mt-14 w-56 rounded-[var(--radius-panel)] border-app border p-3">
+            <nav className="space-y-2">
               <NavItem href="/" label="Cert Lookup" active={isActive("/")} onClick={() => setMobileOpen(false)} />
               <NavItem href="/watchlist" label="Watchlist" active={isActive("/watchlist")} onClick={() => setMobileOpen(false)} />
               <NavItem href="/portfolio" label="Portfolio" active={isActive("/portfolio")} onClick={() => setMobileOpen(false)} />
@@ -67,9 +71,7 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
           </aside>
         </div>
       ) : null}
-
-      <main className="app-content">{children}</main>
+      <main>{children}</main>
     </div>
   );
 }
-

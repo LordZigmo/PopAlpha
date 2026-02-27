@@ -102,21 +102,7 @@ body {
 }
 
 .app-chrome {
-  display: flex;
   min-height: 100vh;
-}
-
-.app-sidebar {
-  position: sticky;
-  top: 0;
-  width: 240px;
-  height: 100vh;
-  flex: 0 0 240px;
-}
-
-.app-content {
-  min-width: 0;
-  flex: 1;
 }
 
 .lift { transition: box-shadow 200ms ease, border-color 200ms ease; }

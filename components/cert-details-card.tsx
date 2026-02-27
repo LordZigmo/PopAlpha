@@ -297,15 +297,8 @@ export default function CertDetailsCard({
         >
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
-              <p className="text-muted text-xs font-semibold uppercase tracking-[0.18em]">Identity Hero</p>
-              <p className="text-app mt-3 text-5xl font-semibold sm:text-6xl">{display(grade)}</p>
+              <p className="text-app text-5xl font-semibold sm:text-6xl">{display(grade)}</p>
               <p className="text-app mt-3 text-base">{title}</p>
-              {ultraScarce ? (
-                <div className="badge-gold mt-3 inline-flex items-center gap-2 rounded-full px-3 py-1">
-                  <span className="text-sm font-semibold">1 of 1</span>
-                  <span className="text-[11px] opacity-85">Highest recorded grade</span>
-                </div>
-              ) : null}
             </div>
             <div className="flex shrink-0 items-start gap-3">
               <div className="glass relative h-24 w-[4.35rem] overflow-hidden rounded-[var(--radius-input)] border-app border bg-surface-soft">
@@ -362,10 +355,17 @@ export default function CertDetailsCard({
           <StatCard
             label="Total Pop"
             value={display(totalPopulation)}
+            headerRight={
+              ultraScarce ? (
+                <span className="badge-gold rounded-full px-3 py-1 text-xs font-semibold">1 of 1</span>
+              ) : null
+            }
             sublabel={
               <span className="mt-1 inline-flex items-center gap-2">
                 <span>Total graded examples</span>
-                <span className={`rounded-full border px-2 py-0.5 ${liquidityChipClass}`}>{liquiditySignal}</span>
+                {!ultraScarce ? (
+                  <span className={`rounded-full border px-2 py-0.5 ${liquidityChipClass}`}>{liquiditySignal}</span>
+                ) : null}
               </span>
             }
           />
