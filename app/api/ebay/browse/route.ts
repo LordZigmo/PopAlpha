@@ -10,6 +10,7 @@ type TokenCache = {
 let tokenCache: TokenCache | null = null;
 
 type EbayBrowseItem = {
+  itemId?: string;
   title?: string;
   price?: { value?: string; currency?: string };
   shippingOptions?: Array<{ shippingCost?: { value?: string; currency?: string } }>;
@@ -106,6 +107,7 @@ export async function GET(req: Request) {
     const items = (payload.itemSummaries ?? []).map((item) => {
       const shipping = item.shippingOptions?.[0]?.shippingCost;
       return {
+        externalId: item.itemId ?? "",
         title: item.title ?? "",
         price: item.price?.value
           ? {
@@ -132,4 +134,3 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: String(error) }, { status: 500 });
   }
 }
-

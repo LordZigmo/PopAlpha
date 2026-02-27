@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getServerSupabaseClient } from "@/lib/supabaseServer";
 import EbayListings from "@/components/ebay-listings";
+import MarketSnapshotBox from "@/components/market-snapshot-box";
 
 type CardRow = {
   id: string;
@@ -58,6 +59,7 @@ export default async function CardIdentityPage({
     .order("variant_key", { ascending: true });
   const variants = (variantsData ?? []) as VariantRow[];
   const ebayQuery = `${card.name} ${card.set} ${card.number}`.trim();
+  const cardVariantId = variants[0]?.id ?? null;
 
   return (
     <main className="app-shell">
@@ -111,7 +113,8 @@ export default async function CardIdentityPage({
           )}
         </section>
 
-        <EbayListings queryBase={ebayQuery} />
+        <MarketSnapshotBox cardVariantId={cardVariantId} />
+        <EbayListings queryBase={ebayQuery} cardVariantId={cardVariantId} />
       </div>
     </main>
   );

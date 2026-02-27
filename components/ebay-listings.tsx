@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 type Listing = {
+  externalId: string;
   title: string;
   price: { value: string; currency: string } | null;
   shipping: { value: string; currency: string } | null;
@@ -15,6 +16,7 @@ type Listing = {
 
 type EbayListingsProps = {
   queryBase: string;
+  cardVariantId: string | null;
 };
 
 function formatMoney(value: string, currency: string): string {
@@ -27,13 +29,22 @@ function formatMoney(value: string, currency: string): string {
   }).format(numeric);
 }
 
-export default function EbayListings({ queryBase }: EbayListingsProps) {
+function normalizeBrowseQuery(value: string, mode: "raw" | "psa"): string {
+  const withoutNoise = value
+    .replace(/\b(Unlimited|Common|Uncommon)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const withGrade = mode === "psa" ? `${withoutNoise} PSA` : withoutNoise;
+  return `${withGrade} -lot -proxy`.replace(/\s+/g, " ").trim();
+}
+
+export default function EbayListings({ queryBase, cardVariantId }: EbayListingsProps) {
   const [mode, setMode] = useState<"raw" | "psa">("raw");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<Listing[]>([]);
 
-  const query = useMemo(() => (mode === "psa" ? `${queryBase} PSA` : queryBase), [mode, queryBase]);
+  const query = useMemo(() => normalizeBrowseQuery(queryBase, mode), [mode, queryBase]);
 
   useEffect(() => {
     let cancelled = false;
@@ -46,7 +57,21 @@ export default function EbayListings({ queryBase }: EbayListingsProps) {
         if (!response.ok || !payload.ok) {
           throw new Error(payload.error ?? "Could not load eBay listings.");
         }
-        if (!cancelled) setItems(payload.items ?? []);
+        if (!cancelled) {
+          const nextItems = payload.items ?? [];
+          setItems(nextItems);
+          if (cardVariantId && nextItems.length > 0) {
+            // Background observation write; intentionally fire-and-forget.
+            void fetch("/api/market/observe", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                cardVariantId,
+                listings: nextItems,
+              }),
+            }).catch(() => {});
+          }
+        }
       } catch (err) {
         if (!cancelled) {
           setItems([]);
@@ -60,7 +85,7 @@ export default function EbayListings({ queryBase }: EbayListingsProps) {
     return () => {
       cancelled = true;
     };
-  }, [query]);
+  }, [cardVariantId, query]);
 
   return (
     <section className="mt-4 glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
@@ -134,4 +159,3 @@ export default function EbayListings({ queryBase }: EbayListingsProps) {
     </section>
   );
 }
-
