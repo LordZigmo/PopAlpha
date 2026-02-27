@@ -13,15 +13,11 @@ type ShareCardProps = {
 };
 
 const shareColors = {
-  shareBg:
-    "radial-gradient(680px circle at 22% 12%, color-mix(in srgb, var(--color-accent) 26%, transparent), transparent 60%), linear-gradient(165deg, #0b1438, #08102b)",
   shareHeadlineGlow:
     "radial-gradient(520px circle at 20% 0%, color-mix(in srgb, #ffffff 14%, transparent), transparent 64%)",
   sharePanelBg: "color-mix(in srgb, #7ea1ff 18%, #172b66)",
   sharePanelText: "#f5f8ff",
   shareSecondaryText: "color-mix(in srgb, #f5f8ff 78%, #8ea4db)",
-  shareGold: "#d8b35a",
-  shareGreen: "#23d89f",
 } as const;
 
 function formatNumber(value: number | null | undefined): string {
@@ -78,72 +74,37 @@ export default function ShareCard({
   const hasImage = typeof imageUrl === "string" && /^https?:\/\//i.test(imageUrl);
   const normalizedOneOfOne = isOneOfOne || totalPop === 1;
   const isTopTier = !normalizedOneOfOne && populationHigher === 0;
-  const isUpperTier =
-    !normalizedOneOfOne &&
-    !isTopTier &&
-    typeof percentHigher === "number" &&
-    Number.isFinite(percentHigher) &&
-    percentHigher < 10;
   const claimHeadline = normalizedOneOfOne
     ? "1 of 1 at this grade"
     : isTopTier
       ? "Top tier - none higher recorded"
       : "Not top tier - higher grades exist";
-  const badge = normalizedOneOfOne
-    ? { label: "🏆 1 OF 1", tone: "gold" as const }
-    : isTopTier
-      ? { label: "TOP TIER", tone: "green" as const }
-      : isUpperTier
-        ? { label: "UPPER TIER", tone: "indigo" as const }
-        : null;
-  const verdictStyle = normalizedOneOfOne
-    ? {
-        borderColor: "color-mix(in srgb, var(--color-gold) 78%, transparent)",
-        background:
-          "linear-gradient(150deg, color-mix(in srgb, var(--color-gold) 26%, transparent), color-mix(in srgb, #1f1a0d 86%, #141b38))",
-        boxShadow: "0 0 24px color-mix(in srgb, var(--color-gold) 22%, transparent)",
-      }
-    : isTopTier
-      ? {
-          borderColor: "color-mix(in srgb, var(--color-positive) 72%, transparent)",
-          background:
-            "linear-gradient(150deg, color-mix(in srgb, var(--color-positive) 24%, transparent), color-mix(in srgb, #0d1f22 78%, #112846))",
-          boxShadow: "0 0 20px color-mix(in srgb, var(--color-positive) 18%, transparent)",
-        }
-      : {
-          borderColor: "color-mix(in srgb, #9fb2ea 44%, transparent)",
-          background: "linear-gradient(150deg, color-mix(in srgb, #89a4e2 16%, #1a2d68), #132452)",
-          boxShadow: "none",
-        };
 
   if (mode === "square") {
     return (
       <article
         className={`relative h-full w-full overflow-hidden rounded-[28px] border border-app text-app ${className}`}
         style={{
-          background: `${shareColors.shareHeadlineGlow}, ${shareColors.shareBg}`,
+          background:
+            "radial-gradient(620px circle at 20% 10%, color-mix(in srgb, var(--color-accent) 18%, transparent), transparent 58%)," +
+            "linear-gradient(165deg, #0c1536, #0a122c)",
         }}
       >
-        <div className="grid h-full grid-rows-[1fr_auto] gap-5 p-14">
-          <div className="grid min-h-0 grid-cols-[3fr_2fr] gap-6">
-            <div className="min-h-0">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-[1.75rem] font-semibold leading-none" style={{ color: shareColors.sharePanelText }}>
-                    POPALPHA
-                  </p>
-                  <p className="mt-1 text-sm font-semibold uppercase tracking-[0.2em]" style={{ color: shareColors.shareSecondaryText }}>
-                    CERT RECAP
-                  </p>
-                </div>
-                <p className="text-sm font-medium" style={{ color: shareColors.shareSecondaryText }}>
-                  popalpha.app
-                </p>
-              </div>
+        <div className="grid h-full grid-rows-[1fr_auto] gap-6 p-14">
+          <div className="mx-auto flex h-full w-full max-w-[968px] flex-col gap-7">
+            <header>
+              <p className="text-[1.75rem] font-semibold leading-none" style={{ color: shareColors.sharePanelText }}>
+                POPALPHA
+              </p>
+              <p className="mt-1 text-sm font-semibold uppercase tracking-[0.2em]" style={{ color: shareColors.shareSecondaryText }}>
+                CERT RECAP
+              </p>
+            </header>
 
-              <div className="mt-7 max-w-[95%]">
+            <section className="space-y-4">
+              <div style={{ background: shareColors.shareHeadlineGlow }} className="rounded-2xl">
                 <p
-                  className="text-[3.1rem] font-semibold leading-[1.02]"
+                  className="text-[3.05rem] font-semibold leading-[1.03]"
                   style={{
                     color: shareColors.sharePanelText,
                     display: "-webkit-box",
@@ -155,13 +116,12 @@ export default function ShareCard({
                   {claimHeadline}
                 </p>
               </div>
-
-              <div className="mt-5">
-                <p className="text-xl font-semibold leading-tight" style={{ color: shareColors.sharePanelText }}>
+              <div className="space-y-1">
+                <p className="text-[1.35rem] font-semibold leading-tight" style={{ color: shareColors.sharePanelText }}>
                   {grade ?? "Grade unavailable"}
                 </p>
                 <p
-                  className="mt-2 text-base leading-tight"
+                  className="text-base leading-tight"
                   style={{
                     color: shareColors.shareSecondaryText,
                     display: "-webkit-box",
@@ -185,114 +145,76 @@ export default function ShareCard({
                   {identityLineB || "Data unavailable"}
                 </p>
               </div>
+            </section>
 
-              <div className="mt-5 flex items-center justify-between gap-3">
-                <div className="min-h-[44px]">
-                  {badge ? (
-                    <span
-                      className="inline-flex rounded-full border px-5 py-2 text-base font-semibold tracking-[0.08em]"
-                      style={
-                        badge.tone === "gold"
-                          ? {
-                              borderColor: "color-mix(in srgb, var(--color-gold) 80%, transparent)",
-                              background: "color-mix(in srgb, var(--color-gold) 22%, #201807)",
-                              color: "#fff3d3",
-                            }
-                          : badge.tone === "green"
-                            ? {
-                                borderColor: "color-mix(in srgb, var(--color-positive) 72%, transparent)",
-                                background: "color-mix(in srgb, var(--color-positive) 20%, #102a24)",
-                                color: "#dfffee",
-                              }
-                            : {
-                                borderColor: "color-mix(in srgb, var(--color-accent) 70%, transparent)",
-                                background: "color-mix(in srgb, var(--color-accent) 22%, #192453)",
-                                color: "#e9eeff",
-                              }
-                      }
-                    >
-                      {badge.label}
-                    </span>
-                  ) : null}
-                </div>
-                <div className="h-20 w-16 overflow-hidden rounded-2xl border border-app" style={{ background: shareColors.sharePanelBg }}>
+            <section className="grid grid-cols-[1fr_292px] items-start gap-6">
+              <div className="rounded-2xl border px-5 py-4" style={{ background: "color-mix(in srgb, #6b90ff 14%, #15295f)", borderColor: "color-mix(in srgb, #d9e5ff 24%, transparent)" }}>
+                <p className="text-sm leading-relaxed" style={{ color: shareColors.shareSecondaryText }}>
+                  Scarcity and grade-distribution recap optimized for social sharing.
+                </p>
+              </div>
+              <div className="h-[292px] w-[292px] overflow-hidden rounded-[24px] border" style={{ background: "linear-gradient(155deg, color-mix(in srgb, #8ea8ff 24%, #243f86), #1a2f67)", borderColor: "color-mix(in srgb, #dce7ff 30%, transparent)" }}>
+                <div className="flex h-full w-full flex-col items-center justify-center px-6 text-center">
                   {hasImage ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={imageUrl} alt="Card preview" className="h-full w-full object-cover" />
                   ) : (
-                    <div className="flex h-full w-full items-center justify-center px-1 text-center text-[9px] font-medium" style={{ color: shareColors.shareSecondaryText }}>
-                      image coming soon
-                    </div>
+                    <>
+                      <div className="h-16 w-16 rounded-2xl border border-app bg-surface/40" />
+                      <p className="mt-3 text-sm font-semibold" style={{ color: shareColors.shareSecondaryText }}>Image coming soon</p>
+                    </>
                   )}
                 </div>
               </div>
-            </div>
+            </section>
 
-            <div className="grid min-h-0 grid-rows-[auto_1fr] gap-4">
-              <div className="rounded-[20px] border p-5" style={verdictStyle}>
-                <p className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: shareColors.shareSecondaryText }}>
-                  VERDICT
+            <section className="grid grid-cols-2 gap-4">
+              <div className="rounded-[16px] border px-5 py-4" style={{ minHeight: 156, background: shareColors.sharePanelBg, borderColor: "color-mix(in srgb, #dce7ff 30%, transparent)" }}>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: shareColors.shareSecondaryText }}>
+                  Scarcity
                 </p>
-                <p className="mt-2 text-[2.3rem] font-semibold leading-none" style={{ color: shareColors.sharePanelText }}>
-                  {normalizedOneOfOne ? "1 of 1" : isTopTier ? "Top tier" : "Not top tier"}
+                <p className="mt-2 text-[2.2rem] font-semibold leading-none" style={{ color: shareColors.sharePanelText }}>
+                  {scarcityScore === null || scarcityScore === undefined ? "Data unavailable" : `${Math.round(scarcityScore)}/100`}
                 </p>
-                <p className="mt-2 text-sm leading-tight" style={{ color: shareColors.sharePanelText }}>
-                  {normalizedOneOfOne
-                    ? "Unique population at this grade"
-                    : isTopTier
-                      ? "No higher examples recorded"
-                      : "Higher grades are recorded"}
-                </p>
+                <p className="mt-2 text-[12px]" style={{ color: shareColors.shareSecondaryText }}>scarcity score</p>
               </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-[16px] border p-4" style={{ background: shareColors.sharePanelBg, borderColor: "color-mix(in srgb, #dce7ff 28%, transparent)" }}>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: shareColors.shareSecondaryText }}>
-                    Scarcity
-                  </p>
-                  <p className="mt-1 text-[2rem] font-semibold leading-none" style={{ color: shareColors.sharePanelText }}>
-                    {scarcityScore === null || scarcityScore === undefined ? "Data unavailable" : `${Math.round(scarcityScore)}/100`}
-                  </p>
-                  <p className="mt-1 text-[11px]" style={{ color: shareColors.shareSecondaryText }}>scarcity score</p>
-                </div>
-                <div className="rounded-[16px] border p-4" style={{ background: shareColors.sharePanelBg, borderColor: "color-mix(in srgb, #dce7ff 28%, transparent)" }}>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: shareColors.shareSecondaryText }}>
-                    Percent higher
-                  </p>
-                  <p className="mt-1 text-[2rem] font-semibold leading-none tabular-nums" style={{ color: shareColors.sharePanelText }}>
-                    {formatPercent(percentHigher)}
-                  </p>
-                  <p className="mt-1 text-[11px]" style={{ color: shareColors.shareSecondaryText }}>graded higher</p>
-                </div>
-                <div className="rounded-[16px] border p-4" style={{ background: shareColors.sharePanelBg, borderColor: "color-mix(in srgb, #dce7ff 28%, transparent)" }}>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: shareColors.shareSecondaryText }}>
-                    Total pop
-                  </p>
-                  <p className="mt-1 text-[2rem] font-semibold leading-none tabular-nums" style={{ color: shareColors.sharePanelText }}>
-                    {formatNumber(totalPop)}
-                  </p>
-                  <p className="mt-1 text-[11px]" style={{ color: shareColors.shareSecondaryText }}>total graded</p>
-                </div>
-                <div className="rounded-[16px] border p-4" style={{ background: shareColors.sharePanelBg, borderColor: "color-mix(in srgb, #dce7ff 28%, transparent)" }}>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: shareColors.shareSecondaryText }}>
-                    Liquidity
-                  </p>
-                  <p
-                    className="mt-1 text-[1.55rem] font-semibold leading-none"
-                    style={{
-                      color: shareColors.sharePanelText,
-                      display: "-webkit-box",
-                      overflow: "hidden",
-                      WebkitLineClamp: 1,
-                      WebkitBoxOrient: "vertical",
-                    }}
-                  >
-                    {liquidityTier ?? "Data unavailable"}
-                  </p>
-                  <p className="mt-1 text-[11px]" style={{ color: shareColors.shareSecondaryText }}>market depth</p>
-                </div>
+              <div className="rounded-[16px] border px-5 py-4" style={{ minHeight: 156, background: shareColors.sharePanelBg, borderColor: "color-mix(in srgb, #dce7ff 30%, transparent)" }}>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: shareColors.shareSecondaryText }}>
+                  Percent higher
+                </p>
+                <p className="mt-2 text-[2.2rem] font-semibold leading-none tabular-nums" style={{ color: shareColors.sharePanelText }}>
+                  {formatPercent(percentHigher)}
+                </p>
+                <p className="mt-2 text-[12px]" style={{ color: shareColors.shareSecondaryText }}>graded higher</p>
               </div>
-            </div>
+              <div className="rounded-[16px] border px-5 py-4" style={{ minHeight: 156, background: shareColors.sharePanelBg, borderColor: "color-mix(in srgb, #dce7ff 30%, transparent)" }}>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: shareColors.shareSecondaryText }}>
+                  Total pop
+                </p>
+                <p className="mt-2 text-[2.2rem] font-semibold leading-none tabular-nums" style={{ color: shareColors.sharePanelText }}>
+                  {formatNumber(totalPop)}
+                </p>
+                <p className="mt-2 text-[12px]" style={{ color: shareColors.shareSecondaryText }}>total graded</p>
+              </div>
+              <div className="rounded-[16px] border px-5 py-4" style={{ minHeight: 156, background: shareColors.sharePanelBg, borderColor: "color-mix(in srgb, #dce7ff 30%, transparent)" }}>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: shareColors.shareSecondaryText }}>
+                  Liquidity
+                </p>
+                <p
+                  className="mt-2 text-[1.82rem] font-semibold leading-none"
+                  style={{
+                    color: shareColors.sharePanelText,
+                    display: "-webkit-box",
+                    overflow: "hidden",
+                    WebkitLineClamp: 1,
+                    WebkitBoxOrient: "vertical",
+                  }}
+                >
+                  {liquidityTier ?? "Data unavailable"}
+                </p>
+                <p className="mt-2 text-[12px]" style={{ color: shareColors.shareSecondaryText }}>market depth</p>
+              </div>
+            </section>
           </div>
 
           <div className="flex items-end justify-between border-t pt-3" style={{ borderColor: "color-mix(in srgb, #bdd2ff 28%, transparent)" }}>
