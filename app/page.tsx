@@ -4,7 +4,7 @@ import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
-const examples = ["23000982", "12345678", "71870967"];
+const examples = ["23000982", "Pikachu", "Bubble Mew", "Yellow Cheeks Pikachu"];
 
 export default function Home() {
   const router = useRouter();
@@ -33,7 +33,11 @@ export default function Home() {
     event.preventDefault();
     const certValue = cert.trim();
     if (!certValue) return;
-    router.push(`/cert/${encodeURIComponent(certValue)}`);
+    if (/^\d+$/.test(certValue)) {
+      router.push(`/cert/${encodeURIComponent(certValue)}`);
+      return;
+    }
+    router.push(`/search?q=${encodeURIComponent(certValue)}`);
   }
 
   return (
@@ -59,7 +63,11 @@ export default function Home() {
 
           <div className="mt-5 flex flex-wrap items-center justify-center gap-2 text-xs">
             {examples.map((example) => (
-              <Link key={example} href={`/cert/${example}`} className="btn-ghost rounded-full border px-3 py-1.5">
+              <Link
+                key={example}
+                href={/^\d+$/.test(example) ? `/cert/${encodeURIComponent(example)}` : `/search?q=${encodeURIComponent(example)}`}
+                className="btn-ghost rounded-full border px-3 py-1.5"
+              >
                 {example}
               </Link>
             ))}
