@@ -1,40 +1,58 @@
 import { NextResponse } from "next/server";
 import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import { measureAsync } from "@/lib/perf";
 
 export const runtime = "nodejs";
 
 type SnapshotRow = {
-  card_variant_id: string;
-  active_listing_count: number | null;
-  median_price_7d: number | null;
-  median_price_30d: number | null;
+  canonical_slug: string;
+  printing_id: string | null;
+  grade: string;
+  active_listings_7d: number | null;
+  median_ask_7d: number | null;
+  median_ask_30d: number | null;
   trimmed_median_30d: number | null;
+  low_ask_30d: number | null;
+  high_ask_30d: number | null;
 };
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
-  const cardVariantId = url.searchParams.get("cardVariantId")?.trim() ?? "";
-  if (!cardVariantId) {
-    return NextResponse.json({ ok: false, error: "Missing cardVariantId query param." }, { status: 400 });
+  const slug = url.searchParams.get("slug")?.trim() ?? "";
+  const printing = url.searchParams.get("printing")?.trim() ?? "";
+  const grade = (url.searchParams.get("grade")?.trim() ?? "RAW").toUpperCase();
+  if (!slug) {
+    return NextResponse.json({ ok: false, error: "Missing slug query param." }, { status: 400 });
   }
 
   const supabase = getServerSupabaseClient();
-  const { data, error } = await supabase
-    .from("market_snapshot")
-    .select("card_variant_id, active_listing_count, median_price_7d, median_price_30d, trimmed_median_30d")
-    .eq("card_variant_id", cardVariantId)
-    .maybeSingle<SnapshotRow>();
+  let query = supabase
+    .from("market_snapshot_rollups")
+    .select(
+      "canonical_slug, printing_id, grade, active_listings_7d, median_ask_7d, median_ask_30d, trimmed_median_30d, low_ask_30d, high_ask_30d"
+    )
+    .eq("canonical_slug", slug)
+    .eq("grade", grade)
+    .limit(1);
 
-  if (error) {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  query = printing ? query.eq("printing_id", printing) : query.is("printing_id", null);
+
+  const result = await measureAsync("market.snapshot.query", { slug, printing: printing || null, grade }, async () => {
+    const { data, error } = await query.maybeSingle<SnapshotRow>();
+    return { data, error: error?.message ?? null };
+  });
+
+  if (result.error) {
+    return NextResponse.json({ ok: false, error: result.error }, { status: 500 });
   }
 
   return NextResponse.json({
     ok: true,
-    activeListings: data?.active_listing_count ?? 0,
-    median7d: data?.median_price_7d ?? null,
-    median30d: data?.median_price_30d ?? null,
-    trimmedMedian30d: data?.trimmed_median_30d ?? null,
+    active7d: result.data?.active_listings_7d ?? 0,
+    median7d: result.data?.median_ask_7d ?? null,
+    median30d: result.data?.median_ask_30d ?? null,
+    trimmedMedian30d: result.data?.trimmed_median_30d ?? null,
+    low30d: result.data?.low_ask_30d ?? null,
+    high30d: result.data?.high_ask_30d ?? null,
   });
 }
-

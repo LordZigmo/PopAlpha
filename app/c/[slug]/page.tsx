@@ -2,45 +2,27 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getServerSupabaseClient } from "@/lib/supabaseServer";
 import EbayListings from "@/components/ebay-listings";
+import MarketSnapshotTiles from "@/components/market-snapshot-tiles";
+import { buildEbayQuery, type GradeSelection } from "@/lib/ebay-query";
 
 type CanonicalCardRow = {
   slug: string;
   canonical_name: string;
-  subject: string | null;
   set_name: string | null;
   year: number | null;
   card_number: string | null;
-  language: string | null;
-  variant: string | null;
 };
 
 type CardPrintingRow = {
   id: string;
-  set_name: string | null;
-  set_code: string | null;
-  year: number | null;
-  card_number: string;
   language: string;
   finish: "NON_HOLO" | "HOLO" | "REVERSE_HOLO" | "ALT_HOLO" | "UNKNOWN";
   finish_detail: string | null;
   edition: "UNLIMITED" | "FIRST_EDITION" | "UNKNOWN";
   stamp: string | null;
-  rarity: string | null;
 };
 
-type GradeSelection = "RAW" | "PSA9" | "PSA10";
-
 const GRADE_OPTIONS: GradeSelection[] = ["RAW", "PSA9", "PSA10"];
-
-function subtitle(row: CanonicalCardRow): string {
-  const bits: string[] = [];
-  if (row.year) bits.push(String(row.year));
-  if (row.set_name) bits.push(row.set_name);
-  if (row.card_number) bits.push(`#${row.card_number}`);
-  if (row.variant) bits.push(row.variant);
-  if (row.language) bits.push(row.language);
-  return bits.join(" • ");
-}
 
 function finishLabel(finish: CardPrintingRow["finish"]): string {
   const map: Record<CardPrintingRow["finish"], string> = {
@@ -51,12 +33,6 @@ function finishLabel(finish: CardPrintingRow["finish"]): string {
     UNKNOWN: "Unknown",
   };
   return map[finish];
-}
-
-function gradeLabel(grade: GradeSelection): string {
-  if (grade === "PSA9") return "PSA 9";
-  if (grade === "PSA10") return "PSA 10";
-  return "Raw";
 }
 
 function finishPriority(finish: CardPrintingRow["finish"]): number {
@@ -83,17 +59,10 @@ function selectedGrade(gradeRaw: string | undefined): GradeSelection {
   return "RAW";
 }
 
-function buildQuery(base: CanonicalCardRow, printing: CardPrintingRow | null, grade: GradeSelection): string {
-  const parts: string[] = [];
-  if (base.canonical_name) parts.push(base.canonical_name);
-  if (base.set_name) parts.push(base.set_name);
-  if (base.card_number) parts.push(base.card_number);
-  if (printing?.edition === "FIRST_EDITION") parts.push("1st edition");
-  if (printing?.finish === "REVERSE_HOLO") parts.push("reverse holo");
-  if (printing?.finish === "HOLO") parts.push("holo");
-  if (grade === "PSA9") parts.push("PSA 9");
-  if (grade === "PSA10") parts.push("PSA 10");
-  return parts.join(" ").replace(/\s+/g, " ").trim();
+function gradeLabel(grade: GradeSelection): string {
+  if (grade === "PSA9") return "PSA 9";
+  if (grade === "PSA10") return "PSA 10";
+  return "Raw";
 }
 
 function toggleHref(slug: string, printingId: string | null, grade: GradeSelection): string {
@@ -117,7 +86,7 @@ export default async function CanonicalCardPage({
 
   const { data: canonical } = await supabase
     .from("canonical_cards")
-    .select("slug, canonical_name, subject, set_name, year, card_number, language, variant")
+    .select("slug, canonical_name, set_name, year, card_number")
     .eq("slug", slug)
     .maybeSingle<CanonicalCardRow>();
 
@@ -125,19 +94,24 @@ export default async function CanonicalCardPage({
 
   const { data: printingsData } = await supabase
     .from("card_printings")
-    .select("id, set_name, set_code, year, card_number, language, finish, finish_detail, edition, stamp, rarity")
-    .eq("canonical_slug", slug)
-    .order("year", { ascending: false })
-    .order("set_name", { ascending: true })
-    .order("card_number", { ascending: true });
+    .select("id, language, finish, finish_detail, edition, stamp")
+    .eq("canonical_slug", slug);
 
   const printings = ((printingsData ?? []) as CardPrintingRow[]).sort(sortPrintings);
   const gradeSelection = selectedGrade(grade);
-  const selectedPrinting =
-    printings.find((row) => row.id === printing) ??
-    (printings.length > 0 ? [...printings].sort(sortPrintings)[0] : null);
-
-  const ebayQuery = buildQuery(canonical, selectedPrinting, gradeSelection);
+  const selectedPrinting = printings.find((row) => row.id === printing) ?? printings[0] ?? null;
+  const ebayQuery = buildEbayQuery({
+    canonicalName: canonical.canonical_name,
+    setName: canonical.set_name,
+    cardNumber: canonical.card_number,
+    printing: selectedPrinting
+      ? {
+          finish: selectedPrinting.finish,
+          edition: selectedPrinting.edition,
+        }
+      : null,
+    grade: gradeSelection,
+  });
 
   return (
     <main className="app-shell">
@@ -148,7 +122,11 @@ export default async function CanonicalCardPage({
 
         <section className="mt-3 glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
           <p className="text-app text-2xl font-semibold">{canonical.canonical_name}</p>
-          <p className="text-muted mt-1 text-sm">{subtitle(canonical)}</p>
+          <p className="text-muted mt-1 text-sm">
+            {canonical.set_name ?? "Unknown set"}
+            {canonical.card_number ? ` • #${canonical.card_number}` : ""}
+            {canonical.year ? ` • ${canonical.year}` : ""}
+          </p>
         </section>
 
         <section className="mt-4 glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
@@ -156,32 +134,27 @@ export default async function CanonicalCardPage({
           {printings.length === 0 ? (
             <p className="text-muted mt-2 text-sm">No printings imported yet.</p>
           ) : (
-            <>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {printings.map((row) => {
-                  const label = [
-                    finishLabel(row.finish),
-                    row.edition === "FIRST_EDITION" ? "1st Ed" : null,
-                    row.stamp,
-                  ]
-                    .filter((part) => Boolean(part))
-                    .join(" • ");
-                  const active = selectedPrinting?.id === row.id;
-                  return (
-                    <Link
-                      key={row.id}
-                      href={toggleHref(slug, row.id, gradeSelection)}
-                      className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
-                        active ? "btn-accent" : "btn-ghost"
-                      }`}
-                    >
-                      {label}
-                    </Link>
-                  );
-                })}
-              </div>
-              <p className="text-muted mt-2 text-[11px]">Missing label? We are refining print-level labeling continuously.</p>
-            </>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {printings.map((row) => {
+                const label = [
+                  finishLabel(row.finish),
+                  row.edition === "FIRST_EDITION" ? "1st Ed" : null,
+                  row.stamp,
+                ]
+                  .filter((part) => Boolean(part))
+                  .join(" • ");
+                const active = selectedPrinting?.id === row.id;
+                return (
+                  <Link
+                    key={row.id}
+                    href={toggleHref(slug, row.id, gradeSelection)}
+                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${active ? "btn-accent" : "btn-ghost"}`}
+                  >
+                    {label}
+                  </Link>
+                );
+              })}
+            </div>
           )}
         </section>
 
@@ -203,7 +176,23 @@ export default async function CanonicalCardPage({
           </div>
         </section>
 
-        <EbayListings query={ebayQuery} cardVariantId={null} />
+        <MarketSnapshotTiles slug={slug} printingId={selectedPrinting?.id ?? null} grade={gradeSelection} />
+
+        <section className="mt-4 glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
+          <p className="text-app text-sm font-semibold uppercase tracking-[0.12em]">Price History</p>
+          <div className="mt-3 rounded-[var(--radius-card)] border-app border bg-surface-soft/40 p-[var(--space-card)]">
+            <div className="h-28 rounded-[var(--radius-input)] border-app border bg-surface/70" />
+            <p className="text-muted mt-2 text-sm">Graph coming soon</p>
+            <p className="text-muted mt-1 text-xs">Rolling medians update as PopAlpha observes listings.</p>
+          </div>
+        </section>
+
+        <EbayListings
+          query={ebayQuery}
+          canonicalSlug={slug}
+          printingId={selectedPrinting?.id ?? null}
+          grade={gradeSelection}
+        />
       </div>
     </main>
   );

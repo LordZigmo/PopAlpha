@@ -369,25 +369,51 @@ export async function POST(req: Request) {
       page += 1;
     }
 
-    const { data: bubbleMew } = await supabase
+    const { data: bubbleMewEnglish } = await supabase
       .from("canonical_cards")
       .select("slug")
       .eq("card_number", "232")
       .ilike("canonical_name", "%mew ex%")
       .ilike("set_name", "%paldean fates%")
+      .eq("language", "EN")
       .limit(1)
       .maybeSingle<{ slug: string }>();
 
-    if (bubbleMew?.slug) {
+    if (bubbleMewEnglish?.slug) {
+      // "bubble mew" should always resolve to EN Paldean Fates #232.
       await supabase
         .from("card_aliases")
-        .upsert(
-          [
-            { alias: "bubble mew", canonical_slug: bubbleMew.slug },
-            { alias: "paldean fates bubble mew", canonical_slug: bubbleMew.slug },
-          ],
-          { onConflict: "alias,canonical_slug" }
-        );
+        .delete()
+        .eq("alias", "bubble mew")
+        .neq("canonical_slug", bubbleMewEnglish.slug);
+      await supabase.from("card_aliases").upsert(
+        [
+          { alias: "bubble mew", canonical_slug: bubbleMewEnglish.slug },
+          { alias: "paldean fates bubble mew", canonical_slug: bubbleMewEnglish.slug },
+        ],
+        { onConflict: "alias,canonical_slug" }
+      );
+    }
+
+    const { data: bubbleMewJp } = await supabase
+      .from("canonical_cards")
+      .select("slug")
+      .eq("card_number", "205")
+      .ilike("canonical_name", "%mew ex%")
+      .or("set_name.ilike.%card 151%,set_name.ilike.%pokemon 151%")
+      .in("language", ["JP", "JA"])
+      .limit(1)
+      .maybeSingle<{ slug: string }>();
+
+    if (bubbleMewJp?.slug) {
+      await supabase
+        .from("card_aliases")
+        .delete()
+        .eq("alias", "bubble mew jp")
+        .neq("canonical_slug", bubbleMewJp.slug);
+      await supabase.from("card_aliases").upsert([{ alias: "bubble mew jp", canonical_slug: bubbleMewJp.slug }], {
+        onConflict: "alias,canonical_slug",
+      });
     }
 
     await updateRun(runId, {

@@ -16,7 +16,9 @@ type Listing = {
 
 type EbayListingsProps = {
   query: string;
-  cardVariantId: string | null;
+  canonicalSlug: string;
+  printingId: string | null;
+  grade: "RAW" | "PSA9" | "PSA10";
 };
 
 function formatMoney(value: string, currency: string): string {
@@ -30,27 +32,25 @@ function formatMoney(value: string, currency: string): string {
 }
 
 function normalizeBrowseQuery(value: string): string {
-  return value
-    .replace(/\b(Unlimited|Common|Uncommon)\b/gi, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .concat(" -lot -proxy")
-    .replace(/\s+/g, " ")
-    .trim();
+  return value.replace(/\s+/g, " ").trim();
 }
 
-export default function EbayListings({ query, cardVariantId }: EbayListingsProps) {
+export default function EbayListings({ query, canonicalSlug, printingId, grade }: EbayListingsProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<Listing[]>([]);
+  const [expanded, setExpanded] = useState(false);
+  const [showQuery, setShowQuery] = useState(false);
 
   const normalizedQuery = useMemo(() => normalizeBrowseQuery(query), [query]);
+  const shownItems = expanded ? items.slice(0, 12) : items.slice(0, 6);
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
       setLoading(true);
       setError(null);
+      setExpanded(false);
       try {
         const response = await fetch(`/api/ebay/browse?q=${encodeURIComponent(normalizedQuery)}&limit=12`);
         const payload = (await response.json()) as { ok: boolean; items?: Listing[]; error?: string };
@@ -60,13 +60,15 @@ export default function EbayListings({ query, cardVariantId }: EbayListingsProps
         if (!cancelled) {
           const nextItems = payload.items ?? [];
           setItems(nextItems);
-          if (cardVariantId && nextItems.length > 0) {
-            // Background observation write; intentionally fire-and-forget.
+          if (nextItems.length > 0) {
             void fetch("/api/market/observe", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                cardVariantId,
+                canonicalSlug,
+                printingId,
+                grade,
+                source: "EBAY",
                 listings: nextItems,
               }),
             }).catch(() => {});
@@ -85,57 +87,60 @@ export default function EbayListings({ query, cardVariantId }: EbayListingsProps
     return () => {
       cancelled = true;
     };
-  }, [cardVariantId, normalizedQuery]);
+  }, [canonicalSlug, printingId, grade, normalizedQuery]);
 
   return (
     <section className="mt-4 glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-app text-sm font-semibold uppercase tracking-[0.12em]">Live eBay listings</p>
+        {items.length > 6 ? (
+          <button type="button" onClick={() => setExpanded((value) => !value)} className="btn-ghost rounded-[var(--radius-input)] border px-2.5 py-1 text-xs font-semibold">
+            {expanded ? "Show less" : "View all"}
+          </button>
+        ) : null}
       </div>
 
-      <p className="text-muted mt-2 text-xs">Query: {normalizedQuery}</p>
+      <div className="mt-2">
+        <button type="button" onClick={() => setShowQuery((value) => !value)} className="text-muted text-[11px] underline underline-offset-4">
+          {showQuery ? "Hide query used" : "Query used"}
+        </button>
+        {showQuery ? <p className="text-muted mt-1 text-[11px]">{normalizedQuery}</p> : null}
+      </div>
 
       {loading ? <p className="text-muted mt-3 text-sm">Loading listings...</p> : null}
-      {!loading && error ? <p className="text-negative mt-3 text-sm">{error}</p> : null}
+      {!loading && error ? <p className="text-muted mt-3 text-sm">Listings unavailable right now.</p> : null}
       {!loading && !error && items.length === 0 ? <p className="text-muted mt-3 text-sm">No live listings found.</p> : null}
 
-      {!loading && !error && items.length > 0 ? (
-        <ul className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {items.slice(0, 12).map((item, index) => (
-            <li key={`${item.itemWebUrl}-${index}`} className="rounded-[var(--radius-card)] border-app border bg-surface-soft/55 p-[var(--space-card)]">
-              <div className="h-[120px] overflow-hidden rounded-[var(--radius-input)] border-app border bg-surface">
-                {item.image ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={item.image} alt={item.title} className="h-full w-full object-cover" loading="lazy" />
-                ) : (
-                  <div className="h-full w-full bg-surface-soft" />
-                )}
+      {!loading && !error && shownItems.length > 0 ? (
+        <ul className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {shownItems.map((item, index) => (
+            <li key={`${item.externalId || item.itemWebUrl}-${index}`} className="rounded-[var(--radius-card)] border-app border bg-surface-soft/45 p-2.5">
+              <div className="flex items-start gap-2">
+                <div className="h-14 w-14 shrink-0 overflow-hidden rounded-[var(--radius-input)] border-app border bg-surface">
+                  {item.image ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={item.image} alt={item.title} className="h-full w-full object-cover" loading="lazy" />
+                  ) : (
+                    <div className="h-full w-full bg-surface-soft" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-app truncate text-xs font-semibold">{item.title}</p>
+                  <p className="text-muted mt-1 truncate text-xs">
+                    {item.price ? formatMoney(item.price.value, item.price.currency) : "Price unavailable"}
+                    {" • "}
+                    {item.shipping ? formatMoney(item.shipping.value, item.shipping.currency) : "Shipping —"}
+                  </p>
+                  <a
+                    href={item.itemWebUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="btn-ghost mt-1.5 inline-flex rounded-[var(--radius-input)] border px-2 py-0.5 text-[11px] font-semibold"
+                  >
+                    View on eBay
+                  </a>
+                </div>
               </div>
-              <p
-                className="text-app mt-2 text-sm font-semibold leading-tight"
-                style={{
-                  display: "-webkit-box",
-                  overflow: "hidden",
-                  WebkitLineClamp: 2,
-                  WebkitBoxOrient: "vertical",
-                }}
-              >
-                {item.title}
-              </p>
-              <p className="text-app mt-2 text-sm font-semibold">
-                {item.price ? formatMoney(item.price.value, item.price.currency) : "Price unavailable"}
-              </p>
-              <p className="text-muted mt-1 text-xs">
-                Shipping: {item.shipping ? formatMoney(item.shipping.value, item.shipping.currency) : "—"}
-              </p>
-              <a
-                href={item.itemWebUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="btn-ghost mt-2 inline-flex rounded-[var(--radius-input)] border px-2 py-1 text-xs font-semibold"
-              >
-                View on eBay
-              </a>
             </li>
           ))}
         </ul>
