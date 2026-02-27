@@ -49,6 +49,18 @@ function dateToInput(value: string): string {
   return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
 }
 
+function formatUpdated(value?: string): string {
+  if (!value) return "Updated —";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "Updated —";
+  return `Updated ${new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(parsed)}`;
+}
+
 export default function CertDetailsCard({ cert, data, source, cacheHit, fetchedAt, rawLookup }: CertDetailsCardProps) {
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
   const [sales, setSales] = useState<PrivateSale[]>([]);
@@ -152,6 +164,14 @@ export default function CertDetailsCard({ cert, data, source, cacheHit, fetchedA
   const title =
     [display(year), display(brand), display(subject), display(variety)].filter((v) => v !== "—").join(" • ") ||
     "Unspecified listing";
+  const updatedText = formatUpdated(fetchedAt);
+
+  const higherCount =
+    metrics.populationHigher !== null && metrics.populationHigher >= 0 ? Math.round(metrics.populationHigher) : null;
+  const totalCount =
+    metrics.totalPopulation !== null && metrics.totalPopulation >= 0 ? Math.round(metrics.totalPopulation) : null;
+  const atGradeOrLowerCount =
+    totalCount !== null && higherCount !== null ? Math.max(totalCount - higherCount, 0) : null;
 
   return (
     <section className="glass glow-card lift density-panel rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
@@ -174,8 +194,14 @@ export default function CertDetailsCard({ cert, data, source, cacheHit, fetchedA
             <span className="border-app rounded-full border px-3 py-1">Label: {display(labelType)}</span>
           </div>
 
-          <div className="mt-4 text-xs text-muted">
-            Source: {source === "cache" ? "cache" : "psa fresh"} · Cache: {cacheHit ? "hit" : "miss"} · Fetched: {fetchedAt ?? "—"}
+          <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-muted">{updatedText}</span>
+            <span className="border-app rounded-full border px-2 py-1 text-muted">
+              Source: {source === "cache" ? "Cache" : "PSA"}
+            </span>
+            <span className="border-app rounded-full border px-2 py-1 text-muted">
+              Cache: {cacheHit ? "Hit" : "Miss"}
+            </span>
           </div>
         </article>
 
@@ -183,23 +209,27 @@ export default function CertDetailsCard({ cert, data, source, cacheHit, fetchedA
           <StatCard label="Total Pop" value={display(totalPopulation)} sublabel="Total graded examples" />
           <StatCard label="Population Higher" value={display(populationHigher)} sublabel="Examples in higher grades" />
           <StatCard
-            label="Tier / Rarity"
-            value={metrics.tierLabel}
-            sublabel={metrics.topGrade ? "PopulationHigher = 0 (none higher)" : "Higher-grade examples exist"}
+            label="Verdict"
+            value={metrics.topGrade ? "Top tier" : "Not top tier"}
+            sublabel={metrics.topGrade ? "None higher recorded" : "Higher grades are recorded"}
             highlight={metrics.topGrade}
             tierAccent
           />
           <StatCard
-            label="Top Tier Share"
-            value={metrics.topTierShare === null ? "—" : `${(metrics.topTierShare * 100).toFixed(1)}%`}
-            sublabel="At grade or lower share"
+            label={metrics.topGrade ? "None higher recorded" : "At grade or lower"}
+            value={metrics.topGrade ? "Yes" : metrics.topTierShare === null ? "—" : `${(metrics.topTierShare * 100).toFixed(1)}%`}
+            sublabel={metrics.topGrade ? "Population higher is zero" : "(total - higher) ÷ total"}
           />
         </aside>
       </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-2">
-        <RarityRing score={metrics.scarcityScore} />
-        <PopulationBar higherShare={metrics.higherShare} topTierShare={metrics.topTierShare} />
+      <div className="mt-4">
+        <PopulationBar
+          higherShare={metrics.higherShare}
+          topTierShare={metrics.topTierShare}
+          higherCount={higherCount}
+          atGradeOrLowerCount={atGradeOrLowerCount}
+        />
       </div>
 
       <section className="mt-5 rounded-[var(--radius-panel)] border-app border bg-surface/70 p-[var(--space-panel)]">
@@ -223,7 +253,7 @@ export default function CertDetailsCard({ cert, data, source, cacheHit, fetchedA
               <span className="text-app font-semibold">{display(populationHigher)}</span> graded higher.
             </p>
             <p className="mt-2">
-              Tier status: <span className="text-app font-semibold">{metrics.tierLabel}</span>. Scarcity Index:{" "}
+              Tier status: <span className="text-app font-semibold">{metrics.topGrade ? "Top tier" : "Not top tier"}</span>. Scarcity Index:{" "}
               <span className="text-app font-semibold">{metrics.scarcityScore ?? "—"}</span>.
             </p>
           </div>
