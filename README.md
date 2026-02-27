@@ -34,6 +34,53 @@ Set these environment variables in Vercel (Production and Preview as needed):
 - `EBAY_CLIENT_SECRET`
 - `EBAY_ENV` (`production` or `sandbox`, defaults to `production`)
 
+## PokemonTCG canonical importer (chunked, production-safe)
+
+Route: `POST /api/admin/import/pokemontcg-canonical`
+
+Query params:
+- `pageStart` (default `1`)
+- `maxPages` (default: `1` in production, `3` locally, capped at `5`)
+- `pageSize` (default `250`, capped at `250`)
+- `setId` (optional, e.g. `sv4pt5`)
+- `dryRun` (optional boolean)
+
+If `ADMIN_SECRET` is set, include request header:
+- `x-admin-secret: <ADMIN_SECRET>`
+
+Examples:
+
+Import one page:
+```bash
+curl -X POST "https://popalpha.app/api/admin/import/pokemontcg-canonical?pageStart=1&maxPages=1"
+```
+
+Import next chunk:
+```bash
+curl -X POST "https://popalpha.app/api/admin/import/pokemontcg-canonical?pageStart=2&maxPages=1"
+```
+
+Import a specific set:
+```bash
+curl -X POST "https://popalpha.app/api/admin/import/pokemontcg-canonical?setId=sv4pt5&pageStart=1&maxPages=2"
+```
+
+Apply migrations locally:
+```bash
+supabase db push
+```
+
+Security reminder:
+- Never expose `SUPABASE_SERVICE_ROLE_KEY` to the browser, client bundles, or public scripts.
+- Keep service role keys server-only (`.env.local`, Vercel server env vars, CI secrets).
+
+Local dataset importer:
+- Set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in `.env.local`.
+- Run:
+```bash
+node scripts/import-pokemon-tcg-data-local.mjs
+```
+
 ## Local environment setup (beginner-friendly)
 
 ### 1) Create your local env file
