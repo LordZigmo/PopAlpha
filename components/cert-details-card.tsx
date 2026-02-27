@@ -10,6 +10,7 @@ import PrivateSalesList, { type PrivateSale } from "@/components/private-sales-l
 import { getDerivedMetrics } from "@/lib/cert-metrics";
 import { buildPsaCertUrl } from "@/lib/psa/cert-url";
 import { buildCardSlug } from "@/lib/card-slug";
+import ShareIntelligenceButton from "@/components/share-intelligence-button";
 
 type CertDetailsCardProps = {
   cert: string;
@@ -437,6 +438,9 @@ export default function CertDetailsCard({
           ? "badge-negative"
           : "border-app text-muted bg-surface-soft";
   const deterministicSummary = getDeterministicCertSummary(display(grade), metrics.totalPopulation, metrics.populationHigher, metrics.scarcityScore);
+  const shareGrade = display(grade) === "—" ? null : `PSA ${display(grade)}`;
+  const sharePercentHigher = metrics.higherShare === null ? null : metrics.higherShare * 100;
+  const shareFileName = `popalpha-cert-${cert}.png`;
 
   return (
     <section className="glass glow-card lift density-panel rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
@@ -449,7 +453,7 @@ export default function CertDetailsCard({
             <div className="min-w-0">
               <p className="text-app text-5xl font-semibold sm:text-6xl">{display(grade)}</p>
               <p className="text-app mt-3 text-base">{title}</p>
-              <div className="mt-2">
+              <div className="mt-2 flex flex-wrap items-center gap-2">
                 {canonicalMatch ? (
                   <a
                     href={`/cards/${encodeURIComponent(canonicalMatch.slug)}`}
@@ -465,6 +469,16 @@ export default function CertDetailsCard({
                     Find card
                   </a>
                 ) : null}
+                <ShareIntelligenceButton
+                  title={title}
+                  grade={shareGrade}
+                  scarcityScore={metrics.scarcityScore}
+                  percentHigher={sharePercentHigher}
+                  totalPop={totalCount}
+                  isOneOfOne={ultraScarce}
+                  liquidityTier={liquidityTier}
+                  fileName={shareFileName}
+                />
               </div>
             </div>
             <div className="flex shrink-0 items-start gap-3">

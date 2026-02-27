@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getServerSupabaseClient } from "@/lib/supabaseServer";
 import CardWatchlistButton from "@/components/card-watchlist-button";
+import ShareIntelligenceButton from "@/components/share-intelligence-button";
 
 type CanonicalCardRow = {
   slug: string;
@@ -52,7 +53,19 @@ export default async function CardPage({
         <section className="mt-3 glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
           <div className="flex items-center justify-between gap-3">
             <p className="text-app text-2xl font-semibold">{data.canonical_name}</p>
-            <CardWatchlistButton slug={data.slug} title={data.canonical_name} setName={data.set_name} year={data.year} />
+            <div className="flex items-center gap-2">
+              <ShareIntelligenceButton
+                title={data.canonical_name}
+                grade={null}
+                scarcityScore={null}
+                percentHigher={null}
+                totalPop={null}
+                isOneOfOne={false}
+                liquidityTier={null}
+                fileName={`popalpha-card-${data.slug}.png`}
+              />
+              <CardWatchlistButton slug={data.slug} title={data.canonical_name} setName={data.set_name} year={data.year} />
+            </div>
           </div>
           <p className="text-muted mt-1 text-sm">{subtitle(data)}</p>
         </section>
