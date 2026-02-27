@@ -47,7 +47,7 @@ export default function RarityRing({ score, compact = false }: { score: number |
         </svg>
         <div>
           <p className="text-app text-2xl font-semibold tabular-nums">{score === null ? "—" : displayScore}</p>
-          <p className="text-muted text-xs">0–100 heuristic (lower pop = higher rarity)</p>
+          <p className="text-muted text-xs">Relative rarity (0-100)</p>
         </div>
       </div>
     </div>

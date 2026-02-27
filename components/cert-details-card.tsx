@@ -16,6 +16,8 @@ type CertDetailsCardProps = {
   cacheHit?: boolean;
   fetchedAt?: string;
   rawLookup: unknown;
+  watchlistSaved?: boolean;
+  onToggleWatchlist?: () => void;
 };
 
 type DisplayValue = string | number | null | undefined;
@@ -61,7 +63,22 @@ function formatUpdated(value?: string): string {
   }).format(parsed)}`;
 }
 
-export default function CertDetailsCard({ cert, data, source, cacheHit, fetchedAt, rawLookup }: CertDetailsCardProps) {
+function formatShare(value: number | null): string {
+  if (value === null) return "—";
+  const n = value * 100;
+  return `${Number.isInteger(n) ? String(n) : n.toFixed(1).replace(/\.0$/, "")}%`;
+}
+
+export default function CertDetailsCard({
+  cert,
+  data,
+  source,
+  cacheHit,
+  fetchedAt,
+  rawLookup,
+  watchlistSaved = false,
+  onToggleWatchlist,
+}: CertDetailsCardProps) {
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
   const [sales, setSales] = useState<PrivateSale[]>([]);
   const [salesLoading, setSalesLoading] = useState(false);
@@ -176,7 +193,10 @@ export default function CertDetailsCard({ cert, data, source, cacheHit, fetchedA
   return (
     <section className="glass glow-card lift density-panel rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
-        <article className="glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
+        <article
+          className="glass rounded-[var(--radius-panel)] border-app border"
+          style={{ padding: "calc(var(--space-panel) * 0.88) var(--space-panel)" }}
+        >
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-muted text-xs font-semibold uppercase tracking-[0.18em]">Identity Hero</p>
@@ -192,6 +212,17 @@ export default function CertDetailsCard({ cert, data, source, cacheHit, fetchedA
             <span className="border-app rounded-full border px-3 py-1">Cert #{cert}</span>
             <span className="border-app rounded-full border px-3 py-1">Category: {display(category)}</span>
             <span className="border-app rounded-full border px-3 py-1">Label: {display(labelType)}</span>
+            {onToggleWatchlist ? (
+              <button
+                type="button"
+                onClick={onToggleWatchlist}
+                className={`rounded-full border px-3 py-1 transition ${
+                  watchlistSaved ? "badge-positive" : "btn-ghost"
+                }`}
+              >
+                {watchlistSaved ? "Watchlist saved" : "Save to watchlist"}
+              </button>
+            ) : null}
           </div>
 
           <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
@@ -216,9 +247,8 @@ export default function CertDetailsCard({ cert, data, source, cacheHit, fetchedA
             tierAccent
           />
           <StatCard
-            label={metrics.topGrade ? "None higher recorded" : "At grade or lower"}
-            value={metrics.topGrade ? "Yes" : metrics.topTierShare === null ? "—" : `${(metrics.topTierShare * 100).toFixed(1)}%`}
-            sublabel={metrics.topGrade ? "Population higher is zero" : "(total - higher) ÷ total"}
+            label="At grade or lower"
+            value={formatShare(metrics.topTierShare)}
           />
         </aside>
       </div>

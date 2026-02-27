@@ -209,12 +209,6 @@ export default function Home() {
             <p className="text-muted mt-2 text-sm">
               Search a cert and review profile-grade identity, population stats, and market context in one dashboard.
             </p>
-            {loadedCert ? (
-              <div className="mt-3 inline-flex items-center gap-2 rounded-full border-app border bg-surface-soft px-3 py-1 text-xs">
-                <span className="text-muted">Watchlist:</span>
-                <span className={isSaved ? "text-positive font-semibold" : "text-app"}>{isSaved ? "Saved" : "Not saved"}</span>
-              </div>
-            ) : null}
           </header>
 
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -237,12 +231,6 @@ export default function Home() {
             <div className="flex items-center gap-2">
               <ThemeToggle />
               <StubIconButton label="Copy link" icon="🔗" onClick={copyCurrentLink} />
-              <StubIconButton
-                label={isSaved ? "Remove from watchlist" : "Save to watchlist"}
-                icon={isSaved ? "🔖" : "📑"}
-                onClick={toggleWatchlist}
-                disabled={!loadedCert}
-              />
               <StubIconButton label="Add private sale" icon="➕" disabled={!loadedCert} />
             </div>
           </div>
@@ -260,6 +248,8 @@ export default function Home() {
                 cacheHit={result.cache_hit}
                 fetchedAt={result.fetched_at}
                 rawLookup={result}
+                watchlistSaved={isSaved}
+                onToggleWatchlist={toggleWatchlist}
               />
             ) : (
               <div className="glass rounded-2xl border-app border p-5">
