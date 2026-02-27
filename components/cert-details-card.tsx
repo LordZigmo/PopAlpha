@@ -508,13 +508,17 @@ export default function CertDetailsCard({
 
               <div className="rounded-[var(--radius-card)] border-app border bg-surface-soft/55 p-[var(--space-card)]">
                 <div className="flex items-center justify-between gap-2">
-                  <p className="text-muted text-xs font-semibold uppercase tracking-[0.12em]">Supply Pressure</p>
+                  <p className="text-muted text-xs font-semibold uppercase tracking-[0.12em]">Grade Pressure</p>
                   <span className={`rounded-full border px-2 py-0.5 text-xs ${pressureClass}`}>{supplyPressure.label}</span>
                 </div>
                 <p className="text-muted mt-2 text-sm">
                   {supplyPressure.ratio === null
-                    ? "Not enough population data to assess pressure."
-                    : `Higher-pop ratio indicates ${supplyPressure.label.toLowerCase()} for this grade band.`}
+                    ? "Share of graded copies that are higher than this grade is unavailable."
+                    : supplyPressure.tone === "positive"
+                      ? "Few higher-graded examples exist relative to total pop."
+                      : supplyPressure.tone === "negative"
+                        ? "Many higher-graded examples exist; this grade is supply-heavy."
+                        : "Share of graded copies that are higher than this grade is moderate."}
                 </p>
               </div>
 
@@ -524,6 +528,33 @@ export default function CertDetailsCard({
                   <span className="rounded-full border border-app bg-surface px-2 py-0.5 text-xs text-app">{liquidityTier}</span>
                 </div>
                 <p className="text-muted mt-2 text-sm">Derived from total graded population and current scarcity profile.</p>
+              </div>
+
+              <div className="rounded-[var(--radius-card)] border-app border bg-surface-soft/55 p-[var(--space-card)]">
+                <p className="text-muted text-xs font-semibold uppercase tracking-[0.12em]">Recent Sales (eBay)</p>
+                <p className="text-muted mt-2 text-sm">No eBay comps connected yet.</p>
+                <p className="text-muted mt-1 text-xs">
+                  Once eBay access is enabled, this will show recent sold listings matched to this card/grade.
+                </p>
+
+                <div className="mt-3 rounded-[var(--radius-input)] border-app border bg-surface/70 p-2">
+                  <div className="grid grid-cols-[0.8fr_0.8fr_2fr_0.8fr] gap-2 text-[11px] font-semibold text-muted">
+                    <span>Date</span>
+                    <span>Price</span>
+                    <span>Title</span>
+                    <span>Source</span>
+                  </div>
+                  <div className="mt-2 space-y-2">
+                    {[0, 1, 2].map((row) => (
+                      <div key={row} className="grid grid-cols-[0.8fr_0.8fr_2fr_0.8fr] gap-2">
+                        <span className="h-2 rounded bg-surface-soft" />
+                        <span className="h-2 rounded bg-surface-soft" />
+                        <span className="h-2 rounded bg-surface-soft" />
+                        <span className="h-2 rounded bg-surface-soft" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
