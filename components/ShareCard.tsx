@@ -12,6 +12,18 @@ type ShareCardProps = {
   className?: string;
 };
 
+const shareColors = {
+  shareBg:
+    "radial-gradient(680px circle at 22% 12%, color-mix(in srgb, var(--color-accent) 26%, transparent), transparent 60%), linear-gradient(165deg, #0b1438, #08102b)",
+  shareHeadlineGlow:
+    "radial-gradient(520px circle at 20% 0%, color-mix(in srgb, #ffffff 14%, transparent), transparent 64%)",
+  sharePanelBg: "color-mix(in srgb, #7ea1ff 18%, #172b66)",
+  sharePanelText: "#f5f8ff",
+  shareSecondaryText: "color-mix(in srgb, #f5f8ff 78%, #8ea4db)",
+  shareGold: "#d8b35a",
+  shareGreen: "#23d89f",
+} as const;
+
 function formatNumber(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "Data unavailable";
   return new Intl.NumberFormat().format(Math.round(value));
@@ -63,56 +75,107 @@ export default function ShareCard({
     .filter(Boolean);
   const identityLineA = segments.slice(0, 2).join(" • ") || title;
   const identityLineB = segments.slice(2).join(" • ");
-  const verdict = isOneOfOne
+  const hasImage = typeof imageUrl === "string" && /^https?:\/\//i.test(imageUrl);
+  const normalizedOneOfOne = isOneOfOne || totalPop === 1;
+  const isTopTier = !normalizedOneOfOne && populationHigher === 0;
+  const isUpperTier =
+    !normalizedOneOfOne &&
+    !isTopTier &&
+    typeof percentHigher === "number" &&
+    Number.isFinite(percentHigher) &&
+    percentHigher < 10;
+  const claimHeadline = normalizedOneOfOne
+    ? "1 of 1 at this grade"
+    : isTopTier
+      ? "Top tier - none higher recorded"
+      : "Not top tier - higher grades exist";
+  const badge = normalizedOneOfOne
+    ? { label: "🏆 1 OF 1", tone: "gold" as const }
+    : isTopTier
+      ? { label: "TOP TIER", tone: "green" as const }
+      : isUpperTier
+        ? { label: "UPPER TIER", tone: "indigo" as const }
+        : null;
+  const verdictStyle = normalizedOneOfOne
     ? {
-        main: "1 of 1",
-        sub: "Unique population at this grade",
-        className: "badge-gold",
+        borderColor: "color-mix(in srgb, var(--color-gold) 78%, transparent)",
+        background:
+          "linear-gradient(150deg, color-mix(in srgb, var(--color-gold) 26%, transparent), color-mix(in srgb, #1f1a0d 86%, #141b38))",
+        boxShadow: "0 0 24px color-mix(in srgb, var(--color-gold) 22%, transparent)",
       }
-    : populationHigher === 0
+    : isTopTier
       ? {
-          main: "Top tier",
-          sub: "No higher examples recorded",
-          className: "tier-label-premium text-app",
+          borderColor: "color-mix(in srgb, var(--color-positive) 72%, transparent)",
+          background:
+            "linear-gradient(150deg, color-mix(in srgb, var(--color-positive) 24%, transparent), color-mix(in srgb, #0d1f22 78%, #112846))",
+          boxShadow: "0 0 20px color-mix(in srgb, var(--color-positive) 18%, transparent)",
         }
       : {
-          main: "Not top tier",
-          sub: "Higher grades are recorded",
-          className: "border-app bg-surface-soft/55",
+          borderColor: "color-mix(in srgb, #9fb2ea 44%, transparent)",
+          background: "linear-gradient(150deg, color-mix(in srgb, #89a4e2 16%, #1a2d68), #132452)",
+          boxShadow: "none",
         };
-  const hasImage = typeof imageUrl === "string" && /^https?:\/\//i.test(imageUrl);
 
   if (mode === "square") {
     return (
       <article
         className={`relative h-full w-full overflow-hidden rounded-[28px] border border-app text-app ${className}`}
         style={{
-          background:
-            "radial-gradient(760px circle at 8% 0%, color-mix(in srgb, var(--color-accent) 26%, transparent), transparent 58%)," +
-            "radial-gradient(680px circle at 88% 100%, color-mix(in srgb, var(--color-positive) 14%, transparent), transparent 62%)," +
-            "linear-gradient(165deg, color-mix(in srgb, var(--color-surface-soft) 84%, transparent), color-mix(in srgb, var(--color-surface) 96%, transparent))",
+          background: `${shareColors.shareHeadlineGlow}, ${shareColors.shareBg}`,
         }}
       >
-        <div className="grid h-full grid-rows-[1fr_auto] gap-6 p-14">
+        <div className="grid h-full grid-rows-[1fr_auto] gap-5 p-14">
           <div className="grid min-h-0 grid-cols-[3fr_2fr] gap-6">
-            <div className="flex min-h-0 flex-col">
-              <div>
-                <p className="text-muted text-xs font-semibold uppercase tracking-[0.2em]">POPALPHA INTELLIGENCE</p>
-                <p className="mt-3 text-6xl font-semibold leading-none">{grade ?? "Canonical Asset"}</p>
+            <div className="min-h-0">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-[1.75rem] font-semibold leading-none" style={{ color: shareColors.sharePanelText }}>
+                    POPALPHA
+                  </p>
+                  <p className="mt-1 text-sm font-semibold uppercase tracking-[0.2em]" style={{ color: shareColors.shareSecondaryText }}>
+                    CERT RECAP
+                  </p>
+                </div>
+                <p className="text-sm font-medium" style={{ color: shareColors.shareSecondaryText }}>
+                  popalpha.app
+                </p>
+              </div>
+
+              <div className="mt-7 max-w-[95%]">
                 <p
-                  className="mt-4 text-xl font-semibold leading-tight"
+                  className="text-[3.1rem] font-semibold leading-[1.02]"
                   style={{
+                    color: shareColors.sharePanelText,
+                    display: "-webkit-box",
+                    overflow: "hidden",
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: "vertical",
+                  }}
+                >
+                  {claimHeadline}
+                </p>
+              </div>
+
+              <div className="mt-5">
+                <p className="text-xl font-semibold leading-tight" style={{ color: shareColors.sharePanelText }}>
+                  {grade ?? "Grade unavailable"}
+                </p>
+                <p
+                  className="mt-2 text-base leading-tight"
+                  style={{
+                    color: shareColors.shareSecondaryText,
                     display: "-webkit-box",
                     overflow: "hidden",
                     WebkitLineClamp: 1,
                     WebkitBoxOrient: "vertical",
                   }}
                 >
-                  {identityLineA}
+                  {identityLineA || "Data unavailable"}
                 </p>
                 <p
-                  className="text-muted mt-1 text-lg leading-tight"
+                  className="mt-1 text-base leading-tight"
                   style={{
+                    color: shareColors.shareSecondaryText,
                     display: "-webkit-box",
                     overflow: "hidden",
                     WebkitLineClamp: 1,
@@ -123,15 +186,42 @@ export default function ShareCard({
                 </p>
               </div>
 
-              <div className="mt-6 flex min-h-0 flex-1 items-end">
-                <div className="glass h-[360px] w-[360px] overflow-hidden rounded-[24px] border-app border">
+              <div className="mt-5 flex items-center justify-between gap-3">
+                <div className="min-h-[44px]">
+                  {badge ? (
+                    <span
+                      className="inline-flex rounded-full border px-5 py-2 text-base font-semibold tracking-[0.08em]"
+                      style={
+                        badge.tone === "gold"
+                          ? {
+                              borderColor: "color-mix(in srgb, var(--color-gold) 80%, transparent)",
+                              background: "color-mix(in srgb, var(--color-gold) 22%, #201807)",
+                              color: "#fff3d3",
+                            }
+                          : badge.tone === "green"
+                            ? {
+                                borderColor: "color-mix(in srgb, var(--color-positive) 72%, transparent)",
+                                background: "color-mix(in srgb, var(--color-positive) 20%, #102a24)",
+                                color: "#dfffee",
+                              }
+                            : {
+                                borderColor: "color-mix(in srgb, var(--color-accent) 70%, transparent)",
+                                background: "color-mix(in srgb, var(--color-accent) 22%, #192453)",
+                                color: "#e9eeff",
+                              }
+                      }
+                    >
+                      {badge.label}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="h-20 w-16 overflow-hidden rounded-2xl border border-app" style={{ background: shareColors.sharePanelBg }}>
                   {hasImage ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={imageUrl} alt="Card preview" className="h-full w-full object-cover" />
                   ) : (
-                    <div className="flex h-full w-full flex-col items-center justify-center bg-[radial-gradient(circle_at_30%_20%,color-mix(in_srgb,var(--color-accent)_24%,transparent),transparent_54%),linear-gradient(150deg,color-mix(in_srgb,var(--color-surface-soft)_86%,transparent),color-mix(in_srgb,var(--color-border)_30%,transparent))]">
-                      <div className="h-14 w-14 rounded-2xl border border-app bg-surface/60" />
-                      <p className="text-muted mt-3 text-sm font-semibold">Image coming soon</p>
+                    <div className="flex h-full w-full items-center justify-center px-1 text-center text-[9px] font-medium" style={{ color: shareColors.shareSecondaryText }}>
+                      image coming soon
                     </div>
                   )}
                 </div>
@@ -139,32 +229,58 @@ export default function ShareCard({
             </div>
 
             <div className="grid min-h-0 grid-rows-[auto_1fr] gap-4">
-              <div className={`rounded-[20px] border p-5 ${verdict.className}`}>
-                <p className="text-muted text-xs font-semibold uppercase tracking-[0.16em]">VERDICT</p>
-                <p className="mt-3 text-4xl font-semibold leading-none">{verdict.main}</p>
-                <p className="mt-2 text-sm">{verdict.sub}</p>
+              <div className="rounded-[20px] border p-5" style={verdictStyle}>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: shareColors.shareSecondaryText }}>
+                  VERDICT
+                </p>
+                <p className="mt-2 text-[2.3rem] font-semibold leading-none" style={{ color: shareColors.sharePanelText }}>
+                  {normalizedOneOfOne ? "1 of 1" : isTopTier ? "Top tier" : "Not top tier"}
+                </p>
+                <p className="mt-2 text-sm leading-tight" style={{ color: shareColors.sharePanelText }}>
+                  {normalizedOneOfOne
+                    ? "Unique population at this grade"
+                    : isTopTier
+                      ? "No higher examples recorded"
+                      : "Higher grades are recorded"}
+                </p>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <div className="glass rounded-[16px] border-app border p-4">
-                  <p className="text-muted text-[11px] font-semibold uppercase tracking-[0.12em]">Scarcity</p>
-                  <p className="mt-1 text-2xl font-semibold">
+                <div className="rounded-[16px] border p-4" style={{ background: shareColors.sharePanelBg, borderColor: "color-mix(in srgb, #dce7ff 28%, transparent)" }}>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: shareColors.shareSecondaryText }}>
+                    Scarcity
+                  </p>
+                  <p className="mt-1 text-[2rem] font-semibold leading-none" style={{ color: shareColors.sharePanelText }}>
                     {scarcityScore === null || scarcityScore === undefined ? "Data unavailable" : `${Math.round(scarcityScore)}/100`}
                   </p>
+                  <p className="mt-1 text-[11px]" style={{ color: shareColors.shareSecondaryText }}>scarcity score</p>
                 </div>
-                <div className="glass rounded-[16px] border-app border p-4">
-                  <p className="text-muted text-[11px] font-semibold uppercase tracking-[0.12em]">Percent higher</p>
-                  <p className="mt-1 text-2xl font-semibold tabular-nums">{formatPercent(percentHigher)}</p>
+                <div className="rounded-[16px] border p-4" style={{ background: shareColors.sharePanelBg, borderColor: "color-mix(in srgb, #dce7ff 28%, transparent)" }}>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: shareColors.shareSecondaryText }}>
+                    Percent higher
+                  </p>
+                  <p className="mt-1 text-[2rem] font-semibold leading-none tabular-nums" style={{ color: shareColors.sharePanelText }}>
+                    {formatPercent(percentHigher)}
+                  </p>
+                  <p className="mt-1 text-[11px]" style={{ color: shareColors.shareSecondaryText }}>graded higher</p>
                 </div>
-                <div className="glass rounded-[16px] border-app border p-4">
-                  <p className="text-muted text-[11px] font-semibold uppercase tracking-[0.12em]">Total pop</p>
-                  <p className="mt-1 text-2xl font-semibold tabular-nums">{formatNumber(totalPop)}</p>
+                <div className="rounded-[16px] border p-4" style={{ background: shareColors.sharePanelBg, borderColor: "color-mix(in srgb, #dce7ff 28%, transparent)" }}>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: shareColors.shareSecondaryText }}>
+                    Total pop
+                  </p>
+                  <p className="mt-1 text-[2rem] font-semibold leading-none tabular-nums" style={{ color: shareColors.sharePanelText }}>
+                    {formatNumber(totalPop)}
+                  </p>
+                  <p className="mt-1 text-[11px]" style={{ color: shareColors.shareSecondaryText }}>total graded</p>
                 </div>
-                <div className="glass rounded-[16px] border-app border p-4">
-                  <p className="text-muted text-[11px] font-semibold uppercase tracking-[0.12em]">Liquidity</p>
+                <div className="rounded-[16px] border p-4" style={{ background: shareColors.sharePanelBg, borderColor: "color-mix(in srgb, #dce7ff 28%, transparent)" }}>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: shareColors.shareSecondaryText }}>
+                    Liquidity
+                  </p>
                   <p
-                    className="mt-1 text-xl font-semibold"
+                    className="mt-1 text-[1.55rem] font-semibold leading-none"
                     style={{
+                      color: shareColors.sharePanelText,
                       display: "-webkit-box",
                       overflow: "hidden",
                       WebkitLineClamp: 1,
@@ -173,14 +289,15 @@ export default function ShareCard({
                   >
                     {liquidityTier ?? "Data unavailable"}
                   </p>
+                  <p className="mt-1 text-[11px]" style={{ color: shareColors.shareSecondaryText }}>market depth</p>
                 </div>
               </div>
             </div>
           </div>
 
-          <div className="flex items-end justify-between border-app border-t pt-3">
-            <p className="text-muted text-sm">popalpha.app</p>
-            <p className="text-muted text-base font-semibold tracking-[0.08em]">POPALPHA</p>
+          <div className="flex items-end justify-between border-t pt-3" style={{ borderColor: "color-mix(in srgb, #bdd2ff 28%, transparent)" }}>
+            <p className="text-sm" style={{ color: shareColors.shareSecondaryText }}>popalpha.app</p>
+            <p className="text-base font-semibold tracking-[0.08em]" style={{ color: shareColors.shareSecondaryText }}>POPALPHA</p>
           </div>
         </div>
       </article>
