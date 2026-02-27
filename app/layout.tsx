@@ -3,7 +3,7 @@ import "./globals.css";
 import { ThemeProvider } from "./theme-provider";
 import AppChrome from "@/components/app-chrome";
 import { getSiteUrl } from "@/lib/site-url";
-import { Analytics } from "@vercel/analytics/react";
+import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 
 const siteUrl = getSiteUrl();
