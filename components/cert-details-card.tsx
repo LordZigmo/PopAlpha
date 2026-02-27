@@ -9,6 +9,7 @@ import PrivateSalesForm, { type SaleFormState } from "@/components/private-sales
 import PrivateSalesList, { type PrivateSale } from "@/components/private-sales-list";
 import { getDerivedMetrics } from "@/lib/cert-metrics";
 import { buildPsaCertUrl } from "@/lib/psa/cert-url";
+import { buildCardSlug } from "@/lib/card-slug";
 
 type CertDetailsCardProps = {
   cert: string;
@@ -28,6 +29,12 @@ type ActivityEvent = {
   summary: string;
   occurred_at: string;
   details: Record<string, unknown>;
+};
+type CardProfile = {
+  card_slug: string;
+  summary_short: string;
+  summary_long: string | null;
+  created_at: string;
 };
 
 function normalizeRaw(raw: unknown): Record<string, unknown> {
@@ -152,6 +159,24 @@ function getLiquidityTier(totalPopulation: number | null): string {
   return "High liquidity";
 }
 
+function getDeterministicCertSummary(grade: string, totalPopulation: number | null, populationHigher: number | null, scarcityScore: number | null): string {
+  if (populationHigher === 0) {
+    return `This ${grade} example sits at the highest recorded PSA grade with no higher examples.`;
+  }
+
+  if (totalPopulation !== null && totalPopulation > 0 && populationHigher !== null) {
+    const percentHigher = (populationHigher / totalPopulation) * 100;
+    const formatted = Number.isInteger(percentHigher) ? String(percentHigher) : percentHigher.toFixed(1).replace(/\.0$/, "");
+    return `${formatted}% of graded examples are higher than this copy.`;
+  }
+
+  if (scarcityScore !== null) {
+    return `Scarcity score reads ${scarcityScore}, indicating relative population pressure at this grade.`;
+  }
+
+  return "Population context is limited for this cert.";
+}
+
 export default function CertDetailsCard({
   cert,
   data,
@@ -172,6 +197,7 @@ export default function CertDetailsCard({
   const [activityError, setActivityError] = useState<string | null>(null);
   const [activityEvents, setActivityEvents] = useState<ActivityEvent[]>([]);
   const [historyCount, setHistoryCount] = useState<number | null>(null);
+  const [cardProfile, setCardProfile] = useState<CardProfile | null>(null);
   const [saleForm, setSaleForm] = useState<SaleFormState>({
     soldAt: dateToInput(new Date().toISOString()),
     price: "",
@@ -257,6 +283,27 @@ export default function CertDetailsCard({
     }
   }, [cert]);
 
+  const cardSlug = useMemo(() => buildCardSlug([year, brand, subject, variety]), [year, brand, subject, variety]);
+
+  const loadCardProfile = useCallback(async () => {
+    if (!cardSlug) {
+      setCardProfile(null);
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/card-profiles?slug=${encodeURIComponent(cardSlug)}`);
+      const payload = (await response.json()) as { ok: boolean; profile?: CardProfile | null };
+      if (!response.ok || !payload.ok) {
+        setCardProfile(null);
+        return;
+      }
+      setCardProfile(payload.profile ?? null);
+    } catch {
+      setCardProfile(null);
+    }
+  }, [cardSlug]);
+
   useEffect(() => {
     if (activeTab === "private") void loadPrivateSales();
   }, [activeTab, loadPrivateSales]);
@@ -264,6 +311,10 @@ export default function CertDetailsCard({
   useEffect(() => {
     void loadActivity();
   }, [loadActivity]);
+
+  useEffect(() => {
+    void loadCardProfile();
+  }, [loadCardProfile]);
 
   useEffect(() => {
     if (!saleToast) return;
@@ -346,6 +397,7 @@ export default function CertDetailsCard({
         : supplyPressure.tone === "negative"
           ? "badge-negative"
           : "border-app text-muted bg-surface-soft";
+  const deterministicSummary = getDeterministicCertSummary(display(grade), metrics.totalPopulation, metrics.populationHigher, metrics.scarcityScore);
 
   return (
     <section className="glass glow-card lift density-panel rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
@@ -472,6 +524,18 @@ export default function CertDetailsCard({
           atGradeOrLowerCount={atGradeOrLowerCount}
         />
       </div>
+
+      {cardProfile ? (
+        <section className="mt-4 rounded-[var(--radius-panel)] border-app border bg-surface/70 p-[var(--space-panel)]">
+          <p className="text-muted text-xs font-semibold uppercase tracking-[0.14em]">Card Overview</p>
+          <p className="text-app mt-2 text-base font-semibold">{cardProfile.summary_short}</p>
+          {cardProfile.summary_long ? <p className="text-muted mt-2 text-sm">{cardProfile.summary_long}</p> : null}
+          <div className="mt-3 rounded-[var(--radius-card)] border-app border bg-surface-soft/55 p-[var(--space-card)]">
+            <p className="text-muted text-xs font-semibold uppercase tracking-[0.12em]">Cert Summary</p>
+            <p className="text-app mt-2 text-sm">{deterministicSummary}</p>
+          </div>
+        </section>
+      ) : null}
 
       <section className="mt-4 rounded-[var(--radius-panel)] border-app border bg-surface/70 p-[var(--space-panel)]">
         <div className="flex flex-wrap gap-2">
