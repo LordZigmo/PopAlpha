@@ -65,6 +65,24 @@ function normalizePayload(raw: Record<string, unknown>): Record<string, unknown>
   return raw;
 }
 
+function pickImageUrl(payload: Record<string, unknown>): string | null {
+  const preferredKeys = [
+    "ImageUrlLarge",
+    "ImageURLLarge",
+    "FrontImageLarge",
+    "CardImageLarge",
+    "PictureUrlLarge",
+    "ImageURL",
+    "ImageUrl",
+    "FrontImage",
+    "CardImage",
+    "PictureUrl",
+    "ImageUrlSmall",
+    "ImageURLSmall",
+  ];
+  return firstString(payload, preferredKeys);
+}
+
 function parseCertificate(raw: Record<string, unknown>, fallbackCertNo: string): ParsedCertificate {
   const normalized = normalizePayload(raw);
 
@@ -76,7 +94,7 @@ function parseCertificate(raw: Record<string, unknown>, fallbackCertNo: string):
     set_name: firstString(normalized, ["Brand", "Category", "set_name", "setName", "SetName"]),
     subject: firstString(normalized, ["Subject", "subject", "player"]),
     variety: firstString(normalized, ["Variety", "variety"]),
-    image_url: firstString(normalized, ["ImageURL", "ImageUrl", "image_url", "imageUrl"]),
+    image_url: pickImageUrl(normalized),
   };
 
   if (process.env.NODE_ENV !== "production" && normalized !== raw) {

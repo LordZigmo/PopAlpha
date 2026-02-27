@@ -3,7 +3,6 @@
 import CertDetailsCard from "@/components/cert-details-card";
 import CertSkeleton from "@/components/cert-skeleton";
 import RawJsonPanel from "@/components/raw-json-panel";
-import ThemeToggle from "@/components/theme-toggle";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { CertificateResponse } from "@/lib/psa/client";
 
@@ -229,7 +228,6 @@ export default function Home() {
             </form>
 
             <div className="flex items-center gap-2">
-              <ThemeToggle />
               <StubIconButton label="Copy link" icon="🔗" onClick={copyCurrentLink} />
               <StubIconButton label="Add private sale" icon="➕" disabled={!loadedCert} />
             </div>

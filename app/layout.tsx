@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { ThemeProvider } from "./theme-provider";
-import ThemeToggle from "@/components/theme-toggle";
+import AppChrome from "@/components/app-chrome";
 import { getSiteUrl } from "@/lib/site-url";
 
 const siteUrl = getSiteUrl();
@@ -36,10 +36,7 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <body className="antialiased">
         <ThemeProvider>
-          <div className="fixed right-4 top-4 z-50">
-            <ThemeToggle />
-          </div>
-          {children}
+          <AppChrome>{children}</AppChrome>
         </ThemeProvider>
       </body>
     </html>

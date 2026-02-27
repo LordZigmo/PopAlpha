@@ -99,6 +99,7 @@ function getPositionInsight(
   scarcityScore: number | null,
 ): string {
   if (totalPopulation === null || populationHigher === null) return "Insufficient population coverage";
+  if (totalPopulation === 1 && populationHigher === 0) return "Ultra-scarce: unique population at this grade";
 
   if (populationHigher === 0 && totalPopulation < 500) return "Elite scarcity tier";
   if (totalPopulation > 0 && populationHigher / totalPopulation > 0.8) return "High grade compression";
@@ -145,6 +146,20 @@ export default function CertDetailsCard({
   const variety = data.parsed.variety ?? firstValue(rawPayload, ["Variety", "variety"]);
   const category = firstValue(rawPayload, ["Category", "category", "Sport"]);
   const labelType = data.parsed.label ?? firstValue(rawPayload, ["LabelType", "label", "Label"]);
+  const imageUrl = data.parsed.image_url ?? firstValue(rawPayload, [
+    "ImageUrlLarge",
+    "ImageURLLarge",
+    "FrontImageLarge",
+    "CardImageLarge",
+    "PictureUrlLarge",
+    "ImageURL",
+    "ImageUrl",
+    "FrontImage",
+    "CardImage",
+    "PictureUrl",
+    "ImageUrlSmall",
+    "ImageURLSmall",
+  ]);
   const totalPopulation = firstValue(rawPayload, ["TotalPopulation", "totalPopulation"]);
   const populationHigher = firstValue(rawPayload, ["PopulationHigher", "populationHigher"]);
 
@@ -261,6 +276,7 @@ export default function CertDetailsCard({
     metrics.totalPopulation !== null && metrics.totalPopulation >= 0 ? Math.round(metrics.totalPopulation) : null;
   const atGradeOrLowerCount =
     totalCount !== null && higherCount !== null ? Math.max(totalCount - higherCount, 0) : null;
+  const ultraScarce = totalCount === 1 && higherCount === 0;
   const liquiditySignal = getLiquiditySignal(metrics.totalPopulation);
   const liquidityChipClass =
     liquiditySignal === "High liquidity"
@@ -279,14 +295,35 @@ export default function CertDetailsCard({
           className="glass rounded-[var(--radius-panel)] border-app border"
           style={{ padding: "calc(var(--space-panel) * 0.88) var(--space-panel)" }}
         >
-          <div className="flex items-start justify-between gap-3">
-            <div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
               <p className="text-muted text-xs font-semibold uppercase tracking-[0.18em]">Identity Hero</p>
               <p className="text-app mt-3 text-5xl font-semibold sm:text-6xl">{display(grade)}</p>
               <p className="text-app mt-3 text-base">{title}</p>
+              {ultraScarce ? (
+                <div className="badge-gold mt-3 inline-flex items-center gap-2 rounded-full px-3 py-1">
+                  <span className="text-sm font-semibold">1 of 1</span>
+                  <span className="text-[11px] opacity-85">Highest recorded grade</span>
+                </div>
+              ) : null}
             </div>
-            <div className="w-[11.5rem] shrink-0">
-              <RarityRing score={metrics.scarcityScore} compact />
+            <div className="flex shrink-0 items-start gap-3">
+              <div className="glass relative h-24 w-[4.35rem] overflow-hidden rounded-[var(--radius-input)] border-app border bg-surface-soft">
+                {typeof imageUrl === "string" && imageUrl.trim() !== "" ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={imageUrl}
+                    alt="PSA cert asset"
+                    className="h-full w-full object-cover"
+                    loading="lazy"
+                  />
+                ) : (
+                  <div className="h-full w-full bg-[radial-gradient(circle_at_20%_12%,color-mix(in_srgb,var(--color-accent)_26%,transparent),transparent_56%),linear-gradient(165deg,color-mix(in_srgb,var(--color-surface-soft)_88%,transparent),color-mix(in_srgb,var(--color-border)_36%,transparent))]" />
+                )}
+              </div>
+              <div className="w-[11.5rem]">
+                <RarityRing score={metrics.scarcityScore} compact />
+              </div>
             </div>
           </div>
 
