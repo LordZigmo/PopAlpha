@@ -15,7 +15,7 @@ type Listing = {
 };
 
 type EbayListingsProps = {
-  queryBase: string;
+  query: string;
   cardVariantId: string | null;
 };
 
@@ -29,22 +29,22 @@ function formatMoney(value: string, currency: string): string {
   }).format(numeric);
 }
 
-function normalizeBrowseQuery(value: string, mode: "raw" | "psa"): string {
-  const withoutNoise = value
+function normalizeBrowseQuery(value: string): string {
+  return value
     .replace(/\b(Unlimited|Common|Uncommon)\b/gi, " ")
     .replace(/\s+/g, " ")
+    .trim()
+    .concat(" -lot -proxy")
+    .replace(/\s+/g, " ")
     .trim();
-  const withGrade = mode === "psa" ? `${withoutNoise} PSA` : withoutNoise;
-  return `${withGrade} -lot -proxy`.replace(/\s+/g, " ").trim();
 }
 
-export default function EbayListings({ queryBase, cardVariantId }: EbayListingsProps) {
-  const [mode, setMode] = useState<"raw" | "psa">("raw");
+export default function EbayListings({ query, cardVariantId }: EbayListingsProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<Listing[]>([]);
 
-  const query = useMemo(() => normalizeBrowseQuery(queryBase, mode), [mode, queryBase]);
+  const normalizedQuery = useMemo(() => normalizeBrowseQuery(query), [query]);
 
   useEffect(() => {
     let cancelled = false;
@@ -52,7 +52,7 @@ export default function EbayListings({ queryBase, cardVariantId }: EbayListingsP
       setLoading(true);
       setError(null);
       try {
-        const response = await fetch(`/api/ebay/browse?q=${encodeURIComponent(query)}&limit=12`);
+        const response = await fetch(`/api/ebay/browse?q=${encodeURIComponent(normalizedQuery)}&limit=12`);
         const payload = (await response.json()) as { ok: boolean; items?: Listing[]; error?: string };
         if (!response.ok || !payload.ok) {
           throw new Error(payload.error ?? "Could not load eBay listings.");
@@ -85,31 +85,15 @@ export default function EbayListings({ queryBase, cardVariantId }: EbayListingsP
     return () => {
       cancelled = true;
     };
-  }, [cardVariantId, query]);
+  }, [cardVariantId, normalizedQuery]);
 
   return (
     <section className="mt-4 glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-app text-sm font-semibold uppercase tracking-[0.12em]">Live eBay listings</p>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setMode("raw")}
-            className={`rounded-full border px-3 py-1 text-xs font-semibold ${mode === "raw" ? "btn-accent" : "btn-ghost"}`}
-          >
-            Raw
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode("psa")}
-            className={`rounded-full border px-3 py-1 text-xs font-semibold ${mode === "psa" ? "btn-accent" : "btn-ghost"}`}
-          >
-            PSA
-          </button>
-        </div>
       </div>
 
-      <p className="text-muted mt-2 text-xs">Query: {query}</p>
+      <p className="text-muted mt-2 text-xs">Query: {normalizedQuery}</p>
 
       {loading ? <p className="text-muted mt-3 text-sm">Loading listings...</p> : null}
       {!loading && error ? <p className="text-negative mt-3 text-sm">{error}</p> : null}

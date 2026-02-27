@@ -463,7 +463,7 @@ export default function CertDetailsCard({
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 {canonicalMatch ? (
                   <a
-                    href={`/cards/${encodeURIComponent(canonicalMatch.slug)}`}
+                    href={`/c/${encodeURIComponent(canonicalMatch.slug)}`}
                     className="btn-accent inline-flex rounded-[var(--radius-input)] border px-3 py-1.5 text-xs font-semibold"
                   >
                     View Card

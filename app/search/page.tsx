@@ -70,6 +70,32 @@ function toPositiveInt(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function normalizeQuery(value: string): string {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function extractCardNumber(query: string): string | null {
+  const slashMatch = query.match(/(?:^|\s)#?(\d{1,4})\s*\/\s*\d+(?:\s|$)/i);
+  if (slashMatch) return slashMatch[1];
+  const hashMatch = query.match(/(?:^|\s)#(\d{1,4})(?:\s|$)/i);
+  if (hashMatch) return hashMatch[1];
+  return null;
+}
+
+function extractNameHint(query: string): string {
+  return query
+    .replace(/#?\d+\s*\/\s*\d+/g, " ")
+    .replace(/#\d+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isLikelySubjectQuery(query: string): boolean {
+  if (/\d/.test(query)) return false;
+  const tokens = query.split(/\s+/).filter((token) => token.length > 0);
+  return tokens.length > 0 && tokens.length <= 2;
+}
+
 function rowSubtitle(row: CanonicalCardRow): string {
   const bits: string[] = [];
   if (row.year) bits.push(String(row.year));
@@ -94,19 +120,40 @@ function printingChipLabel(printing: PrintingRow): string {
   return bits.join(" • ");
 }
 
+function scoreCanonicalMatch(row: CanonicalCardRow, qLower: string, parsedNumber: string | null, subjectMode: boolean): number {
+  const canonicalName = (row.canonical_name ?? "").toLowerCase();
+  const subject = (row.subject ?? "").toLowerCase();
+  const setName = (row.set_name ?? "").toLowerCase();
+  const cardNumber = (row.card_number ?? "").toLowerCase();
+  let score = 0;
+
+  if (subjectMode && subject === qLower) score += 500;
+  if (subjectMode && subject.startsWith(qLower)) score += 420;
+  if (canonicalName.startsWith(qLower)) score += 360;
+  if (subject.includes(qLower)) score += 220;
+  if (canonicalName.includes(qLower)) score += 200;
+  if (setName.includes(qLower)) score += 110;
+  if (parsedNumber && cardNumber === parsedNumber.toLowerCase()) score += 150;
+
+  return score;
+}
+
 async function runBroadSearch(params: {
   q: string;
   page: number;
   lang: string;
   setFilter: string;
+  parsedNumber: string | null;
 }): Promise<SearchResultBundle> {
-  const { q, page, lang, setFilter } = params;
+  const { q, page, lang, setFilter, parsedNumber } = params;
   const supabase = getServerSupabaseClient();
-  const yearValue = /^\d{4}$/.test(q) ? Number.parseInt(q, 10) : null;
+  const qLower = normalizeQuery(q);
+  const subjectMode = isLikelySubjectQuery(qLower);
+  const yearValue = /^\d{4}$/.test(qLower) ? Number.parseInt(qLower, 10) : null;
 
   const fields = "slug, canonical_name, subject, set_name, year, card_number, language, variant";
-  const startsPattern = `${q}%`;
-  const containsPattern = `%${q}%`;
+  const startsPattern = `${qLower}%`;
+  const containsPattern = `%${qLower}%`;
   const broadOrParts = [
     `canonical_name.ilike.${containsPattern}`,
     `subject.ilike.${containsPattern}`,
@@ -115,24 +162,29 @@ async function runBroadSearch(params: {
     `variant.ilike.${containsPattern}`,
     `language.ilike.${containsPattern}`,
   ];
-  if (yearValue !== null) {
-    broadOrParts.push(`year.eq.${yearValue}`);
-  }
+  if (yearValue !== null) broadOrParts.push(`year.eq.${yearValue}`);
+  if (parsedNumber) broadOrParts.push(`card_number.eq.${parsedNumber}`);
 
-  let startsDataQuery = supabase
+  let subjectStartsQuery = supabase
+    .from("canonical_cards")
+    .select(fields)
+    .ilike("subject", startsPattern)
+    .order("subject", { ascending: true })
+    .limit(350);
+
+  let nameStartsQuery = supabase
     .from("canonical_cards")
     .select(fields)
     .ilike("canonical_name", startsPattern)
     .order("canonical_name", { ascending: true })
-    .limit(300);
+    .limit(350);
 
-  let containsDataQuery = supabase
+  let containsQuery = supabase
     .from("canonical_cards")
     .select(fields)
     .or(broadOrParts.join(","))
-    .not("canonical_name", "ilike", startsPattern);
-
-  containsDataQuery = containsDataQuery.order("canonical_name", { ascending: true }).limit(400);
+    .order("canonical_name", { ascending: true })
+    .limit(500);
 
   const printOrParts = [
     `set_name.ilike.${containsPattern}`,
@@ -145,54 +197,60 @@ async function runBroadSearch(params: {
     `language.ilike.${containsPattern}`,
   ];
   if (yearValue !== null) printOrParts.push(`year.eq.${yearValue}`);
+  if (parsedNumber) printOrParts.push(`card_number.eq.${parsedNumber}`);
 
   let printingQuery = supabase
     .from("card_printings")
     .select("id, canonical_slug, set_name, card_number, language, finish, finish_detail, edition, stamp")
     .or(printOrParts.join(","))
     .order("canonical_slug", { ascending: true })
-    .limit(500);
+    .limit(600);
 
   if (lang !== "ALL") {
-    startsDataQuery = startsDataQuery.ilike("language", lang);
-    containsDataQuery = containsDataQuery.ilike("language", lang);
+    subjectStartsQuery = subjectStartsQuery.ilike("language", lang);
+    nameStartsQuery = nameStartsQuery.ilike("language", lang);
+    containsQuery = containsQuery.ilike("language", lang);
     printingQuery = printingQuery.ilike("language", lang);
   }
   if (setFilter) {
-    startsDataQuery = startsDataQuery.ilike("set_name", `%${setFilter}%`);
-    containsDataQuery = containsDataQuery.ilike("set_name", `%${setFilter}%`);
+    subjectStartsQuery = subjectStartsQuery.ilike("set_name", `%${setFilter}%`);
+    nameStartsQuery = nameStartsQuery.ilike("set_name", `%${setFilter}%`);
+    containsQuery = containsQuery.ilike("set_name", `%${setFilter}%`);
     printingQuery = printingQuery.ilike("set_name", `%${setFilter}%`);
   }
 
-  const [{ data: startsRowsRaw }, { data: containsRowsRaw }, { data: matchedPrintingsRaw }] = await Promise.all([
-    startsDataQuery,
-    containsDataQuery,
+  const [{ data: subjectRowsRaw }, { data: startsRowsRaw }, { data: containsRowsRaw }, { data: matchedPrintingsRaw }] = await Promise.all([
+    subjectStartsQuery,
+    nameStartsQuery,
+    containsQuery,
     printingQuery,
   ]);
 
+  const subjectRows = (subjectRowsRaw ?? []) as CanonicalCardRow[];
   const startsRows = (startsRowsRaw ?? []) as CanonicalCardRow[];
   const containsRows = (containsRowsRaw ?? []) as CanonicalCardRow[];
   const matchedPrintings = (matchedPrintingsRaw ?? []) as PrintingRow[];
 
-  const priorityBySlug = new Map<string, number>();
   const canonicalBySlug = new Map<string, CanonicalCardRow>();
+  const scoreBySlug = new Map<string, number>();
 
-  for (const row of startsRows) {
-    priorityBySlug.set(row.slug, Math.max(priorityBySlug.get(row.slug) ?? 0, 3));
+  const applyRowScore = (row: CanonicalCardRow, baseScore: number) => {
     canonicalBySlug.set(row.slug, row);
-  }
-  for (const row of containsRows) {
-    priorityBySlug.set(row.slug, Math.max(priorityBySlug.get(row.slug) ?? 0, 2));
-    canonicalBySlug.set(row.slug, row);
-  }
+    const computed = scoreCanonicalMatch(row, qLower, parsedNumber, subjectMode) + baseScore;
+    scoreBySlug.set(row.slug, Math.max(scoreBySlug.get(row.slug) ?? 0, computed));
+  };
+
+  for (const row of subjectRows) applyRowScore(row, 300);
+  for (const row of startsRows) applyRowScore(row, 220);
+  for (const row of containsRows) applyRowScore(row, 120);
   for (const printing of matchedPrintings) {
-    priorityBySlug.set(printing.canonical_slug, Math.max(priorityBySlug.get(printing.canonical_slug) ?? 0, 1));
+    scoreBySlug.set(printing.canonical_slug, Math.max(scoreBySlug.get(printing.canonical_slug) ?? 0, 75));
   }
 
-  const orderedSlugs = Array.from(priorityBySlug.keys()).sort((a, b) => {
-    const priorityA = priorityBySlug.get(a) ?? 0;
-    const priorityB = priorityBySlug.get(b) ?? 0;
-    if (priorityA !== priorityB) return priorityB - priorityA;
+  const orderedSlugs = Array.from(scoreBySlug.keys()).sort((a, b) => {
+    const scoreA = scoreBySlug.get(a) ?? 0;
+    const scoreB = scoreBySlug.get(b) ?? 0;
+    if (scoreA !== scoreB) return scoreB - scoreA;
     const nameA = canonicalBySlug.get(a)?.canonical_name ?? a;
     const nameB = canonicalBySlug.get(b)?.canonical_name ?? b;
     return nameA.localeCompare(nameB);
@@ -204,11 +262,9 @@ async function runBroadSearch(params: {
   const offset = (boundedPage - 1) * PAGE_SIZE;
   const pageSlugs = orderedSlugs.slice(offset, offset + PAGE_SIZE);
   const missingSlugs = pageSlugs.filter((slug) => !canonicalBySlug.has(slug));
+
   if (missingSlugs.length > 0) {
-    const { data: missingRows } = await supabase
-      .from("canonical_cards")
-      .select(fields)
-      .in("slug", missingSlugs);
+    const { data: missingRows } = await supabase.from("canonical_cards").select(fields).in("slug", missingSlugs);
     for (const row of (missingRows ?? []) as CanonicalCardRow[]) {
       canonicalBySlug.set(row.slug, row);
     }
@@ -256,11 +312,21 @@ async function getCachedBroadSearch(params: {
   page: number;
   lang: string;
   setFilter: string;
+  parsedNumber: string | null;
 }) {
-  const { q, page, lang, setFilter } = params;
+  const { q, page, lang, setFilter, parsedNumber } = params;
   return unstable_cache(
-    () => measureAsync("search.broad", { q, page, lang, setFilter }, () => runBroadSearch(params)),
-    ["search-v1", q.toLowerCase(), String(page), lang.toLowerCase(), setFilter.toLowerCase()],
+    () =>
+      measureAsync("search.broad", { q, page, lang, setFilter, parsedNumber }, () =>
+        runBroadSearch({
+          q,
+          page,
+          lang,
+          setFilter,
+          parsedNumber,
+        })
+      ),
+    ["search-v2", q.toLowerCase(), String(page), lang.toLowerCase(), setFilter.toLowerCase(), parsedNumber ?? "none"],
     { revalidate: 60 }
   )();
 }
@@ -272,6 +338,9 @@ export default async function SearchPage({
 }) {
   const params = await searchParams;
   const q = (params.q ?? "").trim();
+  const qNormalized = normalizeQuery(q);
+  const parsedNumber = extractCardNumber(qNormalized);
+  const nameHint = extractNameHint(qNormalized);
   const page = toPositiveInt(params.page, 1);
   const lang = (params.lang ?? "all").trim().toUpperCase();
   const setFilter = (params.set ?? "").trim();
@@ -289,17 +358,29 @@ export default async function SearchPage({
     );
   }
 
-  if (/^\d+$/.test(q)) {
-    redirect(`/cert/${encodeURIComponent(q)}`);
+  if (/^\d+$/.test(qNormalized)) {
+    redirect(`/cert/${encodeURIComponent(qNormalized)}`);
   }
 
   const supabase = getServerSupabaseClient();
 
-  const { data: printingAliasRow } = await measureAsync("search.printing_alias", { q }, async () =>
+  const { data: aliasRow } = await measureAsync("search.alias", { q: qNormalized }, async () =>
+    supabase
+      .from("card_aliases")
+      .select("canonical_slug")
+      .eq("alias", qNormalized)
+      .limit(1)
+      .maybeSingle<{ canonical_slug: string }>()
+  );
+  if (aliasRow?.canonical_slug) {
+    redirect(`/c/${encodeURIComponent(aliasRow.canonical_slug)}`);
+  }
+
+  const { data: printingAliasRow } = await measureAsync("search.printing_alias", { q: qNormalized }, async () =>
     supabase
       .from("printing_aliases")
       .select("printing_id")
-      .ilike("alias", q)
+      .eq("alias", qNormalized)
       .limit(1)
       .maybeSingle<{ printing_id: string }>()
   );
@@ -312,34 +393,62 @@ export default async function SearchPage({
       .maybeSingle<{ canonical_slug: string }>();
 
     if (printingRow?.canonical_slug) {
-      redirect(`/cards/${encodeURIComponent(printingRow.canonical_slug)}?printing=${encodeURIComponent(printingAliasRow.printing_id)}`);
+      redirect(`/c/${encodeURIComponent(printingRow.canonical_slug)}?printing=${encodeURIComponent(printingAliasRow.printing_id)}`);
     }
   }
 
-  const { data: aliasRow } = await measureAsync("search.alias", { q }, async () =>
-    supabase
-      .from("card_aliases")
-      .select("canonical_slug")
-      .ilike("alias", q)
-      .limit(1)
-      .maybeSingle<{ canonical_slug: string }>()
-  );
+  if (parsedNumber) {
+    let inferredSetHint = setFilter;
+    let inferredNameHint = nameHint;
+    if (!inferredSetHint) {
+      const { data: setHintRow } = await supabase
+        .from("canonical_cards")
+        .select("set_name")
+        .ilike("set_name", `%${qNormalized}%`)
+        .limit(1)
+        .maybeSingle<{ set_name: string | null }>();
+      inferredSetHint = setHintRow?.set_name ?? "";
+    }
+    if (!inferredSetHint) {
+      const tokens = nameHint.split(/\s+/).filter((token) => token.length > 0);
+      if (tokens.length >= 3) {
+        inferredSetHint = tokens.slice(0, 2).join(" ");
+        inferredNameHint = tokens.slice(2).join(" ");
+      }
+    }
 
-  if (aliasRow?.canonical_slug) {
-    redirect(`/cards/${encodeURIComponent(aliasRow.canonical_slug)}`);
+    let structuredQuery = supabase
+      .from("canonical_cards")
+      .select("slug")
+      .eq("card_number", parsedNumber)
+      .limit(3);
+
+    if (inferredSetHint) structuredQuery = structuredQuery.ilike("set_name", `%${inferredSetHint}%`);
+    if (inferredNameHint) {
+      structuredQuery = structuredQuery.or(`canonical_name.ilike.%${inferredNameHint}%,subject.ilike.%${inferredNameHint}%`);
+    }
+
+    const matches = await measureAsync("search.structured", { q: qNormalized, parsedNumber }, async () => {
+      const { data } = await structuredQuery;
+      return (data ?? []) as Array<{ slug: string }>;
+    });
+    if (matches.length === 1) {
+      redirect(`/c/${encodeURIComponent(matches[0].slug)}`);
+    }
   }
 
   const result = await getCachedBroadSearch({
-    q,
+    q: qNormalized,
     page,
     lang,
     setFilter,
+    parsedNumber,
   });
 
   let cardsQuery = supabase
     .from("cards")
     .select("id, slug, name, set, year, number, image_url")
-    .or(`name.ilike.%${q}%,set.ilike.%${q}%,number.ilike.%${q}%`)
+    .or(`name.ilike.%${qNormalized}%,set.ilike.%${qNormalized}%,number.ilike.%${qNormalized}%`)
     .order("name", { ascending: true })
     .limit(25);
   if (setFilter) cardsQuery = cardsQuery.ilike("set", `%${setFilter}%`);
@@ -348,10 +457,7 @@ export default async function SearchPage({
   const cardIds = cardRows.map((row) => row.id);
   let variantRows: VariantChipRow[] = [];
   if (cardIds.length > 0) {
-    const { data: variantsRaw } = await supabase
-      .from("card_variants")
-      .select("card_id, finish, edition")
-      .in("card_id", cardIds);
+    const { data: variantsRaw } = await supabase.from("card_variants").select("card_id, finish, edition").in("card_id", cardIds);
     variantRows = (variantsRaw ?? []) as VariantChipRow[];
   }
 
@@ -410,41 +516,6 @@ export default async function SearchPage({
         </section>
 
         <section className="mt-4 glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
-          <p className="text-app text-sm font-semibold uppercase tracking-[0.12em]">Card DB Matches</p>
-          {cardRows.length === 0 ? (
-            <p className="text-muted mt-2 text-sm">No direct card matches.</p>
-          ) : (
-            <ul className="mt-3 divide-y divide-[color:var(--color-border)]">
-              {cardRows.map((card) => (
-                <li key={card.id}>
-                  <Link
-                    href={`/c/${encodeURIComponent(card.slug)}`}
-                    className="flex items-center justify-between gap-3 py-3"
-                  >
-                    <div className="min-w-0">
-                      <p className="text-app truncate text-sm font-semibold">{card.name}</p>
-                      <p className="text-muted truncate text-xs">
-                        {card.year || "—"} • {card.set} • #{card.number}
-                      </p>
-                      {(chipsByCardId.get(card.id) ?? []).length > 0 ? (
-                        <div className="mt-1 flex flex-wrap gap-1">
-                          {(chipsByCardId.get(card.id) ?? []).slice(0, 3).map((chip) => (
-                            <span key={`${card.id}-${chip}`} className="border-app rounded-full border px-2 py-0.5 text-[11px] text-muted">
-                              {chip}
-                            </span>
-                          ))}
-                        </div>
-                      ) : null}
-                    </div>
-                    <span className="text-muted text-xs font-semibold">View</span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        <section className="mt-4 glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
           {result.rows.length === 0 ? (
             <div>
               <p className="text-app text-sm font-semibold">No matches found.</p>
@@ -454,10 +525,7 @@ export default async function SearchPage({
             <ul className="divide-y divide-[color:var(--color-border)]">
               {result.rows.map((row) => (
                 <li key={row.canonical.slug}>
-                  <Link
-                    href={`/cards/${encodeURIComponent(row.canonical.slug)}`}
-                    className="flex items-center justify-between gap-3 py-3"
-                  >
+                  <Link href={`/c/${encodeURIComponent(row.canonical.slug)}`} className="flex items-center justify-between gap-3 py-3">
                     <div className="min-w-0">
                       <p className="text-app truncate text-sm font-semibold">{row.canonical.canonical_name}</p>
                       <p className="text-muted truncate text-xs">{rowSubtitle(row.canonical)}</p>
@@ -499,6 +567,38 @@ export default async function SearchPage({
               )}
             </div>
           </div>
+        </section>
+
+        <section className="mt-4 glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
+          <p className="text-app text-sm font-semibold uppercase tracking-[0.12em]">Source DB Matches (debug)</p>
+          {cardRows.length === 0 ? (
+            <p className="text-muted mt-2 text-sm">No direct source-card matches.</p>
+          ) : (
+            <ul className="mt-3 divide-y divide-[color:var(--color-border)]">
+              {cardRows.map((card) => (
+                <li key={card.id}>
+                  <Link href={`/c/${encodeURIComponent(card.slug)}`} className="flex items-center justify-between gap-3 py-3">
+                    <div className="min-w-0">
+                      <p className="text-app truncate text-sm font-semibold">{card.name}</p>
+                      <p className="text-muted truncate text-xs">
+                        {card.year || "—"} • {card.set} • #{card.number}
+                      </p>
+                      {(chipsByCardId.get(card.id) ?? []).length > 0 ? (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {(chipsByCardId.get(card.id) ?? []).slice(0, 3).map((chip) => (
+                            <span key={`${card.id}-${chip}`} className="border-app rounded-full border px-2 py-0.5 text-[11px] text-muted">
+                              {chip}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                    <span className="text-muted text-xs font-semibold">View</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
       </div>
     </main>

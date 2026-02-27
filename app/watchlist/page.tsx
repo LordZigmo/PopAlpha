@@ -38,7 +38,7 @@ export default function WatchlistPage() {
             <ul className="mt-3 space-y-2">
               {cards.map((card) => (
                 <li key={`${card.slug}-${card.updatedAt}`} className="flex items-center justify-between gap-2 rounded-[var(--radius-input)] border-app border p-2">
-                  <Link href={`/cards/${encodeURIComponent(card.slug)}`} className="min-w-0 flex-1">
+                  <Link href={`/c/${encodeURIComponent(card.slug)}`} className="min-w-0 flex-1">
                     <p className="text-app truncate text-sm font-semibold">{card.canonical_name}</p>
                     <p className="text-muted truncate text-xs">{card.year ? `${card.year} • ` : ""}{card.set_name || ""}</p>
                   </Link>
