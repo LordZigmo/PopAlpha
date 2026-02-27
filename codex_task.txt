@@ -1,0 +1,41 @@
+﻿Task: Refine the cert profile UI (fintech/lifestyle) with focused polish. Do NOT add new data sources or major new features. Keep existing layout and tabs.
+
+Primary goals:
+1) Fix Scarcity Index scaling so it aligns with user intuition:
+   - total_pop < 100 => score should usually be > 80
+   - 100–1,000 => 50–80
+   - 1,000–5,000 => 30–60
+   - > 5,000 => < 40
+   - Ensure the score never contradicts obvious “Top tier / none higher” situations (avoid extremely low scores when pop is low).
+   - Keep it deterministic and explainable (simple piecewise or log curve is fine).
+
+2) Make the Tier/Rarity insight card feel premium and visually confident:
+   - Use the nicer green treatment we had earlier for “Top tier / none higher” (subtle glow/gradient/border accent).
+   - Ensure it looks great in both Indigo and Finviz themes.
+   - Don’t hardcode raw hex colors in components; use theme tokens/variables or existing utility classes.
+
+3) Improve coherence:
+   - Ensure labels, badges, and meters tell a consistent story (Top tier share, PopulationHigher=0, Scarcity score).
+   - If there’s a conflict, adjust the heuristic or labeling to reduce cognitive dissonance.
+
+4) Motion (subtle):
+   - Add a small load-in animation to the rarity ring/meter (e.g., transition from 0 to score over ~300ms) without adding new dependencies.
+   - Keep performance good.
+
+Constraints:
+- Do not change API response shape.
+- Do not change DB schema or routes.
+- No large refactors; keep changes localized to UI + derived-metrics utilities.
+- Must pass `npm run build`.
+
+Implementation steps:
+- Find where scarcity_score is computed (likely a helper/utility or inside the cert-details component).
+- Replace current scoring logic with improved scaling above.
+- Update the rarity/tier card styling to green premium treatment.
+- Add simple animation for the ring/meter (CSS transition or requestAnimationFrame) without extra packages.
+- Run `npm run build` and fix any issues until it succeeds.
+
+Output:
+- List files changed
+- Briefly explain the new scarcity formula and why it matches the target ranges
+- Confirm build passes

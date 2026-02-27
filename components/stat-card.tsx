@@ -15,7 +15,7 @@ export default function StatCard({
     <div
       className={`glass density-card rounded-[var(--radius-card)] border p-[var(--space-card)] ${
         highlight ? "stat-highlight" : "border-app"
-      } ${tierAccent ? "tier-label-card" : ""}`}
+      } ${tierAccent ? "tier-label-card" : ""} ${highlight && tierAccent ? "tier-label-premium" : ""}`}
     >
       <p className="text-muted text-xs font-semibold uppercase tracking-[0.14em]">{label}</p>
       <p className={`mt-2 text-3xl font-semibold tracking-tight sm:text-4xl ${highlight ? "text-positive" : "text-app"}`}>{value}</p>

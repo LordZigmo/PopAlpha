@@ -95,7 +95,9 @@ export default function CertDetailsCard({ cert, data, source, cacheHit, fetchedA
     } catch (error) {
       setSalesError(String(error));
       setSales([]);
-    } finally { setSalesLoading(false); }
+    } finally {
+      setSalesLoading(false);
+    }
   }, [cert]);
 
   useEffect(() => {
@@ -128,18 +130,10 @@ export default function CertDetailsCard({ cert, data, source, cacheHit, fetchedA
       setSales((prev) => [payload.sale as PrivateSale, ...prev]);
       setSaleForm((prev) => ({ ...prev, price: "", fees: "", notes: "", paymentMethod: "" }));
       setSaleToast("Private sale saved.");
-    } catch (error) { setSaleToast(String(error)); } finally { setSaleSubmitting(false); }
-  }
-
-  async function removeSale(id: string) {
-    try {
-      const response = await fetch(`/api/private-sales/${id}`, { method: "DELETE" });
-      const payload = (await response.json()) as { ok: boolean; error?: string };
-      if (!response.ok || !payload.ok) throw new Error(payload.error ?? "Delete failed");
-      setSales((prev) => prev.filter((sale) => sale.id !== id));
-      setSaleToast("Private sale removed.");
     } catch (error) {
       setSaleToast(String(error));
+    } finally {
+      setSaleSubmitting(false);
     }
   }
 
@@ -155,7 +149,9 @@ export default function CertDetailsCard({ cert, data, source, cacheHit, fetchedA
     }
   }
 
-  const title = [display(year), display(brand), display(subject), display(variety)].filter((v) => v !== "—").join(" • ") || "Unspecified listing";
+  const title =
+    [display(year), display(brand), display(subject), display(variety)].filter((v) => v !== "—").join(" • ") ||
+    "Unspecified listing";
 
   return (
     <section className="glass glow-card lift density-panel rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
@@ -185,18 +181,18 @@ export default function CertDetailsCard({ cert, data, source, cacheHit, fetchedA
 
         <aside className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
           <StatCard label="Total Pop" value={display(totalPopulation)} sublabel="Total graded examples" />
-          <StatCard label="Higher Pop" value={display(populationHigher)} sublabel="Examples above this grade" />
+          <StatCard label="Population Higher" value={display(populationHigher)} sublabel="Examples in higher grades" />
           <StatCard
-            label="Tier Label"
+            label="Tier / Rarity"
             value={metrics.tierLabel}
-            sublabel={metrics.topGrade ? "No higher examples recorded" : "Higher examples exist"}
+            sublabel={metrics.topGrade ? "PopulationHigher = 0 (none higher)" : "Higher-grade examples exist"}
             highlight={metrics.topGrade}
             tierAccent
           />
           <StatCard
             label="Top Tier Share"
             value={metrics.topTierShare === null ? "—" : `${(metrics.topTierShare * 100).toFixed(1)}%`}
-            sublabel="(total - higher) / total"
+            sublabel="At grade or lower share"
           />
         </aside>
       </div>
@@ -222,8 +218,14 @@ export default function CertDetailsCard({ cert, data, source, cacheHit, fetchedA
 
         {activeTab === "overview" ? (
           <div className="mt-4 rounded-[var(--radius-card)] border-app border bg-surface-soft/55 p-[var(--space-card)] text-sm text-muted">
-            This profile has <span className="text-app font-semibold">{display(totalPopulation)}</span> total graded examples, with{" "}
-            <span className="text-app font-semibold">{display(populationHigher)}</span> graded higher.
+            <p>
+              This profile has <span className="text-app font-semibold">{display(totalPopulation)}</span> total graded examples, with{" "}
+              <span className="text-app font-semibold">{display(populationHigher)}</span> graded higher.
+            </p>
+            <p className="mt-2">
+              Tier status: <span className="text-app font-semibold">{metrics.tierLabel}</span>. Scarcity Index:{" "}
+              <span className="text-app font-semibold">{metrics.scarcityScore ?? "—"}</span>.
+            </p>
           </div>
         ) : null}
 
@@ -233,9 +235,15 @@ export default function CertDetailsCard({ cert, data, source, cacheHit, fetchedA
             <div className="rounded-[var(--radius-card)] border-app border bg-surface-soft/55 p-[var(--space-card)]">
               <p className="text-app text-sm font-semibold">Market Context</p>
               <div className="mt-3 space-y-2 text-sm">
-                <p className="text-muted">Fair Value: <span className="font-semibold">—</span> <span className="text-xs">(coming soon)</span></p>
-                <p className="text-muted">Volatility: <span className="font-semibold">—</span> <span className="text-xs">(coming soon)</span></p>
-                <p className="text-muted">Avg days to sell: <span className="font-semibold">—</span> <span className="text-xs">(coming soon)</span></p>
+                <p className="text-muted">
+                  Fair Value: <span className="font-semibold">—</span> <span className="text-xs">(coming soon)</span>
+                </p>
+                <p className="text-muted">
+                  Volatility: <span className="font-semibold">—</span> <span className="text-xs">(coming soon)</span>
+                </p>
+                <p className="text-muted">
+                  Avg days to sell: <span className="font-semibold">—</span> <span className="text-xs">(coming soon)</span>
+                </p>
               </div>
             </div>
           </div>
@@ -255,11 +263,6 @@ export default function CertDetailsCard({ cert, data, source, cacheHit, fetchedA
           </div>
         ) : null}
 
-      <section className="mt-5 rounded-[var(--radius-panel)] border-app border bg-surface/70 p-[var(--space-panel)]">
-        <div className="flex flex-wrap gap-2">{tabs.map((tab) => <button key={tab.key} type="button" onClick={() => setActiveTab(tab.key)} className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${activeTab === tab.key ? "btn-accent" : "btn-ghost"}`}>{tab.label}</button>)}</div>
-        {activeTab === "overview" ? <div className="mt-4 rounded-[var(--radius-card)] border-app border bg-surface-soft/55 p-[var(--space-card)] text-sm text-muted">This profile has <span className="text-app font-semibold">{display(totalPopulation)}</span> total graded examples, with <span className="text-app font-semibold">{display(populationHigher)}</span> graded higher.</div> : null}
-        {activeTab === "market" ? <div className="mt-4 grid gap-4 lg:grid-cols-2"><ProceedsCalculator /><div className="rounded-[var(--radius-card)] border-app border bg-surface-soft/55 p-[var(--space-card)]"><p className="text-app text-sm font-semibold">Market Context</p><div className="mt-3 space-y-2 text-sm"><p className="text-muted">Fair Value: <span className="font-semibold">—</span> <span className="text-xs">(coming soon)</span></p><p className="text-muted">Volatility: <span className="font-semibold">—</span> <span className="text-xs">(coming soon)</span></p><p className="text-muted">Avg days to sell: <span className="font-semibold">—</span> <span className="text-xs">(coming soon)</span></p></div></div></div> : null}
-        {activeTab === "private" ? <div className="mt-4 space-y-4"><PrivateSalesForm state={saleForm} onChange={setSaleForm} onSubmit={submitSale} submitting={saleSubmitting} /><PrivateSalesList sales={sales} loading={salesLoading} error={salesError} onRefresh={() => void loadPrivateSales()} onDelete={removeSale} />{saleToast ? <p className="text-muted text-xs">{saleToast}</p> : null}</div> : null}
         {activeTab === "raw" ? <RawJsonPanel value={rawLookup} className="mt-4" /> : null}
       </section>
     </section>

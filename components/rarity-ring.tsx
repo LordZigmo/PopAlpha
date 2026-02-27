@@ -6,14 +6,24 @@ export default function RarityRing({ score, compact = false }: { score: number |
   const size = compact ? 82 : 110;
   const center = size / 2;
   const circumference = 2 * Math.PI * ringRadius;
-  const [revealed, setRevealed] = useState(false);
+  const [displayScore, setDisplayScore] = useState(0);
 
   useEffect(() => {
-    const frame = window.requestAnimationFrame(() => setRevealed(true));
-    return () => window.cancelAnimationFrame(frame);
-  }, [score]);
+    let rafId = 0;
+    const start = performance.now();
+    const duration = 320;
 
-  const strokeOffset = revealed ? circumference * (1 - normalized / 100) : circumference;
+    const tick = (now: number) => {
+      const progress = Math.min((now - start) / duration, 1);
+      setDisplayScore(Math.round(normalized * progress));
+      if (progress < 1) rafId = window.requestAnimationFrame(tick);
+    };
+
+    rafId = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(rafId);
+  }, [normalized]);
+
+  const strokeOffset = circumference * (1 - displayScore / 100);
 
   return (
     <div className={`glass density-card rounded-[var(--radius-card)] border-app border p-[var(--space-card)] ${compact ? "ring-compact" : ""}`}>
@@ -36,7 +46,7 @@ export default function RarityRing({ score, compact = false }: { score: number |
           />
         </svg>
         <div>
-          <p className="text-app text-2xl font-semibold tabular-nums">{score === null ? "—" : normalized}</p>
+          <p className="text-app text-2xl font-semibold tabular-nums">{score === null ? "—" : displayScore}</p>
           <p className="text-muted text-xs">0–100 heuristic (lower pop = higher rarity)</p>
         </div>
       </div>
