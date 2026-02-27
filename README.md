@@ -26,6 +26,14 @@ To patch mislabels without a full re-import, insert or update higher-priority ru
 - `match_type='rarity'` / `subtype`
 - `match_type='name_regex'` / `set_regex` for targeted cleanup
 
+## eBay Browse integration (read-only)
+
+Live listings on `/c/[slug]` use a server-side proxy route: `GET /api/ebay/browse`.
+Set these environment variables in Vercel (Production and Preview as needed):
+- `EBAY_CLIENT_ID`
+- `EBAY_CLIENT_SECRET`
+- `EBAY_ENV` (`production` or `sandbox`, defaults to `production`)
+
 ## Local environment setup (beginner-friendly)
 
 ### 1) Create your local env file
