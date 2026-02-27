@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "ebay:deletion-setup": "node scripts/ebay-deletion-setup.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.97.0",
