@@ -13,6 +13,7 @@ type ShareIntelligenceButtonProps = {
   totalPop?: number | null;
   isOneOfOne?: boolean;
   liquidityTier?: string | null;
+  imageUrl?: string | null;
   fileName: string;
 };
 
@@ -25,6 +26,7 @@ export default function ShareIntelligenceButton({
   totalPop,
   isOneOfOne = false,
   liquidityTier,
+  imageUrl,
   fileName,
 }: ShareIntelligenceButtonProps) {
   const [open, setOpen] = useState(false);
@@ -71,6 +73,7 @@ export default function ShareIntelligenceButton({
           totalPop={totalPop}
           isOneOfOne={isOneOfOne}
           liquidityTier={liquidityTier}
+          imageUrl={imageUrl}
           mode={mode}
         />
       );
@@ -134,6 +137,7 @@ export default function ShareIntelligenceButton({
                   totalPop={totalPop}
                   isOneOfOne={isOneOfOne}
                   liquidityTier={liquidityTier}
+                  imageUrl={imageUrl}
                   mode="square"
                 />
               </div>

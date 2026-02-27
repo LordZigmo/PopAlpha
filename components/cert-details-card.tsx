@@ -485,6 +485,7 @@ export default function CertDetailsCard({
                   totalPop={totalCount}
                   isOneOfOne={ultraScarce}
                   liquidityTier={liquidityTier}
+                  imageUrl={null}
                   fileName={shareFileName}
                 />
                 {onToggleWatchlist ? (

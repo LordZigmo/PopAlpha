@@ -64,6 +64,7 @@ export default async function CardPage({
                 totalPop={null}
                 isOneOfOne={false}
                 liquidityTier={null}
+                imageUrl={null}
                 fileName={`popalpha-card-${data.slug}.png`}
               />
               <CardWatchlistButton slug={data.slug} title={data.canonical_name} setName={data.set_name} year={data.year} />
