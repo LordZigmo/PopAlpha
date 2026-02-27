@@ -2,57 +2,84 @@
 
 import Link from "next/link";
 import { useState } from "react";
-
-type WatchlistEntry = {
-  cert: string;
-  title: string;
-  grade: string;
-  saved_at: string;
-};
-
-const WATCHLIST_STORAGE_KEY = "popalpha_watchlist_v1";
-
-function readWatchlist(): WatchlistEntry[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(WATCHLIST_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((item): item is WatchlistEntry => {
-      if (!item || typeof item !== "object") return false;
-      return typeof (item as WatchlistEntry).cert === "string";
-    });
-  } catch {
-    return [];
-  }
-}
+import {
+  readWatchlist,
+  removeWatchCard,
+  removeWatchCert,
+  watchlistCount,
+  type WatchCardEntry,
+  type WatchCertEntry,
+} from "@/lib/watchlist";
 
 export default function WatchlistPage() {
-  const [entries] = useState<WatchlistEntry[]>(() => readWatchlist());
+  const [cards, setCards] = useState<WatchCardEntry[]>(() => readWatchlist().cards);
+  const [certs, setCerts] = useState<WatchCertEntry[]>(() => readWatchlist().certs);
+
+  function refresh() {
+    const state = readWatchlist();
+    setCards(state.cards);
+    setCerts(state.certs);
+  }
 
   return (
     <main className="app-shell">
       <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
         <section className="glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
           <h1 className="text-app text-2xl font-semibold tracking-tight">Watchlist</h1>
-          <p className="text-muted mt-2 text-sm">Tracked certs saved from lookup.</p>
+          <p className="text-muted mt-2 text-sm">Saved cards and certs for quick drill-in.</p>
+          <p className="text-muted mt-1 text-xs">Total watched: {watchlistCount({ cards, certs })}</p>
         </section>
 
         <section className="mt-5 glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
-          {entries.length === 0 ? (
-            <p className="text-muted text-sm">No watchlisted certs yet.</p>
+          <p className="text-app text-sm font-semibold uppercase tracking-[0.12em]">Cards</p>
+          {cards.length === 0 ? (
+            <p className="text-muted mt-2 text-sm">No watchlisted cards yet.</p>
           ) : (
-            <ul className="space-y-2">
-              {entries.map((entry) => (
-                <li key={`${entry.cert}-${entry.saved_at}`}>
-                  <Link
-                    href={`/cert/${encodeURIComponent(entry.cert)}`}
-                    className="btn-ghost block rounded-[var(--radius-input)] border px-3 py-2"
-                  >
-                    <p className="text-app text-sm font-semibold">Cert #{entry.cert}</p>
-                    <p className="text-muted text-xs">{entry.title || "Untitled cert"}{entry.grade ? ` • ${entry.grade}` : ""}</p>
+            <ul className="mt-3 space-y-2">
+              {cards.map((card) => (
+                <li key={`${card.slug}-${card.updatedAt}`} className="flex items-center justify-between gap-2 rounded-[var(--radius-input)] border-app border p-2">
+                  <Link href={`/cards/${encodeURIComponent(card.slug)}`} className="min-w-0 flex-1">
+                    <p className="text-app truncate text-sm font-semibold">{card.canonical_name}</p>
+                    <p className="text-muted truncate text-xs">{card.year ? `${card.year} • ` : ""}{card.set_name || ""}</p>
                   </Link>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      removeWatchCard(card.slug);
+                      refresh();
+                    }}
+                    className="btn-ghost rounded-[var(--radius-input)] border px-2 py-1 text-xs"
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="mt-4 glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
+          <p className="text-app text-sm font-semibold uppercase tracking-[0.12em]">Certs</p>
+          {certs.length === 0 ? (
+            <p className="text-muted mt-2 text-sm">No watchlisted certs yet.</p>
+          ) : (
+            <ul className="mt-3 space-y-2">
+              {certs.map((cert) => (
+                <li key={`${cert.cert}-${cert.updatedAt}`} className="flex items-center justify-between gap-2 rounded-[var(--radius-input)] border-app border p-2">
+                  <Link href={`/cert/${encodeURIComponent(cert.cert)}`} className="min-w-0 flex-1">
+                    <p className="text-app truncate text-sm font-semibold">Cert #{cert.cert}</p>
+                    <p className="text-muted truncate text-xs">{cert.label || "Untitled cert"}{cert.grade ? ` • ${cert.grade}` : ""}</p>
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      removeWatchCert(cert.cert);
+                      refresh();
+                    }}
+                    className="btn-ghost rounded-[var(--radius-input)] border px-2 py-1 text-xs"
+                  >
+                    Remove
+                  </button>
                 </li>
               ))}
             </ul>

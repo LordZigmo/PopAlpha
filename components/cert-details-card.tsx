@@ -30,6 +30,11 @@ type ActivityEvent = {
   occurred_at: string;
   details: Record<string, unknown>;
 };
+type CanonicalMatch = {
+  slug: string;
+  canonical_name: string;
+  score: number;
+};
 type CardProfile = {
   card_slug: string;
   summary_short: string;
@@ -198,6 +203,7 @@ export default function CertDetailsCard({
   const [activityEvents, setActivityEvents] = useState<ActivityEvent[]>([]);
   const [historyCount, setHistoryCount] = useState<number | null>(null);
   const [cardProfile, setCardProfile] = useState<CardProfile | null>(null);
+  const [canonicalMatch, setCanonicalMatch] = useState<CanonicalMatch | null>(null);
   const [saleForm, setSaleForm] = useState<SaleFormState>({
     soldAt: dateToInput(new Date().toISOString()),
     price: "",
@@ -214,6 +220,7 @@ export default function CertDetailsCard({
   const variety = data.parsed.variety ?? firstValue(rawPayload, ["Variety", "variety"]);
   const category = firstValue(rawPayload, ["Category", "category", "Sport"]);
   const labelType = data.parsed.label ?? firstValue(rawPayload, ["LabelType", "label", "Label"]);
+  const cardNumber = firstValue(rawPayload, ["CardNumber", "card_number", "CardNo", "No"]);
   const imageUrl = data.parsed.image_url ?? firstValue(rawPayload, [
     "ImageUrlLarge",
     "ImageURLLarge",
@@ -304,6 +311,34 @@ export default function CertDetailsCard({
     }
   }, [cardSlug]);
 
+  const loadCanonicalMatch = useCallback(async () => {
+    const subjectText = display(subject);
+    if (subjectText === "—") {
+      setCanonicalMatch(null);
+      return;
+    }
+
+    const params = new URLSearchParams({
+      subject: subjectText,
+    });
+    if (year !== null && year !== undefined && String(year) !== "—") params.set("year", String(year));
+    if (display(brand) !== "—") params.set("set_name", display(brand));
+    if (display(cardNumber) !== "—") params.set("card_number", display(cardNumber));
+    if (display(variety) !== "—") params.set("variant", display(variety));
+
+    try {
+      const response = await fetch(`/api/canonical/match?${params.toString()}`);
+      const payload = (await response.json()) as { ok: boolean; match?: CanonicalMatch | null };
+      if (!response.ok || !payload.ok) {
+        setCanonicalMatch(null);
+        return;
+      }
+      setCanonicalMatch(payload.match ?? null);
+    } catch {
+      setCanonicalMatch(null);
+    }
+  }, [subject, year, brand, cardNumber, variety]);
+
   useEffect(() => {
     if (activeTab === "private") void loadPrivateSales();
   }, [activeTab, loadPrivateSales]);
@@ -315,6 +350,10 @@ export default function CertDetailsCard({
   useEffect(() => {
     void loadCardProfile();
   }, [loadCardProfile]);
+
+  useEffect(() => {
+    void loadCanonicalMatch();
+  }, [loadCanonicalMatch]);
 
   useEffect(() => {
     if (!saleToast) return;
@@ -410,6 +449,23 @@ export default function CertDetailsCard({
             <div className="min-w-0">
               <p className="text-app text-5xl font-semibold sm:text-6xl">{display(grade)}</p>
               <p className="text-app mt-3 text-base">{title}</p>
+              <div className="mt-2">
+                {canonicalMatch ? (
+                  <a
+                    href={`/cards/${encodeURIComponent(canonicalMatch.slug)}`}
+                    className="btn-accent inline-flex rounded-[var(--radius-input)] border px-3 py-1.5 text-xs font-semibold"
+                  >
+                    View Card
+                  </a>
+                ) : display(subject) !== "—" ? (
+                  <a
+                    href={`/search?q=${encodeURIComponent(display(subject))}`}
+                    className="text-muted text-xs underline underline-offset-4"
+                  >
+                    Find card
+                  </a>
+                ) : null}
+              </div>
             </div>
             <div className="flex shrink-0 items-start gap-3">
               <div className="w-[4.35rem] shrink-0">

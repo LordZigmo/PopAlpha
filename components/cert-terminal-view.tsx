@@ -6,6 +6,7 @@ import RawJsonPanel from "@/components/raw-json-panel";
 import type { CertificateResponse } from "@/lib/psa/client";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { readWatchlist, toggleWatchCert, watchlistCount, type WatchCertEntry } from "@/lib/watchlist";
 
 type LookupResponse = {
   ok: boolean;
@@ -22,14 +23,6 @@ type ToastState = {
   message: string;
 };
 
-type WatchlistEntry = {
-  cert: string;
-  title: string;
-  grade: string;
-  saved_at: string;
-};
-
-const WATCHLIST_STORAGE_KEY = "popalpha_watchlist_v1";
 
 function StubIconButton({
   label,
@@ -64,47 +57,19 @@ function getTitle(data?: CertificateResponse): string {
   return parts.join(" • ");
 }
 
-function readWatchlistFromStorage(): WatchlistEntry[] {
-  if (typeof window === "undefined") return [];
-
-  try {
-    const raw = window.localStorage.getItem(WATCHLIST_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-
-    return parsed
-      .filter((item): item is WatchlistEntry => {
-        if (!item || typeof item !== "object") return false;
-        const candidate = item as Partial<WatchlistEntry>;
-        return typeof candidate.cert === "string";
-      })
-      .map((item) => ({
-        cert: item.cert,
-        title: typeof item.title === "string" ? item.title : "",
-        grade: typeof item.grade === "string" ? item.grade : "",
-        saved_at: typeof item.saved_at === "string" ? item.saved_at : new Date().toISOString(),
-      }));
-  } catch {
-    return [];
-  }
-}
-
-function writeWatchlistToStorage(next: WatchlistEntry[]) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(WATCHLIST_STORAGE_KEY, JSON.stringify(next));
-}
-
 export default function CertTerminalView({ initialCert }: { initialCert: string }) {
   const router = useRouter();
   const [cert, setCert] = useState(initialCert);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<LookupResponse | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
-  const [watchlist, setWatchlist] = useState<WatchlistEntry[]>([]);
+  const [watchCerts, setWatchCerts] = useState<WatchCertEntry[]>([]);
+  const [totalWatched, setTotalWatched] = useState(0);
 
   useEffect(() => {
-    setWatchlist(readWatchlistFromStorage());
+    const state = readWatchlist();
+    setWatchCerts(state.certs);
+    setTotalWatched(watchlistCount(state));
   }, []);
 
   useEffect(() => {
@@ -117,8 +82,8 @@ export default function CertTerminalView({ initialCert }: { initialCert: string 
 
   const isSaved = useMemo(() => {
     if (!loadedCert) return false;
-    return watchlist.some((item) => item.cert === loadedCert);
-  }, [loadedCert, watchlist]);
+    return watchCerts.some((item) => item.cert === loadedCert);
+  }, [loadedCert, watchCerts]);
 
   async function fetchCert(certValue: string) {
     if (!certValue) {
@@ -185,23 +150,15 @@ export default function CertTerminalView({ initialCert }: { initialCert: string 
       setToast({ kind: "error", message: "Load a cert first before saving to watchlist." });
       return;
     }
-
-    const existing = watchlist.some((item) => item.cert === loadedCert);
-    const next = existing
-      ? watchlist.filter((item) => item.cert !== loadedCert)
-      : [
-          {
-            cert: loadedCert,
-            title: getTitle(result.data),
-            grade: result.data.parsed.grade ?? "",
-            saved_at: new Date().toISOString(),
-          },
-          ...watchlist,
-        ];
-
-    setWatchlist(next);
-    writeWatchlistToStorage(next);
-    setToast({ kind: "success", message: existing ? "Removed from watchlist." : "Saved to watchlist." });
+    const next = toggleWatchCert({
+      cert: loadedCert,
+      label: getTitle(result.data),
+      grade: result.data.parsed.grade ?? "",
+    });
+    setWatchCerts(next.certs);
+    setTotalWatched(watchlistCount(next));
+    const nowSaved = next.certs.some((item) => item.cert === loadedCert);
+    setToast({ kind: "success", message: nowSaved ? "Saved to watchlist." : "Removed from watchlist." });
   }
 
   return (
@@ -213,6 +170,7 @@ export default function CertTerminalView({ initialCert }: { initialCert: string 
             <p className="text-muted mt-2 text-sm">
               Search a cert and review profile-grade identity, population stats, and market context in one dashboard.
             </p>
+            <p className="text-muted mt-2 text-xs">Watchlist items: {totalWatched}</p>
           </header>
 
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">

@@ -52,7 +52,7 @@ export default async function CardPage({
         <section className="mt-3 glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
           <div className="flex items-center justify-between gap-3">
             <p className="text-app text-2xl font-semibold">{data.canonical_name}</p>
-            <CardWatchlistButton slug={data.slug} title={data.canonical_name} />
+            <CardWatchlistButton slug={data.slug} title={data.canonical_name} setName={data.set_name} year={data.year} />
           </div>
           <p className="text-muted mt-1 text-sm">{subtitle(data)}</p>
         </section>

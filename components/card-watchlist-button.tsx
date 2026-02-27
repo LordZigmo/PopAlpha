@@ -1,42 +1,30 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { readWatchlist, toggleWatchCard, type WatchCardEntry } from "@/lib/watchlist";
 
-type CardWatchlistEntry = {
+export default function CardWatchlistButton({
+  slug,
+  title,
+  setName,
+  year,
+}: {
   slug: string;
   title: string;
-  saved_at: string;
-};
-
-const STORAGE_KEY = "popalpha_card_watchlist_v1";
-
-function readEntries(): CardWatchlistEntry[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed) ? (parsed as CardWatchlistEntry[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeEntries(entries: CardWatchlistEntry[]) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
-}
-
-export default function CardWatchlistButton({ slug, title }: { slug: string; title: string }) {
-  const [entries, setEntries] = useState<CardWatchlistEntry[]>(() => readEntries());
-  const isSaved = useMemo(() => entries.some((entry) => entry.slug === slug), [entries, slug]);
+  setName?: string | null;
+  year?: number | null;
+}) {
+  const [cards, setCards] = useState<WatchCardEntry[]>(() => readWatchlist().cards);
+  const isSaved = useMemo(() => cards.some((entry) => entry.slug === slug), [cards, slug]);
 
   function toggle() {
-    const next = isSaved
-      ? entries.filter((entry) => entry.slug !== slug)
-      : [{ slug, title, saved_at: new Date().toISOString() }, ...entries];
-    setEntries(next);
-    writeEntries(next);
+    const next = toggleWatchCard({
+      slug,
+      canonical_name: title,
+      set_name: setName ?? "",
+      year: year ?? null,
+    });
+    setCards(next.cards);
   }
 
   return (
@@ -49,4 +37,3 @@ export default function CardWatchlistButton({ slug, title }: { slug: string; tit
     </button>
   );
 }
-
