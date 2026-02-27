@@ -11,6 +11,7 @@ import { getDerivedMetrics } from "@/lib/cert-metrics";
 import { buildPsaCertUrl } from "@/lib/psa/cert-url";
 import { buildCardSlug } from "@/lib/card-slug";
 import ShareIntelligenceButton from "@/components/share-intelligence-button";
+import { generateIntelligenceSummary } from "@/lib/generateIntelligenceSummary";
 
 type CertDetailsCardProps = {
   cert: string;
@@ -441,6 +442,12 @@ export default function CertDetailsCard({
   const shareGrade = display(grade) === "—" ? null : `PSA ${display(grade)}`;
   const sharePercentHigher = metrics.higherShare === null ? null : metrics.higherShare * 100;
   const shareFileName = `popalpha-cert-${cert}.png`;
+  const intelligenceSummary = generateIntelligenceSummary({
+    totalPop: metrics.totalPopulation,
+    populationHigher: metrics.populationHigher,
+    scarcityScore: metrics.scarcityScore,
+    liquidityTier,
+  });
 
   return (
     <section className="glass glow-card lift density-panel rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
@@ -474,11 +481,23 @@ export default function CertDetailsCard({
                   grade={shareGrade}
                   scarcityScore={metrics.scarcityScore}
                   percentHigher={sharePercentHigher}
+                  populationHigher={metrics.populationHigher}
                   totalPop={totalCount}
                   isOneOfOne={ultraScarce}
                   liquidityTier={liquidityTier}
                   fileName={shareFileName}
                 />
+                {onToggleWatchlist ? (
+                  <button
+                    type="button"
+                    onClick={onToggleWatchlist}
+                    className={`rounded-[var(--radius-input)] border px-3 py-1.5 text-xs font-semibold ${
+                      watchlistSaved ? "badge-positive" : "btn-ghost"
+                    }`}
+                  >
+                    {watchlistSaved ? "Watching" : "Watch"}
+                  </button>
+                ) : null}
               </div>
             </div>
             <div className="flex shrink-0 items-start gap-3">
@@ -519,17 +538,6 @@ export default function CertDetailsCard({
             <span className={`rounded-full border px-3 py-1 ${hasPsaScan ? "badge-positive" : "border-app text-muted bg-surface-soft"}`}>
               PSA scan: {hasPsaScan ? "available" : "unavailable"}
             </span>
-            {onToggleWatchlist ? (
-              <button
-                type="button"
-                onClick={onToggleWatchlist}
-                className={`rounded-full border px-3 py-1 transition ${
-                  watchlistSaved ? "badge-positive" : "btn-ghost"
-                }`}
-              >
-                {watchlistSaved ? "Watchlist saved" : "Save to watchlist"}
-              </button>
-            ) : null}
           </div>
 
           <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
@@ -638,6 +646,10 @@ export default function CertDetailsCard({
                           : marketPosition.percentHigher.toFixed(1).replace(/\.0$/, "")}%`}
                   </span>
                 </p>
+              </div>
+              <div className="rounded-[var(--radius-card)] border-app border bg-surface-soft/55 p-[var(--space-card)]">
+                <p className="text-muted text-xs font-semibold uppercase tracking-[0.12em]">Intelligence Summary</p>
+                <p className="text-app mt-2 text-sm leading-relaxed">{intelligenceSummary}</p>
               </div>
 
               <div className="rounded-[var(--radius-card)] border-app border bg-surface-soft/55 p-[var(--space-card)]">

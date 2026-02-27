@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { readWatchlist, toggleWatchCard, type WatchCardEntry } from "@/lib/watchlist";
+import { addCard, isSavedCard, listCards, removeCard, type WatchCardEntry } from "@/lib/watchlist";
 
 export default function CardWatchlistButton({
   slug,
@@ -14,17 +14,22 @@ export default function CardWatchlistButton({
   setName?: string | null;
   year?: number | null;
 }) {
-  const [cards, setCards] = useState<WatchCardEntry[]>(() => readWatchlist().cards);
+  const [cards, setCards] = useState<WatchCardEntry[]>(() => listCards());
   const isSaved = useMemo(() => cards.some((entry) => entry.slug === slug), [cards, slug]);
 
   function toggle() {
-    const next = toggleWatchCard({
-      slug,
-      canonical_name: title,
-      set_name: setName ?? "",
-      year: year ?? null,
-    });
-    setCards(next.cards);
+    if (isSavedCard(slug)) {
+      setCards(removeCard(slug));
+      return;
+    }
+    setCards(
+      addCard({
+        slug,
+        canonical_name: title,
+        set_name: setName ?? "",
+        year: year ?? null,
+      })
+    );
   }
 
   return (
@@ -33,7 +38,7 @@ export default function CardWatchlistButton({
       onClick={toggle}
       className={`rounded-[var(--radius-input)] border px-3 py-1.5 text-xs font-semibold ${isSaved ? "badge-positive" : "btn-ghost"}`}
     >
-      {isSaved ? "Saved" : "Add to Watchlist"}
+      {isSaved ? "Watching" : "Watch"}
     </button>
   );
 }

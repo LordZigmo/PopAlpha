@@ -6,7 +6,7 @@ import RawJsonPanel from "@/components/raw-json-panel";
 import type { CertificateResponse } from "@/lib/psa/client";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { readWatchlist, toggleWatchCert, watchlistCount, type WatchCertEntry } from "@/lib/watchlist";
+import { addCert, isSavedCert, listCerts, removeCert, watchlistCount, type WatchCertEntry } from "@/lib/watchlist";
 
 type LookupResponse = {
   ok: boolean;
@@ -67,9 +67,8 @@ export default function CertTerminalView({ initialCert }: { initialCert: string 
   const [totalWatched, setTotalWatched] = useState(0);
 
   useEffect(() => {
-    const state = readWatchlist();
-    setWatchCerts(state.certs);
-    setTotalWatched(watchlistCount(state));
+    setWatchCerts(listCerts());
+    setTotalWatched(watchlistCount());
   }, []);
 
   useEffect(() => {
@@ -150,14 +149,16 @@ export default function CertTerminalView({ initialCert }: { initialCert: string 
       setToast({ kind: "error", message: "Load a cert first before saving to watchlist." });
       return;
     }
-    const next = toggleWatchCert({
-      cert: loadedCert,
-      label: getTitle(result.data),
-      grade: result.data.parsed.grade ?? "",
-    });
-    setWatchCerts(next.certs);
-    setTotalWatched(watchlistCount(next));
-    const nowSaved = next.certs.some((item) => item.cert === loadedCert);
+    const next = isSavedCert(loadedCert)
+      ? removeCert(loadedCert)
+      : addCert({
+          cert: loadedCert,
+          label: getTitle(result.data),
+          grade: result.data.parsed.grade ?? "",
+        });
+    setWatchCerts(next);
+    setTotalWatched(watchlistCount());
+    const nowSaved = next.some((item) => item.cert === loadedCert);
     setToast({ kind: "success", message: nowSaved ? "Saved to watchlist." : "Removed from watchlist." });
   }
 

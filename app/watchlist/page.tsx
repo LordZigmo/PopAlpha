@@ -3,22 +3,22 @@
 import Link from "next/link";
 import { useState } from "react";
 import {
-  readWatchlist,
-  removeWatchCard,
-  removeWatchCert,
+  listCards,
+  listCerts,
+  removeCard,
+  removeCert,
   watchlistCount,
   type WatchCardEntry,
   type WatchCertEntry,
 } from "@/lib/watchlist";
 
 export default function WatchlistPage() {
-  const [cards, setCards] = useState<WatchCardEntry[]>(() => readWatchlist().cards);
-  const [certs, setCerts] = useState<WatchCertEntry[]>(() => readWatchlist().certs);
+  const [cards, setCards] = useState<WatchCardEntry[]>(() => listCards());
+  const [certs, setCerts] = useState<WatchCertEntry[]>(() => listCerts());
 
   function refresh() {
-    const state = readWatchlist();
-    setCards(state.cards);
-    setCerts(state.certs);
+    setCards(listCards());
+    setCerts(listCerts());
   }
 
   return (
@@ -27,7 +27,7 @@ export default function WatchlistPage() {
         <section className="glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
           <h1 className="text-app text-2xl font-semibold tracking-tight">Watchlist</h1>
           <p className="text-muted mt-2 text-sm">Saved cards and certs for quick drill-in.</p>
-          <p className="text-muted mt-1 text-xs">Total watched: {watchlistCount({ cards, certs })}</p>
+          <p className="text-muted mt-1 text-xs">Total watched: {watchlistCount()}</p>
         </section>
 
         <section className="mt-5 glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
@@ -45,7 +45,7 @@ export default function WatchlistPage() {
                   <button
                     type="button"
                     onClick={() => {
-                      removeWatchCard(card.slug);
+                      removeCard(card.slug);
                       refresh();
                     }}
                     className="btn-ghost rounded-[var(--radius-input)] border px-2 py-1 text-xs"
@@ -73,7 +73,7 @@ export default function WatchlistPage() {
                   <button
                     type="button"
                     onClick={() => {
-                      removeWatchCert(cert.cert);
+                      removeCert(cert.cert);
                       refresh();
                     }}
                     className="btn-ghost rounded-[var(--radius-input)] border px-2 py-1 text-xs"

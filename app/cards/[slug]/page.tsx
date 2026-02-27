@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { getServerSupabaseClient } from "@/lib/supabaseServer";
 import CardWatchlistButton from "@/components/card-watchlist-button";
 import ShareIntelligenceButton from "@/components/share-intelligence-button";
+import WatchlistCountBadge from "@/components/watchlist-count-badge";
 
 type CanonicalCardRow = {
   slug: string;
@@ -53,18 +54,20 @@ export default async function CardPage({
         <section className="mt-3 glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
           <div className="flex items-center justify-between gap-3">
             <p className="text-app text-2xl font-semibold">{data.canonical_name}</p>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2">
               <ShareIntelligenceButton
                 title={data.canonical_name}
                 grade={null}
                 scarcityScore={null}
                 percentHigher={null}
+                populationHigher={null}
                 totalPop={null}
                 isOneOfOne={false}
                 liquidityTier={null}
                 fileName={`popalpha-card-${data.slug}.png`}
               />
               <CardWatchlistButton slug={data.slug} title={data.canonical_name} setName={data.set_name} year={data.year} />
+              <WatchlistCountBadge />
             </div>
           </div>
           <p className="text-muted mt-1 text-sm">{subtitle(data)}</p>
@@ -84,6 +87,13 @@ export default async function CardPage({
             <div className="rounded-[var(--radius-card)] border-app border bg-surface-soft/55 p-[var(--space-card)]">
               <p className="text-app text-sm font-semibold">PSA 10</p>
               <p className="text-muted mt-1 text-xs">Comp stack for PSA 10 tier will be shown here.</p>
+              <div className="mt-3 rounded-[var(--radius-input)] border-app border bg-surface/70 p-3">
+                <p className="text-muted text-[11px] font-semibold uppercase tracking-[0.12em]">Intelligence Summary</p>
+                <p className="text-muted mt-1 text-xs">Lookup a cert for live metrics.</p>
+                <Link href="/" className="mt-2 inline-block text-xs underline underline-offset-4">
+                  Lookup a cert for live metrics
+                </Link>
+              </div>
             </div>
             <div className="rounded-[var(--radius-card)] border-app border bg-surface-soft/55 p-[var(--space-card)]">
               <p className="text-app text-sm font-semibold">TAG 10</p>
