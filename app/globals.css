@@ -93,11 +93,9 @@ body {
   inset: -1px;
   border-radius: 1.75rem;
   z-index: -1;
-  opacity: 0;
-  transition: opacity 250ms ease;
+  opacity: 0.18;
   background: radial-gradient(650px circle at 50% -20%, color-mix(in srgb, var(--color-accent) 25%, transparent), transparent 62%);
 }
-.glow-card:hover::after { opacity: 1; }
 
 .lift { transition: box-shadow 200ms ease, border-color 200ms ease; }
 .lift:hover { box-shadow: var(--shadow-elevated); }

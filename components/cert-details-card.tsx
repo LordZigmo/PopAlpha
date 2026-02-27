@@ -69,6 +69,29 @@ function formatShare(value: number | null): string {
   return `${Number.isInteger(n) ? String(n) : n.toFixed(1).replace(/\.0$/, "")}%`;
 }
 
+function getLiquiditySignal(totalPopulation: number | null): "High liquidity" | "Moderate" | "Thin" | "Unknown" {
+  if (totalPopulation === null) return "Unknown";
+  if (totalPopulation > 10000) return "High liquidity";
+  if (totalPopulation >= 1000) return "Moderate";
+  return "Thin";
+}
+
+function getPositionInsight(
+  totalPopulation: number | null,
+  populationHigher: number | null,
+  scarcityScore: number | null,
+): string {
+  if (totalPopulation === null || populationHigher === null) return "Insufficient population coverage";
+
+  if (populationHigher === 0 && totalPopulation < 500) return "Elite scarcity tier";
+  if (totalPopulation > 0 && populationHigher / totalPopulation > 0.8) return "High grade compression";
+  if (totalPopulation > 10000) return "High supply / high liquidity environment";
+  if (totalPopulation < 1000) return "Thin market structure";
+  if (scarcityScore !== null && scarcityScore >= 80) return "Scarcity-led positioning";
+
+  return "Balanced population profile";
+}
+
 export default function CertDetailsCard({
   cert,
   data,
@@ -189,10 +212,20 @@ export default function CertDetailsCard({
     metrics.totalPopulation !== null && metrics.totalPopulation >= 0 ? Math.round(metrics.totalPopulation) : null;
   const atGradeOrLowerCount =
     totalCount !== null && higherCount !== null ? Math.max(totalCount - higherCount, 0) : null;
+  const liquiditySignal = getLiquiditySignal(metrics.totalPopulation);
+  const liquidityChipClass =
+    liquiditySignal === "High liquidity"
+      ? "badge-positive"
+      : liquiditySignal === "Moderate"
+        ? "border-app text-app bg-surface-soft"
+        : liquiditySignal === "Thin"
+          ? "badge-negative"
+          : "border-app text-muted bg-surface-soft";
+  const positionInsight = getPositionInsight(metrics.totalPopulation, metrics.populationHigher, metrics.scarcityScore);
 
   return (
     <section className="glass glow-card lift density-panel rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
         <article
           className="glass rounded-[var(--radius-panel)] border-app border"
           style={{ padding: "calc(var(--space-panel) * 0.88) var(--space-panel)" }}
@@ -236,8 +269,17 @@ export default function CertDetailsCard({
           </div>
         </article>
 
-        <aside className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-          <StatCard label="Total Pop" value={display(totalPopulation)} sublabel="Total graded examples" />
+        <aside className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
+          <StatCard
+            label="Total Pop"
+            value={display(totalPopulation)}
+            sublabel={
+              <span className="mt-1 inline-flex items-center gap-2">
+                <span>Total graded examples</span>
+                <span className={`rounded-full border px-2 py-0.5 ${liquidityChipClass}`}>{liquiditySignal}</span>
+              </span>
+            }
+          />
           <StatCard label="Population Higher" value={display(populationHigher)} sublabel="Examples in higher grades" />
           <StatCard
             label="Verdict"
@@ -246,6 +288,13 @@ export default function CertDetailsCard({
             highlight={metrics.topGrade}
             tierAccent
           />
+          <div className="glass density-card rounded-[var(--radius-card)] border-app border p-[var(--space-card)]">
+            <p className="text-muted text-xs font-semibold uppercase tracking-[0.14em]">Position Insight</p>
+            <p className="text-app mt-2 text-lg font-semibold leading-tight">{positionInsight}</p>
+            <p className="text-muted mt-1 text-xs">
+              {metrics.scarcityScore === null ? "Scarcity unavailable" : `Scarcity score ${metrics.scarcityScore}`}
+            </p>
+          </div>
           <StatCard
             label="At grade or lower"
             value={formatShare(metrics.topTierShare)}
@@ -262,7 +311,7 @@ export default function CertDetailsCard({
         />
       </div>
 
-      <section className="mt-5 rounded-[var(--radius-panel)] border-app border bg-surface/70 p-[var(--space-panel)]">
+      <section className="mt-4 rounded-[var(--radius-panel)] border-app border bg-surface/70 p-[var(--space-panel)]">
         <div className="flex flex-wrap gap-2">
           {tabs.map((tab) => (
             <button
@@ -275,19 +324,6 @@ export default function CertDetailsCard({
             </button>
           ))}
         </div>
-
-        {activeTab === "overview" ? (
-          <div className="mt-4 rounded-[var(--radius-card)] border-app border bg-surface-soft/55 p-[var(--space-card)] text-sm text-muted">
-            <p>
-              This profile has <span className="text-app font-semibold">{display(totalPopulation)}</span> total graded examples, with{" "}
-              <span className="text-app font-semibold">{display(populationHigher)}</span> graded higher.
-            </p>
-            <p className="mt-2">
-              Tier status: <span className="text-app font-semibold">{metrics.topGrade ? "Top tier" : "Not top tier"}</span>. Scarcity Index:{" "}
-              <span className="text-app font-semibold">{metrics.scarcityScore ?? "—"}</span>.
-            </p>
-          </div>
-        ) : null}
 
         {activeTab === "market" ? (
           <div className="mt-4 grid gap-4 lg:grid-cols-2">

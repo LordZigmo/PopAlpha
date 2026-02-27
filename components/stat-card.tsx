@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 export default function StatCard({
   label,
   value,
@@ -7,7 +9,7 @@ export default function StatCard({
 }: {
   label: string;
   value: string;
-  sublabel?: string;
+  sublabel?: ReactNode;
   highlight?: boolean;
   tierAccent?: boolean;
 }) {

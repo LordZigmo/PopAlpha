@@ -27,7 +27,7 @@ export default function RarityRing({ score, compact = false }: { score: number |
 
   return (
     <div className={`glass density-card rounded-[var(--radius-card)] border-app border p-[var(--space-card)] ${compact ? "ring-compact" : ""}`}>
-      <p className="text-muted text-xs font-semibold uppercase tracking-[0.14em]">Scarcity Index</p>
+      <p className="text-muted text-xs font-semibold uppercase tracking-[0.14em]">Scarcity score</p>
       <div className="mt-3 flex items-center gap-4">
         <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0">
           <circle cx={center} cy={center} r={ringRadius} fill="none" stroke="var(--color-border)" strokeWidth={compact ? 8 : 9} />
@@ -47,7 +47,6 @@ export default function RarityRing({ score, compact = false }: { score: number |
         </svg>
         <div>
           <p className="text-app text-2xl font-semibold tabular-nums">{score === null ? "—" : displayScore}</p>
-          <p className="text-muted text-xs">Relative rarity (0-100)</p>
         </div>
       </div>
     </div>
