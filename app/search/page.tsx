@@ -32,6 +32,7 @@ type PrintingRow = {
   finish_detail: string | null;
   edition: "UNLIMITED" | "FIRST_EDITION" | "UNKNOWN";
   stamp: string | null;
+  image_url: string | null;
 };
 
 type GroupedSearchRow = {
@@ -102,6 +103,12 @@ function isLikelySubjectQuery(query: string): boolean {
   return tokens.length > 0 && tokens.length <= 2;
 }
 
+function isGenericNameQuery(query: string): boolean {
+  if (!/^[a-z\s]+$/.test(query)) return false;
+  const tokens = query.split(/\s+/).filter((token) => token.length > 0);
+  return tokens.length > 0 && tokens.length <= 3;
+}
+
 function rowSubtitle(row: CanonicalCardRow): string {
   const bits: string[] = [];
   if (row.year) bits.push(String(row.year));
@@ -126,22 +133,55 @@ function printingChipLabel(printing: PrintingRow): string {
   return bits.join(" • ");
 }
 
-function scoreCanonicalMatch(row: CanonicalCardRow, qLower: string, parsedNumber: string | null, subjectMode: boolean): number {
+function scoreCanonicalMatch(
+  row: CanonicalCardRow,
+  qLower: string,
+  parsedNumber: string | null,
+  subjectMode: boolean,
+  genericNameMode: boolean
+): number {
   const canonicalName = (row.canonical_name ?? "").toLowerCase();
   const subject = (row.subject ?? "").toLowerCase();
   const setName = (row.set_name ?? "").toLowerCase();
   const cardNumber = (row.card_number ?? "").toLowerCase();
   let score = 0;
 
-  if (subjectMode && subject === qLower) score += 500;
-  if (subjectMode && subject.startsWith(qLower)) score += 420;
-  if (canonicalName.startsWith(qLower)) score += 360;
-  if (subject.includes(qLower)) score += 220;
-  if (canonicalName.includes(qLower)) score += 200;
+  if (subjectMode && subject === qLower) score += 700;
+  if (subjectMode && subject.startsWith(qLower)) score += 560;
+  if (genericNameMode && canonicalName === qLower) score += 520;
+  if (canonicalName.startsWith(qLower)) score += genericNameMode ? 440 : 360;
+  if (subject.includes(qLower)) score += genericNameMode ? 320 : 220;
+  if (canonicalName.includes(qLower)) score += genericNameMode ? 280 : 200;
   if (setName.includes(qLower)) score += 110;
   if (parsedNumber && cardNumber === parsedNumber.toLowerCase()) score += 150;
 
   return score;
+}
+
+function primaryPrintingRank(printing: PrintingRow): number {
+  let score = 0;
+  if (printing.image_url) score += 300;
+  if (printing.language.toUpperCase() === "EN") score += 80;
+  if (printing.finish !== "UNKNOWN") score += 50;
+  if (printing.finish === "HOLO") score += 15;
+  if (printing.edition === "FIRST_EDITION") score += 10;
+  return score;
+}
+
+function choosePrimaryPrinting(printings: PrintingRow[]): PrintingRow | null {
+  if (printings.length === 0) return null;
+  return [...printings].sort((a, b) => primaryPrintingRank(b) - primaryPrintingRank(a) || a.id.localeCompare(b.id))[0] ?? null;
+}
+
+function finishSummaryChips(printings: PrintingRow[]): string[] {
+  const chips: string[] = [];
+  for (const printing of printings) {
+    if (printing.finish === "HOLO" && !chips.includes("Holo")) chips.push("Holo");
+    if (printing.finish === "REVERSE_HOLO" && !chips.includes("Reverse")) chips.push("Reverse");
+    if (printing.edition === "FIRST_EDITION" && !chips.includes("1st Ed")) chips.push("1st Ed");
+    if (chips.length >= 3) break;
+  }
+  return chips;
 }
 
 async function runBroadSearch(params: {
@@ -155,6 +195,7 @@ async function runBroadSearch(params: {
   const supabase = getServerSupabaseClient();
   const qLower = normalizeQuery(q);
   const subjectMode = isLikelySubjectQuery(qLower);
+  const genericNameMode = isGenericNameQuery(qLower);
   const yearValue = /^\d{4}$/.test(qLower) ? Number.parseInt(qLower, 10) : null;
 
   const fields = "slug, canonical_name, subject, set_name, year, card_number, language, variant";
@@ -170,6 +211,10 @@ async function runBroadSearch(params: {
   ];
   if (yearValue !== null) broadOrParts.push(`year.eq.${yearValue}`);
   if (parsedNumber) broadOrParts.push(`card_number.eq.${parsedNumber}`);
+  if (genericNameMode) {
+    broadOrParts.length = 0;
+    broadOrParts.push(`canonical_name.ilike.${containsPattern}`, `subject.ilike.${containsPattern}`);
+  }
 
   let subjectStartsQuery = supabase
     .from("canonical_cards")
@@ -207,7 +252,7 @@ async function runBroadSearch(params: {
 
   let printingQuery = supabase
     .from("card_printings")
-    .select("id, canonical_slug, set_name, card_number, language, finish, finish_detail, edition, stamp")
+    .select("id, canonical_slug, set_name, card_number, language, finish, finish_detail, edition, stamp, image_url")
     .or(printOrParts.join(","))
     .order("canonical_slug", { ascending: true })
     .limit(600);
@@ -242,7 +287,7 @@ async function runBroadSearch(params: {
 
   const applyRowScore = (row: CanonicalCardRow, baseScore: number) => {
     canonicalBySlug.set(row.slug, row);
-    const computed = scoreCanonicalMatch(row, qLower, parsedNumber, subjectMode) + baseScore;
+    const computed = scoreCanonicalMatch(row, qLower, parsedNumber, subjectMode, genericNameMode) + baseScore;
     scoreBySlug.set(row.slug, Math.max(scoreBySlug.get(row.slug) ?? 0, computed));
   };
 
@@ -278,7 +323,7 @@ async function runBroadSearch(params: {
 
   let pagePrintingsQuery = supabase
     .from("card_printings")
-    .select("id, canonical_slug, set_name, card_number, language, finish, finish_detail, edition, stamp")
+    .select("id, canonical_slug, set_name, card_number, language, finish, finish_detail, edition, stamp, image_url")
     .in("canonical_slug", pageSlugs)
     .order("set_name", { ascending: true })
     .order("card_number", { ascending: true });
@@ -350,6 +395,7 @@ export default async function SearchPage({
   const page = toPositiveInt(params.page, 1);
   const lang = (params.lang ?? "all").trim().toUpperCase();
   const setFilter = (params.set ?? "").trim();
+  const genericNameMode = isGenericNameQuery(qNormalized);
 
   if (!q) {
     return (
@@ -548,28 +594,54 @@ export default async function SearchPage({
               <p className="text-muted mt-1 text-sm">Try adding set name, year, or card number.</p>
             </div>
           ) : (
-            <ul className="divide-y divide-[color:var(--color-border)]">
-              {result.rows.map((row) => (
-                <li key={row.canonical.slug}>
-                  <Link href={`/c/${encodeURIComponent(row.canonical.slug)}`} className="flex items-center justify-between gap-3 py-3">
-                    <div className="min-w-0">
-                      <p className="text-app truncate text-sm font-semibold">{row.canonical.canonical_name}</p>
-                      <p className="text-muted truncate text-xs">{rowSubtitle(row.canonical)}</p>
-                      {row.printings.length > 0 ? (
-                        <div className="mt-1 flex flex-wrap gap-1">
-                          {row.printings.slice(0, 4).map((printing) => (
-                            <span key={printing.id} className="border-app rounded-full border px-2 py-0.5 text-[11px] text-muted">
-                              {printingChipLabel(printing)}
-                            </span>
-                          ))}
-                        </div>
-                      ) : null}
-                    </div>
-                    <span className="text-muted text-xs font-semibold">View</span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
+            <div>
+              {genericNameMode ? (
+                <p className="text-muted mb-3 text-xs">Showing canonical card matches first for broad subject-name queries.</p>
+              ) : null}
+              <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+                {result.rows.map((row) => {
+                  const primaryPrinting = choosePrimaryPrinting(row.printings);
+                  const chips = finishSummaryChips(row.printings);
+                  return (
+                    <Link
+                      key={row.canonical.slug}
+                      href={`/c/${encodeURIComponent(row.canonical.slug)}`}
+                      className="group rounded-[var(--radius-card)] border-app border bg-surface-soft/40 p-2 transition duration-200 hover:-translate-y-0.5 hover:border-white/30 hover:bg-surface-soft/55"
+                    >
+                      <div className="relative h-52 overflow-hidden rounded-[var(--radius-input)] border-app border bg-surface/40">
+                        {primaryPrinting?.image_url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={primaryPrinting.image_url}
+                            alt={row.canonical.canonical_name}
+                            className="h-full w-full object-cover object-top transition duration-200 group-hover:scale-[1.02]"
+                          />
+                        ) : (
+                          <div className="flex h-full items-center justify-center bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.08),transparent_65%)] p-4">
+                            <div className="rounded-[var(--radius-input)] border-app border bg-surface/45 px-3 py-2 text-center">
+                              <p className="text-app text-xs font-semibold">Image pending</p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      <div className="mt-3 min-w-0">
+                        <p className="text-app truncate text-sm font-semibold">{row.canonical.canonical_name}</p>
+                        <p className="text-muted mt-1 truncate text-xs">{rowSubtitle(row.canonical)}</p>
+                        {chips.length > 0 ? (
+                          <div className="mt-2 flex flex-wrap gap-1">
+                            {chips.map((chip) => (
+                              <span key={`${row.canonical.slug}-${chip}`} className="border-app rounded-full border px-2 py-0.5 text-[11px] text-muted">
+                                {chip}
+                              </span>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
           )}
 
           <div className="mt-4 flex items-center justify-between">
@@ -616,8 +688,8 @@ export default async function SearchPage({
           )}
         </section>
 
-        <section className="mt-4 glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
-          <p className="text-app text-sm font-semibold uppercase tracking-[0.12em]">Source DB Matches (debug)</p>
+        <section className="mt-4 glass rounded-[var(--radius-panel)] border-app border bg-surface-soft/20 p-[var(--space-panel)]">
+          <p className="text-muted text-sm font-semibold uppercase tracking-[0.12em]">Source DB Matches (debug)</p>
           {cardRows.length === 0 ? (
             <p className="text-muted mt-2 text-sm">No direct source-card matches.</p>
           ) : (
