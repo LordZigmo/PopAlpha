@@ -51,10 +51,11 @@ export default function CanonicalHeroParallax(props: CanonicalHeroParallaxProps)
   }, []);
 
   return (
-    <section ref={rootRef} className="relative mt-4 [--p:0]">
-      <div className="sticky top-0 z-0 h-[240px] overflow-hidden rounded-[var(--radius-panel)] border-app border bg-surface/70 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)] sm:h-[320px]">
+    <section ref={rootRef} className="relative mt-5 [--p:0] sm:mt-6">
+      <div className="sticky top-0 z-0 h-[248px] overflow-hidden sm:h-[336px]">
         {imageUrl ? (
           <>
+            <div className="absolute inset-x-0 top-0 h-24 bg-[linear-gradient(to_bottom,rgba(10,14,20,0.6),rgba(10,14,20,0))]" />
             <div
               className="absolute inset-0"
               style={{
@@ -65,13 +66,13 @@ export default function CanonicalHeroParallax(props: CanonicalHeroParallaxProps)
                 willChange: "transform, opacity, filter",
               }}
             >
-              <div className="absolute inset-x-0 top-3 flex justify-center sm:top-4">
-                {/* Keep the hero art framed as its own object and let the sheet overlap only slightly below it. */}
+              <div className="absolute inset-x-0 top-4 flex justify-center sm:top-5">
+                {/* Let the card art feel freefloating and larger while preserving the top border in view. */}
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={imageUrl}
                   alt={title}
-                  className="h-[260px] w-[min(560px,92vw)] max-w-none object-cover object-[center_18%] drop-shadow-[0_24px_56px_rgba(0,0,0,0.48)] sm:h-[360px]"
+                  className="h-[300px] w-[min(720px,calc(100vw-1.5rem))] max-w-none object-contain object-top drop-shadow-[0_28px_64px_rgba(0,0,0,0.5)] sm:h-[420px] sm:w-[min(760px,calc(100vw-3rem))]"
                 />
               </div>
             </div>
