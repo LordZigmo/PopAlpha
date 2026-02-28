@@ -5,6 +5,7 @@
  * iOS grouped rules: matte dark surfaces, consistent radii and spacing, restrained separators, and touch targets sized for mobile-first interaction.
  */
 import { notFound } from "next/navigation";
+import CanonicalCardFloatingHero from "@/components/canonical-card-floating-hero";
 import CardDetailNavBar from "@/components/card-detail-nav-bar";
 import EbayListings from "@/components/ebay-listings";
 import { GroupCard, GroupedSection, PageShell, Pill, SegmentedControl, StatRow, StatTile } from "@/components/ios-grouped-ui";
@@ -334,62 +335,50 @@ export default async function CanonicalCardPage({
 
       <div className="mx-auto max-w-5xl px-4 pb-[max(env(safe-area-inset-bottom),2.5rem)] pt-4 sm:px-6 sm:pb-[max(env(safe-area-inset-bottom),3.5rem)]">
         <GroupedSection>
+          <CanonicalCardFloatingHero
+            imageUrl={selectedPrinting?.image_url ?? null}
+            title={canonical.canonical_name}
+            overlay={
+              <GroupCard
+                inset
+                header={<p className="text-[15px] font-semibold text-[#f5f7fb]">Canonical Card</p>}
+              >
+                <div className="divide-y divide-white/[0.06]">
+                  <StatRow label="Name" value={canonical.canonical_name} />
+                  <StatRow label="Set" value={canonical.set_name ?? "Unknown set"} />
+                  <StatRow label="Card number" value={canonical.card_number ? `#${canonical.card_number}` : "Unknown"} />
+                  <StatRow label="Year" value={canonical.year ?? "Unknown"} />
+                  <StatRow label="Printing shown" value={selectedPrintingLabel} />
+                </div>
+              </GroupCard>
+            }
+          />
+
           <GroupCard>
-            <div className="grid gap-5 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)] lg:items-start">
-              <div className="flex justify-center lg:justify-start">
-                <div className="flex h-[21rem] w-[15rem] items-center justify-center overflow-hidden rounded-[28px] border border-white/[0.07] bg-[#11151d] shadow-[0_18px_40px_rgba(0,0,0,0.24)] sm:h-[24rem] sm:w-[17rem]">
-                  {selectedPrinting?.image_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={selectedPrinting.image_url}
-                      alt={canonical.canonical_name}
-                      className="h-full w-full object-contain object-center"
-                    />
-                  ) : (
-                    <span className="px-4 text-center text-[12px] font-semibold text-[#7e8694]">No art</span>
-                  )}
+            <div className="rounded-[24px] border border-white/[0.06] bg-[#141820] p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h1 className="text-[28px] font-semibold tracking-[-0.04em] text-[#f5f7fb] sm:text-[36px]">
+                    {canonical.canonical_name}
+                  </h1>
+                  <p className="mt-2 text-[15px] text-[#98a0ae]">
+                    {canonical.set_name ?? "Unknown set"}
+                    {canonical.card_number ? ` • #${canonical.card_number}` : ""}
+                    {canonical.year ? ` • ${canonical.year}` : ""}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Pill label={selectedPrintingLabel} tone={selectedPrinting ? "neutral" : "warning"} />
+                  <Pill label={gradeLabel(gradeSelection)} tone="neutral" />
                 </div>
               </div>
-              <div className="min-w-0 space-y-4">
-                <GroupCard
-                  inset
-                  header={<p className="text-[15px] font-semibold text-[#f5f7fb]">Canonical Card</p>}
-                >
-                  <div className="divide-y divide-white/[0.06]">
-                    <StatRow label="Name" value={canonical.canonical_name} />
-                    <StatRow label="Set" value={canonical.set_name ?? "Unknown set"} />
-                    <StatRow label="Card number" value={canonical.card_number ? `#${canonical.card_number}` : "Unknown"} />
-                    <StatRow label="Year" value={canonical.year ?? "Unknown"} />
-                    <StatRow label="Printing shown" value={selectedPrintingLabel} />
-                  </div>
-                </GroupCard>
-
-                <div className="rounded-[24px] border border-white/[0.06] bg-[#141820] p-5">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <h1 className="text-[28px] font-semibold tracking-[-0.04em] text-[#f5f7fb] sm:text-[36px]">
-                        {canonical.canonical_name}
-                      </h1>
-                      <p className="mt-2 text-[15px] text-[#98a0ae]">
-                        {canonical.set_name ?? "Unknown set"}
-                        {canonical.card_number ? ` • #${canonical.card_number}` : ""}
-                        {canonical.year ? ` • ${canonical.year}` : ""}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Pill label={selectedPrintingLabel} tone={selectedPrinting ? "neutral" : "warning"} />
-                      <Pill label={gradeLabel(gradeSelection)} tone="neutral" />
-                    </div>
-                  </div>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <Pill label={`Scarcity ${scarcity.label}`} tone={scarcity.tone} />
-                    <Pill label={`Liquidity ${liquidity.label}`} tone={liquidity.tone} />
-                    <Pill
-                      label={snapshotData?.median_ask_7d !== null && snapshotData?.median_ask_7d !== undefined ? "Price signal live" : "Collecting"}
-                      tone={marketSignalTone(snapshotData?.median_ask_7d)}
-                    />
-                  </div>
-                </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Pill label={`Scarcity ${scarcity.label}`} tone={scarcity.tone} />
+                <Pill label={`Liquidity ${liquidity.label}`} tone={liquidity.tone} />
+                <Pill
+                  label={snapshotData?.median_ask_7d !== null && snapshotData?.median_ask_7d !== undefined ? "Price signal live" : "Collecting"}
+                  tone={marketSignalTone(snapshotData?.median_ask_7d)}
+                />
               </div>
             </div>
           </GroupCard>
