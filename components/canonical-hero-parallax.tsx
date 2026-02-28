@@ -71,12 +71,11 @@ export default function CanonicalHeroParallax(props: CanonicalHeroParallaxProps)
                 <img
                   src={imageUrl}
                   alt={title}
-                  className="h-[520px] w-[min(1120px,calc(200vw-2rem))] max-w-none object-contain object-top drop-shadow-[0_28px_64px_rgba(0,0,0,0.5)] sm:h-[760px] sm:w-[min(1520px,calc(200vw-4rem))]"
+                  className="h-[620px] w-[min(1320px,calc(240vw-2rem))] max-w-none object-contain object-top drop-shadow-[0_28px_64px_rgba(0,0,0,0.5)] sm:h-[900px] sm:w-[min(1760px,calc(240vw-4rem))]"
                 />
               </div>
             </div>
-            <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(0,0,0,0)_0%,rgba(0,0,0,0)_45%,rgba(0,0,0,0.35)_62%,rgba(0,0,0,0.85)_80%,rgba(0,0,0,1)_100%)]" />
-            <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(8,12,18,0.24),rgba(8,12,18,0.06)_22%,transparent_38%)]" />
+            <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(0,0,0,0)_0%,rgba(0,0,0,0)_58%,rgba(0,0,0,0.18)_72%,rgba(0,0,0,0.6)_86%,rgba(0,0,0,0.9)_100%)]" />
             <div className="absolute inset-x-0 bottom-0 h-20 bg-[linear-gradient(to_bottom,rgba(16,21,28,0),rgba(16,21,28,0.92))]" />
           </>
         ) : (
