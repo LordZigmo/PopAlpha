@@ -44,11 +44,11 @@ type CardPrintingRow = {
 
 type SnapshotRow = {
   active_listings_7d: number | null;
-  median_ask_7d: number | null;
-  median_ask_30d: number | null;
+  median_7d: number | null;
+  median_30d: number | null;
   trimmed_median_30d: number | null;
-  low_ask_30d: number | null;
-  high_ask_30d: number | null;
+  low_30d: number | null;
+  high_30d: number | null;
 };
 
 type TcgSnapshotDebug = {
@@ -311,8 +311,8 @@ export default async function CanonicalCardPage({
   const [rawSnap, psa9Snap, psa10Snap] = await Promise.all(
     (["RAW", "PSA9", "PSA10"] as const).map((g) =>
       supabase
-        .from("market_snapshot_rollups")
-        .select("active_listings_7d, median_ask_7d, median_ask_30d, trimmed_median_30d, low_ask_30d, high_ask_30d")
+        .from("card_metrics")
+        .select("active_listings_7d, median_7d, median_30d, trimmed_median_30d, low_30d, high_30d")
         .eq("canonical_slug", slug)
         .eq("grade", g)
         .is("printing_id", printingIdForQuery)
@@ -332,11 +332,11 @@ export default async function CanonicalCardPage({
     ? {
         ok: true,
         active7d: snapshotData.active_listings_7d ?? 0,
-        median7d: snapshotData.median_ask_7d,
-        median30d: snapshotData.median_ask_30d,
+        median7d: snapshotData.median_7d,
+        median30d: snapshotData.median_30d,
         trimmedMedian30d: snapshotData.trimmed_median_30d,
-        low30d: snapshotData.low_ask_30d,
-        high30d: snapshotData.high_ask_30d,
+        low30d: snapshotData.low_30d,
+        high30d: snapshotData.high_30d,
       }
     : null;
 
@@ -364,13 +364,13 @@ export default async function CanonicalCardPage({
     .filter(Boolean)
     .join(" • ");
 
-  const primaryPrice = formatUsdCompact(snapshotData?.median_ask_7d);
+  const primaryPrice = formatUsdCompact(snapshotData?.median_7d);
   const primaryPriceLabel = `${gradeLabel(gradeSelection)} · 7-day median ask`;
 
   // Grade Ladder premium calculations.
-  const rawMedian7d = gradeSnapMap.RAW?.median_ask_7d ?? null;
-  const psa9Premium = gradePremium(rawMedian7d, gradeSnapMap.PSA9?.median_ask_7d ?? null);
-  const psa10Premium = gradePremium(rawMedian7d, gradeSnapMap.PSA10?.median_ask_7d ?? null);
+  const rawMedian7d = gradeSnapMap.RAW?.median_7d ?? null;
+  const psa9Premium = gradePremium(rawMedian7d, gradeSnapMap.PSA9?.median_7d ?? null);
+  const psa10Premium = gradePremium(rawMedian7d, gradeSnapMap.PSA10?.median_7d ?? null);
 
   return (
     <PageShell>
@@ -496,18 +496,18 @@ export default async function CanonicalCardPage({
             <div className="grid grid-cols-3 gap-3">
               <StatTile
                 label="Raw"
-                value={formatUsdCompact(gradeSnapMap.RAW?.median_ask_7d)}
+                value={formatUsdCompact(gradeSnapMap.RAW?.median_7d)}
                 detail={gradeSelection === "RAW" ? "Current view" : undefined}
               />
               <StatTile
                 label="PSA 9"
-                value={formatUsdCompact(gradeSnapMap.PSA9?.median_ask_7d)}
+                value={formatUsdCompact(gradeSnapMap.PSA9?.median_7d)}
                 detail={psa9Premium.text}
                 tone={psa9Premium.tone}
               />
               <StatTile
                 label="PSA 10"
-                value={formatUsdCompact(gradeSnapMap.PSA10?.median_ask_7d)}
+                value={formatUsdCompact(gradeSnapMap.PSA10?.median_7d)}
                 detail={psa10Premium.text}
                 tone={psa10Premium.tone}
               />

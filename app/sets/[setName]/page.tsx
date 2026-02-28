@@ -19,7 +19,7 @@ type PrintingRow = {
 
 type PriceRow = {
   canonical_slug: string;
-  median_ask_7d: number | null;
+  median_7d: number | null;
 };
 
 type CardEntry = {
@@ -73,8 +73,8 @@ export default async function SetBrowserPage({ params }: { params: Promise<{ set
       .select("canonical_slug, image_url, language, finish, edition")
       .in("canonical_slug", slugs),
     supabase
-      .from("market_snapshot_rollups")
-      .select("canonical_slug, median_ask_7d")
+      .from("card_metrics")
+      .select("canonical_slug, median_7d")
       .in("canonical_slug", slugs)
       .eq("grade", "RAW")
       .is("printing_id", null),
@@ -93,7 +93,7 @@ export default async function SetBrowserPage({ params }: { params: Promise<{ set
 
   const priceBySlug = new Map<string, number | null>();
   for (const p of prices) {
-    priceBySlug.set(p.canonical_slug, p.median_ask_7d);
+    priceBySlug.set(p.canonical_slug, p.median_7d);
   }
 
   // Build + sort card entries (price desc, then card number)

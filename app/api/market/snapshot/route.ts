@@ -9,11 +9,11 @@ type SnapshotRow = {
   printing_id: string | null;
   grade: string;
   active_listings_7d: number | null;
-  median_ask_7d: number | null;
-  median_ask_30d: number | null;
+  median_7d: number | null;
+  median_30d: number | null;
   trimmed_median_30d: number | null;
-  low_ask_30d: number | null;
-  high_ask_30d: number | null;
+  low_30d: number | null;
+  high_30d: number | null;
 };
 
 export async function GET(req: Request) {
@@ -27,9 +27,9 @@ export async function GET(req: Request) {
 
   const supabase = getServerSupabaseClient();
   let query = supabase
-    .from("market_snapshot_rollups")
+    .from("card_metrics")
     .select(
-      "canonical_slug, printing_id, grade, active_listings_7d, median_ask_7d, median_ask_30d, trimmed_median_30d, low_ask_30d, high_ask_30d"
+      "canonical_slug, printing_id, grade, active_listings_7d, median_7d, median_30d, trimmed_median_30d, low_30d, high_30d"
     )
     .eq("canonical_slug", slug)
     .eq("grade", grade)
@@ -49,10 +49,10 @@ export async function GET(req: Request) {
   return NextResponse.json({
     ok: true,
     active7d: result.data?.active_listings_7d ?? 0,
-    median7d: result.data?.median_ask_7d ?? null,
-    median30d: result.data?.median_ask_30d ?? null,
+    median7d: result.data?.median_7d ?? null,
+    median30d: result.data?.median_30d ?? null,
     trimmedMedian30d: result.data?.trimmed_median_30d ?? null,
-    low30d: result.data?.low_ask_30d ?? null,
-    high30d: result.data?.high_ask_30d ?? null,
+    low30d: result.data?.low_30d ?? null,
+    high30d: result.data?.high_30d ?? null,
   });
 }

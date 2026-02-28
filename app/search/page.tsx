@@ -37,7 +37,7 @@ type PrintingRow = {
 
 type SnapshotPriceRow = {
   canonical_slug: string;
-  median_ask_7d: number | null;
+  median_7d: number | null;
 };
 
 type GroupedSearchRow = {
@@ -381,8 +381,8 @@ async function runBroadSearch(params: {
   const [{ data: pagePrintingsRaw }, { data: pagePricesRaw }] = await Promise.all([
     pagePrintingsQuery,
     supabase
-      .from("market_snapshot_rollups")
-      .select("canonical_slug, median_ask_7d")
+      .from("card_metrics")
+      .select("canonical_slug, median_7d")
       .in("canonical_slug", pageSlugs)
       .eq("grade", "RAW")
       .is("printing_id", null),
@@ -397,7 +397,7 @@ async function runBroadSearch(params: {
 
   const priceBySlug = new Map<string, number | null>();
   for (const p of (pagePricesRaw ?? []) as SnapshotPriceRow[]) {
-    priceBySlug.set(p.canonical_slug, p.median_ask_7d);
+    priceBySlug.set(p.canonical_slug, p.median_7d);
   }
 
   const rows: GroupedSearchRow[] = pageSlugs

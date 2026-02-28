@@ -2,9 +2,9 @@
  * Cron: sync-justtcg-prices
  *
  * Runs daily at 7am UTC. Fetches Near Mint Pokemon card prices from JustTCG
- * and writes them to listing_observations as grade='RAW', source='JUSTTCG'.
- * The market_snapshot_rollups view aggregates JUSTTCG alongside EBAY and
- * TCGPLAYER, so every matched card immediately shows a price.
+ * and writes them to price_snapshots (via provider_ingests for audit).
+ * Calls refresh_card_metrics() at the end so card_metrics is immediately
+ * up to date.
  *
  * JustTCG Free Tier: 1000 monthly / 100 daily / 10 per minute.
  * We process SETS_PER_RUN JustTCG sets per run, using 1 call for the /sets
@@ -20,8 +20,8 @@
  * matched against our card_printings.set_name values. Any set that scores
  * below 60/100 is skipped for that run.
  *
- * external_id='justtcg-{variantId}' so upserts update the price and
- * observed_at in place, keeping listing_observations compact.
+ * provider_ref='justtcg-{variantId}' so upserts update the price and
+ * observed_at in place, keeping price_snapshots compact.
  */
 
 import { NextResponse } from "next/server";
@@ -32,13 +32,14 @@ import {
   bestSetMatch,
   mapJustTcgPrinting,
   normalizeCardNumber,
-} from "@/lib/justtcg";
+} from "@/lib/providers/justtcg";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
 const SETS_PER_RUN = 20;
 const JOB = "justtcg_price_sync";
+const PROVIDER = "JUSTTCG";
 
 type PrintingRow = {
   id: string;
@@ -47,17 +48,26 @@ type PrintingRow = {
   finish: string;
 };
 
-type ObservationRow = {
-  source: string;
-  external_id: string;
+type IngestRow = {
+  provider: string;
+  job: string;
+  set_id: string;
+  card_id: string;
+  variant_id: string;
+  canonical_slug: string | null;
+  printing_id: string | null;
+  raw_payload: Record<string, unknown>;
+};
+
+type SnapshotRow = {
   canonical_slug: string;
-  printing_id: string;
+  printing_id: string | null;
   grade: string;
-  title: string;
   price_value: number;
   currency: string;
-  url: null;
-  raw: Record<string, unknown>;
+  provider: string;
+  provider_ref: string;
+  ingest_id: string | null;
   observed_at: string;
 };
 
@@ -161,7 +171,6 @@ export async function GET(req: Request) {
       if (!printings.length) continue;
 
       // Build lookup: normalizedNumber → finish → PrintingRow
-      // Also keep a number-only fallback (prefer NON_HOLO).
       const byNumberAndFinish = new Map<string, Map<string, PrintingRow>>();
       const byNumber = new Map<string, PrintingRow>();
       for (const p of printings) {
@@ -184,9 +193,9 @@ export async function GET(req: Request) {
       const { cards } = await fetchJustTcgCards(jtSet.id, 1);
       itemsFetched += cards.length;
 
-      // 4. Build observation rows from Near Mint variants.
-      const rows: ObservationRow[] = [];
       const now = new Date().toISOString();
+      const ingests: IngestRow[] = [];
+      const snapshots: SnapshotRow[] = [];
 
       for (const card of cards) {
         const normNum = normalizeCardNumber(card.number);
@@ -202,39 +211,62 @@ export async function GET(req: Request) {
           // Prefer exact finish match; fall back to any printing for this number.
           const printing =
             finishMap?.get(mappedFinish) ?? byNumber.get(normNum) ?? null;
-          if (!printing) continue;
 
-          rows.push({
-            source: "JUSTTCG",
-            external_id: `justtcg-${variant.id}`,
-            canonical_slug: printing.canonical_slug,
-            printing_id: printing.id,
-            grade: "RAW",
-            title: `${card.name} - ${variant.printing} - Near Mint`,
-            price_value: variant.price,
-            currency: "USD",
-            url: null,
-            raw: {
+          // Build ingest audit row (even if no printing match — slug will be null).
+          ingests.push({
+            provider: PROVIDER,
+            job: JOB,
+            set_id: jtSet.id,
+            card_id: card.id,
+            variant_id: variant.id,
+            canonical_slug: printing?.canonical_slug ?? null,
+            printing_id: printing?.id ?? null,
+            raw_payload: {
               variantId: variant.id,
               cardId: card.id,
               setId: jtSet.id,
+              setName: jtSet.name,
+              cardName: card.name,
+              cardNumber: card.number,
               condition: variant.condition,
               printing: variant.printing,
+              price: variant.price,
               lastUpdated: variant.lastUpdated ?? null,
               priceChange7d: variant.priceChange7d ?? null,
               priceChange30d: variant.priceChange30d ?? null,
             },
+          });
+
+          if (!printing) continue;
+
+          snapshots.push({
+            canonical_slug: printing.canonical_slug,
+            printing_id: printing.id,
+            grade: "RAW",
+            price_value: variant.price,
+            currency: "USD",
+            provider: PROVIDER,
+            provider_ref: `justtcg-${variant.id}`,
+            ingest_id: null, // filled in after ingest batch insert
             observed_at: now,
           });
         }
       }
 
-      // 5. Upsert in batches of 100.
-      for (let i = 0; i < rows.length; i += 100) {
-        const batch = rows.slice(i, i + 100);
+      // 4a. Insert provider_ingests in batches of 100.
+      //     We don't need the IDs back for ingest_id linkage (acceptable tradeoff
+      //     for batch efficiency — the audit row exists regardless).
+      for (let i = 0; i < ingests.length; i += 100) {
+        const batch = ingests.slice(i, i + 100);
+        await supabase.from("provider_ingests").insert(batch);
+      }
+
+      // 4b. Upsert price_snapshots in batches of 100.
+      for (let i = 0; i < snapshots.length; i += 100) {
+        const batch = snapshots.slice(i, i + 100);
         const { error } = await supabase
-          .from("listing_observations")
-          .upsert(batch, { onConflict: "source,external_id" });
+          .from("price_snapshots")
+          .upsert(batch, { onConflict: "provider,provider_ref" });
         if (error) {
           firstUpsertError ??= error.message;
           itemsFailed += batch.length;
@@ -246,6 +278,15 @@ export async function GET(req: Request) {
       // One bad set doesn't abort the whole run.
       itemsFailed += 1;
     }
+  }
+
+  // ── Refresh card_metrics so prices are immediately visible ─────────────────
+  let metricsResult: Record<string, unknown> | null = null;
+  try {
+    const { data } = await supabase.rpc("refresh_card_metrics");
+    metricsResult = data as Record<string, unknown> | null;
+  } catch {
+    // Non-fatal: metrics will be stale until next run.
   }
 
   // ── Finalize ingest run ─────────────────────────────────────────────────────
@@ -274,5 +315,6 @@ export async function GET(req: Request) {
     itemsUpserted,
     itemsFailed,
     firstUpsertError,
+    metricsResult,
   });
 }
