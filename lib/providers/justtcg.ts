@@ -138,16 +138,16 @@ type CardsEnvelope = {
 export async function fetchJustTcgCards(
   setId: string,
   page = 1,
-): Promise<{ cards: JustTcgCard[]; hasMore: boolean; rawEnvelope: unknown }> {
-  const path = `/cards?set=${encodeURIComponent(setId)}&page=${page}&limit=250`;
+): Promise<{ cards: JustTcgCard[]; hasMore: boolean; rawEnvelope: unknown; httpStatus: number }> {
+  const path = `/cards?set=${encodeURIComponent(setId)}&page=${page}&limit=200`;
   const { status, body } = await jtFetchRaw(path);
   if (status < 200 || status >= 300) {
-    return { cards: [], hasMore: false, rawEnvelope: body };
+    return { cards: [], hasMore: false, rawEnvelope: body, httpStatus: status };
   }
   const envelope = body as CardsEnvelope;
   const cards = envelope.data ?? [];
   const hasMore = envelope.meta?.hasMore ?? false;
-  return { cards, hasMore, rawEnvelope: body };
+  return { cards, hasMore, rawEnvelope: body, httpStatus: status };
 }
 
 // ── Set ID derivation ─────────────────────────────────────────────────────────

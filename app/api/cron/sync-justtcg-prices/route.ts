@@ -248,6 +248,8 @@ export async function GET(req: Request) {
   const allMetricsSnapshots: MetricsSnapshot[] = [];
   const allIngestRows: Record<string, unknown>[] = [];
   const mapUpserts: Record<string, unknown>[] = [];
+  // Debug mode: capture raw JustTCG envelopes to surface in response.
+  const debugRawResponses: Array<{ providerSetId: string; httpStatus: number; envelope: unknown }> = [];
 
   // ── Process each set ────────────────────────────────────────────────────────
   for (const ourSet of setsToProcess) {
@@ -259,26 +261,33 @@ export async function GET(req: Request) {
 
     try {
       // 1. Fetch cards from JustTCG.
-      const { cards, rawEnvelope } = await fetchJustTcgCards(providerSetId, 1);
+      const { cards, rawEnvelope, httpStatus } = await fetchJustTcgCards(providerSetId, 1);
 
-      // 2. Store raw payload (one row per API call).
-      const hash = requestHash(PROVIDER, "/cards", { set: providerSetId, page: 1, limit: 250 });
-      await supabase.from("provider_raw_payloads").upsert(
-        {
-          provider: PROVIDER,
-          endpoint: "/cards",
-          params: { set: providerSetId, page: 1, limit: 250 },
-          response: rawEnvelope,
-          status_code: 200,
-          fetched_at: now,
-          request_hash: hash,
-          canonical_slug: null,
-          variant_ref: null,
-        },
-        { onConflict: "request_hash", ignoreDuplicates: false }
-      );
+      if (isDebug) debugRawResponses.push({ providerSetId, httpStatus, envelope: rawEnvelope });
 
-      // 3. Update provider_set_map confidence.
+      // 2. Store raw payload (one row per API call — INSERT only; skip if already stored today).
+      const hash = requestHash(PROVIDER, "/cards", { set: providerSetId, page: 1, limit: 200 });
+      const { error: rawErr } = await supabase.from("provider_raw_payloads").insert({
+        provider: PROVIDER,
+        endpoint: "/cards",
+        params: { set: providerSetId, page: 1, limit: 200 },
+        response: rawEnvelope ?? {},
+        status_code: httpStatus,
+        fetched_at: now,
+        request_hash: hash,
+        canonical_slug: null,
+        variant_ref: null,
+      });
+      if (rawErr && !rawErr.message.includes("duplicate") && !rawErr.message.includes("unique")) {
+        firstError ??= `provider_raw_payloads insert: ${rawErr.message}`;
+      }
+
+      // 3. Surface non-200 responses as errors so they appear in firstError.
+      if (httpStatus < 200 || httpStatus >= 300) {
+        firstError ??= `JustTCG ${httpStatus} for set ${providerSetId}: ${JSON.stringify(rawEnvelope).slice(0, 200)}`;
+      }
+
+      // 4. Update provider_set_map confidence.
       const hasCards = cards.length > 0;
       mapUpserts.push({
         provider: PROVIDER,
@@ -291,7 +300,7 @@ export async function GET(req: Request) {
 
       if (!hasCards) continue;
 
-      // 4. Load our card_printings for this set (for card number matching).
+      // 5. Load our card_printings for this set (for card number matching).
       const { data: printingsRaw } = await supabase
         .from("card_printings")
         .select("id, canonical_slug, card_number, finish")
@@ -317,7 +326,7 @@ export async function GET(req: Request) {
       const cardsToProcess: JustTcgCard[] = debugLimit ? cards.slice(0, debugLimit) : cards;
       itemsFetched += cardsToProcess.length;
 
-      // 5. Process each card's NM variants.
+      // 6. Process each card's NM variants.
       for (const card of cardsToProcess) {
         const normNum = normalizeCardNumber(card.number);
 
@@ -515,5 +524,7 @@ export async function GET(req: Request) {
     metricsSnapshotsWritten: providerMetricsResult.upserted,
     firstError,
     metricsRefreshResult,
+    // Debug only: full JustTCG response envelopes for each set fetched.
+    ...(isDebug && { debugRawResponses }),
   });
 }
