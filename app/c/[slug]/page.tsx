@@ -1,8 +1,10 @@
 /**
  * README
  * Primitives: PageShell, NavBar, GroupedSection, GroupCard, StatRow, StatTile, SegmentedControl, Pill, Skeleton.
- * Layout: sticky compact nav, identity card, grouped controls, primary signals, secondary snapshots, then market dashboards and listings.
- * iOS grouped rules: matte dark surfaces, consistent radii and spacing, restrained separators, and touch targets sized for mobile-first interaction.
+ * Layout: sticky compact nav → freefloating hero → variant selector → market intelligence →
+ *         grade ladder (RAW / PSA 9 / PSA 10 with premiums + TCG reference) → live listings.
+ * iOS grouped rules: matte dark surfaces, consistent radii and spacing, restrained separators,
+ * and touch targets sized for mobile-first interaction.
  */
 import { notFound } from "next/navigation";
 import CanonicalCardFloatingHero from "@/components/canonical-card-floating-hero";
@@ -191,6 +193,18 @@ function formatUsdCompact(value: number | null | undefined): string {
   }).format(value);
 }
 
+function gradePremium(
+  rawPrice: number | null,
+  gradedPrice: number | null
+): { text: string; tone: "positive" | "neutral" } {
+  if (!rawPrice || !gradedPrice || rawPrice <= 0) return { text: "Forming", tone: "neutral" };
+  const pct = ((gradedPrice - rawPrice) / rawPrice) * 100;
+  const sign = pct >= 0 ? "+" : "";
+  return {
+    text: `${sign}${Math.round(pct)}% vs Raw`,
+    tone: pct > 10 ? "positive" : "neutral",
+  };
+}
 
 async function getTcgSnapshot(
   canonical: CanonicalCardRow,
@@ -287,15 +301,32 @@ export default async function CanonicalCardPage({
   const selectedPrintingLabel = selectedPrinting ? printingOptionLabel(selectedPrinting) : "Unknown printing";
   const finishOptions = Array.from(new Set(printings.map((row) => row.finish)));
   const editionOptions = Array.from(new Set(printings.map((row) => row.edition)));
-  const stampOptions = Array.from(new Set(printings.map((row) => row.stamp).filter((value): value is string => Boolean(value))));
+  const stampOptions = Array.from(
+    new Set(printings.map((row) => row.stamp).filter((value): value is string => Boolean(value)))
+  );
 
-  const { data: snapshotData } = await supabase
-    .from("market_snapshot_rollups")
-    .select("active_listings_7d, median_ask_7d, median_ask_30d, trimmed_median_30d, low_ask_30d, high_ask_30d")
-    .eq("canonical_slug", slug)
-    .eq("grade", gradeSelection)
-    .is("printing_id", selectedPrinting?.id ?? null)
-    .maybeSingle<SnapshotRow>();
+  // Fetch all three grade snapshots in parallel so the Grade Ladder can
+  // display RAW / PSA 9 / PSA 10 simultaneously without extra waterfalls.
+  const printingIdForQuery = selectedPrinting?.id ?? null;
+  const [rawSnap, psa9Snap, psa10Snap] = await Promise.all(
+    (["RAW", "PSA9", "PSA10"] as const).map((g) =>
+      supabase
+        .from("market_snapshot_rollups")
+        .select("active_listings_7d, median_ask_7d, median_ask_30d, trimmed_median_30d, low_ask_30d, high_ask_30d")
+        .eq("canonical_slug", slug)
+        .eq("grade", g)
+        .is("printing_id", printingIdForQuery)
+        .maybeSingle<SnapshotRow>()
+    )
+  );
+
+  const gradeSnapMap = {
+    RAW: rawSnap.data,
+    PSA9: psa9Snap.data,
+    PSA10: psa10Snap.data,
+  } as const;
+
+  const snapshotData = gradeSnapMap[gradeSelection];
 
   const snapshot = snapshotData
     ? {
@@ -336,6 +367,11 @@ export default async function CanonicalCardPage({
   const primaryPrice = formatUsdCompact(snapshotData?.median_ask_7d);
   const primaryPriceLabel = `${gradeLabel(gradeSelection)} · 7-day median ask`;
 
+  // Grade Ladder premium calculations.
+  const rawMedian7d = gradeSnapMap.RAW?.median_ask_7d ?? null;
+  const psa9Premium = gradePremium(rawMedian7d, gradeSnapMap.PSA9?.median_ask_7d ?? null);
+  const psa10Premium = gradePremium(rawMedian7d, gradeSnapMap.PSA10?.median_ask_7d ?? null);
+
   return (
     <PageShell>
       <CardDetailNavBar title={canonical.canonical_name} subtitle={selectedPrintingLabel} />
@@ -356,73 +392,47 @@ export default async function CanonicalCardPage({
       />
 
       <div className="mx-auto max-w-5xl px-4 pb-[max(env(safe-area-inset-bottom),2.5rem)] pt-4 sm:px-6 sm:pb-[max(env(safe-area-inset-bottom),3.5rem)]">
-        <GroupedSection title="About">
+        {/* ── Variant selector ──────────────────────────────────────────────────
+            Near the top so users can pivot grade or printing before
+            reading the market signal data below. */}
+        <GroupedSection title="Variant">
           <GroupCard>
-            <div className="divide-y divide-white/[0.06]">
-              <StatRow label="Set" value={canonical.set_name ?? "Unknown"} />
-              <StatRow label="Card number" value={canonical.card_number ? `#${canonical.card_number}` : "Unknown"} />
-              <StatRow label="Year" value={canonical.year ?? "Unknown"} />
-              <StatRow label="Printing" value={selectedPrintingLabel} />
-            </div>
-          </GroupCard>
-        </GroupedSection>
-
-        <GroupedSection title="Controls" description="Select printing and grade without leaving the signal view.">
-          <GroupCard header={<p className="text-[15px] font-semibold text-[#f5f7fb]">Filters</p>}>
             <div className="space-y-4">
-              <div>
-                <p className="mb-2 text-[13px] font-semibold text-[#98a0ae]">Finish</p>
-                <SegmentedControl
-                  wrap
-                  items={
-                    finishOptions.length
-                      ? finishOptions.map((finish) => {
-                          const nextPrinting = resolvePrintingSelection(printings, selectedPrinting, { finish });
-                          return {
-                            key: finish,
-                            label: finishLabel(finish),
-                            href: toggleHref(slug, nextPrinting?.id ?? null, gradeSelection, debugEnabled),
-                            active: selectedPrinting?.finish === finish,
-                          };
-                        })
-                      : [
-                          {
-                            key: "unknown-finish",
-                            label: "Unknown finish",
-                            active: true,
-                            disabled: true,
-                          },
-                        ]
-                  }
-                />
-              </div>
-              <div>
-                <p className="mb-2 text-[13px] font-semibold text-[#98a0ae]">Edition</p>
-                <SegmentedControl
-                  wrap
-                  items={
-                    editionOptions.length
-                      ? editionOptions.map((edition) => {
-                          const nextPrinting = resolvePrintingSelection(printings, selectedPrinting, { edition });
-                          return {
-                            key: edition,
-                            label: editionLabel(edition),
-                            href: toggleHref(slug, nextPrinting?.id ?? null, gradeSelection, debugEnabled),
-                            active: selectedPrinting?.edition === edition,
-                          };
-                        })
-                      : [
-                          {
-                            key: "unknown-edition",
-                            label: "Unknown edition",
-                            active: true,
-                            disabled: true,
-                          },
-                        ]
-                  }
-                />
-              </div>
-              {stampOptions.length ? (
+              {finishOptions.length > 1 && (
+                <div>
+                  <p className="mb-2 text-[13px] font-semibold text-[#98a0ae]">Finish</p>
+                  <SegmentedControl
+                    wrap
+                    items={finishOptions.map((finish) => {
+                      const nextPrinting = resolvePrintingSelection(printings, selectedPrinting, { finish });
+                      return {
+                        key: finish,
+                        label: finishLabel(finish),
+                        href: toggleHref(slug, nextPrinting?.id ?? null, gradeSelection, debugEnabled),
+                        active: selectedPrinting?.finish === finish,
+                      };
+                    })}
+                  />
+                </div>
+              )}
+              {editionOptions.length > 1 && (
+                <div>
+                  <p className="mb-2 text-[13px] font-semibold text-[#98a0ae]">Edition</p>
+                  <SegmentedControl
+                    wrap
+                    items={editionOptions.map((edition) => {
+                      const nextPrinting = resolvePrintingSelection(printings, selectedPrinting, { edition });
+                      return {
+                        key: edition,
+                        label: editionLabel(edition),
+                        href: toggleHref(slug, nextPrinting?.id ?? null, gradeSelection, debugEnabled),
+                        active: selectedPrinting?.edition === edition,
+                      };
+                    })}
+                  />
+                </div>
+              )}
+              {stampOptions.length > 0 && (
                 <div>
                   <p className="mb-2 text-[13px] font-semibold text-[#98a0ae]">Stamp</p>
                   <SegmentedControl
@@ -438,30 +448,21 @@ export default async function CanonicalCardPage({
                     })}
                   />
                 </div>
-              ) : null}
-              <div>
-                <p className="mb-2 text-[13px] font-semibold text-[#98a0ae]">Exact printing</p>
-                <SegmentedControl
-                  wrap
-                  items={
-                    printings.length
-                      ? printings.map((row) => ({
-                          key: row.id,
-                          label: printingOptionLabel(row),
-                          href: toggleHref(slug, row.id, gradeSelection, debugEnabled),
-                          active: selectedPrinting?.id === row.id,
-                        }))
-                      : [
-                          {
-                            key: "unknown",
-                            label: "Unknown printing",
-                            active: true,
-                            disabled: true,
-                          },
-                        ]
-                  }
-                />
-              </div>
+              )}
+              {printings.length > 1 && (
+                <div>
+                  <p className="mb-2 text-[13px] font-semibold text-[#98a0ae]">Printing</p>
+                  <SegmentedControl
+                    wrap
+                    items={printings.map((row) => ({
+                      key: row.id,
+                      label: printingOptionLabel(row),
+                      href: toggleHref(slug, row.id, gradeSelection, debugEnabled),
+                      active: selectedPrinting?.id === row.id,
+                    }))}
+                  />
+                </div>
+              )}
               <div>
                 <p className="mb-2 text-[13px] font-semibold text-[#98a0ae]">Grade</p>
                 <SegmentedControl
@@ -477,38 +478,57 @@ export default async function CanonicalCardPage({
           </GroupCard>
         </GroupedSection>
 
-        <GroupedSection title="Market Snapshot" description="Population and pricing context in one grouped view.">
-          <div className="grid gap-3 lg:grid-cols-2">
-            <GroupCard header={<p className="text-[15px] font-semibold text-[#f5f7fb]">Population Snapshot</p>}>
-              <div className="divide-y divide-white/[0.06]">
-                <StatRow
-                  label="Observed live asks"
-                  value={snapshotData?.active_listings_7d ? `${snapshotData.active_listings_7d} / 7D` : "Collecting"}
-                  meta={snapshotData?.active_listings_7d ? "Observed across recent sessions" : "Waiting for enough observations"}
-                />
-                <StatRow label="Median ask (7D)" value={formatUsdCompact(snapshotData?.median_ask_7d)} meta="Primary pricing read" />
-                <StatRow label="Median ask (30D)" value={formatUsdCompact(snapshotData?.median_ask_30d)} meta="Longer baseline" />
-              </div>
-            </GroupCard>
+        {/* ── Market Intelligence ───────────────────────────────────────────────
+            Primary signal tiles: 7D median, 7D change, trimmed 30D median,
+            plus depth rows for velocity and spread. */}
+        <MarketSnapshotTiles
+          slug={slug}
+          printingId={selectedPrinting?.id ?? null}
+          grade={gradeSelection}
+          initialData={snapshot}
+        />
 
-            <GroupCard header={<p className="text-[15px] font-semibold text-[#f5f7fb]">TCG Snapshot</p>}>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <StatTile label="Market" value={formatUsdCompact(tcgSnapshot.item?.marketPrice)} detail={tcgSnapshot.item ? "TCG market" : "Collecting"} />
-                <StatTile label="Low" value={formatUsdCompact(tcgSnapshot.item?.lowPrice)} detail={tcgSnapshot.item ? "Lowest seen" : "Collecting"} />
-                <StatTile label="Mid" value={formatUsdCompact(tcgSnapshot.item?.midPrice)} detail={tcgSnapshot.item ? "Midpoint" : "Collecting"} />
-                <StatTile label="High" value={formatUsdCompact(tcgSnapshot.item?.highPrice)} detail={tcgSnapshot.item ? "Upper range" : "Collecting"} />
-              </div>
+        {/* ── Grade Ladder ──────────────────────────────────────────────────────
+            Shows RAW / PSA 9 / PSA 10 side-by-side so collectors instantly
+            see the grading premium. TCGPlayer reference price anchors raw value. */}
+        <GroupedSection title="Grade Ladder" description="7-day median ask across condition tiers.">
+          <GroupCard>
+            <div className="grid grid-cols-3 gap-3">
+              <StatTile
+                label="Raw"
+                value={formatUsdCompact(gradeSnapMap.RAW?.median_ask_7d)}
+                detail={gradeSelection === "RAW" ? "Current view" : undefined}
+              />
+              <StatTile
+                label="PSA 9"
+                value={formatUsdCompact(gradeSnapMap.PSA9?.median_ask_7d)}
+                detail={psa9Premium.text}
+                tone={psa9Premium.tone}
+              />
+              <StatTile
+                label="PSA 10"
+                value={formatUsdCompact(gradeSnapMap.PSA10?.median_ask_7d)}
+                detail={psa10Premium.text}
+                tone={psa10Premium.tone}
+              />
+            </div>
+            {tcgSnapshot.item?.marketPrice != null && (
               <div className="mt-4 border-t border-white/[0.06] pt-4">
-                <p className="text-[13px] text-[#8c94a3]">
-                  {tcgSnapshot.item
-                    ? `${tcgSnapshot.setName ?? "Matched set"}${tcgSnapshot.updatedAt ? ` • Updated ${new Date(tcgSnapshot.updatedAt).toLocaleDateString()}` : ""}`
-                    : "Collecting"}
-                </p>
+                <StatRow
+                  label="TCGPlayer Market"
+                  value={formatUsdCompact(tcgSnapshot.item.marketPrice)}
+                  meta={
+                    tcgSnapshot.updatedAt
+                      ? `Updated ${new Date(tcgSnapshot.updatedAt).toLocaleDateString()}`
+                      : "Raw reference price"
+                  }
+                />
               </div>
-            </GroupCard>
-          </div>
+            )}
+          </GroupCard>
         </GroupedSection>
 
+        {/* ── Debug (gate: ?debug=1) ─────────────────────────────────────────── */}
         {debugEnabled ? (
           <GroupedSection title="TCG Match Debug" description="Resolution details for set and product matching.">
             <div className="grid gap-3 lg:grid-cols-3">
@@ -518,7 +538,10 @@ export default async function CanonicalCardPage({
                   <StatRow label="Set" value={tcgSnapshot.debug.canonical.setName ?? "Unknown"} />
                   <StatRow label="Number" value={tcgSnapshot.debug.canonical.cardNumber ?? "Unknown"} />
                   <StatRow label="Year" value={tcgSnapshot.debug.canonical.year ?? "Unknown"} />
-                  <StatRow label="Printing" value={`${tcgSnapshot.debug.canonical.finish ?? "Unknown"} / ${tcgSnapshot.debug.canonical.edition ?? "Unknown"}`} />
+                  <StatRow
+                    label="Printing"
+                    value={`${tcgSnapshot.debug.canonical.finish ?? "Unknown"} / ${tcgSnapshot.debug.canonical.edition ?? "Unknown"}`}
+                  />
                 </div>
               </GroupCard>
 
@@ -543,7 +566,8 @@ export default async function CanonicalCardPage({
                       <GroupCard key={candidate.id} inset>
                         <p className="text-[13px] font-semibold text-[#f5f7fb]">{candidate.name ?? "Unnamed"}</p>
                         <p className="mt-1 text-[12px] text-[#8c94a3]">
-                          {candidate.id} • Code {candidate.code ?? "n/a"} • Year {candidate.year ?? "n/a"} • Score {candidate.score}
+                          {candidate.id} • Code {candidate.code ?? "n/a"} • Year {candidate.year ?? "n/a"} • Score{" "}
+                          {candidate.score}
                         </p>
                       </GroupCard>
                     ))
@@ -562,10 +586,15 @@ export default async function CanonicalCardPage({
                         : "No product match"
                     }
                   />
-                  <StatRow label="Reason" value={tcgSnapshot.debug.productResolution?.chosenReason ?? "No reason recorded"} />
+                  <StatRow
+                    label="Reason"
+                    value={tcgSnapshot.debug.productResolution?.chosenReason ?? "No reason recorded"}
+                  />
                 </div>
                 <div className="mt-4 space-y-2">
-                  {tcgSnapshot.debug.productResolution?.warning ? <Pill label={tcgSnapshot.debug.productResolution.warning} tone="warning" /> : null}
+                  {tcgSnapshot.debug.productResolution?.warning ? (
+                    <Pill label={tcgSnapshot.debug.productResolution.warning} tone="warning" />
+                  ) : null}
                   {tcgSnapshot.debug.error ? <Pill label={tcgSnapshot.debug.error} tone="negative" /> : null}
                   {tcgSnapshot.debug.productResolution?.topCandidates.length ? (
                     tcgSnapshot.debug.productResolution.topCandidates.map((candidate) => (
@@ -586,26 +615,9 @@ export default async function CanonicalCardPage({
           </GroupedSection>
         ) : null}
 
-        <MarketSnapshotTiles slug={slug} printingId={selectedPrinting?.id ?? null} grade={gradeSelection} initialData={snapshot} />
-
-        <GroupedSection title="Price History" description="Rolling medians update as PopAlpha observes listings.">
-          <GroupCard header={<p className="text-[15px] font-semibold text-[#f5f7fb]">History</p>}>
-            <SegmentedControl
-              items={["7D", "30D", "90D", "All"].map((range, index) => ({
-                key: range,
-                label: range,
-                active: index === 1,
-                disabled: true,
-              }))}
-            />
-            <div className="mt-4 rounded-[24px] border border-white/[0.06] bg-[#11151d] p-4">
-              <div className="h-44 rounded-[20px] border border-white/[0.05] bg-[linear-gradient(to_right,rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:22px_22px]" />
-              <p className="mt-3 text-[14px] font-semibold text-[#f5f7fb]">Graph coming soon</p>
-              <p className="mt-1 text-[12px] text-[#8c94a3]">The grouped container is in place so the live chart can drop in without changing layout.</p>
-            </div>
-          </GroupCard>
-        </GroupedSection>
-
+        {/* ── Live Market Listings ──────────────────────────────────────────────
+            Raw eBay evidence. Also triggers /api/market/observe to record
+            prices into listing_observations for future signal aggregation. */}
         <EbayListings
           query={ebayQuery}
           canonicalSlug={slug}
