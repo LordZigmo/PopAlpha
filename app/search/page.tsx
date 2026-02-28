@@ -81,6 +81,17 @@ function normalizeQuery(value: string): string {
   return value.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
+function tokenizeQuery(query: string): string[] {
+  return Array.from(
+    new Set(
+      query
+        .split(/[^a-z0-9]+/i)
+        .map((token) => token.trim().toLowerCase())
+        .filter((token) => token.length >= 2)
+    )
+  );
+}
+
 function extractCardNumber(query: string): string | null {
   const slashMatch = query.match(/(?:^|\s)#?(\d{1,4})\s*\/\s*\d+(?:\s|$)/i);
   if (slashMatch) return slashMatch[1];
@@ -133,6 +144,7 @@ function shouldAllowStructuredRedirect(query: string): boolean {
 function scoreCanonicalMatch(
   row: CanonicalCardRow,
   qLower: string,
+  tokens: string[],
   parsedNumber: string | null,
   subjectMode: boolean,
   genericNameMode: boolean
@@ -141,6 +153,9 @@ function scoreCanonicalMatch(
   const subject = (row.subject ?? "").toLowerCase();
   const setName = (row.set_name ?? "").toLowerCase();
   const cardNumber = (row.card_number ?? "").toLowerCase();
+  const searchable = [canonicalName, subject, setName, cardNumber, (row.variant ?? "").toLowerCase(), (row.language ?? "").toLowerCase()]
+    .filter((value) => value.length > 0)
+    .join(" ");
   let score = 0;
 
   if (subjectMode && subject === qLower) score += 700;
@@ -151,6 +166,20 @@ function scoreCanonicalMatch(
   if (canonicalName.includes(qLower)) score += genericNameMode ? 280 : 200;
   if (setName.includes(qLower)) score += 110;
   if (parsedNumber && cardNumber === parsedNumber.toLowerCase()) score += 150;
+  for (const token of tokens) {
+    if (subject === token) score += 170;
+    else if (subject.startsWith(token)) score += 120;
+    else if (subject.includes(token)) score += 90;
+
+    if (canonicalName === token) score += 150;
+    else if (canonicalName.startsWith(token)) score += 105;
+    else if (canonicalName.includes(token)) score += 75;
+
+    if (setName === token) score += 80;
+    else if (setName.includes(token)) score += 55;
+
+    if (searchable.includes(token)) score += 20;
+  }
 
   return score;
 }
@@ -180,6 +209,7 @@ async function runBroadSearch(params: {
   const { q, page, lang, setFilter, parsedNumber } = params;
   const supabase = getServerSupabaseClient();
   const qLower = normalizeQuery(q);
+  const tokens = tokenizeQuery(qLower);
   const subjectMode = isLikelySubjectQuery(qLower);
   const genericNameMode = isGenericNameQuery(qLower);
   const yearValue = /^\d{4}$/.test(qLower) ? Number.parseInt(qLower, 10) : null;
@@ -187,6 +217,7 @@ async function runBroadSearch(params: {
   const fields = "slug, canonical_name, subject, set_name, year, card_number, language, variant";
   const startsPattern = `${qLower}%`;
   const containsPattern = `%${qLower}%`;
+  const searchTerms = [qLower, ...tokens.filter((token) => token !== qLower)];
   const broadOrParts = [
     `canonical_name.ilike.${containsPattern}`,
     `subject.ilike.${containsPattern}`,
@@ -197,9 +228,21 @@ async function runBroadSearch(params: {
   ];
   if (yearValue !== null) broadOrParts.push(`year.eq.${yearValue}`);
   if (parsedNumber) broadOrParts.push(`card_number.eq.${parsedNumber}`);
-  if (genericNameMode) {
+  for (const term of searchTerms) {
+    const termPattern = `%${term}%`;
+    broadOrParts.push(
+      `canonical_name.ilike.${termPattern}`,
+      `subject.ilike.${termPattern}`,
+      `set_name.ilike.${termPattern}`,
+      `variant.ilike.${termPattern}`
+    );
+  }
+  if (genericNameMode && tokens.length > 0) {
     broadOrParts.length = 0;
-    broadOrParts.push(`canonical_name.ilike.${containsPattern}`, `subject.ilike.${containsPattern}`);
+    for (const term of searchTerms) {
+      const termPattern = `%${term}%`;
+      broadOrParts.push(`canonical_name.ilike.${termPattern}`, `subject.ilike.${termPattern}`, `set_name.ilike.${termPattern}`);
+    }
   }
 
   let subjectStartsQuery = supabase
@@ -235,6 +278,19 @@ async function runBroadSearch(params: {
   ];
   if (yearValue !== null) printOrParts.push(`year.eq.${yearValue}`);
   if (parsedNumber) printOrParts.push(`card_number.eq.${parsedNumber}`);
+  for (const term of searchTerms) {
+    const termPattern = `%${term}%`;
+    printOrParts.push(
+      `set_name.ilike.${termPattern}`,
+      `card_number.ilike.${termPattern}`,
+      `finish.ilike.${termPattern}`,
+      `finish_detail.ilike.${termPattern}`,
+      `edition.ilike.${termPattern}`,
+      `stamp.ilike.${termPattern}`,
+      `rarity.ilike.${termPattern}`,
+      `language.ilike.${termPattern}`
+    );
+  }
 
   let printingQuery = supabase
     .from("card_printings")
@@ -273,7 +329,7 @@ async function runBroadSearch(params: {
 
   const applyRowScore = (row: CanonicalCardRow, baseScore: number) => {
     canonicalBySlug.set(row.slug, row);
-    const computed = scoreCanonicalMatch(row, qLower, parsedNumber, subjectMode, genericNameMode) + baseScore;
+    const computed = scoreCanonicalMatch(row, qLower, tokens, parsedNumber, subjectMode, genericNameMode) + baseScore;
     scoreBySlug.set(row.slug, Math.max(scoreBySlug.get(row.slug) ?? 0, computed));
   };
 
