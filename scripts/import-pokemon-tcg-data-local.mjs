@@ -11,6 +11,7 @@ const envPath = path.join(projectRoot, ".env.local");
 const statePath = path.join(__dirname, "import-state.json");
 
 const BATCH_SIZE = 250;
+const SUPABASE_REQUEST_TIMEOUT_MS = 30_000;
 
 function loadEnvFile(filePath) {
   if (fs.existsSync(filePath)) {
@@ -139,6 +140,20 @@ async function sleep(ms) {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function fetchWithTimeout(input, init) {
+  const controller = new AbortController();
+  const signal = init?.signal ? AbortSignal.any([init.signal, controller.signal]) : controller.signal;
+  const timer = setTimeout(() => controller.abort(), SUPABASE_REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(input, {
+      ...init,
+      signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function retryAsync(fn, label, maxAttempts = 5) {
   let attempt = 1;
   while (attempt <= maxAttempts) {
@@ -201,8 +216,12 @@ function saveState(state) {
 
 async function upsertBatches(supabase, table, rows, onConflict) {
   let processed = 0;
-  for (const batchRows of chunk(rows, BATCH_SIZE)) {
+  const batches = chunk(rows, BATCH_SIZE);
+  console.log(`[${table}] Starting ${rows.length} rows across ${batches.length} batch(es)`);
+  for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
+    const batchRows = batches[batchIndex];
     const dedupedRows = dedupeByConflict(batchRows, onConflict);
+    console.log(`[${table}] Batch ${batchIndex + 1}/${batches.length}: ${dedupedRows.length} deduped row(s)`);
     const result = await retryAsync(async () => {
       const { error } = await supabase.from(table).upsert(dedupedRows, { onConflict });
       if (error) {
@@ -214,13 +233,44 @@ async function upsertBatches(supabase, table, rows, onConflict) {
       throw new Error(`${table} upsert failed`);
     }
     processed += dedupedRows.length;
+    console.log(`[${table}] Batch ${batchIndex + 1}/${batches.length} complete (${processed}/${rows.length})`);
   }
   return processed;
 }
 
+async function findExistingPrintingRow(supabase, row) {
+  let uniqueQuery = supabase
+    .from("card_printings")
+    .select("id, source_id")
+    .eq("card_number", row.card_number)
+    .eq("language", row.language)
+    .eq("finish", row.finish)
+    .eq("edition", row.edition);
+
+  uniqueQuery = row.set_code ? uniqueQuery.eq("set_code", row.set_code) : uniqueQuery.is("set_code", null);
+  uniqueQuery = row.stamp ? uniqueQuery.eq("stamp", row.stamp) : uniqueQuery.is("stamp", null);
+  uniqueQuery = row.finish_detail
+    ? uniqueQuery.eq("finish_detail", row.finish_detail)
+    : uniqueQuery.is("finish_detail", null);
+
+  const { data, error } = await uniqueQuery.limit(1).maybeSingle();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+function isUniquePrintingConflict(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("card_printings_unique_printing_idx");
+}
+
 async function syncCardPrintings(supabase, rows) {
   const resolvedRows = [];
-  for (const row of rows) {
+  console.log(`[card_printings] Syncing ${rows.length} row(s) one-by-one`);
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+    const row = rows[rowIndex];
+    if (rowIndex === 0 || (rowIndex + 1) % 25 === 0 || rowIndex === rows.length - 1) {
+      console.log(`[card_printings] Row ${rowIndex + 1}/${rows.length}: ${row.source_id}`);
+    }
     const existingBySourceId = await retryAsync(async () => {
       const { data, error } = await supabase
         .from("card_printings")
@@ -235,25 +285,7 @@ async function syncCardPrintings(supabase, rows) {
 
     let existingRow = existingBySourceId;
     if (!existingRow) {
-      let uniqueQuery = supabase
-        .from("card_printings")
-        .select("id, source_id")
-        .eq("card_number", row.card_number)
-        .eq("language", row.language)
-        .eq("finish", row.finish)
-        .eq("edition", row.edition);
-
-      uniqueQuery = row.set_code ? uniqueQuery.eq("set_code", row.set_code) : uniqueQuery.is("set_code", null);
-      uniqueQuery = row.stamp ? uniqueQuery.eq("stamp", row.stamp) : uniqueQuery.is("stamp", null);
-      uniqueQuery = row.finish_detail
-        ? uniqueQuery.eq("finish_detail", row.finish_detail)
-        : uniqueQuery.is("finish_detail", null);
-
-      existingRow = await retryAsync(async () => {
-        const { data, error } = await uniqueQuery.limit(1).maybeSingle();
-        if (error) throw new Error(error.message);
-        return data;
-      }, "card_printings select by unique print");
+      existingRow = await retryAsync(() => findExistingPrintingRow(supabase, row), "card_printings select by unique print");
     }
 
     if (existingRow?.id) {
@@ -269,11 +301,35 @@ async function syncCardPrintings(supabase, rows) {
       continue;
     }
 
-    const inserted = await retryAsync(async () => {
-      const { data, error } = await supabase.from("card_printings").insert(row).select("id, source_id").single();
-      if (error) throw new Error(error.message);
-      return data;
-    }, "card_printings insert");
+    let inserted;
+    try {
+      inserted = await retryAsync(async () => {
+        const { data, error } = await supabase.from("card_printings").insert(row).select("id, source_id").single();
+        if (error) throw new Error(error.message);
+        return data;
+      }, "card_printings insert");
+    } catch (error) {
+      if (!isUniquePrintingConflict(error)) {
+        throw error;
+      }
+
+      const collidedRow = await retryAsync(() => findExistingPrintingRow(supabase, row), "card_printings reselect after insert conflict");
+      if (!collidedRow?.id) {
+        throw error;
+      }
+
+      await retryAsync(async () => {
+        const { error: updateError } = await supabase.from("card_printings").update(row).eq("id", collidedRow.id);
+        if (updateError) throw new Error(updateError.message);
+        return true;
+      }, "card_printings update after insert conflict");
+
+      inserted = {
+        id: collidedRow.id,
+        source_id: row.source_id,
+      };
+    }
+
     if (inserted) {
       resolvedRows.push(inserted);
     }
@@ -289,6 +345,9 @@ async function main() {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
+    },
+    global: {
+      fetch: fetchWithTimeout,
     },
   });
 
@@ -417,8 +476,10 @@ async function main() {
       }
     }
 
+    console.log(`[${fileName}] Upserting canonical_cards`);
     counts.cardsUpserted += await upsertBatches(supabase, "canonical_cards", canonicalRows, "slug");
 
+    console.log(`[${fileName}] Syncing card_printings`);
     const printingIdBySourceId = new Map();
     const syncedPrintings = await syncCardPrintings(supabase, printingRows);
     counts.printingsUpserted += printingRows.length;
@@ -440,16 +501,19 @@ async function main() {
       .filter(Boolean);
 
     if (resolvedPrintingAliases.length > 0) {
+      console.log(`[${fileName}] Upserting printing_aliases (${resolvedPrintingAliases.length})`);
       await upsertBatches(supabase, "printing_aliases", resolvedPrintingAliases, "alias");
     }
 
     if (cardAliasRows.length > 0) {
+      console.log(`[${fileName}] Upserting card_aliases (${cardAliasRows.length})`);
       await upsertBatches(supabase, "card_aliases", cardAliasRows, "alias,canonical_slug");
     }
 
     counts.cardFilesProcessed += 1;
     state.lastProcessedCardFileIndex = cardFileIndex;
     saveState(state);
+    console.log(`[${fileName}] Completed. State saved at card index ${state.lastProcessedCardFileIndex}`);
   }
 
   console.log(`Resuming decks from file index ${state.lastProcessedDeckFileIndex + 1}`);
@@ -502,11 +566,14 @@ async function main() {
       }
     }
 
+    console.log(`[${fileName}] Upserting decks (${deckRows.length})`);
     counts.decksUpserted += await upsertBatches(supabase, "decks", deckRows, "id");
     if (deckAliasRows.length > 0) {
+      console.log(`[${fileName}] Upserting deck_aliases (${deckAliasRows.length})`);
       await upsertBatches(supabase, "deck_aliases", deckAliasRows, "alias");
     }
     if (deckCardRows.length > 0) {
+      console.log(`[${fileName}] Upserting deck_cards (${deckCardRows.length})`);
       counts.deckCardsUpserted += await upsertBatches(
         supabase,
         "deck_cards",
@@ -518,6 +585,7 @@ async function main() {
     counts.deckFilesProcessed += 1;
     state.lastProcessedDeckFileIndex = deckFileIndex;
     saveState(state);
+    console.log(`[${fileName}] Completed. State saved at deck index ${state.lastProcessedDeckFileIndex}`);
   }
 
   console.log("");

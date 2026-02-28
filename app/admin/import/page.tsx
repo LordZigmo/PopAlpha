@@ -4,7 +4,7 @@ import { getServerSupabaseClient } from "@/lib/supabaseServer";
 export const dynamic = "force-dynamic";
 
 type IngestRunListRow = {
-  id: number;
+  id: string;
   status: string;
   ok: boolean;
   items_fetched: number;
@@ -34,7 +34,7 @@ export default async function AdminImportPage() {
     const { data } = await supabase
       .from("ingest_runs")
       .select("id, status, ok, items_fetched, items_upserted, items_failed, error_text, started_at, ended_at")
-      .eq("job", "pokemontcg_import_en")
+      .eq("job", "pokemontcg_canonical_import")
       .order("started_at", { ascending: false })
       .limit(10);
     runs = (data ?? []) as IngestRunListRow[];

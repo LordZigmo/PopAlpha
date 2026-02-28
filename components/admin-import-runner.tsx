@@ -4,11 +4,12 @@ import { useState } from "react";
 
 type RunSummary = {
   ok: boolean;
-  run_id?: number;
-  fetched?: number;
-  upserted_cards?: number;
-  upserted_variants?: number;
-  failed?: number;
+  run_id?: string;
+  pagesProcessed?: number;
+  itemsFetched?: number;
+  itemsUpserted?: number;
+  itemsFailed?: number;
+  dryRun?: boolean;
   error?: string;
 };
 
@@ -48,11 +49,10 @@ export default function AdminImportRunner() {
       {summary ? (
         <p className={`mt-2 text-sm ${summary.ok ? "text-positive" : "text-negative"}`}>
           {summary.ok
-            ? `Run ${summary.run_id}: fetched ${summary.fetched}, cards ${summary.upserted_cards}, variants ${summary.upserted_variants}.`
+            ? `Run ${summary.run_id}: pages ${summary.pagesProcessed}, fetched ${summary.itemsFetched}, upserted ${summary.itemsUpserted}, failed ${summary.itemsFailed}${summary.dryRun ? " (dry run)" : ""}.`
             : `Import failed: ${summary.error ?? "Unknown error"}`}
         </p>
       ) : null}
     </div>
   );
 }
-
