@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import type { CSSProperties } from "react";
 import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import CanonicalHeroParallax from "@/components/canonical-hero-parallax";
 import EbayListings from "@/components/ebay-listings";
 import MarketSnapshotTiles from "@/components/market-snapshot-tiles";
 import SignalBadge from "@/components/signal-badge";
@@ -59,10 +59,6 @@ type TcgSnapshotDebug = {
 };
 
 const GRADE_OPTIONS: GradeSelection[] = ["RAW", "PSA9", "PSA10"];
-const REVEAL_H_DESKTOP = 300;
-const REVEAL_H_MOBILE = 220;
-const PANEL_TOP_IN_REVEAL_DESKTOP = 120;
-const PANEL_TOP_IN_REVEAL_MOBILE = 96;
 
 function finishLabel(finish: CardPrintingRow["finish"]): string {
   const map: Record<CardPrintingRow["finish"], string> = {
@@ -273,13 +269,6 @@ export default async function CanonicalCardPage({
   });
   const tcgSnapshot = await getTcgSnapshot(canonical, selectedPrinting);
 
-  const revealStyle = {
-    "--reveal-h-desktop": `${REVEAL_H_DESKTOP}px`,
-    "--reveal-h-mobile": `${REVEAL_H_MOBILE}px`,
-    "--panel-top-desktop": `${PANEL_TOP_IN_REVEAL_DESKTOP}px`,
-    "--panel-top-mobile": `${PANEL_TOP_IN_REVEAL_MOBILE}px`,
-  } as CSSProperties;
-
   return (
     <main className="app-shell">
       <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
@@ -287,243 +276,205 @@ export default async function CanonicalCardPage({
           Search results
         </Link>
 
-        <section className="relative mt-4">
-          <div
-            className="relative overflow-hidden rounded-[var(--radius-panel)] border-app border bg-surface-soft/35 h-[220px] sm:h-[var(--reveal-h-desktop)]"
-            style={revealStyle}
-          >
-            {selectedPrinting?.image_url ? (
-              <>
-                <div key={selectedPrinting.id} className="absolute inset-0 results-enter">
-                  {/* Keep the top border visible, then let the overlapping panel hide the lower business box. */}
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={selectedPrinting.image_url}
-                    alt={canonical.canonical_name}
-                    className="absolute left-1/2 top-0 h-auto w-[min(560px,92vw)] max-w-none -translate-x-1/2 opacity-95 drop-shadow-[0_22px_44px_rgba(0,0,0,0.45)]"
-                  />
+        <CanonicalHeroParallax
+          imageUrl={selectedPrinting?.image_url ?? null}
+          title={canonical.canonical_name}
+          subtitle={`${canonical.set_name ?? "Unknown set"}${canonical.card_number ? ` • #${canonical.card_number}` : ""}${canonical.year ? ` • ${canonical.year}` : ""}`}
+          leftColumn={
+            <>
+              <div className="rounded-[var(--radius-card)] border-app border bg-surface/78 p-[var(--space-card)] backdrop-blur-sm">
+                <p className="text-muted text-[11px] font-semibold uppercase tracking-[0.08em]">Selected Printing</p>
+                <p className="text-app mt-2 text-sm font-semibold">{selectedPrintingLabel}</p>
+                <p className="text-muted mt-1 text-xs">
+                  {selectedPrinting?.image_url ? "Hero art is sourced from the selected printing." : "No artwork available for the selected printing yet."}
+                </p>
+              </div>
+
+              <div className="mt-4 rounded-[var(--radius-card)] border-app border bg-surface/78 p-[var(--space-card)] backdrop-blur-sm">
+                <p className="text-muted text-[11px] font-semibold uppercase tracking-[0.08em]">Grade Filter</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {GRADE_OPTIONS.map((option) => {
+                    const active = option === gradeSelection;
+                    return (
+                      <Link
+                        key={option}
+                        href={toggleHref(slug, selectedPrinting?.id ?? null, option, debugEnabled)}
+                        className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${active ? "btn-accent" : "btn-ghost"}`}
+                      >
+                        {gradeLabel(option)}
+                      </Link>
+                    );
+                  })}
                 </div>
-                <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(0,0,0,0)_0%,rgba(0,0,0,0)_45%,rgba(0,0,0,0.35)_62%,rgba(0,0,0,0.85)_80%,rgba(0,0,0,1)_100%)]" />
-                <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(8,12,18,0.26),rgba(8,12,18,0.08)_24%,transparent_42%)]" />
-              </>
-            ) : (
-              <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(255,255,255,0.08),transparent_45%),linear-gradient(to_bottom,rgba(255,255,255,0.04),rgba(8,12,18,0.84))]" />
-            )}
+              </div>
+            </>
+          }
+        >
+          <div className="flex flex-wrap gap-2">
+            {printings.map((row) => {
+              const active = selectedPrinting?.id === row.id;
+              return (
+                <Link
+                  key={row.id}
+                  href={toggleHref(slug, row.id, gradeSelection, debugEnabled)}
+                  className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${active ? "btn-accent" : "btn-ghost"}`}
+                >
+                  {printingOptionLabel(row)}
+                </Link>
+              );
+            })}
           </div>
 
-          <div
-            className="relative z-10 mt-[calc(var(--panel-top-mobile)-var(--reveal-h-mobile))] sm:mt-[calc(var(--panel-top-desktop)-var(--reveal-h-desktop))]"
-            style={revealStyle}
-          >
-            <div className="glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
-              <div className="grid gap-5 lg:grid-cols-[240px_minmax(0,1fr)] lg:items-start">
-                <div>
-                  <div className="rounded-[var(--radius-card)] border-app border bg-surface/78 p-[var(--space-card)] backdrop-blur-sm">
-                    <p className="text-muted text-[11px] font-semibold uppercase tracking-[0.08em]">Selected Printing</p>
-                    <p className="text-app mt-2 text-sm font-semibold">{selectedPrintingLabel}</p>
-                    <p className="text-muted mt-1 text-xs">
-                      {selectedPrinting?.image_url ? "Hero art is sourced from the selected printing." : "No artwork available for the selected printing yet."}
-                    </p>
-                  </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <SignalBadge label={scarcity.label} tone={scarcity.tone} prominent />
+            <SignalBadge label={liquidity.label} tone={liquidity.tone} prominent />
+          </div>
 
-                  <div className="mt-4 rounded-[var(--radius-card)] border-app border bg-surface/78 p-[var(--space-card)] backdrop-blur-sm">
-                    <p className="text-muted text-[11px] font-semibold uppercase tracking-[0.08em]">Grade Filter</p>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {GRADE_OPTIONS.map((option) => {
-                        const active = option === gradeSelection;
-                        return (
-                          <Link
-                            key={option}
-                            href={toggleHref(slug, selectedPrinting?.id ?? null, option, debugEnabled)}
-                            className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${active ? "btn-accent" : "btn-ghost"}`}
-                          >
-                            {gradeLabel(option)}
-                          </Link>
-                        );
-                      })}
-                    </div>
+          <div className="mt-5 grid gap-3 sm:grid-cols-2">
+            <div className="rounded-[var(--radius-card)] border-app border bg-surface-soft/45 p-[var(--space-card)]">
+              <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Population Snapshot</p>
+              <p className="text-app mt-2 text-xl font-semibold">
+                {snapshotData?.active_listings_7d ? `${snapshotData.active_listings_7d} live asks / 7D` : "Collecting"}
+              </p>
+              <p className="text-muted mt-1 text-xs">
+                {snapshotData?.active_listings_7d ? "Observed live supply across recent sessions." : "Waiting for enough observed listings."}
+              </p>
+            </div>
+            <div className="rounded-[var(--radius-card)] border-app border bg-surface-soft/45 p-[var(--space-card)]">
+              <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Price Signal</p>
+              <p className="text-app mt-2 text-xl font-semibold">{formatUsdCompact(snapshotData?.median_ask_7d)}</p>
+              <p className="text-muted mt-1 text-xs">
+                {snapshotData?.median_ask_7d !== null && snapshotData?.median_ask_7d !== undefined
+                  ? "Current 7-day median ask."
+                  : "Collecting data from live market observations."}
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-5 rounded-[var(--radius-card)] border-app border bg-surface-soft/45 p-[var(--space-card)]">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Market Snapshot (TCG)</p>
+                <p className="text-muted mt-1 text-xs">TCG market data (daily refresh)</p>
+              </div>
+              {tcgSnapshot.item?.name ? (
+                <p className="text-muted text-[11px]">
+                  {tcgSnapshot.item.name}
+                  {tcgSnapshot.item.number ? ` • #${tcgSnapshot.item.number}` : ""}
+                </p>
+              ) : null}
+            </div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-[var(--radius-input)] border-app border bg-surface/40 p-3">
+                <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Market</p>
+                <p className="text-app mt-2 text-lg font-semibold">{formatUsdCompact(tcgSnapshot.item?.marketPrice)}</p>
+              </div>
+              <div className="rounded-[var(--radius-input)] border-app border bg-surface/40 p-3">
+                <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Low</p>
+                <p className="text-app mt-2 text-lg font-semibold">{formatUsdCompact(tcgSnapshot.item?.lowPrice)}</p>
+              </div>
+              <div className="rounded-[var(--radius-input)] border-app border bg-surface/40 p-3">
+                <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Mid</p>
+                <p className="text-app mt-2 text-lg font-semibold">{formatUsdCompact(tcgSnapshot.item?.midPrice)}</p>
+              </div>
+              <div className="rounded-[var(--radius-input)] border-app border bg-surface/40 p-3">
+                <p className="text-muted text-[11px] uppercase tracking-[0.08em]">High</p>
+                <p className="text-app mt-2 text-lg font-semibold">{formatUsdCompact(tcgSnapshot.item?.highPrice)}</p>
+              </div>
+            </div>
+            <p className="text-muted mt-3 text-xs">
+              {tcgSnapshot.item
+                ? `${tcgSnapshot.setName ?? "Matched set"}${tcgSnapshot.updatedAt ? ` • Updated ${new Date(tcgSnapshot.updatedAt).toLocaleDateString()}` : ""}`
+                : "Collecting"}
+            </p>
+          </div>
+
+          {debugEnabled ? (
+            <details className="mt-4 rounded-[var(--radius-card)] border-app border bg-surface-soft/30 p-[var(--space-card)]">
+              <summary className="cursor-pointer list-none text-app text-sm font-semibold">
+                TCG Match Debug
+              </summary>
+              <div className="mt-3 space-y-4 text-xs">
+                <div className="rounded-[var(--radius-input)] border-app border bg-surface/35 p-3">
+                  <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Canonical</p>
+                  <div className="mt-2 grid gap-1 text-muted">
+                    <p>Name: {tcgSnapshot.debug.canonical.name}</p>
+                    <p>Set: {tcgSnapshot.debug.canonical.setName ?? "Unknown"}</p>
+                    <p>Number: {tcgSnapshot.debug.canonical.cardNumber ?? "Unknown"}</p>
+                    <p>Year: {tcgSnapshot.debug.canonical.year ?? "Unknown"}</p>
+                    <p>Set code: {tcgSnapshot.debug.canonical.setCode ?? "Unknown"}</p>
+                    <p>
+                      Printing: {tcgSnapshot.debug.canonical.finish ?? "Unknown"} / {tcgSnapshot.debug.canonical.edition ?? "Unknown"}
+                    </p>
                   </div>
                 </div>
 
-                <div>
-                  <div key={selectedPrinting?.id ?? "default-printing"} className="results-enter rounded-[var(--radius-card)] border-app border bg-surface/82 p-[var(--space-panel)] backdrop-blur-md">
-                    <p className="text-app text-4xl font-semibold tracking-[-0.03em] sm:text-5xl">{canonical.canonical_name}</p>
-                    <p className="text-muted mt-3 text-sm sm:text-base">
-                      {canonical.set_name ?? "Unknown set"}
-                      {canonical.card_number ? ` • #${canonical.card_number}` : ""}
-                      {canonical.year ? ` • ${canonical.year}` : ""}
+                <div className="rounded-[var(--radius-input)] border-app border bg-surface/35 p-3">
+                  <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Set Resolution</p>
+                  <div className="mt-2 grid gap-1 text-muted">
+                    <p>Query used: {tcgSnapshot.debug.setResolution.queryUsed ?? "None"}</p>
+                    <p>Normalized query: {tcgSnapshot.debug.setResolution.normalizedQuery ?? "None"}</p>
+                    <p>
+                      Chosen:{" "}
+                      {tcgSnapshot.debug.setResolution.chosen
+                        ? `${tcgSnapshot.debug.setResolution.chosen.id} • ${tcgSnapshot.debug.setResolution.chosen.name ?? "Unnamed"} • score ${tcgSnapshot.debug.setResolution.chosen.score}`
+                        : "No set match"}
                     </p>
-
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {printings.map((row) => {
-                        const active = selectedPrinting?.id === row.id;
-                        return (
-                          <Link
-                            key={row.id}
-                            href={toggleHref(slug, row.id, gradeSelection, debugEnabled)}
-                            className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${active ? "btn-accent" : "btn-ghost"}`}
-                          >
-                            {printingOptionLabel(row)}
-                          </Link>
-                        );
-                      })}
-                    </div>
-
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      <SignalBadge label={scarcity.label} tone={scarcity.tone} prominent />
-                      <SignalBadge label={liquidity.label} tone={liquidity.tone} prominent />
-                    </div>
-
-                    <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                      <div className="rounded-[var(--radius-card)] border-app border bg-surface-soft/45 p-[var(--space-card)]">
-                        <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Population Snapshot</p>
-                        <p className="text-app mt-2 text-xl font-semibold">
-                          {snapshotData?.active_listings_7d ? `${snapshotData.active_listings_7d} live asks / 7D` : "Collecting"}
-                        </p>
-                        <p className="text-muted mt-1 text-xs">
-                          {snapshotData?.active_listings_7d ? "Observed live supply across recent sessions." : "Waiting for enough observed listings."}
-                        </p>
-                      </div>
-                      <div className="rounded-[var(--radius-card)] border-app border bg-surface-soft/45 p-[var(--space-card)]">
-                        <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Price Signal</p>
-                        <p className="text-app mt-2 text-xl font-semibold">{formatUsdCompact(snapshotData?.median_ask_7d)}</p>
-                        <p className="text-muted mt-1 text-xs">
-                          {snapshotData?.median_ask_7d !== null && snapshotData?.median_ask_7d !== undefined
-                            ? "Current 7-day median ask."
-                            : "Collecting data from live market observations."}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="mt-5 rounded-[var(--radius-card)] border-app border bg-surface-soft/45 p-[var(--space-card)]">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div>
-                          <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Market Snapshot (TCG)</p>
-                          <p className="text-muted mt-1 text-xs">TCG market data (daily refresh)</p>
-                        </div>
-                        {tcgSnapshot.item?.name ? (
-                          <p className="text-muted text-[11px]">
-                            {tcgSnapshot.item.name}
-                            {tcgSnapshot.item.number ? ` • #${tcgSnapshot.item.number}` : ""}
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {tcgSnapshot.debug.setResolution.candidates.length === 0 ? (
+                      <p className="text-muted">No candidate sets returned.</p>
+                    ) : (
+                      tcgSnapshot.debug.setResolution.candidates.map((candidate) => (
+                        <div key={candidate.id} className="rounded-[var(--radius-input)] border-app border bg-surface/30 p-2 text-muted">
+                          <p>
+                            {candidate.id} • {candidate.name ?? "Unnamed"}
                           </p>
-                        ) : null}
-                      </div>
-                      <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                        <div className="rounded-[var(--radius-input)] border-app border bg-surface/40 p-3">
-                          <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Market</p>
-                          <p className="text-app mt-2 text-lg font-semibold">{formatUsdCompact(tcgSnapshot.item?.marketPrice)}</p>
+                          <p>
+                            Code {candidate.code ?? "n/a"} • Year {candidate.year ?? "n/a"} • Score {candidate.score}
+                          </p>
                         </div>
-                        <div className="rounded-[var(--radius-input)] border-app border bg-surface/40 p-3">
-                          <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Low</p>
-                          <p className="text-app mt-2 text-lg font-semibold">{formatUsdCompact(tcgSnapshot.item?.lowPrice)}</p>
-                        </div>
-                        <div className="rounded-[var(--radius-input)] border-app border bg-surface/40 p-3">
-                          <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Mid</p>
-                          <p className="text-app mt-2 text-lg font-semibold">{formatUsdCompact(tcgSnapshot.item?.midPrice)}</p>
-                        </div>
-                        <div className="rounded-[var(--radius-input)] border-app border bg-surface/40 p-3">
-                          <p className="text-muted text-[11px] uppercase tracking-[0.08em]">High</p>
-                          <p className="text-app mt-2 text-lg font-semibold">{formatUsdCompact(tcgSnapshot.item?.highPrice)}</p>
-                        </div>
-                      </div>
-                      <p className="text-muted mt-3 text-xs">
-                        {tcgSnapshot.item
-                          ? `${tcgSnapshot.setName ?? "Matched set"}${tcgSnapshot.updatedAt ? ` • Updated ${new Date(tcgSnapshot.updatedAt).toLocaleDateString()}` : ""}`
-                          : "Collecting"}
-                      </p>
-                    </div>
+                      ))
+                    )}
+                  </div>
+                </div>
 
-                    {debugEnabled ? (
-                      <details className="mt-4 rounded-[var(--radius-card)] border-app border bg-surface-soft/30 p-[var(--space-card)]">
-                        <summary className="cursor-pointer list-none text-app text-sm font-semibold">
-                          TCG Match Debug
-                        </summary>
-                        <div className="mt-3 space-y-4 text-xs">
-                          <div className="rounded-[var(--radius-input)] border-app border bg-surface/35 p-3">
-                            <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Canonical</p>
-                            <div className="mt-2 grid gap-1 text-muted">
-                              <p>Name: {tcgSnapshot.debug.canonical.name}</p>
-                              <p>Set: {tcgSnapshot.debug.canonical.setName ?? "Unknown"}</p>
-                              <p>Number: {tcgSnapshot.debug.canonical.cardNumber ?? "Unknown"}</p>
-                              <p>Year: {tcgSnapshot.debug.canonical.year ?? "Unknown"}</p>
-                              <p>Set code: {tcgSnapshot.debug.canonical.setCode ?? "Unknown"}</p>
-                              <p>
-                                Printing: {tcgSnapshot.debug.canonical.finish ?? "Unknown"} / {tcgSnapshot.debug.canonical.edition ?? "Unknown"}
-                              </p>
-                            </div>
-                          </div>
-
-                          <div className="rounded-[var(--radius-input)] border-app border bg-surface/35 p-3">
-                            <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Set Resolution</p>
-                            <div className="mt-2 grid gap-1 text-muted">
-                              <p>Query used: {tcgSnapshot.debug.setResolution.queryUsed ?? "None"}</p>
-                              <p>Normalized query: {tcgSnapshot.debug.setResolution.normalizedQuery ?? "None"}</p>
-                              <p>
-                                Chosen:{" "}
-                                {tcgSnapshot.debug.setResolution.chosen
-                                  ? `${tcgSnapshot.debug.setResolution.chosen.id} • ${tcgSnapshot.debug.setResolution.chosen.name ?? "Unnamed"} • score ${tcgSnapshot.debug.setResolution.chosen.score}`
-                                  : "No set match"}
-                              </p>
-                            </div>
-                            <div className="mt-3 space-y-2">
-                              {tcgSnapshot.debug.setResolution.candidates.length === 0 ? (
-                                <p className="text-muted">No candidate sets returned.</p>
-                              ) : (
-                                tcgSnapshot.debug.setResolution.candidates.map((candidate) => (
-                                  <div key={candidate.id} className="rounded-[var(--radius-input)] border-app border bg-surface/30 p-2 text-muted">
-                                    <p>
-                                      {candidate.id} • {candidate.name ?? "Unnamed"}
-                                    </p>
-                                    <p>
-                                      Code {candidate.code ?? "n/a"} • Year {candidate.year ?? "n/a"} • Score {candidate.score}
-                                    </p>
-                                  </div>
-                                ))
-                              )}
-                            </div>
-                          </div>
-
-                          <div className="rounded-[var(--radius-input)] border-app border bg-surface/35 p-3">
-                            <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Product Resolution</p>
-                            <div className="mt-2 grid gap-1 text-muted">
-                              <p>Products in set: {tcgSnapshot.debug.productResolution?.productsInSet ?? 0}</p>
-                              <p>
-                                Chosen:{" "}
-                                {tcgSnapshot.debug.productResolution?.chosen
-                                  ? `${tcgSnapshot.debug.productResolution.chosen.productId} • ${tcgSnapshot.debug.productResolution.chosen.name ?? "Unnamed"}`
-                                  : "No product match"}
-                              </p>
-                              <p>Reason: {tcgSnapshot.debug.productResolution?.chosenReason ?? "No reason recorded"}</p>
-                              {tcgSnapshot.debug.productResolution?.warning ? <p>Warning: {tcgSnapshot.debug.productResolution.warning}</p> : null}
-                              {tcgSnapshot.debug.error ? <p>Error: {tcgSnapshot.debug.error}</p> : null}
-                            </div>
-                            <div className="mt-3 space-y-2">
-                              {tcgSnapshot.debug.productResolution?.topCandidates.length ? (
-                                tcgSnapshot.debug.productResolution.topCandidates.map((candidate) => (
-                                  <div key={candidate.productId} className="rounded-[var(--radius-input)] border-app border bg-surface/30 p-2 text-muted">
-                                    <p>
-                                      {candidate.productId} • {candidate.name ?? "Unnamed"}
-                                    </p>
-                                    <p>
-                                      #{candidate.number ?? "n/a"} • {candidate.rarity ?? "No rarity"} • Score {candidate.score}
-                                    </p>
-                                    <p>Market {formatUsdCompact(candidate.marketPrice)}</p>
-                                  </div>
-                                ))
-                              ) : (
-                                <p className="text-muted">No scored product candidates.</p>
-                              )}
-                            </div>
-                          </div>
+                <div className="rounded-[var(--radius-input)] border-app border bg-surface/35 p-3">
+                  <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Product Resolution</p>
+                  <div className="mt-2 grid gap-1 text-muted">
+                    <p>Products in set: {tcgSnapshot.debug.productResolution?.productsInSet ?? 0}</p>
+                    <p>
+                      Chosen:{" "}
+                      {tcgSnapshot.debug.productResolution?.chosen
+                        ? `${tcgSnapshot.debug.productResolution.chosen.productId} • ${tcgSnapshot.debug.productResolution.chosen.name ?? "Unnamed"}`
+                        : "No product match"}
+                    </p>
+                    <p>Reason: {tcgSnapshot.debug.productResolution?.chosenReason ?? "No reason recorded"}</p>
+                    {tcgSnapshot.debug.productResolution?.warning ? <p>Warning: {tcgSnapshot.debug.productResolution.warning}</p> : null}
+                    {tcgSnapshot.debug.error ? <p>Error: {tcgSnapshot.debug.error}</p> : null}
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {tcgSnapshot.debug.productResolution?.topCandidates.length ? (
+                      tcgSnapshot.debug.productResolution.topCandidates.map((candidate) => (
+                        <div key={candidate.productId} className="rounded-[var(--radius-input)] border-app border bg-surface/30 p-2 text-muted">
+                          <p>
+                            {candidate.productId} • {candidate.name ?? "Unnamed"}
+                          </p>
+                          <p>
+                            #{candidate.number ?? "n/a"} • {candidate.rarity ?? "No rarity"} • Score {candidate.score}
+                          </p>
+                          <p>Market {formatUsdCompact(candidate.marketPrice)}</p>
                         </div>
-                      </details>
-                    ) : null}
+                      ))
+                    ) : (
+                      <p className="text-muted">No scored product candidates.</p>
+                    )}
                   </div>
                 </div>
               </div>
-            </div>
-          </div>
-        </section>
+            </details>
+          ) : null}
+        </CanonicalHeroParallax>
 
         <MarketSnapshotTiles slug={slug} printingId={selectedPrinting?.id ?? null} grade={gradeSelection} initialData={snapshot} />
 
