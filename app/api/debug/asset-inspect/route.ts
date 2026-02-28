@@ -33,7 +33,7 @@ export async function GET(req: Request) {
   const [{ data: canonical }, { data: metricsRows }, selectedVariantRef] = await Promise.all([
     supabase
       .from("canonical_cards")
-      .select("slug, canonical_name, set_name, set_code, year, card_number, variant")
+      .select("slug, canonical_name, set_name, year, card_number, variant")
       .eq("slug", slug)
       .maybeSingle(),
     supabase
