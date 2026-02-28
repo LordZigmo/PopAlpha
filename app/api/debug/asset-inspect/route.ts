@@ -6,7 +6,10 @@ function auth(req: Request): boolean {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false;
   const header = req.headers.get("authorization") ?? "";
-  return header === `Bearer ${secret}`;
+  if (header === `Bearer ${secret}`) return true;
+  // Also accept ?secret= for browser testing.
+  const qs = new URL(req.url).searchParams.get("secret") ?? "";
+  return qs === secret;
 }
 
 export async function GET(req: Request) {
