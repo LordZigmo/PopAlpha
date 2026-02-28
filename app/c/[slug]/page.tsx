@@ -281,48 +281,45 @@ export default async function CanonicalCardPage({
           title={canonical.canonical_name}
           subtitle={`${canonical.set_name ?? "Unknown set"}${canonical.card_number ? ` • #${canonical.card_number}` : ""}${canonical.year ? ` • ${canonical.year}` : ""}`}
           leftColumn={
-            <>
-              <div className="rounded-[var(--radius-card)] border-app border bg-surface/78 p-[var(--space-card)] backdrop-blur-sm">
-                <p className="text-muted text-[11px] font-semibold uppercase tracking-[0.08em]">Selected Printing</p>
-                <p className="text-app mt-2 text-sm font-semibold">{selectedPrintingLabel}</p>
-                <p className="text-muted mt-1 text-xs">
-                  {selectedPrinting?.image_url ? "Hero art is sourced from the selected printing." : "No artwork available for the selected printing yet."}
-                </p>
-              </div>
-
-              <div className="mt-4 rounded-[var(--radius-card)] border-app border bg-surface/78 p-[var(--space-card)] backdrop-blur-sm">
-                <p className="text-muted text-[11px] font-semibold uppercase tracking-[0.08em]">Grade Filter</p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {GRADE_OPTIONS.map((option) => {
-                    const active = option === gradeSelection;
-                    return (
-                      <Link
-                        key={option}
-                        href={toggleHref(slug, selectedPrinting?.id ?? null, option, debugEnabled)}
-                        className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${active ? "btn-accent" : "btn-ghost"}`}
-                      >
-                        {gradeLabel(option)}
-                      </Link>
-                    );
-                  })}
-                </div>
-              </div>
-            </>
+            <div className="rounded-[var(--radius-card)] border-app border bg-surface/78 p-[var(--space-card)] backdrop-blur-sm">
+              <p className="text-muted text-[11px] font-semibold uppercase tracking-[0.08em]">Selected Printing</p>
+              <p className="text-app mt-2 text-sm font-semibold">{selectedPrintingLabel}</p>
+              <p className="text-muted mt-1 text-xs">
+                {selectedPrinting?.image_url ? "Hero art is sourced from the selected printing." : "No artwork available for the selected printing yet."}
+              </p>
+            </div>
           }
         >
-          <div className="flex flex-wrap gap-2">
-            {printings.map((row) => {
-              const active = selectedPrinting?.id === row.id;
-              return (
-                <Link
-                  key={row.id}
-                  href={toggleHref(slug, row.id, gradeSelection, debugEnabled)}
-                  className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${active ? "btn-accent" : "btn-ghost"}`}
-                >
-                  {printingOptionLabel(row)}
-                </Link>
-              );
-            })}
+          <div className="rounded-[var(--radius-card)] border border-white/8 bg-surface-soft/40 p-3">
+            <div className="flex flex-wrap gap-2">
+              {printings.map((row) => {
+                const active = selectedPrinting?.id === row.id;
+                return (
+                  <Link
+                    key={row.id}
+                    href={toggleHref(slug, row.id, gradeSelection, debugEnabled)}
+                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${active ? "btn-accent" : "btn-ghost"}`}
+                  >
+                    {printingOptionLabel(row)}
+                  </Link>
+                );
+              })}
+            </div>
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              {GRADE_OPTIONS.map((option) => {
+                const active = option === gradeSelection;
+                return (
+                  <Link
+                    key={option}
+                    href={toggleHref(slug, selectedPrinting?.id ?? null, option, debugEnabled)}
+                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${active ? "btn-accent" : "btn-ghost"}`}
+                  >
+                    {gradeLabel(option)}
+                  </Link>
+                );
+              })}
+            </div>
           </div>
 
           <div className="mt-4 flex flex-wrap gap-2">

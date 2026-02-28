@@ -52,7 +52,7 @@ export default function CanonicalHeroParallax(props: CanonicalHeroParallaxProps)
 
   return (
     <section ref={rootRef} className="relative mt-4 [--p:0]">
-      <div className="sticky top-0 z-0 h-[240px] overflow-hidden rounded-[var(--radius-panel)] border-app border bg-surface-soft/35 sm:h-[320px]">
+      <div className="sticky top-0 z-0 h-[240px] overflow-hidden rounded-[var(--radius-panel)] border-app border bg-surface/70 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)] sm:h-[320px]">
         {imageUrl ? (
           <>
             <div
@@ -65,24 +65,27 @@ export default function CanonicalHeroParallax(props: CanonicalHeroParallaxProps)
                 willChange: "transform, opacity, filter",
               }}
             >
-              {/* Keep the top half of the card visible while the lower business fades under the panel. */}
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={imageUrl}
-                alt={title}
-                className="absolute left-1/2 top-0 h-[280px] w-[min(560px,92vw)] max-w-none -translate-x-1/2 object-cover object-[center_18%] drop-shadow-[0_24px_56px_rgba(0,0,0,0.48)] sm:h-[380px]"
-              />
+              <div className="absolute inset-x-0 top-3 flex justify-center sm:top-4">
+                {/* Keep the hero art framed as its own object and let the sheet overlap only slightly below it. */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={imageUrl}
+                  alt={title}
+                  className="h-[260px] w-[min(560px,92vw)] max-w-none object-cover object-[center_18%] drop-shadow-[0_24px_56px_rgba(0,0,0,0.48)] sm:h-[360px]"
+                />
+              </div>
             </div>
             <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(0,0,0,0)_0%,rgba(0,0,0,0)_45%,rgba(0,0,0,0.35)_62%,rgba(0,0,0,0.85)_80%,rgba(0,0,0,1)_100%)]" />
             <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(8,12,18,0.24),rgba(8,12,18,0.06)_22%,transparent_38%)]" />
+            <div className="absolute inset-x-0 bottom-0 h-20 bg-[linear-gradient(to_bottom,rgba(16,21,28,0),rgba(16,21,28,0.92))]" />
           </>
         ) : (
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(255,255,255,0.08),transparent_45%),linear-gradient(to_bottom,rgba(255,255,255,0.04),rgba(8,12,18,0.84))]" />
         )}
       </div>
 
-      <div className="relative z-10 -mt-[90px] sm:-mt-[110px]">
-        <div className="glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
+      <div className="relative z-10 -mt-6 sm:-mt-9">
+        <div className="rounded-[var(--radius-panel)] border border-white/10 bg-surface/90 p-[var(--space-panel)] shadow-[0_16px_32px_rgba(0,0,0,0.24)] backdrop-blur-md">
           <div className="grid gap-5 lg:grid-cols-[240px_minmax(0,1fr)] lg:items-start">
             <div>{leftColumn}</div>
 
