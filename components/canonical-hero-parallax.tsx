@@ -85,7 +85,7 @@ export default function CanonicalHeroParallax(props: CanonicalHeroParallaxProps)
       </div>
 
       <div className="relative z-10 -mt-6 sm:-mt-9">
-        <div className="ui-card ui-card-panel">
+        <div className="rounded-[var(--radius-panel)] border border-white/8 bg-[linear-gradient(180deg,rgba(18,22,36,0.9),rgba(10,13,24,0.96))] p-[var(--space-panel)] shadow-[0_18px_40px_rgba(0,0,0,0.24)] backdrop-blur-md">
           <div className="grid gap-5 lg:grid-cols-[240px_minmax(0,1fr)] lg:items-start">
             <div>{leftColumn}</div>
 

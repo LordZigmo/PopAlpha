@@ -191,10 +191,6 @@ function formatUsdCompact(value: number | null | undefined): string {
   }).format(value);
 }
 
-function marketSignalTone(value: number | null | undefined): "neutral" | "positive" {
-  if (value === null || value === undefined || !Number.isFinite(value)) return "neutral";
-  return "positive";
-}
 
 async function getTcgSnapshot(
   canonical: CanonicalCardRow,
@@ -329,57 +325,44 @@ export default async function CanonicalCardPage({
   });
   const tcgSnapshot = await getTcgSnapshot(canonical, selectedPrinting);
 
+  const subtitleText = [
+    canonical.set_name,
+    canonical.card_number ? `#${canonical.card_number}` : null,
+    canonical.year ? String(canonical.year) : null,
+  ]
+    .filter(Boolean)
+    .join(" • ");
+
+  const primaryPrice = formatUsdCompact(snapshotData?.median_ask_7d);
+  const primaryPriceLabel = `${gradeLabel(gradeSelection)} · 7-day median ask`;
+
   return (
     <PageShell>
       <CardDetailNavBar title={canonical.canonical_name} subtitle={selectedPrintingLabel} />
 
-      <div className="mx-auto max-w-5xl px-4 pb-[max(env(safe-area-inset-bottom),2.5rem)] pt-4 sm:px-6 sm:pb-[max(env(safe-area-inset-bottom),3.5rem)]">
-        <GroupedSection>
-          <CanonicalCardFloatingHero
-            imageUrl={selectedPrinting?.image_url ?? null}
-            title={canonical.canonical_name}
-            overlay={
-              <GroupCard
-                inset
-                header={<p className="text-[15px] font-semibold text-[#f5f7fb]">Canonical Card</p>}
-              >
-                <div className="divide-y divide-white/[0.06]">
-                  <StatRow label="Name" value={canonical.canonical_name} />
-                  <StatRow label="Set" value={canonical.set_name ?? "Unknown set"} />
-                  <StatRow label="Card number" value={canonical.card_number ? `#${canonical.card_number}` : "Unknown"} />
-                  <StatRow label="Year" value={canonical.year ?? "Unknown"} />
-                  <StatRow label="Printing shown" value={selectedPrintingLabel} />
-                </div>
-              </GroupCard>
-            }
-          />
+      <CanonicalCardFloatingHero
+        imageUrl={selectedPrinting?.image_url ?? null}
+        title={canonical.canonical_name}
+        subtitle={subtitleText}
+        price={primaryPrice}
+        priceLabel={primaryPriceLabel}
+        signals={
+          <>
+            <Pill label={`Scarcity ${scarcity.label}`} tone={scarcity.tone} />
+            <Pill label={`Liquidity ${liquidity.label}`} tone={liquidity.tone} />
+            <Pill label={selectedPrintingLabel} tone={selectedPrinting ? "neutral" : "warning"} />
+          </>
+        }
+      />
 
+      <div className="mx-auto max-w-5xl px-4 pb-[max(env(safe-area-inset-bottom),2.5rem)] pt-4 sm:px-6 sm:pb-[max(env(safe-area-inset-bottom),3.5rem)]">
+        <GroupedSection title="About">
           <GroupCard>
-            <div className="rounded-[24px] border border-white/[0.06] bg-[#141820] p-5">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <h1 className="text-[28px] font-semibold tracking-[-0.04em] text-[#f5f7fb] sm:text-[36px]">
-                    {canonical.canonical_name}
-                  </h1>
-                  <p className="mt-2 text-[15px] text-[#98a0ae]">
-                    {canonical.set_name ?? "Unknown set"}
-                    {canonical.card_number ? ` • #${canonical.card_number}` : ""}
-                    {canonical.year ? ` • ${canonical.year}` : ""}
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Pill label={selectedPrintingLabel} tone={selectedPrinting ? "neutral" : "warning"} />
-                  <Pill label={gradeLabel(gradeSelection)} tone="neutral" />
-                </div>
-              </div>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <Pill label={`Scarcity ${scarcity.label}`} tone={scarcity.tone} />
-                <Pill label={`Liquidity ${liquidity.label}`} tone={liquidity.tone} />
-                <Pill
-                  label={snapshotData?.median_ask_7d !== null && snapshotData?.median_ask_7d !== undefined ? "Price signal live" : "Collecting"}
-                  tone={marketSignalTone(snapshotData?.median_ask_7d)}
-                />
-              </div>
+            <div className="divide-y divide-white/[0.06]">
+              <StatRow label="Set" value={canonical.set_name ?? "Unknown"} />
+              <StatRow label="Card number" value={canonical.card_number ? `#${canonical.card_number}` : "Unknown"} />
+              <StatRow label="Year" value={canonical.year ?? "Unknown"} />
+              <StatRow label="Printing" value={selectedPrintingLabel} />
             </div>
           </GroupCard>
         </GroupedSection>
@@ -492,23 +475,6 @@ export default async function CanonicalCardPage({
               </div>
             </div>
           </GroupCard>
-        </GroupedSection>
-
-        <GroupedSection title="Primary Signals" description="Fast, comparable reads for scarcity, liquidity, and price.">
-          <div className="grid gap-3 md:grid-cols-3">
-            <StatTile label="Scarcity" value={scarcity.label} detail={snapshotData?.active_listings_7d === null ? "Forming" : "Live ask depth"} tone={scarcity.tone} />
-            <StatTile label="Liquidity" value={liquidity.label} detail={snapshotData?.active_listings_7d === null ? "Forming" : "7-day activity"} tone={liquidity.tone} />
-            <StatTile
-              label="Price Signal"
-              value={formatUsdCompact(snapshotData?.median_ask_7d)}
-              detail={
-                snapshotData?.median_ask_7d !== null && snapshotData?.median_ask_7d !== undefined
-                  ? "Current 7-day median"
-                  : "Collecting"
-              }
-              tone={marketSignalTone(snapshotData?.median_ask_7d)}
-            />
-          </div>
         </GroupedSection>
 
         <GroupedSection title="Market Snapshot" description="Population and pricing context in one grouped view.">
