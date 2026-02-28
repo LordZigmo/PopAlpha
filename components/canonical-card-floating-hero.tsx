@@ -60,11 +60,11 @@ export default function CanonicalCardFloatingHero({
     <section
       ref={rootRef}
       className="relative [--p:0] overflow-hidden"
-      style={{ minHeight: "580px" }}
+      style={{ minHeight: "700px" }}
     >
       {/* Ambient glow behind the card */}
       <div
-        className="pointer-events-none absolute inset-x-0 top-0 h-[440px]"
+        className="pointer-events-none absolute inset-x-0 top-0 h-[600px]"
         style={{
           background:
             "radial-gradient(70% 55% at 50% 20%, rgba(110,76,255,0.14) 0%, transparent 70%)",
@@ -89,14 +89,14 @@ export default function CanonicalCardFloatingHero({
           <img
             src={imageUrl}
             alt={title}
-            className="h-[380px] sm:h-[440px] w-auto max-w-[88vw] object-contain"
+            className="h-[680px] sm:h-[820px] w-auto max-w-[90vw] object-contain"
             style={{
               filter:
                 "drop-shadow(0 28px 64px rgba(0,0,0,0.72)) drop-shadow(0 6px 18px rgba(0,0,0,0.42))",
             }}
           />
         ) : (
-          <div className="h-[380px] w-60 rounded-[28px] border border-white/[0.06] bg-white/[0.03]" />
+          <div className="h-[680px] w-[calc(680px*0.716)] rounded-[28px] border border-white/[0.06] bg-white/[0.03]" />
         )}
       </div>
 
