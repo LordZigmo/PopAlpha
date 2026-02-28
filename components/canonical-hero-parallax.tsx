@@ -52,10 +52,9 @@ export default function CanonicalHeroParallax(props: CanonicalHeroParallaxProps)
 
   return (
     <section ref={rootRef} className="relative mt-5 [--p:0] sm:mt-6">
-      <div className="sticky top-0 z-0 h-[248px] overflow-hidden sm:h-[336px]">
+      <div className="sticky top-0 z-0 h-[280px] overflow-hidden bg-transparent sm:h-[380px]">
         {imageUrl ? (
           <>
-            <div className="absolute inset-x-0 top-0 h-24 bg-[linear-gradient(to_bottom,rgba(10,14,20,0.6),rgba(10,14,20,0))]" />
             <div
               className="absolute inset-0"
               style={{
@@ -66,13 +65,13 @@ export default function CanonicalHeroParallax(props: CanonicalHeroParallaxProps)
                 willChange: "transform, opacity, filter",
               }}
             >
-              <div className="absolute inset-x-0 top-4 flex justify-center sm:top-5">
+              <div className="absolute inset-x-0 top-4 flex justify-center sm:top-6">
                 {/* Let the card art feel freefloating and larger while preserving the top border in view. */}
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={imageUrl}
                   alt={title}
-                  className="h-[300px] w-[min(720px,calc(100vw-1.5rem))] max-w-none object-contain object-top drop-shadow-[0_28px_64px_rgba(0,0,0,0.5)] sm:h-[420px] sm:w-[min(760px,calc(100vw-3rem))]"
+                  className="h-[520px] w-[min(1120px,calc(200vw-2rem))] max-w-none object-contain object-top drop-shadow-[0_28px_64px_rgba(0,0,0,0.5)] sm:h-[760px] sm:w-[min(1520px,calc(200vw-4rem))]"
                 />
               </div>
             </div>
