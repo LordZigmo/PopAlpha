@@ -651,30 +651,30 @@ export default async function SearchPage({
                     <Link
                       key={row.canonical.slug}
                       href={`/c/${encodeURIComponent(row.canonical.slug)}`}
-                      className="group rounded-[var(--radius-card)] border-app border bg-surface-soft/24 p-3 transition duration-200 hover:-translate-y-0.5 hover:border-white/30 hover:bg-surface-soft/38"
+                      className="group relative block overflow-hidden rounded-[var(--radius-card)] border-app border bg-surface-soft/24 transition duration-200 hover:-translate-y-0.5 hover:border-white/30"
                     >
-                      <div className="relative flex min-h-[18rem] items-start justify-center overflow-hidden rounded-[var(--radius-input)] bg-transparent p-1 sm:min-h-[20rem]">
+                      <div className="relative aspect-[3/4] overflow-hidden bg-surface/20">
                         {primaryPrinting?.image_url ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
                             src={primaryPrinting.image_url}
                             alt={row.canonical.canonical_name}
-                            className="h-auto max-h-[18rem] w-auto max-w-full object-contain object-top drop-shadow-[0_14px_28px_rgba(0,0,0,0.35)] transition duration-200 group-hover:scale-[1.02] sm:max-h-[20rem]"
+                            className="h-full w-full object-cover object-top transition duration-200 group-hover:scale-[1.03]"
                           />
                         ) : (
-                          <div className="flex h-full w-full items-center justify-center p-4">
+                          <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.08),transparent_65%)] p-4">
                             <div className="rounded-[var(--radius-input)] border-app border bg-surface/35 px-3 py-2 text-center">
                               <p className="text-app text-xs font-semibold">Image pending</p>
                             </div>
                           </div>
                         )}
-                      </div>
-                      <div className="mt-3 min-w-0">
-                        <p className="text-app truncate text-sm font-semibold">{row.canonical.canonical_name}</p>
-                        <p className="text-muted mt-1 truncate text-xs">
-                          {row.canonical.year ? `${row.canonical.year}` : "Year unknown"}
-                          {row.canonical.set_name ? ` • ${row.canonical.set_name}` : ""}
-                        </p>
+                        <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-[linear-gradient(to_top,rgba(8,12,18,0.92),rgba(8,12,18,0.62)_48%,rgba(8,12,18,0))] p-3">
+                          <p className="text-app truncate text-sm font-semibold">{row.canonical.canonical_name}</p>
+                          <p className="text-muted mt-1 truncate text-xs">
+                            {row.canonical.year ? `${row.canonical.year}` : "Year unknown"}
+                            {row.canonical.set_name ? ` • ${row.canonical.set_name}` : ""}
+                          </p>
+                        </div>
                       </div>
                     </Link>
                   );
