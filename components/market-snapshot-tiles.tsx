@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import SignalBadge from "@/components/signal-badge";
+import { GroupCard, GroupedSection, Pill, Skeleton, StatRow, StatTile } from "@/components/ios-grouped-ui";
 
 type SnapshotPayload = {
   ok: boolean;
@@ -30,7 +30,7 @@ function formatUsd(value: number | null | undefined): string {
 }
 
 function formatPercent(value: number | null | undefined): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) return "Collecting";
+  if (value === null || value === undefined || !Number.isFinite(value)) return "Insufficient sample";
   const rounded = Math.abs(value) >= 10 ? value.toFixed(0) : value.toFixed(1);
   return `${value > 0 ? "+" : ""}${rounded}%`;
 }
@@ -45,29 +45,10 @@ function tileTone(value: number | null | undefined): "neutral" | "positive" | "n
   return value > 0 ? "positive" : "negative";
 }
 
-function Tile({
-  label,
-  value,
-  microcopy,
-  tone = "neutral",
-}: {
-  label: string;
-  value: string | number;
-  microcopy: string;
-  tone?: "neutral" | "positive" | "negative";
-}) {
-  return (
-    <div className="ui-card ui-card-standard">
-      <p className="text-muted text-[11px] uppercase tracking-[0.08em]">{label}</p>
-      <p className="text-app mt-2 text-xl font-semibold">{value}</p>
-      <div className="mt-2">
-        <SignalBadge
-          label={microcopy}
-          tone={tone === "neutral" ? "neutral" : tone === "positive" ? "positive" : "negative"}
-        />
-      </div>
-    </div>
-  );
+function changeMicrocopy(value: number | null): string {
+  if (value === null) return "Insufficient sample";
+  if (value === 0) return "Flat versus 30D";
+  return value > 0 ? "Pricing firming" : "Pricing easing";
 }
 
 export default function MarketSnapshotTiles({ slug, printingId, grade, initialData = null }: MarketSnapshotTilesProps) {
@@ -76,6 +57,7 @@ export default function MarketSnapshotTiles({ slug, printingId, grade, initialDa
 
   useEffect(() => {
     let cancelled = false;
+
     async function load() {
       setLoading(true);
       try {
@@ -90,6 +72,7 @@ export default function MarketSnapshotTiles({ slug, printingId, grade, initialDa
         if (!cancelled) setLoading(false);
       }
     }
+
     void load();
     return () => {
       cancelled = true;
@@ -121,46 +104,52 @@ export default function MarketSnapshotTiles({ slug, printingId, grade, initialDa
       : null;
 
   return (
-    <section className="ui-card ui-card-panel mt-8">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-app text-sm font-semibold uppercase tracking-[0.12em]">Market Intelligence</p>
-          <p className="text-muted mt-1 text-xs">Signal-first view of current ask depth and pricing pressure.</p>
-        </div>
-        {loading ? <SignalBadge label="Refreshing" tone="neutral" /> : null}
-      </div>
-      {!loading && data && !data.ok ? <p className="text-muted mt-3 text-sm">Snapshot unavailable right now.</p> : null}
-      {!loading && (!data || data.ok) ? (
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          <Tile label="Median Ask (7D)" value={formatUsd(median7d)} microcopy={median7d === null ? "Collecting data..." : "Rolling 7-day median"} />
-          <Tile
-            label="7D Change %"
-            value={formatPercent(changePct)}
-            microcopy={changePct === null ? "Insufficient sample" : changePct === 0 ? "Flat versus 30D" : changePct > 0 ? "Pricing firming" : "Pricing easing"}
-            tone={tileTone(changePct)}
-          />
-          <Tile
-            label="Trimmed Median (30D)"
-            value={formatUsd(trimmedMedian30d)}
-            microcopy={trimmedMedian30d === null ? "Waiting for observations" : "Outliers trimmed"}
-          />
-          <Tile
-            label="Active Listings (7D)"
-            value={active7d > 0 ? active7d : "Collecting"}
-            microcopy={active7d > 0 ? "Observed live supply" : "Waiting for observations"}
-          />
-          <Tile
-            label="30D Listing Velocity"
-            value={formatVelocity(listingVelocity)}
-            microcopy={listingVelocity === null ? "Signal forming..." : "Observed listings per day"}
-          />
-          <Tile
-            label="High-Low Spread (30D)"
-            value={formatUsd(spread30d)}
-            microcopy={spread30d === null ? "Insufficient sample" : "Ask range across 30D"}
-          />
-        </div>
-      ) : null}
-    </section>
+    <GroupedSection title="Market Intelligence" description="Signal-first view of current ask depth and pricing pressure.">
+      <GroupCard
+        header={
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[15px] font-semibold text-[#f5f7fb]">Live signal dashboard</p>
+              <p className="text-[12px] text-[#8c94a3]">Aligned metrics, clear states, no decorative noise.</p>
+            </div>
+            {loading ? <Pill label="Refreshing" tone="neutral" size="small" /> : null}
+          </div>
+        }
+      >
+        {!loading && data && !data.ok ? <p className="text-[14px] text-[#98a0ae]">Snapshot unavailable right now.</p> : null}
+
+        {loading && !data ? (
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <GroupCard key={index} inset>
+                <Skeleton className="h-3 w-24" />
+                <Skeleton className="mt-3 h-8 w-28" />
+                <Skeleton className="mt-4 h-6 w-24" />
+              </GroupCard>
+            ))}
+          </div>
+        ) : null}
+
+        {!loading && (!data || data.ok) ? (
+          <>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <StatTile label="Median Ask (7D)" value={formatUsd(median7d)} detail={median7d === null ? "Collecting" : "Rolling 7-day median"} />
+              <StatTile
+                label="7D Change"
+                value={formatPercent(changePct)}
+                detail={changeMicrocopy(changePct)}
+                tone={tileTone(changePct)}
+              />
+              <StatTile label="Trimmed Median (30D)" value={formatUsd(trimmedMedian30d)} detail={trimmedMedian30d === null ? "Collecting" : "Outliers trimmed"} />
+            </div>
+            <div className="mt-4 divide-y divide-white/[0.06] rounded-2xl border border-white/[0.06] bg-[#11151d] px-4">
+              <StatRow label="Active Listings (7D)" value={active7d > 0 ? active7d : "Collecting"} meta={active7d > 0 ? "Observed live supply" : "Collecting"} />
+              <StatRow label="Listing Velocity" value={formatVelocity(listingVelocity)} meta={listingVelocity === null ? "Forming" : "Observed per day"} />
+              <StatRow label="High-Low Spread (30D)" value={formatUsd(spread30d)} meta={spread30d === null ? "Insufficient sample" : "Ask range"} />
+            </div>
+          </>
+        ) : null}
+      </GroupCard>
+    </GroupedSection>
   );
 }

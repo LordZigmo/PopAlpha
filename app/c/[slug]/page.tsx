@@ -1,11 +1,16 @@
-import Link from "next/link";
+/**
+ * README
+ * Primitives: PageShell, NavBar, GroupedSection, GroupCard, StatRow, StatTile, SegmentedControl, Pill, Skeleton.
+ * Layout: sticky compact nav, identity card, grouped controls, primary signals, secondary snapshots, then market dashboards and listings.
+ * iOS grouped rules: matte dark surfaces, consistent radii and spacing, restrained separators, and touch targets sized for mobile-first interaction.
+ */
 import { notFound } from "next/navigation";
-import { getServerSupabaseClient } from "@/lib/supabaseServer";
-import CanonicalHeroParallax from "@/components/canonical-hero-parallax";
+import CardDetailNavBar from "@/components/card-detail-nav-bar";
 import EbayListings from "@/components/ebay-listings";
+import { GroupCard, GroupedSection, PageShell, Pill, SegmentedControl, StatRow, StatTile } from "@/components/ios-grouped-ui";
 import MarketSnapshotTiles from "@/components/market-snapshot-tiles";
-import SignalBadge from "@/components/signal-badge";
 import { buildEbayQuery, type GradeSelection } from "@/lib/ebay-query";
+import { getServerSupabaseClient } from "@/lib/supabaseServer";
 import {
   getCachedTcgSetPricing,
   resolveTcgProductMatch,
@@ -117,17 +122,17 @@ function toggleHref(slug: string, printingId: string | null, grade: GradeSelecti
 }
 
 function scarcitySignal(active7d: number | null): { label: string; tone: "positive" | "warning" | "neutral" } {
-  if (active7d === null || active7d === undefined) return { label: "Scarcity signal forming", tone: "neutral" };
-  if (active7d <= 2) return { label: "Scarcity: High", tone: "positive" };
-  if (active7d <= 6) return { label: "Scarcity: Moderate", tone: "warning" };
-  return { label: "Scarcity: Low", tone: "neutral" };
+  if (active7d === null || active7d === undefined) return { label: "Forming", tone: "neutral" };
+  if (active7d <= 2) return { label: "High", tone: "positive" };
+  if (active7d <= 6) return { label: "Moderate", tone: "warning" };
+  return { label: "Low", tone: "neutral" };
 }
 
 function liquiditySignal(active7d: number | null): { label: string; tone: "positive" | "warning" | "neutral" } {
-  if (active7d === null || active7d === undefined) return { label: "Liquidity signal forming...", tone: "neutral" };
-  if (active7d <= 2) return { label: "Liquidity: Thin", tone: "warning" };
-  if (active7d <= 6) return { label: "Liquidity: Moderate", tone: "neutral" };
-  return { label: "Liquidity: Active", tone: "positive" };
+  if (active7d === null || active7d === undefined) return { label: "Forming", tone: "neutral" };
+  if (active7d <= 2) return { label: "Thin", tone: "warning" };
+  if (active7d <= 6) return { label: "Moderate", tone: "neutral" };
+  return { label: "Active", tone: "positive" };
 }
 
 function formatUsdCompact(value: number | null | undefined): string {
@@ -137,6 +142,11 @@ function formatUsdCompact(value: number | null | undefined): string {
     currency: "USD",
     maximumFractionDigits: value >= 1000 ? 0 : 2,
   }).format(value);
+}
+
+function marketSignalTone(value: number | null | undefined): "neutral" | "positive" {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "neutral";
+  return "positive";
 }
 
 async function getTcgSnapshot(
@@ -231,7 +241,7 @@ export default async function CanonicalCardPage({
   const printings = ((printingsData ?? []) as CardPrintingRow[]).sort(sortPrintings);
   const gradeSelection = selectedGrade(grade);
   const selectedPrinting = printings.find((row) => row.id === printing) ?? printings[0] ?? null;
-  const selectedPrintingLabel = selectedPrinting ? printingOptionLabel(selectedPrinting) : "No printing selected";
+  const selectedPrintingLabel = selectedPrinting ? printingOptionLabel(selectedPrinting) : "Unknown printing";
 
   const { data: snapshotData } = await supabase
     .from("market_snapshot_rollups")
@@ -270,234 +280,243 @@ export default async function CanonicalCardPage({
   const tcgSnapshot = await getTcgSnapshot(canonical, selectedPrinting);
 
   return (
-    <main className="app-shell matte-shell">
-      <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
-        <Link href="/search" className="text-muted text-xs underline underline-offset-4">
-          Search results
-        </Link>
+    <PageShell>
+      <CardDetailNavBar title={canonical.canonical_name} subtitle={selectedPrintingLabel} />
 
-        <CanonicalHeroParallax
-          imageUrl={selectedPrinting?.image_url ?? null}
-          title={canonical.canonical_name}
-          subtitle={`${canonical.set_name ?? "Unknown set"}${canonical.card_number ? ` • #${canonical.card_number}` : ""}${canonical.year ? ` • ${canonical.year}` : ""}`}
-          leftColumn={
-            <div className="ui-card ui-card-standard">
-              <p className="text-muted text-[11px] font-semibold uppercase tracking-[0.08em]">Selected Printing</p>
-              <p className="text-app mt-2 text-sm font-semibold">{selectedPrintingLabel}</p>
-              <p className="text-muted mt-1 text-xs">
-                {selectedPrinting?.image_url ? "Hero art is sourced from the selected printing." : "No artwork available for the selected printing yet."}
-              </p>
+      <div className="mx-auto max-w-5xl px-4 pb-[max(env(safe-area-inset-bottom),2.5rem)] pt-4 sm:px-6 sm:pb-[max(env(safe-area-inset-bottom),3.5rem)]">
+        <GroupedSection>
+          <GroupCard>
+            <div className="grid gap-5 md:grid-cols-[120px_minmax(0,1fr)] md:items-start">
+              <div className="flex justify-center md:justify-start">
+                <div className="flex h-28 w-24 items-center justify-center overflow-hidden rounded-[22px] border border-white/[0.07] bg-[#11151d]">
+                  {selectedPrinting?.image_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={selectedPrinting.image_url}
+                      alt={canonical.canonical_name}
+                      className="h-full w-full object-contain object-center"
+                    />
+                  ) : (
+                    <span className="px-4 text-center text-[12px] font-semibold text-[#7e8694]">No art</span>
+                  )}
+                </div>
+              </div>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h1 className="text-[28px] font-semibold tracking-[-0.04em] text-[#f5f7fb] sm:text-[36px]">
+                      {canonical.canonical_name}
+                    </h1>
+                    <p className="mt-2 text-[15px] text-[#98a0ae]">
+                      {canonical.set_name ?? "Unknown set"}
+                      {canonical.card_number ? ` • #${canonical.card_number}` : ""}
+                      {canonical.year ? ` • ${canonical.year}` : ""}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Pill label={selectedPrintingLabel} tone={selectedPrinting ? "neutral" : "warning"} />
+                    <Pill label={gradeLabel(gradeSelection)} tone="neutral" />
+                  </div>
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Pill label={`Scarcity ${scarcity.label}`} tone={scarcity.tone} />
+                  <Pill label={`Liquidity ${liquidity.label}`} tone={liquidity.tone} />
+                  <Pill
+                    label={snapshotData?.median_ask_7d !== null && snapshotData?.median_ask_7d !== undefined ? "Price signal live" : "Collecting"}
+                    tone={marketSignalTone(snapshotData?.median_ask_7d)}
+                  />
+                </div>
+              </div>
             </div>
-          }
-        >
-          <div className="ui-card ui-card-tight">
-            <div className="flex flex-wrap gap-2">
-              {printings.map((row) => {
-                const active = selectedPrinting?.id === row.id;
-                return (
-                  <Link
-                    key={row.id}
-                    href={toggleHref(slug, row.id, gradeSelection, debugEnabled)}
-                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${active ? "btn-accent" : "btn-ghost"}`}
-                  >
-                    {printingOptionLabel(row)}
-                  </Link>
-                );
-              })}
-            </div>
+          </GroupCard>
+        </GroupedSection>
 
-            <div className="mt-3 flex flex-wrap gap-2">
-              {GRADE_OPTIONS.map((option) => {
-                const active = option === gradeSelection;
-                return (
-                  <Link
-                    key={option}
-                    href={toggleHref(slug, selectedPrinting?.id ?? null, option, debugEnabled)}
-                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${active ? "btn-accent" : "btn-ghost"}`}
-                  >
-                    {gradeLabel(option)}
-                  </Link>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="mt-4 flex flex-wrap gap-2">
-            <SignalBadge label={scarcity.label} tone={scarcity.tone} prominent />
-            <SignalBadge label={liquidity.label} tone={liquidity.tone} prominent />
-          </div>
-
-          <div className="mt-5 grid gap-3 sm:grid-cols-2">
-            <div className="ui-card ui-card-standard">
-              <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Population Snapshot</p>
-              <p className="text-app mt-2 text-xl font-semibold">
-                {snapshotData?.active_listings_7d ? `${snapshotData.active_listings_7d} live asks / 7D` : "Collecting"}
-              </p>
-              <p className="text-muted mt-1 text-xs">
-                {snapshotData?.active_listings_7d ? "Observed live supply across recent sessions." : "Waiting for enough observed listings."}
-              </p>
-            </div>
-            <div className="ui-card ui-card-standard">
-              <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Price Signal</p>
-              <p className="text-app mt-2 text-xl font-semibold">{formatUsdCompact(snapshotData?.median_ask_7d)}</p>
-              <p className="text-muted mt-1 text-xs">
-                {snapshotData?.median_ask_7d !== null && snapshotData?.median_ask_7d !== undefined
-                  ? "Current 7-day median ask."
-                  : "Collecting data from live market observations."}
-              </p>
-            </div>
-          </div>
-
-          <div className="ui-card ui-card-standard mt-5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
+        <GroupedSection title="Controls" description="Select printing and grade without leaving the signal view.">
+          <GroupCard header={<p className="text-[15px] font-semibold text-[#f5f7fb]">Filters</p>}>
+            <div className="space-y-4">
               <div>
-                <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Market Snapshot (TCG)</p>
-                <p className="text-muted mt-1 text-xs">TCG market data (daily refresh)</p>
+                <p className="mb-2 text-[13px] font-semibold text-[#98a0ae]">Printing</p>
+                <SegmentedControl
+                  wrap
+                  items={
+                    printings.length
+                      ? printings.map((row) => ({
+                          key: row.id,
+                          label: printingOptionLabel(row),
+                          href: toggleHref(slug, row.id, gradeSelection, debugEnabled),
+                          active: selectedPrinting?.id === row.id,
+                        }))
+                      : [
+                          {
+                            key: "unknown",
+                            label: "Unknown printing",
+                            active: true,
+                            disabled: true,
+                          },
+                        ]
+                  }
+                />
               </div>
-              {tcgSnapshot.item?.name ? (
-                <p className="text-muted text-[11px]">
-                  {tcgSnapshot.item.name}
-                  {tcgSnapshot.item.number ? ` • #${tcgSnapshot.item.number}` : ""}
-                </p>
-              ) : null}
+              <div>
+                <p className="mb-2 text-[13px] font-semibold text-[#98a0ae]">Grade</p>
+                <SegmentedControl
+                  items={GRADE_OPTIONS.map((option) => ({
+                    key: option,
+                    label: gradeLabel(option),
+                    href: toggleHref(slug, selectedPrinting?.id ?? null, option, debugEnabled),
+                    active: option === gradeSelection,
+                  }))}
+                />
+              </div>
             </div>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <div className="ui-card ui-card-inset">
-                <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Market</p>
-                <p className="text-app mt-2 text-lg font-semibold">{formatUsdCompact(tcgSnapshot.item?.marketPrice)}</p>
-              </div>
-              <div className="ui-card ui-card-inset">
-                <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Low</p>
-                <p className="text-app mt-2 text-lg font-semibold">{formatUsdCompact(tcgSnapshot.item?.lowPrice)}</p>
-              </div>
-              <div className="ui-card ui-card-inset">
-                <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Mid</p>
-                <p className="text-app mt-2 text-lg font-semibold">{formatUsdCompact(tcgSnapshot.item?.midPrice)}</p>
-              </div>
-              <div className="ui-card ui-card-inset">
-                <p className="text-muted text-[11px] uppercase tracking-[0.08em]">High</p>
-                <p className="text-app mt-2 text-lg font-semibold">{formatUsdCompact(tcgSnapshot.item?.highPrice)}</p>
-              </div>
-            </div>
-            <p className="text-muted mt-3 text-xs">
-              {tcgSnapshot.item
-                ? `${tcgSnapshot.setName ?? "Matched set"}${tcgSnapshot.updatedAt ? ` • Updated ${new Date(tcgSnapshot.updatedAt).toLocaleDateString()}` : ""}`
-                : "Collecting"}
-            </p>
+          </GroupCard>
+        </GroupedSection>
+
+        <GroupedSection title="Primary Signals" description="Fast, comparable reads for scarcity, liquidity, and price.">
+          <div className="grid gap-3 md:grid-cols-3">
+            <StatTile label="Scarcity" value={scarcity.label} detail={snapshotData?.active_listings_7d === null ? "Forming" : "Live ask depth"} tone={scarcity.tone} />
+            <StatTile label="Liquidity" value={liquidity.label} detail={snapshotData?.active_listings_7d === null ? "Forming" : "7-day activity"} tone={liquidity.tone} />
+            <StatTile
+              label="Price Signal"
+              value={formatUsdCompact(snapshotData?.median_ask_7d)}
+              detail={
+                snapshotData?.median_ask_7d !== null && snapshotData?.median_ask_7d !== undefined
+                  ? "Current 7-day median"
+                  : "Collecting"
+              }
+              tone={marketSignalTone(snapshotData?.median_ask_7d)}
+            />
           </div>
+        </GroupedSection>
 
-          {debugEnabled ? (
-            <details className="ui-card ui-card-standard mt-4">
-              <summary className="cursor-pointer list-none text-app text-sm font-semibold">
-                TCG Match Debug
-              </summary>
-              <div className="mt-3 space-y-4 text-xs">
-                <div className="ui-card ui-card-inset">
-                  <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Canonical</p>
-                  <div className="mt-2 grid gap-1 text-muted">
-                    <p>Name: {tcgSnapshot.debug.canonical.name}</p>
-                    <p>Set: {tcgSnapshot.debug.canonical.setName ?? "Unknown"}</p>
-                    <p>Number: {tcgSnapshot.debug.canonical.cardNumber ?? "Unknown"}</p>
-                    <p>Year: {tcgSnapshot.debug.canonical.year ?? "Unknown"}</p>
-                    <p>Set code: {tcgSnapshot.debug.canonical.setCode ?? "Unknown"}</p>
-                    <p>
-                      Printing: {tcgSnapshot.debug.canonical.finish ?? "Unknown"} / {tcgSnapshot.debug.canonical.edition ?? "Unknown"}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="ui-card ui-card-inset">
-                  <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Set Resolution</p>
-                  <div className="mt-2 grid gap-1 text-muted">
-                    <p>Query used: {tcgSnapshot.debug.setResolution.queryUsed ?? "None"}</p>
-                    <p>Normalized query: {tcgSnapshot.debug.setResolution.normalizedQuery ?? "None"}</p>
-                    <p>
-                      Chosen:{" "}
-                      {tcgSnapshot.debug.setResolution.chosen
-                        ? `${tcgSnapshot.debug.setResolution.chosen.id} • ${tcgSnapshot.debug.setResolution.chosen.name ?? "Unnamed"} • score ${tcgSnapshot.debug.setResolution.chosen.score}`
-                        : "No set match"}
-                    </p>
-                  </div>
-                  <div className="mt-3 space-y-2">
-                    {tcgSnapshot.debug.setResolution.candidates.length === 0 ? (
-                      <p className="text-muted">No candidate sets returned.</p>
-                    ) : (
-                      tcgSnapshot.debug.setResolution.candidates.map((candidate) => (
-                        <div key={candidate.id} className="ui-card ui-card-inset text-muted">
-                          <p>
-                            {candidate.id} • {candidate.name ?? "Unnamed"}
-                          </p>
-                          <p>
-                            Code {candidate.code ?? "n/a"} • Year {candidate.year ?? "n/a"} • Score {candidate.score}
-                          </p>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-
-                <div className="ui-card ui-card-inset">
-                  <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Product Resolution</p>
-                  <div className="mt-2 grid gap-1 text-muted">
-                    <p>Products in set: {tcgSnapshot.debug.productResolution?.productsInSet ?? 0}</p>
-                    <p>
-                      Chosen:{" "}
-                      {tcgSnapshot.debug.productResolution?.chosen
-                        ? `${tcgSnapshot.debug.productResolution.chosen.productId} • ${tcgSnapshot.debug.productResolution.chosen.name ?? "Unnamed"}`
-                        : "No product match"}
-                    </p>
-                    <p>Reason: {tcgSnapshot.debug.productResolution?.chosenReason ?? "No reason recorded"}</p>
-                    {tcgSnapshot.debug.productResolution?.warning ? <p>Warning: {tcgSnapshot.debug.productResolution.warning}</p> : null}
-                    {tcgSnapshot.debug.error ? <p>Error: {tcgSnapshot.debug.error}</p> : null}
-                  </div>
-                  <div className="mt-3 space-y-2">
-                    {tcgSnapshot.debug.productResolution?.topCandidates.length ? (
-                      tcgSnapshot.debug.productResolution.topCandidates.map((candidate) => (
-                        <div key={candidate.productId} className="ui-card ui-card-inset text-muted">
-                          <p>
-                            {candidate.productId} • {candidate.name ?? "Unnamed"}
-                          </p>
-                          <p>
-                            #{candidate.number ?? "n/a"} • {candidate.rarity ?? "No rarity"} • Score {candidate.score}
-                          </p>
-                          <p>Market {formatUsdCompact(candidate.marketPrice)}</p>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-muted">No scored product candidates.</p>
-                    )}
-                  </div>
-                </div>
+        <GroupedSection title="Market Snapshot" description="Population and pricing context in one grouped view.">
+          <div className="grid gap-3 lg:grid-cols-2">
+            <GroupCard header={<p className="text-[15px] font-semibold text-[#f5f7fb]">Population Snapshot</p>}>
+              <div className="divide-y divide-white/[0.06]">
+                <StatRow
+                  label="Observed live asks"
+                  value={snapshotData?.active_listings_7d ? `${snapshotData.active_listings_7d} / 7D` : "Collecting"}
+                  meta={snapshotData?.active_listings_7d ? "Observed across recent sessions" : "Waiting for enough observations"}
+                />
+                <StatRow label="Median ask (7D)" value={formatUsdCompact(snapshotData?.median_ask_7d)} meta="Primary pricing read" />
+                <StatRow label="Median ask (30D)" value={formatUsdCompact(snapshotData?.median_ask_30d)} meta="Longer baseline" />
               </div>
-            </details>
-          ) : null}
-        </CanonicalHeroParallax>
+            </GroupCard>
+
+            <GroupCard header={<p className="text-[15px] font-semibold text-[#f5f7fb]">TCG Snapshot</p>}>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <StatTile label="Market" value={formatUsdCompact(tcgSnapshot.item?.marketPrice)} detail={tcgSnapshot.item ? "TCG market" : "Collecting"} />
+                <StatTile label="Low" value={formatUsdCompact(tcgSnapshot.item?.lowPrice)} detail={tcgSnapshot.item ? "Lowest seen" : "Collecting"} />
+                <StatTile label="Mid" value={formatUsdCompact(tcgSnapshot.item?.midPrice)} detail={tcgSnapshot.item ? "Midpoint" : "Collecting"} />
+                <StatTile label="High" value={formatUsdCompact(tcgSnapshot.item?.highPrice)} detail={tcgSnapshot.item ? "Upper range" : "Collecting"} />
+              </div>
+              <div className="mt-4 border-t border-white/[0.06] pt-4">
+                <p className="text-[13px] text-[#8c94a3]">
+                  {tcgSnapshot.item
+                    ? `${tcgSnapshot.setName ?? "Matched set"}${tcgSnapshot.updatedAt ? ` • Updated ${new Date(tcgSnapshot.updatedAt).toLocaleDateString()}` : ""}`
+                    : "Collecting"}
+                </p>
+              </div>
+            </GroupCard>
+          </div>
+        </GroupedSection>
+
+        {debugEnabled ? (
+          <GroupedSection title="TCG Match Debug" description="Resolution details for set and product matching.">
+            <div className="grid gap-3 lg:grid-cols-3">
+              <GroupCard header={<p className="text-[15px] font-semibold text-[#f5f7fb]">Canonical</p>}>
+                <div className="divide-y divide-white/[0.06]">
+                  <StatRow label="Name" value={tcgSnapshot.debug.canonical.name} />
+                  <StatRow label="Set" value={tcgSnapshot.debug.canonical.setName ?? "Unknown"} />
+                  <StatRow label="Number" value={tcgSnapshot.debug.canonical.cardNumber ?? "Unknown"} />
+                  <StatRow label="Year" value={tcgSnapshot.debug.canonical.year ?? "Unknown"} />
+                  <StatRow label="Printing" value={`${tcgSnapshot.debug.canonical.finish ?? "Unknown"} / ${tcgSnapshot.debug.canonical.edition ?? "Unknown"}`} />
+                </div>
+              </GroupCard>
+
+              <GroupCard header={<p className="text-[15px] font-semibold text-[#f5f7fb]">Set Resolution</p>}>
+                <div className="divide-y divide-white/[0.06]">
+                  <StatRow label="Query used" value={tcgSnapshot.debug.setResolution.queryUsed ?? "None"} />
+                  <StatRow label="Normalized" value={tcgSnapshot.debug.setResolution.normalizedQuery ?? "None"} />
+                  <StatRow
+                    label="Chosen"
+                    value={
+                      tcgSnapshot.debug.setResolution.chosen
+                        ? `${tcgSnapshot.debug.setResolution.chosen.id} • score ${tcgSnapshot.debug.setResolution.chosen.score}`
+                        : "No set match"
+                    }
+                  />
+                </div>
+                <div className="mt-4 space-y-2">
+                  {tcgSnapshot.debug.setResolution.candidates.length === 0 ? (
+                    <Pill label="No candidate sets returned" tone="warning" />
+                  ) : (
+                    tcgSnapshot.debug.setResolution.candidates.map((candidate) => (
+                      <GroupCard key={candidate.id} inset>
+                        <p className="text-[13px] font-semibold text-[#f5f7fb]">{candidate.name ?? "Unnamed"}</p>
+                        <p className="mt-1 text-[12px] text-[#8c94a3]">
+                          {candidate.id} • Code {candidate.code ?? "n/a"} • Year {candidate.year ?? "n/a"} • Score {candidate.score}
+                        </p>
+                      </GroupCard>
+                    ))
+                  )}
+                </div>
+              </GroupCard>
+
+              <GroupCard header={<p className="text-[15px] font-semibold text-[#f5f7fb]">Product Resolution</p>}>
+                <div className="divide-y divide-white/[0.06]">
+                  <StatRow label="Products in set" value={tcgSnapshot.debug.productResolution?.productsInSet ?? 0} />
+                  <StatRow
+                    label="Chosen"
+                    value={
+                      tcgSnapshot.debug.productResolution?.chosen
+                        ? `${tcgSnapshot.debug.productResolution.chosen.productId}`
+                        : "No product match"
+                    }
+                  />
+                  <StatRow label="Reason" value={tcgSnapshot.debug.productResolution?.chosenReason ?? "No reason recorded"} />
+                </div>
+                <div className="mt-4 space-y-2">
+                  {tcgSnapshot.debug.productResolution?.warning ? <Pill label={tcgSnapshot.debug.productResolution.warning} tone="warning" /> : null}
+                  {tcgSnapshot.debug.error ? <Pill label={tcgSnapshot.debug.error} tone="negative" /> : null}
+                  {tcgSnapshot.debug.productResolution?.topCandidates.length ? (
+                    tcgSnapshot.debug.productResolution.topCandidates.map((candidate) => (
+                      <GroupCard key={candidate.productId} inset>
+                        <p className="text-[13px] font-semibold text-[#f5f7fb]">{candidate.name ?? "Unnamed"}</p>
+                        <p className="mt-1 text-[12px] text-[#8c94a3]">
+                          #{candidate.number ?? "n/a"} • {candidate.rarity ?? "No rarity"} • Score {candidate.score}
+                        </p>
+                        <p className="mt-2 text-[12px] text-[#c8ccd7]">Market {formatUsdCompact(candidate.marketPrice)}</p>
+                      </GroupCard>
+                    ))
+                  ) : (
+                    <Pill label="No scored product candidates" tone="warning" />
+                  )}
+                </div>
+              </GroupCard>
+            </div>
+          </GroupedSection>
+        ) : null}
 
         <MarketSnapshotTiles slug={slug} printingId={selectedPrinting?.id ?? null} grade={gradeSelection} initialData={snapshot} />
 
-        <section className="ui-card ui-card-panel mt-8">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-app text-sm font-semibold uppercase tracking-[0.12em]">Price History</p>
-              <p className="text-muted mt-1 text-xs">Rolling medians update automatically as PopAlpha observes listings.</p>
+        <GroupedSection title="Price History" description="Rolling medians update as PopAlpha observes listings.">
+          <GroupCard header={<p className="text-[15px] font-semibold text-[#f5f7fb]">History</p>}>
+            <SegmentedControl
+              items={["7D", "30D", "90D", "All"].map((range, index) => ({
+                key: range,
+                label: range,
+                active: index === 1,
+                disabled: true,
+              }))}
+            />
+            <div className="mt-4 rounded-[24px] border border-white/[0.06] bg-[#11151d] p-4">
+              <div className="h-44 rounded-[20px] border border-white/[0.05] bg-[linear-gradient(to_right,rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:22px_22px]" />
+              <p className="mt-3 text-[14px] font-semibold text-[#f5f7fb]">Graph coming soon</p>
+              <p className="mt-1 text-[12px] text-[#8c94a3]">The grouped container is in place so the live chart can drop in without changing layout.</p>
             </div>
-            <div className="flex flex-wrap gap-2">
-              {["7D", "30D", "90D", "All"].map((range, index) => (
-                <span
-                  key={range}
-                  className={`rounded-full border px-3 py-1 text-[11px] font-semibold ${index === 1 ? "btn-accent" : "btn-ghost"}`}
-                >
-                  {range}
-                </span>
-              ))}
-            </div>
-          </div>
-          <div className="ui-card ui-card-standard mt-4">
-            <div className="ui-card ui-card-inset h-44 bg-[linear-gradient(to_right,rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:24px_24px]" />
-            <p className="text-app mt-3 text-sm font-semibold">Graph coming soon</p>
-            <p className="text-muted mt-1 text-xs">Rolling medians update automatically as PopAlpha observes listings.</p>
-          </div>
-        </section>
+          </GroupCard>
+        </GroupedSection>
 
         <EbayListings
           query={ebayQuery}
@@ -506,6 +525,6 @@ export default async function CanonicalCardPage({
           grade={gradeSelection}
         />
       </div>
-    </main>
+    </PageShell>
   );
 }

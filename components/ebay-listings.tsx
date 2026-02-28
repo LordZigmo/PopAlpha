@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
+import { GroupCard, GroupedSection, Pill, Skeleton } from "@/components/ios-grouped-ui";
 
 type Listing = {
   externalId: string;
@@ -42,11 +43,12 @@ export default function EbayListings({ query, canonicalSlug, printingId, grade }
   const [expanded, setExpanded] = useState(false);
   const [showQuery, setShowQuery] = useState(false);
 
-  const normalizedQuery = useMemo(() => normalizeBrowseQuery(query), [query]);
+  const normalizedQuery = normalizeBrowseQuery(query);
   const shownItems = expanded ? items.slice(0, 12) : items.slice(0, 6);
 
   useEffect(() => {
     let cancelled = false;
+
     async function load() {
       setLoading(true);
       setError(null);
@@ -83,6 +85,7 @@ export default function EbayListings({ query, canonicalSlug, printingId, grade }
         if (!cancelled) setLoading(false);
       }
     }
+
     void load();
     return () => {
       cancelled = true;
@@ -90,80 +93,113 @@ export default function EbayListings({ query, canonicalSlug, printingId, grade }
   }, [canonicalSlug, printingId, grade, normalizedQuery]);
 
   return (
-    <section className="mt-8 glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <p className="text-app text-sm font-semibold uppercase tracking-[0.12em]">Live Market Listings</p>
-          <p className="text-muted mt-1 text-xs">Live eBay asks are evidence, not the core signal.</p>
+    <GroupedSection title="Live Market Listings" description="Live eBay asks are evidence, not the core signal.">
+      <GroupCard
+        header={
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <Pill label={loading ? "Refreshing" : "Live"} tone="neutral" size="small" />
+              {items.length > 0 ? (
+                <a
+                  href={`https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(normalizedQuery)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[12px] font-semibold text-[#98a0ae]"
+                >
+                  View all on eBay
+                </a>
+              ) : null}
+            </div>
+            {items.length > 6 ? (
+              <button
+                type="button"
+                onClick={() => setExpanded((value) => !value)}
+                className="min-h-11 rounded-2xl border border-white/[0.06] bg-white/[0.03] px-4 text-[13px] font-semibold text-[#e5e9f2]"
+              >
+                {expanded ? "Show less" : "Show all"}
+              </button>
+            ) : null}
+          </div>
+        }
+      >
+        <div className="mb-4">
+          <button type="button" onClick={() => setShowQuery((value) => !value)} className="text-[12px] font-semibold text-[#98a0ae]">
+            {showQuery ? "Hide query" : "Show query"}
+          </button>
+          {showQuery ? <p className="mt-2 text-[12px] text-[#7e8694]">{normalizedQuery}</p> : null}
         </div>
-        <div className="flex items-center gap-2">
-          {items.length > 0 ? (
-            <a
-              href={`https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(normalizedQuery)}`}
-              target="_blank"
-              rel="noreferrer"
-              className="text-muted text-xs underline underline-offset-4"
-            >
-              View all on eBay
-            </a>
-          ) : null}
-          {items.length > 6 ? (
-            <button type="button" onClick={() => setExpanded((value) => !value)} className="btn-ghost rounded-[var(--radius-input)] border px-2.5 py-1 text-xs font-semibold">
-              {expanded ? "Show less" : "View all"}
-            </button>
-          ) : null}
-        </div>
-      </div>
 
-      <div className="mt-2">
-        <button type="button" onClick={() => setShowQuery((value) => !value)} className="text-muted text-[11px] underline underline-offset-4">
-          {showQuery ? "Hide query used" : "Query used"}
-        </button>
-        {showQuery ? <p className="text-muted mt-1 text-[11px]">{normalizedQuery}</p> : null}
-      </div>
-
-      {loading ? <p className="text-muted mt-3 text-sm">Loading listings...</p> : null}
-      {!loading && error ? <p className="text-muted mt-3 text-sm">Listings unavailable right now.</p> : null}
-      {!loading && !error && items.length === 0 ? <p className="text-muted mt-3 text-sm">No live listings yet. PopAlpha will surface evidence as the market forms.</p> : null}
-
-      {!loading && !error && shownItems.length > 0 ? (
-        <ul className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          {shownItems.map((item, index) => (
-            <li key={`${item.externalId || item.itemWebUrl}-${index}`} className="rounded-[var(--radius-card)] border-app border bg-surface-soft/45 p-2.5">
-              <div className="flex items-start gap-2">
-                <div className="h-12 w-12 shrink-0 overflow-hidden rounded-[var(--radius-input)] border-app border bg-surface">
-                  {item.image ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={item.image} alt={item.title} className="h-full w-full object-cover" loading="lazy" />
-                  ) : (
-                    <div className="h-full w-full bg-surface-soft" />
-                  )}
+        {loading ? (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <GroupCard key={index} inset>
+                <div className="flex gap-3">
+                  <Skeleton className="h-16 w-16 rounded-2xl" rounded="card" />
+                  <div className="min-w-0 flex-1">
+                    <Skeleton className="h-4 w-full" />
+                    <Skeleton className="mt-2 h-3 w-3/4" />
+                    <Skeleton className="mt-2 h-3 w-1/2" />
+                    <Skeleton className="mt-3 h-8 w-24 rounded-xl" rounded="card" />
+                  </div>
                 </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-app truncate text-xs font-semibold">{item.title}</p>
-                  <p className="text-muted mt-1 truncate text-xs">
-                    {item.price ? formatMoney(item.price.value, item.price.currency) : "Price unavailable"}
-                    {" • "}
-                    {item.shipping ? formatMoney(item.shipping.value, item.shipping.currency) : "Shipping —"}
-                  </p>
-                  <p className="text-muted mt-1 truncate text-[11px]">
-                    {item.condition ?? "Condition n/a"}
-                    {item.endTime ? ` • Ends ${new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(item.endTime))}` : ""}
-                  </p>
-                  <a
-                    href={item.itemWebUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="btn-ghost mt-1.5 inline-flex rounded-[var(--radius-input)] border px-2 py-0.5 text-[11px] font-semibold"
-                  >
-                    View on eBay
-                  </a>
-                </div>
-              </div>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-    </section>
+              </GroupCard>
+            ))}
+          </div>
+        ) : null}
+
+        {!loading && error ? <p className="text-[14px] text-[#98a0ae]">Listings unavailable right now.</p> : null}
+        {!loading && !error && items.length === 0 ? (
+          <p className="text-[14px] text-[#98a0ae]">No live listings yet. PopAlpha will surface evidence as the market forms.</p>
+        ) : null}
+
+        {!loading && !error && shownItems.length > 0 ? (
+          <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {shownItems.map((item, index) => (
+              <li key={`${item.externalId || item.itemWebUrl}-${index}`}>
+                <GroupCard inset className="h-full">
+                  <div className="flex items-start gap-3">
+                    <div className="h-16 w-16 shrink-0 overflow-hidden rounded-2xl border border-white/[0.06] bg-[#11151d]">
+                      {item.image ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={item.image} alt={item.title} className="h-full w-full object-cover" loading="lazy" />
+                      ) : (
+                        <div className="h-full w-full bg-white/[0.04]" />
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="line-clamp-2 text-[13px] font-semibold text-[#f5f7fb]">{item.title}</p>
+                      <p className="mt-2 text-[12px] text-[#a3abbb]">
+                        {item.price ? formatMoney(item.price.value, item.price.currency) : "Price unavailable"}
+                      </p>
+                      <p className="mt-1 text-[12px] text-[#7e8694]">
+                        {item.shipping ? `${formatMoney(item.shipping.value, item.shipping.currency)} shipping` : "Shipping unknown"}
+                      </p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <Pill label={item.condition ?? "Condition n/a"} tone="neutral" size="small" />
+                        {item.endTime ? (
+                          <Pill
+                            label={`Ends ${new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(item.endTime))}`}
+                            tone="neutral"
+                            size="small"
+                          />
+                        ) : null}
+                      </div>
+                      <a
+                        href={item.itemWebUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-3 inline-flex min-h-11 items-center rounded-2xl border border-white/[0.06] bg-white/[0.03] px-4 text-[13px] font-semibold text-[#e5e9f2]"
+                      >
+                        View listing
+                      </a>
+                    </div>
+                  </div>
+                </GroupCard>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </GroupCard>
+    </GroupedSection>
   );
 }
