@@ -313,18 +313,22 @@ export default async function CanonicalCardPage({
   );
 
   // Fetch all three grade snapshots + view model in parallel.
-  // card_metrics stores aggregate rows at printing_id = NULL (provider prices are not per-printing).
+  // card_metrics rows are keyed by (canonical_slug, printing_id, grade).
+  // For singles: printing_id = selected printing UUID. For sealed / no printing: printing_id IS NULL.
+  const printingIdForQuery = selectedPrinting?.id ?? null;
   const [[rawSnap, psa9Snap, psa10Snap], vm] = await Promise.all([
     Promise.all(
-      (["RAW", "PSA9", "PSA10"] as const).map((g) =>
-        supabase
+      (["RAW", "PSA9", "PSA10"] as const).map((g) => {
+        const q = supabase
           .from("card_metrics")
           .select("active_listings_7d, median_7d, median_30d, trimmed_median_30d, low_30d, high_30d")
           .eq("canonical_slug", slug)
-          .eq("grade", g)
-          .is("printing_id", null)
-          .maybeSingle<SnapshotRow>()
-      )
+          .eq("grade", g);
+        return (printingIdForQuery != null
+          ? q.eq("printing_id", printingIdForQuery)
+          : q.is("printing_id", null)
+        ).maybeSingle<SnapshotRow>();
+      })
     ),
     buildAssetViewModel(slug),
   ]);
@@ -498,48 +502,57 @@ export default async function CanonicalCardPage({
         />
 
         {/* ── PopAlpha Signals ──────────────────────────────────────────────────
-            Derived analytics. Only rendered when signal data exists. */}
-        {vm?.signals && (
+            Derived analytics. Shows tiles when signal data exists, or a
+            "not enough data" notice when a variant is known but unscored. */}
+        {vm?.selectedVariantRef != null && (
           <GroupedSection
             title="PopAlpha Signals"
             description="Computed nightly from price momentum, volatility, and activity data."
           >
-            <GroupCard>
-              <div className="grid grid-cols-3 gap-3">
-                {vm.signals.trend && (
-                  <StatTile
-                    label="Trend"
-                    value={vm.signals.trend.label}
-                    detail={`Score ${vm.signals.trend.score.toFixed(0)}/100`}
-                    tone={
-                      vm.signals.trend.score >= 60 ? "positive"
-                        : vm.signals.trend.score <= 40 ? "warning"
-                        : "neutral"
-                    }
-                  />
-                )}
-                {vm.signals.breakout && (
-                  <StatTile
-                    label="Breakout"
-                    value={vm.signals.breakout.label}
-                    detail={`Score ${vm.signals.breakout.score.toFixed(0)}/100`}
-                    tone={
-                      vm.signals.breakout.score >= 65 ? "positive"
-                        : vm.signals.breakout.score <= 35 ? "warning"
-                        : "neutral"
-                    }
-                  />
-                )}
-                {vm.signals.value && (
-                  <StatTile
-                    label="Value Zone"
-                    value={vm.signals.value.label}
-                    detail={`Score ${vm.signals.value.score.toFixed(0)}/100`}
-                    tone={vm.signals.value.score >= 60 ? "positive" : "neutral"}
-                  />
-                )}
-              </div>
-            </GroupCard>
+            {vm.signals ? (
+              <GroupCard>
+                <div className="grid grid-cols-3 gap-3">
+                  {vm.signals.trend && (
+                    <StatTile
+                      label="Trend"
+                      value={vm.signals.trend.label}
+                      detail={`Score ${vm.signals.trend.score.toFixed(0)}/100`}
+                      tone={
+                        vm.signals.trend.score >= 60 ? "positive"
+                          : vm.signals.trend.score <= 40 ? "warning"
+                          : "neutral"
+                      }
+                    />
+                  )}
+                  {vm.signals.breakout && (
+                    <StatTile
+                      label="Breakout"
+                      value={vm.signals.breakout.label}
+                      detail={`Score ${vm.signals.breakout.score.toFixed(0)}/100`}
+                      tone={
+                        vm.signals.breakout.score >= 65 ? "positive"
+                          : vm.signals.breakout.score <= 35 ? "warning"
+                          : "neutral"
+                      }
+                    />
+                  )}
+                  {vm.signals.value && (
+                    <StatTile
+                      label="Value Zone"
+                      value={vm.signals.value.label}
+                      detail={`Score ${vm.signals.value.score.toFixed(0)}/100`}
+                      tone={vm.signals.value.score >= 60 ? "positive" : "neutral"}
+                    />
+                  )}
+                </div>
+              </GroupCard>
+            ) : (
+              <GroupCard>
+                <p className="text-[14px] text-[#8c94a3]">
+                  Not enough recent activity to score this variant.
+                </p>
+              </GroupCard>
+            )}
           </GroupedSection>
         )}
 

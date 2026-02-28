@@ -95,7 +95,8 @@ export type SearchResult = {
 const STALE_THRESHOLD_MS = 48 * 60 * 60 * 1000; // 48 hours
 const CHART_DAYS_DEFAULT = 30;
 const CHART_POINT_LIMIT = 2000;
-const CHART_MIN_POINTS = 5; // warn below this, but still return
+const CHART_MIN_POINTS = 5;    // warn below this, but still return
+const SIGNAL_MIN_POINTS = 10;  // minimum history points to show signals
 
 // ── Internal helpers ────────────────────────────────────────────────────────
 
@@ -620,32 +621,40 @@ export async function buildAssetViewModel(
   const range_30d_high = prices.length > 0 ? Math.max(...prices) : null;
   const change_7d_pct  = computeChange7dPct(series);
 
-  // 6. Squash signals to 0–100 with human labels.
-  const rawSignals = await getSignals(slug);
+  // 6. Load signals from variant_metrics for the selected variant.
+  //    Query by slug + grade only, then match variant_ref — this way we find
+  //    the best available row even if selectedVariantRef format has evolved.
   let signals: AssetViewModel["signals"] = null;
 
-  if (rawSignals) {
-    const trendRaw    = rawSignals.signal_trend_strength;
-    const breakoutRaw = rawSignals.signal_breakout;
-    const valueRaw    = rawSignals.signal_value_zone;
+  if (selectedVariantRef) {
+    const { data: vmRows } = await supabase
+      .from("variant_metrics")
+      .select("variant_ref, signal_trend, signal_breakout, signal_value, history_points_30d")
+      .eq("canonical_slug", slug)
+      .eq("grade", "RAW")
+      .order("history_points_30d", { ascending: false })
+      .limit(10);
 
-    const trend: SignalDisplay | null = trendRaw !== null ? (() => {
-      const score = tanhSquash(trendRaw, TREND_K);
-      return { label: trendLabel(score), score, raw: trendRaw };
-    })() : null;
+    // Prefer exact variant_ref match, then any row with sufficient data.
+    const vmRow =
+      (vmRows ?? []).find((r) => r.variant_ref === selectedVariantRef) ??
+      (vmRows ?? []).find((r) => (r.history_points_30d ?? 0) >= SIGNAL_MIN_POINTS) ??
+      null;
 
-    const breakout: SignalDisplay | null = breakoutRaw !== null ? (() => {
-      const score = tanhSquash(breakoutRaw, BREAKOUT_K);
-      return { label: breakoutLabel(score), score, raw: breakoutRaw };
-    })() : null;
+    if (vmRow && (vmRow.history_points_30d ?? 0) >= SIGNAL_MIN_POINTS) {
+      const trend = vmRow.signal_trend !== null
+        ? { label: trendLabel(Number(vmRow.signal_trend)), score: Number(vmRow.signal_trend) }
+        : null;
+      const breakout = vmRow.signal_breakout !== null
+        ? { label: breakoutLabel(Number(vmRow.signal_breakout)), score: Number(vmRow.signal_breakout) }
+        : null;
+      const value = vmRow.signal_value !== null
+        ? { label: valueLabel(Number(vmRow.signal_value)), score: Number(vmRow.signal_value) }
+        : null;
 
-    const value: SignalDisplay | null = valueRaw !== null ? (() => {
-      const score = Math.max(0, Math.min(100, Number(valueRaw)));
-      return { label: valueLabel(score), score, raw: Number(valueRaw) };
-    })() : null;
-
-    if (trend !== null || breakout !== null || value !== null) {
-      signals = { trend, breakout, value };
+      if (trend !== null || breakout !== null || value !== null) {
+        signals = { trend, breakout, value };
+      }
     }
   }
 
@@ -663,7 +672,7 @@ export async function buildAssetViewModel(
     range_30d_low,
     range_30d_high,
     change_7d_pct,
-    provider_as_of_ts: rawSignals?.provider_as_of_ts ?? null,
+    provider_as_of_ts: null,
     signals,
   };
 }

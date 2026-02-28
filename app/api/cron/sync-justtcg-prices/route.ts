@@ -52,6 +52,7 @@ import {
   mapVariantToMetrics,
   mapVariantToHistoryPoints,
   buildVariantRef,
+  computeVariantSignals,
   type JustTcgCard,
 } from "@/lib/providers/justtcg";
 import type { MetricsSnapshot, PriceHistoryPoint } from "@/lib/providers/types";
@@ -61,6 +62,7 @@ export const maxDuration = 300;
 
 const JOB = "justtcg_price_sync";
 const PROVIDER = "JUSTTCG";
+const SIGNAL_MIN_POINTS = 10; // minimum history points to compute signals
 
 const SETS_PER_RUN = process.env.JUSTTCG_SETS_PER_RUN
   ? parseInt(process.env.JUSTTCG_SETS_PER_RUN, 10)
@@ -75,6 +77,8 @@ type PrintingRow = {
   canonical_slug: string;
   card_number: string | null;
   finish: string;
+  edition: string;
+  stamp: string | null;
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -265,6 +269,7 @@ export async function GET(req: Request) {
   const allPriceSnapshots: Record<string, unknown>[] = [];
   const allHistoryPoints: PriceHistoryPoint[] = [];
   const allMetricsSnapshots: MetricsSnapshot[] = [];
+  const allVariantMetrics: Record<string, unknown>[] = [];
   const allIngestRows: Record<string, unknown>[] = [];
   const mapUpserts: Record<string, unknown>[] = [];
   // Debug only: raw JustTCG envelopes + chosen sample item.
@@ -324,7 +329,7 @@ export async function GET(req: Request) {
       // 5. Load our card_printings for this set (singles path only).
       const { data: printingsRaw } = await supabase
         .from("card_printings")
-        .select("id, canonical_slug, card_number, finish")
+        .select("id, canonical_slug, card_number, finish, edition, stamp")
         .eq("set_code", ourSet.setCode)
         .eq("language", "EN")
         .not("canonical_slug", "is", null);
@@ -376,8 +381,8 @@ export async function GET(req: Request) {
           const asOfTs = sealedVariant.lastUpdated
             ? new Date(sealedVariant.lastUpdated * 1000).toISOString()
             : now;
-          // "sealed" overrides variant.printing to keep sealed items a distinct cohort.
-          const variantRef = buildVariantRef("sealed", sealedVariant.condition, sealedVariant.language ?? "English", "RAW");
+          // "sealed" overrides variant.printing; edition/stamp irrelevant for sealed.
+          const variantRef = buildVariantRef("sealed", "unknown", null, sealedVariant.condition, sealedVariant.language ?? "English", "RAW");
 
           // Ensure canonical_cards row exists (upsert — safe to re-run).
           sealedCanonicalUpserts.push({
@@ -427,13 +432,36 @@ export async function GET(req: Request) {
             observed_at: asOfTs,
           });
 
-          // "sealed" overrides printingKind so variant_ref is always "sealed:sealed:en:raw".
           allHistoryPoints.push(
-            ...mapVariantToHistoryPoints(sealedVariant, canonicalSlug, "sealed", "RAW"),
+            ...mapVariantToHistoryPoints(sealedVariant, canonicalSlug, "sealed", "unknown", null, "RAW"),
           );
 
           const sealedMetrics = mapVariantToMetrics(sealedVariant, canonicalSlug, null, "RAW", asOfTs);
-          if (sealedMetrics) allMetricsSnapshots.push(sealedMetrics);
+          if (sealedMetrics) {
+            allMetricsSnapshots.push(sealedMetrics);
+            const historyPointCount = (sealedVariant.priceHistory?.length ?? sealedVariant.priceHistory30d?.length ?? 0);
+            const hasSufficientData = historyPointCount >= SIGNAL_MIN_POINTS;
+            const sigs = hasSufficientData
+              ? computeVariantSignals(sealedMetrics.provider_trend_slope_7d, sealedMetrics.provider_cov_price_30d, sealedMetrics.provider_price_relative_to_30d_range, sealedMetrics.provider_price_changes_count_30d)
+              : { signal_trend: null, signal_breakout: null, signal_value: null };
+            allVariantMetrics.push({
+              canonical_slug: canonicalSlug,
+              variant_ref: variantRef,
+              provider: PROVIDER,
+              grade: "RAW",
+              provider_trend_slope_7d: sealedMetrics.provider_trend_slope_7d,
+              provider_cov_price_30d: sealedMetrics.provider_cov_price_30d,
+              provider_price_relative_to_30d_range: sealedMetrics.provider_price_relative_to_30d_range,
+              provider_price_changes_count_30d: sealedMetrics.provider_price_changes_count_30d,
+              provider_as_of_ts: asOfTs,
+              history_points_30d: historyPointCount,
+              signal_trend: sigs.signal_trend,
+              signal_breakout: sigs.signal_breakout,
+              signal_value: sigs.signal_value,
+              signals_as_of_ts: hasSufficientData ? now : null,
+              updated_at: now,
+            });
+          }
 
           if (sampleMode) {
             sampleFound = true;
@@ -461,10 +489,11 @@ export async function GET(req: Request) {
             const asOfTs = variant.lastUpdated
               ? new Date(variant.lastUpdated * 1000).toISOString()
               : now;
-            // Use raw variant.printing (not the mapped finish enum) for variant_ref —
-            // preserves provider-accurate printing identity (e.g. "Holofoil" vs "Holo").
+            // variant_ref includes edition + stamp from matched card_printing for full cohort identity.
             const variantRef = buildVariantRef(
               variant.printing ?? "normal",
+              printing?.edition ?? "UNKNOWN",
+              printing?.stamp ?? null,
               variant.condition,
               variant.language ?? "English",
               "RAW",
@@ -502,7 +531,7 @@ export async function GET(req: Request) {
 
             allPriceSnapshots.push({
               canonical_slug: printing.canonical_slug,
-              printing_id: null,   // aggregate level — card_metrics queries printing_id IS NULL
+              printing_id: printing.id,
               grade: "RAW",
               price_value: variant.price,
               currency: "USD",
@@ -512,13 +541,36 @@ export async function GET(req: Request) {
               observed_at: asOfTs,
             });
 
-            // Pass variant.printing (raw) as printingKind so variant_ref reflects the actual printing.
             allHistoryPoints.push(
-              ...mapVariantToHistoryPoints(variant, printing.canonical_slug, variant.printing ?? "normal", "RAW"),
+              ...mapVariantToHistoryPoints(variant, printing.canonical_slug, variant.printing ?? "normal", printing.edition, printing.stamp, "RAW"),
             );
 
-            const metrics = mapVariantToMetrics(variant, printing.canonical_slug, null, "RAW", asOfTs);
-            if (metrics) allMetricsSnapshots.push(metrics);
+            const metrics = mapVariantToMetrics(variant, printing.canonical_slug, printing.id, "RAW", asOfTs);
+            if (metrics) {
+              allMetricsSnapshots.push(metrics);
+              const historyPointCount = (variant.priceHistory?.length ?? variant.priceHistory30d?.length ?? 0);
+              const hasSufficientData = historyPointCount >= SIGNAL_MIN_POINTS;
+              const sigs = hasSufficientData
+                ? computeVariantSignals(metrics.provider_trend_slope_7d, metrics.provider_cov_price_30d, metrics.provider_price_relative_to_30d_range, metrics.provider_price_changes_count_30d)
+                : { signal_trend: null, signal_breakout: null, signal_value: null };
+              allVariantMetrics.push({
+                canonical_slug: printing.canonical_slug,
+                variant_ref: variantRef,
+                provider: PROVIDER,
+                grade: "RAW",
+                provider_trend_slope_7d: metrics.provider_trend_slope_7d,
+                provider_cov_price_30d: metrics.provider_cov_price_30d,
+                provider_price_relative_to_30d_range: metrics.provider_price_relative_to_30d_range,
+                provider_price_changes_count_30d: metrics.provider_price_changes_count_30d,
+                provider_as_of_ts: asOfTs,
+                history_points_30d: historyPointCount,
+                signal_trend: sigs.signal_trend,
+                signal_breakout: sigs.signal_breakout,
+                signal_value: sigs.signal_value,
+                signals_as_of_ts: hasSufficientData ? now : null,
+                updated_at: now,
+              });
+            }
 
             if (sampleMode) {
               sampleFound = true;
@@ -618,6 +670,17 @@ export async function GET(req: Request) {
   itemsFailed += providerMetricsResult.failed;
   firstError ??= providerMetricsResult.firstError;
 
+  // variant_metrics — per-cohort signals keyed by (canonical_slug, variant_ref, provider, grade)
+  const variantMetricsResult = await batchUpsert(
+    supabase,
+    "variant_metrics",
+    allVariantMetrics,
+    "canonical_slug,variant_ref,provider,grade",
+  );
+  itemsUpserted += variantMetricsResult.upserted;
+  itemsFailed += variantMetricsResult.failed;
+  firstError ??= variantMetricsResult.firstError;
+
   // ── Finalize ingest run ──────────────────────────────────────────────────────
   if (runId) {
     await supabase
@@ -640,6 +703,7 @@ export async function GET(req: Request) {
           firstError,
           historyPointsWritten: histResult.inserted,
           metricsSnapshotsWritten: providerMetricsResult.upserted,
+          variantMetricsWritten: variantMetricsResult.upserted,
         },
       })
       .eq("id", runId);
@@ -657,6 +721,7 @@ export async function GET(req: Request) {
     itemsFailed,
     historyPointsWritten: histResult.inserted,
     metricsSnapshotsWritten: providerMetricsResult.upserted,
+    variantMetricsWritten: variantMetricsResult.upserted,
     firstError,
     metricsRefreshResult,
     ...(isDebug && { debugSampleItem, debugRawResponses }),

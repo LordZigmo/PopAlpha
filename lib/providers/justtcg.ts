@@ -226,37 +226,112 @@ const LANGUAGE_ABBREV: Record<string, string> = {
   "portuguese": "pt",
 };
 
+// Edition normalization map.
+const EDITION_NORM: Record<string, string> = {
+  "first_edition": "1st-edition",
+  "unlimited":     "unlimited",
+  "unknown":       "unknown",
+};
+
+function normalizeEdition(edition: string): string {
+  const key = edition.toLowerCase().replace(/[\s-]+/g, "_");
+  return EDITION_NORM[key] ?? "unknown";
+}
+
+function normalizeStamp(stamp: string | null): string {
+  if (!stamp) return "none";
+  return stamp
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "") || "none";
+}
+
 /**
- * Build a stable, lowercase variant_ref string from printing + condition + language + grade.
- * Format: "{printing_norm}:{condition_norm}:{language_norm}:{grade_norm}"
+ * Build a stable, lowercase variant_ref string (6 segments).
+ * Format: "{printing}:{edition}:{stamp}:{condition}:{language}:{grade}"
  *
  * Examples:
- *   "holofoil:nm:en:raw"
- *   "normal:nm:jp:raw"
- *   "sealed:sealed:en:raw"  (sealed always uses printing_norm="sealed")
+ *   "holofoil:unlimited:none:nm:en:raw"
+ *   "holofoil:1st-edition:none:nm:en:raw"
+ *   "reverse_holofoil:unlimited:cosmos-holo:nm:en:raw"
+ *   "sealed:unknown:none:sealed:en:raw"
  *
  * Rules:
- *   - printing:  lowercase, spaces→underscore (e.g. "Reverse Holofoil" → "reverse_holofoil")
- *                For sealed products, always pass "sealed" to enforce a distinct cohort.
- *   - condition: mapped via normalizeCondition (e.g. "Near Mint" → "nm", "Sealed" → "sealed")
- *   - language:  mapped via LANGUAGE_ABBREV (e.g. "English" → "en"); falls back to lowercase token
- *   - grade:     lowercase (e.g. "RAW" → "raw")
+ *   - printing:  lowercase, spaces→underscore
+ *   - edition:   FIRST_EDITION→1st-edition, UNLIMITED→unlimited, else "unknown"
+ *   - stamp:     null→"none", otherwise slugified
+ *   - condition: mapped via normalizeCondition (Near Mint→nm, Sealed→sealed)
+ *   - language:  mapped via LANGUAGE_ABBREV (English→en, Japanese→jp)
+ *   - grade:     lowercase (RAW→raw)
  *
- * This is the dedup key for price_history_points. It is provider-agnostic and does NOT
- * depend on printing_id FK existence.
+ * This is the primary cohort key used by price_history_points and variant_metrics.
+ * It is provider-agnostic and does not depend on printing_id FK existence.
  */
 export function buildVariantRef(
   printing: string,
+  edition: string,
+  stamp: string | null,
   condition: string,
   language: string,
   grade: string,
 ): string {
-  const printingNorm = printing.toLowerCase().replace(/\s+/g, "_");
+  const printingNorm  = printing.toLowerCase().replace(/\s+/g, "_");
+  const editionNorm   = normalizeEdition(edition);
+  const stampNorm     = normalizeStamp(stamp);
   const conditionNorm = normalizeCondition(condition);
-  const langKey = language.toLowerCase().trim();
-  const languageNorm = LANGUAGE_ABBREV[langKey] ?? langKey.replace(/\s+/g, "_");
-  const gradeNorm = grade.toLowerCase();
-  return `${printingNorm}:${conditionNorm}:${languageNorm}:${gradeNorm}`;
+  const langKey       = language.toLowerCase().trim();
+  const languageNorm  = LANGUAGE_ABBREV[langKey] ?? langKey.replace(/\s+/g, "_");
+  const gradeNorm     = grade.toLowerCase();
+  return `${printingNorm}:${editionNorm}:${stampNorm}:${conditionNorm}:${languageNorm}:${gradeNorm}`;
+}
+
+// ── Signal computation ────────────────────────────────────────────────────────
+
+/** tanh squash: maps any real to [0, 100]. */
+function squash(raw: number, K: number): number {
+  return Math.max(0, Math.min(100, Math.round((50 + 50 * Math.tanh(raw / K)) * 10) / 10));
+}
+
+/**
+ * Compute the three PopAlpha signals from raw provider fields.
+ * Returns null scores when required inputs are missing.
+ * Formulas match refresh_derived_signals() SQL function.
+ *
+ *   signal_trend    = tanh( (trendSlope7d / covPrice30d) / 10 ) → 0–100
+ *   signal_breakout = tanh( trendSlope7d × ln(1+changes30d) × (1−range) / 0.25 ) → 0–100
+ *   signal_value    = (1 − priceRelativeTo30dRange) × 100 → 0–100
+ */
+export function computeVariantSignals(
+  trendSlope7d: number | null,
+  covPrice30d: number | null,
+  priceRelativeTo30dRange: number | null,
+  priceChangesCount30d: number | null,
+): { signal_trend: number | null; signal_breakout: number | null; signal_value: number | null } {
+  let signal_trend: number | null = null;
+  if (trendSlope7d !== null && covPrice30d !== null && covPrice30d !== 0) {
+    signal_trend = squash(trendSlope7d / covPrice30d, 10);
+  }
+
+  let signal_breakout: number | null = null;
+  if (trendSlope7d !== null) {
+    const raw =
+      trendSlope7d *
+      Math.log(1 + (priceChangesCount30d ?? 0)) *
+      (1 - (priceRelativeTo30dRange ?? 0.5));
+    signal_breakout = squash(raw, 0.25);
+  }
+
+  let signal_value: number | null = null;
+  if (priceRelativeTo30dRange !== null) {
+    signal_value = Math.max(
+      0,
+      Math.min(100, Math.round((1 - priceRelativeTo30dRange) * 100 * 10) / 10),
+    );
+  }
+
+  return { signal_trend, signal_breakout, signal_value };
 }
 
 // ── Asset type classification ─────────────────────────────────────────────────
@@ -368,25 +443,33 @@ export function mapVariantToMetrics(
  * deprecated field and is used only as a fallback.
  *
  * @param printingKind  Provider printing string (e.g. "Holofoil"), or "sealed" for
- *                      sealed products (overrides variant.printing to keep sealed a
- *                      distinct cohort in variant_ref).
+ *                      sealed products.
+ * @param edition       Card edition from card_printings ("FIRST_EDITION" | "UNLIMITED" | "UNKNOWN"),
+ *                      or "unknown" for sealed.
+ * @param stamp         Card stamp from card_printings, or null.
  */
 export function mapVariantToHistoryPoints(
   variant: JustTcgVariant,
   canonical_slug: string,
   printingKind: string,
+  edition: string,
+  stamp: string | null,
   grade: string,
 ): PriceHistoryPoint[] {
-  // Prefer priceHistory (populated when priceHistoryDuration=30d is requested).
-  // Fall back to priceHistory30d for backward compatibility.
-  const hasHistory   = (variant.priceHistory?.length ?? 0) > 0;
+  const hasHistory    = (variant.priceHistory?.length ?? 0) > 0;
   const has30dHistory = (variant.priceHistory30d?.length ?? 0) > 0;
   if (!hasHistory && !has30dHistory) return [];
 
   const history = hasHistory ? variant.priceHistory! : variant.priceHistory30d!;
-  // Both sources represent 30-day windows when priceHistoryDuration=30d is used.
   const sourceWindow = "30d";
-  const variantRef = buildVariantRef(printingKind, variant.condition, variant.language ?? "English", grade);
+  const variantRef = buildVariantRef(
+    printingKind,
+    edition,
+    stamp,
+    variant.condition,
+    variant.language ?? "English",
+    grade,
+  );
   return history
     .filter((pt) => pt.p > 0)
     .map((pt) => ({
