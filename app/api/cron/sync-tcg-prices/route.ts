@@ -143,6 +143,7 @@ export async function GET(req: Request) {
   let itemsFetched = 0;
   let itemsUpserted = 0;
   let itemsFailed = 0;
+  let firstUpsertError: string | null = null;
 
   // ── Process each set ─────────────────────────────────────────────────────
   for (const { setCode, setName } of setsToProcess) {
@@ -234,6 +235,7 @@ export async function GET(req: Request) {
           .from("listing_observations")
           .upsert(batch, { onConflict: "source,external_id" });
         if (error) {
+          firstUpsertError ??= error.message;
           itemsFailed += batch.length;
         } else {
           itemsUpserted += batch.length;
@@ -270,5 +272,6 @@ export async function GET(req: Request) {
     itemsFetched,
     itemsUpserted,
     itemsFailed,
+    firstUpsertError,
   });
 }
