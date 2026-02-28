@@ -10,19 +10,30 @@
  *     provider_set_map       set ID confidence tracking
  *
  *   Layer 2 — canonical storage:
- *     price_snapshots        current NM price (upsert by provider_ref)
+ *     canonical_cards        auto-created rows for sealed products
+ *     price_snapshots        current NM/sealed price (upsert by provider_ref)
  *     price_history_points   priceHistory30d time series (ON CONFLICT DO NOTHING)
  *
  *   Layer 3 — analytics:
  *     card_metrics           refresh_card_metrics() then provider field upsert
  *
- * Set discovery:
- *   /sets?game=pokemon is broken on JustTCG. We derive set IDs from our own
- *   card_printings.set_name using setNameToJustTcgId() and verify by whether
- *   cards are returned. Confidence is tracked in provider_set_map.
+ * Asset types:
+ *   'single'  — individual trading cards; matched via card_printings lookup
+ *   'sealed'  — booster packs / boxes / ETBs; canonical row created on ingest
+ *               canonical_slug = "sealed:{provider_card_id}"
+ *               canonical_cards.variant = 'SEALED'
+ *               printing_id = NULL in card_metrics and price_snapshots
  *
- * Debug mode (single set, no cursor):
- *   GET /api/cron/sync-justtcg-prices?set=base-set-pokemon&limit=1
+ * Sealed vs single separation in future ranking queries:
+ *   sealed  → canonical_slug LIKE 'sealed:%'
+ *   singles → canonical_slug NOT LIKE 'sealed:%'
+ *
+ * Debug params:
+ *   ?set=base-set-pokemon     provider set ID (enables debug mode, skips cursor)
+ *   ?asset=sealed|single|any  filter by asset type (default: any)
+ *   ?sample=1                 scan cards until ONE qualifying item is found; process only that
+ *   ?cardLimit=25             max cards to scan when sample=1 (default: all)
+ *   ?force=1                  bypass idempotency check
  *
  * Rate limits (Enterprise): 500K/month · 50K/day · 500/min
  */
@@ -35,6 +46,9 @@ import {
   setNameToJustTcgId,
   mapJustTcgPrinting,
   normalizeCardNumber,
+  normalizeCondition,
+  classifyJustTcgCard,
+  buildSealedCanonicalSlug,
   mapVariantToMetrics,
   mapVariantToHistoryPoints,
   buildVariantRef,
@@ -48,7 +62,6 @@ export const maxDuration = 300;
 const JOB = "justtcg_price_sync";
 const PROVIDER = "JUSTTCG";
 
-// How many sets to process per run. Override via env var for testing.
 const SETS_PER_RUN = process.env.JUSTTCG_SETS_PER_RUN
   ? parseInt(process.env.JUSTTCG_SETS_PER_RUN, 10)
   : 100;
@@ -124,25 +137,28 @@ export async function GET(req: Request) {
   const cronSecret = process.env.CRON_SECRET?.trim();
   if (cronSecret) {
     const auth = req.headers.get("authorization")?.trim() ?? "";
-    // Allow both Vercel cron (Bearer) and direct debug requests (?secret=...)
-    const url = new URL(req.url);
-    const querySecret = url.searchParams.get("secret")?.trim() ?? "";
+    const url0 = new URL(req.url);
+    const querySecret = url0.searchParams.get("secret")?.trim() ?? "";
     if (auth !== `Bearer ${cronSecret}` && querySecret !== cronSecret) {
       return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     }
   }
 
   const url = new URL(req.url);
-  const debugSet = url.searchParams.get("set")?.trim() ?? null;   // e.g. "base-set-pokemon"
-  const debugLimit = parseInt(url.searchParams.get("limit") ?? "0", 10) || null;
-  const isDebug = !!debugSet;
+  const debugSet    = url.searchParams.get("set")?.trim() ?? null;
+  const assetFilter = (url.searchParams.get("asset")?.trim() ?? "any") as "sealed" | "single" | "any";
+  const sampleMode  = url.searchParams.get("sample") === "1";
+  const cardLimit   = parseInt(url.searchParams.get("cardLimit") ?? "0", 10) || null;
+  const force       = url.searchParams.get("force") === "1";
+  const isDebug     = !!debugSet;
 
   const supabase = getServerSupabaseClient();
   const now = new Date().toISOString();
   const runDate = now.slice(0, 10); // YYYY-MM-DD
 
   // ── Idempotency: skip if a complete run already finished today ───────────────
-  if (!isDebug) {
+  // Debug mode also checks unless force=1.
+  if (!force) {
     const { data: todayRun } = await supabase
       .from("ingest_runs")
       .select("id")
@@ -151,7 +167,6 @@ export async function GET(req: Request) {
       .eq("ok", true)
       .gte("ended_at", `${runDate}T00:00:00Z`)
       .lte("ended_at", `${runDate}T23:59:59Z`)
-      // only skip if it was a full pass (done=true)
       .contains("meta", { done: true })
       .limit(1)
       .maybeSingle();
@@ -160,7 +175,7 @@ export async function GET(req: Request) {
     }
   }
 
-  // ── Cursor from last run ────────────────────────────────────────────────────
+  // ── Cursor from last non-debug run ──────────────────────────────────────────
   const { data: lastRun } = await supabase
     .from("ingest_runs")
     .select("meta")
@@ -193,10 +208,11 @@ export async function GET(req: Request) {
   }
   allSets.sort((a, b) => a.setCode.localeCompare(b.setCode));
 
-  // In debug mode: only process the explicitly requested set.
+  // In debug mode: process only the explicitly requested set ID.
+  // setsToProcess[0] is used for the card_printings lookup (singles path).
   let setsToProcess: OurSet[];
   if (isDebug) {
-    setsToProcess = allSets.length > 0 ? [allSets[0]] : []; // placeholder; overridden below
+    setsToProcess = allSets.length > 0 ? [allSets[0]] : [];
   } else {
     const remaining = lastSetCode ? allSets.filter((s) => s.setCode > lastSetCode) : allSets;
     setsToProcess = remaining.slice(0, SETS_PER_RUN);
@@ -231,7 +247,7 @@ export async function GET(req: Request) {
       items_fetched: 0,
       items_upserted: 0,
       items_failed: 0,
-      meta: { lastSetCode, nextSetCode, setsCount: setsToProcess.length, done, isDebug },
+      meta: { lastSetCode, nextSetCode, setsCount: setsToProcess.length, done, isDebug, assetFilter, sampleMode },
     })
     .select("id")
     .single<{ id: string }>();
@@ -243,17 +259,20 @@ export async function GET(req: Request) {
   let itemsFailed = 0;
   let firstError: string | null = null;
 
+  // canonical_cards rows to upsert for sealed products.
+  // MUST be written before price_history_points and price_snapshots (FK constraint).
+  const sealedCanonicalUpserts: Record<string, unknown>[] = [];
   const allPriceSnapshots: Record<string, unknown>[] = [];
   const allHistoryPoints: PriceHistoryPoint[] = [];
   const allMetricsSnapshots: MetricsSnapshot[] = [];
   const allIngestRows: Record<string, unknown>[] = [];
   const mapUpserts: Record<string, unknown>[] = [];
-  // Debug mode: capture raw JustTCG envelopes to surface in response.
+  // Debug only: raw JustTCG envelopes + chosen sample item.
   const debugRawResponses: Array<{ providerSetId: string; httpStatus: number; envelope: unknown }> = [];
+  let debugSampleItem: { name: string; assetType: string; canonicalSlug: string; variantRef: string } | null = null;
 
   // ── Process each set ────────────────────────────────────────────────────────
   for (const ourSet of setsToProcess) {
-    // Resolve provider set ID.
     const existing = setMapByCode.get(ourSet.setCode);
     const providerSetId = isDebug
       ? debugSet!
@@ -265,7 +284,7 @@ export async function GET(req: Request) {
 
       if (isDebug) debugRawResponses.push({ providerSetId, httpStatus, envelope: rawEnvelope });
 
-      // 2. Store raw payload (one row per API call — INSERT only; skip if already stored today).
+      // 2. Store raw payload (INSERT only; duplicate inserts are silently skipped).
       const hash = requestHash(PROVIDER, "/cards", { set: providerSetId, page: 1, limit: 200 });
       const { error: rawErr } = await supabase.from("provider_raw_payloads").insert({
         provider: PROVIDER,
@@ -282,9 +301,11 @@ export async function GET(req: Request) {
         firstError ??= `provider_raw_payloads insert: ${rawErr.message}`;
       }
 
-      // 3. Surface non-200 responses as errors so they appear in firstError.
+      // 3. Surface non-200 responses as a named error and skip this set.
       if (httpStatus < 200 || httpStatus >= 300) {
         firstError ??= `JustTCG ${httpStatus} for set ${providerSetId}: ${JSON.stringify(rawEnvelope).slice(0, 200)}`;
+        itemsFailed += 1;
+        continue;
       }
 
       // 4. Update provider_set_map confidence.
@@ -300,7 +321,7 @@ export async function GET(req: Request) {
 
       if (!hasCards) continue;
 
-      // 5. Load our card_printings for this set (for card number matching).
+      // 5. Load our card_printings for this set (singles path only).
       const { data: printingsRaw } = await supabase
         .from("card_printings")
         .select("id, canonical_slug, card_number, finish")
@@ -309,10 +330,9 @@ export async function GET(req: Request) {
         .not("canonical_slug", "is", null);
 
       const printings = (printingsRaw ?? []) as PrintingRow[];
-
       // Build lookup: normNum → finish → PrintingRow
       const byNumberAndFinish = new Map<string, Map<string, PrintingRow>>();
-      const byNumber = new Map<string, PrintingRow>(); // fallback
+      const byNumber = new Map<string, PrintingRow>(); // fallback: any finish for this number
       for (const p of printings) {
         if (!p.card_number || !p.canonical_slug) continue;
         const normNum = normalizeCardNumber(p.card_number);
@@ -322,87 +342,190 @@ export async function GET(req: Request) {
         if (!byNumber.has(normNum) || p.finish === "NON_HOLO") byNumber.set(normNum, p);
       }
 
-      // Apply debug card limit if set.
-      const cardsToProcess: JustTcgCard[] = debugLimit ? cards.slice(0, debugLimit) : cards;
-      itemsFetched += cardsToProcess.length;
+      // 6. Scan cards — build accumulators for singles and sealed.
+      const cardsToScan: JustTcgCard[] = cardLimit ? cards.slice(0, cardLimit) : cards;
+      let sampleFound = false;
 
-      // 6. Process each card's NM variants.
-      for (const card of cardsToProcess) {
-        const normNum = normalizeCardNumber(card.number);
+      for (const card of cardsToScan) {
+        // In sample mode, stop once one qualifying item has been fully processed.
+        if (sampleMode && sampleFound) break;
 
-        for (const variant of card.variants ?? []) {
-          if (!variant.condition?.toLowerCase().includes("near mint")) continue;
-          if (!variant.price || variant.price <= 0) continue;
+        const assetType = classifyJustTcgCard(card);
 
-          const mappedFinish = mapJustTcgPrinting(variant.printing ?? "");
-          const finishMap = byNumberAndFinish.get(normNum);
-          const printing = finishMap?.get(mappedFinish) ?? byNumber.get(normNum) ?? null;
+        // Skip if this card doesn't match the requested asset filter.
+        if (assetFilter !== "any" && assetType !== assetFilter) continue;
 
-          const asOfTs = variant.lastUpdated
-            ? new Date(variant.lastUpdated * 1000).toISOString()
+        itemsFetched += 1;
+
+        if (assetType === "sealed") {
+          // ── Sealed path ───────────────────────────────────────────────────
+          // Find the first qualifying sealed variant.
+          // In sample mode also require priceHistory to guarantee historyPointsWritten > 0.
+          const sealedVariant = (card.variants ?? []).find((v) => {
+            if (normalizeCondition(v.condition ?? "") !== "sealed") return false;
+            if ((v.price ?? 0) <= 0) return false;
+            if (sampleMode) {
+              const hasHistory = (v.priceHistory?.length ?? 0) > 0 || (v.priceHistory30d?.length ?? 0) > 0;
+              if (!hasHistory) return false;
+            }
+            return true;
+          });
+          if (!sealedVariant) continue;
+
+          const canonicalSlug = buildSealedCanonicalSlug(card.id);
+          const asOfTs = sealedVariant.lastUpdated
+            ? new Date(sealedVariant.lastUpdated * 1000).toISOString()
             : now;
+          // "sealed" overrides variant.printing to keep sealed items a distinct cohort.
+          const variantRef = buildVariantRef("sealed", sealedVariant.condition, sealedVariant.language ?? "English", "RAW");
 
-          const variantRef = buildVariantRef(mappedFinish, variant.condition, "RAW");
+          // Ensure canonical_cards row exists (upsert — safe to re-run).
+          sealedCanonicalUpserts.push({
+            slug: canonicalSlug,
+            canonical_name: card.name,
+            set_name: card.set_name ?? null,
+            card_number: card.number,
+            language: "EN",
+            variant: "SEALED",
+          });
 
-          // Audit row (even if no printing match).
           allIngestRows.push({
             provider: PROVIDER,
             job: JOB,
             set_id: providerSetId,
             card_id: card.id,
-            variant_id: variant.id,
-            canonical_slug: printing?.canonical_slug ?? null,
-            printing_id: printing?.id ?? null,
+            variant_id: sealedVariant.id,
+            canonical_slug: canonicalSlug,
+            printing_id: null,
             raw_payload: {
-              variantId: variant.id,
+              variantId: sealedVariant.id,
+              variantRef,
               cardId: card.id,
               setId: providerSetId,
               cardNumber: card.number,
-              condition: variant.condition,
-              printing: variant.printing,
-              price: variant.price,
-              trendSlope7d: variant.trendSlope7d ?? null,
-              covPrice30d: variant.covPrice30d ?? null,
-              priceRelativeTo30dRange: variant.priceRelativeTo30dRange ?? null,
-              minPriceAllTime: variant.minPriceAllTime ?? null,
-              maxPriceAllTime: variant.maxPriceAllTime ?? null,
-              lastUpdated: variant.lastUpdated ?? null,
+              condition: sealedVariant.condition,
+              printing: sealedVariant.printing,
+              price: sealedVariant.price,
+              trendSlope7d: sealedVariant.trendSlope7d ?? null,
+              covPrice30d: sealedVariant.covPrice30d ?? null,
+              priceRelativeTo30dRange: sealedVariant.priceRelativeTo30dRange ?? null,
+              minPriceAllTime: sealedVariant.minPriceAllTime ?? null,
+              maxPriceAllTime: sealedVariant.maxPriceAllTime ?? null,
+              lastUpdated: sealedVariant.lastUpdated ?? null,
             },
           });
 
-          if (!printing) continue;
-
-          // price_snapshots (current NM price, upsert by provider_ref).
           allPriceSnapshots.push({
-            canonical_slug: printing.canonical_slug,
-            printing_id: printing.id,
+            canonical_slug: canonicalSlug,
+            printing_id: null,
             grade: "RAW",
-            price_value: variant.price,
+            price_value: sealedVariant.price,
             currency: "USD",
             provider: PROVIDER,
-            provider_ref: `justtcg-${variant.id}`,
+            provider_ref: `justtcg-${sealedVariant.id}`,
             ingest_id: null,
             observed_at: asOfTs,
           });
 
-          // price_history_points (from priceHistory30d).
-          const historyPoints = mapVariantToHistoryPoints(
-            variant,
-            printing.canonical_slug,
-            mappedFinish,
-            "RAW",
+          // "sealed" overrides printingKind so variant_ref is always "sealed:sealed:en:raw".
+          allHistoryPoints.push(
+            ...mapVariantToHistoryPoints(sealedVariant, canonicalSlug, "sealed", "RAW"),
           );
-          allHistoryPoints.push(...historyPoints);
 
-          // card_metrics provider fields.
-          const metrics = mapVariantToMetrics(
-            variant,
-            printing.canonical_slug,
-            printing.id,
-            "RAW",
-            asOfTs,
-          );
-          if (metrics) allMetricsSnapshots.push(metrics);
+          const sealedMetrics = mapVariantToMetrics(sealedVariant, canonicalSlug, null, "RAW", asOfTs);
+          if (sealedMetrics) allMetricsSnapshots.push(sealedMetrics);
+
+          if (sampleMode) {
+            sampleFound = true;
+            debugSampleItem = { name: card.name, assetType: "sealed", canonicalSlug, variantRef };
+          }
+
+        } else {
+          // ── Singles path ──────────────────────────────────────────────────
+          const normNum = normalizeCardNumber(card.number);
+
+          for (const variant of card.variants ?? []) {
+            // Singles: only ingest Near Mint condition.
+            if (normalizeCondition(variant.condition ?? "") !== "nm") continue;
+            if (!variant.price || variant.price <= 0) continue;
+            // In sample mode, skip variants without history to guarantee historyPointsWritten > 0.
+            if (sampleMode) {
+              const hasHistory = (variant.priceHistory?.length ?? 0) > 0 || (variant.priceHistory30d?.length ?? 0) > 0;
+              if (!hasHistory) continue;
+            }
+
+            const mappedFinish = mapJustTcgPrinting(variant.printing ?? "");
+            const finishMap = byNumberAndFinish.get(normNum);
+            const printing = finishMap?.get(mappedFinish) ?? byNumber.get(normNum) ?? null;
+
+            const asOfTs = variant.lastUpdated
+              ? new Date(variant.lastUpdated * 1000).toISOString()
+              : now;
+            // Use raw variant.printing (not the mapped finish enum) for variant_ref —
+            // preserves provider-accurate printing identity (e.g. "Holofoil" vs "Holo").
+            const variantRef = buildVariantRef(
+              variant.printing ?? "normal",
+              variant.condition,
+              variant.language ?? "English",
+              "RAW",
+            );
+
+            // Audit row (written even when no printing match — useful for gap analysis).
+            allIngestRows.push({
+              provider: PROVIDER,
+              job: JOB,
+              set_id: providerSetId,
+              card_id: card.id,
+              variant_id: variant.id,
+              canonical_slug: printing?.canonical_slug ?? null,
+              printing_id: printing?.id ?? null,
+              raw_payload: {
+                variantId: variant.id,
+                variantRef,
+                cardId: card.id,
+                setId: providerSetId,
+                cardNumber: card.number,
+                condition: variant.condition,
+                printing: variant.printing,
+                price: variant.price,
+                trendSlope7d: variant.trendSlope7d ?? null,
+                covPrice30d: variant.covPrice30d ?? null,
+                priceRelativeTo30dRange: variant.priceRelativeTo30dRange ?? null,
+                minPriceAllTime: variant.minPriceAllTime ?? null,
+                maxPriceAllTime: variant.maxPriceAllTime ?? null,
+                lastUpdated: variant.lastUpdated ?? null,
+              },
+            });
+
+            // Downstream writes require a printing match.
+            if (!printing) continue;
+
+            allPriceSnapshots.push({
+              canonical_slug: printing.canonical_slug,
+              printing_id: printing.id,
+              grade: "RAW",
+              price_value: variant.price,
+              currency: "USD",
+              provider: PROVIDER,
+              provider_ref: `justtcg-${variant.id}`,
+              ingest_id: null,
+              observed_at: asOfTs,
+            });
+
+            // Pass variant.printing (raw) as printingKind so variant_ref reflects the actual printing.
+            allHistoryPoints.push(
+              ...mapVariantToHistoryPoints(variant, printing.canonical_slug, variant.printing ?? "normal", "RAW"),
+            );
+
+            const metrics = mapVariantToMetrics(variant, printing.canonical_slug, printing.id, "RAW", asOfTs);
+            if (metrics) allMetricsSnapshots.push(metrics);
+
+            if (sampleMode) {
+              sampleFound = true;
+              debugSampleItem = { name: card.name, assetType: "single", canonicalSlug: printing.canonical_slug, variantRef };
+              break; // one variant per card in sample mode
+            }
+          }
         }
       }
     } catch (err) {
@@ -413,6 +536,13 @@ export async function GET(req: Request) {
   }
 
   // ── Batch writes ─────────────────────────────────────────────────────────────
+
+  // Sealed canonical_cards FIRST — price_history_points + price_snapshots have FK on canonical_cards.slug.
+  if (sealedCanonicalUpserts.length > 0) {
+    const sealedResult = await batchUpsert(supabase, "canonical_cards", sealedCanonicalUpserts, "slug");
+    firstError ??= sealedResult.firstError;
+    if (sealedResult.failed > 0) itemsFailed += sealedResult.failed;
+  }
 
   // provider_set_map
   if (mapUpserts.length > 0) {
@@ -448,7 +578,7 @@ export async function GET(req: Request) {
   );
   firstError ??= histResult.firstError;
 
-  // ── refresh_card_metrics() — compute stats from price_snapshots ──────────────
+  // refresh_card_metrics() — compute median/volatility stats from price_snapshots
   let metricsRefreshResult: unknown = null;
   try {
     const { data } = await supabase.rpc("refresh_card_metrics");
@@ -458,8 +588,8 @@ export async function GET(req: Request) {
     firstError ??= `refresh_card_metrics: ${msg}`;
   }
 
-  // ── Upsert provider-supplied fields to card_metrics (after refresh) ──────────
-  // Only sets the provider_* columns — does NOT touch computed stats (median_7d etc.)
+  // Upsert provider-supplied analytics fields to card_metrics (after refresh).
+  // Only writes provider_* columns — does NOT overwrite computed stats (median_7d etc.).
   const metricsRows = allMetricsSnapshots.map((m) => ({
     canonical_slug: m.canonical_slug,
     printing_id: m.printing_id,
@@ -473,6 +603,7 @@ export async function GET(req: Request) {
     provider_min_price_all_time_date: m.provider_min_price_all_time_date,
     provider_max_price_all_time: m.provider_max_price_all_time,
     provider_max_price_all_time_date: m.provider_max_price_all_time_date,
+    provider_price_changes_count_30d: m.provider_price_changes_count_30d,
     provider_as_of_ts: m.provider_as_of_ts,
     updated_at: now,
   }));
@@ -504,6 +635,8 @@ export async function GET(req: Request) {
           setsCount: setsToProcess.length,
           done,
           isDebug,
+          assetFilter,
+          sampleMode,
           firstError,
           historyPointsWritten: histResult.inserted,
           metricsSnapshotsWritten: providerMetricsResult.upserted,
@@ -515,6 +648,8 @@ export async function GET(req: Request) {
   return NextResponse.json({
     ok: true,
     isDebug,
+    assetFilter,
+    sampleMode,
     setsProcessed: setsToProcess.length,
     done,
     itemsFetched,
@@ -524,7 +659,6 @@ export async function GET(req: Request) {
     metricsSnapshotsWritten: providerMetricsResult.upserted,
     firstError,
     metricsRefreshResult,
-    // Debug only: full JustTCG response envelopes for each set fetched.
-    ...(isDebug && { debugRawResponses }),
+    ...(isDebug && { debugSampleItem, debugRawResponses }),
   });
 }

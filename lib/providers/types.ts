@@ -60,4 +60,6 @@ export type MetricsSnapshot = {
   provider_cov_price_7d: number | null;
   provider_min_price_all_time_date: string | null;
   provider_max_price_all_time_date: string | null;
+  // Activity proxy (count of price changes in the last 30 days).
+  provider_price_changes_count_30d: number | null;
 };
