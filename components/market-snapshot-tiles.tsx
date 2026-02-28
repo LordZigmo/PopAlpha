@@ -57,7 +57,7 @@ function Tile({
   tone?: "neutral" | "positive" | "negative";
 }) {
   return (
-    <div className="rounded-[var(--radius-card)] border-app border bg-surface-soft/60 p-[var(--space-card)] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+    <div className="ui-card ui-card-standard">
       <p className="text-muted text-[11px] uppercase tracking-[0.08em]">{label}</p>
       <p className="text-app mt-2 text-xl font-semibold">{value}</p>
       <div className="mt-2">
@@ -121,7 +121,7 @@ export default function MarketSnapshotTiles({ slug, printingId, grade, initialDa
       : null;
 
   return (
-    <section className="mt-8 glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
+    <section className="ui-card ui-card-panel mt-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="text-app text-sm font-semibold uppercase tracking-[0.12em]">Market Intelligence</p>

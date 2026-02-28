@@ -270,7 +270,7 @@ export default async function CanonicalCardPage({
   const tcgSnapshot = await getTcgSnapshot(canonical, selectedPrinting);
 
   return (
-    <main className="app-shell">
+    <main className="app-shell matte-shell">
       <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
         <Link href="/search" className="text-muted text-xs underline underline-offset-4">
           Search results
@@ -281,7 +281,7 @@ export default async function CanonicalCardPage({
           title={canonical.canonical_name}
           subtitle={`${canonical.set_name ?? "Unknown set"}${canonical.card_number ? ` • #${canonical.card_number}` : ""}${canonical.year ? ` • ${canonical.year}` : ""}`}
           leftColumn={
-            <div className="rounded-[var(--radius-card)] border-app border bg-surface/78 p-[var(--space-card)] backdrop-blur-sm">
+            <div className="ui-card ui-card-standard">
               <p className="text-muted text-[11px] font-semibold uppercase tracking-[0.08em]">Selected Printing</p>
               <p className="text-app mt-2 text-sm font-semibold">{selectedPrintingLabel}</p>
               <p className="text-muted mt-1 text-xs">
@@ -290,7 +290,7 @@ export default async function CanonicalCardPage({
             </div>
           }
         >
-          <div className="rounded-[var(--radius-card)] border border-white/8 bg-surface-soft/40 p-3">
+          <div className="ui-card ui-card-tight">
             <div className="flex flex-wrap gap-2">
               {printings.map((row) => {
                 const active = selectedPrinting?.id === row.id;
@@ -328,7 +328,7 @@ export default async function CanonicalCardPage({
           </div>
 
           <div className="mt-5 grid gap-3 sm:grid-cols-2">
-            <div className="rounded-[var(--radius-card)] border-app border bg-surface-soft/45 p-[var(--space-card)]">
+            <div className="ui-card ui-card-standard">
               <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Population Snapshot</p>
               <p className="text-app mt-2 text-xl font-semibold">
                 {snapshotData?.active_listings_7d ? `${snapshotData.active_listings_7d} live asks / 7D` : "Collecting"}
@@ -337,7 +337,7 @@ export default async function CanonicalCardPage({
                 {snapshotData?.active_listings_7d ? "Observed live supply across recent sessions." : "Waiting for enough observed listings."}
               </p>
             </div>
-            <div className="rounded-[var(--radius-card)] border-app border bg-surface-soft/45 p-[var(--space-card)]">
+            <div className="ui-card ui-card-standard">
               <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Price Signal</p>
               <p className="text-app mt-2 text-xl font-semibold">{formatUsdCompact(snapshotData?.median_ask_7d)}</p>
               <p className="text-muted mt-1 text-xs">
@@ -348,7 +348,7 @@ export default async function CanonicalCardPage({
             </div>
           </div>
 
-          <div className="mt-5 rounded-[var(--radius-card)] border-app border bg-surface-soft/45 p-[var(--space-card)]">
+          <div className="ui-card ui-card-standard mt-5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Market Snapshot (TCG)</p>
@@ -362,19 +362,19 @@ export default async function CanonicalCardPage({
               ) : null}
             </div>
             <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-[var(--radius-input)] border-app border bg-surface/40 p-3">
+              <div className="ui-card ui-card-inset">
                 <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Market</p>
                 <p className="text-app mt-2 text-lg font-semibold">{formatUsdCompact(tcgSnapshot.item?.marketPrice)}</p>
               </div>
-              <div className="rounded-[var(--radius-input)] border-app border bg-surface/40 p-3">
+              <div className="ui-card ui-card-inset">
                 <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Low</p>
                 <p className="text-app mt-2 text-lg font-semibold">{formatUsdCompact(tcgSnapshot.item?.lowPrice)}</p>
               </div>
-              <div className="rounded-[var(--radius-input)] border-app border bg-surface/40 p-3">
+              <div className="ui-card ui-card-inset">
                 <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Mid</p>
                 <p className="text-app mt-2 text-lg font-semibold">{formatUsdCompact(tcgSnapshot.item?.midPrice)}</p>
               </div>
-              <div className="rounded-[var(--radius-input)] border-app border bg-surface/40 p-3">
+              <div className="ui-card ui-card-inset">
                 <p className="text-muted text-[11px] uppercase tracking-[0.08em]">High</p>
                 <p className="text-app mt-2 text-lg font-semibold">{formatUsdCompact(tcgSnapshot.item?.highPrice)}</p>
               </div>
@@ -387,12 +387,12 @@ export default async function CanonicalCardPage({
           </div>
 
           {debugEnabled ? (
-            <details className="mt-4 rounded-[var(--radius-card)] border-app border bg-surface-soft/30 p-[var(--space-card)]">
+            <details className="ui-card ui-card-standard mt-4">
               <summary className="cursor-pointer list-none text-app text-sm font-semibold">
                 TCG Match Debug
               </summary>
               <div className="mt-3 space-y-4 text-xs">
-                <div className="rounded-[var(--radius-input)] border-app border bg-surface/35 p-3">
+                <div className="ui-card ui-card-inset">
                   <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Canonical</p>
                   <div className="mt-2 grid gap-1 text-muted">
                     <p>Name: {tcgSnapshot.debug.canonical.name}</p>
@@ -406,7 +406,7 @@ export default async function CanonicalCardPage({
                   </div>
                 </div>
 
-                <div className="rounded-[var(--radius-input)] border-app border bg-surface/35 p-3">
+                <div className="ui-card ui-card-inset">
                   <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Set Resolution</p>
                   <div className="mt-2 grid gap-1 text-muted">
                     <p>Query used: {tcgSnapshot.debug.setResolution.queryUsed ?? "None"}</p>
@@ -423,7 +423,7 @@ export default async function CanonicalCardPage({
                       <p className="text-muted">No candidate sets returned.</p>
                     ) : (
                       tcgSnapshot.debug.setResolution.candidates.map((candidate) => (
-                        <div key={candidate.id} className="rounded-[var(--radius-input)] border-app border bg-surface/30 p-2 text-muted">
+                        <div key={candidate.id} className="ui-card ui-card-inset text-muted">
                           <p>
                             {candidate.id} • {candidate.name ?? "Unnamed"}
                           </p>
@@ -436,7 +436,7 @@ export default async function CanonicalCardPage({
                   </div>
                 </div>
 
-                <div className="rounded-[var(--radius-input)] border-app border bg-surface/35 p-3">
+                <div className="ui-card ui-card-inset">
                   <p className="text-muted text-[11px] uppercase tracking-[0.08em]">Product Resolution</p>
                   <div className="mt-2 grid gap-1 text-muted">
                     <p>Products in set: {tcgSnapshot.debug.productResolution?.productsInSet ?? 0}</p>
@@ -453,7 +453,7 @@ export default async function CanonicalCardPage({
                   <div className="mt-3 space-y-2">
                     {tcgSnapshot.debug.productResolution?.topCandidates.length ? (
                       tcgSnapshot.debug.productResolution.topCandidates.map((candidate) => (
-                        <div key={candidate.productId} className="rounded-[var(--radius-input)] border-app border bg-surface/30 p-2 text-muted">
+                        <div key={candidate.productId} className="ui-card ui-card-inset text-muted">
                           <p>
                             {candidate.productId} • {candidate.name ?? "Unnamed"}
                           </p>
@@ -475,7 +475,7 @@ export default async function CanonicalCardPage({
 
         <MarketSnapshotTiles slug={slug} printingId={selectedPrinting?.id ?? null} grade={gradeSelection} initialData={snapshot} />
 
-        <section className="mt-8 glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
+        <section className="ui-card ui-card-panel mt-8">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-app text-sm font-semibold uppercase tracking-[0.12em]">Price History</p>
@@ -492,8 +492,8 @@ export default async function CanonicalCardPage({
               ))}
             </div>
           </div>
-          <div className="mt-4 rounded-[var(--radius-card)] border-app border bg-surface-soft/35 p-[var(--space-card)]">
-            <div className="h-44 rounded-[var(--radius-input)] border-app border bg-[linear-gradient(to_right,rgba(255,255,255,0.04)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.04)_1px,transparent_1px)] bg-[size:24px_24px] bg-surface/60" />
+          <div className="ui-card ui-card-standard mt-4">
+            <div className="ui-card ui-card-inset h-44 bg-[linear-gradient(to_right,rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:24px_24px]" />
             <p className="text-app mt-3 text-sm font-semibold">Graph coming soon</p>
             <p className="text-muted mt-1 text-xs">Rolling medians update automatically as PopAlpha observes listings.</p>
           </div>
