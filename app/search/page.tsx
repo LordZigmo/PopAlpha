@@ -104,9 +104,30 @@ function isLikelySubjectQuery(query: string): boolean {
 }
 
 function isGenericNameQuery(query: string): boolean {
-  if (!/^[a-z\s]+$/.test(query)) return false;
+  if (query.length > 40) return false;
+  if (/[0-9#/]/.test(query)) return false;
+  if (!/^[a-z'\-\s]+$/.test(query)) return false;
   const tokens = query.split(/\s+/).filter((token) => token.length > 0);
   return tokens.length > 0 && tokens.length <= 3;
+}
+
+function hasSlashCardPattern(query: string): boolean {
+  return /(?:^|\s)#?\d{1,4}\s*\/\s*\d+(?:\s|$)/i.test(query);
+}
+
+function hasHashCardPattern(query: string): boolean {
+  return /(?:^|\s)#\s*\d{1,4}(?:\s|$)/i.test(query);
+}
+
+function hasSetLikeHint(query: string): boolean {
+  if (/\b\d{4}\b/.test(query)) return true;
+  return /[a-z]{3,}/i.test(query);
+}
+
+function shouldAllowStructuredRedirect(query: string): boolean {
+  if (hasSlashCardPattern(query)) return true;
+  if (hasHashCardPattern(query) && hasSetLikeHint(query)) return true;
+  return false;
 }
 
 function rowSubtitle(row: CanonicalCardRow): string {
@@ -396,6 +417,7 @@ export default async function SearchPage({
   const lang = (params.lang ?? "all").trim().toUpperCase();
   const setFilter = (params.set ?? "").trim();
   const genericNameMode = isGenericNameQuery(qNormalized);
+  let exactMatchSuggestion: { href: string; label: string } | null = null;
 
   if (!q) {
     return (
@@ -433,7 +455,21 @@ export default async function SearchPage({
       .maybeSingle<{ canonical_slug: string }>();
 
     if (printingRow?.canonical_slug) {
-      redirect(`/c/${encodeURIComponent(printingRow.canonical_slug)}?printing=${encodeURIComponent(printingAliasRow.printing_id)}`);
+      const href = `/c/${encodeURIComponent(printingRow.canonical_slug)}?printing=${encodeURIComponent(printingAliasRow.printing_id)}`;
+      if (!genericNameMode) {
+        redirect(href);
+      }
+      const { data: exactCanonicalRow } = await supabase
+        .from("canonical_cards")
+        .select("canonical_name")
+        .eq("slug", printingRow.canonical_slug)
+        .maybeSingle<{ canonical_name: string }>();
+      if (exactCanonicalRow?.canonical_name) {
+        exactMatchSuggestion = {
+          href,
+          label: exactCanonicalRow.canonical_name,
+        };
+      }
     }
   }
 
@@ -446,7 +482,23 @@ export default async function SearchPage({
       .maybeSingle<{ canonical_slug: string }>()
   );
   if (aliasRow?.canonical_slug) {
-    redirect(`/c/${encodeURIComponent(aliasRow.canonical_slug)}`);
+    const href = `/c/${encodeURIComponent(aliasRow.canonical_slug)}`;
+    if (!genericNameMode) {
+      redirect(href);
+    }
+    if (!exactMatchSuggestion) {
+      const { data: exactCanonicalRow } = await supabase
+        .from("canonical_cards")
+        .select("canonical_name")
+        .eq("slug", aliasRow.canonical_slug)
+        .maybeSingle<{ canonical_name: string }>();
+      if (exactCanonicalRow?.canonical_name) {
+        exactMatchSuggestion = {
+          href,
+          label: exactCanonicalRow.canonical_name,
+        };
+      }
+    }
   }
 
   const { data: deckAliasRow } = await measureAsync("search.deck_alias", { q: qNormalized }, async () =>
@@ -461,7 +513,8 @@ export default async function SearchPage({
     redirect(`/d/${encodeURIComponent(deckAliasRow.deck_id)}`);
   }
 
-  if (parsedNumber) {
+  // Redirect to a single canonical card only when the query is explicitly card-like, not for broad name searches.
+  if (parsedNumber && !genericNameMode && shouldAllowStructuredRedirect(qNormalized)) {
     let inferredSetHint = setFilter;
     let inferredNameHint = nameHint;
     if (!inferredSetHint) {
@@ -478,6 +531,25 @@ export default async function SearchPage({
       if (tokens.length >= 3) {
         inferredSetHint = tokens.slice(0, 2).join(" ");
         inferredNameHint = tokens.slice(2).join(" ");
+      }
+    }
+
+    if (hasSlashCardPattern(qNormalized)) {
+      let slashMatchQuery = supabase
+        .from("card_printings")
+        .select("canonical_slug")
+        .ilike("finish_detail", `%${qNormalized}%`)
+        .limit(3);
+
+      if (inferredSetHint) slashMatchQuery = slashMatchQuery.ilike("set_name", `%${inferredSetHint}%`);
+
+      const slashMatches = await measureAsync("search.structured_slash", { q: qNormalized }, async () => {
+        const { data } = await slashMatchQuery;
+        return Array.from(new Set(((data ?? []) as Array<{ canonical_slug: string }>).map((row) => row.canonical_slug)));
+      });
+
+      if (slashMatches.length === 1) {
+        redirect(`/c/${encodeURIComponent(slashMatches[0])}`);
       }
     }
 
@@ -562,6 +634,15 @@ export default async function SearchPage({
           <p className="text-muted mt-1 text-sm">
             {result.total} matches {result.total > 0 ? `• Showing ${startIndex}-${endIndex}` : ""}
           </p>
+          {genericNameMode ? <p className="text-muted mt-1 text-xs">Showing canonical matches for: {q}</p> : null}
+          {exactMatchSuggestion ? (
+            <div className="mt-3 inline-flex items-center gap-2 rounded-full border-app border bg-surface-soft/45 px-3 py-1.5 text-xs">
+              <span className="text-muted">Go to exact match:</span>
+              <Link href={exactMatchSuggestion.href} className="text-app font-semibold underline underline-offset-4">
+                {exactMatchSuggestion.label}
+              </Link>
+            </div>
+          ) : null}
 
           <form action="/search" className="sticky top-2 z-10 mt-4 grid gap-2 rounded-[var(--radius-card)] bg-surface/85 p-2 sm:grid-cols-[1fr_auto_auto_auto]">
             <input type="hidden" name="q" value={q} />
