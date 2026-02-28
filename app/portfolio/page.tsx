@@ -8,12 +8,13 @@ type Card = {
   id: string;
   name: string;
   set: string;
-  year: number;
+  year: number | null;
 };
 
 type HoldingRow = {
   id: string;
-  card_id: string;
+  canonical_slug: string | null;
+  printing_id: string | null;
   grade: string;
   qty: number;
   price_paid_usd: number;
@@ -22,10 +23,19 @@ type HoldingRow = {
 };
 
 type MarketRow = {
-  card_id: string;
+  canonical_slug: string | null;
+  printing_id: string | null;
   grade: string;
   price_usd: number;
 };
+
+function identityKey(row: { printing_id: string | null; canonical_slug: string | null; grade: string }) {
+  return `${row.printing_id ?? row.canonical_slug ?? "unknown"}::${row.grade}`;
+}
+
+function cardLookupKey(row: { canonical_slug: string | null }) {
+  return row.canonical_slug ?? "";
+}
 
 function money(n: number) {
   return n.toLocaleString(undefined, {
@@ -78,7 +88,8 @@ export default function PortfolioPage() {
       string,
       {
         key: string;
-        card_id: string;
+        canonical_slug: string | null;
+        printing_id: string | null;
         grade: string;
         lots: HoldingRow[];
         totalQty: number;
@@ -88,11 +99,12 @@ export default function PortfolioPage() {
     >();
 
     for (const h of holdings) {
-      const key = `${h.card_id}::${h.grade}`;
+      const key = identityKey(h);
       if (!grouped.has(key)) {
         grouped.set(key, {
           key,
-          card_id: h.card_id,
+          canonical_slug: h.canonical_slug,
+          printing_id: h.printing_id,
           grade: h.grade,
           lots: [],
           totalQty: 0,
@@ -139,12 +151,12 @@ export default function PortfolioPage() {
       })
       .slice(0, 8)
       .map((lot) => {
-        const key = `${lot.card_id}::${lot.grade}`;
+        const key = identityKey(lot);
         const marketPrice = marketPrices[key] ?? 0;
         const costEach = Number(lot.price_paid_usd);
         return {
           ...lot,
-          title: cardById.get(lot.card_id)?.name ?? "Unknown card",
+          title: cardById.get(cardLookupKey(lot))?.name ?? "Unknown card",
           spread: marketPrice - costEach,
           marketPrice,
         };
@@ -189,32 +201,42 @@ export default function PortfolioPage() {
     setEmail(sessData.session.user.email ?? null);
 
     const { data: cardsData } = await supabase
-      .from("cards")
-      .select("id, name, set, year")
+      .from("canonical_cards")
+      .select("slug, canonical_name, set_name, year")
       .order("year", { ascending: true })
-      .order("set", { ascending: true })
-      .order("name", { ascending: true });
+      .order("set_name", { ascending: true })
+      .order("canonical_name", { ascending: true });
 
-    const list = (cardsData ?? []) as Card[];
+    const list = ((cardsData ?? []) as Array<{
+      slug: string;
+      canonical_name: string;
+      set_name: string | null;
+      year: number | null;
+    }>).map((row) => ({
+      id: row.slug,
+      name: row.canonical_name,
+      set: row.set_name ?? "Unknown set",
+      year: row.year,
+    })) as Card[];
     setCards(list);
 
     if (!cardId && list.length > 0) setCardId(list[0].id);
 
     const { data: holdData } = await supabase
       .from("holdings")
-      .select("id, card_id, grade, qty, price_paid_usd, acquired_on, venue")
+      .select("id, canonical_slug, printing_id, grade, qty, price_paid_usd, acquired_on, venue")
       .order("created_at", { ascending: false });
 
     setHoldings((holdData ?? []) as HoldingRow[]);
 
     const { data: marketData } = await supabase
       .from("market_snapshots")
-      .select("card_id, grade, price_usd")
+      .select("canonical_slug, printing_id, grade, price_usd")
       .eq("source", "tcgplayer");
 
     const priceMap: Record<string, number> = {};
     (marketData ?? []).forEach((row: MarketRow) => {
-      priceMap[`${row.card_id}::${row.grade}`] = Number(row.price_usd);
+      priceMap[identityKey(row)] = Number(row.price_usd);
     });
     setMarketPrices(priceMap);
 
@@ -276,7 +298,8 @@ export default function PortfolioPage() {
 
     const { error } = await supabase.from("holdings").insert({
       user_id: session.user.id,
-      card_id: cardId,
+      canonical_slug: cardId,
+      printing_id: null,
       grade,
       qty,
       price_paid_usd: pricePaid,
@@ -461,7 +484,7 @@ export default function PortfolioPage() {
                 const market = marketPrices[p.key] ?? 0;
                 const marketValue = market * p.totalQty;
                 const pnl = marketValue - p.costBasis;
-                const c = cardById.get(p.card_id);
+                const c = cardById.get(cardLookupKey(p));
                 return (
                   <div key={p.key} className="rounded-2xl border border-white/15 bg-white/5">
                     <button
@@ -470,8 +493,8 @@ export default function PortfolioPage() {
                     >
                       <div className="flex items-center justify-between gap-3">
                         <div>
-                          <p className="font-semibold">{c?.name ?? p.card_id}</p>
-                          <p className="text-xs text-white/65">{c ? `${c.set} • ${c.year}` : "Card"} • {p.grade}</p>
+                          <p className="font-semibold">{c?.name ?? p.canonical_slug ?? "Unknown card"}</p>
+                          <p className="text-xs text-white/65">{c ? `${c.set} • ${c.year ?? "—"}` : "Card"} • {p.grade}</p>
                         </div>
                         <div className="text-right">
                           <p className="text-sm">Qty {p.totalQty}</p>
@@ -545,7 +568,7 @@ export default function PortfolioPage() {
                     >
                       {cards.map((c) => (
                         <option key={c.id} value={c.id}>
-                          {c.name} ({c.set} {c.year})
+                          {c.name} ({c.set} {c.year ?? "—"})
                         </option>
                       ))}
                     </select>

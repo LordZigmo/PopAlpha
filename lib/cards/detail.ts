@@ -21,10 +21,6 @@ type CanonicalCardRow = {
   language: string | null;
 };
 
-type CardRow = {
-  canonical_slug: string | null;
-};
-
 type CardPrintingRow = {
   id: string;
   canonical_slug: string;
@@ -158,14 +154,7 @@ export async function resolveCanonicalSlug(input: string): Promise<string | null
     .eq("slug", slug)
     .maybeSingle<{ slug: string }>();
   if (canonical?.slug) return canonical.slug;
-
-  const { data: card } = await supabase
-    .from("cards")
-    .select("canonical_slug")
-    .eq("slug", slug)
-    .maybeSingle<CardRow>();
-
-  return card?.canonical_slug ?? null;
+  return null;
 }
 
 function pickBestPrintingId(
