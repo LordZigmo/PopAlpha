@@ -12,6 +12,7 @@ const statePath = path.join(__dirname, "import-state.json");
 
 const BATCH_SIZE = 250;
 const SUPABASE_REQUEST_TIMEOUT_MS = 30_000;
+const UPDATE_CONCURRENCY = 10;
 
 function loadEnvFile(filePath) {
   if (fs.existsSync(filePath)) {
@@ -263,77 +264,109 @@ function isUniquePrintingConflict(error) {
   return message.includes("card_printings_unique_printing_idx");
 }
 
+// Fallback: handles one row when a batch insert hits a conflict.
+async function syncSingleCardPrinting(supabase, row) {
+  const existingBySourceId = await retryAsync(async () => {
+    const { data, error } = await supabase
+      .from("card_printings")
+      .select("id, source_id")
+      .eq("source", "pokemon-tcg-data")
+      .eq("source_id", row.source_id)
+      .limit(1)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    return data;
+  }, "card_printings select by source_id");
+
+  if (existingBySourceId?.id) {
+    await retryAsync(async () => {
+      const { error } = await supabase.from("card_printings").update(row).eq("id", existingBySourceId.id);
+      if (error) throw new Error(error.message);
+    }, "card_printings update");
+    return { id: existingBySourceId.id, source_id: row.source_id };
+  }
+
+  // Insert without retrying — a unique conflict is not transient
+  const { data: insertedData, error: insertError } = await supabase
+    .from("card_printings")
+    .insert(row)
+    .select("id, source_id")
+    .single();
+  if (!insertError) return insertedData;
+  if (!isUniquePrintingConflict(insertError instanceof Error ? insertError : new Error(String(insertError)))) {
+    throw new Error(insertError instanceof Error ? insertError.message : String(insertError));
+  }
+
+  // Unique conflict: find the existing row by natural key and update it
+  const collidedRow = await retryAsync(() => findExistingPrintingRow(supabase, row), "card_printings reselect after conflict");
+  if (!collidedRow?.id) throw new Error(insertError instanceof Error ? insertError.message : String(insertError));
+  await retryAsync(async () => {
+    const { error: updateError } = await supabase.from("card_printings").update(row).eq("id", collidedRow.id);
+    if (updateError) throw new Error(updateError.message);
+  }, "card_printings update after conflict");
+  return { id: collidedRow.id, source_id: row.source_id };
+}
+
 async function syncCardPrintings(supabase, rows) {
-  const resolvedRows = [];
-  console.log(`[card_printings] Syncing ${rows.length} row(s) one-by-one`);
-  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
-    const row = rows[rowIndex];
-    if (rowIndex === 0 || (rowIndex + 1) % 25 === 0 || rowIndex === rows.length - 1) {
-      console.log(`[card_printings] Row ${rowIndex + 1}/${rows.length}: ${row.source_id}`);
-    }
-    const existingBySourceId = await retryAsync(async () => {
-      const { data, error } = await supabase
+  console.log(`[card_printings] Fast-syncing ${rows.length} row(s)`);
+
+  // 1. One batch SELECT to find which source_ids already exist
+  const sourceIds = rows.map((r) => r.source_id);
+  const existingMap = new Map(); // source_id → id
+  for (const idChunk of chunk(sourceIds, 1000)) {
+    const { data, error } = await retryAsync(async () => {
+      const result = await supabase
         .from("card_printings")
         .select("id, source_id")
         .eq("source", "pokemon-tcg-data")
-        .eq("source_id", row.source_id)
-        .limit(1)
-        .maybeSingle();
-      if (error) throw new Error(error.message);
-      return data;
-    }, "card_printings select by source_id");
+        .in("source_id", idChunk);
+      if (result.error) throw new Error(result.error.message);
+      return result;
+    }, "card_printings batch-select existing");
+    for (const row of data ?? []) existingMap.set(row.source_id, row.id);
+  }
 
-    let existingRow = existingBySourceId;
-    if (!existingRow) {
-      existingRow = await retryAsync(() => findExistingPrintingRow(supabase, row), "card_printings select by unique print");
-    }
+  const toUpdate = rows.filter((r) => existingMap.has(r.source_id));
+  const toInsert = rows.filter((r) => !existingMap.has(r.source_id));
+  console.log(`[card_printings] ${toUpdate.length} to update, ${toInsert.length} to insert`);
 
-    if (existingRow?.id) {
-      await retryAsync(async () => {
-        const { error } = await supabase.from("card_printings").update(row).eq("id", existingRow.id);
-        if (error) throw new Error(error.message);
-        return true;
-      }, "card_printings update");
-      resolvedRows.push({
-        id: existingRow.id,
-        source_id: row.source_id,
-      });
+  const resolvedRows = [];
+
+  // 2. Parallel updates (UPDATE_CONCURRENCY at a time)
+  for (const updateChunk of chunk(toUpdate, UPDATE_CONCURRENCY)) {
+    const results = await Promise.all(
+      updateChunk.map(async (row) => {
+        const id = existingMap.get(row.source_id);
+        await retryAsync(async () => {
+          const { error } = await supabase.from("card_printings").update(row).eq("id", id);
+          if (error) throw new Error(error.message);
+        }, `card_printings update ${row.source_id}`);
+        return { id, source_id: row.source_id };
+      })
+    );
+    resolvedRows.push(...results);
+  }
+
+  // 3. Batch inserts; fall back to one-by-one if the batch hits a conflict
+  for (const insertChunk of chunk(toInsert, BATCH_SIZE)) {
+    const { data, error } = await supabase
+      .from("card_printings")
+      .insert(insertChunk)
+      .select("id, source_id");
+
+    if (!error && data) {
+      resolvedRows.push(...data);
       continue;
     }
 
-    let inserted;
-    try {
-      inserted = await retryAsync(async () => {
-        const { data, error } = await supabase.from("card_printings").insert(row).select("id, source_id").single();
-        if (error) throw new Error(error.message);
-        return data;
-      }, "card_printings insert");
-    } catch (error) {
-      if (!isUniquePrintingConflict(error)) {
-        throw error;
-      }
-
-      const collidedRow = await retryAsync(() => findExistingPrintingRow(supabase, row), "card_printings reselect after insert conflict");
-      if (!collidedRow?.id) {
-        throw error;
-      }
-
-      await retryAsync(async () => {
-        const { error: updateError } = await supabase.from("card_printings").update(row).eq("id", collidedRow.id);
-        if (updateError) throw new Error(updateError.message);
-        return true;
-      }, "card_printings update after insert conflict");
-
-      inserted = {
-        id: collidedRow.id,
-        source_id: row.source_id,
-      };
-    }
-
-    if (inserted) {
-      resolvedRows.push(inserted);
+    // One row in this batch conflicts with the natural unique index — handle individually
+    console.warn(`[card_printings] Batch insert failed (${error?.message ?? "unknown"}), retrying ${insertChunk.length} rows one-by-one`);
+    for (const row of insertChunk) {
+      const synced = await syncSingleCardPrinting(supabase, row);
+      if (synced) resolvedRows.push(synced);
     }
   }
+
   return resolvedRows;
 }
 
