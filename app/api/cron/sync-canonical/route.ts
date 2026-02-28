@@ -14,6 +14,7 @@
  */
 
 import { NextResponse } from "next/server";
+import { authorizeCronRequest } from "@/lib/cronAuth";
 import { getServerSupabaseClient } from "@/lib/supabaseServer";
 
 export const runtime = "nodejs";
@@ -41,12 +42,9 @@ function resolveBaseUrl(): string {
 
 export async function GET(req: Request) {
   // Vercel sends the CRON_SECRET as a Bearer token when invoking cron routes.
-  const cronSecret = process.env.CRON_SECRET?.trim();
-  if (cronSecret) {
-    const auth = req.headers.get("authorization")?.trim() ?? "";
-    if (auth !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-    }
+  const auth = authorizeCronRequest(req, { allowDeprecatedQuerySecret: true });
+  if (!auth.ok) {
+    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
   const adminSecret = process.env.ADMIN_SECRET?.trim();
@@ -103,6 +101,7 @@ export async function GET(req: Request) {
 
   return NextResponse.json({
     ok: importResult.ok ?? false,
+    deprecatedQueryAuth: auth.deprecatedQueryAuth,
     pageStart,
     pagesPerRun: PAGES_PER_RUN,
     ...importResult,

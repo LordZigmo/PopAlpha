@@ -1,18 +1,10 @@
 import { NextResponse } from "next/server";
+import { authorizeCronRequest } from "@/lib/cronAuth";
 import { fetchJustTcgCards, type JustTcgCard } from "@/lib/providers/justtcg";
 
-function auth(req: Request): boolean {
-  const secret = process.env.CRON_SECRET?.trim();
-  if (!secret) return false;
-  const header = (req.headers.get("authorization") ?? "").trim();
-  if (header === `Bearer ${secret}`) return true;
-  // Also accept ?secret= for browser testing.
-  const qs = (new URL(req.url).searchParams.get("secret") ?? "").trim();
-  return qs === secret;
-}
-
 export async function GET(req: Request) {
-  if (!auth(req)) {
+  const auth = authorizeCronRequest(req, { allowDeprecatedQuerySecret: true });
+  if (!auth.ok) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -64,6 +56,7 @@ export async function GET(req: Request) {
 
     return NextResponse.json({
       ok: true,
+      deprecatedQueryAuth: auth.deprecatedQueryAuth,
       httpStatus,
       meta: (envelope._metadata as unknown) ?? null,
       pagination: (envelope.meta as unknown) ?? null,

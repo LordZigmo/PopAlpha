@@ -1,19 +1,11 @@
 import { NextResponse } from "next/server";
+import { authorizeCronRequest } from "@/lib/cronAuth";
 import { getServerSupabaseClient } from "@/lib/supabaseServer";
 import { getDefaultVariantRef } from "@/lib/data/assets";
 
-function auth(req: Request): boolean {
-  const secret = process.env.CRON_SECRET?.trim();
-  if (!secret) return false;
-  const header = (req.headers.get("authorization") ?? "").trim();
-  if (header === `Bearer ${secret}`) return true;
-  // Also accept ?secret= for browser testing.
-  const qs = (new URL(req.url).searchParams.get("secret") ?? "").trim();
-  return qs === secret;
-}
-
 export async function GET(req: Request) {
-  if (!auth(req)) {
+  const auth = authorizeCronRequest(req, { allowDeprecatedQuerySecret: true });
+  if (!auth.ok) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -77,11 +69,47 @@ export async function GET(req: Request) {
     .slice(0, 5)
     .map(([variant_ref, points_30d]) => ({ variant_ref, points_30d }));
 
+  const selectedVariantPoints = selectedVariantRef ? countMap.get(selectedVariantRef) ?? 0 : 0;
+  const { data: variantMetricRows } = selectedVariantRef
+    ? await supabase
+        .from("variant_metrics")
+        .select("*")
+        .eq("canonical_slug", slug)
+        .eq("provider", "JUSTTCG")
+        .eq("grade", "RAW")
+        .order("history_points_30d", { ascending: false })
+        .limit(10)
+    : { data: null };
+
+  const selectedVariantMetrics =
+    (variantMetricRows ?? []).find((row) => row.variant_ref === selectedVariantRef)
+    ?? (
+      selectedVariantRef
+        ? (variantMetricRows ?? []).find((row) => {
+            const selectedParts = selectedVariantRef.split(":");
+            const candidateParts = String(row.variant_ref ?? "").split(":");
+            if (selectedParts.length === 4 && candidateParts.length === 6) {
+              return (
+                selectedParts[0] === candidateParts[0]
+                && selectedParts[1] === candidateParts[3]
+                && selectedParts[2] === candidateParts[4]
+                && selectedParts[3] === candidateParts[5]
+              );
+            }
+            return false;
+          })
+        : null
+    )
+    ?? null;
+
   return NextResponse.json({
     ok: true,
+    deprecatedQueryAuth: auth.deprecatedQueryAuth,
     canonical,
     metrics: metricsRows ?? [],
     selectedVariantRef,
+    selectedVariantHistoryPoints30d: selectedVariantPoints,
+    selectedVariantMetrics,
     variantCounts,
   });
 }

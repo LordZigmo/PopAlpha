@@ -10,18 +10,16 @@
  */
 
 import { NextResponse } from "next/server";
+import { authorizeCronRequest } from "@/lib/cronAuth";
 import { getServerSupabaseClient } from "@/lib/supabaseServer";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
 export async function GET(req: Request) {
-  const cronSecret = process.env.CRON_SECRET?.trim();
-  if (cronSecret) {
-    const auth = req.headers.get("authorization")?.trim() ?? "";
-    if (auth !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-    }
+  const auth = authorizeCronRequest(req, { allowDeprecatedQuerySecret: true });
+  if (!auth.ok) {
+    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
   const supabase = getServerSupabaseClient();
@@ -31,5 +29,5 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ ok: true, result: data });
+  return NextResponse.json({ ok: true, result: data, deprecatedQueryAuth: auth.deprecatedQueryAuth });
 }

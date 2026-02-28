@@ -15,7 +15,8 @@
  *     price_history_points   priceHistory30d time series (ON CONFLICT DO NOTHING)
  *
  *   Layer 3 — analytics:
- *     card_metrics           refresh_card_metrics() then provider field upsert
+ *     card_metrics           refresh_card_metrics() for legacy market snapshots
+ *     variant_metrics        provider analytics + derived signals per variant_ref
  *
  * Asset types:
  *   'single'  — individual trading cards; matched via card_printings lookup
@@ -33,6 +34,7 @@
  *   ?asset=sealed|single|any  filter by asset type (default: any)
  *   ?sample=1                 scan cards until ONE qualifying item is found; process only that
  *   ?cardLimit=25             max cards to scan when sample=1 (default: all)
+ *   ?limit=1                  max cards processed in debug mode (after provider fetch)
  *   ?force=1                  bypass idempotency check
  *
  * Rate limits (Enterprise): 500K/month · 50K/day · 500/min
@@ -40,10 +42,13 @@
 
 import crypto from "node:crypto";
 import { NextResponse } from "next/server";
+import { authorizeCronRequest } from "@/lib/cronAuth";
 import { getServerSupabaseClient } from "@/lib/supabaseServer";
 import {
   fetchJustTcgCards,
   setNameToJustTcgId,
+  bestSetMatch,
+  normalizeSetNameForMatch,
   mapJustTcgPrinting,
   normalizeCardNumber,
   normalizeCondition,
@@ -52,18 +57,15 @@ import {
   mapVariantToMetrics,
   mapVariantToHistoryPoints,
   buildVariantRef,
-  computeVariantSignals,
   type JustTcgCard,
 } from "@/lib/providers/justtcg";
-import type { MetricsSnapshot, PriceHistoryPoint } from "@/lib/providers/types";
+import type { PriceHistoryPoint } from "@/lib/providers/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
 const JOB = "justtcg_price_sync";
 const PROVIDER = "JUSTTCG";
-const SIGNAL_MIN_POINTS = 10; // minimum history points to compute signals
-
 const SETS_PER_RUN = process.env.JUSTTCG_SETS_PER_RUN
   ? parseInt(process.env.JUSTTCG_SETS_PER_RUN, 10)
   : 100;
@@ -79,6 +81,8 @@ type PrintingRow = {
   finish: string;
   edition: string;
   stamp: string | null;
+  set_code?: string | null;
+  set_name?: string | null;
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -86,6 +90,20 @@ type PrintingRow = {
 function requestHash(provider: string, endpoint: string, params: Record<string, unknown>): string {
   const str = JSON.stringify({ provider, endpoint, params });
   return crypto.createHash("sha256").update(str).digest("hex").slice(0, 16);
+}
+
+function setNamesAreCompatible(providerSetName: string, candidateSetName: string): boolean {
+  const providerNorm = normalizeSetNameForMatch(providerSetName);
+  const candidateNorm = normalizeSetNameForMatch(candidateSetName);
+  if (!providerNorm || !candidateNorm) return false;
+  if (providerNorm === candidateNorm) return true;
+
+  const providerTokens = providerNorm.split(" ").filter(Boolean);
+  const candidateTokens = candidateNorm.split(" ").filter(Boolean);
+  const providerNoSet = providerTokens.filter((token) => token !== "set");
+  const candidateNoSet = candidateTokens.filter((token) => token !== "set");
+
+  return providerNoSet.join(" ") === candidateNoSet.join(" ");
 }
 
 async function batchUpsert<T extends Record<string, unknown>>(
@@ -138,14 +156,9 @@ async function batchInsertIgnore<T extends Record<string, unknown>>(
 
 export async function GET(req: Request) {
   // ── Auth ────────────────────────────────────────────────────────────────────
-  const cronSecret = process.env.CRON_SECRET?.trim();
-  if (cronSecret) {
-    const auth = req.headers.get("authorization")?.trim() ?? "";
-    const url0 = new URL(req.url);
-    const querySecret = url0.searchParams.get("secret")?.trim() ?? "";
-    if (auth !== `Bearer ${cronSecret}` && querySecret !== cronSecret) {
-      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-    }
+  const auth = authorizeCronRequest(req, { allowDeprecatedQuerySecret: true });
+  if (!auth.ok) {
+    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
   const url = new URL(req.url);
@@ -153,6 +166,7 @@ export async function GET(req: Request) {
   const assetFilter = (url.searchParams.get("asset")?.trim() ?? "any") as "sealed" | "single" | "any";
   const sampleMode  = url.searchParams.get("sample") === "1";
   const cardLimit   = parseInt(url.searchParams.get("cardLimit") ?? "0", 10) || null;
+  const debugLimit  = parseInt(url.searchParams.get("limit") ?? "0", 10) || null;
   const force       = url.searchParams.get("force") === "1";
   const isDebug     = !!debugSet;
 
@@ -212,11 +226,24 @@ export async function GET(req: Request) {
   }
   allSets.sort((a, b) => a.setCode.localeCompare(b.setCode));
 
+  const { data: allPrintingsRaw } = await supabase
+    .from("card_printings")
+    .select("id, canonical_slug, card_number, finish, edition, stamp, set_code, set_name")
+    .eq("language", "EN")
+    .not("canonical_slug", "is", null)
+    .limit(50000);
+
+  const allPrintings = (allPrintingsRaw ?? []) as PrintingRow[];
+
   // In debug mode: process only the explicitly requested set ID.
   // setsToProcess[0] is used for the card_printings lookup (singles path).
   let setsToProcess: OurSet[];
   if (isDebug) {
-    setsToProcess = allSets.length > 0 ? [allSets[0]] : [];
+    const matchedSet =
+      allSets.find((set) => setNameToJustTcgId(set.setName) === debugSet) ??
+      allSets[0] ??
+      null;
+    setsToProcess = matchedSet ? [matchedSet] : [];
   } else {
     const remaining = lastSetCode ? allSets.filter((s) => s.setCode > lastSetCode) : allSets;
     setsToProcess = remaining.slice(0, SETS_PER_RUN);
@@ -268,13 +295,15 @@ export async function GET(req: Request) {
   const sealedCanonicalUpserts: Record<string, unknown>[] = [];
   const allPriceSnapshots: Record<string, unknown>[] = [];
   const allHistoryPoints: PriceHistoryPoint[] = [];
-  const allMetricsSnapshots: MetricsSnapshot[] = [];
   const allVariantMetrics: Record<string, unknown>[] = [];
   const allIngestRows: Record<string, unknown>[] = [];
   const mapUpserts: Record<string, unknown>[] = [];
   // Debug only: raw JustTCG envelopes + chosen sample item.
   const debugRawResponses: Array<{ providerSetId: string; httpStatus: number; envelope: unknown }> = [];
   let debugSampleItem: { name: string; assetType: string; canonicalSlug: string; variantRef: string } | null = null;
+  let debugLookupSet:
+    | { providerSetId: string; canonicalSetCodeForLookup: string; canonicalSetNameForLookup: string }
+    | null = null;
 
   // ── Process each set ────────────────────────────────────────────────────────
   for (const ourSet of setsToProcess) {
@@ -313,28 +342,48 @@ export async function GET(req: Request) {
         continue;
       }
 
+      const lookupSet =
+        isDebug && (cards[0]?.set_name ?? null)
+          ? bestSetMatch(cards[0].set_name ?? "", allSets)
+          : null;
+      const canonicalSetCodeForLookup = lookupSet?.setCode ?? ourSet.setCode;
+      const canonicalSetNameForLookup = lookupSet?.setName ?? ourSet.setName;
+      if (isDebug) {
+        debugLookupSet = {
+          providerSetId,
+          canonicalSetCodeForLookup,
+          canonicalSetNameForLookup,
+        };
+      }
+
       // 4. Update provider_set_map confidence.
       const hasCards = cards.length > 0;
-      mapUpserts.push({
-        provider: PROVIDER,
-        canonical_set_code: ourSet.setCode,
-        canonical_set_name: ourSet.setName,
-        provider_set_id: providerSetId,
-        confidence: hasCards ? 1.0 : 0.0,
-        last_verified_at: hasCards ? now : null,
-      });
+      if (canonicalSetCodeForLookup) {
+        mapUpserts.push({
+          provider: PROVIDER,
+          canonical_set_code: canonicalSetCodeForLookup,
+          canonical_set_name: canonicalSetNameForLookup,
+          provider_set_id: providerSetId,
+          confidence: hasCards ? 1.0 : 0.0,
+          last_verified_at: hasCards ? now : null,
+        });
+      }
 
       if (!hasCards) continue;
 
-      // 5. Load our card_printings for this set (singles path only).
-      const { data: printingsRaw } = await supabase
-        .from("card_printings")
-        .select("id, canonical_slug, card_number, finish, edition, stamp")
-        .eq("set_code", ourSet.setCode)
-        .eq("language", "EN")
-        .not("canonical_slug", "is", null);
+      // 5. Choose the most plausible local printings pool for this provider set.
+      const providerSetName = cards[0]?.set_name ?? canonicalSetNameForLookup;
+      const candidatePrintings = allPrintings.filter((printing) => {
+        if (!printing.card_number || !printing.canonical_slug) return false;
+        if (!providerSetName || !printing.set_name) {
+          return printing.set_code === canonicalSetCodeForLookup;
+        }
+        return setNamesAreCompatible(providerSetName, printing.set_name);
+      });
 
-      const printings = (printingsRaw ?? []) as PrintingRow[];
+      const printings = candidatePrintings.length > 0
+        ? candidatePrintings
+        : allPrintings.filter((printing) => printing.set_code === canonicalSetCodeForLookup);
       // Build lookup: normNum → finish → PrintingRow
       const byNumberAndFinish = new Map<string, Map<string, PrintingRow>>();
       const byNumber = new Map<string, PrintingRow>(); // fallback: any finish for this number
@@ -348,7 +397,8 @@ export async function GET(req: Request) {
       }
 
       // 6. Scan cards — build accumulators for singles and sealed.
-      const cardsToScan: JustTcgCard[] = cardLimit ? cards.slice(0, cardLimit) : cards;
+      const maxCardsToScan = isDebug && debugLimit ? debugLimit : cardLimit;
+      const cardsToScan: JustTcgCard[] = maxCardsToScan ? cards.slice(0, maxCardsToScan) : cards;
       let sampleFound = false;
 
       for (const card of cardsToScan) {
@@ -438,12 +488,7 @@ export async function GET(req: Request) {
 
           const sealedMetrics = mapVariantToMetrics(sealedVariant, canonicalSlug, null, "RAW", asOfTs);
           if (sealedMetrics) {
-            allMetricsSnapshots.push(sealedMetrics);
             const historyPointCount = (sealedVariant.priceHistory?.length ?? sealedVariant.priceHistory30d?.length ?? 0);
-            const hasSufficientData = historyPointCount >= SIGNAL_MIN_POINTS;
-            const sigs = hasSufficientData
-              ? computeVariantSignals(sealedMetrics.provider_trend_slope_7d, sealedMetrics.provider_cov_price_30d, sealedMetrics.provider_price_relative_to_30d_range, sealedMetrics.provider_price_changes_count_30d)
-              : { signal_trend: null, signal_breakout: null, signal_value: null };
             allVariantMetrics.push({
               canonical_slug: canonicalSlug,
               variant_ref: variantRef,
@@ -455,10 +500,10 @@ export async function GET(req: Request) {
               provider_price_changes_count_30d: sealedMetrics.provider_price_changes_count_30d,
               provider_as_of_ts: asOfTs,
               history_points_30d: historyPointCount,
-              signal_trend: sigs.signal_trend,
-              signal_breakout: sigs.signal_breakout,
-              signal_value: sigs.signal_value,
-              signals_as_of_ts: hasSufficientData ? now : null,
+              signal_trend: null,
+              signal_breakout: null,
+              signal_value: null,
+              signals_as_of_ts: null,
               updated_at: now,
             });
           }
@@ -547,12 +592,7 @@ export async function GET(req: Request) {
 
             const metrics = mapVariantToMetrics(variant, printing.canonical_slug, printing.id, "RAW", asOfTs);
             if (metrics) {
-              allMetricsSnapshots.push(metrics);
               const historyPointCount = (variant.priceHistory?.length ?? variant.priceHistory30d?.length ?? 0);
-              const hasSufficientData = historyPointCount >= SIGNAL_MIN_POINTS;
-              const sigs = hasSufficientData
-                ? computeVariantSignals(metrics.provider_trend_slope_7d, metrics.provider_cov_price_30d, metrics.provider_price_relative_to_30d_range, metrics.provider_price_changes_count_30d)
-                : { signal_trend: null, signal_breakout: null, signal_value: null };
               allVariantMetrics.push({
                 canonical_slug: printing.canonical_slug,
                 variant_ref: variantRef,
@@ -564,10 +604,10 @@ export async function GET(req: Request) {
                 provider_price_changes_count_30d: metrics.provider_price_changes_count_30d,
                 provider_as_of_ts: asOfTs,
                 history_points_30d: historyPointCount,
-                signal_trend: sigs.signal_trend,
-                signal_breakout: sigs.signal_breakout,
-                signal_value: sigs.signal_value,
-                signals_as_of_ts: hasSufficientData ? now : null,
+                signal_trend: null,
+                signal_breakout: null,
+                signal_value: null,
+                signals_as_of_ts: null,
                 updated_at: now,
               });
             }
@@ -640,36 +680,6 @@ export async function GET(req: Request) {
     firstError ??= `refresh_card_metrics: ${msg}`;
   }
 
-  // Upsert provider-supplied analytics fields to card_metrics (after refresh).
-  // Only writes provider_* columns — does NOT overwrite computed stats (median_7d etc.).
-  const metricsRows = allMetricsSnapshots.map((m) => ({
-    canonical_slug: m.canonical_slug,
-    printing_id: m.printing_id,
-    grade: m.grade,
-    provider_trend_slope_7d: m.provider_trend_slope_7d,
-    provider_trend_slope_30d: m.provider_trend_slope_30d,
-    provider_cov_price_7d: m.provider_cov_price_7d,
-    provider_cov_price_30d: m.provider_cov_price_30d,
-    provider_price_relative_to_30d_range: m.provider_price_relative_to_30d_range,
-    provider_min_price_all_time: m.provider_min_price_all_time,
-    provider_min_price_all_time_date: m.provider_min_price_all_time_date,
-    provider_max_price_all_time: m.provider_max_price_all_time,
-    provider_max_price_all_time_date: m.provider_max_price_all_time_date,
-    provider_price_changes_count_30d: m.provider_price_changes_count_30d,
-    provider_as_of_ts: m.provider_as_of_ts,
-    updated_at: now,
-  }));
-
-  const providerMetricsResult = await batchUpsert(
-    supabase,
-    "card_metrics",
-    metricsRows,
-    "canonical_slug,printing_id,grade",
-  );
-  itemsUpserted += providerMetricsResult.upserted;
-  itemsFailed += providerMetricsResult.failed;
-  firstError ??= providerMetricsResult.firstError;
-
   // variant_metrics — per-cohort signals keyed by (canonical_slug, variant_ref, provider, grade)
   const variantMetricsResult = await batchUpsert(
     supabase,
@@ -700,14 +710,48 @@ export async function GET(req: Request) {
           isDebug,
           assetFilter,
           sampleMode,
+          deprecatedQueryAuth: auth.deprecatedQueryAuth,
           firstError,
           historyPointsWritten: histResult.inserted,
-          metricsSnapshotsWritten: providerMetricsResult.upserted,
           variantMetricsWritten: variantMetricsResult.upserted,
         },
       })
       .eq("id", runId);
   }
+
+  const firstDebugResponse = debugRawResponses[0] ?? null;
+  const firstDebugEnvelope = firstDebugResponse?.envelope as
+    | { data?: JustTcgCard[]; meta?: unknown; _metadata?: unknown }
+    | null;
+  const debugProviderResponse = firstDebugResponse
+    ? {
+        providerSetId: firstDebugResponse.providerSetId,
+        httpStatus: firstDebugResponse.httpStatus,
+        meta: firstDebugEnvelope?.meta ?? null,
+        providerMeta: firstDebugEnvelope?._metadata ?? null,
+        cards: (firstDebugEnvelope?.data ?? [])
+          .slice(0, Math.min(debugLimit ?? 3, 3))
+          .map((card) => ({
+            id: card.id,
+            name: card.name,
+            number: card.number,
+            variants: (card.variants ?? []).slice(0, 2).map((variant) => ({
+              id: variant.id,
+              condition: variant.condition,
+              printing: variant.printing,
+              price: variant.price,
+              trendSlope7d: variant.trendSlope7d ?? null,
+              covPrice30d: variant.covPrice30d ?? null,
+              priceRelativeTo30dRange: variant.priceRelativeTo30dRange ?? null,
+              priceChangesCount30d: variant.priceChangesCount30d ?? null,
+              historyPoints30d:
+                variant.priceHistory?.length ??
+                variant.priceHistory30d?.length ??
+                0,
+            })),
+          })),
+      }
+    : null;
 
   return NextResponse.json({
     ok: true,
@@ -720,10 +764,20 @@ export async function GET(req: Request) {
     itemsUpserted,
     itemsFailed,
     historyPointsWritten: histResult.inserted,
-    metricsSnapshotsWritten: providerMetricsResult.upserted,
     variantMetricsWritten: variantMetricsResult.upserted,
     firstError,
     metricsRefreshResult,
-    ...(isDebug && { debugSampleItem, debugRawResponses }),
+    deprecatedQueryAuth: auth.deprecatedQueryAuth,
+    ...(isDebug && {
+      debugSampleItem,
+      debugProviderResponse,
+      debugLookupSet,
+      debugVariantMetricRows: allVariantMetrics.slice(0, 10).map((row) => ({
+        canonical_slug: row.canonical_slug,
+        variant_ref: row.variant_ref,
+        provider_as_of_ts: row.provider_as_of_ts,
+        history_points_30d: row.history_points_30d,
+      })),
+    }),
   });
 }

@@ -24,6 +24,7 @@
  */
 
 import { NextResponse } from "next/server";
+import { authorizeCronRequest } from "@/lib/cronAuth";
 import { getServerSupabaseClient } from "@/lib/supabaseServer";
 import { resolveTcgTrackingSetDetailed, getCachedTcgSetPricing } from "@/lib/tcgtracking";
 
@@ -66,12 +67,9 @@ function normalizeCardNumber(raw: string | undefined): string {
 
 export async function GET(req: Request) {
   // Vercel sends CRON_SECRET as a Bearer token on cron invocations.
-  const cronSecret = process.env.CRON_SECRET?.trim();
-  if (cronSecret) {
-    const auth = req.headers.get("authorization")?.trim() ?? "";
-    if (auth !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-    }
+  const auth = authorizeCronRequest(req, { allowDeprecatedQuerySecret: true });
+  if (!auth.ok) {
+    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
   const supabase = getServerSupabaseClient();
@@ -265,6 +263,7 @@ export async function GET(req: Request) {
 
   return NextResponse.json({
     ok: true,
+    deprecatedQueryAuth: auth.deprecatedQueryAuth,
     lastSetCode,
     nextSetCode,
     setsProcessed: setsToProcess.length,

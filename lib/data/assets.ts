@@ -5,7 +5,7 @@
  *
  * ALL database reads for the frontend go through this module.
  * Nothing here calls provider APIs — it reads only internal tables:
- *   canonical_cards, card_metrics, price_history_points, price_snapshots
+ *   canonical_cards, card_metrics, variant_metrics, price_history_points, price_snapshots
  *
  * Exports:
  *   getAssetPageData(slug, opts?)
@@ -110,63 +110,92 @@ function isMetricsStale(providerAsOfTs: string | null): boolean {
   return ageMs > STALE_THRESHOLD_MS;
 }
 
-// ── getDefaultVariantRef ────────────────────────────────────────────────────
+type VariantHistoryStat = {
+  variantRef: string;
+  points: number;
+  latestTs: string | null;
+};
 
-/**
- * Returns the most appropriate variant_ref for a given slug.
- *
- * Rules:
- * 1. Determine preferred pattern:
- *    - sealed slug → "sealed:sealed:en:raw"
- *    - single slug → any variant_ref matching "*:nm:en:raw"
- * 2. Return preferred if it has >= 10 history points in the last 30 days.
- * 3. Fallback: return variant_ref with the most points in last 30 days.
- * 4. If no history exists at all, return the preferred pattern as a best guess.
- */
-export async function getDefaultVariantRef(slug: string): Promise<string | null> {
+type ParsedVariantRef = {
+  printing: string;
+  edition: string | null;
+  stamp: string | null;
+  condition: string;
+  language: string;
+  grade: string;
+};
+
+async function getRecentVariantStats(slug: string, days = 30): Promise<VariantHistoryStat[]> {
   const supabase = getServerSupabaseClient();
-  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
-  // Get point counts per variant_ref in the last 30 days.
-  const { data: rows } = await supabase
+  const { data } = await supabase
     .from("price_history_points")
-    .select("variant_ref")
+    .select("variant_ref, ts")
     .eq("canonical_slug", slug)
     .gte("ts", since)
     .limit(CHART_POINT_LIMIT);
 
-  if (!rows || rows.length === 0) {
-    // No history at all — return sensible default without crashing.
-    return isSealedSlug(slug) ? "sealed:sealed:en:raw" : null;
-  }
-
-  // Count points per variant_ref.
-  const counts = new Map<string, number>();
-  for (const row of rows) {
-    counts.set(row.variant_ref, (counts.get(row.variant_ref) ?? 0) + 1);
-  }
-
-  // Check if preferred variant has enough data.
-  const isSealed = isSealedSlug(slug);
-  if (isSealed) {
-    const preferred = "sealed:sealed:en:raw";
-    if ((counts.get(preferred) ?? 0) >= 10) return preferred;
-  } else {
-    // Singles: find first variant ending in :nm:en:raw
-    const nmEnRaw = [...counts.entries()].find(([vr]) => vr.endsWith(":nm:en:raw"));
-    if (nmEnRaw && nmEnRaw[1] >= 10) return nmEnRaw[0];
-  }
-
-  // Fallback: variant with the most points.
-  let best: string | null = null;
-  let bestCount = -1;
-  for (const [vr, cnt] of counts.entries()) {
-    if (cnt > bestCount) {
-      best = vr;
-      bestCount = cnt;
+  const stats = new Map<string, VariantHistoryStat>();
+  for (const row of data ?? []) {
+    const variantRef = row.variant_ref as string;
+    const ts = (row.ts as string | null) ?? null;
+    const current = stats.get(variantRef) ?? { variantRef, points: 0, latestTs: null };
+    current.points += 1;
+    if (ts && (!current.latestTs || ts > current.latestTs)) {
+      current.latestTs = ts;
     }
+    stats.set(variantRef, current);
   }
-  return best;
+
+  return [...stats.values()].sort((a, b) => {
+    if (b.points !== a.points) return b.points - a.points;
+    if (a.latestTs === b.latestTs) return a.variantRef.localeCompare(b.variantRef);
+    if (!a.latestTs) return 1;
+    if (!b.latestTs) return -1;
+    return b.latestTs.localeCompare(a.latestTs);
+  });
+}
+
+function parseVariantRef(variantRef: string): ParsedVariantRef | null {
+  const parts = variantRef.split(":");
+  if (parts.length === 6) {
+    const [printing, edition, stamp, condition, language, grade] = parts;
+    return { printing, edition, stamp, condition, language, grade };
+  }
+  if (parts.length === 4) {
+    const [printing, condition, language, grade] = parts;
+    return { printing, edition: null, stamp: null, condition, language, grade };
+  }
+  return null;
+}
+
+function variantRefsCompatible(source: string, candidate: string): boolean {
+  if (source === candidate) return true;
+
+  const left = parseVariantRef(source);
+  const right = parseVariantRef(candidate);
+  if (!left || !right) return false;
+  if (left.printing !== right.printing) return false;
+  if (left.condition !== right.condition) return false;
+  if (left.language !== right.language) return false;
+  if (left.grade !== right.grade) return false;
+  if (left.edition && right.edition && left.edition !== right.edition) return false;
+  if (left.stamp && right.stamp && left.stamp !== right.stamp) return false;
+  return true;
+}
+
+// ── getDefaultVariantRef ────────────────────────────────────────────────────
+
+/**
+ * Returns the dominant variant_ref in the last 30 days.
+ * Ordered by:
+ * 1. most history points
+ * 2. most recent point timestamp
+ */
+export async function getDefaultVariantRef(slug: string): Promise<string | null> {
+  const stats = await getRecentVariantStats(slug, 30);
+  return stats[0]?.variantRef ?? null;
 }
 
 // ── getChartSeries ──────────────────────────────────────────────────────────
@@ -307,15 +336,13 @@ export async function listMovers(opts: {
   const cohort = opts.cohort ?? "any";
 
   let query = supabase
-    .from("card_metrics")
-    .select(
-      "canonical_slug, median_7d, signal_trend_strength, signal_breakout, signal_value_zone"
-    )
-    .is("printing_id", null)
+    .from("variant_metrics")
+    .select("canonical_slug, signal_trend, signal_breakout, signal_value")
+    .eq("provider", "JUSTTCG")
     .eq("grade", "RAW")
-    .not("signal_trend_strength", "is", null)
-    .order("signal_trend_strength", { ascending: direction === "down" })
-    .limit(limit);
+    .not("signal_trend", "is", null)
+    .order("signal_trend", { ascending: direction === "down" })
+    .limit(limit * 5);
 
   if (cohort === "sealed") {
     query = query.like("canonical_slug", "sealed:%");
@@ -326,25 +353,61 @@ export async function listMovers(opts: {
   const { data } = await query;
   if (!data || data.length === 0) return [];
 
+  const signalRows: Array<{
+    canonical_slug: string;
+    signal_trend: number | null;
+    signal_breakout: number | null;
+    signal_value: number | null;
+  }> = [];
+  const seen = new Set<string>();
+  for (const row of data) {
+    const slug = row.canonical_slug as string;
+    if (seen.has(slug)) continue;
+    seen.add(slug);
+    signalRows.push({
+      canonical_slug: slug,
+      signal_trend: row.signal_trend as number | null,
+      signal_breakout: row.signal_breakout as number | null,
+      signal_value: row.signal_value as number | null,
+    });
+    if (signalRows.length >= limit) break;
+  }
+  if (signalRows.length === 0) return [];
+
   // Join with canonical_cards for name + set_name.
-  const slugs = data.map((r) => r.canonical_slug as string);
+  const slugs = signalRows.map((r) => r.canonical_slug);
   const { data: cards } = await supabase
     .from("canonical_cards")
     .select("slug, canonical_name, set_name")
     .in("slug", slugs);
 
+  const { data: metricsRows } = await supabase
+    .from("card_metrics")
+    .select("canonical_slug, median_7d, updated_at")
+    .in("canonical_slug", slugs)
+    .is("printing_id", null)
+    .eq("grade", "RAW")
+    .order("updated_at", { ascending: false });
+
   const cardMap = new Map(
     (cards ?? []).map((c) => [c.slug, { canonical_name: c.canonical_name as string, set_name: c.set_name as string | null }])
   );
+  const medianMap = new Map<string, number | null>();
+  for (const row of metricsRows ?? []) {
+    const slug = row.canonical_slug as string;
+    if (!medianMap.has(slug)) {
+      medianMap.set(slug, row.median_7d as number | null);
+    }
+  }
 
-  return data.map((r) => ({
-    canonical_slug: r.canonical_slug as string,
-    canonical_name: cardMap.get(r.canonical_slug as string)?.canonical_name ?? null,
-    set_name: cardMap.get(r.canonical_slug as string)?.set_name ?? null,
-    median_7d: r.median_7d as number | null,
-    signal_trend_strength: r.signal_trend_strength as number | null,
-    signal_breakout: r.signal_breakout as number | null,
-    signal_value_zone: r.signal_value_zone as number | null,
+  return signalRows.map((r) => ({
+    canonical_slug: r.canonical_slug,
+    canonical_name: cardMap.get(r.canonical_slug)?.canonical_name ?? null,
+    set_name: cardMap.get(r.canonical_slug)?.set_name ?? null,
+    median_7d: medianMap.get(r.canonical_slug) ?? null,
+    signal_trend_strength: r.signal_trend,
+    signal_breakout: r.signal_breakout,
+    signal_value_zone: r.signal_value,
   }));
 }
 
@@ -403,8 +466,8 @@ export async function searchAssets(
 
 /**
  * Lightweight fetch of only the derived signal columns for a slug.
- * Returns null if no metrics row exists — never throws.
- * Uses the most-recently-updated row (grade=RAW, printing_id=NULL).
+ * Returns null if the asset is unknown — never throws.
+ * Signals come from the selected variant_metrics row only.
  */
 export type AssetSignals = {
   signal_trend_strength: number | null;
@@ -416,35 +479,16 @@ export type AssetSignals = {
 };
 
 export async function getSignals(slug: string): Promise<AssetSignals | null> {
-  const supabase = getServerSupabaseClient();
-
-  const { data } = await supabase
-    .from("card_metrics")
-    .select(
-      "signal_trend_strength, signal_breakout, signal_value_zone, signals_as_of_ts, provider_as_of_ts"
-    )
-    .eq("canonical_slug", slug)
-    .is("printing_id", null)
-    .eq("grade", "RAW")
-    .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle<{
-      signal_trend_strength: number | null;
-      signal_breakout: number | null;
-      signal_value_zone: number | null;
-      signals_as_of_ts: string | null;
-      provider_as_of_ts: string | null;
-    }>();
-
-  if (!data) return null;
+  const vm = await buildAssetViewModel(slug);
+  if (!vm) return null;
 
   return {
-    signal_trend_strength: data.signal_trend_strength,
-    signal_breakout: data.signal_breakout,
-    signal_value_zone: data.signal_value_zone,
-    signals_as_of_ts: data.signals_as_of_ts,
-    provider_as_of_ts: data.provider_as_of_ts,
-    metricsStale: isMetricsStale(data.provider_as_of_ts),
+    signal_trend_strength: vm.signals?.trend?.score ?? null,
+    signal_breakout: vm.signals?.breakout?.score ?? null,
+    signal_value_zone: vm.signals?.value?.score ?? null,
+    signals_as_of_ts: vm.signals_as_of_ts ?? null,
+    provider_as_of_ts: vm.provider_as_of_ts,
+    metricsStale: isMetricsStale(vm.provider_as_of_ts),
   };
 }
 
@@ -476,6 +520,8 @@ export type AssetViewModel = {
   /** (price_now − price_7d_ago) / price_7d_ago × 100, null if not enough data. */
   change_7d_pct: number | null;
   provider_as_of_ts: string | null;
+  signals_as_of_ts: string | null;
+  reason: "no_history" | "insufficient_recent_activity" | null;
   /**
    * Null when no signal data exists yet (provider hasn't run or fields are null).
    * Each sub-signal is independently null-able.
@@ -546,11 +592,10 @@ function computeChange7dPct(series: ChartPoint[]): number | null {
  */
 export async function buildAssetViewModel(
   slug: string,
-  selectedVariantRefOverride?: string | null,
+  grade = "RAW",
   days = 30,
 ): Promise<AssetViewModel | null> {
   const supabase = getServerSupabaseClient();
-  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
   // 1. Canonical card — return null if unknown so page can 404.
   const { data: canonical } = await supabase
@@ -565,96 +610,82 @@ export async function buildAssetViewModel(
 
   const isSealed = isSealedSlug(slug) || canonical.variant === "SEALED";
 
-  // 2. Variant ref counts for last `days` days.
-  const { data: histRows } = await supabase
-    .from("price_history_points")
-    .select("variant_ref")
-    .eq("canonical_slug", slug)
-    .gte("ts", since)
-    .limit(CHART_POINT_LIMIT);
+  // 2. Determine the single variant_ref we should display.
+  const recentVariantStats = await getRecentVariantStats(slug, 30);
+  const selectedVariantRef = recentVariantStats[0]?.variantRef ?? null;
+  const selectedVariantPoints = recentVariantStats[0]?.points ?? 0;
+  const availableVariantRefs = recentVariantStats
+    .filter((row) => row.points >= SIGNAL_MIN_POINTS)
+    .map((row) => row.variantRef);
 
-  const counts = new Map<string, number>();
-  for (const r of histRows ?? []) {
-    counts.set(r.variant_ref, (counts.get(r.variant_ref) ?? 0) + 1);
-  }
+  // 3. Chart series for the selected variant.
+  const series = selectedVariantRef
+    ? await getChartSeries(slug, selectedVariantRef, days)
+    : [];
 
-  const availableVariantRefs = [...counts.entries()]
-    .filter(([, n]) => n >= 10)
-    .sort((a, b) => b[1] - a[1])
-    .map(([vr]) => vr);
-
-  // 3. Resolve selected variant ref.
-  let selectedVariantRef: string | null = null;
-  if (selectedVariantRefOverride != null && counts.has(selectedVariantRefOverride)) {
-    selectedVariantRef = selectedVariantRefOverride;
-  } else if (availableVariantRefs.length > 0) {
-    selectedVariantRef = isSealed
-      ? (availableVariantRefs.find((v) => v === "sealed:sealed:en:raw") ?? availableVariantRefs[0])
-      : (availableVariantRefs.find((v) => v.endsWith(":nm:en:raw")) ?? availableVariantRefs[0]);
-  } else if (counts.size > 0) {
-    // Fallback: best by count even if < 10 points.
-    let best: string | null = null, bestN = -1;
-    for (const [vr, n] of counts.entries()) { if (n > bestN) { best = vr; bestN = n; } }
-    selectedVariantRef = best;
-  } else {
-    selectedVariantRef = isSealed ? "sealed:sealed:en:raw" : null;
-  }
-
-  // 4. Chart series for the selected variant.
-  let series: ChartPoint[] = [];
-  if (selectedVariantRef) {
-    const { data: pts } = await supabase
-      .from("price_history_points")
-      .select("ts, price")
-      .eq("canonical_slug", slug)
-      .eq("variant_ref", selectedVariantRef)
-      .gte("ts", since)
-      .order("ts", { ascending: true })
-      .limit(CHART_POINT_LIMIT);
-    series = (pts ?? []).map((r) => ({ ts: r.ts as string, price: Number(r.price) }));
-  }
-
-  // 5. Compute price metrics from series.
+  // 4. Compute price metrics from series.
   const price_now = series.length > 0 ? series[series.length - 1].price : null;
   const prices = series.map((p) => p.price);
   const range_30d_low  = prices.length > 0 ? Math.min(...prices) : null;
   const range_30d_high = prices.length > 0 ? Math.max(...prices) : null;
   const change_7d_pct  = computeChange7dPct(series);
 
-  // 6. Load signals from variant_metrics for the selected variant.
-  //    Query by slug + grade only, then match variant_ref — this way we find
-  //    the best available row even if selectedVariantRef format has evolved.
+  // 5. Load the exact variant_metrics row for the selected variant.
   let signals: AssetViewModel["signals"] = null;
+  let provider_as_of_ts: string | null = null;
+  let signals_as_of_ts: string | null = null;
+  let reason: AssetViewModel["reason"] = null;
 
-  if (selectedVariantRef) {
+  if (!selectedVariantRef) {
+    reason = "no_history";
+  } else {
     const { data: vmRows } = await supabase
       .from("variant_metrics")
-      .select("variant_ref, signal_trend, signal_breakout, signal_value, history_points_30d")
+      .select("variant_ref, signal_trend, signal_breakout, signal_value, history_points_30d, provider_as_of_ts, signals_as_of_ts")
       .eq("canonical_slug", slug)
-      .eq("grade", "RAW")
+      .eq("provider", "JUSTTCG")
+      .eq("grade", grade)
       .order("history_points_30d", { ascending: false })
       .limit(10);
 
-    // Prefer exact variant_ref match, then any row with sufficient data.
-    const vmRow =
-      (vmRows ?? []).find((r) => r.variant_ref === selectedVariantRef) ??
-      (vmRows ?? []).find((r) => (r.history_points_30d ?? 0) >= SIGNAL_MIN_POINTS) ??
-      null;
+    const vmRow = (vmRows ?? []).find((row) => row.variant_ref === selectedVariantRef)
+      ?? (vmRows ?? []).find((row) => variantRefsCompatible(selectedVariantRef, row.variant_ref as string))
+      ?? null;
 
-    if (vmRow && (vmRow.history_points_30d ?? 0) >= SIGNAL_MIN_POINTS) {
-      const trend = vmRow.signal_trend !== null
-        ? { label: trendLabel(Number(vmRow.signal_trend)), score: Number(vmRow.signal_trend) }
+    const typedVmRow = vmRow as {
+      variant_ref: string;
+        signal_trend: number | null;
+        signal_breakout: number | null;
+        signal_value: number | null;
+        history_points_30d: number | null;
+        provider_as_of_ts: string | null;
+        signals_as_of_ts: string | null;
+      } | null;
+
+    provider_as_of_ts = typedVmRow?.provider_as_of_ts ?? null;
+    signals_as_of_ts = typedVmRow?.signals_as_of_ts ?? null;
+
+    const enoughHistory =
+      Math.max(selectedVariantPoints, typedVmRow?.history_points_30d ?? 0) >= SIGNAL_MIN_POINTS;
+
+    if (enoughHistory) {
+      const trend = typedVmRow?.signal_trend !== null && typedVmRow?.signal_trend !== undefined
+        ? { label: trendLabel(Number(typedVmRow.signal_trend)), score: Number(typedVmRow.signal_trend) }
         : null;
-      const breakout = vmRow.signal_breakout !== null
-        ? { label: breakoutLabel(Number(vmRow.signal_breakout)), score: Number(vmRow.signal_breakout) }
+      const breakout = typedVmRow?.signal_breakout !== null && typedVmRow?.signal_breakout !== undefined
+        ? { label: breakoutLabel(Number(typedVmRow.signal_breakout)), score: Number(typedVmRow.signal_breakout) }
         : null;
-      const value = vmRow.signal_value !== null
-        ? { label: valueLabel(Number(vmRow.signal_value)), score: Number(vmRow.signal_value) }
+      const value = typedVmRow?.signal_value !== null && typedVmRow?.signal_value !== undefined
+        ? { label: valueLabel(Number(typedVmRow.signal_value)), score: Number(typedVmRow.signal_value) }
         : null;
 
       if (trend !== null || breakout !== null || value !== null) {
         signals = { trend, breakout, value };
+      } else {
+        reason = "insufficient_recent_activity";
       }
+    } else {
+      reason = "insufficient_recent_activity";
     }
   }
 
@@ -672,7 +703,9 @@ export async function buildAssetViewModel(
     range_30d_low,
     range_30d_high,
     change_7d_pct,
-    provider_as_of_ts: null,
+    provider_as_of_ts,
+    signals_as_of_ts,
+    reason,
     signals,
   };
 }
