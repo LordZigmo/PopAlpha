@@ -237,10 +237,13 @@ async function main() {
   const dryRun = args.has("--dry-run");
   const reset = args.has("--reset");
   const force = args.has("--force");
+  const skipCursorFill = args.has("--skip-cursor-fill");
   const maxSetsArg = [...args].find((arg) => arg.startsWith("--max-sets="));
   const maxSets = maxSetsArg ? Number(maxSetsArg.split("=", 2)[1]) : null;
   const refreshEveryArg = [...args].find((arg) => arg.startsWith("--refresh-every="));
   const refreshEvery = refreshEveryArg ? Math.max(1, Number(refreshEveryArg.split("=", 2)[1])) : 10;
+  const maxCursorRunsArg = [...args].find((arg) => arg.startsWith("--max-cursor-runs="));
+  const maxCursorRuns = maxCursorRunsArg ? Math.max(1, Number(maxCursorRunsArg.split("=", 2)[1])) : 10;
 
   const supabase = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
@@ -268,6 +271,7 @@ async function main() {
     requestsMonth: state.requestsMonth,
     queuedSets: queue.length,
     processed: [],
+    cursorRuns: [],
     stoppedReason: null,
   };
 
@@ -341,8 +345,65 @@ async function main() {
     result.finalRefresh = refreshResult;
   }
 
+  if (!skipCursorFill) {
+    let cursorRuns = 0;
+    while (cursorRuns < maxCursorRuns) {
+      if (state.requestsToday >= DAILY_LIMIT) {
+        result.stoppedReason = "daily_limit_reached";
+        break;
+      }
+      if (state.requestsMonth >= MONTHLY_LIMIT) {
+        result.stoppedReason = "monthly_limit_reached";
+        break;
+      }
+
+      const syncResult = await callJson(`${baseUrl}/api/cron/sync-justtcg-prices?force=1`, cronSecret);
+      state.requestsToday += 1;
+      state.requestsMonth += 1;
+      cursorRuns += 1;
+
+      let refreshResult = null;
+      if ((cursorRuns % Math.max(1, refreshEvery)) === 0 || syncResult.done) {
+        refreshResult = await callJson(`${baseUrl}/api/cron/refresh-derived-signals`, cronSecret);
+      }
+
+      result.cursorRuns.push({
+        run: cursorRuns,
+        setsProcessed: syncResult.setsProcessed ?? null,
+        done: Boolean(syncResult.done),
+        itemsFetched: syncResult.itemsFetched ?? null,
+        variantMetricsWritten: syncResult.variantMetricsWritten ?? null,
+        historyPointsWritten: syncResult.historyPointsWritten ?? null,
+        firstError: syncResult.firstError ?? null,
+        refreshRowsUpdated: refreshResult?.rowsUpdated ?? null,
+      });
+
+      state.lastRun = {
+        at: new Date().toISOString(),
+        setCode: null,
+        setName: "cursor-fill",
+        providerSetId: "cursor-fill",
+      };
+      saveState(state);
+
+      if (syncResult.done) {
+        break;
+      }
+    }
+
+    if (result.cursorRuns.length > 0) {
+      const refreshResult = await callJson(`${baseUrl}/api/cron/refresh-derived-signals`, cronSecret);
+      result.finalRefresh = refreshResult;
+    }
+  }
+
   if (!result.stoppedReason) {
-    result.stoppedReason = queue.length === 0 ? "already_complete_for_month" : "queue_exhausted";
+    if (result.cursorRuns.length > 0) {
+      const lastCursorRun = result.cursorRuns[result.cursorRuns.length - 1];
+      result.stoppedReason = lastCursorRun?.done ? "cursor_catalog_complete" : "cursor_run_limit_reached";
+    } else {
+      result.stoppedReason = queue.length === 0 ? "already_complete_for_month" : "queue_exhausted";
+    }
   }
 
   state.completedAt = new Date().toISOString();
