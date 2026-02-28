@@ -491,6 +491,7 @@ export async function GET(req: Request) {
             const historyPointCount = (sealedVariant.priceHistory?.length ?? sealedVariant.priceHistory30d?.length ?? 0);
             allVariantMetrics.push({
               canonical_slug: canonicalSlug,
+              printing_id: null,
               variant_ref: variantRef,
               provider: PROVIDER,
               grade: "RAW",
@@ -595,6 +596,7 @@ export async function GET(req: Request) {
               const historyPointCount = (variant.priceHistory?.length ?? variant.priceHistory30d?.length ?? 0);
               allVariantMetrics.push({
                 canonical_slug: printing.canonical_slug,
+                printing_id: printing.id,
                 variant_ref: variantRef,
                 provider: PROVIDER,
                 grade: "RAW",
