@@ -130,30 +130,6 @@ function shouldAllowStructuredRedirect(query: string): boolean {
   return false;
 }
 
-function rowSubtitle(row: CanonicalCardRow): string {
-  const bits: string[] = [];
-  if (row.year) bits.push(String(row.year));
-  if (row.set_name) bits.push(row.set_name);
-  if (row.card_number) bits.push(`#${row.card_number}`);
-  if (row.variant) bits.push(row.variant);
-  if (row.language) bits.push(row.language);
-  return bits.join(" • ");
-}
-
-function printingChipLabel(printing: PrintingRow): string {
-  const finishMap: Record<PrintingRow["finish"], string> = {
-    NON_HOLO: "Non-Holo",
-    HOLO: "Holo",
-    REVERSE_HOLO: "Reverse Holo",
-    ALT_HOLO: "Alt Holo",
-    UNKNOWN: "Unknown",
-  };
-  const bits: string[] = [finishMap[printing.finish]];
-  if (printing.edition === "FIRST_EDITION") bits.push("1st Ed");
-  if (printing.stamp) bits.push(printing.stamp);
-  return bits.join(" • ");
-}
-
 function scoreCanonicalMatch(
   row: CanonicalCardRow,
   qLower: string,
@@ -192,17 +168,6 @@ function primaryPrintingRank(printing: PrintingRow): number {
 function choosePrimaryPrinting(printings: PrintingRow[]): PrintingRow | null {
   if (printings.length === 0) return null;
   return [...printings].sort((a, b) => primaryPrintingRank(b) - primaryPrintingRank(a) || a.id.localeCompare(b.id))[0] ?? null;
-}
-
-function finishSummaryChips(printings: PrintingRow[]): string[] {
-  const chips: string[] = [];
-  for (const printing of printings) {
-    if (printing.finish === "HOLO" && !chips.includes("Holo")) chips.push("Holo");
-    if (printing.finish === "REVERSE_HOLO" && !chips.includes("Reverse")) chips.push("Reverse");
-    if (printing.edition === "FIRST_EDITION" && !chips.includes("1st Ed")) chips.push("1st Ed");
-    if (chips.length >= 3) break;
-  }
-  return chips;
 }
 
 async function runBroadSearch(params: {
@@ -682,24 +647,23 @@ export default async function SearchPage({
               <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
                 {result.rows.map((row) => {
                   const primaryPrinting = choosePrimaryPrinting(row.printings);
-                  const chips = finishSummaryChips(row.printings);
                   return (
                     <Link
                       key={row.canonical.slug}
                       href={`/c/${encodeURIComponent(row.canonical.slug)}`}
-                      className="group rounded-[var(--radius-card)] border-app border bg-surface-soft/40 p-2 transition duration-200 hover:-translate-y-0.5 hover:border-white/30 hover:bg-surface-soft/55"
+                      className="group rounded-[var(--radius-card)] border-app border bg-surface-soft/24 p-3 transition duration-200 hover:-translate-y-0.5 hover:border-white/30 hover:bg-surface-soft/38"
                     >
-                      <div className="relative h-52 overflow-hidden rounded-[var(--radius-input)] border-app border bg-surface/40">
+                      <div className="relative flex min-h-[18rem] items-start justify-center overflow-hidden rounded-[var(--radius-input)] bg-transparent p-1 sm:min-h-[20rem]">
                         {primaryPrinting?.image_url ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
                             src={primaryPrinting.image_url}
                             alt={row.canonical.canonical_name}
-                            className="h-full w-full object-cover object-top transition duration-200 group-hover:scale-[1.02]"
+                            className="h-auto max-h-[18rem] w-auto max-w-full object-contain object-top drop-shadow-[0_14px_28px_rgba(0,0,0,0.35)] transition duration-200 group-hover:scale-[1.02] sm:max-h-[20rem]"
                           />
                         ) : (
-                          <div className="flex h-full items-center justify-center bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.08),transparent_65%)] p-4">
-                            <div className="rounded-[var(--radius-input)] border-app border bg-surface/45 px-3 py-2 text-center">
+                          <div className="flex h-full w-full items-center justify-center p-4">
+                            <div className="rounded-[var(--radius-input)] border-app border bg-surface/35 px-3 py-2 text-center">
                               <p className="text-app text-xs font-semibold">Image pending</p>
                             </div>
                           </div>
@@ -707,16 +671,10 @@ export default async function SearchPage({
                       </div>
                       <div className="mt-3 min-w-0">
                         <p className="text-app truncate text-sm font-semibold">{row.canonical.canonical_name}</p>
-                        <p className="text-muted mt-1 truncate text-xs">{rowSubtitle(row.canonical)}</p>
-                        {chips.length > 0 ? (
-                          <div className="mt-2 flex flex-wrap gap-1">
-                            {chips.map((chip) => (
-                              <span key={`${row.canonical.slug}-${chip}`} className="border-app rounded-full border px-2 py-0.5 text-[11px] text-muted">
-                                {chip}
-                              </span>
-                            ))}
-                          </div>
-                        ) : null}
+                        <p className="text-muted mt-1 truncate text-xs">
+                          {row.canonical.year ? `${row.canonical.year}` : "Year unknown"}
+                          {row.canonical.set_name ? ` • ${row.canonical.set_name}` : ""}
+                        </p>
                       </div>
                     </Link>
                   );
