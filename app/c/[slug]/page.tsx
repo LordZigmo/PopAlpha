@@ -76,6 +76,15 @@ function finishLabel(finish: CardPrintingRow["finish"]): string {
   return map[finish];
 }
 
+function editionLabel(edition: CardPrintingRow["edition"]): string {
+  const map: Record<CardPrintingRow["edition"], string> = {
+    UNLIMITED: "Unlimited",
+    FIRST_EDITION: "1st Edition",
+    UNKNOWN: "Unknown Edition",
+  };
+  return map[edition];
+}
+
 function finishPriority(finish: CardPrintingRow["finish"]): number {
   const order: Record<CardPrintingRow["finish"], number> = {
     HOLO: 0,
@@ -110,6 +119,43 @@ function printingOptionLabel(printing: CardPrintingRow): string {
   return [finishLabel(printing.finish), printing.edition === "FIRST_EDITION" ? "1st Ed" : null, printing.stamp]
     .filter((value) => Boolean(value))
     .join(" • ");
+}
+
+function resolvePrintingSelection(
+  printings: CardPrintingRow[],
+  selectedPrinting: CardPrintingRow | null,
+  overrides: Partial<Pick<CardPrintingRow, "finish" | "edition" | "stamp">>
+): CardPrintingRow | null {
+  if (printings.length === 0) return null;
+
+  const desired = {
+    finish: overrides.finish ?? selectedPrinting?.finish ?? null,
+    edition: overrides.edition ?? selectedPrinting?.edition ?? null,
+    stamp: overrides.stamp ?? selectedPrinting?.stamp ?? null,
+  };
+
+  const exact = printings.find(
+    (printing) =>
+      (desired.finish === null || printing.finish === desired.finish) &&
+      (desired.edition === null || printing.edition === desired.edition) &&
+      (desired.stamp === null || printing.stamp === desired.stamp)
+  );
+  if (exact) return exact;
+
+  const byFinishEdition = printings.find(
+    (printing) =>
+      (desired.finish === null || printing.finish === desired.finish) &&
+      (desired.edition === null || printing.edition === desired.edition)
+  );
+  if (byFinishEdition) return byFinishEdition;
+
+  const byFinish = printings.find((printing) => desired.finish === null || printing.finish === desired.finish);
+  if (byFinish) return byFinish;
+
+  const byEdition = printings.find((printing) => desired.edition === null || printing.edition === desired.edition);
+  if (byEdition) return byEdition;
+
+  return printings[0];
 }
 
 function toggleHref(slug: string, printingId: string | null, grade: GradeSelection, debugEnabled: boolean): string {
@@ -242,6 +288,9 @@ export default async function CanonicalCardPage({
   const gradeSelection = selectedGrade(grade);
   const selectedPrinting = printings.find((row) => row.id === printing) ?? printings[0] ?? null;
   const selectedPrintingLabel = selectedPrinting ? printingOptionLabel(selectedPrinting) : "Unknown printing";
+  const finishOptions = Array.from(new Set(printings.map((row) => row.finish)));
+  const editionOptions = Array.from(new Set(printings.map((row) => row.edition)));
+  const stampOptions = Array.from(new Set(printings.map((row) => row.stamp).filter((value): value is string => Boolean(value))));
 
   const { data: snapshotData } = await supabase
     .from("market_snapshot_rollups")
@@ -350,7 +399,76 @@ export default async function CanonicalCardPage({
           <GroupCard header={<p className="text-[15px] font-semibold text-[#f5f7fb]">Filters</p>}>
             <div className="space-y-4">
               <div>
-                <p className="mb-2 text-[13px] font-semibold text-[#98a0ae]">Printing</p>
+                <p className="mb-2 text-[13px] font-semibold text-[#98a0ae]">Finish</p>
+                <SegmentedControl
+                  wrap
+                  items={
+                    finishOptions.length
+                      ? finishOptions.map((finish) => {
+                          const nextPrinting = resolvePrintingSelection(printings, selectedPrinting, { finish });
+                          return {
+                            key: finish,
+                            label: finishLabel(finish),
+                            href: toggleHref(slug, nextPrinting?.id ?? null, gradeSelection, debugEnabled),
+                            active: selectedPrinting?.finish === finish,
+                          };
+                        })
+                      : [
+                          {
+                            key: "unknown-finish",
+                            label: "Unknown finish",
+                            active: true,
+                            disabled: true,
+                          },
+                        ]
+                  }
+                />
+              </div>
+              <div>
+                <p className="mb-2 text-[13px] font-semibold text-[#98a0ae]">Edition</p>
+                <SegmentedControl
+                  wrap
+                  items={
+                    editionOptions.length
+                      ? editionOptions.map((edition) => {
+                          const nextPrinting = resolvePrintingSelection(printings, selectedPrinting, { edition });
+                          return {
+                            key: edition,
+                            label: editionLabel(edition),
+                            href: toggleHref(slug, nextPrinting?.id ?? null, gradeSelection, debugEnabled),
+                            active: selectedPrinting?.edition === edition,
+                          };
+                        })
+                      : [
+                          {
+                            key: "unknown-edition",
+                            label: "Unknown edition",
+                            active: true,
+                            disabled: true,
+                          },
+                        ]
+                  }
+                />
+              </div>
+              {stampOptions.length ? (
+                <div>
+                  <p className="mb-2 text-[13px] font-semibold text-[#98a0ae]">Stamp</p>
+                  <SegmentedControl
+                    wrap
+                    items={stampOptions.map((stamp) => {
+                      const nextPrinting = resolvePrintingSelection(printings, selectedPrinting, { stamp });
+                      return {
+                        key: stamp,
+                        label: stamp,
+                        href: toggleHref(slug, nextPrinting?.id ?? null, gradeSelection, debugEnabled),
+                        active: selectedPrinting?.stamp === stamp,
+                      };
+                    })}
+                  />
+                </div>
+              ) : null}
+              <div>
+                <p className="mb-2 text-[13px] font-semibold text-[#98a0ae]">Exact printing</p>
                 <SegmentedControl
                   wrap
                   items={
