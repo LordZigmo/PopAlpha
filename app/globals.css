@@ -2,20 +2,20 @@
 
 :root,
 .theme-indigo {
-  --color-background: #10151c;
-  --color-surface: #171e27;
-  --color-surface-soft: #222b36;
-  --color-accent: #d36a3b;
-  --color-on-accent: #fff3ea;
-  --color-text: #ecf1f7;
-  --color-muted: #9aa6b6;
-  --color-border: #334150;
-  --color-positive: #d98a52;
-  --color-negative: #ff5c79;
-  --color-gold: #c9a04f;
-  --color-gold-ink: #fff5d9;
-  --color-overlay: rgba(14, 19, 26, 0.8);
-  --shadow-elevated: 0 18px 42px rgba(0, 0, 0, 0.5);
+  --color-background: #080811;
+  --color-surface: #12111f;
+  --color-surface-soft: #1a1730;
+  --color-accent: #ff6b9f;
+  --color-on-accent: #fff1f8;
+  --color-text: #f2efff;
+  --color-muted: #a9a1c7;
+  --color-border: #3b315f;
+  --color-positive: #ff8c6b;
+  --color-negative: #ff5c8a;
+  --color-gold: #d79dff;
+  --color-gold-ink: #fff3ff;
+  --color-overlay: rgba(8, 6, 20, 0.84);
+  --shadow-elevated: 0 22px 52px rgba(0, 0, 0, 0.62);
   --space-panel: 1.5rem;
   --space-card: 1rem;
   --radius-panel: 1.75rem;
@@ -66,9 +66,10 @@ body {
   position: relative;
   min-height: 100vh;
   background:
-    radial-gradient(900px circle at 15% -5%, color-mix(in srgb, var(--color-accent) 18%, transparent), transparent 58%),
-    radial-gradient(820px circle at 90% 5%, color-mix(in srgb, var(--color-positive) 14%, transparent), transparent 64%),
-    linear-gradient(180deg, color-mix(in srgb, var(--color-background) 92%, #000), var(--color-background));
+    radial-gradient(900px circle at 14% -8%, color-mix(in srgb, var(--color-accent) 22%, transparent), transparent 56%),
+    radial-gradient(760px circle at 88% 2%, color-mix(in srgb, #7d5cff 18%, transparent), transparent 60%),
+    radial-gradient(820px circle at 50% 120%, color-mix(in srgb, var(--color-positive) 14%, transparent), transparent 62%),
+    linear-gradient(180deg, color-mix(in srgb, var(--color-background) 88%, #03010a), var(--color-background));
 }
 
 .app-shell::before {
@@ -83,9 +84,13 @@ body {
 
 .glass,
 .card {
-  background: color-mix(in srgb, var(--color-surface) 82%, transparent);
-  border: 1px solid var(--color-border);
-  box-shadow: var(--shadow-elevated);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-surface-soft) 92%, transparent), color-mix(in srgb, var(--color-surface) 96%, transparent));
+  border: 1px solid color-mix(in srgb, var(--color-border) 90%, #4f3f7d);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    0 0 0 1px color-mix(in srgb, var(--color-accent) 6%, transparent),
+    var(--shadow-elevated);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
 }
@@ -136,15 +141,18 @@ body {
 .btn-accent:hover { filter: brightness(1.06); }
 
 .btn-ghost {
-  background: color-mix(in srgb, var(--color-surface) 84%, transparent);
+  background: color-mix(in srgb, var(--color-surface-soft) 82%, transparent);
   color: var(--color-text);
-  border: 1px solid var(--color-border);
+  border: 1px solid color-mix(in srgb, var(--color-border) 88%, #4f3f7d);
 }
-.btn-ghost:hover { background: var(--color-surface-soft); }
+.btn-ghost:hover {
+  background: color-mix(in srgb, var(--color-surface-soft) 94%, var(--color-accent));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
 
 .input-themed {
-  background: color-mix(in srgb, var(--color-surface) 85%, transparent);
-  border: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-surface-soft) 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-border) 88%, #4f3f7d);
   color: var(--color-text);
 }
 .input-themed::placeholder { color: var(--color-muted); }
