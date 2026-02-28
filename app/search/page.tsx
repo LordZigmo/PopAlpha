@@ -651,15 +651,15 @@ export default async function SearchPage({
                     <Link
                       key={row.canonical.slug}
                       href={`/c/${encodeURIComponent(row.canonical.slug)}`}
-                      className="group relative block overflow-hidden rounded-[var(--radius-card)] border-app border bg-surface-soft/24 transition duration-200 hover:-translate-y-0.5 hover:border-white/30"
+                      className="group block transition duration-200 hover:-translate-y-0.5"
                     >
-                      <div className="relative aspect-[3/4] overflow-hidden bg-surface/20">
+                      <div className="relative aspect-[63/88] overflow-hidden rounded-[var(--radius-card)] border-app border bg-surface-soft/24">
                         {primaryPrinting?.image_url ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
                             src={primaryPrinting.image_url}
                             alt={row.canonical.canonical_name}
-                            className="h-full w-full object-cover object-top transition duration-200 group-hover:scale-[1.03]"
+                            className="h-full w-full object-cover object-center transition duration-200 group-hover:scale-[1.02]"
                           />
                         ) : (
                           <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.08),transparent_65%)] p-4">
@@ -668,13 +668,13 @@ export default async function SearchPage({
                             </div>
                           </div>
                         )}
-                        <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-[linear-gradient(to_top,rgba(8,12,18,0.92),rgba(8,12,18,0.62)_48%,rgba(8,12,18,0))] p-3">
-                          <p className="text-app truncate text-sm font-semibold">{row.canonical.canonical_name}</p>
-                          <p className="text-muted mt-1 truncate text-xs">
-                            {row.canonical.year ? `${row.canonical.year}` : "Year unknown"}
-                            {row.canonical.set_name ? ` • ${row.canonical.set_name}` : ""}
-                          </p>
-                        </div>
+                      </div>
+                      <div className="mt-2 min-w-0 px-1">
+                        <p className="text-app truncate text-sm font-semibold">{row.canonical.canonical_name}</p>
+                        <p className="text-muted mt-1 truncate text-xs">
+                          {row.canonical.year ? `${row.canonical.year}` : "Year unknown"}
+                          {row.canonical.set_name ? ` • ${row.canonical.set_name}` : ""}
+                        </p>
                       </div>
                     </Link>
                   );
