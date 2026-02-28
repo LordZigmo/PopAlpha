@@ -14,6 +14,7 @@ import { GroupCard, GroupedSection, PageShell, Pill, SegmentedControl, StatRow, 
 import MarketSnapshotTiles from "@/components/market-snapshot-tiles";
 import { buildEbayQuery, type GradeSelection } from "@/lib/ebay-query";
 import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import { getSignals } from "@/lib/data/assets";
 import {
   getCachedTcgSetPricing,
   resolveTcgProductMatch,
@@ -193,6 +194,12 @@ function formatUsdCompact(value: number | null | undefined): string {
   }).format(value);
 }
 
+/** Formats a numeric signal value for display, rounding to 2 dp. */
+function formatSignal(value: number | null | undefined, suffix = ""): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
+  return `${value >= 0 ? "+" : ""}${value.toFixed(2)}${suffix}`;
+}
+
 function gradePremium(
   rawPrice: number | null,
   gradedPrice: number | null
@@ -305,20 +312,22 @@ export default async function CanonicalCardPage({
     new Set(printings.map((row) => row.stamp).filter((value): value is string => Boolean(value)))
   );
 
-  // Fetch all three grade snapshots in parallel so the Grade Ladder can
-  // display RAW / PSA 9 / PSA 10 simultaneously without extra waterfalls.
+  // Fetch all three grade snapshots + derived signals in parallel.
   const printingIdForQuery = selectedPrinting?.id ?? null;
-  const [rawSnap, psa9Snap, psa10Snap] = await Promise.all(
-    (["RAW", "PSA9", "PSA10"] as const).map((g) =>
-      supabase
-        .from("card_metrics")
-        .select("active_listings_7d, median_7d, median_30d, trimmed_median_30d, low_30d, high_30d")
-        .eq("canonical_slug", slug)
-        .eq("grade", g)
-        .is("printing_id", printingIdForQuery)
-        .maybeSingle<SnapshotRow>()
-    )
-  );
+  const [[rawSnap, psa9Snap, psa10Snap], signals] = await Promise.all([
+    Promise.all(
+      (["RAW", "PSA9", "PSA10"] as const).map((g) =>
+        supabase
+          .from("card_metrics")
+          .select("active_listings_7d, median_7d, median_30d, trimmed_median_30d, low_30d, high_30d")
+          .eq("canonical_slug", slug)
+          .eq("grade", g)
+          .is("printing_id", printingIdForQuery)
+          .maybeSingle<SnapshotRow>()
+      )
+    ),
+    getSignals(slug),
+  ]);
 
   const gradeSnapMap = {
     RAW: rawSnap.data,
@@ -487,6 +496,88 @@ export default async function CanonicalCardPage({
           grade={gradeSelection}
           initialData={snapshot}
         />
+
+        {/* ── PopAlpha Signals ──────────────────────────────────────────────────
+            Derived analytics computed nightly from provider data.
+            Rendered even if null (shows "—") — never blocks page render. */}
+        <GroupedSection
+          title="PopAlpha Signals"
+          description="Computed nightly from price momentum, volatility, and activity data."
+        >
+          <GroupCard>
+            <div className="grid grid-cols-3 gap-3">
+              <StatTile
+                label="Trend Strength"
+                value={formatSignal(signals?.signal_trend_strength)}
+                detail={
+                  signals?.signal_trend_strength != null
+                    ? signals.signal_trend_strength >= 0
+                      ? "Upward momentum"
+                      : "Downward momentum"
+                    : "Insufficient data"
+                }
+                tone={
+                  signals?.signal_trend_strength != null
+                    ? signals.signal_trend_strength > 5
+                      ? "positive"
+                      : signals.signal_trend_strength < -5
+                        ? "warning"
+                        : "neutral"
+                    : "neutral"
+                }
+              />
+              <StatTile
+                label="Breakout Score"
+                value={formatSignal(signals?.signal_breakout)}
+                detail={
+                  signals?.signal_breakout != null
+                    ? signals.signal_breakout > 0.5
+                      ? "Gaining momentum"
+                      : signals.signal_breakout < -0.5
+                        ? "Losing momentum"
+                        : "Neutral"
+                    : "Insufficient data"
+                }
+                tone={
+                  signals?.signal_breakout != null
+                    ? signals.signal_breakout > 0.5
+                      ? "positive"
+                      : signals.signal_breakout < -0.5
+                        ? "warning"
+                        : "neutral"
+                    : "neutral"
+                }
+              />
+              <StatTile
+                label="Value Zone"
+                value={formatSignal(signals?.signal_value_zone, "%")}
+                detail={
+                  signals?.signal_value_zone != null
+                    ? signals.signal_value_zone >= 70
+                      ? "Near 30-day low"
+                      : signals.signal_value_zone <= 30
+                        ? "Near 30-day high"
+                        : "Mid range"
+                    : "Insufficient data"
+                }
+                tone={
+                  signals?.signal_value_zone != null
+                    ? signals.signal_value_zone >= 70
+                      ? "positive"
+                      : "neutral"
+                    : "neutral"
+                }
+              />
+            </div>
+            {signals?.metricsStale && (
+              <p className="mt-3 text-[12px] text-[#8c94a3]">
+                Signals last updated {signals.signals_as_of_ts
+                  ? new Date(signals.signals_as_of_ts).toLocaleDateString()
+                  : "unknown"} · Provider data may be stale
+              </p>
+            )}
+          </GroupCard>
+        </GroupedSection>
 
         {/* ── Grade Ladder ──────────────────────────────────────────────────────
             Shows RAW / PSA 9 / PSA 10 side-by-side so collectors instantly
