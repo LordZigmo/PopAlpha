@@ -1,45 +1,61 @@
 /**
  * Cron: sync-justtcg-prices
  *
- * Runs daily at 7am UTC. Fetches Near Mint Pokemon card prices from JustTCG
- * and writes them to price_snapshots (via provider_ingests for audit).
- * Calls refresh_card_metrics() at the end so card_metrics is immediately
- * up to date.
+ * Runs nightly at 6am UTC (≈1am EST). Fetches Pokemon card prices from
+ * JustTCG Enterprise and writes to our 3-layer price architecture:
  *
- * JustTCG Free Tier: 1000 monthly / 100 daily / 10 per minute.
- * We process SETS_PER_RUN JustTCG sets per run, using 1 call for the /sets
- * listing plus ~1–2 calls per set for paginated /cards. With 20 sets/run
- * that's ~21–41 calls — safely within the daily 100-request cap.
+ *   Layer 1 — provider audit:
+ *     provider_raw_payloads  full /cards response per set
+ *     provider_ingests       one row per matched card variant
+ *     provider_set_map       set ID confidence tracking
  *
- * Cursor strategy: the last processed JustTCG set ID is stored in
- * ingest_runs.meta.nextSetId. Sets are processed alphabetically by ID.
- * When the full catalog is exhausted the cursor resets to '' so the next
- * run restarts from the beginning, giving a rolling daily price refresh.
+ *   Layer 2 — canonical storage:
+ *     price_snapshots        current NM price (upsert by provider_ref)
+ *     price_history_points   priceHistory30d time series (ON CONFLICT DO NOTHING)
  *
- * Set matching: JustTCG names ("SV01: Scarlet & Violet Base Set") are fuzzy-
- * matched against our card_printings.set_name values. Any set that scores
- * below 60/100 is skipped for that run.
+ *   Layer 3 — analytics:
+ *     card_metrics           refresh_card_metrics() then provider field upsert
  *
- * provider_ref='justtcg-{variantId}' so upserts update the price and
- * observed_at in place, keeping price_snapshots compact.
+ * Set discovery:
+ *   /sets?game=pokemon is broken on JustTCG. We derive set IDs from our own
+ *   card_printings.set_name using setNameToJustTcgId() and verify by whether
+ *   cards are returned. Confidence is tracked in provider_set_map.
+ *
+ * Debug mode (single set, no cursor):
+ *   GET /api/cron/sync-justtcg-prices?set=base-set-pokemon&limit=1
+ *
+ * Rate limits (Enterprise): 500K/month · 50K/day · 500/min
  */
 
+import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 import { getServerSupabaseClient } from "@/lib/supabaseServer";
 import {
-  fetchJustTcgSets,
   fetchJustTcgCards,
-  bestSetMatch,
+  setNameToJustTcgId,
   mapJustTcgPrinting,
   normalizeCardNumber,
+  mapVariantToMetrics,
+  mapVariantToHistoryPoints,
+  buildVariantRef,
+  type JustTcgCard,
 } from "@/lib/providers/justtcg";
+import type { MetricsSnapshot, PriceHistoryPoint } from "@/lib/providers/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-const SETS_PER_RUN = 20;
 const JOB = "justtcg_price_sync";
 const PROVIDER = "JUSTTCG";
+
+// How many sets to process per run. Override via env var for testing.
+const SETS_PER_RUN = process.env.JUSTTCG_SETS_PER_RUN
+  ? parseInt(process.env.JUSTTCG_SETS_PER_RUN, 10)
+  : 100;
+
+// ── Types ──────────────────────────────────────────────────────────────────────
+
+type OurSet = { setCode: string; setName: string };
 
 type PrintingRow = {
   id: string;
@@ -48,42 +64,103 @@ type PrintingRow = {
   finish: string;
 };
 
-type IngestRow = {
-  provider: string;
-  job: string;
-  set_id: string;
-  card_id: string;
-  variant_id: string;
-  canonical_slug: string | null;
-  printing_id: string | null;
-  raw_payload: Record<string, unknown>;
-};
+// ── Helpers ────────────────────────────────────────────────────────────────────
 
-type SnapshotRow = {
-  canonical_slug: string;
-  printing_id: string | null;
-  grade: string;
-  price_value: number;
-  currency: string;
-  provider: string;
-  provider_ref: string;
-  ingest_id: string | null;
-  observed_at: string;
-};
+function requestHash(provider: string, endpoint: string, params: Record<string, unknown>): string {
+  const str = JSON.stringify({ provider, endpoint, params });
+  return crypto.createHash("sha256").update(str).digest("hex").slice(0, 16);
+}
+
+async function batchUpsert<T extends Record<string, unknown>>(
+  supabase: ReturnType<typeof getServerSupabaseClient>,
+  table: string,
+  rows: T[],
+  onConflict: string,
+  batchSize = 250,
+): Promise<{ upserted: number; failed: number; firstError: string | null }> {
+  let upserted = 0;
+  let failed = 0;
+  let firstError: string | null = null;
+  for (let i = 0; i < rows.length; i += batchSize) {
+    const batch = rows.slice(i, i + batchSize);
+    const { error } = await supabase.from(table).upsert(batch, { onConflict });
+    if (error) {
+      firstError ??= `${table}: ${error.message}`;
+      failed += batch.length;
+    } else {
+      upserted += batch.length;
+    }
+  }
+  return { upserted, failed, firstError };
+}
+
+async function batchInsertIgnore<T extends Record<string, unknown>>(
+  supabase: ReturnType<typeof getServerSupabaseClient>,
+  table: string,
+  rows: T[],
+  onConflict: string,
+  batchSize = 500,
+): Promise<{ inserted: number; firstError: string | null }> {
+  let inserted = 0;
+  let firstError: string | null = null;
+  for (let i = 0; i < rows.length; i += batchSize) {
+    const batch = rows.slice(i, i + batchSize);
+    const { error } = await supabase
+      .from(table)
+      .upsert(batch, { onConflict, ignoreDuplicates: true });
+    if (error) {
+      firstError ??= `${table}: ${error.message}`;
+    } else {
+      inserted += batch.length;
+    }
+  }
+  return { inserted, firstError };
+}
+
+// ── Main handler ──────────────────────────────────────────────────────────────
 
 export async function GET(req: Request) {
-  // Vercel sends CRON_SECRET as a Bearer token on cron invocations.
+  // ── Auth ────────────────────────────────────────────────────────────────────
   const cronSecret = process.env.CRON_SECRET?.trim();
   if (cronSecret) {
     const auth = req.headers.get("authorization")?.trim() ?? "";
-    if (auth !== `Bearer ${cronSecret}`) {
+    // Allow both Vercel cron (Bearer) and direct debug requests (?secret=...)
+    const url = new URL(req.url);
+    const querySecret = url.searchParams.get("secret")?.trim() ?? "";
+    if (auth !== `Bearer ${cronSecret}` && querySecret !== cronSecret) {
       return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     }
   }
 
-  const supabase = getServerSupabaseClient();
+  const url = new URL(req.url);
+  const debugSet = url.searchParams.get("set")?.trim() ?? null;   // e.g. "base-set-pokemon"
+  const debugLimit = parseInt(url.searchParams.get("limit") ?? "0", 10) || null;
+  const isDebug = !!debugSet;
 
-  // ── Cursor: last processed JustTCG set ID ──────────────────────────────────
+  const supabase = getServerSupabaseClient();
+  const now = new Date().toISOString();
+  const runDate = now.slice(0, 10); // YYYY-MM-DD
+
+  // ── Idempotency: skip if a complete run already finished today ───────────────
+  if (!isDebug) {
+    const { data: todayRun } = await supabase
+      .from("ingest_runs")
+      .select("id")
+      .eq("job", JOB)
+      .eq("status", "finished")
+      .eq("ok", true)
+      .gte("ended_at", `${runDate}T00:00:00Z`)
+      .lte("ended_at", `${runDate}T23:59:59Z`)
+      // only skip if it was a full pass (done=true)
+      .contains("meta", { done: true })
+      .limit(1)
+      .maybeSingle();
+    if (todayRun) {
+      return NextResponse.json({ ok: true, skipped: true, reason: "already completed today" });
+    }
+  }
+
+  // ── Cursor from last run ────────────────────────────────────────────────────
   const { data: lastRun } = await supabase
     .from("ingest_runs")
     .select("meta")
@@ -95,25 +172,10 @@ export async function GET(req: Request) {
     .maybeSingle<{ meta: Record<string, unknown> | null }>();
 
   const lastMeta = lastRun?.meta ?? null;
-  const lastSetId =
-    typeof lastMeta?.nextSetId === "string" ? lastMeta.nextSetId : "";
+  const lastSetCode = typeof lastMeta?.nextSetCode === "string" ? lastMeta.nextSetCode : "";
 
-  // ── Fetch all JustTCG sets (one API call) ───────────────────────────────────
-  const allJustTcgSets = await fetchJustTcgSets();
-  allJustTcgSets.sort((a, b) => a.id.localeCompare(b.id));
-
-  // Apply cursor: only process sets whose ID comes after the cursor.
-  const remaining = lastSetId
-    ? allJustTcgSets.filter((s) => s.id > lastSetId)
-    : allJustTcgSets;
-
-  const setsToProcess = remaining.slice(0, SETS_PER_RUN);
-  const done = setsToProcess.length < SETS_PER_RUN;
-  const lastProcessedSetId = setsToProcess.at(-1)?.id ?? "";
-  const nextSetId = done ? "" : lastProcessedSetId;
-
-  // ── Fetch all our set codes for fuzzy matching (done once per run) ──────────
-  const { data: ourSetsRaw } = await supabase
+  // ── Get our canonical English sets ─────────────────────────────────────────
+  const { data: setsRaw } = await supabase
     .from("card_printings")
     .select("set_code, set_name")
     .eq("language", "EN")
@@ -121,16 +183,44 @@ export async function GET(req: Request) {
     .not("set_name", "is", null)
     .limit(10000);
 
-  const seenSetCodes = new Set<string>();
-  const ourSetCandidates: Array<{ setCode: string; setName: string }> = [];
-  for (const row of ourSetsRaw ?? []) {
-    if (row.set_code && row.set_name && !seenSetCodes.has(row.set_code)) {
-      seenSetCodes.add(row.set_code);
-      ourSetCandidates.push({ setCode: row.set_code, setName: row.set_name });
+  const seenCodes = new Set<string>();
+  const allSets: OurSet[] = [];
+  for (const row of setsRaw ?? []) {
+    if (row.set_code && row.set_name && !seenCodes.has(row.set_code)) {
+      seenCodes.add(row.set_code);
+      allSets.push({ setCode: row.set_code, setName: row.set_name });
     }
   }
+  allSets.sort((a, b) => a.setCode.localeCompare(b.setCode));
 
-  // ── Create ingest run record ────────────────────────────────────────────────
+  // In debug mode: only process the explicitly requested set.
+  let setsToProcess: OurSet[];
+  if (isDebug) {
+    setsToProcess = allSets.length > 0 ? [allSets[0]] : []; // placeholder; overridden below
+  } else {
+    const remaining = lastSetCode ? allSets.filter((s) => s.setCode > lastSetCode) : allSets;
+    setsToProcess = remaining.slice(0, SETS_PER_RUN);
+  }
+
+  const done = isDebug ? false : setsToProcess.length < SETS_PER_RUN;
+  const nextSetCode = done ? "" : (setsToProcess.at(-1)?.setCode ?? "");
+
+  // ── Load or derive provider_set_map entries ─────────────────────────────────
+  const { data: existingMapRows } = await supabase
+    .from("provider_set_map")
+    .select("canonical_set_code, provider_set_id, confidence")
+    .eq("provider", PROVIDER)
+    .in("canonical_set_code", setsToProcess.map((s) => s.setCode));
+
+  const setMapByCode = new Map<string, { provider_set_id: string; confidence: number }>();
+  for (const row of existingMapRows ?? []) {
+    setMapByCode.set(row.canonical_set_code, {
+      provider_set_id: row.provider_set_id,
+      confidence: row.confidence,
+    });
+  }
+
+  // ── Start ingest run ────────────────────────────────────────────────────────
   const { data: runRow } = await supabase
     .from("ingest_runs")
     .insert({
@@ -141,82 +231,115 @@ export async function GET(req: Request) {
       items_fetched: 0,
       items_upserted: 0,
       items_failed: 0,
-      meta: { lastSetId, nextSetId, setsCount: setsToProcess.length, done },
+      meta: { lastSetCode, nextSetCode, setsCount: setsToProcess.length, done, isDebug },
     })
     .select("id")
     .single<{ id: string }>();
-
   const runId = runRow?.id ?? null;
+
+  // ── Accumulators ────────────────────────────────────────────────────────────
   let itemsFetched = 0;
   let itemsUpserted = 0;
   let itemsFailed = 0;
-  let firstUpsertError: string | null = null;
+  let firstError: string | null = null;
 
-  // ── Process each JustTCG set ────────────────────────────────────────────────
-  for (const jtSet of setsToProcess) {
+  const allPriceSnapshots: Record<string, unknown>[] = [];
+  const allHistoryPoints: PriceHistoryPoint[] = [];
+  const allMetricsSnapshots: MetricsSnapshot[] = [];
+  const allIngestRows: Record<string, unknown>[] = [];
+  const mapUpserts: Record<string, unknown>[] = [];
+
+  // ── Process each set ────────────────────────────────────────────────────────
+  for (const ourSet of setsToProcess) {
+    // Resolve provider set ID.
+    const existing = setMapByCode.get(ourSet.setCode);
+    const providerSetId = isDebug
+      ? debugSet!
+      : (existing?.provider_set_id ?? setNameToJustTcgId(ourSet.setName));
+
     try {
-      // 1. Fuzzy-match JustTCG set name to one of our set_codes.
-      const match = bestSetMatch(jtSet.name, ourSetCandidates);
-      if (!match) continue;
+      // 1. Fetch cards from JustTCG.
+      const { cards, rawEnvelope } = await fetchJustTcgCards(providerSetId, 1);
 
-      // 2. Fetch our card_printings for this set_code.
-      const { data: printingsInSet } = await supabase
+      // 2. Store raw payload (one row per API call).
+      const hash = requestHash(PROVIDER, "/cards", { set: providerSetId, page: 1, limit: 250 });
+      await supabase.from("provider_raw_payloads").upsert(
+        {
+          provider: PROVIDER,
+          endpoint: "/cards",
+          params: { set: providerSetId, page: 1, limit: 250 },
+          response: rawEnvelope,
+          status_code: 200,
+          fetched_at: now,
+          request_hash: hash,
+          canonical_slug: null,
+          variant_ref: null,
+        },
+        { onConflict: "request_hash", ignoreDuplicates: false }
+      );
+
+      // 3. Update provider_set_map confidence.
+      const hasCards = cards.length > 0;
+      mapUpserts.push({
+        provider: PROVIDER,
+        canonical_set_code: ourSet.setCode,
+        canonical_set_name: ourSet.setName,
+        provider_set_id: providerSetId,
+        confidence: hasCards ? 1.0 : 0.0,
+        last_verified_at: hasCards ? now : null,
+      });
+
+      if (!hasCards) continue;
+
+      // 4. Load our card_printings for this set (for card number matching).
+      const { data: printingsRaw } = await supabase
         .from("card_printings")
         .select("id, canonical_slug, card_number, finish")
-        .eq("set_code", match.setCode)
+        .eq("set_code", ourSet.setCode)
         .eq("language", "EN")
         .not("canonical_slug", "is", null);
 
-      const printings = (printingsInSet ?? []) as PrintingRow[];
-      if (!printings.length) continue;
+      const printings = (printingsRaw ?? []) as PrintingRow[];
 
-      // Build lookup: normalizedNumber → finish → PrintingRow
+      // Build lookup: normNum → finish → PrintingRow
       const byNumberAndFinish = new Map<string, Map<string, PrintingRow>>();
-      const byNumber = new Map<string, PrintingRow>();
+      const byNumber = new Map<string, PrintingRow>(); // fallback
       for (const p of printings) {
         if (!p.card_number || !p.canonical_slug) continue;
         const normNum = normalizeCardNumber(p.card_number);
-
         let finishMap = byNumberAndFinish.get(normNum);
-        if (!finishMap) {
-          finishMap = new Map();
-          byNumberAndFinish.set(normNum, finishMap);
-        }
+        if (!finishMap) { finishMap = new Map(); byNumberAndFinish.set(normNum, finishMap); }
         finishMap.set(p.finish, p);
-
-        if (!byNumber.has(normNum) || p.finish === "NON_HOLO") {
-          byNumber.set(normNum, p);
-        }
+        if (!byNumber.has(normNum) || p.finish === "NON_HOLO") byNumber.set(normNum, p);
       }
 
-      // 3. Fetch cards from JustTCG for this set (1 page, up to 250 cards).
-      const { cards } = await fetchJustTcgCards(jtSet.id, 1);
-      itemsFetched += cards.length;
+      // Apply debug card limit if set.
+      const cardsToProcess: JustTcgCard[] = debugLimit ? cards.slice(0, debugLimit) : cards;
+      itemsFetched += cardsToProcess.length;
 
-      const now = new Date().toISOString();
-      const ingests: IngestRow[] = [];
-      const snapshots: SnapshotRow[] = [];
-
-      for (const card of cards) {
+      // 5. Process each card's NM variants.
+      for (const card of cardsToProcess) {
         const normNum = normalizeCardNumber(card.number);
 
         for (const variant of card.variants ?? []) {
-          // Only Near Mint — this is the standard ungraded market reference.
           if (!variant.condition?.toLowerCase().includes("near mint")) continue;
           if (!variant.price || variant.price <= 0) continue;
 
           const mappedFinish = mapJustTcgPrinting(variant.printing ?? "");
           const finishMap = byNumberAndFinish.get(normNum);
+          const printing = finishMap?.get(mappedFinish) ?? byNumber.get(normNum) ?? null;
 
-          // Prefer exact finish match; fall back to any printing for this number.
-          const printing =
-            finishMap?.get(mappedFinish) ?? byNumber.get(normNum) ?? null;
+          const asOfTs = variant.lastUpdated
+            ? new Date(variant.lastUpdated * 1000).toISOString()
+            : now;
 
-          // Build ingest audit row (even if no printing match — slug will be null).
-          ingests.push({
+          const variantRef = buildVariantRef(mappedFinish, variant.condition, "RAW");
+
+          // Audit row (even if no printing match).
+          allIngestRows.push({
             provider: PROVIDER,
             job: JOB,
-            set_id: jtSet.id,
+            set_id: providerSetId,
             card_id: card.id,
             variant_id: variant.id,
             canonical_slug: printing?.canonical_slug ?? null,
@@ -224,22 +347,24 @@ export async function GET(req: Request) {
             raw_payload: {
               variantId: variant.id,
               cardId: card.id,
-              setId: jtSet.id,
-              setName: jtSet.name,
-              cardName: card.name,
+              setId: providerSetId,
               cardNumber: card.number,
               condition: variant.condition,
               printing: variant.printing,
               price: variant.price,
+              trendSlope7d: variant.trendSlope7d ?? null,
+              covPrice30d: variant.covPrice30d ?? null,
+              priceRelativeTo30dRange: variant.priceRelativeTo30dRange ?? null,
+              minPriceAllTime: variant.minPriceAllTime ?? null,
+              maxPriceAllTime: variant.maxPriceAllTime ?? null,
               lastUpdated: variant.lastUpdated ?? null,
-              priceChange7d: variant.priceChange7d ?? null,
-              priceChange30d: variant.priceChange30d ?? null,
             },
           });
 
           if (!printing) continue;
 
-          snapshots.push({
+          // price_snapshots (current NM price, upsert by provider_ref).
+          allPriceSnapshots.push({
             canonical_slug: printing.canonical_slug,
             printing_id: printing.id,
             grade: "RAW",
@@ -247,74 +372,148 @@ export async function GET(req: Request) {
             currency: "USD",
             provider: PROVIDER,
             provider_ref: `justtcg-${variant.id}`,
-            ingest_id: null, // filled in after ingest batch insert
-            observed_at: now,
+            ingest_id: null,
+            observed_at: asOfTs,
           });
+
+          // price_history_points (from priceHistory30d).
+          const historyPoints = mapVariantToHistoryPoints(
+            variant,
+            printing.canonical_slug,
+            mappedFinish,
+            "RAW",
+          );
+          allHistoryPoints.push(...historyPoints);
+
+          // card_metrics provider fields.
+          const metrics = mapVariantToMetrics(
+            variant,
+            printing.canonical_slug,
+            printing.id,
+            "RAW",
+            asOfTs,
+          );
+          if (metrics) allMetricsSnapshots.push(metrics);
         }
       }
-
-      // 4a. Insert provider_ingests in batches of 100.
-      //     We don't need the IDs back for ingest_id linkage (acceptable tradeoff
-      //     for batch efficiency — the audit row exists regardless).
-      for (let i = 0; i < ingests.length; i += 100) {
-        const batch = ingests.slice(i, i + 100);
-        await supabase.from("provider_ingests").insert(batch);
-      }
-
-      // 4b. Upsert price_snapshots in batches of 100.
-      for (let i = 0; i < snapshots.length; i += 100) {
-        const batch = snapshots.slice(i, i + 100);
-        const { error } = await supabase
-          .from("price_snapshots")
-          .upsert(batch, { onConflict: "provider,provider_ref" });
-        if (error) {
-          firstUpsertError ??= error.message;
-          itemsFailed += batch.length;
-        } else {
-          itemsUpserted += batch.length;
-        }
-      }
-    } catch {
-      // One bad set doesn't abort the whole run.
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      firstError ??= `set ${ourSet.setCode}: ${msg}`;
       itemsFailed += 1;
     }
   }
 
-  // ── Refresh card_metrics so prices are immediately visible ─────────────────
-  let metricsResult: Record<string, unknown> | null = null;
-  try {
-    const { data } = await supabase.rpc("refresh_card_metrics");
-    metricsResult = data as Record<string, unknown> | null;
-  } catch {
-    // Non-fatal: metrics will be stale until next run.
+  // ── Batch writes ─────────────────────────────────────────────────────────────
+
+  // provider_set_map
+  if (mapUpserts.length > 0) {
+    await supabase
+      .from("provider_set_map")
+      .upsert(mapUpserts as Record<string, unknown>[], { onConflict: "provider,canonical_set_code" });
   }
 
-  // ── Finalize ingest run ─────────────────────────────────────────────────────
+  // provider_ingests
+  if (allIngestRows.length > 0) {
+    for (let i = 0; i < allIngestRows.length; i += 250) {
+      await supabase.from("provider_ingests").insert(allIngestRows.slice(i, i + 250));
+    }
+  }
+
+  // price_snapshots
+  const snapResult = await batchUpsert(
+    supabase,
+    "price_snapshots",
+    allPriceSnapshots as Record<string, unknown>[],
+    "provider,provider_ref",
+  );
+  itemsUpserted += snapResult.upserted;
+  itemsFailed += snapResult.failed;
+  firstError ??= snapResult.firstError;
+
+  // price_history_points (ON CONFLICT DO NOTHING — idempotent)
+  const histResult = await batchInsertIgnore(
+    supabase,
+    "price_history_points",
+    allHistoryPoints as unknown as Record<string, unknown>[],
+    "canonical_slug,variant_ref,provider,ts",
+  );
+  firstError ??= histResult.firstError;
+
+  // ── refresh_card_metrics() — compute stats from price_snapshots ──────────────
+  let metricsRefreshResult: unknown = null;
+  try {
+    const { data } = await supabase.rpc("refresh_card_metrics");
+    metricsRefreshResult = data;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    firstError ??= `refresh_card_metrics: ${msg}`;
+  }
+
+  // ── Upsert provider-supplied fields to card_metrics (after refresh) ──────────
+  // Only sets the provider_* columns — does NOT touch computed stats (median_7d etc.)
+  const metricsRows = allMetricsSnapshots.map((m) => ({
+    canonical_slug: m.canonical_slug,
+    printing_id: m.printing_id,
+    grade: m.grade,
+    provider_trend_slope_7d: m.provider_trend_slope_7d,
+    provider_trend_slope_30d: m.provider_trend_slope_30d,
+    provider_cov_price_7d: m.provider_cov_price_7d,
+    provider_cov_price_30d: m.provider_cov_price_30d,
+    provider_price_relative_to_30d_range: m.provider_price_relative_to_30d_range,
+    provider_min_price_all_time: m.provider_min_price_all_time,
+    provider_min_price_all_time_date: m.provider_min_price_all_time_date,
+    provider_max_price_all_time: m.provider_max_price_all_time,
+    provider_max_price_all_time_date: m.provider_max_price_all_time_date,
+    provider_as_of_ts: m.provider_as_of_ts,
+    updated_at: now,
+  }));
+
+  const providerMetricsResult = await batchUpsert(
+    supabase,
+    "card_metrics",
+    metricsRows,
+    "canonical_slug,printing_id,grade",
+  );
+  itemsUpserted += providerMetricsResult.upserted;
+  itemsFailed += providerMetricsResult.failed;
+  firstError ??= providerMetricsResult.firstError;
+
+  // ── Finalize ingest run ──────────────────────────────────────────────────────
   if (runId) {
     await supabase
       .from("ingest_runs")
       .update({
         status: "finished",
-        ok: true,
+        ok: firstError === null,
         items_fetched: itemsFetched,
         items_upserted: itemsUpserted,
         items_failed: itemsFailed,
         ended_at: new Date().toISOString(),
-        meta: { lastSetId, nextSetId, setsCount: setsToProcess.length, done },
+        meta: {
+          lastSetCode,
+          nextSetCode,
+          setsCount: setsToProcess.length,
+          done,
+          isDebug,
+          firstError,
+          historyPointsWritten: histResult.inserted,
+          metricsSnapshotsWritten: providerMetricsResult.upserted,
+        },
       })
       .eq("id", runId);
   }
 
   return NextResponse.json({
     ok: true,
-    lastSetId,
-    nextSetId,
+    isDebug,
     setsProcessed: setsToProcess.length,
     done,
     itemsFetched,
     itemsUpserted,
     itemsFailed,
-    firstUpsertError,
-    metricsResult,
+    historyPointsWritten: histResult.inserted,
+    metricsSnapshotsWritten: providerMetricsResult.upserted,
+    firstError,
+    metricsRefreshResult,
   });
 }

@@ -1,24 +1,63 @@
 /**
  * Shared canonical types for the provider layer.
  *
- * Any price source (JustTCG, TCGPlayer, eBay, ...) normalizes its output
- * into NormalizedPricePoint before writing to price_snapshots.
+ * Any price source normalizes its output into these internal DTOs before
+ * writing to our DB. Nothing outside lib/providers should import raw
+ * provider response types.
  */
 
+/** A single normalized price point written to price_snapshots. */
 export type NormalizedPricePoint = {
-  /** FK to canonical_cards.slug */
   canonical_slug: string;
-  /** FK to card_printings.id — null means no specific printing resolved */
   printing_id: string | null;
-  /** 'RAW' | 'PSA9' | 'PSA10' | ... */
   grade: string;
   price_value: number;
   currency: string;
-  /** Provider name stored in price_snapshots.provider */
   provider: string;
-  /** Provider's own unique ID for this price point (used for upsert dedup) */
+  /** Provider's own unique ID for this price point (upsert dedup key). */
   provider_ref: string;
-  /** FK to provider_ingests.id */
   ingest_id: string | null;
   observed_at: string;
+};
+
+/**
+ * A single historical price point from a provider's time-series data.
+ * Written to price_history_points with ON CONFLICT DO NOTHING.
+ *
+ * variant_ref: stable string identifying finish+condition+grade,
+ * e.g. "HOLO:Near Mint:RAW". Does NOT depend on printing_id FK.
+ */
+export type PriceHistoryPoint = {
+  canonical_slug: string;
+  variant_ref: string;   // e.g. "HOLO:Near Mint:RAW"
+  provider: string;
+  ts: string;            // ISO 8601
+  price: number;
+  currency: string;
+  source_window: string; // e.g. '30d'
+};
+
+/**
+ * Provider-supplied pre-computed analytics for a card variant.
+ * Column names match the provider_* columns added to card_metrics in
+ * migration 20260301090000.
+ */
+export type MetricsSnapshot = {
+  canonical_slug: string;
+  printing_id: string | null;
+  grade: string;
+  provider: string;
+  provider_as_of_ts: string;
+  price_value: number;
+  // The 4 core signals shipping this weekend:
+  provider_trend_slope_7d: number | null;
+  provider_cov_price_30d: number | null;
+  provider_price_relative_to_30d_range: number | null;
+  provider_min_price_all_time: number | null;
+  provider_max_price_all_time: number | null;
+  // Supporting context:
+  provider_trend_slope_30d: number | null;
+  provider_cov_price_7d: number | null;
+  provider_min_price_all_time_date: string | null;
+  provider_max_price_all_time_date: string | null;
 };

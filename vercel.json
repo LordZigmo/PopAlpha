@@ -9,11 +9,11 @@
       "schedule": "0 5 * * *"
     },
     {
-      "path": "/api/cron/snapshot-price-history",
+      "path": "/api/cron/sync-justtcg-prices",
       "schedule": "0 6 * * *"
     },
     {
-      "path": "/api/cron/sync-justtcg-prices",
+      "path": "/api/cron/snapshot-price-history",
       "schedule": "0 7 * * *"
     }
   ]
