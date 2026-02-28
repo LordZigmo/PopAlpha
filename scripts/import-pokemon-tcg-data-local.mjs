@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import dotenv from "dotenv";
 import { createClient } from "@supabase/supabase-js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -12,6 +13,9 @@ const statePath = path.join(__dirname, "import-state.json");
 const BATCH_SIZE = 250;
 
 function loadEnvFile(filePath) {
+  if (fs.existsSync(filePath)) {
+    dotenv.config({ path: filePath, override: false });
+  }
   if (!fs.existsSync(filePath)) return;
   const raw = fs.readFileSync(filePath, "utf8");
   for (const line of raw.split(/\r?\n/)) {
@@ -131,6 +135,43 @@ function chunk(array, size) {
   return out;
 }
 
+async function sleep(ms) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function retryAsync(fn, label, maxAttempts = 5) {
+  let attempt = 1;
+  while (attempt <= maxAttempts) {
+    try {
+      return await fn();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (attempt >= maxAttempts) {
+        throw new Error(`${label} failed after ${attempt} attempts: ${message}`);
+      }
+      const delayMs = Math.min(5000, 400 * 2 ** (attempt - 1)) + Math.floor(Math.random() * 200);
+      console.warn(`${label} attempt ${attempt} failed: ${message}. Retrying in ${delayMs}ms...`);
+      await sleep(delayMs);
+      attempt += 1;
+    }
+  }
+}
+
+function dedupeByConflict(rows, onConflict) {
+  const keys = String(onConflict)
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+  if (keys.length === 0) return rows;
+
+  const map = new Map();
+  for (const row of rows) {
+    const dedupeKey = keys.map((key) => JSON.stringify(row[key] ?? null)).join("|");
+    map.set(dedupeKey, row);
+  }
+  return Array.from(map.values());
+}
+
 function loadState() {
   if (!fs.existsSync(statePath)) {
     return {
@@ -161,13 +202,83 @@ function saveState(state) {
 async function upsertBatches(supabase, table, rows, onConflict) {
   let processed = 0;
   for (const batchRows of chunk(rows, BATCH_SIZE)) {
-    const { error } = await supabase.from(table).upsert(batchRows, { onConflict });
-    if (error) {
-      throw new Error(`${table} upsert failed: ${error.message}`);
+    const dedupedRows = dedupeByConflict(batchRows, onConflict);
+    const result = await retryAsync(async () => {
+      const { error } = await supabase.from(table).upsert(dedupedRows, { onConflict });
+      if (error) {
+        throw new Error(error.message);
+      }
+      return { ok: true };
+    }, `${table} upsert`);
+    if (!result?.ok) {
+      throw new Error(`${table} upsert failed`);
     }
-    processed += batchRows.length;
+    processed += dedupedRows.length;
   }
   return processed;
+}
+
+async function syncCardPrintings(supabase, rows) {
+  const resolvedRows = [];
+  for (const row of rows) {
+    const existingBySourceId = await retryAsync(async () => {
+      const { data, error } = await supabase
+        .from("card_printings")
+        .select("id, source_id")
+        .eq("source", "pokemon-tcg-data")
+        .eq("source_id", row.source_id)
+        .limit(1)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      return data;
+    }, "card_printings select by source_id");
+
+    let existingRow = existingBySourceId;
+    if (!existingRow) {
+      let uniqueQuery = supabase
+        .from("card_printings")
+        .select("id, source_id")
+        .eq("card_number", row.card_number)
+        .eq("language", row.language)
+        .eq("finish", row.finish)
+        .eq("edition", row.edition);
+
+      uniqueQuery = row.set_code ? uniqueQuery.eq("set_code", row.set_code) : uniqueQuery.is("set_code", null);
+      uniqueQuery = row.stamp ? uniqueQuery.eq("stamp", row.stamp) : uniqueQuery.is("stamp", null);
+      uniqueQuery = row.finish_detail
+        ? uniqueQuery.eq("finish_detail", row.finish_detail)
+        : uniqueQuery.is("finish_detail", null);
+
+      existingRow = await retryAsync(async () => {
+        const { data, error } = await uniqueQuery.limit(1).maybeSingle();
+        if (error) throw new Error(error.message);
+        return data;
+      }, "card_printings select by unique print");
+    }
+
+    if (existingRow?.id) {
+      await retryAsync(async () => {
+        const { error } = await supabase.from("card_printings").update(row).eq("id", existingRow.id);
+        if (error) throw new Error(error.message);
+        return true;
+      }, "card_printings update");
+      resolvedRows.push({
+        id: existingRow.id,
+        source_id: row.source_id,
+      });
+      continue;
+    }
+
+    const inserted = await retryAsync(async () => {
+      const { data, error } = await supabase.from("card_printings").insert(row).select("id, source_id").single();
+      if (error) throw new Error(error.message);
+      return data;
+    }, "card_printings insert");
+    if (inserted) {
+      resolvedRows.push(inserted);
+    }
+  }
+  return resolvedRows;
 }
 
 async function main() {
@@ -309,19 +420,11 @@ async function main() {
     counts.cardsUpserted += await upsertBatches(supabase, "canonical_cards", canonicalRows, "slug");
 
     const printingIdBySourceId = new Map();
-    for (const batchRows of chunk(printingRows, BATCH_SIZE)) {
-      const { data, error } = await supabase
-        .from("card_printings")
-        .upsert(batchRows, { onConflict: "source,source_id" })
-        .select("id, source_id");
-      if (error) {
-        throw new Error(`card_printings upsert failed: ${error.message}`);
-      }
-      counts.printingsUpserted += batchRows.length;
-      for (const row of data ?? []) {
-        if (row?.source_id && row?.id) {
-          printingIdBySourceId.set(row.source_id, row.id);
-        }
+    const syncedPrintings = await syncCardPrintings(supabase, printingRows);
+    counts.printingsUpserted += printingRows.length;
+    for (const row of syncedPrintings) {
+      if (row?.source_id && row?.id) {
+        printingIdBySourceId.set(row.source_id, row.id);
       }
     }
 

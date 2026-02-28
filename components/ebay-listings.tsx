@@ -90,14 +90,29 @@ export default function EbayListings({ query, canonicalSlug, printingId, grade }
   }, [canonicalSlug, printingId, grade, normalizedQuery]);
 
   return (
-    <section className="mt-4 glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
+    <section className="mt-8 glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-app text-sm font-semibold uppercase tracking-[0.12em]">Live eBay listings</p>
-        {items.length > 6 ? (
-          <button type="button" onClick={() => setExpanded((value) => !value)} className="btn-ghost rounded-[var(--radius-input)] border px-2.5 py-1 text-xs font-semibold">
-            {expanded ? "Show less" : "View all"}
-          </button>
-        ) : null}
+        <div>
+          <p className="text-app text-sm font-semibold uppercase tracking-[0.12em]">Live Market Listings</p>
+          <p className="text-muted mt-1 text-xs">Live eBay asks are evidence, not the core signal.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {items.length > 0 ? (
+            <a
+              href={`https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(normalizedQuery)}`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-muted text-xs underline underline-offset-4"
+            >
+              View all on eBay
+            </a>
+          ) : null}
+          {items.length > 6 ? (
+            <button type="button" onClick={() => setExpanded((value) => !value)} className="btn-ghost rounded-[var(--radius-input)] border px-2.5 py-1 text-xs font-semibold">
+              {expanded ? "Show less" : "View all"}
+            </button>
+          ) : null}
+        </div>
       </div>
 
       <div className="mt-2">
@@ -109,14 +124,14 @@ export default function EbayListings({ query, canonicalSlug, printingId, grade }
 
       {loading ? <p className="text-muted mt-3 text-sm">Loading listings...</p> : null}
       {!loading && error ? <p className="text-muted mt-3 text-sm">Listings unavailable right now.</p> : null}
-      {!loading && !error && items.length === 0 ? <p className="text-muted mt-3 text-sm">No live listings found.</p> : null}
+      {!loading && !error && items.length === 0 ? <p className="text-muted mt-3 text-sm">No live listings yet. PopAlpha will surface evidence as the market forms.</p> : null}
 
       {!loading && !error && shownItems.length > 0 ? (
         <ul className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
           {shownItems.map((item, index) => (
             <li key={`${item.externalId || item.itemWebUrl}-${index}`} className="rounded-[var(--radius-card)] border-app border bg-surface-soft/45 p-2.5">
               <div className="flex items-start gap-2">
-                <div className="h-14 w-14 shrink-0 overflow-hidden rounded-[var(--radius-input)] border-app border bg-surface">
+                <div className="h-12 w-12 shrink-0 overflow-hidden rounded-[var(--radius-input)] border-app border bg-surface">
                   {item.image ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={item.image} alt={item.title} className="h-full w-full object-cover" loading="lazy" />
@@ -130,6 +145,10 @@ export default function EbayListings({ query, canonicalSlug, printingId, grade }
                     {item.price ? formatMoney(item.price.value, item.price.currency) : "Price unavailable"}
                     {" • "}
                     {item.shipping ? formatMoney(item.shipping.value, item.shipping.currency) : "Shipping —"}
+                  </p>
+                  <p className="text-muted mt-1 truncate text-[11px]">
+                    {item.condition ?? "Condition n/a"}
+                    {item.endTime ? ` • Ends ${new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(item.endTime))}` : ""}
                   </p>
                   <a
                     href={item.itemWebUrl}
