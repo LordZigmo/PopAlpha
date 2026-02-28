@@ -2,12 +2,12 @@ import { NextResponse } from "next/server";
 import { fetchJustTcgCards, type JustTcgCard } from "@/lib/providers/justtcg";
 
 function auth(req: Request): boolean {
-  const secret = process.env.CRON_SECRET;
+  const secret = process.env.CRON_SECRET?.trim();
   if (!secret) return false;
-  const header = req.headers.get("authorization") ?? "";
+  const header = (req.headers.get("authorization") ?? "").trim();
   if (header === `Bearer ${secret}`) return true;
   // Also accept ?secret= for browser testing.
-  const qs = new URL(req.url).searchParams.get("secret") ?? "";
+  const qs = (new URL(req.url).searchParams.get("secret") ?? "").trim();
   return qs === secret;
 }
 
