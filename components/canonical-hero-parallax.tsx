@@ -52,7 +52,7 @@ export default function CanonicalHeroParallax(props: CanonicalHeroParallaxProps)
 
   return (
     <section ref={rootRef} className="relative mt-5 [--p:0] sm:mt-6">
-      <div className="sticky top-0 z-0 h-[300px] overflow-hidden bg-transparent sm:h-[420px]">
+      <div className="sticky top-0 z-0 h-[360px] overflow-hidden bg-transparent sm:h-[520px]">
         {imageUrl ? (
           <>
             <div
@@ -71,12 +71,12 @@ export default function CanonicalHeroParallax(props: CanonicalHeroParallaxProps)
                 <img
                   src={imageUrl}
                   alt={title}
-                  className="h-[500px] w-[min(1480px,calc(240vw-2rem))] max-w-none object-contain object-top drop-shadow-[0_28px_64px_rgba(0,0,0,0.5)] sm:h-[700px] sm:w-[min(1880px,calc(240vw-4rem))]"
+                  className="h-[540px] w-[min(1760px,calc(280vw-2rem))] max-w-none object-contain object-top drop-shadow-[0_28px_64px_rgba(0,0,0,0.5)] sm:h-[800px] sm:w-[min(2360px,calc(300vw-4rem))]"
                 />
               </div>
             </div>
             <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center">
-              <div className="h-24 w-[min(1480px,calc(240vw-2rem))] bg-[linear-gradient(to_bottom,rgba(0,0,0,0),rgba(16,21,28,0.7)_72%,rgba(16,21,28,0.92)_100%)] sm:h-32 sm:w-[min(1880px,calc(240vw-4rem))]" />
+              <div className="h-24 w-[min(1760px,calc(280vw-2rem))] bg-[linear-gradient(to_bottom,rgba(0,0,0,0),rgba(16,21,28,0.64)_74%,rgba(16,21,28,0.9)_100%)] sm:h-36 sm:w-[min(2360px,calc(300vw-4rem))]" />
             </div>
           </>
         ) : (
