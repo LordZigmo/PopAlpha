@@ -2,19 +2,19 @@
 
 :root,
 .theme-indigo {
-  --color-background: #050816;
-  --color-surface: #0c1330;
-  --color-surface-soft: #151f43;
-  --color-accent: #7a6cff;
-  --color-on-accent: #eef0ff;
-  --color-text: #e7ecff;
-  --color-muted: #98a6d8;
-  --color-border: #253262;
-  --color-positive: #12d08d;
+  --color-background: #10151c;
+  --color-surface: #171e27;
+  --color-surface-soft: #222b36;
+  --color-accent: #d36a3b;
+  --color-on-accent: #fff3ea;
+  --color-text: #ecf1f7;
+  --color-muted: #9aa6b6;
+  --color-border: #334150;
+  --color-positive: #d98a52;
   --color-negative: #ff5c79;
   --color-gold: #c9a04f;
   --color-gold-ink: #fff5d9;
-  --color-overlay: rgba(4, 8, 18, 0.78);
+  --color-overlay: rgba(14, 19, 26, 0.8);
   --shadow-elevated: 0 18px 42px rgba(0, 0, 0, 0.5);
   --space-panel: 1.5rem;
   --space-card: 1rem;
@@ -66,8 +66,8 @@ body {
   position: relative;
   min-height: 100vh;
   background:
-    radial-gradient(900px circle at 15% -5%, color-mix(in srgb, var(--color-accent) 14%, transparent), transparent 58%),
-    radial-gradient(820px circle at 90% 5%, color-mix(in srgb, var(--color-positive) 10%, transparent), transparent 64%),
+    radial-gradient(900px circle at 15% -5%, color-mix(in srgb, var(--color-accent) 18%, transparent), transparent 58%),
+    radial-gradient(820px circle at 90% 5%, color-mix(in srgb, var(--color-positive) 14%, transparent), transparent 64%),
     linear-gradient(180deg, color-mix(in srgb, var(--color-background) 92%, #000), var(--color-background));
 }
 
