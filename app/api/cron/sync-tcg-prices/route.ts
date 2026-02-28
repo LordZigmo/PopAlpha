@@ -99,7 +99,6 @@ export async function GET(req: Request) {
   const { data: printingRows } = await supabase
     .from("card_printings")
     .select("set_code, set_name")
-    .eq("source", "pokemontcg")
     .eq("language", "EN")
     .not("set_code", "is", null)
     .gt("set_code", lastSetCode)
@@ -172,7 +171,8 @@ export async function GET(req: Request) {
         .from("card_printings")
         .select("id, canonical_slug, card_number, finish")
         .eq("set_code", setCode)
-        .eq("language", "EN");
+        .eq("language", "EN")
+        .not("canonical_slug", "is", null);
 
       const printings = (printingsInSet ?? []) as PrintingRow[];
 
