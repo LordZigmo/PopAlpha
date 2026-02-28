@@ -35,9 +35,15 @@ type PrintingRow = {
   image_url: string | null;
 };
 
+type SnapshotPriceRow = {
+  canonical_slug: string;
+  median_ask_7d: number | null;
+};
+
 type GroupedSearchRow = {
   canonical: CanonicalCardRow;
   printings: PrintingRow[];
+  rawPrice: number | null;
 };
 
 type SearchResultBundle = {
@@ -372,13 +378,26 @@ async function runBroadSearch(params: {
 
   if (lang !== "ALL") pagePrintingsQuery = pagePrintingsQuery.ilike("language", lang);
   if (setFilter) pagePrintingsQuery = pagePrintingsQuery.ilike("set_name", `%${setFilter}%`);
-  const { data: pagePrintingsRaw } = await pagePrintingsQuery;
+  const [{ data: pagePrintingsRaw }, { data: pagePricesRaw }] = await Promise.all([
+    pagePrintingsQuery,
+    supabase
+      .from("market_snapshot_rollups")
+      .select("canonical_slug, median_ask_7d")
+      .in("canonical_slug", pageSlugs)
+      .eq("grade", "RAW")
+      .is("printing_id", null),
+  ]);
   const pagePrintings = (pagePrintingsRaw ?? []) as PrintingRow[];
   const printingsBySlug = new Map<string, PrintingRow[]>();
   for (const printing of pagePrintings) {
     const current = printingsBySlug.get(printing.canonical_slug) ?? [];
     current.push(printing);
     printingsBySlug.set(printing.canonical_slug, current);
+  }
+
+  const priceBySlug = new Map<string, number | null>();
+  for (const p of (pagePricesRaw ?? []) as SnapshotPriceRow[]) {
+    priceBySlug.set(p.canonical_slug, p.median_ask_7d);
   }
 
   const rows: GroupedSearchRow[] = pageSlugs
@@ -388,6 +407,7 @@ async function runBroadSearch(params: {
       return {
         canonical,
         printings: printingsBySlug.get(slug) ?? [],
+        rawPrice: priceBySlug.get(slug) ?? null,
       };
     })
     .filter((row): row is GroupedSearchRow => row !== null);
@@ -727,10 +747,15 @@ export default async function SearchPage({
                       </div>
                       <div className="mt-2 min-w-0 px-1">
                         <p className="text-app truncate text-sm font-semibold">{row.canonical.canonical_name}</p>
-                        <p className="text-muted mt-1 truncate text-xs">
+                        <p className="text-muted mt-0.5 truncate text-xs">
                           {row.canonical.year ? `${row.canonical.year}` : "Year unknown"}
                           {row.canonical.set_name ? ` • ${row.canonical.set_name}` : ""}
                         </p>
+                        {row.rawPrice != null ? (
+                          <p className="mt-0.5 text-xs font-semibold" style={{ color: "var(--color-accent)" }}>
+                            ${row.rawPrice < 1 ? row.rawPrice.toFixed(2) : row.rawPrice.toFixed(0)} RAW
+                          </p>
+                        ) : null}
                       </div>
                     </Link>
                   );

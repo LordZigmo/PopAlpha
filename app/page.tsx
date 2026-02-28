@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -112,7 +113,13 @@ export default function Home() {
             A financial engine for alternative assets, built to price, track, and surface signal across collectible cards.
           </p>
 
-          <form onSubmit={onSubmit} className="mt-8 flex items-center gap-2">
+          <div className="mt-6 flex items-center justify-center gap-4">
+            <Link href="/sets" className="text-muted text-sm transition-colors hover:text-app underline underline-offset-4">
+              Browse Sets
+            </Link>
+          </div>
+
+          <form onSubmit={onSubmit} className="mt-6 flex items-center gap-2">
             <input
               ref={inputRef}
               value={cert}
