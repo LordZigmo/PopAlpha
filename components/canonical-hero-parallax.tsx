@@ -52,7 +52,7 @@ export default function CanonicalHeroParallax(props: CanonicalHeroParallaxProps)
 
   return (
     <section ref={rootRef} className="relative mt-5 [--p:0] sm:mt-6">
-      <div className="sticky top-0 z-0 h-[280px] overflow-hidden bg-transparent sm:h-[380px]">
+      <div className="sticky top-0 z-0 h-[300px] overflow-hidden bg-transparent sm:h-[420px]">
         {imageUrl ? (
           <>
             <div
@@ -71,12 +71,13 @@ export default function CanonicalHeroParallax(props: CanonicalHeroParallaxProps)
                 <img
                   src={imageUrl}
                   alt={title}
-                  className="h-[620px] w-[min(1320px,calc(240vw-2rem))] max-w-none object-contain object-top drop-shadow-[0_28px_64px_rgba(0,0,0,0.5)] sm:h-[900px] sm:w-[min(1760px,calc(240vw-4rem))]"
+                  className="h-[500px] w-[min(1480px,calc(240vw-2rem))] max-w-none object-contain object-top drop-shadow-[0_28px_64px_rgba(0,0,0,0.5)] sm:h-[700px] sm:w-[min(1880px,calc(240vw-4rem))]"
                 />
               </div>
             </div>
-            <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(0,0,0,0)_0%,rgba(0,0,0,0)_58%,rgba(0,0,0,0.18)_72%,rgba(0,0,0,0.6)_86%,rgba(0,0,0,0.9)_100%)]" />
-            <div className="absolute inset-x-0 bottom-0 h-20 bg-[linear-gradient(to_bottom,rgba(16,21,28,0),rgba(16,21,28,0.92))]" />
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center">
+              <div className="h-24 w-[min(1480px,calc(240vw-2rem))] bg-[linear-gradient(to_bottom,rgba(0,0,0,0),rgba(16,21,28,0.7)_72%,rgba(16,21,28,0.92)_100%)] sm:h-32 sm:w-[min(1880px,calc(240vw-4rem))]" />
+            </div>
           </>
         ) : (
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(255,255,255,0.08),transparent_45%),linear-gradient(to_bottom,rgba(255,255,255,0.04),rgba(8,12,18,0.84))]" />
