@@ -2,20 +2,20 @@
 
 :root,
 .theme-indigo {
-  --color-background: #080811;
-  --color-surface: #12111f;
-  --color-surface-soft: #1a1730;
-  --color-accent: #ff6b9f;
-  --color-on-accent: #fff1f8;
-  --color-text: #f2efff;
-  --color-muted: #a9a1c7;
-  --color-border: #3b315f;
-  --color-positive: #ff8c6b;
-  --color-negative: #ff5c8a;
-  --color-gold: #d79dff;
-  --color-gold-ink: #fff3ff;
-  --color-overlay: rgba(8, 6, 20, 0.84);
-  --shadow-elevated: 0 22px 52px rgba(0, 0, 0, 0.62);
+  --color-background: #06070f;
+  --color-surface: #0f1320;
+  --color-surface-soft: #171b2d;
+  --color-accent: #f7a64a;
+  --color-on-accent: #1f1305;
+  --color-text: #f4f0ea;
+  --color-muted: #aca59a;
+  --color-border: #3a3244;
+  --color-positive: #ffbf66;
+  --color-negative: #ff6c78;
+  --color-gold: #ffc874;
+  --color-gold-ink: #201304;
+  --color-overlay: rgba(6, 7, 15, 0.86);
+  --shadow-elevated: 0 24px 56px rgba(0, 0, 0, 0.68);
   --space-panel: 1.5rem;
   --space-card: 1rem;
   --radius-panel: 1.75rem;
@@ -66,10 +66,10 @@ body {
   position: relative;
   min-height: 100vh;
   background:
-    radial-gradient(900px circle at 14% -8%, color-mix(in srgb, var(--color-accent) 22%, transparent), transparent 56%),
-    radial-gradient(760px circle at 88% 2%, color-mix(in srgb, #7d5cff 18%, transparent), transparent 60%),
-    radial-gradient(820px circle at 50% 120%, color-mix(in srgb, var(--color-positive) 14%, transparent), transparent 62%),
-    linear-gradient(180deg, color-mix(in srgb, var(--color-background) 88%, #03010a), var(--color-background));
+    radial-gradient(920px circle at 14% -8%, color-mix(in srgb, var(--color-accent) 18%, transparent), transparent 54%),
+    radial-gradient(760px circle at 88% 2%, color-mix(in srgb, #6e4cff 12%, transparent), transparent 60%),
+    radial-gradient(820px circle at 52% 118%, color-mix(in srgb, var(--color-positive) 12%, transparent), transparent 62%),
+    linear-gradient(180deg, color-mix(in srgb, var(--color-background) 90%, #020308), var(--color-background));
 }
 
 .app-shell::before {
@@ -83,13 +83,15 @@ body {
 }
 
 .glass,
-.card {
+.card,
+.bg-surface,
+.bg-surface-soft {
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--color-surface-soft) 92%, transparent), color-mix(in srgb, var(--color-surface) 96%, transparent));
-  border: 1px solid color-mix(in srgb, var(--color-border) 90%, #4f3f7d);
+    linear-gradient(180deg, color-mix(in srgb, var(--color-surface-soft) 94%, transparent), color-mix(in srgb, var(--color-surface) 97%, transparent));
+  border: 1px solid color-mix(in srgb, var(--color-border) 88%, #58403a);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.03),
-    0 0 0 1px color-mix(in srgb, var(--color-accent) 6%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--color-accent) 5%, transparent),
     var(--shadow-elevated);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
@@ -103,7 +105,7 @@ body {
   border-radius: 1.75rem;
   z-index: -1;
   opacity: 0.18;
-  background: radial-gradient(650px circle at 50% -20%, color-mix(in srgb, var(--color-accent) 25%, transparent), transparent 62%);
+  background: radial-gradient(650px circle at 50% -20%, color-mix(in srgb, var(--color-accent) 20%, transparent), transparent 62%);
 }
 
 .app-chrome {
@@ -143,16 +145,16 @@ body {
 .btn-ghost {
   background: color-mix(in srgb, var(--color-surface-soft) 82%, transparent);
   color: var(--color-text);
-  border: 1px solid color-mix(in srgb, var(--color-border) 88%, #4f3f7d);
+  border: 1px solid color-mix(in srgb, var(--color-border) 88%, #58403a);
 }
 .btn-ghost:hover {
   background: color-mix(in srgb, var(--color-surface-soft) 94%, var(--color-accent));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 18%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 14%, transparent);
 }
 
 .input-themed {
   background: color-mix(in srgb, var(--color-surface-soft) 88%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-border) 88%, #4f3f7d);
+  border: 1px solid color-mix(in srgb, var(--color-border) 88%, #58403a);
   color: var(--color-text);
 }
 .input-themed::placeholder { color: var(--color-muted); }
