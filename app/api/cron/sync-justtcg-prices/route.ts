@@ -502,7 +502,7 @@ export async function GET(req: Request) {
 
             allPriceSnapshots.push({
               canonical_slug: printing.canonical_slug,
-              printing_id: printing.id,
+              printing_id: null,   // aggregate level — card_metrics queries printing_id IS NULL
               grade: "RAW",
               price_value: variant.price,
               currency: "USD",
@@ -517,7 +517,7 @@ export async function GET(req: Request) {
               ...mapVariantToHistoryPoints(variant, printing.canonical_slug, variant.printing ?? "normal", "RAW"),
             );
 
-            const metrics = mapVariantToMetrics(variant, printing.canonical_slug, printing.id, "RAW", asOfTs);
+            const metrics = mapVariantToMetrics(variant, printing.canonical_slug, null, "RAW", asOfTs);
             if (metrics) allMetricsSnapshots.push(metrics);
 
             if (sampleMode) {

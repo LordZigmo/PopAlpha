@@ -313,7 +313,7 @@ export default async function CanonicalCardPage({
   );
 
   // Fetch all three grade snapshots + view model in parallel.
-  const printingIdForQuery = selectedPrinting?.id ?? null;
+  // card_metrics stores aggregate rows at printing_id = NULL (provider prices are not per-printing).
   const [[rawSnap, psa9Snap, psa10Snap], vm] = await Promise.all([
     Promise.all(
       (["RAW", "PSA9", "PSA10"] as const).map((g) =>
@@ -322,7 +322,7 @@ export default async function CanonicalCardPage({
           .select("active_listings_7d, median_7d, median_30d, trimmed_median_30d, low_30d, high_30d")
           .eq("canonical_slug", slug)
           .eq("grade", g)
-          .is("printing_id", printingIdForQuery)
+          .is("printing_id", null)
           .maybeSingle<SnapshotRow>()
       )
     ),
