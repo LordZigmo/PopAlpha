@@ -58,6 +58,8 @@ type TcgSnapshotDebug = {
 };
 
 const GRADE_OPTIONS: GradeSelection[] = ["RAW", "PSA9", "PSA10"];
+const HERO_BG_H = 280;
+const HERO_PANEL_OFFSET = 120;
 
 function finishLabel(finish: CardPrintingRow["finish"]): string {
   const map: Record<CardPrintingRow["finish"], string> = {
@@ -272,33 +274,40 @@ export default async function CanonicalCardPage({
           Search results
         </Link>
 
-        <section className="mt-4 glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
-          <div className="relative">
-            <div className="relative h-[200px] overflow-hidden rounded-[var(--radius-card)] border-app border bg-surface-soft/35 sm:h-[260px]">
-              {selectedPrinting?.image_url ? (
-                <>
-                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.06),transparent_52%)]" />
-                  {/* Crop and position the card art so the illustration leads, while the lower rules box stays hidden. */}
-                  <div className="absolute inset-0">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={selectedPrinting.image_url}
-                      alt={canonical.canonical_name}
-                      className="absolute left-1/2 top-[-20px] h-[260px] w-[min(520px,92vw)] -translate-x-1/2 object-cover opacity-95 drop-shadow-[0_22px_44px_rgba(0,0,0,0.45)] sm:top-[-40px] sm:h-[340px]"
-                      style={{ objectPosition: "center 22%" }}
-                    />
-                  </div>
-                  <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(8,12,18,0.4),rgba(8,12,18,0.08)_28%,rgba(8,12,18,0.1)_55%,rgba(8,12,18,0.9)_100%)]" />
-                  <div className="absolute inset-0 bg-[linear-gradient(to_bottom,transparent_55%,rgba(9,13,18,0.98)_100%)]" />
-                </>
-              ) : (
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(255,255,255,0.08),transparent_45%),linear-gradient(to_bottom,rgba(255,255,255,0.04),rgba(8,12,18,0.84))]" />
-              )}
-            </div>
+        <section className="relative mt-4">
+          <div
+            className="relative overflow-hidden rounded-[var(--radius-panel)] border-app border bg-surface-soft/35 h-[220px] sm:h-[var(--hero-bg-h)]"
+            style={
+              {
+                "--hero-bg-h": `${HERO_BG_H}px`,
+                "--hero-panel-offset": `${HERO_PANEL_OFFSET}px`,
+              } as React.CSSProperties
+            }
+          >
+            {selectedPrinting?.image_url ? (
+              <>
+                <div className="absolute inset-0">
+                  {/* Keep the top yellow border visible while the lower text box fades under the panel overlap. */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={selectedPrinting.image_url}
+                    alt={canonical.canonical_name}
+                    className="absolute left-1/2 top-[-6px] h-auto w-[min(560px,92vw)] max-w-none -translate-x-1/2 opacity-95 drop-shadow-[0_22px_44px_rgba(0,0,0,0.45)] sm:top-[-10px]"
+                  />
+                </div>
+                <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(0,0,0,0)_0%,rgba(0,0,0,0)_40%,rgba(0,0,0,0.35)_58%,rgba(0,0,0,0.85)_78%,rgba(0,0,0,1)_100%)]" />
+                <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(8,12,18,0.38),rgba(8,12,18,0.08)_24%,transparent_42%)]" />
+              </>
+            ) : (
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(255,255,255,0.08),transparent_45%),linear-gradient(to_bottom,rgba(255,255,255,0.04),rgba(8,12,18,0.84))]" />
+            )}
+          </div>
 
-            <div className="relative z-10 -mt-14 grid gap-5 sm:-mt-16 lg:grid-cols-[240px_minmax(0,1fr)] lg:items-start">
-              <div>
-                <div className="rounded-[var(--radius-card)] border-app border bg-surface/78 p-[var(--space-card)] backdrop-blur-sm">
+          <div className="relative z-10 mt-[calc(96px-220px)] sm:mt-[calc(var(--hero-panel-offset)-var(--hero-bg-h))]">
+            <div className="glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
+              <div className="grid gap-5 lg:grid-cols-[240px_minmax(0,1fr)] lg:items-start">
+                <div>
+                  <div className="rounded-[var(--radius-card)] border-app border bg-surface/78 p-[var(--space-card)] backdrop-blur-sm">
                 <p className="text-muted text-[11px] font-semibold uppercase tracking-[0.08em]">Selected Printing</p>
                 <p className="text-app mt-2 text-sm font-semibold">{selectedPrintingLabel}</p>
                 <p className="text-muted mt-1 text-xs">
@@ -306,7 +315,7 @@ export default async function CanonicalCardPage({
                 </p>
               </div>
 
-              <div className="mt-4 rounded-[var(--radius-card)] border-app border bg-surface/78 p-[var(--space-card)] backdrop-blur-sm">
+                  <div className="mt-4 rounded-[var(--radius-card)] border-app border bg-surface/78 p-[var(--space-card)] backdrop-blur-sm">
                 <p className="text-muted text-[11px] font-semibold uppercase tracking-[0.08em]">Printing Filter</p>
                 {printings.length === 0 ? (
                   <p className="text-muted mt-2 text-sm">No printings imported yet.</p>
@@ -335,7 +344,7 @@ export default async function CanonicalCardPage({
                 )}
               </div>
 
-              <div className="mt-4 rounded-[var(--radius-card)] border-app border bg-surface/78 p-[var(--space-card)] backdrop-blur-sm">
+                  <div className="mt-4 rounded-[var(--radius-card)] border-app border bg-surface/78 p-[var(--space-card)] backdrop-blur-sm">
                 <p className="text-muted text-[11px] font-semibold uppercase tracking-[0.08em]">Grade Filter</p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {GRADE_OPTIONS.map((option) => {
@@ -352,10 +361,10 @@ export default async function CanonicalCardPage({
                   })}
                 </div>
               </div>
-              </div>
+                </div>
 
-              <div>
-                <div className="rounded-[var(--radius-card)] border-app border bg-surface/82 p-[var(--space-panel)] backdrop-blur-md">
+                <div>
+                  <div className="rounded-[var(--radius-card)] border-app border bg-surface/82 p-[var(--space-panel)] backdrop-blur-md">
                 <p className="text-app text-4xl font-semibold tracking-[-0.03em] sm:text-5xl">{canonical.canonical_name}</p>
                 <p className="text-muted mt-3 text-sm sm:text-base">
                   {canonical.set_name ?? "Unknown set"}
@@ -513,8 +522,9 @@ export default async function CanonicalCardPage({
                   </details>
                 ) : null}
               </div>
+                </div>
+              </div>
             </div>
-          </div>
           </div>
         </section>
 
