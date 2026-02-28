@@ -1,82 +1,70 @@
 "use client";
 
 import Link from "next/link";
+import { Suspense } from "react";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
 import ThemeToggle from "@/components/theme-toggle";
-
-function NavItem({
-  href,
-  label,
-  active,
-  onClick,
-  compact = false,
-}: {
-  href: string;
-  label: string;
-  active: boolean;
-  onClick?: () => void;
-  compact?: boolean;
-}) {
-  return (
-    <Link
-      href={href}
-      onClick={onClick}
-      className={`block rounded-[var(--radius-input)] border ${compact ? "px-3 py-2 text-xs" : "px-3 py-2 text-sm"} transition ${
-        active ? "btn-accent" : "btn-ghost"
-      }`}
-    >
-      {label}
-    </Link>
-  );
-}
+import NavSearchForm from "@/components/nav-search-form";
 
 export default function AppChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const hideNav = pathname.startsWith("/login") || pathname.startsWith("/auth/callback");
-  const showFloatingNav = pathname.startsWith("/cert/");
 
-  if (hideNav) return <>{children}</>;
+  // Auth pages get no chrome at all
+  if (pathname.startsWith("/login") || pathname.startsWith("/auth/callback")) {
+    return <>{children}</>;
+  }
 
-  const isActive = (href: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href));
+  // Home page keeps its full-screen search hero — no header needed
+  if (pathname === "/") {
+    return <>{children}</>;
+  }
 
   return (
-    <div className="app-chrome">
-      {showFloatingNav ? (
-        <div className="hidden lg:flex fixed right-4 top-4 z-50 items-center gap-2">
-          <NavItem href="/" label="Lookup" active={isActive("/")} compact />
-          <NavItem href="/watchlist" label="Watchlist" active={isActive("/watchlist")} compact />
-          <NavItem href="/portfolio" label="Portfolio" active={isActive("/portfolio")} compact />
-          <ThemeToggle />
-        </div>
-      ) : null}
+    <>
+      <header
+        className="fixed inset-x-0 top-0 z-50"
+        style={{
+          borderBottom: "1px solid var(--color-border)",
+          background: "color-mix(in srgb, var(--color-surface) 92%, transparent)",
+          backdropFilter: "blur(14px)",
+          WebkitBackdropFilter: "blur(14px)",
+        }}
+      >
+        <div className="mx-auto flex h-14 max-w-5xl items-center gap-3 px-4 sm:px-6">
+          {/* Logo */}
+          <Link href="/" className="text-app shrink-0 text-sm font-semibold tracking-tight">
+            PopAlpha
+          </Link>
 
-      {showFloatingNav ? (
-        <div className="lg:hidden fixed left-3 top-3 z-50 flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setMobileOpen((v) => !v)}
-            className="btn-ghost rounded-[var(--radius-input)] border px-3 py-2 text-xs font-semibold"
+          {/* Search — wrapped in Suspense because useSearchParams() requires it */}
+          <Suspense
+            fallback={
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <div
+                  className="input-themed h-9 flex-1 rounded-full opacity-40"
+                  aria-hidden="true"
+                />
+              </div>
+            }
           >
-            Menu
-          </button>
-          <ThemeToggle />
-        </div>
-      ) : null}
+            <NavSearchForm />
+          </Suspense>
 
-      {showFloatingNav && mobileOpen ? (
-        <div className="fixed inset-0 z-40 bg-black/30 lg:hidden">
-          <aside className="glass ml-3 mt-14 w-56 rounded-[var(--radius-panel)] border-app border p-3">
-            <nav className="space-y-2">
-              <NavItem href="/" label="Cert Lookup" active={isActive("/")} onClick={() => setMobileOpen(false)} />
-              <NavItem href="/watchlist" label="Watchlist" active={isActive("/watchlist")} onClick={() => setMobileOpen(false)} />
-              <NavItem href="/portfolio" label="Portfolio" active={isActive("/portfolio")} onClick={() => setMobileOpen(false)} />
-            </nav>
-          </aside>
+          {/* Right-side nav */}
+          <nav className="ml-auto flex shrink-0 items-center gap-2">
+            <Link
+              href="/sets"
+              className="btn-ghost hidden rounded-[var(--radius-input)] border px-3 py-1.5 text-xs font-semibold sm:block"
+            >
+              Sets
+            </Link>
+            <ThemeToggle />
+          </nav>
         </div>
-      ) : null}
-      <main>{children}</main>
-    </div>
+      </header>
+
+      {/* Push content below the fixed header */}
+      <div className="pt-14">{children}</div>
+    </>
   );
 }
