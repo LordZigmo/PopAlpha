@@ -447,5 +447,226 @@ export async function getSignals(slug: string): Promise<AssetSignals | null> {
   };
 }
 
+// ── Signal display + view model ──────────────────────────────────────────────
+
+/** A signal value squashed to 0–100 with a human label. */
+export type SignalDisplay = {
+  label: string;
+  score: number;   // 0–100 (1 dp)
+  raw?: number;    // pre-squash value, for tooltips / debug
+};
+
+export type AssetViewModel = {
+  identity: {
+    slug: string;
+    canonical_name: string;
+    set_name: string | null;
+    card_number: string | null;
+    variant: "SEALED" | "SINGLE";
+  };
+  /** Best variant_ref to display (sealed:sealed:en:raw / *:nm:en:raw / fallback). */
+  selectedVariantRef: string | null;
+  /** Variant refs that have >= 10 history points in the last 30 days. */
+  availableVariantRefs: string[];
+  /** Latest price from the 30d history series. */
+  price_now: number | null;
+  range_30d_low: number | null;
+  range_30d_high: number | null;
+  /** (price_now − price_7d_ago) / price_7d_ago × 100, null if not enough data. */
+  change_7d_pct: number | null;
+  provider_as_of_ts: string | null;
+  /**
+   * Null when no signal data exists yet (provider hasn't run or fields are null).
+   * Each sub-signal is independently null-able.
+   */
+  signals: {
+    trend:    SignalDisplay | null;
+    breakout: SignalDisplay | null;
+    value:    SignalDisplay | null;
+  } | null;
+};
+
+// Squashing constants
+const TREND_K    = 10;    // tanh(1) ≈ 0.76 at raw=10 → score ≈ 88
+const BREAKOUT_K = 0.25;  // tanh(1) ≈ 0.76 at raw=0.25 → score ≈ 88
+
+/** Maps any real number to 0–100 using tanh(x/K). */
+function tanhSquash(raw: number, K: number): number {
+  return Math.max(0, Math.min(100, Math.round((50 + 50 * Math.tanh(raw / K)) * 10) / 10));
+}
+
+function trendLabel(score: number): string {
+  if (score < 20) return "Strong Downtrend";
+  if (score < 40) return "Cooling";
+  if (score < 60) return "Flat";
+  if (score < 80) return "Building Momentum";
+  return "Strong Uptrend";
+}
+
+function breakoutLabel(score: number): string {
+  if (score < 25) return "Fading";
+  if (score < 45) return "Low";
+  if (score < 65) return "Moderate";
+  if (score < 85) return "High";
+  return "Very High";
+}
+
+function valueLabel(score: number): string {
+  if (score >= 80) return "Near 30D Low";
+  if (score >= 60) return "Below Mid";
+  if (score >= 40) return "Mid Range";
+  if (score >= 20) return "Above Mid";
+  return "Near 30D High";
+}
+
+/** Compute % change from the price closest to 7 days ago to price_now. */
+function computeChange7dPct(series: ChartPoint[]): number | null {
+  if (series.length < 2) return null;
+  const sevenDaysAgoMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const priceNow = series[series.length - 1].price;
+  // Series is ts-asc. Walk forward, keep last point at-or-before 7d ago.
+  let price7dAgo: number | null = null;
+  for (const pt of series) {
+    if (new Date(pt.ts).getTime() <= sevenDaysAgoMs) {
+      price7dAgo = pt.price;
+    } else {
+      break;
+    }
+  }
+  if (price7dAgo === null || price7dAgo <= 0) return null;
+  return ((priceNow - price7dAgo) / price7dAgo) * 100;
+}
+
+/**
+ * Builds a display-ready view model for an asset page.
+ *
+ * The page renders whatever is present; it should contain no business logic.
+ * All missing data is surfaced as null — never as placeholder strings.
+ */
+export async function buildAssetViewModel(
+  slug: string,
+  selectedVariantRefOverride?: string | null,
+  days = 30,
+): Promise<AssetViewModel | null> {
+  const supabase = getServerSupabaseClient();
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+  // 1. Canonical card — return null if unknown so page can 404.
+  const { data: canonical } = await supabase
+    .from("canonical_cards")
+    .select("slug, canonical_name, set_name, card_number, variant")
+    .eq("slug", slug)
+    .maybeSingle<{
+      slug: string; canonical_name: string; set_name: string | null;
+      card_number: string | null; variant: string | null;
+    }>();
+  if (!canonical) return null;
+
+  const isSealed = isSealedSlug(slug) || canonical.variant === "SEALED";
+
+  // 2. Variant ref counts for last `days` days.
+  const { data: histRows } = await supabase
+    .from("price_history_points")
+    .select("variant_ref")
+    .eq("canonical_slug", slug)
+    .gte("ts", since)
+    .limit(CHART_POINT_LIMIT);
+
+  const counts = new Map<string, number>();
+  for (const r of histRows ?? []) {
+    counts.set(r.variant_ref, (counts.get(r.variant_ref) ?? 0) + 1);
+  }
+
+  const availableVariantRefs = [...counts.entries()]
+    .filter(([, n]) => n >= 10)
+    .sort((a, b) => b[1] - a[1])
+    .map(([vr]) => vr);
+
+  // 3. Resolve selected variant ref.
+  let selectedVariantRef: string | null = null;
+  if (selectedVariantRefOverride != null && counts.has(selectedVariantRefOverride)) {
+    selectedVariantRef = selectedVariantRefOverride;
+  } else if (availableVariantRefs.length > 0) {
+    selectedVariantRef = isSealed
+      ? (availableVariantRefs.find((v) => v === "sealed:sealed:en:raw") ?? availableVariantRefs[0])
+      : (availableVariantRefs.find((v) => v.endsWith(":nm:en:raw")) ?? availableVariantRefs[0]);
+  } else if (counts.size > 0) {
+    // Fallback: best by count even if < 10 points.
+    let best: string | null = null, bestN = -1;
+    for (const [vr, n] of counts.entries()) { if (n > bestN) { best = vr; bestN = n; } }
+    selectedVariantRef = best;
+  } else {
+    selectedVariantRef = isSealed ? "sealed:sealed:en:raw" : null;
+  }
+
+  // 4. Chart series for the selected variant.
+  let series: ChartPoint[] = [];
+  if (selectedVariantRef) {
+    const { data: pts } = await supabase
+      .from("price_history_points")
+      .select("ts, price")
+      .eq("canonical_slug", slug)
+      .eq("variant_ref", selectedVariantRef)
+      .gte("ts", since)
+      .order("ts", { ascending: true })
+      .limit(CHART_POINT_LIMIT);
+    series = (pts ?? []).map((r) => ({ ts: r.ts as string, price: Number(r.price) }));
+  }
+
+  // 5. Compute price metrics from series.
+  const price_now = series.length > 0 ? series[series.length - 1].price : null;
+  const prices = series.map((p) => p.price);
+  const range_30d_low  = prices.length > 0 ? Math.min(...prices) : null;
+  const range_30d_high = prices.length > 0 ? Math.max(...prices) : null;
+  const change_7d_pct  = computeChange7dPct(series);
+
+  // 6. Squash signals to 0–100 with human labels.
+  const rawSignals = await getSignals(slug);
+  let signals: AssetViewModel["signals"] = null;
+
+  if (rawSignals) {
+    const trendRaw    = rawSignals.signal_trend_strength;
+    const breakoutRaw = rawSignals.signal_breakout;
+    const valueRaw    = rawSignals.signal_value_zone;
+
+    const trend: SignalDisplay | null = trendRaw !== null ? (() => {
+      const score = tanhSquash(trendRaw, TREND_K);
+      return { label: trendLabel(score), score, raw: trendRaw };
+    })() : null;
+
+    const breakout: SignalDisplay | null = breakoutRaw !== null ? (() => {
+      const score = tanhSquash(breakoutRaw, BREAKOUT_K);
+      return { label: breakoutLabel(score), score, raw: breakoutRaw };
+    })() : null;
+
+    const value: SignalDisplay | null = valueRaw !== null ? (() => {
+      const score = Math.max(0, Math.min(100, Number(valueRaw)));
+      return { label: valueLabel(score), score, raw: Number(valueRaw) };
+    })() : null;
+
+    if (trend !== null || breakout !== null || value !== null) {
+      signals = { trend, breakout, value };
+    }
+  }
+
+  return {
+    identity: {
+      slug: canonical.slug,
+      canonical_name: canonical.canonical_name,
+      set_name: canonical.set_name,
+      card_number: canonical.card_number,
+      variant: isSealed ? "SEALED" : "SINGLE",
+    },
+    selectedVariantRef,
+    availableVariantRefs,
+    price_now,
+    range_30d_low,
+    range_30d_high,
+    change_7d_pct,
+    provider_as_of_ts: rawSignals?.provider_as_of_ts ?? null,
+    signals,
+  };
+}
+
 // ── Re-export CHART_MIN_POINTS so page can check sufficiency ────────────────
 export { CHART_MIN_POINTS };

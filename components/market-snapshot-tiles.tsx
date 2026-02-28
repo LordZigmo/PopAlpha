@@ -132,21 +132,39 @@ export default function MarketSnapshotTiles({ slug, printingId, grade, initialDa
 
         {!loading && (!data || data.ok) ? (
           <>
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              <StatTile label="Median Ask (7D)" value={formatUsd(median7d)} detail={median7d === null ? "Collecting" : "Rolling 7-day median"} />
-              <StatTile
-                label="7D Change"
-                value={formatPercent(changePct)}
-                detail={changeMicrocopy(changePct)}
-                tone={tileTone(changePct)}
-              />
-              <StatTile label="Trimmed Median (30D)" value={formatUsd(trimmedMedian30d)} detail={trimmedMedian30d === null ? "Collecting" : "Outliers trimmed"} />
-            </div>
-            <div className="mt-4 divide-y divide-white/[0.06] rounded-2xl border border-white/[0.06] bg-[#11151d] px-4">
-              <StatRow label="Active Listings (7D)" value={active7d > 0 ? active7d : "Collecting"} meta={active7d > 0 ? "Observed live supply" : "Collecting"} />
-              <StatRow label="Listing Velocity" value={formatVelocity(listingVelocity)} meta={listingVelocity === null ? "Forming" : "Observed per day"} />
-              <StatRow label="High-Low Spread (30D)" value={formatUsd(spread30d)} meta={spread30d === null ? "Insufficient sample" : "Ask range"} />
-            </div>
+            {median7d === null && changePct === null && trimmedMedian30d === null ? (
+              <p className="text-[14px] text-[#98a0ae]">Pricing data forming.</p>
+            ) : (
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {median7d !== null && (
+                  <StatTile label="Median Ask (7D)" value={formatUsd(median7d)} detail="Rolling 7-day median" />
+                )}
+                {changePct !== null && (
+                  <StatTile
+                    label="7D Change"
+                    value={formatPercent(changePct)}
+                    detail={changeMicrocopy(changePct)}
+                    tone={tileTone(changePct)}
+                  />
+                )}
+                {trimmedMedian30d !== null && (
+                  <StatTile label="Trimmed Median (30D)" value={formatUsd(trimmedMedian30d)} detail="Outliers trimmed" />
+                )}
+              </div>
+            )}
+            {(active7d > 0 || listingVelocity !== null || spread30d !== null) && (
+              <div className="mt-4 divide-y divide-white/[0.06] rounded-2xl border border-white/[0.06] bg-[#11151d] px-4">
+                {active7d > 0 && (
+                  <StatRow label="Active Listings (7D)" value={active7d} meta="Observed live supply" />
+                )}
+                {listingVelocity !== null && (
+                  <StatRow label="Listing Velocity" value={formatVelocity(listingVelocity)} meta="Observed per day" />
+                )}
+                {spread30d !== null && (
+                  <StatRow label="High-Low Spread (30D)" value={formatUsd(spread30d)} meta="Ask range" />
+                )}
+              </div>
+            )}
           </>
         ) : null}
       </GroupCard>

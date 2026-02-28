@@ -8,8 +8,8 @@ type Props = {
   title: string;
   /** e.g. "Base Set • #4 • 1999" */
   subtitle: string;
-  /** Primary price string e.g. "$2,340" or "Collecting" */
-  price: string;
+  /** Formatted price string e.g. "$2,340". Null = no price to show (omit the row entirely). */
+  price: string | null;
   /** e.g. "PSA 10 · 7-day median ask" */
   priceLabel: string;
   /** Pill components for scarcity / liquidity / printing */
@@ -118,14 +118,16 @@ export default function CanonicalCardFloatingHero({
           <h1 className="mt-1 text-[30px] font-semibold leading-tight tracking-[-0.035em] text-[#f5f7fb] sm:text-[38px]">
             {title}
           </h1>
-          <div className="mt-3 flex flex-wrap items-baseline gap-2.5">
-            <span className="text-[46px] font-bold leading-none tracking-[-0.04em] tabular-nums text-[#f5f7fb] sm:text-[56px]">
-              {price}
-            </span>
-            <span className="text-[13px] leading-tight text-[#7e8694]">
-              {priceLabel}
-            </span>
-          </div>
+          {price !== null && (
+            <div className="mt-3 flex flex-wrap items-baseline gap-2.5">
+              <span className="text-[46px] font-bold leading-none tracking-[-0.04em] tabular-nums text-[#f5f7fb] sm:text-[56px]">
+                {price}
+              </span>
+              <span className="text-[13px] leading-tight text-[#7e8694]">
+                {priceLabel}
+              </span>
+            </div>
+          )}
           <div className="mt-3 flex flex-wrap gap-1.5">{signals}</div>
         </div>
       </div>

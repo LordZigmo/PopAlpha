@@ -14,7 +14,7 @@ import { GroupCard, GroupedSection, PageShell, Pill, SegmentedControl, StatRow, 
 import MarketSnapshotTiles from "@/components/market-snapshot-tiles";
 import { buildEbayQuery, type GradeSelection } from "@/lib/ebay-query";
 import { getServerSupabaseClient } from "@/lib/supabaseServer";
-import { getSignals } from "@/lib/data/assets";
+import { buildAssetViewModel } from "@/lib/data/assets";
 import {
   getCachedTcgSetPricing,
   resolveTcgProductMatch,
@@ -186,7 +186,7 @@ function liquiditySignal(active7d: number | null): { label: string; tone: "posit
 }
 
 function formatUsdCompact(value: number | null | undefined): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) return "Collecting";
+  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
   return new Intl.NumberFormat(undefined, {
     style: "currency",
     currency: "USD",
@@ -203,8 +203,8 @@ function formatSignal(value: number | null | undefined, suffix = ""): string {
 function gradePremium(
   rawPrice: number | null,
   gradedPrice: number | null
-): { text: string; tone: "positive" | "neutral" } {
-  if (!rawPrice || !gradedPrice || rawPrice <= 0) return { text: "Forming", tone: "neutral" };
+): { text: string | null; tone: "positive" | "neutral" } {
+  if (!rawPrice || !gradedPrice || rawPrice <= 0) return { text: null, tone: "neutral" };
   const pct = ((gradedPrice - rawPrice) / rawPrice) * 100;
   const sign = pct >= 0 ? "+" : "";
   return {
@@ -312,9 +312,9 @@ export default async function CanonicalCardPage({
     new Set(printings.map((row) => row.stamp).filter((value): value is string => Boolean(value)))
   );
 
-  // Fetch all three grade snapshots + derived signals in parallel.
+  // Fetch all three grade snapshots + view model in parallel.
   const printingIdForQuery = selectedPrinting?.id ?? null;
-  const [[rawSnap, psa9Snap, psa10Snap], signals] = await Promise.all([
+  const [[rawSnap, psa9Snap, psa10Snap], vm] = await Promise.all([
     Promise.all(
       (["RAW", "PSA9", "PSA10"] as const).map((g) =>
         supabase
@@ -326,7 +326,7 @@ export default async function CanonicalCardPage({
           .maybeSingle<SnapshotRow>()
       )
     ),
-    getSignals(slug),
+    buildAssetViewModel(slug),
   ]);
 
   const gradeSnapMap = {
@@ -373,7 +373,7 @@ export default async function CanonicalCardPage({
     .filter(Boolean)
     .join(" • ");
 
-  const primaryPrice = formatUsdCompact(snapshotData?.median_7d);
+  const primaryPrice = snapshotData?.median_7d != null ? formatUsdCompact(snapshotData.median_7d) : null;
   const primaryPriceLabel = `${gradeLabel(gradeSelection)} · 7-day median ask`;
 
   // Grade Ladder premium calculations.
@@ -393,8 +393,8 @@ export default async function CanonicalCardPage({
         priceLabel={primaryPriceLabel}
         signals={
           <>
-            <Pill label={`Scarcity ${scarcity.label}`} tone={scarcity.tone} />
-            <Pill label={`Liquidity ${liquidity.label}`} tone={liquidity.tone} />
+            {snapshotData?.active_listings_7d != null && <Pill label={`Scarcity ${scarcity.label}`} tone={scarcity.tone} />}
+            {snapshotData?.active_listings_7d != null && <Pill label={`Liquidity ${liquidity.label}`} tone={liquidity.tone} />}
             <Pill label={selectedPrintingLabel} tone={selectedPrinting ? "neutral" : "warning"} />
           </>
         }
@@ -498,86 +498,50 @@ export default async function CanonicalCardPage({
         />
 
         {/* ── PopAlpha Signals ──────────────────────────────────────────────────
-            Derived analytics computed nightly from provider data.
-            Rendered even if null (shows "—") — never blocks page render. */}
-        <GroupedSection
-          title="PopAlpha Signals"
-          description="Computed nightly from price momentum, volatility, and activity data."
-        >
-          <GroupCard>
-            <div className="grid grid-cols-3 gap-3">
-              <StatTile
-                label="Trend Strength"
-                value={formatSignal(signals?.signal_trend_strength)}
-                detail={
-                  signals?.signal_trend_strength != null
-                    ? signals.signal_trend_strength >= 0
-                      ? "Upward momentum"
-                      : "Downward momentum"
-                    : "Insufficient data"
-                }
-                tone={
-                  signals?.signal_trend_strength != null
-                    ? signals.signal_trend_strength > 5
-                      ? "positive"
-                      : signals.signal_trend_strength < -5
-                        ? "warning"
+            Derived analytics. Only rendered when signal data exists. */}
+        {vm?.signals && (
+          <GroupedSection
+            title="PopAlpha Signals"
+            description="Computed nightly from price momentum, volatility, and activity data."
+          >
+            <GroupCard>
+              <div className="grid grid-cols-3 gap-3">
+                {vm.signals.trend && (
+                  <StatTile
+                    label="Trend"
+                    value={vm.signals.trend.label}
+                    detail={`Score ${vm.signals.trend.score.toFixed(0)}/100`}
+                    tone={
+                      vm.signals.trend.score >= 60 ? "positive"
+                        : vm.signals.trend.score <= 40 ? "warning"
                         : "neutral"
-                    : "neutral"
-                }
-              />
-              <StatTile
-                label="Breakout Score"
-                value={formatSignal(signals?.signal_breakout)}
-                detail={
-                  signals?.signal_breakout != null
-                    ? signals.signal_breakout > 0.5
-                      ? "Gaining momentum"
-                      : signals.signal_breakout < -0.5
-                        ? "Losing momentum"
-                        : "Neutral"
-                    : "Insufficient data"
-                }
-                tone={
-                  signals?.signal_breakout != null
-                    ? signals.signal_breakout > 0.5
-                      ? "positive"
-                      : signals.signal_breakout < -0.5
-                        ? "warning"
+                    }
+                  />
+                )}
+                {vm.signals.breakout && (
+                  <StatTile
+                    label="Breakout"
+                    value={vm.signals.breakout.label}
+                    detail={`Score ${vm.signals.breakout.score.toFixed(0)}/100`}
+                    tone={
+                      vm.signals.breakout.score >= 65 ? "positive"
+                        : vm.signals.breakout.score <= 35 ? "warning"
                         : "neutral"
-                    : "neutral"
-                }
-              />
-              <StatTile
-                label="Value Zone"
-                value={formatSignal(signals?.signal_value_zone, "%")}
-                detail={
-                  signals?.signal_value_zone != null
-                    ? signals.signal_value_zone >= 70
-                      ? "Near 30-day low"
-                      : signals.signal_value_zone <= 30
-                        ? "Near 30-day high"
-                        : "Mid range"
-                    : "Insufficient data"
-                }
-                tone={
-                  signals?.signal_value_zone != null
-                    ? signals.signal_value_zone >= 70
-                      ? "positive"
-                      : "neutral"
-                    : "neutral"
-                }
-              />
-            </div>
-            {signals?.metricsStale && (
-              <p className="mt-3 text-[12px] text-[#8c94a3]">
-                Signals last updated {signals.signals_as_of_ts
-                  ? new Date(signals.signals_as_of_ts).toLocaleDateString()
-                  : "unknown"} · Provider data may be stale
-              </p>
-            )}
-          </GroupCard>
-        </GroupedSection>
+                    }
+                  />
+                )}
+                {vm.signals.value && (
+                  <StatTile
+                    label="Value Zone"
+                    value={vm.signals.value.label}
+                    detail={`Score ${vm.signals.value.score.toFixed(0)}/100`}
+                    tone={vm.signals.value.score >= 60 ? "positive" : "neutral"}
+                  />
+                )}
+              </div>
+            </GroupCard>
+          </GroupedSection>
+        )}
 
         {/* ── Grade Ladder ──────────────────────────────────────────────────────
             Shows RAW / PSA 9 / PSA 10 side-by-side so collectors instantly
