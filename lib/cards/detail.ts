@@ -225,7 +225,7 @@ export async function buildCardDetailResponse(inputSlug: string): Promise<CardDe
   const canonicalSlug = await resolveCanonicalSlug(inputSlug);
   if (!canonicalSlug) return null;
 
-  const [{ data: canonical }, { data: printings }, { data: rawMetrics }, { data: gradedMetrics }] = await Promise.all([
+  const [canonicalResult, printingsResult, rawMetricsResult, gradedMetricsResult] = await Promise.all([
     supabase
       .from("canonical_cards")
       .select("slug, canonical_name, set_name, year, card_number, language")
@@ -251,6 +251,16 @@ export async function buildCardDetailResponse(inputSlug: string): Promise<CardDe
       .in("provider", [...GRADED_PROVIDERS])
       .in("grade", [...GRADE_BUCKETS]),
   ]);
+
+  if (canonicalResult.error) throw new Error(`canonical_cards: ${canonicalResult.error.message}`);
+  if (printingsResult.error) throw new Error(`card_printings: ${printingsResult.error.message}`);
+  if (rawMetricsResult.error) throw new Error(`card_metrics: ${rawMetricsResult.error.message}`);
+  if (gradedMetricsResult.error) throw new Error(`variant_metrics: ${gradedMetricsResult.error.message}`);
+
+  const canonical = canonicalResult.data;
+  const printings = printingsResult.data;
+  const rawMetrics = rawMetricsResult.data;
+  const gradedMetrics = gradedMetricsResult.data;
 
   if (!canonical) return null;
 
