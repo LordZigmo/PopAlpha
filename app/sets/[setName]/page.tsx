@@ -112,41 +112,18 @@ export default async function SetBrowserPage({ params }: { params: Promise<{ set
     return (a.cardNumber ?? "").localeCompare(b.cardNumber ?? "", undefined, { numeric: true });
   });
 
-  const withPrice = entries.filter((e) => e.rawPrice != null).length;
-  const topPrice = entries[0]?.rawPrice;
-
   return (
     <main className="app-shell">
       <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
-        <div className="mb-4">
+        <div className="mb-5 flex items-baseline gap-3">
           <Link href="/sets" className="text-muted text-sm transition-colors hover:text-app">
-            ← All Sets
+            ← Sets
           </Link>
+          <h1 className="text-app text-xl font-semibold">{decodedSetName}</h1>
+          <span className="text-muted text-xs">{cards.length} cards</span>
         </div>
 
-        <section className="glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
-          <p className="text-app text-xl font-semibold">{decodedSetName}</p>
-          <div className="mt-2 flex flex-wrap gap-6">
-            <div>
-              <p className="text-muted text-xs">Cards</p>
-              <p className="text-app text-sm font-semibold">{cards.length}</p>
-            </div>
-            <div>
-              <p className="text-muted text-xs">Priced</p>
-              <p className="text-app text-sm font-semibold">{withPrice}</p>
-            </div>
-            {topPrice != null && (
-              <div>
-                <p className="text-muted text-xs">Top Card (RAW)</p>
-                <p className="text-sm font-semibold" style={{ color: "var(--color-accent)" }}>
-                  ${topPrice < 1 ? topPrice.toFixed(2) : topPrice.toFixed(0)}
-                </p>
-              </div>
-            )}
-          </div>
-        </section>
-
-        <section className="mt-4">
+        <section>
           <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
             {entries.map((entry) => (
               <Link
