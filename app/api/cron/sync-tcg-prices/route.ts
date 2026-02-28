@@ -29,10 +29,9 @@ import { resolveTcgTrackingSetDetailed, getCachedTcgSetPricing } from "@/lib/tcg
 
 export const runtime = "nodejs";
 
-/** Stay within Vercel Hobby 60 s limit. Raise to 300 on Pro. */
-export const maxDuration = 60;
+export const maxDuration = 300;
 
-const SETS_PER_RUN = 10;
+const SETS_PER_RUN = 50;
 const JOB = "tcg_price_sync";
 
 type PrintingRow = {

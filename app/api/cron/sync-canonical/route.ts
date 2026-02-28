@@ -18,10 +18,9 @@ import { getServerSupabaseClient } from "@/lib/supabaseServer";
 
 export const runtime = "nodejs";
 
-/** Stay within Vercel Hobby's 60 s limit. Raise to 300 on Pro. */
-export const maxDuration = 60;
+export const maxDuration = 300;
 
-const PAGES_PER_RUN = 2;
+const PAGES_PER_RUN = 10;
 const PAGE_SIZE = 250;
 const JOB = "pokemontcg_canonical_import";
 
