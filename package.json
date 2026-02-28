@@ -4,9 +4,11 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "node scripts/check-no-cards-axis.mjs && next build",
     "start": "next start",
     "lint": "eslint",
+    "test:search": "node tests/run-search-tests.mjs",
+    "guard:no-cards-axis": "node scripts/check-no-cards-axis.mjs",
     "ebay:deletion-setup": "node scripts/ebay-deletion-setup.mjs",
     "justtcg:backfill-live": "node scripts/backfill-justtcg-live.mjs"
   },

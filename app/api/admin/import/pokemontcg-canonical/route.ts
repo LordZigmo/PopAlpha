@@ -3,6 +3,7 @@ import { getServerSupabaseClient } from "@/lib/supabaseServer";
 import { getRequiredEnv } from "@/lib/env";
 import type { PokemonTcgCard, PokemonTcgSet } from "@/lib/pokemontcg/client";
 import { measureAsync } from "@/lib/perf";
+import { buildCanonicalSearchDoc, normalizeSearchText } from "@/lib/search/normalize.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,6 +29,9 @@ type CanonicalRow = {
   card_number: string | null;
   language: string | null;
   variant: string | null;
+  primary_image_url: string | null;
+  search_doc: string;
+  search_doc_norm: string;
 };
 
 type DerivedPrinting = {
@@ -112,7 +116,7 @@ function slugify(input: string): string {
 }
 
 function normalizeAlias(value: string): string {
-  return value.toLowerCase().replace(/\s+/g, " ").trim();
+  return normalizeSearchText(value);
 }
 
 function parseCardNumber(rawNumber: string): string {
@@ -201,6 +205,14 @@ function toPreparedCard(card: PokemonTcgCard, setYearMap: Map<string, number | n
     aliases: buildAliases(card.name, setName, parsedNumber, rawNumber),
   }));
 
+  const searchDoc = buildCanonicalSearchDoc({
+    canonical_name: card.name,
+    subject,
+    set_name: setName,
+    card_number: parsedNumber || null,
+    year,
+  });
+
   return {
     canonical: {
       slug: canonicalSlug,
@@ -211,6 +223,9 @@ function toPreparedCard(card: PokemonTcgCard, setYearMap: Map<string, number | n
       card_number: parsedNumber || null,
       language: "EN",
       variant: "POKEMONTCG",
+      primary_image_url: imageUrl,
+      search_doc: searchDoc,
+      search_doc_norm: normalizeSearchText(searchDoc),
     },
     printings,
     canonicalAliases: Array.from(
@@ -395,6 +410,7 @@ export async function POST(req: Request) {
         for (const prepared of preparedCards) {
           const canonicalAliases = prepared.canonicalAliases.map((alias) => ({
             alias,
+            alias_norm: normalizeSearchText(alias),
             canonical_slug: prepared.canonical.slug,
           }));
           if (canonicalAliases.length > 0) {
@@ -496,8 +512,12 @@ export async function POST(req: Request) {
         await supabase.from("card_aliases").delete().eq("alias", "bubble mew").neq("canonical_slug", bubbleMewEnglish.slug);
         await supabase.from("card_aliases").upsert(
           [
-            { alias: "bubble mew", canonical_slug: bubbleMewEnglish.slug },
-            { alias: "paldean fates bubble mew", canonical_slug: bubbleMewEnglish.slug },
+            { alias: "bubble mew", alias_norm: normalizeSearchText("bubble mew"), canonical_slug: bubbleMewEnglish.slug },
+            {
+              alias: "paldean fates bubble mew",
+              alias_norm: normalizeSearchText("paldean fates bubble mew"),
+              canonical_slug: bubbleMewEnglish.slug,
+            },
           ],
           { onConflict: "alias,canonical_slug" }
         );
@@ -515,9 +535,12 @@ export async function POST(req: Request) {
 
       if (bubbleMewJp?.slug) {
         await supabase.from("card_aliases").delete().eq("alias", "bubble mew jp").neq("canonical_slug", bubbleMewJp.slug);
-        await supabase.from("card_aliases").upsert([{ alias: "bubble mew jp", canonical_slug: bubbleMewJp.slug }], {
-          onConflict: "alias,canonical_slug",
-        });
+        await supabase.from("card_aliases").upsert(
+          [{ alias: "bubble mew jp", alias_norm: normalizeSearchText("bubble mew jp"), canonical_slug: bubbleMewJp.slug }],
+          {
+            onConflict: "alias,canonical_slug",
+          }
+        );
       }
     }
 

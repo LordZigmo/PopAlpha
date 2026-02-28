@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import CardSearch from "@/components/card-search";
 
 const SEARCH_EXAMPLES = [
   "Start with a pokemon...",
@@ -33,14 +33,7 @@ const SEARCH_EXAMPLES = [
 ];
 
 export default function Home() {
-  const router = useRouter();
-  const [cert, setCert] = useState("");
   const [placeholder, setPlaceholder] = useState("");
-  const inputRef = useRef<HTMLInputElement | null>(null);
-
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
 
   useEffect(() => {
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -79,31 +72,6 @@ export default function Home() {
     };
   }, []);
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "/") {
-        const target = event.target as HTMLElement | null;
-        if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
-        event.preventDefault();
-        inputRef.current?.focus();
-      }
-    };
-
-    window.addEventListener("keydown", onKeyDown as unknown as EventListener);
-    return () => window.removeEventListener("keydown", onKeyDown as unknown as EventListener);
-  }, []);
-
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const certValue = cert.trim();
-    if (!certValue) return;
-    if (/^\d+$/.test(certValue)) {
-      router.push(`/cert/${encodeURIComponent(certValue)}`);
-      return;
-    }
-    router.push(`/search?q=${encodeURIComponent(certValue)}`);
-  }
-
   return (
     <main className="app-shell">
       <div className="mx-auto flex min-h-screen w-full max-w-4xl items-center justify-center px-4 py-12 sm:px-6">
@@ -119,19 +87,13 @@ export default function Home() {
             </Link>
           </div>
 
-          <form onSubmit={onSubmit} className="mt-6 flex items-center gap-2">
-            <input
-              ref={inputRef}
-              value={cert}
-              onChange={(event) => setCert(event.target.value)}
-              placeholder={placeholder || "Search"}
-              className="input-themed h-14 w-full rounded-full px-6 text-base"
-              autoFocus
-            />
-            <button type="submit" className="btn-accent h-14 rounded-full px-6 text-sm font-semibold">
-              Search
-            </button>
-          </form>
+          <CardSearch
+            className="mt-6"
+            size="hero"
+            placeholder={placeholder || "Search"}
+            autoFocus
+            enableGlobalShortcut
+          />
         </section>
       </div>
     </main>

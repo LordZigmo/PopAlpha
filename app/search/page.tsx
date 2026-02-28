@@ -53,22 +53,6 @@ type SearchResultBundle = {
   totalPages: number;
 };
 
-type IdentityCardRow = {
-  id: string;
-  slug: string;
-  name: string;
-  set: string;
-  year: number;
-  number: string;
-  image_url: string | null;
-};
-
-type VariantChipRow = {
-  card_id: string;
-  finish: "NON_HOLO" | "HOLO" | "REVERSE_HOLO" | "ALT_HOLO" | "UNKNOWN";
-  edition: "UNLIMITED" | "FIRST_EDITION" | "UNKNOWN";
-};
-
 type DeckRow = {
   id: string;
   name: string;
@@ -496,7 +480,7 @@ export default async function SearchPage({
       .maybeSingle<{ canonical_slug: string }>();
 
     if (printingRow?.canonical_slug) {
-      const href = `/c/${encodeURIComponent(printingRow.canonical_slug)}?printing=${encodeURIComponent(printingAliasRow.printing_id)}`;
+      const href = `/cards/${encodeURIComponent(printingRow.canonical_slug)}?printing=${encodeURIComponent(printingAliasRow.printing_id)}`;
       if (!genericNameMode) {
         redirect(href);
       }
@@ -523,7 +507,7 @@ export default async function SearchPage({
       .maybeSingle<{ canonical_slug: string }>()
   );
   if (aliasRow?.canonical_slug) {
-    const href = `/c/${encodeURIComponent(aliasRow.canonical_slug)}`;
+    const href = `/cards/${encodeURIComponent(aliasRow.canonical_slug)}`;
     if (!genericNameMode) {
       redirect(href);
     }
@@ -590,7 +574,7 @@ export default async function SearchPage({
       });
 
       if (slashMatches.length === 1) {
-        redirect(`/c/${encodeURIComponent(slashMatches[0])}`);
+        redirect(`/cards/${encodeURIComponent(slashMatches[0])}`);
       }
     }
 
@@ -610,7 +594,7 @@ export default async function SearchPage({
       return (data ?? []) as Array<{ slug: string }>;
     });
     if (matches.length === 1) {
-      redirect(`/c/${encodeURIComponent(matches[0].slug)}`);
+      redirect(`/cards/${encodeURIComponent(matches[0].slug)}`);
     }
   }
 
@@ -629,31 +613,6 @@ export default async function SearchPage({
     .order("name", { ascending: true })
     .limit(25);
   const deckRows = (deckRowsRaw ?? []) as DeckRow[];
-
-  let cardsQuery = supabase
-    .from("cards")
-    .select("id, slug, name, set, year, number, image_url")
-    .or(`name.ilike.%${qNormalized}%,set.ilike.%${qNormalized}%,number.ilike.%${qNormalized}%`)
-    .order("name", { ascending: true })
-    .limit(25);
-  if (setFilter) cardsQuery = cardsQuery.ilike("set", `%${setFilter}%`);
-  const { data: cardRowsRaw } = await cardsQuery;
-  const cardRows = (cardRowsRaw ?? []) as IdentityCardRow[];
-  const cardIds = cardRows.map((row) => row.id);
-  let variantRows: VariantChipRow[] = [];
-  if (cardIds.length > 0) {
-    const { data: variantsRaw } = await supabase.from("card_variants").select("card_id, finish, edition").in("card_id", cardIds);
-    variantRows = (variantsRaw ?? []) as VariantChipRow[];
-  }
-
-  const chipsByCardId = new Map<string, string[]>();
-  for (const variant of variantRows) {
-    const chips = chipsByCardId.get(variant.card_id) ?? [];
-    if (variant.finish === "HOLO" && !chips.includes("Holo")) chips.push("Holo");
-    if (variant.finish === "REVERSE_HOLO" && !chips.includes("Reverse")) chips.push("Reverse");
-    if (variant.edition === "FIRST_EDITION" && !chips.includes("1st Ed")) chips.push("1st Ed");
-    chipsByCardId.set(variant.card_id, chips.slice(0, 3));
-  }
 
   const startIndex = result.total === 0 ? 0 : (result.page - 1) * PAGE_SIZE + 1;
   const endIndex = result.total === 0 ? 0 : startIndex + result.rows.length - 1;
@@ -726,7 +685,7 @@ export default async function SearchPage({
                   return (
                     <Link
                       key={row.canonical.slug}
-                      href={`/c/${encodeURIComponent(row.canonical.slug)}`}
+                      href={`/cards/${encodeURIComponent(row.canonical.slug)}`}
                       className="group block transition duration-200 hover:-translate-y-0.5"
                     >
                       <div className="relative aspect-[63/88] overflow-hidden rounded-[var(--radius-card)] border-app border bg-surface-soft/24">
@@ -799,38 +758,6 @@ export default async function SearchPage({
                     <div className="min-w-0">
                       <p className="text-app truncate text-sm font-semibold">{deck.name}</p>
                       <p className="text-muted truncate text-xs">{deck.format ?? "Format unknown"}</p>
-                    </div>
-                    <span className="text-muted text-xs font-semibold">View</span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        <section className="mt-4 glass rounded-[var(--radius-panel)] border-app border bg-surface-soft/20 p-[var(--space-panel)]">
-          <p className="text-muted text-sm font-semibold uppercase tracking-[0.12em]">Source DB Matches (debug)</p>
-          {cardRows.length === 0 ? (
-            <p className="text-muted mt-2 text-sm">No direct source-card matches.</p>
-          ) : (
-            <ul className="mt-3 divide-y divide-[color:var(--color-border)]">
-              {cardRows.map((card) => (
-                <li key={card.id}>
-                  <Link href={`/c/${encodeURIComponent(card.slug)}`} className="flex items-center justify-between gap-3 py-3">
-                    <div className="min-w-0">
-                      <p className="text-app truncate text-sm font-semibold">{card.name}</p>
-                      <p className="text-muted truncate text-xs">
-                        {card.year || "—"} • {card.set} • #{card.number}
-                      </p>
-                      {(chipsByCardId.get(card.id) ?? []).length > 0 ? (
-                        <div className="mt-1 flex flex-wrap gap-1">
-                          {(chipsByCardId.get(card.id) ?? []).slice(0, 3).map((chip) => (
-                            <span key={`${card.id}-${chip}`} className="border-app rounded-full border px-2 py-0.5 text-[11px] text-muted">
-                              {chip}
-                            </span>
-                          ))}
-                        </div>
-                      ) : null}
                     </div>
                     <span className="text-muted text-xs font-semibold">View</span>
                   </Link>
