@@ -3,7 +3,33 @@
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-const SEARCH_EXAMPLES = ["Bubble Mew", "Base Set Charizard", "Paldean Fates"];
+const SEARCH_EXAMPLES = [
+  "Start with a pokemon...",
+  "Bubble Mew",
+  "Base Set Charizard",
+  "Paldean Fates",
+  "Moonbreon",
+  "Mew ex",
+  "Skyridge Gengar",
+  "Gold Star Rayquaza",
+  "Crystal Lugia",
+  "1st Edition Blastoise",
+  "Shining Tyranitar",
+  "Pikachu Illustrator",
+  "Latias ex",
+  "Team Rocket Dark Charizard",
+  "Neo Genesis Lugia",
+  "CoroCoro Mew",
+  "Poncho Pikachu",
+  "151 Charizard ex",
+  "Prismatic Evolutions",
+  "Evolving Skies",
+  "Base Set",
+  "Japanese exclusive promos",
+  "PSA 10 grails",
+  "Trainer Gallery",
+  "Alt art chases",
+];
 
 export default function Home() {
   const router = useRouter();
@@ -28,7 +54,7 @@ export default function Home() {
         setPlaceholder(current.slice(0, charIndex));
         if (charIndex >= current.length) {
           deleting = true;
-          timeoutId = setTimeout(tick, 1400);
+          timeoutId = setTimeout(tick, exampleIndex === 0 ? 6000 : 1400);
           return;
         }
         timeoutId = setTimeout(tick, 75);
@@ -82,6 +108,9 @@ export default function Home() {
       <div className="mx-auto flex min-h-screen w-full max-w-4xl items-center justify-center px-4 py-12 sm:px-6">
         <section className="w-full max-w-2xl text-center">
           <h1 className="text-app text-5xl font-semibold tracking-tight sm:text-6xl">PopAlpha</h1>
+          <p className="text-muted mx-auto mt-4 max-w-xl text-sm sm:text-base">
+            A financial engine for alternative assets, built to price, track, and surface signal across collectible cards.
+          </p>
 
           <form onSubmit={onSubmit} className="mt-8 flex items-center gap-2">
             <input
