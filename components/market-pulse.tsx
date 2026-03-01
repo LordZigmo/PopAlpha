@@ -64,7 +64,7 @@ export default function MarketPulse({
   }
 
   return (
-    <div className="mt-6 rounded-2xl border border-[#1E1E1E] bg-[#111111] px-5 py-5">
+    <div className="glass-target mt-6 rounded-2xl border border-[#1E1E1E] bg-[#111111] px-5 py-5">
       {/* Header */}
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2.5">

@@ -16,6 +16,7 @@ import MarketPulse from "@/components/market-pulse";
 import MarketSummaryCard from "@/components/market-summary-card";
 import PriceTickerStrip from "@/components/price-ticker-strip";
 import SignalGauge from "@/components/signal-gauge";
+import StyleToggle from "@/components/style-toggle";
 import { buildEbayQuery, type GradeSelection, type GradedSource } from "@/lib/ebay-query";
 import { buildPrintingPill } from "@/lib/cards/detail";
 import { buildRawVariantRef } from "@/lib/identity/variant-ref";
@@ -495,7 +496,10 @@ export default async function CanonicalCardPage({
       <div id="content" className="content-sheet">
         <div className="mx-auto max-w-5xl px-4 pb-[max(env(safe-area-inset-bottom),2.5rem)] pt-8 sm:px-6 sm:pb-[max(env(safe-area-inset-bottom),3.5rem)]">
           {/* ── Card identity + price ──────────────────────────────────── */}
-          <div className="mb-6">
+          <div className="relative mb-6">
+            <div className="absolute right-0 top-0">
+              <StyleToggle />
+            </div>
             <h1 className="text-[36px] font-semibold leading-tight tracking-[-0.035em] text-[#F0F0F0] sm:text-[44px]">
               {canonical.canonical_name}
             </h1>
@@ -573,7 +577,7 @@ export default async function CanonicalCardPage({
 
         {/* ── Signal meta strip ────────────────────────────────────────────── */}
         {(vm?.signals_history_points_30d != null || vm?.signals_as_of_ts) && (
-          <div className="mt-4 flex flex-wrap gap-4 rounded-2xl border border-[#1E1E1E] bg-[#111111] px-4 py-3 sm:gap-6 sm:px-5 sm:py-3.5">
+          <div className="glass-target mt-4 flex flex-wrap gap-4 rounded-2xl border border-[#1E1E1E] bg-[#111111] px-4 py-3 sm:gap-6 sm:px-5 sm:py-3.5">
             {[
               {
                 label: "Confidence",

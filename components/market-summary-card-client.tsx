@@ -115,6 +115,7 @@ export default function MarketSummaryCardClient({
   return (
     <GroupedSection>
       <GroupCard
+        className="glass-target"
         header={
           <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
             <p className="text-[22px] font-semibold text-[#F0F0F0]">Market Summary</p>

@@ -53,7 +53,7 @@ export default function SignalGauge({ label, score, displayLabel }: SignalGaugeP
   }, [safeScore, targetOffset]);
 
   return (
-    <div className="gauge-card flex flex-col items-center rounded-2xl border border-[#1E1E1E] bg-[#111111] px-2 py-3 transition-transform sm:px-3 sm:py-4">
+    <div className="glass-target gauge-card flex flex-col items-center rounded-2xl border border-[#1E1E1E] bg-[#111111] px-2 py-3 transition-transform sm:px-3 sm:py-4">
       <svg viewBox="0 0 120 72" className="w-full max-w-[120px]" aria-label={`${label}: ${safeScore !== null ? safeScore : "N/A"}`}>
         {/* Background arc */}
         <path
