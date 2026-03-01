@@ -152,7 +152,7 @@ export default function MarketPulse({
       </div>
 
       {/* Countdown */}
-      {hasVoted && countdown && (
+      {countdown && (
         <p className="mt-4 text-center text-[14px] tabular-nums text-[#666]">
           {countdown}
         </p>
