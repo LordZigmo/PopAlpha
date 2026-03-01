@@ -534,6 +534,7 @@ export type AssetViewModel = {
   change_7d_pct: number | null;
   provider_as_of_ts: string | null;
   signals_as_of_ts: string | null;
+  signals_history_points_30d: number | null;
   reason: "no_history" | "insufficient_recent_activity" | null;
   /**
    * Null when no signal data exists yet (provider hasn't run or fields are null).
@@ -647,6 +648,7 @@ export async function buildAssetViewModel(
   let signals: AssetViewModel["signals"] = null;
   let provider_as_of_ts: string | null = null;
   let signals_as_of_ts: string | null = null;
+  let signals_history_points_30d: number | null = null;
   let reason: AssetViewModel["reason"] = null;
 
   if (!selectedVariantRef) {
@@ -677,6 +679,7 @@ export async function buildAssetViewModel(
 
     provider_as_of_ts = typedVmRow?.provider_as_of_ts ?? null;
     signals_as_of_ts = typedVmRow?.signals_as_of_ts ?? null;
+    signals_history_points_30d = typedVmRow?.history_points_30d ?? null;
 
     const enoughHistory =
       Math.max(selectedVariantPoints, typedVmRow?.history_points_30d ?? 0) >= SIGNAL_MIN_POINTS;
@@ -719,6 +722,7 @@ export async function buildAssetViewModel(
     change_7d_pct,
     provider_as_of_ts,
     signals_as_of_ts,
+    signals_history_points_30d,
     reason,
     signals,
   };

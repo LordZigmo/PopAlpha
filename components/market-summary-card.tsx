@@ -61,6 +61,13 @@ function formatRelativeTime(value: string | null): string | null {
   return `${days}d ago`;
 }
 
+function formatUpdatedLabel(value: string | null): string {
+  if (!value) return "—";
+  const relative = formatRelativeTime(value);
+  if (!relative) return formatDateLabel(value);
+  return `${relative} • ${formatDateLabel(value)}`;
+}
+
 function computeChange30d(points: HistoryPointRow[]): number | null {
   if (points.length < 2) return null;
   const first = points[0]?.price;
@@ -144,7 +151,7 @@ export default async function MarketSummaryCard({
   const { low, high } = computeLowHigh(chartSeries);
   const sparklinePath = buildSparklinePath(chartSeries);
   const asOfTs = marketLatest?.observed_at ?? marketLatest?.updated_at ?? null;
-  const relativeAsOf = formatRelativeTime(asOfTs);
+  const sampleCount = chartSeries.length;
 
   return (
     <GroupedSection>
@@ -167,10 +174,10 @@ export default async function MarketSummaryCard({
               <div className="mt-2 text-[30px] font-semibold tracking-[-0.03em] text-[#f5f7fb]">
                 {formatUsd(marketLatest.price_usd)}
               </div>
-              <p className="mt-2 text-[12px] text-[#8c94a3]">
-                As of {formatDateLabel(asOfTs)}
-                {relativeAsOf ? ` (${relativeAsOf})` : ""}
-              </p>
+              <div className="mt-4 divide-y divide-white/[0.06] rounded-2xl border border-white/[0.06] bg-[#171b23] px-4">
+                <StatRow label="Updated" value={formatUpdatedLabel(asOfTs)} />
+                <StatRow label="Samples (30D)" value={sampleCount > 0 ? String(sampleCount) : "—"} />
+              </div>
 
               <div className="mt-4 divide-y divide-white/[0.06] rounded-2xl border border-white/[0.06] bg-[#171b23] px-4">
                 <StatRow label="30D Change" value={formatPercent(change30d)} />

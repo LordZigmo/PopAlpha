@@ -23,6 +23,10 @@ type MarketSnapshotTilesProps = {
     breakout: { label: string; score: number } | null;
     value: { label: string; score: number } | null;
   } | null;
+  signalsMeta?: {
+    historyPoints30d: number | null;
+    signalsAsOfTs: string | null;
+  } | null;
 };
 
 function formatUsd(value: number | null | undefined): string {
@@ -56,12 +60,44 @@ function changeMicrocopy(value: number | null): string {
   return value > 0 ? "Pricing firming" : "Pricing easing";
 }
 
+function signalConfidence(points30d: number | null): { label: "High" | "Medium" | "Low"; tone: "positive" | "warning" | "neutral" } | null {
+  if (points30d === null || !Number.isFinite(points30d)) return null;
+  if (points30d >= 80) return { label: "High", tone: "positive" };
+  if (points30d >= 30) return { label: "Medium", tone: "warning" };
+  return { label: "Low", tone: "neutral" };
+}
+
+function formatSignalsUpdated(value: string | null): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  const diffMs = Date.now() - date.getTime();
+  const absMs = Math.abs(diffMs);
+  const minutes = Math.round(absMs / (60 * 1000));
+  let relative = "just now";
+  if (minutes >= 1 && minutes < 60) relative = `${minutes}m ago`;
+  else if (minutes >= 60) {
+    const hours = Math.round(minutes / 60);
+    if (hours < 24) relative = `${hours}h ago`;
+    else relative = `${Math.round(hours / 24)}d ago`;
+  }
+  const exact = new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+  return `${relative} • ${exact}`;
+}
+
 export default function MarketSnapshotTiles({
   slug,
   printingId,
   grade,
   initialData = null,
   derivedSignals = null,
+  signalsMeta = null,
 }: MarketSnapshotTilesProps) {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<SnapshotPayload | null>(initialData);
@@ -113,6 +149,7 @@ export default function MarketSnapshotTiles({
     Number.isFinite(data.low30d)
       ? data.high30d - data.low30d
       : null;
+  const confidence = signalConfidence(signalsMeta?.historyPoints30d ?? null);
 
   return (
     <GroupedSection>
@@ -210,6 +247,17 @@ export default function MarketSnapshotTiles({
                     ? derivedSignals.value.score >= 60 ? "positive" : "neutral"
                     : "neutral"
                 }
+              />
+            </div>
+            <div className="mt-4 divide-y divide-white/[0.06] rounded-2xl border border-white/[0.06] bg-[#11151d] px-4">
+              <StatRow
+                label="Signals Confidence"
+                value={confidence?.label ?? "—"}
+                meta={confidence ? <Pill label={confidence.label} tone={confidence.tone} size="small" /> : undefined}
+              />
+              <StatRow
+                label="Signals Updated"
+                value={formatSignalsUpdated(signalsMeta?.signalsAsOfTs ?? null)}
               />
             </div>
           </>

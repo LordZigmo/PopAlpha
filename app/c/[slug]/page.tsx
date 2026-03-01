@@ -518,6 +518,10 @@ export default async function CanonicalCardPage({
           grade={selectedSnapshotGrade ?? activeBucket}
           initialData={snapshot}
           derivedSignals={vm?.signals ?? null}
+          signalsMeta={{
+            historyPoints30d: vm?.signals_history_points_30d ?? null,
+            signalsAsOfTs: vm?.signals_as_of_ts ?? null,
+          }}
         />
 
         <MarketSummaryCard

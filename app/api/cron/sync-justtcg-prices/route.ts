@@ -75,6 +75,7 @@ const SETS_PER_RUN = process.env.JUSTTCG_SETS_PER_RUN
 const NIGHTLY_DEFAULT_LIMIT = 100;
 const NIGHTLY_MAX_REQUESTS_PER_RUN = 100;
 const NIGHTLY_JITTER_MS = 80;
+const NIGHTLY_INCREMENTAL_SIGNAL_LIMIT = 500;
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -516,7 +517,9 @@ async function runNightlySync(params: {
   let itemsFailed = 0;
   let firstError: string | null = null;
   let requestCount = 0;
-  let signalsRowsUpdated = 0;
+  let signalsRowsUpdatedIncremental = 0;
+  let signalsRowsUpdatedFull = 0;
+  let signalsRefreshMode: "incremental" | "full" | "none" = "none";
   const skipReasonCounts: Partial<Record<TrackedSkipReason, number>> = {};
   const skippedSamples: TrackedSkipSample[] = [];
   const diagnosticsRows: Array<Record<string, unknown>> = [];
@@ -665,6 +668,12 @@ async function runNightlySync(params: {
             failed: 0,
             skipReasonCounts,
             skippedSamples,
+            updatedVariantKeyCount: 0,
+            updatedVariantKeys: [],
+            updatedVariantKeysHash: null,
+            signalsRowsUpdatedIncremental: 0,
+            signalsRowsUpdatedFull: 0,
+            signalsRefreshMode: "none",
             done: true,
           },
         })
@@ -679,9 +688,13 @@ async function runNightlySync(params: {
       failed: 0,
       skipReasonCounts,
       skippedSamples,
+      updatedVariantKeyCount: 0,
       nextCursor,
       outboundRequests: 0,
       requestCap: NIGHTLY_MAX_REQUESTS_PER_RUN,
+      signalsRowsUpdatedIncremental: 0,
+      signalsRowsUpdatedFull: 0,
+      signalsRefreshMode: "none",
       deprecatedQueryAuth: authDeprecatedQueryAuth,
     });
   }
@@ -988,18 +1001,87 @@ async function runNightlySync(params: {
     variantMetricsWritten = variantMetricsResult.upserted;
   }
 
-  try {
-    const { data, error } = await supabase.rpc("refresh_derived_signals");
-    if (error) {
-      firstError ??= `refresh_derived_signals: ${error.message}`;
-    } else {
-      signalsRowsUpdated =
-        typeof data === "number"
-          ? data
-          : Number((data as { rowsUpdated?: number; rows?: number } | null)?.rowsUpdated ?? (data as { rows?: number } | null)?.rows ?? 0);
+  const updatedVariantKeysRaw = allVariantMetrics.map((row) => ({
+    canonical_slug: String(row.canonical_slug ?? ""),
+    variant_ref: String(row.variant_ref ?? ""),
+    provider: String(row.provider ?? ""),
+    grade: String(row.grade ?? ""),
+  }));
+  const updatedVariantKeysMap = new Map<string, { canonical_slug: string; variant_ref: string; provider: string; grade: string }>();
+  for (const key of updatedVariantKeysRaw) {
+    if (!key.canonical_slug || !key.variant_ref || !key.provider || !key.grade) continue;
+    updatedVariantKeysMap.set(
+      `${key.canonical_slug}::${key.variant_ref}::${key.provider}::${key.grade}`,
+      key,
+    );
+  }
+  const updatedVariantKeys = [...updatedVariantKeysMap.values()];
+  const updatedVariantKeyCount = updatedVariantKeys.length;
+  const updatedVariantKeysForMeta =
+    updatedVariantKeyCount <= NIGHTLY_INCREMENTAL_SIGNAL_LIMIT ? updatedVariantKeys : null;
+  const updatedVariantKeysHash =
+    updatedVariantKeysForMeta === null && updatedVariantKeyCount > 0
+      ? crypto.createHash("sha256").update(JSON.stringify(updatedVariantKeys)).digest("hex").slice(0, 16)
+      : null;
+
+  if (updatedVariantKeyCount > 0 && updatedVariantKeyCount <= NIGHTLY_INCREMENTAL_SIGNAL_LIMIT) {
+    try {
+      const { data, error } = await supabase.rpc("refresh_derived_signals_for_variants", {
+        keys: updatedVariantKeys,
+      });
+      if (error) {
+        const incrementalError = `refresh_derived_signals_for_variants: ${error.message}`;
+        firstError ??= incrementalError;
+        const { data: fallbackData, error: fallbackError } = await supabase.rpc("refresh_derived_signals");
+        if (fallbackError) {
+          firstError ??= `refresh_derived_signals: ${fallbackError.message}`;
+        } else {
+          signalsRefreshMode = "full";
+          signalsRowsUpdatedFull =
+            typeof fallbackData === "number"
+              ? fallbackData
+              : Number((fallbackData as { rowsUpdated?: number; rows?: number } | null)?.rowsUpdated ?? (fallbackData as { rows?: number } | null)?.rows ?? 0);
+        }
+      } else {
+        signalsRefreshMode = "incremental";
+        signalsRowsUpdatedIncremental =
+          typeof data === "number"
+            ? data
+            : Number((data as { rowsUpdated?: number; rows?: number } | null)?.rowsUpdated ?? (data as { rows?: number } | null)?.rows ?? 0);
+      }
+    } catch (err) {
+      const incrementalError = `refresh_derived_signals_for_variants: ${err instanceof Error ? err.message : String(err)}`;
+      firstError ??= incrementalError;
+      try {
+        const { data: fallbackData, error: fallbackError } = await supabase.rpc("refresh_derived_signals");
+        if (fallbackError) {
+          firstError ??= `refresh_derived_signals: ${fallbackError.message}`;
+        } else {
+          signalsRefreshMode = "full";
+          signalsRowsUpdatedFull =
+            typeof fallbackData === "number"
+              ? fallbackData
+              : Number((fallbackData as { rowsUpdated?: number; rows?: number } | null)?.rowsUpdated ?? (fallbackData as { rows?: number } | null)?.rows ?? 0);
+        }
+      } catch (fallbackErr) {
+        firstError ??= `refresh_derived_signals: ${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)}`;
+      }
     }
-  } catch (err) {
-    firstError ??= `refresh_derived_signals: ${err instanceof Error ? err.message : String(err)}`;
+  } else if (updatedVariantKeyCount > NIGHTLY_INCREMENTAL_SIGNAL_LIMIT) {
+    try {
+      const { data, error } = await supabase.rpc("refresh_derived_signals");
+      if (error) {
+        firstError ??= `refresh_derived_signals: ${error.message}`;
+      } else {
+        signalsRefreshMode = "full";
+        signalsRowsUpdatedFull =
+          typeof data === "number"
+            ? data
+            : Number((data as { rowsUpdated?: number; rows?: number } | null)?.rowsUpdated ?? (data as { rows?: number } | null)?.rows ?? 0);
+      }
+    } catch (err) {
+      firstError ??= `refresh_derived_signals: ${err instanceof Error ? err.message : String(err)}`;
+    }
   }
 
   if (diagnosticsRows.length > 0) {
@@ -1032,10 +1114,15 @@ async function runNightlySync(params: {
           requestCap: NIGHTLY_MAX_REQUESTS_PER_RUN,
           skipReasonCounts,
           skippedSamples,
+          updatedVariantKeyCount,
+          updatedVariantKeys: updatedVariantKeysForMeta,
+          updatedVariantKeysHash,
           marketLatestWritten,
           historyPointsWritten,
           variantMetricsWritten,
-          signalsRowsUpdated,
+          signalsRowsUpdatedIncremental,
+          signalsRowsUpdatedFull,
+          signalsRefreshMode,
           deprecatedQueryAuth: authDeprecatedQueryAuth,
           firstError,
         },
@@ -1055,10 +1142,13 @@ async function runNightlySync(params: {
     requestCap: NIGHTLY_MAX_REQUESTS_PER_RUN,
     skipReasonCounts,
     skippedSamples,
+    updatedVariantKeyCount,
     marketLatestWritten,
     historyPointsWritten,
     variantMetricsWritten,
-    signalsRowsUpdated,
+    signalsRowsUpdatedIncremental,
+    signalsRowsUpdatedFull,
+    signalsRefreshMode,
     firstError,
     deprecatedQueryAuth: authDeprecatedQueryAuth,
   });
