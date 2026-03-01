@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-import { GroupCard, GroupedSection, Pill } from "@/components/ios-grouped-ui";
+import { GroupCard, GroupedSection } from "@/components/ios-grouped-ui";
 import PriceTickerStrip from "@/components/price-ticker-strip";
 import EnhancedChart from "@/components/enhanced-chart";
 
@@ -118,28 +118,25 @@ export default function MarketSummaryCardClient({
         header={
           <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
             <p className="text-[20px] font-semibold text-[#F0F0F0]">Market Summary</p>
-            <div className="flex items-center gap-2">
-              <Pill label="RAW cache" tone="neutral" size="small" />
-              <div className="grid auto-cols-fr grid-flow-col gap-1 rounded-2xl border border-[#1E1E1E] bg-[#151515] p-1">
-                {(["7d", "30d", "90d"] as WindowKey[]).map((windowKey) => {
-                  const active = activeWindow === windowKey;
-                  return (
-                    <button
-                      key={windowKey}
-                      type="button"
-                      onClick={() => setWindow(windowKey)}
-                      className={[
-                        "flex min-h-11 items-center justify-center rounded-xl px-3 text-center text-[15px] font-semibold transition",
-                        active
-                          ? "bg-[#222] text-[#F0F0F0] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
-                          : "text-[#777]",
-                      ].join(" ")}
-                    >
-                      {windowKey.toUpperCase()}
-                    </button>
-                  );
-                })}
-              </div>
+            <div className="grid auto-cols-fr grid-flow-col gap-1 rounded-2xl border border-[#1E1E1E] bg-[#151515] p-1">
+              {(["7d", "30d", "90d"] as WindowKey[]).map((windowKey) => {
+                const active = activeWindow === windowKey;
+                return (
+                  <button
+                    key={windowKey}
+                    type="button"
+                    onClick={() => setWindow(windowKey)}
+                    className={[
+                      "flex min-h-11 items-center justify-center rounded-xl px-3 text-center text-[15px] font-semibold transition",
+                      active
+                        ? "bg-[#222] text-[#F0F0F0] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
+                        : "text-[#777]",
+                    ].join(" ")}
+                  >
+                    {windowKey.toUpperCase()}
+                  </button>
+                );
+              })}
             </div>
           </div>
         }
@@ -150,16 +147,30 @@ export default function MarketSummaryCardClient({
           </div>
         ) : (
           <div className="space-y-4">
+            {/* Hero price */}
+            <div className="flex flex-wrap items-baseline gap-2.5">
+              <span className="text-[36px] font-bold leading-none tracking-[-0.03em] tabular-nums text-[#F0F0F0] sm:text-[42px]">
+                {formatUsd(currentPrice)}
+              </span>
+              {changeValue !== null && Number.isFinite(changeValue) && (
+                <span className={`text-[18px] font-semibold tabular-nums sm:text-[20px] ${changeValue > 0 ? "text-[#00DC5A]" : changeValue < 0 ? "text-[#FF3B30]" : "text-[#6B6B6B]"}`}>
+                  {formatPercent(changeValue)}
+                </span>
+              )}
+              <span className="text-[14px] text-[#6B6B6B]">
+                {formatRelativeTime(asOfTs) ?? ""}
+              </span>
+            </div>
+
+            {/* Secondary stats */}
             <PriceTickerStrip
               items={[
-                { label: "Current Price", value: formatUsd(currentPrice) },
-                { label: "Updated", value: formatRelativeTime(asOfTs) ?? "—" },
-                { label: `Samples (${effectiveWindow.toUpperCase()})`, value: sampleCount > 0 ? String(sampleCount) : "—" },
-                { label: `${effectiveWindow.toUpperCase()} Change`, value: formatPercent(changeValue), tone: changeTone(changeValue) },
                 { label: `${effectiveWindow.toUpperCase()} Low`, value: formatUsd(low) },
                 { label: `${effectiveWindow.toUpperCase()} High`, value: formatUsd(high) },
+                { label: "Samples", value: sampleCount > 0 ? String(sampleCount) : "—" },
               ]}
             />
+
             <EnhancedChart
               points={chartSeries}
               windowLabel={effectiveWindow.toUpperCase()}
