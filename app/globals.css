@@ -203,6 +203,15 @@ body {
 @keyframes fadeSlideIn { from { opacity: 0; transform: translateY(8px);} to {opacity:1; transform:translateY(0);} }
 .results-enter { animation: fadeSlideIn 220ms ease-out; }
 
+@keyframes aiWordFade {
+  from { opacity: 0; filter: blur(4px); }
+  to { opacity: 1; filter: blur(0); }
+}
+.ai-word-fade {
+  opacity: 0;
+  animation: aiWordFade 350ms ease forwards;
+}
+
 .raw-json-panel .raw-json-content { grid-template-rows: 0fr; }
 .raw-json-panel[open] .raw-json-content { grid-template-rows: 1fr; margin-top: 0.5rem; }
 
@@ -314,7 +323,7 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .lift, .glow-card::after, .theme-transition, .theme-transition *, .raw-json-panel .raw-json-content, .ring-meter { transition: none; }
-  .pulse-positive, .results-enter { animation: none; }
+  .pulse-positive, .results-enter, .ai-word-fade { animation: none; opacity: 1; }
   .gauge-arc, .collapsible-content, .collapsible-chevron, .gauge-card { transition: none; }
   [class*="terminalBlink"] { animation: none; }
   [data-style="glass"] .glass-target { backdrop-filter: none; -webkit-backdrop-filter: none; }

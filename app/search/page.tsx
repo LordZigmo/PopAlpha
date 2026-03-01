@@ -633,6 +633,9 @@ export default async function SearchPage({
     };
   });
 
+  const resultSetNames = new Set(displayRows.map((r) => r.set_name).filter((s): s is string => s !== null));
+  const matchedSetName = resultSetNames.size === 1 && displayRows.length >= 2 ? [...resultSetNames][0] ?? null : null;
+
   return (
     <main className="app-shell">
       <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
@@ -658,6 +661,7 @@ export default async function SearchPage({
           page={result.page}
           totalPages={result.totalPages}
           initialSort={sort}
+          matchedSetName={matchedSetName}
           currentParams={{
             q,
             page: String(result.page),

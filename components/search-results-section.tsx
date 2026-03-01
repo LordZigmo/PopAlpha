@@ -23,12 +23,30 @@ function formatSearchHref(basePath: string, params: URLSearchParams) {
   return query ? `${basePath}?${query}` : basePath;
 }
 
+function AiParagraph({ text }: { text: string }) {
+  const words = text.split(" ");
+  return (
+    <p className="mt-3 max-w-2xl text-[15px] leading-relaxed text-[#888]">
+      {words.map((word, i) => (
+        <span
+          key={i}
+          className="ai-word-fade inline-block"
+          style={{ animationDelay: `${i * 50}ms` }}
+        >
+          {word}&nbsp;
+        </span>
+      ))}
+    </p>
+  );
+}
+
 export default function SearchResultsSection({
   rows,
   total,
   page,
   totalPages,
   initialSort,
+  matchedSetName,
   currentParams,
 }: {
   rows: SearchDisplayRow[];
@@ -36,6 +54,7 @@ export default function SearchResultsSection({
   page: number;
   totalPages: number;
   initialSort: SearchSort;
+  matchedSetName?: string | null;
   currentParams: Record<string, string>;
 }) {
   const pathname = usePathname();
@@ -98,6 +117,14 @@ export default function SearchResultsSection({
 
   return (
     <section className="mt-6">
+      {matchedSetName && (
+        <div className="mb-6">
+          <h2 className="text-[28px] font-semibold tracking-tight text-[#F0F0F0] sm:text-[36px]">
+            {matchedSetName}
+          </h2>
+          <AiParagraph text="Showing all tracked cards from this set. Prices are refreshed daily across multiple marketplaces to help you spot trends and find value." />
+        </div>
+      )}
       <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-muted text-xs">{total} results.</p>
