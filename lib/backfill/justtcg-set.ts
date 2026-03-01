@@ -65,6 +65,31 @@ function requestHash(provider: string, endpoint: string, params: Record<string, 
 function normalizeName(value: string | null | undefined) {
   return (value ?? "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
 }
+function normalizeStampToken(value: string | null | undefined) {
+  const normalized = normalizeName(value);
+  if (!normalized) return null;
+  if (normalized === "poke ball") return "POKE_BALL_PATTERN";
+  if (normalized === "master ball") return "MASTER_BALL_PATTERN";
+  if (normalized === "energy symbol pattern") return "ENERGY_SYMBOL_PATTERN";
+  return normalized.replace(/\s+/g, "_").toUpperCase();
+}
+function parseProviderCardStamp(name: string) {
+  const parentheticalMatch = name.match(/\(([^()]+)\)\s*$/u);
+  if (parentheticalMatch?.[1]) {
+    return normalizeStampToken(parentheticalMatch[1]);
+  }
+  const bareSuffixMatch = name.match(/\s+(Poke Ball|Master Ball|Energy Symbol Pattern)\s*$/iu);
+  if (bareSuffixMatch?.[1]) {
+    return normalizeStampToken(bareSuffixMatch[1]);
+  }
+  return null;
+}
+function stripProviderCardVariantSuffix(name: string) {
+  return name
+    .replace(/\s*\([^()]+\)\s*$/u, "")
+    .replace(/\s+(?:Poke Ball|Master Ball|Energy Symbol Pattern)\s*$/iu, "")
+    .trim();
+}
 function toEpochMillis(raw: number | null | undefined) {
   if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) return null;
   return raw >= 1_000_000_000_000 ? raw : raw * 1000;
@@ -144,14 +169,20 @@ function scoreCandidate(params: { card: JustTcgCard; variant: JustTcgVariant; pr
   if (expectedNumber && providerNumber !== expectedNumber) return { score: -1, notes: ["number_mismatch"] };
   const providerFinish = mapJustTcgPrinting(variant.printing ?? "");
   if (printing.finish !== "UNKNOWN" && providerFinish !== printing.finish) return { score: -1, notes: ["finish_mismatch"] };
+  const expectedStamp = normalizeStampToken(printing.stamp);
+  const providerStamp = parseProviderCardStamp(card.name);
+  if (expectedStamp && providerStamp !== expectedStamp) return { score: -1, notes: ["stamp_mismatch"] };
+  if (!expectedStamp && providerStamp) return { score: -1, notes: ["unexpected_stamp"] };
   const language = (variant.language ?? "English").trim().toLowerCase();
   if (language !== "english") return { score: -1, notes: ["language_mismatch"] };
   let score = 0;
   const notes: string[] = [];
   if (expectedNumber && providerNumber === expectedNumber) { score += 100; notes.push("number_match"); }
   if (providerFinish === printing.finish) { score += 50; notes.push("finish_match"); }
+  if (expectedStamp && providerStamp === expectedStamp) { score += 40; notes.push("stamp_match"); }
+  else if (!expectedStamp && !providerStamp) { score += 10; notes.push("base_variant"); }
   const expectedName = normalizeName(canonical.subject ?? canonical.canonical_name ?? canonical.slug);
-  const providerName = normalizeName(card.name);
+  const providerName = normalizeName(stripProviderCardVariantSuffix(card.name));
   if (expectedName && providerName === expectedName) { score += 35; notes.push("name_exact"); }
   else if (expectedName && providerName.includes(expectedName)) { score += 20; notes.push("name_contains"); }
   const normalizedCondition = normalizeCondition(variant.condition ?? "");

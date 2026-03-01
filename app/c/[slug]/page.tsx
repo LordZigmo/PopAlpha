@@ -577,26 +577,6 @@ export default async function CanonicalCardPage({
           printingId={selectedPrinting?.id ?? null}
           variantRef={rawVariantRef}
           selectedWindow={activeMarketWindow}
-          windowLinks={{
-            "7d": toggleHref(slug, selectedPrinting?.id ?? null, debugEnabled, returnTo, {
-              mode: viewMode,
-              provider: viewMode === "GRADED" ? activeProvider : null,
-              bucket: viewMode === "GRADED" ? activeBucket : null,
-              marketWindow: "7d",
-            }),
-            "30d": toggleHref(slug, selectedPrinting?.id ?? null, debugEnabled, returnTo, {
-              mode: viewMode,
-              provider: viewMode === "GRADED" ? activeProvider : null,
-              bucket: viewMode === "GRADED" ? activeBucket : null,
-              marketWindow: "30d",
-            }),
-            "90d": toggleHref(slug, selectedPrinting?.id ?? null, debugEnabled, returnTo, {
-              mode: viewMode,
-              provider: viewMode === "GRADED" ? activeProvider : null,
-              bucket: viewMode === "GRADED" ? activeBucket : null,
-              marketWindow: "90d",
-            }),
-          }}
         />
 
         <GroupedSection>

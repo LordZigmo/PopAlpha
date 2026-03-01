@@ -34,6 +34,13 @@ const TILE_VALUE_TONE_CLASS: Record<Tone, string> = {
   warning: "text-amber-200",
 };
 
+const TILE_LABEL_TONE_CLASS: Record<Tone, string> = {
+  neutral: "text-[#8c94a3]",
+  positive: "text-emerald-200",
+  negative: "text-rose-200",
+  warning: "text-amber-200",
+};
+
 export function PageShell({ children }: { children: ReactNode }) {
   return (
     <main className="min-h-screen bg-[#0b0d12] text-[#f5f7fb]">
@@ -184,7 +191,7 @@ export function StatTile({
 }) {
   return (
     <GroupCard inset className={TILE_TONE_CLASS[tone]}>
-      <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#8c94a3]">{label}</p>
+      <p className={cn("text-[12px] font-semibold uppercase tracking-[0.08em]", TILE_LABEL_TONE_CLASS[tone])}>{label}</p>
       <div className={cn("mt-2 text-[24px] font-semibold tracking-[-0.03em]", TILE_VALUE_TONE_CLASS[tone])}>{value}</div>
       {detail ? <div className="mt-3">{typeof detail === "string" ? <Pill label={detail} tone={tone} size="small" /> : detail}</div> : null}
     </GroupCard>
