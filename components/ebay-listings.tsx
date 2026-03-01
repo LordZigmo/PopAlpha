@@ -40,11 +40,10 @@ export default function EbayListings({ query, canonicalSlug, printingId, grade }
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<Listing[]>([]);
-  const [expanded, setExpanded] = useState(false);
   const [showQuery, setShowQuery] = useState(false);
 
   const normalizedQuery = normalizeBrowseQuery(query);
-  const shownItems = expanded ? items.slice(0, 12) : items.slice(0, 6);
+  const shownItems = items.slice(0, 10);
 
   useEffect(() => {
     let cancelled = false;
@@ -52,9 +51,8 @@ export default function EbayListings({ query, canonicalSlug, printingId, grade }
     async function load() {
       setLoading(true);
       setError(null);
-      setExpanded(false);
       try {
-        const response = await fetch(`/api/ebay/browse?q=${encodeURIComponent(normalizedQuery)}&limit=12`);
+        const response = await fetch(`/api/ebay/browse?q=${encodeURIComponent(normalizedQuery)}&limit=10`);
         const payload = (await response.json()) as { ok: boolean; items?: Listing[]; error?: string };
         if (!response.ok || !payload.ok) {
           throw new Error(payload.error ?? "Could not load eBay listings.");
@@ -93,7 +91,7 @@ export default function EbayListings({ query, canonicalSlug, printingId, grade }
   }, [canonicalSlug, printingId, grade, normalizedQuery]);
 
   return (
-    <GroupedSection title="Live Market Listings" description="Live eBay asks are evidence, not the core signal.">
+    <GroupedSection>
       <GroupCard
         header={
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -106,19 +104,10 @@ export default function EbayListings({ query, canonicalSlug, printingId, grade }
                   rel="noreferrer"
                   className="text-[12px] font-semibold text-[#98a0ae]"
                 >
-                  View all on eBay
+                  Live eBay Listings
                 </a>
               ) : null}
             </div>
-            {items.length > 6 ? (
-              <button
-                type="button"
-                onClick={() => setExpanded((value) => !value)}
-                className="min-h-11 rounded-2xl border border-white/[0.06] bg-white/[0.03] px-4 text-[13px] font-semibold text-[#e5e9f2]"
-              >
-                {expanded ? "Show less" : "Show all"}
-              </button>
-            ) : null}
           </div>
         }
       >
@@ -130,19 +119,18 @@ export default function EbayListings({ query, canonicalSlug, printingId, grade }
         </div>
 
         {loading ? (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="divide-y divide-white/[0.06] overflow-hidden rounded-2xl border border-white/[0.06] bg-white/[0.02]">
             {Array.from({ length: 6 }).map((_, index) => (
-              <GroupCard key={index} inset>
-                <div className="flex gap-3">
-                  <Skeleton className="h-16 w-16 rounded-2xl" rounded="card" />
-                  <div className="min-w-0 flex-1">
-                    <Skeleton className="h-4 w-full" />
-                    <Skeleton className="mt-2 h-3 w-3/4" />
-                    <Skeleton className="mt-2 h-3 w-1/2" />
-                    <Skeleton className="mt-3 h-8 w-24 rounded-xl" rounded="card" />
-                  </div>
+              <div key={index} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 py-3">
+                <div className="min-w-0">
+                  <Skeleton className="h-4 w-4/5" />
+                  <Skeleton className="mt-2 h-3 w-1/2" />
                 </div>
-              </GroupCard>
+                <div className="text-right">
+                  <Skeleton className="ml-auto h-4 w-20" />
+                  <Skeleton className="mt-2 ml-auto h-3 w-14" />
+                </div>
+              </div>
             ))}
           </div>
         ) : null}
@@ -153,48 +141,34 @@ export default function EbayListings({ query, canonicalSlug, printingId, grade }
         ) : null}
 
         {!loading && !error && shownItems.length > 0 ? (
-          <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <ul className="divide-y divide-white/[0.06] overflow-hidden rounded-2xl border border-white/[0.06] bg-white/[0.02]">
             {shownItems.map((item, index) => (
               <li key={`${item.externalId || item.itemWebUrl}-${index}`}>
-                <GroupCard inset className="h-full">
-                  <div className="flex items-start gap-3">
-                    <div className="h-16 w-16 shrink-0 overflow-hidden rounded-2xl border border-white/[0.06] bg-[#11151d]">
-                      {item.image ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={item.image} alt={item.title} className="h-full w-full object-cover" loading="lazy" />
-                      ) : (
-                        <div className="h-full w-full bg-white/[0.04]" />
-                      )}
+                <a
+                  href={item.itemWebUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 py-3 transition hover:bg-white/[0.03]"
+                >
+                  <div className="min-w-0">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <p className="truncate text-[13px] font-semibold text-[#f5f7fb]">{item.title}</p>
+                      <span className="shrink-0 text-[11px] font-medium text-[#7e8694]">{item.condition ?? "n/a"}</span>
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="line-clamp-2 text-[13px] font-semibold text-[#f5f7fb]">{item.title}</p>
-                      <p className="mt-2 text-[12px] text-[#a3abbb]">
-                        {item.price ? formatMoney(item.price.value, item.price.currency) : "Price unavailable"}
-                      </p>
-                      <p className="mt-1 text-[12px] text-[#7e8694]">
-                        {item.shipping ? `${formatMoney(item.shipping.value, item.shipping.currency)} shipping` : "Shipping unknown"}
-                      </p>
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        <Pill label={item.condition ?? "Condition n/a"} tone="neutral" size="small" />
-                        {item.endTime ? (
-                          <Pill
-                            label={`Ends ${new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(item.endTime))}`}
-                            tone="neutral"
-                            size="small"
-                          />
-                        ) : null}
-                      </div>
-                      <a
-                        href={item.itemWebUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="mt-3 inline-flex min-h-11 items-center rounded-2xl border border-white/[0.06] bg-white/[0.03] px-4 text-[13px] font-semibold text-[#e5e9f2]"
-                      >
-                        View listing
-                      </a>
-                    </div>
+                    <p className="mt-1 truncate text-[11px] text-[#8d99a5]">
+                      {item.shipping ? `${formatMoney(item.shipping.value, item.shipping.currency)} shipping` : "Shipping unknown"}
+                      {item.endTime
+                        ? ` • ends ${new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(item.endTime))}`
+                        : ""}
+                    </p>
                   </div>
-                </GroupCard>
+                  <div className="text-right">
+                    <p className="text-[13px] font-semibold text-[#eef3f7]">
+                      {item.price ? formatMoney(item.price.value, item.price.currency) : "—"}
+                    </p>
+                    <p className="mt-1 text-[11px] font-medium uppercase tracking-[0.08em] text-[#8d99a5]">Ask</p>
+                  </div>
+                </a>
               </li>
             ))}
           </ul>
