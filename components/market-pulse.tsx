@@ -54,12 +54,18 @@ export default function MarketPulse({
   }
 
   return (
-    <div className="mt-6">
+    <div className="mt-6 rounded-2xl border border-[#1E1E1E] bg-[#111111] px-5 py-5">
       {/* Header */}
-      <div className="mb-3 flex items-center justify-between">
-        <p className="text-[13px] font-semibold uppercase tracking-[0.08em] text-[#6B6B6B]">
-          Market Pulse
-        </p>
+      <div className="mb-4 flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <span className="pulse-live-dot relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full animate-[livePing_2.4s_ease-in-out_infinite] rounded-full bg-[#3A9A5B] opacity-60" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-[#3A9A5B]" />
+          </span>
+          <p className="text-[13px] font-semibold uppercase tracking-[0.08em] text-[#888]">
+            Market Pulse
+          </p>
+        </div>
         {total > 0 && (
           <p className="text-[11px] tabular-nums text-[#555]">
             {formatVoteCount(total)} vote{total !== 1 ? "s" : ""}
@@ -68,12 +74,12 @@ export default function MarketPulse({
       </div>
 
       {/* Split bar */}
-      <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-[#1A1A1A]">
+      <div className="flex h-3.5 w-full overflow-hidden rounded-full bg-[#1A1A1A]">
         <div
           className="rounded-l-full transition-all duration-500"
           style={{
             width: `${bullishPct}%`,
-            backgroundColor: "#2D6A4F",
+            backgroundColor: "#377E5C",
             minWidth: total > 0 ? "4px" : undefined,
           }}
         />
@@ -81,7 +87,7 @@ export default function MarketPulse({
           className="rounded-r-full transition-all duration-500"
           style={{
             width: `${bearishPct}%`,
-            backgroundColor: "#6B3A3A",
+            backgroundColor: "#7D4549",
             minWidth: total > 0 ? "4px" : undefined,
           }}
         />
@@ -89,32 +95,32 @@ export default function MarketPulse({
 
       {/* Percentages */}
       {total > 0 && (
-        <div className="mt-1.5 flex justify-between">
-          <span className="text-[11px] font-semibold tabular-nums" style={{ color: "#52B788" }}>
+        <div className="mt-2 flex justify-between">
+          <span className="text-[12px] font-semibold tabular-nums" style={{ color: "#6BC99A" }}>
             {bullishPct.toFixed(0)}% Bullish
           </span>
-          <span className="text-[11px] font-semibold tabular-nums" style={{ color: "#C1666B" }}>
+          <span className="text-[12px] font-semibold tabular-nums" style={{ color: "#D4797E" }}>
             {bearishPct.toFixed(0)}% Bearish
           </span>
         </div>
       )}
 
       {/* Vote buttons */}
-      <div className="mt-4 flex gap-3">
+      <div className="mt-5 flex gap-3">
         <button
           type="button"
           disabled={hasVoted}
           onClick={() => handleVote("bullish")}
           className={[
-            "flex flex-1 items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-[13px] font-semibold transition-all duration-300",
+            "flex flex-1 items-center justify-center gap-2 rounded-xl border px-4 py-3.5 text-[14px] font-semibold transition-all duration-300",
             hasVoted && userVote === "bullish"
-              ? "border-[#2D6A4F] bg-[#2D6A4F]/15 text-[#52B788]"
+              ? "border-[#377E5C] bg-[#377E5C]/15 text-[#6BC99A]"
               : hasVoted
                 ? "border-[#1E1E1E] bg-transparent text-[#333] cursor-default"
-                : "border-[#1E1E1E] bg-[#111111] text-[#999] hover:border-[#2D6A4F]/40 hover:text-[#52B788]",
+                : "border-[#1E1E1E] bg-[#151515] text-[#AAA] hover:border-[#377E5C]/40 hover:text-[#6BC99A]",
           ].join(" ")}
         >
-          <span className="text-[15px]" aria-hidden="true">{hasVoted && userVote === "bullish" ? "\u{1F512}" : "\u{1F44D}"}</span>
+          <span className="text-[16px]" aria-hidden="true">{hasVoted && userVote === "bullish" ? "\u{1F512}" : "\u{1F44D}"}</span>
           Vote Up
         </button>
         <button
@@ -122,22 +128,22 @@ export default function MarketPulse({
           disabled={hasVoted}
           onClick={() => handleVote("bearish")}
           className={[
-            "flex flex-1 items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-[13px] font-semibold transition-all duration-300",
+            "flex flex-1 items-center justify-center gap-2 rounded-xl border px-4 py-3.5 text-[14px] font-semibold transition-all duration-300",
             hasVoted && userVote === "bearish"
-              ? "border-[#6B3A3A] bg-[#6B3A3A]/15 text-[#C1666B]"
+              ? "border-[#7D4549] bg-[#7D4549]/15 text-[#D4797E]"
               : hasVoted
                 ? "border-[#1E1E1E] bg-transparent text-[#333] cursor-default"
-                : "border-[#1E1E1E] bg-[#111111] text-[#999] hover:border-[#6B3A3A]/40 hover:text-[#C1666B]",
+                : "border-[#1E1E1E] bg-[#151515] text-[#AAA] hover:border-[#7D4549]/40 hover:text-[#D4797E]",
           ].join(" ")}
         >
-          <span className="text-[15px]" aria-hidden="true">{hasVoted && userVote === "bearish" ? "\u{1F512}" : "\u{1F44E}"}</span>
+          <span className="text-[16px]" aria-hidden="true">{hasVoted && userVote === "bearish" ? "\u{1F512}" : "\u{1F44E}"}</span>
           Vote Down
         </button>
       </div>
 
       {/* Countdown */}
       {hasVoted && countdown && (
-        <p className="mt-3 text-center text-[12px] text-[#555]">
+        <p className="mt-4 text-center text-[12px] text-[#666]">
           {countdown}
         </p>
       )}

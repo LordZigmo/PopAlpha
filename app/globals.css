@@ -113,6 +113,11 @@ body {
 .lift { transition: box-shadow 200ms ease, border-color 200ms ease; }
 .lift:hover { box-shadow: var(--shadow-elevated); }
 
+@keyframes livePing {
+  0%, 100% { opacity: 0; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(2.2); }
+}
+
 @keyframes glowPulse {
   0% { box-shadow: 0 0 0 rgba(0, 0, 0, 0); }
   50% { box-shadow: 0 0 26px color-mix(in srgb, var(--color-positive) 45%, transparent); }
