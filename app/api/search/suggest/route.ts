@@ -12,12 +12,6 @@ type CanonicalCardRow = {
   year: number | null;
 };
 
-type DeckRow = {
-  id: string;
-  name: string;
-  format: string | null;
-};
-
 function normalizeQuery(value: string): string {
   return value.trim().replace(/\s+/g, " ").toLowerCase();
 }
@@ -40,24 +34,14 @@ export async function GET(req: Request) {
   const supabase = getServerSupabaseClient();
   const containsPattern = `%${q}%`;
 
-  const [cardsRaw, decksRaw] = await Promise.all([
-    measureAsync("search.suggest.cards", { q }, async () => {
-      const { data } = await supabase
-        .from("canonical_cards")
-        .select("slug, canonical_name, set_name, card_number, year")
-        .or(`canonical_name.ilike.${containsPattern},set_name.ilike.${containsPattern},card_number.ilike.${containsPattern}`)
-        .limit(24);
-      return (data ?? []) as CanonicalCardRow[];
-    }),
-    measureAsync("search.suggest.decks", { q }, async () => {
-      const { data } = await supabase
-        .from("decks")
-        .select("id, name, format")
-        .ilike("name", containsPattern)
-        .limit(15);
-      return (data ?? []) as DeckRow[];
-    }),
-  ]);
+  const cardsRaw = await measureAsync("search.suggest.cards", { q }, async () => {
+    const { data } = await supabase
+      .from("canonical_cards")
+      .select("slug, canonical_name, set_name, card_number, year")
+      .or(`canonical_name.ilike.${containsPattern},set_name.ilike.${containsPattern},card_number.ilike.${containsPattern}`)
+      .limit(24);
+    return (data ?? []) as CanonicalCardRow[];
+  });
 
   const cards = cardsRaw
     .sort((a, b) => {
@@ -68,18 +52,9 @@ export async function GET(req: Request) {
     })
     .slice(0, 8);
 
-  const decks = decksRaw
-    .sort((a, b) => {
-      const scoreA = scoreText(a.name, q);
-      const scoreB = scoreText(b.name, q);
-      if (scoreA !== scoreB) return scoreB - scoreA;
-      return a.name.localeCompare(b.name);
-    })
-    .slice(0, 5);
-
   return NextResponse.json({
     ok: true,
     cards,
-    decks,
+    decks: [],
   });
 }

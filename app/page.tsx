@@ -93,6 +93,7 @@ export default function Home() {
             placeholder={placeholder || "Search"}
             autoFocus
             enableGlobalShortcut
+            submitMode="active-or-search"
           />
         </section>
       </div>

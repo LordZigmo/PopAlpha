@@ -12,6 +12,7 @@ type CardSearchProps = {
   enableGlobalShortcut?: boolean;
   size?: "nav" | "hero";
   showSubmitButton?: boolean;
+  submitMode?: "active-only" | "active-or-search";
   className?: string;
 };
 
@@ -85,6 +86,7 @@ export default function CardSearch({
   enableGlobalShortcut = false,
   size = "nav",
   showSubmitButton = true,
+  submitMode = "active-only",
   className,
 }: CardSearchProps) {
   const router = useRouter();
@@ -163,8 +165,11 @@ export default function CardSearch({
       return;
     }
 
-    closeDropdown();
-    router.push(`/search?q=${encodeURIComponent(trimmed)}`);
+    if (submitMode === "active-or-search") {
+      closeDropdown();
+      router.push(`/search?q=${encodeURIComponent(trimmed)}`);
+      return;
+    }
   }
 
   const sizeClasses = size === "hero"

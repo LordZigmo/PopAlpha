@@ -13,6 +13,7 @@ export default function NavSearchForm() {
       size="nav"
       placeholder="Search cards…"
       enableGlobalShortcut
+      submitMode="active-only"
       initialValue={searchParams.get("q") ?? ""}
     />
   );
