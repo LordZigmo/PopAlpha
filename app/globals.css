@@ -5,7 +5,7 @@
   --color-background: #0A0A0A;
   --color-surface: #111111;
   --color-surface-soft: #1A1A1A;
-  --color-accent: #00D1B2;
+  --color-accent: #00B4D8;
   --color-on-accent: #0A0A0A;
   --color-text: #F0F0F0;
   --color-muted: #6B6B6B;
@@ -107,7 +107,7 @@ body {
   margin-top: -35vh;
   border-radius: 28px 28px 0 0;
   background: var(--color-background);
-  box-shadow: 0 -1px 0 rgba(255, 255, 255, 0.06), 0 -24px 64px rgba(0, 0, 0, 0.5);
+  box-shadow: none;
 }
 
 .lift { transition: box-shadow 200ms ease, border-color 200ms ease; }
