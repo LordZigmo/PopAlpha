@@ -14,37 +14,37 @@ function cn(...values: Array<string | false | null | undefined>) {
 type Tone = "neutral" | "positive" | "negative" | "warning";
 
 const PILL_TONE_CLASS: Record<Tone, string> = {
-  neutral: "border-white/10 bg-white/[0.04] text-[#b6c2cc]",
-  positive: "border-emerald-400/20 bg-emerald-400/[0.08] !text-emerald-200",
-  negative: "border-rose-400/20 bg-rose-400/[0.08] !text-rose-200",
+  neutral: "border-[#1E1E1E] bg-white/[0.04] text-[#999]",
+  positive: "border-[#00DC5A]/20 bg-[#00DC5A]/[0.08] !text-[#00DC5A]",
+  negative: "border-[#FF3B30]/20 bg-[#FF3B30]/[0.08] !text-[#FF3B30]",
   warning: "border-amber-400/20 bg-amber-400/[0.08] !text-amber-200",
 };
 
 const TILE_TONE_CLASS: Record<Tone, string> = {
   neutral: "",
-  positive: "border-emerald-400/18 bg-emerald-400/[0.06]",
-  negative: "border-rose-400/18 bg-rose-400/[0.06]",
+  positive: "border-[#00DC5A]/18 bg-[#00DC5A]/[0.06]",
+  negative: "border-[#FF3B30]/18 bg-[#FF3B30]/[0.06]",
   warning: "border-amber-400/18 bg-amber-400/[0.06]",
 };
 
 const TILE_VALUE_TONE_CLASS: Record<Tone, string> = {
-  neutral: "text-[#f5f7fb]",
-  positive: "!text-emerald-200",
-  negative: "!text-rose-200",
+  neutral: "text-[#F0F0F0]",
+  positive: "!text-[#00DC5A]",
+  negative: "!text-[#FF3B30]",
   warning: "!text-amber-200",
 };
 
 const TILE_LABEL_TONE_CLASS: Record<Tone, string> = {
-  neutral: "text-[#8c94a3]",
-  positive: "!text-emerald-200",
-  negative: "!text-rose-200",
+  neutral: "text-[#6B6B6B]",
+  positive: "!text-[#00DC5A]",
+  negative: "!text-[#FF3B30]",
   warning: "!text-amber-200",
 };
 
 export function PageShell({ children }: { children: ReactNode }) {
   return (
-    <main className="min-h-screen bg-[#04080a] text-[#eef3f7]">
-      <div className="min-h-screen bg-[linear-gradient(180deg,#0b1014_0%,#04080a_16rem,#04080a_100%)]">{children}</div>
+    <main className="min-h-screen bg-[#0A0A0A] text-[#F0F0F0]">
+      <div className="min-h-screen">{children}</div>
     </main>
   );
 }
@@ -64,15 +64,15 @@ export function NavBar({
   return (
     <header
       className={cn(
-        "sticky top-0 z-40 border-b border-white/[0.06] backdrop-blur-xl",
-        compact ? "bg-[#0b1014f2]" : "bg-[#0b1014cc]"
+        "sticky top-0 z-40 border-b border-[#1E1E1E]",
+        compact ? "bg-[#0A0A0Af2]" : "bg-[#0A0A0Acc]"
       )}
     >
       <div className="mx-auto flex max-w-5xl items-center gap-3 px-3 pb-3 pt-[max(env(safe-area-inset-top),0.5rem)] sm:px-4">
         <Link
           href={backHref}
           aria-label="Back"
-          className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-[#121922]/92 text-[#dde7ee]"
+          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-[#1E1E1E] bg-[#111111] text-[#999]"
         >
           <span className="text-[26px] leading-none">‹</span>
         </Link>
@@ -81,7 +81,7 @@ export function NavBar({
             {title ? (
               <p className={cn("truncate font-semibold tracking-[-0.02em]", compact ? "text-[15px]" : "text-[17px]")}>{title}</p>
             ) : null}
-            {subtitle ? <p className="truncate text-[12px] text-[#8d99a5]">{subtitle}</p> : null}
+            {subtitle ? <p className="truncate text-[12px] text-[#6B6B6B]">{subtitle}</p> : null}
           </div>
         ) : null}
       </div>
@@ -104,8 +104,8 @@ export function GroupedSection({
     <section className={cn("mt-6", className)}>
       {title || description ? (
         <div className="mb-2 px-1">
-          {title ? <p className="text-[13px] font-semibold uppercase tracking-[0.08em] text-[#8d99a5]">{title}</p> : null}
-          {description ? <p className="mt-1 text-[13px] text-[#73808d]">{description}</p> : null}
+          {title ? <p className="text-[13px] font-semibold uppercase tracking-[0.08em] text-[#6B6B6B]">{title}</p> : null}
+          {description ? <p className="mt-1 text-[13px] text-[#555]">{description}</p> : null}
         </div>
       ) : null}
       <div className="space-y-3">{children}</div>
@@ -127,12 +127,12 @@ export function GroupCard({
   return (
     <div
       className={cn(
-        "overflow-hidden border border-white/[0.07] bg-[#0d1318] shadow-[0_18px_42px_rgba(0,0,0,0.34)]",
-        inset ? "rounded-2xl bg-[#121922]" : "rounded-[28px]",
+        "overflow-hidden border border-[#1E1E1E] bg-[#111111] shadow-[0_12px_32px_rgba(0,0,0,0.25)]",
+        inset ? "rounded-2xl bg-[#1A1A1A]" : "rounded-[20px]",
         className
       )}
     >
-      {header ? <div className="border-b border-white/[0.06] px-5 py-3">{header}</div> : null}
+      {header ? <div className="border-b border-[#1E1E1E] px-5 py-3">{header}</div> : null}
       <div className={cn(inset ? "p-4" : "p-5 sm:p-6")}>{children}</div>
     </div>
   );
@@ -212,12 +212,12 @@ export function StatRow({
   return (
     <div className="flex min-h-11 items-center justify-between gap-3 py-3">
       <div className="min-w-0">
-        <p className="text-[15px] text-[#dbe4eb]">{label}</p>
+        <p className="text-[15px] text-[#D0D0D0]">{label}</p>
         {meta ? (
-          <div className="mt-1 text-[12px] text-[#8d99a5]">{typeof meta === "string" ? <Pill label={meta} tone={tone} size="small" /> : meta}</div>
+          <div className="mt-1 text-[12px] text-[#6B6B6B]">{typeof meta === "string" ? <Pill label={meta} tone={tone} size="small" /> : meta}</div>
         ) : null}
       </div>
-      <div className="shrink-0 text-right text-[15px] font-semibold text-[#eef3f7]">{value}</div>
+      <div className="shrink-0 text-right text-[15px] font-semibold text-[#F0F0F0]">{value}</div>
     </div>
   );
 }
@@ -232,7 +232,7 @@ export function SegmentedControl({
   return (
     <div
       className={cn(
-        "rounded-2xl border border-white/[0.06] bg-[#0b1014] p-1",
+        "rounded-2xl border border-[#1E1E1E] bg-[#0D0D0D] p-1",
         wrap ? "flex flex-wrap gap-1.5" : "grid auto-cols-fr grid-flow-col gap-1"
       )}
     >
@@ -240,8 +240,8 @@ export function SegmentedControl({
         const className = cn(
           "flex min-h-11 items-center justify-center rounded-xl px-3 text-center text-[13px] font-semibold transition",
           item.active
-            ? "bg-[#1a242d] text-[#eef3f7] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
-            : "text-[#8d99a5]",
+            ? "bg-[#222222] text-[#F0F0F0] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
+            : "text-[#6B6B6B]",
           item.disabled && "cursor-default opacity-60",
           wrap && "min-w-fit"
         );

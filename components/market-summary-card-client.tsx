@@ -151,10 +151,10 @@ export default function MarketSummaryCardClient({
       <GroupCard
         header={
           <div className="flex items-center justify-between gap-3">
-            <p className="text-[15px] font-semibold text-[#f5f7fb]">Market Summary</p>
+            <p className="text-[15px] font-semibold text-[#F0F0F0]">Market Summary</p>
             <div className="flex items-center gap-2">
               <Pill label="RAW cache" tone="neutral" size="small" />
-              <div className="grid min-w-[168px] auto-cols-fr grid-flow-col gap-1 rounded-2xl border border-white/[0.06] bg-[#11151d] p-1">
+              <div className="grid min-w-[168px] auto-cols-fr grid-flow-col gap-1 rounded-2xl border border-[#1E1E1E] bg-[#151515] p-1">
                 {(["7d", "30d", "90d"] as WindowKey[]).map((windowKey) => {
                   const active = activeWindow === windowKey;
                   return (
@@ -165,8 +165,8 @@ export default function MarketSummaryCardClient({
                       className={[
                         "flex min-h-11 items-center justify-center rounded-xl px-3 text-center text-[13px] font-semibold transition",
                         active
-                          ? "bg-[#2b313d] text-[#f5f7fb] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
-                          : "text-[#98a0ae]",
+                          ? "bg-[#222] text-[#F0F0F0] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
+                          : "text-[#777]",
                       ].join(" ")}
                     >
                       {windowKey.toUpperCase()}
@@ -179,40 +179,40 @@ export default function MarketSummaryCardClient({
         }
       >
         {currentPrice === null ? (
-          <div className="rounded-2xl border border-white/[0.06] bg-[#11151d] px-4 py-5 text-[14px] text-[#98a0ae]">
+          <div className="rounded-2xl border border-[#1E1E1E] bg-[#151515] px-4 py-5 text-[14px] text-[#777]">
             No market data yet.
           </div>
         ) : (
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(220px,0.8fr)]">
-            <div className="rounded-2xl border border-white/[0.06] bg-[#11151d] p-4 sm:p-5">
-              <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#8c94a3]">Current Price</p>
-              <div className="mt-2 text-[30px] font-semibold tracking-[-0.03em] text-[#f5f7fb]">{formatUsd(currentPrice)}</div>
-              <div className="mt-4 divide-y divide-white/[0.06] rounded-2xl border border-white/[0.06] bg-[#171b23] px-4">
+            <div className="rounded-2xl border border-[#1E1E1E] bg-[#151515] p-4 sm:p-5">
+              <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#6B6B6B]">Current Price</p>
+              <div className="mt-2 text-[30px] font-semibold tracking-[-0.03em] text-[#F0F0F0]">{formatUsd(currentPrice)}</div>
+              <div className="mt-4 divide-y divide-[#1E1E1E] rounded-2xl border border-[#1E1E1E] bg-[#1A1A1A] px-4">
                 <StatRow label="Updated" value={formatUpdatedLabel(asOfTs)} />
                 <StatRow label={`Samples (${effectiveWindow.toUpperCase()})`} value={sampleCount > 0 ? String(sampleCount) : "—"} />
               </div>
-              <div className="mt-4 divide-y divide-white/[0.06] rounded-2xl border border-white/[0.06] bg-[#171b23] px-4">
+              <div className="mt-4 divide-y divide-[#1E1E1E] rounded-2xl border border-[#1E1E1E] bg-[#1A1A1A] px-4">
                 <StatRow label={`${effectiveWindow.toUpperCase()} Change`} value={formatPercent(changeValue)} />
                 <StatRow label={`${effectiveWindow.toUpperCase()} Low`} value={formatUsd(low)} />
                 <StatRow label={`${effectiveWindow.toUpperCase()} High`} value={formatUsd(high)} />
               </div>
             </div>
 
-            <div className="rounded-2xl border border-white/[0.06] bg-[#11151d] p-4 sm:p-5">
-              <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#8c94a3]">{effectiveWindow.toUpperCase()} Trend</p>
+            <div className="rounded-2xl border border-[#1E1E1E] bg-[#151515] p-4 sm:p-5">
+              <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#6B6B6B]">{effectiveWindow.toUpperCase()} Trend</p>
               {sparklinePath ? (
                 <svg viewBox="0 0 280 78" className="mt-4 h-24 w-full" role="img" aria-label={`${effectiveWindow} price sparkline`} preserveAspectRatio="none">
                   <path
                     d={sparklinePath}
                     fill="none"
-                    stroke="#8fb6ff"
+                    stroke="var(--color-accent)"
                     strokeWidth="3"
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   />
                 </svg>
               ) : (
-                <div className="mt-4 flex h-24 items-center justify-center rounded-2xl border border-dashed border-white/[0.08] text-[14px] text-[#98a0ae]">
+                <div className="mt-4 flex h-24 items-center justify-center rounded-2xl border border-dashed border-white/[0.08] text-[14px] text-[#777]">
                   No market data yet.
                 </div>
               )}

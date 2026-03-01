@@ -157,14 +157,14 @@ export default function MarketSnapshotTiles({
         header={
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-[15px] font-semibold text-[#f5f7fb]">Live signal dashboard</p>
-              <p className="text-[12px] text-[#8c94a3]">Aligned metrics, clear states, no decorative noise.</p>
+              <p className="text-[15px] font-semibold text-[#F0F0F0]">Live signal dashboard</p>
+              <p className="text-[12px] text-[#6B6B6B]">Aligned metrics, clear states, no decorative noise.</p>
             </div>
             {loading ? <Pill label="Refreshing" tone="neutral" size="small" /> : null}
           </div>
         }
       >
-        {!loading && data && !data.ok ? <p className="text-[14px] text-[#98a0ae]">Snapshot unavailable right now.</p> : null}
+        {!loading && data && !data.ok ? <p className="text-[14px] text-[#777]">Snapshot unavailable right now.</p> : null}
 
         {loading && !data ? (
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -181,7 +181,7 @@ export default function MarketSnapshotTiles({
         {!loading && (!data || data.ok) ? (
           <>
             {median7d === null && changePct === null && trimmedMedian30d === null ? (
-              <p className="text-[14px] text-[#98a0ae]">Pricing data forming.</p>
+              <p className="text-[14px] text-[#777]">Pricing data forming.</p>
             ) : (
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {median7d !== null && (
@@ -201,7 +201,7 @@ export default function MarketSnapshotTiles({
               </div>
             )}
             {(active7d > 0 || listingVelocity !== null || spread30d !== null) && (
-              <div className="mt-4 divide-y divide-white/[0.06] rounded-2xl border border-white/[0.06] bg-[#11151d] px-4">
+              <div className="mt-4 divide-y divide-[#1E1E1E] rounded-2xl border border-[#1E1E1E] bg-[#151515] px-4">
                 {active7d > 0 && (
                   <StatRow label="Active Listings (7D)" value={active7d} meta="Observed live supply" />
                 )}

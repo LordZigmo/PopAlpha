@@ -14,9 +14,9 @@ export default function CardDetailNavBar({
       <Link
         href={backHref ?? "/search"}
         aria-label="Back"
-        className="pointer-events-auto flex h-14 w-14 items-center justify-center rounded-full bg-white/[0.04] text-[#d7dbe5]"
+        className="pointer-events-auto flex h-12 w-12 items-center justify-center rounded-full border border-[#1E1E1E] bg-[#0A0A0A]/60 text-[#6B6B6B] transition hover:text-[#F0F0F0]"
       >
-        <span className="text-[26px] leading-none">‹</span>
+        <span className="text-[26px] leading-none">&lsaquo;</span>
       </Link>
     </div>
   );

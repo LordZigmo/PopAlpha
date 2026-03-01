@@ -2,25 +2,25 @@
 
 :root,
 .theme-indigo {
-  --color-background: #04080a;
-  --color-surface: #0b1014;
-  --color-surface-soft: #121922;
-  --color-accent: #7aa6b8;
-  --color-on-accent: #071016;
-  --color-text: #eef3f7;
-  --color-muted: #8d99a5;
-  --color-border: #1a242d;
-  --color-positive: #66e1b0;
-  --color-negative: #ff6c78;
-  --color-gold: #a4c5d2;
-  --color-gold-ink: #081118;
-  --color-overlay: rgba(4, 8, 10, 0.86);
+  --color-background: #0A0A0A;
+  --color-surface: #111111;
+  --color-surface-soft: #1A1A1A;
+  --color-accent: #00D1B2;
+  --color-on-accent: #0A0A0A;
+  --color-text: #F0F0F0;
+  --color-muted: #6B6B6B;
+  --color-border: #1E1E1E;
+  --color-positive: #00DC5A;
+  --color-negative: #FF3B30;
+  --color-gold: #FFD700;
+  --color-gold-ink: #0A0A0A;
+  --color-overlay: rgba(10, 10, 10, 0.92);
   --shadow-elevated: 0 28px 72px rgba(0, 0, 0, 0.78);
   --space-panel: 1.5rem;
   --space-card: 1rem;
-  --radius-panel: 1.75rem;
-  --radius-card: 1rem;
-  --radius-input: 0.85rem;
+  --radius-panel: 1.25rem;
+  --radius-card: 0.75rem;
+  --radius-input: 0.625rem;
   --stat-font: "Inter", ui-sans-serif, system-ui;
 }
 
@@ -66,10 +66,8 @@ body {
   position: relative;
   min-height: 100vh;
   background:
-    radial-gradient(920px circle at 14% -8%, color-mix(in srgb, var(--color-accent) 10%, transparent), transparent 54%),
-    radial-gradient(760px circle at 88% 2%, color-mix(in srgb, #4b6880 8%, transparent), transparent 60%),
-    radial-gradient(820px circle at 52% 118%, color-mix(in srgb, var(--color-positive) 6%, transparent), transparent 62%),
-    linear-gradient(180deg, color-mix(in srgb, var(--color-background) 92%, #010304), var(--color-background));
+    radial-gradient(900px circle at 50% -5%, color-mix(in srgb, var(--color-accent) 4%, transparent), transparent 60%),
+    var(--color-background);
 }
 
 .app-shell::before {
@@ -77,22 +75,16 @@ body {
   pointer-events: none;
   position: absolute;
   inset: 0;
-  opacity: 0.08;
+  opacity: 0.03;
   mix-blend-mode: soft-light;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.55'/%3E%3C/svg%3E");
 }
 
 .glass,
 .card {
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--color-surface-soft) 96%, transparent), color-mix(in srgb, var(--color-surface) 98%, transparent));
-  border: 1px solid color-mix(in srgb, var(--color-border) 92%, #141b22);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.025),
-    0 0 0 1px color-mix(in srgb, #ffffff 2%, transparent),
-    var(--shadow-elevated);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-elevated);
 }
 
 .glow-card { position: relative; isolation: isolate; }
@@ -102,12 +94,20 @@ body {
   inset: -1px;
   border-radius: 1.75rem;
   z-index: -1;
-  opacity: 0.1;
+  opacity: 0.05;
   background: radial-gradient(650px circle at 50% -20%, color-mix(in srgb, var(--color-accent) 12%, transparent), transparent 62%);
 }
 
 .app-chrome {
   min-height: 100vh;
+}
+
+.content-sheet {
+  position: relative;
+  margin-top: -35vh;
+  border-radius: 28px 28px 0 0;
+  background: var(--color-background);
+  box-shadow: 0 -1px 0 rgba(255, 255, 255, 0.06), 0 -24px 64px rgba(0, 0, 0, 0.5);
 }
 
 .lift { transition: box-shadow 200ms ease, border-color 200ms ease; }

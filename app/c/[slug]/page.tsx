@@ -453,34 +453,49 @@ export default async function CanonicalCardPage({
 
       <CanonicalCardFloatingHero
         imageUrl={selectedPrinting?.image_url ?? null}
-        title={canonical.canonical_name}
-        subtitle={subtitleText}
-        price={primaryPrice}
-        priceLabel={primaryPriceLabel}
-        signals={
-          <>
-            {snapshotData?.active_listings_7d != null && <Pill label={`Scarcity ${scarcity.label}`} tone={scarcity.tone} />}
-            {snapshotData?.active_listings_7d != null && <Pill label={`Liquidity ${liquidity.label}`} tone={liquidity.tone} />}
-            {selectedPrinting && selectedPrintingLabel ? (
-              <Pill label={selectedPrintingLabel} tone="neutral" />
-            ) : (
-              <>
-                {canonical.set_name && canonicalSetHref ? (
-                  <Link
-                    href={canonicalSetHref}
-                    className="inline-flex min-h-7 items-center rounded-full border border-white/10 bg-white/[0.04] px-3 text-[12px] font-semibold text-[#c8ccd7]"
-                  >
-                    {canonical.set_name}
-                  </Link>
-                ) : null}
-                {canonical.card_number ? <Pill label={`#${canonical.card_number}`} tone="neutral" /> : null}
-              </>
-            )}
-          </>
-        }
+        altText={canonical.canonical_name}
       />
 
-      <div className="mx-auto max-w-5xl px-4 pb-[max(env(safe-area-inset-bottom),2.5rem)] pt-4 sm:px-6 sm:pb-[max(env(safe-area-inset-bottom),3.5rem)]">
+      <div className="content-sheet">
+        <div className="mx-auto max-w-5xl px-4 pb-[max(env(safe-area-inset-bottom),2.5rem)] pt-8 sm:px-6 sm:pb-[max(env(safe-area-inset-bottom),3.5rem)]">
+          {/* ── Card identity + price ──────────────────────────────────── */}
+          <div className="mb-6">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[#6B6B6B]">
+              {subtitleText}
+            </p>
+            <h1 className="mt-1 text-[30px] font-semibold leading-tight tracking-[-0.035em] text-[#F0F0F0] sm:text-[38px]">
+              {canonical.canonical_name}
+            </h1>
+            {primaryPrice !== null && (
+              <div className="mt-3 flex flex-wrap items-baseline gap-2.5">
+                <span className="text-[46px] font-bold leading-none tracking-[-0.04em] tabular-nums text-[#F0F0F0] sm:text-[56px]">
+                  {primaryPrice}
+                </span>
+                <span className="text-[13px] leading-tight text-[#6B6B6B]">
+                  {primaryPriceLabel}
+                </span>
+              </div>
+            )}
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {snapshotData?.active_listings_7d != null && <Pill label={`Scarcity ${scarcity.label}`} tone={scarcity.tone} />}
+              {snapshotData?.active_listings_7d != null && <Pill label={`Liquidity ${liquidity.label}`} tone={liquidity.tone} />}
+              {selectedPrinting && selectedPrintingLabel ? (
+                <Pill label={selectedPrintingLabel} tone="neutral" />
+              ) : (
+                <>
+                  {canonical.set_name && canonicalSetHref ? (
+                    <Link
+                      href={canonicalSetHref}
+                      className="inline-flex min-h-7 items-center rounded-full border border-[#1E1E1E] bg-white/[0.04] px-3 text-[12px] font-semibold text-[#999]"
+                    >
+                      {canonical.set_name}
+                    </Link>
+                  ) : null}
+                  {canonical.card_number ? <Pill label={`#${canonical.card_number}`} tone="neutral" /> : null}
+                </>
+              )}
+            </div>
+          </div>
         {/* ── Variant selector ──────────────────────────────────────────────────
             Near the top so users can pivot grade or printing before
             reading the market signal data below. */}
@@ -488,7 +503,7 @@ export default async function CanonicalCardPage({
           <GroupCard>
             <div className="space-y-4">
               <div>
-                <p className="mb-2 text-[13px] font-semibold text-[#98a0ae]">Mode</p>
+                <p className="mb-2 text-[13px] font-semibold text-[#777]">Mode</p>
                 <SegmentedControl
                   items={VIEW_MODES.map((option) => ({
                     key: option,
@@ -511,7 +526,7 @@ export default async function CanonicalCardPage({
               </div>
               {viewMode === "RAW" && variantPills.length > 0 ? (
                   <div>
-                    <p className="mb-2 text-[13px] font-semibold text-[#98a0ae]">Variant</p>
+                    <p className="mb-2 text-[13px] font-semibold text-[#777]">Variant</p>
                     <SegmentedControl
                       wrap={shouldWrapVariantSegments(variantPills.length)}
                       items={variantPills.map(({ printing: variantPrinting, pill }) => ({
@@ -526,7 +541,7 @@ export default async function CanonicalCardPage({
               {viewMode === "GRADED" ? (
                 <>
                   <div>
-                    <p className="mb-2 text-[13px] font-semibold text-[#98a0ae]">Source</p>
+                    <p className="mb-2 text-[13px] font-semibold text-[#777]">Source</p>
                     <SegmentedControl
                       items={GRADED_SOURCES.map((source) => {
                         const providerHasRows = availableProviders.includes(source);
@@ -550,7 +565,7 @@ export default async function CanonicalCardPage({
                     />
                   </div>
                   <div>
-                    <p className="mb-2 text-[13px] font-semibold text-[#98a0ae]">Grade</p>
+                    <p className="mb-2 text-[13px] font-semibold text-[#777]">Grade</p>
                     <SegmentedControl
                       items={GRADE_BUCKETS.map((gradeBucket) => ({
                         key: gradeBucket,
@@ -583,12 +598,12 @@ export default async function CanonicalCardPage({
           <GroupCard
             header={
               <div className="flex items-center justify-between gap-3">
-                <p className="text-[15px] font-semibold text-[#f5f7fb]">Community Sentiment</p>
+                <p className="text-[15px] font-semibold text-[#F0F0F0]">Community Sentiment</p>
                 <Pill label="Coming soon" tone="neutral" size="small" />
               </div>
             }
           >
-            <div className="rounded-2xl border border-white/[0.06] bg-[#11151d] px-4 py-5 text-[14px] text-[#98a0ae]">
+            <div className="rounded-2xl border border-[#1E1E1E] bg-[#151515] px-4 py-5 text-[14px] text-[#777]">
               Community sentiment data will appear here.
             </div>
           </GroupCard>
@@ -618,6 +633,7 @@ export default async function CanonicalCardPage({
           printingId={selectedPrinting?.id ?? null}
           grade={legacyListingsGrade}
         />
+        </div>
       </div>
     </PageShell>
   );

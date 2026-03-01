@@ -23,10 +23,10 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
 
   return (
     <>
-      <header className="fixed inset-x-0 top-0 z-50">
+      <header className="fixed inset-x-0 top-0 z-50 border-b border-[#1E1E1E] bg-[#0A0A0A]/95">
         <div className="mx-auto flex h-14 max-w-5xl items-center gap-3 px-4 sm:px-6">
           {/* Logo */}
-          <Link href="/" className="text-app shrink-0 text-sm font-semibold tracking-tight">
+          <Link href="/" className="text-app shrink-0 text-[15px] font-bold tracking-tight">
             PopAlpha
           </Link>
 
@@ -52,7 +52,7 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
           <nav className="ml-auto flex shrink-0 items-center gap-2">
             <Link
               href="/sets"
-              className="btn-ghost hidden rounded-[var(--radius-input)] border px-3 py-1.5 text-xs font-semibold sm:block"
+              className="hidden rounded-[var(--radius-input)] border border-[#1E1E1E] px-3 py-1.5 text-xs font-semibold text-[#6B6B6B] transition hover:text-[#F0F0F0] sm:block"
             >
               Sets
             </Link>

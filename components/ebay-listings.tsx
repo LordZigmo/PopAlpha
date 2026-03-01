@@ -102,7 +102,7 @@ export default function EbayListings({ query, canonicalSlug, printingId, grade }
                   href={`https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(normalizedQuery)}`}
                   target="_blank"
                   rel="noreferrer"
-                  className="text-[12px] font-semibold text-[#98a0ae]"
+                  className="text-[12px] font-semibold text-[#777]"
                 >
                   Live eBay Listings
                 </a>
@@ -112,14 +112,14 @@ export default function EbayListings({ query, canonicalSlug, printingId, grade }
         }
       >
         <div className="mb-4">
-          <button type="button" onClick={() => setShowQuery((value) => !value)} className="text-[12px] font-semibold text-[#98a0ae]">
+          <button type="button" onClick={() => setShowQuery((value) => !value)} className="text-[12px] font-semibold text-[#777]">
             {showQuery ? "Hide query" : "Show query"}
           </button>
-          {showQuery ? <p className="mt-2 text-[12px] text-[#7e8694]">{normalizedQuery}</p> : null}
+          {showQuery ? <p className="mt-2 text-[12px] text-[#666]">{normalizedQuery}</p> : null}
         </div>
 
         {loading ? (
-          <div className="divide-y divide-white/[0.06] overflow-hidden rounded-2xl border border-white/[0.06] bg-white/[0.02]">
+          <div className="divide-y divide-[#1E1E1E] overflow-hidden rounded-2xl border border-[#1E1E1E] bg-white/[0.02]">
             {Array.from({ length: 6 }).map((_, index) => (
               <div key={index} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 py-3">
                 <div className="min-w-0">
@@ -135,27 +135,27 @@ export default function EbayListings({ query, canonicalSlug, printingId, grade }
           </div>
         ) : null}
 
-        {!loading && error ? <p className="text-[14px] text-[#98a0ae]">Listings unavailable right now.</p> : null}
+        {!loading && error ? <p className="text-[14px] text-[#777]">Listings unavailable right now.</p> : null}
         {!loading && !error && items.length === 0 ? (
-          <p className="text-[14px] text-[#98a0ae]">No live listings yet. PopAlpha will surface evidence as the market forms.</p>
+          <p className="text-[14px] text-[#777]">No live listings yet. PopAlpha will surface evidence as the market forms.</p>
         ) : null}
 
         {!loading && !error && shownItems.length > 0 ? (
-          <ul className="divide-y divide-white/[0.06] overflow-hidden rounded-2xl border border-white/[0.06] bg-white/[0.02]">
+          <ul className="divide-y divide-[#1E1E1E] overflow-hidden rounded-2xl border border-[#1E1E1E] bg-white/[0.02]">
             {shownItems.map((item, index) => (
               <li key={`${item.externalId || item.itemWebUrl}-${index}`}>
                 <a
                   href={item.itemWebUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 py-3 transition hover:bg-white/[0.03]"
+                  className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 py-3 transition hover:bg-[#1A1A1A]"
                 >
                   <div className="min-w-0">
                     <div className="flex min-w-0 items-center gap-2">
-                      <p className="truncate text-[13px] font-semibold text-[#f5f7fb]">{item.title}</p>
-                      <span className="shrink-0 text-[11px] font-medium text-[#7e8694]">{item.condition ?? "n/a"}</span>
+                      <p className="truncate text-[13px] font-semibold text-[#F0F0F0]">{item.title}</p>
+                      <span className="shrink-0 text-[11px] font-medium text-[#666]">{item.condition ?? "n/a"}</span>
                     </div>
-                    <p className="mt-1 truncate text-[11px] text-[#8d99a5]">
+                    <p className="mt-1 truncate text-[11px] text-[#6B6B6B]">
                       {item.shipping ? `${formatMoney(item.shipping.value, item.shipping.currency)} shipping` : "Shipping unknown"}
                       {item.endTime
                         ? ` • ends ${new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(item.endTime))}`
@@ -163,10 +163,10 @@ export default function EbayListings({ query, canonicalSlug, printingId, grade }
                     </p>
                   </div>
                   <div className="text-right">
-                    <p className="text-[13px] font-semibold text-[#eef3f7]">
+                    <p className="text-[13px] font-semibold text-[#F0F0F0]">
                       {item.price ? formatMoney(item.price.value, item.price.currency) : "—"}
                     </p>
-                    <p className="mt-1 text-[11px] font-medium uppercase tracking-[0.08em] text-[#8d99a5]">Ask</p>
+                    <p className="mt-1 text-[11px] font-medium uppercase tracking-[0.08em] text-[#6B6B6B]">Ask</p>
                   </div>
                 </a>
               </li>
