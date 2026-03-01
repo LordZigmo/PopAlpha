@@ -15,7 +15,8 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
   }
 
   // Home page keeps its full-screen search hero — no header needed
-  if (pathname === "/") {
+  // Card detail pages use their own floating hero layout
+  if (pathname === "/" || pathname.startsWith("/c/")) {
     return <>{children}</>;
   }
 

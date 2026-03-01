@@ -9,7 +9,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import CanonicalCardFloatingHero from "@/components/canonical-card-floating-hero";
-import CardDetailNavBar from "@/components/card-detail-nav-bar";
 import CollapsibleSection from "@/components/collapsible-section";
 import EbayListings from "@/components/ebay-listings";
 import { GroupCard, GroupedSection, PageShell, Pill, SegmentedControl } from "@/components/ios-grouped-ui";
@@ -472,8 +471,6 @@ export default async function CanonicalCardPage({
 
   return (
     <PageShell>
-      <CardDetailNavBar title="" backHref={backHref} />
-
       <CanonicalCardFloatingHero
         imageUrl={selectedPrinting?.image_url ?? null}
         altText={canonical.canonical_name}

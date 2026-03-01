@@ -67,24 +67,11 @@ export default function CanonicalCardFloatingHero({
             src={imageUrl}
             alt={altText}
             className="h-[55vh] max-h-[680px] sm:h-[60vh] sm:max-h-[820px] w-auto max-w-[90vw] object-contain"
-            style={{
-              filter:
-                "drop-shadow(0 28px 64px rgba(0,0,0,0.72)) drop-shadow(0 6px 18px rgba(0,0,0,0.42))",
-            }}
           />
         ) : (
           <div className="h-[55vh] max-h-[680px] w-[calc(680px*0.716)] rounded-[20px] border border-[#1E1E1E] bg-white/[0.03]" />
         )}
       </div>
-
-      {/* Bottom fade — transparent to page background */}
-      <div
-        className="pointer-events-none absolute inset-x-0 bottom-0 h-80"
-        style={{
-          background:
-            "linear-gradient(to bottom, transparent 0%, rgba(10,10,10,0.55) 35%, #0A0A0A 64%)",
-        }}
-      />
     </section>
   );
 }
