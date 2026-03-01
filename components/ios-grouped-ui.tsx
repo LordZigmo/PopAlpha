@@ -47,13 +47,13 @@ export function NavBar({
         compact ? "bg-[#11141bf2]" : "bg-[#11141bcc]"
       )}
     >
-      <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 pb-3 pt-[max(env(safe-area-inset-top),0.75rem)] sm:px-6">
+      <div className="mx-auto flex max-w-5xl items-center gap-3 px-3 pb-3 pt-[max(env(safe-area-inset-top),0.5rem)] sm:px-4">
         <Link
           href={backHref}
           aria-label="Back"
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/[0.06] bg-white/[0.04] text-[#d7dbe5]"
+          className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-white/[0.04] text-[#d7dbe5]"
         >
-          <span className="text-lg leading-none">‹</span>
+          <span className="text-[26px] leading-none">‹</span>
         </Link>
         {showIdentity ? (
           <div className="min-w-0 flex-1">

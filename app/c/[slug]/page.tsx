@@ -6,6 +6,7 @@
  * iOS grouped rules: matte dark surfaces, consistent radii and spacing, restrained separators,
  * and touch targets sized for mobile-first interaction.
  */
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import CanonicalCardFloatingHero from "@/components/canonical-card-floating-hero";
 import CardDetailNavBar from "@/components/card-detail-nav-bar";
@@ -209,6 +210,11 @@ function toggleHref(
   if (backHref !== DEFAULT_BACK_HREF) params.set("returnTo", backHref);
   const qs = params.toString();
   return qs ? `/c/${encodeURIComponent(slug)}?${qs}` : `/c/${encodeURIComponent(slug)}`;
+}
+
+function setHref(setName: string | null): string | null {
+  if (!setName) return null;
+  return `/sets/${encodeURIComponent(setName)}`;
 }
 
 function scarcitySignal(active7d: number | null): { label: string; tone: "positive" | "warning" | "neutral" } {
@@ -475,6 +481,7 @@ export default async function CanonicalCardPage({
 
   const primaryPrice = snapshotData?.median_7d != null ? formatUsdCompact(snapshotData.median_7d) : null;
   const primaryPriceLabel = `${selectedSnapshotGrade ? legacyGradeLabel(selectedSnapshotGrade) : `${providerLabel(activeProvider)} ${gradeBucketLabel(activeBucket)}`} · 7-day median ask`;
+  const canonicalSetHref = setHref(canonical.set_name);
 
   // Grade Ladder premium calculations.
   const rawMedian7d = gradeSnapMap.RAW?.median_7d ?? null;
@@ -495,7 +502,21 @@ export default async function CanonicalCardPage({
           <>
             {snapshotData?.active_listings_7d != null && <Pill label={`Scarcity ${scarcity.label}`} tone={scarcity.tone} />}
             {snapshotData?.active_listings_7d != null && <Pill label={`Liquidity ${liquidity.label}`} tone={liquidity.tone} />}
-            <Pill label={selectedPrintingLabel} tone={selectedPrinting ? "neutral" : "warning"} />
+            {selectedPrinting ? (
+              <Pill label={selectedPrintingLabel} tone="neutral" />
+            ) : (
+              <>
+                {canonical.set_name && canonicalSetHref ? (
+                  <Link
+                    href={canonicalSetHref}
+                    className="inline-flex min-h-7 items-center rounded-full border border-white/10 bg-white/[0.04] px-3 text-[12px] font-semibold text-[#c8ccd7]"
+                  >
+                    {canonical.set_name}
+                  </Link>
+                ) : null}
+                {canonical.card_number ? <Pill label={`#${canonical.card_number}`} tone="neutral" /> : null}
+              </>
+            )}
           </>
         }
       />
@@ -532,7 +553,7 @@ export default async function CanonicalCardPage({
                 <div>
                   <p className="mb-2 text-[13px] font-semibold text-[#98a0ae]">Variant</p>
                   <SegmentedControl
-                    wrap
+                    wrap={variantPills.length > 1}
                     items={variantPills.map(({ printing: variantPrinting, pill }) => ({
                       key: pill.pillKey,
                       label: pill.pillLabel,
@@ -547,7 +568,6 @@ export default async function CanonicalCardPage({
                   <div>
                     <p className="mb-2 text-[13px] font-semibold text-[#98a0ae]">Source</p>
                     <SegmentedControl
-                      wrap
                       items={GRADED_SOURCES.map((source) => {
                         const providerHasRows = availableProviders.includes(source);
                         const fallbackBucketForSource = GRADE_BUCKETS.find((gradeBucket) =>
