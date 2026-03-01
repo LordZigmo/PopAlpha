@@ -12,7 +12,8 @@ import CardDetailNavBar from "@/components/card-detail-nav-bar";
 import EbayListings from "@/components/ebay-listings";
 import { GroupCard, GroupedSection, PageShell, Pill, SegmentedControl, StatRow, StatTile } from "@/components/ios-grouped-ui";
 import MarketSnapshotTiles from "@/components/market-snapshot-tiles";
-import { buildEbayQuery, type GradeSelection } from "@/lib/ebay-query";
+import { buildEbayQuery, type GradeSelection, type GradedSource } from "@/lib/ebay-query";
+import { buildPrintingPill } from "@/lib/cards/detail";
 import { getServerSupabaseClient } from "@/lib/supabaseServer";
 import { buildAssetViewModel } from "@/lib/data/assets";
 import {
@@ -67,8 +68,21 @@ type TcgSnapshotDebug = {
   error: string | null;
 };
 
-const GRADE_OPTIONS: GradeSelection[] = ["RAW", "PSA9", "PSA10"];
 const DEFAULT_BACK_HREF = "/search";
+const VIEW_MODES = ["RAW", "GRADED"] as const;
+const GRADED_SOURCES = ["PSA", "TAG", "BGS", "CGC"] as const;
+const GRADE_BUCKETS = ["LE_7", "G8", "G9", "G10"] as const;
+
+type ViewMode = (typeof VIEW_MODES)[number];
+type GradeBucket = (typeof GRADE_BUCKETS)[number];
+
+type GradedAvailabilityRow = {
+  provider: GradedSource;
+  grade: GradeBucket;
+  provider_as_of_ts: string | null;
+  signals_as_of_ts: string | null;
+  history_points_30d: number | null;
+};
 
 function finishLabel(finish: CardPrintingRow["finish"]): string {
   const map: Record<CardPrintingRow["finish"], string> = {
@@ -79,15 +93,6 @@ function finishLabel(finish: CardPrintingRow["finish"]): string {
     UNKNOWN: "Unknown",
   };
   return map[finish];
-}
-
-function editionLabel(edition: CardPrintingRow["edition"]): string {
-  const map: Record<CardPrintingRow["edition"], string> = {
-    UNLIMITED: "Unlimited",
-    FIRST_EDITION: "1st Edition",
-    UNKNOWN: "Unknown Edition",
-  };
-  return map[edition];
 }
 
 function finishPriority(finish: CardPrintingRow["finish"]): number {
@@ -114,53 +119,61 @@ function selectedGrade(gradeRaw: string | undefined): GradeSelection {
   return "RAW";
 }
 
-function gradeLabel(grade: GradeSelection): string {
+function selectedViewMode(modeRaw: string | undefined, gradeRaw: string | undefined): ViewMode {
+  const upper = (modeRaw ?? "").toUpperCase();
+  if (upper === "RAW" || upper === "GRADED") return upper;
+  return selectedGrade(gradeRaw) === "RAW" ? "RAW" : "GRADED";
+}
+
+function legacyGradeToBucket(gradeRaw: string | undefined): GradeBucket | null {
+  const parsed = selectedGrade(gradeRaw);
+  if (parsed === "PSA9") return "G9";
+  if (parsed === "PSA10") return "G10";
+  return null;
+}
+
+function selectedBucket(bucketRaw: string | undefined, gradeRaw: string | undefined): GradeBucket | null {
+  const upper = (bucketRaw ?? "").toUpperCase();
+  if ((GRADE_BUCKETS as readonly string[]).includes(upper)) return upper as GradeBucket;
+  return legacyGradeToBucket(gradeRaw);
+}
+
+function selectedProvider(providerRaw: string | undefined): GradedSource | null {
+  const upper = (providerRaw ?? "").toUpperCase();
+  if ((GRADED_SOURCES as readonly string[]).includes(upper)) return upper as GradedSource;
+  return null;
+}
+
+function gradeBucketLabel(grade: GradeBucket): string {
+  if (grade === "LE_7") return "7 or Less";
+  if (grade === "G8") return "8";
+  if (grade === "G9") return "9";
+  if (grade === "G10") return "10";
+  return grade;
+}
+
+function providerLabel(provider: GradedSource): string {
+  if (provider === "BGS") return "Beckett";
+  return provider;
+}
+
+function legacyGradeLabel(grade: GradeSelection): string {
   if (grade === "PSA9") return "PSA 9";
   if (grade === "PSA10") return "PSA 10";
   return "Raw";
+}
+
+function snapshotGradeForSelection(mode: ViewMode, bucket: GradeBucket | null): "RAW" | "PSA9" | "PSA10" | null {
+  if (mode === "RAW") return "RAW";
+  if (bucket === "G9") return "PSA9";
+  if (bucket === "G10") return "PSA10";
+  return null;
 }
 
 function printingOptionLabel(printing: CardPrintingRow): string {
   return [finishLabel(printing.finish), printing.edition === "FIRST_EDITION" ? "1st Ed" : null, printing.stamp]
     .filter((value) => Boolean(value))
     .join(" • ");
-}
-
-function resolvePrintingSelection(
-  printings: CardPrintingRow[],
-  selectedPrinting: CardPrintingRow | null,
-  overrides: Partial<Pick<CardPrintingRow, "finish" | "edition" | "stamp">>
-): CardPrintingRow | null {
-  if (printings.length === 0) return null;
-
-  const desired = {
-    finish: overrides.finish ?? selectedPrinting?.finish ?? null,
-    edition: overrides.edition ?? selectedPrinting?.edition ?? null,
-    stamp: overrides.stamp ?? selectedPrinting?.stamp ?? null,
-  };
-
-  const exact = printings.find(
-    (printing) =>
-      (desired.finish === null || printing.finish === desired.finish) &&
-      (desired.edition === null || printing.edition === desired.edition) &&
-      (desired.stamp === null || printing.stamp === desired.stamp)
-  );
-  if (exact) return exact;
-
-  const byFinishEdition = printings.find(
-    (printing) =>
-      (desired.finish === null || printing.finish === desired.finish) &&
-      (desired.edition === null || printing.edition === desired.edition)
-  );
-  if (byFinishEdition) return byFinishEdition;
-
-  const byFinish = printings.find((printing) => desired.finish === null || printing.finish === desired.finish);
-  if (byFinish) return byFinish;
-
-  const byEdition = printings.find((printing) => desired.edition === null || printing.edition === desired.edition);
-  if (byEdition) return byEdition;
-
-  return printings[0];
 }
 
 function resolveBackHref(returnTo: string | undefined): string {
@@ -173,13 +186,24 @@ function resolveBackHref(returnTo: string | undefined): string {
 function toggleHref(
   slug: string,
   printingId: string | null,
-  grade: GradeSelection,
   debugEnabled: boolean,
   returnTo?: string,
+  opts?: {
+    mode?: ViewMode;
+    provider?: GradedSource | null;
+    bucket?: GradeBucket | null;
+  },
 ): string {
   const params = new URLSearchParams();
   if (printingId) params.set("printing", printingId);
-  if (grade !== "RAW") params.set("grade", grade);
+  const mode = opts?.mode;
+  const bucket = opts?.bucket;
+  const provider = opts?.provider;
+  if (mode && mode !== "RAW") params.set("mode", mode);
+  if (provider) params.set("provider", provider);
+  if (bucket) params.set("bucket", bucket);
+  if (bucket === "G9") params.set("grade", "PSA9");
+  else if (bucket === "G10") params.set("grade", "PSA10");
   if (debugEnabled) params.set("debug", "1");
   const backHref = resolveBackHref(returnTo);
   if (backHref !== DEFAULT_BACK_HREF) params.set("returnTo", backHref);
@@ -292,10 +316,18 @@ export default async function CanonicalCardPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ printing?: string; grade?: string; debug?: string; returnTo?: string }>;
+  searchParams: Promise<{
+    printing?: string;
+    grade?: string;
+    mode?: string;
+    provider?: string;
+    bucket?: string;
+    debug?: string;
+    returnTo?: string;
+  }>;
 }) {
   const { slug } = await params;
-  const { printing, grade, debug, returnTo } = await searchParams;
+  const { printing, grade, mode, provider, bucket, debug, returnTo } = await searchParams;
   const supabase = getServerSupabaseClient();
   const debugEnabled = debug === "1";
   const backHref = resolveBackHref(returnTo);
@@ -314,14 +346,66 @@ export default async function CanonicalCardPage({
     .eq("canonical_slug", slug);
 
   const printings = ((printingsData ?? []) as CardPrintingRow[]).sort(sortPrintings);
-  const gradeSelection = selectedGrade(grade);
+  const viewMode = selectedViewMode(mode, grade);
   const selectedPrinting = printings.find((row) => row.id === printing) ?? printings[0] ?? null;
   const selectedPrintingLabel = selectedPrinting ? printingOptionLabel(selectedPrinting) : "Unknown printing";
-  const finishOptions = Array.from(new Set(printings.map((row) => row.finish)));
-  const editionOptions = Array.from(new Set(printings.map((row) => row.edition)));
-  const stampOptions = Array.from(
-    new Set(printings.map((row) => row.stamp).filter((value): value is string => Boolean(value)))
+  const variantPills = printings.map((row) => ({
+    printing: row,
+    pill: buildPrintingPill({
+      id: row.id,
+      canonical_slug: slug,
+      finish: row.finish,
+      finish_detail: row.finish_detail,
+      edition: row.edition,
+      stamp: row.stamp,
+      image_url: row.image_url,
+    }),
+  }));
+
+  const { data: gradedAvailabilityData } = selectedPrinting
+    ? await supabase
+        .from("variant_metrics")
+        .select("provider, grade, provider_as_of_ts, signals_as_of_ts, history_points_30d")
+        .eq("canonical_slug", slug)
+        .eq("printing_id", selectedPrinting.id)
+        .in("provider", [...GRADED_SOURCES])
+        .in("grade", [...GRADE_BUCKETS])
+    : { data: [] };
+
+  const gradedAvailability = ((gradedAvailabilityData ?? []) as Array<Record<string, unknown>>)
+    .filter((row): row is GradedAvailabilityRow => {
+      const providerValue = row.provider;
+      const gradeValue = row.grade;
+      return typeof providerValue === "string"
+        && typeof gradeValue === "string"
+        && (GRADED_SOURCES as readonly string[]).includes(providerValue)
+        && (GRADE_BUCKETS as readonly string[]).includes(gradeValue);
+    })
+    .filter((row) => {
+      return row.signals_as_of_ts !== null
+        || row.provider_as_of_ts !== null
+        || (row.history_points_30d ?? 0) >= 5;
+    });
+
+  const availableProviders = GRADED_SOURCES.filter((source) =>
+    gradedAvailability.some((row) => row.provider === source)
   );
+  const activeProvider = selectedProvider(provider)
+    ?? (availableProviders.includes("PSA") ? "PSA" : availableProviders[0] ?? "PSA");
+
+  const availableBucketsForProvider = GRADE_BUCKETS.filter((gradeBucket) =>
+    gradedAvailability.some((row) => row.provider === activeProvider && row.grade === gradeBucket)
+  );
+  const activeBucket = selectedBucket(bucket, grade)
+    ?? (availableBucketsForProvider.includes("G9")
+      ? "G9"
+      : availableBucketsForProvider.includes("G10")
+        ? "G10"
+        : availableBucketsForProvider[0] ?? "G9");
+
+  const selectedSnapshotGrade = snapshotGradeForSelection(viewMode, activeBucket);
+  const queryGradeSelection: GradeSelection = viewMode === "RAW" ? "RAW" : activeBucket;
+  const legacyListingsGrade: "RAW" | "PSA9" | "PSA10" = selectedSnapshotGrade ?? "RAW";
 
   // Fetch all three grade snapshots + view model in parallel.
   // card_metrics rows are keyed by (canonical_slug, printing_id, grade).
@@ -350,7 +434,7 @@ export default async function CanonicalCardPage({
     PSA10: psa10Snap.data,
   } as const;
 
-  const snapshotData = gradeSnapMap[gradeSelection];
+  const snapshotData = selectedSnapshotGrade ? gradeSnapMap[selectedSnapshotGrade] : null;
 
   const snapshot = snapshotData
     ? {
@@ -376,7 +460,8 @@ export default async function CanonicalCardPage({
           edition: selectedPrinting.edition,
         }
       : null,
-    grade: gradeSelection,
+    grade: queryGradeSelection,
+    provider: viewMode === "GRADED" ? activeProvider : null,
   });
   const tcgSnapshot = await getTcgSnapshot(canonical, selectedPrinting);
 
@@ -389,7 +474,7 @@ export default async function CanonicalCardPage({
     .join(" • ");
 
   const primaryPrice = snapshotData?.median_7d != null ? formatUsdCompact(snapshotData.median_7d) : null;
-  const primaryPriceLabel = `${gradeLabel(gradeSelection)} · 7-day median ask`;
+  const primaryPriceLabel = `${selectedSnapshotGrade ? legacyGradeLabel(selectedSnapshotGrade) : `${providerLabel(activeProvider)} ${gradeBucketLabel(activeBucket)}`} · 7-day median ask`;
 
   // Grade Ladder premium calculations.
   const rawMedian7d = gradeSnapMap.RAW?.median_7d ?? null;
@@ -422,82 +507,85 @@ export default async function CanonicalCardPage({
         <GroupedSection title="Variant">
           <GroupCard>
             <div className="space-y-4">
-              {finishOptions.length > 1 && (
-                <div>
-                  <p className="mb-2 text-[13px] font-semibold text-[#98a0ae]">Finish</p>
-                  <SegmentedControl
-                    wrap
-                    items={finishOptions.map((finish) => {
-                      const nextPrinting = resolvePrintingSelection(printings, selectedPrinting, { finish });
-                      return {
-                        key: finish,
-                        label: finishLabel(finish),
-                        href: toggleHref(slug, nextPrinting?.id ?? null, gradeSelection, debugEnabled, returnTo),
-                        active: selectedPrinting?.finish === finish,
-                      };
-                    })}
-                  />
-                </div>
-              )}
-              {editionOptions.length > 1 && (
-                <div>
-                  <p className="mb-2 text-[13px] font-semibold text-[#98a0ae]">Edition</p>
-                  <SegmentedControl
-                    wrap
-                    items={editionOptions.map((edition) => {
-                      const nextPrinting = resolvePrintingSelection(printings, selectedPrinting, { edition });
-                      return {
-                        key: edition,
-                        label: editionLabel(edition),
-                        href: toggleHref(slug, nextPrinting?.id ?? null, gradeSelection, debugEnabled, returnTo),
-                        active: selectedPrinting?.edition === edition,
-                      };
-                    })}
-                  />
-                </div>
-              )}
-              {stampOptions.length > 0 && (
-                <div>
-                  <p className="mb-2 text-[13px] font-semibold text-[#98a0ae]">Stamp</p>
-                  <SegmentedControl
-                    wrap
-                    items={stampOptions.map((stamp) => {
-                      const nextPrinting = resolvePrintingSelection(printings, selectedPrinting, { stamp });
-                      return {
-                        key: stamp,
-                        label: stamp,
-                        href: toggleHref(slug, nextPrinting?.id ?? null, gradeSelection, debugEnabled, returnTo),
-                        active: selectedPrinting?.stamp === stamp,
-                      };
-                    })}
-                  />
-                </div>
-              )}
-              {printings.length > 1 && (
-                <div>
-                  <p className="mb-2 text-[13px] font-semibold text-[#98a0ae]">Printing</p>
-                  <SegmentedControl
-                    wrap
-                    items={printings.map((row) => ({
-                      key: row.id,
-                      label: printingOptionLabel(row),
-                      href: toggleHref(slug, row.id, gradeSelection, debugEnabled, returnTo),
-                      active: selectedPrinting?.id === row.id,
-                    }))}
-                  />
-                </div>
-              )}
               <div>
-                <p className="mb-2 text-[13px] font-semibold text-[#98a0ae]">Grade</p>
+                <p className="mb-2 text-[13px] font-semibold text-[#98a0ae]">Mode</p>
                 <SegmentedControl
-                  items={GRADE_OPTIONS.map((option) => ({
+                  items={VIEW_MODES.map((option) => ({
                     key: option,
-                    label: gradeLabel(option),
-                    href: toggleHref(slug, selectedPrinting?.id ?? null, option, debugEnabled, returnTo),
-                    active: option === gradeSelection,
+                    label: option,
+                    href: toggleHref(
+                      slug,
+                      selectedPrinting?.id ?? null,
+                      debugEnabled,
+                      returnTo,
+                      {
+                        mode: option,
+                        provider: option === "GRADED" ? activeProvider : null,
+                        bucket: option === "GRADED" ? activeBucket : null,
+                      },
+                    ),
+                    active: option === viewMode,
                   }))}
                 />
               </div>
+              {viewMode === "RAW" && variantPills.length > 0 ? (
+                <div>
+                  <p className="mb-2 text-[13px] font-semibold text-[#98a0ae]">Variant</p>
+                  <SegmentedControl
+                    wrap
+                    items={variantPills.map(({ printing: variantPrinting, pill }) => ({
+                      key: pill.pillKey,
+                      label: pill.pillLabel,
+                      href: toggleHref(slug, variantPrinting.id, debugEnabled, returnTo, { mode: "RAW" }),
+                      active: selectedPrinting?.id === variantPrinting.id,
+                    }))}
+                  />
+                </div>
+              ) : null}
+              {viewMode === "GRADED" ? (
+                <>
+                  <div>
+                    <p className="mb-2 text-[13px] font-semibold text-[#98a0ae]">Source</p>
+                    <SegmentedControl
+                      wrap
+                      items={GRADED_SOURCES.map((source) => {
+                        const providerHasRows = availableProviders.includes(source);
+                        const fallbackBucketForSource = GRADE_BUCKETS.find((gradeBucket) =>
+                          gradedAvailability.some((row) => row.provider === source && row.grade === gradeBucket)
+                        ) ?? activeBucket;
+
+                        return {
+                          key: source,
+                          label: providerLabel(source),
+                          href: toggleHref(slug, selectedPrinting?.id ?? null, debugEnabled, returnTo, {
+                            mode: "GRADED",
+                            provider: source,
+                            bucket: source === activeProvider ? activeBucket : fallbackBucketForSource,
+                          }),
+                          active: source === activeProvider,
+                          disabled: !providerHasRows,
+                        };
+                      })}
+                    />
+                  </div>
+                  <div>
+                    <p className="mb-2 text-[13px] font-semibold text-[#98a0ae]">Grade</p>
+                    <SegmentedControl
+                      items={GRADE_BUCKETS.map((gradeBucket) => ({
+                        key: gradeBucket,
+                        label: gradeBucketLabel(gradeBucket),
+                        href: toggleHref(slug, selectedPrinting?.id ?? null, debugEnabled, returnTo, {
+                          mode: "GRADED",
+                          provider: activeProvider,
+                          bucket: gradeBucket,
+                        }),
+                        active: gradeBucket === activeBucket,
+                        disabled: !availableBucketsForProvider.includes(gradeBucket),
+                      }))}
+                    />
+                  </div>
+                </>
+              ) : null}
             </div>
           </GroupCard>
         </GroupedSection>
@@ -508,7 +596,7 @@ export default async function CanonicalCardPage({
         <MarketSnapshotTiles
           slug={slug}
           printingId={selectedPrinting?.id ?? null}
-          grade={gradeSelection}
+          grade={selectedSnapshotGrade ?? activeBucket}
           initialData={snapshot}
         />
 
@@ -576,7 +664,7 @@ export default async function CanonicalCardPage({
               <StatTile
                 label="Raw"
                 value={formatUsdCompact(gradeSnapMap.RAW?.median_7d)}
-                detail={gradeSelection === "RAW" ? "Current view" : undefined}
+                detail={viewMode === "RAW" ? "Current view" : undefined}
               />
               <StatTile
                 label="PSA 9"
@@ -701,7 +789,7 @@ export default async function CanonicalCardPage({
           query={ebayQuery}
           canonicalSlug={slug}
           printingId={selectedPrinting?.id ?? null}
-          grade={gradeSelection}
+          grade={legacyListingsGrade}
         />
       </div>
     </PageShell>
