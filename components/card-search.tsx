@@ -10,7 +10,7 @@ type CardSearchProps = {
   placeholder?: string;
   autoFocus?: boolean;
   enableGlobalShortcut?: boolean;
-  size?: "nav" | "hero";
+  size?: "nav" | "hero" | "search";
   showSubmitButton?: boolean;
   submitMode?: "active-only" | "active-or-search";
   className?: string;
@@ -173,19 +173,26 @@ export default function CardSearch({
     }
   }
 
-  const sizeClasses = size === "hero"
+  const sizeClasses = size === "search"
     ? {
         form: "gap-2",
-        input: "h-14 rounded-full px-6 text-base",
-        button: "h-14 rounded-full px-6 text-sm font-semibold",
+        input: "h-16 rounded-full px-7 text-[17px]",
+        button: "h-16 rounded-full px-7 text-base font-semibold",
         dropdown: "top-[calc(100%+0.75rem)] rounded-3xl",
       }
-    : {
-        form: "gap-2",
-        input: "h-9 rounded-full px-4 text-sm",
-        button: "h-9 rounded-full px-4 text-sm font-semibold",
-        dropdown: "top-[calc(100%+0.5rem)] rounded-2xl",
-      };
+    : size === "hero"
+      ? {
+          form: "gap-2",
+          input: "h-14 rounded-full px-6 text-base",
+          button: "h-14 rounded-full px-6 text-sm font-semibold",
+          dropdown: "top-[calc(100%+0.75rem)] rounded-3xl",
+        }
+      : {
+          form: "gap-2",
+          input: "h-9 rounded-full px-4 text-sm",
+          button: "h-9 rounded-full px-4 text-sm font-semibold",
+          dropdown: "top-[calc(100%+0.5rem)] rounded-2xl",
+        };
 
   return (
     <div ref={rootRef} className={joinClasses("relative min-w-0", className)}>

@@ -19,17 +19,11 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
 
+  const hideHeaderSearch = pathname === "/search";
+
   return (
     <>
-      <header
-        className="fixed inset-x-0 top-0 z-50"
-        style={{
-          borderBottom: "1px solid var(--color-border)",
-          background: "color-mix(in srgb, var(--color-surface) 92%, transparent)",
-          backdropFilter: "blur(14px)",
-          WebkitBackdropFilter: "blur(14px)",
-        }}
-      >
+      <header className="fixed inset-x-0 top-0 z-50">
         <div className="mx-auto flex h-14 max-w-5xl items-center gap-3 px-4 sm:px-6">
           {/* Logo */}
           <Link href="/" className="text-app shrink-0 text-sm font-semibold tracking-tight">
@@ -37,18 +31,22 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
           </Link>
 
           {/* Search — wrapped in Suspense because useSearchParams() requires it */}
-          <Suspense
-            fallback={
-              <div className="flex min-w-0 flex-1 items-center gap-2">
-                <div
-                  className="input-themed h-9 flex-1 rounded-full opacity-40"
-                  aria-hidden="true"
-                />
-              </div>
-            }
-          >
-            <NavSearchForm />
-          </Suspense>
+          {!hideHeaderSearch ? (
+            <Suspense
+              fallback={
+                <div className="flex min-w-0 flex-1 items-center gap-2">
+                  <div
+                    className="input-themed h-9 flex-1 rounded-full opacity-40"
+                    aria-hidden="true"
+                  />
+                </div>
+              }
+            >
+              <NavSearchForm />
+            </Suspense>
+          ) : (
+            <div className="flex-1" />
+          )}
 
           {/* Right-side nav */}
           <nav className="ml-auto flex shrink-0 items-center gap-2">

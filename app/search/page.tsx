@@ -473,16 +473,16 @@ export default async function SearchPage({
   if (!q) {
     return (
       <main className="app-shell">
-        <div className="mx-auto flex min-h-screen w-full max-w-4xl items-center justify-center px-4 py-12 sm:px-6">
-          <section className="w-full max-w-2xl text-center">
+        <div className="mx-auto w-full max-w-5xl px-4 py-12 sm:px-6">
+          <section className="mx-auto w-full max-w-3xl pt-10 text-center sm:pt-14">
             <h1 className="text-app text-6xl font-semibold tracking-tight sm:text-7xl">PopAlpha</h1>
-            <p className="text-muted mx-auto mt-4 max-w-xl text-sm sm:text-base">
+            <p className="text-muted mx-auto mt-4 max-w-2xl text-sm sm:text-base">
               Smarter TCG Market Insights.
             </p>
 
             <CardSearch
-              className="mt-6"
-              size="hero"
+              className="mx-auto mt-7 w-full max-w-3xl"
+              size="search"
               placeholder="Search"
               autoFocus
               enableGlobalShortcut
@@ -623,15 +623,15 @@ export default async function SearchPage({
   return (
     <main className="app-shell">
       <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
-        <section className="mx-auto w-full max-w-2xl text-center">
+        <section className="mx-auto w-full max-w-3xl pt-2 text-center sm:pt-4">
           <h1 className="text-app text-6xl font-semibold tracking-tight sm:text-7xl">PopAlpha</h1>
-          <p className="text-muted mx-auto mt-4 max-w-xl text-sm sm:text-base">
+          <p className="text-muted mx-auto mt-4 max-w-2xl text-sm sm:text-base">
             Smarter TCG Market Insights.
           </p>
 
           <CardSearch
-            className="mt-6"
-            size="hero"
+            className="mx-auto mt-7 w-full max-w-3xl"
+            size="search"
             placeholder="Search"
             enableGlobalShortcut
             submitMode="active-or-search"

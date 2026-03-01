@@ -15,6 +15,7 @@ export function buildEbayQuery(input: {
   provider?: GradedSource | null;
 }): string {
   const parts: string[] = [];
+  const exclusions = ["-lot", "-proxy", "-digital", "-custom", "-metal", "-case", "-download", "-coin", "-pack"];
   if (input.canonicalName) parts.push(input.canonicalName);
   if (input.setName) parts.push(input.setName);
   if (input.cardNumber) parts.push(input.cardNumber);
@@ -24,6 +25,18 @@ export function buildEbayQuery(input: {
   if (input.printing?.edition === "FIRST_EDITION") parts.push("1st edition");
 
   const gradedProvider = input.provider ?? "PSA";
+  const isGraded = input.grade !== "RAW";
+
+  if (!isGraded) {
+    exclusions.push("-psa", "-cgc", "-bgs", "-beckett", "-tag", "-graded", "-slab", "-sgc");
+  } else {
+    parts.push("graded");
+    if (gradedProvider === "BGS") {
+      parts.push("BGS");
+      parts.push("Beckett");
+    }
+  }
+
   if (input.grade === "PSA9") parts.push("PSA 9");
   if (input.grade === "PSA10") parts.push("PSA 10");
   if (input.grade === "LE_7") parts.push(gradedProvider);
@@ -31,7 +44,7 @@ export function buildEbayQuery(input: {
   if (input.grade === "G9") parts.push(`${gradedProvider} 9`);
   if (input.grade === "G10") parts.push(`${gradedProvider} 10`);
 
-  parts.push("-lot", "-proxy", "-digital", "-custom", "-metal", "-case", "-download", "-coin", "-pack");
+  parts.push(...exclusions);
 
   return parts.join(" ").replace(/\s+/g, " ").trim();
 }
