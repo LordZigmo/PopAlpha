@@ -7,8 +7,7 @@ type CardStyle = "terminal" | "glass";
 const STORAGE_KEY = "popalpha-card-style";
 
 function applyStyle(style: CardStyle) {
-  const el = document.getElementById("content");
-  if (el) el.setAttribute("data-style", style);
+  document.documentElement.setAttribute("data-style", style);
 }
 
 export default function StyleToggle() {
@@ -51,7 +50,7 @@ export default function StyleToggle() {
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        className="btn-ghost inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-semibold uppercase tracking-[0.08em] text-[#999]"
+        className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#1E1E1E]/50 bg-[#0A0A0A]/90 px-2.5 text-[12px] font-semibold uppercase tracking-[0.08em] text-[#555] backdrop-blur-sm transition hover:text-[#999]"
         aria-label="Card style"
       >
         {style === "terminal" ? "Terminal" : "Glass"}

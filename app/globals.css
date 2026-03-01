@@ -110,7 +110,7 @@ body {
   box-shadow: none;
 }
 
-.content-sheet[data-style="glass"] .glass-target {
+[data-style="glass"] .glass-target {
   background: rgba(255, 255, 255, 0.04);
   border-color: rgba(255, 255, 255, 0.12);
   backdrop-filter: blur(16px);
@@ -317,7 +317,7 @@ body {
   .pulse-positive, .results-enter { animation: none; }
   .gauge-arc, .collapsible-content, .collapsible-chevron, .gauge-card { transition: none; }
   [class*="terminalBlink"] { animation: none; }
-  .content-sheet[data-style="glass"] .glass-target { backdrop-filter: none; -webkit-backdrop-filter: none; }
+  [data-style="glass"] .glass-target { backdrop-filter: none; -webkit-backdrop-filter: none; }
 }
 
 /* Compatibility layer for existing Tailwind color classes during token migration */
