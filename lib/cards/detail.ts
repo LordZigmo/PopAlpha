@@ -45,6 +45,7 @@ type GradedMetricRow = {
   printing_id: string | null;
   provider: string;
   grade: string;
+  provider_as_of_ts: string | null;
   signal_trend: number | null;
   signal_breakout: number | null;
   signal_value: number | null;
@@ -234,7 +235,7 @@ export async function buildCardDetailResponse(inputSlug: string): Promise<CardDe
       .eq("grade", "RAW"),
     supabase
       .from("variant_metrics")
-      .select("printing_id, provider, grade, signal_trend, signal_breakout, signal_value, signals_as_of_ts, history_points_30d")
+      .select("printing_id, provider, grade, provider_as_of_ts, signal_trend, signal_breakout, signal_value, signals_as_of_ts, history_points_30d")
       .eq("canonical_slug", canonicalSlug)
       .not("printing_id", "is", null)
       .in("provider", [...GRADED_PROVIDERS])
@@ -287,6 +288,7 @@ export async function buildCardDetailResponse(inputSlug: string): Promise<CardDe
     gradeBucket: row.grade as GradeBucket,
     available:
       row.signals_as_of_ts !== null ||
+      (row.provider === "PSA" && row.provider_as_of_ts !== null) ||
       (row.history_points_30d ?? 0) >= GRADED_AVAILABILITY_THRESHOLD,
     metrics: buildGradedMetrics(row),
   }));
