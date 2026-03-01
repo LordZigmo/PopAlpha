@@ -14,9 +14,12 @@ import type { MetricsSnapshot, PriceHistoryPoint } from "./types";
 
 const BASE_URL = "https://api.justtcg.com/v1";
 
-function toIsoFromEpoch(raw: number | null | undefined): string | null {
+export function normalizeJustTcgEpochToIso(raw: number | null | undefined): string | null {
   if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) return null;
   const millis = raw >= 1_000_000_000_000 ? raw : raw * 1000;
+  const minMs = Date.UTC(2010, 0, 1, 0, 0, 0, 0);
+  const maxMs = Date.now() + 24 * 60 * 60 * 1000;
+  if (millis < minMs || millis > maxMs) return null;
   return new Date(millis).toISOString();
 }
 
@@ -145,11 +148,27 @@ type CardsEnvelope = {
  * priceHistoryDuration=30d causes the API to populate variant.priceHistory
  * with 30-day data. priceHistory30d is the deprecated fallback.
  */
-export async function fetchJustTcgCards(
+export async function fetchJustTcgCardsPage(
   setId: string,
   page = 1,
+  options?: { limit?: number; priceHistoryDuration?: string; offset?: number; includeNullPrices?: boolean; number?: string },
 ): Promise<{ cards: JustTcgCard[]; hasMore: boolean; rawEnvelope: unknown; httpStatus: number }> {
-  const path = `/cards?set=${encodeURIComponent(setId)}&page=${page}&limit=200&priceHistoryDuration=30d`;
+  const limit = Math.max(1, Math.min(options?.limit ?? 200, 200));
+  const priceHistoryDuration = options?.priceHistoryDuration?.trim() || "30d";
+  const offset = typeof options?.offset === "number"
+    ? Math.max(0, Math.floor(options.offset))
+    : Math.max(0, (Math.max(1, Math.floor(page)) - 1) * limit);
+  const includeNullPrices = options?.includeNullPrices === true;
+  const number = options?.number?.trim() || "";
+  const queryParts = [
+    `set=${encodeURIComponent(setId)}`,
+    `offset=${offset}`,
+    `limit=${limit}`,
+    `priceHistoryDuration=${encodeURIComponent(priceHistoryDuration)}`,
+  ];
+  if (includeNullPrices) queryParts.push("include_null_prices=true");
+  if (number) queryParts.push(`number=${encodeURIComponent(number)}`);
+  const path = `/cards?${queryParts.join("&")}`;
   const { status, body } = await jtFetchRaw(path);
   if (status < 200 || status >= 300) {
     return { cards: [], hasMore: false, rawEnvelope: body, httpStatus: status };
@@ -158,6 +177,13 @@ export async function fetchJustTcgCards(
   const cards = envelope.data ?? [];
   const hasMore = envelope.meta?.hasMore ?? false;
   return { cards, hasMore, rawEnvelope: body, httpStatus: status };
+}
+
+export async function fetchJustTcgCards(
+  setId: string,
+  page = 1,
+): Promise<{ cards: JustTcgCard[]; hasMore: boolean; rawEnvelope: unknown; httpStatus: number }> {
+  return fetchJustTcgCardsPage(setId, page, { limit: 200, priceHistoryDuration: "30d" });
 }
 
 // ── Set ID derivation ─────────────────────────────────────────────────────────
@@ -173,6 +199,7 @@ export async function fetchJustTcgCards(
 export function setNameToJustTcgId(setName: string): string {
   return (
     setName
+      .replace(/&/g, " and ")
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "") + "-pokemon"
@@ -183,8 +210,9 @@ export function setNameToJustTcgId(setName: string): string {
 
 /** Map JustTCG printing name → our finish enum. */
 export function mapJustTcgPrinting(printing: string): string {
-  const p = printing.toLowerCase();
+  const p = printing.toLowerCase().trim();
   if (p.includes("reverse")) return "REVERSE_HOLO";
+  if (p.includes("cosmos")) return "HOLO";
   if (p.includes("holo")) return "HOLO";
   return "NON_HOLO";
 }
@@ -195,7 +223,31 @@ export function normalizeCardNumber(raw: string | undefined): string {
   const trimmed = raw.trim().replace(/^#/, "");
   const slashMatch = trimmed.match(/^(\d+)\//);
   if (slashMatch) return String(parseInt(slashMatch[1], 10));
+  if (/^\d+$/.test(trimmed)) return String(parseInt(trimmed, 10));
   return trimmed;
+}
+
+/**
+ * Normalize a card number into a deterministic comparison key.
+ *
+ * Examples:
+ *   "004/193"  -> "4"
+ *   "BW004"    -> "BW4"
+ *   "BW04"     -> "BW4"
+ *   "SWSH001"  -> "SWSH1"
+ *   "DP01"     -> "DP1"
+ *   "XY01"     -> "XY1"
+ */
+export function normalizeMatchingCardNumber(raw: string | undefined): string {
+  const normalized = normalizeCardNumber(raw);
+  const promoMatch = normalized.match(/^([A-Za-z]+)(\d+)$/);
+  if (promoMatch) {
+    return `${promoMatch[1].toUpperCase()}${String(parseInt(promoMatch[2], 10))}`;
+  }
+  if (/^[A-Za-z]+$/.test(normalized)) {
+    return normalized.toUpperCase();
+  }
+  return normalized;
 }
 
 // ── Internal DTO mapping ──────────────────────────────────────────────────────
@@ -466,7 +518,7 @@ export function mapVariantToHistoryPoints(
   return history
     .filter((pt) => pt.p > 0)
     .map((pt) => {
-      const ts = toIsoFromEpoch(pt.t);
+      const ts = normalizeJustTcgEpochToIso(pt.t);
       if (!ts) return null;
       return {
         canonical_slug,

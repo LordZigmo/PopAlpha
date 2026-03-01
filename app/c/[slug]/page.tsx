@@ -158,6 +158,52 @@ function printingOptionLabel(printing: CardPrintingRow): string | null {
     .join(" • ") || null;
 }
 
+function rawVariantSegmentLabel(
+  printing: CardPrintingRow,
+  allPrintings: CardPrintingRow[],
+): string {
+  const distinctFinishes = new Set(
+    allPrintings
+      .map((row) => row.finish)
+      .filter((value) => value && value !== "UNKNOWN")
+  );
+  const distinctEditions = new Set(
+    allPrintings
+      .map((row) => row.edition)
+      .filter((value) => value && value !== "UNKNOWN")
+  );
+
+  if (printing.stamp) return buildPrintingPill({
+    id: printing.id,
+    canonical_slug: "",
+    finish: printing.finish,
+    finish_detail: printing.finish_detail,
+    edition: printing.edition,
+    stamp: printing.stamp,
+    image_url: printing.image_url,
+  }).pillLabel;
+
+  const finishText = printing.finish !== "UNKNOWN" ? finishLabel(printing.finish) : null;
+  if (distinctFinishes.size > 1 && finishText) {
+    if (printing.edition === "FIRST_EDITION") return `1st ${finishText}`;
+    return finishText;
+  }
+
+  if (printing.edition === "FIRST_EDITION") {
+    return finishText ? `1st ${finishText}` : "1st Edition";
+  }
+
+  if (distinctEditions.size > 1 && printing.edition !== "UNKNOWN") {
+    return printing.edition === "UNLIMITED" && finishText
+      ? `${finishText}`
+      : printing.edition === "UNLIMITED"
+        ? "Unlimited"
+        : "1st Edition";
+  }
+
+  return finishText ?? "Variant";
+}
+
 function resolveBackHref(returnTo: string | undefined): string {
   const trimmed = (returnTo ?? "").trim();
   if (!trimmed) return DEFAULT_BACK_HREF;
@@ -451,15 +497,15 @@ export default async function CanonicalCardPage({
               {viewMode === "RAW" && variantPills.length > 0 ? (
                 <div>
                   <p className="mb-2 text-[13px] font-semibold text-[#98a0ae]">Variant</p>
-                  <SegmentedControl
-                    wrap={variantPills.length > 1}
-                    items={variantPills.map(({ printing: variantPrinting, pill }) => ({
-                      key: pill.pillKey,
-                      label: pill.pillLabel,
-                      href: toggleHref(slug, variantPrinting.id, debugEnabled, returnTo, { mode: "RAW" }),
-                      active: selectedPrinting?.id === variantPrinting.id,
-                    }))}
-                  />
+                    <SegmentedControl
+                      wrap={variantPills.length > 1}
+                      items={variantPills.map(({ printing: variantPrinting, pill }) => ({
+                        key: pill.pillKey,
+                        label: rawVariantSegmentLabel(variantPrinting, printings),
+                        href: toggleHref(slug, variantPrinting.id, debugEnabled, returnTo, { mode: "RAW" }),
+                        active: selectedPrinting?.id === variantPrinting.id,
+                      }))}
+                    />
                 </div>
               ) : null}
               {viewMode === "GRADED" ? (
@@ -509,6 +555,27 @@ export default async function CanonicalCardPage({
           </GroupCard>
         </GroupedSection>
 
+        <MarketSummaryCard
+          canonicalSlug={slug}
+          printingId={selectedPrinting?.id ?? null}
+          variantRef={rawVariantRef}
+        />
+
+        <GroupedSection>
+          <GroupCard
+            header={
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-[15px] font-semibold text-[#f5f7fb]">Community Sentiment</p>
+                <Pill label="Coming soon" tone="neutral" size="small" />
+              </div>
+            }
+          >
+            <div className="rounded-2xl border border-white/[0.06] bg-[#11151d] px-4 py-5 text-[14px] text-[#98a0ae]">
+              Community sentiment data will appear here.
+            </div>
+          </GroupCard>
+        </GroupedSection>
+
         {/* ── Market Intelligence ───────────────────────────────────────────────
             Primary signal tiles: 7D median, 7D change, trimmed 30D median,
             plus depth rows for velocity and spread. */}
@@ -522,12 +589,6 @@ export default async function CanonicalCardPage({
             historyPoints30d: vm?.signals_history_points_30d ?? null,
             signalsAsOfTs: vm?.signals_as_of_ts ?? null,
           }}
-        />
-
-        <MarketSummaryCard
-          canonicalSlug={slug}
-          printingId={selectedPrinting?.id ?? null}
-          variantRef={rawVariantRef}
         />
 
         {/* ── Live Market Listings ──────────────────────────────────────────────

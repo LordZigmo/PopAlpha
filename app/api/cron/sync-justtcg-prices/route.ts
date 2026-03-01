@@ -59,6 +59,7 @@ import {
   mapVariantToMetrics,
   mapVariantToHistoryPoints,
   buildLegacyVariantRef,
+  normalizeJustTcgEpochToIso,
   type JustTcgCard,
 } from "@/lib/providers/justtcg";
 import type { PriceHistoryPoint } from "@/lib/providers/types";
@@ -154,9 +155,7 @@ function requestHash(provider: string, endpoint: string, params: Record<string, 
 }
 
 function toProviderObservedAt(raw: number | null | undefined, fallbackIso: string): string {
-  if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) return fallbackIso;
-  const millis = raw >= 1_000_000_000_000 ? raw : raw * 1000;
-  return new Date(millis).toISOString();
+  return normalizeJustTcgEpochToIso(raw) ?? fallbackIso;
 }
 
 function buildTrimmedVariantAuditPayload(variant: {
@@ -455,7 +454,7 @@ function queuePrintingBackedVariantWrite(params: {
   }
 
   cardExternalMappingsUpserts.push({
-    card_id: printing.id,
+    card_id: card.id,
     source: PROVIDER,
     mapping_type: "printing",
     external_id: variant.id,
@@ -905,7 +904,7 @@ async function runNightlySync(params: {
     for (let i = 0; i < cardExternalMappingsUpserts.length; i += 250) {
       const { error } = await supabase
       .from("card_external_mappings")
-      .upsert(cardExternalMappingsUpserts.slice(i, i + 250), { onConflict: "card_id,source,mapping_type" });
+      .upsert(cardExternalMappingsUpserts.slice(i, i + 250), { onConflict: "source,mapping_type,printing_id" });
       if (error) {
         firstError ??= `card_external_mappings: ${error.message}`;
         itemsFailed += Math.min(250, cardExternalMappingsUpserts.length - i);
@@ -1650,7 +1649,7 @@ export async function GET(req: Request) {
     for (let i = 0; i < cardExternalMappingsUpserts.length; i += 250) {
       const { error } = await supabase
       .from("card_external_mappings")
-      .upsert(cardExternalMappingsUpserts.slice(i, i + 250), { onConflict: "card_id,source,mapping_type" });
+      .upsert(cardExternalMappingsUpserts.slice(i, i + 250), { onConflict: "source,mapping_type,printing_id" });
       if (error) {
         firstError ??= `card_external_mappings: ${error.message}`;
         break;
@@ -1698,15 +1697,32 @@ export async function GET(req: Request) {
   // price_history_points (ON CONFLICT DO NOTHING — idempotent)
   let historyPointsWritten = 0;
   if (allHistoryPoints.length > 0) {
-    const result = await batchInsertIgnore(
-      supabase,
-      "price_history_points",
-      allHistoryPoints as unknown as Record<string, unknown>[],
-      "canonical_slug,variant_ref,provider,ts",
-      "ts",
-    );
-    historyPointsWritten += result.inserted;
-    firstError ??= result.firstError;
+    const canonicalHistoryPoints = allHistoryPoints.filter((row) => String(row.variant_ref ?? "").includes("::"));
+    const legacyHistoryPoints = allHistoryPoints.filter((row) => !String(row.variant_ref ?? "").includes("::"));
+
+    if (canonicalHistoryPoints.length > 0) {
+      const result = await batchInsertIgnore(
+        supabase,
+        "price_history_points",
+        canonicalHistoryPoints as unknown as Record<string, unknown>[],
+        "provider,variant_ref,ts,source_window",
+        "ts",
+      );
+      historyPointsWritten += result.inserted;
+      firstError ??= result.firstError;
+    }
+
+    if (legacyHistoryPoints.length > 0) {
+      const result = await batchInsertIgnore(
+        supabase,
+        "price_history_points",
+        legacyHistoryPoints as unknown as Record<string, unknown>[],
+        "canonical_slug,variant_ref,provider,ts",
+        "ts",
+      );
+      historyPointsWritten += result.inserted;
+      firstError ??= result.firstError;
+    }
   }
 
   const historyCountByVariantRef = new Map<string, number>();

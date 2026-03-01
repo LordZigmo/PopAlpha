@@ -339,7 +339,7 @@ export async function POST(req: Request) {
 
       const bestVariant = best.matchingVariants[0];
       const mappingRow = {
-        ["card" + "_id"]: tracked.printing_id,
+        ["card" + "_id"]: best.card.id,
         source: PROVIDER,
         mapping_type: "printing",
         external_id: bestVariant.variant.id,
@@ -358,7 +358,7 @@ export async function POST(req: Request) {
 
       const { error: upsertError } = await supabase
         .from("card_external_mappings")
-        .upsert(mappingRow, { onConflict: "card_id,source,mapping_type" });
+        .upsert(mappingRow, { onConflict: "source,mapping_type,printing_id" });
 
       if (upsertError) {
         hardFailCount += 1;
