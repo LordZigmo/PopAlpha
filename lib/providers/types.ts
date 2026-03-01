@@ -24,12 +24,14 @@ export type NormalizedPricePoint = {
  * A single historical price point from a provider's time-series data.
  * Written to price_history_points with ON CONFLICT DO NOTHING.
  *
- * variant_ref: stable string identifying finish+condition+grade,
- * e.g. "HOLO:Near Mint:RAW". Does NOT depend on printing_id FK.
+ * variant_ref: stable cohort key. Printing-backed rows use the canonical
+ * identity format "<printing_id>::RAW" or "<printing_id>::<PROVIDER>::<GRADE_BUCKET>".
+ * Legacy sealed rows may still use a provider-shaped fallback until sealed
+ * has a printing_id axis.
  */
 export type PriceHistoryPoint = {
   canonical_slug: string;
-  variant_ref: string;   // e.g. "HOLO:Near Mint:RAW"
+  variant_ref: string;   // e.g. "<printing_id>::RAW"
   provider: string;
   ts: string;            // ISO 8601
   price: number;

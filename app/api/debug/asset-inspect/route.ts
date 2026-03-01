@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { authorizeCronRequest } from "@/lib/cronAuth";
 import { getServerSupabaseClient } from "@/lib/supabaseServer";
 import { getDefaultVariantRef } from "@/lib/data/assets";
+import { parseVariantRef as parseCanonicalVariantRef } from "@/lib/identity/variant-ref";
 
 export async function GET(req: Request) {
   const auth = authorizeCronRequest(req, { allowDeprecatedQuerySecret: true });
@@ -86,6 +87,16 @@ export async function GET(req: Request) {
     ?? (
       selectedVariantRef
         ? (variantMetricRows ?? []).find((row) => {
+            const selectedCanonical = parseCanonicalVariantRef(selectedVariantRef);
+            const candidateCanonical = parseCanonicalVariantRef(String(row.variant_ref ?? ""));
+            if (selectedCanonical && candidateCanonical) {
+              return (
+                selectedCanonical.printingId === candidateCanonical.printingId
+                && selectedCanonical.mode === candidateCanonical.mode
+                && selectedCanonical.provider === candidateCanonical.provider
+                && selectedCanonical.gradeBucket === candidateCanonical.gradeBucket
+              );
+            }
             const selectedParts = selectedVariantRef.split(":");
             const candidateParts = String(row.variant_ref ?? "").split(":");
             if (selectedParts.length === 4 && candidateParts.length === 6) {

@@ -1,25 +1,25 @@
 import { GroupCard, GroupedSection, Pill, StatRow } from "@/components/ios-grouped-ui";
+import { getServerSupabaseClient } from "@/lib/supabaseServer";
 
-type ChartPoint = {
+type MarketSummaryCardProps = {
+  canonicalSlug: string;
+  printingId: string | null;
+  variantRef: string | null;
+};
+
+type MarketLatestRow = {
+  price_usd: number | null;
+  observed_at: string | null;
+  updated_at: string | null;
+};
+
+type HistoryPointRow = {
   ts: string;
   price: number;
 };
 
-type MarketSummaryCardProps = {
-  currentMarketPrice: number | null;
-  change7dPct: number | null;
-  change30dPct: number | null;
-  change90dPct: number | null;
-  volume30d: number | null;
-  activeListings: number | null;
-  chartSeries: ChartPoint[];
-  high52w: number | null;
-  low52w: number | null;
-  volatility: number | null;
-};
-
 function formatUsd(value: number | null | undefined): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) return "N/A";
+  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
   return new Intl.NumberFormat(undefined, {
     style: "currency",
     currency: "USD",
@@ -27,23 +27,61 @@ function formatUsd(value: number | null | undefined): string {
   }).format(value);
 }
 
-function formatPercent(value: number | null | undefined): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) return "N/A";
+function formatPercent(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return "—";
   const rounded = Math.abs(value) >= 10 ? value.toFixed(0) : value.toFixed(1);
   return `${value > 0 ? "+" : ""}${rounded}%`;
 }
 
-function formatInteger(value: number | null | undefined): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) return "N/A";
-  return new Intl.NumberFormat().format(Math.round(value));
+function formatDateLabel(value: string | null): string {
+  if (!value) return "Unknown";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Unknown";
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
 }
 
-function formatVolatility(value: number | null | undefined): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) return "N/A";
-  return `${value.toFixed(2)}`;
+function formatRelativeTime(value: string | null): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const diffMs = Date.now() - date.getTime();
+  const absMs = Math.abs(diffMs);
+  const minutes = Math.round(absMs / (60 * 1000));
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  return `${days}d ago`;
 }
 
-function buildSparklinePath(points: ChartPoint[]): string | null {
+function computeChange30d(points: HistoryPointRow[]): number | null {
+  if (points.length < 2) return null;
+  const first = points[0]?.price;
+  const last = points[points.length - 1]?.price;
+  if (!Number.isFinite(first) || !Number.isFinite(last) || first <= 0) return null;
+  return ((last - first) / first) * 100;
+}
+
+function computeLowHigh(points: HistoryPointRow[]): { low: number | null; high: number | null } {
+  if (points.length === 0) return { low: null, high: null };
+  const prices = points
+    .map((point) => point.price)
+    .filter((value) => Number.isFinite(value));
+  if (prices.length === 0) return { low: null, high: null };
+  return {
+    low: Math.min(...prices),
+    high: Math.max(...prices),
+  };
+}
+
+function buildSparklinePath(points: HistoryPointRow[]): string | null {
   if (points.length < 2) return null;
   const values = points
     .map((point) => point.price)
@@ -51,7 +89,7 @@ function buildSparklinePath(points: ChartPoint[]): string | null {
   if (values.length < 2) return null;
 
   const width = 280;
-  const height = 92;
+  const height = 78;
   const min = Math.min(...values);
   const max = Math.max(...values);
   const range = Math.max(max - min, 1);
@@ -65,82 +103,109 @@ function buildSparklinePath(points: ChartPoint[]): string | null {
     .join(" ");
 }
 
-export default function MarketSummaryCard({
-  currentMarketPrice,
-  change7dPct,
-  change30dPct,
-  change90dPct,
-  volume30d,
-  activeListings,
-  chartSeries,
-  high52w,
-  low52w,
-  volatility,
+export default async function MarketSummaryCard({
+  canonicalSlug,
+  printingId,
+  variantRef,
 }: MarketSummaryCardProps) {
+  const supabase = getServerSupabaseClient();
+
+  const [marketLatestQuery, historyQuery] = printingId && variantRef
+    ? await Promise.all([
+        supabase
+          .from("market_latest")
+          .select("price_usd, observed_at, updated_at")
+          .eq("canonical_slug", canonicalSlug)
+          .eq("printing_id", printingId)
+          .eq("source", "JUSTTCG")
+          .eq("grade", "RAW")
+          .eq("price_type", "MARKET")
+          .order("updated_at", { ascending: false })
+          .limit(1)
+          .maybeSingle<MarketLatestRow>(),
+        supabase
+          .from("price_history_points")
+          .select("ts, price")
+          .eq("canonical_slug", canonicalSlug)
+          .eq("provider", "JUSTTCG")
+          .eq("source_window", "30d")
+          .eq("variant_ref", variantRef)
+          .order("ts", { ascending: false })
+          .limit(200),
+      ])
+    : [
+        { data: null },
+        { data: [] as HistoryPointRow[] },
+      ];
+
+  const marketLatest = marketLatestQuery.data ?? null;
+  const chartSeries = [...(((historyQuery.data ?? []) as HistoryPointRow[]))].reverse();
+  const change30d = computeChange30d(chartSeries);
+  const { low, high } = computeLowHigh(chartSeries);
   const sparklinePath = buildSparklinePath(chartSeries);
+  const asOfTs = marketLatest?.observed_at ?? marketLatest?.updated_at ?? null;
+  const relativeAsOf = formatRelativeTime(asOfTs);
 
   return (
     <GroupedSection>
       <GroupCard
         header={
           <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-[15px] font-semibold text-[#f5f7fb]">Market Summary</p>
-            </div>
-            <Pill label="TCG-linked" tone="neutral" size="small" />
+            <p className="text-[15px] font-semibold text-[#f5f7fb]">Market Summary</p>
+            <Pill label="RAW cache" tone="neutral" size="small" />
           </div>
         }
       >
-        <div className="grid gap-5 lg:grid-cols-2">
-          <div className="divide-y divide-white/[0.06] rounded-2xl border border-white/[0.06] bg-[#11151d] px-4">
-            <StatRow label="Current Market Price" value={formatUsd(currentMarketPrice)} />
-            <StatRow label="7D Change %" value={formatPercent(change7dPct)} />
-            <StatRow label="30D Change %" value={formatPercent(change30dPct)} />
-            <StatRow label="90D Change %" value={formatPercent(change90dPct)} />
-            <StatRow label="Volume (30D)" value={formatInteger(volume30d)} />
-            <StatRow label="Active Listings" value={formatInteger(activeListings)} />
+        {!marketLatest ? (
+          <div className="rounded-2xl border border-white/[0.06] bg-[#11151d] px-4 py-5 text-[14px] text-[#98a0ae]">
+            No market data yet.
           </div>
+        ) : (
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(220px,0.8fr)]">
+            <div className="rounded-2xl border border-white/[0.06] bg-[#11151d] p-4 sm:p-5">
+              <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#8c94a3]">Current Price</p>
+              <div className="mt-2 text-[30px] font-semibold tracking-[-0.03em] text-[#f5f7fb]">
+                {formatUsd(marketLatest.price_usd)}
+              </div>
+              <p className="mt-2 text-[12px] text-[#8c94a3]">
+                As of {formatDateLabel(asOfTs)}
+                {relativeAsOf ? ` (${relativeAsOf})` : ""}
+              </p>
 
-          <div className="space-y-3">
-            <div className="rounded-2xl border border-white/[0.06] bg-[#11151d] p-4">
-              <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#8c94a3]">Mini Price Chart</p>
+              <div className="mt-4 divide-y divide-white/[0.06] rounded-2xl border border-white/[0.06] bg-[#171b23] px-4">
+                <StatRow label="30D Change" value={formatPercent(change30d)} />
+                <StatRow label="30D Low" value={formatUsd(low)} />
+                <StatRow label="30D High" value={formatUsd(high)} />
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-white/[0.06] bg-[#11151d] p-4 sm:p-5">
+              <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#8c94a3]">30D Trend</p>
               {sparklinePath ? (
                 <svg
-                  viewBox="0 0 280 92"
-                  className="mt-3 h-24 w-full"
+                  viewBox="0 0 280 78"
+                  className="mt-4 h-24 w-full"
                   role="img"
-                  aria-label="30 day price trend"
+                  aria-label="30 day price sparkline"
                   preserveAspectRatio="none"
                 >
-                  <defs>
-                    <linearGradient id="market-summary-spark" x1="0%" x2="100%" y1="0%" y2="0%">
-                      <stop offset="0%" stopColor="#8fb6ff" />
-                      <stop offset="100%" stopColor="#d4f6e3" />
-                    </linearGradient>
-                  </defs>
                   <path
                     d={sparklinePath}
                     fill="none"
-                    stroke="url(#market-summary-spark)"
+                    stroke="#8fb6ff"
                     strokeWidth="3"
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   />
                 </svg>
               ) : (
-                <div className="mt-3 flex h-24 items-center justify-center rounded-2xl border border-dashed border-white/[0.08] text-[14px] text-[#98a0ae]">
-                  N/A
+                <div className="mt-4 flex h-24 items-center justify-center rounded-2xl border border-dashed border-white/[0.08] text-[14px] text-[#98a0ae]">
+                  No market data yet.
                 </div>
               )}
             </div>
-
-            <div className="divide-y divide-white/[0.06] rounded-2xl border border-white/[0.06] bg-[#11151d] px-4">
-              <StatRow label="52W High" value={formatUsd(high52w)} />
-              <StatRow label="52W Low" value={formatUsd(low52w)} />
-              <StatRow label="Volatility" value={formatVolatility(volatility)} />
-            </div>
           </div>
-        </div>
+        )}
       </GroupCard>
     </GroupedSection>
   );

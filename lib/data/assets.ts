@@ -16,6 +16,7 @@
  */
 
 import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import { parseVariantRef as parseCanonicalVariantRef } from "@/lib/identity/variant-ref";
 
 // ── Shared types ────────────────────────────────────────────────────────────
 
@@ -116,7 +117,7 @@ type VariantHistoryStat = {
   latestTs: string | null;
 };
 
-type ParsedVariantRef = {
+type ParsedLegacyVariantRef = {
   printing: string;
   edition: string | null;
   stamp: string | null;
@@ -157,7 +158,7 @@ async function getRecentVariantStats(slug: string, days = 30): Promise<VariantHi
   });
 }
 
-function parseVariantRef(variantRef: string): ParsedVariantRef | null {
+function parseLegacyVariantRef(variantRef: string): ParsedLegacyVariantRef | null {
   const parts = variantRef.split(":");
   if (parts.length === 6) {
     const [printing, edition, stamp, condition, language, grade] = parts;
@@ -173,8 +174,19 @@ function parseVariantRef(variantRef: string): ParsedVariantRef | null {
 function variantRefsCompatible(source: string, candidate: string): boolean {
   if (source === candidate) return true;
 
-  const left = parseVariantRef(source);
-  const right = parseVariantRef(candidate);
+  const leftCanonical = parseCanonicalVariantRef(source);
+  const rightCanonical = parseCanonicalVariantRef(candidate);
+  if (leftCanonical && rightCanonical) {
+    return (
+      leftCanonical.printingId === rightCanonical.printingId
+      && leftCanonical.mode === rightCanonical.mode
+      && leftCanonical.provider === rightCanonical.provider
+      && leftCanonical.gradeBucket === rightCanonical.gradeBucket
+    );
+  }
+
+  const left = parseLegacyVariantRef(source);
+  const right = parseLegacyVariantRef(candidate);
   if (!left || !right) return false;
   if (left.printing !== right.printing) return false;
   if (left.condition !== right.condition) return false;

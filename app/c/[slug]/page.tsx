@@ -11,21 +11,14 @@ import { notFound } from "next/navigation";
 import CanonicalCardFloatingHero from "@/components/canonical-card-floating-hero";
 import CardDetailNavBar from "@/components/card-detail-nav-bar";
 import EbayListings from "@/components/ebay-listings";
-import { GroupCard, GroupedSection, PageShell, Pill, SegmentedControl, StatRow } from "@/components/ios-grouped-ui";
+import { GroupCard, GroupedSection, PageShell, Pill, SegmentedControl } from "@/components/ios-grouped-ui";
 import MarketSummaryCard from "@/components/market-summary-card";
 import MarketSnapshotTiles from "@/components/market-snapshot-tiles";
 import { buildEbayQuery, type GradeSelection, type GradedSource } from "@/lib/ebay-query";
 import { buildPrintingPill } from "@/lib/cards/detail";
+import { buildRawVariantRef } from "@/lib/identity/variant-ref";
 import { getServerSupabaseClient } from "@/lib/supabaseServer";
 import { buildAssetViewModel } from "@/lib/data/assets";
-import {
-  getCachedTcgSetPricing,
-  resolveTcgProductMatch,
-  resolveTcgTrackingSetDetailed,
-  type TcgPricingItem,
-  type TcgProductResolution,
-  type TcgTrackingSetResolution,
-} from "@/lib/tcgtracking";
 
 type CanonicalCardRow = {
   slug: string;
@@ -53,21 +46,6 @@ type SnapshotRow = {
   trimmed_median_30d: number | null;
   low_30d: number | null;
   high_30d: number | null;
-};
-
-type TcgSnapshotDebug = {
-  canonical: {
-    name: string;
-    setName: string | null;
-    cardNumber: string | null;
-    year: number | null;
-    setCode: string | null;
-    finish: CardPrintingRow["finish"] | null;
-    edition: CardPrintingRow["edition"] | null;
-  };
-  setResolution: TcgTrackingSetResolution;
-  productResolution: TcgProductResolution | null;
-  error: string | null;
 };
 
 const DEFAULT_BACK_HREF = "/search";
@@ -243,96 +221,6 @@ function formatUsdCompact(value: number | null | undefined): string {
   }).format(value);
 }
 
-function computePeriodChangePct(
-  series: Array<{ ts: string; price: number }>,
-  days: number,
-): number | null {
-  if (series.length < 2) return null;
-  const targetMs = Date.now() - days * 24 * 60 * 60 * 1000;
-  const priceNow = series[series.length - 1]?.price;
-  if (priceNow === null || priceNow === undefined || !Number.isFinite(priceNow)) return null;
-
-  let referencePrice: number | null = null;
-  for (const point of series) {
-    if (new Date(point.ts).getTime() <= targetMs) {
-      referencePrice = point.price;
-    } else {
-      break;
-    }
-  }
-
-  if (referencePrice === null) {
-    referencePrice = series[0]?.price ?? null;
-  }
-
-  if (referencePrice === null || !Number.isFinite(referencePrice) || referencePrice <= 0) return null;
-  return ((priceNow - referencePrice) / referencePrice) * 100;
-}
-
-async function getTcgSnapshot(
-  canonical: CanonicalCardRow,
-  selectedPrinting: CardPrintingRow | null
-): Promise<{ item: TcgPricingItem | null; setName: string | null; updatedAt: string | null; debug: TcgSnapshotDebug }> {
-  const cat = selectedPrinting?.language?.toUpperCase() === "JP" ? 85 : 3;
-  const defaultSetResolution: TcgTrackingSetResolution = {
-    queryUsed: selectedPrinting?.set_code ?? canonical.set_name ?? null,
-    normalizedQuery: null,
-    candidates: [],
-    chosen: null,
-  };
-  const defaultDebug: TcgSnapshotDebug = {
-    canonical: {
-      name: canonical.canonical_name,
-      setName: canonical.set_name,
-      cardNumber: canonical.card_number,
-      year: canonical.year,
-      setCode: selectedPrinting?.set_code ?? null,
-      finish: selectedPrinting?.finish ?? null,
-      edition: selectedPrinting?.edition ?? null,
-    },
-    setResolution: defaultSetResolution,
-    productResolution: null,
-    error: null,
-  };
-
-  try {
-    const setResolution = await resolveTcgTrackingSetDetailed({
-      cat,
-      setCode: selectedPrinting?.set_code ?? null,
-      setName: canonical.set_name,
-    });
-    defaultDebug.setResolution = setResolution;
-
-    if (!setResolution.chosen) {
-      return { item: null, setName: canonical.set_name, updatedAt: null, debug: defaultDebug };
-    }
-
-    const payload = await getCachedTcgSetPricing({
-      cat,
-      setId: setResolution.chosen.id,
-      limit: 250,
-    });
-    const productResolution = resolveTcgProductMatch({
-      items: payload.items,
-      canonicalName: canonical.canonical_name,
-      canonicalCardNumber: canonical.card_number,
-    });
-    defaultDebug.productResolution = productResolution;
-
-    const matched = payload.items.find((item) => item.productId === productResolution.chosen?.productId) ?? null;
-
-    return {
-      item: matched,
-      setName: payload.setName ?? setResolution.chosen.name ?? canonical.set_name,
-      updatedAt: matched?.updatedAt ?? payload.updatedAt ?? null,
-      debug: defaultDebug,
-    };
-  } catch (error) {
-    defaultDebug.error = error instanceof Error ? error.message : String(error);
-    return { item: null, setName: canonical.set_name, updatedAt: null, debug: defaultDebug };
-  }
-}
-
 export default async function CanonicalCardPage({
   params,
   searchParams,
@@ -485,18 +373,7 @@ export default async function CanonicalCardPage({
     grade: queryGradeSelection,
     provider: viewMode === "GRADED" ? activeProvider : null,
   });
-  const tcgSnapshot = await getTcgSnapshot(canonical, selectedPrinting);
-  const marketSummaryCurrentPrice =
-    tcgSnapshot.item?.marketPrice
-    ?? vm?.price_now
-    ?? snapshotData?.median_7d
-    ?? null;
-  const marketSummaryChange30d = vm ? computePeriodChangePct(vm.chartSeries, 30) : null;
-  const marketSummaryChange90d = null;
-  const marketSummaryVolume30d = null;
-  const marketSummaryHigh52w = null;
-  const marketSummaryLow52w = null;
-  const marketSummaryVolatility = null;
+  const rawVariantRef = selectedPrinting ? buildRawVariantRef(selectedPrinting.id) : null;
 
   const subtitleText = [
     canonical.set_name,
@@ -644,104 +521,10 @@ export default async function CanonicalCardPage({
         />
 
         <MarketSummaryCard
-          currentMarketPrice={marketSummaryCurrentPrice}
-          change7dPct={vm?.change_7d_pct ?? null}
-          change30dPct={marketSummaryChange30d}
-          change90dPct={marketSummaryChange90d}
-          volume30d={marketSummaryVolume30d}
-          activeListings={snapshotData?.active_listings_7d ?? null}
-          chartSeries={vm?.chartSeries ?? []}
-          high52w={marketSummaryHigh52w}
-          low52w={marketSummaryLow52w}
-          volatility={marketSummaryVolatility}
+          canonicalSlug={slug}
+          printingId={selectedPrinting?.id ?? null}
+          variantRef={rawVariantRef}
         />
-
-        {/* ── Debug (gate: ?debug=1) ─────────────────────────────────────────── */}
-        {debugEnabled ? (
-          <GroupedSection title="TCG Match Debug" description="Resolution details for set and product matching.">
-            <div className="grid gap-3 lg:grid-cols-3">
-              <GroupCard header={<p className="text-[15px] font-semibold text-[#f5f7fb]">Canonical</p>}>
-                <div className="divide-y divide-white/[0.06]">
-                  <StatRow label="Name" value={tcgSnapshot.debug.canonical.name} />
-                  <StatRow label="Set" value={tcgSnapshot.debug.canonical.setName ?? "Unknown"} />
-                  <StatRow label="Number" value={tcgSnapshot.debug.canonical.cardNumber ?? "Unknown"} />
-                  <StatRow label="Year" value={tcgSnapshot.debug.canonical.year ?? "Unknown"} />
-                  <StatRow
-                    label="Printing"
-                    value={`${tcgSnapshot.debug.canonical.finish ?? "Unknown"} / ${tcgSnapshot.debug.canonical.edition ?? "Unknown"}`}
-                  />
-                </div>
-              </GroupCard>
-
-              <GroupCard header={<p className="text-[15px] font-semibold text-[#f5f7fb]">Set Resolution</p>}>
-                <div className="divide-y divide-white/[0.06]">
-                  <StatRow label="Query used" value={tcgSnapshot.debug.setResolution.queryUsed ?? "None"} />
-                  <StatRow label="Normalized" value={tcgSnapshot.debug.setResolution.normalizedQuery ?? "None"} />
-                  <StatRow
-                    label="Chosen"
-                    value={
-                      tcgSnapshot.debug.setResolution.chosen
-                        ? `${tcgSnapshot.debug.setResolution.chosen.id} • score ${tcgSnapshot.debug.setResolution.chosen.score}`
-                        : "No set match"
-                    }
-                  />
-                </div>
-                <div className="mt-4 space-y-2">
-                  {tcgSnapshot.debug.setResolution.candidates.length === 0 ? (
-                    <Pill label="No candidate sets returned" tone="warning" />
-                  ) : (
-                    tcgSnapshot.debug.setResolution.candidates.map((candidate) => (
-                      <GroupCard key={candidate.id} inset>
-                        <p className="text-[13px] font-semibold text-[#f5f7fb]">{candidate.name ?? "Unnamed"}</p>
-                        <p className="mt-1 text-[12px] text-[#8c94a3]">
-                          {candidate.id} • Code {candidate.code ?? "n/a"} • Year {candidate.year ?? "n/a"} • Score{" "}
-                          {candidate.score}
-                        </p>
-                      </GroupCard>
-                    ))
-                  )}
-                </div>
-              </GroupCard>
-
-              <GroupCard header={<p className="text-[15px] font-semibold text-[#f5f7fb]">Product Resolution</p>}>
-                <div className="divide-y divide-white/[0.06]">
-                  <StatRow label="Products in set" value={tcgSnapshot.debug.productResolution?.productsInSet ?? 0} />
-                  <StatRow
-                    label="Chosen"
-                    value={
-                      tcgSnapshot.debug.productResolution?.chosen
-                        ? `${tcgSnapshot.debug.productResolution.chosen.productId}`
-                        : "No product match"
-                    }
-                  />
-                  <StatRow
-                    label="Reason"
-                    value={tcgSnapshot.debug.productResolution?.chosenReason ?? "No reason recorded"}
-                  />
-                </div>
-                <div className="mt-4 space-y-2">
-                  {tcgSnapshot.debug.productResolution?.warning ? (
-                    <Pill label={tcgSnapshot.debug.productResolution.warning} tone="warning" />
-                  ) : null}
-                  {tcgSnapshot.debug.error ? <Pill label={tcgSnapshot.debug.error} tone="negative" /> : null}
-                  {tcgSnapshot.debug.productResolution?.topCandidates.length ? (
-                    tcgSnapshot.debug.productResolution.topCandidates.map((candidate) => (
-                      <GroupCard key={candidate.productId} inset>
-                        <p className="text-[13px] font-semibold text-[#f5f7fb]">{candidate.name ?? "Unnamed"}</p>
-                        <p className="mt-1 text-[12px] text-[#8c94a3]">
-                          #{candidate.number ?? "n/a"} • {candidate.rarity ?? "No rarity"} • Score {candidate.score}
-                        </p>
-                        <p className="mt-2 text-[12px] text-[#c8ccd7]">Market {formatUsdCompact(candidate.marketPrice)}</p>
-                      </GroupCard>
-                    ))
-                  ) : (
-                    <Pill label="No scored product candidates" tone="warning" />
-                  )}
-                </div>
-              </GroupCard>
-            </div>
-          </GroupedSection>
-        ) : null}
 
         {/* ── Live Market Listings ──────────────────────────────────────────────
             Raw eBay evidence. Also triggers /api/market/observe to record

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCertificate } from "@/lib/psa/client";
+import { buildGradedVariantRef } from "@/lib/identity/variant-ref";
 import { getServerSupabaseClient } from "@/lib/supabaseServer";
 import { getRequiredEnv } from "@/lib/env";
 
@@ -245,7 +246,7 @@ export async function POST(req: Request) {
               {
                 canonical_slug: resolved.canonical_slug,
                 printing_id: resolved.printing_id,
-                variant_ref: resolved.printing_id,
+                variant_ref: buildGradedVariantRef(resolved.printing_id, "PSA", gradeBucket),
                 provider: "PSA",
                 grade: gradeBucket,
                 provider_as_of_ts: new Date().toISOString(),

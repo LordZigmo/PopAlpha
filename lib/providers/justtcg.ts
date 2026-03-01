@@ -14,6 +14,12 @@ import type { MetricsSnapshot, PriceHistoryPoint } from "./types";
 
 const BASE_URL = "https://api.justtcg.com/v1";
 
+function toIsoFromEpoch(raw: number | null | undefined): string | null {
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) return null;
+  const millis = raw >= 1_000_000_000_000 ? raw : raw * 1000;
+  return new Date(millis).toISOString();
+}
+
 function apiKey(): string {
   const key = process.env.JUSTTCG_API_KEY;
   if (!key) throw new Error("JUSTTCG_API_KEY env var not set");
@@ -249,7 +255,7 @@ function normalizeStamp(stamp: string | null): string {
 }
 
 /**
- * Build a stable, lowercase variant_ref string (6 segments).
+ * Build a legacy provider-shaped variant_ref string (6 segments).
  * Format: "{printing}:{edition}:{stamp}:{condition}:{language}:{grade}"
  *
  * Examples:
@@ -266,10 +272,10 @@ function normalizeStamp(stamp: string | null): string {
  *   - language:  mapped via LANGUAGE_ABBREV (English→en, Japanese→jp)
  *   - grade:     lowercase (RAW→raw)
  *
- * This is the primary cohort key used by price_history_points and variant_metrics.
- * It is provider-agnostic and does not depend on printing_id FK existence.
+ * Deprecated for printing-backed singles. Kept only for legacy sealed cohorts
+ * that do not yet have a first-class printing_id identity.
  */
-export function buildVariantRef(
+export function buildLegacyVariantRef(
   printing: string,
   edition: string,
   stamp: string | null,
@@ -436,25 +442,20 @@ export function mapVariantToMetrics(
 
 /**
  * Map a variant's price history to PriceHistoryPoint DTOs.
- * Unix timestamps (seconds) → ISO 8601. variant_ref is a stable text key.
+ * Unix timestamps (seconds) → ISO 8601. Caller provides the canonical
+ * variant_ref so price_history_points and variant_metrics share the exact key.
  *
  * Fetch requests include priceHistoryDuration=30d, which causes the API to
  * populate variant.priceHistory with 30-day data. priceHistory30d is the
  * deprecated field and is used only as a fallback.
  *
- * @param printingKind  Provider printing string (e.g. "Holofoil"), or "sealed" for
- *                      sealed products.
- * @param edition       Card edition from card_printings ("FIRST_EDITION" | "UNLIMITED" | "UNKNOWN"),
- *                      or "unknown" for sealed.
- * @param stamp         Card stamp from card_printings, or null.
+ * @param variantRef    Canonical cohort key. Printing-backed singles should use
+ *                      lib/identity/variant-ref.
  */
 export function mapVariantToHistoryPoints(
   variant: JustTcgVariant,
   canonical_slug: string,
-  printingKind: string,
-  edition: string,
-  stamp: string | null,
-  grade: string,
+  variantRef: string,
 ): PriceHistoryPoint[] {
   const hasHistory    = (variant.priceHistory?.length ?? 0) > 0;
   const has30dHistory = (variant.priceHistory30d?.length ?? 0) > 0;
@@ -462,25 +463,22 @@ export function mapVariantToHistoryPoints(
 
   const history = hasHistory ? variant.priceHistory! : variant.priceHistory30d!;
   const sourceWindow = "30d";
-  const variantRef = buildVariantRef(
-    printingKind,
-    edition,
-    stamp,
-    variant.condition,
-    variant.language ?? "English",
-    grade,
-  );
   return history
     .filter((pt) => pt.p > 0)
-    .map((pt) => ({
-      canonical_slug,
-      variant_ref: variantRef,
-      provider: "JUSTTCG",
-      ts: new Date(pt.t * 1000).toISOString(),
-      price: pt.p,
-      currency: "USD",
-      source_window: sourceWindow,
-    }));
+    .map((pt) => {
+      const ts = toIsoFromEpoch(pt.t);
+      if (!ts) return null;
+      return {
+        canonical_slug,
+        variant_ref: variantRef,
+        provider: "JUSTTCG",
+        ts,
+        price: pt.p,
+        currency: "USD",
+        source_window: sourceWindow,
+      };
+    })
+    .filter((row): row is PriceHistoryPoint => row !== null);
 }
 
 // ── Legacy helpers (kept for backward compat) ─────────────────────────────────
