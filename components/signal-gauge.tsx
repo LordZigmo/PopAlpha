@@ -85,11 +85,11 @@ export default function SignalGauge({ label, score, displayLabel }: SignalGaugeP
           {safeScore !== null ? safeScore.toFixed(0) : "--"}
         </text>
       </svg>
-      <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#6B6B6B]">
+      <p className="mt-1 text-[13px] font-semibold uppercase tracking-[0.08em] text-[#6B6B6B]">
         {label}
       </p>
       {displayLabel && (
-        <p className="mt-0.5 text-[12px] font-semibold" style={{ color }}>
+        <p className="mt-0.5 text-[14px] font-semibold" style={{ color }}>
           {displayLabel}
         </p>
       )}

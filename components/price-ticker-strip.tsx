@@ -25,10 +25,10 @@ export default function PriceTickerStrip({ items }: PriceTickerStripProps) {
           key={item.label}
           className="flex-1 min-w-[100px] border-l border-[#1E1E1E] px-4 py-3 first:border-l-0"
         >
-          <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#6B6B6B]">
+          <p className="text-[12px] font-semibold uppercase tracking-[0.1em] text-[#6B6B6B]">
             {item.label}
           </p>
-          <p className={`mt-1 text-[16px] font-bold tabular-nums tracking-[-0.02em] ${TONE_COLOR[item.tone ?? "neutral"]}`}>
+          <p className={`mt-1 text-[18px] font-bold tabular-nums tracking-[-0.02em] ${TONE_COLOR[item.tone ?? "neutral"]}`}>
             {item.value}
           </p>
         </div>

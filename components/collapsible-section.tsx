@@ -28,10 +28,10 @@ export default function CollapsibleSection({
         className="flex w-full items-center justify-between gap-3 rounded-2xl border border-[#1E1E1E] bg-[#111111] px-5 py-3.5 text-left transition hover:bg-[#151515]"
       >
         <div className="flex items-center gap-2.5 min-w-0">
-          <p className="text-[15px] font-semibold text-[#F0F0F0] truncate">{title}</p>
+          <p className="text-[16px] font-semibold text-[#F0F0F0] truncate">{title}</p>
           {badge}
           {subtitle && (
-            <p className="text-[12px] text-[#6B6B6B] truncate hidden sm:block">{subtitle}</p>
+            <p className="text-[13px] text-[#6B6B6B] truncate hidden sm:block">{subtitle}</p>
           )}
         </div>
         <svg

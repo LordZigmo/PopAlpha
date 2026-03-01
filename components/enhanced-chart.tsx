@@ -92,7 +92,7 @@ export default function EnhancedChart({
 
   if (points.length < 2) {
     return (
-      <div className="flex h-[200px] items-center justify-center rounded-2xl border border-dashed border-white/[0.08] text-[14px] text-[#777] sm:h-[260px]">
+      <div className="flex h-[200px] items-center justify-center rounded-2xl border border-dashed border-white/[0.08] text-[15px] text-[#777] sm:h-[260px]">
         Not enough data to chart.
       </div>
     );
@@ -104,18 +104,18 @@ export default function EnhancedChart({
       {(windowLabel || currentPrice != null) && (
         <div className="mb-2 flex items-baseline justify-between gap-3">
           {windowLabel && (
-            <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#6B6B6B]">
+            <p className="text-[13px] font-semibold uppercase tracking-[0.08em] text-[#6B6B6B]">
               {windowLabel} Trend
             </p>
           )}
           {currentPrice != null && (
             <div className="flex items-baseline gap-2">
-              <span className="text-[15px] font-semibold tabular-nums text-[#F0F0F0]">
+              <span className="text-[16px] font-semibold tabular-nums text-[#F0F0F0]">
                 {formatUsd(currentPrice)}
               </span>
               {changePercent != null && Number.isFinite(changePercent) && (
                 <span
-                  className={`text-[13px] font-semibold tabular-nums ${changePercent > 0 ? "text-[#00DC5A]" : changePercent < 0 ? "text-[#FF3B30]" : "text-[#6B6B6B]"}`}
+                  className={`text-[14px] font-semibold tabular-nums ${changePercent > 0 ? "text-[#00DC5A]" : changePercent < 0 ? "text-[#FF3B30]" : "text-[#6B6B6B]"}`}
                 >
                   {changePercent > 0 ? "+" : ""}
                   {Math.abs(changePercent) >= 10 ? changePercent.toFixed(0) : changePercent.toFixed(1)}%
@@ -183,14 +183,14 @@ export default function EnhancedChart({
 
       {/* Y-axis labels */}
       <div className="pointer-events-none absolute inset-0 flex flex-col justify-between py-[5%]">
-        <span className="text-[10px] font-tabular text-[#555] pl-1">{formatUsd(max)}</span>
-        <span className="text-[10px] font-tabular text-[#555] pl-1">{formatUsd(min)}</span>
+        <span className="text-[11px] font-tabular text-[#555] pl-1">{formatUsd(max)}</span>
+        <span className="text-[11px] font-tabular text-[#555] pl-1">{formatUsd(min)}</span>
       </div>
 
       {/* Hover tooltip */}
       {hover && (
         <div
-          className="pointer-events-none absolute top-0 z-10 rounded-lg border border-[#1E1E1E] bg-[#151515] px-2.5 py-1.5 text-[12px] shadow-lg"
+          className="pointer-events-none absolute top-0 z-10 rounded-lg border border-[#1E1E1E] bg-[#151515] px-2.5 py-1.5 text-[13px] shadow-lg"
           style={{
             left: `${(hover.x / SVG_W) * 100}%`,
             transform: "translateX(-50%)",

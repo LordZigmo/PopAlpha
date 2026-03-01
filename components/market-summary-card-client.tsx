@@ -117,7 +117,7 @@ export default function MarketSummaryCardClient({
       <GroupCard
         header={
           <div className="flex items-center justify-between gap-3">
-            <p className="text-[15px] font-semibold text-[#F0F0F0]">Market Summary</p>
+            <p className="text-[16px] font-semibold text-[#F0F0F0]">Market Summary</p>
             <div className="flex items-center gap-2">
               <Pill label="RAW cache" tone="neutral" size="small" />
               <div className="grid min-w-[168px] auto-cols-fr grid-flow-col gap-1 rounded-2xl border border-[#1E1E1E] bg-[#151515] p-1">
@@ -129,7 +129,7 @@ export default function MarketSummaryCardClient({
                       type="button"
                       onClick={() => setWindow(windowKey)}
                       className={[
-                        "flex min-h-11 items-center justify-center rounded-xl px-3 text-center text-[13px] font-semibold transition",
+                        "flex min-h-11 items-center justify-center rounded-xl px-3 text-center text-[14px] font-semibold transition",
                         active
                           ? "bg-[#222] text-[#F0F0F0] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
                           : "text-[#777]",
@@ -145,7 +145,7 @@ export default function MarketSummaryCardClient({
         }
       >
         {currentPrice === null ? (
-          <div className="rounded-2xl border border-[#1E1E1E] bg-[#151515] px-4 py-5 text-[14px] text-[#777]">
+          <div className="rounded-2xl border border-[#1E1E1E] bg-[#151515] px-4 py-5 text-[15px] text-[#777]">
             No market data yet.
           </div>
         ) : (
