@@ -23,20 +23,35 @@ type AliasRow = {
   alias_norm: string;
 };
 
-function applyTokenFilters<T>(query: T, tokens: string[]): T {
+function isNumericToken(token: string): boolean {
+  return /^\d+$/.test(token);
+}
+
+function applyContainsTokenFilters<T>(query: T, column: "search_doc_norm" | "alias_norm", tokens: string[]): T {
   let next = query;
   for (const token of tokens) {
-    next = (next as { ilike: (column: string, pattern: string) => T }).ilike("search_doc_norm", `%${token}%`);
+    next = (next as { ilike: (column: string, pattern: string) => T }).ilike(column, `%${token}%`);
   }
   return next;
 }
 
-function applyAliasTokenFilters<T>(query: T, tokens: string[]): T {
-  let next = query;
-  for (const token of tokens) {
-    next = (next as { ilike: (column: string, pattern: string) => T }).ilike("alias_norm", `%${token}%`);
-  }
-  return next;
+function applyNumericCardNumberFilters<T>(query: T, numericTokens: string[]): T {
+  const clauses = Array.from(
+    new Set(
+      numericTokens.flatMap((token) => [
+        `card_number.eq.${token}`,
+        `card_number.ilike.${token}/%`,
+      ]),
+    ),
+  );
+
+  if (clauses.length === 0) return query;
+
+  return (query as { or: (filters: string) => T }).or(clauses.join(","));
+}
+
+function emptyResult() {
+  return Promise.resolve({ data: [], error: null });
 }
 
 function dedupeBySlug<T extends { canonical_slug: string }>(rows: T[]): T[] {
@@ -50,6 +65,45 @@ function dedupeBySlug<T extends { canonical_slug: string }>(rows: T[]): T[] {
   return deduped;
 }
 
+function buildDirectQuery(
+  supabase: ReturnType<typeof getServerSupabaseClient>,
+  tokens: string[],
+) {
+  const textTokens = tokens.filter((token) => !isNumericToken(token));
+  const numericTokens = tokens.filter((token) => isNumericToken(token));
+
+  let query = supabase
+    .from("canonical_cards")
+    .select("slug, canonical_name, set_name, card_number, year, primary_image_url, search_doc_norm")
+    .limit(FETCH_LIMIT);
+
+  if (textTokens.length > 0) {
+    query = applyContainsTokenFilters(query, "search_doc_norm", textTokens);
+  } else if (numericTokens.length > 0) {
+    query = applyNumericCardNumberFilters(query, numericTokens);
+  }
+
+  return query;
+}
+
+function buildAliasQuery(
+  supabase: ReturnType<typeof getServerSupabaseClient>,
+  tokens: string[],
+) {
+  const textTokens = tokens.filter((token) => !isNumericToken(token));
+
+  if (textTokens.length === 0) {
+    return emptyResult();
+  }
+
+  const query = supabase
+    .from("card_aliases")
+    .select("canonical_slug, alias_norm")
+    .limit(FETCH_LIMIT);
+
+  return applyContainsTokenFilters(query, "alias_norm", textTokens);
+}
+
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const q = url.searchParams.get("q") ?? "";
@@ -61,20 +115,8 @@ export async function GET(req: Request) {
 
   const supabase = getServerSupabaseClient();
   const [directTokenResult, aliasTokenResult] = await Promise.all([
-    applyTokenFilters(
-      supabase
-        .from("canonical_cards")
-        .select("slug, canonical_name, set_name, card_number, year, primary_image_url, search_doc_norm")
-        .limit(FETCH_LIMIT),
-      normalized.tokens,
-    ),
-    applyAliasTokenFilters(
-      supabase
-        .from("card_aliases")
-        .select("canonical_slug, alias_norm")
-        .limit(FETCH_LIMIT),
-      normalized.tokens,
-    ),
+    buildDirectQuery(supabase, normalized.tokens),
+    buildAliasQuery(supabase, normalized.tokens),
   ]);
 
   for (const result of [directTokenResult, aliasTokenResult]) {

@@ -183,6 +183,91 @@ export function runSearchCardsTests() {
 
   assert.equal(aliasBeatsGeneric[0]?.canonical_slug, "base-4-charizard");
 
+  const charizardFourRanksBaseCardFirst = buildSearchCardResults({
+    canonicalRows: [
+      {
+        canonical_slug: "base-4-charizard",
+        canonical_name: "Charizard",
+        set_name: "Base Set",
+        card_number: "4",
+        year: 1999,
+        primary_image_url: null,
+        search_doc_norm: "charizard base set 4 102 1999",
+      },
+      {
+        canonical_slug: "lost-origin-tg03-charizard",
+        canonical_name: "Charizard",
+        set_name: "Lost Origin",
+        card_number: "TG03",
+        year: 2022,
+        primary_image_url: null,
+        search_doc_norm: "charizard lost origin trainer gallery 4 2022 tg03",
+      },
+    ],
+    aliasRows: [],
+    query: normalizeSearchInput("charizard 4"),
+    limit: 20,
+  });
+
+  assert.equal(charizardFourRanksBaseCardFirst[0]?.canonical_slug, "base-4-charizard");
+
+  const numericTokenBoundaryResult = buildSearchCardResults({
+    canonicalRows: [
+      {
+        canonical_slug: "base-4-charizard",
+        canonical_name: "Charizard",
+        set_name: "Base Set",
+        card_number: "4",
+        year: 1999,
+        primary_image_url: null,
+        search_doc_norm: "charizard base set 4 102 1999",
+      },
+      {
+        canonical_slug: "promo-999-charizard-2024",
+        canonical_name: "Charizard",
+        set_name: "Promo",
+        card_number: "TG03",
+        year: 2024,
+        primary_image_url: null,
+        search_doc_norm: "charizard promo tg03 2024",
+      },
+    ],
+    aliasRows: [],
+    query: normalizeSearchInput("charizard 4"),
+    limit: 20,
+  });
+
+  assert.equal(numericTokenBoundaryResult.length, 1);
+  assert.equal(numericTokenBoundaryResult[0]?.canonical_slug, "base-4-charizard");
+
+  const setAndNumberStillWins = buildSearchCardResults({
+    canonicalRows: [
+      {
+        canonical_slug: "base-4-charizard",
+        canonical_name: "Charizard",
+        set_name: "Base Set",
+        card_number: "4",
+        year: 1999,
+        primary_image_url: null,
+        search_doc_norm: "charizard base set 4 102 1999",
+      },
+      {
+        canonical_slug: "expedition-4-charizard",
+        canonical_name: "Charizard",
+        set_name: "Expedition",
+        card_number: "4",
+        year: 2002,
+        primary_image_url: null,
+        search_doc_norm: "charizard expedition 4 165 2002",
+      },
+    ],
+    aliasRows: [],
+    query: normalizeSearchInput("base set charizard 4"),
+    limit: 20,
+  });
+
+  assert.equal(setAndNumberStillWins[0]?.canonical_slug, "base-4-charizard");
+
   const tieBreakerResult = buildSearchCardResults({
     canonicalRows: [
       {

@@ -3,6 +3,7 @@ import type { NormalizedSearchInput } from "./normalize.mjs";
 export type SearchRankSignals = {
   exact_norm_match: boolean;
   set_number_match: boolean;
+  number_match: boolean;
   exact_name_match: boolean;
   alias_match: boolean;
   token_coverage: number;
