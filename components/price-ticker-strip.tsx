@@ -2,6 +2,8 @@ type TickerItem = {
   label: string;
   value: string;
   tone?: "neutral" | "positive" | "negative" | "warning";
+  /** Fill the cell background with a muted tone color */
+  filled?: boolean;
 };
 
 type PriceTickerStripProps = {
@@ -15,6 +17,13 @@ const TONE_COLOR: Record<string, string> = {
   warning: "text-amber-200",
 };
 
+const FILLED_BG: Record<string, string> = {
+  neutral: "bg-[#111111]",
+  positive: "bg-[#00DC5A]/[0.08]",
+  negative: "bg-[#FF3B30]/[0.08]",
+  warning: "bg-amber-400/[0.08]",
+};
+
 export default function PriceTickerStrip({ items }: PriceTickerStripProps) {
   if (items.length === 0) return null;
 
@@ -23,9 +32,9 @@ export default function PriceTickerStrip({ items }: PriceTickerStripProps) {
       {items.map((item) => (
         <div
           key={item.label}
-          className="min-w-0 bg-[#111111] px-3 py-2.5 sm:px-4 sm:py-3"
+          className={`min-w-0 px-3 py-2.5 sm:px-4 sm:py-3 ${item.filled ? FILLED_BG[item.tone ?? "neutral"] : "bg-[#111111]"}`}
         >
-          <p className="truncate text-[11px] font-semibold uppercase tracking-[0.1em] text-[#6B6B6B] sm:text-[13px]">
+          <p className={`truncate text-[11px] font-semibold uppercase tracking-[0.1em] sm:text-[13px] ${item.filled && item.tone && item.tone !== "neutral" ? TONE_COLOR[item.tone] : "text-[#6B6B6B]"}`}>
             {item.label}
           </p>
           <p className={`mt-1 text-[17px] font-bold tabular-nums tracking-[-0.02em] sm:text-[20px] ${TONE_COLOR[item.tone ?? "neutral"]}`}>

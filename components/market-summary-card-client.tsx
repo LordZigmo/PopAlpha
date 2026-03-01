@@ -148,16 +148,11 @@ export default function MarketSummaryCardClient({
         ) : (
           <div className="space-y-4">
             {/* Hero price */}
-            <div className="flex flex-wrap items-baseline gap-2.5">
+            <div className="flex items-baseline justify-between gap-2">
               <span className="text-[36px] font-bold leading-none tracking-[-0.03em] tabular-nums text-[#F0F0F0] sm:text-[42px]">
                 {formatUsd(currentPrice)}
               </span>
-              {changeValue !== null && Number.isFinite(changeValue) && (
-                <span className={`text-[18px] font-semibold tabular-nums sm:text-[20px] ${changeValue > 0 ? "text-[#00DC5A]" : changeValue < 0 ? "text-[#FF3B30]" : "text-[#6B6B6B]"}`}>
-                  {formatPercent(changeValue)}
-                </span>
-              )}
-              <span className="text-[14px] text-[#6B6B6B]">
+              <span className="shrink-0 text-[14px] text-[#6B6B6B]">
                 {formatRelativeTime(asOfTs) ?? ""}
               </span>
             </div>
@@ -167,7 +162,7 @@ export default function MarketSummaryCardClient({
               items={[
                 { label: `${effectiveWindow.toUpperCase()} Low`, value: formatUsd(low) },
                 { label: `${effectiveWindow.toUpperCase()} High`, value: formatUsd(high) },
-                { label: "Samples", value: sampleCount > 0 ? String(sampleCount) : "—" },
+                { label: `${effectiveWindow.toUpperCase()} Change`, value: formatPercent(changeValue), tone: changeTone(changeValue), filled: true },
               ]}
             />
 
