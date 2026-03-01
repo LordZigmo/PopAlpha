@@ -151,7 +151,7 @@ export function Pill({
     <span
       className={cn(
         "inline-flex items-center rounded-full border font-semibold",
-        size === "small" ? "min-h-6 px-2.5 text-[13px]" : "min-h-8 px-3 text-[14px]",
+        size === "small" ? "min-h-7 px-3 text-[15px]" : "min-h-8 px-3 text-[14px]",
         PILL_TONE_CLASS[tone]
       )}
     >

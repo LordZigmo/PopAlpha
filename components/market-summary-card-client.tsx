@@ -117,7 +117,7 @@ export default function MarketSummaryCardClient({
       <GroupCard
         header={
           <div className="flex items-center justify-between gap-3">
-            <p className="text-[17px] font-semibold text-[#F0F0F0]">Market Summary</p>
+            <p className="text-[20px] font-semibold text-[#F0F0F0]">Market Summary</p>
             <div className="flex items-center gap-2">
               <Pill label="RAW cache" tone="neutral" size="small" />
               <div className="grid min-w-[168px] auto-cols-fr grid-flow-col gap-1 rounded-2xl border border-[#1E1E1E] bg-[#151515] p-1">

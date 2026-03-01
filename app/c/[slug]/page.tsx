@@ -541,24 +541,29 @@ export default async function CanonicalCardPage({
 
         {/* ── Signal meta strip ────────────────────────────────────────────── */}
         {(vm?.signals_history_points_30d != null || vm?.signals_as_of_ts) && (
-          <div className="mt-4">
-            <PriceTickerStrip
-              items={[
-                {
-                  label: "Confidence",
-                  value: signalConfidenceLabel(vm?.signals_history_points_30d ?? null).label,
-                  tone: signalConfidenceLabel(vm?.signals_history_points_30d ?? null).tone,
-                },
-                {
-                  label: "Last Computed",
-                  value: formatSignalsUpdated(vm?.signals_as_of_ts ?? null),
-                },
-                {
-                  label: "Data Points",
-                  value: vm?.signals_history_points_30d != null ? String(vm.signals_history_points_30d) : "--",
-                },
-              ]}
-            />
+          <div className="mt-4 flex flex-wrap gap-6 rounded-2xl border border-[#1E1E1E] bg-[#111111] px-5 py-3.5">
+            {[
+              {
+                label: "Confidence",
+                value: signalConfidenceLabel(vm?.signals_history_points_30d ?? null).label,
+                color: { positive: "#00DC5A", negative: "#FF3B30", warning: "#FFD60A", neutral: "#F0F0F0" }[signalConfidenceLabel(vm?.signals_history_points_30d ?? null).tone],
+              },
+              {
+                label: "Last Computed",
+                value: formatSignalsUpdated(vm?.signals_as_of_ts ?? null),
+                color: "#F0F0F0",
+              },
+              {
+                label: "Data Points",
+                value: vm?.signals_history_points_30d != null ? String(vm.signals_history_points_30d) : "--",
+                color: "#F0F0F0",
+              },
+            ].map((item) => (
+              <div key={item.label} className="flex-1 min-w-[80px]">
+                <p className="text-[13px] font-semibold uppercase tracking-[0.1em] text-[#6B6B6B]">{item.label}</p>
+                <p className="mt-1 text-[20px] font-bold tabular-nums tracking-[-0.02em]" style={{ color: item.color }}>{item.value}</p>
+              </div>
+            ))}
           </div>
         )}
 
