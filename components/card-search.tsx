@@ -183,10 +183,10 @@ export default function CardSearch({
       }
     : size === "hero"
       ? {
-          bubble: "h-14 rounded-full pl-6 pr-1.5",
-          input: "text-base",
-          iconBtn: "h-10 w-10",
-          iconSvg: "h-[18px] w-[18px]",
+          bubble: "h-[60px] rounded-full pl-7 pr-2",
+          input: "text-lg",
+          iconBtn: "h-11 w-11",
+          iconSvg: "h-5 w-5",
           dropdown: "top-[calc(100%+0.75rem)] rounded-3xl",
         }
       : {

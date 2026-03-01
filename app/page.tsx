@@ -3,6 +3,13 @@
 import { useEffect, useState } from "react";
 import CardSearch from "@/components/card-search";
 
+const TAGLINES = [
+  "Smarter TCG Market Insights.",
+  "Real-time insight for real-world deals.",
+  "Track prices. Spot trends. Collect smarter.",
+  "Your edge in the TCG market.",
+];
+
 const SEARCH_EXAMPLES = [
   "Start with a pokemon...",
   "Bubble Mew",
@@ -32,6 +39,7 @@ const SEARCH_EXAMPLES = [
 ];
 
 export default function Home() {
+  const [tagline, setTagline] = useState(TAGLINES[0]);
   const [placeholder, setPlaceholder] = useState("");
 
   useEffect(() => {
@@ -71,17 +79,21 @@ export default function Home() {
     };
   }, []);
 
+  useEffect(() => {
+    setTagline(TAGLINES[Math.floor(Math.random() * TAGLINES.length)]);
+  }, []);
+
   return (
     <main className="app-shell">
       <div className="mx-auto flex min-h-screen w-full max-w-4xl items-center justify-center px-4 py-12 sm:px-6">
-        <section className="w-full max-w-2xl text-center">
+        <section className="w-full max-w-3xl text-center">
           <h1 className="text-app text-6xl font-semibold tracking-tight sm:text-7xl">PopAlpha</h1>
           <p className="text-muted mx-auto mt-4 max-w-xl text-sm sm:text-base">
-            Smarter TCG Market Insights.
+            {tagline}
           </p>
 
           <CardSearch
-            className="mt-6"
+            className="mt-8"
             size="hero"
             placeholder={placeholder || "Search"}
             autoFocus
