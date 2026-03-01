@@ -521,7 +521,7 @@ export default async function CanonicalCardPage({
 
         {/* ── Signal Gauges ──────────────────────────────────────────────────── */}
         {vm?.signals && (vm.signals.trend || vm.signals.breakout || vm.signals.value) && (
-          <div className="mt-6 grid grid-cols-3 gap-3">
+          <div className="mt-6 grid grid-cols-3 gap-2 sm:gap-3">
             <SignalGauge
               label="Trend"
               score={vm.signals.trend?.score ?? null}
@@ -550,7 +550,7 @@ export default async function CanonicalCardPage({
 
         {/* ── Signal meta strip ────────────────────────────────────────────── */}
         {(vm?.signals_history_points_30d != null || vm?.signals_as_of_ts) && (
-          <div className="mt-4 flex flex-wrap gap-6 rounded-2xl border border-[#1E1E1E] bg-[#111111] px-5 py-3.5">
+          <div className="mt-4 flex flex-wrap gap-4 rounded-2xl border border-[#1E1E1E] bg-[#111111] px-4 py-3 sm:gap-6 sm:px-5 sm:py-3.5">
             {[
               {
                 label: "Confidence",
@@ -568,9 +568,9 @@ export default async function CanonicalCardPage({
                 color: "#F0F0F0",
               },
             ].map((item) => (
-              <div key={item.label} className="flex-1 min-w-[80px]">
-                <p className="text-[13px] font-semibold uppercase tracking-[0.1em] text-[#6B6B6B]">{item.label}</p>
-                <p className="mt-1 text-[20px] font-bold tabular-nums tracking-[-0.02em]" style={{ color: item.color }}>{item.value}</p>
+              <div key={item.label} className="flex-1 min-w-[70px]">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[#6B6B6B] sm:text-[13px]">{item.label}</p>
+                <p className="mt-1 text-[17px] font-bold tabular-nums tracking-[-0.02em] sm:text-[20px]" style={{ color: item.color }}>{item.value}</p>
               </div>
             ))}
           </div>

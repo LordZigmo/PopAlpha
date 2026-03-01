@@ -53,7 +53,7 @@ export default function SignalGauge({ label, score, displayLabel }: SignalGaugeP
   }, [safeScore, targetOffset]);
 
   return (
-    <div className="gauge-card flex flex-col items-center rounded-2xl border border-[#1E1E1E] bg-[#111111] px-3 py-4 transition-transform">
+    <div className="gauge-card flex flex-col items-center rounded-2xl border border-[#1E1E1E] bg-[#111111] px-2 py-3 transition-transform sm:px-3 sm:py-4">
       <svg viewBox="0 0 120 72" className="w-full max-w-[120px]" aria-label={`${label}: ${safeScore !== null ? safeScore : "N/A"}`}>
         {/* Background arc */}
         <path
@@ -85,11 +85,11 @@ export default function SignalGauge({ label, score, displayLabel }: SignalGaugeP
           {safeScore !== null ? safeScore.toFixed(0) : "--"}
         </text>
       </svg>
-      <p className="mt-1 text-[14px] font-semibold uppercase tracking-[0.08em] text-[#6B6B6B]">
+      <p className="mt-1 text-[12px] font-semibold uppercase tracking-[0.08em] text-[#6B6B6B] sm:text-[14px]">
         {label}
       </p>
       {displayLabel && (
-        <p className="mt-0.5 text-[15px] font-semibold" style={{ color }}>
+        <p className="mt-0.5 text-[13px] font-semibold sm:text-[15px]" style={{ color }}>
           {displayLabel}
         </p>
       )}

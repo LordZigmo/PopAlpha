@@ -19,16 +19,16 @@ export default function PriceTickerStrip({ items }: PriceTickerStripProps) {
   if (items.length === 0) return null;
 
   return (
-    <div className="ticker-strip flex flex-wrap rounded-2xl border border-[#1E1E1E] bg-[#111111]">
+    <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-[#1E1E1E] bg-[#1E1E1E] sm:grid-cols-3 lg:grid-cols-6">
       {items.map((item) => (
         <div
           key={item.label}
-          className="flex-1 min-w-[100px] border-l border-[#1E1E1E] px-4 py-3 first:border-l-0"
+          className="min-w-0 bg-[#111111] px-3 py-2.5 sm:px-4 sm:py-3"
         >
-          <p className="text-[13px] font-semibold uppercase tracking-[0.1em] text-[#6B6B6B]">
+          <p className="truncate text-[11px] font-semibold uppercase tracking-[0.1em] text-[#6B6B6B] sm:text-[13px]">
             {item.label}
           </p>
-          <p className={`mt-1 text-[20px] font-bold tabular-nums tracking-[-0.02em] ${TONE_COLOR[item.tone ?? "neutral"]}`}>
+          <p className={`mt-1 text-[17px] font-bold tabular-nums tracking-[-0.02em] sm:text-[20px] ${TONE_COLOR[item.tone ?? "neutral"]}`}>
             {item.value}
           </p>
         </div>
