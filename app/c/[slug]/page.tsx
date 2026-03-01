@@ -11,7 +11,7 @@ import { notFound } from "next/navigation";
 import CanonicalCardFloatingHero from "@/components/canonical-card-floating-hero";
 import CollapsibleSection from "@/components/collapsible-section";
 import EbayListings from "@/components/ebay-listings";
-import { GroupCard, GroupedSection, PageShell, Pill, SegmentedControl } from "@/components/ios-grouped-ui";
+import { GroupedSection, PageShell, Pill, SegmentedControl } from "@/components/ios-grouped-ui";
 import MarketPulse from "@/components/market-pulse";
 import MarketSummaryCard from "@/components/market-summary-card";
 import PriceTickerStrip from "@/components/price-ticker-strip";
@@ -518,6 +518,7 @@ export default async function CanonicalCardPage({
               )}
             </div>
           </div>
+
         {/* ── Signal Gauges ──────────────────────────────────────────────────── */}
         {vm?.signals && (vm.signals.trend || vm.signals.breakout || vm.signals.value) && (
           <div className="mt-6 grid grid-cols-3 gap-3">
@@ -538,6 +539,14 @@ export default async function CanonicalCardPage({
             />
           </div>
         )}
+
+        {/* ── Market Summary (enlarged chart) ──────────────────────────────── */}
+        <MarketSummaryCard
+          canonicalSlug={slug}
+          printingId={selectedPrinting?.id ?? null}
+          variantRef={rawVariantRef}
+          selectedWindow={activeMarketWindow}
+        />
 
         {/* ── Signal meta strip ────────────────────────────────────────────── */}
         {(vm?.signals_history_points_30d != null || vm?.signals_as_of_ts) && (
@@ -567,102 +576,101 @@ export default async function CanonicalCardPage({
           </div>
         )}
 
-        {/* ── Market Summary (enlarged chart) ──────────────────────────────── */}
-        <MarketSummaryCard
-          canonicalSlug={slug}
-          printingId={selectedPrinting?.id ?? null}
-          variantRef={rawVariantRef}
-          selectedWindow={activeMarketWindow}
-        />
-
         {/* ── Variant selector ────────────────────────────────────────────── */}
         <GroupedSection title="Variant">
-          <GroupCard>
-            <div className="space-y-4">
-              <div>
-                <p className="mb-2 text-[15px] font-semibold text-[#777]">Mode</p>
-                <SegmentedControl
-                  items={VIEW_MODES.map((option) => ({
-                    key: option,
-                    label: option,
-                    href: toggleHref(
-                      slug,
-                      selectedPrinting?.id ?? null,
-                      debugEnabled,
-                      returnTo,
-                      {
-                        mode: option,
-                        provider: option === "GRADED" ? activeProvider : null,
-                        bucket: option === "GRADED" ? activeBucket : null,
-                        marketWindow: activeMarketWindow,
-                      },
-                    ),
-                    active: option === viewMode,
-                  }))}
-                />
+          <div className="space-y-4">
+            <div>
+              <p className="mb-2 text-[15px] font-semibold text-[#777]">Mode</p>
+              <SegmentedControl
+                items={VIEW_MODES.map((option) => ({
+                  key: option,
+                  label: option,
+                  href: toggleHref(
+                    slug,
+                    selectedPrinting?.id ?? null,
+                    debugEnabled,
+                    returnTo,
+                    {
+                      mode: option,
+                      provider: option === "GRADED" ? activeProvider : null,
+                      bucket: option === "GRADED" ? activeBucket : null,
+                      marketWindow: activeMarketWindow,
+                    },
+                  ),
+                  active: option === viewMode,
+                }))}
+              />
+            </div>
+            {viewMode === "RAW" && variantPills.length > 0 ? (
+                <div>
+                  <p className="mb-2 text-[15px] font-semibold text-[#777]">Variant</p>
+                  <SegmentedControl
+                    wrap={shouldWrapVariantSegments(variantPills.length)}
+                    items={variantPills.map(({ printing: variantPrinting, pill }) => ({
+                      key: pill.pillKey,
+                      label: rawVariantSegmentLabel(variantPrinting, printings),
+                      href: toggleHref(slug, variantPrinting.id, debugEnabled, returnTo, { mode: "RAW", marketWindow: activeMarketWindow }),
+                      active: selectedPrinting?.id === variantPrinting.id,
+                    }))}
+                  />
               </div>
-              {viewMode === "RAW" && variantPills.length > 0 ? (
-                  <div>
-                    <p className="mb-2 text-[15px] font-semibold text-[#777]">Variant</p>
-                    <SegmentedControl
-                      wrap={shouldWrapVariantSegments(variantPills.length)}
-                      items={variantPills.map(({ printing: variantPrinting, pill }) => ({
-                        key: pill.pillKey,
-                        label: rawVariantSegmentLabel(variantPrinting, printings),
-                        href: toggleHref(slug, variantPrinting.id, debugEnabled, returnTo, { mode: "RAW", marketWindow: activeMarketWindow }),
-                        active: selectedPrinting?.id === variantPrinting.id,
-                      }))}
-                    />
-                </div>
-              ) : null}
-              {viewMode === "GRADED" ? (
-                <>
-                  <div>
-                    <p className="mb-2 text-[15px] font-semibold text-[#777]">Source</p>
-                    <SegmentedControl
-                      items={GRADED_SOURCES.map((source) => {
-                        const providerHasRows = availableProviders.includes(source);
-                        const fallbackBucketForSource = GRADE_BUCKETS.find((gradeBucket) =>
-                          gradedAvailability.some((row) => row.provider === source && row.grade === gradeBucket)
-                        ) ?? activeBucket;
+            ) : null}
+            {viewMode === "GRADED" ? (
+              <>
+                <div>
+                  <p className="mb-2 text-[15px] font-semibold text-[#777]">Source</p>
+                  <SegmentedControl
+                    items={GRADED_SOURCES.map((source) => {
+                      const providerHasRows = availableProviders.includes(source);
+                      const fallbackBucketForSource = GRADE_BUCKETS.find((gradeBucket) =>
+                        gradedAvailability.some((row) => row.provider === source && row.grade === gradeBucket)
+                      ) ?? activeBucket;
 
-                        return {
-                          key: source,
-                          label: providerLabel(source),
-                          href: toggleHref(slug, selectedPrinting?.id ?? null, debugEnabled, returnTo, {
-                            mode: "GRADED",
-                            provider: source,
-                            bucket: source === activeProvider ? activeBucket : fallbackBucketForSource,
-                            marketWindow: activeMarketWindow,
-                          }),
-                          active: source === activeProvider,
-                          disabled: !providerHasRows,
-                        };
-                      })}
-                    />
-                  </div>
-                  <div>
-                    <p className="mb-2 text-[15px] font-semibold text-[#777]">Grade</p>
-                    <SegmentedControl
-                      items={GRADE_BUCKETS.map((gradeBucket) => ({
-                        key: gradeBucket,
-                        label: gradeBucketLabel(gradeBucket),
+                      return {
+                        key: source,
+                        label: providerLabel(source),
                         href: toggleHref(slug, selectedPrinting?.id ?? null, debugEnabled, returnTo, {
                           mode: "GRADED",
-                          provider: activeProvider,
-                          bucket: gradeBucket,
+                          provider: source,
+                          bucket: source === activeProvider ? activeBucket : fallbackBucketForSource,
                           marketWindow: activeMarketWindow,
                         }),
-                        active: gradeBucket === activeBucket,
-                        disabled: !availableBucketsForProvider.includes(gradeBucket),
-                      }))}
-                    />
-                  </div>
-                </>
-              ) : null}
-            </div>
-          </GroupCard>
+                        active: source === activeProvider,
+                        disabled: !providerHasRows,
+                      };
+                    })}
+                  />
+                </div>
+                <div>
+                  <p className="mb-2 text-[15px] font-semibold text-[#777]">Grade</p>
+                  <SegmentedControl
+                    items={GRADE_BUCKETS.map((gradeBucket) => ({
+                      key: gradeBucket,
+                      label: gradeBucketLabel(gradeBucket),
+                      href: toggleHref(slug, selectedPrinting?.id ?? null, debugEnabled, returnTo, {
+                        mode: "GRADED",
+                        provider: activeProvider,
+                        bucket: gradeBucket,
+                        marketWindow: activeMarketWindow,
+                      }),
+                      active: gradeBucket === activeBucket,
+                      disabled: !availableBucketsForProvider.includes(gradeBucket),
+                    }))}
+                  />
+                </div>
+              </>
+            ) : null}
+          </div>
         </GroupedSection>
+
+        {/* ── Market Pulse ─────────────────────────────────────────────────
+            Community sentiment vote — stub data, wire to DB later. */}
+        <MarketPulse
+          bullishVotes={0}
+          bearishVotes={0}
+          userVote={null}
+          resolvesAt={Date.now() + 6 * 24 * 60 * 60 * 1000 + 12 * 60 * 60 * 1000}
+        />
 
         {/* ── Live eBay Listings ──────────────────────────────────────────── */}
         <CollapsibleSection title="Live eBay Listings" defaultOpen={false} badge={<Pill label="Live" tone="neutral" size="small" />}>
@@ -673,15 +681,6 @@ export default async function CanonicalCardPage({
             grade={legacyListingsGrade}
           />
         </CollapsibleSection>
-
-        {/* ── Market Pulse ─────────────────────────────────────────────────
-            Community sentiment vote — stub data, wire to DB later. */}
-        <MarketPulse
-          bullishVotes={0}
-          bearishVotes={0}
-          userVote={null}
-          resolvesAt={Date.now() + 6 * 24 * 60 * 60 * 1000 + 12 * 60 * 60 * 1000}
-        />
         </div>
       </div>
     </PageShell>
