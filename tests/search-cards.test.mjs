@@ -268,6 +268,34 @@ export function runSearchCardsTests() {
 
   assert.equal(setAndNumberStillWins[0]?.canonical_slug, "base-4-charizard");
 
+  const bareNameAndNumberPrefersOriginalEra = buildSearchCardResults({
+    canonicalRows: [
+      {
+        canonical_slug: "base-4-charizard",
+        canonical_name: "Charizard",
+        set_name: "Base Set",
+        card_number: "4",
+        year: 1999,
+        primary_image_url: null,
+        search_doc_norm: "charizard base set 4 102 1999",
+      },
+      {
+        canonical_slug: "expedition-4-charizard",
+        canonical_name: "Charizard",
+        set_name: "Expedition",
+        card_number: "4",
+        year: 2002,
+        primary_image_url: null,
+        search_doc_norm: "charizard expedition 4 165 2002",
+      },
+    ],
+    aliasRows: [],
+    query: normalizeSearchInput("charizard 4"),
+    limit: 20,
+  });
+
+  assert.equal(bareNameAndNumberPrefersOriginalEra[0]?.canonical_slug, "base-4-charizard");
+
   const tieBreakerResult = buildSearchCardResults({
     canonicalRows: [
       {

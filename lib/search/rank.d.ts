@@ -35,6 +35,9 @@ export function compareRankedSearchRows(
     set_name: string | null;
     year: number | null;
     score: number;
+    set_number_match?: boolean;
+    number_match?: boolean;
+    exact_name_match?: boolean;
   },
   b: {
     canonical_slug: string;
@@ -42,5 +45,8 @@ export function compareRankedSearchRows(
     set_name: string | null;
     year: number | null;
     score: number;
+    set_number_match?: boolean;
+    number_match?: boolean;
+    exact_name_match?: boolean;
   },
 ): number;

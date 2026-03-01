@@ -3,12 +3,17 @@ import { redirect } from "next/navigation";
 import { unstable_cache } from "next/cache";
 import { getServerSupabaseClient } from "@/lib/supabaseServer";
 import { measureAsync } from "@/lib/perf";
+import SearchResultsSection from "@/components/search-results-section";
+import { parseSearchSort } from "@/lib/search/sort.mjs";
+
+type SearchSort = "relevance" | "newest" | "oldest";
 
 type SearchParams = {
   q?: string;
   page?: string;
   lang?: string;
   set?: string;
+  sort?: string;
 };
 
 type CanonicalCardRow = {
@@ -435,6 +440,7 @@ export default async function SearchPage({
   const page = toPositiveInt(params.page, 1);
   const lang = (params.lang ?? "all").trim().toUpperCase();
   const setFilter = (params.set ?? "").trim();
+  const sort = parseSearchSort(params.sort) as SearchSort;
   const genericNameMode = isGenericNameQuery(qNormalized);
   let exactMatchSuggestion: { href: string; label: string } | null = null;
 
@@ -590,15 +596,17 @@ export default async function SearchPage({
 
   const startIndex = result.total === 0 ? 0 : (result.page - 1) * PAGE_SIZE + 1;
   const endIndex = result.total === 0 ? 0 : startIndex + result.rows.length - 1;
-
-  const prevHref =
-    result.page > 1
-      ? `/search?q=${encodeURIComponent(q)}&page=${result.page - 1}&lang=${encodeURIComponent(lang.toLowerCase())}&set=${encodeURIComponent(setFilter)}`
-      : null;
-  const nextHref =
-    result.page < result.totalPages
-      ? `/search?q=${encodeURIComponent(q)}&page=${result.page + 1}&lang=${encodeURIComponent(lang.toLowerCase())}&set=${encodeURIComponent(setFilter)}`
-      : null;
+  const displayRows = result.rows.map((row) => {
+    const primaryPrinting = choosePrimaryPrinting(row.printings);
+    return {
+      canonical_slug: row.canonical.slug,
+      canonical_name: row.canonical.canonical_name,
+      set_name: row.canonical.set_name,
+      year: row.canonical.year,
+      raw_price: row.rawPrice,
+      primary_image_url: primaryPrinting?.image_url ?? null,
+    };
+  });
 
   return (
     <main className="app-shell">
@@ -620,6 +628,7 @@ export default async function SearchPage({
 
           <form action="/search" className="sticky top-2 z-10 mt-4 grid gap-2 rounded-[var(--radius-card)] bg-surface/85 p-2 sm:grid-cols-[1fr_auto_auto_auto]">
             <input type="hidden" name="q" value={q} />
+            <input type="hidden" name="sort" value={sort} />
             <input
               name="set"
               defaultValue={setFilter}
@@ -641,84 +650,22 @@ export default async function SearchPage({
             </button>
           </form>
         </section>
-
-        <section className="mt-4 glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
-          {result.rows.length === 0 ? (
-            <div>
-              <p className="text-app text-sm font-semibold">No matches found.</p>
-              <p className="text-muted mt-1 text-sm">Try adding set name, year, or card number.</p>
-            </div>
-          ) : (
-            <div>
-              {genericNameMode ? (
-                <p className="text-muted mb-3 text-xs">Showing canonical card matches first for broad subject-name queries.</p>
-              ) : null}
-              <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-                {result.rows.map((row) => {
-                  const primaryPrinting = choosePrimaryPrinting(row.printings);
-                  return (
-                    <Link
-                      key={row.canonical.slug}
-                      href={`/cards/${encodeURIComponent(row.canonical.slug)}`}
-                      className="group block transition duration-200 hover:-translate-y-0.5"
-                    >
-                      <div className="relative aspect-[63/88] overflow-hidden rounded-[var(--radius-card)] border-app border bg-surface-soft/24">
-                        {primaryPrinting?.image_url ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={primaryPrinting.image_url}
-                            alt={row.canonical.canonical_name}
-                            className="h-full w-full object-cover object-center transition duration-200 group-hover:scale-[1.02]"
-                          />
-                        ) : (
-                          <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.08),transparent_65%)] p-4">
-                            <div className="rounded-[var(--radius-input)] border-app border bg-surface/35 px-3 py-2 text-center">
-                              <p className="text-app text-xs font-semibold">Image pending</p>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                      <div className="mt-2 min-w-0 px-1">
-                        <p className="text-app truncate text-sm font-semibold">{row.canonical.canonical_name}</p>
-                        <p className="text-muted mt-0.5 truncate text-xs">
-                          {row.canonical.year ? `${row.canonical.year}` : "Year unknown"}
-                          {row.canonical.set_name ? ` • ${row.canonical.set_name}` : ""}
-                        </p>
-                        {row.rawPrice != null ? (
-                          <p className="mt-0.5 text-xs font-semibold" style={{ color: "var(--color-accent)" }}>
-                            ${row.rawPrice < 1 ? row.rawPrice.toFixed(2) : row.rawPrice.toFixed(0)} RAW
-                          </p>
-                        ) : null}
-                      </div>
-                    </Link>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          <div className="mt-4 flex items-center justify-between">
-            <span className="text-muted text-xs">
-              Page {result.page} of {result.totalPages}
-            </span>
-            <div className="flex items-center gap-2">
-              {prevHref ? (
-                <Link href={prevHref} className="btn-ghost rounded-[var(--radius-input)] border px-3 py-1.5 text-xs">
-                  Prev
-                </Link>
-              ) : (
-                <span className="border-app rounded-[var(--radius-input)] border px-3 py-1.5 text-xs text-muted">Prev</span>
-              )}
-              {nextHref ? (
-                <Link href={nextHref} className="btn-ghost rounded-[var(--radius-input)] border px-3 py-1.5 text-xs">
-                  Next
-                </Link>
-              ) : (
-                <span className="border-app rounded-[var(--radius-input)] border px-3 py-1.5 text-xs text-muted">Next</span>
-              )}
-            </div>
-          </div>
-        </section>
+        <SearchResultsSection
+          key={`${q}-${sort}-${result.page}-${lang}-${setFilter}`}
+          rows={displayRows}
+          total={result.total}
+          page={result.page}
+          totalPages={result.totalPages}
+          genericNameMode={genericNameMode}
+          initialSort={sort}
+          currentParams={{
+            q,
+            page: String(result.page),
+            lang: lang.toLowerCase(),
+            set: setFilter,
+            sort,
+          }}
+        />
       </div>
     </main>
   );
