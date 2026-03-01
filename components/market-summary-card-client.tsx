@@ -157,20 +157,22 @@ export default function MarketSummaryCardClient({
               </span>
             </div>
 
-            {/* Secondary stats */}
-            <PriceTickerStrip
-              items={[
-                { label: `${effectiveWindow.toUpperCase()} Low`, value: formatUsd(low) },
-                { label: `${effectiveWindow.toUpperCase()} High`, value: formatUsd(high) },
-                { label: `${effectiveWindow.toUpperCase()} Change`, value: formatPercent(changeValue), tone: changeTone(changeValue), filled: true },
-              ]}
-            />
-
+            {/* Chart */}
             <EnhancedChart
               points={chartSeries}
               windowLabel={effectiveWindow.toUpperCase()}
               currentPrice={currentPrice}
               changePercent={changeValue}
+            />
+
+            {/* Stats table — 2×2, change cell last (bottom-right) */}
+            <PriceTickerStrip
+              items={[
+                { label: `${effectiveWindow.toUpperCase()} Low`, value: formatUsd(low) },
+                { label: `${effectiveWindow.toUpperCase()} High`, value: formatUsd(high) },
+                { label: "Samples", value: sampleCount > 0 ? String(sampleCount) : "—" },
+                { label: `${effectiveWindow.toUpperCase()} Change`, value: formatPercent(changeValue), tone: changeTone(changeValue), filled: true },
+              ]}
             />
           </div>
         )}

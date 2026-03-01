@@ -482,12 +482,12 @@ export default async function CanonicalCardPage({
         <div className="mx-auto max-w-5xl px-4 pb-[max(env(safe-area-inset-bottom),2.5rem)] pt-8 sm:px-6 sm:pb-[max(env(safe-area-inset-bottom),3.5rem)]">
           {/* ── Card identity + price ──────────────────────────────────── */}
           <div className="mb-6">
-            <p className="text-[15px] font-semibold uppercase tracking-[0.1em] text-[#6B6B6B]">
-              {subtitleText}
-            </p>
-            <h1 className="mt-1 text-[36px] font-semibold leading-tight tracking-[-0.035em] text-[#F0F0F0] sm:text-[44px]">
+            <h1 className="text-[36px] font-semibold leading-tight tracking-[-0.035em] text-[#F0F0F0] sm:text-[44px]">
               {canonical.canonical_name}
             </h1>
+            <p className="mt-1 text-[15px] font-semibold uppercase tracking-[0.1em] text-[#6B6B6B]">
+              {subtitleText}
+            </p>
             {primaryPrice !== null && (
               <div className="mt-3 flex flex-wrap items-baseline gap-2.5">
                 <span className="text-[46px] font-bold leading-none tracking-[-0.04em] tabular-nums text-[#F0F0F0] sm:text-[56px]">

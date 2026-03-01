@@ -24,11 +24,16 @@ const FILLED_BG: Record<string, string> = {
   warning: "bg-amber-400/[0.08]",
 };
 
+function gridClass(count: number): string {
+  if (count <= 4) return "grid-cols-2";
+  return "grid-cols-2 sm:grid-cols-3 lg:grid-cols-6";
+}
+
 export default function PriceTickerStrip({ items }: PriceTickerStripProps) {
   if (items.length === 0) return null;
 
   return (
-    <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-[#1E1E1E] bg-[#1E1E1E] sm:grid-cols-3 lg:grid-cols-6">
+    <div className={`grid gap-px overflow-hidden rounded-2xl border border-[#1E1E1E] bg-[#1E1E1E] ${gridClass(items.length)}`}>
       {items.map((item) => (
         <div
           key={item.label}
