@@ -117,7 +117,7 @@ export default function MarketSummaryCardClient({
       <GroupCard
         header={
           <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
-            <p className="text-[20px] font-semibold text-[#F0F0F0]">Market Summary</p>
+            <p className="text-[22px] font-semibold text-[#F0F0F0]">Market Summary</p>
             <div className="grid auto-cols-fr grid-flow-col gap-1 rounded-2xl border border-[#1E1E1E] bg-[#151515] p-1">
               {(["7d", "30d", "90d"] as WindowKey[]).map((windowKey) => {
                 const active = activeWindow === windowKey;

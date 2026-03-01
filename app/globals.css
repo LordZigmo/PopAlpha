@@ -118,6 +118,11 @@ body {
   50% { opacity: 0.6; transform: scale(2.2); }
 }
 
+@keyframes terminalBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
 @keyframes glowPulse {
   0% { box-shadow: 0 0 0 rgba(0, 0, 0, 0); }
   50% { box-shadow: 0 0 26px color-mix(in srgb, var(--color-positive) 45%, transparent); }
@@ -299,6 +304,7 @@ body {
   .lift, .glow-card::after, .theme-transition, .theme-transition *, .raw-json-panel .raw-json-content, .ring-meter { transition: none; }
   .pulse-positive, .results-enter { animation: none; }
   .gauge-arc, .collapsible-content, .collapsible-chevron, .gauge-card { transition: none; }
+  [class*="terminalBlink"] { animation: none; }
 }
 
 /* Compatibility layer for existing Tailwind color classes during token migration */
