@@ -261,7 +261,7 @@ export default function CardSearch({
       {shouldOpen ? (
         <div
           className={joinClasses(
-            "results-enter absolute left-0 right-0 z-50 overflow-hidden border-app border bg-surface/96 shadow-2xl backdrop-blur-xl",
+            "results-enter absolute left-0 right-0 z-50 overflow-hidden border-app border bg-surface shadow-2xl",
             sizeClasses.dropdown,
           )}
         >

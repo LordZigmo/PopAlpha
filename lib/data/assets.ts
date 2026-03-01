@@ -517,6 +517,7 @@ export type AssetViewModel = {
   price_now: number | null;
   range_30d_low: number | null;
   range_30d_high: number | null;
+  chartSeries: ChartPoint[];
   /** (price_now − price_7d_ago) / price_7d_ago × 100, null if not enough data. */
   change_7d_pct: number | null;
   provider_as_of_ts: string | null;
@@ -702,6 +703,7 @@ export async function buildAssetViewModel(
     price_now,
     range_30d_low,
     range_30d_high,
+    chartSeries: series,
     change_7d_pct,
     provider_as_of_ts,
     signals_as_of_ts,

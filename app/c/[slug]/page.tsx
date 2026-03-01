@@ -12,6 +12,7 @@ import CanonicalCardFloatingHero from "@/components/canonical-card-floating-hero
 import CardDetailNavBar from "@/components/card-detail-nav-bar";
 import EbayListings from "@/components/ebay-listings";
 import { GroupCard, GroupedSection, PageShell, Pill, SegmentedControl, StatRow } from "@/components/ios-grouped-ui";
+import MarketSummaryCard from "@/components/market-summary-card";
 import MarketSnapshotTiles from "@/components/market-snapshot-tiles";
 import { buildEbayQuery, type GradeSelection, type GradedSource } from "@/lib/ebay-query";
 import { buildPrintingPill } from "@/lib/cards/detail";
@@ -242,6 +243,32 @@ function formatUsdCompact(value: number | null | undefined): string {
   }).format(value);
 }
 
+function computePeriodChangePct(
+  series: Array<{ ts: string; price: number }>,
+  days: number,
+): number | null {
+  if (series.length < 2) return null;
+  const targetMs = Date.now() - days * 24 * 60 * 60 * 1000;
+  const priceNow = series[series.length - 1]?.price;
+  if (priceNow === null || priceNow === undefined || !Number.isFinite(priceNow)) return null;
+
+  let referencePrice: number | null = null;
+  for (const point of series) {
+    if (new Date(point.ts).getTime() <= targetMs) {
+      referencePrice = point.price;
+    } else {
+      break;
+    }
+  }
+
+  if (referencePrice === null) {
+    referencePrice = series[0]?.price ?? null;
+  }
+
+  if (referencePrice === null || !Number.isFinite(referencePrice) || referencePrice <= 0) return null;
+  return ((priceNow - referencePrice) / referencePrice) * 100;
+}
+
 async function getTcgSnapshot(
   canonical: CanonicalCardRow,
   selectedPrinting: CardPrintingRow | null
@@ -459,6 +486,17 @@ export default async function CanonicalCardPage({
     provider: viewMode === "GRADED" ? activeProvider : null,
   });
   const tcgSnapshot = await getTcgSnapshot(canonical, selectedPrinting);
+  const marketSummaryCurrentPrice =
+    tcgSnapshot.item?.marketPrice
+    ?? vm?.price_now
+    ?? snapshotData?.median_7d
+    ?? null;
+  const marketSummaryChange30d = vm ? computePeriodChangePct(vm.chartSeries, 30) : null;
+  const marketSummaryChange90d = null;
+  const marketSummaryVolume30d = null;
+  const marketSummaryHigh52w = null;
+  const marketSummaryLow52w = null;
+  const marketSummaryVolatility = null;
 
   const subtitleText = [
     canonical.set_name,
@@ -603,6 +641,19 @@ export default async function CanonicalCardPage({
           grade={selectedSnapshotGrade ?? activeBucket}
           initialData={snapshot}
           derivedSignals={vm?.signals ?? null}
+        />
+
+        <MarketSummaryCard
+          currentMarketPrice={marketSummaryCurrentPrice}
+          change7dPct={vm?.change_7d_pct ?? null}
+          change30dPct={marketSummaryChange30d}
+          change90dPct={marketSummaryChange90d}
+          volume30d={marketSummaryVolume30d}
+          activeListings={snapshotData?.active_listings_7d ?? null}
+          chartSeries={vm?.chartSeries ?? []}
+          high52w={marketSummaryHigh52w}
+          low52w={marketSummaryLow52w}
+          volatility={marketSummaryVolatility}
         />
 
         {/* ── Debug (gate: ?debug=1) ─────────────────────────────────────────── */}
