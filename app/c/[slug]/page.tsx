@@ -204,6 +204,10 @@ function rawVariantSegmentLabel(
   return finishText ?? "Variant";
 }
 
+function shouldWrapVariantSegments(count: number): boolean {
+  return count > 4;
+}
+
 function resolveBackHref(returnTo: string | undefined): string {
   const trimmed = (returnTo ?? "").trim();
   if (!trimmed) return DEFAULT_BACK_HREF;
@@ -220,6 +224,7 @@ function toggleHref(
     mode?: ViewMode;
     provider?: GradedSource | null;
     bucket?: GradeBucket | null;
+    marketWindow?: "30d" | "90d";
   },
 ): string {
   const params = new URLSearchParams();
@@ -227,16 +232,22 @@ function toggleHref(
   const mode = opts?.mode;
   const bucket = opts?.bucket;
   const provider = opts?.provider;
+  const marketWindow = opts?.marketWindow;
   if (mode && mode !== "RAW") params.set("mode", mode);
   if (provider) params.set("provider", provider);
   if (bucket) params.set("bucket", bucket);
   if (bucket === "G9") params.set("grade", "PSA9");
   else if (bucket === "G10") params.set("grade", "PSA10");
+  if (marketWindow && marketWindow !== "30d") params.set("marketWindow", marketWindow);
   if (debugEnabled) params.set("debug", "1");
   const backHref = resolveBackHref(returnTo);
   if (backHref !== DEFAULT_BACK_HREF) params.set("returnTo", backHref);
   const qs = params.toString();
   return qs ? `/c/${encodeURIComponent(slug)}?${qs}` : `/c/${encodeURIComponent(slug)}`;
+}
+
+function selectedMarketWindow(raw: string | undefined): "30d" | "90d" {
+  return raw === "90d" ? "90d" : "30d";
 }
 
 function setHref(setName: string | null): string | null {
@@ -278,15 +289,17 @@ export default async function CanonicalCardPage({
     mode?: string;
     provider?: string;
     bucket?: string;
+    marketWindow?: string;
     debug?: string;
     returnTo?: string;
   }>;
 }) {
   const { slug } = await params;
-  const { printing, grade, mode, provider, bucket, debug, returnTo } = await searchParams;
+  const { printing, grade, mode, provider, bucket, marketWindow, debug, returnTo } = await searchParams;
   const supabase = getServerSupabaseClient();
   const debugEnabled = debug === "1";
   const backHref = resolveBackHref(returnTo);
+  const activeMarketWindow = selectedMarketWindow(marketWindow);
 
   const { data: canonical } = await supabase
     .from("canonical_cards")
@@ -488,6 +501,7 @@ export default async function CanonicalCardPage({
                         mode: option,
                         provider: option === "GRADED" ? activeProvider : null,
                         bucket: option === "GRADED" ? activeBucket : null,
+                        marketWindow: activeMarketWindow,
                       },
                     ),
                     active: option === viewMode,
@@ -495,14 +509,14 @@ export default async function CanonicalCardPage({
                 />
               </div>
               {viewMode === "RAW" && variantPills.length > 0 ? (
-                <div>
-                  <p className="mb-2 text-[13px] font-semibold text-[#98a0ae]">Variant</p>
+                  <div>
+                    <p className="mb-2 text-[13px] font-semibold text-[#98a0ae]">Variant</p>
                     <SegmentedControl
-                      wrap={variantPills.length > 1}
+                      wrap={shouldWrapVariantSegments(variantPills.length)}
                       items={variantPills.map(({ printing: variantPrinting, pill }) => ({
                         key: pill.pillKey,
                         label: rawVariantSegmentLabel(variantPrinting, printings),
-                        href: toggleHref(slug, variantPrinting.id, debugEnabled, returnTo, { mode: "RAW" }),
+                        href: toggleHref(slug, variantPrinting.id, debugEnabled, returnTo, { mode: "RAW", marketWindow: activeMarketWindow }),
                         active: selectedPrinting?.id === variantPrinting.id,
                       }))}
                     />
@@ -526,6 +540,7 @@ export default async function CanonicalCardPage({
                             mode: "GRADED",
                             provider: source,
                             bucket: source === activeProvider ? activeBucket : fallbackBucketForSource,
+                            marketWindow: activeMarketWindow,
                           }),
                           active: source === activeProvider,
                           disabled: !providerHasRows,
@@ -543,6 +558,7 @@ export default async function CanonicalCardPage({
                           mode: "GRADED",
                           provider: activeProvider,
                           bucket: gradeBucket,
+                          marketWindow: activeMarketWindow,
                         }),
                         active: gradeBucket === activeBucket,
                         disabled: !availableBucketsForProvider.includes(gradeBucket),
@@ -559,6 +575,21 @@ export default async function CanonicalCardPage({
           canonicalSlug={slug}
           printingId={selectedPrinting?.id ?? null}
           variantRef={rawVariantRef}
+          selectedWindow={activeMarketWindow}
+          windowLinks={{
+            "30d": toggleHref(slug, selectedPrinting?.id ?? null, debugEnabled, returnTo, {
+              mode: viewMode,
+              provider: viewMode === "GRADED" ? activeProvider : null,
+              bucket: viewMode === "GRADED" ? activeBucket : null,
+              marketWindow: "30d",
+            }),
+            "90d": toggleHref(slug, selectedPrinting?.id ?? null, debugEnabled, returnTo, {
+              mode: viewMode,
+              provider: viewMode === "GRADED" ? activeProvider : null,
+              bucket: viewMode === "GRADED" ? activeBucket : null,
+              marketWindow: "90d",
+            }),
+          }}
         />
 
         <GroupedSection>

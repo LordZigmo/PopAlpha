@@ -1,10 +1,15 @@
-import { GroupCard, GroupedSection, Pill, StatRow } from "@/components/ios-grouped-ui";
+import { GroupCard, GroupedSection, Pill, SegmentedControl, StatRow } from "@/components/ios-grouped-ui";
 import { getServerSupabaseClient } from "@/lib/supabaseServer";
 
 type MarketSummaryCardProps = {
   canonicalSlug: string;
   printingId: string | null;
   variantRef: string | null;
+  selectedWindow: "30d" | "90d";
+  windowLinks: {
+    "30d": string;
+    "90d": string;
+  };
 };
 
 type MarketLatestRow = {
@@ -114,10 +119,12 @@ export default async function MarketSummaryCard({
   canonicalSlug,
   printingId,
   variantRef,
+  selectedWindow,
+  windowLinks,
 }: MarketSummaryCardProps) {
   const supabase = getServerSupabaseClient();
 
-  const [marketLatestQuery, historyQuery] = printingId && variantRef
+  const [marketLatestQuery, history30dQuery, history90dQuery] = printingId && variantRef
     ? await Promise.all([
         supabase
           .from("market_latest")
@@ -139,14 +146,27 @@ export default async function MarketSummaryCard({
           .eq("variant_ref", variantRef)
           .order("ts", { ascending: false })
           .limit(200),
+        supabase
+          .from("price_history_points")
+          .select("ts, price")
+          .eq("canonical_slug", canonicalSlug)
+          .eq("provider", "JUSTTCG")
+          .eq("source_window", "90d")
+          .eq("variant_ref", variantRef)
+          .order("ts", { ascending: false })
+          .limit(400),
       ])
     : [
         { data: null },
         { data: [] as HistoryPointRow[] },
+        { data: [] as HistoryPointRow[] },
       ];
 
   const marketLatest = marketLatestQuery.data ?? null;
-  const chartSeries = [...(((historyQuery.data ?? []) as HistoryPointRow[]))].reverse();
+  const history30d = [...(((history30dQuery.data ?? []) as HistoryPointRow[]))].reverse();
+  const history90d = [...(((history90dQuery.data ?? []) as HistoryPointRow[]))].reverse();
+  const chartSeries = selectedWindow === "90d" && history90d.length > 0 ? history90d : history30d;
+  const effectiveWindow: "30d" | "90d" = selectedWindow === "90d" && history90d.length > 0 ? "90d" : "30d";
   const change30d = computeChange30d(chartSeries);
   const { low, high } = computeLowHigh(chartSeries);
   const sparklinePath = buildSparklinePath(chartSeries);
@@ -159,7 +179,27 @@ export default async function MarketSummaryCard({
         header={
           <div className="flex items-center justify-between gap-3">
             <p className="text-[15px] font-semibold text-[#f5f7fb]">Market Summary</p>
-            <Pill label="RAW cache" tone="neutral" size="small" />
+            <div className="flex items-center gap-2">
+              <Pill label="RAW cache" tone="neutral" size="small" />
+              <div className="min-w-[140px]">
+                <SegmentedControl
+                  items={[
+                    {
+                      key: "30d",
+                      label: "30D",
+                      href: windowLinks["30d"],
+                      active: selectedWindow === "30d",
+                    },
+                    {
+                      key: "90d",
+                      label: "90D",
+                      href: windowLinks["90d"],
+                      active: selectedWindow === "90d",
+                    },
+                  ]}
+                />
+              </div>
+            </div>
           </div>
         }
       >
@@ -176,18 +216,18 @@ export default async function MarketSummaryCard({
               </div>
               <div className="mt-4 divide-y divide-white/[0.06] rounded-2xl border border-white/[0.06] bg-[#171b23] px-4">
                 <StatRow label="Updated" value={formatUpdatedLabel(asOfTs)} />
-                <StatRow label="Samples (30D)" value={sampleCount > 0 ? String(sampleCount) : "—"} />
+                <StatRow label={`Samples (${effectiveWindow.toUpperCase()})`} value={sampleCount > 0 ? String(sampleCount) : "—"} />
               </div>
 
               <div className="mt-4 divide-y divide-white/[0.06] rounded-2xl border border-white/[0.06] bg-[#171b23] px-4">
-                <StatRow label="30D Change" value={formatPercent(change30d)} />
-                <StatRow label="30D Low" value={formatUsd(low)} />
-                <StatRow label="30D High" value={formatUsd(high)} />
+                <StatRow label={`${effectiveWindow.toUpperCase()} Change`} value={formatPercent(change30d)} />
+                <StatRow label={`${effectiveWindow.toUpperCase()} Low`} value={formatUsd(low)} />
+                <StatRow label={`${effectiveWindow.toUpperCase()} High`} value={formatUsd(high)} />
               </div>
             </div>
 
             <div className="rounded-2xl border border-white/[0.06] bg-[#11151d] p-4 sm:p-5">
-              <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#8c94a3]">30D Trend</p>
+              <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#8c94a3]">{effectiveWindow.toUpperCase()} Trend</p>
               {sparklinePath ? (
                 <svg
                   viewBox="0 0 280 78"
