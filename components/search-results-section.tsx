@@ -97,7 +97,7 @@ export default function SearchResultsSection({
   }
 
   return (
-    <section className="mt-4 glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
+    <section className="mt-6">
       <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-muted text-xs">{total} results.</p>

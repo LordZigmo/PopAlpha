@@ -15,9 +15,8 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
 
-  // Home page keeps its full-screen search hero — no header needed
-  // Card detail pages use their own floating hero layout
-  if (pathname === "/" || pathname.startsWith("/c/")) {
+  // Home, search, and card detail pages use their own layout — no header
+  if (pathname === "/" || pathname === "/search" || pathname.startsWith("/c/")) {
     return (
       <>
         <div className="fixed right-4 top-4 z-[60]">
@@ -27,8 +26,6 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
       </>
     );
   }
-
-  const hideHeaderSearch = pathname === "/search";
 
   return (
     <>
@@ -40,22 +37,18 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
           </Link>
 
           {/* Search — wrapped in Suspense because useSearchParams() requires it */}
-          {!hideHeaderSearch ? (
-            <Suspense
-              fallback={
-                <div className="flex min-w-0 flex-1 items-center gap-2">
-                  <div
-                    className="input-themed h-9 flex-1 rounded-full opacity-40"
-                    aria-hidden="true"
-                  />
-                </div>
-              }
-            >
-              <NavSearchForm />
-            </Suspense>
-          ) : (
-            <div className="flex-1" />
-          )}
+          <Suspense
+            fallback={
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <div
+                  className="input-themed h-9 flex-1 rounded-full opacity-40"
+                  aria-hidden="true"
+                />
+              </div>
+            }
+          >
+            <NavSearchForm />
+          </Suspense>
 
           {/* Right-side nav */}
           <nav className="ml-auto flex shrink-0 items-center gap-2">
