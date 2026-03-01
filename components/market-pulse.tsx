@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 type MarketPulseProps = {
   /** Total bullish votes — wire to DB later */
@@ -13,15 +13,18 @@ type MarketPulseProps = {
   resolvesAt: number | null;
 };
 
-function formatCountdown(resolvesAt: number | null): string | null {
+function formatCountdown(resolvesAt: number | null, now: number): string | null {
   if (resolvesAt === null) return null;
-  const diff = resolvesAt - Date.now();
+  const diff = resolvesAt - now;
   if (diff <= 0) return "Resolved";
   const days = Math.floor(diff / (1000 * 60 * 60 * 24));
   const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-  if (days > 0) return `Resolves in ${days}d ${hours}h`;
   const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-  return `Resolves in ${hours}h ${minutes}m`;
+  const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  if (days > 0) return `Resolves in ${days}d ${pad(hours)}h ${pad(minutes)}m ${pad(seconds)}s`;
+  if (hours > 0) return `Resolves in ${hours}h ${pad(minutes)}m ${pad(seconds)}s`;
+  return `Resolves in ${minutes}m ${pad(seconds)}s`;
 }
 
 function formatVoteCount(count: number): string {
@@ -39,11 +42,18 @@ export default function MarketPulse({
   const [bearish, setBearish] = useState(initialBearish);
   const [userVote, setUserVote] = useState(initialUserVote);
 
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
   const total = bullish + bearish;
   const bullishPct = total > 0 ? (bullish / total) * 100 : 50;
   const bearishPct = total > 0 ? (bearish / total) * 100 : 50;
   const hasVoted = userVote !== null;
-  const countdown = formatCountdown(resolvesAt);
+  const countdown = formatCountdown(resolvesAt, now);
 
   function handleVote(vote: "bullish" | "bearish") {
     if (hasVoted) return;
@@ -143,7 +153,7 @@ export default function MarketPulse({
 
       {/* Countdown */}
       {hasVoted && countdown && (
-        <p className="mt-4 text-center text-[14px] text-[#666]">
+        <p className="mt-4 text-center text-[14px] tabular-nums text-[#666]">
           {countdown}
         </p>
       )}
