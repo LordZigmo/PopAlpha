@@ -3,19 +3,19 @@
 :root,
 .theme-indigo {
   --color-background: #04080a;
-  --color-surface: #0c1418;
-  --color-surface-soft: #132027;
-  --color-accent: #79d8c8;
-  --color-on-accent: #071a17;
-  --color-text: #eef7f5;
-  --color-muted: #8fa5a1;
-  --color-border: #21343b;
+  --color-surface: #0b1014;
+  --color-surface-soft: #121922;
+  --color-accent: #7aa6b8;
+  --color-on-accent: #071016;
+  --color-text: #eef3f7;
+  --color-muted: #8d99a5;
+  --color-border: #1a242d;
   --color-positive: #66e1b0;
   --color-negative: #ff6c78;
-  --color-gold: #9be7dc;
-  --color-gold-ink: #07201c;
+  --color-gold: #a4c5d2;
+  --color-gold-ink: #081118;
   --color-overlay: rgba(4, 8, 10, 0.86);
-  --shadow-elevated: 0 24px 56px rgba(0, 0, 0, 0.68);
+  --shadow-elevated: 0 28px 72px rgba(0, 0, 0, 0.78);
   --space-panel: 1.5rem;
   --space-card: 1rem;
   --radius-panel: 1.75rem;
@@ -66,9 +66,9 @@ body {
   position: relative;
   min-height: 100vh;
   background:
-    radial-gradient(920px circle at 14% -8%, color-mix(in srgb, var(--color-accent) 18%, transparent), transparent 54%),
-    radial-gradient(760px circle at 88% 2%, color-mix(in srgb, #5a9ec2 12%, transparent), transparent 60%),
-    radial-gradient(820px circle at 52% 118%, color-mix(in srgb, var(--color-positive) 12%, transparent), transparent 62%),
+    radial-gradient(920px circle at 14% -8%, color-mix(in srgb, var(--color-accent) 10%, transparent), transparent 54%),
+    radial-gradient(760px circle at 88% 2%, color-mix(in srgb, #4b6880 8%, transparent), transparent 60%),
+    radial-gradient(820px circle at 52% 118%, color-mix(in srgb, var(--color-positive) 6%, transparent), transparent 62%),
     linear-gradient(180deg, color-mix(in srgb, var(--color-background) 92%, #010304), var(--color-background));
 }
 
@@ -85,11 +85,11 @@ body {
 .glass,
 .card {
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--color-surface-soft) 94%, transparent), color-mix(in srgb, var(--color-surface) 97%, transparent));
-  border: 1px solid color-mix(in srgb, var(--color-border) 88%, #1c262c);
+    linear-gradient(180deg, color-mix(in srgb, var(--color-surface-soft) 96%, transparent), color-mix(in srgb, var(--color-surface) 98%, transparent));
+  border: 1px solid color-mix(in srgb, var(--color-border) 92%, #141b22);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.03),
-    0 0 0 1px color-mix(in srgb, var(--color-accent) 8%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.025),
+    0 0 0 1px color-mix(in srgb, #ffffff 2%, transparent),
     var(--shadow-elevated);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
@@ -102,8 +102,8 @@ body {
   inset: -1px;
   border-radius: 1.75rem;
   z-index: -1;
-  opacity: 0.18;
-  background: radial-gradient(650px circle at 50% -20%, color-mix(in srgb, var(--color-accent) 20%, transparent), transparent 62%);
+  opacity: 0.1;
+  background: radial-gradient(650px circle at 50% -20%, color-mix(in srgb, var(--color-accent) 12%, transparent), transparent 62%);
 }
 
 .app-chrome {
@@ -143,16 +143,16 @@ body {
 .btn-ghost {
   background: color-mix(in srgb, var(--color-surface-soft) 82%, transparent);
   color: var(--color-text);
-  border: 1px solid color-mix(in srgb, var(--color-border) 88%, #1c262c);
+  border: 1px solid color-mix(in srgb, var(--color-border) 90%, #141b22);
 }
 .btn-ghost:hover {
-  background: color-mix(in srgb, var(--color-surface-soft) 94%, var(--color-accent));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 14%, transparent);
+  background: color-mix(in srgb, var(--color-surface-soft) 96%, var(--color-accent));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 10%, transparent);
 }
 
 .input-themed {
   background: color-mix(in srgb, var(--color-surface-soft) 88%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-border) 88%, #1c262c);
+  border: 1px solid color-mix(in srgb, var(--color-border) 90%, #141b22);
   color: var(--color-text);
 }
 .input-themed::placeholder { color: var(--color-muted); }

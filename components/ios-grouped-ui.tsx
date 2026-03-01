@@ -14,7 +14,7 @@ function cn(...values: Array<string | false | null | undefined>) {
 type Tone = "neutral" | "positive" | "negative" | "warning";
 
 const PILL_TONE_CLASS: Record<Tone, string> = {
-  neutral: "border-white/10 bg-white/[0.04] text-[#b4cbc6]",
+  neutral: "border-white/10 bg-white/[0.04] text-[#b6c2cc]",
   positive: "border-emerald-400/20 bg-emerald-400/[0.08] !text-emerald-200",
   negative: "border-rose-400/20 bg-rose-400/[0.08] !text-rose-200",
   warning: "border-amber-400/20 bg-amber-400/[0.08] !text-amber-200",
@@ -43,8 +43,8 @@ const TILE_LABEL_TONE_CLASS: Record<Tone, string> = {
 
 export function PageShell({ children }: { children: ReactNode }) {
   return (
-    <main className="min-h-screen bg-[#04080a] text-[#eef7f5]">
-      <div className="min-h-screen bg-[linear-gradient(180deg,#0c1418_0%,#04080a_16rem,#04080a_100%)]">{children}</div>
+    <main className="min-h-screen bg-[#04080a] text-[#eef3f7]">
+      <div className="min-h-screen bg-[linear-gradient(180deg,#0b1014_0%,#04080a_16rem,#04080a_100%)]">{children}</div>
     </main>
   );
 }
@@ -65,14 +65,14 @@ export function NavBar({
     <header
       className={cn(
         "sticky top-0 z-40 border-b border-white/[0.06] backdrop-blur-xl",
-        compact ? "bg-[#0c1418f2]" : "bg-[#0c1418cc]"
+        compact ? "bg-[#0b1014f2]" : "bg-[#0b1014cc]"
       )}
     >
       <div className="mx-auto flex max-w-5xl items-center gap-3 px-3 pb-3 pt-[max(env(safe-area-inset-top),0.5rem)] sm:px-4">
         <Link
           href={backHref}
           aria-label="Back"
-          className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-[#132027]/90 text-[#d4f1eb]"
+          className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-[#121922]/92 text-[#dde7ee]"
         >
           <span className="text-[26px] leading-none">‹</span>
         </Link>
@@ -81,7 +81,7 @@ export function NavBar({
             {title ? (
               <p className={cn("truncate font-semibold tracking-[-0.02em]", compact ? "text-[15px]" : "text-[17px]")}>{title}</p>
             ) : null}
-            {subtitle ? <p className="truncate text-[12px] text-[#8fa5a1]">{subtitle}</p> : null}
+            {subtitle ? <p className="truncate text-[12px] text-[#8d99a5]">{subtitle}</p> : null}
           </div>
         ) : null}
       </div>
@@ -104,8 +104,8 @@ export function GroupedSection({
     <section className={cn("mt-6", className)}>
       {title || description ? (
         <div className="mb-2 px-1">
-          {title ? <p className="text-[13px] font-semibold uppercase tracking-[0.08em] text-[#8fa5a1]">{title}</p> : null}
-          {description ? <p className="mt-1 text-[13px] text-[#738784]">{description}</p> : null}
+          {title ? <p className="text-[13px] font-semibold uppercase tracking-[0.08em] text-[#8d99a5]">{title}</p> : null}
+          {description ? <p className="mt-1 text-[13px] text-[#73808d]">{description}</p> : null}
         </div>
       ) : null}
       <div className="space-y-3">{children}</div>
@@ -127,8 +127,8 @@ export function GroupCard({
   return (
     <div
       className={cn(
-        "overflow-hidden border border-white/[0.07] bg-[#0f171b] shadow-[0_12px_28px_rgba(0,0,0,0.22)]",
-        inset ? "rounded-2xl bg-[#132027]" : "rounded-[28px]",
+        "overflow-hidden border border-white/[0.07] bg-[#0d1318] shadow-[0_18px_42px_rgba(0,0,0,0.34)]",
+        inset ? "rounded-2xl bg-[#121922]" : "rounded-[28px]",
         className
       )}
     >
@@ -212,12 +212,12 @@ export function StatRow({
   return (
     <div className="flex min-h-11 items-center justify-between gap-3 py-3">
       <div className="min-w-0">
-        <p className="text-[15px] text-[#d8ebe7]">{label}</p>
+        <p className="text-[15px] text-[#dbe4eb]">{label}</p>
         {meta ? (
-          <div className="mt-1 text-[12px] text-[#8fa5a1]">{typeof meta === "string" ? <Pill label={meta} tone={tone} size="small" /> : meta}</div>
+          <div className="mt-1 text-[12px] text-[#8d99a5]">{typeof meta === "string" ? <Pill label={meta} tone={tone} size="small" /> : meta}</div>
         ) : null}
       </div>
-      <div className="shrink-0 text-right text-[15px] font-semibold text-[#eef7f5]">{value}</div>
+      <div className="shrink-0 text-right text-[15px] font-semibold text-[#eef3f7]">{value}</div>
     </div>
   );
 }
@@ -232,7 +232,7 @@ export function SegmentedControl({
   return (
     <div
       className={cn(
-        "rounded-2xl border border-white/[0.06] bg-[#0c1418] p-1",
+        "rounded-2xl border border-white/[0.06] bg-[#0b1014] p-1",
         wrap ? "flex flex-wrap gap-1.5" : "grid auto-cols-fr grid-flow-col gap-1"
       )}
     >
@@ -240,8 +240,8 @@ export function SegmentedControl({
         const className = cn(
           "flex min-h-11 items-center justify-center rounded-xl px-3 text-center text-[13px] font-semibold transition",
           item.active
-            ? "bg-[#1c2b31] text-[#eef7f5] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
-            : "text-[#8fa5a1]",
+            ? "bg-[#1a242d] text-[#eef3f7] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
+            : "text-[#8d99a5]",
           item.disabled && "cursor-default opacity-60",
           wrap && "min-w-fit"
         );
