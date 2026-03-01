@@ -100,7 +100,7 @@ export default function EbayListings({ query, canonicalSlug, printingId, grade }
               href={`https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(normalizedQuery)}`}
               target="_blank"
               rel="noreferrer"
-              className="text-[13px] font-semibold text-[#777]"
+              className="text-[14px] font-semibold text-[#777]"
             >
               Live eBay Listings
             </a>
@@ -109,10 +109,10 @@ export default function EbayListings({ query, canonicalSlug, printingId, grade }
       </div>
 
       <div className="mb-4">
-        <button type="button" onClick={() => setShowQuery((value) => !value)} className="text-[13px] font-semibold text-[#777]">
+        <button type="button" onClick={() => setShowQuery((value) => !value)} className="text-[14px] font-semibold text-[#777]">
           {showQuery ? "Hide query" : "Show query"}
         </button>
-        {showQuery ? <p className="mt-2 text-[13px] text-[#666]">{normalizedQuery}</p> : null}
+        {showQuery ? <p className="mt-2 text-[14px] text-[#666]">{normalizedQuery}</p> : null}
       </div>
 
       {loading ? (
@@ -132,9 +132,9 @@ export default function EbayListings({ query, canonicalSlug, printingId, grade }
         </div>
       ) : null}
 
-      {!loading && error ? <p className="text-[15px] text-[#777]">Listings unavailable right now.</p> : null}
+      {!loading && error ? <p className="text-[16px] text-[#777]">Listings unavailable right now.</p> : null}
       {!loading && !error && items.length === 0 ? (
-        <p className="text-[15px] text-[#777]">No live listings yet. PopAlpha will surface evidence as the market forms.</p>
+        <p className="text-[16px] text-[#777]">No live listings yet. PopAlpha will surface evidence as the market forms.</p>
       ) : null}
 
       {!loading && !error && shownItems.length > 0 ? (
@@ -149,10 +149,10 @@ export default function EbayListings({ query, canonicalSlug, printingId, grade }
               >
                 <div className="min-w-0">
                   <div className="flex min-w-0 items-center gap-2">
-                    <p className="truncate text-[14px] font-semibold text-[#F0F0F0]">{item.title}</p>
-                    <span className="shrink-0 text-[12px] font-medium text-[#666]">{item.condition ?? "n/a"}</span>
+                    <p className="truncate text-[15px] font-semibold text-[#F0F0F0]">{item.title}</p>
+                    <span className="shrink-0 text-[13px] font-medium text-[#666]">{item.condition ?? "n/a"}</span>
                   </div>
-                  <p className="mt-1 truncate text-[12px] text-[#6B6B6B]">
+                  <p className="mt-1 truncate text-[13px] text-[#6B6B6B]">
                     {item.shipping ? `${formatMoney(item.shipping.value, item.shipping.currency)} shipping` : "Shipping unknown"}
                     {item.endTime
                       ? ` • ends ${new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(item.endTime))}`
@@ -160,10 +160,10 @@ export default function EbayListings({ query, canonicalSlug, printingId, grade }
                   </p>
                 </div>
                 <div className="text-right">
-                  <p className="text-[14px] font-semibold tabular-nums text-[#F0F0F0]">
+                  <p className="text-[15px] font-semibold tabular-nums text-[#F0F0F0]">
                     {item.price ? formatMoney(item.price.value, item.price.currency) : "—"}
                   </p>
-                  <p className="mt-1 text-[12px] font-medium uppercase tracking-[0.08em] text-[#6B6B6B]">Ask</p>
+                  <p className="mt-1 text-[13px] font-medium uppercase tracking-[0.08em] text-[#6B6B6B]">Ask</p>
                 </div>
               </a>
             </li>

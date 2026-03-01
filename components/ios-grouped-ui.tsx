@@ -104,8 +104,8 @@ export function GroupedSection({
     <section className={cn("mt-6", className)}>
       {title || description ? (
         <div className="mb-2 px-1">
-          {title ? <p className="text-[14px] font-semibold uppercase tracking-[0.08em] text-[#6B6B6B]">{title}</p> : null}
-          {description ? <p className="mt-1 text-[14px] text-[#555]">{description}</p> : null}
+          {title ? <p className="text-[15px] font-semibold uppercase tracking-[0.08em] text-[#6B6B6B]">{title}</p> : null}
+          {description ? <p className="mt-1 text-[15px] text-[#555]">{description}</p> : null}
         </div>
       ) : null}
       <div className="space-y-3">{children}</div>
@@ -151,7 +151,7 @@ export function Pill({
     <span
       className={cn(
         "inline-flex items-center rounded-full border font-semibold",
-        size === "small" ? "min-h-6 px-2.5 text-[12px]" : "min-h-7 px-3 text-[13px]",
+        size === "small" ? "min-h-6 px-2.5 text-[13px]" : "min-h-8 px-3 text-[14px]",
         PILL_TONE_CLASS[tone]
       )}
     >
@@ -191,8 +191,8 @@ export function StatTile({
 }) {
   return (
     <GroupCard inset className={TILE_TONE_CLASS[tone]}>
-      <p className={cn("text-[13px] font-semibold uppercase tracking-[0.08em]", TILE_LABEL_TONE_CLASS[tone])}>{label}</p>
-      <div className={cn("mt-2 text-[26px] font-semibold tracking-[-0.03em]", TILE_VALUE_TONE_CLASS[tone])}>{value}</div>
+      <p className={cn("text-[14px] font-semibold uppercase tracking-[0.08em]", TILE_LABEL_TONE_CLASS[tone])}>{label}</p>
+      <div className={cn("mt-2 text-[28px] font-semibold tracking-[-0.03em]", TILE_VALUE_TONE_CLASS[tone])}>{value}</div>
       {detail ? <div className="mt-3">{typeof detail === "string" ? <Pill label={detail} tone={tone} size="small" /> : detail}</div> : null}
     </GroupCard>
   );
@@ -212,12 +212,12 @@ export function StatRow({
   return (
     <div className="flex min-h-11 items-center justify-between gap-3 py-3">
       <div className="min-w-0">
-        <p className="text-[16px] text-[#D0D0D0]">{label}</p>
+        <p className="text-[17px] text-[#D0D0D0]">{label}</p>
         {meta ? (
-          <div className="mt-1 text-[13px] text-[#6B6B6B]">{typeof meta === "string" ? <Pill label={meta} tone={tone} size="small" /> : meta}</div>
+          <div className="mt-1 text-[14px] text-[#6B6B6B]">{typeof meta === "string" ? <Pill label={meta} tone={tone} size="small" /> : meta}</div>
         ) : null}
       </div>
-      <div className="shrink-0 text-right text-[16px] font-semibold text-[#F0F0F0]">{value}</div>
+      <div className="shrink-0 text-right text-[17px] font-semibold text-[#F0F0F0]">{value}</div>
     </div>
   );
 }
@@ -233,8 +233,8 @@ export function StatStripItem({
 }) {
   return (
     <div className="inline-flex flex-col">
-      <p className="text-[12px] font-semibold uppercase tracking-[0.1em] text-[#6B6B6B]">{label}</p>
-      <p className={cn("mt-0.5 text-[18px] font-bold tabular-nums tracking-[-0.02em]", TILE_VALUE_TONE_CLASS[tone])}>{value}</p>
+      <p className="text-[13px] font-semibold uppercase tracking-[0.1em] text-[#6B6B6B]">{label}</p>
+      <p className={cn("mt-0.5 text-[20px] font-bold tabular-nums tracking-[-0.02em]", TILE_VALUE_TONE_CLASS[tone])}>{value}</p>
     </div>
   );
 }
@@ -255,7 +255,7 @@ export function SegmentedControl({
     >
       {items.map((item) => {
         const className = cn(
-          "flex min-h-11 items-center justify-center rounded-xl px-3 text-center text-[14px] font-semibold transition",
+          "flex min-h-11 items-center justify-center rounded-xl px-3 text-center text-[15px] font-semibold transition",
           item.active
             ? "bg-[#222222] text-[#F0F0F0] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
             : "text-[#6B6B6B]",

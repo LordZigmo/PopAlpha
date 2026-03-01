@@ -245,7 +245,8 @@ function toggleHref(
   const backHref = resolveBackHref(returnTo);
   if (backHref !== DEFAULT_BACK_HREF) params.set("returnTo", backHref);
   const qs = params.toString();
-  return qs ? `/c/${encodeURIComponent(slug)}?${qs}` : `/c/${encodeURIComponent(slug)}`;
+  const path = qs ? `/c/${encodeURIComponent(slug)}?${qs}` : `/c/${encodeURIComponent(slug)}`;
+  return `${path}#content`;
 }
 
 function selectedMarketWindow(raw: string | undefined): "7d" | "30d" | "90d" {
@@ -477,14 +478,14 @@ export default async function CanonicalCardPage({
         altText={canonical.canonical_name}
       />
 
-      <div className="content-sheet">
+      <div id="content" className="content-sheet">
         <div className="mx-auto max-w-5xl px-4 pb-[max(env(safe-area-inset-bottom),2.5rem)] pt-8 sm:px-6 sm:pb-[max(env(safe-area-inset-bottom),3.5rem)]">
           {/* ── Card identity + price ──────────────────────────────────── */}
           <div className="mb-6">
-            <p className="text-[13px] font-semibold uppercase tracking-[0.1em] text-[#6B6B6B]">
+            <p className="text-[15px] font-semibold uppercase tracking-[0.1em] text-[#6B6B6B]">
               {subtitleText}
             </p>
-            <h1 className="mt-1 text-[34px] font-semibold leading-tight tracking-[-0.035em] text-[#F0F0F0] sm:text-[42px]">
+            <h1 className="mt-1 text-[36px] font-semibold leading-tight tracking-[-0.035em] text-[#F0F0F0] sm:text-[44px]">
               {canonical.canonical_name}
             </h1>
             {primaryPrice !== null && (
@@ -492,7 +493,7 @@ export default async function CanonicalCardPage({
                 <span className="text-[46px] font-bold leading-none tracking-[-0.04em] tabular-nums text-[#F0F0F0] sm:text-[56px]">
                   {primaryPrice}
                 </span>
-                <span className="text-[15px] leading-tight text-[#6B6B6B]">
+                <span className="text-[16px] leading-tight text-[#6B6B6B]">
                   {primaryPriceLabel}
                 </span>
               </div>
@@ -507,7 +508,7 @@ export default async function CanonicalCardPage({
                   {canonical.set_name && canonicalSetHref ? (
                     <Link
                       href={canonicalSetHref}
-                      className="inline-flex min-h-7 items-center rounded-full border border-[#1E1E1E] bg-white/[0.04] px-3 text-[14px] font-semibold text-[#999]"
+                      className="inline-flex min-h-7 items-center rounded-full border border-[#1E1E1E] bg-white/[0.04] px-3 text-[15px] font-semibold text-[#999]"
                     >
                       {canonical.set_name}
                     </Link>
@@ -574,7 +575,7 @@ export default async function CanonicalCardPage({
           <GroupCard>
             <div className="space-y-4">
               <div>
-                <p className="mb-2 text-[14px] font-semibold text-[#777]">Mode</p>
+                <p className="mb-2 text-[15px] font-semibold text-[#777]">Mode</p>
                 <SegmentedControl
                   items={VIEW_MODES.map((option) => ({
                     key: option,
@@ -597,7 +598,7 @@ export default async function CanonicalCardPage({
               </div>
               {viewMode === "RAW" && variantPills.length > 0 ? (
                   <div>
-                    <p className="mb-2 text-[14px] font-semibold text-[#777]">Variant</p>
+                    <p className="mb-2 text-[15px] font-semibold text-[#777]">Variant</p>
                     <SegmentedControl
                       wrap={shouldWrapVariantSegments(variantPills.length)}
                       items={variantPills.map(({ printing: variantPrinting, pill }) => ({
@@ -612,7 +613,7 @@ export default async function CanonicalCardPage({
               {viewMode === "GRADED" ? (
                 <>
                   <div>
-                    <p className="mb-2 text-[14px] font-semibold text-[#777]">Source</p>
+                    <p className="mb-2 text-[15px] font-semibold text-[#777]">Source</p>
                     <SegmentedControl
                       items={GRADED_SOURCES.map((source) => {
                         const providerHasRows = availableProviders.includes(source);
@@ -636,7 +637,7 @@ export default async function CanonicalCardPage({
                     />
                   </div>
                   <div>
-                    <p className="mb-2 text-[14px] font-semibold text-[#777]">Grade</p>
+                    <p className="mb-2 text-[15px] font-semibold text-[#777]">Grade</p>
                     <SegmentedControl
                       items={GRADE_BUCKETS.map((gradeBucket) => ({
                         key: gradeBucket,
