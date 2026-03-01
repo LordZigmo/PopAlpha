@@ -39,6 +39,7 @@ type CardPrintingRow = {
   edition: "UNLIMITED" | "FIRST_EDITION" | "UNKNOWN";
   stamp: string | null;
   image_url: string | null;
+  rarity: string | null;
 };
 
 type SnapshotRow = {
@@ -259,6 +260,18 @@ function setHref(setName: string | null): string | null {
   return `/sets/${encodeURIComponent(setName)}`;
 }
 
+function rarityColor(rarity: string | null): { label: string; color: string; borderColor: string; bgColor: string } | null {
+  if (!rarity) return null;
+  const r = rarity.toLowerCase();
+  if (r === "common") return { label: "Common", color: "#D0D0D0", borderColor: "rgba(208,208,208,0.25)", bgColor: "rgba(208,208,208,0.06)" };
+  if (r === "uncommon") return { label: "Uncommon", color: "#4ADE80", borderColor: "rgba(74,222,128,0.25)", bgColor: "rgba(74,222,128,0.06)" };
+  if (r === "rare" || r.includes("rare")) return { label: rarity, color: "#60A5FA", borderColor: "rgba(96,165,250,0.25)", bgColor: "rgba(96,165,250,0.06)" };
+  if (r.includes("mythic") || r.includes("very rare") || r.includes("illustration") || r === "promo") return { label: rarity, color: "#C084FC", borderColor: "rgba(192,132,252,0.25)", bgColor: "rgba(192,132,252,0.06)" };
+  if (r.includes("legend") || r.includes("hyper") || r.includes("secret") || r.includes("special art") || r === "sar") return { label: rarity, color: "#FB923C", borderColor: "rgba(251,146,60,0.25)", bgColor: "rgba(251,146,60,0.06)" };
+  // Fallback for unknown rarities
+  return { label: rarity, color: "#999", borderColor: "rgba(153,153,153,0.25)", bgColor: "rgba(153,153,153,0.06)" };
+}
+
 function scarcitySignal(active7d: number | null): { label: string; tone: "positive" | "warning" | "neutral" } {
   if (active7d === null || active7d === undefined) return { label: "Forming", tone: "neutral" };
   if (active7d <= 2) return { label: "High", tone: "positive" };
@@ -336,7 +349,7 @@ export default async function CanonicalCardPage({
 
   const { data: printingsData } = await supabase
     .from("card_printings")
-    .select("id, language, set_code, finish, finish_detail, edition, stamp, image_url")
+    .select("id, language, set_code, finish, finish_detail, edition, stamp, image_url, rarity")
     .eq("canonical_slug", slug);
 
   const printings = ((printingsData ?? []) as CardPrintingRow[]).sort(sortPrintings);
@@ -469,6 +482,7 @@ export default async function CanonicalCardPage({
 
   const primaryPrice = snapshotData?.median_7d != null ? formatUsdCompact(snapshotData.median_7d) : null;
   const primaryPriceLabel = `${selectedSnapshotGrade ? legacyGradeLabel(selectedSnapshotGrade) : `${providerLabel(activeProvider)} ${gradeBucketLabel(activeBucket)}`} · 7-day median ask`;
+  const rarityInfo = selectedPrinting ? rarityColor(selectedPrinting.rarity) : null;
   const canonicalSetHref = setHref(canonical.set_name);
 
   return (
@@ -503,7 +517,16 @@ export default async function CanonicalCardPage({
               {snapshotData?.active_listings_7d != null && <Pill label={`Liquidity ${liquidity.label}`} tone={liquidity.tone} />}
               {selectedPrinting && selectedPrintingLabel ? (
                 <Pill label={selectedPrintingLabel} tone="metallic" />
-              ) : (
+              ) : null}
+              {rarityInfo && (
+                <span
+                  className="inline-flex min-h-8 items-center rounded-full border px-3 text-[14px] font-semibold"
+                  style={{ color: rarityInfo.color, borderColor: rarityInfo.borderColor, backgroundColor: rarityInfo.bgColor }}
+                >
+                  {rarityInfo.label}
+                </span>
+              )}
+              {!selectedPrinting || !selectedPrintingLabel ? (
                 <>
                   {canonical.set_name && canonicalSetHref ? (
                     <Link
@@ -515,7 +538,7 @@ export default async function CanonicalCardPage({
                   ) : null}
                   {canonical.card_number ? <Pill label={`#${canonical.card_number}`} tone="neutral" /> : null}
                 </>
-              )}
+              ) : null}
             </div>
           </div>
 
