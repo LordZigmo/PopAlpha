@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { GroupCard, GroupedSection, Pill, Skeleton, StatRow, StatTile } from "@/components/ios-grouped-ui";
+import { GroupCard, GroupedSection, Pill, Skeleton, StatRow } from "@/components/ios-grouped-ui";
+import PriceTickerStrip from "@/components/price-ticker-strip";
+import CollapsibleSection from "@/components/collapsible-section";
 
 type SnapshotPayload = {
   ok: boolean;
@@ -54,50 +56,11 @@ function tileTone(value: number | null | undefined): "neutral" | "positive" | "n
   return value > 0 ? "positive" : "negative";
 }
 
-function changeMicrocopy(value: number | null): string {
-  if (value === null) return "Insufficient sample";
-  if (value === 0) return "Flat versus 30D";
-  return value > 0 ? "Pricing firming" : "Pricing easing";
-}
-
-function signalConfidence(points30d: number | null): { label: "High" | "Medium" | "Low"; tone: "positive" | "warning" | "negative" } | null {
-  if (points30d === null || !Number.isFinite(points30d)) return null;
-  if (points30d >= 80) return { label: "High", tone: "positive" };
-  if (points30d >= 30) return { label: "Medium", tone: "warning" };
-  return { label: "Low", tone: "negative" };
-}
-
-function formatSignalsUpdated(value: string | null): string {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
-  const diffMs = Date.now() - date.getTime();
-  const absMs = Math.abs(diffMs);
-  const minutes = Math.round(absMs / (60 * 1000));
-  let relative = "just now";
-  if (minutes >= 1 && minutes < 60) relative = `${minutes}m ago`;
-  else if (minutes >= 60) {
-    const hours = Math.round(minutes / 60);
-    if (hours < 24) relative = `${hours}h ago`;
-    else relative = `${Math.round(hours / 24)}d ago`;
-  }
-  const exact = new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
-  return `${relative} • ${exact}`;
-}
-
 export default function MarketSnapshotTiles({
   slug,
   printingId,
   grade,
   initialData = null,
-  derivedSignals = null,
-  signalsMeta = null,
 }: MarketSnapshotTilesProps) {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<SnapshotPayload | null>(initialData);
@@ -149,17 +112,13 @@ export default function MarketSnapshotTiles({
     Number.isFinite(data.low30d)
       ? data.high30d - data.low30d
       : null;
-  const confidence = signalConfidence(signalsMeta?.historyPoints30d ?? null);
 
   return (
     <GroupedSection>
       <GroupCard
         header={
           <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-[15px] font-semibold text-[#F0F0F0]">Live signal dashboard</p>
-              <p className="text-[12px] text-[#6B6B6B]">Aligned metrics, clear states, no decorative noise.</p>
-            </div>
+            <p className="text-[15px] font-semibold text-[#F0F0F0]">Market Intelligence</p>
             {loading ? <Pill label="Refreshing" tone="neutral" size="small" /> : null}
           </div>
         }
@@ -167,14 +126,9 @@ export default function MarketSnapshotTiles({
         {!loading && data && !data.ok ? <p className="text-[14px] text-[#777]">Snapshot unavailable right now.</p> : null}
 
         {loading && !data ? (
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {Array.from({ length: 6 }).map((_, index) => (
-              <GroupCard key={index} inset>
-                <Skeleton className="h-3 w-24" />
-                <Skeleton className="mt-3 h-8 w-28" />
-                <Skeleton className="mt-4 h-6 w-24" />
-              </GroupCard>
-            ))}
+          <div className="space-y-3">
+            <Skeleton className="h-16 w-full" rounded="card" />
+            <Skeleton className="h-16 w-full" rounded="card" />
           </div>
         ) : null}
 
@@ -183,88 +137,29 @@ export default function MarketSnapshotTiles({
             {median7d === null && changePct === null && trimmedMedian30d === null ? (
               <p className="text-[14px] text-[#777]">Pricing data forming.</p>
             ) : (
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {median7d !== null && (
-                  <StatTile label="Median Ask (7D)" value={formatUsd(median7d)} detail="Rolling 7-day median" />
-                )}
-                {changePct !== null && (
-                  <StatTile
-                    label="7D Change"
-                    value={formatPercent(changePct)}
-                    detail={changeMicrocopy(changePct)}
-                    tone={tileTone(changePct)}
-                  />
-                )}
-                {trimmedMedian30d !== null && (
-                  <StatTile label="Trimmed Median (30D)" value={formatUsd(trimmedMedian30d)} detail="Outliers trimmed" />
-                )}
-              </div>
+              <PriceTickerStrip
+                items={[
+                  ...(median7d !== null ? [{ label: "Median Ask (7D)", value: formatUsd(median7d) }] : []),
+                  ...(changePct !== null ? [{ label: "7D Change", value: formatPercent(changePct), tone: tileTone(changePct) as "neutral" | "positive" | "negative" }] : []),
+                  ...(trimmedMedian30d !== null ? [{ label: "Trimmed Med (30D)", value: formatUsd(trimmedMedian30d) }] : []),
+                ]}
+              />
             )}
             {(active7d > 0 || listingVelocity !== null || spread30d !== null) && (
-              <div className="mt-4 divide-y divide-[#1E1E1E] rounded-2xl border border-[#1E1E1E] bg-[#151515] px-4">
-                {active7d > 0 && (
-                  <StatRow label="Active Listings (7D)" value={active7d} meta="Observed live supply" />
-                )}
-                {listingVelocity !== null && (
-                  <StatRow label="Listing Velocity" value={formatVelocity(listingVelocity)} meta="Observed per day" />
-                )}
-                {spread30d !== null && (
-                  <StatRow label="High-Low Spread (30D)" value={formatUsd(spread30d)} meta="Ask range" />
-                )}
-              </div>
+              <CollapsibleSection title="Market Depth" defaultOpen={false}>
+                <div className="divide-y divide-[#1E1E1E] rounded-2xl border border-[#1E1E1E] bg-[#111111] px-4">
+                  {active7d > 0 && (
+                    <StatRow label="Active Listings (7D)" value={active7d} meta="Observed live supply" />
+                  )}
+                  {listingVelocity !== null && (
+                    <StatRow label="Listing Velocity" value={formatVelocity(listingVelocity)} meta="Observed per day" />
+                  )}
+                  {spread30d !== null && (
+                    <StatRow label="High-Low Spread (30D)" value={formatUsd(spread30d)} meta="Ask range" />
+                  )}
+                </div>
+              </CollapsibleSection>
             )}
-            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              <StatTile
-                label="Trend"
-                value={derivedSignals?.trend?.label ?? "N/A"}
-                detail={derivedSignals?.trend ? `Score ${derivedSignals.trend.score.toFixed(0)}/100` : "Awaiting backend"}
-                tone={
-                  derivedSignals?.trend
-                    ? derivedSignals.trend.score >= 60 ? "positive"
-                      : derivedSignals.trend.score <= 40 ? "negative"
-                      : "warning"
-                    : "neutral"
-                }
-              />
-              <StatTile
-                label="Breakout"
-                value={derivedSignals?.breakout?.label ?? "N/A"}
-                detail={derivedSignals?.breakout ? `Score ${derivedSignals.breakout.score.toFixed(0)}/100` : "Awaiting backend"}
-                tone={
-                  derivedSignals?.breakout
-                    ? derivedSignals.breakout.score >= 65 ? "positive"
-                      : derivedSignals.breakout.score <= 35 ? "negative"
-                      : "warning"
-                    : "neutral"
-                }
-              />
-              <StatTile
-                label="Value"
-                value={derivedSignals?.value?.label ?? "N/A"}
-                detail={derivedSignals?.value ? `Score ${derivedSignals.value.score.toFixed(0)}/100` : "Awaiting backend"}
-                tone={
-                  derivedSignals?.value
-                    ? derivedSignals.value.score >= 60 ? "positive"
-                      : derivedSignals.value.score <= 40 ? "negative"
-                      : "warning"
-                    : "neutral"
-                }
-              />
-            </div>
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <StatTile
-                label="Signals Confidence"
-                value={confidence?.label ?? "—"}
-                detail={confidence ? "Data volume based" : "Awaiting backend"}
-                tone={confidence?.tone ?? "neutral"}
-              />
-              <GroupCard inset>
-                <StatRow
-                  label="Signals Updated"
-                  value={formatSignalsUpdated(signalsMeta?.signalsAsOfTs ?? null)}
-                />
-              </GroupCard>
-            </div>
           </>
         ) : null}
       </GroupCard>

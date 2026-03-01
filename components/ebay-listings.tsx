@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { GroupCard, GroupedSection, Pill, Skeleton } from "@/components/ios-grouped-ui";
+import { Pill, Skeleton } from "@/components/ios-grouped-ui";
 
 type Listing = {
   externalId: string;
@@ -91,89 +91,85 @@ export default function EbayListings({ query, canonicalSlug, printingId, grade }
   }, [canonicalSlug, printingId, grade, normalizedQuery]);
 
   return (
-    <GroupedSection>
-      <GroupCard
-        header={
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <Pill label={loading ? "Refreshing" : "Live"} tone="neutral" size="small" />
-              {items.length > 0 ? (
-                <a
-                  href={`https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(normalizedQuery)}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-[12px] font-semibold text-[#777]"
-                >
-                  Live eBay Listings
-                </a>
-              ) : null}
-            </div>
-          </div>
-        }
-      >
-        <div className="mb-4">
-          <button type="button" onClick={() => setShowQuery((value) => !value)} className="text-[12px] font-semibold text-[#777]">
-            {showQuery ? "Hide query" : "Show query"}
-          </button>
-          {showQuery ? <p className="mt-2 text-[12px] text-[#666]">{normalizedQuery}</p> : null}
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Pill label={loading ? "Refreshing" : "Live"} tone="neutral" size="small" />
+          {items.length > 0 ? (
+            <a
+              href={`https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(normalizedQuery)}`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-[12px] font-semibold text-[#777]"
+            >
+              Live eBay Listings
+            </a>
+          ) : null}
         </div>
+      </div>
 
-        {loading ? (
-          <div className="divide-y divide-[#1E1E1E] overflow-hidden rounded-2xl border border-[#1E1E1E] bg-white/[0.02]">
-            {Array.from({ length: 6 }).map((_, index) => (
-              <div key={index} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 py-3">
+      <div className="mb-4">
+        <button type="button" onClick={() => setShowQuery((value) => !value)} className="text-[12px] font-semibold text-[#777]">
+          {showQuery ? "Hide query" : "Show query"}
+        </button>
+        {showQuery ? <p className="mt-2 text-[12px] text-[#666]">{normalizedQuery}</p> : null}
+      </div>
+
+      {loading ? (
+        <div className="divide-y divide-[#1E1E1E] overflow-hidden rounded-2xl border border-[#1E1E1E] bg-white/[0.02]">
+          {Array.from({ length: 6 }).map((_, index) => (
+            <div key={index} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 py-3">
+              <div className="min-w-0">
+                <Skeleton className="h-4 w-4/5" />
+                <Skeleton className="mt-2 h-3 w-1/2" />
+              </div>
+              <div className="text-right">
+                <Skeleton className="ml-auto h-4 w-20" />
+                <Skeleton className="mt-2 ml-auto h-3 w-14" />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {!loading && error ? <p className="text-[14px] text-[#777]">Listings unavailable right now.</p> : null}
+      {!loading && !error && items.length === 0 ? (
+        <p className="text-[14px] text-[#777]">No live listings yet. PopAlpha will surface evidence as the market forms.</p>
+      ) : null}
+
+      {!loading && !error && shownItems.length > 0 ? (
+        <ul className="divide-y divide-[#1E1E1E] overflow-hidden rounded-2xl border border-[#1E1E1E] bg-white/[0.02]">
+          {shownItems.map((item, index) => (
+            <li key={`${item.externalId || item.itemWebUrl}-${index}`}>
+              <a
+                href={item.itemWebUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 py-3 transition hover:bg-[#1A1A1A]"
+              >
                 <div className="min-w-0">
-                  <Skeleton className="h-4 w-4/5" />
-                  <Skeleton className="mt-2 h-3 w-1/2" />
+                  <div className="flex min-w-0 items-center gap-2">
+                    <p className="truncate text-[13px] font-semibold text-[#F0F0F0]">{item.title}</p>
+                    <span className="shrink-0 text-[11px] font-medium text-[#666]">{item.condition ?? "n/a"}</span>
+                  </div>
+                  <p className="mt-1 truncate text-[11px] text-[#6B6B6B]">
+                    {item.shipping ? `${formatMoney(item.shipping.value, item.shipping.currency)} shipping` : "Shipping unknown"}
+                    {item.endTime
+                      ? ` • ends ${new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(item.endTime))}`
+                      : ""}
+                  </p>
                 </div>
                 <div className="text-right">
-                  <Skeleton className="ml-auto h-4 w-20" />
-                  <Skeleton className="mt-2 ml-auto h-3 w-14" />
+                  <p className="text-[13px] font-semibold tabular-nums text-[#F0F0F0]">
+                    {item.price ? formatMoney(item.price.value, item.price.currency) : "—"}
+                  </p>
+                  <p className="mt-1 text-[11px] font-medium uppercase tracking-[0.08em] text-[#6B6B6B]">Ask</p>
                 </div>
-              </div>
-            ))}
-          </div>
-        ) : null}
-
-        {!loading && error ? <p className="text-[14px] text-[#777]">Listings unavailable right now.</p> : null}
-        {!loading && !error && items.length === 0 ? (
-          <p className="text-[14px] text-[#777]">No live listings yet. PopAlpha will surface evidence as the market forms.</p>
-        ) : null}
-
-        {!loading && !error && shownItems.length > 0 ? (
-          <ul className="divide-y divide-[#1E1E1E] overflow-hidden rounded-2xl border border-[#1E1E1E] bg-white/[0.02]">
-            {shownItems.map((item, index) => (
-              <li key={`${item.externalId || item.itemWebUrl}-${index}`}>
-                <a
-                  href={item.itemWebUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 py-3 transition hover:bg-[#1A1A1A]"
-                >
-                  <div className="min-w-0">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <p className="truncate text-[13px] font-semibold text-[#F0F0F0]">{item.title}</p>
-                      <span className="shrink-0 text-[11px] font-medium text-[#666]">{item.condition ?? "n/a"}</span>
-                    </div>
-                    <p className="mt-1 truncate text-[11px] text-[#6B6B6B]">
-                      {item.shipping ? `${formatMoney(item.shipping.value, item.shipping.currency)} shipping` : "Shipping unknown"}
-                      {item.endTime
-                        ? ` • ends ${new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(item.endTime))}`
-                        : ""}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-[13px] font-semibold text-[#F0F0F0]">
-                      {item.price ? formatMoney(item.price.value, item.price.currency) : "—"}
-                    </p>
-                    <p className="mt-1 text-[11px] font-medium uppercase tracking-[0.08em] text-[#6B6B6B]">Ask</p>
-                  </div>
-                </a>
-              </li>
-            ))}
-          </ul>
-        ) : null}
-      </GroupCard>
-    </GroupedSection>
+              </a>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
   );
 }

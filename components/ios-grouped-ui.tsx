@@ -222,6 +222,23 @@ export function StatRow({
   );
 }
 
+export function StatStripItem({
+  label,
+  value,
+  tone = "neutral",
+}: {
+  label: string;
+  value: string;
+  tone?: Tone;
+}) {
+  return (
+    <div className="inline-flex flex-col">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#6B6B6B]">{label}</p>
+      <p className={cn("mt-0.5 text-[16px] font-bold tabular-nums tracking-[-0.02em]", TILE_VALUE_TONE_CLASS[tone])}>{value}</p>
+    </div>
+  );
+}
+
 export function SegmentedControl({
   items,
   wrap = false,

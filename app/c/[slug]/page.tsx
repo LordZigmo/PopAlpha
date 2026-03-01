@@ -10,10 +10,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import CanonicalCardFloatingHero from "@/components/canonical-card-floating-hero";
 import CardDetailNavBar from "@/components/card-detail-nav-bar";
+import CollapsibleSection from "@/components/collapsible-section";
 import EbayListings from "@/components/ebay-listings";
 import { GroupCard, GroupedSection, PageShell, Pill, SegmentedControl } from "@/components/ios-grouped-ui";
 import MarketSummaryCard from "@/components/market-summary-card";
 import MarketSnapshotTiles from "@/components/market-snapshot-tiles";
+import PriceTickerStrip from "@/components/price-ticker-strip";
+import SignalGauge from "@/components/signal-gauge";
 import { buildEbayQuery, type GradeSelection, type GradedSource } from "@/lib/ebay-query";
 import { buildPrintingPill } from "@/lib/cards/detail";
 import { buildRawVariantRef } from "@/lib/identity/variant-ref";
@@ -270,6 +273,27 @@ function liquiditySignal(active7d: number | null): { label: string; tone: "posit
   return { label: "Active", tone: "positive" };
 }
 
+function signalConfidenceLabel(points30d: number | null): { label: string; tone: "positive" | "warning" | "negative" | "neutral" } {
+  if (points30d === null || !Number.isFinite(points30d)) return { label: "--", tone: "neutral" };
+  if (points30d >= 80) return { label: "High", tone: "positive" };
+  if (points30d >= 30) return { label: "Medium", tone: "warning" };
+  return { label: "Low", tone: "negative" };
+}
+
+function formatSignalsUpdated(value: string | null): string {
+  if (!value) return "--";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "--";
+  const diffMs = Date.now() - date.getTime();
+  const absMs = Math.abs(diffMs);
+  const minutes = Math.round(absMs / (60 * 1000));
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+}
+
 function formatUsdCompact(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return "—";
   return new Intl.NumberFormat(undefined, {
@@ -496,9 +520,67 @@ export default async function CanonicalCardPage({
               )}
             </div>
           </div>
-        {/* ── Variant selector ──────────────────────────────────────────────────
-            Near the top so users can pivot grade or printing before
-            reading the market signal data below. */}
+        {/* ── Signal Gauges ──────────────────────────────────────────────────── */}
+        {vm?.signals && (vm.signals.trend || vm.signals.breakout || vm.signals.value) && (
+          <div className="mt-6 grid grid-cols-3 gap-3">
+            <SignalGauge
+              label="Trend"
+              score={vm.signals.trend?.score ?? null}
+              displayLabel={vm.signals.trend?.label}
+            />
+            <SignalGauge
+              label="Breakout"
+              score={vm.signals.breakout?.score ?? null}
+              displayLabel={vm.signals.breakout?.label}
+            />
+            <SignalGauge
+              label="Value"
+              score={vm.signals.value?.score ?? null}
+              displayLabel={vm.signals.value?.label}
+            />
+          </div>
+        )}
+
+        {/* ── Signal meta strip ────────────────────────────────────────────── */}
+        {(vm?.signals_history_points_30d != null || vm?.signals_as_of_ts) && (
+          <div className="mt-4">
+            <PriceTickerStrip
+              items={[
+                {
+                  label: "Confidence",
+                  value: signalConfidenceLabel(vm?.signals_history_points_30d ?? null).label,
+                  tone: signalConfidenceLabel(vm?.signals_history_points_30d ?? null).tone,
+                },
+                {
+                  label: "Last Computed",
+                  value: formatSignalsUpdated(vm?.signals_as_of_ts ?? null),
+                },
+                {
+                  label: "Data Points",
+                  value: vm?.signals_history_points_30d != null ? String(vm.signals_history_points_30d) : "--",
+                },
+              ]}
+            />
+          </div>
+        )}
+
+        {/* ── Market Summary (enlarged chart) ──────────────────────────────── */}
+        <MarketSummaryCard
+          canonicalSlug={slug}
+          printingId={selectedPrinting?.id ?? null}
+          variantRef={rawVariantRef}
+          selectedWindow={activeMarketWindow}
+        />
+
+        {/* ── Market Intelligence ─────────────────────────────────────────── */}
+        <MarketSnapshotTiles
+          slug={slug}
+          printingId={selectedPrinting?.id ?? null}
+          grade={selectedSnapshotGrade ?? activeBucket}
+          initialData={snapshot}
+        />
+
+        {/* ── Variant selector ────────────────────────────────────────────── */}
         <GroupedSection title="Variant">
           <GroupCard>
             <div className="space-y-4">
@@ -587,13 +669,17 @@ export default async function CanonicalCardPage({
           </GroupCard>
         </GroupedSection>
 
-        <MarketSummaryCard
-          canonicalSlug={slug}
-          printingId={selectedPrinting?.id ?? null}
-          variantRef={rawVariantRef}
-          selectedWindow={activeMarketWindow}
-        />
+        {/* ── Live eBay Listings ──────────────────────────────────────────── */}
+        <CollapsibleSection title="Live eBay Listings" defaultOpen={false} badge={<Pill label="Live" tone="neutral" size="small" />}>
+          <EbayListings
+            query={ebayQuery}
+            canonicalSlug={slug}
+            printingId={selectedPrinting?.id ?? null}
+            grade={legacyListingsGrade}
+          />
+        </CollapsibleSection>
 
+        {/* ── Community Sentiment ─────────────────────────────────────────── */}
         <GroupedSection>
           <GroupCard
             header={
@@ -608,31 +694,6 @@ export default async function CanonicalCardPage({
             </div>
           </GroupCard>
         </GroupedSection>
-
-        {/* ── Market Intelligence ───────────────────────────────────────────────
-            Primary signal tiles: 7D median, 7D change, trimmed 30D median,
-            plus depth rows for velocity and spread. */}
-        <MarketSnapshotTiles
-          slug={slug}
-          printingId={selectedPrinting?.id ?? null}
-          grade={selectedSnapshotGrade ?? activeBucket}
-          initialData={snapshot}
-          derivedSignals={vm?.signals ?? null}
-          signalsMeta={{
-            historyPoints30d: vm?.signals_history_points_30d ?? null,
-            signalsAsOfTs: vm?.signals_as_of_ts ?? null,
-          }}
-        />
-
-        {/* ── Live Market Listings ──────────────────────────────────────────────
-            Raw eBay evidence. Also triggers /api/market/observe to record
-            prices into listing_observations for future signal aggregation. */}
-        <EbayListings
-          query={ebayQuery}
-          canonicalSlug={slug}
-          printingId={selectedPrinting?.id ?? null}
-          grade={legacyListingsGrade}
-        />
         </div>
       </div>
     </PageShell>
