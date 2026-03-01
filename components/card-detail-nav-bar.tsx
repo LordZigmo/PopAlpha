@@ -1,25 +1,23 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { NavBar } from "@/components/ios-grouped-ui";
+import Link from "next/link";
 
 export default function CardDetailNavBar({
-  title,
-  subtitle,
   backHref,
 }: {
-  title: string;
+  title?: string;
   subtitle?: string;
   backHref?: string;
 }) {
-  const [compact, setCompact] = useState(false);
-
-  useEffect(() => {
-    const onScroll = () => setCompact(window.scrollY > 36);
-    onScroll();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
-  }, []);
-
-  return <NavBar title={title} subtitle={subtitle} compact={compact} backHref={backHref} />;
+  return (
+    <div className="pointer-events-none fixed left-3 top-[max(env(safe-area-inset-top),0.5rem)] z-50 sm:left-4">
+      <Link
+        href={backHref ?? "/search"}
+        aria-label="Back"
+        className="pointer-events-auto flex h-14 w-14 items-center justify-center rounded-full bg-white/[0.04] text-[#d7dbe5]"
+      >
+        <span className="text-[26px] leading-none">‹</span>
+      </Link>
+    </div>
+  );
 }

@@ -18,6 +18,11 @@ type MarketSnapshotTilesProps = {
   printingId: string | null;
   grade: string;
   initialData?: SnapshotPayload | null;
+  derivedSignals?: {
+    trend: { label: string; score: number } | null;
+    breakout: { label: string; score: number } | null;
+    value: { label: string; score: number } | null;
+  } | null;
 };
 
 function formatUsd(value: number | null | undefined): string {
@@ -51,7 +56,13 @@ function changeMicrocopy(value: number | null): string {
   return value > 0 ? "Pricing firming" : "Pricing easing";
 }
 
-export default function MarketSnapshotTiles({ slug, printingId, grade, initialData = null }: MarketSnapshotTilesProps) {
+export default function MarketSnapshotTiles({
+  slug,
+  printingId,
+  grade,
+  initialData = null,
+  derivedSignals = null,
+}: MarketSnapshotTilesProps) {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<SnapshotPayload | null>(initialData);
 
@@ -104,7 +115,7 @@ export default function MarketSnapshotTiles({ slug, printingId, grade, initialDa
       : null;
 
   return (
-    <GroupedSection title="Market Intelligence" description="Signal-first view of current ask depth and pricing pressure.">
+    <GroupedSection>
       <GroupCard
         header={
           <div className="flex items-center justify-between gap-3">
@@ -165,6 +176,42 @@ export default function MarketSnapshotTiles({ slug, printingId, grade, initialDa
                 )}
               </div>
             )}
+            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <StatTile
+                label="Trend"
+                value={derivedSignals?.trend?.label ?? "N/A"}
+                detail={derivedSignals?.trend ? `Score ${derivedSignals.trend.score.toFixed(0)}/100` : "Awaiting backend"}
+                tone={
+                  derivedSignals?.trend
+                    ? derivedSignals.trend.score >= 60 ? "positive"
+                      : derivedSignals.trend.score <= 40 ? "warning"
+                      : "neutral"
+                    : "neutral"
+                }
+              />
+              <StatTile
+                label="Breakout"
+                value={derivedSignals?.breakout?.label ?? "N/A"}
+                detail={derivedSignals?.breakout ? `Score ${derivedSignals.breakout.score.toFixed(0)}/100` : "Awaiting backend"}
+                tone={
+                  derivedSignals?.breakout
+                    ? derivedSignals.breakout.score >= 65 ? "positive"
+                      : derivedSignals.breakout.score <= 35 ? "warning"
+                      : "neutral"
+                    : "neutral"
+                }
+              />
+              <StatTile
+                label="Value"
+                value={derivedSignals?.value?.label ?? "N/A"}
+                detail={derivedSignals?.value ? `Score ${derivedSignals.value.score.toFixed(0)}/100` : "Awaiting backend"}
+                tone={
+                  derivedSignals?.value
+                    ? derivedSignals.value.score >= 60 ? "positive" : "neutral"
+                    : "neutral"
+                }
+              />
+            </div>
           </>
         ) : null}
       </GroupCard>

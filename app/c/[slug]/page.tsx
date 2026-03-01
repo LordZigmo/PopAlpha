@@ -11,7 +11,7 @@ import { notFound } from "next/navigation";
 import CanonicalCardFloatingHero from "@/components/canonical-card-floating-hero";
 import CardDetailNavBar from "@/components/card-detail-nav-bar";
 import EbayListings from "@/components/ebay-listings";
-import { GroupCard, GroupedSection, PageShell, Pill, SegmentedControl, StatRow, StatTile } from "@/components/ios-grouped-ui";
+import { GroupCard, GroupedSection, PageShell, Pill, SegmentedControl, StatRow } from "@/components/ios-grouped-ui";
 import MarketSnapshotTiles from "@/components/market-snapshot-tiles";
 import { buildEbayQuery, type GradeSelection, type GradedSource } from "@/lib/ebay-query";
 import { buildPrintingPill } from "@/lib/cards/detail";
@@ -171,10 +171,12 @@ function snapshotGradeForSelection(mode: ViewMode, bucket: GradeBucket | null): 
   return null;
 }
 
-function printingOptionLabel(printing: CardPrintingRow): string {
-  return [finishLabel(printing.finish), printing.edition === "FIRST_EDITION" ? "1st Ed" : null, printing.stamp]
+function printingOptionLabel(printing: CardPrintingRow): string | null {
+  const finish = finishLabel(printing.finish);
+  const safeFinish = finish === "Unknown" ? null : finish;
+  return [safeFinish, printing.edition === "FIRST_EDITION" ? "1st Ed" : null, printing.stamp]
     .filter((value) => Boolean(value))
-    .join(" • ");
+    .join(" • ") || null;
 }
 
 function resolveBackHref(returnTo: string | undefined): string {
@@ -238,19 +240,6 @@ function formatUsdCompact(value: number | null | undefined): string {
     currency: "USD",
     maximumFractionDigits: value >= 1000 ? 0 : 2,
   }).format(value);
-}
-
-function gradePremium(
-  rawPrice: number | null,
-  gradedPrice: number | null
-): { text: string | null; tone: "positive" | "neutral" } {
-  if (!rawPrice || !gradedPrice || rawPrice <= 0) return { text: null, tone: "neutral" };
-  const pct = ((gradedPrice - rawPrice) / rawPrice) * 100;
-  const sign = pct >= 0 ? "+" : "";
-  return {
-    text: `${sign}${Math.round(pct)}% vs Raw`,
-    tone: pct > 10 ? "positive" : "neutral",
-  };
 }
 
 async function getTcgSnapshot(
@@ -354,7 +343,7 @@ export default async function CanonicalCardPage({
   const printings = ((printingsData ?? []) as CardPrintingRow[]).sort(sortPrintings);
   const viewMode = selectedViewMode(mode, grade);
   const selectedPrinting = printings.find((row) => row.id === printing) ?? printings[0] ?? null;
-  const selectedPrintingLabel = selectedPrinting ? printingOptionLabel(selectedPrinting) : "Unknown printing";
+  const selectedPrintingLabel = selectedPrinting ? printingOptionLabel(selectedPrinting) : null;
   const variantPills = printings.map((row) => ({
     printing: row,
     pill: buildPrintingPill({
@@ -483,11 +472,6 @@ export default async function CanonicalCardPage({
   const primaryPriceLabel = `${selectedSnapshotGrade ? legacyGradeLabel(selectedSnapshotGrade) : `${providerLabel(activeProvider)} ${gradeBucketLabel(activeBucket)}`} · 7-day median ask`;
   const canonicalSetHref = setHref(canonical.set_name);
 
-  // Grade Ladder premium calculations.
-  const rawMedian7d = gradeSnapMap.RAW?.median_7d ?? null;
-  const psa9Premium = gradePremium(rawMedian7d, gradeSnapMap.PSA9?.median_7d ?? null);
-  const psa10Premium = gradePremium(rawMedian7d, gradeSnapMap.PSA10?.median_7d ?? null);
-
   return (
     <PageShell>
       <CardDetailNavBar title="" backHref={backHref} />
@@ -502,7 +486,7 @@ export default async function CanonicalCardPage({
           <>
             {snapshotData?.active_listings_7d != null && <Pill label={`Scarcity ${scarcity.label}`} tone={scarcity.tone} />}
             {snapshotData?.active_listings_7d != null && <Pill label={`Liquidity ${liquidity.label}`} tone={liquidity.tone} />}
-            {selectedPrinting ? (
+            {selectedPrinting && selectedPrintingLabel ? (
               <Pill label={selectedPrintingLabel} tone="neutral" />
             ) : (
               <>
@@ -618,102 +602,8 @@ export default async function CanonicalCardPage({
           printingId={selectedPrinting?.id ?? null}
           grade={selectedSnapshotGrade ?? activeBucket}
           initialData={snapshot}
+          derivedSignals={vm?.signals ?? null}
         />
-
-        {/* ── PopAlpha Signals ──────────────────────────────────────────────────
-            Derived analytics. Shows tiles when signal data exists, or a
-            "not enough data" notice when a variant is known but unscored. */}
-        {vm?.selectedVariantRef != null && (
-          <GroupedSection
-            title="PopAlpha Signals"
-            description="Computed nightly from price momentum, volatility, and activity data."
-          >
-            {vm.signals ? (
-              <GroupCard>
-                <div className="grid grid-cols-3 gap-3">
-                  {vm.signals.trend && (
-                    <StatTile
-                      label="Trend"
-                      value={vm.signals.trend.label}
-                      detail={`Score ${vm.signals.trend.score.toFixed(0)}/100`}
-                      tone={
-                        vm.signals.trend.score >= 60 ? "positive"
-                          : vm.signals.trend.score <= 40 ? "warning"
-                          : "neutral"
-                      }
-                    />
-                  )}
-                  {vm.signals.breakout && (
-                    <StatTile
-                      label="Breakout"
-                      value={vm.signals.breakout.label}
-                      detail={`Score ${vm.signals.breakout.score.toFixed(0)}/100`}
-                      tone={
-                        vm.signals.breakout.score >= 65 ? "positive"
-                          : vm.signals.breakout.score <= 35 ? "warning"
-                          : "neutral"
-                      }
-                    />
-                  )}
-                  {vm.signals.value && (
-                    <StatTile
-                      label="Value Zone"
-                      value={vm.signals.value.label}
-                      detail={`Score ${vm.signals.value.score.toFixed(0)}/100`}
-                      tone={vm.signals.value.score >= 60 ? "positive" : "neutral"}
-                    />
-                  )}
-                </div>
-              </GroupCard>
-            ) : (
-              <GroupCard>
-                <p className="text-[14px] text-[#8c94a3]">
-                  Not enough recent activity to score this variant.
-                </p>
-              </GroupCard>
-            )}
-          </GroupedSection>
-        )}
-
-        {/* ── Grade Ladder ──────────────────────────────────────────────────────
-            Shows RAW / PSA 9 / PSA 10 side-by-side so collectors instantly
-            see the grading premium. TCGPlayer reference price anchors raw value. */}
-        <GroupedSection title="Grade Ladder" description="7-day median ask across condition tiers.">
-          <GroupCard>
-            <div className="grid grid-cols-3 gap-3">
-              <StatTile
-                label="Raw"
-                value={formatUsdCompact(gradeSnapMap.RAW?.median_7d)}
-                detail={viewMode === "RAW" ? "Current view" : undefined}
-              />
-              <StatTile
-                label="PSA 9"
-                value={formatUsdCompact(gradeSnapMap.PSA9?.median_7d)}
-                detail={psa9Premium.text}
-                tone={psa9Premium.tone}
-              />
-              <StatTile
-                label="PSA 10"
-                value={formatUsdCompact(gradeSnapMap.PSA10?.median_7d)}
-                detail={psa10Premium.text}
-                tone={psa10Premium.tone}
-              />
-            </div>
-            {tcgSnapshot.item?.marketPrice != null && (
-              <div className="mt-4 border-t border-white/[0.06] pt-4">
-                <StatRow
-                  label="TCGPlayer Market"
-                  value={formatUsdCompact(tcgSnapshot.item.marketPrice)}
-                  meta={
-                    tcgSnapshot.updatedAt
-                      ? `Updated ${new Date(tcgSnapshot.updatedAt).toLocaleDateString()}`
-                      : "Raw reference price"
-                  }
-                />
-              </div>
-            )}
-          </GroupCard>
-        </GroupedSection>
 
         {/* ── Debug (gate: ?debug=1) ─────────────────────────────────────────── */}
         {debugEnabled ? (
