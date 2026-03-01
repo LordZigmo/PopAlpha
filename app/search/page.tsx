@@ -59,8 +59,8 @@ type SearchResultBundle = {
   totalPages: number;
 };
 
-const DEFAULT_PAGE_SIZE = 25;
-const ALLOWED_PAGE_SIZES = new Set([25, 50, 100]);
+const DEFAULT_PAGE_SIZE = 24;
+const ALLOWED_PAGE_SIZES = new Set([24, 48, 96]);
 
 function toPositiveInt(value: string | undefined, fallback: number): number {
   if (!value) return fallback;

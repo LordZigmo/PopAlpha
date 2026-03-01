@@ -6,8 +6,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { parseSearchSort, SEARCH_SORTS, sortSearchResults } from "@/lib/search/sort.mjs";
 
 type SearchSort = "relevance" | "newest" | "oldest";
-type SearchPageSize = 25 | 50 | 100;
-const PAGE_SIZE_OPTIONS: SearchPageSize[] = [25, 50, 100];
+type SearchPageSize = 24 | 48 | 96;
+const PAGE_SIZE_OPTIONS: SearchPageSize[] = [24, 48, 96];
 
 type SearchDisplayRow = {
   canonical_slug: string;
@@ -41,9 +41,9 @@ export default function SearchResultsSection({
   const pathname = usePathname();
   const router = useRouter();
   const [sort, setSort] = useState<SearchSort>(initialSort);
-  const initialPageSize = Number.parseInt(currentParams.pageSize ?? "25", 10);
+  const initialPageSize = Number.parseInt(currentParams.pageSize ?? "24", 10);
   const [pageSize, setPageSize] = useState<SearchPageSize>(
-    initialPageSize === 50 || initialPageSize === 100 ? initialPageSize : 25
+    initialPageSize === 48 || initialPageSize === 96 ? initialPageSize : 24
   );
 
   const sortedRows = useMemo(() => sortSearchResults(rows, sort), [rows, sort]);
@@ -86,7 +86,7 @@ export default function SearchResultsSection({
 
   function updatePageSize(nextPageSize: string) {
     const parsed = Number.parseInt(nextPageSize, 10);
-    const resolved: SearchPageSize = parsed === 50 || parsed === 100 ? parsed : 25;
+    const resolved: SearchPageSize = parsed === 48 || parsed === 96 ? parsed : 24;
     setPageSize(resolved);
 
     const params = new URLSearchParams(baseParams);
@@ -125,7 +125,7 @@ export default function SearchResultsSection({
           <p className="text-muted mt-1 text-sm">Try adding set name, year, or card number.</p>
         </div>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+        <div className="grid grid-cols-3 gap-2 sm:gap-3 lg:grid-cols-4">
           {sortedRows.map((row) => (
             <Link
               key={row.canonical_slug}
@@ -148,14 +148,14 @@ export default function SearchResultsSection({
                   </div>
                 )}
               </div>
-              <div className="mt-2 min-w-0 px-1">
-                <p className="text-app truncate text-sm font-semibold">{row.canonical_name}</p>
-                <p className="text-muted mt-0.5 truncate text-xs">
+              <div className="mt-1 min-w-0 px-0.5 sm:mt-2 sm:px-1">
+                <p className="text-app truncate text-[11px] font-semibold sm:text-sm">{row.canonical_name}</p>
+                <p className="text-muted mt-0.5 hidden truncate text-xs sm:block">
                   {row.year ? `${row.year}` : "Year unknown"}
                   {row.set_name ? ` • ${row.set_name}` : ""}
                 </p>
                 {row.raw_price != null ? (
-                  <p className="mt-0.5 text-xs font-semibold" style={{ color: "var(--color-accent)" }}>
+                  <p className="mt-0.5 text-[10px] font-semibold sm:text-xs" style={{ color: "var(--color-accent)" }}>
                     ${row.raw_price < 1 ? row.raw_price.toFixed(2) : row.raw_price.toFixed(0)} RAW
                   </p>
                 ) : null}
