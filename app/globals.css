@@ -179,6 +179,10 @@ body {
   border-color: color-mix(in srgb, var(--color-accent) 68%, var(--color-border));
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 35%, transparent);
 }
+.search-bubble:focus-within {
+  border-color: color-mix(in srgb, var(--color-accent) 68%, var(--color-border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 35%, transparent);
+}
 
 .badge-positive {
   border: 1px solid color-mix(in srgb, var(--color-positive) 60%, var(--color-border));

@@ -175,22 +175,25 @@ export default function CardSearch({
 
   const sizeClasses = size === "search"
     ? {
-        form: "gap-2",
-        input: "h-16 rounded-full px-7 text-[17px]",
-        button: "h-16 rounded-full px-7 text-base font-semibold",
+        bubble: "h-16 rounded-full pl-7 pr-2",
+        input: "text-[17px]",
+        iconBtn: "h-11 w-11",
+        iconSvg: "h-5 w-5",
         dropdown: "top-[calc(100%+0.75rem)] rounded-3xl",
       }
     : size === "hero"
       ? {
-          form: "gap-2",
-          input: "h-14 rounded-full px-6 text-base",
-          button: "h-14 rounded-full px-6 text-sm font-semibold",
+          bubble: "h-14 rounded-full pl-6 pr-1.5",
+          input: "text-base",
+          iconBtn: "h-10 w-10",
+          iconSvg: "h-[18px] w-[18px]",
           dropdown: "top-[calc(100%+0.75rem)] rounded-3xl",
         }
       : {
-          form: "gap-2",
-          input: "h-9 rounded-full px-4 text-sm",
-          button: "h-9 rounded-full px-4 text-sm font-semibold",
+          bubble: "h-9 rounded-full pl-4 pr-1",
+          input: "text-sm",
+          iconBtn: "h-7 w-7",
+          iconSvg: "h-3.5 w-3.5",
           dropdown: "top-[calc(100%+0.5rem)] rounded-2xl",
         };
 
@@ -201,7 +204,7 @@ export default function CardSearch({
           event.preventDefault();
           submitSearch();
         }}
-        className={joinClasses("flex min-w-0 items-center", sizeClasses.form)}
+        className={joinClasses("search-bubble input-themed flex min-w-0 items-center gap-1", sizeClasses.bubble)}
         role="search"
       >
         <input
@@ -244,16 +247,39 @@ export default function CardSearch({
             }
           }}
           placeholder={placeholder}
-          className={joinClasses("input-themed min-w-0 flex-1", sizeClasses.input)}
+          className={joinClasses("min-w-0 flex-1 bg-transparent outline-none placeholder:text-[var(--color-muted)]", sizeClasses.input)}
           role="combobox"
           aria-autocomplete="list"
           aria-expanded={shouldOpen}
           aria-controls={listboxId}
           aria-activedescendant={activeResult ? `${listboxId}-${activeResult.canonical_slug}` : undefined}
         />
+        <button
+          type="button"
+          className={joinClasses(
+            "flex shrink-0 items-center justify-center rounded-full transition text-[var(--color-muted)] hover:text-[var(--color-text)]",
+            sizeClasses.iconBtn,
+          )}
+          aria-label="Camera search"
+        >
+          <svg className={sizeClasses.iconSvg} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+            <circle cx="12" cy="13" r="4" />
+          </svg>
+        </button>
         {showSubmitButton ? (
-          <button type="submit" className={joinClasses("btn-accent shrink-0", sizeClasses.button)}>
-            Search
+          <button
+            type="submit"
+            className={joinClasses(
+              "btn-accent flex shrink-0 items-center justify-center rounded-full",
+              sizeClasses.iconBtn,
+            )}
+            aria-label="Search"
+          >
+            <svg className={sizeClasses.iconSvg} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
           </button>
         ) : null}
       </form>
