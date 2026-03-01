@@ -224,7 +224,7 @@ function toggleHref(
     mode?: ViewMode;
     provider?: GradedSource | null;
     bucket?: GradeBucket | null;
-    marketWindow?: "30d" | "90d";
+    marketWindow?: "7d" | "30d" | "90d";
   },
 ): string {
   const params = new URLSearchParams();
@@ -246,7 +246,8 @@ function toggleHref(
   return qs ? `/c/${encodeURIComponent(slug)}?${qs}` : `/c/${encodeURIComponent(slug)}`;
 }
 
-function selectedMarketWindow(raw: string | undefined): "30d" | "90d" {
+function selectedMarketWindow(raw: string | undefined): "7d" | "30d" | "90d" {
+  if (raw === "7d") return "7d";
   return raw === "90d" ? "90d" : "30d";
 }
 
@@ -577,6 +578,12 @@ export default async function CanonicalCardPage({
           variantRef={rawVariantRef}
           selectedWindow={activeMarketWindow}
           windowLinks={{
+            "7d": toggleHref(slug, selectedPrinting?.id ?? null, debugEnabled, returnTo, {
+              mode: viewMode,
+              provider: viewMode === "GRADED" ? activeProvider : null,
+              bucket: viewMode === "GRADED" ? activeBucket : null,
+              marketWindow: "7d",
+            }),
             "30d": toggleHref(slug, selectedPrinting?.id ?? null, debugEnabled, returnTo, {
               mode: viewMode,
               provider: viewMode === "GRADED" ? activeProvider : null,

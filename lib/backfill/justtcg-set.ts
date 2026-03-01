@@ -48,7 +48,7 @@ type HistoryRow = {
   ts: string;
   price: number;
   currency: string;
-  source_window: "30d" | "90d" | "365d" | "full";
+  source_window: "7d" | "30d" | "90d" | "365d" | "full";
 };
 export type BackfillJustTcgSetResult = {
   ok: boolean; runId: string | null; setKey: string; canonicalSetName: string; providerSetId: string; language: "EN";
@@ -97,7 +97,7 @@ function buildHistoryRows(
   variant: JustTcgVariant,
   canonicalSlug: string,
   variantRef: string,
-  sourceWindow: "30d" | "90d" | "365d" | "full",
+  sourceWindow: "7d" | "30d" | "90d" | "365d" | "full",
 ): HistoryRow[] {
   const history = (variant.priceHistory?.length ?? 0) > 0 ? variant.priceHistory ?? [] : variant.priceHistory30d ?? [];
   if (history.length === 0) return [];
@@ -119,7 +119,7 @@ function buildHistoryRows(
       source_window: sourceWindow,
     });
 
-    if (sourceWindow !== "30d") {
+    if (sourceWindow !== "30d" && sourceWindow !== "7d") {
       const tsMs = toEpochMillis(point.t);
       if (tsMs && tsMs >= cutoffMs) {
         rows.push({
@@ -279,39 +279,19 @@ async function refreshSignalsInBatches(keys: Array<Record<string, unknown>>) {
 
   return { rowsUpdated, firstError };
 }
-async function fetchSetCards(providerSetId: string, aggressive: boolean) {
+async function fetchCardsForWindow(providerSetId: string, requestedWindow: string, endpointLabel: string) {
   const pages: JustTcgCard[] = [];
   const auditRows: Array<Record<string, unknown>> = [];
   const nowIso = new Date().toISOString();
   let providerRequestsUsed = 0;
-  const providerWindowRequested = aggressive ? "all" : "30d";
-  let providerWindowUsed = providerWindowRequested;
   let firstError: string | null = null;
   let page = 1;
-  let currentWindow = providerWindowRequested;
+  const currentWindow = requestedWindow;
   let expectedTotal: number | null = null;
   const seenCardIds = new Set<string>();
   while (page <= MAX_PAGES) {
     providerRequestsUsed += 1;
-    let result = await fetchJustTcgCardsPage(providerSetId, page, { limit: 200, priceHistoryDuration: currentWindow });
-    if (page === 1 && currentWindow === "all" && result.httpStatus >= 300) {
-      currentWindow = "365d";
-      providerWindowUsed = "365d";
-      providerRequestsUsed += 1;
-      result = await fetchJustTcgCardsPage(providerSetId, page, { limit: 200, priceHistoryDuration: currentWindow });
-      if (result.httpStatus >= 300) {
-        currentWindow = "90d";
-        providerWindowUsed = "90d";
-        providerRequestsUsed += 1;
-        result = await fetchJustTcgCardsPage(providerSetId, page, { limit: 200, priceHistoryDuration: currentWindow });
-        if (result.httpStatus >= 300) {
-          currentWindow = "30d";
-          providerWindowUsed = "30d";
-          providerRequestsUsed += 1;
-          result = await fetchJustTcgCardsPage(providerSetId, page, { limit: 200, priceHistoryDuration: currentWindow });
-        }
-      }
-    }
+    const result = await fetchJustTcgCardsPage(providerSetId, page, { limit: 200, priceHistoryDuration: currentWindow });
     const envelopeMeta = (
       result.rawEnvelope
       && typeof result.rawEnvelope === "object"
@@ -340,7 +320,7 @@ async function fetchSetCards(providerSetId: string, aggressive: boolean) {
       },
       status_code: result.httpStatus,
       fetched_at: nowIso,
-      request_hash: requestHash(PROVIDER, "/cards/backfill-set-page", { set: providerSetId, page, limit: 200, priceHistoryDuration: currentWindow }),
+      request_hash: requestHash(PROVIDER, endpointLabel, { set: providerSetId, page, limit: 200, priceHistoryDuration: currentWindow }),
       canonical_slug: null,
       variant_ref: null,
     });
@@ -359,7 +339,50 @@ async function fetchSetCards(providerSetId: string, aggressive: boolean) {
     firstError = `JustTCG returned 0 cards for set ${providerSetId}`;
   }
   if (page > MAX_PAGES) firstError = `JustTCG set fetch exceeded ${MAX_PAGES} pages for ${providerSetId}`;
-  return { cards: pages, auditRows, providerRequestsUsed, providerWindowRequested, providerWindowUsed, firstError };
+  return { cards: pages, auditRows, providerRequestsUsed, firstError };
+}
+
+async function fetchSetCards(providerSetId: string, aggressive: boolean) {
+  const providerWindowRequested = aggressive ? "all" : "30d";
+  let providerWindowUsed = providerWindowRequested;
+
+  let primary = await fetchCardsForWindow(providerSetId, providerWindowRequested, "/cards/backfill-set-page");
+  if (providerWindowRequested === "all" && primary.firstError) {
+    providerWindowUsed = "365d";
+    primary = await fetchCardsForWindow(providerSetId, "365d", "/cards/backfill-set-page");
+    if (primary.firstError) {
+      providerWindowUsed = "90d";
+      primary = await fetchCardsForWindow(providerSetId, "90d", "/cards/backfill-set-page");
+      if (primary.firstError) {
+        providerWindowUsed = "30d";
+        primary = await fetchCardsForWindow(providerSetId, "30d", "/cards/backfill-set-page");
+      }
+    }
+  }
+
+  let history7dCards: JustTcgCard[] = [];
+  let history7dAuditRows: Array<Record<string, unknown>> = [];
+  let history7dRequestsUsed = 0;
+  let history7dError: string | null = null;
+
+  if (!primary.firstError && providerWindowUsed !== "7d") {
+    const sevenDay = await fetchCardsForWindow(providerSetId, "7d", "/cards/backfill-set-page-7d");
+    history7dCards = sevenDay.cards;
+    history7dAuditRows = sevenDay.auditRows;
+    history7dRequestsUsed = sevenDay.providerRequestsUsed;
+    history7dError = sevenDay.firstError;
+  }
+
+  return {
+    cards: primary.cards,
+    auditRows: [...primary.auditRows, ...history7dAuditRows],
+    providerRequestsUsed: primary.providerRequestsUsed + history7dRequestsUsed,
+    providerWindowRequested,
+    providerWindowUsed,
+    history7dCards,
+    history7dError,
+    firstError: primary.firstError,
+  };
 }
 
 export async function backfillJustTcgSet(setKey: string, options: BackfillJustTcgSetOptions = {}): Promise<BackfillJustTcgSetResult> {
@@ -463,6 +486,12 @@ export async function backfillJustTcgSet(setKey: string, options: BackfillJustTc
       bucket.push(card);
       cardsByNumber.set(key, bucket);
     }
+    const history7dVariantMap = new Map<string, JustTcgVariant>();
+    for (const card of fetchResult.history7dCards ?? []) {
+      for (const variant of card.variants ?? []) {
+        history7dVariantMap.set(variant.id, variant);
+      }
+    }
 
     const mappingRows: Record<string, unknown>[] = [];
     const ingestRows: Record<string, unknown>[] = [];
@@ -558,6 +587,10 @@ export async function backfillJustTcgSet(setKey: string, options: BackfillJustTc
               ? "90d"
               : "30d";
       const historyPointRows = buildHistoryRows(best.variant, printing.canonical_slug, variantRef, historyWindow);
+      const history7dVariant = history7dVariantMap.get(best.variant.id) ?? null;
+      const history7dRows = history7dVariant
+        ? buildHistoryRows(history7dVariant, printing.canonical_slug, variantRef, "7d")
+        : [];
       const historyPoints30d = historyPointRows.filter((row) => row.source_window === "30d").length;
       const metrics = mapVariantToMetrics(best.variant, printing.canonical_slug, printing.id, "RAW", observedAt);
 
@@ -568,7 +601,7 @@ export async function backfillJustTcgSet(setKey: string, options: BackfillJustTc
       providerRawRows.push({
         provider: PROVIDER, endpoint: "/cards/backfill-set-match",
         params: { set: providerSetId, printing_id: printing.id, canonical_slug: printing.canonical_slug, aggressive },
-        response: { selected: { provider_card_id: best.card.id, provider_variant_id: best.variant.id, provider_card_number: best.card.number, provider_printing: best.variant.printing ?? null, provider_condition: best.variant.condition ?? null, match_confidence: Math.min(1, best.score / 215), match_notes: best.notes }, pricing: summarizeVariant(best.variant), cached: { historyWindow, historyPoints: historyPointRows.length } },
+        response: { selected: { provider_card_id: best.card.id, provider_variant_id: best.variant.id, provider_card_number: best.card.number, provider_printing: best.variant.printing ?? null, provider_condition: best.variant.condition ?? null, match_confidence: Math.min(1, best.score / 215), match_notes: best.notes }, pricing: summarizeVariant(best.variant), cached: { historyWindow, historyPoints: historyPointRows.length, historyPoints7d: history7dRows.length } },
         status_code: 200,
         fetched_at: nowIso,
         request_hash: requestHash(PROVIDER, "/cards/backfill-set-match", { set: providerSetId, printing_id: printing.id, variant_id: best.variant.id, aggressive }),
@@ -583,7 +616,7 @@ export async function backfillJustTcgSet(setKey: string, options: BackfillJustTc
         card_id: best.variant.id, source: PROVIDER, grade: "RAW", price_type: "MARKET", price_usd: best.variant.price, currency: "USD", volume: null, external_id: best.variant.id, url: null,
         observed_at: observedAt, canonical_slug: printing.canonical_slug, printing_id: printing.id, updated_at: nowIso,
       });
-      historyRows.push(...historyPointRows);
+      historyRows.push(...historyPointRows, ...history7dRows);
 
       if (!metrics) {
         pushFailure({ canonical_slug: printing.canonical_slug, printing_id: printing.id, code: "PROVIDER_PAYLOAD_INVALID", detail: "JustTCG variant payload missing required provider analytics fields.", sample: { variantId: best.variant.id } });

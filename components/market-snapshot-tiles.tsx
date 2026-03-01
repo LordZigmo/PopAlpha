@@ -60,11 +60,11 @@ function changeMicrocopy(value: number | null): string {
   return value > 0 ? "Pricing firming" : "Pricing easing";
 }
 
-function signalConfidence(points30d: number | null): { label: "High" | "Medium" | "Low"; tone: "positive" | "warning" | "neutral" } | null {
+function signalConfidence(points30d: number | null): { label: "High" | "Medium" | "Low"; tone: "positive" | "warning" | "negative" } | null {
   if (points30d === null || !Number.isFinite(points30d)) return null;
   if (points30d >= 80) return { label: "High", tone: "positive" };
   if (points30d >= 30) return { label: "Medium", tone: "warning" };
-  return { label: "Low", tone: "neutral" };
+  return { label: "Low", tone: "negative" };
 }
 
 function formatSignalsUpdated(value: string | null): string {
@@ -221,8 +221,8 @@ export default function MarketSnapshotTiles({
                 tone={
                   derivedSignals?.trend
                     ? derivedSignals.trend.score >= 60 ? "positive"
-                      : derivedSignals.trend.score <= 40 ? "warning"
-                      : "neutral"
+                      : derivedSignals.trend.score <= 40 ? "negative"
+                      : "warning"
                     : "neutral"
                 }
               />
@@ -233,8 +233,8 @@ export default function MarketSnapshotTiles({
                 tone={
                   derivedSignals?.breakout
                     ? derivedSignals.breakout.score >= 65 ? "positive"
-                      : derivedSignals.breakout.score <= 35 ? "warning"
-                      : "neutral"
+                      : derivedSignals.breakout.score <= 35 ? "negative"
+                      : "warning"
                     : "neutral"
                 }
               />
@@ -244,21 +244,26 @@ export default function MarketSnapshotTiles({
                 detail={derivedSignals?.value ? `Score ${derivedSignals.value.score.toFixed(0)}/100` : "Awaiting backend"}
                 tone={
                   derivedSignals?.value
-                    ? derivedSignals.value.score >= 60 ? "positive" : "neutral"
+                    ? derivedSignals.value.score >= 60 ? "positive"
+                      : derivedSignals.value.score <= 40 ? "negative"
+                      : "warning"
                     : "neutral"
                 }
               />
             </div>
-            <div className="mt-4 divide-y divide-white/[0.06] rounded-2xl border border-white/[0.06] bg-[#11151d] px-4">
-              <StatRow
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <StatTile
                 label="Signals Confidence"
                 value={confidence?.label ?? "—"}
-                meta={confidence ? <Pill label={confidence.label} tone={confidence.tone} size="small" /> : undefined}
+                detail={confidence ? "Data volume based" : "Awaiting backend"}
+                tone={confidence?.tone ?? "neutral"}
               />
-              <StatRow
-                label="Signals Updated"
-                value={formatSignalsUpdated(signalsMeta?.signalsAsOfTs ?? null)}
-              />
+              <GroupCard inset>
+                <StatRow
+                  label="Signals Updated"
+                  value={formatSignalsUpdated(signalsMeta?.signalsAsOfTs ?? null)}
+                />
+              </GroupCard>
             </div>
           </>
         ) : null}

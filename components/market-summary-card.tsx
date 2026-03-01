@@ -5,8 +5,9 @@ type MarketSummaryCardProps = {
   canonicalSlug: string;
   printingId: string | null;
   variantRef: string | null;
-  selectedWindow: "30d" | "90d";
+  selectedWindow: "7d" | "30d" | "90d";
   windowLinks: {
+    "7d": string;
     "30d": string;
     "90d": string;
   };
@@ -93,6 +94,15 @@ function computeLowHigh(points: HistoryPointRow[]): { low: number | null; high: 
   };
 }
 
+function filterRecentDays(points: HistoryPointRow[], days: number): HistoryPointRow[] {
+  if (points.length === 0) return [];
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+  return points.filter((point) => {
+    const ts = new Date(point.ts).getTime();
+    return Number.isFinite(ts) && ts >= cutoff;
+  });
+}
+
 function buildSparklinePath(points: HistoryPointRow[]): string | null {
   if (points.length < 2) return null;
   const values = points
@@ -124,7 +134,7 @@ export default async function MarketSummaryCard({
 }: MarketSummaryCardProps) {
   const supabase = getServerSupabaseClient();
 
-  const [marketLatestQuery, history30dQuery, history90dQuery] = printingId && variantRef
+  const [marketLatestQuery, history7dQuery, history30dQuery, history90dQuery] = printingId && variantRef
     ? await Promise.all([
         supabase
           .from("market_latest")
@@ -137,6 +147,15 @@ export default async function MarketSummaryCard({
           .order("updated_at", { ascending: false })
           .limit(1)
           .maybeSingle<MarketLatestRow>(),
+        supabase
+          .from("price_history_points")
+          .select("ts, price")
+          .eq("canonical_slug", canonicalSlug)
+          .eq("provider", "JUSTTCG")
+          .eq("source_window", "7d")
+          .eq("variant_ref", variantRef)
+          .order("ts", { ascending: false })
+          .limit(120),
         supabase
           .from("price_history_points")
           .select("ts, price")
@@ -160,14 +179,27 @@ export default async function MarketSummaryCard({
         { data: null },
         { data: [] as HistoryPointRow[] },
         { data: [] as HistoryPointRow[] },
+        { data: [] as HistoryPointRow[] },
       ];
 
   const marketLatest = marketLatestQuery.data ?? null;
+  const cachedHistory7d = [...(((history7dQuery.data ?? []) as HistoryPointRow[]))].reverse();
   const history30d = [...(((history30dQuery.data ?? []) as HistoryPointRow[]))].reverse();
   const history90d = [...(((history90dQuery.data ?? []) as HistoryPointRow[]))].reverse();
-  const chartSeries = selectedWindow === "90d" && history90d.length > 0 ? history90d : history30d;
-  const effectiveWindow: "30d" | "90d" = selectedWindow === "90d" && history90d.length > 0 ? "90d" : "30d";
-  const change30d = computeChange30d(chartSeries);
+  const history7d = cachedHistory7d.length > 0 ? cachedHistory7d : filterRecentDays(history30d, 7);
+  const chartSeries =
+    selectedWindow === "90d" && history90d.length > 0
+      ? history90d
+      : selectedWindow === "7d" && history7d.length > 0
+        ? history7d
+        : history30d;
+  const effectiveWindow: "7d" | "30d" | "90d" =
+    selectedWindow === "90d" && history90d.length > 0
+      ? "90d"
+      : selectedWindow === "7d" && history7d.length > 0
+        ? "7d"
+        : "30d";
+  const changeValue = computeChange30d(chartSeries);
   const { low, high } = computeLowHigh(chartSeries);
   const sparklinePath = buildSparklinePath(chartSeries);
   const asOfTs = marketLatest?.observed_at ?? marketLatest?.updated_at ?? null;
@@ -184,6 +216,12 @@ export default async function MarketSummaryCard({
               <div className="min-w-[140px]">
                 <SegmentedControl
                   items={[
+                    {
+                      key: "7d",
+                      label: "7D",
+                      href: windowLinks["7d"],
+                      active: selectedWindow === "7d",
+                    },
                     {
                       key: "30d",
                       label: "30D",
@@ -220,7 +258,7 @@ export default async function MarketSummaryCard({
               </div>
 
               <div className="mt-4 divide-y divide-white/[0.06] rounded-2xl border border-white/[0.06] bg-[#171b23] px-4">
-                <StatRow label={`${effectiveWindow.toUpperCase()} Change`} value={formatPercent(change30d)} />
+                <StatRow label={`${effectiveWindow.toUpperCase()} Change`} value={formatPercent(changeValue)} />
                 <StatRow label={`${effectiveWindow.toUpperCase()} Low`} value={formatUsd(low)} />
                 <StatRow label={`${effectiveWindow.toUpperCase()} High`} value={formatUsd(high)} />
               </div>
