@@ -1,10 +1,10 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { unstable_cache } from "next/cache";
 import { getServerSupabaseClient } from "@/lib/supabaseServer";
 import { measureAsync } from "@/lib/perf";
 import SearchResultsSection from "@/components/search-results-section";
-import { parseSearchSort } from "@/lib/search/sort.mjs";
+import CardSearch from "@/components/card-search";
+import { parseSearchSort, sortSearchResults } from "@/lib/search/sort.mjs";
 
 type SearchSort = "relevance" | "newest" | "oldest";
 
@@ -194,8 +194,9 @@ async function runBroadSearch(params: {
   lang: string;
   setFilter: string;
   parsedNumber: string | null;
+  sort: SearchSort;
 }): Promise<SearchResultBundle> {
-  const { q, page, lang, setFilter, parsedNumber } = params;
+  const { q, page, lang, setFilter, parsedNumber, sort } = params;
   const supabase = getServerSupabaseClient();
   const qLower = normalizeQuery(q);
   const tokens = tokenizeQuery(qLower);
@@ -329,7 +330,7 @@ async function runBroadSearch(params: {
     scoreBySlug.set(printing.canonical_slug, Math.max(scoreBySlug.get(printing.canonical_slug) ?? 0, 75));
   }
 
-  const orderedSlugs = Array.from(scoreBySlug.keys()).sort((a, b) => {
+  const relevanceOrderedSlugs = Array.from(scoreBySlug.keys()).sort((a, b) => {
     const scoreA = scoreBySlug.get(a) ?? 0;
     const scoreB = scoreBySlug.get(b) ?? 0;
     if (scoreA !== scoreB) return scoreB - scoreA;
@@ -337,6 +338,22 @@ async function runBroadSearch(params: {
     const nameB = canonicalBySlug.get(b)?.canonical_name ?? b;
     return nameA.localeCompare(nameB);
   });
+
+  const orderedSlugs =
+    sort === "relevance"
+      ? relevanceOrderedSlugs
+      : sortSearchResults(
+          relevanceOrderedSlugs.map((slug) => {
+            const row = canonicalBySlug.get(slug);
+            return {
+              canonical_slug: slug,
+              canonical_name: row?.canonical_name ?? slug,
+              set_name: row?.set_name ?? null,
+              year: row?.year ?? null,
+            };
+          }),
+          sort,
+        ).map((row) => row.canonical_slug);
 
   const total = orderedSlugs.length;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -409,20 +426,30 @@ async function getCachedBroadSearch(params: {
   lang: string;
   setFilter: string;
   parsedNumber: string | null;
+  sort: SearchSort;
 }) {
-  const { q, page, lang, setFilter, parsedNumber } = params;
+  const { q, page, lang, setFilter, parsedNumber, sort } = params;
   return unstable_cache(
     () =>
-      measureAsync("search.broad", { q, page, lang, setFilter, parsedNumber }, () =>
+      measureAsync("search.broad", { q, page, lang, setFilter, parsedNumber, sort }, () =>
         runBroadSearch({
           q,
           page,
           lang,
           setFilter,
           parsedNumber,
+          sort,
         })
       ),
-    ["search-v2", q.toLowerCase(), String(page), lang.toLowerCase(), setFilter.toLowerCase(), parsedNumber ?? "none"],
+    [
+      "search-v2",
+      q.toLowerCase(),
+      String(page),
+      lang.toLowerCase(),
+      setFilter.toLowerCase(),
+      parsedNumber ?? "none",
+      sort,
+    ],
     { revalidate: 60 }
   )();
 }
@@ -442,15 +469,25 @@ export default async function SearchPage({
   const setFilter = (params.set ?? "").trim();
   const sort = parseSearchSort(params.sort) as SearchSort;
   const genericNameMode = isGenericNameQuery(qNormalized);
-  let exactMatchSuggestion: { href: string; label: string } | null = null;
 
   if (!q) {
     return (
       <main className="app-shell">
-        <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
-          <section className="glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
-            <p className="text-app text-lg font-semibold">Search</p>
-            <p className="text-muted mt-2 text-sm">Enter a card name or alias to browse canonical card profiles.</p>
+        <div className="mx-auto flex min-h-screen w-full max-w-4xl items-center justify-center px-4 py-12 sm:px-6">
+          <section className="w-full max-w-2xl text-center">
+            <h1 className="text-app text-6xl font-semibold tracking-tight sm:text-7xl">PopAlpha</h1>
+            <p className="text-muted mx-auto mt-4 max-w-xl text-sm sm:text-base">
+              Smarter TCG Market Insights.
+            </p>
+
+            <CardSearch
+              className="mt-6"
+              size="hero"
+              placeholder="Search"
+              autoFocus
+              enableGlobalShortcut
+              submitMode="active-or-search"
+            />
           </section>
         </div>
       </main>
@@ -484,17 +521,6 @@ export default async function SearchPage({
       if (!genericNameMode) {
         redirect(href);
       }
-      const { data: exactCanonicalRow } = await supabase
-        .from("canonical_cards")
-        .select("canonical_name")
-        .eq("slug", printingRow.canonical_slug)
-        .maybeSingle<{ canonical_name: string }>();
-      if (exactCanonicalRow?.canonical_name) {
-        exactMatchSuggestion = {
-          href,
-          label: exactCanonicalRow.canonical_name,
-        };
-      }
     }
   }
 
@@ -510,19 +536,6 @@ export default async function SearchPage({
     const href = `/cards/${encodeURIComponent(aliasRow.canonical_slug)}`;
     if (!genericNameMode) {
       redirect(href);
-    }
-    if (!exactMatchSuggestion) {
-      const { data: exactCanonicalRow } = await supabase
-        .from("canonical_cards")
-        .select("canonical_name")
-        .eq("slug", aliasRow.canonical_slug)
-        .maybeSingle<{ canonical_name: string }>();
-      if (exactCanonicalRow?.canonical_name) {
-        exactMatchSuggestion = {
-          href,
-          label: exactCanonicalRow.canonical_name,
-        };
-      }
     }
   }
 
@@ -592,10 +605,9 @@ export default async function SearchPage({
     lang,
     setFilter,
     parsedNumber,
+    sort,
   });
 
-  const startIndex = result.total === 0 ? 0 : (result.page - 1) * PAGE_SIZE + 1;
-  const endIndex = result.total === 0 ? 0 : startIndex + result.rows.length - 1;
   const displayRows = result.rows.map((row) => {
     const primaryPrinting = choosePrimaryPrinting(row.printings);
     return {
@@ -611,44 +623,20 @@ export default async function SearchPage({
   return (
     <main className="app-shell">
       <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
-        <section className="glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
-          <p className="text-app text-xl font-semibold">Results for “{q}”</p>
-          <p className="text-muted mt-1 text-sm">
-            {result.total} matches {result.total > 0 ? `• Showing ${startIndex}-${endIndex}` : ""}
+        <section className="mx-auto w-full max-w-2xl text-center">
+          <h1 className="text-app text-6xl font-semibold tracking-tight sm:text-7xl">PopAlpha</h1>
+          <p className="text-muted mx-auto mt-4 max-w-xl text-sm sm:text-base">
+            Smarter TCG Market Insights.
           </p>
-          {genericNameMode ? <p className="text-muted mt-1 text-xs">Showing canonical matches for: {q}</p> : null}
-          {exactMatchSuggestion ? (
-            <div className="mt-3 inline-flex items-center gap-2 rounded-full border-app border bg-surface-soft/45 px-3 py-1.5 text-xs">
-              <span className="text-muted">Go to exact match:</span>
-              <Link href={exactMatchSuggestion.href} className="text-app font-semibold underline underline-offset-4">
-                {exactMatchSuggestion.label}
-              </Link>
-            </div>
-          ) : null}
 
-          <form action="/search" className="sticky top-2 z-10 mt-4 grid gap-2 rounded-[var(--radius-card)] bg-surface/85 p-2 sm:grid-cols-[1fr_auto_auto_auto]">
-            <input type="hidden" name="q" value={q} />
-            <input type="hidden" name="sort" value={sort} />
-            <input
-              name="set"
-              defaultValue={setFilter}
-              placeholder="Filter set name"
-              className="input-themed h-10 rounded-[var(--radius-input)] px-3 text-sm"
-            />
-            <select
-              name="lang"
-              defaultValue={lang.toLowerCase()}
-              className="input-themed h-10 rounded-[var(--radius-input)] px-3 text-sm"
-            >
-              <option value="all">Language: All</option>
-              <option value="en">EN</option>
-              <option value="jp">JP</option>
-            </select>
-            <input type="hidden" name="page" value="1" />
-            <button type="submit" className="btn-accent h-10 rounded-[var(--radius-input)] px-4 text-sm font-semibold">
-              Apply
-            </button>
-          </form>
+          <CardSearch
+            className="mt-6"
+            size="hero"
+            placeholder="Search"
+            enableGlobalShortcut
+            submitMode="active-or-search"
+            initialValue={q}
+          />
         </section>
         <SearchResultsSection
           key={`${q}-${sort}-${result.page}-${lang}-${setFilter}`}
@@ -656,7 +644,6 @@ export default async function SearchPage({
           total={result.total}
           page={result.page}
           totalPages={result.totalPages}
-          genericNameMode={genericNameMode}
           initialSort={sort}
           currentParams={{
             q,

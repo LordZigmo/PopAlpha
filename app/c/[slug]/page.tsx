@@ -68,6 +68,7 @@ type TcgSnapshotDebug = {
 };
 
 const GRADE_OPTIONS: GradeSelection[] = ["RAW", "PSA9", "PSA10"];
+const DEFAULT_BACK_HREF = "/search";
 
 function finishLabel(finish: CardPrintingRow["finish"]): string {
   const map: Record<CardPrintingRow["finish"], string> = {
@@ -162,11 +163,26 @@ function resolvePrintingSelection(
   return printings[0];
 }
 
-function toggleHref(slug: string, printingId: string | null, grade: GradeSelection, debugEnabled: boolean): string {
+function resolveBackHref(returnTo: string | undefined): string {
+  const trimmed = (returnTo ?? "").trim();
+  if (!trimmed) return DEFAULT_BACK_HREF;
+  if (!trimmed.startsWith("/search")) return DEFAULT_BACK_HREF;
+  return trimmed;
+}
+
+function toggleHref(
+  slug: string,
+  printingId: string | null,
+  grade: GradeSelection,
+  debugEnabled: boolean,
+  returnTo?: string,
+): string {
   const params = new URLSearchParams();
   if (printingId) params.set("printing", printingId);
   if (grade !== "RAW") params.set("grade", grade);
   if (debugEnabled) params.set("debug", "1");
+  const backHref = resolveBackHref(returnTo);
+  if (backHref !== DEFAULT_BACK_HREF) params.set("returnTo", backHref);
   const qs = params.toString();
   return qs ? `/c/${encodeURIComponent(slug)}?${qs}` : `/c/${encodeURIComponent(slug)}`;
 }
@@ -192,12 +208,6 @@ function formatUsdCompact(value: number | null | undefined): string {
     currency: "USD",
     maximumFractionDigits: value >= 1000 ? 0 : 2,
   }).format(value);
-}
-
-/** Formats a numeric signal value for display, rounding to 2 dp. */
-function formatSignal(value: number | null | undefined, suffix = ""): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
-  return `${value >= 0 ? "+" : ""}${value.toFixed(2)}${suffix}`;
 }
 
 function gradePremium(
@@ -282,12 +292,13 @@ export default async function CanonicalCardPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ printing?: string; grade?: string; debug?: string }>;
+  searchParams: Promise<{ printing?: string; grade?: string; debug?: string; returnTo?: string }>;
 }) {
   const { slug } = await params;
-  const { printing, grade, debug } = await searchParams;
+  const { printing, grade, debug, returnTo } = await searchParams;
   const supabase = getServerSupabaseClient();
   const debugEnabled = debug === "1";
+  const backHref = resolveBackHref(returnTo);
 
   const { data: canonical } = await supabase
     .from("canonical_cards")
@@ -387,7 +398,7 @@ export default async function CanonicalCardPage({
 
   return (
     <PageShell>
-      <CardDetailNavBar title={canonical.canonical_name} subtitle={selectedPrintingLabel} />
+      <CardDetailNavBar title="" backHref={backHref} />
 
       <CanonicalCardFloatingHero
         imageUrl={selectedPrinting?.image_url ?? null}
@@ -421,7 +432,7 @@ export default async function CanonicalCardPage({
                       return {
                         key: finish,
                         label: finishLabel(finish),
-                        href: toggleHref(slug, nextPrinting?.id ?? null, gradeSelection, debugEnabled),
+                        href: toggleHref(slug, nextPrinting?.id ?? null, gradeSelection, debugEnabled, returnTo),
                         active: selectedPrinting?.finish === finish,
                       };
                     })}
@@ -438,7 +449,7 @@ export default async function CanonicalCardPage({
                       return {
                         key: edition,
                         label: editionLabel(edition),
-                        href: toggleHref(slug, nextPrinting?.id ?? null, gradeSelection, debugEnabled),
+                        href: toggleHref(slug, nextPrinting?.id ?? null, gradeSelection, debugEnabled, returnTo),
                         active: selectedPrinting?.edition === edition,
                       };
                     })}
@@ -455,7 +466,7 @@ export default async function CanonicalCardPage({
                       return {
                         key: stamp,
                         label: stamp,
-                        href: toggleHref(slug, nextPrinting?.id ?? null, gradeSelection, debugEnabled),
+                        href: toggleHref(slug, nextPrinting?.id ?? null, gradeSelection, debugEnabled, returnTo),
                         active: selectedPrinting?.stamp === stamp,
                       };
                     })}
@@ -470,7 +481,7 @@ export default async function CanonicalCardPage({
                     items={printings.map((row) => ({
                       key: row.id,
                       label: printingOptionLabel(row),
-                      href: toggleHref(slug, row.id, gradeSelection, debugEnabled),
+                      href: toggleHref(slug, row.id, gradeSelection, debugEnabled, returnTo),
                       active: selectedPrinting?.id === row.id,
                     }))}
                   />
@@ -482,7 +493,7 @@ export default async function CanonicalCardPage({
                   items={GRADE_OPTIONS.map((option) => ({
                     key: option,
                     label: gradeLabel(option),
-                    href: toggleHref(slug, selectedPrinting?.id ?? null, option, debugEnabled),
+                    href: toggleHref(slug, selectedPrinting?.id ?? null, option, debugEnabled, returnTo),
                     active: option === gradeSelection,
                   }))}
                 />

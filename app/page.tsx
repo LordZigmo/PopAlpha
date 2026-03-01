@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 import CardSearch from "@/components/card-search";
 
@@ -76,16 +75,10 @@ export default function Home() {
     <main className="app-shell">
       <div className="mx-auto flex min-h-screen w-full max-w-4xl items-center justify-center px-4 py-12 sm:px-6">
         <section className="w-full max-w-2xl text-center">
-          <h1 className="text-app text-5xl font-semibold tracking-tight sm:text-6xl">PopAlpha</h1>
+          <h1 className="text-app text-6xl font-semibold tracking-tight sm:text-7xl">PopAlpha</h1>
           <p className="text-muted mx-auto mt-4 max-w-xl text-sm sm:text-base">
-            A financial engine for alternative assets, built to price, track, and surface signal across collectible cards.
+            Smarter TCG Market Insights.
           </p>
-
-          <div className="mt-6 flex items-center justify-center gap-4">
-            <Link href="/sets" className="text-muted text-sm transition-colors hover:text-app underline underline-offset-4">
-              Browse Sets
-            </Link>
-          </div>
 
           <CardSearch
             className="mt-6"

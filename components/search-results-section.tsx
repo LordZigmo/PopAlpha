@@ -26,7 +26,6 @@ export default function SearchResultsSection({
   total,
   page,
   totalPages,
-  genericNameMode,
   initialSort,
   currentParams,
 }: {
@@ -34,7 +33,6 @@ export default function SearchResultsSection({
   total: number;
   page: number;
   totalPages: number;
-  genericNameMode: boolean;
   initialSort: SearchSort;
   currentParams: Record<string, string>;
 }) {
@@ -52,6 +50,8 @@ export default function SearchResultsSection({
     }
     return params;
   }, [currentParams]);
+
+  const currentSearchHref = useMemo(() => formatSearchHref(pathname, baseParams), [baseParams, pathname]);
 
   const prevHref = useMemo(() => {
     if (page <= 1) return null;
@@ -82,11 +82,7 @@ export default function SearchResultsSection({
     <section className="mt-4 glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
       <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          {genericNameMode ? (
-            <p className="text-muted text-xs">Showing canonical card matches first for broad subject-name queries.</p>
-          ) : (
-            <p className="text-muted text-xs">{total} total matches on this search.</p>
-          )}
+          <p className="text-muted text-xs">{total} results.</p>
         </div>
         <label className="flex items-center gap-2 text-sm">
           <span className="text-muted">Sort:</span>
@@ -115,7 +111,7 @@ export default function SearchResultsSection({
           {sortedRows.map((row) => (
             <Link
               key={row.canonical_slug}
-              href={`/cards/${encodeURIComponent(row.canonical_slug)}`}
+              href={`/cards/${encodeURIComponent(row.canonical_slug)}?returnTo=${encodeURIComponent(currentSearchHref)}`}
               className="group block transition duration-200 hover:-translate-y-0.5"
             >
               <div className="relative aspect-[63/88] overflow-hidden rounded-[var(--radius-card)] border-app border bg-surface-soft/24">

@@ -6,9 +6,11 @@ import { NavBar } from "@/components/ios-grouped-ui";
 export default function CardDetailNavBar({
   title,
   subtitle,
+  backHref,
 }: {
   title: string;
   subtitle?: string;
+  backHref?: string;
 }) {
   const [compact, setCompact] = useState(false);
 
@@ -19,5 +21,5 @@ export default function CardDetailNavBar({
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
-  return <NavBar title={title} subtitle={subtitle} compact={compact} />;
+  return <NavBar title={title} subtitle={subtitle} compact={compact} backHref={backHref} />;
 }

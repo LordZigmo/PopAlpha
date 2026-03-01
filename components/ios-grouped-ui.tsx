@@ -39,6 +39,7 @@ export function NavBar({
   compact?: boolean;
   backHref?: string;
 }) {
+  const showIdentity = Boolean(title || subtitle);
   return (
     <header
       className={cn(
@@ -54,10 +55,14 @@ export function NavBar({
         >
           <span className="text-lg leading-none">‹</span>
         </Link>
-        <div className="min-w-0 flex-1">
-          <p className={cn("truncate font-semibold tracking-[-0.02em]", compact ? "text-[15px]" : "text-[17px]")}>{title}</p>
-          {subtitle ? <p className="truncate text-[12px] text-[#98a0ae]">{subtitle}</p> : null}
-        </div>
+        {showIdentity ? (
+          <div className="min-w-0 flex-1">
+            {title ? (
+              <p className={cn("truncate font-semibold tracking-[-0.02em]", compact ? "text-[15px]" : "text-[17px]")}>{title}</p>
+            ) : null}
+            {subtitle ? <p className="truncate text-[12px] text-[#98a0ae]">{subtitle}</p> : null}
+          </div>
+        ) : null}
       </div>
     </header>
   );
