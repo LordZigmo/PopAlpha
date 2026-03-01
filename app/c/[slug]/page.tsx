@@ -12,6 +12,7 @@ import CanonicalCardFloatingHero from "@/components/canonical-card-floating-hero
 import CollapsibleSection from "@/components/collapsible-section";
 import EbayListings from "@/components/ebay-listings";
 import { GroupCard, GroupedSection, PageShell, Pill, SegmentedControl } from "@/components/ios-grouped-ui";
+import MarketPulse from "@/components/market-pulse";
 import MarketSummaryCard from "@/components/market-summary-card";
 import PriceTickerStrip from "@/components/price-ticker-strip";
 import SignalGauge from "@/components/signal-gauge";
@@ -667,21 +668,14 @@ export default async function CanonicalCardPage({
           />
         </CollapsibleSection>
 
-        {/* ── Community Sentiment ─────────────────────────────────────────── */}
-        <GroupedSection>
-          <GroupCard
-            header={
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-[15px] font-semibold text-[#F0F0F0]">Community Sentiment</p>
-                <Pill label="Coming soon" tone="neutral" size="small" />
-              </div>
-            }
-          >
-            <div className="rounded-2xl border border-[#1E1E1E] bg-[#151515] px-4 py-5 text-[14px] text-[#777]">
-              Community sentiment data will appear here.
-            </div>
-          </GroupCard>
-        </GroupedSection>
+        {/* ── Market Pulse ─────────────────────────────────────────────────
+            Community sentiment vote — stub data, wire to DB later. */}
+        <MarketPulse
+          bullishVotes={0}
+          bearishVotes={0}
+          userVote={null}
+          resolvesAt={Date.now() + 6 * 24 * 60 * 60 * 1000 + 12 * 60 * 60 * 1000}
+        />
         </div>
       </div>
     </PageShell>
