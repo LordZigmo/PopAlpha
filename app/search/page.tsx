@@ -11,6 +11,7 @@ type SearchSort = "relevance" | "newest" | "oldest";
 type SearchParams = {
   q?: string;
   page?: string;
+  pageSize?: string;
   lang?: string;
   set?: string;
   sort?: string;
@@ -58,12 +59,18 @@ type SearchResultBundle = {
   totalPages: number;
 };
 
-const PAGE_SIZE = 25;
+const DEFAULT_PAGE_SIZE = 25;
+const ALLOWED_PAGE_SIZES = new Set([25, 50, 100]);
 
 function toPositiveInt(value: string | undefined, fallback: number): number {
   if (!value) return fallback;
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function parsePageSize(value: string | undefined): number {
+  const parsed = toPositiveInt(value, DEFAULT_PAGE_SIZE);
+  return ALLOWED_PAGE_SIZES.has(parsed) ? parsed : DEFAULT_PAGE_SIZE;
 }
 
 function normalizeQuery(value: string): string {
@@ -191,12 +198,13 @@ function choosePrimaryPrinting(printings: PrintingRow[]): PrintingRow | null {
 async function runBroadSearch(params: {
   q: string;
   page: number;
+  pageSize: number;
   lang: string;
   setFilter: string;
   parsedNumber: string | null;
   sort: SearchSort;
 }): Promise<SearchResultBundle> {
-  const { q, page, lang, setFilter, parsedNumber, sort } = params;
+  const { q, page, pageSize, lang, setFilter, parsedNumber, sort } = params;
   const supabase = getServerSupabaseClient();
   const qLower = normalizeQuery(q);
   const tokens = tokenizeQuery(qLower);
@@ -356,10 +364,10 @@ async function runBroadSearch(params: {
         ).map((row) => row.canonical_slug);
 
   const total = orderedSlugs.length;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const boundedPage = Math.min(page, totalPages);
-  const offset = (boundedPage - 1) * PAGE_SIZE;
-  const pageSlugs = orderedSlugs.slice(offset, offset + PAGE_SIZE);
+  const offset = (boundedPage - 1) * pageSize;
+  const pageSlugs = orderedSlugs.slice(offset, offset + pageSize);
   const missingSlugs = pageSlugs.filter((slug) => !canonicalBySlug.has(slug));
 
   if (missingSlugs.length > 0) {
@@ -423,18 +431,20 @@ async function runBroadSearch(params: {
 async function getCachedBroadSearch(params: {
   q: string;
   page: number;
+  pageSize: number;
   lang: string;
   setFilter: string;
   parsedNumber: string | null;
   sort: SearchSort;
 }) {
-  const { q, page, lang, setFilter, parsedNumber, sort } = params;
+  const { q, page, pageSize, lang, setFilter, parsedNumber, sort } = params;
   return unstable_cache(
     () =>
-      measureAsync("search.broad", { q, page, lang, setFilter, parsedNumber, sort }, () =>
+      measureAsync("search.broad", { q, page, pageSize, lang, setFilter, parsedNumber, sort }, () =>
         runBroadSearch({
           q,
           page,
+          pageSize,
           lang,
           setFilter,
           parsedNumber,
@@ -445,6 +455,7 @@ async function getCachedBroadSearch(params: {
       "search-v2",
       q.toLowerCase(),
       String(page),
+      String(pageSize),
       lang.toLowerCase(),
       setFilter.toLowerCase(),
       parsedNumber ?? "none",
@@ -465,6 +476,7 @@ export default async function SearchPage({
   const parsedNumber = extractCardNumber(qNormalized);
   const nameHint = extractNameHint(qNormalized);
   const page = toPositiveInt(params.page, 1);
+  const pageSize = parsePageSize(params.pageSize);
   const lang = (params.lang ?? "all").trim().toUpperCase();
   const setFilter = (params.set ?? "").trim();
   const sort = parseSearchSort(params.sort) as SearchSort;
@@ -602,6 +614,7 @@ export default async function SearchPage({
   const result = await getCachedBroadSearch({
     q: qNormalized,
     page,
+    pageSize,
     lang,
     setFilter,
     parsedNumber,
@@ -639,7 +652,7 @@ export default async function SearchPage({
           />
         </section>
         <SearchResultsSection
-          key={`${q}-${sort}-${result.page}-${lang}-${setFilter}`}
+          key={`${q}-${sort}-${result.page}-${pageSize}-${lang}-${setFilter}`}
           rows={displayRows}
           total={result.total}
           page={result.page}
@@ -648,6 +661,7 @@ export default async function SearchPage({
           currentParams={{
             q,
             page: String(result.page),
+            pageSize: String(pageSize),
             lang: lang.toLowerCase(),
             set: setFilter,
             sort,

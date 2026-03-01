@@ -6,6 +6,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { parseSearchSort, SEARCH_SORTS, sortSearchResults } from "@/lib/search/sort.mjs";
 
 type SearchSort = "relevance" | "newest" | "oldest";
+type SearchPageSize = 25 | 50 | 100;
+const PAGE_SIZE_OPTIONS: SearchPageSize[] = [25, 50, 100];
 
 type SearchDisplayRow = {
   canonical_slug: string;
@@ -39,6 +41,10 @@ export default function SearchResultsSection({
   const pathname = usePathname();
   const router = useRouter();
   const [sort, setSort] = useState<SearchSort>(initialSort);
+  const initialPageSize = Number.parseInt(currentParams.pageSize ?? "25", 10);
+  const [pageSize, setPageSize] = useState<SearchPageSize>(
+    initialPageSize === 50 || initialPageSize === 100 ? initialPageSize : 25
+  );
 
   const sortedRows = useMemo(() => sortSearchResults(rows, sort), [rows, sort]);
 
@@ -75,6 +81,18 @@ export default function SearchResultsSection({
 
     const params = new URLSearchParams(baseParams);
     params.set("sort", resolved);
+    router.replace(formatSearchHref(pathname, params), { scroll: false });
+  }
+
+  function updatePageSize(nextPageSize: string) {
+    const parsed = Number.parseInt(nextPageSize, 10);
+    const resolved: SearchPageSize = parsed === 50 || parsed === 100 ? parsed : 25;
+    setPageSize(resolved);
+
+    const params = new URLSearchParams(baseParams);
+    params.set("pageSize", String(resolved));
+    params.set("page", "1");
+    params.set("sort", sort);
     router.replace(formatSearchHref(pathname, params), { scroll: false });
   }
 
@@ -148,9 +166,26 @@ export default function SearchResultsSection({
       )}
 
       <div className="mt-4 flex items-center justify-between">
-        <span className="text-muted text-xs">
-          Page {page} of {totalPages}
-        </span>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+          <span className="text-muted text-xs">
+            Page {page} of {totalPages}
+          </span>
+          <label className="flex items-center gap-2 text-xs">
+            <span className="text-muted">Per page:</span>
+            <select
+              value={pageSize}
+              onChange={(event) => updatePageSize(event.target.value)}
+              className="input-themed h-8 min-w-[5rem] rounded-[var(--radius-input)] px-2 text-xs"
+              aria-label="Cards per search page"
+            >
+              {PAGE_SIZE_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
         <div className="flex items-center gap-2">
           {prevHref ? (
             <Link href={prevHref} className="btn-ghost rounded-[var(--radius-input)] border px-3 py-1.5 text-xs">
