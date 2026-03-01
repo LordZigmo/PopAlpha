@@ -14,7 +14,6 @@ import CollapsibleSection from "@/components/collapsible-section";
 import EbayListings from "@/components/ebay-listings";
 import { GroupCard, GroupedSection, PageShell, Pill, SegmentedControl } from "@/components/ios-grouped-ui";
 import MarketSummaryCard from "@/components/market-summary-card";
-import MarketSnapshotTiles from "@/components/market-snapshot-tiles";
 import PriceTickerStrip from "@/components/price-ticker-strip";
 import SignalGauge from "@/components/signal-gauge";
 import { buildEbayQuery, type GradeSelection, type GradedSource } from "@/lib/ebay-query";
@@ -570,14 +569,6 @@ export default async function CanonicalCardPage({
           printingId={selectedPrinting?.id ?? null}
           variantRef={rawVariantRef}
           selectedWindow={activeMarketWindow}
-        />
-
-        {/* ── Market Intelligence ─────────────────────────────────────────── */}
-        <MarketSnapshotTiles
-          slug={slug}
-          printingId={selectedPrinting?.id ?? null}
-          grade={selectedSnapshotGrade ?? activeBucket}
-          initialData={snapshot}
         />
 
         {/* ── Variant selector ────────────────────────────────────────────── */}
