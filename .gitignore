@@ -45,3 +45,19 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Local agent/editor config
+.claude/
+
+# External datasets
+pokemon-tcg-data/
+
+# Local runtime state
+scripts/import-state.json
+scripts/justtcg-live-state.json
+
+# Generated artifacts
+scripts/output/
+
+# Supabase local temp
+.supabase/
