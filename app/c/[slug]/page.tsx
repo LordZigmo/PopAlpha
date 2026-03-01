@@ -502,7 +502,7 @@ export default async function CanonicalCardPage({
               {snapshotData?.active_listings_7d != null && <Pill label={`Scarcity ${scarcity.label}`} tone={scarcity.tone} />}
               {snapshotData?.active_listings_7d != null && <Pill label={`Liquidity ${liquidity.label}`} tone={liquidity.tone} />}
               {selectedPrinting && selectedPrintingLabel ? (
-                <Pill label={selectedPrintingLabel} tone="neutral" />
+                <Pill label={selectedPrintingLabel} tone="metallic" />
               ) : (
                 <>
                   {canonical.set_name && canonicalSetHref ? (

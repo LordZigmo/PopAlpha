@@ -144,18 +144,19 @@ export function Pill({
   size = "default",
 }: {
   label: string;
-  tone?: Tone;
+  tone?: Tone | "metallic";
   size?: "default" | "small";
 }) {
+  const isMetallic = tone === "metallic";
   return (
     <span
       className={cn(
         "inline-flex items-center rounded-full border font-semibold",
         size === "small" ? "min-h-7 px-3 text-[15px]" : "min-h-8 px-3 text-[14px]",
-        PILL_TONE_CLASS[tone]
+        isMetallic ? "pill-metallic" : PILL_TONE_CLASS[tone]
       )}
     >
-      {label}
+      {isMetallic ? <span className="pill-metallic-text">{label}</span> : label}
     </span>
   );
 }

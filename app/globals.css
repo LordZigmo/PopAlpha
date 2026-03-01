@@ -268,6 +268,30 @@ body {
   box-shadow: 0 0 20px color-mix(in srgb, var(--color-accent) 10%, transparent);
 }
 
+/* Metallic silver pill */
+.pill-metallic {
+  border-color: rgba(180, 180, 195, 0.3);
+  background:
+    linear-gradient(135deg,
+      rgba(160, 160, 180, 0.12) 0%,
+      rgba(220, 220, 235, 0.08) 40%,
+      rgba(140, 140, 160, 0.12) 100%);
+}
+.pill-metallic-text {
+  background: linear-gradient(
+    135deg,
+    #9A9AB0 0%,
+    #D4D4E8 22%,
+    #A8A8BE 44%,
+    #E0E0F0 66%,
+    #B0B0C8 88%,
+    #C8C8DC 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
 /* Tabular numbers utility */
 .font-tabular { font-feature-settings: "tnum"; font-variant-numeric: tabular-nums; }
 
