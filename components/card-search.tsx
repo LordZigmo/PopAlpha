@@ -95,7 +95,7 @@ export default function CardSearch({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [value, setValue] = useState(initialValue);
   const [isFocused, setIsFocused] = useState(false);
-  const [activeIndex, setActiveIndex] = useState(0);
+  const [activeIndex, setActiveIndex] = useState(-1);
   const { results, isLoading, error, hasSearched } = useCardSearch(value);
   const highlightTokens = extractHighlightTokens(value);
 
@@ -134,12 +134,13 @@ export default function CardSearch({
 
   const hasQuery = value.trim().length > 0;
   const shouldOpen = isFocused && hasQuery && (isLoading || hasSearched || !!error);
-  const clampedActiveIndex = results.length === 0 ? 0 : Math.min(activeIndex, results.length - 1);
-  const activeResult = results[clampedActiveIndex] ?? null;
+  const resolvedActiveIndex =
+    activeIndex >= 0 && results.length > 0 ? Math.min(activeIndex, results.length - 1) : -1;
+  const activeResult = resolvedActiveIndex >= 0 ? results[resolvedActiveIndex] : null;
 
   function closeDropdown() {
     setIsFocused(false);
-    setActiveIndex(0);
+    setActiveIndex(-1);
   }
 
   function navigateToResult(slug: string) {
@@ -202,7 +203,7 @@ export default function CardSearch({
           onChange={(event) => {
             setValue(event.target.value);
             setIsFocused(true);
-            setActiveIndex(0);
+            setActiveIndex(-1);
           }}
           onFocus={() => setIsFocused(true)}
           onKeyDown={(event) => {
@@ -210,7 +211,7 @@ export default function CardSearch({
               if (results.length > 0) {
                 event.preventDefault();
                 setIsFocused(true);
-                setActiveIndex((current) => Math.min(current + 1, results.length - 1));
+                setActiveIndex((current) => (current < 0 ? 0 : Math.min(current + 1, results.length - 1)));
               }
               return;
             }
@@ -218,7 +219,7 @@ export default function CardSearch({
             if (event.key === "ArrowUp") {
               if (results.length > 0) {
                 event.preventDefault();
-                setActiveIndex((current) => Math.max(current - 1, 0));
+                setActiveIndex((current) => (current < 0 ? results.length - 1 : Math.max(current - 1, 0)));
               }
               return;
             }
@@ -279,7 +280,7 @@ export default function CardSearch({
               className="max-h-[min(60vh,22rem)] overflow-y-auto p-2"
             >
               {results.map((result, index) => {
-                const isActive = index === clampedActiveIndex;
+                const isActive = index === resolvedActiveIndex;
                 return (
                   <li key={result.canonical_slug} role="presentation">
                     <button
