@@ -101,27 +101,18 @@ export default function EnhancedChart({
   return (
     <div className="relative">
       {/* Header row */}
-      {(windowLabel || currentPrice != null) && (
-        <div className="mb-2 flex items-baseline justify-between gap-3">
-          {windowLabel && (
-            <p className="text-[14px] font-semibold uppercase tracking-[0.08em] text-[#6B6B6B]">
-              {windowLabel} Trend
-            </p>
-          )}
-          {currentPrice != null && (
-            <div className="flex items-baseline gap-2">
-              <span className="text-[17px] font-semibold tabular-nums text-[#F0F0F0]">
-                {formatUsd(currentPrice)}
-              </span>
-              {changePercent != null && Number.isFinite(changePercent) && (
-                <span
-                  className={`text-[15px] font-semibold tabular-nums ${changePercent > 0 ? "text-[#00DC5A]" : changePercent < 0 ? "text-[#FF3B30]" : "text-[#6B6B6B]"}`}
-                >
-                  {changePercent > 0 ? "+" : ""}
-                  {Math.abs(changePercent) >= 10 ? changePercent.toFixed(0) : changePercent.toFixed(1)}%
-                </span>
-              )}
-            </div>
+      {currentPrice != null && (
+        <div className="mb-2 flex items-baseline justify-end gap-2">
+          <span className="text-[17px] font-semibold tabular-nums text-[#F0F0F0]">
+            {formatUsd(currentPrice)}
+          </span>
+          {changePercent != null && Number.isFinite(changePercent) && (
+            <span
+              className={`text-[15px] font-semibold tabular-nums ${changePercent > 0 ? "text-[#00DC5A]" : changePercent < 0 ? "text-[#FF3B30]" : "text-[#6B6B6B]"}`}
+            >
+              {changePercent > 0 ? "+" : ""}
+              {Math.abs(changePercent) >= 10 ? changePercent.toFixed(0) : changePercent.toFixed(1)}%
+            </span>
           )}
         </div>
       )}

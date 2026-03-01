@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 type MarketPulseProps = {
   /** Total bullish votes — wire to DB later */
@@ -30,39 +30,6 @@ function formatCountdown(resolvesAt: number | null, now: number): string | null 
 function formatVoteCount(count: number): string {
   if (count >= 1000) return `${(count / 1000).toFixed(1)}k`;
   return String(count);
-}
-
-function TerminalCountdown({ text }: { text: string }) {
-  const prevRef = useRef(text);
-  const [changedIndices, setChangedIndices] = useState<Set<number>>(new Set());
-
-  useEffect(() => {
-    const prev = prevRef.current;
-    prevRef.current = text;
-    const changed = new Set<number>();
-    for (let i = 0; i < text.length; i++) {
-      if (text[i] !== prev[i]) changed.add(i);
-    }
-    if (changed.size === 0) return;
-    setChangedIndices(changed);
-    const id = setTimeout(() => setChangedIndices(new Set()), 400);
-    return () => clearTimeout(id);
-  }, [text]);
-
-  return (
-    <p className="mt-4 text-center text-[14px]" style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
-      {text.split("").map((char, i) => (
-        <span
-          key={i}
-          className="inline-block transition-colors duration-300"
-          style={{ color: changedIndices.has(i) ? "#F0F0F0" : "#666" }}
-        >
-          {char}
-        </span>
-      ))}
-      <span className="ml-0.5 inline-block w-[2px] h-[14px] align-middle animate-[terminalBlink_1s_step-end_infinite] bg-[#666]" />
-    </p>
-  );
 }
 
 export default function MarketPulse({
@@ -185,7 +152,11 @@ export default function MarketPulse({
       </div>
 
       {/* Countdown */}
-      {countdown && <TerminalCountdown text={countdown} />}
+      {countdown && (
+        <p className="mt-4 text-center text-[14px] tabular-nums text-[#666]">
+          {countdown}
+        </p>
+      )}
     </div>
   );
 }

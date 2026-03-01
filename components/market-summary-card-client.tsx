@@ -149,7 +149,7 @@ export default function MarketSummaryCardClient({
           <div className="space-y-4">
             {/* Hero price */}
             <div className="flex items-baseline justify-between gap-2">
-              <span className="text-[36px] font-bold leading-none tracking-[-0.03em] tabular-nums text-[#F0F0F0] sm:text-[42px]">
+              <span className="text-[38px] font-bold leading-none tracking-[-0.03em] tabular-nums text-[#F0F0F0] sm:text-[44px]">
                 {formatUsd(currentPrice)}
               </span>
               <span className="shrink-0 text-[14px] text-[#6B6B6B]">
@@ -165,13 +165,15 @@ export default function MarketSummaryCardClient({
               changePercent={changeValue}
             />
 
+            <div className="border-t border-[#1E1E1E]" />
+
             {/* Stats table — 2×2, change cell last (bottom-right) */}
             <PriceTickerStrip
               items={[
                 { label: `${effectiveWindow.toUpperCase()} Low`, value: formatUsd(low) },
                 { label: `${effectiveWindow.toUpperCase()} High`, value: formatUsd(high) },
                 { label: "Samples", value: sampleCount > 0 ? String(sampleCount) : "—" },
-                { label: `${effectiveWindow.toUpperCase()} Change`, value: formatPercent(changeValue), tone: changeTone(changeValue), filled: true },
+                { label: `${effectiveWindow.toUpperCase()} Change`, value: formatPercent(changeValue), tone: changeTone(changeValue) },
               ]}
             />
           </div>
