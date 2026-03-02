@@ -35,7 +35,6 @@ const PAD_Y = 10;
 
 export default function EnhancedChart({
   points,
-  windowLabel,
   currentPrice,
   changePercent,
 }: EnhancedChartProps) {
@@ -67,11 +66,16 @@ export default function EnhancedChart({
     ? `${linePath} L ${toX(points.length - 1).toFixed(1)} ${SVG_H} L ${toX(0).toFixed(1)} ${SVG_H} Z`
     : null;
 
-  // Grid lines at 25%, 50%, 75%
+  // Grid lines at 25%, 50%, 75% — reduced opacity
   const gridYs = [0.25, 0.5, 0.75].map((pct) => ({
     y: PAD_Y + pct * (SVG_H - PAD_Y * 2),
     price: max - pct * range,
   }));
+
+  // Last point for emphasis
+  const lastPoint = points.length >= 2 ? points[points.length - 1] : null;
+  const lastX = lastPoint ? toX(points.length - 1) : 0;
+  const lastY = lastPoint ? toY(lastPoint.price) : 0;
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<SVGSVGElement>) => {
@@ -92,7 +96,7 @@ export default function EnhancedChart({
 
   if (points.length < 2) {
     return (
-      <div className="flex h-[200px] items-center justify-center rounded-2xl border border-dashed border-white/[0.08] text-[16px] text-[#777] sm:h-[260px]">
+      <div className="flex h-[200px] items-center justify-center rounded-2xl border border-dashed border-white/[0.06] text-[16px] text-[#777] sm:h-[260px]">
         Not enough data to chart.
       </div>
     );
@@ -100,15 +104,15 @@ export default function EnhancedChart({
 
   return (
     <div className="relative">
-      {/* Header row */}
+      {/* Header row — price + change */}
       {currentPrice != null && (
-        <div className="mb-2 flex items-baseline justify-end gap-2">
+        <div className="mb-3 flex items-baseline justify-end gap-2.5">
           <span className="text-[17px] font-semibold tabular-nums text-[#F0F0F0]">
             {formatUsd(currentPrice)}
           </span>
           {changePercent != null && Number.isFinite(changePercent) && (
             <span
-              className={`text-[15px] font-semibold tabular-nums ${changePercent > 0 ? "text-[#00DC5A]" : changePercent < 0 ? "text-[#FF3B30]" : "text-[#6B6B6B]"}`}
+              className={`text-[17px] font-bold tabular-nums ${changePercent > 0 ? "text-[#00DC5A]" : changePercent < 0 ? "text-[#FF3B30]" : "text-[#6B6B6B]"}`}
             >
               {changePercent > 0 ? "+" : ""}
               {Math.abs(changePercent) >= 10 ? changePercent.toFixed(0) : changePercent.toFixed(1)}%
@@ -132,7 +136,7 @@ export default function EnhancedChart({
           </linearGradient>
         </defs>
 
-        {/* Grid lines */}
+        {/* Grid lines — reduced opacity */}
         {gridYs.map((g) => (
           <line
             key={g.y}
@@ -140,7 +144,7 @@ export default function EnhancedChart({
             y1={g.y}
             x2={SVG_W - PAD_X}
             y2={g.y}
-            stroke="#1E1E1E"
+            stroke="rgba(255,255,255,0.04)"
             strokeWidth="1"
           />
         ))}
@@ -150,38 +154,45 @@ export default function EnhancedChart({
           <path d={areaPath} fill="url(#chart-fill-grad)" className="chart-gradient-fill" />
         )}
 
-        {/* Line */}
+        {/* Line — increased prominence */}
         {linePath && (
           <path
             d={linePath}
             fill="none"
             stroke="var(--color-accent)"
-            strokeWidth="2.5"
+            strokeWidth="3"
             strokeLinecap="round"
             strokeLinejoin="round"
             vectorEffect="non-scaling-stroke"
           />
         )}
 
+        {/* Emphasized last node */}
+        {lastPoint && !hover && (
+          <g className="chart-last-node">
+            <circle cx={lastX} cy={lastY} r="5" fill="var(--color-accent)" stroke="#0A0A0A" strokeWidth="2" />
+          </g>
+        )}
+
         {/* Crosshair on hover */}
         {hover && (
           <g className="chart-crosshair">
-            <line x1={hover.x} y1={PAD_Y} x2={hover.x} y2={SVG_H} stroke="#555" strokeWidth="1" strokeDasharray="4 3" />
-            <circle cx={hover.x} cy={hover.y} r="4" fill="var(--color-accent)" stroke="#0A0A0A" strokeWidth="2" />
+            <line x1={hover.x} y1={PAD_Y} x2={hover.x} y2={SVG_H} stroke="rgba(255,255,255,0.12)" strokeWidth="1" strokeDasharray="4 3" />
+            <circle cx={hover.x} cy={hover.y} r="5" fill="var(--color-accent)" stroke="#0A0A0A" strokeWidth="2" />
           </g>
         )}
       </svg>
 
       {/* Y-axis labels */}
       <div className="pointer-events-none absolute inset-0 flex flex-col justify-between py-[5%]">
-        <span className="text-[12px] font-tabular text-[#555] pl-1">{formatUsd(max)}</span>
-        <span className="text-[12px] font-tabular text-[#555] pl-1">{formatUsd(min)}</span>
+        <span className="text-[12px] font-tabular text-[#444] pl-1">{formatUsd(max)}</span>
+        <span className="text-[12px] font-tabular text-[#444] pl-1">{formatUsd(min)}</span>
       </div>
 
       {/* Hover tooltip */}
       {hover && (
         <div
-          className="pointer-events-none absolute top-0 z-10 rounded-lg border border-[#1E1E1E] bg-[#151515] px-2.5 py-1.5 text-[14px] shadow-lg"
+          className="pointer-events-none absolute top-0 z-10 rounded-lg border border-white/[0.08] bg-[#151515] px-2.5 py-1.5 text-[14px] shadow-lg"
           style={{
             left: `${(hover.x / SVG_W) * 100}%`,
             transform: "translateX(-50%)",

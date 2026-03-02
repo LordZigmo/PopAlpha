@@ -1,6 +1,6 @@
 export type DealWheelVerdict = {
   tone: "neutral" | "positive" | "negative";
-  label: "Fair Deal" | "Buyer Advantage" | "Dealer Advantage";
+  label: "Balanced" | "Buyer Edge" | "Dealer Edge";
   strength: "Balanced" | "Slight" | "Strong" | "Very Strong";
   difference: number;
   differencePercent: number;
@@ -53,7 +53,7 @@ export function evaluateDealWheelPrice(selectedPrice: number, balancePrice: numb
   if (absolutePercent <= 3) {
     return {
       tone: "neutral",
-      label: "Fair Deal",
+      label: "Balanced",
       strength: "Balanced",
       difference,
       differencePercent,
@@ -67,7 +67,7 @@ export function evaluateDealWheelPrice(selectedPrice: number, balancePrice: numb
 
   return {
     tone: buyerAdvantage ? "positive" : "negative",
-    label: buyerAdvantage ? "Buyer Advantage" : "Dealer Advantage",
+    label: buyerAdvantage ? "Buyer Edge" : "Dealer Edge",
     strength,
     difference,
     differencePercent,

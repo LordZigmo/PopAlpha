@@ -1,4 +1,5 @@
 import CardMarketIntelClient from "@/components/card-market-intel-client";
+import { computeLiquidity } from "@/lib/cards/liquidity";
 import { getServerSupabaseClient } from "@/lib/supabaseServer";
 import {
   breakoutSignalLabel,
@@ -34,6 +35,10 @@ type CardMetricRow = {
   active_listings_7d: number | null;
   median_30d: number | null;
   trimmed_median_30d: number | null;
+  snapshot_count_30d: number | null;
+  provider_price_changes_count_30d: number | null;
+  low_30d: number | null;
+  high_30d: number | null;
 };
 
 type VariantSignalRow = {
@@ -107,7 +112,7 @@ export default async function MarketSummaryCard({
           .limit(history90dLimit),
         supabase
           .from("card_metrics")
-          .select("printing_id, active_listings_7d, median_30d, trimmed_median_30d")
+          .select("printing_id, active_listings_7d, median_30d, trimmed_median_30d, snapshot_count_30d, provider_price_changes_count_30d, low_30d, high_30d")
           .eq("canonical_slug", canonicalSlug)
           .eq("grade", "RAW")
           .in("printing_id", printingIds),
@@ -177,22 +182,32 @@ export default async function MarketSummaryCard({
     const cachedHistory7d = history7dByVariant.get(variant.variantRef) ?? [];
     const history90d = history90dByVariant.get(variant.variantRef) ?? [];
     const signalRow = signalsByPrinting.get(variant.printingId) ?? null;
+    const metrics = cardMetricsByPrinting.get(variant.printingId) ?? null;
     const trendScore = signalRow?.signal_trend === null || signalRow?.signal_trend === undefined ? null : Number(signalRow.signal_trend);
     const breakoutScore = signalRow?.signal_breakout === null || signalRow?.signal_breakout === undefined ? null : Number(signalRow.signal_breakout);
     const valueScore = signalRow?.signal_value === null || signalRow?.signal_value === undefined ? null : Number(signalRow.signal_value);
+
+    const liq = computeLiquidity({
+      priceChanges30d: metrics?.provider_price_changes_count_30d ?? null,
+      snapshotCount30d: metrics?.snapshot_count_30d ?? null,
+      low30d: metrics?.low_30d ?? null,
+      high30d: metrics?.high_30d ?? null,
+      median30d: metrics?.median_30d ?? null,
+    });
+
     return {
       printingId: variant.printingId,
       label: variant.label,
       currentPrice: marketLatest?.price_usd ?? null,
       marketBalancePrice:
-        cardMetricsByPrinting.get(variant.printingId)?.trimmed_median_30d
-        ?? cardMetricsByPrinting.get(variant.printingId)?.median_30d
+        metrics?.trimmed_median_30d
+        ?? metrics?.median_30d
         ?? null,
       asOfTs: marketLatest?.observed_at ?? marketLatest?.updated_at ?? null,
       history7d: cachedHistory7d.length > 0 ? cachedHistory7d : filterRecentDays(history30d, 7),
       history30d,
       history90d,
-      activeListings7d: cardMetricsByPrinting.get(variant.printingId)?.active_listings_7d ?? null,
+      activeListings7d: metrics?.active_listings_7d ?? null,
       signalTrend: trendScore,
       signalTrendLabel: trendScore === null ? null : trendSignalLabel(trendScore),
       signalBreakout: breakoutScore,
@@ -204,6 +219,12 @@ export default async function MarketSummaryCard({
           ? null
           : Number(signalRow.history_points_30d),
       signalsAsOfTs: signalRow?.signals_as_of_ts ?? null,
+      liquidityScore: liq?.score ?? null,
+      liquidityTier: liq?.tier ?? null,
+      liquidityTone: liq?.tone ?? "neutral" as const,
+      liquidityPriceChanges30d: metrics?.provider_price_changes_count_30d ?? null,
+      liquiditySnapshotCount30d: metrics?.snapshot_count_30d ?? null,
+      liquiditySpreadPercent: liq?.spreadPercent ?? null,
     };
   });
 

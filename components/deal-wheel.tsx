@@ -49,15 +49,41 @@ function formatSignedPercent(value: number): string {
   return `${value > 0 ? "+" : value < 0 ? "-" : ""}${Math.abs(value).toFixed(digits)}%`;
 }
 
+/** Smooth color interpolation based on price deviation percent */
+function interpolateColor(differencePercent: number): string {
+  // Clamp to +-45% range
+  const t = Math.max(-1, Math.min(1, differencePercent / 45));
+  const abs = Math.abs(t);
+  // Ease the interpolation for smoother gradient
+  const ease = abs * abs * (3 - 2 * abs); // smoothstep
+
+  if (t < 0) {
+    // Negative = buyer edge → green
+    // Lerp from neutral to green
+    const r = Math.round(240 - ease * 240);
+    const g = Math.round(240 - ease * 20);
+    const b = Math.round(240 - ease * 150);
+    return `rgb(${r},${g},${b})`;
+  }
+  if (t > 0) {
+    // Positive = dealer edge → red
+    const r = Math.round(240 + ease * 15);
+    const g = Math.round(240 - ease * 181);
+    const b = Math.round(240 - ease * 192);
+    return `rgb(${r},${g},${b})`;
+  }
+  return "#F0F0F0";
+}
+
 function toneColor(tone: "neutral" | "positive" | "negative"): string {
   if (tone === "positive") return "#00DC5A";
   if (tone === "negative") return "#FF3B30";
   return "#F0F0F0";
 }
 
-// ── Drum Picker Constants ──
-const ITEM_W = 56;
-const HALF_VISIBLE = 7;
+// ── Drum Picker ──
+const ITEM_W = 72;
+const HALF_VISIBLE = 4;
 
 export default function DealWheel({ variants, selectedPrintingId }: DealWheelProps) {
   const activeVariant =
@@ -94,10 +120,10 @@ export default function DealWheel({ variants, selectedPrintingId }: DealWheelPro
   const { min, max } = getDealWheelBounds(balancePrice);
   const price = normalizeDealWheelPrice(rawPrice, balancePrice);
   const verdict = evaluateDealWheelPrice(price, balancePrice);
-  const accent = toneColor(verdict.tone);
+  const accent = interpolateColor(verdict.differencePercent);
+  const toneAccent = toneColor(verdict.tone);
   const insight = getDealWheelInsight(price, balancePrice);
 
-  // Drum items — fractional index for smooth scrolling
   const totalSteps = Math.round((max - min) / step);
   const rawIndex = (rawPrice - min) / step;
   const centerIndex = Math.min(totalSteps, Math.max(0, Math.round(rawIndex)));
@@ -107,21 +133,8 @@ export default function DealWheel({ variants, selectedPrintingId }: DealWheelPro
     const idx = centerIndex + i;
     if (idx < 0 || idx > totalSteps) continue;
     const itemPrice = normalizeDealWheelPrice(min + idx * step, balancePrice);
-    const dist = idx - rawIndex;
-    drumItems.push({ idx, itemPrice, dist });
+    drumItems.push({ idx, itemPrice, dist: idx - rawIndex });
   }
-
-  // Selection window color follows tone
-  const selBorder = verdict.tone === "positive"
-    ? "rgba(0, 220, 90, 0.3)"
-    : verdict.tone === "negative"
-      ? "rgba(255, 59, 48, 0.3)"
-      : "rgba(255, 255, 255, 0.1)";
-  const selBg = verdict.tone === "positive"
-    ? "rgba(0, 220, 90, 0.04)"
-    : verdict.tone === "negative"
-      ? "rgba(255, 59, 48, 0.04)"
-      : "rgba(255, 255, 255, 0.02)";
 
   // Fade insight text on tone change
   const toneChanged = verdict.tone !== prevToneRef.current;
@@ -136,10 +149,10 @@ export default function DealWheel({ variants, selectedPrintingId }: DealWheelPro
   }
 
   const pillLabel = verdict.tone === "neutral"
-    ? "Fair Deal"
+    ? "Balanced"
     : `${verdict.strength} ${verdict.label}`;
 
-  // ── Drag handlers ──
+  // ── Drag ──
   const handlePointerDown = (e: React.PointerEvent) => {
     e.preventDefault();
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
@@ -151,8 +164,7 @@ export default function DealWheel({ variants, selectedPrintingId }: DealWheelPro
   const handlePointerMove = (e: React.PointerEvent) => {
     if (!dragRef.current.active) return;
     const dx = e.clientX - dragRef.current.startX;
-    const pricePerPx = step / ITEM_W;
-    const newRaw = dragRef.current.startRaw - dx * pricePerPx;
+    const newRaw = dragRef.current.startRaw - dx * (step / ITEM_W);
     setRawPrice(Math.max(min, Math.min(max, newRaw)));
   };
 
@@ -160,12 +172,10 @@ export default function DealWheel({ variants, selectedPrintingId }: DealWheelPro
     if (!dragRef.current.active) return;
     dragRef.current.active = false;
     setIsDragging(false);
-
     const snapped = normalizeDealWheelPrice(rawPrice, balancePrice);
     const final = isNearCenter(snapped, balancePrice)
       ? normalizeDealWheelPrice(balancePrice, balancePrice)
       : snapped;
-
     if (snapTimeoutRef.current) clearTimeout(snapTimeoutRef.current);
     snapTimeoutRef.current = setTimeout(() => setRawPrice(final), 50);
   };
@@ -184,45 +194,39 @@ export default function DealWheel({ variants, selectedPrintingId }: DealWheelPro
           </div>
         }
       >
-        <div className="space-y-5">
-          {/* Market Balance Price */}
-          <div className="text-center">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#6B6B6B]">Market Balance</p>
-            <p className="mt-1 text-[38px] font-bold leading-none tracking-[-0.03em] tabular-nums text-[#F0F0F0] sm:text-[44px]">
-              {formatUsd(balancePrice)}
-            </p>
-          </div>
+        <div className="space-y-4">
+          {/* Market Balance — compact single line */}
+          <p className="text-center text-[13px] text-[#6B6B6B]">
+            Market Balance{" "}
+            <span className="font-semibold tabular-nums text-[#999]">{formatUsd(balancePrice)}</span>
+          </p>
 
-          {/* Horizontal Drum Picker */}
+          {/* Drum Picker */}
           <div
-            className="relative overflow-hidden rounded-2xl border border-[#1E1E1E] bg-[#0D0D0D]"
-            style={{ height: 88 }}
+            className="relative overflow-hidden rounded-2xl bg-[#0D0D0D]"
+            style={{ height: 72 }}
           >
-            {/* Selection window */}
+            {/* Hairline selection indicators */}
             <div
-              className="pointer-events-none absolute left-1/2 top-2 bottom-2 z-10 -translate-x-1/2 rounded-lg"
-              style={{
-                width: ITEM_W + 8,
-                borderWidth: 1,
-                borderStyle: "solid",
-                borderColor: selBorder,
-                background: selBg,
-                transition: "border-color 200ms ease, background 200ms ease",
-              }}
+              className="pointer-events-none absolute top-3 bottom-3 z-10"
+              style={{ left: `calc(50% - ${ITEM_W / 2 + 1}px)`, width: 1, background: "rgba(255,255,255,0.06)" }}
+            />
+            <div
+              className="pointer-events-none absolute top-3 bottom-3 z-10"
+              style={{ left: `calc(50% + ${ITEM_W / 2 + 1}px)`, width: 1, background: "rgba(255,255,255,0.06)" }}
             />
 
-            {/* Left gradient mask */}
+            {/* Gradient masks */}
             <div
               className="pointer-events-none absolute bottom-0 left-0 top-0 z-20"
-              style={{ width: 64, background: "linear-gradient(to right, #0D0D0D, transparent)" }}
+              style={{ width: 80, background: "linear-gradient(to right, #0D0D0D, transparent)" }}
             />
-            {/* Right gradient mask */}
             <div
               className="pointer-events-none absolute bottom-0 right-0 top-0 z-20"
-              style={{ width: 64, background: "linear-gradient(to left, #0D0D0D, transparent)" }}
+              style={{ width: 80, background: "linear-gradient(to left, #0D0D0D, transparent)" }}
             />
 
-            {/* Draggable items area */}
+            {/* Drag surface + items */}
             <div
               className="absolute inset-0 z-30 cursor-grab active:cursor-grabbing"
               style={{ touchAction: "none" }}
@@ -235,12 +239,7 @@ export default function DealWheel({ variants, selectedPrintingId }: DealWheelPro
                 const absD = Math.abs(item.dist);
                 const x = item.dist * ITEM_W;
                 const isCenter = absD < 0.5;
-                const fontSize = absD < 0.6 ? 22 : absD < 1.6 ? 16 : absD < 2.6 ? 14 : 12;
-                const opacity = Math.max(0.12, 1 - absD * 0.22);
-                const fontWeight = absD < 0.6 ? 700 : absD < 1.6 ? 600 : 400;
-                const color = isCenter
-                  ? verdict.tone !== "neutral" ? accent : "#F0F0F0"
-                  : "#888";
+                const opacity = absD < 0.5 ? 1 : absD < 1.5 ? 0.3 : absD < 2.5 ? 0.12 : 0.05;
 
                 return (
                   <div
@@ -249,10 +248,10 @@ export default function DealWheel({ variants, selectedPrintingId }: DealWheelPro
                     style={{
                       width: ITEM_W,
                       transform: `translate(calc(-50% + ${x}px), -50%)`,
-                      fontSize,
-                      fontWeight,
+                      fontSize: 18,
+                      fontWeight: 600,
                       opacity,
-                      color,
+                      color: isCenter ? accent : "#F0F0F0",
                       fontVariantNumeric: "tabular-nums",
                       whiteSpace: "nowrap",
                     }}
@@ -264,7 +263,7 @@ export default function DealWheel({ variants, selectedPrintingId }: DealWheelPro
             </div>
           </div>
 
-          {/* Hidden range input for keyboard a11y */}
+          {/* Hidden range for keyboard a11y */}
           <input
             id={a11yInputId}
             type="range"
@@ -277,25 +276,25 @@ export default function DealWheel({ variants, selectedPrintingId }: DealWheelPro
             aria-label="Adjust price"
           />
 
-          {/* Selected Price + Verdict */}
+          {/* Selected Price + Verdict — tight grouping */}
           <div className="text-center">
             <p
-              className="text-[32px] font-bold leading-none tracking-[-0.03em] tabular-nums sm:text-[36px]"
-              style={{ color: accent }}
+              className="text-[34px] font-bold leading-none tracking-[-0.03em] tabular-nums sm:text-[38px]"
+              style={{ color: accent, transition: "color 150ms cubic-bezier(0.25,0.8,0.25,1)" }}
             >
               {formatUsd(price)}
             </p>
-            {verdict.tone !== "neutral" && (
-              <p className="mt-1 text-[14px] tabular-nums text-[#6B6B6B]">
-                {formatSignedUsd(verdict.difference)} ({formatSignedPercent(verdict.differencePercent)})
-              </p>
-            )}
-            <div className="mt-2">
+            <div className="mt-2 inline-flex items-center gap-2">
               <Pill label={pillLabel} tone={verdict.tone} />
+              {verdict.tone !== "neutral" && (
+                <span className="text-[13px] tabular-nums text-[#6B6B6B]">
+                  {formatSignedUsd(verdict.difference)} ({formatSignedPercent(verdict.differencePercent)})
+                </span>
+              )}
             </div>
           </div>
 
-          {/* Insight Line */}
+          {/* Insight */}
           <p
             ref={insightRef}
             className="deal-wheel-insight text-center text-[15px] leading-relaxed text-[#6B6B6B]"
@@ -303,17 +302,17 @@ export default function DealWheel({ variants, selectedPrintingId }: DealWheelPro
             {insight}
           </p>
 
-          {/* 2-Column Stats */}
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="rounded-2xl border border-[#1E1E1E] bg-[#151515] px-4 py-3">
+          {/* Stats */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-2xl border border-white/[0.05] bg-[#151515] px-4 py-3">
               <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#6B6B6B]">Difference</p>
-              <p className="mt-1 text-[22px] font-bold tabular-nums tracking-[-0.02em]" style={{ color: accent }}>
+              <p className="mt-1 text-[22px] font-bold tabular-nums tracking-[-0.02em]" style={{ color: toneAccent }}>
                 {formatSignedUsd(verdict.difference)}
               </p>
             </div>
-            <div className="rounded-2xl border border-[#1E1E1E] bg-[#151515] px-4 py-3">
+            <div className="rounded-2xl border border-white/[0.05] bg-[#151515] px-4 py-3">
               <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#6B6B6B]">Variance</p>
-              <p className="mt-1 text-[22px] font-bold tabular-nums tracking-[-0.02em]" style={{ color: accent }}>
+              <p className="mt-1 text-[22px] font-bold tabular-nums tracking-[-0.02em]" style={{ color: toneAccent }}>
                 {formatSignedPercent(verdict.differencePercent)}
               </p>
             </div>

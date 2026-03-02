@@ -256,6 +256,28 @@ body {
 @keyframes fadeSlideIn { from { opacity: 0; transform: translateY(8px);} to {opacity:1; transform:translateY(0);} }
 .results-enter { animation: fadeSlideIn 220ms ease-out; }
 
+@keyframes fadeSlideUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+.fade-slide-up { animation: fadeSlideUp 400ms cubic-bezier(0.25, 0.8, 0.25, 1) both; }
+
+/* Engine summary stagger */
+.engine-line { opacity: 0; animation: fadeSlideUp 350ms cubic-bezier(0.25, 0.8, 0.25, 1) both; }
+.engine-line:nth-child(1) { animation-delay: 80ms; }
+.engine-line:nth-child(2) { animation-delay: 200ms; }
+.engine-line:nth-child(3) { animation-delay: 320ms; }
+
+/* Sliding pill indicator */
+.sliding-pill-track { position: relative; }
+.sliding-pill-bg {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  border-radius: 12px;
+  background: #222;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+  transition: transform 180ms cubic-bezier(0.25, 0.8, 0.25, 1), width 180ms cubic-bezier(0.25, 0.8, 0.25, 1);
+  z-index: 0;
+}
+
 @keyframes aiWordFade {
   from { opacity: 0; filter: blur(4px); }
   to { opacity: 1; filter: blur(0); }
@@ -332,8 +354,11 @@ body {
 }
 
 /* Chart styles */
-.chart-gradient-fill { opacity: 0.15; }
+.chart-gradient-fill { opacity: 0.18; }
 .chart-crosshair { pointer-events: none; }
+.chart-last-node {
+  filter: drop-shadow(0 0 6px var(--color-accent));
+}
 
 /* Ticker strip separators */
 .ticker-strip > * + * { border-left: 1px solid #1E1E1E; }
@@ -450,6 +475,9 @@ body {
   .deal-wheel-slider-v2::-moz-range-thumb,
   .deal-wheel-drum-snap,
   .deal-wheel-insight { transition: none; }
+  .fade-slide-up, .engine-line { animation: none; opacity: 1; }
+  .sliding-pill-bg { transition: none; }
+  .chart-last-node { filter: none; }
 }
 
 /* Compatibility layer for existing Tailwind color classes during token migration */

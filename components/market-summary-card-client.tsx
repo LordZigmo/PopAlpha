@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { GroupCard, GroupedSection } from "@/components/ios-grouped-ui";
 import PriceTickerStrip from "@/components/price-ticker-strip";
@@ -78,6 +78,45 @@ function changeTone(value: number | null): "neutral" | "positive" | "negative" {
 
 type WindowKey = "7d" | "30d" | "90d";
 
+const WINDOWS: WindowKey[] = ["7d", "30d", "90d"];
+
+function WindowTabs({ active, onChange }: { active: WindowKey; onChange: (w: WindowKey) => void }) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const activeIndex = WINDOWS.indexOf(active);
+
+  return (
+    <div
+      ref={trackRef}
+      className="relative grid auto-cols-fr grid-flow-col gap-0 rounded-2xl border border-white/[0.06] bg-[#0D0D0D] p-1"
+    >
+      {/* Sliding background pill */}
+      <div
+        className="sliding-pill-bg"
+        style={{
+          width: `calc(${100 / WINDOWS.length}% - 0px)`,
+          transform: `translateX(${activeIndex * 100}%)`,
+        }}
+      />
+      {WINDOWS.map((windowKey) => {
+        const isActive = active === windowKey;
+        return (
+          <button
+            key={windowKey}
+            type="button"
+            onClick={() => onChange(windowKey)}
+            className={[
+              "relative z-10 flex min-h-11 items-center justify-center rounded-xl px-3 text-center text-[15px] font-semibold transition-colors duration-150",
+              isActive ? "text-[#F0F0F0]" : "text-[#555]",
+            ].join(" ")}
+          >
+            {windowKey.toUpperCase()}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function MarketSummaryCardClient({
   variants,
   selectedPrintingId,
@@ -143,32 +182,13 @@ export default function MarketSummaryCardClient({
           <div className="space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
               <p className="text-[22px] font-semibold text-[#F0F0F0]">Market Summary</p>
-              <div className="grid auto-cols-fr grid-flow-col gap-1 rounded-2xl border border-[#1E1E1E] bg-[#151515] p-1">
-                {(["7d", "30d", "90d"] as WindowKey[]).map((windowKey) => {
-                  const active = activeWindow === windowKey;
-                  return (
-                    <button
-                      key={windowKey}
-                      type="button"
-                      onClick={() => setWindow(windowKey)}
-                      className={[
-                        "flex min-h-11 items-center justify-center rounded-xl px-3 text-center text-[15px] font-semibold transition",
-                        active
-                          ? "bg-[#222] text-[#F0F0F0] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
-                          : "text-[#777]",
-                      ].join(" ")}
-                    >
-                      {windowKey.toUpperCase()}
-                    </button>
-                  );
-                })}
-              </div>
+              <WindowTabs active={activeWindow} onChange={setWindow} />
             </div>
           </div>
         }
       >
         {currentPrice === null ? (
-          <div className="rounded-2xl border border-[#1E1E1E] bg-[#151515] px-4 py-5 text-[16px] text-[#777]">
+          <div className="rounded-2xl border border-white/[0.06] bg-[#151515] px-4 py-5 text-[16px] text-[#777]">
             No market data yet.
           </div>
         ) : (
@@ -191,7 +211,7 @@ export default function MarketSummaryCardClient({
               changePercent={changeValue}
             />
 
-            <div className="border-t border-[#1E1E1E]" />
+            <div className="border-t border-white/[0.06]" />
 
             {/* Stats table — 2×2, change cell last (bottom-right) */}
             <PriceTickerStrip
@@ -205,7 +225,7 @@ export default function MarketSummaryCardClient({
 
             {variants.length > 1 ? (
               <>
-                <div className="border-t border-[#1E1E1E]" />
+                <div className="border-t border-white/[0.06]" />
                 <div className="flex flex-wrap gap-2">
                   {variants.map((variant) => {
                     const active = variant.printingId === (activeVariant?.printingId ?? null);
@@ -215,10 +235,10 @@ export default function MarketSummaryCardClient({
                         type="button"
                         onClick={() => setVariant(variant.printingId)}
                         className={[
-                          "inline-flex min-h-10 items-center rounded-full border px-3 text-[14px] font-semibold transition",
+                          "inline-flex min-h-10 items-center rounded-full border px-3 text-[14px] font-semibold transition-all duration-150",
                           active
-                            ? "border-[#2B2B2B] bg-[#222] text-[#F0F0F0]"
-                            : "border-[#1E1E1E] bg-[#151515] text-[#777]",
+                            ? "border-white/[0.1] bg-[#222] text-[#F0F0F0] shadow-[0_2px_8px_rgba(0,0,0,0.2)]"
+                            : "border-white/[0.04] bg-transparent text-[#555]",
                         ].join(" ")}
                       >
                         {variant.label}

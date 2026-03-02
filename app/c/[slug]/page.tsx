@@ -474,6 +474,20 @@ export default async function CanonicalCardPage({
   const primaryPriceLabel = currentRawPrice != null
     ? "Current market price"
     : `${selectedSnapshotGrade ? legacyGradeLabel(selectedSnapshotGrade) : `${providerLabel(activeProvider)} ${gradeBucketLabel(activeBucket)}`} · 7-day median ask`;
+
+  // Fair Value + Edge
+  const fairValue = snapshotData?.trimmed_median_30d ?? snapshotData?.median_30d ?? null;
+  const edgePercent = displayPrimaryPrice != null && fairValue != null && fairValue > 0
+    ? ((displayPrimaryPrice - fairValue) / fairValue) * 100
+    : null;
+  const edgeLabel = edgePercent !== null
+    ? edgePercent < -1 ? "Buyer Edge" : edgePercent > 1 ? "Dealer Edge" : "Fair Value"
+    : null;
+  const edgeTone = edgePercent !== null
+    ? edgePercent < -1 ? "positive" : edgePercent > 1 ? "negative" : "neutral"
+    : "neutral";
+  const edgeColor = edgeTone === "positive" ? "#00DC5A" : edgeTone === "negative" ? "#FF3B30" : "#6B6B6B";
+
   const rarityInfo = selectedPrinting ? rarityColor(selectedPrinting.rarity) : null;
   const canonicalSetHref = setHref(canonical.set_name);
 
@@ -495,13 +509,40 @@ export default async function CanonicalCardPage({
               {subtitleText}
             </p>
             {primaryPrice !== null && (
-              <div className="mt-3 flex flex-wrap items-baseline gap-2.5">
-                <span className="text-[46px] font-bold leading-none tracking-[-0.04em] tabular-nums text-[#F0F0F0] sm:text-[56px]">
-                  {primaryPrice}
-                </span>
-                <span className="text-[16px] leading-tight text-[#6B6B6B]">
-                  {primaryPriceLabel}
-                </span>
+              <div className="mt-3">
+                <div className="flex flex-wrap items-baseline gap-2.5">
+                  <span className="text-[46px] font-bold leading-none tracking-[-0.04em] tabular-nums text-[#F0F0F0] sm:text-[56px]">
+                    {primaryPrice}
+                  </span>
+                  {edgePercent !== null && (
+                    <span
+                      className="text-[20px] font-bold tabular-nums tracking-[-0.02em] sm:text-[24px]"
+                      style={{ color: edgeColor }}
+                    >
+                      {edgePercent > 0 ? "+" : ""}{Math.abs(edgePercent) >= 10 ? edgePercent.toFixed(0) : edgePercent.toFixed(1)}%
+                    </span>
+                  )}
+                </div>
+                {fairValue != null && (
+                  <div className="mt-1.5 flex flex-wrap items-baseline gap-2">
+                    <span className="text-[15px] text-[#6B6B6B]">
+                      Fair Value <span className="font-semibold tabular-nums text-[#999]">{formatUsdCompact(fairValue)}</span>
+                    </span>
+                    {edgeLabel && edgeLabel !== "Fair Value" && (
+                      <span
+                        className="inline-flex items-center rounded-full border px-2 py-0.5 text-[12px] font-semibold"
+                        style={{
+                          color: edgeColor,
+                          borderColor: edgeTone === "positive" ? "rgba(0,220,90,0.25)" : edgeTone === "negative" ? "rgba(255,59,48,0.25)" : "rgba(107,107,107,0.25)",
+                          backgroundColor: edgeTone === "positive" ? "rgba(0,220,90,0.08)" : edgeTone === "negative" ? "rgba(255,59,48,0.08)" : "transparent",
+                        }}
+                      >
+                        {edgeLabel}
+                      </span>
+                    )}
+                  </div>
+                )}
+                <p className="mt-1 text-[14px] text-[#555]">{primaryPriceLabel}</p>
               </div>
             )}
             <div className="mt-3 flex flex-wrap items-start justify-between gap-2">

@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 
 import DealWheel from "@/components/deal-wheel";
+import EngineSummary from "@/components/engine-summary";
+import LiquidityModule from "@/components/liquidity-module";
 import MarketSummaryCardClient from "@/components/market-summary-card-client";
 import SignalGauge from "@/components/signal-gauge";
 
@@ -28,6 +30,12 @@ type VariantMetricPayload = {
   signalValueLabel: string | null;
   signalsHistoryPoints30d: number | null;
   signalsAsOfTs: string | null;
+  liquidityScore: number | null;
+  liquidityTier: string | null;
+  liquidityTone: "warning" | "neutral" | "positive";
+  liquidityPriceChanges30d: number | null;
+  liquiditySnapshotCount30d: number | null;
+  liquiditySpreadPercent: number | null;
 };
 
 type CardMarketIntelClientProps = {
@@ -87,7 +95,7 @@ export default function CardMarketIntelClient({
   return (
     <>
       {hasSignals ? (
-        <div className="mt-6 grid grid-cols-3 gap-2 sm:gap-3">
+        <div className="fade-slide-up mt-6 grid grid-cols-3 gap-2 sm:gap-3">
           <SignalGauge
             label="Trend"
             score={activeVariant?.signalTrend ?? null}
@@ -105,6 +113,19 @@ export default function CardMarketIntelClient({
           />
         </div>
       ) : null}
+
+      <EngineSummary
+        currentPrice={activeVariant?.currentPrice ?? null}
+        marketBalancePrice={activeVariant?.marketBalancePrice ?? null}
+        signalTrend={activeVariant?.signalTrend ?? null}
+        signalTrendLabel={activeVariant?.signalTrendLabel ?? null}
+        signalValue={activeVariant?.signalValue ?? null}
+        signalValueLabel={activeVariant?.signalValueLabel ?? null}
+        liquidityScore={activeVariant?.liquidityScore ?? null}
+        liquidityTier={activeVariant?.liquidityTier ?? null}
+        priceChanges30d={activeVariant?.liquidityPriceChanges30d ?? null}
+        spreadPercent={activeVariant?.liquiditySpreadPercent ?? null}
+      />
 
       <MarketSummaryCardClient
         variants={variants.map((variant) => ({
@@ -130,30 +151,46 @@ export default function CardMarketIntelClient({
         selectedPrintingId={activeVariant?.printingId ?? selectedPrintingId}
       />
 
+      <LiquidityModule
+        score={activeVariant?.liquidityScore ?? null}
+        tier={activeVariant?.liquidityTier ?? null}
+        tone={activeVariant?.liquidityTone ?? "neutral"}
+        priceChanges30d={activeVariant?.liquidityPriceChanges30d ?? null}
+        snapshotCount30d={activeVariant?.liquiditySnapshotCount30d ?? null}
+        spreadPercent={activeVariant?.liquiditySpreadPercent ?? null}
+      />
+
       {(activeVariant?.signalsHistoryPoints30d != null || activeVariant?.signalsAsOfTs) ? (
-        <div className="glass-target mt-4 flex flex-wrap gap-4 rounded-2xl border border-[#1E1E1E] bg-[#111111] px-4 py-3 sm:gap-6 sm:px-5 sm:py-3.5">
-          {[
-            {
-              label: "Confidence",
-              value: confidence.label,
-              color: { positive: "#00DC5A", negative: "#FF3B30", warning: "#FFD60A", neutral: "#F0F0F0" }[confidence.tone],
-            },
-            {
-              label: "Last Computed",
-              value: formatSignalsUpdated(activeVariant?.signalsAsOfTs ?? null),
-              color: "#F0F0F0",
-            },
-            {
-              label: "Data Points",
-              value: activeVariant?.signalsHistoryPoints30d != null ? String(activeVariant.signalsHistoryPoints30d) : "--",
-              color: "#F0F0F0",
-            },
-          ].map((item) => (
-            <div key={item.label} className="flex-1 min-w-[70px]">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[#6B6B6B] sm:text-[13px]">{item.label}</p>
-              <p className="mt-1 text-[17px] font-bold tabular-nums tracking-[-0.02em] sm:text-[20px]" style={{ color: item.color }}>{item.value}</p>
-            </div>
-          ))}
+        <div className="mt-5 flex flex-wrap items-center gap-2.5">
+          {/* Confidence badge */}
+          <span
+            className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[13px] font-semibold"
+            style={{
+              color: { positive: "#00DC5A", negative: "#FF3B30", warning: "#FFD60A", neutral: "#999" }[confidence.tone],
+              borderColor: { positive: "rgba(0,220,90,0.2)", negative: "rgba(255,59,48,0.2)", warning: "rgba(255,214,10,0.2)", neutral: "rgba(255,255,255,0.06)" }[confidence.tone],
+              backgroundColor: { positive: "rgba(0,220,90,0.06)", negative: "rgba(255,59,48,0.06)", warning: "rgba(255,214,10,0.06)", neutral: "rgba(255,255,255,0.03)" }[confidence.tone],
+            }}
+          >
+            <span
+              className="inline-block h-1.5 w-1.5 rounded-full"
+              style={{
+                backgroundColor: { positive: "#00DC5A", negative: "#FF3B30", warning: "#FFD60A", neutral: "#555" }[confidence.tone],
+              }}
+            />
+            {confidence.label} confidence
+          </span>
+
+          {/* Sample size */}
+          {activeVariant?.signalsHistoryPoints30d != null && (
+            <span className="text-[13px] tabular-nums text-[#555]">
+              {activeVariant.signalsHistoryPoints30d} data points
+            </span>
+          )}
+
+          {/* Last computed */}
+          <span className="text-[13px] text-[#444]">
+            {formatSignalsUpdated(activeVariant?.signalsAsOfTs ?? null)}
+          </span>
         </div>
       ) : null}
     </>

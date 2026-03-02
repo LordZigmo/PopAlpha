@@ -101,14 +101,14 @@ export function GroupedSection({
   className?: string;
 }) {
   return (
-    <section className={cn("mt-6", className)}>
+    <section className={cn("mt-8", className)}>
       {title || description ? (
-        <div className="mb-2 px-1">
+        <div className="mb-2.5 px-1">
           {title ? <p className="text-[15px] font-semibold uppercase tracking-[0.08em] text-[#6B6B6B]">{title}</p> : null}
           {description ? <p className="mt-1 text-[15px] text-[#555]">{description}</p> : null}
         </div>
       ) : null}
-      <div className="space-y-3">{children}</div>
+      <div className="space-y-4">{children}</div>
     </section>
   );
 }
@@ -127,12 +127,12 @@ export function GroupCard({
   return (
     <div
       className={cn(
-        "overflow-hidden border border-[#1E1E1E] bg-[#111111] shadow-[0_12px_32px_rgba(0,0,0,0.25)]",
+        "overflow-hidden border border-white/[0.06] bg-[#111111] shadow-[0_8px_24px_rgba(0,0,0,0.2),0_24px_48px_rgba(0,0,0,0.15)]",
         inset ? "rounded-2xl bg-[#1A1A1A]" : "rounded-[20px]",
         className
       )}
     >
-      {header ? <div className="border-b border-[#1E1E1E] px-5 py-3">{header}</div> : null}
+      {header ? <div className="border-b border-white/[0.06] px-5 py-3.5">{header}</div> : null}
       <div className={cn(inset ? "p-4" : "p-5 sm:p-6")}>{children}</div>
     </div>
   );

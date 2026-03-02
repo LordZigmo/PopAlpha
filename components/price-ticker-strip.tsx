@@ -33,7 +33,7 @@ export default function PriceTickerStrip({ items }: PriceTickerStripProps) {
   if (items.length === 0) return null;
 
   return (
-    <div className={`grid gap-px overflow-hidden rounded-2xl border border-[#1E1E1E] bg-[#1E1E1E] ${gridClass(items.length)}`}>
+    <div className={`grid gap-px overflow-hidden rounded-2xl border border-white/[0.06] bg-[#1A1A1A] ${gridClass(items.length)}`}>
       {items.map((item) => (
         <div
           key={item.label}
