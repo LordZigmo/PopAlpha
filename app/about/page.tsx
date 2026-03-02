@@ -16,8 +16,8 @@ export default function AboutPage() {
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6B6B6B]">
             About PopAlpha
           </p>
-          <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">
-            PopAlpha is a simple tool that helps you understand Pokemon card prices fast.
+          <h1 className="mt-3 max-w-3xl text-[34px] font-semibold leading-[1.02] tracking-[-0.045em] sm:text-[52px]">
+            Understand Pokemon card prices fast.
           </h1>
           <div className="mt-6 space-y-5 text-[15px] leading-7 text-[#A0A0A0] sm:text-[16px]">
             <p>
@@ -39,9 +39,9 @@ export default function AboutPage() {
         </div>
 
         <section className="mt-6 rounded-[28px] border border-[#1E1E1E] bg-[#101010] p-6 sm:p-8">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6B6B6B]">
+          <h2 className="text-[30px] font-semibold leading-[1.04] tracking-[-0.04em] sm:text-[44px]">
             Built For Singles Collectors
-          </p>
+          </h2>
           <div className="mt-4 space-y-5 text-[15px] leading-7 text-[#A0A0A0] sm:text-[16px]">
             <p>Right now, we focus on raw Pokemon card singles.</p>
             <p>
@@ -60,9 +60,9 @@ export default function AboutPage() {
         </section>
 
         <section className="mt-6 rounded-[28px] border border-[#1E1E1E] bg-[#101010] p-6 sm:p-8">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6B6B6B]">
+          <h2 className="text-[30px] font-semibold leading-[1.04] tracking-[-0.04em] sm:text-[44px]">
             Why We Built It
-          </p>
+          </h2>
           <div className="mt-4 space-y-5 text-[15px] leading-7 text-[#A0A0A0] sm:text-[16px]">
             <p>We got tired of doing mental math at card shows.</p>
             <p>Averaging eBay sold listings. Guessing what felt fair. Trying to learn about a card while someone waited for an offer.</p>
@@ -72,9 +72,9 @@ export default function AboutPage() {
         </section>
 
         <section className="mt-6 rounded-[28px] border border-[#1E1E1E] bg-[#101010] p-6 sm:p-8">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6B6B6B]">
+          <h2 className="text-[30px] font-semibold leading-[1.04] tracking-[-0.04em] sm:text-[44px]">
             Our Mission
-          </p>
+          </h2>
           <p className="mt-4 text-[15px] leading-7 text-[#A0A0A0] sm:text-[16px]">
             To make Pokemon card collecting easier, smarter, and more fun.
           </p>

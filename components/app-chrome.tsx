@@ -28,11 +28,11 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
 
-  // Home, search, and card detail pages use their own layout — no header
-  if (pathname === "/" || pathname === "/search" || pathname.startsWith("/c/")) {
+  // Home, search, about, and card detail pages use their own layout — no header
+  if (pathname === "/" || pathname === "/search" || pathname === "/about" || pathname.startsWith("/c/")) {
     return (
       <>
-        <AboutLink fixed />
+        {pathname !== "/about" ? <AboutLink fixed /> : null}
         {children}
       </>
     );
