@@ -32,6 +32,8 @@ type HistoryPointRow = {
 type CardMetricRow = {
   printing_id: string | null;
   active_listings_7d: number | null;
+  median_30d: number | null;
+  trimmed_median_30d: number | null;
 };
 
 type VariantSignalRow = {
@@ -105,7 +107,7 @@ export default async function MarketSummaryCard({
           .limit(history90dLimit),
         supabase
           .from("card_metrics")
-          .select("printing_id, active_listings_7d")
+          .select("printing_id, active_listings_7d, median_30d, trimmed_median_30d")
           .eq("canonical_slug", canonicalSlug)
           .eq("grade", "RAW")
           .in("printing_id", printingIds),
@@ -182,6 +184,10 @@ export default async function MarketSummaryCard({
       printingId: variant.printingId,
       label: variant.label,
       currentPrice: marketLatest?.price_usd ?? null,
+      marketBalancePrice:
+        cardMetricsByPrinting.get(variant.printingId)?.trimmed_median_30d
+        ?? cardMetricsByPrinting.get(variant.printingId)?.median_30d
+        ?? null,
       asOfTs: marketLatest?.observed_at ?? marketLatest?.updated_at ?? null,
       history7d: cachedHistory7d.length > 0 ? cachedHistory7d : filterRecentDays(history30d, 7),
       history30d,

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import DealWheel from "@/components/deal-wheel";
 import MarketSummaryCardClient from "@/components/market-summary-card-client";
 import SignalGauge from "@/components/signal-gauge";
 
@@ -14,6 +15,7 @@ type VariantMetricPayload = {
   printingId: string;
   label: string;
   currentPrice: number | null;
+  marketBalancePrice: number | null;
   asOfTs: string | null;
   history7d: HistoryPointRow[];
   history30d: HistoryPointRow[];
@@ -117,6 +119,15 @@ export default function CardMarketIntelClient({
         selectedPrintingId={activeVariant?.printingId ?? selectedPrintingId}
         selectedWindow={selectedWindow}
         onVariantChange={setActivePrintingId}
+      />
+
+      <DealWheel
+        variants={variants.map((variant) => ({
+          printingId: variant.printingId,
+          label: variant.label,
+          marketBalancePrice: variant.marketBalancePrice,
+        }))}
+        selectedPrintingId={activeVariant?.printingId ?? selectedPrintingId}
       />
 
       {(activeVariant?.signalsHistoryPoints30d != null || activeVariant?.signalsAsOfTs) ? (
