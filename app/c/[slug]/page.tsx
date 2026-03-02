@@ -96,6 +96,17 @@ function sortPrintings(a: CardPrintingRow, b: CardPrintingRow): number {
   return a.id.localeCompare(b.id);
 }
 
+function rawVariantSortPriority(printing: CardPrintingRow): number {
+  const order: Record<CardPrintingRow["finish"], number> = {
+    NON_HOLO: 0,
+    REVERSE_HOLO: 1,
+    HOLO: 2,
+    ALT_HOLO: 3,
+    UNKNOWN: 4,
+  };
+  return order[printing.finish] ?? 9;
+}
+
 function defaultPrintingPriority(printing: CardPrintingRow): number {
   let score = 0;
   if (printing.finish === "NON_HOLO") score += 100;
@@ -297,9 +308,8 @@ function marketStatusSignal(
   active7d: number | null,
 ): { label: string; tone: "positive" | "warning" | "neutral" } {
   if (active7d === null || active7d === undefined) return { label: "Market Forming", tone: "neutral" };
-  if (active7d <= 2) return { label: "Tight Supply", tone: "positive" };
-  if (active7d <= 6) return { label: "Balanced Market", tone: "warning" };
-  return { label: "Active Market", tone: "neutral" };
+  if (active7d <= 4) return { label: "Scarce", tone: "positive" };
+  return { label: "Abundant", tone: "neutral" };
 }
 
 function signalConfidenceLabel(points30d: number | null): { label: string; tone: "positive" | "warning" | "negative" | "neutral" } {
@@ -473,7 +483,13 @@ export default async function CanonicalCardPage({
     grade: queryGradeSelection,
     provider: viewMode === "GRADED" ? activeProvider : null,
   });
-  const rawVariantOptions = printings.map((row) => ({
+  const rawVariantOptions = [...printings]
+    .sort((a, b) => {
+      const finishDelta = rawVariantSortPriority(a) - rawVariantSortPriority(b);
+      if (finishDelta !== 0) return finishDelta;
+      return sortPrintings(a, b);
+    })
+    .map((row) => ({
     printingId: row.id,
     label: rawVariantSegmentLabel(row, printings),
     variantRef: buildRawVariantRef(row.id),

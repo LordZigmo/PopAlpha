@@ -167,28 +167,6 @@ export default function MarketSummaryCardClient({
                 })}
               </div>
             </div>
-            {variants.length > 1 ? (
-              <div className="flex flex-wrap gap-2">
-                {variants.map((variant) => {
-                  const active = variant.printingId === (activeVariant?.printingId ?? null);
-                  return (
-                    <button
-                      key={variant.printingId}
-                      type="button"
-                      onClick={() => setVariant(variant.printingId)}
-                      className={[
-                        "inline-flex min-h-10 items-center rounded-full border px-3 text-[14px] font-semibold transition",
-                        active
-                          ? "border-[#2B2B2B] bg-[#222] text-[#F0F0F0]"
-                          : "border-[#1E1E1E] bg-[#151515] text-[#777]",
-                      ].join(" ")}
-                    >
-                      {variant.label}
-                    </button>
-                  );
-                })}
-              </div>
-            ) : null}
           </div>
         }
       >
@@ -227,6 +205,32 @@ export default function MarketSummaryCardClient({
                 { label: `${effectiveWindow.toUpperCase()} Change`, value: formatPercent(changeValue), tone: changeTone(changeValue) },
               ]}
             />
+
+            {variants.length > 1 ? (
+              <>
+                <div className="border-t border-[#1E1E1E]" />
+                <div className="flex flex-wrap gap-2">
+                  {variants.map((variant) => {
+                    const active = variant.printingId === (activeVariant?.printingId ?? null);
+                    return (
+                      <button
+                        key={variant.printingId}
+                        type="button"
+                        onClick={() => setVariant(variant.printingId)}
+                        className={[
+                          "inline-flex min-h-10 items-center rounded-full border px-3 text-[14px] font-semibold transition",
+                          active
+                            ? "border-[#2B2B2B] bg-[#222] text-[#F0F0F0]"
+                            : "border-[#1E1E1E] bg-[#151515] text-[#777]",
+                        ].join(" ")}
+                      >
+                        {variant.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            ) : null}
           </div>
         )}
       </GroupCard>
