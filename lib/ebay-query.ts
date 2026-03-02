@@ -6,19 +6,44 @@ export type QueryPrintingHint = {
   edition: "UNLIMITED" | "FIRST_EDITION" | "UNKNOWN";
 } | null;
 
-export function buildEbayQuery(input: {
+type EbayQueryInput = {
   canonicalName: string | null;
   setName: string | null;
   cardNumber: string | null;
   printing: QueryPrintingHint;
   grade: GradeSelection;
   provider?: GradedSource | null;
-}): string {
+};
+
+function normalizeQueryTerm(value: string | null | undefined): string {
+  return String(value ?? "")
+    .replace(/[^\p{L}\p{N}\s-]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function uniqueQueries(values: string[]): string[] {
+  const seen = new Set<string>();
+  const next: string[] = [];
+  for (const value of values) {
+    const normalized = value.replace(/\s+/g, " ").trim();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    next.push(normalized);
+  }
+  return next;
+}
+
+function buildQueryParts(input: EbayQueryInput, options?: { includeSet?: boolean; includeCardNumber?: boolean }): string[] {
   const parts: string[] = [];
   const exclusions = ["-lot", "-proxy", "-digital", "-custom", "-metal", "-case", "-download", "-coin", "-pack"];
-  if (input.canonicalName) parts.push(input.canonicalName);
-  if (input.setName) parts.push(input.setName);
-  if (input.cardNumber) parts.push(input.cardNumber);
+  const canonicalName = normalizeQueryTerm(input.canonicalName);
+  const setName = normalizeQueryTerm(input.setName);
+  const cardNumber = normalizeQueryTerm(input.cardNumber);
+  if (canonicalName) parts.push(canonicalName);
+  if (options?.includeCardNumber !== false && cardNumber) parts.push(cardNumber);
+  parts.push("pokemon");
+  if (options?.includeSet !== false && setName) parts.push(setName);
 
   if (input.printing?.finish === "REVERSE_HOLO") parts.push("reverse holo");
   if (input.printing?.finish === "HOLO") parts.push("holo");
@@ -45,6 +70,19 @@ export function buildEbayQuery(input: {
   if (input.grade === "G10") parts.push(`${gradedProvider} 10`);
 
   parts.push(...exclusions);
+  return parts;
+}
 
-  return parts.join(" ").replace(/\s+/g, " ").trim();
+export function buildEbaySearchQueries(input: EbayQueryInput): string[] {
+  const queries = [
+    buildQueryParts(input, { includeSet: true, includeCardNumber: true }).join(" "),
+    buildQueryParts(input, { includeSet: false, includeCardNumber: true }).join(" "),
+    buildQueryParts(input, { includeSet: true, includeCardNumber: false }).join(" "),
+    buildQueryParts(input, { includeSet: false, includeCardNumber: false }).join(" "),
+  ];
+  return uniqueQueries(queries);
+}
+
+export function buildEbayQuery(input: EbayQueryInput): string {
+  return buildEbaySearchQueries(input)[0] ?? "";
 }

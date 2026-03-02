@@ -14,7 +14,7 @@ import EbayListings from "@/components/ebay-listings";
 import { GroupedSection, PageShell, Pill, SegmentedControl } from "@/components/ios-grouped-ui";
 import MarketPulse from "@/components/market-pulse";
 import MarketSummaryCard from "@/components/market-summary-card";
-import { buildEbayQuery, type GradeSelection, type GradedSource } from "@/lib/ebay-query";
+import { buildEbaySearchQueries, type GradeSelection, type GradedSource } from "@/lib/ebay-query";
 import { buildPrintingPill } from "@/lib/cards/detail";
 import { buildRawVariantRef } from "@/lib/identity/variant-ref";
 import { getServerSupabaseClient } from "@/lib/supabaseServer";
@@ -435,7 +435,7 @@ export default async function CanonicalCardPage({
   const snapshotData = selectedSnapshotGrade ? gradeSnapMap[selectedSnapshotGrade] : null;
 
   const marketStatus = marketStatusSignal(snapshotData?.active_listings_7d ?? null);
-  const ebayQuery = buildEbayQuery({
+  const ebayQueries = buildEbaySearchQueries({
     canonicalName: canonical.canonical_name,
     setName: canonical.set_name,
     cardNumber: canonical.card_number,
@@ -632,7 +632,7 @@ export default async function CanonicalCardPage({
         {/* ── Live eBay Listings ──────────────────────────────────────────── */}
         <CollapsibleSection title="Live eBay Listings" defaultOpen={false} badge={<Pill label="Live" tone="neutral" size="small" />}>
           <EbayListings
-            query={ebayQuery}
+            queries={ebayQueries}
             canonicalSlug={slug}
             printingId={selectedPrinting?.id ?? null}
             grade={legacyListingsGrade}

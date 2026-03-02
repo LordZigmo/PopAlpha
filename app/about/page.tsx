@@ -25,11 +25,11 @@ export default function AboutPage() {
             </p>
             <div>
               <p>You're trying to figure out:</p>
-              <ul className="mt-3 space-y-1 pl-5">
-                <li>Is this a fair price?</li>
-                <li>Is this card trending up?</li>
-                <li>Why is this version more expensive?</li>
-                <li>Am I about to overpay?</li>
+              <ul className="mt-3 list-disc space-y-1 pl-5 marker:text-[#D0D0D0]">
+                <li className="pl-1">Is this a fair price?</li>
+                <li className="pl-1">Is this card trending up?</li>
+                <li className="pl-1">Why is this version more expensive?</li>
+                <li className="pl-1">Am I about to overpay?</li>
               </ul>
             </div>
             <p>We've felt that pain too.</p>
@@ -51,12 +51,12 @@ export default function AboutPage() {
             </p>
             <div>
               <p>PopAlpha tracks:</p>
-              <ul className="mt-3 space-y-1 pl-5">
-                <li>Real Pokemon card sale prices</li>
-                <li>Variant-specific price changes</li>
-                <li>Market trends</li>
-                <li>A Market Balance Price (our estimate of what's fair right now)</li>
-                <li>Set summaries to help you learn more about each release</li>
+              <ul className="mt-3 list-disc space-y-1 pl-5 marker:text-[#D0D0D0]">
+                <li className="pl-1">Real Pokemon card sale prices</li>
+                <li className="pl-1">Variant-specific price changes</li>
+                <li className="pl-1">Market trends</li>
+                <li className="pl-1">A Market Balance Price (our estimate of what's fair right now)</li>
+                <li className="pl-1">Set summaries to help you learn more about each release</li>
               </ul>
             </div>
             <p>No spreadsheets. No ten open tabs. Just clear, fast insight.</p>

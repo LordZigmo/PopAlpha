@@ -21,6 +21,11 @@ type EbayBrowseItem = {
   seller?: { username?: string };
 };
 
+type EbayBrowseResponse = {
+  itemSummaries?: EbayBrowseItem[];
+  total?: number;
+};
+
 function getEbayBaseUrl(): string {
   const env = (process.env.EBAY_ENV ?? "production").trim().toLowerCase();
   return env === "sandbox" ? "https://api.sandbox.ebay.com" : "https://api.ebay.com";
@@ -28,8 +33,12 @@ function getEbayBaseUrl(): string {
 
 function parseLimit(raw: string | null): number {
   const value = Number.parseInt(raw ?? "", 10);
-  if (!Number.isFinite(value) || value <= 0) return 12;
-  return Math.min(value, 24);
+  if (!Number.isFinite(value) || value <= 0) return 50;
+  return Math.min(value, 60);
+}
+
+function normalizeQuery(raw: string): string {
+  return raw.replace(/\s+/g, " ").trim();
 }
 
 async function getAppAccessToken(): Promise<string> {
@@ -77,7 +86,9 @@ async function getAppAccessToken(): Promise<string> {
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
-  const q = url.searchParams.get("q")?.trim() ?? "";
+  const queries = url.searchParams.getAll("q").map(normalizeQuery).filter(Boolean);
+  const uniqueQueries = [...new Set(queries)];
+  const q = uniqueQueries[0] ?? "";
   const limit = parseLimit(url.searchParams.get("limit"));
   if (!q) {
     return NextResponse.json({ ok: false, error: "Missing q query param." }, { status: 400 });
@@ -86,51 +97,72 @@ export async function GET(req: Request) {
   try {
     const token = await getAppAccessToken();
     const browseUrl = `${getEbayBaseUrl()}/buy/browse/v1/item_summary/search`;
-    const params = new URLSearchParams({
-      q,
-      limit: String(limit),
-    });
+    const dedupedItems = new Map<string, ReturnType<typeof mapBrowseItem>>();
+    const totals: number[] = [];
 
-    const response = await fetch(`${browseUrl}?${params.toString()}`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-      cache: "no-store",
-    });
+    for (const query of uniqueQueries) {
+      const params = new URLSearchParams({
+        q: query,
+        limit: String(Math.min(limit, 50)),
+        filter: "buyingOptions:{FIXED_PRICE}",
+      });
 
-    if (!response.ok) {
-      const text = await response.text();
-      return NextResponse.json({ ok: false, error: `Browse request failed (${response.status}): ${text}` }, { status: 502 });
+      const response = await fetch(`${browseUrl}?${params.toString()}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        cache: "no-store",
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        return NextResponse.json({ ok: false, error: `Browse request failed (${response.status}): ${text}` }, { status: 502 });
+      }
+
+      const payload = (await response.json()) as EbayBrowseResponse;
+      if (typeof payload.total === "number") totals.push(payload.total);
+      for (const item of payload.itemSummaries ?? []) {
+        const mapped = mapBrowseItem(item);
+        const dedupeKey = mapped.externalId || mapped.itemWebUrl || `${mapped.title}:${mapped.price?.value ?? ""}`;
+        if (!dedupeKey || dedupedItems.has(dedupeKey)) continue;
+        dedupedItems.set(dedupeKey, mapped);
+      }
+
+      if (dedupedItems.size >= limit) break;
     }
 
-    const payload = (await response.json()) as { itemSummaries?: EbayBrowseItem[] };
-    const items = (payload.itemSummaries ?? []).map((item) => {
-      const shipping = item.shippingOptions?.[0]?.shippingCost;
-      return {
-        externalId: item.itemId ?? "",
-        title: item.title ?? "",
-        price: item.price?.value
-          ? {
-              value: item.price.value,
-              currency: item.price.currency ?? "USD",
-            }
-          : null,
-        shipping: shipping?.value
-          ? {
-              value: shipping.value,
-              currency: shipping.currency ?? "USD",
-            }
-          : null,
-        itemWebUrl: item.itemWebUrl ?? "",
-        image: item.image?.imageUrl ?? null,
-        condition: item.condition ?? null,
-        endTime: item.itemEndDate ?? null,
-        seller: item.seller?.username ?? null,
-      };
+    return NextResponse.json({
+      ok: true,
+      total: totals.length > 0 ? Math.max(...totals) : dedupedItems.size,
+      items: [...dedupedItems.values()].slice(0, limit),
+      queriesUsed: uniqueQueries,
     });
-
-    return NextResponse.json({ ok: true, items });
   } catch (error) {
     return NextResponse.json({ ok: false, error: String(error) }, { status: 500 });
   }
+}
+
+function mapBrowseItem(item: EbayBrowseItem) {
+  const shipping = item.shippingOptions?.[0]?.shippingCost;
+  return {
+    externalId: item.itemId ?? "",
+    title: item.title ?? "",
+    price: item.price?.value
+      ? {
+          value: item.price.value,
+          currency: item.price.currency ?? "USD",
+        }
+      : null,
+    shipping: shipping?.value
+      ? {
+          value: shipping.value,
+          currency: shipping.currency ?? "USD",
+        }
+      : null,
+    itemWebUrl: item.itemWebUrl ?? "",
+    image: item.image?.imageUrl ?? null,
+    condition: item.condition ?? null,
+    endTime: item.itemEndDate ?? null,
+    seller: item.seller?.username ?? null,
+  };
 }
