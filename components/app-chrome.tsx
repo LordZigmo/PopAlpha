@@ -6,6 +6,20 @@ import { usePathname } from "next/navigation";
 import ThemeToggle from "@/components/theme-toggle";
 import NavSearchForm from "@/components/nav-search-form";
 
+function AboutLink({ fixed = false }: { fixed?: boolean }) {
+  return (
+    <Link
+      href="/about"
+      className={[
+        "rounded-[var(--radius-input)] border border-[#1E1E1E] px-3 py-1.5 text-xs font-semibold text-[#6B6B6B] transition hover:text-[#F0F0F0]",
+        fixed ? "fixed right-4 top-4 z-50 bg-[#0A0A0A]/80 backdrop-blur-sm sm:right-6" : "",
+      ].join(" ")}
+    >
+      About
+    </Link>
+  );
+}
+
 export default function AppChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
@@ -16,7 +30,12 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
 
   // Home, search, and card detail pages use their own layout — no header
   if (pathname === "/" || pathname === "/search" || pathname.startsWith("/c/")) {
-    return <>{children}</>;
+    return (
+      <>
+        <AboutLink fixed />
+        {children}
+      </>
+    );
   }
 
   return (
@@ -50,6 +69,7 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
             >
               Sets
             </Link>
+            <AboutLink />
             <ThemeToggle />
           </nav>
         </div>
