@@ -9,6 +9,13 @@ type SetEntry = {
   change_7d_pct?: number | null;
   change_30d_pct?: number | null;
   heat_score?: number | null;
+  unknown_finish_count: number;
+  summary?: {
+    card_count: number;
+    change_7d_pct: number | null;
+    change_30d_pct: number | null;
+    heat_score: number | null;
+  };
 };
 
 export const dynamic = "force-dynamic";
@@ -31,39 +38,39 @@ export default async function SetsPage() {
         .eq("as_of_date", latestAsOf)
     : { data: null };
 
-  const summaryMap = new Map<string, Partial<SetEntry>>();
+  const summaryMap = new Map<string, SetEntry["summary"]>();
   for (const row of snapshotRows ?? []) {
-    if (!row?.set_name) continue;
-    if (!summaryMap.has(row.set_name)) {
-      summaryMap.set(row.set_name, {
-        set_id: row.set_id,
-        heat_score: row.heat_score,
-        change_7d_pct: row.change_7d_pct,
-        change_30d_pct: row.change_30d_pct,
-        card_count: row.card_count,
-      });
-    }
+    const key = row.set_id ?? row.set_name;
+    if (!key) continue;
+    summaryMap.set(key, {
+      card_count: row.card_count,
+      change_7d_pct: row.change_7d_pct,
+      change_30d_pct: row.change_30d_pct,
+      heat_score: row.heat_score,
+    });
   }
 
   const { data: catalog } = await supabase
     .from("canonical_set_catalog")
-    .select("set_name, year, card_count")
+    .select("set_name, year, card_count, unknown_finish_count, set_id")
     .order("year", { ascending: false })
     .order("set_name", { ascending: true });
 
   const sets: SetEntry[] = [];
   for (const entry of catalog ?? []) {
     if (!entry?.set_name) continue;
-    const key = `${entry.set_name}||${entry.year ?? "null"}`;
-    const summary = summaryMap.get(entry.set_name);
+    const key = entry.set_id ?? entry.set_name;
+    const summary = key ? summaryMap.get(key) : undefined;
     sets.push({
       set_name: entry.set_name,
       year: entry.year,
       card_count: summary?.card_count ?? entry.card_count ?? 0,
-      set_id: summary?.set_id ?? null,
+      set_id: entry.set_id ?? null,
       change_7d_pct: summary?.change_7d_pct ?? null,
       change_30d_pct: summary?.change_30d_pct ?? null,
       heat_score: summary?.heat_score ?? null,
+      unknown_finish_count: entry.unknown_finish_count ?? 0,
+      summary: summary,
     });
   }
 
@@ -103,21 +110,32 @@ export default async function SetsPage() {
             <section key={year}>
               <p className="text-muted mb-2 text-xs font-semibold uppercase tracking-[0.12em]">{year}</p>
               <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3">
-                {yearSets.map((s) => (
-                  <Link
-                    key={`${s.set_name}-${s.year ?? "x"}`}
-                    href={`/sets/${encodeURIComponent(s.set_name)}`}
-                    className="glass group flex items-center justify-between rounded-[var(--radius-card)] border-app border px-4 py-3 transition duration-150 hover:bg-surface-soft/30"
-                  >
-                    <div className="min-w-0">
-                      <p className="text-app truncate text-sm font-semibold">{s.set_name}</p>
-                      <p className="text-muted mt-0.5 text-xs">{s.card_count} cards</p>
-                    </div>
-                    <span className="text-muted ml-3 shrink-0 text-xs font-semibold transition-colors group-hover:text-app">
-                      Browse →
-                    </span>
-                  </Link>
-                ))}
+                {yearSets.map((s) => {
+                  const fullyClassified = s.unknown_finish_count === 0;
+                  const hasPricing = Boolean(s.summary?.card_count && s.summary.card_count > 0);
+                  const signalPositive = fullyClassified && hasPricing;
+                  const signalLabel = signalPositive ? "Market Live" : "Needs data";
+                  const signalClass = signalPositive ? "glow-signal-positive" : "glow-signal-negative";
+                  return (
+                    <Link
+                      key={`${s.set_name}-${s.year ?? "x"}`}
+                      href={`/sets/${encodeURIComponent(s.set_name)}`}
+                      className="glass group flex items-center justify-between rounded-[var(--radius-card)] border-app border px-4 py-3 transition duration-150 hover:bg-surface-soft/30"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className={`glow-signal ${signalClass}`} />
+                          <p className="text-app truncate text-sm font-semibold">{s.set_name}</p>
+                        </div>
+                        <p className="text-muted mt-0.5 text-xs">{s.card_count} cards</p>
+                        <p className="text-muted text-[0.6rem] uppercase tracking-[0.2em]">{signalLabel}</p>
+                      </div>
+                      <span className="text-muted ml-3 shrink-0 text-xs font-semibold transition-colors group-hover:text-app">
+                        Browse →
+                      </span>
+                    </Link>
+                  );
+                })}
               </div>
             </section>
           ))}
