@@ -5,8 +5,9 @@ import { measureAsync } from "@/lib/perf";
 import SearchResultsSection from "@/components/search-results-section";
 import CardSearch from "@/components/card-search";
 import { parseSearchSort, sortSearchResults } from "@/lib/search/sort.mjs";
+import { getLatestSetSummarySnapshot, type SetSummarySnapshot } from "@/lib/sets/summary";
 
-type SearchSort = "relevance" | "newest" | "oldest";
+type SearchSort = "relevance" | "market-price" | "newest" | "oldest";
 
 type SearchParams = {
   q?: string;
@@ -57,6 +58,15 @@ type SearchResultBundle = {
   total: number;
   page: number;
   totalPages: number;
+};
+
+type SearchDisplayRow = {
+  canonical_slug: string;
+  canonical_name: string;
+  set_name: string | null;
+  year: number | null;
+  raw_price: number | null;
+  primary_image_url: string | null;
 };
 
 const DEFAULT_PAGE_SIZE = 24;
@@ -348,18 +358,45 @@ async function runBroadSearch(params: {
   });
 
   const orderedSlugs =
-    sort === "relevance"
+    relevanceOrderedSlugs.length === 0
+      ? []
+      : sort === "relevance"
       ? relevanceOrderedSlugs
       : sortSearchResults(
-          relevanceOrderedSlugs.map((slug) => {
-            const row = canonicalBySlug.get(slug);
-            return {
-              canonical_slug: slug,
-              canonical_name: row?.canonical_name ?? slug,
-              set_name: row?.set_name ?? null,
-              year: row?.year ?? null,
-            };
-          }),
+          sort === "market-price"
+            ? await (async () => {
+                const { data: allPricesRaw } = await supabase
+                  .from("card_metrics")
+                  .select("canonical_slug, median_7d")
+                  .in("canonical_slug", relevanceOrderedSlugs)
+                  .eq("grade", "RAW")
+                  .is("printing_id", null);
+
+                const allPriceBySlug = new Map<string, number | null>();
+                for (const row of (allPricesRaw ?? []) as SnapshotPriceRow[]) {
+                  allPriceBySlug.set(row.canonical_slug, row.median_7d);
+                }
+
+                return relevanceOrderedSlugs.map((slug) => {
+                  const row = canonicalBySlug.get(slug);
+                  return {
+                    canonical_slug: slug,
+                    canonical_name: row?.canonical_name ?? slug,
+                    set_name: row?.set_name ?? null,
+                    year: row?.year ?? null,
+                    raw_price: allPriceBySlug.get(slug) ?? null,
+                  };
+                });
+              })()
+            : relevanceOrderedSlugs.map((slug) => {
+                const row = canonicalBySlug.get(slug);
+                return {
+                  canonical_slug: slug,
+                  canonical_name: row?.canonical_name ?? slug,
+                  set_name: row?.set_name ?? null,
+                  year: row?.year ?? null,
+                };
+              }),
           sort,
         ).map((row) => row.canonical_slug);
 
@@ -463,6 +500,80 @@ async function getCachedBroadSearch(params: {
     ],
     { revalidate: 60 }
   )();
+}
+
+async function loadSetSearchEnhancements(setName: string): Promise<{
+  setSummary: SetSummarySnapshot | null;
+  chaseCards: SearchDisplayRow[];
+}> {
+  const supabase = getServerSupabaseClient();
+  const [setSummary, canonicalRowsResult] = await Promise.all([
+    getLatestSetSummarySnapshot(setName),
+    supabase
+      .from("canonical_cards")
+      .select("slug, canonical_name, set_name, year")
+      .eq("set_name", setName),
+  ]);
+
+  const canonicalRows = (canonicalRowsResult.data ?? []) as Array<{
+    slug: string;
+    canonical_name: string;
+    set_name: string | null;
+    year: number | null;
+  }>;
+
+  if (canonicalRows.length === 0) {
+    return { setSummary, chaseCards: [] };
+  }
+
+  const slugs = canonicalRows.map((row) => row.slug);
+  const [{ data: metricRowsRaw }, { data: printingRowsRaw }] = await Promise.all([
+    supabase
+      .from("card_metrics")
+      .select("canonical_slug, median_7d")
+      .in("canonical_slug", slugs)
+      .eq("grade", "RAW")
+      .is("printing_id", null),
+    supabase
+      .from("card_printings")
+      .select("id, canonical_slug, set_name, card_number, language, finish, finish_detail, edition, stamp, image_url")
+      .in("canonical_slug", slugs)
+      .eq("language", "EN"),
+  ]);
+
+  const priceBySlug = new Map<string, number | null>();
+  for (const row of (metricRowsRaw ?? []) as SnapshotPriceRow[]) {
+    priceBySlug.set(row.canonical_slug, row.median_7d);
+  }
+
+  const printingsBySlug = new Map<string, PrintingRow[]>();
+  for (const printing of (printingRowsRaw ?? []) as PrintingRow[]) {
+    const bucket = printingsBySlug.get(printing.canonical_slug) ?? [];
+    bucket.push(printing);
+    printingsBySlug.set(printing.canonical_slug, bucket);
+  }
+
+  const chaseCards = sortSearchResults(
+    canonicalRows.map((row) => {
+      const primaryPrinting = choosePrimaryPrinting(printingsBySlug.get(row.slug) ?? []);
+      return {
+        canonical_slug: row.slug,
+        canonical_name: row.canonical_name,
+        set_name: row.set_name,
+        year: row.year,
+        raw_price: priceBySlug.get(row.slug) ?? null,
+        primary_image_url: primaryPrinting?.image_url ?? null,
+      };
+    }),
+    "market-price",
+  )
+    .filter((row) => row.raw_price !== null)
+    .slice(0, 3);
+
+  return {
+    setSummary,
+    chaseCards,
+  };
 }
 
 export default async function SearchPage({
@@ -621,7 +732,7 @@ export default async function SearchPage({
     sort,
   });
 
-  const displayRows = result.rows.map((row) => {
+  const displayRows: SearchDisplayRow[] = result.rows.map((row) => {
     const primaryPrinting = choosePrimaryPrinting(row.printings);
     return {
       canonical_slug: row.canonical.slug,
@@ -635,18 +746,16 @@ export default async function SearchPage({
 
   const resultSetNames = new Set(displayRows.map((r) => r.set_name).filter((s): s is string => s !== null));
   const matchedSetName = resultSetNames.size === 1 && displayRows.length >= 2 ? [...resultSetNames][0] ?? null : null;
+  const { setSummary, chaseCards } = matchedSetName
+    ? await loadSetSearchEnhancements(matchedSetName)
+    : { setSummary: null, chaseCards: [] };
 
   return (
     <main className="app-shell">
-      <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
-        <section className="mx-auto w-full max-w-3xl pt-2 text-center sm:pt-4">
-          <h1 className="text-app text-6xl font-semibold tracking-tight sm:text-7xl">PopAlpha</h1>
-          <p className="text-muted mx-auto mt-4 max-w-2xl text-sm sm:text-base">
-            Smarter TCG Market Insights.
-          </p>
-
+      <div className="mx-auto max-w-5xl px-4 py-4 sm:px-6 sm:py-5">
+        <section className="mx-auto w-full max-w-3xl pt-1 sm:pt-2">
           <CardSearch
-            className="mx-auto mt-7 w-full max-w-3xl"
+            className="mx-auto w-full max-w-3xl"
             size="search"
             placeholder="Search"
             enableGlobalShortcut
@@ -657,11 +766,13 @@ export default async function SearchPage({
         <SearchResultsSection
           key={`${q}-${sort}-${result.page}-${pageSize}-${lang}-${setFilter}`}
           rows={displayRows}
+          chaseCards={chaseCards}
           total={result.total}
           page={result.page}
           totalPages={result.totalPages}
           initialSort={sort}
           matchedSetName={matchedSetName}
+          setSummary={setSummary}
           currentParams={{
             q,
             page: String(result.page),

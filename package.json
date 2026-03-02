@@ -11,7 +11,8 @@
     "guard:no-cards-axis": "node scripts/check-no-cards-axis.mjs",
     "ebay:deletion-setup": "node scripts/ebay-deletion-setup.mjs",
     "justtcg:backfill-live": "node scripts/backfill-justtcg-live.mjs",
-    "sets:backfill-summaries": "node scripts/backfill-set-summaries.mjs"
+    "sets:backfill-summaries": "node scripts/backfill-set-summaries.mjs",
+    "justtcg:repair-sweep": "node scripts/sweep-justtcg-finish-repair.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.97.0",

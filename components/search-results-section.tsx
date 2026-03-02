@@ -4,8 +4,9 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { parseSearchSort, SEARCH_SORTS, sortSearchResults } from "@/lib/search/sort.mjs";
+import type { SetSummarySnapshot } from "@/lib/sets/summary";
 
-type SearchSort = "relevance" | "newest" | "oldest";
+type SearchSort = "relevance" | "market-price" | "newest" | "oldest";
 type SearchPageSize = 24 | 48 | 96;
 const PAGE_SIZE_OPTIONS: SearchPageSize[] = [24, 48, 96];
 
@@ -23,38 +24,128 @@ function formatSearchHref(basePath: string, params: URLSearchParams) {
   return query ? `${basePath}?${query}` : basePath;
 }
 
-function AiParagraph({ text }: { text: string }) {
-  const words = text.split(" ");
+function getSetDescription(setName: string | null | undefined) {
+  const normalized = String(setName ?? "").trim().toLowerCase();
+  if (normalized === "ascended heroes") {
+    return "Ascended Heroes is a character-focused set that saw strong interest at launch. Prices for the top chase cards rose quickly in the first weeks, especially for rare and alternate art versions.\n\nAfter the early spike, most cards pulled back as more supply entered the market. Right now, value is still concentrated in the highest-rarity cards, while mid-tier cards are starting to stabilize.\n\nPopAlpha is tracking renewed momentum in select alt-arts, with a few cards entering the Value Zone after recent price drops.\n\nWatch for breakout signals and changes in graded supply to confirm longer-term trends.";
+  }
+
+  return "Showing all tracked cards from this set. Prices are refreshed daily across multiple marketplaces to help you spot trends and find value.";
+}
+
+function ExpandableSetDescription({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const shouldCollapse = text.length > 220;
+
   return (
-    <p className="mt-3 max-w-2xl text-[15px] leading-relaxed text-[#888]">
-      {words.map((word, i) => (
-        <span
-          key={i}
-          className="ai-word-fade inline-block"
-          style={{ animationDelay: `${i * 50}ms` }}
+    <div className="mt-3 max-w-2xl">
+      <p
+        className="text-[15px] leading-relaxed text-[#888] whitespace-pre-line"
+        style={
+          !expanded && shouldCollapse
+            ? {
+                display: "-webkit-box",
+                WebkitLineClamp: 3,
+                WebkitBoxOrient: "vertical",
+                overflow: "hidden",
+              }
+            : undefined
+        }
+      >
+        {text}
+      </p>
+      {shouldCollapse ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((current) => !current)}
+          className="mt-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-accent)] transition hover:opacity-80"
         >
-          {word}&nbsp;
-        </span>
-      ))}
-    </p>
+          {expanded ? "Show less" : "Show more"}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function formatCurrency(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "N/A";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: value >= 1000 ? 0 : 2,
+  }).format(value);
+}
+
+function formatPercent(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "N/A";
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${value.toFixed(1)}%`;
+}
+
+function ResultCard({
+  row,
+  currentSearchHref,
+}: {
+  row: SearchDisplayRow;
+  currentSearchHref: string;
+}) {
+  return (
+    <Link
+      key={row.canonical_slug}
+      href={`/cards/${encodeURIComponent(row.canonical_slug)}?returnTo=${encodeURIComponent(currentSearchHref)}`}
+      className="group block transition duration-200 hover:-translate-y-0.5"
+    >
+      <div className="relative aspect-[63/88] overflow-hidden rounded-[var(--radius-card)] border-app border bg-surface-soft/24">
+        {row.primary_image_url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={row.primary_image_url}
+            alt={row.canonical_name}
+            className="h-full w-full object-cover object-center transition duration-200 group-hover:scale-[1.02]"
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.08),transparent_65%)] p-4">
+            <div className="rounded-[var(--radius-input)] border-app border bg-surface/35 px-3 py-2 text-center">
+              <p className="text-app text-xs font-semibold">Image pending</p>
+            </div>
+          </div>
+        )}
+      </div>
+      <div className="mt-1 min-w-0 px-0.5 sm:mt-2 sm:px-1">
+        <p className="text-app truncate text-[11px] font-semibold sm:text-sm">{row.canonical_name}</p>
+        <p className="text-muted mt-0.5 hidden truncate text-xs sm:block">
+          {row.year ? `${row.year}` : "Year unknown"}
+          {row.set_name ? ` • ${row.set_name}` : ""}
+        </p>
+        {row.raw_price != null ? (
+          <p className="mt-0.5 text-[10px] font-semibold sm:text-xs" style={{ color: "var(--color-accent)" }}>
+            {formatCurrency(row.raw_price)} RAW
+          </p>
+        ) : null}
+      </div>
+    </Link>
   );
 }
 
 export default function SearchResultsSection({
   rows,
+  chaseCards,
   total,
   page,
   totalPages,
   initialSort,
   matchedSetName,
+  setSummary,
   currentParams,
 }: {
   rows: SearchDisplayRow[];
+  chaseCards?: SearchDisplayRow[];
   total: number;
   page: number;
   totalPages: number;
   initialSort: SearchSort;
   matchedSetName?: string | null;
+  setSummary?: SetSummarySnapshot | null;
   currentParams: Record<string, string>;
 }) {
   const pathname = usePathname();
@@ -66,6 +157,15 @@ export default function SearchResultsSection({
   );
 
   const sortedRows = useMemo(() => sortSearchResults(rows, sort), [rows, sort]);
+  const chaseCardSlugSet = useMemo(
+    () => new Set((chaseCards ?? []).map((row) => row.canonical_slug)),
+    [chaseCards],
+  );
+  const setDescription = useMemo(() => getSetDescription(matchedSetName), [matchedSetName]);
+  const mainRows = useMemo(
+    () => sortedRows.filter((row) => !chaseCardSlugSet.has(row.canonical_slug)),
+    [chaseCardSlugSet, sortedRows],
+  );
 
   const baseParams = useMemo(() => {
     const params = new URLSearchParams();
@@ -122,7 +222,7 @@ export default function SearchResultsSection({
           <h2 className="text-[28px] font-semibold tracking-tight text-[#F0F0F0] sm:text-[36px]">
             {matchedSetName}
           </h2>
-          <AiParagraph text="Showing all tracked cards from this set. Prices are refreshed daily across multiple marketplaces to help you spot trends and find value." />
+          <ExpandableSetDescription text={setDescription} />
         </div>
       )}
       <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -139,7 +239,13 @@ export default function SearchResultsSection({
           >
             {SEARCH_SORTS.map((option) => (
               <option key={option} value={option}>
-                {option === "relevance" ? "Relevance" : option === "newest" ? "Newest" : "Oldest"}
+                {option === "relevance"
+                  ? "Relevance"
+                  : option === "market-price"
+                    ? "Market Price"
+                    : option === "newest"
+                      ? "Newest"
+                      : "Oldest"}
               </option>
             ))}
           </select>
@@ -152,44 +258,68 @@ export default function SearchResultsSection({
           <p className="text-muted mt-1 text-sm">Try adding set name, year, or card number.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-3 gap-2 sm:gap-3 lg:grid-cols-4">
-          {sortedRows.map((row) => (
-            <Link
-              key={row.canonical_slug}
-              href={`/cards/${encodeURIComponent(row.canonical_slug)}?returnTo=${encodeURIComponent(currentSearchHref)}`}
-              className="group block transition duration-200 hover:-translate-y-0.5"
-            >
-              <div className="relative aspect-[63/88] overflow-hidden rounded-[var(--radius-card)] border-app border bg-surface-soft/24">
-                {row.primary_image_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={row.primary_image_url}
-                    alt={row.canonical_name}
-                    className="h-full w-full object-cover object-center transition duration-200 group-hover:scale-[1.02]"
-                  />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.08),transparent_65%)] p-4">
-                    <div className="rounded-[var(--radius-input)] border-app border bg-surface/35 px-3 py-2 text-center">
-                      <p className="text-app text-xs font-semibold">Image pending</p>
-                    </div>
-                  </div>
-                )}
-              </div>
-              <div className="mt-1 min-w-0 px-0.5 sm:mt-2 sm:px-1">
-                <p className="text-app truncate text-[11px] font-semibold sm:text-sm">{row.canonical_name}</p>
-                <p className="text-muted mt-0.5 hidden truncate text-xs sm:block">
-                  {row.year ? `${row.year}` : "Year unknown"}
-                  {row.set_name ? ` • ${row.set_name}` : ""}
-                </p>
-                {row.raw_price != null ? (
-                  <p className="mt-0.5 text-[10px] font-semibold sm:text-xs" style={{ color: "var(--color-accent)" }}>
-                    ${row.raw_price < 1 ? row.raw_price.toFixed(2) : row.raw_price.toFixed(0)} RAW
+        <>
+          {matchedSetName && setSummary ? (
+            <div className="mb-6 rounded-[var(--radius-card)] border-app border bg-surface-soft/22 p-4 sm:p-5">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div>
+                  <p className="text-muted text-[11px] uppercase tracking-[0.16em]">Market Cap</p>
+                  <p className="text-app mt-1 text-lg font-semibold">{formatCurrency(setSummary.marketCap)}</p>
+                </div>
+                <div>
+                  <p className="text-muted text-[11px] uppercase tracking-[0.16em]">7D Change</p>
+                  <p className="text-app mt-1 text-lg font-semibold">{formatPercent(setSummary.change7dPct)}</p>
+                </div>
+                <div>
+                  <p className="text-muted text-[11px] uppercase tracking-[0.16em]">30D Change</p>
+                  <p className="text-app mt-1 text-lg font-semibold">{formatPercent(setSummary.change30dPct)}</p>
+                </div>
+                <div>
+                  <p className="text-muted text-[11px] uppercase tracking-[0.16em]">Heat Score</p>
+                  <p className="text-app mt-1 text-lg font-semibold">{setSummary.heatScore.toFixed(1)}</p>
+                </div>
+                <div>
+                  <p className="text-muted text-[11px] uppercase tracking-[0.16em]">Breakouts</p>
+                  <p className="text-app mt-1 text-base font-semibold">{setSummary.breakoutCount}</p>
+                </div>
+                <div>
+                  <p className="text-muted text-[11px] uppercase tracking-[0.16em]">Value Zone</p>
+                  <p className="text-app mt-1 text-base font-semibold">{setSummary.valueZoneCount}</p>
+                </div>
+                <div>
+                  <p className="text-muted text-[11px] uppercase tracking-[0.16em]">Bullish Trends</p>
+                  <p className="text-app mt-1 text-base font-semibold">{setSummary.trendBullishCount}</p>
+                </div>
+                <div>
+                  <p className="text-muted text-[11px] uppercase tracking-[0.16em]">Sentiment</p>
+                  <p className="text-app mt-1 text-base font-semibold">
+                    {setSummary.sentimentUpPct == null ? "N/A" : formatPercent(setSummary.sentimentUpPct)}
                   </p>
-                ) : null}
+                </div>
               </div>
-            </Link>
-          ))}
-        </div>
+            </div>
+          ) : null}
+
+          {(chaseCards ?? []).length > 0 ? (
+            <div className="mb-6">
+              <h3 className="text-app text-sm font-semibold uppercase tracking-[0.18em]">Chase Cards</h3>
+              <p className="text-muted mt-1 text-xs">Highest current RAW market prices in this set.</p>
+              <div className="mt-3 grid grid-cols-3 gap-2 sm:gap-3">
+                {(chaseCards ?? []).map((row) => (
+                  <ResultCard key={row.canonical_slug} row={row} currentSearchHref={currentSearchHref} />
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {mainRows.length > 0 ? (
+            <div className="grid grid-cols-3 gap-2 sm:gap-3 lg:grid-cols-4">
+              {mainRows.map((row) => (
+                <ResultCard key={row.canonical_slug} row={row} currentSearchHref={currentSearchHref} />
+              ))}
+            </div>
+          ) : null}
+        </>
       )}
 
       <div className="mt-4 flex items-center justify-between">

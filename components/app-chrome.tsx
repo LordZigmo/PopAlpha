@@ -4,7 +4,6 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { usePathname } from "next/navigation";
 import ThemeToggle from "@/components/theme-toggle";
-import StyleToggle from "@/components/style-toggle";
 import NavSearchForm from "@/components/nav-search-form";
 
 export default function AppChrome({ children }: { children: React.ReactNode }) {
@@ -17,14 +16,7 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
 
   // Home, search, and card detail pages use their own layout — no header
   if (pathname === "/" || pathname === "/search" || pathname.startsWith("/c/")) {
-    return (
-      <>
-        <div className="fixed right-4 top-4 z-[60]">
-          <StyleToggle />
-        </div>
-        {children}
-      </>
-    );
+    return <>{children}</>;
   }
 
   return (
@@ -58,7 +50,6 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
             >
               Sets
             </Link>
-            <StyleToggle />
             <ThemeToggle />
           </nav>
         </div>
