@@ -20,11 +20,69 @@ function normalizeMatchingCardNumber(raw) {
 }
 
 function mapJustTcgPrinting(printing) {
-  const p = printing.toLowerCase().trim();
-  if (p.includes("reverse")) return "REVERSE_HOLO";
-  if (p.includes("cosmos")) return "HOLO";
-  if (p.includes("holo")) return "HOLO";
-  return "NON_HOLO";
+  const p = printing.toLowerCase().trim().replace(/[_-]+/g, " ");
+  if (!p) return "UNKNOWN";
+  if (/\breverse\b/.test(p)) return "REVERSE_HOLO";
+  if (
+    /\bnon\s*holo(?:foil)?\b/.test(p)
+    || /\bnon\s*foil\b/.test(p)
+    || /\bnormal\b/.test(p)
+    || /\bstandard\b/.test(p)
+    || /\bregular\b/.test(p)
+  ) {
+    return "NON_HOLO";
+  }
+  if (
+    /\bcosmos\b/.test(p)
+    || /\bholo(?:foil)?\b/.test(p)
+    || (/\bfoil\b/.test(p) && !/\bnon\s*foil\b/.test(p))
+  ) {
+    return "HOLO";
+  }
+  return "UNKNOWN";
+}
+
+function normalizeJustTcgLabel(value) {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[_-]+/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseJustTcgPatternStampLabel(value) {
+  const normalized = normalizeJustTcgLabel(value);
+  if (!normalized) return null;
+
+  const parentheticalMatch = String(value ?? "").match(/\(([^()]+)\)\s*$/u);
+  if (parentheticalMatch?.[1]) {
+    return parseJustTcgPatternStampLabel(parentheticalMatch[1]);
+  }
+
+  if (normalized.includes("energy symbol pattern")) return "ENERGY_SYMBOL_PATTERN";
+
+  const ballMatch = normalized.match(/\b([a-z]+)\s+ball\b/u);
+  if (ballMatch?.[1]) {
+    return `${ballMatch[1].toUpperCase()}_BALL_PATTERN`;
+  }
+
+  const patternMatch = normalized.match(/\b([a-z]+(?:\s+[a-z]+)*)\s+pattern\b/u);
+  if (patternMatch?.[1]) {
+    return `${patternMatch[1].replace(/\s+/g, "_").toUpperCase()}_PATTERN`;
+  }
+
+  return null;
+}
+
+function extractJustTcgPatternStamp(...values) {
+  for (const value of values) {
+    const parsed = parseJustTcgPatternStampLabel(value);
+    if (parsed) return parsed;
+  }
+  return null;
 }
 
 function normalizeName(value) {
@@ -84,7 +142,14 @@ export function runJustTcgNormalizationTests() {
   assert.equal(mapJustTcgPrinting("Reverse Holofoil"), "REVERSE_HOLO");
   assert.equal(mapJustTcgPrinting("Cosmos Holofoil"), "HOLO");
   assert.equal(mapJustTcgPrinting("Reverse Cosmos Holofoil"), "REVERSE_HOLO");
-  assert.equal(mapJustTcgPrinting(""), "NON_HOLO");
+  assert.equal(mapJustTcgPrinting("Non-Holo"), "NON_HOLO");
+  assert.equal(mapJustTcgPrinting("Regular"), "NON_HOLO");
+  assert.equal(mapJustTcgPrinting(""), "UNKNOWN");
+  assert.equal(mapJustTcgPrinting("Unlimited"), "UNKNOWN");
+  assert.equal(extractJustTcgPatternStamp("Master Ball Holo"), "MASTER_BALL_PATTERN");
+  assert.equal(extractJustTcgPatternStamp("Love Ball Holo"), "LOVE_BALL_PATTERN");
+  assert.equal(extractJustTcgPatternStamp("Pikachu ex (Poke Ball)"), "POKE_BALL_PATTERN");
+  assert.equal(extractJustTcgPatternStamp("Energy Symbol Pattern"), "ENERGY_SYMBOL_PATTERN");
 
   assert.equal(parsePatternStamp("Pikachu ex (Poke Ball)"), "POKE_BALL_PATTERN");
   assert.equal(parsePatternStamp("Pikachu ex (Master Ball)"), "MASTER_BALL_PATTERN");

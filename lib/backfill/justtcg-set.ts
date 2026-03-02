@@ -2,7 +2,9 @@ import crypto from "node:crypto";
 import { buildRawVariantRef } from "@/lib/identity/variant-ref";
 import { getServerSupabaseClient } from "@/lib/supabaseServer";
 import {
+  extractJustTcgPatternStamp,
   fetchJustTcgCardsPage,
+  finishPreferenceScore,
   mapJustTcgPrinting,
   mapVariantToMetrics,
   normalizeJustTcgEpochToIso,
@@ -73,21 +75,13 @@ function normalizeStampToken(value: string | null | undefined) {
   if (normalized === "energy symbol pattern") return "ENERGY_SYMBOL_PATTERN";
   return normalized.replace(/\s+/g, "_").toUpperCase();
 }
-function parseProviderCardStamp(name: string) {
-  const parentheticalMatch = name.match(/\(([^()]+)\)\s*$/u);
-  if (parentheticalMatch?.[1]) {
-    return normalizeStampToken(parentheticalMatch[1]);
-  }
-  const bareSuffixMatch = name.match(/\s+(Poke Ball|Master Ball|Energy Symbol Pattern)\s*$/iu);
-  if (bareSuffixMatch?.[1]) {
-    return normalizeStampToken(bareSuffixMatch[1]);
-  }
-  return null;
+function parseProviderCardStamp(name: string, printing: string | null | undefined) {
+  return extractJustTcgPatternStamp(printing, name);
 }
 function stripProviderCardVariantSuffix(name: string) {
   return name
     .replace(/\s*\([^()]+\)\s*$/u, "")
-    .replace(/\s+(?:Poke Ball|Master Ball|Energy Symbol Pattern)\s*$/iu, "")
+    .replace(/\s+(?:[A-Za-z]+\s+Ball|[A-Za-z]+(?:\s+[A-Za-z]+)*\s+Pattern)\s*$/iu, "")
     .trim();
 }
 function toEpochMillis(raw: number | null | undefined) {
@@ -174,9 +168,11 @@ function scoreCandidate(params: { card: JustTcgCard; variant: JustTcgVariant; pr
   const providerNumber = normalizeCardNumber(card.number);
   if (expectedNumber && providerNumber !== expectedNumber) return { score: -1, notes: ["number_mismatch"] };
   const providerFinish = mapJustTcgPrinting(variant.printing ?? "");
-  if (printing.finish !== "UNKNOWN" && providerFinish !== printing.finish) return { score: -1, notes: ["finish_mismatch"] };
+  if (printing.finish !== "UNKNOWN" && providerFinish !== "UNKNOWN" && providerFinish !== printing.finish) {
+    return { score: -1, notes: ["finish_mismatch"] };
+  }
   const expectedStamp = normalizeStampToken(printing.stamp);
-  const providerStamp = parseProviderCardStamp(card.name);
+  const providerStamp = parseProviderCardStamp(card.name, variant.printing ?? "");
   if (expectedStamp && providerStamp !== expectedStamp) return { score: -1, notes: ["stamp_mismatch"] };
   if (!expectedStamp && providerStamp) return { score: -1, notes: ["unexpected_stamp"] };
   const language = (variant.language ?? "English").trim().toLowerCase();
@@ -185,9 +181,13 @@ function scoreCandidate(params: { card: JustTcgCard; variant: JustTcgVariant; pr
   const notes: string[] = [];
   if (expectedNumber && providerNumber === expectedNumber) { score += 100; notes.push("number_match"); }
   if (providerFinish === printing.finish) { score += 50; notes.push("finish_match"); }
+  else if (providerFinish === "UNKNOWN") {
+    score += 5;
+    notes.push("finish_unspecified_by_provider");
+  }
   else if (printing.finish === "UNKNOWN") {
     score += unknownFinishTieBreakScore(providerFinish);
-    if (providerFinish) notes.push(`unknown_finish_prefers_${providerFinish.toLowerCase()}`);
+    notes.push(`unknown_finish_prefers_${providerFinish.toLowerCase()}`);
   }
   if (expectedStamp && providerStamp === expectedStamp) { score += 40; notes.push("stamp_match"); }
   else if (!expectedStamp && !providerStamp) { score += 10; notes.push("base_variant"); }
@@ -218,7 +218,13 @@ function evaluateCandidateRejection(params: {
   if (expectedNumber && providerNumber !== expectedNumber) reasons.push("card_number_mismatch");
 
   const providerFinish = mapJustTcgPrinting(variant.printing ?? "");
-  if (printing.finish !== "UNKNOWN" && providerFinish !== printing.finish) reasons.push("finish_mismatch");
+  if (printing.finish !== "UNKNOWN" && providerFinish !== "UNKNOWN" && providerFinish !== printing.finish) {
+    reasons.push("finish_mismatch");
+  }
+  const expectedStamp = normalizeStampToken(printing.stamp);
+  const providerStamp = parseProviderCardStamp(card.name, variant.printing ?? "");
+  if (expectedStamp && providerStamp !== expectedStamp) reasons.push("stamp_mismatch");
+  if (!expectedStamp && providerStamp) reasons.push("unexpected_stamp");
 
   const language = (variant.language ?? "English").trim().toLowerCase();
   if (language !== "english") reasons.push("language_mismatch");
@@ -230,6 +236,7 @@ function evaluateCandidateRejection(params: {
   let proximityScore = 0;
   if (expectedNumber && providerNumber === expectedNumber) proximityScore += 40;
   if (providerFinish === printing.finish) proximityScore += 25;
+  else if (providerFinish === "UNKNOWN") proximityScore += 5;
   if (expectedName && providerName === expectedName) proximityScore += 20;
   else if (expectedName && providerName.includes(expectedName)) proximityScore += 10;
   if (language === "english") proximityScore += 5;
@@ -585,7 +592,11 @@ export async function backfillJustTcgSet(setKey: string, options: BackfillJustTc
           candidates.push({ card, variant, score: ranked.score, notes: ranked.notes });
         }
       }
-      candidates.sort((a, b) => (a.score !== b.score ? b.score - a.score : a.variant.id.localeCompare(b.variant.id)));
+      candidates.sort((a, b) =>
+        (a.score !== b.score ? b.score - a.score : 0)
+        || (finishPreferenceScore(mapJustTcgPrinting(b.variant.printing ?? "")) - finishPreferenceScore(mapJustTcgPrinting(a.variant.printing ?? "")))
+        || a.variant.id.localeCompare(b.variant.id)
+      );
       if (candidates.length === 0) {
         pushFailure({
           canonical_slug: printing.canonical_slug, printing_id: printing.id, code: "NO_PROVIDER_MATCH",

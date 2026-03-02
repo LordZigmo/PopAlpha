@@ -53,6 +53,7 @@ import {
   jtFetchRaw,
   setNameToJustTcgId,
   bestSetMatch,
+  finishPreferenceScore,
   normalizeSetNameForMatch,
   mapJustTcgPrinting,
   normalizeCardNumber,
@@ -132,6 +133,27 @@ type TrackedAssetRow = {
   enabled: boolean;
   created_at: string;
 };
+
+function chooseBestPrintingForNumber(
+  finishMap: Map<string, PrintingRow> | undefined,
+  fallback: PrintingRow | undefined,
+  mappedFinish: string,
+): PrintingRow | null {
+  if (finishMap?.has(mappedFinish)) {
+    return finishMap.get(mappedFinish) ?? null;
+  }
+
+  if (finishMap && finishMap.size > 0) {
+    const ranked = Array.from(finishMap.entries())
+      .sort((left, right) =>
+        finishPreferenceScore(right[0]) - finishPreferenceScore(left[0])
+        || left[0].localeCompare(right[0])
+      );
+    return ranked[0]?.[1] ?? fallback ?? null;
+  }
+
+  return fallback ?? null;
+}
 
 type TrackedSkipReason =
   | "MISSING_JUSTTCG_MAPPING"
@@ -923,10 +945,12 @@ async function runNightlySync(params: {
         const expectedFinish = mapJustTcgPrinting(providerPrinting ?? "");
         selectedVariant =
           selectedCard.variants.find((variant) => variant.id === mapping.external_id) ??
-          selectedCard.variants.find((variant) =>
-            normalizeCondition(variant.condition ?? "") === "nm"
-            && mapJustTcgPrinting(variant.printing ?? "") === expectedFinish,
-          ) ??
+          (expectedFinish !== "UNKNOWN"
+            ? selectedCard.variants.find((variant) =>
+                normalizeCondition(variant.condition ?? "") === "nm"
+                && mapJustTcgPrinting(variant.printing ?? "") === expectedFinish,
+              ) ?? null
+            : null) ??
           selectedCard.variants.find((variant) => normalizeCondition(variant.condition ?? "") === "nm") ??
           null;
       }
@@ -1505,7 +1529,10 @@ export async function GET(req: Request) {
         let finishMap = byNumberAndFinish.get(normNum);
         if (!finishMap) { finishMap = new Map(); byNumberAndFinish.set(normNum, finishMap); }
         finishMap.set(p.finish, p);
-        if (!byNumber.has(normNum) || p.finish === "NON_HOLO") byNumber.set(normNum, p);
+        const existing = byNumber.get(normNum);
+        if (!existing || finishPreferenceScore(p.finish) > finishPreferenceScore(existing.finish)) {
+          byNumber.set(normNum, p);
+        }
       }
 
       // 6. Scan cards — build accumulators for singles and sealed.
@@ -1640,7 +1667,7 @@ export async function GET(req: Request) {
 
             const mappedFinish = mapJustTcgPrinting(variant.printing ?? "");
             const finishMap = byNumberAndFinish.get(normNum);
-            const printing = finishMap?.get(mappedFinish) ?? byNumber.get(normNum) ?? null;
+            const printing = chooseBestPrintingForNumber(finishMap, byNumber.get(normNum), mappedFinish);
             const variantRef = printing
               ? buildRawVariantRef(printing.id)
               : buildLegacyVariantRef(

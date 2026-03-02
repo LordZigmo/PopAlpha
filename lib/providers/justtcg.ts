@@ -15,6 +15,17 @@ import type { MetricsSnapshot, PriceHistoryPoint } from "./types";
 
 const BASE_URL = "https://api.justtcg.com/v1";
 
+function normalizeJustTcgLabel(value: string | null | undefined): string {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[_-]+/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function normalizeJustTcgEpochToIso(raw: number | null | undefined): string | null {
   if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) return null;
   const millis = raw >= 1_000_000_000_000 ? raw : raw * 1000;
@@ -142,6 +153,40 @@ type CardsEnvelope = {
   };
 };
 
+export type JustTcgFinish = "NON_HOLO" | "HOLO" | "REVERSE_HOLO" | "UNKNOWN";
+
+function parseJustTcgPatternStampLabel(value: string | null | undefined): string | null {
+  const normalized = normalizeJustTcgLabel(value);
+  if (!normalized) return null;
+
+  const parentheticalMatch = String(value ?? "").match(/\(([^()]+)\)\s*$/u);
+  if (parentheticalMatch?.[1]) {
+    return parseJustTcgPatternStampLabel(parentheticalMatch[1]);
+  }
+
+  if (normalized.includes("energy symbol pattern")) return "ENERGY_SYMBOL_PATTERN";
+
+  const ballMatch = normalized.match(/\b([a-z]+)\s+ball\b/u);
+  if (ballMatch?.[1]) {
+    return `${ballMatch[1].toUpperCase()}_BALL_PATTERN`;
+  }
+
+  const patternMatch = normalized.match(/\b([a-z]+(?:\s+[a-z]+)*)\s+pattern\b/u);
+  if (patternMatch?.[1]) {
+    return `${patternMatch[1].replace(/\s+/g, "_").toUpperCase()}_PATTERN`;
+  }
+
+  return null;
+}
+
+export function extractJustTcgPatternStamp(...values: Array<string | null | undefined>): string | null {
+  for (const value of values) {
+    const parsed = parseJustTcgPatternStampLabel(value);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
 // ── API calls ─────────────────────────────────────────────────────────────────
 
 /** Fetch one page of cards for a JustTCG set (up to 200 per page).
@@ -209,13 +254,39 @@ export function setNameToJustTcgId(setName: string): string {
 
 // ── Value mapping ─────────────────────────────────────────────────────────────
 
+export function finishPreferenceScore(finish: string | null | undefined): number {
+  if (finish === "NON_HOLO") return 30;
+  if (finish === "HOLO") return 20;
+  if (finish === "REVERSE_HOLO") return 10;
+  return 0;
+}
+
 /** Map JustTCG printing name → our finish enum. */
-export function mapJustTcgPrinting(printing: string): string {
-  const p = printing.toLowerCase().trim();
-  if (p.includes("reverse")) return "REVERSE_HOLO";
-  if (p.includes("cosmos")) return "HOLO";
-  if (p.includes("holo")) return "HOLO";
-  return "NON_HOLO";
+export function mapJustTcgPrinting(printing: string): JustTcgFinish {
+  const p = normalizeJustTcgLabel(printing);
+  if (!p) return "UNKNOWN";
+
+  if (/\breverse\b/.test(p)) return "REVERSE_HOLO";
+
+  if (
+    /\bnon\s*holo(?:foil)?\b/.test(p)
+    || /\bnon\s*foil\b/.test(p)
+    || /\bnormal\b/.test(p)
+    || /\bstandard\b/.test(p)
+    || /\bregular\b/.test(p)
+  ) {
+    return "NON_HOLO";
+  }
+
+  if (
+    /\bcosmos\b/.test(p)
+    || /\bholo(?:foil)?\b/.test(p)
+    || (/\bfoil\b/.test(p) && !/\bnon\s*foil\b/.test(p))
+  ) {
+    return "HOLO";
+  }
+
+  return "UNKNOWN";
 }
 
 /** Normalize a card number: "004/130" → "4", "SWSH001" → "SWSH001". */

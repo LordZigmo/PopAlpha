@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { authorizeCronRequest } from "@/lib/cronAuth";
 import { buildJustTcgSetSearchTerms } from "@/lib/providers/justtcg-set-search";
 import {
+  extractJustTcgPatternStamp,
   fetchJustTcgCardsPage,
   jtFetchRaw,
   mapJustTcgPrinting,
@@ -54,6 +55,7 @@ type CanonicalRow = {
 type FinishVariant = {
   finish: "NON_HOLO" | "HOLO" | "REVERSE_HOLO";
   variantKey: "normal" | "holofoil" | "reverseholofoil";
+  stamp: string | null;
 };
 
 type ProviderCardCandidate = {
@@ -95,26 +97,14 @@ function toStampToken(value: string) {
   return normalizeName(value).replace(/\s+/g, "_").toUpperCase();
 }
 
-function parsePatternStamp(name: string): string | null {
-  const parentheticalMatch = name.match(/\(([^()]+)\)\s*$/u);
-  if (parentheticalMatch?.[1]) {
-    const parenthetical = normalizeName(parentheticalMatch[1]);
-    if (parenthetical === "poke ball") return "POKE_BALL_PATTERN";
-    if (parenthetical === "master ball") return "MASTER_BALL_PATTERN";
-    if (parenthetical === "energy symbol pattern") return "ENERGY_SYMBOL_PATTERN";
-    return parenthetical ? parenthetical.replace(/\s+/g, "_").toUpperCase() : null;
-  }
-  const normalized = normalizeName(name);
-  if (normalized.includes("master ball")) return "MASTER_BALL_PATTERN";
-  if (normalized.includes("poke ball")) return "POKE_BALL_PATTERN";
-  if (normalized.includes("energy symbol pattern")) return "ENERGY_SYMBOL_PATTERN";
-  return null;
+function parsePatternStamp(...values: Array<string | null | undefined>): string | null {
+  return extractJustTcgPatternStamp(...values);
 }
 
 function stripPatternSuffix(name: string): string {
   return name
     .replace(/\s*\([^()]+\)\s*$/u, "")
-    .replace(/\s+(?:Poke Ball|Master Ball|Energy Symbol Pattern)\s*$/iu, "")
+    .replace(/\s+(?:[A-Za-z]+\s+Ball|[A-Za-z]+(?:\s+[A-Za-z]+)*\s+Pattern)\s*$/iu, "")
     .trim();
 }
 
@@ -150,15 +140,20 @@ function distinctFinishVariants(card: JustTcgCard): FinishVariant[] {
     if (language !== "english") continue;
     const finish = mapJustTcgPrinting(variant.printing ?? "");
     if (finish !== "NON_HOLO" && finish !== "HOLO" && finish !== "REVERSE_HOLO") continue;
-    if (seen.has(finish)) continue;
-    seen.add(finish);
-    variants.push({ finish, variantKey: toVariantKey(finish) });
+    const stamp = parsePatternStamp(variant.printing, card.name);
+    const key = `${finish}:${stamp ?? "BASE"}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    variants.push({ finish, variantKey: toVariantKey(finish), stamp });
   }
-  return variants.sort((a, b) => finishPriority(a.finish) - finishPriority(b.finish));
+  return variants.sort((a, b) =>
+    stampPriority(a.stamp) - stampPriority(b.stamp)
+    || finishPriority(a.finish) - finishPriority(b.finish)
+  );
 }
 
 function buildSourceId(cardId: string, variant: FinishVariant) {
-  return `${cardId}:${variant.finish}:UNLIMITED:${variant.variantKey}`;
+  return `${cardId}:${variant.finish}:${variant.stamp ?? "BASE"}:UNLIMITED:${variant.variantKey}`;
 }
 
 function buildCandidateSummary(candidate: ProviderCardCandidate) {
@@ -478,17 +473,14 @@ export async function POST(req: Request) {
       continue;
     }
 
-    const existingSignalsCount = await Promise.all([
+    const downstreamRefCounts = await Promise.all([
       supabase.from("market_latest").select("printing_id", { count: "exact", head: true }).eq("printing_id", printing.id),
+      supabase.from("price_snapshots").select("printing_id", { count: "exact", head: true }).eq("printing_id", printing.id),
       supabase.from("variant_metrics").select("printing_id", { count: "exact", head: true }).eq("printing_id", printing.id),
       supabase.from("card_external_mappings").select("printing_id", { count: "exact", head: true }).eq("printing_id", printing.id),
+      supabase.from("provider_ingests").select("printing_id", { count: "exact", head: true }).eq("printing_id", printing.id),
     ]);
-    const hasDownstreamRefs = existingSignalsCount.some((entry) => (entry.count ?? 0) > 0);
-    if (hasDownstreamRefs) {
-      skipped += 1;
-      if (skippedSamples.length < 25) skippedSamples.push({ canonical_slug: printing.canonical_slug, printing_id: printing.id, reason: "downstream_refs_exist" });
-      continue;
-    }
+    const hasDownstreamRefs = downstreamRefCounts.some((entry) => (entry.count ?? 0) > 0);
 
     const expectedNumber = normalizeMatchingCardNumber(printing.card_number ?? "");
     const candidateCards = expectedNumber ? cardsByNumber.get(expectedNumber) ?? [] : [];
@@ -594,8 +586,8 @@ export async function POST(req: Request) {
     const resolvedCardNumber = manualRepair?.cardNumber || providerCardNumber || printing.card_number;
     const finishVariants = manualRepair
       ? [
-          { finish: manualRepair.primaryFinish, variantKey: toVariantKey(manualRepair.primaryFinish) },
-          ...manualRepair.extraFinishes.map((finish) => ({ finish, variantKey: toVariantKey(finish) })),
+          { finish: manualRepair.primaryFinish, variantKey: toVariantKey(manualRepair.primaryFinish), stamp: null },
+          ...manualRepair.extraFinishes.map((finish) => ({ finish, variantKey: toVariantKey(finish), stamp: null })),
         ]
       : distinctFinishVariants(primaryCard!);
     if (finishVariants.length === 0) {
@@ -617,7 +609,7 @@ export async function POST(req: Request) {
       finish: variant.finish,
       finish_detail: printing.finish_detail,
       edition: "UNLIMITED",
-      stamp: printing.stamp,
+      stamp: variant.stamp ?? printing.stamp,
       rarity: printing.rarity,
       image_url: printing.image_url,
       source: printing.source ?? "pokemon-tcg-data",
@@ -638,7 +630,7 @@ export async function POST(req: Request) {
           finish: variant.finish,
           finish_detail: printing.finish_detail,
           edition: "UNLIMITED",
-          stamp: supplemental.stamp,
+          stamp: variant.stamp ?? supplemental.stamp,
           rarity: printing.rarity,
           image_url: printing.image_url,
           source: printing.source ?? "pokemon-tcg-data",
@@ -683,7 +675,7 @@ export async function POST(req: Request) {
       finish: primary.finish,
       finish_detail: printing.finish_detail,
       edition: "UNLIMITED",
-      stamp: printing.stamp,
+      stamp: primary.stamp ?? printing.stamp,
       rarity: printing.rarity,
       image_url: printing.image_url,
       source: printing.source ?? "pokemon-tcg-data",
@@ -729,6 +721,19 @@ export async function POST(req: Request) {
       .eq("id", printing.id);
     if (updateError) {
       if (updateError.message.includes("card_printings_unique_printing_idx")) {
+        if (hasDownstreamRefs) {
+          skipped += 1;
+          if (skippedSamples.length < 25) {
+            skippedSamples.push({
+              canonical_slug: printing.canonical_slug,
+              printing_id: printing.id,
+              reason: "downstream_refs_conflict_requires_merge",
+              attempted_target: attemptedBaseTarget,
+            });
+          }
+          continue;
+        }
+
         const { data: conflictingRow, error: conflictLookupError } = await supabase
           .from("card_printings")
           .select("id, canonical_slug")
