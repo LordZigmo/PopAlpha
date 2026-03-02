@@ -135,12 +135,14 @@ async function getRecentVariantStats(slug: string, days = 30): Promise<VariantHi
   const supabase = getServerSupabaseClient();
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("price_history_points")
     .select("variant_ref, ts")
     .eq("canonical_slug", slug)
     .gte("ts", since)
     .limit(CHART_POINT_LIMIT);
+
+  if (error) console.error("[getRecentVariantStats]", slug, error.message);
 
   const stats = new Map<string, VariantHistoryStat>();
   for (const row of data ?? []) {
@@ -229,7 +231,7 @@ export async function getChartSeries(
   const supabase = getServerSupabaseClient();
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("price_history_points")
     .select("ts, price")
     .eq("canonical_slug", slug)
@@ -237,6 +239,8 @@ export async function getChartSeries(
     .gte("ts", since)
     .order("ts", { ascending: true })
     .limit(CHART_POINT_LIMIT);
+
+  if (error) console.error("[getChartSeries]", slug, variantRef, error.message);
 
   return (data ?? []).map((r) => ({ ts: r.ts as string, price: Number(r.price) }));
 }
@@ -251,7 +255,7 @@ export async function getChartSeries(
 async function getLatestMetrics(slug: string): Promise<AssetMetrics | null> {
   const supabase = getServerSupabaseClient();
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("card_metrics")
     .select(
       [
@@ -274,6 +278,8 @@ async function getLatestMetrics(slug: string): Promise<AssetMetrics | null> {
     .limit(1)
     .maybeSingle<AssetMetrics>();
 
+  if (error) console.error("[getLatestMetrics]", slug, error.message);
+
   return data ?? null;
 }
 
@@ -295,7 +301,7 @@ export async function getAssetPageData(
   const days = opts.days ?? CHART_DAYS_DEFAULT;
 
   // Load canonical card (required — return null if missing so page can 404).
-  const { data: canonical } = await supabase
+  const { data: canonical, error: canonicalError } = await supabase
     .from("canonical_cards")
     .select("slug, canonical_name, set_name, year, card_number, variant")
     .eq("slug", slug)
@@ -308,6 +314,7 @@ export async function getAssetPageData(
       variant: string | null;
     }>();
 
+  if (canonicalError) console.error("[getAssetPageData]", slug, canonicalError.message);
   if (!canonical) return null;
 
   const isSealed = isSealedSlug(slug) || canonical.variant === "SEALED";
@@ -367,7 +374,8 @@ export async function listMovers(opts: {
     query = query.not("canonical_slug", "like", "sealed:%");
   }
 
-  const { data } = await query;
+  const { data, error: variantError } = await query;
+  if (variantError) console.error("[listMovers]", variantError.message);
   if (!data || data.length === 0) return [];
 
   const signalRows: Array<{
@@ -393,18 +401,22 @@ export async function listMovers(opts: {
 
   // Join with canonical_cards for name + set_name.
   const slugs = signalRows.map((r) => r.canonical_slug);
-  const { data: cards } = await supabase
+  const { data: cards, error: cardsError } = await supabase
     .from("canonical_cards")
     .select("slug, canonical_name, set_name")
     .in("slug", slugs);
 
-  const { data: metricsRows } = await supabase
+  if (cardsError) console.error("[listMovers] cards", cardsError.message);
+
+  const { data: metricsRows, error: metricsError } = await supabase
     .from("card_metrics")
     .select("canonical_slug, median_7d, updated_at")
     .in("canonical_slug", slugs)
     .is("printing_id", null)
     .eq("grade", "RAW")
     .order("updated_at", { ascending: false });
+
+  if (metricsError) console.error("[listMovers] metrics", metricsError.message);
 
   const cardMap = new Map(
     (cards ?? []).map((c) => [c.slug, { canonical_name: c.canonical_name as string, set_name: c.set_name as string | null }])
@@ -442,23 +454,26 @@ export async function searchAssets(
   const term = query.trim();
   if (!term) return [];
 
-  const { data: cards } = await supabase
+  const { data: cards, error: cardsError } = await supabase
     .from("canonical_cards")
     .select("slug, canonical_name, set_name, card_number, year, variant")
     .ilike("canonical_name", `%${term}%`)
     .order("canonical_name")
     .limit(limit);
 
+  if (cardsError) console.error("[searchAssets]", cardsError.message);
   if (!cards || cards.length === 0) return [];
 
   const slugs = cards.map((c) => c.slug as string);
-  const { data: metricsRows } = await supabase
+  const { data: metricsRows, error: metricsError } = await supabase
     .from("card_metrics")
     .select("canonical_slug, median_7d")
     .in("canonical_slug", slugs)
     .is("printing_id", null)
     .eq("grade", "RAW")
     .order("updated_at", { ascending: false });
+
+  if (metricsError) console.error("[searchAssets] metrics", metricsError.message);
 
   // Keep only latest row per slug (already ordered by updated_at desc).
   const latestMedian = new Map<string, number | null>();
@@ -585,7 +600,7 @@ export async function buildAssetViewModel(
   const supabase = getServerSupabaseClient();
 
   // 1. Canonical card — return null if unknown so page can 404.
-  const { data: canonical } = await supabase
+  const { data: canonical, error: canonicalError } = await supabase
     .from("canonical_cards")
     .select("slug, canonical_name, set_name, card_number, variant")
     .eq("slug", slug)
@@ -593,6 +608,7 @@ export async function buildAssetViewModel(
       slug: string; canonical_name: string; set_name: string | null;
       card_number: string | null; variant: string | null;
     }>();
+  if (canonicalError) console.error("[buildAssetViewModel]", slug, canonicalError.message);
   if (!canonical) return null;
 
   const isSealed = isSealedSlug(slug) || canonical.variant === "SEALED";
@@ -633,7 +649,7 @@ export async function buildAssetViewModel(
   if (!selectedVariantRef) {
     reason = "no_history";
   } else {
-    const { data: vmRows } = await supabase
+    const { data: vmRows, error: vmError } = await supabase
       .from("variant_metrics")
       .select("variant_ref, signal_trend, signal_breakout, signal_value, history_points_30d, provider_as_of_ts, signals_as_of_ts")
       .eq("canonical_slug", slug)
@@ -641,6 +657,8 @@ export async function buildAssetViewModel(
       .eq("grade", grade)
       .order("history_points_30d", { ascending: false })
       .limit(10);
+
+    if (vmError) console.error("[buildAssetViewModel] variant_metrics", slug, vmError.message);
 
     const vmRow = (vmRows ?? []).find((row) => row.variant_ref === selectedVariantRef)
       ?? (vmRows ?? []).find((row) => variantRefsCompatible(selectedVariantRef, row.variant_ref as string))

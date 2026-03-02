@@ -27,11 +27,12 @@ function parseBoolean(value: unknown): boolean {
 
 export async function POST(req: Request) {
   const importToken = process.env.ADMIN_IMPORT_TOKEN?.trim();
-  if (importToken) {
-    const auth = req.headers.get("authorization") ?? "";
-    if (auth !== `Bearer ${importToken}`) {
-      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-    }
+  if (!importToken) {
+    return NextResponse.json({ ok: false, error: "ADMIN_IMPORT_TOKEN not configured" }, { status: 500 });
+  }
+  const auth = req.headers.get("authorization") ?? "";
+  if (auth !== `Bearer ${importToken}`) {
+    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
   let body: ImportBody = {};

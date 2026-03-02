@@ -13,6 +13,10 @@
       "schedule": "0 6 * * *"
     },
     {
+      "path": "/api/cron/refresh-card-metrics",
+      "schedule": "30 6 * * *"
+    },
+    {
       "path": "/api/cron/snapshot-price-history",
       "schedule": "0 7 * * *"
     },

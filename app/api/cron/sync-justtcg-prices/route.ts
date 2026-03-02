@@ -1335,33 +1335,49 @@ export async function GET(req: Request) {
   const lastMeta = lastRun?.meta ?? null;
   const lastSetCode = typeof lastMeta?.nextSetCode === "string" ? lastMeta.nextSetCode : "";
 
-  // ── Get our canonical English sets ─────────────────────────────────────────
-  const { data: setsRaw } = await supabase
-    .from("card_printings")
-    .select("set_code, set_name")
-    .eq("language", "EN")
-    .not("set_code", "is", null)
-    .not("set_name", "is", null)
-    .limit(10000);
-
+  // ── Get our canonical English sets (paginated) ─────────────────────────────
+  const PRINTINGS_PAGE = 5000;
   const seenCodes = new Set<string>();
   const allSets: OurSet[] = [];
-  for (const row of setsRaw ?? []) {
-    if (row.set_code && row.set_name && !seenCodes.has(row.set_code)) {
-      seenCodes.add(row.set_code);
-      allSets.push({ setCode: row.set_code, setName: row.set_name });
+  {
+    let from = 0;
+    while (true) {
+      const { data: page } = await supabase
+        .from("card_printings")
+        .select("set_code, set_name")
+        .eq("language", "EN")
+        .not("set_code", "is", null)
+        .not("set_name", "is", null)
+        .range(from, from + PRINTINGS_PAGE - 1);
+      const rows = page ?? [];
+      for (const row of rows) {
+        if (row.set_code && row.set_name && !seenCodes.has(row.set_code)) {
+          seenCodes.add(row.set_code);
+          allSets.push({ setCode: row.set_code, setName: row.set_name });
+        }
+      }
+      if (rows.length < PRINTINGS_PAGE) break;
+      from += PRINTINGS_PAGE;
     }
   }
   allSets.sort((a, b) => a.setCode.localeCompare(b.setCode));
 
-  const { data: allPrintingsRaw } = await supabase
-    .from("card_printings")
-    .select("id, canonical_slug, card_number, finish, edition, stamp, set_code, set_name")
-    .eq("language", "EN")
-    .not("canonical_slug", "is", null)
-    .limit(50000);
-
-  const allPrintings = (allPrintingsRaw ?? []) as PrintingRow[];
+  const allPrintings: PrintingRow[] = [];
+  {
+    let from = 0;
+    while (true) {
+      const { data: page } = await supabase
+        .from("card_printings")
+        .select("id, canonical_slug, card_number, finish, edition, stamp, set_code, set_name")
+        .eq("language", "EN")
+        .not("canonical_slug", "is", null)
+        .range(from, from + PRINTINGS_PAGE - 1);
+      const rows = (page ?? []) as PrintingRow[];
+      allPrintings.push(...rows);
+      if (rows.length < PRINTINGS_PAGE) break;
+      from += PRINTINGS_PAGE;
+    }
+  }
 
   // In debug mode: process only the explicitly requested set ID.
   // setsToProcess[0] is used for the card_printings lookup (singles path).
