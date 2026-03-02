@@ -208,7 +208,40 @@ async function ensurePrintingRow(
   const { error: insertError } = await supabase
     .from("card_printings")
     .insert(row);
-  return insertError ? { ok: false, error: insertError.message, attemptedTarget } : { ok: true, inserted: true };
+  if (!insertError) return { ok: true, inserted: true };
+
+  if (insertError.message.includes("card_printings_unique_printing_idx")) {
+    const { data: conflictingRow, error: conflictError } = await supabase
+      .from("card_printings")
+      .select("id, canonical_slug")
+      .eq("set_code", attemptedTarget.set_code)
+      .eq("card_number", attemptedTarget.card_number)
+      .eq("language", attemptedTarget.language)
+      .eq("finish", attemptedTarget.finish)
+      .eq("edition", attemptedTarget.edition)
+      .is("stamp", attemptedTarget.stamp)
+      .is("finish_detail", attemptedTarget.finish_detail)
+      .limit(1)
+      .maybeSingle<{ id: string; canonical_slug: string }>();
+
+    if (conflictError) return { ok: false, error: conflictError.message, attemptedTarget };
+    if (!conflictingRow) return { ok: false, error: insertError.message, attemptedTarget };
+    if (conflictingRow.canonical_slug !== attemptedTarget.canonical_slug) {
+      return {
+        ok: false,
+        error: `Conflicting printing belongs to ${conflictingRow.canonical_slug}, not ${attemptedTarget.canonical_slug}.`,
+        attemptedTarget,
+      };
+    }
+
+    const { error: mergeError } = await supabase
+      .from("card_printings")
+      .update(row)
+      .eq("id", conflictingRow.id);
+    return mergeError ? { ok: false, error: mergeError.message, attemptedTarget } : { ok: true, inserted: false, merged: true };
+  }
+
+  return { ok: false, error: insertError.message, attemptedTarget };
 }
 
 async function fetchSetCards(providerSetId: string) {
@@ -511,9 +544,23 @@ export async function POST(req: Request) {
     }
 
     const baseCandidates = matchingCards.filter((candidate) => candidate.stamp === null);
+    const exactNumberCandidates = matchingCards.filter(
+      (candidate) => normalizeMatchingCardNumber(candidate.card.number) === expectedNumber,
+    );
+    const exactNumberBaseCandidates = exactNumberCandidates.filter((candidate) => candidate.stamp === null);
+    const exactNumberStampedCandidates = exactNumberCandidates
+      .filter((candidate) => candidate.stamp !== null)
+      .sort((left, right) =>
+        stampPriority(left.stamp) - stampPriority(right.stamp)
+        || String(left.stamp ?? "").localeCompare(String(right.stamp ?? ""))
+        || left.card.id.localeCompare(right.card.id),
+      );
     const primaryCandidate =
-      baseCandidates.length === 1 ? baseCandidates[0]
-        : matchingCards.length === 1 ? matchingCards[0]
+      exactNumberBaseCandidates.length === 1 ? exactNumberBaseCandidates[0]
+        : exactNumberCandidates.length === 1 ? exactNumberCandidates[0]
+          : exactNumberBaseCandidates.length === 0 && exactNumberStampedCandidates.length > 0 ? exactNumberStampedCandidates[0]
+          : baseCandidates.length === 1 ? baseCandidates[0]
+            : matchingCards.length === 1 ? matchingCards[0]
           : null;
     const manualRepair = !primaryCandidate && matchingCards.length === 0
       ? MANUAL_REPAIRS.get(printing.canonical_slug) ?? null
@@ -644,6 +691,18 @@ export async function POST(req: Request) {
       updated_at: new Date().toISOString(),
     };
 
+    const attemptedBaseTarget = {
+      canonical_slug: baseUpdate.canonical_slug,
+      set_code: baseUpdate.set_code,
+      card_number: baseUpdate.card_number,
+      language: baseUpdate.language,
+      finish: baseUpdate.finish,
+      edition: baseUpdate.edition,
+      stamp: baseUpdate.stamp,
+      finish_detail: baseUpdate.finish_detail,
+      source_id: baseUpdate.source_id,
+    };
+
     if (resolvedCardNumber && resolvedCardNumber !== canonical.card_number) {
       const { error: canonicalUpdateError } = await supabase
         .from("canonical_cards")
@@ -669,6 +728,55 @@ export async function POST(req: Request) {
       .update(baseUpdate)
       .eq("id", printing.id);
     if (updateError) {
+      if (updateError.message.includes("card_printings_unique_printing_idx")) {
+        const { data: conflictingRow, error: conflictLookupError } = await supabase
+          .from("card_printings")
+          .select("id, canonical_slug")
+          .eq("set_code", String(baseUpdate.set_code ?? ""))
+          .eq("card_number", String(baseUpdate.card_number ?? ""))
+          .eq("language", String(baseUpdate.language ?? ""))
+          .eq("finish", String(baseUpdate.finish ?? ""))
+          .eq("edition", String(baseUpdate.edition ?? ""))
+          .is("stamp", baseUpdate.stamp ?? null)
+          .is("finish_detail", baseUpdate.finish_detail ?? null)
+          .limit(1)
+          .maybeSingle<{ id: string; canonical_slug: string }>();
+
+        if (!conflictLookupError && conflictingRow?.id && conflictingRow.canonical_slug === printing.canonical_slug) {
+          const { error: mergeError } = await supabase
+            .from("card_printings")
+            .update(baseUpdate)
+            .eq("id", conflictingRow.id);
+
+          if (!mergeError) {
+            const { error: deleteError } = await supabase
+              .from("card_printings")
+              .delete()
+              .eq("id", printing.id);
+
+            if (!deleteError) {
+              updatedInPlace += 1;
+              if (updatedSamples.length < 25) {
+                updatedSamples.push({
+                  canonical_slug: printing.canonical_slug,
+                  printing_id: printing.id,
+                  merged_into_printing_id: conflictingRow.id,
+                  primary_finish: primary.finish,
+                  provider_card_id: primaryCard?.id ?? null,
+                  resolved_card_number: resolvedCardNumber,
+                  manual_repair: Boolean(manualRepair),
+                  supplemental_pattern_cards: supplementalCandidates.map((candidate) => ({
+                    id: candidate.card.id,
+                    stamp: candidate.stamp,
+                  })),
+                });
+              }
+              continue;
+            }
+          }
+        }
+      }
+
       skipped += 1;
       if (skippedSamples.length < 25) {
         skippedSamples.push({
@@ -676,17 +784,7 @@ export async function POST(req: Request) {
           printing_id: printing.id,
           reason: "update_failed",
           error: updateError.message,
-          attempted_target: {
-            canonical_slug: baseUpdate.canonical_slug,
-            set_code: baseUpdate.set_code,
-            card_number: baseUpdate.card_number,
-            language: baseUpdate.language,
-            finish: baseUpdate.finish,
-            edition: baseUpdate.edition,
-            stamp: baseUpdate.stamp,
-            finish_detail: baseUpdate.finish_detail,
-            source_id: baseUpdate.source_id,
-          },
+          attempted_target: attemptedBaseTarget,
         });
       }
       continue;
