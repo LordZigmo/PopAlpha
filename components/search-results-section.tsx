@@ -85,15 +85,17 @@ function formatPercent(value: number | null | undefined) {
 function ResultCard({
   row,
   currentSearchHref,
+  className,
 }: {
   row: SearchDisplayRow;
   currentSearchHref: string;
+  className?: string;
 }) {
   return (
     <Link
       key={row.canonical_slug}
       href={`/cards/${encodeURIComponent(row.canonical_slug)}?returnTo=${encodeURIComponent(currentSearchHref)}`}
-      className="group block transition duration-200 hover:-translate-y-0.5"
+      className={`group block transition duration-200 hover:-translate-y-0.5 ${className ?? ""}`.trim()}
     >
       <div className="relative aspect-[63/88] overflow-hidden rounded-[var(--radius-card)] border-app border bg-surface-soft/24">
         {row.primary_image_url ? (
@@ -156,15 +158,25 @@ export default function SearchResultsSection({
     initialPageSize === 48 || initialPageSize === 96 ? initialPageSize : 24
   );
 
+  const isMarketPriceSort = sort === "market-price";
   const sortedRows = useMemo(() => sortSearchResults(rows, sort), [rows, sort]);
-  const chaseCardSlugSet = useMemo(
-    () => new Set((chaseCards ?? []).map((row) => row.canonical_slug)),
-    [chaseCards],
+  const featuredChaseCards = useMemo(
+    () => (isMarketPriceSort ? (chaseCards ?? []).slice(0, 4) : []),
+    [chaseCards, isMarketPriceSort],
   );
+  const primaryChaseSlugSet = useMemo(
+    () => new Set(featuredChaseCards.slice(0, 3).map((row) => row.canonical_slug)),
+    [featuredChaseCards],
+  );
+  const desktopOnlyChaseSlug = featuredChaseCards[3]?.canonical_slug ?? null;
   const setDescription = useMemo(() => getSetDescription(matchedSetName), [matchedSetName]);
   const mainRows = useMemo(
-    () => sortedRows.filter((row) => !chaseCardSlugSet.has(row.canonical_slug)),
-    [chaseCardSlugSet, sortedRows],
+    () => (
+      isMarketPriceSort
+        ? sortedRows.filter((row) => !primaryChaseSlugSet.has(row.canonical_slug))
+        : sortedRows
+    ),
+    [isMarketPriceSort, primaryChaseSlugSet, sortedRows],
   );
 
   const baseParams = useMemo(() => {
@@ -300,13 +312,18 @@ export default function SearchResultsSection({
             </div>
           ) : null}
 
-          {(chaseCards ?? []).length > 0 ? (
+          {featuredChaseCards.length > 0 ? (
             <div className="mb-6">
               <h3 className="text-app text-sm font-semibold uppercase tracking-[0.18em]">Chase Cards</h3>
               <p className="text-muted mt-1 text-xs">Highest current RAW market prices in this set.</p>
-              <div className="mt-3 grid grid-cols-3 gap-2 sm:gap-3">
-                {(chaseCards ?? []).map((row) => (
-                  <ResultCard key={row.canonical_slug} row={row} currentSearchHref={currentSearchHref} />
+              <div className="mt-3 grid grid-cols-3 gap-2 sm:gap-3 lg:grid-cols-4">
+                {featuredChaseCards.map((row, index) => (
+                  <ResultCard
+                    key={row.canonical_slug}
+                    row={row}
+                    currentSearchHref={currentSearchHref}
+                    className={index === 3 ? "hidden lg:block" : undefined}
+                  />
                 ))}
               </div>
             </div>
@@ -315,7 +332,12 @@ export default function SearchResultsSection({
           {mainRows.length > 0 ? (
             <div className="grid grid-cols-3 gap-2 sm:gap-3 lg:grid-cols-4">
               {mainRows.map((row) => (
-                <ResultCard key={row.canonical_slug} row={row} currentSearchHref={currentSearchHref} />
+                <ResultCard
+                  key={row.canonical_slug}
+                  row={row}
+                  currentSearchHref={currentSearchHref}
+                  className={desktopOnlyChaseSlug === row.canonical_slug ? "lg:hidden" : undefined}
+                />
               ))}
             </div>
           ) : null}

@@ -103,6 +103,12 @@ function toObservedAt(raw: number | null | undefined, fallbackIso: string) {
 function inferSetDisplayName(setKey: string) {
   return setKey.replace(/-pokemon$/i, "").split("-").filter(Boolean).map((t) => t.charAt(0).toUpperCase() + t.slice(1)).join(" ");
 }
+function unknownFinishTieBreakScore(providerFinish: string) {
+  if (providerFinish === "NON_HOLO") return 6;
+  if (providerFinish === "HOLO") return 4;
+  if (providerFinish === "REVERSE_HOLO") return 2;
+  return 0;
+}
 function summarizeVariant(variant: JustTcgVariant) {
   return {
     id: variant.id,
@@ -179,6 +185,10 @@ function scoreCandidate(params: { card: JustTcgCard; variant: JustTcgVariant; pr
   const notes: string[] = [];
   if (expectedNumber && providerNumber === expectedNumber) { score += 100; notes.push("number_match"); }
   if (providerFinish === printing.finish) { score += 50; notes.push("finish_match"); }
+  else if (printing.finish === "UNKNOWN") {
+    score += unknownFinishTieBreakScore(providerFinish);
+    if (providerFinish) notes.push(`unknown_finish_prefers_${providerFinish.toLowerCase()}`);
+  }
   if (expectedStamp && providerStamp === expectedStamp) { score += 40; notes.push("stamp_match"); }
   else if (!expectedStamp && !providerStamp) { score += 10; notes.push("base_variant"); }
   const expectedName = normalizeName(canonical.subject ?? canonical.canonical_name ?? canonical.slug);
@@ -527,6 +537,7 @@ export async function backfillJustTcgSet(setKey: string, options: BackfillJustTc
     const mappingRows: Record<string, unknown>[] = [];
     const ingestRows: Record<string, unknown>[] = [];
     const providerRawRows: Record<string, unknown>[] = [];
+    const priceSnapshotRows: Record<string, unknown>[] = [];
     const marketLatestRows: Record<string, unknown>[] = [];
     const variantMetricRows: Record<string, unknown>[] = [];
     const historyRows: Record<string, unknown>[] = [];
@@ -643,6 +654,17 @@ export async function backfillJustTcgSet(setKey: string, options: BackfillJustTc
         card_id: best.card.id, source: PROVIDER, mapping_type: "printing", external_id: best.variant.id, canonical_slug: printing.canonical_slug, printing_id: printing.id,
         meta: { provider_set_id: providerSetId, provider_card_id: best.card.id, provider_variant_id: best.variant.id, provider_card_number: best.card.number, provider_printing: best.variant.printing ?? null, match_confidence: Math.min(1, best.score / 215), match_notes: best.notes },
       });
+      priceSnapshotRows.push({
+        canonical_slug: printing.canonical_slug,
+        printing_id: printing.id,
+        grade: "RAW",
+        price_value: best.variant.price,
+        currency: "USD",
+        provider: PROVIDER,
+        provider_ref: `justtcg-${best.variant.id}`,
+        ingest_id: null,
+        observed_at: observedAt,
+      });
       marketLatestRows.push({
         card_id: best.variant.id, source: PROVIDER, grade: "RAW", price_type: "MARKET", price_usd: best.variant.price, currency: "USD", volume: null, external_id: best.variant.id, url: null,
         observed_at: observedAt, canonical_slug: printing.canonical_slug, printing_id: printing.id, updated_at: nowIso,
@@ -677,6 +699,8 @@ export async function backfillJustTcgSet(setKey: string, options: BackfillJustTc
       const mappingResult = await batchUpsert("card_external_mappings", mappingRows, "source,mapping_type,printing_id");
       mappingUpserts = mappingResult.upserted;
       if (mappingResult.firstError) pushFailure({ canonical_slug: printings[0].canonical_slug, printing_id: printings[0].id, code: "DB_UPSERT_FAILED", detail: mappingResult.firstError }, true);
+      const snapshotResult = await batchUpsert("price_snapshots", priceSnapshotRows, "provider,provider_ref");
+      if (snapshotResult.firstError) pushFailure({ canonical_slug: printings[0].canonical_slug, printing_id: printings[0].id, code: "DB_UPSERT_FAILED", detail: snapshotResult.firstError }, true);
       const marketLatestResult = await batchUpsert("market_latest", marketLatestRows, "card_id,source,grade,price_type");
       marketLatestWritten = marketLatestResult.upserted;
       if (marketLatestResult.firstError) pushFailure({ canonical_slug: printings[0].canonical_slug, printing_id: printings[0].id, code: "DB_UPSERT_FAILED", detail: marketLatestResult.firstError }, true);
@@ -686,6 +710,12 @@ export async function backfillJustTcgSet(setKey: string, options: BackfillJustTc
       const variantMetricsResult = await batchUpsert("variant_metrics", variantMetricRows, "canonical_slug,printing_id,provider,grade");
       variantMetricsWritten = variantMetricsResult.upserted;
       if (variantMetricsResult.firstError) pushFailure({ canonical_slug: printings[0].canonical_slug, printing_id: printings[0].id, code: "DB_UPSERT_FAILED", detail: variantMetricsResult.firstError }, true);
+      if (priceSnapshotRows.length > 0) {
+        const { error: refreshMetricsError } = await supabase.rpc("refresh_card_metrics");
+        if (refreshMetricsError) {
+          pushFailure({ canonical_slug: printings[0].canonical_slug, printing_id: printings[0].id, code: "DB_UPSERT_FAILED", detail: `refresh_card_metrics: ${refreshMetricsError.message}` }, true);
+        }
+      }
       if (updatedVariantKeys.length > 0) {
         const { rowsUpdated, firstError: batchSignalError } = await refreshSignalsInBatches(updatedVariantKeys);
         if (batchSignalError) {

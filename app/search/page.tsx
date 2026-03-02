@@ -568,7 +568,7 @@ async function loadSetSearchEnhancements(setName: string): Promise<{
     "market-price",
   )
     .filter((row) => row.raw_price !== null)
-    .slice(0, 3);
+    .slice(0, 4);
 
   return {
     setSummary,
