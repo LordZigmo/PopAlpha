@@ -50,14 +50,44 @@ export default async function SetsPage() {
     });
   }
 
-  const { data: catalog } = await supabase
+  let catalogData = await supabase
     .from("canonical_set_catalog")
     .select("set_name, year, card_count, unknown_finish_count, set_id")
     .order("year", { ascending: false })
     .order("set_name", { ascending: true });
 
+  if (catalogData.error || (catalogData.data ?? []).length === 0) {
+    const fallback = await supabase
+      .from("canonical_cards")
+      .select("set_name, year")
+      .not("set_name", "is", null)
+      .limit(30000);
+    const map = new Map<string, { set_name: string; year: number | null; card_count: number }>();
+    for (const row of (fallback.data ?? []) as { set_name: string | null; year: number | null }[]) {
+      if (!row.set_name) continue;
+      const key = `${row.set_name}||${row.year ?? "null"}`;
+      const existing = map.get(key);
+      if (existing) {
+        existing.card_count += 1;
+      } else {
+        map.set(key, { set_name: row.set_name, year: row.year, card_count: 1 });
+      }
+    }
+    catalogData = {
+      ...catalogData,
+      data: Array.from(map.values()).map((entry) => ({
+        set_name: entry.set_name,
+        year: entry.year,
+        card_count: entry.card_count,
+        unknown_finish_count: 0,
+        set_id: null,
+      })),
+      error: null,
+    };
+  }
+
   const sets: SetEntry[] = [];
-  for (const entry of catalog ?? []) {
+  for (const entry of catalogData.data ?? []) {
     if (!entry?.set_name) continue;
     const key = entry.set_id ?? entry.set_name;
     const summary = key ? summaryMap.get(key) : undefined;
