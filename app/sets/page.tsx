@@ -141,9 +141,8 @@ export default async function SetsPage() {
               <p className="text-muted mb-2 text-xs font-semibold uppercase tracking-[0.12em]">{year}</p>
               <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3">
                 {yearSets.map((s) => {
-                  const fullyClassified = s.unknown_finish_count === 0;
                   const hasPricing = Boolean(s.summary?.card_count && s.summary.card_count > 0);
-                  const signalPositive = fullyClassified && hasPricing;
+                  const signalPositive = hasPricing;
                   const signalLabel = signalPositive ? "Market Live" : "Needs data";
                   const signalClass = signalPositive ? "glow-signal-positive" : "glow-signal-negative";
                   return (
