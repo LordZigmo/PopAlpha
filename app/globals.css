@@ -432,60 +432,8 @@ body {
   box-shadow: 0 12px 24px rgba(0, 0, 0, 0.5), inset 0 1px 1px rgba(255, 255, 255, 0.55);
 }
 
-.deal-wheel-track {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 50%;
-  height: 14px;
-  margin-top: -7px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
-  overflow: hidden;
-  pointer-events: none;
-  z-index: 0;
-}
-
-.deal-wheel-fill {
-  position: absolute;
-  top: 0;
-  height: 100%;
-  transition: width 60ms linear, opacity 120ms ease;
-}
-
-.deal-wheel-fill-left {
-  right: 50%;
-  border-radius: 999px 0 0 999px;
-  background: linear-gradient(270deg, var(--color-positive), transparent);
-}
-
-.deal-wheel-fill-right {
-  left: 50%;
-  border-radius: 0 999px 999px 0;
-  background: linear-gradient(90deg, var(--color-negative), transparent);
-}
-
-.deal-wheel-neutral-zone {
-  position: absolute;
-  top: 0;
-  height: 100%;
-  background: rgba(255, 255, 255, 0.04);
-  border-left: 1px solid rgba(255, 255, 255, 0.06);
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
-  pointer-events: none;
-  z-index: 1;
-}
-
-.deal-wheel-center-tick {
-  position: absolute;
-  left: 50%;
-  top: 0;
-  width: 2px;
-  height: 100%;
-  margin-left: -1px;
-  background: rgba(255, 255, 255, 0.15);
-  pointer-events: none;
-  z-index: 1;
+.deal-wheel-needle {
+  transition: transform 500ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .deal-wheel-insight {
@@ -500,7 +448,7 @@ body {
   [data-style="glass"] .glass-target { backdrop-filter: none; -webkit-backdrop-filter: none; }
   .deal-wheel-slider-v2::-webkit-slider-thumb,
   .deal-wheel-slider-v2::-moz-range-thumb,
-  .deal-wheel-fill,
+  .deal-wheel-needle,
   .deal-wheel-insight { transition: none; }
 }
 
