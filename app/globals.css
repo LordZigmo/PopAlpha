@@ -98,6 +98,12 @@ body {
   background: radial-gradient(650px circle at 50% -20%, color-mix(in srgb, var(--color-accent) 12%, transparent), transparent 62%);
 }
 
+.search-bubble-borderless {
+  border-color: transparent;
+  background: var(--color-background);
+  box-shadow: none !important;
+}
+
 .glow-signal {
   width: 0.75rem;
   height: 0.75rem;

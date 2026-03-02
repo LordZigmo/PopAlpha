@@ -3,7 +3,11 @@
 import { useSearchParams } from "next/navigation";
 import CardSearch from "@/components/card-search";
 
-export default function NavSearchForm() {
+type NavSearchFormProps = {
+  borderless?: boolean;
+};
+
+export default function NavSearchForm({ borderless = false }: NavSearchFormProps) {
   const searchParams = useSearchParams();
 
   return (
@@ -15,6 +19,7 @@ export default function NavSearchForm() {
       enableGlobalShortcut
       submitMode="active-or-search"
       initialValue={searchParams.get("q") ?? ""}
+      borderless={borderless}
     />
   );
 }

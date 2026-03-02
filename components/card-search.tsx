@@ -14,6 +14,7 @@ type CardSearchProps = {
   showSubmitButton?: boolean;
   submitMode?: "active-only" | "active-or-search";
   className?: string;
+  borderless?: boolean;
 };
 
 function joinClasses(...values: Array<string | false | null | undefined>) {
@@ -88,6 +89,7 @@ export default function CardSearch({
   showSubmitButton = true,
   submitMode = "active-only",
   className,
+  borderless = false,
 }: CardSearchProps) {
   const router = useRouter();
   const listboxId = useId();
@@ -204,7 +206,11 @@ export default function CardSearch({
           event.preventDefault();
           submitSearch();
         }}
-        className={joinClasses("search-bubble input-themed flex min-w-0 items-center gap-1", sizeClasses.bubble)}
+        className={joinClasses(
+          "search-bubble input-themed flex min-w-0 items-center gap-1",
+          sizeClasses.bubble,
+          borderless && "search-bubble-borderless",
+        )}
         role="search"
       >
         <input

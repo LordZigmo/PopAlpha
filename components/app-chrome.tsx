@@ -22,6 +22,7 @@ function AboutLink({ fixed = false }: { fixed?: boolean }) {
 
 export default function AppChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const isSetsPage = pathname?.startsWith("/sets") ?? false;
 
   // Auth pages get no chrome at all
   if (pathname.startsWith("/login") || pathname.startsWith("/auth/callback")) {
@@ -58,7 +59,7 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
               </div>
             }
           >
-            <NavSearchForm />
+            <NavSearchForm borderless={isSetsPage} />
           </Suspense>
 
           {/* Right-side nav */}
@@ -70,7 +71,7 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
               Sets
             </Link>
             <AboutLink />
-            <ThemeToggle />
+            {!isSetsPage ? <ThemeToggle /> : null}
           </nav>
         </div>
       </header>
