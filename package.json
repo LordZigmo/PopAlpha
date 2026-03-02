@@ -10,7 +10,8 @@
     "test:search": "node tests/run-search-tests.mjs",
     "guard:no-cards-axis": "node scripts/check-no-cards-axis.mjs",
     "ebay:deletion-setup": "node scripts/ebay-deletion-setup.mjs",
-    "justtcg:backfill-live": "node scripts/backfill-justtcg-live.mjs"
+    "justtcg:backfill-live": "node scripts/backfill-justtcg-live.mjs",
+    "sets:backfill-summaries": "node scripts/backfill-set-summaries.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.97.0",

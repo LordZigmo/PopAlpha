@@ -45,9 +45,12 @@ import { NextResponse } from "next/server";
 import { authorizeCronRequest } from "@/lib/cronAuth";
 import { buildTrackedSelectionPlan } from "@/lib/cron/justtcg-tracked-selection.mjs";
 import { buildRawVariantRef } from "@/lib/identity/variant-ref";
+import { buildJustTcgSetSearchTerms } from "@/lib/providers/justtcg-set-search";
+import { refreshSetSummaryPipeline } from "@/lib/sets/refresh";
 import { getServerSupabaseClient } from "@/lib/supabaseServer";
 import {
   fetchJustTcgCards,
+  jtFetchRaw,
   setNameToJustTcgId,
   bestSetMatch,
   normalizeSetNameForMatch,
@@ -145,6 +148,10 @@ type TrackedSkipSample = {
   mapping_id?: string;
   provider_set_id?: string;
   provider_variant_id?: string;
+};
+
+type JustTcgSetSearchEnvelope = {
+  data?: Array<{ id: string; name: string }>;
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -256,6 +263,65 @@ function setNamesAreCompatible(providerSetName: string, candidateSetName: string
   const candidateNoSet = candidateTokens.filter((token) => token !== "set");
 
   return providerNoSet.join(" ") === candidateNoSet.join(" ");
+}
+
+async function resolveProviderSetIdForSet(params: {
+  supabase: ReturnType<typeof getServerSupabaseClient>;
+  setCode: string;
+  setName: string;
+  existingProviderSetId: string | null;
+}) {
+  const { supabase, setCode, setName, existingProviderSetId } = params;
+  if (existingProviderSetId) return existingProviderSetId;
+
+  const searchTerms = buildJustTcgSetSearchTerms(setName, setCode);
+  const targetNorm = normalizeSetNameForMatch(setName);
+  const targetTokens = new Set(targetNorm.split(" ").filter(Boolean));
+
+  for (const term of searchTerms) {
+    const setSearch = await jtFetchRaw(`/sets?game=pokemon&q=${encodeURIComponent(term)}`);
+    if (setSearch.status < 200 || setSearch.status >= 300) continue;
+
+    const envelope = (setSearch.body ?? {}) as JustTcgSetSearchEnvelope;
+    const ranked = (envelope.data ?? [])
+      .map((row) => {
+        const providerNorm = normalizeSetNameForMatch(row.name);
+        const exact = providerNorm === targetNorm;
+        const compatible = setNamesAreCompatible(row.name, setName);
+        const tokenMatches = Array.from(targetTokens).filter((token) => providerNorm.includes(token)).length;
+
+        let score = 0;
+        if (exact) score += 100;
+        else if (compatible) score += 50;
+        score += tokenMatches * 5;
+
+        return {
+          id: row.id,
+          score,
+        };
+      })
+      .filter((row) => row.score > 0)
+      .sort((left, right) => right.score - left.score || left.id.localeCompare(right.id));
+
+    if (ranked[0]?.id) {
+      await supabase
+        .from("provider_set_map")
+        .upsert(
+          [{
+            provider: PROVIDER,
+            canonical_set_code: setCode,
+            canonical_set_name: setName,
+            provider_set_id: ranked[0].id,
+            confidence: 0.9,
+            last_verified_at: null,
+          }],
+          { onConflict: "provider,canonical_set_code" },
+        );
+      return ranked[0].id;
+    }
+  }
+
+  return setNameToJustTcgId(setName);
 }
 
 async function batchUpsert<T extends Record<string, unknown>>(
@@ -519,6 +585,9 @@ async function runNightlySync(params: {
   let signalsRowsUpdatedIncremental = 0;
   let signalsRowsUpdatedFull = 0;
   let signalsRefreshMode: "incremental" | "full" | "none" = "none";
+  let setSummaryRefreshMode: "incremental" | "full" | "none" = "none";
+  let setSummaryRefreshResult: unknown = null;
+  let setSummaryRefreshError: string | null = null;
   const skipReasonCounts: Partial<Record<TrackedSkipReason, number>> = {};
   const skippedSamples: TrackedSkipSample[] = [];
   const diagnosticsRows: Array<Record<string, unknown>> = [];
@@ -1083,6 +1152,18 @@ async function runNightlySync(params: {
     }
   }
 
+  if (updatedVariantKeyCount > 0) {
+    const summaryRefresh = await refreshSetSummaryPipeline({
+      supabase,
+      keys: updatedVariantKeys,
+      incrementalLimit: NIGHTLY_INCREMENTAL_SIGNAL_LIMIT,
+    });
+    setSummaryRefreshMode = summaryRefresh.mode;
+    setSummaryRefreshResult = summaryRefresh.result;
+    setSummaryRefreshError = summaryRefresh.error;
+    firstError ??= summaryRefresh.error;
+  }
+
   if (diagnosticsRows.length > 0) {
     const { error } = await supabase.from("tracked_refresh_diagnostics").insert(diagnosticsRows);
     if (error) {
@@ -1122,6 +1203,9 @@ async function runNightlySync(params: {
           signalsRowsUpdatedIncremental,
           signalsRowsUpdatedFull,
           signalsRefreshMode,
+          setSummaryRefreshMode,
+          setSummaryRefreshResult,
+          setSummaryRefreshError,
           deprecatedQueryAuth: authDeprecatedQueryAuth,
           firstError,
         },
@@ -1148,6 +1232,9 @@ async function runNightlySync(params: {
     signalsRowsUpdatedIncremental,
     signalsRowsUpdatedFull,
     signalsRefreshMode,
+    setSummaryRefreshMode,
+    setSummaryRefreshResult,
+    setSummaryRefreshError,
     firstError,
     deprecatedQueryAuth: authDeprecatedQueryAuth,
   });
@@ -1330,7 +1417,12 @@ export async function GET(req: Request) {
     const existing = setMapByCode.get(ourSet.setCode);
     const providerSetId = isDebug
       ? debugSet!
-      : (existing?.provider_set_id ?? setNameToJustTcgId(ourSet.setName));
+      : await resolveProviderSetIdForSet({
+          supabase,
+          setCode: ourSet.setCode,
+          setName: ourSet.setName,
+          existingProviderSetId: existing?.provider_set_id ?? null,
+        });
 
     try {
       // 1. Fetch cards from JustTCG.
@@ -1752,6 +1844,9 @@ export async function GET(req: Request) {
   const keyedVariantMetrics = allVariantMetrics.filter((row) => row.printing_id);
   const legacyVariantMetrics = allVariantMetrics.filter((row) => !row.printing_id);
   let variantMetricsWritten = 0;
+  let setSummaryRefreshMode: "incremental" | "full" | "none" = "none";
+  let setSummaryRefreshResult: unknown = null;
+  let setSummaryRefreshError: string | null = null;
 
   if (keyedVariantMetrics.length > 0) {
     const result = await batchUpsert(
@@ -1779,6 +1874,34 @@ export async function GET(req: Request) {
     variantMetricsWritten += result.upserted;
   }
 
+  const updatedVariantKeysMap = new Map<string, { canonical_slug: string; variant_ref: string; provider: string; grade: string }>();
+  for (const row of allVariantMetrics) {
+    const key = {
+      canonical_slug: String(row.canonical_slug ?? ""),
+      variant_ref: String(row.variant_ref ?? ""),
+      provider: String(row.provider ?? ""),
+      grade: String(row.grade ?? ""),
+    };
+    if (!key.canonical_slug || !key.variant_ref || !key.provider || !key.grade) continue;
+    updatedVariantKeysMap.set(
+      `${key.canonical_slug}::${key.variant_ref}::${key.provider}::${key.grade}`,
+      key,
+    );
+  }
+
+  if (updatedVariantKeysMap.size > 0) {
+    const summaryRefresh = await refreshSetSummaryPipeline({
+      supabase,
+      keys: [...updatedVariantKeysMap.values()],
+      incrementalLimit: NIGHTLY_INCREMENTAL_SIGNAL_LIMIT,
+      asOfDate: runDate,
+    });
+    setSummaryRefreshMode = summaryRefresh.mode;
+    setSummaryRefreshResult = summaryRefresh.result;
+    setSummaryRefreshError = summaryRefresh.error;
+    firstError ??= summaryRefresh.error;
+  }
+
   // ── Finalize ingest run ──────────────────────────────────────────────────────
   if (runId) {
     await supabase
@@ -1803,6 +1926,9 @@ export async function GET(req: Request) {
           marketLatestWritten,
           historyPointsWritten,
           variantMetricsWritten,
+          setSummaryRefreshMode,
+          setSummaryRefreshResult,
+          setSummaryRefreshError,
         },
       })
       .eq("id", runId);
@@ -1855,6 +1981,9 @@ export async function GET(req: Request) {
     marketLatestWritten,
     historyPointsWritten,
     variantMetricsWritten,
+    setSummaryRefreshMode,
+    setSummaryRefreshResult,
+    setSummaryRefreshError,
     firstError,
     metricsRefreshResult,
     deprecatedQueryAuth: auth.deprecatedQueryAuth,

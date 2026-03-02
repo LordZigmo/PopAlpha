@@ -1,8 +1,10 @@
 import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 import { authorizeCronRequest } from "@/lib/cronAuth";
+import { buildJustTcgSetSearchTerms } from "@/lib/providers/justtcg-set-search";
 import {
   fetchJustTcgCards,
+  jtFetchRaw,
   mapJustTcgPrinting,
   normalizeCardNumber,
   normalizeCondition,
@@ -48,6 +50,10 @@ type CanonicalContext = {
   card_number: string | null;
 };
 
+type JustTcgSetSearchEnvelope = {
+  data?: Array<{ id: string; name: string }>;
+};
+
 function requestHash(provider: string, endpoint: string, params: Record<string, unknown>): string {
   const str = JSON.stringify({ provider, endpoint, params });
   return crypto.createHash("sha256").update(str).digest("hex").slice(0, 16);
@@ -61,6 +67,79 @@ function normalizeName(value: string | null | undefined): string {
     .replace(/[^a-z0-9]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+async function resolveTrackedProviderSetId(params: {
+  setName: string | null | undefined;
+  setCode: string | null | undefined;
+  supabase: ReturnType<typeof getServerSupabaseClient>;
+}) {
+  const setName = String(params.setName ?? "").trim();
+  const setCode = String(params.setCode ?? "").trim() || null;
+  const fallback = setName ? setNameToJustTcgId(setName) : null;
+
+  if (setCode) {
+    const { data } = await params.supabase
+      .from("provider_set_map")
+      .select("provider_set_id")
+      .eq("provider", PROVIDER)
+      .eq("canonical_set_code", setCode)
+      .limit(1)
+      .maybeSingle<{ provider_set_id: string }>();
+    if (data?.provider_set_id) return data.provider_set_id;
+  }
+
+  if (!setName) return fallback;
+
+  const target = normalizeName(setName);
+  const targetTokens = new Set(target.split(" ").filter(Boolean));
+  const searchTerms = buildJustTcgSetSearchTerms(setName, setCode);
+
+  for (const term of searchTerms) {
+    const termTarget = normalizeName(term);
+    const setSearch = await jtFetchRaw(`/sets?game=pokemon&q=${encodeURIComponent(term)}`);
+    if (setSearch.status < 200 || setSearch.status >= 300) continue;
+
+    const envelope = (setSearch.body ?? {}) as JustTcgSetSearchEnvelope;
+    const rows = envelope.data ?? [];
+    const ranked = rows
+      .map((row) => {
+        const providerName = normalizeName(row.name);
+        const exact = providerName === termTarget || providerName === target;
+        const contains =
+          providerName.includes(termTarget)
+          || termTarget.includes(providerName)
+          || providerName.includes(target)
+          || target.includes(providerName);
+        const tokenMatches = Array.from(targetTokens).filter((token) => providerName.includes(token)).length;
+
+        let score = 0;
+        if (exact) score += 100;
+        else if (contains) score += 40;
+        score += tokenMatches * 5;
+
+        return {
+          id: row.id,
+          score,
+        };
+      })
+      .filter((row) => row.score > 0)
+      .sort((left, right) => right.score - left.score || left.id.localeCompare(right.id));
+
+    if (ranked[0]?.id) {
+      if (setCode) {
+        await params.supabase
+          .from("provider_set_map")
+          .upsert(
+            [{ provider: PROVIDER, canonical_set_code: setCode, provider_set_id: ranked[0].id }],
+            { onConflict: "provider,canonical_set_code" },
+          );
+      }
+      return ranked[0].id;
+    }
+  }
+
+  return fallback;
 }
 
 function scoreCandidate(params: {
@@ -231,8 +310,11 @@ export async function POST(req: Request) {
   for (const entry of selectedContexts) {
     const providerSetId =
       (entry.printing?.set_code ? providerSetIdBySetCode.get(entry.printing.set_code) : null)
-      ?? (entry.printing?.set_name ? setNameToJustTcgId(entry.printing.set_name) : null)
-      ?? (entry.canonical?.set_name ? setNameToJustTcgId(entry.canonical.set_name) : null);
+      ?? await resolveTrackedProviderSetId({
+        setName: entry.printing?.set_name ?? entry.canonical?.set_name ?? null,
+        setCode: entry.printing?.set_code ?? null,
+        supabase,
+      });
     if (!providerSetId) {
       continue;
     }

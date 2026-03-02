@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { getSetSummaryPageData } from "@/lib/sets/summary";
 import { getServerSupabaseClient } from "@/lib/supabaseServer";
 
 type CanonicalRow = {
@@ -52,6 +53,7 @@ export default async function SetBrowserPage({ params }: { params: Promise<{ set
   const { setName } = await params;
   const decodedSetName = decodeURIComponent(setName);
   const supabase = getServerSupabaseClient();
+  const summary = await getSetSummaryPageData(decodedSetName);
 
   // Fetch all cards in this set
   const { data: cardsRaw } = await supabase
@@ -122,6 +124,55 @@ export default async function SetBrowserPage({ params }: { params: Promise<{ set
           <h1 className="text-app text-xl font-semibold">{decodedSetName}</h1>
           <span className="text-muted text-xs">{cards.length} cards</span>
         </div>
+
+        {summary.snapshot ? (
+          <section className="mb-6 space-y-3">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-[var(--radius-card)] border-app border bg-surface-soft/30 p-4">
+                <p className="text-muted text-[11px] uppercase tracking-[0.18em]">Market Cap</p>
+                <p className="mt-2 text-app text-lg font-semibold">${summary.snapshot.marketCap.toFixed(0)}</p>
+                <p className="mt-1 text-xs text-muted">
+                  {summary.snapshot.change7dPct == null ? "No 7D delta yet" : `${summary.snapshot.change7dPct.toFixed(2)}% vs 7D`}
+                </p>
+              </div>
+              <div className="rounded-[var(--radius-card)] border-app border bg-surface-soft/30 p-4">
+                <p className="text-muted text-[11px] uppercase tracking-[0.18em]">Heat Score</p>
+                <p className="mt-2 text-app text-lg font-semibold">{summary.snapshot.heatScore.toFixed(2)}</p>
+                <p className="mt-1 text-xs text-muted">Daily snapshot {summary.snapshot.asOfDate}</p>
+              </div>
+              <div className="rounded-[var(--radius-card)] border-app border bg-surface-soft/30 p-4">
+                <p className="text-muted text-[11px] uppercase tracking-[0.18em]">Signals</p>
+                <p className="mt-2 text-app text-lg font-semibold">
+                  {summary.snapshot.breakoutCount} / {summary.snapshot.valueZoneCount} / {summary.snapshot.trendBullishCount}
+                </p>
+                <p className="mt-1 text-xs text-muted">Breakout / Value / Bullish</p>
+              </div>
+              <div className="rounded-[var(--radius-card)] border-app border bg-surface-soft/30 p-4">
+                <p className="text-muted text-[11px] uppercase tracking-[0.18em]">Sentiment</p>
+                <p className="mt-2 text-app text-lg font-semibold">
+                  {summary.snapshot.sentimentUpPct == null ? "N/A" : `${summary.snapshot.sentimentUpPct.toFixed(0)}%`}
+                </p>
+                <p className="mt-1 text-xs text-muted">{summary.snapshot.voteCount} votes</p>
+              </div>
+            </div>
+
+            {summary.finishBreakdown.length > 0 ? (
+              <div className="rounded-[var(--radius-card)] border-app border bg-surface-soft/20 p-4">
+                <p className="text-muted text-[11px] uppercase tracking-[0.18em]">Finish Breakdown</p>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {summary.finishBreakdown.map((row) => (
+                    <div key={row.finish} className="rounded-[var(--radius-input)] border-app border bg-surface/20 px-3 py-2">
+                      <p className="text-app text-sm font-semibold">{row.finish.replaceAll("_", " ")}</p>
+                      <p className="text-xs text-muted">
+                        ${row.marketCap.toFixed(0)} cap · {row.cardCount} cards
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </section>
+        ) : null}
 
         <section>
           <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">

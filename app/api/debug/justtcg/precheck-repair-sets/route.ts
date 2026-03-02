@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { authorizeCronRequest } from "@/lib/cronAuth";
+import { buildJustTcgSetSearchTerms } from "@/lib/providers/justtcg-set-search";
 import {
   fetchJustTcgCardsPage,
   jtFetchRaw,
@@ -38,46 +39,10 @@ function normalizeName(value: string | null | undefined) {
     .trim();
 }
 
-function buildSetSearchTerms(setName: string) {
-  const terms = new Set<string>();
-  const trimmed = setName.trim();
-  if (trimmed) terms.add(trimmed);
-  const andExpanded = trimmed.replace(/&/g, " and ").replace(/\s+/g, " ").trim();
-  if (andExpanded) terms.add(andExpanded);
-  const punctuationCollapsed = trimmed
-    .replace(/&/g, " ")
-    .replace(/[—–-]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (punctuationCollapsed) terms.add(punctuationCollapsed);
-  const punctuationRemoved = trimmed
-    .replace(/[&—–-]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (punctuationRemoved) terms.add(punctuationRemoved);
-
-  const promoExpanded = andExpanded
-    .replace(/^DP\b/i, "Diamond and Pearl")
-    .replace(/^BW\b/i, "Black and White")
-    .replace(/^SWSH\b/i, "Sword and Shield")
-    .replace(/^SM\b/i, "Sun and Moon")
-    .replace(/^SVP\b/i, "Scarlet and Violet")
-    .replace(/^XY\b/i, "XY")
-    .replace(/\bBlack Star Promos\b/i, "Promos")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (promoExpanded) terms.add(promoExpanded);
-  if (/^Wizards Black Star Promos$/i.test(trimmed)) terms.add("WoTC Promo");
-  if (/^HS[—–-]/i.test(trimmed)) terms.add(trimmed.replace(/^HS[—–-]\s*/i, "").trim());
-  if (/^HeartGold\s*&\s*SoulSilver$/i.test(trimmed)) terms.add("HeartGold SoulSilver");
-
-  return Array.from(terms);
-}
-
 async function resolveProviderSetId(setName: string, setCode: string | null) {
   const supabase = getServerSupabaseClient();
   const canonicalFallbackSetId = setNameToJustTcgId(setName);
-  const searchTerms = buildSetSearchTerms(setName);
+  const searchTerms = buildJustTcgSetSearchTerms(setName, setCode);
   const target = normalizeName(setName);
   const targetTokens = new Set(target.split(" ").filter(Boolean));
   const localLooksPromo = /\bpromo\b/i.test(setName);

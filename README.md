@@ -34,6 +34,47 @@ Set these environment variables in Vercel (Production and Preview as needed):
 - `EBAY_CLIENT_SECRET`
 - `EBAY_ENV` (`production` or `sandbox`, defaults to `production`)
 
+## Set Summary pipeline
+
+Set pages and homepage rankings should read from precomputed set-level caches, not compute aggregates on each request.
+
+Core tables:
+- `variant_price_latest`: latest provider-backed price per variant cohort.
+- `variant_price_daily`: daily close rollup per variant cohort (used for 7D / 30D deltas).
+- `variant_signals_latest`: latest derived signal state per variant cohort.
+- `variant_sentiment_latest`: optional hook for open question vote aggregates.
+- `set_finish_summary_latest`: current finish-type breakdown per set.
+- `set_summary_snapshots`: daily set-level snapshots keyed by `(set_id, as_of_date)`.
+
+Metric definitions:
+- `market_cap`: sum of the primary variant for each card in the set.
+- Primary variant fallback:
+  - Prefer `NON_HOLO` when present.
+  - Otherwise pick the most liquid variant (highest 30D observation count, then most recent observation).
+- `market_cap_all_variants`: sum of all current variant prices in the set.
+- `change_7d_pct` / `change_30d_pct`: percent move versus the set's aggregated 7-day / 30-day prior daily closes.
+- `heat_score`: `0.60 * avg_abs_change_7d + 0.25 * normalized_activity_30d + 0.15 * breakout_density`.
+- `breakout_count`, `value_zone_count`, `trend_bullish_count`: counts of primary variants above the current thresholds in `variant_signals_latest`.
+- `sentiment_up_pct`: weighted average of `variant_sentiment_latest.sentiment_up_pct` by vote count when available.
+
+Refresh cadence:
+- `sync-justtcg-prices` incrementally refreshes set summary artifacts for changed variants after ingest writes.
+- `GET /api/cron/refresh-set-summaries` runs daily at `09:00 UTC` via `vercel.json` for a full rebuild.
+
+Backfill:
+```bash
+npm run sets:backfill-summaries
+```
+
+Optional flags:
+- `--days=30` controls the historical window (max 90).
+- `--refreshPipeline=0` skips the initial full latest-table refresh.
+
+Extending to new providers:
+- Keep provider-specific ingestion logic writing into `price_history_points` and `variant_metrics`.
+- Reuse the same canonical `variant_ref` / `printing_id` identity.
+- The set summary SQL reads provider-agnostic latest/daily tables, so adding a provider should not require rewriting the set snapshot pipeline.
+
 ## PokemonTCG canonical importer (chunked, production-safe)
 
 Route: `POST /api/admin/import/pokemontcg-canonical`
