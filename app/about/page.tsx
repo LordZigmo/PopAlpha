@@ -16,23 +16,25 @@ export default function AboutPage() {
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6B6B6B]">
             About PopAlpha
           </p>
-          <h1 className="mt-3 max-w-3xl text-[34px] font-semibold leading-[1.02] tracking-[-0.045em] sm:text-[52px]">
-            Understand Pokemon card prices fast.
+          <h1 className="mt-3 text-[28px] font-semibold leading-[1.02] tracking-[-0.05em] sm:text-[44px] lg:text-[48px]">
+            Understand Pokemon Card Prices Fast
           </h1>
           <div className="mt-6 space-y-5 text-[15px] leading-7 text-[#A0A0A0] sm:text-[16px]">
             <p>
-              If youve ever stood at a card show with your phone out, flipping between eBay listings and price charts, you know the feeling.
+              If you've ever stood at a card show with your phone out, flipping between eBay listings and price charts, you know the feeling.
             </p>
             <div>
-              <p>Youre trying to figure out:</p>
-              <p className="mt-3">Is this a fair price?</p>
-              <p>Is this card trending up?</p>
-              <p>Why is this version more expensive?</p>
-              <p>Am I about to overpay?</p>
+              <p>You're trying to figure out:</p>
+              <ul className="mt-3 space-y-1 pl-5">
+                <li>Is this a fair price?</li>
+                <li>Is this card trending up?</li>
+                <li>Why is this version more expensive?</li>
+                <li>Am I about to overpay?</li>
+              </ul>
             </div>
-            <p>Weve felt that pain too.</p>
+            <p>We've felt that pain too.</p>
             <p>
-              Sometimes you dont just want a list of past sales. You want the vibe of the card. Is it hot? Quiet? Undervalued? Overhyped?
+              Sometimes you don't just want a list of past sales. You want the vibe of the card. Is it hot? Quiet? Undervalued? Overhyped?
             </p>
             <p>PopAlpha was built to give you that answer in seconds.</p>
           </div>
@@ -45,15 +47,17 @@ export default function AboutPage() {
           <div className="mt-4 space-y-5 text-[15px] leading-7 text-[#A0A0A0] sm:text-[16px]">
             <p>Right now, we focus on raw Pokemon card singles.</p>
             <p>
-              Each version of a card Holo, Non-Holo, 1st Edition, Shadowless acts differently in the market. So we treat them differently.
+              Each version of a card, Holo, Non-Holo, 1st Edition, Shadowless, acts differently in the market. So we treat them differently.
             </p>
             <div>
               <p>PopAlpha tracks:</p>
-              <p className="mt-3">Real Pokemon card sale prices</p>
-              <p>Variant-specific price changes</p>
-              <p>Market trends</p>
-              <p>A Market Balance Price (our estimate of whats fair right now)</p>
-              <p>Set summaries to help you learn more about each release</p>
+              <ul className="mt-3 space-y-1 pl-5">
+                <li>Real Pokemon card sale prices</li>
+                <li>Variant-specific price changes</li>
+                <li>Market trends</li>
+                <li>A Market Balance Price (our estimate of what's fair right now)</li>
+                <li>Set summaries to help you learn more about each release</li>
+              </ul>
             </div>
             <p>No spreadsheets. No ten open tabs. Just clear, fast insight.</p>
           </div>
@@ -66,7 +70,7 @@ export default function AboutPage() {
           <div className="mt-4 space-y-5 text-[15px] leading-7 text-[#A0A0A0] sm:text-[16px]">
             <p>We got tired of doing mental math at card shows.</p>
             <p>Averaging eBay sold listings. Guessing what felt fair. Trying to learn about a card while someone waited for an offer.</p>
-            <p>The Pokemon market has grown a lot. But the tools havent kept up.</p>
+            <p>The Pokemon market has grown a lot. But the tools haven't kept up.</p>
             <p>So we built the tool we wished we had.</p>
           </div>
         </section>
@@ -79,7 +83,7 @@ export default function AboutPage() {
             To make Pokemon card collecting easier, smarter, and more fun.
           </p>
           <p className="mt-4 text-[15px] leading-7 text-[#A0A0A0] sm:text-[16px]">
-            Whether youre buying your first single or building a serious collection, PopAlpha helps you understand the market without the stress.
+            Whether you're buying your first single or building a serious collection, PopAlpha helps you understand the market without the stress.
           </p>
         </section>
       </div>

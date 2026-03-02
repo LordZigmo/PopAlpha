@@ -23,6 +23,7 @@ type MarketSummaryCardClientProps = {
   }>;
   selectedPrintingId: string | null;
   selectedWindow: "7d" | "30d" | "90d";
+  onVariantChange?: (printingId: string) => void;
 };
 
 function formatUsd(value: number | null | undefined): string {
@@ -81,20 +82,16 @@ export default function MarketSummaryCardClient({
   variants,
   selectedPrintingId,
   selectedWindow,
+  onVariantChange,
 }: MarketSummaryCardClientProps) {
   const [activeWindow, setActiveWindow] = useState<WindowKey>(selectedWindow);
-  const [activePrintingId, setActivePrintingId] = useState<string | null>(selectedPrintingId);
 
   useEffect(() => {
     setActiveWindow(selectedWindow);
   }, [selectedWindow]);
 
-  useEffect(() => {
-    setActivePrintingId(selectedPrintingId);
-  }, [selectedPrintingId]);
-
   const activeVariant =
-    variants.find((variant) => variant.printingId === activePrintingId)
+    variants.find((variant) => variant.printingId === selectedPrintingId)
     ?? variants[0]
     ?? null;
 
@@ -131,7 +128,7 @@ export default function MarketSummaryCardClient({
   }
 
   function setVariant(nextPrintingId: string) {
-    setActivePrintingId(nextPrintingId);
+    onVariantChange?.(nextPrintingId);
     if (typeof window === "undefined") return;
     const url = new URL(window.location.href);
     url.searchParams.set("printing", nextPrintingId);

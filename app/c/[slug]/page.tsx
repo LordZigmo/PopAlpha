@@ -14,8 +14,6 @@ import EbayListings from "@/components/ebay-listings";
 import { GroupedSection, PageShell, Pill, SegmentedControl } from "@/components/ios-grouped-ui";
 import MarketPulse from "@/components/market-pulse";
 import MarketSummaryCard from "@/components/market-summary-card";
-import PriceTickerStrip from "@/components/price-ticker-strip";
-import SignalGauge from "@/components/signal-gauge";
 import { buildEbayQuery, type GradeSelection, type GradedSource } from "@/lib/ebay-query";
 import { buildPrintingPill } from "@/lib/cards/detail";
 import { buildRawVariantRef } from "@/lib/identity/variant-ref";
@@ -312,27 +310,6 @@ function marketStatusSignal(
   return { label: "Abundant", tone: "neutral" };
 }
 
-function signalConfidenceLabel(points30d: number | null): { label: string; tone: "positive" | "warning" | "negative" | "neutral" } {
-  if (points30d === null || !Number.isFinite(points30d)) return { label: "--", tone: "neutral" };
-  if (points30d >= 80) return { label: "High", tone: "positive" };
-  if (points30d >= 30) return { label: "Medium", tone: "warning" };
-  return { label: "Low", tone: "negative" };
-}
-
-function formatSignalsUpdated(value: string | null): string {
-  if (!value) return "--";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "--";
-  const diffMs = Date.now() - date.getTime();
-  const absMs = Math.abs(diffMs);
-  const minutes = Math.round(absMs / (60 * 1000));
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.round(hours / 24)}d ago`;
-}
-
 function formatUsdCompact(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return "—";
   return new Intl.NumberFormat(undefined, {
@@ -457,18 +434,6 @@ export default async function CanonicalCardPage({
 
   const snapshotData = selectedSnapshotGrade ? gradeSnapMap[selectedSnapshotGrade] : null;
 
-  const snapshot = snapshotData
-    ? {
-        ok: true,
-        active7d: snapshotData.active_listings_7d ?? 0,
-        median7d: snapshotData.median_7d,
-        median30d: snapshotData.median_30d,
-        trimmedMedian30d: snapshotData.trimmed_median_30d,
-        low30d: snapshotData.low_30d,
-        high30d: snapshotData.high_30d,
-      }
-    : null;
-
   const marketStatus = marketStatusSignal(snapshotData?.active_listings_7d ?? null);
   const ebayQuery = buildEbayQuery({
     canonicalName: canonical.canonical_name,
@@ -574,27 +539,6 @@ export default async function CanonicalCardPage({
             </div>
           </div>
 
-        {/* ── Signal Gauges ──────────────────────────────────────────────────── */}
-        {vm?.signals && (vm.signals.trend || vm.signals.breakout || vm.signals.value) && (
-          <div className="mt-6 grid grid-cols-3 gap-2 sm:gap-3">
-            <SignalGauge
-              label="Trend"
-              score={vm.signals.trend?.score ?? null}
-              displayLabel={vm.signals.trend?.label}
-            />
-            <SignalGauge
-              label="Breakout"
-              score={vm.signals.breakout?.score ?? null}
-              displayLabel={vm.signals.breakout?.label}
-            />
-            <SignalGauge
-              label="Value"
-              score={vm.signals.value?.score ?? null}
-              displayLabel={vm.signals.value?.label}
-            />
-          </div>
-        )}
-
         {/* ── Market Summary (enlarged chart) ──────────────────────────────── */}
         <MarketSummaryCard
           canonicalSlug={slug}
@@ -602,34 +546,6 @@ export default async function CanonicalCardPage({
           selectedWindow={activeMarketWindow}
           variants={rawVariantOptions}
         />
-
-        {/* ── Signal meta strip ────────────────────────────────────────────── */}
-        {(vm?.signals_history_points_30d != null || vm?.signals_as_of_ts) && (
-          <div className="glass-target mt-4 flex flex-wrap gap-4 rounded-2xl border border-[#1E1E1E] bg-[#111111] px-4 py-3 sm:gap-6 sm:px-5 sm:py-3.5">
-            {[
-              {
-                label: "Confidence",
-                value: signalConfidenceLabel(vm?.signals_history_points_30d ?? null).label,
-                color: { positive: "#00DC5A", negative: "#FF3B30", warning: "#FFD60A", neutral: "#F0F0F0" }[signalConfidenceLabel(vm?.signals_history_points_30d ?? null).tone],
-              },
-              {
-                label: "Last Computed",
-                value: formatSignalsUpdated(vm?.signals_as_of_ts ?? null),
-                color: "#F0F0F0",
-              },
-              {
-                label: "Data Points",
-                value: vm?.signals_history_points_30d != null ? String(vm.signals_history_points_30d) : "--",
-                color: "#F0F0F0",
-              },
-            ].map((item) => (
-              <div key={item.label} className="flex-1 min-w-[70px]">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[#6B6B6B] sm:text-[13px]">{item.label}</p>
-                <p className="mt-1 text-[17px] font-bold tabular-nums tracking-[-0.02em] sm:text-[20px]" style={{ color: item.color }}>{item.value}</p>
-              </div>
-            ))}
-          </div>
-        )}
 
         {/* ── Variant selector ────────────────────────────────────────────── */}
         <GroupedSection title="Variant">
