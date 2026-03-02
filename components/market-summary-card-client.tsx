@@ -12,12 +12,17 @@ type HistoryPointRow = {
 };
 
 type MarketSummaryCardClientProps = {
-  currentPrice: number | null;
-  asOfTs: string | null;
+  variants: Array<{
+    printingId: string;
+    label: string;
+    currentPrice: number | null;
+    asOfTs: string | null;
+    history7d: HistoryPointRow[];
+    history30d: HistoryPointRow[];
+    history90d: HistoryPointRow[];
+  }>;
+  selectedPrintingId: string | null;
   selectedWindow: "7d" | "30d" | "90d";
-  history7d: HistoryPointRow[];
-  history30d: HistoryPointRow[];
-  history90d: HistoryPointRow[];
 };
 
 function formatUsd(value: number | null | undefined): string {
@@ -73,18 +78,31 @@ function changeTone(value: number | null): "neutral" | "positive" | "negative" {
 type WindowKey = "7d" | "30d" | "90d";
 
 export default function MarketSummaryCardClient({
-  currentPrice,
-  asOfTs,
+  variants,
+  selectedPrintingId,
   selectedWindow,
-  history7d,
-  history30d,
-  history90d,
 }: MarketSummaryCardClientProps) {
   const [activeWindow, setActiveWindow] = useState<WindowKey>(selectedWindow);
+  const [activePrintingId, setActivePrintingId] = useState<string | null>(selectedPrintingId);
 
   useEffect(() => {
     setActiveWindow(selectedWindow);
   }, [selectedWindow]);
+
+  useEffect(() => {
+    setActivePrintingId(selectedPrintingId);
+  }, [selectedPrintingId]);
+
+  const activeVariant =
+    variants.find((variant) => variant.printingId === activePrintingId)
+    ?? variants[0]
+    ?? null;
+
+  const currentPrice = activeVariant?.currentPrice ?? null;
+  const asOfTs = activeVariant?.asOfTs ?? null;
+  const history7d = activeVariant?.history7d ?? [];
+  const history30d = activeVariant?.history30d ?? [];
+  const history90d = activeVariant?.history90d ?? [];
 
   const chartSeries =
     activeWindow === "90d" && history90d.length > 0
@@ -112,33 +130,65 @@ export default function MarketSummaryCardClient({
     window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
   }
 
+  function setVariant(nextPrintingId: string) {
+    setActivePrintingId(nextPrintingId);
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("printing", nextPrintingId);
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+  }
+
   return (
     <GroupedSection>
       <GroupCard
         className="glass-target"
         header={
-          <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
-            <p className="text-[22px] font-semibold text-[#F0F0F0]">Market Summary</p>
-            <div className="grid auto-cols-fr grid-flow-col gap-1 rounded-2xl border border-[#1E1E1E] bg-[#151515] p-1">
-              {(["7d", "30d", "90d"] as WindowKey[]).map((windowKey) => {
-                const active = activeWindow === windowKey;
-                return (
-                  <button
-                    key={windowKey}
-                    type="button"
-                    onClick={() => setWindow(windowKey)}
-                    className={[
-                      "flex min-h-11 items-center justify-center rounded-xl px-3 text-center text-[15px] font-semibold transition",
-                      active
-                        ? "bg-[#222] text-[#F0F0F0] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
-                        : "text-[#777]",
-                    ].join(" ")}
-                  >
-                    {windowKey.toUpperCase()}
-                  </button>
-                );
-              })}
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
+              <p className="text-[22px] font-semibold text-[#F0F0F0]">Market Summary</p>
+              <div className="grid auto-cols-fr grid-flow-col gap-1 rounded-2xl border border-[#1E1E1E] bg-[#151515] p-1">
+                {(["7d", "30d", "90d"] as WindowKey[]).map((windowKey) => {
+                  const active = activeWindow === windowKey;
+                  return (
+                    <button
+                      key={windowKey}
+                      type="button"
+                      onClick={() => setWindow(windowKey)}
+                      className={[
+                        "flex min-h-11 items-center justify-center rounded-xl px-3 text-center text-[15px] font-semibold transition",
+                        active
+                          ? "bg-[#222] text-[#F0F0F0] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
+                          : "text-[#777]",
+                      ].join(" ")}
+                    >
+                      {windowKey.toUpperCase()}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
+            {variants.length > 1 ? (
+              <div className="flex flex-wrap gap-2">
+                {variants.map((variant) => {
+                  const active = variant.printingId === (activeVariant?.printingId ?? null);
+                  return (
+                    <button
+                      key={variant.printingId}
+                      type="button"
+                      onClick={() => setVariant(variant.printingId)}
+                      className={[
+                        "inline-flex min-h-10 items-center rounded-full border px-3 text-[14px] font-semibold transition",
+                        active
+                          ? "border-[#2B2B2B] bg-[#222] text-[#F0F0F0]"
+                          : "border-[#1E1E1E] bg-[#151515] text-[#777]",
+                      ].join(" ")}
+                    >
+                      {variant.label}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
           </div>
         }
       >

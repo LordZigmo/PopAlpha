@@ -3,12 +3,17 @@ import { getServerSupabaseClient } from "@/lib/supabaseServer";
 
 type MarketSummaryCardProps = {
   canonicalSlug: string;
-  printingId: string | null;
-  variantRef: string | null;
+  selectedPrintingId: string | null;
   selectedWindow: "7d" | "30d" | "90d";
+  variants: Array<{
+    printingId: string;
+    label: string;
+    variantRef: string;
+  }>;
 };
 
 type MarketLatestRow = {
+  printing_id: string | null;
   price_usd: number | null;
   observed_at: string | null;
   updated_at: string | null;
@@ -30,75 +35,115 @@ function filterRecentDays(points: HistoryPointRow[], days: number): HistoryPoint
 
 export default async function MarketSummaryCard({
   canonicalSlug,
-  printingId,
-  variantRef,
+  selectedPrintingId,
   selectedWindow,
+  variants,
 }: MarketSummaryCardProps) {
   const supabase = getServerSupabaseClient();
+  const printingIds = variants.map((variant) => variant.printingId);
+  const variantRefs = variants.map((variant) => variant.variantRef);
+  const history7dLimit = Math.max(120, variantRefs.length * 60);
+  const history30dLimit = Math.max(200, variantRefs.length * 120);
+  const history90dLimit = Math.max(400, variantRefs.length * 200);
 
-  const [marketLatestQuery, history7dQuery, history30dQuery, history90dQuery] = printingId && variantRef
+  const [marketLatestQuery, history7dQuery, history30dQuery, history90dQuery] = printingIds.length > 0 && variantRefs.length > 0
     ? await Promise.all([
         supabase
           .from("market_latest")
-          .select("price_usd, observed_at, updated_at")
+          .select("printing_id, price_usd, observed_at, updated_at")
           .eq("canonical_slug", canonicalSlug)
-          .eq("printing_id", printingId)
+          .in("printing_id", printingIds)
           .eq("source", "JUSTTCG")
           .eq("grade", "RAW")
           .eq("price_type", "MARKET")
-          .order("updated_at", { ascending: false })
-          .limit(1)
-          .maybeSingle<MarketLatestRow>(),
+          .order("updated_at", { ascending: false }),
         supabase
           .from("price_history_points")
-          .select("ts, price")
+          .select("variant_ref, ts, price")
           .eq("canonical_slug", canonicalSlug)
           .eq("provider", "JUSTTCG")
           .eq("source_window", "7d")
-          .eq("variant_ref", variantRef)
+          .in("variant_ref", variantRefs)
           .order("ts", { ascending: false })
-          .limit(120),
+          .limit(history7dLimit),
         supabase
           .from("price_history_points")
-          .select("ts, price")
+          .select("variant_ref, ts, price")
           .eq("canonical_slug", canonicalSlug)
           .eq("provider", "JUSTTCG")
           .eq("source_window", "30d")
-          .eq("variant_ref", variantRef)
+          .in("variant_ref", variantRefs)
           .order("ts", { ascending: false })
-          .limit(200),
+          .limit(history30dLimit),
         supabase
           .from("price_history_points")
-          .select("ts, price")
+          .select("variant_ref, ts, price")
           .eq("canonical_slug", canonicalSlug)
           .eq("provider", "JUSTTCG")
           .eq("source_window", "90d")
-          .eq("variant_ref", variantRef)
+          .in("variant_ref", variantRefs)
           .order("ts", { ascending: false })
-          .limit(400),
+          .limit(history90dLimit),
       ])
     : [
-        { data: null },
+        { data: [] as MarketLatestRow[] },
         { data: [] as HistoryPointRow[] },
         { data: [] as HistoryPointRow[] },
         { data: [] as HistoryPointRow[] },
       ];
 
-  const marketLatest = marketLatestQuery.data ?? null;
-  const cachedHistory7d = [...(((history7dQuery.data ?? []) as HistoryPointRow[]))].reverse();
-  const history30d = [...(((history30dQuery.data ?? []) as HistoryPointRow[]))].reverse();
-  const history90d = [...(((history90dQuery.data ?? []) as HistoryPointRow[]))].reverse();
-  const history7d = cachedHistory7d.length > 0 ? cachedHistory7d : filterRecentDays(history30d, 7);
-  const asOfTs = marketLatest?.observed_at ?? marketLatest?.updated_at ?? null;
+  const marketLatestRows = (marketLatestQuery.data ?? []) as MarketLatestRow[];
+  const latestByPrinting = new Map<string, MarketLatestRow>();
+  for (const row of marketLatestRows) {
+    const printingId = row.printing_id;
+    if (!printingId || latestByPrinting.has(printingId)) continue;
+    latestByPrinting.set(printingId, row);
+  }
+
+  const history7dRows = (history7dQuery.data ?? []) as Array<HistoryPointRow & { variant_ref?: string }>;
+  const history30dRows = (history30dQuery.data ?? []) as Array<HistoryPointRow & { variant_ref?: string }>;
+  const history90dRows = (history90dQuery.data ?? []) as Array<HistoryPointRow & { variant_ref?: string }>;
+
+  const buildHistoryMap = (rows: Array<HistoryPointRow & { variant_ref?: string }>) => {
+    const map = new Map<string, HistoryPointRow[]>();
+    for (const row of rows) {
+      const variantRef = row.variant_ref;
+      if (!variantRef) continue;
+      const current = map.get(variantRef) ?? [];
+      current.push({ ts: row.ts, price: row.price });
+      map.set(variantRef, current);
+    }
+    for (const [variantRef, points] of map.entries()) {
+      map.set(variantRef, [...points].reverse());
+    }
+    return map;
+  };
+
+  const history7dByVariant = buildHistoryMap(history7dRows);
+  const history30dByVariant = buildHistoryMap(history30dRows);
+  const history90dByVariant = buildHistoryMap(history90dRows);
+
+  const variantPayload = variants.map((variant) => {
+    const marketLatest = latestByPrinting.get(variant.printingId) ?? null;
+    const history30d = history30dByVariant.get(variant.variantRef) ?? [];
+    const cachedHistory7d = history7dByVariant.get(variant.variantRef) ?? [];
+    const history90d = history90dByVariant.get(variant.variantRef) ?? [];
+    return {
+      printingId: variant.printingId,
+      label: variant.label,
+      currentPrice: marketLatest?.price_usd ?? null,
+      asOfTs: marketLatest?.observed_at ?? marketLatest?.updated_at ?? null,
+      history7d: cachedHistory7d.length > 0 ? cachedHistory7d : filterRecentDays(history30d, 7),
+      history30d,
+      history90d,
+    };
+  });
 
   return (
     <MarketSummaryCardClient
-      currentPrice={marketLatest?.price_usd ?? null}
-      asOfTs={asOfTs}
+      variants={variantPayload}
+      selectedPrintingId={selectedPrintingId}
       selectedWindow={selectedWindow}
-      history7d={history7d}
-      history30d={history30d}
-      history90d={history90d}
     />
   );
 }

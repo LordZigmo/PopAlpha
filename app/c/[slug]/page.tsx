@@ -232,10 +232,6 @@ function rawVariantSegmentLabel(
   return finishText ?? "Variant";
 }
 
-function shouldWrapVariantSegments(count: number): boolean {
-  return count > 4;
-}
-
 function resolveBackHref(returnTo: string | undefined): string {
   const trimmed = (returnTo ?? "").trim();
   if (!trimmed) return DEFAULT_BACK_HREF;
@@ -297,18 +293,13 @@ function rarityColor(rarity: string | null): { label: string; color: string; bor
   return { label: rarity, color: "#999", borderColor: "rgba(153,153,153,0.25)", bgColor: "rgba(153,153,153,0.06)" };
 }
 
-function scarcitySignal(active7d: number | null): { label: string; tone: "positive" | "warning" | "neutral" } {
-  if (active7d === null || active7d === undefined) return { label: "Forming", tone: "neutral" };
-  if (active7d <= 2) return { label: "High", tone: "positive" };
-  if (active7d <= 6) return { label: "Moderate", tone: "warning" };
-  return { label: "Low", tone: "neutral" };
-}
-
-function liquiditySignal(active7d: number | null): { label: string; tone: "positive" | "warning" | "neutral" } {
-  if (active7d === null || active7d === undefined) return { label: "Forming", tone: "neutral" };
-  if (active7d <= 2) return { label: "Thin", tone: "warning" };
-  if (active7d <= 6) return { label: "Moderate", tone: "neutral" };
-  return { label: "Active", tone: "positive" };
+function marketStatusSignal(
+  active7d: number | null,
+): { label: string; tone: "positive" | "warning" | "neutral" } {
+  if (active7d === null || active7d === undefined) return { label: "Market Forming", tone: "neutral" };
+  if (active7d <= 2) return { label: "Tight Supply", tone: "positive" };
+  if (active7d <= 6) return { label: "Balanced Market", tone: "warning" };
+  return { label: "Active Market", tone: "neutral" };
 }
 
 function signalConfidenceLabel(points30d: number | null): { label: string; tone: "positive" | "warning" | "negative" | "neutral" } {
@@ -381,18 +372,6 @@ export default async function CanonicalCardPage({
   const viewMode = selectedViewMode(mode, grade);
   const selectedPrinting = printings.find((row) => row.id === printing) ?? chooseDefaultPrinting(printings) ?? null;
   const selectedPrintingLabel = selectedPrinting ? printingOptionLabel(selectedPrinting) : null;
-  const variantPills = printings.map((row) => ({
-    printing: row,
-    pill: buildPrintingPill({
-      id: row.id,
-      canonical_slug: slug,
-      finish: row.finish,
-      finish_detail: row.finish_detail,
-      edition: row.edition,
-      stamp: row.stamp,
-      image_url: row.image_url,
-    }),
-  }));
 
   const { data: gradedAvailabilityData } = selectedPrinting
     ? await supabase
@@ -480,8 +459,7 @@ export default async function CanonicalCardPage({
       }
     : null;
 
-  const scarcity = scarcitySignal(snapshotData?.active_listings_7d ?? null);
-  const liquidity = liquiditySignal(snapshotData?.active_listings_7d ?? null);
+  const marketStatus = marketStatusSignal(snapshotData?.active_listings_7d ?? null);
   const ebayQuery = buildEbayQuery({
     canonicalName: canonical.canonical_name,
     setName: canonical.set_name,
@@ -495,7 +473,11 @@ export default async function CanonicalCardPage({
     grade: queryGradeSelection,
     provider: viewMode === "GRADED" ? activeProvider : null,
   });
-  const rawVariantRef = selectedPrinting ? buildRawVariantRef(selectedPrinting.id) : null;
+  const rawVariantOptions = printings.map((row) => ({
+    printingId: row.id,
+    label: rawVariantSegmentLabel(row, printings),
+    variantRef: buildRawVariantRef(row.id),
+  }));
 
   const subtitleText = [
     canonical.set_name,
@@ -541,32 +523,37 @@ export default async function CanonicalCardPage({
                 </span>
               </div>
             )}
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              {snapshotData?.active_listings_7d != null && <Pill label={`Scarcity ${scarcity.label}`} tone={scarcity.tone} />}
-              {snapshotData?.active_listings_7d != null && <Pill label={`Liquidity ${liquidity.label}`} tone={liquidity.tone} />}
-              {selectedPrinting && selectedPrintingLabel ? (
-                <Pill label={selectedPrintingLabel} tone="metallic" />
-              ) : null}
-              {rarityInfo && (
-                <span
-                  className="inline-flex min-h-8 items-center rounded-full border px-3 text-[14px] font-semibold"
-                  style={{ color: rarityInfo.color, borderColor: rarityInfo.borderColor, backgroundColor: rarityInfo.bgColor }}
-                >
-                  {rarityInfo.label}
-                </span>
-              )}
-              {!selectedPrinting || !selectedPrintingLabel ? (
-                <>
-                  {canonical.set_name && canonicalSetHref ? (
-                    <Link
-                      href={canonicalSetHref}
-                      className="inline-flex min-h-7 items-center rounded-full border border-[#1E1E1E] bg-white/[0.04] px-3 text-[15px] font-semibold text-[#999]"
-                    >
-                      {canonical.set_name}
-                    </Link>
-                  ) : null}
-                  {canonical.card_number ? <Pill label={`#${canonical.card_number}`} tone="neutral" /> : null}
-                </>
+            <div className="mt-3 flex flex-wrap items-start justify-between gap-2">
+              <div className="flex flex-wrap gap-1.5">
+                {selectedPrinting && selectedPrintingLabel ? (
+                  <Pill label={selectedPrintingLabel} tone="metallic" />
+                ) : null}
+                {rarityInfo && (
+                  <span
+                    className="inline-flex min-h-8 items-center rounded-full border px-3 text-[14px] font-semibold"
+                    style={{ color: rarityInfo.color, borderColor: rarityInfo.borderColor, backgroundColor: rarityInfo.bgColor }}
+                  >
+                    {rarityInfo.label}
+                  </span>
+                )}
+                {!selectedPrinting || !selectedPrintingLabel ? (
+                  <>
+                    {canonical.set_name && canonicalSetHref ? (
+                      <Link
+                        href={canonicalSetHref}
+                        className="inline-flex min-h-7 items-center rounded-full border border-[#1E1E1E] bg-white/[0.04] px-3 text-[15px] font-semibold text-[#999]"
+                      >
+                        {canonical.set_name}
+                      </Link>
+                    ) : null}
+                    {canonical.card_number ? <Pill label={`#${canonical.card_number}`} tone="neutral" /> : null}
+                  </>
+                ) : null}
+              </div>
+              {snapshotData?.active_listings_7d != null ? (
+                <div className="flex flex-wrap justify-end gap-1.5">
+                  <Pill label={marketStatus.label} tone={marketStatus.tone} />
+                </div>
               ) : null}
             </div>
           </div>
@@ -595,9 +582,9 @@ export default async function CanonicalCardPage({
         {/* ── Market Summary (enlarged chart) ──────────────────────────────── */}
         <MarketSummaryCard
           canonicalSlug={slug}
-          printingId={selectedPrinting?.id ?? null}
-          variantRef={rawVariantRef}
+          selectedPrintingId={selectedPrinting?.id ?? null}
           selectedWindow={activeMarketWindow}
+          variants={rawVariantOptions}
         />
 
         {/* ── Signal meta strip ────────────────────────────────────────────── */}
@@ -653,20 +640,6 @@ export default async function CanonicalCardPage({
                 }))}
               />
             </div>
-            {viewMode === "RAW" && variantPills.length > 0 ? (
-                <div>
-                  <p className="mb-2 text-[15px] font-semibold text-[#777]">Variant</p>
-                  <SegmentedControl
-                    wrap={shouldWrapVariantSegments(variantPills.length)}
-                    items={variantPills.map(({ printing: variantPrinting, pill }) => ({
-                      key: pill.pillKey,
-                      label: rawVariantSegmentLabel(variantPrinting, printings),
-                      href: toggleHref(slug, variantPrinting.id, debugEnabled, returnTo, { mode: "RAW", marketWindow: activeMarketWindow }),
-                      active: selectedPrinting?.id === variantPrinting.id,
-                    }))}
-                  />
-              </div>
-            ) : null}
             {viewMode === "GRADED" ? (
               <>
                 <div>
