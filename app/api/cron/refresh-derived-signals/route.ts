@@ -119,19 +119,29 @@ export async function GET(req: Request) {
         );
       }
 
+      // Batch-fetch history point counts for all rows (replaces per-row N+1 queries)
+      const batchSlugs = [...new Set(typedRows.map((r) => r.canonical_slug))];
+      const batchVariants = [...new Set(typedRows.map((r) => r.variant_ref))];
+      const { data: historyRows, error: historyError } = await supabase
+        .from("price_history_points")
+        .select("canonical_slug, variant_ref")
+        .in("canonical_slug", batchSlugs)
+        .in("variant_ref", batchVariants)
+        .gte("ts", since)
+        .limit(10000);
+
+      if (historyError) {
+        return NextResponse.json({ ok: false, error: historyError.message }, { status: 500 });
+      }
+
+      const countMap = new Map<string, number>();
+      for (const pt of historyRows ?? []) {
+        const key = `${pt.canonical_slug as string}::${pt.variant_ref as string}`;
+        countMap.set(key, (countMap.get(key) ?? 0) + 1);
+      }
+
       for (const row of typedRows) {
-        const { count, error: countError } = await supabase
-          .from("price_history_points")
-          .select("ts", { count: "exact", head: true })
-          .eq("canonical_slug", row.canonical_slug)
-          .eq("variant_ref", row.variant_ref)
-          .gte("ts", since);
-
-        if (countError) {
-          return NextResponse.json({ ok: false, error: countError.message }, { status: 500 });
-        }
-
-        const points30d = count ?? 0;
+        const points30d = countMap.get(`${row.canonical_slug}::${row.variant_ref}`) ?? 0;
         const latestPrice = latestPriceMap.get(`${row.variant_ref}::${row.grade}`) ?? null;
         const {
           signal_trend: trend,

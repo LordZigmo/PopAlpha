@@ -18,6 +18,11 @@ function normalize(value: string | null): string {
   return (value ?? "").trim().toLowerCase();
 }
 
+/** Strip chars that could inject extra PostgREST .or() filter conditions */
+function sanitizeForFilter(value: string): string {
+  return value.replace(/[,()\\]/g, "");
+}
+
 function contains(haystack: string, needle: string): boolean {
   return needle.length > 0 && haystack.includes(needle);
 }
@@ -58,7 +63,7 @@ export async function GET(req: Request) {
   const { data, error } = await supabase
     .from("canonical_cards")
     .select("slug, canonical_name, subject, set_name, year, card_number, language, variant")
-    .or(`subject.ilike.%${subject}%,canonical_name.ilike.%${subject}%`)
+    .or(`subject.ilike.%${sanitizeForFilter(subject)}%,canonical_name.ilike.%${sanitizeForFilter(subject)}%`)
     .limit(120);
 
   if (error) {

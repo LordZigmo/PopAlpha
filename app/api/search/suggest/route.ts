@@ -16,6 +16,11 @@ function normalizeQuery(value: string): string {
   return value.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
+/** Strip chars that could inject extra PostgREST .or() filter conditions */
+function sanitizeForFilter(value: string): string {
+  return value.replace(/[,()\\]/g, "");
+}
+
 function scoreText(value: string | null | undefined, query: string): number {
   const text = (value ?? "").toLowerCase();
   if (!text) return 0;
@@ -32,7 +37,7 @@ export async function GET(req: Request) {
   }
 
   const supabase = getServerSupabaseClient();
-  const containsPattern = `%${q}%`;
+  const containsPattern = `%${sanitizeForFilter(q)}%`;
 
   const cardsRaw = await measureAsync("search.suggest.cards", { q }, async () => {
     const { data } = await supabase

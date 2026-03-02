@@ -34,6 +34,11 @@ function toErrorMessage(error: unknown): string {
   return String(error);
 }
 
+/** Strip chars that could inject extra PostgREST .or() filter conditions */
+function sanitizeForFilter(value: string): string {
+  return value.replace(/[,()\\]/g, "");
+}
+
 function normalizeText(value: string | null | undefined): string {
   return String(value ?? "")
     .normalize("NFKD")
@@ -108,11 +113,11 @@ async function resolvePsaPrinting(
   let query = supabase
     .from("canonical_cards")
     .select("slug, canonical_name, subject, set_name, year")
-    .or(`canonical_name.ilike.%${subjectQuery}%,subject.ilike.%${subjectQuery}%`)
+    .or(`canonical_name.ilike.%${sanitizeForFilter(subjectQuery)}%,subject.ilike.%${sanitizeForFilter(subjectQuery)}%`)
     .limit(25);
 
   if (parsed.year !== null) query = query.eq("year", parsed.year);
-  if (parsed.set_name) query = query.ilike("set_name", `%${parsed.set_name}%`);
+  if (parsed.set_name) query = query.ilike("set_name", `%${sanitizeForFilter(parsed.set_name)}%`);
 
   const { data: candidates, error } = await query;
   if (error) throw new Error(`canonical_cards: ${error.message}`);
