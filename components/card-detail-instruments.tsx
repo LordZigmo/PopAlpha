@@ -2,6 +2,11 @@
 
 import { useState } from "react";
 import type { CardDetailResponse, CardDetailMetrics, GradeBucket, GradedProvider } from "@/lib/cards/detail-types";
+import {
+  breakoutSignalLabel,
+  trendSignalLabel,
+  valueSignalLabel,
+} from "@/lib/signals/scoring";
 
 type CardDetailInstrumentsProps = {
   detail: CardDetailResponse;
@@ -18,16 +23,25 @@ function pillClass(active: boolean, disabled = false): string {
 
 function formatMetric(value: number | null): string {
   if (value === null || !Number.isFinite(value)) return "—";
-  return value.toFixed(2);
+  return value.toFixed(0);
+}
+
+function metricWithLabel(
+  value: number | null,
+  labelForScore: (score: number) => string,
+): string {
+  if (value === null || !Number.isFinite(value)) return "—";
+  const rounded = Math.max(0, Math.min(100, value));
+  return `${formatMetric(rounded)} · ${labelForScore(rounded)}`;
 }
 
 function metricCard(label: string, metrics: CardDetailMetrics | null) {
   return (
     <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4">
       <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#98a0ae]">{label}</p>
-      <p className="mt-2 text-sm text-[#f5f7fb]">Trend: {formatMetric(metrics?.trend ?? null)}</p>
-      <p className="mt-1 text-sm text-[#f5f7fb]">Breakout: {formatMetric(metrics?.breakout ?? null)}</p>
-      <p className="mt-1 text-sm text-[#f5f7fb]">Value: {formatMetric(metrics?.valueZone ?? null)}</p>
+      <p className="mt-2 text-sm text-[#f5f7fb]">Trend: {metricWithLabel(metrics?.trend ?? null, trendSignalLabel)}</p>
+      <p className="mt-1 text-sm text-[#f5f7fb]">Breakout: {metricWithLabel(metrics?.breakout ?? null, breakoutSignalLabel)}</p>
+      <p className="mt-1 text-sm text-[#f5f7fb]">Value: {metricWithLabel(metrics?.valueZone ?? null, valueSignalLabel)}</p>
       <p className="mt-1 text-xs text-[#8c94a3]">Points 30D: {metrics?.points30d ?? "—"}</p>
       <p className="mt-1 text-xs text-[#8c94a3]">Liquidity: {formatMetric(metrics?.liquidityScore ?? null)}</p>
       <p className="mt-2 text-[11px] text-[#8c94a3]">As of: {metrics?.asOf ?? "—"}</p>

@@ -13,25 +13,23 @@
 
 import { NextResponse } from "next/server";
 import { authorizeCronRequest } from "@/lib/cronAuth";
+import { computeVariantSignals } from "@/lib/signals/scoring";
 import { getServerSupabaseClient } from "@/lib/supabaseServer";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
+const SIGNAL_BATCH_SIZE = 150;
 
 type VariantMetricRow = {
   id: string;
   canonical_slug: string;
   variant_ref: string;
+  grade: string;
   provider_trend_slope_7d: number | null;
   provider_cov_price_30d: number | null;
   provider_price_relative_to_30d_range: number | null;
   provider_price_changes_count_30d: number | null;
 };
-
-function roundTo(value: number, digits: number): number {
-  const factor = 10 ** digits;
-  return Math.round(value * factor) / factor;
-}
 
 export async function GET(req: Request) {
   const auth = authorizeCronRequest(req, { allowDeprecatedQuerySecret: true });
@@ -43,7 +41,7 @@ export async function GET(req: Request) {
 
   try {
     const { data, error } = await supabase.rpc("refresh_derived_signals");
-    if (error) {
+    if (error && !error.message.toLowerCase().includes("statement timeout")) {
       return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
     }
     let rowsUpdated =
@@ -51,10 +49,13 @@ export async function GET(req: Request) {
         ? data
         : Number((data as { rowsUpdated?: number; rows?: number } | null)?.rowsUpdated ?? (data as { rows?: number } | null)?.rows ?? 0);
 
+    if (rowsUpdated > 0) {
+      return NextResponse.json({ ok: true, rowsUpdated, deprecatedQueryAuth: auth.deprecatedQueryAuth });
+    }
+
     const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
     let fallbackRowsUpdated = 0;
     let from = 0;
-    const pageSize = 250;
 
     while (true) {
       const { data: rows, error: rowsError } = await supabase
@@ -63,6 +64,7 @@ export async function GET(req: Request) {
           "id",
           "canonical_slug",
           "variant_ref",
+          "grade",
           "provider_trend_slope_7d",
           "provider_cov_price_30d",
           "provider_price_relative_to_30d_range",
@@ -70,7 +72,9 @@ export async function GET(req: Request) {
         ].join(", "))
         .eq("provider", "JUSTTCG")
         .eq("grade", "RAW")
-        .range(from, from + pageSize - 1);
+        .order("canonical_slug", { ascending: true })
+        .order("variant_ref", { ascending: true })
+        .range(from, from + SIGNAL_BATCH_SIZE - 1);
 
       if (rowsError) {
         return NextResponse.json({ ok: false, error: rowsError.message }, { status: 500 });
@@ -78,6 +82,42 @@ export async function GET(req: Request) {
       if (!rows || rows.length === 0) break;
 
       const typedRows = rows as unknown as VariantMetricRow[];
+      const rpcKeys = typedRows.map((row) => ({
+        canonical_slug: row.canonical_slug,
+        variant_ref: row.variant_ref,
+        provider: "JUSTTCG",
+        grade: row.grade,
+      }));
+      const { data: batchRpcData, error: batchRpcError } = await supabase.rpc("refresh_derived_signals_for_variants", {
+        keys: rpcKeys,
+      });
+      if (!batchRpcError) {
+        fallbackRowsUpdated += Number((batchRpcData as { rowsUpdated?: number } | null)?.rowsUpdated ?? typedRows.length);
+        if (typedRows.length < SIGNAL_BATCH_SIZE) break;
+        from += SIGNAL_BATCH_SIZE;
+        continue;
+      }
+
+      const variantRefs = [...new Set(typedRows.map((row) => row.variant_ref))];
+      const grades = [...new Set(typedRows.map((row) => row.grade))];
+      const { data: priceRows, error: priceError } = await supabase
+        .from("variant_price_latest")
+        .select("variant_ref, grade, price_value")
+        .eq("provider", "JUSTTCG")
+        .in("variant_ref", variantRefs)
+        .in("grade", grades);
+
+      if (priceError) {
+        return NextResponse.json({ ok: false, error: priceError.message }, { status: 500 });
+      }
+
+      const latestPriceMap = new Map<string, number | null>();
+      for (const priceRow of priceRows ?? []) {
+        latestPriceMap.set(
+          `${priceRow.variant_ref as string}::${priceRow.grade as string}`,
+          priceRow.price_value !== null && priceRow.price_value !== undefined ? Number(priceRow.price_value) : null,
+        );
+      }
 
       for (const row of typedRows) {
         const { count, error: countError } = await supabase
@@ -92,29 +132,20 @@ export async function GET(req: Request) {
         }
 
         const points30d = count ?? 0;
+        const latestPrice = latestPriceMap.get(`${row.variant_ref}::${row.grade}`) ?? null;
+        const {
+          signal_trend: trend,
+          signal_breakout: breakout,
+          signal_value: value,
+        } = computeVariantSignals({
+          trendSlope7d: row.provider_trend_slope_7d,
+          covPrice30d: row.provider_cov_price_30d,
+          priceRelativeTo30dRange: row.provider_price_relative_to_30d_range,
+          priceChangesCount30d: row.provider_price_changes_count_30d,
+          latestPrice,
+          samplePoints: points30d,
+        });
         const hasEnoughHistory = points30d >= 10;
-        const trend =
-          hasEnoughHistory
-          && row.provider_trend_slope_7d !== null
-          && row.provider_cov_price_30d !== null
-          && row.provider_cov_price_30d !== 0
-            ? roundTo(row.provider_trend_slope_7d / row.provider_cov_price_30d, 4)
-            : null;
-        const breakout =
-          hasEnoughHistory
-          && row.provider_trend_slope_7d !== null
-          && row.provider_price_relative_to_30d_range !== null
-            ? roundTo(
-                row.provider_trend_slope_7d
-                  * Math.log(1 + Math.max(row.provider_price_changes_count_30d ?? 0, 0))
-                  * (1 - row.provider_price_relative_to_30d_range),
-                4,
-              )
-            : null;
-        const value =
-          hasEnoughHistory && row.provider_price_relative_to_30d_range !== null
-            ? roundTo((1 - row.provider_price_relative_to_30d_range) * 100, 2)
-            : null;
 
         const { error: updateError } = await supabase
           .from("variant_metrics")
@@ -135,8 +166,8 @@ export async function GET(req: Request) {
         fallbackRowsUpdated += 1;
       }
 
-      if (typedRows.length < pageSize) break;
-      from += pageSize;
+      if (typedRows.length < SIGNAL_BATCH_SIZE) break;
+      from += SIGNAL_BATCH_SIZE;
     }
 
     rowsUpdated = Math.max(rowsUpdated, fallbackRowsUpdated);

@@ -10,6 +10,7 @@
  * Set ID convention: setNameToJustTcgId(set_name) → e.g. "base-set-pokemon"
  */
 
+import { computeVariantSignals as scoreVariantSignals } from "@/lib/signals/scoring";
 import type { MetricsSnapshot, PriceHistoryPoint } from "./types";
 
 const BASE_URL = "https://api.justtcg.com/v1";
@@ -347,49 +348,31 @@ export function buildLegacyVariantRef(
 
 // ── Signal computation ────────────────────────────────────────────────────────
 
-/** tanh squash: maps any real to [0, 100]. */
-function squash(raw: number, K: number): number {
-  return Math.max(0, Math.min(100, Math.round((50 + 50 * Math.tanh(raw / K)) * 10) / 10));
-}
-
 /**
  * Compute the three PopAlpha signals from raw provider fields.
  * Returns null scores when required inputs are missing.
  * Formulas match refresh_derived_signals() SQL function.
  *
- *   signal_trend    = tanh( (trendSlope7d / covPrice30d) / 10 ) → 0–100
- *   signal_breakout = tanh( trendSlope7d × ln(1+changes30d) × (1−range) / 0.25 ) → 0–100
- *   signal_value    = (1 − priceRelativeTo30dRange) × 100 → 0–100
+ *   signal_trend    = bounded, risk-adjusted momentum (0–100, centered at 50)
+ *   signal_breakout = bounded positive momentum × activity × room-to-run
+ *   signal_value    = discounted-to-range score penalized for illiquid penny prices
  */
 export function computeVariantSignals(
   trendSlope7d: number | null,
   covPrice30d: number | null,
   priceRelativeTo30dRange: number | null,
   priceChangesCount30d: number | null,
+  latestPrice: number | null,
+  samplePoints: number,
 ): { signal_trend: number | null; signal_breakout: number | null; signal_value: number | null } {
-  let signal_trend: number | null = null;
-  if (trendSlope7d !== null && covPrice30d !== null && covPrice30d !== 0) {
-    signal_trend = squash(trendSlope7d / covPrice30d, 10);
-  }
-
-  let signal_breakout: number | null = null;
-  if (trendSlope7d !== null) {
-    const raw =
-      trendSlope7d *
-      Math.log(1 + (priceChangesCount30d ?? 0)) *
-      (1 - (priceRelativeTo30dRange ?? 0.5));
-    signal_breakout = squash(raw, 0.25);
-  }
-
-  let signal_value: number | null = null;
-  if (priceRelativeTo30dRange !== null) {
-    signal_value = Math.max(
-      0,
-      Math.min(100, Math.round((1 - priceRelativeTo30dRange) * 100 * 10) / 10),
-    );
-  }
-
-  return { signal_trend, signal_breakout, signal_value };
+  return scoreVariantSignals({
+    trendSlope7d,
+    covPrice30d,
+    priceRelativeTo30dRange,
+    priceChangesCount30d,
+    latestPrice,
+    samplePoints,
+  });
 }
 
 // ── Asset type classification ─────────────────────────────────────────────────

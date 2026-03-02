@@ -33,12 +33,18 @@ type CardPrintingRow = {
 
 type RawMetricRow = {
   printing_id: string | null;
-  signal_trend_strength: number | null;
-  signal_breakout: number | null;
-  signal_value_zone: number | null;
-  signals_as_of_ts: string | null;
   liquidity_score: number | null;
   snapshot_count_30d: number | null;
+};
+
+type RawSignalRow = {
+  printing_id: string | null;
+  provider_as_of_ts: string | null;
+  signal_trend: number | null;
+  signal_breakout: number | null;
+  signal_value: number | null;
+  signals_as_of_ts: string | null;
+  history_points_30d: number | null;
 };
 
 type GradedMetricRow = {
@@ -120,15 +126,15 @@ export function buildPrintingPill(row: CardPrintingRow): CardPrintingPill {
   };
 }
 
-function buildRawMetrics(row: RawMetricRow | null): CardDetailMetrics | null {
-  if (!row) return null;
+function buildRawMetrics(metricsRow: RawMetricRow | null, signalRow: RawSignalRow | null): CardDetailMetrics | null {
+  if (!metricsRow && !signalRow) return null;
   return {
-    trend: row.signal_trend_strength,
-    breakout: row.signal_breakout,
-    valueZone: row.signal_value_zone,
-    asOf: row.signals_as_of_ts,
-    liquidityScore: row.liquidity_score,
-    points30d: row.snapshot_count_30d,
+    trend: signalRow?.signal_trend ?? null,
+    breakout: signalRow?.signal_breakout ?? null,
+    valueZone: signalRow?.signal_value ?? null,
+    asOf: signalRow?.signals_as_of_ts ?? signalRow?.provider_as_of_ts ?? null,
+    liquidityScore: metricsRow?.liquidity_score ?? null,
+    points30d: signalRow?.history_points_30d ?? metricsRow?.snapshot_count_30d ?? null,
   };
 }
 
@@ -215,7 +221,7 @@ export async function buildCardDetailResponse(inputSlug: string): Promise<CardDe
   const canonicalSlug = await resolveCanonicalSlug(inputSlug);
   if (!canonicalSlug) return null;
 
-  const [canonicalResult, printingsResult, rawMetricsResult, gradedMetricsResult] = await Promise.all([
+  const [canonicalResult, printingsResult, rawMetricsResult, rawSignalsResult, gradedMetricsResult] = await Promise.all([
     supabase
       .from("canonical_cards")
       .select("slug, canonical_name, set_name, year, card_number, language")
@@ -230,9 +236,16 @@ export async function buildCardDetailResponse(inputSlug: string): Promise<CardDe
       .order("id", { ascending: true }),
     supabase
       .from("card_metrics")
-      .select("printing_id, signal_trend_strength, signal_breakout, signal_value_zone, signals_as_of_ts, liquidity_score, snapshot_count_30d")
+      .select("printing_id, liquidity_score, snapshot_count_30d")
       .eq("canonical_slug", canonicalSlug)
       .eq("grade", "RAW"),
+    supabase
+      .from("variant_metrics")
+      .select("printing_id, provider_as_of_ts, signal_trend, signal_breakout, signal_value, signals_as_of_ts, history_points_30d")
+      .eq("canonical_slug", canonicalSlug)
+      .eq("provider", "JUSTTCG")
+      .eq("grade", "RAW")
+      .not("printing_id", "is", null),
     supabase
       .from("variant_metrics")
       .select("printing_id, provider, grade, provider_as_of_ts, signal_trend, signal_breakout, signal_value, signals_as_of_ts, history_points_30d")
@@ -245,11 +258,13 @@ export async function buildCardDetailResponse(inputSlug: string): Promise<CardDe
   if (canonicalResult.error) throw new Error(`canonical_cards: ${canonicalResult.error.message}`);
   if (printingsResult.error) throw new Error(`card_printings: ${printingsResult.error.message}`);
   if (rawMetricsResult.error) throw new Error(`card_metrics: ${rawMetricsResult.error.message}`);
+  if (rawSignalsResult.error) throw new Error(`variant_metrics RAW: ${rawSignalsResult.error.message}`);
   if (gradedMetricsResult.error) throw new Error(`variant_metrics: ${gradedMetricsResult.error.message}`);
 
   const canonical = canonicalResult.data;
   const printings = printingsResult.data;
   const rawMetrics = rawMetricsResult.data;
+  const rawSignals = rawSignalsResult.data;
   const gradedMetrics = gradedMetricsResult.data;
 
   if (!canonical) return null;
@@ -259,17 +274,22 @@ export async function buildCardDetailResponse(inputSlug: string): Promise<CardDe
   for (const row of (rawMetrics ?? []) as RawMetricRow[]) {
     if (row.printing_id) rawMetricMap.set(row.printing_id, row);
   }
+  const rawSignalMap = new Map<string, RawSignalRow>();
+  for (const row of (rawSignals ?? []) as RawSignalRow[]) {
+    if (row.printing_id) rawSignalMap.set(row.printing_id, row);
+  }
 
   const rawVariants = printingRows.map((row) => {
     const metricsRow = rawMetricMap.get(row.id) ?? null;
-    const metrics = buildRawMetrics(metricsRow);
+    const signalRow = rawSignalMap.get(row.id) ?? null;
+    const metrics = buildRawMetrics(metricsRow, signalRow);
     return {
       ...buildPrintingPill(row),
       available:
-        !!metricsRow &&
+        !!metrics &&
         (
-          metricsRow.signals_as_of_ts !== null ||
-          (metricsRow.snapshot_count_30d ?? 0) >= RAW_AVAILABILITY_THRESHOLD
+          signalRow?.signals_as_of_ts !== null ||
+          Math.max(signalRow?.history_points_30d ?? 0, metricsRow?.snapshot_count_30d ?? 0) >= RAW_AVAILABILITY_THRESHOLD
         ),
       metrics,
     };

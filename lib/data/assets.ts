@@ -17,6 +17,11 @@
 
 import { getServerSupabaseClient } from "@/lib/supabaseServer";
 import { parseVariantRef as parseCanonicalVariantRef } from "@/lib/identity/variant-ref";
+import {
+  breakoutSignalLabel,
+  trendSignalLabel,
+  valueSignalLabel,
+} from "@/lib/signals/scoring";
 
 // ── Shared types ────────────────────────────────────────────────────────────
 
@@ -547,39 +552,6 @@ export type AssetViewModel = {
   } | null;
 };
 
-// Squashing constants
-const TREND_K    = 10;    // tanh(1) ≈ 0.76 at raw=10 → score ≈ 88
-const BREAKOUT_K = 0.25;  // tanh(1) ≈ 0.76 at raw=0.25 → score ≈ 88
-
-/** Maps any real number to 0–100 using tanh(x/K). */
-function tanhSquash(raw: number, K: number): number {
-  return Math.max(0, Math.min(100, Math.round((50 + 50 * Math.tanh(raw / K)) * 10) / 10));
-}
-
-function trendLabel(score: number): string {
-  if (score < 20) return "Strong Downtrend";
-  if (score < 40) return "Cooling";
-  if (score < 60) return "Flat";
-  if (score < 80) return "Building Momentum";
-  return "Strong Uptrend";
-}
-
-function breakoutLabel(score: number): string {
-  if (score < 25) return "Fading";
-  if (score < 45) return "Low";
-  if (score < 65) return "Moderate";
-  if (score < 85) return "High";
-  return "Very High";
-}
-
-function valueLabel(score: number): string {
-  if (score >= 80) return "Near 30D Low";
-  if (score >= 60) return "Below Mid";
-  if (score >= 40) return "Mid Range";
-  if (score >= 20) return "Above Mid";
-  return "Near 30D High";
-}
-
 /** Compute % change from the price closest to 7 days ago to price_now. */
 function computeChange7dPct(series: ChartPoint[]): number | null {
   if (series.length < 2) return null;
@@ -696,13 +668,13 @@ export async function buildAssetViewModel(
 
     if (enoughHistory) {
       const trend = typedVmRow?.signal_trend !== null && typedVmRow?.signal_trend !== undefined
-        ? { label: trendLabel(Number(typedVmRow.signal_trend)), score: Number(typedVmRow.signal_trend) }
+        ? { label: trendSignalLabel(Number(typedVmRow.signal_trend)), score: Number(typedVmRow.signal_trend) }
         : null;
       const breakout = typedVmRow?.signal_breakout !== null && typedVmRow?.signal_breakout !== undefined
-        ? { label: breakoutLabel(Number(typedVmRow.signal_breakout)), score: Number(typedVmRow.signal_breakout) }
+        ? { label: breakoutSignalLabel(Number(typedVmRow.signal_breakout)), score: Number(typedVmRow.signal_breakout) }
         : null;
       const value = typedVmRow?.signal_value !== null && typedVmRow?.signal_value !== undefined
-        ? { label: valueLabel(Number(typedVmRow.signal_value)), score: Number(typedVmRow.signal_value) }
+        ? { label: valueSignalLabel(Number(typedVmRow.signal_value)), score: Number(typedVmRow.signal_value) }
         : null;
 
       if (trend !== null || breakout !== null || value !== null) {
