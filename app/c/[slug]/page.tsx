@@ -96,6 +96,31 @@ function sortPrintings(a: CardPrintingRow, b: CardPrintingRow): number {
   return a.id.localeCompare(b.id);
 }
 
+function defaultPrintingPriority(printing: CardPrintingRow): number {
+  let score = 0;
+  if (printing.finish === "NON_HOLO") score += 100;
+  else if (printing.finish === "HOLO") score += 70;
+  else if (printing.finish === "REVERSE_HOLO") score += 50;
+  else if (printing.finish === "ALT_HOLO") score += 30;
+
+  if (printing.edition === "UNLIMITED") score += 20;
+  else if (printing.edition === "FIRST_EDITION") score += 10;
+
+  if (!printing.stamp) score += 10;
+  if (printing.image_url) score += 5;
+
+  return score;
+}
+
+function chooseDefaultPrinting(printings: CardPrintingRow[]): CardPrintingRow | null {
+  if (printings.length === 0) return null;
+  return [...printings].sort((a, b) => {
+    const scoreDelta = defaultPrintingPriority(b) - defaultPrintingPriority(a);
+    if (scoreDelta !== 0) return scoreDelta;
+    return sortPrintings(a, b);
+  })[0] ?? null;
+}
+
 function selectedGrade(gradeRaw: string | undefined): GradeSelection {
   const upper = (gradeRaw ?? "RAW").toUpperCase();
   if (upper === "PSA9" || upper === "PSA10" || upper === "RAW") return upper;
@@ -354,7 +379,7 @@ export default async function CanonicalCardPage({
 
   const printings = ((printingsData ?? []) as CardPrintingRow[]).sort(sortPrintings);
   const viewMode = selectedViewMode(mode, grade);
-  const selectedPrinting = printings.find((row) => row.id === printing) ?? printings[0] ?? null;
+  const selectedPrinting = printings.find((row) => row.id === printing) ?? chooseDefaultPrinting(printings) ?? null;
   const selectedPrintingLabel = selectedPrinting ? printingOptionLabel(selectedPrinting) : null;
   const variantPills = printings.map((row) => ({
     printing: row,
@@ -432,7 +457,7 @@ export default async function CanonicalCardPage({
         ).maybeSingle<SnapshotRow>();
       })
     ),
-    buildAssetViewModel(slug),
+    buildAssetViewModel(slug, "RAW", 30, printingIdForQuery),
   ]);
 
   const gradeSnapMap = {
@@ -480,8 +505,12 @@ export default async function CanonicalCardPage({
     .filter(Boolean)
     .join(" • ");
 
-  const primaryPrice = snapshotData?.median_7d != null ? formatUsdCompact(snapshotData.median_7d) : null;
-  const primaryPriceLabel = `${selectedSnapshotGrade ? legacyGradeLabel(selectedSnapshotGrade) : `${providerLabel(activeProvider)} ${gradeBucketLabel(activeBucket)}`} · 7-day median ask`;
+  const currentRawPrice = viewMode === "RAW" ? vm?.price_now ?? null : null;
+  const displayPrimaryPrice = currentRawPrice ?? snapshotData?.median_7d ?? null;
+  const primaryPrice = displayPrimaryPrice != null ? formatUsdCompact(displayPrimaryPrice) : null;
+  const primaryPriceLabel = currentRawPrice != null
+    ? "Current market price"
+    : `${selectedSnapshotGrade ? legacyGradeLabel(selectedSnapshotGrade) : `${providerLabel(activeProvider)} ${gradeBucketLabel(activeBucket)}`} · 7-day median ask`;
   const rarityInfo = selectedPrinting ? rarityColor(selectedPrinting.rarity) : null;
   const canonicalSetHref = setHref(canonical.set_name);
 

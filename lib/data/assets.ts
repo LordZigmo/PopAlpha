@@ -608,6 +608,7 @@ export async function buildAssetViewModel(
   slug: string,
   grade = "RAW",
   days = 30,
+  preferredPrintingId: string | null = null,
 ): Promise<AssetViewModel | null> {
   const supabase = getServerSupabaseClient();
 
@@ -626,7 +627,13 @@ export async function buildAssetViewModel(
 
   // 2. Determine the single variant_ref we should display.
   const recentVariantStats = await getRecentVariantStats(slug, 30);
-  const selectedVariantRef = recentVariantStats[0]?.variantRef ?? null;
+  const preferredVariantStats = preferredPrintingId
+    ? recentVariantStats.filter((row) => {
+        const parsed = parseCanonicalVariantRef(row.variantRef);
+        return parsed?.printingId === preferredPrintingId;
+      })
+    : [];
+  const selectedVariantRef = preferredVariantStats[0]?.variantRef ?? recentVariantStats[0]?.variantRef ?? null;
   const selectedVariantPoints = recentVariantStats[0]?.points ?? 0;
   const availableVariantRefs = recentVariantStats
     .filter((row) => row.points >= SIGNAL_MIN_POINTS)
@@ -681,8 +688,11 @@ export async function buildAssetViewModel(
     signals_as_of_ts = typedVmRow?.signals_as_of_ts ?? null;
     signals_history_points_30d = typedVmRow?.history_points_30d ?? null;
 
+    const selectedPoints = (preferredVariantStats.find((row) => row.variantRef === selectedVariantRef)?.points
+      ?? recentVariantStats.find((row) => row.variantRef === selectedVariantRef)?.points
+      ?? selectedVariantPoints);
     const enoughHistory =
-      Math.max(selectedVariantPoints, typedVmRow?.history_points_30d ?? 0) >= SIGNAL_MIN_POINTS;
+      Math.max(selectedPoints, typedVmRow?.history_points_30d ?? 0) >= SIGNAL_MIN_POINTS;
 
     if (enoughHistory) {
       const trend = typedVmRow?.signal_trend !== null && typedVmRow?.signal_trend !== undefined
