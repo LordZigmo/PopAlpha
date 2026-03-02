@@ -55,46 +55,79 @@ function buildNameTokens(name: string): string[] {
     .filter((token) => token.length >= 2);
 }
 
-function hasNumberToken(title: string, cardNumber: string | null): boolean {
+function normalizedPhrase(value: string | null | undefined): string {
+  return normalizeTitle(value);
+}
+
+function hasMatchingCardNumber(title: string, cardNumber: string | null): boolean {
   if (!cardNumber) return false;
   const numeric = cardNumber.replace(/[^0-9]/g, "");
   if (!numeric) return false;
   return new RegExp(`(^|[^0-9])${numeric}([^0-9]|$)`).test(title);
 }
 
-function matchesRequestedCard(
+function mentionsDifferentSet(title: string, setName: string | null): boolean {
+  const requestedSet = normalizedPhrase(setName);
+  if (!requestedSet) return false;
+  if (title.includes(requestedSet)) return false;
+
+  const setTokens = requestedSet.split(" ").filter(Boolean);
+  if (setTokens.length < 2) return false;
+
+  const anchor = setTokens[setTokens.length - 1];
+  if (!anchor || !title.includes(anchor)) return false;
+
+  const phrases = title.match(new RegExp(`(?:\\b[a-z0-9']+\\s+){0,2}${anchor}\\b`, "g")) ?? [];
+  return phrases.some((phrase) => {
+    const normalized = phrase.replace(/\s+/g, " ").trim();
+    return normalized.length > anchor.length && normalized !== requestedSet;
+  });
+}
+
+function evaluateRequestedCard(
   item: ReturnType<typeof mapBrowseItem>,
   input: {
     canonicalName: string;
+    setName: string | null;
     cardNumber: string | null;
     finish: string | null;
     grade: string;
-  },
-): boolean {
-  const title = normalizeTitle(item.title);
-  if (!title) return false;
-
-  const nameTokens = buildNameTokens(input.canonicalName);
-  if (nameTokens.length === 0) return false;
-  if (!nameTokens.every((token) => title.includes(token))) return false;
-
-  if (input.cardNumber && !hasNumberToken(title, input.cardNumber)) {
-    return false;
   }
+): { matches: boolean; score: number } {
+  const title = normalizeTitle(item.title);
+  if (!title) return { matches: false, score: 0 };
+
+  const canonicalPhrase = normalizedPhrase(input.canonicalName);
+  const nameTokens = buildNameTokens(input.canonicalName);
+  if (!canonicalPhrase || nameTokens.length === 0) return { matches: false, score: 0 };
+  if (!title.includes(canonicalPhrase)) return { matches: false, score: 0 };
+  if (mentionsDifferentSet(title, input.setName)) return { matches: false, score: 0 };
+
+  let score = 100;
 
   if (input.grade === "RAW") {
-    if (/\b(psa|cgc|bgs|beckett|tag|graded|slab|sgc)\b/.test(title)) return false;
+    if (/\b(psa|cgc|bgs|beckett|tag|graded|slab|sgc)\b/.test(title)) return { matches: false, score: 0 };
   }
 
   const finish = (input.finish ?? "").toUpperCase();
   if (finish === "REVERSE_HOLO") {
-    if (!title.includes("reverse")) return false;
+    if (!title.includes("reverse")) return { matches: false, score: 0 };
+    score += 20;
   }
   if (finish === "NON_HOLO") {
-    if (title.includes("reverse holo") || title.includes("reverse")) return false;
+    if (title.includes("reverse holo") || title.includes("reverse")) return { matches: false, score: 0 };
   }
 
-  return true;
+  const requestedSet = normalizedPhrase(input.setName);
+  if (requestedSet && title.includes(requestedSet)) {
+    score += 40;
+  }
+
+  if (hasMatchingCardNumber(title, input.cardNumber)) {
+    score += 15;
+  }
+
+  return { matches: true, score };
 }
 
 async function getAppAccessToken(): Promise<string> {
@@ -146,6 +179,7 @@ export async function GET(req: Request) {
   const uniqueQueries = [...new Set(queries)];
   const q = uniqueQueries[0] ?? "";
   const canonicalName = url.searchParams.get("canonicalName")?.trim() ?? "";
+  const setName = url.searchParams.get("setName")?.trim() ?? null;
   const cardNumber = url.searchParams.get("cardNumber")?.trim() ?? null;
   const finish = url.searchParams.get("finish")?.trim() ?? null;
   const grade = url.searchParams.get("grade")?.trim() ?? "RAW";
@@ -160,7 +194,7 @@ export async function GET(req: Request) {
   try {
     const token = await getAppAccessToken();
     const browseUrl = `${getEbayBaseUrl()}/buy/browse/v1/item_summary/search`;
-    const dedupedItems = new Map<string, ReturnType<typeof mapBrowseItem>>();
+    const dedupedItems = new Map<string, ReturnType<typeof mapBrowseItem> & { _matchScore?: number }>();
 
     for (const query of uniqueQueries) {
       const params = new URLSearchParams({
@@ -184,19 +218,28 @@ export async function GET(req: Request) {
       const payload = (await response.json()) as EbayBrowseResponse;
       for (const item of payload.itemSummaries ?? []) {
         const mapped = mapBrowseItem(item);
-        if (!matchesRequestedCard(mapped, { canonicalName, cardNumber, finish, grade })) continue;
+        const evaluation = evaluateRequestedCard(mapped, { canonicalName, setName, cardNumber, finish, grade });
+        if (!evaluation.matches) continue;
         const dedupeKey = mapped.externalId || mapped.itemWebUrl || `${mapped.title}:${mapped.price?.value ?? ""}`;
         if (!dedupeKey || dedupedItems.has(dedupeKey)) continue;
-        dedupedItems.set(dedupeKey, mapped);
+        dedupedItems.set(dedupeKey, { ...mapped, _matchScore: evaluation.score });
       }
 
       if (dedupedItems.size >= limit) break;
     }
 
+    const sortedItems = [...dedupedItems.values()].sort((left, right) => {
+      const scoreDelta = Number(right._matchScore ?? 0) - Number(left._matchScore ?? 0);
+      if (scoreDelta !== 0) return scoreDelta;
+      const leftPrice = left.price?.value ? Number.parseFloat(left.price.value) : Number.POSITIVE_INFINITY;
+      const rightPrice = right.price?.value ? Number.parseFloat(right.price.value) : Number.POSITIVE_INFINITY;
+      return leftPrice - rightPrice;
+    }).map(({ _matchScore, ...item }) => item);
+
     return NextResponse.json({
       ok: true,
       total: dedupedItems.size,
-      items: [...dedupedItems.values()].slice(0, limit),
+      items: sortedItems.slice(0, limit),
       queriesUsed: uniqueQueries,
     });
   } catch (error) {
