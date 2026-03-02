@@ -66,6 +66,22 @@ function hasMatchingCardNumber(title: string, cardNumber: string | null): boolea
   return new RegExp(`(^|[^0-9])${numeric}([^0-9]|$)`).test(title);
 }
 
+function firstListingNumber(title: string): string | null {
+  const slashMatch = title.match(/\b(\d{1,4})\s*\/\s*\d{1,4}\b/);
+  if (slashMatch?.[1]) {
+    const parsed = Number.parseInt(slashMatch[1], 10);
+    return Number.isFinite(parsed) ? String(parsed) : null;
+  }
+
+  const numberMatch = title.match(/\b(\d{1,4})\b/);
+  if (numberMatch?.[1]) {
+    const parsed = Number.parseInt(numberMatch[1], 10);
+    return Number.isFinite(parsed) ? String(parsed) : null;
+  }
+
+  return null;
+}
+
 function mentionsDifferentSet(title: string, setName: string | null): boolean {
   const requestedSet = normalizedPhrase(setName);
   if (!requestedSet) return false;
@@ -121,6 +137,15 @@ function evaluateRequestedCard(
   const requestedSet = normalizedPhrase(input.setName);
   if (requestedSet && title.includes(requestedSet)) {
     score += 40;
+  }
+
+  const requestedCardNumber = input.cardNumber ? String(Number.parseInt(input.cardNumber, 10)) : null;
+  if (requestedCardNumber) {
+    const firstNumber = firstListingNumber(title);
+    if (firstNumber !== requestedCardNumber) {
+      return { matches: false, score: 0 };
+    }
+    score += 25;
   }
 
   if (hasMatchingCardNumber(title, input.cardNumber)) {
