@@ -138,6 +138,7 @@ export default function SearchResultsSection({
   initialSort,
   matchedSetName,
   setSummary,
+  pricedOnly,
   currentParams,
 }: {
   rows: SearchDisplayRow[];
@@ -148,6 +149,7 @@ export default function SearchResultsSection({
   initialSort: SearchSort;
   matchedSetName?: string | null;
   setSummary?: SetSummarySnapshot | null;
+  pricedOnly: boolean;
   currentParams: Record<string, string>;
 }) {
   const pathname = usePathname();
@@ -222,6 +224,15 @@ export default function SearchResultsSection({
 
     const params = new URLSearchParams(baseParams);
     params.set("pageSize", String(resolved));
+    params.set("page", "1");
+    params.set("sort", sort);
+    router.replace(formatSearchHref(pathname, params), { scroll: false });
+  }
+
+  function updatePricedOnly(nextValue: boolean) {
+    const params = new URLSearchParams(baseParams);
+    if (nextValue) params.set("priced", "1");
+    else params.delete("priced");
     params.set("page", "1");
     params.set("sort", sort);
     router.replace(formatSearchHref(pathname, params), { scroll: false });
@@ -344,7 +355,7 @@ export default function SearchResultsSection({
         </>
       )}
 
-      <div className="mt-4 flex items-center justify-between">
+      <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
           <span className="text-muted text-xs">
             Page {page} of {totalPages}
@@ -364,6 +375,29 @@ export default function SearchResultsSection({
               ))}
             </select>
           </label>
+          <fieldset className="flex items-center gap-3 text-xs">
+            <legend className="sr-only">Market data filter</legend>
+            <label className="flex items-center gap-1.5">
+              <input
+                type="radio"
+                name="priced-filter"
+                checked={!pricedOnly}
+                onChange={() => updatePricedOnly(false)}
+                className="h-3.5 w-3.5 accent-[var(--color-accent)]"
+              />
+              <span className="text-muted">All cards</span>
+            </label>
+            <label className="flex items-center gap-1.5">
+              <input
+                type="radio"
+                name="priced-filter"
+                checked={pricedOnly}
+                onChange={() => updatePricedOnly(true)}
+                className="h-3.5 w-3.5 accent-[var(--color-accent)]"
+              />
+              <span className="text-muted">Market data only</span>
+            </label>
+          </fieldset>
         </div>
         <div className="flex items-center gap-2">
           {prevHref ? (

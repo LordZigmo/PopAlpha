@@ -16,6 +16,7 @@ type SearchParams = {
   lang?: string;
   set?: string;
   sort?: string;
+  priced?: string;
 };
 
 type CanonicalCardRow = {
@@ -213,8 +214,9 @@ async function runBroadSearch(params: {
   setFilter: string;
   parsedNumber: string | null;
   sort: SearchSort;
+  pricedOnly: boolean;
 }): Promise<SearchResultBundle> {
-  const { q, page, pageSize, lang, setFilter, parsedNumber, sort } = params;
+  const { q, page, pageSize, lang, setFilter, parsedNumber, sort, pricedOnly } = params;
   const supabase = getServerSupabaseClient();
   const qLower = normalizeQuery(q);
   const tokens = tokenizeQuery(qLower);
@@ -357,27 +359,37 @@ async function runBroadSearch(params: {
     return nameA.localeCompare(nameB);
   });
 
+  const needsAllPrices = relevanceOrderedSlugs.length > 0 && (sort === "market-price" || pricedOnly);
+  let allPriceBySlug = new Map<string, number | null>();
+
+  if (needsAllPrices) {
+    const { data: allPricesRaw } = await supabase
+      .from("card_metrics")
+      .select("canonical_slug, median_7d")
+      .in("canonical_slug", relevanceOrderedSlugs)
+      .eq("grade", "RAW")
+      .is("printing_id", null);
+
+    for (const row of (allPricesRaw ?? []) as SnapshotPriceRow[]) {
+      allPriceBySlug.set(row.canonical_slug, row.median_7d);
+    }
+  }
+
+  const filteredRelevanceSlugs = pricedOnly
+    ? relevanceOrderedSlugs.filter((slug) => {
+        const price = allPriceBySlug.get(slug);
+        return typeof price === "number" && Number.isFinite(price);
+      })
+    : relevanceOrderedSlugs;
+
   const orderedSlugs =
-    relevanceOrderedSlugs.length === 0
+    filteredRelevanceSlugs.length === 0
       ? []
       : sort === "relevance"
-      ? relevanceOrderedSlugs
-      : sortSearchResults(
-          sort === "market-price"
-            ? await (async () => {
-                const { data: allPricesRaw } = await supabase
-                  .from("card_metrics")
-                  .select("canonical_slug, median_7d")
-                  .in("canonical_slug", relevanceOrderedSlugs)
-                  .eq("grade", "RAW")
-                  .is("printing_id", null);
-
-                const allPriceBySlug = new Map<string, number | null>();
-                for (const row of (allPricesRaw ?? []) as SnapshotPriceRow[]) {
-                  allPriceBySlug.set(row.canonical_slug, row.median_7d);
-                }
-
-                return relevanceOrderedSlugs.map((slug) => {
+        ? filteredRelevanceSlugs
+        : sortSearchResults(
+            sort === "market-price"
+              ? filteredRelevanceSlugs.map((slug) => {
                   const row = canonicalBySlug.get(slug);
                   return {
                     canonical_slug: slug,
@@ -386,19 +398,18 @@ async function runBroadSearch(params: {
                     year: row?.year ?? null,
                     raw_price: allPriceBySlug.get(slug) ?? null,
                   };
-                });
-              })()
-            : relevanceOrderedSlugs.map((slug) => {
-                const row = canonicalBySlug.get(slug);
-                return {
-                  canonical_slug: slug,
-                  canonical_name: row?.canonical_name ?? slug,
-                  set_name: row?.set_name ?? null,
-                  year: row?.year ?? null,
-                };
-              }),
-          sort,
-        ).map((row) => row.canonical_slug);
+                })
+              : filteredRelevanceSlugs.map((slug) => {
+                  const row = canonicalBySlug.get(slug);
+                  return {
+                    canonical_slug: slug,
+                    canonical_name: row?.canonical_name ?? slug,
+                    set_name: row?.set_name ?? null,
+                    year: row?.year ?? null,
+                  };
+                }),
+            sort,
+          ).map((row) => row.canonical_slug);
 
   const total = orderedSlugs.length;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -473,11 +484,12 @@ async function getCachedBroadSearch(params: {
   setFilter: string;
   parsedNumber: string | null;
   sort: SearchSort;
+  pricedOnly: boolean;
 }) {
-  const { q, page, pageSize, lang, setFilter, parsedNumber, sort } = params;
+  const { q, page, pageSize, lang, setFilter, parsedNumber, sort, pricedOnly } = params;
   return unstable_cache(
     () =>
-      measureAsync("search.broad", { q, page, pageSize, lang, setFilter, parsedNumber, sort }, () =>
+      measureAsync("search.broad", { q, page, pageSize, lang, setFilter, parsedNumber, sort, pricedOnly }, () =>
         runBroadSearch({
           q,
           page,
@@ -486,6 +498,7 @@ async function getCachedBroadSearch(params: {
           setFilter,
           parsedNumber,
           sort,
+          pricedOnly,
         })
       ),
     [
@@ -497,6 +510,7 @@ async function getCachedBroadSearch(params: {
       setFilter.toLowerCase(),
       parsedNumber ?? "none",
       sort,
+      pricedOnly ? "priced-only" : "all-results",
     ],
     { revalidate: 60 }
   )();
@@ -591,6 +605,7 @@ export default async function SearchPage({
   const lang = (params.lang ?? "all").trim().toUpperCase();
   const setFilter = (params.set ?? "").trim();
   const sort = parseSearchSort(params.sort) as SearchSort;
+  const pricedOnly = params.priced === "1";
   const genericNameMode = isGenericNameQuery(qNormalized);
 
   if (!q) {
@@ -730,6 +745,7 @@ export default async function SearchPage({
     setFilter,
     parsedNumber,
     sort,
+    pricedOnly,
   });
 
   const displayRows: SearchDisplayRow[] = result.rows.map((row) => {
@@ -773,6 +789,7 @@ export default async function SearchPage({
           initialSort={sort}
           matchedSetName={matchedSetName}
           setSummary={setSummary}
+          pricedOnly={pricedOnly}
           currentParams={{
             q,
             page: String(result.page),
@@ -780,6 +797,7 @@ export default async function SearchPage({
             lang: lang.toLowerCase(),
             set: setFilter,
             sort,
+            priced: pricedOnly ? "1" : "",
           }}
         />
       </div>
