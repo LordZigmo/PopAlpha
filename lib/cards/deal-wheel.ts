@@ -50,7 +50,7 @@ export function evaluateDealWheelPrice(selectedPrice: number, balancePrice: numb
   const differencePercent = balancePrice > 0 ? (difference / balancePrice) * 100 : 0;
   const absolutePercent = Math.abs(differencePercent);
 
-  if (absolutePercent <= 4) {
+  if (absolutePercent <= 3) {
     return {
       tone: "neutral",
       label: "Fair Deal",
@@ -75,4 +75,40 @@ export function evaluateDealWheelPrice(selectedPrice: number, balancePrice: numb
       ? "The adjusted price is below market balance, which improves value for the buyer."
       : "The adjusted price is above market balance, which improves margin for the dealer.",
   };
+}
+
+export function getDealWheelInsight(selectedPrice: number, balancePrice: number): string {
+  if (!Number.isFinite(balancePrice) || balancePrice <= 0) return "";
+  const diff = selectedPrice - balancePrice;
+  const pct = (diff / balancePrice) * 100;
+  const absPct = Math.abs(pct);
+
+  if (absPct <= 3) return "At market balance \u2014 fair for both sides";
+
+  const absDiff = Math.abs(diff);
+  const dollars = new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: absDiff >= 1000 ? 0 : 2,
+  }).format(absDiff);
+  const pctStr = absPct >= 10 ? Math.round(absPct) : absPct.toFixed(1);
+  const strength = absPct <= 10 ? "slight" : absPct <= 20 ? "strong" : "very strong";
+
+  if (diff < 0) {
+    return `$${dollars.replace(/^\$/, "")} below market (-${pctStr}%) \u2014 ${strength} buyer advantage`;
+  }
+  return `$${dollars.replace(/^\$/, "")} above market (+${pctStr}%) \u2014 ${strength} dealer premium`;
+}
+
+export function getCenterProgress(selectedPrice: number, balancePrice: number): number {
+  if (!Number.isFinite(balancePrice) || balancePrice <= 0) return 0;
+  const pct = ((selectedPrice - balancePrice) / balancePrice) * 100;
+  const maxPct = 45;
+  return Math.max(-1, Math.min(1, pct / maxPct));
+}
+
+export function isNearCenter(selectedPrice: number, balancePrice: number): boolean {
+  if (!Number.isFinite(balancePrice) || balancePrice <= 0) return false;
+  const pct = Math.abs(((selectedPrice - balancePrice) / balancePrice) * 100);
+  return pct <= 1;
 }
