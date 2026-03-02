@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { buildSetId } from "@/lib/sets/summary-core.mjs";
 import { getServerSupabaseClient } from "@/lib/supabaseServer";
 
 type SetEntry = {
@@ -34,16 +35,16 @@ export default async function SetsPage() {
   const { data: snapshotRows } = latestAsOf
     ? await supabase
         .from("set_summary_snapshots")
-        .select("set_id, set_name, as_of_date, card_count, change_7d_pct, change_30d_pct, heat_score")
+        .select("set_name, as_of_date, change_7d_pct, change_30d_pct, heat_score")
         .eq("as_of_date", latestAsOf)
     : { data: null };
 
   const summaryMap = new Map<string, SetEntry["summary"]>();
   for (const row of snapshotRows ?? []) {
-    const key = row.set_id ?? row.set_name;
+    const key = row.set_name;
     if (!key) continue;
     summaryMap.set(key, {
-      card_count: row.card_count,
+      card_count: 0,
       change_7d_pct: row.change_7d_pct,
       change_30d_pct: row.change_30d_pct,
       heat_score: row.heat_score,
@@ -52,7 +53,7 @@ export default async function SetsPage() {
 
   let catalogData = await supabase
     .from("canonical_set_catalog")
-    .select("set_name, year, card_count, unknown_finish_count, set_id")
+    .select("set_name, year, card_count")
     .order("year", { ascending: false })
     .order("set_name", { ascending: true });
 
@@ -79,7 +80,6 @@ export default async function SetsPage() {
         set_name: entry.set_name,
         year: entry.year,
         card_count: entry.card_count,
-        unknown_finish_count: 0,
         set_id: null,
       })),
       error: null,
@@ -89,17 +89,17 @@ export default async function SetsPage() {
   const sets: SetEntry[] = [];
   for (const entry of catalogData.data ?? []) {
     if (!entry?.set_name) continue;
-    const key = entry.set_id ?? entry.set_name;
+    const key = entry.set_name;
     const summary = key ? summaryMap.get(key) : undefined;
     sets.push({
       set_name: entry.set_name,
       year: entry.year,
-      card_count: summary?.card_count ?? entry.card_count ?? 0,
-      set_id: entry.set_id ?? null,
+      card_count: entry.card_count ?? 0,
+      set_id: buildSetId(entry.set_name),
       change_7d_pct: summary?.change_7d_pct ?? null,
       change_30d_pct: summary?.change_30d_pct ?? null,
       heat_score: summary?.heat_score ?? null,
-      unknown_finish_count: entry.unknown_finish_count ?? 0,
+      unknown_finish_count: 0,
       summary: summary,
     });
   }
@@ -141,7 +141,7 @@ export default async function SetsPage() {
               <p className="text-muted mb-2 text-xs font-semibold uppercase tracking-[0.12em]">{year}</p>
               <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3">
                 {yearSets.map((s) => {
-                  const hasPricing = Boolean(s.summary?.card_count && s.summary.card_count > 0);
+                  const hasPricing = Boolean(s.summary);
                   const signalPositive = hasPricing;
                   const signalLabel = signalPositive ? "Market Live" : "Needs data";
                   const signalClass = signalPositive ? "glow-signal-positive" : "glow-signal-negative";

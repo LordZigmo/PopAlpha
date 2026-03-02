@@ -2,7 +2,6 @@ import { getServerSupabaseClient } from "@/lib/supabaseServer";
 import { buildSetId } from "@/lib/sets/summary-core.mjs";
 
 type SetSummarySnapshotRow = {
-  set_id: string;
   set_name: string;
   as_of_date: string;
   market_cap: number;
@@ -21,7 +20,6 @@ type SetSummarySnapshotRow = {
 };
 
 type SetFinishSummaryRow = {
-  set_id: string;
   set_name: string;
   finish: string;
   market_cap: number;
@@ -77,7 +75,7 @@ export type SetSummaryPageData = {
 
 function toSnapshot(row: SetSummarySnapshotRow): SetSummarySnapshot {
   return {
-    setId: row.set_id,
+    setId: buildSetId(row.set_name) ?? "",
     setName: row.set_name,
     asOfDate: row.as_of_date,
     marketCap: Number(row.market_cap ?? 0),
@@ -101,7 +99,7 @@ function toSnapshot(row: SetSummarySnapshotRow): SetSummarySnapshot {
 
 function toFinishBreakdown(row: SetFinishSummaryRow): SetFinishBreakdown {
   return {
-    setId: row.set_id,
+    setId: buildSetId(row.set_name) ?? "",
     setName: row.set_name,
     finish: row.finish,
     marketCap: Number(row.market_cap ?? 0),
@@ -113,14 +111,12 @@ function toFinishBreakdown(row: SetFinishSummaryRow): SetFinishBreakdown {
 }
 
 export async function getLatestSetSummarySnapshot(setName: string): Promise<SetSummarySnapshot | null> {
-  const setId = buildSetId(setName);
-  if (!setId) return null;
+  if (!setName.trim()) return null;
 
   const supabase = getServerSupabaseClient();
   const { data } = await supabase
     .from("set_summary_snapshots")
     .select([
-      "set_id",
       "set_name",
       "as_of_date",
       "market_cap",
@@ -137,7 +133,7 @@ export async function getLatestSetSummarySnapshot(setName: string): Promise<SetS
       "top_losers_json",
       "updated_at",
     ].join(", "))
-    .eq("set_id", setId)
+    .eq("set_name", setName)
     .order("as_of_date", { ascending: false })
     .limit(1)
     .maybeSingle<SetSummarySnapshotRow>();
@@ -146,14 +142,13 @@ export async function getLatestSetSummarySnapshot(setName: string): Promise<SetS
 }
 
 export async function getSetFinishBreakdown(setName: string): Promise<SetFinishBreakdown[]> {
-  const setId = buildSetId(setName);
-  if (!setId) return [];
+  if (!setName.trim()) return [];
 
   const supabase = getServerSupabaseClient();
   const { data } = await supabase
     .from("set_finish_summary_latest")
-    .select("set_id, set_name, finish, market_cap, card_count, change_7d_pct, change_30d_pct, updated_at")
-    .eq("set_id", setId)
+    .select("set_name, finish, market_cap, card_count, change_7d_pct, change_30d_pct, updated_at")
+    .eq("set_name", setName)
     .order("market_cap", { ascending: false });
 
   return ((data ?? []) as SetFinishSummaryRow[]).map(toFinishBreakdown);
