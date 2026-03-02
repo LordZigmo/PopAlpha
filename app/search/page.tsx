@@ -46,6 +46,8 @@ type PrintingRow = {
 type SnapshotPriceRow = {
   canonical_slug: string;
   median_7d: number | null;
+  median_30d?: number | null;
+  snapshot_count_30d?: number | null;
 };
 
 type GroupedSearchRow = {
@@ -206,6 +208,15 @@ function choosePrimaryPrinting(printings: PrintingRow[]): PrintingRow | null {
   return [...printings].sort((a, b) => primaryPrintingRank(b) - primaryPrintingRank(a) || a.id.localeCompare(b.id))[0] ?? null;
 }
 
+function hasUsableMarketData(row: SnapshotPriceRow | null | undefined): boolean {
+  if (!row) return false;
+  const snapshotCount = Number(row.snapshot_count_30d ?? 0);
+  if (Number.isFinite(snapshotCount) && snapshotCount >= 1) return true;
+  if (typeof row.median_7d === "number" && Number.isFinite(row.median_7d)) return true;
+  if (typeof row.median_30d === "number" && Number.isFinite(row.median_30d)) return true;
+  return false;
+}
+
 async function runBroadSearch(params: {
   q: string;
   page: number;
@@ -360,25 +371,24 @@ async function runBroadSearch(params: {
   });
 
   const needsAllPrices = relevanceOrderedSlugs.length > 0 && (sort === "market-price" || pricedOnly);
-  let allPriceBySlug = new Map<string, number | null>();
+  let allMetricsBySlug = new Map<string, SnapshotPriceRow>();
 
   if (needsAllPrices) {
     const { data: allPricesRaw } = await supabase
       .from("card_metrics")
-      .select("canonical_slug, median_7d")
+      .select("canonical_slug, median_7d, median_30d, snapshot_count_30d")
       .in("canonical_slug", relevanceOrderedSlugs)
       .eq("grade", "RAW")
       .is("printing_id", null);
 
     for (const row of (allPricesRaw ?? []) as SnapshotPriceRow[]) {
-      allPriceBySlug.set(row.canonical_slug, row.median_7d);
+      allMetricsBySlug.set(row.canonical_slug, row);
     }
   }
 
   const filteredRelevanceSlugs = pricedOnly
     ? relevanceOrderedSlugs.filter((slug) => {
-        const price = allPriceBySlug.get(slug);
-        return typeof price === "number" && Number.isFinite(price);
+        return hasUsableMarketData(allMetricsBySlug.get(slug));
       })
     : relevanceOrderedSlugs;
 
@@ -396,7 +406,7 @@ async function runBroadSearch(params: {
                     canonical_name: row?.canonical_name ?? slug,
                     set_name: row?.set_name ?? null,
                     year: row?.year ?? null,
-                    raw_price: allPriceBySlug.get(slug) ?? null,
+                    raw_price: allMetricsBySlug.get(slug)?.median_7d ?? null,
                   };
                 })
               : filteredRelevanceSlugs.map((slug) => {
@@ -438,7 +448,7 @@ async function runBroadSearch(params: {
     pagePrintingsQuery,
     supabase
       .from("card_metrics")
-      .select("canonical_slug, median_7d")
+      .select("canonical_slug, median_7d, median_30d, snapshot_count_30d")
       .in("canonical_slug", pageSlugs)
       .eq("grade", "RAW")
       .is("printing_id", null),
@@ -603,7 +613,7 @@ export default async function SearchPage({
   const page = toPositiveInt(params.page, 1);
   const pageSize = parsePageSize(params.pageSize);
   const lang = (params.lang ?? "all").trim().toUpperCase();
-  const setFilter = (params.set ?? "").trim();
+  const requestedSetFilter = (params.set ?? "").trim();
   const sort = parseSearchSort(params.sort) as SearchSort;
   const pricedOnly = params.priced === "1";
   const genericNameMode = isGenericNameQuery(qNormalized);
@@ -637,6 +647,7 @@ export default async function SearchPage({
   }
 
   const supabase = getServerSupabaseClient();
+  let setFilter = requestedSetFilter;
 
   const { data: printingAliasRow } = await measureAsync("search.printing_alias", { q: qNormalized }, async () =>
     supabase
@@ -674,6 +685,21 @@ export default async function SearchPage({
     const href = `/cards/${encodeURIComponent(aliasRow.canonical_slug)}`;
     if (!genericNameMode) {
       redirect(href);
+    }
+  }
+
+  if (!setFilter && !parsedNumber && qNormalized) {
+    const { data: exactSetRow } = await measureAsync("search.set_exact", { q: qNormalized }, async () =>
+      supabase
+        .from("canonical_cards")
+        .select("set_name")
+        .ilike("set_name", qNormalized)
+        .limit(1)
+        .maybeSingle<{ set_name: string | null }>()
+    );
+
+    if (exactSetRow?.set_name) {
+      setFilter = exactSetRow.set_name;
     }
   }
 

@@ -18,6 +18,10 @@ type Listing = {
 type EbayListingsProps = {
   queries: string[];
   canonicalSlug: string;
+  canonicalName: string;
+  setName: string | null;
+  cardNumber: string | null;
+  finish: string | null;
   printingId: string | null;
   grade: "RAW" | "PSA9" | "PSA10";
 };
@@ -43,7 +47,16 @@ function totalAskValue(item: Listing): number | null {
   return price + (Number.isFinite(shipping) ? shipping : 0);
 }
 
-export default function EbayListings({ queries, canonicalSlug, printingId, grade }: EbayListingsProps) {
+export default function EbayListings({
+  queries,
+  canonicalSlug,
+  canonicalName,
+  setName,
+  cardNumber,
+  finish,
+  printingId,
+  grade,
+}: EbayListingsProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<Listing[]>([]);
@@ -71,6 +84,11 @@ export default function EbayListings({ queries, canonicalSlug, printingId, grade
         const params = new URLSearchParams();
         params.set("limit", "50");
         for (const query of normalizedQueries) params.append("q", query);
+        params.set("canonicalName", canonicalName);
+        if (setName) params.set("setName", setName);
+        if (cardNumber) params.set("cardNumber", cardNumber);
+        if (finish) params.set("finish", finish);
+        params.set("grade", grade);
         const response = await fetch(`/api/ebay/browse?${params.toString()}`);
         const payload = (await response.json()) as { ok: boolean; items?: Listing[]; total?: number; error?: string };
         if (!response.ok || !payload.ok) {
@@ -109,7 +127,7 @@ export default function EbayListings({ queries, canonicalSlug, printingId, grade
     return () => {
       cancelled = true;
     };
-  }, [canonicalSlug, printingId, grade, normalizedQueries.join("||")]);
+  }, [canonicalSlug, canonicalName, setName, cardNumber, finish, printingId, grade, normalizedQueries.join("||")]);
 
   return (
     <div>

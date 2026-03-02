@@ -634,6 +634,10 @@ export default async function CanonicalCardPage({
           <EbayListings
             queries={ebayQueries}
             canonicalSlug={slug}
+            canonicalName={canonical.canonical_name}
+            setName={canonical.set_name}
+            cardNumber={canonical.card_number}
+            finish={selectedPrinting?.finish ?? null}
             printingId={selectedPrinting?.id ?? null}
             grade={legacyListingsGrade}
           />

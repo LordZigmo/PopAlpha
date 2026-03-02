@@ -41,6 +41,62 @@ function normalizeQuery(raw: string): string {
   return raw.replace(/\s+/g, " ").trim();
 }
 
+function normalizeTitle(value: string | null | undefined): string {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildNameTokens(name: string): string[] {
+  return normalizeTitle(name)
+    .split(" ")
+    .filter((token) => token.length >= 2);
+}
+
+function hasNumberToken(title: string, cardNumber: string | null): boolean {
+  if (!cardNumber) return false;
+  const numeric = cardNumber.replace(/[^0-9]/g, "");
+  if (!numeric) return false;
+  return new RegExp(`(^|[^0-9])${numeric}([^0-9]|$)`).test(title);
+}
+
+function matchesRequestedCard(
+  item: ReturnType<typeof mapBrowseItem>,
+  input: {
+    canonicalName: string;
+    cardNumber: string | null;
+    finish: string | null;
+    grade: string;
+  },
+): boolean {
+  const title = normalizeTitle(item.title);
+  if (!title) return false;
+
+  const nameTokens = buildNameTokens(input.canonicalName);
+  if (nameTokens.length === 0) return false;
+  if (!nameTokens.every((token) => title.includes(token))) return false;
+
+  if (input.cardNumber && !hasNumberToken(title, input.cardNumber)) {
+    return false;
+  }
+
+  if (input.grade === "RAW") {
+    if (/\b(psa|cgc|bgs|beckett|tag|graded|slab|sgc)\b/.test(title)) return false;
+  }
+
+  const finish = (input.finish ?? "").toUpperCase();
+  if (finish === "REVERSE_HOLO") {
+    if (!title.includes("reverse")) return false;
+  }
+  if (finish === "NON_HOLO") {
+    if (title.includes("reverse holo") || title.includes("reverse")) return false;
+  }
+
+  return true;
+}
+
 async function getAppAccessToken(): Promise<string> {
   const now = Date.now();
   if (tokenCache && tokenCache.expiresAt > now + 20_000) {
@@ -89,16 +145,22 @@ export async function GET(req: Request) {
   const queries = url.searchParams.getAll("q").map(normalizeQuery).filter(Boolean);
   const uniqueQueries = [...new Set(queries)];
   const q = uniqueQueries[0] ?? "";
+  const canonicalName = url.searchParams.get("canonicalName")?.trim() ?? "";
+  const cardNumber = url.searchParams.get("cardNumber")?.trim() ?? null;
+  const finish = url.searchParams.get("finish")?.trim() ?? null;
+  const grade = url.searchParams.get("grade")?.trim() ?? "RAW";
   const limit = parseLimit(url.searchParams.get("limit"));
   if (!q) {
     return NextResponse.json({ ok: false, error: "Missing q query param." }, { status: 400 });
+  }
+  if (!canonicalName) {
+    return NextResponse.json({ ok: false, error: "Missing canonicalName query param." }, { status: 400 });
   }
 
   try {
     const token = await getAppAccessToken();
     const browseUrl = `${getEbayBaseUrl()}/buy/browse/v1/item_summary/search`;
     const dedupedItems = new Map<string, ReturnType<typeof mapBrowseItem>>();
-    const totals: number[] = [];
 
     for (const query of uniqueQueries) {
       const params = new URLSearchParams({
@@ -120,9 +182,9 @@ export async function GET(req: Request) {
       }
 
       const payload = (await response.json()) as EbayBrowseResponse;
-      if (typeof payload.total === "number") totals.push(payload.total);
       for (const item of payload.itemSummaries ?? []) {
         const mapped = mapBrowseItem(item);
+        if (!matchesRequestedCard(mapped, { canonicalName, cardNumber, finish, grade })) continue;
         const dedupeKey = mapped.externalId || mapped.itemWebUrl || `${mapped.title}:${mapped.price?.value ?? ""}`;
         if (!dedupeKey || dedupedItems.has(dedupeKey)) continue;
         dedupedItems.set(dedupeKey, mapped);
@@ -133,7 +195,7 @@ export async function GET(req: Request) {
 
     return NextResponse.json({
       ok: true,
-      total: totals.length > 0 ? Math.max(...totals) : dedupedItems.size,
+      total: dedupedItems.size,
       items: [...dedupedItems.values()].slice(0, limit),
       queriesUsed: uniqueQueries,
     });

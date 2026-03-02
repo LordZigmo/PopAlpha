@@ -77,8 +77,7 @@ export function buildEbaySearchQueries(input: EbayQueryInput): string[] {
   const queries = [
     buildQueryParts(input, { includeSet: true, includeCardNumber: true }).join(" "),
     buildQueryParts(input, { includeSet: false, includeCardNumber: true }).join(" "),
-    buildQueryParts(input, { includeSet: true, includeCardNumber: false }).join(" "),
-    buildQueryParts(input, { includeSet: false, includeCardNumber: false }).join(" "),
+    [`"${normalizeQueryTerm(input.canonicalName)}"`, normalizeQueryTerm(input.cardNumber), "pokemon"].filter(Boolean).join(" "),
   ];
   return uniqueQueries(queries);
 }
