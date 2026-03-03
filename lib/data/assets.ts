@@ -557,6 +557,9 @@ export type AssetViewModel = {
 function computeChangePct(series: ChartPoint[], hoursAgo: number): number | null {
   if (series.length < 2) return null;
   const cutoffMs = Date.now() - hoursAgo * 60 * 60 * 1000;
+  const latestTs = new Date(series[series.length - 1].ts).getTime();
+  // If even the latest point is older than the cutoff, no meaningful change
+  if (latestTs <= cutoffMs) return null;
   const priceNow = series[series.length - 1].price;
   // Series is ts-asc. Walk forward, keep last point at-or-before cutoff.
   let priceAtCutoff: number | null = null;
