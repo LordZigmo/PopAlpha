@@ -1,8 +1,8 @@
 import { redirect } from "next/navigation";
 import { unstable_cache } from "next/cache";
+import { getCanonicalMarketPulseMap, type CanonicalMarketPulse } from "@/lib/data/market";
 import { dbPublic } from "@/lib/db";
 import { measureAsync } from "@/lib/perf";
-import { compute7dChangeBatch } from "@/lib/data/assets";
 import SearchResultsSection from "@/components/search-results-section";
 import CardSearch from "@/components/card-search";
 import { parseSearchSort, sortSearchResults } from "@/lib/search/sort.mjs";
@@ -44,17 +44,12 @@ type PrintingRow = {
   image_url: string | null;
 };
 
-type SnapshotPriceRow = {
-  canonical_slug: string;
-  median_7d: number | null;
-  median_30d?: number | null;
-  snapshot_count_30d?: number | null;
-};
-
 type GroupedSearchRow = {
   canonical: CanonicalCardRow;
   printings: PrintingRow[];
   rawPrice: number | null;
+  changePct: number | null;
+  changeWindow: "24H" | "7D" | null;
 };
 
 type SearchResultBundle = {
@@ -71,6 +66,7 @@ type SearchDisplayRow = {
   year: number | null;
   raw_price: number | null;
   change_pct: number | null;
+  change_window: "24H" | "7D" | null;
   primary_image_url: string | null;
 };
 
@@ -210,13 +206,8 @@ function choosePrimaryPrinting(printings: PrintingRow[]): PrintingRow | null {
   return [...printings].sort((a, b) => primaryPrintingRank(b) - primaryPrintingRank(a) || a.id.localeCompare(b.id))[0] ?? null;
 }
 
-function hasUsableMarketData(row: SnapshotPriceRow | null | undefined): boolean {
-  if (!row) return false;
-  const snapshotCount = Number(row.snapshot_count_30d ?? 0);
-  if (Number.isFinite(snapshotCount) && snapshotCount >= 1) return true;
-  if (typeof row.median_7d === "number" && Number.isFinite(row.median_7d)) return true;
-  if (typeof row.median_30d === "number" && Number.isFinite(row.median_30d)) return true;
-  return false;
+function hasUsableMarketData(value: number | null | undefined): boolean {
+  return typeof value === "number" && Number.isFinite(value);
 }
 
 async function runBroadSearch(params: {
@@ -373,24 +364,15 @@ async function runBroadSearch(params: {
   });
 
   const needsAllPrices = relevanceOrderedSlugs.length > 0 && (sort === "market-price" || pricedOnly);
-  let allMetricsBySlug = new Map<string, SnapshotPriceRow>();
+  let allMarketPulseBySlug = new Map<string, CanonicalMarketPulse>();
 
   if (needsAllPrices) {
-    const { data: allPricesRaw } = await supabase
-      .from("public_card_metrics")
-      .select("canonical_slug, median_7d, median_30d, snapshot_count_30d")
-      .in("canonical_slug", relevanceOrderedSlugs)
-      .eq("grade", "RAW")
-      .is("printing_id", null);
-
-    for (const row of (allPricesRaw ?? []) as SnapshotPriceRow[]) {
-      allMetricsBySlug.set(row.canonical_slug, row);
-    }
+    allMarketPulseBySlug = await getCanonicalMarketPulseMap(supabase, relevanceOrderedSlugs);
   }
 
   const filteredRelevanceSlugs = pricedOnly
     ? relevanceOrderedSlugs.filter((slug) => {
-        return hasUsableMarketData(allMetricsBySlug.get(slug));
+        return hasUsableMarketData(allMarketPulseBySlug.get(slug)?.marketPrice ?? null);
       })
     : relevanceOrderedSlugs;
 
@@ -408,7 +390,7 @@ async function runBroadSearch(params: {
                     canonical_name: row?.canonical_name ?? slug,
                     set_name: row?.set_name ?? null,
                     year: row?.year ?? null,
-                    raw_price: allMetricsBySlug.get(slug)?.median_7d ?? null,
+                    raw_price: allMarketPulseBySlug.get(slug)?.marketPrice ?? null,
                   };
                 })
               : filteredRelevanceSlugs.map((slug) => {
@@ -446,15 +428,13 @@ async function runBroadSearch(params: {
 
   if (lang !== "ALL") pagePrintingsQuery = pagePrintingsQuery.ilike("language", lang);
   if (setFilter) pagePrintingsQuery = pagePrintingsQuery.ilike("set_name", `%${setFilter}%`);
-  const [{ data: pagePrintingsRaw }, { data: pagePricesRaw }] = await Promise.all([
+  const [pagePrintingsResult, pageMarketPulseBySlug] = await Promise.all([
     pagePrintingsQuery,
-    supabase
-      .from("public_card_metrics")
-      .select("canonical_slug, median_7d, median_30d, snapshot_count_30d")
-      .in("canonical_slug", pageSlugs)
-      .eq("grade", "RAW")
-      .is("printing_id", null),
+    needsAllPrices
+      ? Promise.resolve(new Map(pageSlugs.map((slug) => [slug, allMarketPulseBySlug.get(slug) ?? null])))
+      : getCanonicalMarketPulseMap(supabase, pageSlugs),
   ]);
+  const pagePrintingsRaw = pagePrintingsResult.data;
   const pagePrintings = (pagePrintingsRaw ?? []) as PrintingRow[];
   const printingsBySlug = new Map<string, PrintingRow[]>();
   for (const printing of pagePrintings) {
@@ -463,19 +443,17 @@ async function runBroadSearch(params: {
     printingsBySlug.set(printing.canonical_slug, current);
   }
 
-  const priceBySlug = new Map<string, number | null>();
-  for (const p of (pagePricesRaw ?? []) as SnapshotPriceRow[]) {
-    priceBySlug.set(p.canonical_slug, p.median_7d);
-  }
-
   const rows: GroupedSearchRow[] = pageSlugs
     .map((slug) => {
       const canonical = canonicalBySlug.get(slug);
+      const marketPulse = pageMarketPulseBySlug.get(slug) ?? null;
       if (!canonical) return null;
       return {
         canonical,
         printings: printingsBySlug.get(slug) ?? [],
-        rawPrice: priceBySlug.get(slug) ?? null,
+        rawPrice: marketPulse?.marketPrice ?? null,
+        changePct: marketPulse?.changePct ?? null,
+        changeWindow: marketPulse?.changeWindow ?? null,
       };
     })
     .filter((row): row is GroupedSearchRow => row !== null);
@@ -553,13 +531,8 @@ async function loadSetSearchEnhancements(setName: string): Promise<{
   }
 
   const slugs = canonicalRows.map((row) => row.slug);
-  const [{ data: metricRowsRaw }, { data: printingRowsRaw }] = await Promise.all([
-    supabase
-      .from("public_card_metrics")
-      .select("canonical_slug, median_7d")
-      .in("canonical_slug", slugs)
-      .eq("grade", "RAW")
-      .is("printing_id", null),
+  const [marketPulseBySlug, printingRowsResult] = await Promise.all([
+    getCanonicalMarketPulseMap(supabase, slugs),
     supabase
       .from("card_printings")
       .select("id, canonical_slug, set_name, card_number, language, finish, finish_detail, edition, stamp, image_url")
@@ -567,30 +540,25 @@ async function loadSetSearchEnhancements(setName: string): Promise<{
       .eq("language", "EN"),
   ]);
 
-  const priceBySlug = new Map<string, number | null>();
-  for (const row of (metricRowsRaw ?? []) as SnapshotPriceRow[]) {
-    priceBySlug.set(row.canonical_slug, row.median_7d);
-  }
-
   const printingsBySlug = new Map<string, PrintingRow[]>();
-  for (const printing of (printingRowsRaw ?? []) as PrintingRow[]) {
+  for (const printing of (printingRowsResult.data ?? []) as PrintingRow[]) {
     const bucket = printingsBySlug.get(printing.canonical_slug) ?? [];
     bucket.push(printing);
     printingsBySlug.set(printing.canonical_slug, bucket);
   }
 
-  const chaseChangeMap = await compute7dChangeBatch(slugs);
-
   const chaseCards = sortSearchResults(
     canonicalRows.map((row) => {
       const primaryPrinting = choosePrimaryPrinting(printingsBySlug.get(row.slug) ?? []);
+      const marketPulse = marketPulseBySlug.get(row.slug) ?? null;
       return {
         canonical_slug: row.slug,
         canonical_name: row.canonical_name,
         set_name: row.set_name,
         year: row.year,
-        raw_price: priceBySlug.get(row.slug) ?? null,
-        change_pct: chaseChangeMap.get(row.slug) ?? null,
+        raw_price: marketPulse?.marketPrice ?? null,
+        change_pct: marketPulse?.changePct ?? null,
+        change_window: marketPulse?.changeWindow ?? null,
         primary_image_url: primaryPrinting?.image_url ?? null,
       };
     }),
@@ -779,9 +747,6 @@ export default async function SearchPage({
     pricedOnly,
   });
 
-  const resultSlugs = result.rows.map((row) => row.canonical.slug);
-  const changeMap = resultSlugs.length > 0 ? await compute7dChangeBatch(resultSlugs) : new Map<string, number>();
-
   const displayRows: SearchDisplayRow[] = result.rows.map((row) => {
     const primaryPrinting = choosePrimaryPrinting(row.printings);
     return {
@@ -790,7 +755,8 @@ export default async function SearchPage({
       set_name: row.canonical.set_name,
       year: row.canonical.year,
       raw_price: row.rawPrice,
-      change_pct: changeMap.get(row.canonical.slug) ?? null,
+      change_pct: row.changePct,
+      change_window: row.changeWindow,
       primary_image_url: primaryPrinting?.image_url ?? null,
     };
   });

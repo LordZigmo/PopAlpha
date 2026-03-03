@@ -2,7 +2,13 @@
  * Shared price change badge used in card tiles, search results, and set browser.
  * Works in both server and client components.
  */
-export default function ChangeBadge({ pct }: { pct: number | null }) {
+export default function ChangeBadge({
+  pct,
+  windowLabel,
+}: {
+  pct: number | null;
+  windowLabel?: "24H" | "7D" | null;
+}) {
   if (pct == null || pct === 0) return null;
   const up = pct > 0;
   const abs = Math.abs(pct);
@@ -12,7 +18,7 @@ export default function ChangeBadge({ pct }: { pct: number | null }) {
       className="text-[13px] font-semibold tabular-nums"
       style={{ color: up ? "#00DC5A" : "#FF3B30" }}
     >
-      {up ? "\u25B2" : "\u25BC"} {up ? "+" : "-"}{formatted}%
+      {up ? "\u25B2" : "\u25BC"} {up ? "+" : "-"}{formatted}%{windowLabel ? ` ${windowLabel}` : ""}
     </span>
   );
 }

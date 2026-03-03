@@ -18,6 +18,7 @@ type SearchDisplayRow = {
   year: number | null;
   raw_price: number | null;
   change_pct: number | null;
+  change_window: "24H" | "7D" | null;
   primary_image_url: string | null;
 };
 
@@ -126,7 +127,7 @@ function ResultCard({
             <span className="text-[10px] font-semibold sm:text-xs" style={{ color: "var(--color-accent)" }}>
               {formatCurrency(row.raw_price)} RAW
             </span>
-            <ChangeBadge pct={row.change_pct} />
+            <ChangeBadge pct={row.change_pct} windowLabel={row.change_window} />
           </div>
         ) : null}
       </div>

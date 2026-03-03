@@ -4,17 +4,18 @@
  * Single server-side data loader for the homepage.
  * Uses dbPublic() only — no service-role access.
  *
- * Query plan (2 parallel batches, 4 queries total):
+ * Query plan (2 parallel batches, 6 queries total):
  *   Batch 1: movers (variant_movers) + variant metrics for losers/trending (parallel)
  *   Batch 2: canonical_cards metadata + card_metrics prices (parallel)
  *   JS merge into HomepageData
  *
  * Why two tables?
  *   - variant_metrics has provider_trend_slope_7d (for losers/trending)
- *   - card_metrics has median_7d prices (for display)
+ *   - card_metrics has canonical market price + deltas (for display)
  *   - refresh_card_metrics() doesn't copy trend data to canonical rows
  */
 
+import { getCanonicalMarketPulseMap } from "@/lib/data/market";
 import { dbPublic } from "@/lib/db";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -24,8 +25,9 @@ export type HomepageCard = {
   name: string;
   set_name: string | null;
   year: number | null;
-  median_7d: number | null;
+  market_price: number | null;
   change_pct: number | null;
+  change_window: "24H" | "7D" | null;
   mover_tier: "hot" | "warming" | "cooling" | "cold" | null;
   image_url: string | null;
 };
@@ -138,21 +140,14 @@ export async function getHomepageData(): Promise<HomepageData> {
 
     const slugArray = [...allSlugs];
 
-    // ── Batch 2: card metadata + prices + images + 7d history ─────────────
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-
-    const [cardsResult, pricesResult, imagesResult, historyResult] = await Promise.all([
+    // ── Batch 2: card metadata + prices (with change pcts) + images ────
+    const [cardsResult, marketPulseMap, imagesResult] = await Promise.all([
       db
         .from("canonical_cards")
         .select("slug, canonical_name, set_name, year")
         .in("slug", slugArray),
 
-      db
-        .from("public_card_metrics")
-        .select("canonical_slug, median_7d")
-        .in("canonical_slug", slugArray)
-        .is("printing_id", null)
-        .eq("grade", "RAW"),
+      getCanonicalMarketPulseMap(db, slugArray),
 
       db
         .from("card_printings")
@@ -161,74 +156,16 @@ export async function getHomepageData(): Promise<HomepageData> {
         .eq("language", "EN")
         .not("image_url", "is", null)
         .limit(slugArray.length * 3),
-
-      // 4. Price history for actual 7d change computation (NM only)
-      db
-        .from("public_price_history")
-        .select("canonical_slug, variant_ref, ts, price")
-        .in("canonical_slug", slugArray)
-        .eq("provider", "JUSTTCG")
-        .eq("source_window", "30d")
-        // NM: canonical refs (uuid::RAW) are inherently NM; legacy non-NM is rare
-        .gte("ts", sevenDaysAgo)
-        .order("ts", { ascending: true })
-        .limit(slugArray.length * 200),
     ]);
 
     if (cardsResult.error) console.error("[homepage] cards", cardsResult.error.message);
-    if (pricesResult.error) console.error("[homepage] prices", pricesResult.error.message);
     if (imagesResult.error) console.error("[homepage] images", imagesResult.error.message);
-    if (historyResult.error) console.error("[homepage] history", historyResult.error.message);
-
-    // ── Compute 7d price change from actual history ─────────────────────
-    // Uses the same boundary-based method as assets.ts computeChangePct:
-    // find the price closest to (but not after) the 7d cutoff, compare to latest.
-    type HistRow = { canonical_slug: string; variant_ref: string; ts: string; price: number };
-    const changeMap = new Map<string, number>();
-    const slugVariants = new Map<string, Map<string, HistRow[]>>();
-    for (const row of (historyResult.data ?? []) as HistRow[]) {
-      if (!slugVariants.has(row.canonical_slug)) slugVariants.set(row.canonical_slug, new Map());
-      const varMap = slugVariants.get(row.canonical_slug)!;
-      if (!varMap.has(row.variant_ref)) varMap.set(row.variant_ref, []);
-      varMap.get(row.variant_ref)!.push(row);
-    }
-    const cutoff7dMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
-    for (const [slug, varMap] of slugVariants) {
-      // Pick variant with most data points (same as card page's getRecentVariantStats)
-      let best: HistRow[] = [];
-      for (const points of varMap.values()) {
-        if (points.length > best.length) best = points;
-      }
-      if (best.length < 2) continue;
-      const latestTs = new Date(best[best.length - 1].ts).getTime();
-      if (latestTs <= cutoff7dMs) continue; // all data older than 7d
-      const priceNow = best[best.length - 1].price;
-      // Walk ts-asc, keep last point at-or-before 7d cutoff
-      let priceAtCutoff: number | null = null;
-      for (const pt of best) {
-        if (new Date(pt.ts).getTime() <= cutoff7dMs) {
-          priceAtCutoff = pt.price;
-        } else {
-          break;
-        }
-      }
-      if (priceAtCutoff !== null && priceAtCutoff > 0) {
-        changeMap.set(slug, ((priceNow - priceAtCutoff) / priceAtCutoff) * 100);
-      }
-    }
 
     // ── Build lookup maps ─────────────────────────────────────────────────
     type CardRow = { slug: string; canonical_name: string; set_name: string | null; year: number | null };
     const cardMap = new Map<string, CardRow>();
     for (const c of (cardsResult.data ?? []) as CardRow[]) {
       cardMap.set(c.slug, c);
-    }
-
-    const priceMap = new Map<string, number | null>();
-    for (const row of (pricesResult.data ?? []) as { canonical_slug: string; median_7d: number | null }[]) {
-      if (!priceMap.has(row.canonical_slug)) {
-        priceMap.set(row.canonical_slug, row.median_7d);
-      }
     }
 
     const imageMap = new Map<string, string>();
@@ -241,17 +178,18 @@ export async function getHomepageData(): Promise<HomepageData> {
     // ── Assemble helpers ──────────────────────────────────────────────────
     function toCard(
       slug: string,
-      overrides: { median_7d?: number | null; mover_tier?: HomepageCard["mover_tier"] } = {},
+      overrides: { fallbackPrice?: number | null; mover_tier?: HomepageCard["mover_tier"] } = {},
     ): HomepageCard {
       const card = cardMap.get(slug);
-      const price = overrides.median_7d ?? priceMap.get(slug) ?? null;
+      const marketPulse = marketPulseMap.get(slug);
       return {
         slug,
         name: card?.canonical_name ?? slug,
         set_name: card?.set_name ?? null,
         year: card?.year ?? null,
-        median_7d: price,
-        change_pct: changeMap.get(slug) ?? null,
+        market_price: marketPulse?.marketPrice ?? overrides.fallbackPrice ?? null,
+        change_pct: marketPulse?.changePct ?? null,
+        change_window: marketPulse?.changeWindow ?? null,
         image_url: imageMap.get(slug) ?? null,
         mover_tier: overrides.mover_tier ?? null,
       };
@@ -261,7 +199,7 @@ export async function getHomepageData(): Promise<HomepageData> {
     const moversOut: HomepageCard[] = [];
     for (const r of dedupedMovers) {
       moversOut.push(toCard(r.canonical_slug, {
-        median_7d: r.median_7d,
+        fallbackPrice: r.median_7d,
         mover_tier: r.mover_tier as HomepageCard["mover_tier"],
       }));
       if (moversOut.length >= SECTION_LIMIT) break;
@@ -270,7 +208,7 @@ export async function getHomepageData(): Promise<HomepageData> {
     // ── Losers: filter to cards with real prices above MIN_PRICE ─────────
     const losersOut: HomepageCard[] = [];
     for (const r of loserVariants) {
-      const price = priceMap.get(r.canonical_slug);
+      const price = marketPulseMap.get(r.canonical_slug)?.marketPrice ?? null;
       if (price == null || price < MIN_PRICE) continue;
       losersOut.push(toCard(r.canonical_slug));
       if (losersOut.length >= SECTION_LIMIT) break;
@@ -279,7 +217,7 @@ export async function getHomepageData(): Promise<HomepageData> {
     // ── Trending: filter to cards with real prices above MIN_PRICE ────────
     const trendingOut: HomepageCard[] = [];
     for (const r of trendingVariants) {
-      const price = priceMap.get(r.canonical_slug);
+      const price = marketPulseMap.get(r.canonical_slug)?.marketPrice ?? null;
       if (price == null || price < MIN_PRICE) continue;
       trendingOut.push(toCard(r.canonical_slug));
       if (trendingOut.length >= SECTION_LIMIT) break;

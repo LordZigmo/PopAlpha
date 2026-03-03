@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { getCanonicalMarketPulseMap } from "@/lib/data/market";
 import { getSetSummaryPageData } from "@/lib/sets/summary";
-import { compute7dChangeBatch } from "@/lib/data/assets";
 import ChangeBadge from "@/components/change-badge";
 import { dbPublic } from "@/lib/db";
 
@@ -20,11 +20,6 @@ type PrintingRow = {
   edition: string;
 };
 
-type PriceRow = {
-  canonical_slug: string;
-  median_7d: number | null;
-};
-
 type CardEntry = {
   slug: string;
   name: string;
@@ -32,6 +27,7 @@ type CardEntry = {
   imageUrl: string | null;
   rawPrice: number | null;
   changePct: number | null;
+  changeWindow: "24H" | "7D" | null;
 };
 
 function formatUsd(value: number | null | undefined, digits = 2): string {
@@ -120,21 +116,15 @@ export default async function SetBrowserPage({ params }: { params: Promise<{ set
   const slugs = cards.map((c) => c.slug);
 
   // Fetch printings and prices in parallel
-  const [{ data: printingsRaw }, { data: pricesRaw }] = await Promise.all([
+  const [{ data: printingsRaw }, marketPulseBySlug] = await Promise.all([
     supabase
       .from("card_printings")
       .select("canonical_slug, image_url, language, finish, edition")
       .in("canonical_slug", slugs),
-    supabase
-      .from("public_card_metrics")
-      .select("canonical_slug, median_7d")
-      .in("canonical_slug", slugs)
-      .eq("grade", "RAW")
-      .is("printing_id", null),
+    getCanonicalMarketPulseMap(supabase, slugs),
   ]);
 
   const printings = (printingsRaw ?? []) as PrintingRow[];
-  const prices = (pricesRaw ?? []) as PriceRow[];
 
   // Build lookup maps
   const printingsBySlug = new Map<string, PrintingRow[]>();
@@ -144,22 +134,15 @@ export default async function SetBrowserPage({ params }: { params: Promise<{ set
     printingsBySlug.set(p.canonical_slug, cur);
   }
 
-  const priceBySlug = new Map<string, number | null>();
-  for (const p of prices) {
-    priceBySlug.set(p.canonical_slug, p.median_7d);
-  }
-
-  // Compute 7d change for all cards in the set
-  const changeMap = await compute7dChangeBatch(slugs);
-
   // Build + sort card entries (price desc, then card number)
   const entries: CardEntry[] = cards.map((card) => ({
     slug: card.slug,
     name: card.canonical_name,
     cardNumber: card.card_number,
     imageUrl: chooseBestImage(printingsBySlug.get(card.slug) ?? []),
-    rawPrice: priceBySlug.get(card.slug) ?? null,
-    changePct: changeMap.get(card.slug) ?? null,
+    rawPrice: marketPulseBySlug.get(card.slug)?.marketPrice ?? null,
+    changePct: marketPulseBySlug.get(card.slug)?.changePct ?? null,
+    changeWindow: marketPulseBySlug.get(card.slug)?.changeWindow ?? null,
   }));
 
   entries.sort((a, b) => {
@@ -286,7 +269,7 @@ export default async function SetBrowserPage({ params }: { params: Promise<{ set
                       <span className="text-xs font-semibold" style={{ color: "var(--color-accent)" }}>
                         ${entry.rawPrice < 1 ? entry.rawPrice.toFixed(2) : entry.rawPrice.toFixed(0)} RAW
                       </span>
-                      <ChangeBadge pct={entry.changePct} />
+                      <ChangeBadge pct={entry.changePct} windowLabel={entry.changeWindow} />
                     </div>
                   ) : (
                     <p className="mt-0.5 text-xs text-muted">—</p>

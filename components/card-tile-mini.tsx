@@ -61,9 +61,9 @@ export default function CardTileMini({
 
         <div className="mt-1.5 flex items-center gap-1">
           <span className="text-[14px] font-bold tabular-nums text-[#F0F0F0]">
-            {formatPrice(card.median_7d)}
+            {formatPrice(card.market_price)}
           </span>
-          <ChangeBadge pct={card.change_pct} />
+          <ChangeBadge pct={card.change_pct} windowLabel={card.change_window} />
         </div>
 
         {showTier && tier ? (
