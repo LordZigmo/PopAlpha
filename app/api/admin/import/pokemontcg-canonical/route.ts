@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import { requireAdmin } from "@/lib/auth/require";
+import { dbAdmin } from "@/lib/db";
 import { getRequiredEnv } from "@/lib/env";
 import type { PokemonTcgCard, PokemonTcgSet } from "@/lib/pokemontcg/client";
 import { measureAsync } from "@/lib/perf";
@@ -306,18 +307,13 @@ async function updateRun(
   runId: string,
   updates: Partial<Record<"status" | "ok" | "items_fetched" | "items_upserted" | "items_failed" | "error_text" | "meta" | "ended_at", unknown>>
 ) {
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
   await supabase.from("ingest_runs").update(updates).eq("id", runId);
 }
 
 export async function POST(req: Request) {
-  const adminSecret = process.env.ADMIN_SECRET?.trim();
-  if (adminSecret) {
-    const supplied = req.headers.get("x-admin-secret")?.trim() ?? "";
-    if (!supplied || supplied !== adminSecret) {
-      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-    }
-  }
+  const auth = await requireAdmin(req);
+  if (!auth.ok) return auth.response;
 
   let apiKey = "";
   try {
@@ -330,7 +326,7 @@ export async function POST(req: Request) {
   const params = parseParams(req);
   const envName = process.env.NODE_ENV === "production" || process.env.VERCEL === "1" ? "production" : "development";
 
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
   const { data: runRow, error: runError } = await supabase
     .from("ingest_runs")
     .insert({

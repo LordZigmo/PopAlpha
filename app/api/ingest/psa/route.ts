@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { getCertificate } from "@/lib/psa/client";
 import { buildGradedVariantRef } from "@/lib/identity/variant-ref";
-import { getServerSupabaseClient } from "@/lib/supabaseServer";
-import { getRequiredEnv } from "@/lib/env";
+import { requireCron } from "@/lib/auth/require";
+import { dbAdmin } from "@/lib/db";
 
 export const runtime = "nodejs";
 
@@ -99,7 +99,7 @@ function scorePrintingCandidate(printing: PrintingCandidateRow, varietyText: str
 }
 
 async function resolvePsaPrinting(
-  supabase: ReturnType<typeof getServerSupabaseClient>,
+  supabase: ReturnType<typeof dbAdmin>,
   parsed: {
     subject: string | null;
     set_name: string | null;
@@ -154,31 +154,10 @@ async function resolvePsaPrinting(
 }
 
 export async function POST(req: Request) {
-  let cronSecret: string;
-  try {
-    cronSecret = getRequiredEnv("CRON_SECRET");
-  } catch {
-    return NextResponse.json({ ok: false, error: "Missing CRON_SECRET env var" }, { status: 500 });
-  }
+  const authResult = await requireCron(req);
+  if (!authResult.ok) return authResult.response;
 
-  const auth = req.headers.get("authorization") ?? "";
-  if (auth !== `Bearer ${cronSecret}`) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-  }
-
-  let supabase;
-  try {
-    supabase = getServerSupabaseClient();
-  } catch {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          "Server configuration error: missing Supabase server environment variables. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.",
-      },
-      { status: 500 }
-    );
-  }
+  const supabase = dbAdmin();
 
   const counters: IngestCounters = {
     itemsFetched: 0,

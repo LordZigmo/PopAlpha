@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import { dbAdmin } from "@/lib/db";
 import { buildSearchCardResults } from "@/lib/search/cards.mjs";
 import { normalizeSearchInput } from "@/lib/search/normalize.mjs";
 
@@ -66,7 +66,7 @@ function dedupeBySlug<T extends { canonical_slug: string }>(rows: T[]): T[] {
 }
 
 function buildDirectQuery(
-  supabase: ReturnType<typeof getServerSupabaseClient>,
+  supabase: ReturnType<typeof dbAdmin>,
   tokens: string[],
 ) {
   const textTokens = tokens.filter((token) => !isNumericToken(token));
@@ -87,7 +87,7 @@ function buildDirectQuery(
 }
 
 function buildAliasQuery(
-  supabase: ReturnType<typeof getServerSupabaseClient>,
+  supabase: ReturnType<typeof dbAdmin>,
   tokens: string[],
 ) {
   const textTokens = tokens.filter((token) => !isNumericToken(token));
@@ -113,7 +113,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: true, cards: [] });
   }
 
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
   const [directTokenResult, aliasTokenResult] = await Promise.all([
     buildDirectQuery(supabase, normalized.tokens),
     buildAliasQuery(supabase, normalized.tokens),

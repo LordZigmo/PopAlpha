@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import { dbAdmin } from "@/lib/db";
 
 export const runtime = "nodejs";
 
@@ -110,7 +110,7 @@ export async function GET(req: Request) {
   }
 
   try {
-    const supabase = getServerSupabaseClient();
+    const supabase = dbAdmin();
     const { data, error } = await supabase
       .from("psa_cert_snapshots")
       .select("id, cert, fetched_at, source, parsed, hash")

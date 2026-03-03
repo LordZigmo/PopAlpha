@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { authorizeCronRequest } from "@/lib/cronAuth";
+import { requireCron } from "@/lib/auth/require";
 import { buildJustTcgSetSearchTerms } from "@/lib/providers/justtcg-set-search";
 import {
   fetchJustTcgCardsPage,
@@ -10,7 +10,7 @@ import {
   setNameToJustTcgId,
   type JustTcgCard,
 } from "@/lib/providers/justtcg";
-import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import { dbAdmin } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,7 +40,7 @@ function normalizeName(value: string | null | undefined) {
 }
 
 async function resolveProviderSetId(setName: string, setCode: string | null) {
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
   const canonicalFallbackSetId = setNameToJustTcgId(setName);
   const searchTerms = buildJustTcgSetSearchTerms(setName, setCode);
   const target = normalizeName(setName);
@@ -154,15 +154,13 @@ function classifyProbe(params: {
 }
 
 export async function GET(req: Request) {
-  const auth = authorizeCronRequest(req, { allowDeprecatedQuerySecret: true });
-  if (!auth.ok) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireCron(req);
+  if (!auth.ok) return auth.response;
 
   const url = new URL(req.url);
   const limit = Math.max(1, Math.min(Number(url.searchParams.get("limit") ?? "10") || 10, MAX_LIMIT));
 
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
   const { data: unknownRows, error } = await supabase
     .from("card_printings")
     .select("set_name,set_code,card_number")
@@ -267,6 +265,5 @@ export async function GET(req: Request) {
     totalUnknownRowsScanned: unknownRows?.length ?? 0,
     statusCounts,
     rows,
-    deprecatedQueryAuth: auth.deprecatedQueryAuth,
   });
 }

@@ -15,7 +15,7 @@
  *   searchAssets(query, limit?)
  */
 
-import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import { dbAdmin } from "@/lib/db";
 import { parseVariantRef as parseCanonicalVariantRef } from "@/lib/identity/variant-ref";
 import {
   breakoutSignalLabel,
@@ -132,7 +132,7 @@ type ParsedLegacyVariantRef = {
 };
 
 async function getRecentVariantStats(slug: string, days = 30): Promise<VariantHistoryStat[]> {
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
   const { data, error } = await supabase
@@ -228,7 +228,7 @@ export async function getChartSeries(
   variantRef: string,
   days = CHART_DAYS_DEFAULT,
 ): Promise<ChartPoint[]> {
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
   const { data, error } = await supabase
@@ -253,7 +253,7 @@ export async function getChartSeries(
  * Returns null if no metrics row exists — never throws.
  */
 async function getLatestMetrics(slug: string): Promise<AssetMetrics | null> {
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
 
   const { data, error } = await supabase
     .from("card_metrics")
@@ -297,7 +297,7 @@ export async function getAssetPageData(
   slug: string,
   opts: { days?: number } = {},
 ): Promise<AssetPageData | null> {
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
   const days = opts.days ?? CHART_DAYS_DEFAULT;
 
   // Load canonical card (required — return null if missing so page can 404).
@@ -354,7 +354,7 @@ export async function listMovers(opts: {
   limit?: number;
   direction?: "up" | "down";
 }): Promise<MoverItem[]> {
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
   const limit = opts.limit ?? 10;
   const direction = opts.direction ?? "up";
   const cohort = opts.cohort ?? "any";
@@ -450,7 +450,7 @@ export async function searchAssets(
   query: string,
   limit = 25,
 ): Promise<SearchResult[]> {
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
   const term = query.trim();
   if (!term) return [];
 
@@ -597,7 +597,7 @@ export async function buildAssetViewModel(
   days = 30,
   preferredPrintingId: string | null = null,
 ): Promise<AssetViewModel | null> {
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
 
   // 1. Canonical card — return null if unknown so page can 404.
   const { data: canonical, error: canonicalError } = await supabase

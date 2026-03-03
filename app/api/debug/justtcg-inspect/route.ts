@@ -1,12 +1,10 @@
 import { NextResponse } from "next/server";
-import { authorizeCronRequest } from "@/lib/cronAuth";
+import { requireCron } from "@/lib/auth/require";
 import { fetchJustTcgCards, type JustTcgCard } from "@/lib/providers/justtcg";
 
 export async function GET(req: Request) {
-  const auth = authorizeCronRequest(req, { allowDeprecatedQuerySecret: true });
-  if (!auth.ok) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireCron(req);
+  if (!auth.ok) return auth.response;
 
   const { searchParams } = new URL(req.url);
   const setId = searchParams.get("set");
@@ -56,7 +54,6 @@ export async function GET(req: Request) {
 
     return NextResponse.json({
       ok: true,
-      deprecatedQueryAuth: auth.deprecatedQueryAuth,
       httpStatus,
       meta: (envelope._metadata as unknown) ?? null,
       pagination: (envelope.meta as unknown) ?? null,

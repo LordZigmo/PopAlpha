@@ -1,6 +1,6 @@
 import CardMarketIntelClient from "@/components/card-market-intel-client";
 import { computeLiquidity } from "@/lib/cards/liquidity";
-import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import { dbAdmin } from "@/lib/db";
 import {
   breakoutSignalLabel,
   trendSignalLabel,
@@ -65,7 +65,7 @@ export default async function MarketSummaryCard({
   selectedWindow,
   variants,
 }: MarketSummaryCardProps) {
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
   const printingIds = variants.map((variant) => variant.printingId);
   const variantRefs = variants.map((variant) => variant.variantRef);
   const history7dLimit = Math.max(120, variantRefs.length * 60);

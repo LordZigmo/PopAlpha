@@ -11,19 +11,17 @@
  */
 
 import { NextResponse } from "next/server";
-import { authorizeCronRequest } from "@/lib/cronAuth";
-import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import { requireCron } from "@/lib/auth/require";
+import { dbAdmin } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
 export async function GET(req: Request) {
-  const auth = authorizeCronRequest(req, { allowDeprecatedQuerySecret: true });
-  if (!auth.ok) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireCron(req);
+  if (!auth.ok) return auth.response;
 
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
 
   const { data, error } = await supabase.rpc("snapshot_price_history");
 
@@ -31,5 +29,5 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ ...((data as Record<string, unknown> | null) ?? {}), deprecatedQueryAuth: auth.deprecatedQueryAuth });
+  return NextResponse.json({ ...((data as Record<string, unknown> | null) ?? {}) });
 }

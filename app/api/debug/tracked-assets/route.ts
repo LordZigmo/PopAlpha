@@ -1,18 +1,16 @@
 import { NextResponse } from "next/server";
-import { authorizeCronRequest } from "@/lib/cronAuth";
-import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import { requireCron } from "@/lib/auth/require";
+import { dbAdmin } from "@/lib/db";
 
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
-  const auth = authorizeCronRequest(req, { allowDeprecatedQuerySecret: true });
-  if (!auth.ok) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireCron(req);
+  if (!auth.ok) return auth.response;
 
   const url = new URL(req.url);
   const limit = Math.max(1, Math.min(parseInt(url.searchParams.get("limit") ?? "100", 10) || 100, 500));
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
 
   const { data, error } = await supabase
     .from("tracked_assets")
@@ -29,7 +27,6 @@ export async function GET(req: Request) {
 
   return NextResponse.json({
     ok: true,
-    deprecatedQueryAuth: auth.deprecatedQueryAuth,
     count: rows.length,
     rows,
   });

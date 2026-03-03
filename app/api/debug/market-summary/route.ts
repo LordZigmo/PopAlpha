@@ -1,15 +1,13 @@
 import { NextResponse } from "next/server";
-import { authorizeCronRequest } from "@/lib/cronAuth";
+import { requireCron } from "@/lib/auth/require";
 import { buildRawVariantRef } from "@/lib/identity/variant-ref";
-import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import { dbAdmin } from "@/lib/db";
 
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
-  const auth = authorizeCronRequest(req, { allowDeprecatedQuerySecret: true });
-  if (!auth.ok) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireCron(req);
+  if (!auth.ok) return auth.response;
 
   const { searchParams } = new URL(req.url);
   const slug = searchParams.get("slug")?.trim() ?? "";
@@ -22,7 +20,7 @@ export async function GET(req: Request) {
     );
   }
 
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
   const variantRef = buildRawVariantRef(printingId);
 
   const [{ data: marketLatest }, { data: variantMetrics }, { data: historyRows }] = await Promise.all([
@@ -75,7 +73,6 @@ export async function GET(req: Request) {
 
   return NextResponse.json({
     ok: true,
-    deprecatedQueryAuth: auth.deprecatedQueryAuth,
     slug,
     printing_id: printingId,
     variant_ref: variantRef,

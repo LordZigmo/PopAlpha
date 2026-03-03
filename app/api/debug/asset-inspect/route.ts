@@ -1,14 +1,12 @@
 import { NextResponse } from "next/server";
-import { authorizeCronRequest } from "@/lib/cronAuth";
-import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import { requireCron } from "@/lib/auth/require";
+import { dbAdmin } from "@/lib/db";
 import { getDefaultVariantRef } from "@/lib/data/assets";
 import { parseVariantRef as parseCanonicalVariantRef } from "@/lib/identity/variant-ref";
 
 export async function GET(req: Request) {
-  const auth = authorizeCronRequest(req, { allowDeprecatedQuerySecret: true });
-  if (!auth.ok) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireCron(req);
+  if (!auth.ok) return auth.response;
 
   const { searchParams } = new URL(req.url);
   const slug = searchParams.get("slug");
@@ -20,7 +18,7 @@ export async function GET(req: Request) {
     );
   }
 
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
 
   // Parallel: canonical row, latest card_metrics, defaultVariantRef.
   const [{ data: canonical }, { data: metricsRows }, selectedVariantRef] = await Promise.all([
@@ -115,7 +113,6 @@ export async function GET(req: Request) {
 
   return NextResponse.json({
     ok: true,
-    deprecatedQueryAuth: auth.deprecatedQueryAuth,
     canonical,
     metrics: metricsRows ?? [],
     selectedVariantRef,

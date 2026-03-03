@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getSetSummaryPageData } from "@/lib/sets/summary";
-import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import { dbAdmin } from "@/lib/db";
 
 type CanonicalRow = {
   slug: string;
@@ -100,7 +100,7 @@ function chooseBestImage(printings: PrintingRow[]): string | null {
 export default async function SetBrowserPage({ params }: { params: Promise<{ setName: string }> }) {
   const { setName } = await params;
   const decodedSetName = decodeURIComponent(setName);
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
   const summary = await getSetSummaryPageData(decodedSetName);
 
   // Fetch all cards in this set

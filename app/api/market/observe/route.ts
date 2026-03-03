@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import { requireCron } from "@/lib/auth/require";
+import { dbAdmin } from "@/lib/db";
 import { measureAsync } from "@/lib/perf";
 
 export const runtime = "nodejs";
@@ -29,6 +30,9 @@ function toNumeric(value: string | undefined): number | null {
 }
 
 export async function POST(req: Request) {
+  const auth = await requireCron(req);
+  if (!auth.ok) return auth.response;
+
   let payload: ObserveRequest;
   try {
     payload = (await req.json()) as ObserveRequest;
@@ -82,7 +86,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, upserted: 0 });
   }
 
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
   const upsertResult = await measureAsync("market.observe.upsert", { canonicalSlug, grade, size: rows.length }, async () => {
     const { error } = await supabase.from("listing_observations").upsert(rows, {
       onConflict: "source,external_id",

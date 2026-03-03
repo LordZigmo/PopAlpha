@@ -1,19 +1,18 @@
 import { NextResponse } from "next/server";
-import { authorizeCronRequest } from "@/lib/cronAuth";
+import { requireCron } from "@/lib/auth/require";
 import { backfillJustTcgSet } from "@/lib/backfill/justtcg-set";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
 export async function POST(req: Request) {
-  const auth = authorizeCronRequest(req, { allowDeprecatedQuerySecret: true });
-  if (!auth.ok) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireCron(req);
+  if (!auth.ok) return auth.response;
 
   const url = new URL(req.url);
   const setKey = (url.searchParams.get("set") ?? "paldea-evolved").trim();
   const providerSetId = (url.searchParams.get("providerSetId") ?? "").trim();
+  const canonicalSetName = (url.searchParams.get("canonicalSetName") ?? "").trim();
   const language = (url.searchParams.get("language") ?? "EN").trim().toUpperCase();
   const aggressive = url.searchParams.get("aggressive") !== "0";
   const dryRun = url.searchParams.get("dryRun") === "1";
@@ -31,13 +30,13 @@ export async function POST(req: Request) {
       aggressive,
       dryRun,
       providerSetIdOverride: providerSetId || undefined,
+      canonicalSetNameOverride: canonicalSetName || undefined,
     });
 
     const status = result.ok ? 200 : 500;
     return NextResponse.json(
       {
         ...result,
-        deprecatedQueryAuth: auth.deprecatedQueryAuth,
       },
       { status },
     );
@@ -47,7 +46,6 @@ export async function POST(req: Request) {
       {
         ok: false,
         error: message,
-        deprecatedQueryAuth: auth.deprecatedQueryAuth,
       },
       { status: 500 },
     );

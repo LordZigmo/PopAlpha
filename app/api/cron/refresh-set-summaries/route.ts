@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { authorizeCronRequest } from "@/lib/cronAuth";
+import { requireCron } from "@/lib/auth/require";
 import { refreshSetSummaryPipeline } from "@/lib/sets/refresh";
 import { buildSetId } from "@/lib/sets/summary-core.mjs";
-import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import { dbAdmin } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -17,16 +17,14 @@ function computeLookbackDays(asOfDate: string | undefined): number {
 }
 
 export async function GET(req: Request) {
-  const auth = authorizeCronRequest(req, { allowDeprecatedQuerySecret: true });
-  if (!auth.ok) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireCron(req);
+  if (!auth.ok) return auth.response;
 
   const url = new URL(req.url);
   const asOfDate = url.searchParams.get("asOfDate")?.trim() || undefined;
   const setName = url.searchParams.get("setName")?.trim() || "";
   const setId = url.searchParams.get("setId")?.trim() || buildSetId(setName);
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
   const lookbackDays = computeLookbackDays(asOfDate);
 
   try {
@@ -74,8 +72,7 @@ export async function GET(req: Request) {
         lookbackDays,
         snapshotRows: data,
         finishRows: finishData,
-        deprecatedQueryAuth: auth.deprecatedQueryAuth,
-      });
+              });
     }
 
     const result = await refreshSetSummaryPipeline({
@@ -92,8 +89,7 @@ export async function GET(req: Request) {
       ok: true,
       mode: result.mode,
       result: result.result,
-      deprecatedQueryAuth: auth.deprecatedQueryAuth,
-    });
+          });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ ok: false, error: message }, { status: 500 });

@@ -14,8 +14,8 @@
  */
 
 import { NextResponse } from "next/server";
-import { authorizeCronRequest } from "@/lib/cronAuth";
-import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import { requireCron } from "@/lib/auth/require";
+import { dbAdmin } from "@/lib/db";
 
 export const runtime = "nodejs";
 
@@ -41,11 +41,8 @@ function resolveBaseUrl(): string {
 }
 
 export async function GET(req: Request) {
-  // Vercel sends the CRON_SECRET as a Bearer token when invoking cron routes.
-  const auth = authorizeCronRequest(req, { allowDeprecatedQuerySecret: true });
-  if (!auth.ok) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireCron(req);
+  if (!auth.ok) return auth.response;
 
   const adminSecret = process.env.ADMIN_SECRET?.trim();
   if (!adminSecret) {
@@ -56,7 +53,7 @@ export async function GET(req: Request) {
   }
 
   // ── Determine which page to start on ─────────────────────────────────────
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
 
   const { data: lastRun } = await supabase
     .from("ingest_runs")
@@ -101,7 +98,6 @@ export async function GET(req: Request) {
 
   return NextResponse.json({
     ok: importResult.ok ?? false,
-    deprecatedQueryAuth: auth.deprecatedQueryAuth,
     pageStart,
     pagesPerRun: PAGES_PER_RUN,
     ...importResult,

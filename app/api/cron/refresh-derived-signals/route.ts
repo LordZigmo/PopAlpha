@@ -12,9 +12,9 @@
  */
 
 import { NextResponse } from "next/server";
-import { authorizeCronRequest } from "@/lib/cronAuth";
+import { requireCron } from "@/lib/auth/require";
 import { computeVariantSignals } from "@/lib/signals/scoring";
-import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import { dbAdmin } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -32,12 +32,10 @@ type VariantMetricRow = {
 };
 
 export async function GET(req: Request) {
-  const auth = authorizeCronRequest(req, { allowDeprecatedQuerySecret: true });
-  if (!auth.ok) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireCron(req);
+  if (!auth.ok) return auth.response;
 
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
 
   try {
     const { data, error } = await supabase.rpc("refresh_derived_signals");
@@ -50,7 +48,7 @@ export async function GET(req: Request) {
         : Number((data as { rowsUpdated?: number; rows?: number } | null)?.rowsUpdated ?? (data as { rows?: number } | null)?.rows ?? 0);
 
     if (rowsUpdated > 0) {
-      return NextResponse.json({ ok: true, rowsUpdated, deprecatedQueryAuth: auth.deprecatedQueryAuth });
+      return NextResponse.json({ ok: true, rowsUpdated });
     }
 
     const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
@@ -181,7 +179,7 @@ export async function GET(req: Request) {
     }
 
     rowsUpdated = Math.max(rowsUpdated, fallbackRowsUpdated);
-    return NextResponse.json({ ok: true, rowsUpdated, deprecatedQueryAuth: auth.deprecatedQueryAuth });
+    return NextResponse.json({ ok: true, rowsUpdated });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ ok: false, error: msg }, { status: 500 });

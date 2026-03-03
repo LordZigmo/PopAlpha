@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { type SupabaseClient } from "@supabase/supabase-js";
 import { getCertificate, type CertificateResponse } from "@/lib/psa/client";
-import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import { dbAdmin } from "@/lib/db";
 import { buildSnapshotParsed, hashSnapshotParsed } from "@/lib/psa/snapshot";
 import { measureAsync } from "@/lib/perf";
 
@@ -96,7 +96,7 @@ export async function GET(req: Request) {
 
   let supabase: SupabaseClient;
   try {
-    supabase = getServerSupabaseClient();
+    supabase = dbAdmin();
   } catch {
     return NextResponse.json(
       {

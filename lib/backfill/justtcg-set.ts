@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { buildRawVariantRef } from "@/lib/identity/variant-ref";
-import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import { dbAdmin } from "@/lib/db";
 import {
   extractJustTcgPatternStamp,
   fetchJustTcgCardsPage,
@@ -28,6 +28,8 @@ export type BackfillJustTcgSetOptions = {
   aggressive?: boolean;
   dryRun?: boolean;
   providerSetIdOverride?: string;
+  /** Exact set name for card_printings lookup — bypasses inferSetDisplayName */
+  canonicalSetNameOverride?: string;
 };
 type ErrorCode =
   | "MISSING_CANONICAL_PRINTING"
@@ -168,13 +170,12 @@ function scoreCandidate(params: { card: JustTcgCard; variant: JustTcgVariant; pr
   const providerNumber = normalizeCardNumber(card.number);
   if (expectedNumber && providerNumber !== expectedNumber) return { score: -1, notes: ["number_mismatch"] };
   const providerFinish = mapJustTcgPrinting(variant.printing ?? "");
-  if (printing.finish !== "UNKNOWN" && providerFinish !== "UNKNOWN" && providerFinish !== printing.finish) {
-    return { score: -1, notes: ["finish_mismatch"] };
-  }
+  // Finish: trust JustTCG — don't hard-reject mismatches; the backfill will
+  // overwrite card_printings.finish with the provider's value after matching.
   const expectedStamp = normalizeStampToken(printing.stamp);
   const providerStamp = parseProviderCardStamp(card.name, variant.printing ?? "");
-  if (expectedStamp && providerStamp !== expectedStamp) return { score: -1, notes: ["stamp_mismatch"] };
-  if (!expectedStamp && providerStamp) return { score: -1, notes: ["unexpected_stamp"] };
+  // Stamps: trust JustTCG — don't hard-reject mismatches; the backfill will
+  // overwrite card_printings.stamp with the provider's value after matching.
   const language = (variant.language ?? "English").trim().toLowerCase();
   if (language !== "english") return { score: -1, notes: ["language_mismatch"] };
   let score = 0;
@@ -189,8 +190,11 @@ function scoreCandidate(params: { card: JustTcgCard; variant: JustTcgVariant; pr
     score += unknownFinishTieBreakScore(providerFinish);
     notes.push(`unknown_finish_prefers_${providerFinish.toLowerCase()}`);
   }
+  else { score += 5; notes.push("finish_adopt_from_provider"); }
   if (expectedStamp && providerStamp === expectedStamp) { score += 40; notes.push("stamp_match"); }
   else if (!expectedStamp && !providerStamp) { score += 10; notes.push("base_variant"); }
+  else if (providerStamp) { score += 5; notes.push("stamp_adopt_from_provider"); }
+  else { score += 0; notes.push("provider_missing_stamp"); }
   const expectedName = normalizeName(canonical.subject ?? canonical.canonical_name ?? canonical.slug);
   const providerName = normalizeName(stripProviderCardVariantSuffix(card.name));
   if (expectedName && providerName === expectedName) { score += 35; notes.push("name_exact"); }
@@ -218,13 +222,10 @@ function evaluateCandidateRejection(params: {
   if (expectedNumber && providerNumber !== expectedNumber) reasons.push("card_number_mismatch");
 
   const providerFinish = mapJustTcgPrinting(variant.printing ?? "");
-  if (printing.finish !== "UNKNOWN" && providerFinish !== "UNKNOWN" && providerFinish !== printing.finish) {
-    reasons.push("finish_mismatch");
-  }
+  // Finish: JustTCG is authoritative — finish mismatches are not rejection reasons.
   const expectedStamp = normalizeStampToken(printing.stamp);
   const providerStamp = parseProviderCardStamp(card.name, variant.printing ?? "");
-  if (expectedStamp && providerStamp !== expectedStamp) reasons.push("stamp_mismatch");
-  if (!expectedStamp && providerStamp) reasons.push("unexpected_stamp");
+  // Stamps: JustTCG is authoritative — stamp mismatches are not rejection reasons.
 
   const language = (variant.language ?? "English").trim().toLowerCase();
   if (language !== "english") reasons.push("language_mismatch");
@@ -283,7 +284,7 @@ function buildRejectedCandidatesSample(params: {
 }
 async function batchUpsert(table: string, rows: Record<string, unknown>[], onConflict: string, batchSize = 250) {
   if (rows.length === 0) return { upserted: 0, firstError: null as string | null };
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
   let upserted = 0;
   let firstError: string | null = null;
   for (let i = 0; i < rows.length; i += batchSize) {
@@ -296,7 +297,7 @@ async function batchUpsert(table: string, rows: Record<string, unknown>[], onCon
 }
 async function batchInsertIgnore(table: string, rows: Record<string, unknown>[], onConflict: string, selectColumn?: string, batchSize = 500) {
   if (rows.length === 0) return { inserted: 0, firstError: null as string | null };
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
   let inserted = 0;
   let firstError: string | null = null;
   for (let i = 0; i < rows.length; i += batchSize) {
@@ -311,7 +312,7 @@ async function batchInsertIgnore(table: string, rows: Record<string, unknown>[],
 }
 async function refreshSignalsInBatches(keys: Array<Record<string, unknown>>) {
   if (keys.length === 0) return { rowsUpdated: 0, firstError: null as string | null };
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
   let rowsUpdated = 0;
   let firstError: string | null = null;
 
@@ -434,7 +435,7 @@ async function fetchSetCards(providerSetId: string, aggressive: boolean) {
 }
 
 export async function backfillJustTcgSet(setKey: string, options: BackfillJustTcgSetOptions = {}): Promise<BackfillJustTcgSetResult> {
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
   const language = options.language ?? "EN";
   if (language !== "EN") throw new Error("This backfill currently supports EN only. Re-run with { language: 'EN' }.");
   const dryRun = options.dryRun === true;
@@ -442,7 +443,7 @@ export async function backfillJustTcgSet(setKey: string, options: BackfillJustTc
   const providerSetIdOverride = (options.providerSetIdOverride ?? "").trim() || null;
   const setKeyNormalized = String(setKey ?? "").trim().toLowerCase();
   if (!setKeyNormalized) throw new Error("A JustTCG set key is required, e.g. 'paldea-evolved'.");
-  const canonicalSetNameGuess = inferSetDisplayName(setKeyNormalized);
+  const canonicalSetNameGuess = (options.canonicalSetNameOverride ?? "").trim() || inferSetDisplayName(setKeyNormalized);
   const providerSetIdCandidates = Array.from(new Set([setKeyNormalized, setKeyNormalized.endsWith("-pokemon") ? setKeyNormalized : `${setKeyNormalized}-pokemon`]));
 
   const { data: runRow, error: runError } = await supabase
@@ -549,6 +550,8 @@ export async function backfillJustTcgSet(setKey: string, options: BackfillJustTc
     const variantMetricRows: Record<string, unknown>[] = [];
     const historyRows: Record<string, unknown>[] = [];
     const updatedVariantKeys: Array<{ canonical_slug: string; variant_ref: string; provider: string; grade: string }> = [];
+    const stampUpdates: Array<{ printing_id: string; stamp: string }> = [];
+    const finishUpdates: Array<{ printing_id: string; finish: string }> = [];
     const nowIso = new Date().toISOString();
 
     for (const printing of printings) {
@@ -618,17 +621,26 @@ export async function backfillJustTcgSet(setKey: string, options: BackfillJustTc
         ingestRows.push({ provider: PROVIDER, job: JOB, set_id: providerSetId, card_id: printing.id, variant_id: null, canonical_slug: printing.canonical_slug, printing_id: printing.id, raw_payload: { status: "no_match", code: "NO_PROVIDER_MATCH", expectedNumber, finish: printing.finish } });
         continue;
       }
-      const best = candidates[0];
+      // Tie-break ambiguous matches: prefer shorter variant ID (base variant over promo/special)
+      let best = candidates[0];
       if (candidates[1] && candidates[1].score === best.score && candidates[1].variant.id !== best.variant.id) {
-        pushFailure({
-          canonical_slug: printing.canonical_slug, printing_id: printing.id, code: "AMBIGUOUS_PROVIDER_MATCH", detail: "Multiple JustTCG variants tied for top match.",
-          sample: { topCandidates: candidates.slice(0, 3).map((candidate) => ({ cardId: candidate.card.id, variantId: candidate.variant.id, score: candidate.score, notes: candidate.notes })) },
-        });
-        ingestRows.push({ provider: PROVIDER, job: JOB, set_id: providerSetId, card_id: printing.id, variant_id: null, canonical_slug: printing.canonical_slug, printing_id: printing.id, raw_payload: { status: "ambiguous", code: "AMBIGUOUS_PROVIDER_MATCH" } });
-        continue;
+        const tied = candidates.filter((c) => c.score === best.score);
+        tied.sort((a, b) => a.variant.id.length - b.variant.id.length || a.variant.id.localeCompare(b.variant.id));
+        best = tied[0];
       }
 
       matchedCount += 1;
+      // Adopt JustTCG stamp when it differs from our local data
+      const providerStampForMatch = parseProviderCardStamp(best.card.name, best.variant.printing ?? "");
+      const localStampForMatch = normalizeStampToken(printing.stamp);
+      if (providerStampForMatch && providerStampForMatch !== localStampForMatch) {
+        stampUpdates.push({ printing_id: printing.id, stamp: providerStampForMatch });
+      }
+      // Adopt JustTCG finish when it differs from our local data
+      const providerFinishForMatch = mapJustTcgPrinting(best.variant.printing ?? "");
+      if (providerFinishForMatch !== "UNKNOWN" && providerFinishForMatch !== printing.finish) {
+        finishUpdates.push({ printing_id: printing.id, finish: providerFinishForMatch });
+      }
       const variantRef = buildRawVariantRef(printing.id);
       const observedAt = toObservedAt(best.variant.lastUpdated ?? null, nowIso);
       const historyWindow =
@@ -736,6 +748,15 @@ export async function backfillJustTcgSet(setKey: string, options: BackfillJustTc
         } else {
           signalsRowsUpdated = rowsUpdated;
         }
+      }
+      // Adopt JustTCG stamps + finishes into card_printings (provider is authoritative)
+      for (const su of stampUpdates) {
+        const { error } = await supabase.from("card_printings").update({ stamp: su.stamp }).eq("id", su.printing_id);
+        if (error) firstError ??= `card_printings stamp update: ${error.message}`;
+      }
+      for (const fu of finishUpdates) {
+        const { error } = await supabase.from("card_printings").update({ finish: fu.finish }).eq("id", fu.printing_id);
+        if (error) firstError ??= `card_printings finish update: ${error.message}`;
       }
     }
 

@@ -1,3 +1,5 @@
+import { safeEqual } from "@/lib/auth/context";
+
 export type CronAuthResult = {
   ok: boolean;
   deprecatedQueryAuth: boolean;
@@ -10,6 +12,8 @@ type CronAuthOptions = {
 /**
  * Standard cron auth is Authorization: Bearer <CRON_SECRET>.
  * ?secret=... remains as a temporary deprecated fallback for manual debugging.
+ *
+ * @deprecated Use requireCron() from "@/lib/auth/require" instead.
  */
 export function authorizeCronRequest(
   req: Request,
@@ -21,13 +25,14 @@ export function authorizeCronRequest(
   }
 
   const authHeader = req.headers.get("authorization")?.trim() ?? "";
-  if (authHeader === `Bearer ${secret}`) {
+  const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+  if (safeEqual(bearer, secret)) {
     return { ok: true, deprecatedQueryAuth: false };
   }
 
   if (options.allowDeprecatedQuerySecret) {
     const querySecret = new URL(req.url).searchParams.get("secret")?.trim() ?? "";
-    if (querySecret === secret) {
+    if (safeEqual(querySecret, secret)) {
       return { ok: true, deprecatedQueryAuth: true };
     }
   }

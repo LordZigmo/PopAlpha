@@ -225,6 +225,7 @@ export default function PortfolioPage() {
     const { data: holdData } = await supabase
       .from("holdings")
       .select("id, canonical_slug, printing_id, grade, qty, price_paid_usd, acquired_on, venue")
+      .eq("user_id", sessData.session.user.id)
       .order("created_at", { ascending: false });
 
     setHoldings((holdData ?? []) as HoldingRow[]);

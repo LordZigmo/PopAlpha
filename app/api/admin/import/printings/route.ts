@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { getServerSupabaseClient } from "@/lib/supabaseServer";
-import { getRequiredEnv } from "@/lib/env";
+import { requireAdmin } from "@/lib/auth/require";
+import { dbAdmin } from "@/lib/db";
 
 export const runtime = "nodejs";
 
@@ -41,18 +41,8 @@ function normalizeAlias(value: string): string {
 }
 
 export async function POST(req: Request) {
-  const auth = req.headers.get("authorization") ?? "";
-
-  let adminSecret: string;
-  try {
-    adminSecret = getRequiredEnv("ADMIN_SECRET");
-  } catch {
-    return NextResponse.json({ ok: false, error: "Missing ADMIN_SECRET env var (server-only)." }, { status: 500 });
-  }
-
-  if (auth !== `Bearer ${adminSecret}`) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-  }
+  const authResult = await requireAdmin(req);
+  if (!authResult.ok) return authResult.response;
 
   let payload: unknown;
   try {
@@ -65,7 +55,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "Body must be a JSON array of printings." }, { status: 400 });
   }
 
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
   const rejects: Array<{ index: number; reason: string }> = [];
   let inserted = 0;
   let updated = 0;

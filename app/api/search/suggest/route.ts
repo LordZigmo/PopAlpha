@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import { dbAdmin } from "@/lib/db";
 import { measureAsync } from "@/lib/perf";
 
 export const runtime = "nodejs";
@@ -36,7 +36,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: true, cards: [], decks: [] });
   }
 
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
   const containsPattern = `%${sanitizeForFilter(q)}%`;
 
   const cardsRaw = await measureAsync("search.suggest.cards", { q }, async () => {

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { authorizeCronRequest } from "@/lib/cronAuth";
-import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import { requireCron } from "@/lib/auth/require";
+import { dbAdmin } from "@/lib/db";
 
 export const runtime = "nodejs";
 
@@ -15,12 +15,10 @@ const STARTER_SLUGS: Array<{ slug: string; priority: number }> = [
 ];
 
 export async function POST(req: Request) {
-  const auth = authorizeCronRequest(req, { allowDeprecatedQuerySecret: true });
-  if (!auth.ok) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireCron(req);
+  if (!auth.ok) return auth.response;
 
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
   const slugs = STARTER_SLUGS.map((entry) => entry.slug);
 
   const { data: printings, error } = await supabase
@@ -80,7 +78,6 @@ export async function POST(req: Request) {
 
   return NextResponse.json({
     ok: true,
-    deprecatedQueryAuth: auth.deprecatedQueryAuth,
     inserted,
     missing,
     seeded,

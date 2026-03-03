@@ -1,19 +1,17 @@
 import { NextResponse } from "next/server";
-import { authorizeCronRequest } from "@/lib/cronAuth";
-import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import { requireCron } from "@/lib/auth/require";
+import { dbAdmin } from "@/lib/db";
 
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
-  const auth = authorizeCronRequest(req, { allowDeprecatedQuerySecret: true });
-  if (!auth.ok) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireCron(req);
+  if (!auth.ok) return auth.response;
 
   const url = new URL(req.url);
   const sinceHours = Math.max(1, Math.min(parseInt(url.searchParams.get("since_hours") ?? "24", 10) || 24, 24 * 30));
   const sinceIso = new Date(Date.now() - sinceHours * 60 * 60 * 1000).toISOString();
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
 
   const { data: diagnostics, error } = await supabase
     .from("tracked_refresh_diagnostics")
@@ -81,7 +79,6 @@ export async function GET(req: Request) {
 
   return NextResponse.json({
     ok: true,
-    deprecatedQueryAuth: auth.deprecatedQueryAuth,
     since_hours: sinceHours,
     count: rows.length,
     latest_nightly_run: latestNightlyRun ?? null,

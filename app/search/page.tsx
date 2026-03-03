@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { unstable_cache } from "next/cache";
-import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import { dbAdmin } from "@/lib/db";
 import { measureAsync } from "@/lib/perf";
 import SearchResultsSection from "@/components/search-results-section";
 import CardSearch from "@/components/card-search";
@@ -228,7 +228,7 @@ async function runBroadSearch(params: {
   pricedOnly: boolean;
 }): Promise<SearchResultBundle> {
   const { q, page, pageSize, lang, setFilter, parsedNumber, sort, pricedOnly } = params;
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
   const qLower = normalizeQuery(q);
   const tokens = tokenizeQuery(qLower);
   const subjectMode = isLikelySubjectQuery(qLower);
@@ -530,7 +530,7 @@ async function loadSetSearchEnhancements(setName: string): Promise<{
   setSummary: SetSummarySnapshot | null;
   chaseCards: SearchDisplayRow[];
 }> {
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
   const [setSummary, canonicalRowsResult] = await Promise.all([
     getLatestSetSummarySnapshot(setName),
     supabase
@@ -646,7 +646,7 @@ export default async function SearchPage({
     redirect(`/cert/${encodeURIComponent(qNormalized)}`);
   }
 
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
   let setFilter = requestedSetFilter;
 
   const { data: printingAliasRow } = await measureAsync("search.printing_alias", { q: qNormalized }, async () =>

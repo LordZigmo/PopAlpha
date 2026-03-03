@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import { dbAdmin } from "@/lib/db";
 
 export const runtime = "nodejs";
 
@@ -59,7 +59,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: "Missing subject query param." }, { status: 400 });
   }
 
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
   const { data, error } = await supabase
     .from("canonical_cards")
     .select("slug, canonical_name, subject, set_name, year, card_number, language, variant")

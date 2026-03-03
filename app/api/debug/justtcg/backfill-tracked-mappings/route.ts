@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { NextResponse } from "next/server";
-import { authorizeCronRequest } from "@/lib/cronAuth";
+import { requireCron } from "@/lib/auth/require";
 import { buildJustTcgSetSearchTerms } from "@/lib/providers/justtcg-set-search";
 import {
   fetchJustTcgCards,
@@ -12,7 +12,7 @@ import {
   type JustTcgCard,
   type JustTcgVariant,
 } from "@/lib/providers/justtcg";
-import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import { dbAdmin } from "@/lib/db";
 
 export const runtime = "nodejs";
 
@@ -72,7 +72,7 @@ function normalizeName(value: string | null | undefined): string {
 async function resolveTrackedProviderSetId(params: {
   setName: string | null | undefined;
   setCode: string | null | undefined;
-  supabase: ReturnType<typeof getServerSupabaseClient>;
+  supabase: ReturnType<typeof dbAdmin>;
 }) {
   const setName = String(params.setName ?? "").trim();
   const setCode = String(params.setCode ?? "").trim() || null;
@@ -190,14 +190,12 @@ function scoreCandidate(params: {
 }
 
 export async function POST(req: Request) {
-  const auth = authorizeCronRequest(req, { allowDeprecatedQuerySecret: true });
-  if (!auth.ok) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireCron(req);
+  if (!auth.ok) return auth.response;
 
   const url = new URL(req.url);
   const limit = Math.max(1, Math.min(parseInt(url.searchParams.get("limit") ?? `${DEFAULT_LIMIT}`, 10) || DEFAULT_LIMIT, MAX_LIMIT));
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
   const now = new Date().toISOString();
 
   const { data: runRow } = await supabase
@@ -522,7 +520,6 @@ export async function POST(req: Request) {
     providerRequestsUsed,
     createdMappings,
     noMatches: noMatches.slice(0, 10),
-    deprecatedQueryAuth: auth.deprecatedQueryAuth,
     firstError,
   });
 }

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { authorizeCronRequest } from "@/lib/cronAuth";
+import { requireCron } from "@/lib/auth/require";
 import { buildJustTcgSetSearchTerms } from "@/lib/providers/justtcg-set-search";
 import {
   extractJustTcgPatternStamp,
@@ -12,7 +12,7 @@ import {
   setNameToJustTcgId,
   type JustTcgCard,
 } from "@/lib/providers/justtcg";
-import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import { dbAdmin } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -179,7 +179,7 @@ async function ensurePrintingRow(
     finish_detail: row.finish_detail ?? null,
     source_id: row.source_id ?? null,
   };
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
   const source = String(row.source ?? "");
   const sourceId = String(row.source_id ?? "");
   const { data: existing, error: selectError } = await supabase
@@ -315,7 +315,7 @@ async function resolveProviderSetId(params: { setName: string; setCode: string |
   const { setName, setCode, providerSetIdOverride } = params;
   if (providerSetIdOverride) return providerSetIdOverride;
 
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
   const canonicalFallbackSetId = setNameToJustTcgId(setName);
   const searchTerms = buildJustTcgSetSearchTerms(setName, setCode);
   const target = normalizeName(setName);
@@ -385,12 +385,10 @@ async function resolveProviderSetId(params: { setName: string; setCode: string |
 }
 
 export async function POST(req: Request) {
-  const auth = authorizeCronRequest(req, { allowDeprecatedQuerySecret: true });
-  if (!auth.ok) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireCron(req);
+  if (!auth.ok) return auth.response;
 
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
   const url = new URL(req.url);
   const targetSetCode = (url.searchParams.get("setCode") ?? DEFAULT_SET_CODE).trim() || null;
   const targetSetName = (url.searchParams.get("setName") ?? DEFAULT_SET_NAME).trim() || DEFAULT_SET_NAME;
@@ -426,7 +424,6 @@ export async function POST(req: Request) {
       insertedVariants: 0,
       skipped: 0,
       note: "No UNKNOWN EN printings remain for this set.",
-      deprecatedQueryAuth: auth.deprecatedQueryAuth,
     });
   }
 
@@ -823,6 +820,5 @@ export async function POST(req: Request) {
     skipped,
     updatedSamples,
     skippedSamples,
-    deprecatedQueryAuth: auth.deprecatedQueryAuth,
   });
 }

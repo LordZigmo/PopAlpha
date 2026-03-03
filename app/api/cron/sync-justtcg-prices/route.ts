@@ -42,12 +42,12 @@
 
 import crypto from "node:crypto";
 import { NextResponse } from "next/server";
-import { authorizeCronRequest } from "@/lib/cronAuth";
+import { requireCron } from "@/lib/auth/require";
 import { buildTrackedSelectionPlan } from "@/lib/cron/justtcg-tracked-selection.mjs";
 import { buildRawVariantRef } from "@/lib/identity/variant-ref";
 import { buildJustTcgSetSearchTerms } from "@/lib/providers/justtcg-set-search";
 import { refreshSetSummaryPipeline } from "@/lib/sets/refresh";
-import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import { dbAdmin } from "@/lib/db";
 import {
   fetchJustTcgCards,
   jtFetchRaw,
@@ -288,7 +288,7 @@ function setNamesAreCompatible(providerSetName: string, candidateSetName: string
 }
 
 async function resolveProviderSetIdForSet(params: {
-  supabase: ReturnType<typeof getServerSupabaseClient>;
+  supabase: ReturnType<typeof dbAdmin>;
   setCode: string;
   setName: string;
   existingProviderSetId: string | null;
@@ -347,7 +347,7 @@ async function resolveProviderSetIdForSet(params: {
 }
 
 async function batchUpsert<T extends Record<string, unknown>>(
-  supabase: ReturnType<typeof getServerSupabaseClient>,
+  supabase: ReturnType<typeof dbAdmin>,
   table: string,
   rows: T[],
   onConflict: string,
@@ -370,7 +370,7 @@ async function batchUpsert<T extends Record<string, unknown>>(
 }
 
 async function batchInsertIgnore<T extends Record<string, unknown>>(
-  supabase: ReturnType<typeof getServerSupabaseClient>,
+  supabase: ReturnType<typeof dbAdmin>,
   table: string,
   rows: T[],
   onConflict: string,
@@ -562,14 +562,13 @@ function queuePrintingBackedVariantWrite(params: {
 
 async function runNightlySync(params: {
   req: Request;
-  supabase: ReturnType<typeof getServerSupabaseClient>;
+  supabase: ReturnType<typeof dbAdmin>;
   now: string;
-  authDeprecatedQueryAuth: boolean;
   limit: number;
   cursor: number;
   trackedOnly: boolean;
 }) {
-  const { req, supabase, now, authDeprecatedQueryAuth, limit, cursor, trackedOnly } = params;
+  const { req, supabase, now, limit, cursor, trackedOnly } = params;
   const url = new URL(req.url);
   const force = url.searchParams.get("force") === "1";
 
@@ -785,7 +784,6 @@ async function runNightlySync(params: {
       signalsRowsUpdatedIncremental: 0,
       signalsRowsUpdatedFull: 0,
       signalsRefreshMode: "none",
-      deprecatedQueryAuth: authDeprecatedQueryAuth,
     });
   }
 
@@ -1230,7 +1228,6 @@ async function runNightlySync(params: {
           setSummaryRefreshMode,
           setSummaryRefreshResult,
           setSummaryRefreshError,
-          deprecatedQueryAuth: authDeprecatedQueryAuth,
           firstError,
         },
       })
@@ -1260,7 +1257,6 @@ async function runNightlySync(params: {
     setSummaryRefreshResult,
     setSummaryRefreshError,
     firstError,
-    deprecatedQueryAuth: authDeprecatedQueryAuth,
   });
 }
 
@@ -1268,10 +1264,8 @@ async function runNightlySync(params: {
 
 export async function GET(req: Request) {
   // ── Auth ────────────────────────────────────────────────────────────────────
-  const auth = authorizeCronRequest(req, { allowDeprecatedQuerySecret: true });
-  if (!auth.ok) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireCron(req);
+  if (!auth.ok) return auth.response;
 
   const url = new URL(req.url);
   const mode = url.searchParams.get("mode")?.trim() ?? "default";
@@ -1283,7 +1277,7 @@ export async function GET(req: Request) {
   const force       = url.searchParams.get("force") === "1";
   const isDebug     = !!debugSet;
 
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
   const now = new Date().toISOString();
   const runDate = now.slice(0, 10); // YYYY-MM-DD
 
@@ -1295,7 +1289,6 @@ export async function GET(req: Request) {
       req,
       supabase,
       now,
-      authDeprecatedQueryAuth: auth.deprecatedQueryAuth,
       limit: nightlyLimit,
       cursor: nightlyCursor,
       trackedOnly,
@@ -1964,7 +1957,6 @@ export async function GET(req: Request) {
           isDebug,
           assetFilter,
           sampleMode,
-          deprecatedQueryAuth: auth.deprecatedQueryAuth,
           firstError,
           marketLatestWritten,
           historyPointsWritten,
@@ -2029,7 +2021,6 @@ export async function GET(req: Request) {
     setSummaryRefreshError,
     firstError,
     metricsRefreshResult,
-    deprecatedQueryAuth: auth.deprecatedQueryAuth,
     ...(isDebug && {
       debugSampleItem,
       debugProviderResponse,

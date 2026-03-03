@@ -1,4 +1,4 @@
-import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import { dbAdmin } from "@/lib/db";
 import {
   GRADED_PROVIDERS,
   GRADE_BUCKETS,
@@ -151,7 +151,7 @@ function buildGradedMetrics(row: GradedMetricRow | null): CardDetailMetrics | nu
 }
 
 export async function resolveCanonicalSlug(input: string): Promise<string | null> {
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
   const slug = input.trim();
   if (!slug) return null;
 
@@ -217,7 +217,7 @@ function pickDefaultGradeBucket(
 }
 
 export async function buildCardDetailResponse(inputSlug: string): Promise<CardDetailResponse | null> {
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
   const canonicalSlug = await resolveCanonicalSlug(inputSlug);
   if (!canonicalSlug) return null;
 

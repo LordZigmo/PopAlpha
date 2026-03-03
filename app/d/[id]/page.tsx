@@ -1,5 +1,5 @@
 import { notFound, redirect } from "next/navigation";
-import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import { dbAdmin } from "@/lib/db";
 
 type DeckCardRow = {
   deck_id: string;
@@ -23,7 +23,7 @@ export default async function DeckDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const supabase = getServerSupabaseClient();
+  const supabase = dbAdmin();
 
   const { data: deckCardsData } = await supabase
     .from("deck_cards")

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getServerSupabaseClient } from "@/lib/supabaseServer";
+import { requireUser } from "@/lib/auth/require";
+import { dbAdmin } from "@/lib/db";
 
 export const runtime = "nodejs";
 
@@ -25,17 +26,22 @@ function parseNumber(value: unknown): number | null {
 }
 
 export async function GET(req: Request) {
+  const auth = await requireUser(req);
+  if (!auth.ok) return auth.response;
+  const { userId } = auth;
+
   const cert = new URL(req.url).searchParams.get("cert")?.trim() ?? "";
   if (!cert) {
     return NextResponse.json({ ok: false, error: "Missing cert query param." }, { status: 400 });
   }
 
   try {
-    const supabase = getServerSupabaseClient();
+    const supabase = dbAdmin();
     const { data, error } = await supabase
       .from("private_sales")
       .select("id, cert, price, currency, sold_at, fees, payment_method, notes, created_at")
       .eq("cert", cert)
+      .eq("owner_id", userId)
       .order("sold_at", { ascending: false })
       .returns<PrivateSaleRow[]>();
 
@@ -50,6 +56,10 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const auth = await requireUser(req);
+  if (!auth.ok) return auth.response;
+  const { userId } = auth;
+
   let payload: Record<string, unknown>;
 
   try {
@@ -83,7 +93,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    const supabase = getServerSupabaseClient();
+    const supabase = dbAdmin();
 
     const { data, error } = await supabase
       .from("private_sales")
@@ -95,6 +105,7 @@ export async function POST(req: Request) {
         fees,
         payment_method: paymentMethod,
         notes,
+        owner_id: userId,
       })
       .select("id, cert, price, currency, sold_at, fees, payment_method, notes, created_at")
       .single<PrivateSaleRow>();
