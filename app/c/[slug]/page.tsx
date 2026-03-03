@@ -601,7 +601,6 @@ export default async function CanonicalCardPage({
                       style={{ color: priceChangeColor }}
                     >
                       {priceChangePct > 0 ? "+" : ""}{Math.abs(priceChangePct) >= 10 ? priceChangePct.toFixed(0) : priceChangePct.toFixed(1)}%
-                      {priceChangeLabel ? <span className="ml-1 text-[14px] font-semibold text-[#555] sm:text-[16px]">{priceChangeLabel}</span> : null}
                     </span>
                   )}
                 </div>
@@ -705,12 +704,6 @@ export default async function CanonicalCardPage({
           summaryText={cardProfile?.summary_long ?? cardProfile?.summary_short ?? null}
         />
 
-        <CardViewTracker
-          canonicalSlug={slug}
-          initialTotalViews={viewSnapshot.totalViews}
-          initialSeries={viewSnapshot.series}
-        />
-
         {/* ── Market Summary (enlarged chart) ──────────────────────────────── */}
         <MarketSummaryCard
           canonicalSlug={slug}
@@ -782,6 +775,14 @@ export default async function CanonicalCardPage({
           userVote={null}
           resolvesAt={Date.now() + 6 * 24 * 60 * 60 * 1000 + 12 * 60 * 60 * 1000}
         />
+
+        <div className="pt-4 sm:pt-5">
+          <CardViewTracker
+            canonicalSlug={slug}
+            initialTotalViews={viewSnapshot.totalViews}
+            initialSeries={viewSnapshot.series}
+          />
+        </div>
 
         {/* ── Live eBay Listings ──────────────────────────────────────────── */}
         <CollapsibleSection title="Live eBay Listings" defaultOpen={false} badge={<Pill label="Live" tone="neutral" size="small" />}>

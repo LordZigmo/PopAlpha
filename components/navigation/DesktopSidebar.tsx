@@ -6,6 +6,8 @@ import { usePathname } from "next/navigation";
 import { SignedIn, SignedOut, UserButton, useUser } from "@clerk/nextjs";
 import { motion } from "framer-motion";
 import PricingModal from "@/components/billing/pricing-modal";
+import LiveActivityFeed from "@/components/navigation/live-activity-feed";
+import ElitePromo from "@/components/sidebar/ElitePromo";
 import { Home, PieChart, UserCircle, Users } from "lucide-react";
 
 type LinkItem = {
@@ -163,25 +165,9 @@ export default function DesktopSidebar() {
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setPricingOpen(true)}
-          className="relative mt-4 block overflow-hidden rounded-[1.35rem] border border-[#1E1E1E] bg-[#101010] px-4 py-4 text-left"
-        >
-          <motion.span
-            className="absolute inset-y-0 -left-1/3 w-1/3 bg-gradient-to-r from-transparent via-white/18 to-transparent"
-            animate={{ x: ["0%", "360%"] }}
-            transition={{ duration: 2.4, repeat: Number.POSITIVE_INFINITY, ease: "linear" }}
-          />
-          <span className="relative z-10 flex items-center justify-between gap-3">
-            <span className="text-[14px] font-semibold tracking-[-0.01em] text-[#C9E6FF]">
-              Unlock Elite
-            </span>
-            <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#7DBBFF]">
-              Pro
-            </span>
-          </span>
-        </button>
+        <LiveActivityFeed />
+
+        <ElitePromo onClick={() => setPricingOpen(true)} />
 
         <PricingModal open={pricingOpen} onClose={() => setPricingOpen(false)} />
       </div>

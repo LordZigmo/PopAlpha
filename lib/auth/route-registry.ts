@@ -13,6 +13,7 @@
  */
 
 export const PUBLIC_ROUTES = [
+  "cards/live-activity",
   "cards/[slug]/detail",
   "cards/[slug]/view",
   "search/cards",
@@ -56,6 +57,7 @@ export const INGEST_ROUTES = [
 ];
 
 export const USER_ROUTES = [
+  "community-pulse",
   "private-sales",
   "private-sales/[id]",
   "pro/signals",

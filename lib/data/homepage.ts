@@ -30,6 +30,7 @@ export type HomepageCard = {
   change_window: "24H" | "7D" | null;
   mover_tier: "hot" | "warming" | "cooling" | "cold" | null;
   image_url: string | null;
+  sparkline_7d: number[];
 };
 
 export type HomepageData = {
@@ -141,7 +142,7 @@ export async function getHomepageData(): Promise<HomepageData> {
     const slugArray = [...allSlugs];
 
     // ── Batch 2: card metadata + prices (with change pcts) + images ────
-    const [cardsResult, marketPulseMap, imagesResult] = await Promise.all([
+    const [cardsResult, marketPulseMap, imagesResult, sparklineResult] = await Promise.all([
       db
         .from("canonical_cards")
         .select("slug, canonical_name, set_name, year")
@@ -156,10 +157,20 @@ export async function getHomepageData(): Promise<HomepageData> {
         .eq("language", "EN")
         .not("image_url", "is", null)
         .limit(slugArray.length * 3),
+
+      db
+        .from("public_price_history")
+        .select("canonical_slug, ts, price")
+        .in("canonical_slug", slugArray)
+        .eq("provider", "JUSTTCG")
+        .eq("source_window", "7d")
+        .order("ts", { ascending: false })
+        .limit(Math.max(slugArray.length * 24, 120)),
     ]);
 
     if (cardsResult.error) console.error("[homepage] cards", cardsResult.error.message);
     if (imagesResult.error) console.error("[homepage] images", imagesResult.error.message);
+    if (sparklineResult.error) console.error("[homepage] sparkline", sparklineResult.error.message);
 
     // ── Build lookup maps ─────────────────────────────────────────────────
     type CardRow = { slug: string; canonical_name: string; set_name: string | null; year: number | null };
@@ -173,6 +184,18 @@ export async function getHomepageData(): Promise<HomepageData> {
       if (!imageMap.has(row.canonical_slug) && row.image_url) {
         imageMap.set(row.canonical_slug, row.image_url);
       }
+    }
+
+    const sparklineMap = new Map<string, number[]>();
+    for (const row of (sparklineResult.data ?? []) as { canonical_slug: string; price: number | null }[]) {
+      if (!row.canonical_slug || row.price == null) continue;
+      const current = sparklineMap.get(row.canonical_slug) ?? [];
+      if (current.length >= 7) continue;
+      current.push(row.price);
+      sparklineMap.set(row.canonical_slug, current);
+    }
+    for (const [slug, points] of sparklineMap.entries()) {
+      sparklineMap.set(slug, [...points].reverse());
     }
 
     // ── Assemble helpers ──────────────────────────────────────────────────
@@ -192,6 +215,7 @@ export async function getHomepageData(): Promise<HomepageData> {
         change_window: marketPulse?.changeWindow ?? null,
         image_url: imageMap.get(slug) ?? null,
         mover_tier: overrides.mover_tier ?? null,
+        sparkline_7d: sparklineMap.get(slug) ?? [],
       };
     }
 

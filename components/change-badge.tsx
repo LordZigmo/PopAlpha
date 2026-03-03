@@ -4,7 +4,6 @@
  */
 export default function ChangeBadge({
   pct,
-  windowLabel,
 }: {
   pct: number | null;
   windowLabel?: "24H" | "7D" | null;
@@ -18,7 +17,7 @@ export default function ChangeBadge({
       className="text-[13px] font-semibold tabular-nums"
       style={{ color: up ? "#00DC5A" : "#FF3B30" }}
     >
-      {up ? "\u25B2" : "\u25BC"} {up ? "+" : "-"}{formatted}%{windowLabel ? ` ${windowLabel}` : ""}
+      {up ? "\u25B2" : "\u25BC"} {up ? "+" : "-"}{formatted}%
     </span>
   );
 }
