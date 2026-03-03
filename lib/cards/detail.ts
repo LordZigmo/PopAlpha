@@ -40,10 +40,6 @@ type RawMetricRow = {
 type RawSignalRow = {
   printing_id: string | null;
   provider_as_of_ts: string | null;
-  signal_trend: number | null;
-  signal_breakout: number | null;
-  signal_value: number | null;
-  signals_as_of_ts: string | null;
   history_points_30d: number | null;
 };
 
@@ -52,10 +48,6 @@ type GradedMetricRow = {
   provider: string;
   grade: string;
   provider_as_of_ts: string | null;
-  signal_trend: number | null;
-  signal_breakout: number | null;
-  signal_value: number | null;
-  signals_as_of_ts: string | null;
   history_points_30d: number | null;
 };
 
@@ -128,11 +120,12 @@ export function buildPrintingPill(row: CardPrintingRow): CardPrintingPill {
 
 function buildRawMetrics(metricsRow: RawMetricRow | null, signalRow: RawSignalRow | null): CardDetailMetrics | null {
   if (!metricsRow && !signalRow) return null;
+  // Signal columns (trend, breakout, valueZone) are paywalled — always null from public views.
   return {
-    trend: signalRow?.signal_trend ?? null,
-    breakout: signalRow?.signal_breakout ?? null,
-    valueZone: signalRow?.signal_value ?? null,
-    asOf: signalRow?.signals_as_of_ts ?? signalRow?.provider_as_of_ts ?? null,
+    trend: null,
+    breakout: null,
+    valueZone: null,
+    asOf: signalRow?.provider_as_of_ts ?? null,
     liquidityScore: metricsRow?.liquidity_score ?? null,
     points30d: signalRow?.history_points_30d ?? metricsRow?.snapshot_count_30d ?? null,
   };
@@ -140,11 +133,12 @@ function buildRawMetrics(metricsRow: RawMetricRow | null, signalRow: RawSignalRo
 
 function buildGradedMetrics(row: GradedMetricRow | null): CardDetailMetrics | null {
   if (!row) return null;
+  // Signal columns paywalled — always null from public views.
   return {
-    trend: row.signal_trend,
-    breakout: row.signal_breakout,
-    valueZone: row.signal_value,
-    asOf: row.signals_as_of_ts,
+    trend: null,
+    breakout: null,
+    valueZone: null,
+    asOf: row.provider_as_of_ts,
     liquidityScore: null,
     points30d: row.history_points_30d,
   };
@@ -241,14 +235,14 @@ export async function buildCardDetailResponse(inputSlug: string): Promise<CardDe
       .eq("grade", "RAW"),
     supabase
       .from("public_variant_metrics")
-      .select("printing_id, provider_as_of_ts, signal_trend, signal_breakout, signal_value, signals_as_of_ts, history_points_30d")
+      .select("printing_id, provider_as_of_ts, history_points_30d")
       .eq("canonical_slug", canonicalSlug)
       .eq("provider", "JUSTTCG")
       .eq("grade", "RAW")
       .not("printing_id", "is", null),
     supabase
       .from("public_variant_metrics")
-      .select("printing_id, provider, grade, provider_as_of_ts, signal_trend, signal_breakout, signal_value, signals_as_of_ts, history_points_30d")
+      .select("printing_id, provider, grade, provider_as_of_ts, history_points_30d")
       .eq("canonical_slug", canonicalSlug)
       .not("printing_id", "is", null)
       .in("provider", [...GRADED_PROVIDERS])
@@ -287,10 +281,7 @@ export async function buildCardDetailResponse(inputSlug: string): Promise<CardDe
       ...buildPrintingPill(row),
       available:
         !!metrics &&
-        (
-          signalRow?.signals_as_of_ts !== null ||
-          Math.max(signalRow?.history_points_30d ?? 0, metricsRow?.snapshot_count_30d ?? 0) >= RAW_AVAILABILITY_THRESHOLD
-        ),
+        Math.max(signalRow?.history_points_30d ?? 0, metricsRow?.snapshot_count_30d ?? 0) >= RAW_AVAILABILITY_THRESHOLD,
       metrics,
     };
   });
@@ -307,7 +298,6 @@ export async function buildCardDetailResponse(inputSlug: string): Promise<CardDe
     provider: row.provider as GradedProvider,
     gradeBucket: row.grade as GradeBucket,
     available:
-      row.signals_as_of_ts !== null ||
       (row.provider === "PSA" && row.provider_as_of_ts !== null) ||
       (row.history_points_30d ?? 0) >= GRADED_AVAILABILITY_THRESHOLD,
     metrics: buildGradedMetrics(row),

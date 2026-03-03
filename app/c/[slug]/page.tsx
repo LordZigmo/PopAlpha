@@ -61,7 +61,6 @@ type GradedAvailabilityRow = {
   provider: GradedSource;
   grade: GradeBucket;
   provider_as_of_ts: string | null;
-  signals_as_of_ts: string | null;
   history_points_30d: number | null;
 };
 
@@ -363,7 +362,7 @@ export default async function CanonicalCardPage({
   const { data: gradedAvailabilityData } = selectedPrinting
     ? await supabase
         .from("public_variant_metrics")
-        .select("provider, grade, provider_as_of_ts, signals_as_of_ts, history_points_30d")
+        .select("provider, grade, provider_as_of_ts, history_points_30d")
         .eq("canonical_slug", slug)
         .eq("printing_id", selectedPrinting.id)
         .in("provider", [...GRADED_SOURCES])
@@ -380,8 +379,7 @@ export default async function CanonicalCardPage({
         && (GRADE_BUCKETS as readonly string[]).includes(gradeValue);
     })
     .filter((row) => {
-      return row.signals_as_of_ts !== null
-        || row.provider_as_of_ts !== null
+      return row.provider_as_of_ts !== null
         || (row.history_points_30d ?? 0) >= 5;
     });
 

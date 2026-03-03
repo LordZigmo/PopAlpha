@@ -1,11 +1,6 @@
 import CardMarketIntelClient from "@/components/card-market-intel-client";
 import { computeLiquidity } from "@/lib/cards/liquidity";
 import { dbPublic } from "@/lib/db";
-import {
-  breakoutSignalLabel,
-  trendSignalLabel,
-  valueSignalLabel,
-} from "@/lib/signals/scoring";
 
 type MarketSummaryCardProps = {
   canonicalSlug: string;
@@ -43,11 +38,7 @@ type CardMetricRow = {
 
 type VariantSignalRow = {
   printing_id: string | null;
-  signal_trend: number | null;
-  signal_breakout: number | null;
-  signal_value: number | null;
   history_points_30d: number | null;
-  signals_as_of_ts: string | null;
 };
 
 function filterRecentDays(points: HistoryPointRow[], days: number): HistoryPointRow[] {
@@ -118,7 +109,7 @@ export default async function MarketSummaryCard({
           .in("printing_id", printingIds),
         supabase
           .from("public_variant_metrics")
-          .select("printing_id, signal_trend, signal_breakout, signal_value, history_points_30d, signals_as_of_ts")
+          .select("printing_id, history_points_30d")
           .eq("canonical_slug", canonicalSlug)
           .eq("provider", "JUSTTCG")
           .eq("grade", "RAW")
@@ -183,9 +174,6 @@ export default async function MarketSummaryCard({
     const history90d = history90dByVariant.get(variant.variantRef) ?? [];
     const signalRow = signalsByPrinting.get(variant.printingId) ?? null;
     const metrics = cardMetricsByPrinting.get(variant.printingId) ?? null;
-    const trendScore = signalRow?.signal_trend === null || signalRow?.signal_trend === undefined ? null : Number(signalRow.signal_trend);
-    const breakoutScore = signalRow?.signal_breakout === null || signalRow?.signal_breakout === undefined ? null : Number(signalRow.signal_breakout);
-    const valueScore = signalRow?.signal_value === null || signalRow?.signal_value === undefined ? null : Number(signalRow.signal_value);
 
     const liq = computeLiquidity({
       priceChanges30d: metrics?.provider_price_changes_count_30d ?? null,
@@ -195,6 +183,7 @@ export default async function MarketSummaryCard({
       median30d: metrics?.median_30d ?? null,
     });
 
+    // Signal columns are paywalled — always null from public views.
     return {
       printingId: variant.printingId,
       label: variant.label,
@@ -208,17 +197,17 @@ export default async function MarketSummaryCard({
       history30d,
       history90d,
       activeListings7d: metrics?.active_listings_7d ?? null,
-      signalTrend: trendScore,
-      signalTrendLabel: trendScore === null ? null : trendSignalLabel(trendScore),
-      signalBreakout: breakoutScore,
-      signalBreakoutLabel: breakoutScore === null ? null : breakoutSignalLabel(breakoutScore),
-      signalValue: valueScore,
-      signalValueLabel: valueScore === null ? null : valueSignalLabel(valueScore),
+      signalTrend: null,
+      signalTrendLabel: null,
+      signalBreakout: null,
+      signalBreakoutLabel: null,
+      signalValue: null,
+      signalValueLabel: null,
       signalsHistoryPoints30d:
         signalRow?.history_points_30d === null || signalRow?.history_points_30d === undefined
           ? null
           : Number(signalRow.history_points_30d),
-      signalsAsOfTs: signalRow?.signals_as_of_ts ?? null,
+      signalsAsOfTs: null,
       liquidityScore: liq?.score ?? null,
       liquidityTier: liq?.tier ?? null,
       liquidityTone: liq?.tone ?? "neutral" as const,

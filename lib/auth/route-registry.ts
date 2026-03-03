@@ -52,4 +52,5 @@ export const INGEST_ROUTES = [
 export const USER_ROUTES = [
   "private-sales",
   "private-sales/[id]",
+  "pro/signals",
 ];

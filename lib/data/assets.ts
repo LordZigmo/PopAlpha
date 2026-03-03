@@ -16,12 +16,12 @@
  */
 
 import { dbPublic } from "@/lib/db";
+import { dbAdmin } from "@/lib/db/admin";
 import { parseVariantRef as parseCanonicalVariantRef } from "@/lib/identity/variant-ref";
-import {
-  breakoutSignalLabel,
-  trendSignalLabel,
-  valueSignalLabel,
-} from "@/lib/signals/scoring";
+// Signal label functions removed — signal columns are paywalled out of public views.
+// When pro UI is built, re-add: trendSignalLabel, breakoutSignalLabel, valueSignalLabel
+// from "@/lib/signals/scoring".
+import { hasPro } from "@/lib/entitlements";
 
 // ── Shared types ────────────────────────────────────────────────────────────
 
@@ -255,6 +255,8 @@ export async function getChartSeries(
 async function getLatestMetrics(slug: string): Promise<AssetMetrics | null> {
   const supabase = dbPublic();
 
+  // Signal columns (signal_trend_strength, signal_breakout, signal_value_zone, signals_as_of_ts)
+  // are excluded from public_card_metrics — paywalled behind pro views.
   const { data, error } = await supabase
     .from("public_card_metrics")
     .select(
@@ -266,8 +268,7 @@ async function getLatestMetrics(slug: string): Promise<AssetMetrics | null> {
         "provider_price_relative_to_30d_range",
         "provider_min_price_all_time", "provider_max_price_all_time",
         "provider_price_changes_count_30d", "provider_as_of_ts",
-        "signal_trend_strength", "signal_breakout", "signal_value_zone",
-        "signals_as_of_ts", "updated_at",
+        "updated_at",
       ].join(", ")
     )
     .eq("canonical_slug", slug)
@@ -349,18 +350,22 @@ export async function getAssetPageData(
  * opts.limit:  number of results (default: 10)
  * opts.direction: 'up' | 'down' (default: 'up')
  */
+// TODO: When a movers UI is built, move this behind an API route with proper auth.
 export async function listMovers(opts: {
   cohort?: "sealed" | "single" | "any";
   limit?: number;
   direction?: "up" | "down";
 }): Promise<MoverItem[]> {
-  const supabase = dbPublic();
+  // Uses dbAdmin + pro_variant_metrics because signal columns are paywalled
+  // out of the public view. Sorting by signal_trend requires the pro view.
+  const admin = dbAdmin();
+  const pub = dbPublic();
   const limit = opts.limit ?? 10;
   const direction = opts.direction ?? "up";
   const cohort = opts.cohort ?? "any";
 
-  let query = supabase
-    .from("public_variant_metrics")
+  let query = admin
+    .from("pro_variant_metrics")
     .select("canonical_slug, signal_trend, signal_breakout, signal_value")
     .eq("provider", "JUSTTCG")
     .eq("grade", "RAW")
@@ -399,16 +404,16 @@ export async function listMovers(opts: {
   }
   if (signalRows.length === 0) return [];
 
-  // Join with canonical_cards for name + set_name.
+  // Join with canonical_cards for name + set_name (public read is fine).
   const slugs = signalRows.map((r) => r.canonical_slug);
-  const { data: cards, error: cardsError } = await supabase
+  const { data: cards, error: cardsError } = await pub
     .from("canonical_cards")
     .select("slug, canonical_name, set_name")
     .in("slug", slugs);
 
   if (cardsError) console.error("[listMovers] cards", cardsError.message);
 
-  const { data: metricsRows, error: metricsError } = await supabase
+  const { data: metricsRows, error: metricsError } = await pub
     .from("public_card_metrics")
     .select("canonical_slug, median_7d, updated_at")
     .in("canonical_slug", slugs)
@@ -429,14 +434,15 @@ export async function listMovers(opts: {
     }
   }
 
+  const isPro = hasPro();
   return signalRows.map((r) => ({
     canonical_slug: r.canonical_slug,
     canonical_name: cardMap.get(r.canonical_slug)?.canonical_name ?? null,
     set_name: cardMap.get(r.canonical_slug)?.set_name ?? null,
     median_7d: medianMap.get(r.canonical_slug) ?? null,
-    signal_trend_strength: r.signal_trend,
-    signal_breakout: r.signal_breakout,
-    signal_value_zone: r.signal_value,
+    signal_trend_strength: isPro ? r.signal_trend : null,
+    signal_breakout: isPro ? r.signal_breakout : null,
+    signal_value_zone: isPro ? r.signal_value : null,
   }));
 }
 
@@ -649,9 +655,11 @@ export async function buildAssetViewModel(
   if (!selectedVariantRef) {
     reason = "no_history";
   } else {
+    // Signal columns (signal_trend, signal_breakout, signal_value, signals_as_of_ts)
+    // are paywalled — no longer in public_variant_metrics. Only request what's available.
     const { data: vmRows, error: vmError } = await supabase
       .from("public_variant_metrics")
-      .select("variant_ref, signal_trend, signal_breakout, signal_value, history_points_30d, provider_as_of_ts, signals_as_of_ts")
+      .select("variant_ref, history_points_30d, provider_as_of_ts")
       .eq("canonical_slug", slug)
       .eq("provider", "JUSTTCG")
       .eq("grade", grade)
@@ -666,16 +674,12 @@ export async function buildAssetViewModel(
 
     const typedVmRow = vmRow as {
       variant_ref: string;
-        signal_trend: number | null;
-        signal_breakout: number | null;
-        signal_value: number | null;
-        history_points_30d: number | null;
-        provider_as_of_ts: string | null;
-        signals_as_of_ts: string | null;
-      } | null;
+      history_points_30d: number | null;
+      provider_as_of_ts: string | null;
+    } | null;
 
     provider_as_of_ts = typedVmRow?.provider_as_of_ts ?? null;
-    signals_as_of_ts = typedVmRow?.signals_as_of_ts ?? null;
+    // signals_as_of_ts not available in public view — paywalled.
     signals_history_points_30d = typedVmRow?.history_points_30d ?? null;
 
     const selectedPoints = (preferredVariantStats.find((row) => row.variantRef === selectedVariantRef)?.points
@@ -684,22 +688,10 @@ export async function buildAssetViewModel(
     const enoughHistory =
       Math.max(selectedPoints, typedVmRow?.history_points_30d ?? 0) >= SIGNAL_MIN_POINTS;
 
-    if (enoughHistory) {
-      const trend = typedVmRow?.signal_trend !== null && typedVmRow?.signal_trend !== undefined
-        ? { label: trendSignalLabel(Number(typedVmRow.signal_trend)), score: Number(typedVmRow.signal_trend) }
-        : null;
-      const breakout = typedVmRow?.signal_breakout !== null && typedVmRow?.signal_breakout !== undefined
-        ? { label: breakoutSignalLabel(Number(typedVmRow.signal_breakout)), score: Number(typedVmRow.signal_breakout) }
-        : null;
-      const value = typedVmRow?.signal_value !== null && typedVmRow?.signal_value !== undefined
-        ? { label: valueSignalLabel(Number(typedVmRow.signal_value)), score: Number(typedVmRow.signal_value) }
-        : null;
-
-      if (trend !== null || breakout !== null || value !== null) {
-        signals = { trend, breakout, value };
-      } else {
-        reason = "insufficient_recent_activity";
-      }
+    // Signal columns are paywalled — not available in public_variant_metrics.
+    // Signals will always be null here; pro users get them via /api/pro/signals.
+    if (!enoughHistory) {
+      reason = "insufficient_recent_activity";
     } else {
       reason = "insufficient_recent_activity";
     }

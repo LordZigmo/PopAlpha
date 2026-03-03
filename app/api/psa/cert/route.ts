@@ -4,10 +4,16 @@ import { getCertificate, type CertificateResponse } from "@/lib/psa/client";
 import { dbAdmin } from "@/lib/db/admin";
 import { buildSnapshotParsed, hashSnapshotParsed } from "@/lib/psa/snapshot";
 import { measureAsync } from "@/lib/perf";
+import { createRateLimiter } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+/** PSA cert numbers are numeric, typically 5–10 digits (older certs ~5, modern 8–10). */
+const CERT_PATTERN = /^\d{4,12}$/;
+
+const rateLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 10 });
 
 type CachedCertRow = {
   cert: string;
@@ -91,6 +97,30 @@ export async function GET(req: Request) {
     return NextResponse.json(
       { ok: false, error: "Missing cert query param. Example: /api/psa/cert?cert=12345678" },
       { status: 400 }
+    );
+  }
+
+  if (!CERT_PATTERN.test(cert)) {
+    return NextResponse.json(
+      { ok: false, error: "Invalid cert number format." },
+      { status: 400 }
+    );
+  }
+
+  // Rate limit by IP — 10 requests per minute per IP.
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  const rl = rateLimiter(ip);
+  if (!rl.allowed) {
+    console.warn("[psa/cert] rate-limited", { ip, cert });
+    return new NextResponse(
+      JSON.stringify({ ok: false, error: "Rate limit exceeded." }),
+      {
+        status: 429,
+        headers: {
+          "Content-Type": "application/json",
+          "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)),
+        },
+      }
     );
   }
 
