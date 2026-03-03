@@ -37,6 +37,7 @@ export const CRON_ROUTES = [
   "cron/snapshot-price-history",
   "cron/refresh-derived-signals",
   "cron/refresh-set-summaries",
+  "cron/sync-pokemon-tcg-graded",
 ];
 
 export const ADMIN_ROUTES = [
