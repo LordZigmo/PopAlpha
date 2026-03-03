@@ -63,7 +63,8 @@ async function fetchAllEpisodes() {
     const { status, body } = await apiFetch(`/episodes?page=${page}`);
     if (status < 200 || status >= 300 || !body?.data?.length) break;
     all.push(...body.data);
-    if (!body.links?.next) break;
+    // API doesn't return meta/links — keep going while we get a full page (20)
+    if (body.data.length < 20) break;
     page++;
   }
   return all;
@@ -188,23 +189,35 @@ async function main() {
 
   console.log(`\nMatched: ${matched}, Unmatched: ${unmatched}`);
 
+  // Deduplicate by canonical_set_code (keep first match)
+  const seenCodes = new Set();
+  const dedupedRows = [];
+  for (const row of upsertRows) {
+    if (seenCodes.has(row.canonical_set_code)) {
+      console.log(`  (dedup) Skipping duplicate mapping for ${row.canonical_set_code}`);
+      continue;
+    }
+    seenCodes.add(row.canonical_set_code);
+    dedupedRows.push(row);
+  }
+
   // 4. Upsert into provider_set_map
   if (dryRun) {
-    console.log(`[DRY RUN] Would upsert ${upsertRows.length} rows into provider_set_map`);
+    console.log(`[DRY RUN] Would upsert ${dedupedRows.length} rows into provider_set_map`);
     return;
   }
 
-  if (upsertRows.length === 0) {
+  if (dedupedRows.length === 0) {
     console.log("No rows to upsert.");
     return;
   }
 
-  console.log(`\nUpserting ${upsertRows.length} rows into provider_set_map...`);
+  console.log(`\nUpserting ${dedupedRows.length} rows into provider_set_map...`);
   const BATCH_SIZE = 50;
   let totalUpserted = 0;
 
-  for (let i = 0; i < upsertRows.length; i += BATCH_SIZE) {
-    const batch = upsertRows.slice(i, i + BATCH_SIZE);
+  for (let i = 0; i < dedupedRows.length; i += BATCH_SIZE) {
+    const batch = dedupedRows.slice(i, i + BATCH_SIZE);
     const { error } = await supabase
       .from("provider_set_map")
       .upsert(batch, { onConflict: "provider,canonical_set_code" });

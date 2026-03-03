@@ -83,7 +83,7 @@ export type PtcgApiCard = {
   id: number;
   tcgid: string;
   name: string;
-  card_number: string;
+  card_number: string | number;
   rarity: string | null;
   prices: PtcgApiCardPrices | null;
   episode?: {
@@ -185,7 +185,8 @@ export async function fetchEpisodes(
     return { episodes: [], hasMore: false, httpStatus: status };
   }
   const episodes = body.data ?? [];
-  const hasMore = body.links?.next != null;
+  // API doesn't always return links/meta — infer hasMore from full page (20 items)
+  const hasMore = episodes.length >= 20;
   return { episodes, hasMore, httpStatus: status };
 }
 
@@ -223,7 +224,8 @@ export async function fetchEpisodeCards(
     return { cards: [], hasMore: false, httpStatus: status };
   }
   const cards = body.data ?? [];
-  const hasMore = body.links?.next != null;
+  // API doesn't always return links/meta — infer hasMore from full page (20 items)
+  const hasMore = cards.length >= 20;
   return { cards, hasMore, httpStatus: status };
 }
 
@@ -253,9 +255,9 @@ export async function fetchAllEpisodeCards(episodeId: number): Promise<PtcgApiCa
  * Normalize a card number from the Pokemon TCG API to match our card_printings format.
  * "004/130" → "4", "223" → "223", "SWSH001" → "SWSH1"
  */
-export function normalizeCardNumber(raw: string | null | undefined): string {
-  if (!raw) return "";
-  const trimmed = raw.trim().replace(/^#/, "");
+export function normalizeCardNumber(raw: string | number | null | undefined): string {
+  if (raw == null) return "";
+  const trimmed = String(raw).trim().replace(/^#/, "");
   const slashMatch = trimmed.match(/^(\d+)\//);
   if (slashMatch) return String(parseInt(slashMatch[1], 10));
   if (/^\d+$/.test(trimmed)) return String(parseInt(trimmed, 10));

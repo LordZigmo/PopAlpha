@@ -148,11 +148,33 @@ export async function GET(req: Request) {
     }> = [];
 
     if (isDebug) {
-      setsToProcess = [{
-        canonical_set_code: debugSet,
-        canonical_set_name: debugSet,
-        provider_set_id: debugSet,
-      }];
+      // Debug mode: look up the real set code from provider_set_map
+      const { data: debugRow } = await supabase
+        .from("provider_set_map")
+        .select("canonical_set_code, canonical_set_name, provider_set_id")
+        .eq("provider", PROVIDER)
+        .eq("provider_set_id", debugSet)
+        .limit(1)
+        .maybeSingle();
+
+      if (debugRow) {
+        setsToProcess = [debugRow];
+      } else {
+        // Fallback: try as set_code
+        const { data: codeRow } = await supabase
+          .from("provider_set_map")
+          .select("canonical_set_code, canonical_set_name, provider_set_id")
+          .eq("provider", PROVIDER)
+          .eq("canonical_set_code", debugSet)
+          .limit(1)
+          .maybeSingle();
+
+        setsToProcess = codeRow ? [codeRow] : [{
+          canonical_set_code: debugSet,
+          canonical_set_name: debugSet,
+          provider_set_id: debugSet,
+        }];
+      }
     } else {
       // Cursor-based pagination from last successful run
       const { data: cursor } = await supabase
@@ -370,7 +392,7 @@ async function processSet(
   let error: string | null = null;
 
   if (priceSnapshotRows.length > 0) {
-    const r = await batchUpsert(supabase, "price_snapshots", priceSnapshotRows, "provider_ref");
+    const r = await batchUpsert(supabase, "price_snapshots", priceSnapshotRows, "provider,provider_ref");
     totalUpserted += r.upserted;
     totalFailed += r.failed;
     if (r.firstError && !error) error = r.firstError;
@@ -382,7 +404,7 @@ async function processSet(
       supabase,
       "price_history_points",
       historyRows,
-      "canonical_slug,variant_ref,provider,ts,source_window",
+      "provider,variant_ref,ts,source_window",
     );
     historyWritten = r.upserted;
     if (r.firstError && !error) error = r.firstError;
@@ -394,7 +416,7 @@ async function processSet(
       supabase,
       "variant_metrics",
       variantMetricRows,
-      "canonical_slug,variant_ref,provider,grade",
+      "canonical_slug,printing_id,provider,grade",
     );
     metricsWritten = r.upserted;
     if (r.firstError && !error) error = r.firstError;
@@ -436,7 +458,7 @@ function writeGradedPrice(params: {
     currency: "EUR",
     provider: PROVIDER,
     provider_ref: providerRef,
-    ingest_id: runId,
+    ingest_id: null,
     observed_at: asOfTs,
   });
 
@@ -451,12 +473,13 @@ function writeGradedPrice(params: {
     source_window: "snapshot",
   });
 
-  // variant_metrics
+  // variant_metrics — provider column must be the grading company (PSA/BGS/CGC)
+  // to satisfy the variant_metrics_printing_key_variant_ref_chk constraint
   variantMetricRows.push({
     canonical_slug: printing.canonical_slug,
     printing_id: printing.id,
     variant_ref: variantRef,
-    provider: PROVIDER,
+    provider: gp.provider,
     grade: gp.grade,
     provider_trend_slope_7d: null,
     provider_cov_price_30d: null,
