@@ -55,3 +55,33 @@ export async function requireUser(
   }
   return { ok: false, response: denied(pathFromReq(req), "user", ctx.kind) };
 }
+
+/**
+ * Require an authenticated user who has completed onboarding (has a handle).
+ * Returns 401 if not authenticated, 403 with "onboarding_required" if no handle.
+ */
+export async function requireOnboarded(
+  req: Request,
+): Promise<
+  | (AuthSuccess<Extract<AuthContext, { kind: "user" }>> & { userId: string; handle: string })
+  | AuthFailure
+> {
+  const auth = await requireUser(req);
+  if (!auth.ok) return auth;
+
+  // Dynamic import keeps the service-role client out of this file's static imports.
+  const { getAppUser } = await import("@/lib/data/app-user");
+  const appUser = await getAppUser(auth.userId);
+
+  if (!appUser?.handle) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { ok: false, error: "onboarding_required" },
+        { status: 403 },
+      ),
+    };
+  }
+
+  return { ok: true, ctx: auth.ctx, userId: auth.userId, handle: appUser.handle };
+}

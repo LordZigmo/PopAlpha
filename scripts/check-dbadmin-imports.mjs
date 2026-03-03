@@ -22,7 +22,11 @@ const ALLOWED_PREFIXES = [
   "app/api/market/observe/",
   "app/api/psa/cert/route.ts",
   "app/api/pro/",
+  "app/api/onboarding/",
+  "app/api/handles/",
+  "app/api/me/",
   "lib/db/admin.ts",
+  "lib/data/app-user.ts",
   "lib/backfill/",
   "scripts/",
 ];

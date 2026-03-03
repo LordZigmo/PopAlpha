@@ -24,6 +24,7 @@ export const PUBLIC_ROUTES = [
   "psa/cert/activity",
   "ebay/browse",
   "card-profiles",
+  "handles/availability",
 ];
 
 export const CRON_ROUTES = [
@@ -54,4 +55,6 @@ export const USER_ROUTES = [
   "private-sales/[id]",
   "pro/signals",
   "holdings",
+  "onboarding/handle",
+  "me",
 ];

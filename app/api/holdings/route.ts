@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/auth/require";
+import { requireOnboarded } from "@/lib/auth/require";
 import { dbAdmin } from "@/lib/db/admin";
 
 export const runtime = "nodejs";
@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 // ── GET /api/holdings — list authenticated user's holdings ──────────────────
 
 export async function GET(req: Request) {
-  const auth = await requireUser(req);
+  const auth = await requireOnboarded(req);
   if (!auth.ok) return auth.response;
 
   const supabase = dbAdmin();
@@ -27,7 +27,7 @@ export async function GET(req: Request) {
 // ── POST /api/holdings — add a lot for the authenticated user ───────────────
 
 export async function POST(req: Request) {
-  const auth = await requireUser(req);
+  const auth = await requireOnboarded(req);
   if (!auth.ok) return auth.response;
 
   let body: Record<string, unknown>;

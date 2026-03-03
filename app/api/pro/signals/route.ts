@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/auth/require";
+import { requireOnboarded } from "@/lib/auth/require";
 import { hasPro } from "@/lib/entitlements";
 import { dbAdmin } from "@/lib/db/admin";
 import { createRateLimiter } from "@/lib/rate-limit";
@@ -18,7 +18,7 @@ const rateLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 60 });
 export async function GET(req: Request) {
   // 1. Auth (cheap) → 2. Entitlement (cheap) → 3. Rate limit
   // Non-pro users reject before touching the limiter so they can't burn tokens.
-  const auth = await requireUser(req);
+  const auth = await requireOnboarded(req);
   if (!auth.ok) return auth.response;
 
   if (!hasPro(auth.userId)) {

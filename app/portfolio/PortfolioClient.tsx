@@ -72,6 +72,7 @@ function PortfolioInner() {
   const searchParams = useSearchParams();
 
   const [loading, setLoading] = useState(true);
+  const [onboardingRedirect, setOnboardingRedirect] = useState(false);
   const [holdingsError, setHoldingsError] = useState<string | null>(null);
 
   const [cards, setCards] = useState<Card[]>([]);
@@ -269,8 +270,27 @@ function PortfolioInner() {
 
   useEffect(() => {
     if (!isLoaded || !user) return;
-    loadAll();
-  }, [isLoaded, user, loadAll]);
+
+    // Pre-check: redirect to onboarding if user has no handle
+    (async () => {
+      try {
+        const res = await fetch("/api/me");
+        if (res.ok) {
+          const json = await res.json();
+          if (!json.user?.onboarded) {
+            const qs = searchParams.toString();
+            const returnUrl = pathname + (qs ? `?${qs}` : "");
+            setOnboardingRedirect(true);
+            window.location.href = `/onboarding/handle?return_to=${encodeURIComponent(returnUrl)}`;
+            return;
+          }
+        }
+      } catch {
+        // Non-fatal — API gate (requireOnboarded) is the real guard
+      }
+      loadAll();
+    })();
+  }, [isLoaded, user, loadAll, pathname, searchParams]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -299,6 +319,19 @@ function PortfolioInner() {
     const qs = searchParams.toString();
     const returnUrl = pathname + (qs ? `?${qs}` : "");
     return <RedirectToSignIn redirectUrl={returnUrl} />;
+  }
+
+  // ── Redirecting to onboarding ────────────────────────────────────────
+
+  if (onboardingRedirect) {
+    return (
+      <div className="app-shell flex min-h-[60vh] items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
+          <p className="text-sm text-white/50">Setting up your account...</p>
+        </div>
+      </div>
+    );
   }
 
   // ── Signed-in: data still loading ─────────────────────────────────────
