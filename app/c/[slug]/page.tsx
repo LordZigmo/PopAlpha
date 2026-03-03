@@ -473,18 +473,28 @@ export default async function CanonicalCardPage({
     ? "Current market price"
     : `${selectedSnapshotGrade ? legacyGradeLabel(selectedSnapshotGrade) : `${providerLabel(activeProvider)} ${gradeBucketLabel(activeBucket)}`} · 7-day median ask`;
 
+  // 24h price change (fallback to 7d)
+  const priceChangePct = vm?.change_24h_pct ?? vm?.change_7d_pct ?? null;
+  const priceChangeLabel = vm?.change_24h_pct != null ? "24h" : vm?.change_7d_pct != null ? "7d" : null;
+  const priceChangeColor = priceChangePct != null && priceChangePct !== 0
+    ? priceChangePct > 0 ? "#00DC5A" : "#FF3B30"
+    : "#6B6B6B";
+
   // Fair Value + Edge
   const fairValue = snapshotData?.trimmed_median_30d ?? snapshotData?.median_30d ?? null;
   const edgePercent = displayPrimaryPrice != null && fairValue != null && fairValue > 0
     ? ((displayPrimaryPrice - fairValue) / fairValue) * 100
     : null;
-  const edgeLabel = edgePercent !== null
-    ? edgePercent < -1 ? "Buyer Edge" : edgePercent > 1 ? "Dealer Edge" : "Fair Value"
+  const edgeAbsPct = edgePercent !== null ? Math.abs(edgePercent) : null;
+  const edgeFormatted = edgeAbsPct !== null
+    ? (edgeAbsPct >= 10 ? edgeAbsPct.toFixed(0) : edgeAbsPct.toFixed(1)) + "%"
     : null;
-  const edgeTone = edgePercent !== null
-    ? edgePercent < -1 ? "positive" : edgePercent > 1 ? "negative" : "neutral"
-    : "neutral";
-  const edgeColor = edgeTone === "positive" ? "#00DC5A" : edgeTone === "negative" ? "#FF3B30" : "#6B6B6B";
+  const edgeLabel = edgePercent !== null
+    ? edgePercent < -1 ? "Buyer's Edge" : edgePercent > 1 ? "Dealer's Edge" : null
+    : null;
+  const edgeColor = edgePercent !== null
+    ? edgePercent < -1 ? "#00DC5A" : edgePercent > 1 ? "#FF3B30" : "#6B6B6B"
+    : "#6B6B6B";
 
   const rarityInfo = selectedPrinting ? rarityColor(selectedPrinting.rarity) : null;
   const canonicalSetHref = setHref(canonical.set_name);
@@ -512,12 +522,13 @@ export default async function CanonicalCardPage({
                   <span className="text-[46px] font-bold leading-none tracking-[-0.04em] tabular-nums text-[#F0F0F0] sm:text-[56px]">
                     {primaryPrice}
                   </span>
-                  {edgePercent !== null && (
+                  {priceChangePct != null && priceChangePct !== 0 && (
                     <span
                       className="text-[20px] font-bold tabular-nums tracking-[-0.02em] sm:text-[24px]"
-                      style={{ color: edgeColor }}
+                      style={{ color: priceChangeColor }}
                     >
-                      {edgePercent > 0 ? "+" : ""}{Math.abs(edgePercent) >= 10 ? edgePercent.toFixed(0) : edgePercent.toFixed(1)}%
+                      {priceChangePct > 0 ? "+" : ""}{Math.abs(priceChangePct) >= 10 ? priceChangePct.toFixed(0) : priceChangePct.toFixed(1)}%
+                      {priceChangeLabel ? <span className="ml-1 text-[14px] font-semibold text-[#555] sm:text-[16px]">{priceChangeLabel}</span> : null}
                     </span>
                   )}
                 </div>
@@ -526,16 +537,16 @@ export default async function CanonicalCardPage({
                     <span className="text-[15px] text-[#6B6B6B]">
                       Fair Value <span className="font-semibold tabular-nums text-[#999]">{formatUsdCompact(fairValue)}</span>
                     </span>
-                    {edgeLabel && edgeLabel !== "Fair Value" && (
+                    {edgeLabel && edgeFormatted && (
                       <span
                         className="inline-flex items-center rounded-full border px-2 py-0.5 text-[12px] font-semibold"
                         style={{
                           color: edgeColor,
-                          borderColor: edgeTone === "positive" ? "rgba(0,220,90,0.25)" : edgeTone === "negative" ? "rgba(255,59,48,0.25)" : "rgba(107,107,107,0.25)",
-                          backgroundColor: edgeTone === "positive" ? "rgba(0,220,90,0.08)" : edgeTone === "negative" ? "rgba(255,59,48,0.08)" : "transparent",
+                          borderColor: edgePercent != null && edgePercent < -1 ? "rgba(0,220,90,0.25)" : edgePercent != null && edgePercent > 1 ? "rgba(255,59,48,0.25)" : "rgba(107,107,107,0.25)",
+                          backgroundColor: edgePercent != null && edgePercent < -1 ? "rgba(0,220,90,0.08)" : edgePercent != null && edgePercent > 1 ? "rgba(255,59,48,0.08)" : "transparent",
                         }}
                       >
-                        {edgeLabel}
+                        {edgeFormatted} {edgeLabel}
                       </span>
                     )}
                   </div>

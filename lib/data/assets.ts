@@ -534,6 +534,8 @@ export type AssetViewModel = {
   range_30d_low: number | null;
   range_30d_high: number | null;
   chartSeries: ChartPoint[];
+  /** (price_now − price_24h_ago) / price_24h_ago × 100, null if not enough data. */
+  change_24h_pct: number | null;
   /** (price_now − price_7d_ago) / price_7d_ago × 100, null if not enough data. */
   change_7d_pct: number | null;
   provider_as_of_ts: string | null;
@@ -551,22 +553,22 @@ export type AssetViewModel = {
   } | null;
 };
 
-/** Compute % change from the price closest to 7 days ago to price_now. */
-function computeChange7dPct(series: ChartPoint[]): number | null {
+/** Compute % change from the price closest to N hours ago to price_now. */
+function computeChangePct(series: ChartPoint[], hoursAgo: number): number | null {
   if (series.length < 2) return null;
-  const sevenDaysAgoMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const cutoffMs = Date.now() - hoursAgo * 60 * 60 * 1000;
   const priceNow = series[series.length - 1].price;
-  // Series is ts-asc. Walk forward, keep last point at-or-before 7d ago.
-  let price7dAgo: number | null = null;
+  // Series is ts-asc. Walk forward, keep last point at-or-before cutoff.
+  let priceAtCutoff: number | null = null;
   for (const pt of series) {
-    if (new Date(pt.ts).getTime() <= sevenDaysAgoMs) {
-      price7dAgo = pt.price;
+    if (new Date(pt.ts).getTime() <= cutoffMs) {
+      priceAtCutoff = pt.price;
     } else {
       break;
     }
   }
-  if (price7dAgo === null || price7dAgo <= 0) return null;
-  return ((priceNow - price7dAgo) / price7dAgo) * 100;
+  if (priceAtCutoff === null || priceAtCutoff <= 0) return null;
+  return ((priceNow - priceAtCutoff) / priceAtCutoff) * 100;
 }
 
 /**
@@ -621,7 +623,8 @@ export async function buildAssetViewModel(
   const prices = series.map((p) => p.price);
   const range_30d_low  = prices.length > 0 ? Math.min(...prices) : null;
   const range_30d_high = prices.length > 0 ? Math.max(...prices) : null;
-  const change_7d_pct  = computeChange7dPct(series);
+  const change_24h_pct = computeChangePct(series, 24);
+  const change_7d_pct  = computeChangePct(series, 168);
 
   // 5. Load the exact variant_metrics row for the selected variant.
   let signals: AssetViewModel["signals"] = null;
@@ -689,6 +692,7 @@ export async function buildAssetViewModel(
     range_30d_low,
     range_30d_high,
     chartSeries: series,
+    change_24h_pct,
     change_7d_pct,
     provider_as_of_ts,
     signals_as_of_ts,
