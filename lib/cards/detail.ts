@@ -1,4 +1,4 @@
-import { dbAdmin } from "@/lib/db";
+import { dbPublic } from "@/lib/db";
 import {
   GRADED_PROVIDERS,
   GRADE_BUCKETS,
@@ -151,7 +151,7 @@ function buildGradedMetrics(row: GradedMetricRow | null): CardDetailMetrics | nu
 }
 
 export async function resolveCanonicalSlug(input: string): Promise<string | null> {
-  const supabase = dbAdmin();
+  const supabase = dbPublic();
   const slug = input.trim();
   if (!slug) return null;
 
@@ -217,7 +217,7 @@ function pickDefaultGradeBucket(
 }
 
 export async function buildCardDetailResponse(inputSlug: string): Promise<CardDetailResponse | null> {
-  const supabase = dbAdmin();
+  const supabase = dbPublic();
   const canonicalSlug = await resolveCanonicalSlug(inputSlug);
   if (!canonicalSlug) return null;
 

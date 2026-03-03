@@ -12,7 +12,7 @@ import {
   type JustTcgCard,
   type JustTcgVariant,
 } from "@/lib/providers/justtcg";
-import { dbAdmin } from "@/lib/db";
+import { dbAdmin } from "@/lib/db/admin";
 
 export const runtime = "nodejs";
 

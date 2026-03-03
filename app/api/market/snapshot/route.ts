@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { dbAdmin } from "@/lib/db";
+import { dbPublic } from "@/lib/db";
 import { measureAsync } from "@/lib/perf";
 
 export const runtime = "nodejs";
@@ -25,7 +25,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: "Missing slug query param." }, { status: 400 });
   }
 
-  const supabase = dbAdmin();
+  const supabase = dbPublic();
   let query = supabase
     .from("card_metrics")
     .select(

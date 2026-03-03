@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { type SupabaseClient } from "@supabase/supabase-js";
 import { getCertificate, type CertificateResponse } from "@/lib/psa/client";
-import { dbAdmin } from "@/lib/db";
+import { dbPublic } from "@/lib/db";
 import { buildSnapshotParsed, hashSnapshotParsed } from "@/lib/psa/snapshot";
 import { measureAsync } from "@/lib/perf";
 
@@ -96,13 +96,13 @@ export async function GET(req: Request) {
 
   let supabase: SupabaseClient;
   try {
-    supabase = dbAdmin();
+    supabase = dbPublic();
   } catch {
     return NextResponse.json(
       {
         ok: false,
         error:
-          "Server configuration error: missing Supabase server environment variables. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.",
+          "Server configuration error: missing Supabase environment variables. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.",
       },
       { status: 500 }
     );

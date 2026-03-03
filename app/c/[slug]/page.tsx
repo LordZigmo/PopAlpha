@@ -17,7 +17,7 @@ import MarketSummaryCard from "@/components/market-summary-card";
 import { buildEbaySearchQueries, type GradeSelection, type GradedSource } from "@/lib/ebay-query";
 import { buildPrintingPill } from "@/lib/cards/detail";
 import { buildRawVariantRef } from "@/lib/identity/variant-ref";
-import { dbAdmin } from "@/lib/db";
+import { dbPublic } from "@/lib/db";
 import { buildAssetViewModel } from "@/lib/data/assets";
 
 type CanonicalCardRow = {
@@ -337,7 +337,7 @@ export default async function CanonicalCardPage({
 }) {
   const { slug } = await params;
   const { printing, grade, mode, provider, bucket, marketWindow, debug, returnTo } = await searchParams;
-  const supabase = dbAdmin();
+  const supabase = dbPublic();
   const debugEnabled = debug === "1";
   const backHref = resolveBackHref(returnTo);
   const activeMarketWindow = selectedMarketWindow(marketWindow);

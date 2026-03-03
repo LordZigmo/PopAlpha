@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/auth/require";
 import { buildRawVariantRef } from "@/lib/identity/variant-ref";
-import { dbAdmin } from "@/lib/db";
+import { dbAdmin } from "@/lib/db/admin";
 
 export const runtime = "nodejs";
 

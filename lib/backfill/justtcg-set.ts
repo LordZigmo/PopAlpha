@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { buildRawVariantRef } from "@/lib/identity/variant-ref";
-import { dbAdmin } from "@/lib/db";
+import { dbAdmin } from "@/lib/db/admin";
 import {
   extractJustTcgPatternStamp,
   fetchJustTcgCardsPage,

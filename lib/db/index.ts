@@ -1,23 +1,4 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { getRequiredEnvs } from "@/lib/env";
-
-// ── Service-role client (singleton) ──────────────────────────────────────────
-
-let _admin: SupabaseClient | null = null;
-
-/**
- * Service-role Supabase client. Bypasses RLS.
- * Use for: cron jobs, admin routes, ingest pipelines, maintenance.
- */
-export function dbAdmin(): SupabaseClient {
-  if (_admin) return _admin;
-  const { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = getRequiredEnvs([
-    "SUPABASE_URL",
-    "SUPABASE_SERVICE_ROLE_KEY",
-  ]);
-  _admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-  return _admin;
-}
 
 // ── Anon-key client (singleton) ──────────────────────────────────────────────
 
@@ -25,8 +6,10 @@ let _public: SupabaseClient | null = null;
 
 /**
  * Anon-key Supabase client. Respects RLS.
- * Use for: public reads (once RLS policies exist for public tables).
- * Interim: public routes still use dbAdmin() since no public-table RLS exists yet.
+ * Use for: public reads, user-route queries, page data, lib helpers.
+ *
+ * With RLS disabled this has identical access to the service-role client.
+ * When RLS is enabled, public tables will need anon-read policies.
  */
 export function dbPublic(): SupabaseClient {
   if (_public) return _public;
@@ -61,7 +44,7 @@ export function dbUser(jwt: string): SupabaseClient {
 
 // ── Backward-compatible re-export ────────────────────────────────────────────
 
-/** @deprecated Use dbAdmin() instead. */
+/** @deprecated Use dbPublic() for reads, dbUser() for user routes, or the admin client from "@/lib/db/admin" for privileged ops. */
 export function getServerSupabaseClient(): SupabaseClient {
-  return dbAdmin();
+  return dbPublic();
 }

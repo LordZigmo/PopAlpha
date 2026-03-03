@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/auth/require";
-import { dbAdmin } from "@/lib/db";
+import { dbAdmin } from "@/lib/db/admin";
 import { measureAsync } from "@/lib/perf";
 
 export const runtime = "nodejs";

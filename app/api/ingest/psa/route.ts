@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getCertificate } from "@/lib/psa/client";
 import { buildGradedVariantRef } from "@/lib/identity/variant-ref";
 import { requireCron } from "@/lib/auth/require";
-import { dbAdmin } from "@/lib/db";
+import { dbAdmin } from "@/lib/db/admin";
 
 export const runtime = "nodejs";
 

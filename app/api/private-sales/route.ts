@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require";
-import { dbAdmin } from "@/lib/db";
+import { dbPublic } from "@/lib/db";
 
 export const runtime = "nodejs";
 
@@ -36,7 +36,7 @@ export async function GET(req: Request) {
   }
 
   try {
-    const supabase = dbAdmin();
+    const supabase = dbPublic();
     const { data, error } = await supabase
       .from("private_sales")
       .select("id, cert, price, currency, sold_at, fees, payment_method, notes, created_at")
@@ -93,7 +93,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    const supabase = dbAdmin();
+    const supabase = dbPublic();
 
     const { data, error } = await supabase
       .from("private_sales")

@@ -11,7 +11,7 @@
 
 import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/auth/require";
-import { dbAdmin } from "@/lib/db";
+import { dbAdmin } from "@/lib/db/admin";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;

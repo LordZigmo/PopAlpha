@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/require";
-import { dbAdmin } from "@/lib/db";
+import { dbAdmin } from "@/lib/db/admin";
 import { getRequiredEnv } from "@/lib/env";
 import type { PokemonTcgCard, PokemonTcgSet } from "@/lib/pokemontcg/client";
 import { measureAsync } from "@/lib/perf";

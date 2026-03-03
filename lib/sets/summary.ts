@@ -1,4 +1,4 @@
-import { dbAdmin } from "@/lib/db";
+import { dbPublic } from "@/lib/db";
 import { buildSetId } from "@/lib/sets/summary-core.mjs";
 
 type SetSummarySnapshotRow = {
@@ -113,7 +113,7 @@ function toFinishBreakdown(row: SetFinishSummaryRow): SetFinishBreakdown {
 export async function getLatestSetSummarySnapshot(setName: string): Promise<SetSummarySnapshot | null> {
   if (!setName.trim()) return null;
 
-  const supabase = dbAdmin();
+  const supabase = dbPublic();
   const { data } = await supabase
     .from("set_summary_snapshots")
     .select([
@@ -144,7 +144,7 @@ export async function getLatestSetSummarySnapshot(setName: string): Promise<SetS
 export async function getSetFinishBreakdown(setName: string): Promise<SetFinishBreakdown[]> {
   if (!setName.trim()) return [];
 
-  const supabase = dbAdmin();
+  const supabase = dbPublic();
   const { data } = await supabase
     .from("set_finish_summary_latest")
     .select("set_name, finish, market_cap, card_count, change_7d_pct, change_30d_pct, updated_at")

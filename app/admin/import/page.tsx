@@ -1,5 +1,5 @@
 import AdminImportRunner from "@/components/admin-import-runner";
-import { dbAdmin } from "@/lib/db";
+import { dbPublic } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +30,7 @@ function formatTime(value: string | null): string {
 export default async function AdminImportPage() {
   let runs: IngestRunListRow[] = [];
   try {
-    const supabase = dbAdmin();
+    const supabase = dbPublic();
     const { data } = await supabase
       .from("ingest_runs")
       .select("id, status, ok, items_fetched, items_upserted, items_failed, error_text, started_at, ended_at")

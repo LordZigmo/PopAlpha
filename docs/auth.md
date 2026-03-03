@@ -14,21 +14,23 @@ PopAlpha uses a 4-kind auth model defined in `lib/auth/context.ts`.
 ## Adding a New Route
 
 1. **Pick a classification**: public, user, admin, cron, ingest, or debug
-2. **Add to middleware.ts**: Add the route key to the appropriate `Set<string>`
+2. **Add to `lib/auth/route-registry.ts`**: Add the route key to the appropriate array
 3. **Use the correct guard + db client in the handler**:
-   - Public: `dbAdmin()` (no guard; switch to `dbPublic()` when RLS policies exist)
-   - User: `requireUser(req)` + `dbAdmin()` (switch to `dbUser(jwt)` when RLS is enabled)
-   - Admin: `requireAdmin(req)` + `dbAdmin()`
-   - Cron/Ingest: `requireCron(req)` + `dbAdmin()`
-   - Debug: `requireCron(req)` + `dbAdmin()` (middleware blocks in prod unless `ALLOW_DEBUG_IN_PROD=1`)
+   - Public: `dbPublic()` from `@/lib/db` (no guard)
+   - User: `requireUser(req)` + `dbPublic()` from `@/lib/db` (switch to `dbUser(jwt)` when RLS is enabled)
+   - Admin: `requireAdmin(req)` + `dbAdmin()` from `@/lib/db/admin`
+   - Cron/Ingest: `requireCron(req)` + `dbAdmin()` from `@/lib/db/admin`
+   - Debug: `requireCron(req)` + `dbAdmin()` from `@/lib/db/admin` (middleware blocks in prod unless `ALLOW_DEBUG_IN_PROD=1`)
 
-## DB Clients (`lib/db.ts`)
+## DB Clients
 
-| Client | Key | RLS | Use for |
-|---|---|---|---|
-| `dbAdmin()` | Service role | Bypasses | Cron, admin, ingest, public reads (interim) |
-| `dbPublic()` | Anon key | Respects | Public reads (when public-table RLS policies exist) |
-| `dbUser(jwt)` | Anon key + JWT | Respects | User routes (when RLS is enabled on user tables) |
+| Client | Import | Key | RLS | Use for |
+|---|---|---|---|---|
+| `dbAdmin()` | `@/lib/db/admin` | Service role | Bypasses | Cron, admin, debug, ingest, backfill |
+| `dbPublic()` | `@/lib/db` | Anon key | Respects | Public routes, user routes, pages, lib helpers |
+| `dbUser(jwt)` | `@/lib/db` | Anon key + JWT | Respects | User routes (when RLS is enabled) |
+
+`dbAdmin()` is deliberately isolated in `lib/db/admin.ts` to make service-role usage explicit. A build guard (`scripts/check-dbadmin-imports.mjs`) fails the build if `dbAdmin` appears in public routes, user routes, pages, or components.
 
 ## Clerk Integration Checklist
 
@@ -41,7 +43,7 @@ const { userId } = await auth();
 return userId ?? null;
 ```
 
-**Swap Point 2** -- `lib/db.ts` `dbUser()`:
+**Swap Point 2** -- `lib/db/index.ts` `dbUser()`:
 ```ts
 // Update to get Clerk token:
 const { getToken } = await auth();

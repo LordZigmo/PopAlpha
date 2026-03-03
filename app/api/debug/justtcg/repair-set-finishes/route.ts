@@ -12,7 +12,7 @@ import {
   setNameToJustTcgId,
   type JustTcgCard,
 } from "@/lib/providers/justtcg";
-import { dbAdmin } from "@/lib/db";
+import { dbAdmin } from "@/lib/db/admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

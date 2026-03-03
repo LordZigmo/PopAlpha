@@ -25,7 +25,7 @@
 
 import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/auth/require";
-import { dbAdmin } from "@/lib/db";
+import { dbAdmin } from "@/lib/db/admin";
 import { resolveTcgTrackingSetDetailed, getCachedTcgSetPricing } from "@/lib/tcgtracking";
 
 export const runtime = "nodejs";

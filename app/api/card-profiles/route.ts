@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { dbAdmin } from "@/lib/db";
+import { dbPublic } from "@/lib/db";
 
 export const runtime = "nodejs";
 
@@ -26,7 +26,7 @@ export async function GET(req: Request) {
   }
 
   try {
-    const supabase = dbAdmin();
+    const supabase = dbPublic();
     const { data, error } = await supabase
       .from("card_profiles")
       .select("card_slug, summary_short, summary_long, created_at")

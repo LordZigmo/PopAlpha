@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { buildSetId } from "@/lib/sets/summary-core.mjs";
-import { dbAdmin } from "@/lib/db";
+import { dbPublic } from "@/lib/db";
 
 type SetEntry = {
   set_name: string;
@@ -22,7 +22,7 @@ type SetEntry = {
 export const dynamic = "force-dynamic";
 
 export default async function SetsPage() {
-  const supabase = dbAdmin();
+  const supabase = dbPublic();
 
   const { data: latestSnapshot } = await supabase
     .from("set_summary_snapshots")

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require";
-import { dbAdmin } from "@/lib/db";
+import { dbPublic } from "@/lib/db";
 
 export const runtime = "nodejs";
 
@@ -13,7 +13,7 @@ export async function DELETE(_: Request, { params }: { params: Promise<{ id: str
   if (!id) return NextResponse.json({ ok: false, error: "Missing sale id." }, { status: 400 });
 
   try {
-    const supabase = dbAdmin();
+    const supabase = dbPublic();
 
     // Verify ownership before deleting
     const { data: row, error: fetchError } = await supabase

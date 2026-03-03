@@ -47,7 +47,7 @@ import { buildTrackedSelectionPlan } from "@/lib/cron/justtcg-tracked-selection.
 import { buildRawVariantRef } from "@/lib/identity/variant-ref";
 import { buildJustTcgSetSearchTerms } from "@/lib/providers/justtcg-set-search";
 import { refreshSetSummaryPipeline } from "@/lib/sets/refresh";
-import { dbAdmin } from "@/lib/db";
+import { dbAdmin } from "@/lib/db/admin";
 import {
   fetchJustTcgCards,
   jtFetchRaw,
