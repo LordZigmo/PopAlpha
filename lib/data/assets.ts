@@ -76,7 +76,6 @@ export type MoverItem = {
   canonical_name: string | null;
   set_name: string | null;
   median_7d: number | null;
-  mover_rank: number;
   mover_tier: "hot" | "warming" | "cooling" | "cold";
 };
 
@@ -354,14 +353,15 @@ export async function listMovers(opts: {
   const direction = opts.direction ?? "up";
   const cohort = opts.cohort ?? "any";
 
-  // public_variant_movers exposes mover_rank + mover_tier (derived from signals)
-  // but not the raw signal values. Safe to query with dbPublic().
+  // public_variant_movers exposes coarse mover_tier (hot/warming/cooling/cold)
+  // and tier_priority (1–4) for sorting — no raw signal values or fine-grained ranks.
   let query = supabase
     .from("public_variant_movers")
-    .select("canonical_slug, mover_rank, mover_tier")
+    .select("canonical_slug, mover_tier, tier_priority")
     .eq("provider", "JUSTTCG")
     .eq("grade", "RAW")
-    .order("mover_rank", { ascending: direction === "up" })
+    .order("tier_priority", { ascending: direction === "up" })
+    .order("updated_at", { ascending: false })
     .limit(limit * 5);
 
   if (cohort === "sealed") {
@@ -374,8 +374,8 @@ export async function listMovers(opts: {
   if (variantError) console.error("[listMovers]", variantError.message);
   if (!data || data.length === 0) return [];
 
-  // Deduplicate to one row per canonical_slug (best rank wins).
-  type MoverRow = { canonical_slug: string; mover_rank: number; mover_tier: string };
+  // Deduplicate to one row per canonical_slug (best tier wins).
+  type MoverRow = { canonical_slug: string; mover_tier: string; tier_priority: number };
   const deduped: MoverRow[] = [];
   const seen = new Set<string>();
   for (const row of data as MoverRow[]) {
@@ -420,7 +420,6 @@ export async function listMovers(opts: {
     canonical_name: cardMap.get(r.canonical_slug)?.canonical_name ?? null,
     set_name: cardMap.get(r.canonical_slug)?.set_name ?? null,
     median_7d: medianMap.get(r.canonical_slug) ?? null,
-    mover_rank: r.mover_rank,
     mover_tier: r.mover_tier as MoverItem["mover_tier"],
   }));
 }
