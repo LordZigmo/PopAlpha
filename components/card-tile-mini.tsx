@@ -13,15 +13,24 @@ function formatPrice(n: number | null): string {
   return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-function TrendArrow({ slope }: { slope: number | null }) {
+function formatChangePct(slope: number, price: number): string {
+  const pct = (slope * 7) / price * 100;
+  const abs = Math.abs(pct);
+  const formatted = abs >= 10 ? abs.toFixed(0) : abs.toFixed(1);
+  return `${pct > 0 ? "+" : "-"}${formatted}%`;
+}
+
+function TrendBadge({ slope, price }: { slope: number | null; price: number | null }) {
   if (slope == null || slope === 0) return null;
   const up = slope > 0;
+  const hasPct = price != null && price > 0;
   return (
     <span
-      className="text-[13px] font-semibold"
+      className="text-[13px] font-semibold tabular-nums"
       style={{ color: up ? "#00DC5A" : "#FF3B30" }}
     >
       {up ? "\u25B2" : "\u25BC"}
+      {hasPct ? ` ${formatChangePct(slope, price)}` : null}
     </span>
   );
 }
@@ -78,7 +87,7 @@ export default function CardTileMini({
           <span className="text-[14px] font-bold tabular-nums text-[#F0F0F0]">
             {formatPrice(card.median_7d)}
           </span>
-          <TrendArrow slope={card.trend_slope_7d} />
+          <TrendBadge slope={card.trend_slope_7d} price={card.median_7d} />
         </div>
 
         {/* Tier badge (movers only) */}

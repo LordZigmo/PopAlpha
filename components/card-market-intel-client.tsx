@@ -19,6 +19,7 @@ type VariantMetricPayload = {
   currentPrice: number | null;
   marketBalancePrice: number | null;
   asOfTs: string | null;
+  trendSlope7d: number | null;
   history7d: HistoryPointRow[];
   history30d: HistoryPointRow[];
   history90d: HistoryPointRow[];
@@ -133,6 +134,7 @@ export default function CardMarketIntelClient({
           label: variant.label,
           currentPrice: variant.currentPrice,
           asOfTs: variant.asOfTs,
+          trendSlope7d: variant.trendSlope7d,
           history7d: variant.history7d,
           history30d: variant.history30d,
           history90d: variant.history90d,

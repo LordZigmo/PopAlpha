@@ -66,7 +66,7 @@ export async function getHomepageData(): Promise<HomepageData> {
       // 1. Top movers — hot/warming tiers, pre-joined with card_metrics prices
       db
         .from("public_variant_movers_priced")
-        .select("canonical_slug, mover_tier, tier_priority, median_7d, updated_at")
+        .select("canonical_slug, mover_tier, tier_priority, median_7d, provider_trend_slope_7d, updated_at")
         .eq("provider", "JUSTTCG")
         .eq("grade", "RAW")
         .in("mover_tier", ["hot", "warming"])
@@ -101,7 +101,7 @@ export async function getHomepageData(): Promise<HomepageData> {
     if (trendingVariantResult.error) console.error("[homepage] trending", trendingVariantResult.error.message);
 
     // ── Deduplicate movers by canonical_slug ──────────────────────────────
-    type MoverRow = { canonical_slug: string; mover_tier: string; tier_priority: number; median_7d: number | null; updated_at: string };
+    type MoverRow = { canonical_slug: string; mover_tier: string; tier_priority: number; median_7d: number | null; provider_trend_slope_7d: number | null; updated_at: string };
     const dedupedMovers: MoverRow[] = [];
     const seenMovers = new Set<string>();
     for (const row of (moversResult.data ?? []) as MoverRow[]) {
@@ -215,6 +215,7 @@ export async function getHomepageData(): Promise<HomepageData> {
     for (const r of dedupedMovers) {
       moversOut.push(toCard(r.canonical_slug, {
         median_7d: r.median_7d,
+        trend_slope_7d: r.provider_trend_slope_7d,
         mover_tier: r.mover_tier as HomepageCard["mover_tier"],
       }));
       if (moversOut.length >= SECTION_LIMIT) break;

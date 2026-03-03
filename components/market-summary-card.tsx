@@ -39,6 +39,7 @@ type CardMetricRow = {
 type VariantSignalRow = {
   printing_id: string | null;
   history_points_30d: number | null;
+  provider_trend_slope_7d: number | null;
 };
 
 function filterRecentDays(points: HistoryPointRow[], days: number): HistoryPointRow[] {
@@ -109,7 +110,7 @@ export default async function MarketSummaryCard({
           .in("printing_id", printingIds),
         supabase
           .from("public_variant_metrics")
-          .select("printing_id, history_points_30d")
+          .select("printing_id, history_points_30d, provider_trend_slope_7d")
           .eq("canonical_slug", canonicalSlug)
           .eq("provider", "JUSTTCG")
           .eq("grade", "RAW")
@@ -203,6 +204,7 @@ export default async function MarketSummaryCard({
       signalBreakoutLabel: null,
       signalValue: null,
       signalValueLabel: null,
+      trendSlope7d: signalRow?.provider_trend_slope_7d ?? null,
       signalsHistoryPoints30d:
         signalRow?.history_points_30d === null || signalRow?.history_points_30d === undefined
           ? null
