@@ -1,3 +1,4 @@
+import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse, type NextRequest } from "next/server";
 import {
   PUBLIC_ROUTES,
@@ -68,39 +69,66 @@ function classifyRoute(pathname: string): RouteClass {
   return "unknown";
 }
 
+// ── Protected page routes (require Clerk sign-in) ───────────────────────────
+
+const isProtectedRoute = createRouteMatcher(["/portfolio(.*)"]);
+
 // ── Middleware ────────────────────────────────────────────────────────────────
 
-export function middleware(req: NextRequest) {
+export default clerkMiddleware(async (auth, req: NextRequest) => {
   const { pathname } = req.nextUrl;
-  const routeClass = classifyRoute(pathname);
 
-  // Debug routes: block in production unless ALLOW_DEBUG_IN_PROD=1
-  if (routeClass === "debug") {
-    const isProd = process.env.NODE_ENV === "production" || process.env.VERCEL === "1";
-    const allowed = process.env.ALLOW_DEBUG_IN_PROD === "1";
-    if (isProd && !allowed) {
+  // Only classify API routes and /portfolio — other pages pass through
+  if (pathname.startsWith("/api/") || pathname === "/portfolio") {
+    const routeClass = classifyRoute(pathname);
+
+    // Debug routes: block in production unless ALLOW_DEBUG_IN_PROD=1
+    if (routeClass === "debug") {
+      const isProd = process.env.NODE_ENV === "production" || process.env.VERCEL === "1";
+      const allowed = process.env.ALLOW_DEBUG_IN_PROD === "1";
+      if (isProd && !allowed) {
+        return NextResponse.json(
+          { ok: false, error: "Debug routes are disabled in production." },
+          { status: 403 },
+        );
+      }
+    }
+
+    // Unknown API routes: deny by default
+    if (routeClass === "unknown" && pathname.startsWith("/api/")) {
       return NextResponse.json(
-        { ok: false, error: "Debug routes are disabled in production." },
-        { status: 403 },
+        { ok: false, error: "Not found." },
+        { status: 404 },
       );
     }
+
+    // All classified routes: tag with x-route-class header
+    const response = NextResponse.next();
+    response.headers.set("x-route-class", routeClass);
+
+    // Protected page routes: require Clerk auth
+    if (isProtectedRoute(req)) {
+      await auth.protect();
+    }
+
+    return response;
   }
 
-  // Unknown routes: deny by default
-  if (routeClass === "unknown") {
-    return NextResponse.json(
-      { ok: false, error: "Not found." },
-      { status: 404 },
-    );
+  // Protected page routes outside API (shouldn't happen given matcher, but safe)
+  if (isProtectedRoute(req)) {
+    await auth.protect();
   }
+});
 
-  // All classified routes: pass through with x-route-class header
-  const response = NextResponse.next();
-  response.headers.set("x-route-class", routeClass);
-  return response;
-}
-
-// Only run middleware on API routes and specific pages
+// Match API routes, protected pages, sign-in/sign-up, and all non-static routes
+// for Clerk session resolution.
 export const config = {
-  matcher: ["/api/:path*", "/portfolio"],
+  matcher: [
+    "/api/:path*",
+    "/portfolio",
+    "/sign-in(.*)",
+    "/sign-up(.*)",
+    // Clerk: match all routes except static files
+    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
+  ],
 };

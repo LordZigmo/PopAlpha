@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { ClerkProvider } from "@clerk/nextjs";
 import { ThemeProvider } from "./theme-provider";
 import AppChrome from "@/components/app-chrome";
 import { getSiteUrl } from "@/lib/site-url";
@@ -29,12 +30,14 @@ export const metadata: Metadata = {
   },
 };
 
+const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+
 export default function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  return (
+  const inner = (
     <html lang="en" suppressHydrationWarning data-style="terminal">
       <body className="antialiased">
         <ThemeProvider>
@@ -45,4 +48,9 @@ export default function RootLayout({
       </body>
     </html>
   );
+
+  // ClerkProvider requires a publishable key — skip during builds without keys
+  if (!clerkKey) return inner;
+
+  return <ClerkProvider>{inner}</ClerkProvider>;
 }

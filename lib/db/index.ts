@@ -27,9 +27,10 @@ export function dbPublic(): SupabaseClient {
 /**
  * Per-request Supabase client authenticated with a user JWT. Respects RLS.
  *
- * CLERK SWAP POINT: Update to get Clerk token:
+ * When Clerk JWT templates are configured for Supabase:
  *   const { getToken } = await auth();
  *   const token = await getToken({ template: "supabase" });
+ *   const client = dbUser(token);
  */
 export function dbUser(jwt: string): SupabaseClient {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;

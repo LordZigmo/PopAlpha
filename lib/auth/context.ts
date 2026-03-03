@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import { auth } from "@clerk/nextjs/server";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -28,52 +28,11 @@ export function safeEqual(a: string | undefined, b: string | undefined): boolean
   }
 }
 
-// ── User JWT verification ────────────────────────────────────────────────────
+// ── User identity via Clerk ─────────────────────────────────────────────────
 
-/**
- * CLERK SWAP POINT: Replace this function body with:
- *   const { userId } = await auth();
- *   return userId ?? null;
- */
-async function verifyUserJwt(req: Request): Promise<string | null> {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anonKey) return null;
-
-  // Extract JWT from cookie or Authorization header
-  const authHeader = req.headers.get("authorization") ?? "";
-  const cookieHeader = req.headers.get("cookie") ?? "";
-  let token: string | null = null;
-
-  if (authHeader.startsWith("Bearer ")) {
-    token = authHeader.slice(7).trim();
-  } else {
-    // Parse sb-*-auth-token from cookies
-    const match = cookieHeader.match(/sb-[^=]+-auth-token=([^;]+)/);
-    if (match) {
-      try {
-        // Supabase stores the token as a JSON-encoded array ["base64token"]
-        const decoded = decodeURIComponent(match[1]);
-        const parsed = JSON.parse(decoded);
-        token = Array.isArray(parsed) ? parsed[0] : parsed;
-      } catch {
-        token = decodeURIComponent(match[1]);
-      }
-    }
-  }
-
-  if (!token) return null;
-
-  try {
-    const client = createClient(url, anonKey, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-    });
-    const { data, error } = await client.auth.getUser();
-    if (error || !data.user) return null;
-    return data.user.id;
-  } catch {
-    return null;
-  }
+async function verifyUserJwt(_req: Request): Promise<string | null> {
+  const { userId } = await auth();
+  return userId ?? null;
 }
 
 // ── Main resolver ────────────────────────────────────────────────────────────
@@ -84,7 +43,7 @@ async function verifyUserJwt(req: Request): Promise<string | null> {
  * Priority:
  * 1. CRON_SECRET bearer → "cron"
  * 2. ADMIN_SECRET bearer / x-admin-secret header / ADMIN_IMPORT_TOKEN bearer → "admin"
- * 3. Supabase JWT → "user"
+ * 3. Clerk session → "user"
  * 4. Fallback → "public"
  */
 export async function resolveAuthContext(req: Request): Promise<AuthContext> {
@@ -114,7 +73,7 @@ export async function resolveAuthContext(req: Request): Promise<AuthContext> {
     return { kind: "admin", reason: "bearer-admin-import-token" };
   }
 
-  // 3. Supabase user JWT
+  // 3. Clerk user session
   const userId = await verifyUserJwt(req);
   if (userId) {
     return { kind: "user", userId };

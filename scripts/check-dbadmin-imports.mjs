@@ -18,6 +18,7 @@ const ALLOWED_PREFIXES = [
   "app/api/admin/",
   "app/api/debug/",
   "app/api/ingest/",
+  "app/api/holdings/",
   "app/api/market/observe/",
   "app/api/psa/cert/route.ts",
   "app/api/pro/",

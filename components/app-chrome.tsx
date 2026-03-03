@@ -25,7 +25,12 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
   const isSetsPage = pathname?.startsWith("/sets") ?? false;
 
   // Auth pages get no chrome at all
-  if (pathname.startsWith("/login") || pathname.startsWith("/auth/callback")) {
+  if (
+    pathname.startsWith("/login") ||
+    pathname.startsWith("/auth/callback") ||
+    pathname.startsWith("/sign-in") ||
+    pathname.startsWith("/sign-up")
+  ) {
     return <>{children}</>;
   }
 

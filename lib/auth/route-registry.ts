@@ -53,4 +53,5 @@ export const USER_ROUTES = [
   "private-sales",
   "private-sales/[id]",
   "pro/signals",
+  "holdings",
 ];
