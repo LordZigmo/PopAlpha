@@ -62,4 +62,12 @@ export const USER_ROUTES = [
   "holdings",
   "onboarding/handle",
   "me",
+  "me/push",
+  "me/push/test",
+  "settings",
+  "profile",
+  "profile/banner",
+  "profile/follow",
+  "profile/posts",
+  "profile/posts/[id]",
 ];

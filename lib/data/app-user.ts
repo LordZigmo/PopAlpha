@@ -11,6 +11,12 @@ export type AppUser = {
   handle_norm: string | null;
   created_at: string;
   onboarding_completed_at: string | null;
+  profile_bio: string | null;
+  profile_banner_url: string | null;
+  notify_price_alerts: boolean;
+  notify_weekly_digest: boolean;
+  notify_product_updates: boolean;
+  profile_visibility: "PUBLIC" | "PRIVATE";
 };
 
 /**
@@ -22,7 +28,7 @@ export async function ensureAppUser(clerkUserId: string): Promise<AppUser> {
   const { data, error } = await db
     .from("app_users")
     .upsert({ clerk_user_id: clerkUserId }, { onConflict: "clerk_user_id" })
-    .select("clerk_user_id, handle, handle_norm, created_at, onboarding_completed_at")
+    .select("clerk_user_id, handle, handle_norm, created_at, onboarding_completed_at, profile_bio, profile_banner_url, notify_price_alerts, notify_weekly_digest, notify_product_updates, profile_visibility")
     .single();
 
   if (error) throw new Error(`ensureAppUser failed: ${error.message}`);
@@ -36,7 +42,7 @@ export async function getAppUser(clerkUserId: string): Promise<AppUser | null> {
   const db = dbAdmin();
   const { data, error } = await db
     .from("app_users")
-    .select("clerk_user_id, handle, handle_norm, created_at, onboarding_completed_at")
+    .select("clerk_user_id, handle, handle_norm, created_at, onboarding_completed_at, profile_bio, profile_banner_url, notify_price_alerts, notify_weekly_digest, notify_product_updates, profile_visibility")
     .eq("clerk_user_id", clerkUserId)
     .maybeSingle();
 
@@ -81,7 +87,7 @@ export async function claimHandle(
       })
       .eq("clerk_user_id", clerkUserId)
       .is("handle", null)
-      .select("clerk_user_id, handle, handle_norm, created_at, onboarding_completed_at")
+      .select("clerk_user_id, handle, handle_norm, created_at, onboarding_completed_at, profile_bio, profile_banner_url, notify_price_alerts, notify_weekly_digest, notify_product_updates, profile_visibility")
       .single();
 
     if (error) {
@@ -89,6 +95,52 @@ export async function claimHandle(
       if (error.code === "23505") return null;
       // No rows matched (user already has a handle)
       if (error.code === "PGRST116") return null;
+      throw error;
+    }
+    return data as AppUser;
+  } catch (err: unknown) {
+    const pgErr = err as { code?: string };
+    if (pgErr.code === "23505") return null;
+    throw err;
+  }
+}
+
+export async function updateAppProfile(
+  clerkUserId: string,
+  updates: {
+    handle?: string;
+    handleNorm?: string;
+    profileBio?: string | null;
+    profileBannerUrl?: string | null;
+    notifyPriceAlerts?: boolean;
+    notifyWeeklyDigest?: boolean;
+    notifyProductUpdates?: boolean;
+    profileVisibility?: "PUBLIC" | "PRIVATE";
+  },
+): Promise<AppUser | null> {
+  const db = dbAdmin();
+  const payload: Record<string, unknown> = {};
+
+  if (typeof updates.handle === "string") payload.handle = updates.handle;
+  if (typeof updates.handleNorm === "string") payload.handle_norm = updates.handleNorm;
+  if ("profileBio" in updates) payload.profile_bio = updates.profileBio ?? null;
+  if ("profileBannerUrl" in updates) payload.profile_banner_url = updates.profileBannerUrl ?? null;
+  if (typeof updates.notifyPriceAlerts === "boolean") payload.notify_price_alerts = updates.notifyPriceAlerts;
+  if (typeof updates.notifyWeeklyDigest === "boolean") payload.notify_weekly_digest = updates.notifyWeeklyDigest;
+  if (typeof updates.notifyProductUpdates === "boolean") payload.notify_product_updates = updates.notifyProductUpdates;
+  if (typeof updates.profileVisibility === "string") payload.profile_visibility = updates.profileVisibility;
+  if (Object.keys(payload).length === 0) return getAppUser(clerkUserId);
+
+  try {
+    const { data, error } = await db
+      .from("app_users")
+      .update(payload)
+      .eq("clerk_user_id", clerkUserId)
+      .select("clerk_user_id, handle, handle_norm, created_at, onboarding_completed_at, profile_bio, profile_banner_url, notify_price_alerts, notify_weekly_digest, notify_product_updates, profile_visibility")
+      .single();
+
+    if (error) {
+      if (error.code === "23505") return null;
       throw error;
     }
     return data as AppUser;

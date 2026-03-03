@@ -14,6 +14,7 @@ export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: "PopAlpha",
   description: "Alternative Asset Portfolio Analytics",
+  manifest: "/manifest.webmanifest",
   alternates: {
     canonical: "/",
   },

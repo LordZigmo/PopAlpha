@@ -4,54 +4,9 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { usePathname } from "next/navigation";
 import { SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
+import AppShell from "@/components/layout/AppShell";
 import ThemeToggle from "@/components/theme-toggle";
 import NavSearchForm from "@/components/nav-search-form";
-
-function SideRail({ pathname }: { pathname: string }) {
-  const items = [
-    { href: "/", label: "Home", glyph: "H" },
-    { href: "/portfolio", label: "Portfolio", glyph: "P" },
-    { href: "/about", label: "About", glyph: "A" },
-  ];
-
-  return (
-    <nav
-      aria-label="Quick navigation"
-      className="group fixed right-4 top-1/2 z-50 hidden -translate-y-1/2 overflow-hidden rounded-[1.35rem] border border-[#1E1E1E] bg-[#0A0A0A]/88 shadow-[0_16px_40px_rgba(0,0,0,0.45)] backdrop-blur-sm transition-[width,background-color,border-color] duration-300 ease-out hover:w-44 focus-within:w-44 sm:flex sm:w-14 sm:flex-col"
-    >
-      {items.map((item) => {
-        const active = item.href === "/"
-          ? pathname === "/"
-          : pathname === item.href || pathname.startsWith(`${item.href}/`);
-
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            className={[
-              "flex h-14 items-center gap-3 border-b border-[#1E1E1E] px-4 text-sm font-semibold transition last:border-b-0",
-              active ? "bg-white/[0.08] text-[#F0F0F0]" : "text-[#7A7A7A] hover:bg-white/[0.04] hover:text-[#F0F0F0]",
-            ].join(" ")}
-          >
-            <span
-              className={[
-                "flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-[11px] font-bold tracking-[0.14em] transition-colors",
-                active
-                  ? "border-[#F0F0F0] bg-[#F0F0F0] text-[#0A0A0A]"
-                  : "border-[#2A2A2A] bg-[#141414] text-[#A0A0A0] group-hover:border-[#3A3A3A]",
-              ].join(" ")}
-            >
-              {item.glyph}
-            </span>
-            <span className="whitespace-nowrap opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100">
-              {item.label}
-            </span>
-          </Link>
-        );
-      })}
-    </nav>
-  );
-}
 
 function AboutLink({ fixed = false }: { fixed?: boolean }) {
   return (
@@ -123,22 +78,16 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
   // Home, search, about, and card detail pages use their own layout — no header
   if (pathname === "/" || pathname === "/search" || pathname === "/about" || pathname.startsWith("/c/")) {
     return (
-      <>
-        {pathname !== "/about" && (
-          <div className="fixed right-4 top-4 z-50 flex items-center gap-2 sm:right-6">
-            <AuthBlock />
-          </div>
-        )}
-        <SideRail pathname={pathname} />
+      <AppShell>
         {children}
-      </>
+      </AppShell>
     );
   }
 
   return (
-    <>
+    <AppShell>
       <header className="fixed inset-x-0 top-0 z-50 border-b border-[#1E1E1E] bg-[#0A0A0A]/95">
-        <div className="mx-auto flex h-14 max-w-5xl items-center gap-3 px-4 sm:px-6">
+        <div className="mx-auto flex h-14 max-w-5xl items-center gap-3 px-4 sm:px-6 md:pr-10">
           {/* Logo */}
           <Link href="/" className="text-app shrink-0 text-[15px] font-bold tracking-tight">
             PopAlpha
@@ -176,6 +125,6 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
 
       {/* Push content below the fixed header */}
       <div className="pt-14">{children}</div>
-    </>
+    </AppShell>
   );
 }
