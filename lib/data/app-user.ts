@@ -21,7 +21,7 @@ export async function ensureAppUser(clerkUserId: string): Promise<AppUser> {
   const db = dbAdmin();
   const { data, error } = await db
     .from("app_users")
-    .upsert({ clerk_user_id: clerkUserId }, { onConflict: "clerk_user_id", ignoreDuplicates: true })
+    .upsert({ clerk_user_id: clerkUserId }, { onConflict: "clerk_user_id" })
     .select("clerk_user_id, handle, handle_norm, created_at, onboarding_completed_at")
     .single();
 

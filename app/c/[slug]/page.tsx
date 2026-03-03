@@ -9,15 +9,17 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import CanonicalCardFloatingHero from "@/components/canonical-card-floating-hero";
-import CardAiAnalysis from "@/components/card-ai-analysis";
+import CardViewTracker from "@/components/card-view-tracker";
 import CollapsibleSection from "@/components/collapsible-section";
 import EbayListings from "@/components/ebay-listings";
-import { GroupedSection, PageShell, Pill, SegmentedControl } from "@/components/ios-grouped-ui";
+import { GroupedSection, PageShell, Pill, SegmentedControl, StatStripItem } from "@/components/ios-grouped-ui";
 import MarketPulse from "@/components/market-pulse";
 import MarketSummaryCard from "@/components/market-summary-card";
+import PopAlphaScoutPreview from "@/components/popalpha-scout-preview";
 import { buildEbaySearchQueries, type GradeSelection, type GradedSource } from "@/lib/ebay-query";
 import { buildPrintingPill } from "@/lib/cards/detail";
-import { buildRawVariantRef } from "@/lib/identity/variant-ref";
+import { getCardViewSnapshot } from "@/lib/data/card-views";
+import { buildGradedVariantRef, buildRawVariantRef } from "@/lib/identity/variant-ref";
 import { dbPublic } from "@/lib/db";
 import { buildAssetViewModel } from "@/lib/data/assets";
 
@@ -50,6 +52,11 @@ type SnapshotRow = {
   high_30d: number | null;
 };
 
+type CardProfileRow = {
+  summary_short: string;
+  summary_long: string | null;
+};
+
 const DEFAULT_BACK_HREF = "/search";
 const VIEW_MODES = ["RAW", "GRADED"] as const;
 const GRADED_SOURCES = ["PSA", "TAG", "BGS", "CGC"] as const;
@@ -63,6 +70,13 @@ type GradedAvailabilityRow = {
   grade: GradeBucket;
   provider_as_of_ts: string | null;
   history_points_30d: number | null;
+};
+
+type GradedPriceHistoryRow = {
+  variant_ref: string;
+  price: number;
+  currency: string | null;
+  ts: string;
 };
 
 function finishLabel(finish: CardPrintingRow["finish"]): string {
@@ -355,6 +369,12 @@ export default async function CanonicalCardPage({
     .select("id, language, set_code, finish, finish_detail, edition, stamp, image_url, rarity")
     .eq("canonical_slug", slug);
 
+  const { data: cardProfile } = await supabase
+    .from("card_profiles")
+    .select("summary_short, summary_long")
+    .eq("card_slug", slug)
+    .maybeSingle<CardProfileRow>();
+
   const printings = ((printingsData ?? []) as CardPrintingRow[]).sort(sortPrintings);
   const viewMode = selectedViewMode(mode, grade);
   const selectedPrinting = printings.find((row) => row.id === printing) ?? chooseDefaultPrinting(printings) ?? null;
@@ -387,28 +407,42 @@ export default async function CanonicalCardPage({
   const availableProviders = GRADED_SOURCES.filter((source) =>
     gradedAvailability.some((row) => row.provider === source)
   );
-  const activeProvider = selectedProvider(provider)
-    ?? (availableProviders.includes("PSA") ? "PSA" : availableProviders[0] ?? "PSA");
+  const requestedProvider = selectedProvider(provider);
+  const activeProvider = (requestedProvider && availableProviders.includes(requestedProvider)
+    ? requestedProvider
+    : null)
+    ?? (availableProviders.includes("PSA") ? "PSA" : availableProviders[0] ?? null);
 
-  const availableBucketsForProvider = GRADE_BUCKETS.filter((gradeBucket) =>
-    gradedAvailability.some((row) => row.provider === activeProvider && row.grade === gradeBucket)
-  );
-  const activeBucket = selectedBucket(bucket, grade)
+  const availableBucketsForProvider = activeProvider
+    ? GRADE_BUCKETS.filter((gradeBucket) =>
+        gradedAvailability.some((row) => row.provider === activeProvider && row.grade === gradeBucket)
+      )
+    : [];
+  const requestedBucket = selectedBucket(bucket, grade);
+  const activeBucket = (requestedBucket && availableBucketsForProvider.includes(requestedBucket)
+    ? requestedBucket
+    : null)
     ?? (availableBucketsForProvider.includes("G9")
       ? "G9"
       : availableBucketsForProvider.includes("G10")
         ? "G10"
-        : availableBucketsForProvider[0] ?? "G9");
+        : availableBucketsForProvider[0] ?? null);
 
   const selectedSnapshotGrade = snapshotGradeForSelection(viewMode, activeBucket);
-  const queryGradeSelection: GradeSelection = viewMode === "RAW" ? "RAW" : activeBucket;
+  const queryGradeSelection: GradeSelection = viewMode === "RAW" ? "RAW" : (activeBucket ?? "RAW");
   const legacyListingsGrade: "RAW" | "PSA9" | "PSA10" = selectedSnapshotGrade ?? "RAW";
+  const gradedVariantRefsForActiveBucket = selectedPrinting && activeBucket
+    ? availableProviders.map((source) => ({
+        provider: source,
+        variantRef: buildGradedVariantRef(selectedPrinting.id, source, activeBucket),
+      }))
+    : [];
 
   // Fetch all three grade snapshots + view model in parallel.
   // card_metrics rows are keyed by (canonical_slug, printing_id, grade).
   // For singles: printing_id = selected printing UUID. For sealed / no printing: printing_id IS NULL.
   const printingIdForQuery = selectedPrinting?.id ?? null;
-  const [[rawSnap, psa9Snap, psa10Snap], vm] = await Promise.all([
+  const [[rawSnap, psa9Snap, psa10Snap], vm, gradedPriceHistoryQuery, viewSnapshot] = await Promise.all([
     Promise.all(
       (["RAW", "PSA9", "PSA10"] as const).map((g) => {
         const q = supabase
@@ -423,6 +457,18 @@ export default async function CanonicalCardPage({
       })
     ),
     buildAssetViewModel(slug, "RAW", 30, printingIdForQuery),
+    gradedVariantRefsForActiveBucket.length > 0
+      ? supabase
+          .from("public_price_history")
+          .select("variant_ref, price, currency, ts")
+          .eq("canonical_slug", slug)
+          .eq("provider", "POKEMON_TCG_API")
+          .eq("source_window", "snapshot")
+          .in("variant_ref", gradedVariantRefsForActiveBucket.map((entry) => entry.variantRef))
+          .order("ts", { ascending: false })
+          .limit(Math.max(gradedVariantRefsForActiveBucket.length * 4, 12))
+      : Promise.resolve({ data: [] as GradedPriceHistoryRow[] }),
+    getCardViewSnapshot(slug, 14),
   ]);
 
   const gradeSnapMap = {
@@ -430,6 +476,12 @@ export default async function CanonicalCardPage({
     PSA9: psa9Snap.data,
     PSA10: psa10Snap.data,
   } as const;
+  const gradedPriceHistoryRows = (gradedPriceHistoryQuery.data ?? []) as GradedPriceHistoryRow[];
+  const latestGradedPriceByVariantRef = new Map<string, GradedPriceHistoryRow>();
+  for (const row of gradedPriceHistoryRows) {
+    if (!row.variant_ref || latestGradedPriceByVariantRef.has(row.variant_ref)) continue;
+    latestGradedPriceByVariantRef.set(row.variant_ref, row);
+  }
 
   const snapshotData = selectedSnapshotGrade ? gradeSnapMap[selectedSnapshotGrade] : null;
 
@@ -472,7 +524,12 @@ export default async function CanonicalCardPage({
   const primaryPrice = displayPrimaryPrice != null ? formatUsdCompact(displayPrimaryPrice) : null;
   const primaryPriceLabel = currentRawPrice != null
     ? "Current market price"
-    : `${selectedSnapshotGrade ? legacyGradeLabel(selectedSnapshotGrade) : `${providerLabel(activeProvider)} ${gradeBucketLabel(activeBucket)}`} · 7-day median ask`;
+    : `${selectedSnapshotGrade
+      ? legacyGradeLabel(selectedSnapshotGrade)
+      : activeProvider && activeBucket
+        ? `${providerLabel(activeProvider)} ${gradeBucketLabel(activeBucket)}`
+        : "Graded market"
+    } · 7-day median ask`;
 
   // 24h price change (fallback to 7d)
   const priceChangePct = vm?.change_24h_pct ?? vm?.change_7d_pct ?? null;
@@ -499,6 +556,21 @@ export default async function CanonicalCardPage({
 
   const rarityInfo = selectedPrinting ? rarityColor(selectedPrinting.rarity) : null;
   const canonicalSetHref = setHref(canonical.set_name);
+  const selectedGradedReference = selectedSnapshotGrade && selectedSnapshotGrade !== "RAW"
+    ? gradeSnapMap[selectedSnapshotGrade]?.median_7d ?? null
+    : null;
+  const rawReference = gradeSnapMap.RAW?.median_7d ?? null;
+  const gradedPremiumPct = selectedGradedReference != null && rawReference != null && rawReference > 0
+    ? ((selectedGradedReference - rawReference) / rawReference) * 100
+    : null;
+  const gradedProviderCards = gradedVariantRefsForActiveBucket.map((entry) => {
+    const latestRow = latestGradedPriceByVariantRef.get(entry.variantRef);
+    return {
+      key: entry.provider,
+      label: providerLabel(entry.provider),
+      value: latestRow?.price != null ? formatUsdCompact(latestRow.price) : "Forming",
+    };
+  });
 
   return (
     <PageShell>
@@ -590,6 +662,55 @@ export default async function CanonicalCardPage({
             </div>
           </div>
 
+          {viewMode === "GRADED" && activeProvider && availableProviders.length > 0 ? (
+            <div className="mb-6 rounded-[20px] border border-[#1E1E1E] bg-[#101010] px-4 py-4 sm:px-5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Pill label={activeBucket ? `${gradeBucketLabel(activeBucket)} Grade Board` : "Graded Market"} tone="metallic" />
+                  <span className="text-[13px] text-[#6B6B6B]">Latest grader prices we actually have</span>
+                </div>
+                {selectedGradedReference != null ? (
+                  <span className="text-[24px] font-bold tracking-[-0.03em] text-[#F0F0F0]">
+                    {formatUsdCompact(selectedGradedReference)}
+                  </span>
+                ) : (
+                  <span className="text-[14px] font-semibold text-[#6B6B6B]">Market forming</span>
+                )}
+              </div>
+              <div className="mt-4 flex flex-wrap gap-4 sm:gap-6">
+                {gradedProviderCards.map((item) => (
+                  <StatStripItem key={item.key} label={item.label} value={item.value} />
+                ))}
+                {rawReference != null ? (
+                  <StatStripItem label="Raw Ref" value={formatUsdCompact(rawReference)} />
+                ) : null}
+                {gradedPremiumPct != null ? (
+                  <StatStripItem
+                    label="Grade Premium"
+                    value={`${gradedPremiumPct > 0 ? "+" : ""}${Math.abs(gradedPremiumPct) >= 10 ? gradedPremiumPct.toFixed(0) : gradedPremiumPct.toFixed(1)}%`}
+                    tone={gradedPremiumPct >= 0 ? "positive" : "negative"}
+                  />
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
+        <PopAlphaScoutPreview
+          cardName={canonical.canonical_name}
+          marketPrice={displayPrimaryPrice ?? null}
+          fairValue={fairValue}
+          changePct={priceChangePct}
+          changeLabel={priceChangeLabel}
+          activeListings7d={snapshotData?.active_listings_7d ?? null}
+          summaryText={cardProfile?.summary_long ?? cardProfile?.summary_short ?? null}
+        />
+
+        <CardViewTracker
+          canonicalSlug={slug}
+          initialTotalViews={viewSnapshot.totalViews}
+          initialSeries={viewSnapshot.series}
+        />
+
         {/* ── Market Summary (enlarged chart) ──────────────────────────────── */}
         <MarketSummaryCard
           canonicalSlug={slug}
@@ -625,47 +746,29 @@ export default async function CanonicalCardPage({
             </div>
             {viewMode === "GRADED" ? (
               <>
-                <div>
-                  <p className="mb-2 text-[15px] font-semibold text-[#777]">Source</p>
-                  <SegmentedControl
-                    items={GRADED_SOURCES.map((source) => {
-                      const providerHasRows = availableProviders.includes(source);
-                      const fallbackBucketForSource = GRADE_BUCKETS.find((gradeBucket) =>
-                        gradedAvailability.some((row) => row.provider === source && row.grade === gradeBucket)
-                      ) ?? activeBucket;
-
-                      return {
-                        key: source,
-                        label: providerLabel(source),
-                        href: toggleHref(slug, selectedPrinting?.id ?? null, debugEnabled, returnTo, {
-                          mode: "GRADED",
-                          provider: source,
-                          bucket: source === activeProvider ? activeBucket : fallbackBucketForSource,
-                          marketWindow: activeMarketWindow,
-                        }),
-                        active: source === activeProvider,
-                        disabled: !providerHasRows,
-                      };
-                    })}
-                  />
-                </div>
-                <div>
-                  <p className="mb-2 text-[15px] font-semibold text-[#777]">Grade</p>
-                  <SegmentedControl
-                    items={GRADE_BUCKETS.map((gradeBucket) => ({
-                      key: gradeBucket,
-                      label: gradeBucketLabel(gradeBucket),
-                      href: toggleHref(slug, selectedPrinting?.id ?? null, debugEnabled, returnTo, {
-                        mode: "GRADED",
-                        provider: activeProvider,
-                        bucket: gradeBucket,
-                        marketWindow: activeMarketWindow,
-                      }),
-                      active: gradeBucket === activeBucket,
-                      disabled: !availableBucketsForProvider.includes(gradeBucket),
-                    }))}
-                  />
-                </div>
+                {availableProviders.length > 0 && activeProvider ? (
+                  <>
+                    <div>
+                      <p className="mb-2 text-[15px] font-semibold text-[#777]">Grade</p>
+                      <SegmentedControl
+                        items={availableBucketsForProvider.map((gradeBucket) => ({
+                          key: gradeBucket,
+                          label: gradeBucketLabel(gradeBucket),
+                          href: toggleHref(slug, selectedPrinting?.id ?? null, debugEnabled, returnTo, {
+                            mode: "GRADED",
+                            bucket: gradeBucket,
+                            marketWindow: activeMarketWindow,
+                          }),
+                          active: gradeBucket === activeBucket,
+                        }))}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <div className="rounded-2xl border border-[#1E1E1E] bg-[#0D0D0D] px-4 py-3 text-sm text-[#6B6B6B]">
+                    No graded market data is available yet for this card.
+                  </div>
+                )}
               </>
             ) : null}
           </div>
@@ -678,25 +781,6 @@ export default async function CanonicalCardPage({
           bearishVotes={0}
           userVote={null}
           resolvesAt={Date.now() + 6 * 24 * 60 * 60 * 1000 + 12 * 60 * 60 * 1000}
-        />
-
-        <CardAiAnalysis
-          input={{
-            card: {
-              name: canonical.canonical_name,
-              setName: canonical.set_name,
-              marketPrice: displayPrimaryPrice ?? null,
-              change24hPct: vm?.change_24h_pct ?? null,
-              change7dPct: vm?.change_7d_pct ?? null,
-              grade10Price: gradeSnapMap.PSA10?.median_7d ?? null,
-              rawPrice: gradeSnapMap.RAW?.median_7d ?? null,
-              viewCount24h: null,
-              previousViewCount24h: null,
-              communityVotesBullish: 0,
-              communityVotesBearish: 0,
-              notes: selectedPrintingLabel,
-            },
-          }}
         />
 
         {/* ── Live eBay Listings ──────────────────────────────────────────── */}

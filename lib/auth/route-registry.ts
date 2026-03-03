@@ -14,6 +14,7 @@
 
 export const PUBLIC_ROUTES = [
   "cards/[slug]/detail",
+  "cards/[slug]/view",
   "search/cards",
   "search/suggest",
   "canonical/match",

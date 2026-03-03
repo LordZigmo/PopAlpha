@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 
 import DealWheel from "@/components/deal-wheel";
-import EngineSummary from "@/components/engine-summary";
 import LiquidityModule from "@/components/liquidity-module";
 import MarketSummaryCardClient from "@/components/market-summary-card-client";
 import SignalGauge from "@/components/signal-gauge";
@@ -114,19 +113,6 @@ export default function CardMarketIntelClient({
           />
         </div>
       ) : null}
-
-      <EngineSummary
-        currentPrice={activeVariant?.currentPrice ?? null}
-        marketBalancePrice={activeVariant?.marketBalancePrice ?? null}
-        signalTrend={activeVariant?.signalTrend ?? null}
-        signalTrendLabel={activeVariant?.signalTrendLabel ?? null}
-        signalValue={activeVariant?.signalValue ?? null}
-        signalValueLabel={activeVariant?.signalValueLabel ?? null}
-        liquidityScore={activeVariant?.liquidityScore ?? null}
-        liquidityTier={activeVariant?.liquidityTier ?? null}
-        priceChanges30d={activeVariant?.liquidityPriceChanges30d ?? null}
-        spreadPercent={activeVariant?.liquiditySpreadPercent ?? null}
-      />
 
       <MarketSummaryCardClient
         variants={variants.map((variant) => ({

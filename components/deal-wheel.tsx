@@ -34,7 +34,7 @@ function formatUsd(value: number | null | undefined): string {
   return new Intl.NumberFormat(undefined, {
     style: "currency",
     currency: "USD",
-    maximumFractionDigits: value >= 1000 ? 0 : 2,
+    maximumFractionDigits: value < 10 ? 2 : 0,
   }).format(value);
 }
 
