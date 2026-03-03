@@ -65,21 +65,22 @@ function classifyRoute(pathname: string): RouteClass {
 
   // Page routes
   if (pathname === "/portfolio") return "page-auth";
+  if (pathname.startsWith("/onboarding")) return "page-auth";
 
   return "unknown";
 }
 
 // ── Protected page routes (require Clerk sign-in) ───────────────────────────
 
-const isProtectedRoute = createRouteMatcher(["/portfolio(.*)"]);
+const isProtectedRoute = createRouteMatcher(["/portfolio(.*)", "/onboarding(.*)"]);
 
 // ── Middleware ────────────────────────────────────────────────────────────────
 
 export default clerkMiddleware(async (auth, req: NextRequest) => {
   const { pathname } = req.nextUrl;
 
-  // Only classify API routes and /portfolio — other pages pass through
-  if (pathname.startsWith("/api/") || pathname === "/portfolio") {
+  // Only classify API routes and protected pages — other pages pass through
+  if (pathname.startsWith("/api/") || pathname === "/portfolio" || pathname.startsWith("/onboarding")) {
     const routeClass = classifyRoute(pathname);
 
     // Debug routes: block in production unless ALLOW_DEBUG_IN_PROD=1
@@ -126,6 +127,7 @@ export const config = {
   matcher: [
     "/api/:path*",
     "/portfolio",
+    "/onboarding(.*)",
     "/sign-in(.*)",
     "/sign-up(.*)",
     // Clerk: match all routes except static files
