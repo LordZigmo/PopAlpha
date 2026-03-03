@@ -27,7 +27,7 @@ export async function GET(req: Request) {
 
   const supabase = dbPublic();
   let query = supabase
-    .from("card_metrics")
+    .from("public_card_metrics")
     .select(
       "canonical_slug, printing_id, grade, active_listings_7d, median_7d, median_30d, trimmed_median_30d, low_30d, high_30d"
     )

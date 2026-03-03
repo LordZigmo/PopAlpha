@@ -136,7 +136,7 @@ async function getRecentVariantStats(slug: string, days = 30): Promise<VariantHi
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
   const { data, error } = await supabase
-    .from("price_history_points")
+    .from("public_price_history")
     .select("variant_ref, ts")
     .eq("canonical_slug", slug)
     .gte("ts", since)
@@ -232,7 +232,7 @@ export async function getChartSeries(
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
   const { data, error } = await supabase
-    .from("price_history_points")
+    .from("public_price_history")
     .select("ts, price")
     .eq("canonical_slug", slug)
     .eq("variant_ref", variantRef)
@@ -256,7 +256,7 @@ async function getLatestMetrics(slug: string): Promise<AssetMetrics | null> {
   const supabase = dbPublic();
 
   const { data, error } = await supabase
-    .from("card_metrics")
+    .from("public_card_metrics")
     .select(
       [
         "median_7d", "median_30d", "low_30d", "high_30d", "trimmed_median_30d",
@@ -360,7 +360,7 @@ export async function listMovers(opts: {
   const cohort = opts.cohort ?? "any";
 
   let query = supabase
-    .from("variant_metrics")
+    .from("public_variant_metrics")
     .select("canonical_slug, signal_trend, signal_breakout, signal_value")
     .eq("provider", "JUSTTCG")
     .eq("grade", "RAW")
@@ -409,7 +409,7 @@ export async function listMovers(opts: {
   if (cardsError) console.error("[listMovers] cards", cardsError.message);
 
   const { data: metricsRows, error: metricsError } = await supabase
-    .from("card_metrics")
+    .from("public_card_metrics")
     .select("canonical_slug, median_7d, updated_at")
     .in("canonical_slug", slugs)
     .is("printing_id", null)
@@ -466,7 +466,7 @@ export async function searchAssets(
 
   const slugs = cards.map((c) => c.slug as string);
   const { data: metricsRows, error: metricsError } = await supabase
-    .from("card_metrics")
+    .from("public_card_metrics")
     .select("canonical_slug, median_7d")
     .in("canonical_slug", slugs)
     .is("printing_id", null)
@@ -650,7 +650,7 @@ export async function buildAssetViewModel(
     reason = "no_history";
   } else {
     const { data: vmRows, error: vmError } = await supabase
-      .from("variant_metrics")
+      .from("public_variant_metrics")
       .select("variant_ref, signal_trend, signal_breakout, signal_value, history_points_30d, provider_as_of_ts, signals_as_of_ts")
       .eq("canonical_slug", slug)
       .eq("provider", "JUSTTCG")

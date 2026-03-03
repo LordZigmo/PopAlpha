@@ -27,6 +27,16 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  // Require X-EBAY-SIGNATURE header to be present.
+  // TODO: implement full JWS signature verification before processing real deletion data.
+  const sig = req.headers.get("X-EBAY-SIGNATURE");
+  if (!sig) {
+    return NextResponse.json(
+      { received: false, error: "Missing X-EBAY-SIGNATURE header." },
+      { status: 401 },
+    );
+  }
+
   let payload: unknown;
   try {
     payload = await req.json();

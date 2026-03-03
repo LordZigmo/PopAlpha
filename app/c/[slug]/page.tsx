@@ -362,7 +362,7 @@ export default async function CanonicalCardPage({
 
   const { data: gradedAvailabilityData } = selectedPrinting
     ? await supabase
-        .from("variant_metrics")
+        .from("public_variant_metrics")
         .select("provider, grade, provider_as_of_ts, signals_as_of_ts, history_points_30d")
         .eq("canonical_slug", slug)
         .eq("printing_id", selectedPrinting.id)
@@ -413,7 +413,7 @@ export default async function CanonicalCardPage({
     Promise.all(
       (["RAW", "PSA9", "PSA10"] as const).map((g) => {
         const q = supabase
-          .from("card_metrics")
+          .from("public_card_metrics")
           .select("active_listings_7d, median_7d, median_30d, trimmed_median_30d, low_30d, high_30d")
           .eq("canonical_slug", slug)
           .eq("grade", g);

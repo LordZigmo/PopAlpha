@@ -112,7 +112,7 @@ export async function GET(req: Request) {
   try {
     const supabase = dbPublic();
     const { data, error } = await supabase
-      .from("psa_cert_snapshots")
+      .from("public_psa_snapshots")
       .select("id, cert, fetched_at, source, parsed, hash")
       .eq("cert", cert)
       .order("fetched_at", { ascending: false })

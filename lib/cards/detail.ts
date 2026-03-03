@@ -235,19 +235,19 @@ export async function buildCardDetailResponse(inputSlug: string): Promise<CardDe
       .order("finish", { ascending: true })
       .order("id", { ascending: true }),
     supabase
-      .from("card_metrics")
+      .from("public_card_metrics")
       .select("printing_id, liquidity_score, snapshot_count_30d")
       .eq("canonical_slug", canonicalSlug)
       .eq("grade", "RAW"),
     supabase
-      .from("variant_metrics")
+      .from("public_variant_metrics")
       .select("printing_id, provider_as_of_ts, signal_trend, signal_breakout, signal_value, signals_as_of_ts, history_points_30d")
       .eq("canonical_slug", canonicalSlug)
       .eq("provider", "JUSTTCG")
       .eq("grade", "RAW")
       .not("printing_id", "is", null),
     supabase
-      .from("variant_metrics")
+      .from("public_variant_metrics")
       .select("printing_id, provider, grade, provider_as_of_ts, signal_trend, signal_breakout, signal_value, signals_as_of_ts, history_points_30d")
       .eq("canonical_slug", canonicalSlug)
       .not("printing_id", "is", null)

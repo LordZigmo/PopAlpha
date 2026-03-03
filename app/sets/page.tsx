@@ -25,7 +25,7 @@ export default async function SetsPage() {
   const supabase = dbPublic();
 
   const { data: latestSnapshot } = await supabase
-    .from("set_summary_snapshots")
+    .from("public_set_summaries")
     .select("as_of_date")
     .order("as_of_date", { ascending: false })
     .limit(1);
@@ -34,7 +34,7 @@ export default async function SetsPage() {
 
   const { data: snapshotRows } = latestAsOf
     ? await supabase
-        .from("set_summary_snapshots")
+        .from("public_set_summaries")
         .select("set_name, as_of_date, change_7d_pct, change_30d_pct, heat_score")
         .eq("as_of_date", latestAsOf)
     : { data: null };

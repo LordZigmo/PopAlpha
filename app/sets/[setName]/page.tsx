@@ -123,7 +123,7 @@ export default async function SetBrowserPage({ params }: { params: Promise<{ set
       .select("canonical_slug, image_url, language, finish, edition")
       .in("canonical_slug", slugs),
     supabase
-      .from("card_metrics")
+      .from("public_card_metrics")
       .select("canonical_slug, median_7d")
       .in("canonical_slug", slugs)
       .eq("grade", "RAW")

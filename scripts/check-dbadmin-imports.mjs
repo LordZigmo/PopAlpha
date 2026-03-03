@@ -19,7 +19,7 @@ const ALLOWED_PREFIXES = [
   "app/api/debug/",
   "app/api/ingest/",
   "app/api/market/observe/",
-  "app/api/ebay/deletion-notification/",
+  "app/api/psa/cert/route.ts",
   "lib/db/admin.ts",
   "lib/backfill/",
   "scripts/",

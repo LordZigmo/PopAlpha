@@ -115,7 +115,7 @@ export async function getLatestSetSummarySnapshot(setName: string): Promise<SetS
 
   const supabase = dbPublic();
   const { data } = await supabase
-    .from("set_summary_snapshots")
+    .from("public_set_summaries")
     .select([
       "set_name",
       "as_of_date",
@@ -146,7 +146,7 @@ export async function getSetFinishBreakdown(setName: string): Promise<SetFinishB
 
   const supabase = dbPublic();
   const { data } = await supabase
-    .from("set_finish_summary_latest")
+    .from("public_set_finish_summary")
     .select("set_name, finish, market_cap, card_count, change_7d_pct, change_30d_pct, updated_at")
     .eq("set_name", setName)
     .order("market_cap", { ascending: false });

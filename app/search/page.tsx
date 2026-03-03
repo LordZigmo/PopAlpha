@@ -375,7 +375,7 @@ async function runBroadSearch(params: {
 
   if (needsAllPrices) {
     const { data: allPricesRaw } = await supabase
-      .from("card_metrics")
+      .from("public_card_metrics")
       .select("canonical_slug, median_7d, median_30d, snapshot_count_30d")
       .in("canonical_slug", relevanceOrderedSlugs)
       .eq("grade", "RAW")
@@ -447,7 +447,7 @@ async function runBroadSearch(params: {
   const [{ data: pagePrintingsRaw }, { data: pagePricesRaw }] = await Promise.all([
     pagePrintingsQuery,
     supabase
-      .from("card_metrics")
+      .from("public_card_metrics")
       .select("canonical_slug, median_7d, median_30d, snapshot_count_30d")
       .in("canonical_slug", pageSlugs)
       .eq("grade", "RAW")
@@ -553,7 +553,7 @@ async function loadSetSearchEnhancements(setName: string): Promise<{
   const slugs = canonicalRows.map((row) => row.slug);
   const [{ data: metricRowsRaw }, { data: printingRowsRaw }] = await Promise.all([
     supabase
-      .from("card_metrics")
+      .from("public_card_metrics")
       .select("canonical_slug, median_7d")
       .in("canonical_slug", slugs)
       .eq("grade", "RAW")

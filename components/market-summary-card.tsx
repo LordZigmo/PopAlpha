@@ -75,7 +75,7 @@ export default async function MarketSummaryCard({
   const [marketLatestQuery, history7dQuery, history30dQuery, history90dQuery, cardMetricsQuery, variantSignalsQuery] = printingIds.length > 0 && variantRefs.length > 0
     ? await Promise.all([
         supabase
-          .from("market_latest")
+          .from("public_market_latest")
           .select("printing_id, price_usd, observed_at, updated_at")
           .eq("canonical_slug", canonicalSlug)
           .in("printing_id", printingIds)
@@ -84,7 +84,7 @@ export default async function MarketSummaryCard({
           .eq("price_type", "MARKET")
           .order("updated_at", { ascending: false }),
         supabase
-          .from("price_history_points")
+          .from("public_price_history")
           .select("variant_ref, ts, price")
           .eq("canonical_slug", canonicalSlug)
           .eq("provider", "JUSTTCG")
@@ -93,7 +93,7 @@ export default async function MarketSummaryCard({
           .order("ts", { ascending: false })
           .limit(history7dLimit),
         supabase
-          .from("price_history_points")
+          .from("public_price_history")
           .select("variant_ref, ts, price")
           .eq("canonical_slug", canonicalSlug)
           .eq("provider", "JUSTTCG")
@@ -102,7 +102,7 @@ export default async function MarketSummaryCard({
           .order("ts", { ascending: false })
           .limit(history30dLimit),
         supabase
-          .from("price_history_points")
+          .from("public_price_history")
           .select("variant_ref, ts, price")
           .eq("canonical_slug", canonicalSlug)
           .eq("provider", "JUSTTCG")
@@ -111,13 +111,13 @@ export default async function MarketSummaryCard({
           .order("ts", { ascending: false })
           .limit(history90dLimit),
         supabase
-          .from("card_metrics")
+          .from("public_card_metrics")
           .select("printing_id, active_listings_7d, median_30d, trimmed_median_30d, snapshot_count_30d, provider_price_changes_count_30d, low_30d, high_30d")
           .eq("canonical_slug", canonicalSlug)
           .eq("grade", "RAW")
           .in("printing_id", printingIds),
         supabase
-          .from("variant_metrics")
+          .from("public_variant_metrics")
           .select("printing_id, signal_trend, signal_breakout, signal_value, history_points_30d, signals_as_of_ts")
           .eq("canonical_slug", canonicalSlug)
           .eq("provider", "JUSTTCG")
