@@ -1,107 +1,126 @@
-"use client";
+import { Suspense } from "react";
+import { getHomepageData } from "@/lib/data/homepage";
+import HomepageSearch from "@/components/homepage-search";
+import SectionCarousel from "@/components/section-carousel";
+import CardTileMini from "@/components/card-tile-mini";
+import ProSectionLocked from "@/components/pro-section-locked";
 
-import { useEffect, useState } from "react";
-import CardSearch from "@/components/card-search";
+export const dynamic = "force-dynamic";
 
-const TAGLINES = [
-  "Smarter TCG Market Insights.",
-  "Real-time insight for real-world deals.",
-  "Track prices. Spot trends. Collect smarter.",
-  "Your edge in the TCG market.",
-];
+function timeAgo(iso: string | null): string {
+  if (!iso) return "";
+  const ms = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(ms / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
 
-const SEARCH_EXAMPLES = [
-  "Start with a pokemon...",
-  "Bubble Mew",
-  "Base Set Charizard",
-  "Paldean Fates",
-  "Moonbreon",
-  "Mew ex",
-  "Skyridge Gengar",
-  "Gold Star Rayquaza",
-  "Crystal Lugia",
-  "1st Edition Blastoise",
-  "Shining Tyranitar",
-  "Pikachu Illustrator",
-  "Latias ex",
-  "Team Rocket Dark Charizard",
-  "Neo Genesis Lugia",
-  "CoroCoro Mew",
-  "Poncho Pikachu",
-  "151 Charizard ex",
-  "Prismatic Evolutions",
-  "Evolving Skies",
-  "Base Set",
-  "Japanese exclusive promos",
-  "PSA 10 grails",
-  "Trainer Gallery",
-  "Alt art chases",
-];
-
-export default function Home() {
-  const [tagline, setTagline] = useState(TAGLINES[0]);
-  const [placeholder, setPlaceholder] = useState("");
-
-  useEffect(() => {
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    let exampleIndex = 0;
-    let charIndex = 0;
-    let deleting = false;
-
-    const tick = () => {
-      const current = SEARCH_EXAMPLES[exampleIndex] ?? "";
-      if (!deleting) {
-        charIndex += 1;
-        setPlaceholder(current.slice(0, charIndex));
-        if (charIndex >= current.length) {
-          deleting = true;
-          timeoutId = setTimeout(tick, exampleIndex === 0 ? 6000 : 1400);
-          return;
-        }
-        timeoutId = setTimeout(tick, 75);
-        return;
-      }
-
-      charIndex = Math.max(0, charIndex - 1);
-      setPlaceholder(current.slice(0, charIndex));
-      if (charIndex === 0) {
-        deleting = false;
-        exampleIndex = (exampleIndex + 1) % SEARCH_EXAMPLES.length;
-        timeoutId = setTimeout(tick, 180);
-        return;
-      }
-      timeoutId = setTimeout(tick, 45);
-    };
-
-    timeoutId = setTimeout(tick, 300);
-    return () => {
-      if (timeoutId !== null) clearTimeout(timeoutId);
-    };
-  }, []);
-
-  useEffect(() => {
-    setTagline(TAGLINES[Math.floor(Math.random() * TAGLINES.length)]);
-  }, []);
+export default async function HomePage() {
+  const data = await getHomepageData();
+  const asOf = timeAgo(data.as_of);
 
   return (
-    <main className="app-shell">
-      <div className="mx-auto flex min-h-screen w-full max-w-4xl items-center justify-center px-4 py-12 sm:px-6">
-        <section className="w-full max-w-3xl text-center">
-          <h1 className="text-app text-6xl font-semibold tracking-tight sm:text-7xl">PopAlpha</h1>
-          <p className="text-muted mx-auto mt-4 max-w-xl text-sm sm:text-base">
-            {tagline}
-          </p>
+    <main className="min-h-screen bg-[#0A0A0A] text-[#F0F0F0] pb-16">
+      {/* ── Header / Search ──────────────────────────────────────────── */}
+      <div className="mx-auto max-w-5xl px-4 pt-16 sm:px-6 sm:pt-20">
+        <div className="flex items-baseline justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">PopAlpha</h1>
+            <p className="mt-1 text-[13px] text-[#555]">
+              TCG Market Intelligence
+              {asOf ? <span className="ml-2 text-[#444]">{asOf}</span> : null}
+            </p>
+          </div>
+        </div>
 
-          <CardSearch
-            className="mt-8"
-            size="hero"
-            placeholder={placeholder || "Search"}
-            autoFocus
-            enableGlobalShortcut
-            submitMode="active-or-search"
-          />
-        </section>
+        <div className="mt-5">
+          <Suspense
+            fallback={
+              <div className="h-[60px] rounded-full border border-white/[0.06] bg-[#111] opacity-40" />
+            }
+          >
+            <HomepageSearch />
+          </Suspense>
+        </div>
       </div>
+
+      {/* ── Top Movers ───────────────────────────────────────────────── */}
+      <SectionCarousel title="Top Movers" icon="🔥" subtitle="24h">
+        {data.movers.length > 0
+          ? data.movers.map((card) => (
+              <CardTileMini key={card.slug} card={card} showTier />
+            ))
+          : null}
+        {data.movers.length === 0 ? (
+          <EmptySlot message="No mover data yet" />
+        ) : null}
+      </SectionCarousel>
+
+      {/* ── Top Losers ───────────────────────────────────────────────── */}
+      <SectionCarousel title="Biggest Drops" icon="📉" subtitle="7d trend">
+        {data.losers.length > 0
+          ? data.losers.map((card) => (
+              <CardTileMini key={card.slug} card={card} />
+            ))
+          : null}
+        {data.losers.length === 0 ? (
+          <EmptySlot message="No drop data yet" />
+        ) : null}
+      </SectionCarousel>
+
+      {/* ── Trending ─────────────────────────────────────────────────── */}
+      <SectionCarousel title="Trending" icon="📈" subtitle="7d sustained">
+        {data.trending.length > 0
+          ? data.trending.map((card) => (
+              <CardTileMini key={card.slug} card={card} />
+            ))
+          : null}
+        {data.trending.length === 0 ? (
+          <EmptySlot message="No trending data yet" />
+        ) : null}
+      </SectionCarousel>
+
+      {/* ── Community Pulse (coming soon) ─────────────────────────────── */}
+      <section className="mt-8">
+        <div className="flex items-baseline gap-2 px-4 sm:px-6">
+          <span className="text-base">🗳</span>
+          <h2 className="text-[15px] font-semibold uppercase tracking-[0.08em] text-[#6B6B6B]">
+            Community Pulse
+          </h2>
+        </div>
+        <div className="mt-3 px-4 sm:px-6">
+          <div className="flex min-h-[100px] items-center justify-center rounded-2xl border border-dashed border-white/[0.08] bg-[#111]/50">
+            <p className="text-[13px] text-[#444]">
+              Sentiment voting coming soon
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Breakout Candidates (PRO) ────────────────────────────────── */}
+      <ProSectionLocked
+        title="Breakout Candidates"
+        icon="🧠"
+        description="Unlock Pro to see breakout leaders"
+      />
+
+      {/* ── Undervalued vs Trend (PRO) ───────────────────────────────── */}
+      <ProSectionLocked
+        title="Undervalued Picks"
+        icon="💎"
+        description="Unlock Pro to see value-zone misalignment"
+      />
     </main>
+  );
+}
+
+function EmptySlot({ message }: { message: string }) {
+  return (
+    <div className="flex min-h-[140px] w-full items-center justify-center text-[13px] text-[#444]">
+      {message}
+    </div>
   );
 }
