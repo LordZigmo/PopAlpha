@@ -19,8 +19,24 @@ function timeAgo(iso: string | null): string {
 }
 
 export default async function HomePage() {
-  const data = await getHomepageData();
-  const asOf = timeAgo(data.as_of);
+  console.log("[homepage] rendering started");
+  let data;
+  try {
+    data = await getHomepageData();
+    console.log("[homepage] data fetched:", {
+      movers: data?.movers?.length ?? 0,
+      losers: data?.losers?.length ?? 0,
+      trending: data?.trending?.length ?? 0,
+    });
+  } catch (err) {
+    console.error("[homepage] getHomepageData threw:", err);
+    data = { movers: [], losers: [], trending: [], as_of: null };
+  }
+
+  const movers = Array.isArray(data?.movers) ? data.movers : [];
+  const losers = Array.isArray(data?.losers) ? data.losers : [];
+  const trending = Array.isArray(data?.trending) ? data.trending : [];
+  const asOf = timeAgo(data?.as_of ?? null);
 
   return (
     <main className="min-h-screen bg-[#0A0A0A] text-[#F0F0F0] pb-16">
@@ -49,36 +65,36 @@ export default async function HomePage() {
 
       {/* ── Top Movers ───────────────────────────────────────────────── */}
       <SectionCarousel title="Top Movers" icon="🔥" subtitle="24h">
-        {data.movers.length > 0
-          ? data.movers.map((card) => (
+        {movers.length > 0
+          ? movers.map((card) => (
               <CardTileMini key={card.slug} card={card} showTier />
             ))
           : null}
-        {data.movers.length === 0 ? (
+        {movers.length === 0 ? (
           <EmptySlot message="No mover data yet" />
         ) : null}
       </SectionCarousel>
 
       {/* ── Top Losers ───────────────────────────────────────────────── */}
       <SectionCarousel title="Biggest Drops" icon="📉" subtitle="7d trend">
-        {data.losers.length > 0
-          ? data.losers.map((card) => (
+        {losers.length > 0
+          ? losers.map((card) => (
               <CardTileMini key={card.slug} card={card} />
             ))
           : null}
-        {data.losers.length === 0 ? (
+        {losers.length === 0 ? (
           <EmptySlot message="No drop data yet" />
         ) : null}
       </SectionCarousel>
 
       {/* ── Trending ─────────────────────────────────────────────────── */}
       <SectionCarousel title="Trending" icon="📈" subtitle="7d sustained">
-        {data.trending.length > 0
-          ? data.trending.map((card) => (
+        {trending.length > 0
+          ? trending.map((card) => (
               <CardTileMini key={card.slug} card={card} />
             ))
           : null}
-        {data.trending.length === 0 ? (
+        {trending.length === 0 ? (
           <EmptySlot message="No trending data yet" />
         ) : null}
       </SectionCarousel>
