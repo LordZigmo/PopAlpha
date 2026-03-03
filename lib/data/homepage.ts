@@ -41,9 +41,18 @@ const MIN_CHANGES_TRENDING = 5;
 
 // ── Loader ──────────────────────────────────────────────────────────────────
 
-export async function getHomepageData(): Promise<HomepageData> {
-  const db = dbPublic();
+const EMPTY: HomepageData = { movers: [], losers: [], trending: [], as_of: null };
 
+export async function getHomepageData(): Promise<HomepageData> {
+  let db;
+  try {
+    db = dbPublic();
+  } catch (err) {
+    console.error("[homepage] dbPublic() init failed:", err);
+    return EMPTY;
+  }
+
+  try {
   // ── Batch 1: three independent queries in parallel ──────────────────────
   const [moversResult, losersResult, trendingResult] = await Promise.all([
     // 1. Top movers — hot/warming tiers from public_variant_movers
@@ -201,4 +210,9 @@ export async function getHomepageData(): Promise<HomepageData> {
   const as_of = timestamps.length > 0 ? timestamps.sort().reverse()[0] : null;
 
   return { movers: moversOut, losers: losersOut, trending: trendingOut, as_of };
+
+  } catch (err) {
+    console.error("[homepage] getHomepageData failed:", err);
+    return EMPTY;
+  }
 }
