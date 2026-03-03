@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getSetSummaryPageData } from "@/lib/sets/summary";
+import { compute7dChangeBatch } from "@/lib/data/assets";
+import ChangeBadge from "@/components/change-badge";
 import { dbPublic } from "@/lib/db";
 
 type CanonicalRow = {
@@ -29,6 +31,7 @@ type CardEntry = {
   cardNumber: string | null;
   imageUrl: string | null;
   rawPrice: number | null;
+  changePct: number | null;
 };
 
 function formatUsd(value: number | null | undefined, digits = 2): string {
@@ -146,6 +149,9 @@ export default async function SetBrowserPage({ params }: { params: Promise<{ set
     priceBySlug.set(p.canonical_slug, p.median_7d);
   }
 
+  // Compute 7d change for all cards in the set
+  const changeMap = await compute7dChangeBatch(slugs);
+
   // Build + sort card entries (price desc, then card number)
   const entries: CardEntry[] = cards.map((card) => ({
     slug: card.slug,
@@ -153,6 +159,7 @@ export default async function SetBrowserPage({ params }: { params: Promise<{ set
     cardNumber: card.card_number,
     imageUrl: chooseBestImage(printingsBySlug.get(card.slug) ?? []),
     rawPrice: priceBySlug.get(card.slug) ?? null,
+    changePct: changeMap.get(card.slug) ?? null,
   }));
 
   entries.sort((a, b) => {
@@ -275,9 +282,12 @@ export default async function SetBrowserPage({ params }: { params: Promise<{ set
                     {entry.cardNumber ? `#${entry.cardNumber}` : "—"}
                   </p>
                   {entry.rawPrice != null ? (
-                    <p className="mt-0.5 text-xs font-semibold" style={{ color: "var(--color-accent)" }}>
-                      ${entry.rawPrice < 1 ? entry.rawPrice.toFixed(2) : entry.rawPrice.toFixed(0)} RAW
-                    </p>
+                    <div className="mt-0.5 flex items-center gap-1">
+                      <span className="text-xs font-semibold" style={{ color: "var(--color-accent)" }}>
+                        ${entry.rawPrice < 1 ? entry.rawPrice.toFixed(2) : entry.rawPrice.toFixed(0)} RAW
+                      </span>
+                      <ChangeBadge pct={entry.changePct} />
+                    </div>
                   ) : (
                     <p className="mt-0.5 text-xs text-muted">—</p>
                   )}

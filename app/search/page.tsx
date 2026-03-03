@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { unstable_cache } from "next/cache";
 import { dbPublic } from "@/lib/db";
 import { measureAsync } from "@/lib/perf";
+import { compute7dChangeBatch } from "@/lib/data/assets";
 import SearchResultsSection from "@/components/search-results-section";
 import CardSearch from "@/components/card-search";
 import { parseSearchSort, sortSearchResults } from "@/lib/search/sort.mjs";
@@ -69,6 +70,7 @@ type SearchDisplayRow = {
   set_name: string | null;
   year: number | null;
   raw_price: number | null;
+  change_pct: number | null;
   primary_image_url: string | null;
 };
 
@@ -577,6 +579,8 @@ async function loadSetSearchEnhancements(setName: string): Promise<{
     printingsBySlug.set(printing.canonical_slug, bucket);
   }
 
+  const chaseChangeMap = await compute7dChangeBatch(slugs);
+
   const chaseCards = sortSearchResults(
     canonicalRows.map((row) => {
       const primaryPrinting = choosePrimaryPrinting(printingsBySlug.get(row.slug) ?? []);
@@ -586,6 +590,7 @@ async function loadSetSearchEnhancements(setName: string): Promise<{
         set_name: row.set_name,
         year: row.year,
         raw_price: priceBySlug.get(row.slug) ?? null,
+        change_pct: chaseChangeMap.get(row.slug) ?? null,
         primary_image_url: primaryPrinting?.image_url ?? null,
       };
     }),
@@ -774,6 +779,9 @@ export default async function SearchPage({
     pricedOnly,
   });
 
+  const resultSlugs = result.rows.map((row) => row.canonical.slug);
+  const changeMap = resultSlugs.length > 0 ? await compute7dChangeBatch(resultSlugs) : new Map<string, number>();
+
   const displayRows: SearchDisplayRow[] = result.rows.map((row) => {
     const primaryPrinting = choosePrimaryPrinting(row.printings);
     return {
@@ -782,6 +790,7 @@ export default async function SearchPage({
       set_name: row.canonical.set_name,
       year: row.canonical.year,
       raw_price: row.rawPrice,
+      change_pct: changeMap.get(row.canonical.slug) ?? null,
       primary_image_url: primaryPrinting?.image_url ?? null,
     };
   });

@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { parseSearchSort, SEARCH_SORTS, sortSearchResults } from "@/lib/search/sort.mjs";
 import type { SetSummarySnapshot } from "@/lib/sets/summary";
+import ChangeBadge from "@/components/change-badge";
 
 type SearchSort = "relevance" | "market-price" | "newest" | "oldest";
 type SearchPageSize = 24 | 48 | 96;
@@ -16,6 +17,7 @@ type SearchDisplayRow = {
   set_name: string | null;
   year: number | null;
   raw_price: number | null;
+  change_pct: number | null;
   primary_image_url: string | null;
 };
 
@@ -120,9 +122,12 @@ function ResultCard({
           {row.set_name ? ` • ${row.set_name}` : ""}
         </p>
         {row.raw_price != null ? (
-          <p className="mt-0.5 text-[10px] font-semibold sm:text-xs" style={{ color: "var(--color-accent)" }}>
-            {formatCurrency(row.raw_price)} RAW
-          </p>
+          <div className="mt-0.5 flex items-center gap-1">
+            <span className="text-[10px] font-semibold sm:text-xs" style={{ color: "var(--color-accent)" }}>
+              {formatCurrency(row.raw_price)} RAW
+            </span>
+            <ChangeBadge pct={row.change_pct} />
+          </div>
         ) : null}
       </div>
     </Link>

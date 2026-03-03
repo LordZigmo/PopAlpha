@@ -711,5 +711,68 @@ export async function buildAssetViewModel(
   };
 }
 
+// ── compute7dChangeBatch ─────────────────────────────────────────────────────
+
+/**
+ * Batch-computes 7-day price change for a list of slugs.
+ * Uses the same boundary-based method as homepage and card page:
+ *   find price closest to 7d ago → compare to latest.
+ * Returns Map<slug, changePct>.
+ */
+export async function compute7dChangeBatch(slugs: string[]): Promise<Map<string, number>> {
+  if (slugs.length === 0) return new Map();
+
+  const supabase = dbPublic();
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+  const { data, error } = await supabase
+    .from("public_price_history")
+    .select("canonical_slug, variant_ref, ts, price")
+    .in("canonical_slug", slugs)
+    .eq("provider", "JUSTTCG")
+    .eq("source_window", "30d")
+    .gte("ts", sevenDaysAgo)
+    .order("ts", { ascending: true })
+    .limit(slugs.length * 200);
+
+  if (error) console.error("[compute7dChangeBatch]", error.message);
+
+  type HistRow = { canonical_slug: string; variant_ref: string; ts: string; price: number };
+  const slugVariants = new Map<string, Map<string, HistRow[]>>();
+  for (const row of (data ?? []) as HistRow[]) {
+    if (!slugVariants.has(row.canonical_slug)) slugVariants.set(row.canonical_slug, new Map());
+    const varMap = slugVariants.get(row.canonical_slug)!;
+    if (!varMap.has(row.variant_ref)) varMap.set(row.variant_ref, []);
+    varMap.get(row.variant_ref)!.push(row);
+  }
+
+  const cutoff7dMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const changeMap = new Map<string, number>();
+
+  for (const [slug, varMap] of slugVariants) {
+    let best: HistRow[] = [];
+    for (const points of varMap.values()) {
+      if (points.length > best.length) best = points;
+    }
+    if (best.length < 2) continue;
+    const latestTs = new Date(best[best.length - 1].ts).getTime();
+    if (latestTs <= cutoff7dMs) continue;
+    const priceNow = best[best.length - 1].price;
+    let priceAtCutoff: number | null = null;
+    for (const pt of best) {
+      if (new Date(pt.ts).getTime() <= cutoff7dMs) {
+        priceAtCutoff = pt.price;
+      } else {
+        break;
+      }
+    }
+    if (priceAtCutoff !== null && priceAtCutoff > 0) {
+      changeMap.set(slug, ((priceNow - priceAtCutoff) / priceAtCutoff) * 100);
+    }
+  }
+
+  return changeMap;
+}
+
 // ── Re-export CHART_MIN_POINTS so page can check sufficiency ────────────────
 export { CHART_MIN_POINTS };

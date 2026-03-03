@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { HomepageCard } from "@/lib/data/homepage";
+import ChangeBadge from "@/components/change-badge";
 
 const TIER_STYLES: Record<string, { label: string; color: string; bg: string }> = {
   hot:     { label: "Hot",     color: "#00DC5A", bg: "rgba(0,220,90,0.08)" },
@@ -11,21 +12,6 @@ const TIER_STYLES: Record<string, { label: string; color: string; bg: string }> 
 function formatPrice(n: number | null): string {
   if (n == null || n <= 0) return "--";
   return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function ChangeBadge({ pct }: { pct: number | null }) {
-  if (pct == null || pct === 0) return null;
-  const up = pct > 0;
-  const abs = Math.abs(pct);
-  const formatted = abs >= 10 ? abs.toFixed(0) : abs.toFixed(1);
-  return (
-    <span
-      className="text-[13px] font-semibold tabular-nums"
-      style={{ color: up ? "#00DC5A" : "#FF3B30" }}
-    >
-      {up ? "\u25B2" : "\u25BC"} {up ? "+" : "-"}{formatted}%
-    </span>
-  );
 }
 
 /**
