@@ -27,6 +27,7 @@ export type HomepageCard = {
   median_7d: number | null;
   trend_slope_7d: number | null;
   mover_tier: "hot" | "warming" | "cooling" | "cold" | null;
+  image_url: string | null;
 };
 
 export type HomepageData = {
@@ -38,7 +39,7 @@ export type HomepageData = {
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const SECTION_LIMIT = 12;
+const SECTION_LIMIT = 3;
 /** Minimum 7d median to filter noise / $0 cards */
 const MIN_PRICE = 0.5;
 /** Minimum trade count for "sustained trending" vs noise */
@@ -137,8 +138,8 @@ export async function getHomepageData(): Promise<HomepageData> {
 
     const slugArray = [...allSlugs];
 
-    // ── Batch 2: card metadata + prices ───────────────────────────────────
-    const [cardsResult, pricesResult] = await Promise.all([
+    // ── Batch 2: card metadata + prices + images ──────────────────────────
+    const [cardsResult, pricesResult, imagesResult] = await Promise.all([
       db
         .from("canonical_cards")
         .select("slug, canonical_name, set_name, year")
@@ -150,10 +151,19 @@ export async function getHomepageData(): Promise<HomepageData> {
         .in("canonical_slug", slugArray)
         .is("printing_id", null)
         .eq("grade", "RAW"),
+
+      db
+        .from("card_printings")
+        .select("canonical_slug, image_url")
+        .in("canonical_slug", slugArray)
+        .eq("language", "EN")
+        .not("image_url", "is", null)
+        .limit(slugArray.length * 3),
     ]);
 
     if (cardsResult.error) console.error("[homepage] cards", cardsResult.error.message);
     if (pricesResult.error) console.error("[homepage] prices", pricesResult.error.message);
+    if (imagesResult.error) console.error("[homepage] images", imagesResult.error.message);
 
     // ── Build lookup maps ─────────────────────────────────────────────────
     type CardRow = { slug: string; canonical_name: string; set_name: string | null; year: number | null };
@@ -166,6 +176,13 @@ export async function getHomepageData(): Promise<HomepageData> {
     for (const row of (pricesResult.data ?? []) as { canonical_slug: string; median_7d: number | null }[]) {
       if (!priceMap.has(row.canonical_slug)) {
         priceMap.set(row.canonical_slug, row.median_7d);
+      }
+    }
+
+    const imageMap = new Map<string, string>();
+    for (const row of (imagesResult.data ?? []) as { canonical_slug: string; image_url: string }[]) {
+      if (!imageMap.has(row.canonical_slug) && row.image_url) {
+        imageMap.set(row.canonical_slug, row.image_url);
       }
     }
 
@@ -182,6 +199,7 @@ export async function getHomepageData(): Promise<HomepageData> {
         set_name: card?.set_name ?? null,
         year: card?.year ?? null,
         median_7d: price,
+        image_url: imageMap.get(slug) ?? null,
         trend_slope_7d: overrides.trend_slope_7d ?? null,
         mover_tier: overrides.mover_tier ?? null,
       };

@@ -77,7 +77,7 @@ export default async function HomePage() {
       {/* ── Top Movers ───────────────────────────────────────────────── */}
       <SectionCarousel title="Top Movers" icon="🔥" subtitle="24h">
         {movers.length > 0
-          ? movers.map((card) => (
+          ? movers.slice(0, 3).map((card) => (
               <CardTileMini key={card.slug} card={card} showTier />
             ))
           : null}
@@ -89,7 +89,7 @@ export default async function HomePage() {
       {/* ── Top Losers ───────────────────────────────────────────────── */}
       <SectionCarousel title="Biggest Drops" icon="📉" subtitle="7d trend">
         {losers.length > 0
-          ? losers.map((card) => (
+          ? losers.slice(0, 3).map((card) => (
               <CardTileMini key={card.slug} card={card} />
             ))
           : null}
@@ -101,7 +101,7 @@ export default async function HomePage() {
       {/* ── Trending ─────────────────────────────────────────────────── */}
       <SectionCarousel title="Trending" icon="📈" subtitle="7d sustained">
         {trending.length > 0
-          ? trending.map((card) => (
+          ? trending.slice(0, 3).map((card) => (
               <CardTileMini key={card.slug} card={card} />
             ))
           : null}

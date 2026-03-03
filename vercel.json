@@ -13,8 +13,12 @@
       "schedule": "0 6 * * *"
     },
     {
-      "path": "/api/cron/refresh-card-metrics",
+      "path": "/api/cron/sync-pokedata-prices",
       "schedule": "30 6 * * *"
+    },
+    {
+      "path": "/api/cron/refresh-card-metrics",
+      "schedule": "45 6 * * *"
     },
     {
       "path": "/api/cron/snapshot-price-history",
