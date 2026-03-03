@@ -11,6 +11,7 @@ export default function SignInPage() {
           <p className="text-muted mt-1 text-sm">Sign in to your account.</p>
         </div>
         <SignIn
+          fallbackRedirectUrl="/"
           appearance={{
             elements: {
               rootBox: "w-full",

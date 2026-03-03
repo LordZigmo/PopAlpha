@@ -11,6 +11,7 @@ export default function SignUpPage() {
           <p className="text-muted mt-1 text-sm">Create your account.</p>
         </div>
         <SignUp
+          fallbackRedirectUrl="/"
           appearance={{
             elements: {
               rootBox: "w-full",

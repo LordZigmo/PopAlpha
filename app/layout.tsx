@@ -6,6 +6,7 @@ import AppChrome from "@/components/app-chrome";
 import { getSiteUrl } from "@/lib/site-url";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
+import { clerkEnabled, assertClerkConfigured } from "@/lib/auth/clerk-enabled";
 
 const siteUrl = getSiteUrl();
 
@@ -30,13 +31,14 @@ export const metadata: Metadata = {
   },
 };
 
-const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
-
 export default function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  // Fail loudly in production if Clerk keys are missing
+  assertClerkConfigured();
+
   const inner = (
     <html lang="en" suppressHydrationWarning data-style="terminal">
       <body className="antialiased">
@@ -49,8 +51,8 @@ export default function RootLayout({
     </html>
   );
 
-  // ClerkProvider requires a publishable key — skip during builds without keys
-  if (!clerkKey) return inner;
+  // Skip ClerkProvider during builds without keys (prerender safety)
+  if (!clerkEnabled) return inner;
 
   return <ClerkProvider>{inner}</ClerkProvider>;
 }

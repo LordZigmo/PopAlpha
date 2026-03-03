@@ -1,9 +1,12 @@
 "use client";
 
 import SettingsMenu from "@/components/settings-menu";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useUser, useClerk } from "@clerk/nextjs";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useUser, useClerk, RedirectToSignIn } from "@clerk/nextjs";
+import { usePathname, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+
+// ── Types ────────────────────────────────────────────────────────────────────
 
 type Card = {
   id: string;
@@ -29,6 +32,10 @@ type MarketRow = {
   grade: string;
   price_usd: number;
 };
+
+const VALID_GRADES = ["RAW", "PSA9", "PSA10"] as const;
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
 function identityKey(row: { printing_id: string | null; canonical_slug: string | null; grade: string }) {
   return `${row.printing_id ?? row.canonical_slug ?? "unknown"}::${row.grade}`;
@@ -56,11 +63,16 @@ function formatDate(dateString: string | null) {
   });
 }
 
-export default function PortfolioClient() {
+// ── Inner component (needs useSearchParams → must be inside Suspense) ───────
+
+function PortfolioInner() {
   const { user, isLoaded } = useUser();
   const { signOut } = useClerk();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
 
   const [loading, setLoading] = useState(true);
+  const [holdingsError, setHoldingsError] = useState<string | null>(null);
 
   const [cards, setCards] = useState<Card[]>([]);
   const [holdings, setHoldings] = useState<HoldingRow[]>([]);
@@ -69,6 +81,7 @@ export default function PortfolioClient() {
 
   const [addOpen, setAddOpen] = useState(false);
   const [addErr, setAddErr] = useState<string | null>(null);
+  const [addSuccess, setAddSuccess] = useState(false);
   const [addSaving, setAddSaving] = useState(false);
 
   const [cardId, setCardId] = useState<string>("");
@@ -184,77 +197,80 @@ export default function PortfolioClient() {
     const psa10Rate = gradedUnits > 0 ? (psa10Units / gradedUnits) * 100 : 0;
     const gradingCoverage = totalUnits > 0 ? (gradedUnits / totalUnits) * 100 : 0;
 
-    return {
-      totalUnits,
-      gradedUnits,
-      psa10Units,
-      psa9Units,
-      psa10Rate,
-      gradingCoverage,
-    };
+    return { totalUnits, gradedUnits, psa10Units, psa9Units, psa10Rate, gradingCoverage };
   }, [holdings]);
 
-  async function loadAll() {
+  // ── Data fetching ───────────────────────────────────────────────────────
+
+  const fetchHoldings = useCallback(async () => {
+    setHoldingsError(null);
+    try {
+      const res = await fetch("/api/holdings");
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        throw new Error(json?.error ?? `HTTP ${res.status}`);
+      }
+      const json = await res.json();
+      setHoldings((json.holdings ?? []) as HoldingRow[]);
+    } catch (err) {
+      setHoldingsError(err instanceof Error ? err.message : "Failed to load holdings.");
+    }
+  }, []);
+
+  const loadAll = useCallback(async () => {
     setLoading(true);
 
-    // Public reads — cards and market prices (no auth needed)
-    const { data: cardsData } = await supabase
-      .from("canonical_cards")
-      .select("slug, canonical_name, set_name, year")
-      .order("year", { ascending: true })
-      .order("set_name", { ascending: true })
-      .order("canonical_name", { ascending: true });
+    // Public reads — cards and market prices (anon key, no auth)
+    const [, holdingsResult, ] = await Promise.allSettled([
+      (async () => {
+        const { data: cardsData } = await supabase
+          .from("canonical_cards")
+          .select("slug, canonical_name, set_name, year")
+          .order("year", { ascending: true })
+          .order("set_name", { ascending: true })
+          .order("canonical_name", { ascending: true });
 
-    const list = ((cardsData ?? []) as Array<{
-      slug: string;
-      canonical_name: string;
-      set_name: string | null;
-      year: number | null;
-    }>).map((row) => ({
-      id: row.slug,
-      name: row.canonical_name,
-      set: row.set_name ?? "Unknown set",
-      year: row.year,
-    })) as Card[];
-    setCards(list);
+        const list = ((cardsData ?? []) as Array<{
+          slug: string;
+          canonical_name: string;
+          set_name: string | null;
+          year: number | null;
+        }>).map((row) => ({
+          id: row.slug,
+          name: row.canonical_name,
+          set: row.set_name ?? "Unknown set",
+          year: row.year,
+        })) as Card[];
+        setCards(list);
+        setCardId((prev) => (prev || list[0]?.id || ""));
+      })(),
+      fetchHoldings(),
+      (async () => {
+        const { data: marketData } = await supabase
+          .from("market_snapshots")
+          .select("canonical_slug, printing_id, grade, price_usd")
+          .eq("source", "tcgplayer");
 
-    if (!cardId && list.length > 0) setCardId(list[0].id);
+        const priceMap: Record<string, number> = {};
+        (marketData ?? []).forEach((row: MarketRow) => {
+          priceMap[identityKey(row)] = Number(row.price_usd);
+        });
+        setMarketPrices(priceMap);
+      })(),
+    ]);
 
-    // Holdings — via API route (auth handled server-side)
-    try {
-      const holdRes = await fetch("/api/holdings");
-      if (holdRes.ok) {
-        const holdJson = await holdRes.json();
-        setHoldings((holdJson.holdings ?? []) as HoldingRow[]);
-      }
-    } catch {
-      // Network error — holdings stay empty
+    // Surface holdings error even when other fetches succeed
+    if (holdingsResult.status === "rejected") {
+      setHoldingsError(holdingsResult.reason?.message ?? "Failed to load holdings.");
     }
-
-    // Market prices — public read
-    const { data: marketData } = await supabase
-      .from("market_snapshots")
-      .select("canonical_slug, printing_id, grade, price_usd")
-      .eq("source", "tcgplayer");
-
-    const priceMap: Record<string, number> = {};
-    (marketData ?? []).forEach((row: MarketRow) => {
-      priceMap[identityKey(row)] = Number(row.price_usd);
-    });
-    setMarketPrices(priceMap);
 
     setLoading(false);
-  }
+  }, [fetchHoldings]);
 
   useEffect(() => {
-    if (!isLoaded) return;
-    if (!user) {
-      window.location.href = "/sign-in";
-      return;
-    }
+    if (!isLoaded || !user) return;
     loadAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoaded, user]);
+  }, [isLoaded, user, loadAll]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -264,8 +280,49 @@ export default function PortfolioClient() {
     return () => document.removeEventListener("keydown", onKey);
   }, [addOpen]);
 
+  // ── Loading state ─────────────────────────────────────────────────────
+
+  if (!isLoaded) {
+    return (
+      <div className="app-shell flex min-h-[60vh] items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
+          <p className="text-sm text-white/50">Loading account...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Signed-out redirect ───────────────────────────────────────────────
+
+  if (!user) {
+    const qs = searchParams.toString();
+    const returnUrl = pathname + (qs ? `?${qs}` : "");
+    return <RedirectToSignIn redirectUrl={returnUrl} />;
+  }
+
+  // ── Signed-in: data still loading ─────────────────────────────────────
+
+  if (loading) {
+    return (
+      <div className="app-shell px-4 py-6 sm:px-6 lg:px-10">
+        <div className="mx-auto max-w-[1200px] space-y-4">
+          <div className="h-8 w-48 animate-pulse rounded-xl bg-white/10" />
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="h-64 animate-pulse rounded-3xl bg-white/5" />
+            <div className="h-64 animate-pulse rounded-3xl bg-white/5" />
+          </div>
+          <div className="h-48 animate-pulse rounded-3xl bg-white/5" />
+        </div>
+      </div>
+    );
+  }
+
+  // ── Handlers ──────────────────────────────────────────────────────────
+
   function openAddLot() {
     setAddErr(null);
+    setAddSuccess(false);
     if (!cardId && cards.length > 0) setCardId(cards[0].id);
     setAddOpen(true);
     setTimeout(() => modalRef.current?.focus(), 0);
@@ -274,20 +331,28 @@ export default function PortfolioClient() {
   async function addLot(e: React.FormEvent) {
     e.preventDefault();
     setAddErr(null);
+    setAddSuccess(false);
     setAddSaving(true);
 
+    // Client-side validation
     if (!cardId) {
       setAddErr("Pick a card.");
       setAddSaving(false);
       return;
     }
-    if (!qty || qty < 1) {
-      setAddErr("Qty must be at least 1.");
+    if (!VALID_GRADES.includes(grade as typeof VALID_GRADES[number])) {
+      setAddErr("Select a valid grade.");
       setAddSaving(false);
       return;
     }
-    if (pricePaid < 0) {
-      setAddErr("Price paid must be >= 0.");
+    const intQty = Math.floor(qty);
+    if (!Number.isFinite(intQty) || intQty < 1) {
+      setAddErr("Qty must be a positive whole number.");
+      setAddSaving(false);
+      return;
+    }
+    if (!Number.isFinite(pricePaid) || pricePaid < 0) {
+      setAddErr("Price paid must be a non-negative number.");
       setAddSaving(false);
       return;
     }
@@ -299,7 +364,7 @@ export default function PortfolioClient() {
         body: JSON.stringify({
           canonical_slug: cardId,
           grade,
-          qty,
+          qty: intQty,
           price_paid_usd: pricePaid,
           acquired_on: acquiredOn || null,
           venue: venue || null,
@@ -313,22 +378,26 @@ export default function PortfolioClient() {
         return;
       }
     } catch {
-      setAddErr("Network error.");
+      setAddErr("Network error. Check your connection and try again.");
       setAddSaving(false);
       return;
     }
 
+    // Success — reset form, show feedback, re-fetch
     setQty(1);
-    setPricePaid(pricePaid);
     setAcquiredOn("");
     setVenue("");
-
-    await loadAll();
-    setAddOpen(false);
+    setAddSuccess(true);
     setAddSaving(false);
-  }
 
-  if (!isLoaded || loading) return <div className="p-8">Loading...</div>;
+    await fetchHoldings();
+
+    // Auto-dismiss success after 2s, then close modal
+    setTimeout(() => {
+      setAddSuccess(false);
+      setAddOpen(false);
+    }, 1200);
+  }
 
   const pnlClass = totalPnL >= 0 ? "text-emerald-600" : "text-rose-600";
 
@@ -363,6 +432,19 @@ export default function PortfolioClient() {
               </button>
             </div>
           </div>
+
+          {/* Holdings error banner */}
+          {holdingsError && (
+            <div className="relative z-10 mt-4 flex items-center justify-between gap-3 rounded-2xl border border-rose-400/30 bg-rose-500/15 px-4 py-3 text-sm">
+              <span className="text-rose-200">Failed to load holdings: {holdingsError}</span>
+              <button
+                onClick={fetchHoldings}
+                className="shrink-0 rounded-xl bg-white/20 px-3 py-1.5 text-xs font-medium hover:bg-white/30 transition"
+              >
+                Retry
+              </button>
+            </div>
+          )}
 
           <div className="relative z-10 mt-6 grid gap-4 lg:grid-cols-[1.4fr_1fr]">
             <div className="rounded-3xl border border-white/20 bg-black/20 p-5">
@@ -554,6 +636,12 @@ export default function PortfolioClient() {
                   </button>
                 </div>
 
+                {addSuccess && (
+                  <div className="mt-4 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300">
+                    Lot added successfully.
+                  </div>
+                )}
+
                 {addErr && (
                   <div className="mt-4 rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-700 dark:text-rose-300">
                     {addErr}
@@ -584,9 +672,9 @@ export default function PortfolioClient() {
                         onChange={(e) => setGrade(e.target.value)}
                         className="w-full rounded-2xl px-3 py-3 text-sm bg-white/70 dark:bg-neutral-900/50 border border-neutral-200/70 dark:border-neutral-800/70 focus:outline-none focus:ring-2 focus:ring-neutral-900/20 dark:focus:ring-white/15"
                       >
-                        <option value="RAW">RAW</option>
-                        <option value="PSA9">PSA9</option>
-                        <option value="PSA10">PSA10</option>
+                        {VALID_GRADES.map((g) => (
+                          <option key={g} value={g}>{g}</option>
+                        ))}
                       </select>
                     </div>
 
@@ -595,6 +683,7 @@ export default function PortfolioClient() {
                       <input
                         type="number"
                         min={1}
+                        step={1}
                         value={qty}
                         onChange={(e) => setQty(Number(e.target.value))}
                         className="w-full rounded-2xl px-3 py-3 text-sm bg-white/70 dark:bg-neutral-900/50 border border-neutral-200/70 dark:border-neutral-800/70 focus:outline-none focus:ring-2 focus:ring-neutral-900/20 dark:focus:ring-white/15"
@@ -662,5 +751,21 @@ export default function PortfolioClient() {
         </div>
       )}
     </div>
+  );
+}
+
+// ── Exported wrapper (Suspense boundary for useSearchParams) ─────────────
+
+export default function PortfolioClient() {
+  return (
+    <Suspense
+      fallback={
+        <div className="app-shell flex min-h-[60vh] items-center justify-center">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
+        </div>
+      }
+    >
+      <PortfolioInner />
+    </Suspense>
   );
 }
