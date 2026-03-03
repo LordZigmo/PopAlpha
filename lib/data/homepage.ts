@@ -162,13 +162,14 @@ export async function getHomepageData(): Promise<HomepageData> {
         .not("image_url", "is", null)
         .limit(slugArray.length * 3),
 
-      // 4. Price history for actual 7d change computation
+      // 4. Price history for actual 7d change computation (NM only)
       db
         .from("public_price_history")
         .select("canonical_slug, variant_ref, ts, price")
         .in("canonical_slug", slugArray)
         .eq("provider", "JUSTTCG")
         .eq("source_window", "30d")
+        .or("variant_ref.like.%:nm:%,variant_ref.like.%:sealed:%")
         .gte("ts", sevenDaysAgo)
         .order("ts", { ascending: true })
         .limit(slugArray.length * 200),
@@ -180,6 +181,8 @@ export async function getHomepageData(): Promise<HomepageData> {
     if (historyResult.error) console.error("[homepage] history", historyResult.error.message);
 
     // ── Compute 7d price change from actual history ─────────────────────
+    // Uses the same boundary-based method as assets.ts computeChangePct:
+    // find the price closest to (but not after) the 7d cutoff, compare to latest.
     type HistRow = { canonical_slug: string; variant_ref: string; ts: string; price: number };
     const changeMap = new Map<string, number>();
     const slugVariants = new Map<string, Map<string, HistRow[]>>();
@@ -189,15 +192,28 @@ export async function getHomepageData(): Promise<HomepageData> {
       if (!varMap.has(row.variant_ref)) varMap.set(row.variant_ref, []);
       varMap.get(row.variant_ref)!.push(row);
     }
+    const cutoff7dMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
     for (const [slug, varMap] of slugVariants) {
+      // Pick variant with most data points (same as card page's getRecentVariantStats)
       let best: HistRow[] = [];
       for (const points of varMap.values()) {
         if (points.length > best.length) best = points;
       }
-      if (best.length >= 2) {
-        const first = best[0].price;
-        const last = best[best.length - 1].price;
-        if (first > 0) changeMap.set(slug, ((last - first) / first) * 100);
+      if (best.length < 2) continue;
+      const latestTs = new Date(best[best.length - 1].ts).getTime();
+      if (latestTs <= cutoff7dMs) continue; // all data older than 7d
+      const priceNow = best[best.length - 1].price;
+      // Walk ts-asc, keep last point at-or-before 7d cutoff
+      let priceAtCutoff: number | null = null;
+      for (const pt of best) {
+        if (new Date(pt.ts).getTime() <= cutoff7dMs) {
+          priceAtCutoff = pt.price;
+        } else {
+          break;
+        }
+      }
+      if (priceAtCutoff !== null && priceAtCutoff > 0) {
+        changeMap.set(slug, ((priceNow - priceAtCutoff) / priceAtCutoff) * 100);
       }
     }
 

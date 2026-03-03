@@ -132,6 +132,9 @@ async function getRecentVariantStats(slug: string, days = 30): Promise<VariantHi
     .from("public_price_history")
     .select("variant_ref, ts")
     .eq("canonical_slug", slug)
+    .eq("provider", "JUSTTCG")
+    .eq("source_window", "30d")
+    .or("variant_ref.like.%:nm:%,variant_ref.like.%:sealed:%")
     .gte("ts", since)
     .limit(CHART_POINT_LIMIT);
 
@@ -229,6 +232,8 @@ export async function getChartSeries(
     .select("ts, price")
     .eq("canonical_slug", slug)
     .eq("variant_ref", variantRef)
+    .eq("provider", "JUSTTCG")
+    .eq("source_window", "30d")
     .gte("ts", since)
     .order("ts", { ascending: true })
     .limit(CHART_POINT_LIMIT);
