@@ -62,15 +62,15 @@ export async function getHomepageData(): Promise<HomepageData> {
   try {
     // ── Batch 1: movers + variant-level trend data ────────────────────────
     const [moversResult, losersVariantResult, trendingVariantResult] = await Promise.all([
-      // 1. Top movers — hot/warming tiers
+      // 1. Top movers — hot/warming tiers, pre-joined with card_metrics prices
       db
-        .from("public_variant_movers")
-        .select("canonical_slug, mover_tier, tier_priority, updated_at")
+        .from("public_variant_movers_priced")
+        .select("canonical_slug, mover_tier, tier_priority, median_7d, updated_at")
         .eq("provider", "JUSTTCG")
         .eq("grade", "RAW")
         .in("mover_tier", ["hot", "warming"])
         .order("tier_priority", { ascending: true })
-        .order("updated_at", { ascending: false })
+        .order("median_7d", { ascending: false })
         .limit(SECTION_LIMIT * 5),
 
       // 2. Losers — steepest negative trend slope from variant_metrics
@@ -100,14 +100,14 @@ export async function getHomepageData(): Promise<HomepageData> {
     if (trendingVariantResult.error) console.error("[homepage] trending", trendingVariantResult.error.message);
 
     // ── Deduplicate movers by canonical_slug ──────────────────────────────
-    type MoverRow = { canonical_slug: string; mover_tier: string; tier_priority: number; updated_at: string };
+    type MoverRow = { canonical_slug: string; mover_tier: string; tier_priority: number; median_7d: number | null; updated_at: string };
     const dedupedMovers: MoverRow[] = [];
     const seenMovers = new Set<string>();
     for (const row of (moversResult.data ?? []) as MoverRow[]) {
       if (seenMovers.has(row.canonical_slug)) continue;
       seenMovers.add(row.canonical_slug);
       dedupedMovers.push(row);
-      if (dedupedMovers.length >= SECTION_LIMIT * 2) break; // over-fetch, filter by price later
+      if (dedupedMovers.length >= SECTION_LIMIT) break; // view already filters to priced cards
     }
 
     // Deduplicate variant results by canonical_slug (keep first = best slope)
@@ -192,11 +192,11 @@ export async function getHomepageData(): Promise<HomepageData> {
       return p != null && p > 0;
     }
 
-    // ── Movers: only show cards that have a real price ────────────────────
+    // ── Movers: view already guarantees price > 0 ─────────────────────────
     const moversOut: HomepageCard[] = [];
     for (const r of dedupedMovers) {
-      if (!hasPrice(r.canonical_slug)) continue;
       moversOut.push(toCard(r.canonical_slug, {
+        median_7d: r.median_7d,
         mover_tier: r.mover_tier as HomepageCard["mover_tier"],
       }));
       if (moversOut.length >= SECTION_LIMIT) break;
