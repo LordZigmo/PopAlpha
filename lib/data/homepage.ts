@@ -169,7 +169,7 @@ export async function getHomepageData(): Promise<HomepageData> {
         .in("canonical_slug", slugArray)
         .eq("provider", "JUSTTCG")
         .eq("source_window", "30d")
-        .or("variant_ref.like.%:nm:%,variant_ref.like.%:sealed:%")
+        // NM: canonical refs (uuid::RAW) are inherently NM; legacy non-NM is rare
         .gte("ts", sevenDaysAgo)
         .order("ts", { ascending: true })
         .limit(slugArray.length * 200),

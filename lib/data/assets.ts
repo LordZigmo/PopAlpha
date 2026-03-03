@@ -134,7 +134,8 @@ async function getRecentVariantStats(slug: string, days = 30): Promise<VariantHi
     .eq("canonical_slug", slug)
     .eq("provider", "JUSTTCG")
     .eq("source_window", "30d")
-    .or("variant_ref.like.%:nm:%,variant_ref.like.%:sealed:%")
+    // NM filtering: canonical refs (uuid::RAW) are inherently NM;
+    // legacy refs with :lp:/:mp: are rare and deprioritized by point count.
     .gte("ts", since)
     .limit(CHART_POINT_LIMIT);
 
