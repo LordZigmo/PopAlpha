@@ -22,7 +22,6 @@ const ALLOWED_PREFIXES = [
   "app/api/psa/cert/route.ts",
   "app/api/pro/",
   "lib/db/admin.ts",
-  "lib/data/assets.ts",
   "lib/backfill/",
   "scripts/",
 ];

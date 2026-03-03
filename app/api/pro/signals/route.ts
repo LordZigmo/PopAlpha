@@ -2,8 +2,11 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require";
 import { hasPro } from "@/lib/entitlements";
 import { dbAdmin } from "@/lib/db/admin";
+import { createRateLimiter } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
+
+const rateLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 60 });
 
 /**
  * Serves signal data only to entitled users.
@@ -15,6 +18,21 @@ export const runtime = "nodejs";
 export async function GET(req: Request) {
   const auth = await requireUser(req);
   if (!auth.ok) return auth.response;
+
+  const rl = rateLimiter(auth.userId);
+  if (!rl.allowed) {
+    console.warn("[pro/signals] rate-limited", { userId: auth.userId });
+    return new NextResponse(
+      JSON.stringify({ ok: false, error: "Rate limit exceeded." }),
+      {
+        status: 429,
+        headers: {
+          "Content-Type": "application/json",
+          "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)),
+        },
+      },
+    );
+  }
 
   if (!hasPro(auth.userId)) {
     return NextResponse.json(
@@ -34,10 +52,11 @@ export async function GET(req: Request) {
   const supabase = dbAdmin();
   const { data, error } = await supabase
     .from("pro_variant_metrics")
-    .select("canonical_slug, variant_ref, signal_trend, signal_breakout, signal_value, signals_as_of_ts, provider_as_of_ts")
+    .select("variant_ref, signal_trend, signal_breakout, signal_value, signals_as_of_ts")
     .eq("canonical_slug", slug)
     .eq("provider", "JUSTTCG")
     .eq("grade", "RAW")
+    .not("signal_trend", "is", null)
     .order("history_points_30d", { ascending: false })
     .limit(10);
 

@@ -16,12 +16,7 @@
  */
 
 import { dbPublic } from "@/lib/db";
-import { dbAdmin } from "@/lib/db/admin";
 import { parseVariantRef as parseCanonicalVariantRef } from "@/lib/identity/variant-ref";
-// Signal label functions removed — signal columns are paywalled out of public views.
-// When pro UI is built, re-add: trendSignalLabel, breakoutSignalLabel, valueSignalLabel
-// from "@/lib/signals/scoring".
-import { hasPro } from "@/lib/entitlements";
 
 // ── Shared types ────────────────────────────────────────────────────────────
 
@@ -81,9 +76,8 @@ export type MoverItem = {
   canonical_name: string | null;
   set_name: string | null;
   median_7d: number | null;
-  signal_trend_strength: number | null;
-  signal_breakout: number | null;
-  signal_value_zone: number | null;
+  mover_rank: number;
+  mover_tier: "hot" | "warming" | "cooling" | "cold";
 };
 
 export type SearchResult = {
@@ -350,27 +344,24 @@ export async function getAssetPageData(
  * opts.limit:  number of results (default: 10)
  * opts.direction: 'up' | 'down' (default: 'up')
  */
-// TODO: When a movers UI is built, move this behind an API route with proper auth.
 export async function listMovers(opts: {
   cohort?: "sealed" | "single" | "any";
   limit?: number;
   direction?: "up" | "down";
 }): Promise<MoverItem[]> {
-  // Uses dbAdmin + pro_variant_metrics because signal columns are paywalled
-  // out of the public view. Sorting by signal_trend requires the pro view.
-  const admin = dbAdmin();
-  const pub = dbPublic();
+  const supabase = dbPublic();
   const limit = opts.limit ?? 10;
   const direction = opts.direction ?? "up";
   const cohort = opts.cohort ?? "any";
 
-  let query = admin
-    .from("pro_variant_metrics")
-    .select("canonical_slug, signal_trend, signal_breakout, signal_value")
+  // public_variant_movers exposes mover_rank + mover_tier (derived from signals)
+  // but not the raw signal values. Safe to query with dbPublic().
+  let query = supabase
+    .from("public_variant_movers")
+    .select("canonical_slug, mover_rank, mover_tier")
     .eq("provider", "JUSTTCG")
     .eq("grade", "RAW")
-    .not("signal_trend", "is", null)
-    .order("signal_trend", { ascending: direction === "down" })
+    .order("mover_rank", { ascending: direction === "up" })
     .limit(limit * 5);
 
   if (cohort === "sealed") {
@@ -383,66 +374,54 @@ export async function listMovers(opts: {
   if (variantError) console.error("[listMovers]", variantError.message);
   if (!data || data.length === 0) return [];
 
-  const signalRows: Array<{
-    canonical_slug: string;
-    signal_trend: number | null;
-    signal_breakout: number | null;
-    signal_value: number | null;
-  }> = [];
+  // Deduplicate to one row per canonical_slug (best rank wins).
+  type MoverRow = { canonical_slug: string; mover_rank: number; mover_tier: string };
+  const deduped: MoverRow[] = [];
   const seen = new Set<string>();
-  for (const row of data) {
-    const slug = row.canonical_slug as string;
-    if (seen.has(slug)) continue;
-    seen.add(slug);
-    signalRows.push({
-      canonical_slug: slug,
-      signal_trend: row.signal_trend as number | null,
-      signal_breakout: row.signal_breakout as number | null,
-      signal_value: row.signal_value as number | null,
-    });
-    if (signalRows.length >= limit) break;
+  for (const row of data as MoverRow[]) {
+    if (seen.has(row.canonical_slug)) continue;
+    seen.add(row.canonical_slug);
+    deduped.push(row);
+    if (deduped.length >= limit) break;
   }
-  if (signalRows.length === 0) return [];
+  if (deduped.length === 0) return [];
 
-  // Join with canonical_cards for name + set_name (public read is fine).
-  const slugs = signalRows.map((r) => r.canonical_slug);
-  const { data: cards, error: cardsError } = await pub
-    .from("canonical_cards")
-    .select("slug, canonical_name, set_name")
-    .in("slug", slugs);
+  const slugs = deduped.map((r) => r.canonical_slug);
+  const [cardsResult, metricsResult] = await Promise.all([
+    supabase
+      .from("canonical_cards")
+      .select("slug, canonical_name, set_name")
+      .in("slug", slugs),
+    supabase
+      .from("public_card_metrics")
+      .select("canonical_slug, median_7d, updated_at")
+      .in("canonical_slug", slugs)
+      .is("printing_id", null)
+      .eq("grade", "RAW")
+      .order("updated_at", { ascending: false }),
+  ]);
 
-  if (cardsError) console.error("[listMovers] cards", cardsError.message);
-
-  const { data: metricsRows, error: metricsError } = await pub
-    .from("public_card_metrics")
-    .select("canonical_slug, median_7d, updated_at")
-    .in("canonical_slug", slugs)
-    .is("printing_id", null)
-    .eq("grade", "RAW")
-    .order("updated_at", { ascending: false });
-
-  if (metricsError) console.error("[listMovers] metrics", metricsError.message);
+  if (cardsResult.error) console.error("[listMovers] cards", cardsResult.error.message);
+  if (metricsResult.error) console.error("[listMovers] metrics", metricsResult.error.message);
 
   const cardMap = new Map(
-    (cards ?? []).map((c) => [c.slug, { canonical_name: c.canonical_name as string, set_name: c.set_name as string | null }])
+    (cardsResult.data ?? []).map((c) => [c.slug, { canonical_name: c.canonical_name as string, set_name: c.set_name as string | null }])
   );
   const medianMap = new Map<string, number | null>();
-  for (const row of metricsRows ?? []) {
+  for (const row of metricsResult.data ?? []) {
     const slug = row.canonical_slug as string;
     if (!medianMap.has(slug)) {
       medianMap.set(slug, row.median_7d as number | null);
     }
   }
 
-  const isPro = hasPro();
-  return signalRows.map((r) => ({
+  return deduped.map((r) => ({
     canonical_slug: r.canonical_slug,
     canonical_name: cardMap.get(r.canonical_slug)?.canonical_name ?? null,
     set_name: cardMap.get(r.canonical_slug)?.set_name ?? null,
     median_7d: medianMap.get(r.canonical_slug) ?? null,
-    signal_trend_strength: isPro ? r.signal_trend : null,
-    signal_breakout: isPro ? r.signal_breakout : null,
-    signal_value_zone: isPro ? r.signal_value : null,
+    mover_rank: r.mover_rank,
+    mover_tier: r.mover_tier as MoverItem["mover_tier"],
   }));
 }
 
