@@ -51,7 +51,7 @@ export default function CardTileMini({
   return (
     <Link
       href={`/c/${encodeURIComponent(card.slug)}`}
-      className="group flex w-[160px] shrink-0 flex-col rounded-2xl border border-white/[0.06] bg-[#111] transition hover:border-white/[0.12] hover:bg-[#161616]"
+      className="group flex w-[160px] shrink-0 flex-col rounded-2xl border border-white/[0.06] bg-[#111] transition hover:border-white/[0.12] hover:bg-[#161616] lg:w-auto lg:min-w-0 lg:flex-1"
       style={{ scrollSnapAlign: "start" }}
     >
       {/* Card image */}

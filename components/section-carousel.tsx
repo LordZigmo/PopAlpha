@@ -30,7 +30,7 @@ export default function SectionCarousel({
       </div>
 
       <div
-        className="mt-3 flex gap-3 overflow-x-auto px-4 pb-2 sm:px-6"
+        className="mt-3 flex gap-3 overflow-x-auto px-4 pb-2 sm:px-6 lg:overflow-x-visible"
         style={{
           scrollSnapType: "x mandatory",
           WebkitOverflowScrolling: "touch",

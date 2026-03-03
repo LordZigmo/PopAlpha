@@ -39,7 +39,7 @@ export type HomepageData = {
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const SECTION_LIMIT = 3;
+const SECTION_LIMIT = 5;
 /** Minimum 7d median to filter noise / $0 cards */
 const MIN_PRICE = 0.5;
 /** Minimum trade count for "sustained trending" vs noise */
