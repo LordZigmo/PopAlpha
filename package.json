@@ -13,13 +13,16 @@
     "justtcg:backfill-live": "node scripts/backfill-justtcg-live.mjs",
     "sets:backfill-summaries": "node scripts/backfill-set-summaries.mjs",
     "justtcg:repair-sweep": "node scripts/sweep-justtcg-finish-repair.mjs",
-    "watch:unknown-finishes": "node scripts/watch-unknown-finishes.mjs"
+    "watch:unknown-finishes": "node scripts/watch-unknown-finishes.mjs",
+    "ai:refresh-embeddings": "node scripts/refresh-card-embeddings.mjs"
   },
   "dependencies": {
     "@ai-sdk/google": "^3.0.36",
     "@clerk/nextjs": "^6.39.0",
+    "@neondatabase/serverless": "^1.0.2",
     "@supabase/supabase-js": "^2.97.0",
     "@vercel/analytics": "^1.6.1",
+    "@vercel/postgres": "^0.10.0",
     "@vercel/speed-insights": "^1.3.1",
     "ai": "^6.0.108",
     "dotenv": "^17.3.1",

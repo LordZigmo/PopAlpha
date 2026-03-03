@@ -33,6 +33,10 @@
       "schedule": "0 9 * * *"
     },
     {
+      "path": "/api/cron/refresh-card-embeddings",
+      "schedule": "30 9 * * *"
+    },
+    {
       "path": "/api/cron/sync-pokemon-tcg-graded",
       "schedule": "30 8 * * *"
     }

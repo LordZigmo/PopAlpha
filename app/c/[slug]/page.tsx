@@ -9,6 +9,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import CanonicalCardFloatingHero from "@/components/canonical-card-floating-hero";
+import CardAiAnalysis from "@/components/card-ai-analysis";
 import CollapsibleSection from "@/components/collapsible-section";
 import EbayListings from "@/components/ebay-listings";
 import { GroupedSection, PageShell, Pill, SegmentedControl } from "@/components/ios-grouped-ui";
@@ -677,6 +678,25 @@ export default async function CanonicalCardPage({
           bearishVotes={0}
           userVote={null}
           resolvesAt={Date.now() + 6 * 24 * 60 * 60 * 1000 + 12 * 60 * 60 * 1000}
+        />
+
+        <CardAiAnalysis
+          input={{
+            card: {
+              name: canonical.canonical_name,
+              setName: canonical.set_name,
+              marketPrice: displayPrimaryPrice ?? null,
+              change24hPct: vm?.change_24h_pct ?? null,
+              change7dPct: vm?.change_7d_pct ?? null,
+              grade10Price: gradeSnapMap.PSA10?.median_7d ?? null,
+              rawPrice: gradeSnapMap.RAW?.median_7d ?? null,
+              viewCount24h: null,
+              previousViewCount24h: null,
+              communityVotesBullish: 0,
+              communityVotesBearish: 0,
+              notes: selectedPrintingLabel,
+            },
+          }}
         />
 
         {/* ── Live eBay Listings ──────────────────────────────────────────── */}

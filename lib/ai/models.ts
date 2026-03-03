@@ -9,5 +9,11 @@ export function getPopAlphaModel(tier: PopAlphaTier) {
     case "Ace":
     case "Elite":
       return google("gemini-2.0-flash");
+    default:
+      return google("gemini-1.5-flash");
   }
+}
+
+export function getPopAlphaEmbeddingModel() {
+  return google.textEmbeddingModel("gemini-embedding-001");
 }

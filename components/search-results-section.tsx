@@ -137,6 +137,7 @@ function ResultCard({
 
 export default function SearchResultsSection({
   rows,
+  semanticRows,
   chaseCards,
   total,
   page,
@@ -148,6 +149,7 @@ export default function SearchResultsSection({
   currentParams,
 }: {
   rows: SearchDisplayRow[];
+  semanticRows?: SearchDisplayRow[];
   chaseCards?: SearchDisplayRow[];
   total: number;
   page: number;
@@ -168,6 +170,7 @@ export default function SearchResultsSection({
 
   const isMarketPriceSort = sort === "market-price";
   const sortedRows = useMemo(() => sortSearchResults(rows, sort), [rows, sort]);
+  const semanticMatches = useMemo(() => semanticRows ?? [], [semanticRows]);
   const featuredChaseCards = useMemo(
     () => (isMarketPriceSort ? (chaseCards ?? []).slice(0, 4) : []),
     [chaseCards, isMarketPriceSort],
@@ -288,6 +291,24 @@ export default function SearchResultsSection({
         </div>
       ) : (
         <>
+          {semanticMatches.length > 0 ? (
+            <div className="mb-6 rounded-[var(--radius-card)] border-app border bg-surface-soft/20 p-4 sm:p-5">
+              <div className="mb-3">
+                <h3 className="text-app text-sm font-semibold uppercase tracking-[0.18em]">AI Matches</h3>
+                <p className="text-muted mt-1 text-xs">Semantic matches for natural-language search.</p>
+              </div>
+              <div className="grid grid-cols-3 gap-2 sm:gap-3 lg:grid-cols-4">
+                {semanticMatches.map((row) => (
+                  <ResultCard
+                    key={`semantic-${row.canonical_slug}`}
+                    row={row}
+                    currentSearchHref={currentSearchHref}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : null}
+
           {matchedSetName && setSummary ? (
             <div className="mb-6 rounded-[var(--radius-card)] border-app border bg-surface-soft/22 p-4 sm:p-5">
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

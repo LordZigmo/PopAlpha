@@ -61,3 +61,5 @@ scripts/output/
 
 # Supabase local temp
 .supabase/
+
+.vercel

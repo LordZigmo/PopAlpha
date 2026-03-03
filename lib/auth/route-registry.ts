@@ -34,6 +34,7 @@ export const CRON_ROUTES = [
   "cron/sync-justtcg-prices",
   "cron/sync-pokedata-prices",
   "cron/refresh-card-metrics",
+  "cron/refresh-card-embeddings",
   "cron/snapshot-price-history",
   "cron/refresh-derived-signals",
   "cron/refresh-set-summaries",
