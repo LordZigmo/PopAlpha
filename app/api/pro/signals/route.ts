@@ -16,8 +16,17 @@ const rateLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 60 });
  * Usage: GET /api/pro/signals?slug=<canonical_slug>
  */
 export async function GET(req: Request) {
+  // 1. Auth (cheap) → 2. Entitlement (cheap) → 3. Rate limit
+  // Non-pro users reject before touching the limiter so they can't burn tokens.
   const auth = await requireUser(req);
   if (!auth.ok) return auth.response;
+
+  if (!hasPro(auth.userId)) {
+    return NextResponse.json(
+      { ok: false, error: "Pro subscription required." },
+      { status: 403 },
+    );
+  }
 
   const rl = rateLimiter(auth.userId);
   if (!rl.allowed) {
@@ -31,13 +40,6 @@ export async function GET(req: Request) {
           "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)),
         },
       },
-    );
-  }
-
-  if (!hasPro(auth.userId)) {
-    return NextResponse.json(
-      { ok: false, error: "Pro subscription required." },
-      { status: 403 },
     );
   }
 
