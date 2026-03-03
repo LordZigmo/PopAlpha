@@ -25,7 +25,7 @@ export type HomepageCard = {
   set_name: string | null;
   year: number | null;
   median_7d: number | null;
-  trend_slope_7d: number | null;
+  change_pct: number | null;
   mover_tier: "hot" | "warming" | "cooling" | "cold" | null;
   image_url: string | null;
 };
@@ -138,8 +138,10 @@ export async function getHomepageData(): Promise<HomepageData> {
 
     const slugArray = [...allSlugs];
 
-    // ── Batch 2: card metadata + prices + images ──────────────────────────
-    const [cardsResult, pricesResult, imagesResult] = await Promise.all([
+    // ── Batch 2: card metadata + prices + images + 7d history ─────────────
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    const [cardsResult, pricesResult, imagesResult, historyResult] = await Promise.all([
       db
         .from("canonical_cards")
         .select("slug, canonical_name, set_name, year")
@@ -159,11 +161,45 @@ export async function getHomepageData(): Promise<HomepageData> {
         .eq("language", "EN")
         .not("image_url", "is", null)
         .limit(slugArray.length * 3),
+
+      // 4. Price history for actual 7d change computation
+      db
+        .from("public_price_history")
+        .select("canonical_slug, variant_ref, ts, price")
+        .in("canonical_slug", slugArray)
+        .eq("provider", "JUSTTCG")
+        .eq("source_window", "30d")
+        .gte("ts", sevenDaysAgo)
+        .order("ts", { ascending: true })
+        .limit(slugArray.length * 200),
     ]);
 
     if (cardsResult.error) console.error("[homepage] cards", cardsResult.error.message);
     if (pricesResult.error) console.error("[homepage] prices", pricesResult.error.message);
     if (imagesResult.error) console.error("[homepage] images", imagesResult.error.message);
+    if (historyResult.error) console.error("[homepage] history", historyResult.error.message);
+
+    // ── Compute 7d price change from actual history ─────────────────────
+    type HistRow = { canonical_slug: string; variant_ref: string; ts: string; price: number };
+    const changeMap = new Map<string, number>();
+    const slugVariants = new Map<string, Map<string, HistRow[]>>();
+    for (const row of (historyResult.data ?? []) as HistRow[]) {
+      if (!slugVariants.has(row.canonical_slug)) slugVariants.set(row.canonical_slug, new Map());
+      const varMap = slugVariants.get(row.canonical_slug)!;
+      if (!varMap.has(row.variant_ref)) varMap.set(row.variant_ref, []);
+      varMap.get(row.variant_ref)!.push(row);
+    }
+    for (const [slug, varMap] of slugVariants) {
+      let best: HistRow[] = [];
+      for (const points of varMap.values()) {
+        if (points.length > best.length) best = points;
+      }
+      if (best.length >= 2) {
+        const first = best[0].price;
+        const last = best[best.length - 1].price;
+        if (first > 0) changeMap.set(slug, ((last - first) / first) * 100);
+      }
+    }
 
     // ── Build lookup maps ─────────────────────────────────────────────────
     type CardRow = { slug: string; canonical_name: string; set_name: string | null; year: number | null };
@@ -189,7 +225,7 @@ export async function getHomepageData(): Promise<HomepageData> {
     // ── Assemble helpers ──────────────────────────────────────────────────
     function toCard(
       slug: string,
-      overrides: { median_7d?: number | null; trend_slope_7d?: number | null; mover_tier?: HomepageCard["mover_tier"] } = {},
+      overrides: { median_7d?: number | null; mover_tier?: HomepageCard["mover_tier"] } = {},
     ): HomepageCard {
       const card = cardMap.get(slug);
       const price = overrides.median_7d ?? priceMap.get(slug) ?? null;
@@ -199,15 +235,10 @@ export async function getHomepageData(): Promise<HomepageData> {
         set_name: card?.set_name ?? null,
         year: card?.year ?? null,
         median_7d: price,
+        change_pct: changeMap.get(slug) ?? null,
         image_url: imageMap.get(slug) ?? null,
-        trend_slope_7d: overrides.trend_slope_7d ?? null,
         mover_tier: overrides.mover_tier ?? null,
       };
-    }
-
-    function hasPrice(slug: string): boolean {
-      const p = priceMap.get(slug);
-      return p != null && p > 0;
     }
 
     // ── Movers: view already guarantees price > 0 ─────────────────────────
@@ -215,7 +246,6 @@ export async function getHomepageData(): Promise<HomepageData> {
     for (const r of dedupedMovers) {
       moversOut.push(toCard(r.canonical_slug, {
         median_7d: r.median_7d,
-        trend_slope_7d: r.provider_trend_slope_7d,
         mover_tier: r.mover_tier as HomepageCard["mover_tier"],
       }));
       if (moversOut.length >= SECTION_LIMIT) break;
@@ -226,9 +256,7 @@ export async function getHomepageData(): Promise<HomepageData> {
     for (const r of loserVariants) {
       const price = priceMap.get(r.canonical_slug);
       if (price == null || price < MIN_PRICE) continue;
-      losersOut.push(toCard(r.canonical_slug, {
-        trend_slope_7d: r.provider_trend_slope_7d,
-      }));
+      losersOut.push(toCard(r.canonical_slug));
       if (losersOut.length >= SECTION_LIMIT) break;
     }
 
@@ -237,9 +265,7 @@ export async function getHomepageData(): Promise<HomepageData> {
     for (const r of trendingVariants) {
       const price = priceMap.get(r.canonical_slug);
       if (price == null || price < MIN_PRICE) continue;
-      trendingOut.push(toCard(r.canonical_slug, {
-        trend_slope_7d: r.provider_trend_slope_7d,
-      }));
+      trendingOut.push(toCard(r.canonical_slug));
       if (trendingOut.length >= SECTION_LIMIT) break;
     }
 

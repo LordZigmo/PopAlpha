@@ -444,7 +444,11 @@ export async function backfillJustTcgSet(setKey: string, options: BackfillJustTc
   const setKeyNormalized = String(setKey ?? "").trim().toLowerCase();
   if (!setKeyNormalized) throw new Error("A JustTCG set key is required, e.g. 'paldea-evolved'.");
   const canonicalSetNameGuess = (options.canonicalSetNameOverride ?? "").trim() || inferSetDisplayName(setKeyNormalized);
-  const providerSetIdCandidates = Array.from(new Set([setKeyNormalized, setKeyNormalized.endsWith("-pokemon") ? setKeyNormalized : `${setKeyNormalized}-pokemon`]));
+  const providerSetIdCandidates = Array.from(new Set([
+    setKeyNormalized,
+    setKeyNormalized.endsWith("-pokemon") ? setKeyNormalized : `${setKeyNormalized}-pokemon`,
+    ...(providerSetIdOverride ? [providerSetIdOverride.toLowerCase()] : []),
+  ]));
 
   const { data: runRow, error: runError } = await supabase
     .from("ingest_runs")

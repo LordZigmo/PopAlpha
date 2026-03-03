@@ -243,7 +243,7 @@ export default function ShareCard({
           </div>
 
           <div className="flex items-end justify-between border-t pt-3" style={{ borderColor: "color-mix(in srgb, #bdd2ff 28%, transparent)" }}>
-            <p className="text-sm" style={{ color: shareColors.shareSecondaryText }}>popalpha.app</p>
+            <p className="text-sm" style={{ color: shareColors.shareSecondaryText }}>popalpha.ai</p>
             <p className="text-base font-semibold tracking-[0.08em]" style={{ color: shareColors.shareSecondaryText }}>POPALPHA</p>
           </div>
         </div>

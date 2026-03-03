@@ -75,7 +75,7 @@ export default async function HomePage() {
       </div>
 
       {/* ── Top Movers ───────────────────────────────────────────────── */}
-      <SectionCarousel title="Top Movers" icon="🔥" subtitle="24h">
+      <SectionCarousel title="Top Movers" icon="🔥" subtitle="7d">
         {movers.length > 0
           ? movers.slice(0, 5).map((card) => (
               <CardTileMini key={card.slug} card={card} showTier />
@@ -146,7 +146,7 @@ export default async function HomePage() {
 
 function EmptySlot({ message }: { message: string }) {
   return (
-    <div className="flex min-h-[140px] w-full items-center justify-center text-[13px] text-[#444]">
+    <div className="flex min-h-[140px] w-full items-center justify-center text-[13px] text-[#444] lg:col-span-5">
       {message}
     </div>
   );

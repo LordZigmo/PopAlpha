@@ -140,7 +140,7 @@ export default function MarketSnapshotTiles({
               <PriceTickerStrip
                 items={[
                   ...(median7d !== null ? [{ label: "Median Ask (7D)", value: formatUsd(median7d) }] : []),
-                  ...(changePct !== null ? [{ label: "7D Change", value: formatPercent(changePct), tone: tileTone(changePct) as "neutral" | "positive" | "negative" }] : []),
+                  ...(changePct !== null ? [{ label: "7D vs 30D Avg", value: formatPercent(changePct), tone: tileTone(changePct) as "neutral" | "positive" | "negative" }] : []),
                   ...(trimmedMedian30d !== null ? [{ label: "Trimmed Med (30D)", value: formatUsd(trimmedMedian30d) }] : []),
                 ]}
               />

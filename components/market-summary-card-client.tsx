@@ -65,12 +65,6 @@ function computeChange(points: HistoryPointRow[]): number | null {
   return ((last - first) / first) * 100;
 }
 
-/** Fallback: estimate 7d % change from provider trend slope + current price. */
-function slopeToChangePct(slope: number | null | undefined, price: number | null): number | null {
-  if (slope == null || !Number.isFinite(slope) || price == null || price <= 0) return null;
-  return (slope * 7) / price * 100;
-}
-
 function computeLowHigh(points: HistoryPointRow[]): { low: number | null; high: number | null } {
   if (points.length === 0) return { low: null, high: null };
   const prices = points.map((point) => point.price).filter((value) => Number.isFinite(value));
@@ -160,11 +154,7 @@ export default function MarketSummaryCardClient({
         ? "7d"
         : "30d";
 
-  const historyChange = computeChange(chartSeries);
-  // When history-derived change is null or exactly 0, use provider slope as fallback
-  const changeValue = (historyChange !== null && historyChange !== 0)
-    ? historyChange
-    : historyChange ?? slopeToChangePct(activeVariant?.trendSlope7d, currentPrice);
+  const changeValue = computeChange(chartSeries);
   const { low, high } = computeLowHigh(chartSeries);
   const sampleCount = chartSeries.length;
 

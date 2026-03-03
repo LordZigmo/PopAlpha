@@ -2,7 +2,7 @@
 # PopAlpha PokemonTCG Importer
 # ==============================
 
-$baseUrl = "https://popalpha.app/api/admin/import/pokemontcg-canonical"
+$baseUrl = "https://popalpha.ai/api/admin/import/pokemontcg-canonical"
 $adminSecret = "83e6903877bed690a3571143fe5eeeab117d8302a1b930ccb31f6851bb0570bf"  # set to your ADMIN_SECRET only if the route requires it
 $pageStart = 1
 $maxPages = 1          # how many pages per invocation (keep 1 for safety)

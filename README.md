@@ -93,17 +93,17 @@ Examples:
 
 Import one page:
 ```bash
-curl -X POST "https://popalpha.app/api/admin/import/pokemontcg-canonical?pageStart=1&maxPages=1"
+curl -X POST "https://popalpha.ai/api/admin/import/pokemontcg-canonical?pageStart=1&maxPages=1"
 ```
 
 Import next chunk:
 ```bash
-curl -X POST "https://popalpha.app/api/admin/import/pokemontcg-canonical?pageStart=2&maxPages=1"
+curl -X POST "https://popalpha.ai/api/admin/import/pokemontcg-canonical?pageStart=2&maxPages=1"
 ```
 
 Import a specific set:
 ```bash
-curl -X POST "https://popalpha.app/api/admin/import/pokemontcg-canonical?setId=sv4pt5&pageStart=1&maxPages=2"
+curl -X POST "https://popalpha.ai/api/admin/import/pokemontcg-canonical?setId=sv4pt5&pageStart=1&maxPages=2"
 ```
 
 Apply migrations locally:
@@ -158,12 +158,12 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=<your_supabase_anon_key>
 # Existing app secrets (used by other routes)
 CRON_SECRET=<any-long-random-string>
 ADMIN_SECRET=<any-long-random-string>
-NEXT_PUBLIC_SITE_URL=https://popalpha.app
+NEXT_PUBLIC_SITE_URL=https://popalpha.ai
 ```
 
 ### 3) Where to get each value
 
-Production domain is **https://popalpha.app**.
+Production domain is **https://popalpha.ai**.
 For local development, you can either:
 - set `NEXT_PUBLIC_SITE_URL=http://localhost:3000`, or
 - leave it unset and the app will safely fall back to localhost in development.

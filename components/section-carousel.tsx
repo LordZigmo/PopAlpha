@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 /**
  * Horizontal scroll carousel for homepage sections.
- * CSS-only scroll-snap for SSR compatibility — no client JS.
+ * Mobile: CSS-only scroll-snap. Desktop: 5-column grid.
  */
 export default function SectionCarousel({
   title,
@@ -18,8 +18,8 @@ export default function SectionCarousel({
   empty?: string;
 }) {
   return (
-    <section className="mt-8">
-      <div className="flex items-baseline gap-2 px-4 sm:px-6">
+    <section className="mt-8 lg:mx-auto lg:max-w-5xl lg:px-6">
+      <div className="flex items-baseline gap-2 px-4 sm:px-6 lg:px-0">
         {icon ? <span className="text-base">{icon}</span> : null}
         <h2 className="text-[15px] font-semibold uppercase tracking-[0.08em] text-[#6B6B6B]">
           {title}
@@ -30,7 +30,7 @@ export default function SectionCarousel({
       </div>
 
       <div
-        className="mt-3 flex gap-3 overflow-x-auto px-4 pb-2 sm:px-6 lg:overflow-x-visible"
+        className="mt-3 flex gap-3 overflow-x-auto px-4 pb-2 sm:px-6 lg:grid lg:grid-cols-5 lg:overflow-visible lg:px-0 lg:pb-0"
         style={{
           scrollSnapType: "x mandatory",
           WebkitOverflowScrolling: "touch",
@@ -39,7 +39,7 @@ export default function SectionCarousel({
       >
         {children}
         {empty ? (
-          <div className="flex min-h-[140px] w-full items-center justify-center text-sm text-[#444]">
+          <div className="flex min-h-[140px] w-full items-center justify-center text-sm text-[#444] lg:col-span-5">
             {empty}
           </div>
         ) : null}

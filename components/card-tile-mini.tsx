@@ -13,24 +13,17 @@ function formatPrice(n: number | null): string {
   return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-function formatChangePct(slope: number, price: number): string {
-  const pct = (slope * 7) / price * 100;
+function ChangeBadge({ pct }: { pct: number | null }) {
+  if (pct == null || pct === 0) return null;
+  const up = pct > 0;
   const abs = Math.abs(pct);
   const formatted = abs >= 10 ? abs.toFixed(0) : abs.toFixed(1);
-  return `${pct > 0 ? "+" : "-"}${formatted}%`;
-}
-
-function TrendBadge({ slope, price }: { slope: number | null; price: number | null }) {
-  if (slope == null || slope === 0) return null;
-  const up = slope > 0;
-  const hasPct = price != null && price > 0;
   return (
     <span
       className="text-[13px] font-semibold tabular-nums"
       style={{ color: up ? "#00DC5A" : "#FF3B30" }}
     >
-      {up ? "\u25B2" : "\u25BC"}
-      {hasPct ? ` ${formatChangePct(slope, price)}` : null}
+      {up ? "\u25B2" : "\u25BC"} {up ? "+" : "-"}{formatted}%
     </span>
   );
 }
@@ -51,11 +44,11 @@ export default function CardTileMini({
   return (
     <Link
       href={`/c/${encodeURIComponent(card.slug)}`}
-      className="group flex w-[160px] shrink-0 flex-col rounded-2xl border border-white/[0.06] bg-[#111] transition hover:border-white/[0.12] hover:bg-[#161616] lg:w-auto lg:min-w-0 lg:flex-1"
+      className="group flex w-[160px] shrink-0 flex-col lg:w-auto"
       style={{ scrollSnapAlign: "start" }}
     >
       {/* Card image */}
-      <div className="relative aspect-[63/88] w-full overflow-hidden rounded-t-2xl bg-[#0D0D0D]">
+      <div className="relative aspect-[63/88] w-full overflow-hidden rounded-lg bg-[#0D0D0D]">
         {card.image_url ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -65,32 +58,28 @@ export default function CardTileMini({
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.06),transparent_65%)]">
-            <p className="text-[10px] text-[#333]">No image</p>
+            <p className="text-[11px] text-[#333]">No image</p>
           </div>
         )}
       </div>
 
       {/* Text content */}
-      <div className="flex flex-1 flex-col p-2.5">
-        {/* Card name */}
-        <p className="line-clamp-2 text-[12px] font-semibold leading-tight text-[#E0E0E0] group-hover:text-[#F0F0F0]">
+      <div className="mt-2 flex flex-col">
+        <p className="line-clamp-2 text-[14px] font-semibold leading-tight text-[#E0E0E0] group-hover:text-white">
           {card.name}
         </p>
 
-        {/* Set */}
-        <p className="mt-0.5 truncate text-[10px] text-[#555]">
+        <p className="mt-0.5 truncate text-[12px] text-[#555]">
           {card.set_name ?? "Unknown set"}
         </p>
 
-        {/* Price + trend */}
-        <div className="mt-auto flex items-center gap-1 pt-2">
+        <div className="mt-1.5 flex items-center gap-1">
           <span className="text-[14px] font-bold tabular-nums text-[#F0F0F0]">
             {formatPrice(card.median_7d)}
           </span>
-          <TrendBadge slope={card.trend_slope_7d} price={card.median_7d} />
+          <ChangeBadge pct={card.change_pct} />
         </div>
 
-        {/* Tier badge (movers only) */}
         {showTier && tier ? (
           <span
             className="mt-1.5 inline-flex w-fit items-center rounded-full px-2 py-0.5 text-[10px] font-semibold"

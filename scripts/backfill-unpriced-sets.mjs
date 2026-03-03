@@ -147,7 +147,7 @@ async function main() {
 
     const t0 = Date.now();
     const params = new URLSearchParams({
-      set: row.canonical_set_code,
+      set: row.provider_set_id,
       canonicalSetName: row.canonical_set_name ?? "",
       providerSetId: row.provider_set_id,
       aggressive: "1",
@@ -179,6 +179,8 @@ async function main() {
           `${elapsed}s -- ${err}`,
         );
         failed++;
+        processed++;
+        continue; // don't mark failed sets as processed — allows retry
       }
     } catch (e) {
       const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
@@ -187,8 +189,11 @@ async function main() {
         `${elapsed}s -- ${e.message?.slice(0, 80)}`,
       );
       failed++;
+      processed++;
+      continue; // don't mark failed sets as processed — allows retry
     }
 
+    // Only mark successful sets as processed
     processedSetCodes.add(row.canonical_set_code);
     state.processedSets = [...processedSetCodes];
     state.lastRun = { at: new Date().toISOString(), setCode: row.canonical_set_code };
