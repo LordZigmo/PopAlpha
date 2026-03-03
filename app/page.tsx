@@ -18,19 +18,30 @@ function timeAgo(iso: string | null): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
+const EMPTY_DATA = { movers: [], losers: [], trending: [], as_of: null } as const;
+const DATA_TIMEOUT_MS = 8_000; // under Vercel's 10s function limit
+
 export default async function HomePage() {
-  console.log("[homepage] rendering started");
+  console.log("[homepage] rendering started", new Date().toISOString());
   let data;
   try {
-    data = await getHomepageData();
-    console.log("[homepage] data fetched:", {
+    data = await Promise.race([
+      getHomepageData(),
+      new Promise<typeof EMPTY_DATA>((resolve) =>
+        setTimeout(() => {
+          console.warn("[homepage] data fetch timed out after", DATA_TIMEOUT_MS, "ms");
+          resolve(EMPTY_DATA);
+        }, DATA_TIMEOUT_MS),
+      ),
+    ]);
+    console.log("[homepage] data resolved:", {
       movers: data?.movers?.length ?? 0,
       losers: data?.losers?.length ?? 0,
       trending: data?.trending?.length ?? 0,
     });
   } catch (err) {
     console.error("[homepage] getHomepageData threw:", err);
-    data = { movers: [], losers: [], trending: [], as_of: null };
+    data = EMPTY_DATA;
   }
 
   const movers = Array.isArray(data?.movers) ? data.movers : [];

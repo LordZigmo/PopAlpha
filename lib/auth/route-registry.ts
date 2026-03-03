@@ -25,6 +25,7 @@ export const PUBLIC_ROUTES = [
   "ebay/browse",
   "card-profiles",
   "handles/availability",
+  "health",
 ];
 
 export const CRON_ROUTES = [
