@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "node scripts/check-no-cards-axis.mjs && next build",
+    "build": "node scripts/check-no-cards-axis.mjs && node scripts/check-route-coverage.mjs && next build",
     "start": "next start",
     "lint": "eslint",
     "test:search": "node tests/run-search-tests.mjs",

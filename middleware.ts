@@ -1,50 +1,21 @@
 import { NextResponse, type NextRequest } from "next/server";
+import {
+  PUBLIC_ROUTES,
+  CRON_ROUTES,
+  ADMIN_ROUTES,
+  INGEST_ROUTES,
+  USER_ROUTES,
+} from "@/lib/auth/route-registry";
 
 // ── Route classification sets ────────────────────────────────────────────────
-// Each API path (without /api/ prefix) maps to a classification.
-// Dynamic segments use [param] placeholder for matching.
+// Single source of truth lives in lib/auth/route-registry.ts.
+// Build-time coverage check: scripts/check-route-coverage.mjs
 
-const PUBLIC_ROUTES = new Set([
-  "cards/[slug]/detail",
-  "search/cards",
-  "search/suggest",
-  "canonical/match",
-  "market/snapshot",
-  "tcg/pricing",
-  "tcg/sets/search",
-  "psa/cert",
-  "psa/cert/activity",
-  "ebay/browse",
-  "card-profiles",
-]);
-
-const CRON_ROUTES = new Set([
-  "cron/sync-canonical",
-  "cron/sync-tcg-prices",
-  "cron/sync-justtcg-prices",
-  "cron/refresh-card-metrics",
-  "cron/snapshot-price-history",
-  "cron/refresh-derived-signals",
-  "cron/refresh-set-summaries",
-]);
-
-const ADMIN_ROUTES = new Set([
-  "admin/import/pokemontcg-canonical",
-  "admin/import/pokemontcg",
-  "admin/import/printings",
-  "admin/psa-seeds",
-]);
-
-const INGEST_ROUTES = new Set([
-  "market/observe",
-  "ingest/psa",
-  "ebay/deletion-notification",
-]);
-
-const USER_ROUTES = new Set([
-  "private-sales",
-  "private-sales/[id]",
-]);
+const PUBLIC_SET = new Set(PUBLIC_ROUTES);
+const CRON_SET = new Set(CRON_ROUTES);
+const ADMIN_SET = new Set(ADMIN_ROUTES);
+const INGEST_SET = new Set(INGEST_ROUTES);
+const USER_SET = new Set(USER_ROUTES);
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -82,11 +53,11 @@ function classifyRoute(pathname: string): RouteClass {
     if (pathname.startsWith("/api/debug/")) return "debug";
 
     const key = toRouteKey(pathname);
-    if (PUBLIC_ROUTES.has(key)) return "public";
-    if (CRON_ROUTES.has(key)) return "cron";
-    if (ADMIN_ROUTES.has(key)) return "admin";
-    if (INGEST_ROUTES.has(key)) return "ingest";
-    if (USER_ROUTES.has(key)) return "user";
+    if (PUBLIC_SET.has(key)) return "public";
+    if (CRON_SET.has(key)) return "cron";
+    if (ADMIN_SET.has(key)) return "admin";
+    if (INGEST_SET.has(key)) return "ingest";
+    if (USER_SET.has(key)) return "user";
 
     return "unknown";
   }
