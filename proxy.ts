@@ -74,9 +74,9 @@ function classifyRoute(pathname: string): RouteClass {
 
 const isProtectedRoute = createRouteMatcher(["/portfolio(.*)", "/onboarding(.*)"]);
 
-// ── Middleware ────────────────────────────────────────────────────────────────
+// ── Clerk handler ───────────────────────────────────────────────────────────
 
-export default clerkMiddleware(async (auth, req: NextRequest) => {
+const clerkHandler = clerkMiddleware(async (auth, req: NextRequest) => {
   const { pathname } = req.nextUrl;
 
   // Only classify API routes and protected pages — other pages pass through
@@ -120,6 +120,28 @@ export default clerkMiddleware(async (auth, req: NextRequest) => {
     await auth.protect();
   }
 });
+
+// ── Exported middleware — wraps Clerk with error handling ────────────────────
+
+export default async function proxy(req: NextRequest, event: unknown) {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return await (clerkHandler as any)(req, event);
+  } catch (err) {
+    console.error("[proxy] middleware error:", err);
+
+    // If the Clerk handshake failed, strip the param and redirect to the
+    // clean URL so the user sees the page as a guest instead of a 500.
+    const url = req.nextUrl.clone();
+    if (url.searchParams.has("__clerk_handshake")) {
+      url.searchParams.delete("__clerk_handshake");
+      console.error("[proxy] Clerk handshake failed — redirecting to clean URL");
+      return NextResponse.redirect(url);
+    }
+
+    return NextResponse.next();
+  }
+}
 
 // Match API routes, protected pages, sign-in/sign-up, and all non-static routes
 // for Clerk session resolution.
