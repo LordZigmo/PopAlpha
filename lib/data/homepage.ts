@@ -54,6 +54,19 @@ const VARIANT_FETCH_LIMIT = 60;
 
 const EMPTY: HomepageData = { movers: [], losers: [], trending: [], as_of: null };
 
+function compareMovementMagnitude(a: HomepageCard, b: HomepageCard): number {
+  const aMove = typeof a.change_pct === "number" && Number.isFinite(a.change_pct) ? Math.abs(a.change_pct) : -1;
+  const bMove = typeof b.change_pct === "number" && Number.isFinite(b.change_pct) ? Math.abs(b.change_pct) : -1;
+
+  if (aMove !== bMove) return bMove - aMove;
+
+  const aPrice = typeof a.market_price === "number" && Number.isFinite(a.market_price) ? a.market_price : -1;
+  const bPrice = typeof b.market_price === "number" && Number.isFinite(b.market_price) ? b.market_price : -1;
+  if (aPrice !== bPrice) return bPrice - aPrice;
+
+  return a.name.localeCompare(b.name);
+}
+
 export async function getHomepageData(): Promise<HomepageData> {
   let db;
   try {
@@ -226,8 +239,9 @@ export async function getHomepageData(): Promise<HomepageData> {
         fallbackPrice: r.median_7d,
         mover_tier: r.mover_tier as HomepageCard["mover_tier"],
       }));
-      if (moversOut.length >= SECTION_LIMIT) break;
     }
+    moversOut.sort(compareMovementMagnitude);
+    moversOut.splice(SECTION_LIMIT);
 
     // ── Losers: filter to cards with real prices above MIN_PRICE ─────────
     const losersOut: HomepageCard[] = [];
@@ -235,8 +249,9 @@ export async function getHomepageData(): Promise<HomepageData> {
       const price = marketPulseMap.get(r.canonical_slug)?.marketPrice ?? null;
       if (price == null || price < MIN_PRICE) continue;
       losersOut.push(toCard(r.canonical_slug));
-      if (losersOut.length >= SECTION_LIMIT) break;
     }
+    losersOut.sort(compareMovementMagnitude);
+    losersOut.splice(SECTION_LIMIT);
 
     // ── Trending: filter to cards with real prices above MIN_PRICE ────────
     const trendingOut: HomepageCard[] = [];
@@ -244,8 +259,9 @@ export async function getHomepageData(): Promise<HomepageData> {
       const price = marketPulseMap.get(r.canonical_slug)?.marketPrice ?? null;
       if (price == null || price < MIN_PRICE) continue;
       trendingOut.push(toCard(r.canonical_slug));
-      if (trendingOut.length >= SECTION_LIMIT) break;
     }
+    trendingOut.sort(compareMovementMagnitude);
+    trendingOut.splice(SECTION_LIMIT);
 
     // ── Derive as_of ──────────────────────────────────────────────────────
     const timestamps = [

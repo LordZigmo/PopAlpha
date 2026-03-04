@@ -20,7 +20,8 @@ export default function DesktopSidebar() {
           <SignedOut>
             <Link
               href="/sign-up"
-              className="rounded-2xl border border-white/[0.08] bg-white px-3.5 py-2 text-[12px] font-bold tracking-[0.08em] text-[#0A0A0A] transition hover:bg-white/90"
+              className="rounded-2xl border px-3.5 py-2 text-[12px] font-bold tracking-[0.08em] transition hover:opacity-90"
+              style={{ backgroundColor: "#FFFFFF", color: "#0A0A0A", borderColor: "#FFFFFF" }}
             >
               SIGN UP
             </Link>

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import Link from "next/link";
-import { useUser } from "@clerk/nextjs";
+import { SignOutButton, useUser } from "@clerk/nextjs";
 import { Camera, Pencil } from "lucide-react";
 import PostBody, { type PostMention } from "@/components/profile/post-body";
 
@@ -37,6 +37,11 @@ type SuggestCard = {
   slug: string;
   canonical_name: string;
   set_name: string | null;
+};
+
+type HoldingsSummaryResponse = {
+  ok: boolean;
+  collectionValue?: number;
 };
 
 function getOpenSlashRange(text: string, caret: number | null): { start: number; end: number; query: string } | null {
@@ -79,11 +84,21 @@ function formatPostTime(value: string): string {
   }).format(date);
 }
 
+function formatCurrency(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "$0";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: value >= 1000 ? 0 : 2,
+  }).format(value);
+}
+
 export default function ProfilePage() {
   const { user, isLoaded } = useUser();
   const [appProfile, setAppProfile] = useState<AppProfile | null>(null);
   const [posts, setPosts] = useState<ProfilePost[]>([]);
   const [stats, setStats] = useState({ post_count: 0, follower_count: 0, following_count: 0 });
+  const [portfolioValue, setPortfolioValue] = useState<number | null>(null);
   const [loadingProfile, setLoadingProfile] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [uploadingBanner, setUploadingBanner] = useState(false);
@@ -129,6 +144,25 @@ export default function ProfilePage() {
       })
       .finally(() => {
         if (!cancelled) setLoadingProfile(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoaded, user]);
+
+  useEffect(() => {
+    if (!isLoaded || !user) return;
+    let cancelled = false;
+
+    void fetch("/api/holdings/summary", { cache: "no-store" })
+      .then(async (response) => {
+        const payload = (await response.json()) as HoldingsSummaryResponse;
+        if (!response.ok || !payload.ok || cancelled) return;
+        setPortfolioValue(typeof payload.collectionValue === "number" ? payload.collectionValue : 0);
+      })
+      .catch(() => {
+        if (!cancelled) setPortfolioValue(null);
       });
 
     return () => {
@@ -432,13 +466,21 @@ export default function ProfilePage() {
         </div>
 
         <div className="px-5 pb-5 sm:px-6 sm:pb-6">
-          <div className="mb-4 flex justify-end">
+          <div className="mb-4 flex justify-end gap-3">
             <Link
               href="/settings"
               className="rounded-2xl border border-[#1E1E1E] bg-white/[0.04] px-4 py-2 text-[13px] font-semibold text-white transition hover:bg-white/[0.08]"
             >
               Settings
             </Link>
+            <SignOutButton>
+              <button
+                type="button"
+                className="rounded-2xl border border-[#1E1E1E] bg-white/[0.04] px-4 py-2 text-[13px] font-semibold text-white transition hover:bg-white/[0.08]"
+              >
+                Sign Out
+              </button>
+            </SignOutButton>
           </div>
 
           <div className="-mt-16 flex flex-wrap items-end justify-between gap-4">
@@ -547,6 +589,12 @@ export default function ProfilePage() {
 
             <div className="mt-4 flex flex-wrap gap-5 text-[13px] text-[#8A8A8A]">
               <span>Joined {joined}</span>
+              <Link
+                href="/portfolio"
+                className="font-medium text-[#CFCFCF] transition hover:text-white"
+              >
+                Portfolio {formatCurrency(portfolioValue)}
+              </Link>
               <span>{stats.post_count} Posts</span>
               <span>{stats.following_count} Following</span>
               <span>{stats.follower_count} Followers</span>

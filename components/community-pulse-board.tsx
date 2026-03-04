@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import type { CommunityPulseCard, CommunityVoteSide } from "@/lib/data/community-pulse";
 import VotePieChart from "@/components/vote-pie-chart";
@@ -87,6 +88,7 @@ export default function CommunityPulseBoard({
   weekEndsAt,
   signedIn,
 }: CommunityPulseBoardProps) {
+  const router = useRouter();
   const [cards, setCards] = useState(initialCards);
   const [votesRemaining, setVotesRemaining] = useState(initialVotesRemaining);
   const [activeSlug, setActiveSlug] = useState<string | null>(null);
@@ -127,7 +129,11 @@ export default function CommunityPulseBoard({
   }, [signedIn]);
 
   async function castVote(cardSlug: string, direction: CommunityVoteSide) {
-    if (!signedIn || activeSlug || votesRemaining <= 0) return;
+    if (!signedIn) {
+      router.push("/sign-up");
+      return;
+    }
+    if (activeSlug || votesRemaining <= 0) return;
 
     const current = cards.find((card) => card.slug === cardSlug);
     if (!current || current.userVote) return;
@@ -228,7 +234,8 @@ export default function CommunityPulseBoard({
           <p className="text-[15px] leading-6 text-[#A3A3A3]">Sign up to predict the Pokémon market!</p>
           <Link
             href="/sign-up"
-            className="rounded-2xl border border-white/[0.08] bg-white px-3.5 py-2 text-[12px] font-bold tracking-[0.08em] text-[#0A0A0A] transition hover:bg-white/90"
+            className="rounded-2xl border px-3.5 py-2 text-[12px] font-bold tracking-[0.08em] transition hover:opacity-90"
+            style={{ backgroundColor: "#FFFFFF", color: "#0A0A0A", borderColor: "#FFFFFF" }}
           >
             SIGN UP
           </Link>
@@ -362,7 +369,7 @@ export default function CommunityPulseBoard({
                 <button
                   type="button"
                   onClick={() => castVote(card.slug, "up")}
-                  disabled={voteLocked}
+                  disabled={signedIn ? voteLocked : false}
                   className={[
                     "group rounded-2xl border px-4 py-4 text-left transition",
                     card.userVote === "up"
@@ -383,7 +390,7 @@ export default function CommunityPulseBoard({
                 <button
                   type="button"
                   onClick={() => castVote(card.slug, "down")}
-                  disabled={voteLocked}
+                  disabled={signedIn ? voteLocked : false}
                   className={[
                     "group rounded-2xl border px-4 py-4 text-left transition",
                     card.userVote === "down"

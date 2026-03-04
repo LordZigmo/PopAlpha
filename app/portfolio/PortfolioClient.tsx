@@ -436,30 +436,30 @@ function PortfolioInner() {
 
   return (
     <div className="app-shell px-4 py-6 sm:px-6 lg:px-10">
-      <div className="mx-auto max-w-[1200px] rounded-[2rem] border border-white/20 bg-[#2f2555] p-3 sm:p-5 shadow-[0_35px_80px_rgba(0,0,0,0.55)]">
-        <div className="relative overflow-hidden rounded-[1.8rem] border border-white/20 bg-gradient-to-br from-[#a441d6] via-[#6e4ac6] to-[#2f74d0] p-5 sm:p-7">
-          <div className="absolute -left-16 -top-16 h-64 w-64 rounded-full bg-orange-400/20 blur-3xl" />
-          <div className="absolute -right-20 -bottom-20 h-72 w-72 rounded-full bg-sky-300/20 blur-3xl" />
+      <div className="mx-auto max-w-[1200px] rounded-[2rem] border border-[#1E1E1E] bg-[#0A0A0A] p-3 sm:p-5 shadow-[0_35px_80px_rgba(0,0,0,0.55)]">
+        <div className="relative overflow-hidden rounded-[1.8rem] border border-white/[0.08] bg-[radial-gradient(circle_at_top_left,rgba(37,99,235,0.18),transparent_34%),radial-gradient(circle_at_top_right,rgba(79,70,229,0.14),transparent_30%),linear-gradient(180deg,#111827_0%,#0A0A0A_78%)] p-5 sm:p-7">
+          <div className="absolute -left-16 -top-16 h-64 w-64 rounded-full bg-sky-400/10 blur-3xl" />
+          <div className="absolute -right-20 -bottom-20 h-72 w-72 rounded-full bg-indigo-300/10 blur-3xl" />
 
           <div className="relative z-10 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-xl bg-white/20 grid place-items-center font-bold">PA</div>
+              <div className="grid h-10 w-10 place-items-center rounded-xl border border-white/[0.08] bg-white/[0.06] font-bold text-white">PA</div>
               <div>
-                <p className="text-xs text-white/75">Sales Command Center</p>
-                <p className="font-semibold">PopAlpha Portfolio</p>
+                <p className="text-xs uppercase tracking-[0.16em] text-[#8BA3C7]">Portfolio Desk</p>
+                <p className="font-semibold text-white">PopAlpha Portfolio</p>
               </div>
             </div>
             <div className="flex items-center gap-2">
               <SettingsMenu />
               <button
                 onClick={openAddLot}
-                className="rounded-xl bg-white/20 px-4 py-2 text-sm font-medium hover:bg-white/30 transition"
+                className="rounded-xl border border-white/[0.08] bg-white/[0.06] px-4 py-2 text-sm font-medium text-white transition hover:bg-white/[0.1]"
               >
                 Add lot
               </button>
               <button
                 onClick={() => signOut({ redirectUrl: "/" })}
-                className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-[#2b2553] hover:bg-white/90 transition"
+                className="rounded-xl border border-white/[0.08] bg-white px-4 py-2 text-sm font-semibold text-[#0A0A0A] transition hover:bg-white/90"
               >
                 Sign out
               </button>
@@ -468,11 +468,11 @@ function PortfolioInner() {
 
           {/* Holdings error banner */}
           {holdingsError && (
-            <div className="relative z-10 mt-4 flex items-center justify-between gap-3 rounded-2xl border border-rose-400/30 bg-rose-500/15 px-4 py-3 text-sm">
+            <div className="relative z-10 mt-4 flex items-center justify-between gap-3 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm">
               <span className="text-rose-200">Failed to load holdings: {holdingsError}</span>
               <button
                 onClick={fetchHoldings}
-                className="shrink-0 rounded-xl bg-white/20 px-3 py-1.5 text-xs font-medium hover:bg-white/30 transition"
+                className="shrink-0 rounded-xl border border-white/[0.08] bg-white/[0.06] px-3 py-1.5 text-xs font-medium text-white transition hover:bg-white/[0.1]"
               >
                 Retry
               </button>
@@ -480,78 +480,78 @@ function PortfolioInner() {
           )}
 
           <div className="relative z-10 mt-6 grid gap-4 lg:grid-cols-[1.4fr_1fr]">
-            <div className="rounded-3xl border border-white/20 bg-black/20 p-5">
-              <p className="text-sm text-white/80">Collection Performance</p>
+            <div className="rounded-3xl border border-white/[0.08] bg-white/[0.03] p-5 backdrop-blur-sm">
+              <p className="text-sm text-[#D7DBE6]">Collection Performance</p>
               <div className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
                 <div>
-                  <p className="text-white/60">Total Cost</p>
-                  <p className="mt-1 text-xl font-semibold">${money(totalCost)}</p>
+                  <p className="text-[#8A8A8A]">Total Cost</p>
+                  <p className="mt-1 text-xl font-semibold text-white">${money(totalCost)}</p>
                 </div>
                 <div>
-                  <p className="text-white/60">Market Value</p>
-                  <p className="mt-1 text-xl font-semibold">${money(totalMarket)}</p>
+                  <p className="text-[#8A8A8A]">Market Value</p>
+                  <p className="mt-1 text-xl font-semibold text-white">${money(totalMarket)}</p>
                 </div>
                 <div>
-                  <p className="text-white/60">Unrealized P/L</p>
+                  <p className="text-[#8A8A8A]">Unrealized P/L</p>
                   <p className={`mt-1 text-xl font-semibold ${pnlClass}`}>${money(totalPnL)}</p>
                 </div>
                 <div>
-                  <p className="text-white/60">P/L %</p>
+                  <p className="text-[#8A8A8A]">P/L %</p>
                   <p className={`mt-1 text-xl font-semibold ${pnlClass}`}>{totalPct.toFixed(2)}%</p>
                 </div>
               </div>
               <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
-                <div className="rounded-2xl border border-white/20 bg-white/10 p-3">
-                  <p className="text-xs text-white/70">PSA Graded Units</p>
-                  <p className="mt-1 text-2xl font-semibold">{psaStats.gradedUnits}</p>
+                <div className="rounded-2xl border border-white/[0.08] bg-black/20 p-3">
+                  <p className="text-xs text-[#8A8A8A]">PSA Graded Units</p>
+                  <p className="mt-1 text-2xl font-semibold text-white">{psaStats.gradedUnits}</p>
                 </div>
-                <div className="rounded-2xl border border-white/20 bg-white/10 p-3">
-                  <p className="text-xs text-white/70">PSA10 Count</p>
-                  <p className="mt-1 text-2xl font-semibold">{psaStats.psa10Units}</p>
+                <div className="rounded-2xl border border-white/[0.08] bg-black/20 p-3">
+                  <p className="text-xs text-[#8A8A8A]">PSA10 Count</p>
+                  <p className="mt-1 text-2xl font-semibold text-white">{psaStats.psa10Units}</p>
                 </div>
-                <div className="rounded-2xl border border-white/20 bg-white/10 p-3 col-span-2 sm:col-span-1">
-                  <p className="text-xs text-white/70">PSA10 Rate</p>
-                  <p className="mt-1 text-2xl font-semibold">{psaStats.psa10Rate.toFixed(1)}%</p>
+                <div className="col-span-2 rounded-2xl border border-white/[0.08] bg-black/20 p-3 sm:col-span-1">
+                  <p className="text-xs text-[#8A8A8A]">PSA10 Rate</p>
+                  <p className="mt-1 text-2xl font-semibold text-white">{psaStats.psa10Rate.toFixed(1)}%</p>
                 </div>
               </div>
             </div>
 
-            <div className="rounded-3xl border border-white/20 bg-black/20 p-5">
-              <p className="text-sm text-white/70">Account Snapshot</p>
-              <h2 className="mt-2 text-3xl font-bold leading-tight">{email ?? "Signed in user"}</h2>
+            <div className="rounded-3xl border border-white/[0.08] bg-white/[0.03] p-5 backdrop-blur-sm">
+              <p className="text-sm text-[#8A8A8A]">Account Snapshot</p>
+              <h2 className="mt-2 text-3xl font-bold leading-tight text-white">{email ?? "Signed in user"}</h2>
               <div className="mt-4 space-y-3 text-sm">
-                <div className="rounded-2xl border border-white/20 bg-white/10 p-3 flex items-center justify-between">
-                  <span className="text-white/70">Sales History Rows</span>
-                  <span className="font-semibold">{salesHistory.length}</span>
+                <div className="flex items-center justify-between rounded-2xl border border-white/[0.08] bg-black/20 p-3">
+                  <span className="text-[#8A8A8A]">Sales History Rows</span>
+                  <span className="font-semibold text-white">{salesHistory.length}</span>
                 </div>
-                <div className="rounded-2xl border border-white/20 bg-white/10 p-3 flex items-center justify-between">
-                  <span className="text-white/70">Total Units</span>
-                  <span className="font-semibold">{psaStats.totalUnits}</span>
+                <div className="flex items-center justify-between rounded-2xl border border-white/[0.08] bg-black/20 p-3">
+                  <span className="text-[#8A8A8A]">Total Units</span>
+                  <span className="font-semibold text-white">{psaStats.totalUnits}</span>
                 </div>
-                <div className="rounded-2xl border border-white/20 bg-white/10 p-3 flex items-center justify-between">
-                  <span className="text-white/70">Grading Coverage</span>
-                  <span className="font-semibold">{psaStats.gradingCoverage.toFixed(1)}%</span>
+                <div className="flex items-center justify-between rounded-2xl border border-white/[0.08] bg-black/20 p-3">
+                  <span className="text-[#8A8A8A]">Grading Coverage</span>
+                  <span className="font-semibold text-white">{psaStats.gradingCoverage.toFixed(1)}%</span>
                 </div>
-                <div className="rounded-2xl border border-white/20 bg-white/10 p-3 flex items-center justify-between">
-                  <span className="text-white/70">PSA9 Count</span>
-                  <span className="font-semibold">{psaStats.psa9Units}</span>
+                <div className="flex items-center justify-between rounded-2xl border border-white/[0.08] bg-black/20 p-3">
+                  <span className="text-[#8A8A8A]">PSA9 Count</span>
+                  <span className="font-semibold text-white">{psaStats.psa9Units}</span>
                 </div>
               </div>
             </div>
           </div>
 
-          <div className="relative z-10 mt-6 rounded-3xl border border-white/20 bg-black/20 p-4">
+          <div className="relative z-10 mt-6 rounded-3xl border border-white/[0.08] bg-white/[0.03] p-4 backdrop-blur-sm">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <h3 className="text-lg font-semibold">Sales History</h3>
-                <p className="text-xs text-white/65">Most recent lot activity with PSA-aware spread tracking.</p>
+                <h3 className="text-lg font-semibold text-white">Sales History</h3>
+                <p className="text-xs text-[#8A8A8A]">Most recent lot activity with PSA-aware spread tracking.</p>
               </div>
-              <span className="text-xs text-white/70">Latest 8 rows</span>
+              <span className="text-xs text-[#8A8A8A]">Latest 8 rows</span>
             </div>
 
             <div className="mt-4 overflow-x-auto">
-              <table className="min-w-full text-left text-sm">
-                <thead className="text-xs uppercase text-white/65">
+              <table className="min-w-full text-left text-sm text-[#D7DBE6]">
+                <thead className="text-xs uppercase text-[#8A8A8A]">
                   <tr>
                     <th className="py-2 pr-4">Date</th>
                     <th className="py-2 pr-4">Card</th>
@@ -566,13 +566,13 @@ function PortfolioInner() {
                 <tbody>
                   {salesHistory.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="py-5 text-center text-white/65">
+                      <td colSpan={8} className="py-5 text-center text-[#8A8A8A]">
                         No sales history yet. Click <span className="font-semibold">Add lot</span> to create your first row.
                       </td>
                     </tr>
                   ) : (
                     salesHistory.map((row) => (
-                      <tr key={row.id} className="border-t border-white/10">
+                      <tr key={row.id} className="border-t border-white/[0.06]">
                         <td className="py-3 pr-4">{formatDate(row.acquired_on)}</td>
                         <td className="py-3 pr-4">{row.title}</td>
                         <td className="py-3 pr-4">{row.grade}</td>
@@ -591,10 +591,10 @@ function PortfolioInner() {
             </div>
           </div>
 
-          <div className="relative z-10 mt-4 rounded-3xl border border-white/20 bg-black/20 p-4">
+          <div className="relative z-10 mt-4 rounded-3xl border border-white/[0.08] bg-white/[0.03] p-4 backdrop-blur-sm">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold">Positions</h3>
-              <span className="text-xs text-white/70">{positions.length} tracked</span>
+              <h3 className="text-lg font-semibold text-white">Positions</h3>
+              <span className="text-xs text-[#8A8A8A]">{positions.length} tracked</span>
             </div>
             <div className="mt-3 space-y-2">
               {positions.map((p) => {
@@ -603,18 +603,18 @@ function PortfolioInner() {
                 const pnl = marketValue - p.costBasis;
                 const c = cardById.get(cardLookupKey(p));
                 return (
-                  <div key={p.key} className="rounded-2xl border border-white/15 bg-white/5">
+                  <div key={p.key} className="rounded-2xl border border-white/[0.08] bg-black/20">
                     <button
                       onClick={() => setExpanded(expanded === p.key ? null : p.key)}
                       className="w-full px-4 py-3 text-left"
                     >
                       <div className="flex items-center justify-between gap-3">
                         <div>
-                          <p className="font-semibold">{c?.name ?? p.canonical_slug ?? "Unknown card"}</p>
-                          <p className="text-xs text-white/65">{c ? `${c.set} • ${c.year ?? "—"}` : "Card"} • {p.grade}</p>
+                          <p className="font-semibold text-white">{c?.name ?? p.canonical_slug ?? "Unknown card"}</p>
+                          <p className="text-xs text-[#8A8A8A]">{c ? `${c.set} • ${c.year ?? "—"}` : "Card"} • {p.grade}</p>
                         </div>
                         <div className="text-right">
-                          <p className="text-sm">Qty {p.totalQty}</p>
+                          <p className="text-sm text-[#D7DBE6]">Qty {p.totalQty}</p>
                           <p className={`text-sm font-semibold ${pnl >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
                             {pnl >= 0 ? "+" : ""}${money(pnl)}
                           </p>
@@ -622,7 +622,7 @@ function PortfolioInner() {
                       </div>
                     </button>
                     {expanded === p.key && (
-                      <div className="border-t border-white/10 px-4 py-3 text-xs text-white/80">
+                      <div className="border-t border-white/[0.06] px-4 py-3 text-xs text-[#C8CDD8]">
                         Avg cost ${money(p.avgCost)} • Market ${money(market)} • Basis ${money(p.costBasis)}
                       </div>
                     )}
@@ -652,17 +652,17 @@ function PortfolioInner() {
               aria-modal="true"
               className="relative w-full sm:max-w-lg outline-none"
             >
-              <div className="glass rounded-t-3xl sm:rounded-3xl px-5 py-5 sm:p-6 border border-neutral-200/50 dark:border-neutral-800/60 translate-y-0">
+              <div className="translate-y-0 rounded-t-3xl border border-white/[0.08] bg-[#0F1117] px-5 py-5 text-white shadow-[0_35px_80px_rgba(0,0,0,0.5)] sm:rounded-3xl sm:p-6">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <h3 className="text-lg font-semibold">Add Lot</h3>
-                    <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                    <h3 className="text-lg font-semibold text-white">Add Lot</h3>
+                    <p className="mt-1 text-xs text-[#8A8A8A]">
                       This creates a new row in your sales history and position tracking.
                     </p>
                   </div>
                   <button
                     onClick={() => setAddOpen(false)}
-                    className="h-9 w-9 rounded-2xl grid place-items-center hover:bg-neutral-100/70 dark:hover:bg-neutral-800/60 transition"
+                    className="grid h-9 w-9 place-items-center rounded-2xl border border-white/[0.08] bg-white/[0.04] transition hover:bg-white/[0.08]"
                     aria-label="Close"
                   >
                     ✕
@@ -670,24 +670,24 @@ function PortfolioInner() {
                 </div>
 
                 {addSuccess && (
-                  <div className="mt-4 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300">
+                  <div className="mt-4 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
                     Lot added successfully.
                   </div>
                 )}
 
                 {addErr && (
-                  <div className="mt-4 rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-700 dark:text-rose-300">
+                  <div className="mt-4 rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
                     {addErr}
                   </div>
                 )}
 
                 <form onSubmit={addLot} className="mt-5 space-y-4">
                   <div className="space-y-2">
-                    <label className="text-xs font-medium text-neutral-600 dark:text-neutral-300">Card</label>
+                    <label className="text-xs font-medium text-[#B8C1D6]">Card</label>
                     <select
                       value={cardId}
                       onChange={(e) => setCardId(e.target.value)}
-                      className="w-full rounded-2xl px-3 py-3 text-sm bg-white/70 dark:bg-neutral-900/50 border border-neutral-200/70 dark:border-neutral-800/70 focus:outline-none focus:ring-2 focus:ring-neutral-900/20 dark:focus:ring-white/15"
+                      className="w-full rounded-2xl border border-white/[0.08] bg-white/[0.04] px-3 py-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-white/10"
                     >
                       {cards.map((c) => (
                         <option key={c.id} value={c.id}>
@@ -699,11 +699,11 @@ function PortfolioInner() {
 
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-2">
-                      <label className="text-xs font-medium text-neutral-600 dark:text-neutral-300">Grade</label>
+                      <label className="text-xs font-medium text-[#B8C1D6]">Grade</label>
                       <select
                         value={grade}
                         onChange={(e) => setGrade(e.target.value)}
-                        className="w-full rounded-2xl px-3 py-3 text-sm bg-white/70 dark:bg-neutral-900/50 border border-neutral-200/70 dark:border-neutral-800/70 focus:outline-none focus:ring-2 focus:ring-neutral-900/20 dark:focus:ring-white/15"
+                        className="w-full rounded-2xl border border-white/[0.08] bg-white/[0.04] px-3 py-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-white/10"
                       >
                         {VALID_GRADES.map((g) => (
                           <option key={g} value={g}>{g}</option>
@@ -712,49 +712,49 @@ function PortfolioInner() {
                     </div>
 
                     <div className="space-y-2">
-                      <label className="text-xs font-medium text-neutral-600 dark:text-neutral-300">Qty</label>
+                      <label className="text-xs font-medium text-[#B8C1D6]">Qty</label>
                       <input
                         type="number"
                         min={1}
                         step={1}
                         value={qty}
                         onChange={(e) => setQty(Number(e.target.value))}
-                        className="w-full rounded-2xl px-3 py-3 text-sm bg-white/70 dark:bg-neutral-900/50 border border-neutral-200/70 dark:border-neutral-800/70 focus:outline-none focus:ring-2 focus:ring-neutral-900/20 dark:focus:ring-white/15"
+                        className="w-full rounded-2xl border border-white/[0.08] bg-white/[0.04] px-3 py-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-white/10"
                       />
                     </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-2">
-                      <label className="text-xs font-medium text-neutral-600 dark:text-neutral-300">Price paid (per unit)</label>
+                      <label className="text-xs font-medium text-[#B8C1D6]">Price paid (per unit)</label>
                       <input
                         type="number"
                         min={0}
                         step="0.01"
                         value={pricePaid}
                         onChange={(e) => setPricePaid(Number(e.target.value))}
-                        className="w-full rounded-2xl px-3 py-3 text-sm bg-white/70 dark:bg-neutral-900/50 border border-neutral-200/70 dark:border-neutral-800/70 focus:outline-none focus:ring-2 focus:ring-neutral-900/20 dark:focus:ring-white/15"
+                        className="w-full rounded-2xl border border-white/[0.08] bg-white/[0.04] px-3 py-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-white/10"
                       />
                     </div>
 
                     <div className="space-y-2">
-                      <label className="text-xs font-medium text-neutral-600 dark:text-neutral-300">Acquired on (optional)</label>
+                      <label className="text-xs font-medium text-[#B8C1D6]">Acquired on (optional)</label>
                       <input
                         type="date"
                         value={acquiredOn}
                         onChange={(e) => setAcquiredOn(e.target.value)}
-                        className="w-full rounded-2xl px-3 py-3 text-sm bg-white/70 dark:bg-neutral-900/50 border border-neutral-200/70 dark:border-neutral-800/70 focus:outline-none focus:ring-2 focus:ring-neutral-900/20 dark:focus:ring-white/15"
+                        className="w-full rounded-2xl border border-white/[0.08] bg-white/[0.04] px-3 py-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-white/10"
                       />
                     </div>
                   </div>
 
                   <div className="space-y-2">
-                    <label className="text-xs font-medium text-neutral-600 dark:text-neutral-300">Venue (optional)</label>
+                    <label className="text-xs font-medium text-[#B8C1D6]">Venue (optional)</label>
                     <input
                       value={venue}
                       onChange={(e) => setVenue(e.target.value)}
                       placeholder="eBay, local shop, WhatNot…"
-                      className="w-full rounded-2xl px-3 py-3 text-sm bg-white/70 dark:bg-neutral-900/50 border border-neutral-200/70 dark:border-neutral-800/70 focus:outline-none focus:ring-2 focus:ring-neutral-900/20 dark:focus:ring-white/15"
+                      className="w-full rounded-2xl border border-white/[0.08] bg-white/[0.04] px-3 py-3 text-sm text-white placeholder:text-[#666] focus:outline-none focus:ring-2 focus:ring-white/10"
                     />
                   </div>
 
@@ -762,7 +762,7 @@ function PortfolioInner() {
                     <button
                       type="button"
                       onClick={() => setAddOpen(false)}
-                      className="px-4 py-3 rounded-2xl text-sm border border-neutral-200/70 bg-white/60 hover:bg-white/80 transition dark:border-neutral-800/70 dark:bg-neutral-900/50 dark:hover:bg-neutral-900/70"
+                      className="rounded-2xl border border-white/[0.08] bg-white/[0.04] px-4 py-3 text-sm text-white transition hover:bg-white/[0.08]"
                     >
                       Cancel
                     </button>
@@ -770,7 +770,7 @@ function PortfolioInner() {
                     <button
                       type="submit"
                       disabled={addSaving}
-                      className="px-5 py-3 rounded-2xl text-sm font-medium bg-neutral-900 text-white hover:bg-neutral-800 transition disabled:opacity-60 disabled:cursor-not-allowed dark:bg-neutral-200 dark:text-neutral-900 dark:hover:bg-neutral-300"
+                      className="rounded-2xl bg-white px-5 py-3 text-sm font-medium text-[#0A0A0A] transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {addSaving ? "Saving…" : "Add Lot"}
                     </button>
@@ -778,7 +778,7 @@ function PortfolioInner() {
                 </form>
               </div>
 
-              <div className="sm:hidden absolute -top-3 left-1/2 -translate-x-1/2 h-1.5 w-12 rounded-full bg-white/60 dark:bg-neutral-800/80" />
+              <div className="absolute -top-3 left-1/2 h-1.5 w-12 -translate-x-1/2 rounded-full bg-white/60 sm:hidden" />
             </div>
           </div>
         </div>

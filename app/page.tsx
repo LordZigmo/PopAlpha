@@ -458,9 +458,9 @@ export default async function HomePage() {
         <div className="flex items-baseline justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">PopAlpha</h1>
-            <p className="mt-1 text-[13px] text-[#555]">
-              TCG Market Intelligence
-              {asOf ? <span className="ml-2 text-[#444]">{asOf}</span> : null}
+            <p className="mt-1 text-[13px] text-[#7A7A7A]">
+              The AI that knows the market and loves the cards.
+              {asOf ? <span className="ml-2 text-[#676767]">{asOf}</span> : null}
             </p>
           </div>
         </div>

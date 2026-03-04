@@ -627,7 +627,7 @@ export default async function SearchPage({
   const pageSize = parsePageSize(params.pageSize);
   const lang = (params.lang ?? "all").trim().toUpperCase();
   const requestedSetFilter = (params.set ?? "").trim();
-  const sort = parseSearchSort(params.sort) as SearchSort;
+  const sort = parseSearchSort(params.sort ?? "market-price") as SearchSort;
   const pricedOnly = params.priced === "1";
   const genericNameMode = isGenericNameQuery(qNormalized);
 
