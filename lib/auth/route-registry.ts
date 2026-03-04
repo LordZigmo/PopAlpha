@@ -30,6 +30,7 @@ export const PUBLIC_ROUTES = [
   "card-profiles",
   "handles/availability",
   "health",
+  "waitlist",
 ];
 
 export const CRON_ROUTES = [

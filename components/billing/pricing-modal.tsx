@@ -1,9 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
+import { useUser } from "@clerk/nextjs";
 
 type PricingModalProps = {
   open: boolean;
@@ -17,7 +17,6 @@ type TierConfig = {
   blurb: string;
   bullets: string[];
   ctaLabel: string;
-  href?: string;
   featured?: boolean;
 };
 
@@ -44,8 +43,7 @@ const TIERS: TierConfig[] = [
       "Deeper tools for active collectors",
       "A faster path from noise to signal",
     ],
-    ctaLabel: "Choose Ace",
-    href: process.env.NEXT_PUBLIC_STRIPE_ACE_CHECKOUT_URL,
+    ctaLabel: "Join The Waitlist",
   },
   {
     name: "Elite",
@@ -57,20 +55,61 @@ const TIERS: TierConfig[] = [
       "Whale Radar and top-tier signal visibility",
       "The strongest workflow for serious tracking",
     ],
-    ctaLabel: "Go Elite",
-    href: process.env.NEXT_PUBLIC_STRIPE_ELITE_CHECKOUT_URL,
+    ctaLabel: "Join The Waitlist",
     featured: true,
   },
 ];
 
 export default function PricingModal({ open, onClose }: PricingModalProps) {
+  const { user } = useUser();
   const [mounted, setMounted] = useState(false);
+  const [waitlistTier, setWaitlistTier] = useState<"Ace" | "Elite" | null>(null);
+  const [waitlistEmail, setWaitlistEmail] = useState("");
+  const [waitlistState, setWaitlistState] = useState<"idle" | "saving" | "success" | "error">("idle");
+  const [waitlistMessage, setWaitlistMessage] = useState<string | null>(null);
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
+  useEffect(() => {
+    if (!open) return;
+    setWaitlistTier(null);
+    setWaitlistState("idle");
+    setWaitlistMessage(null);
+    setWaitlistEmail(user?.primaryEmailAddress?.emailAddress ?? "");
+  }, [open, user?.primaryEmailAddress?.emailAddress]);
+
   if (!mounted) return null;
+
+  async function submitWaitlist() {
+    if (!waitlistTier) return;
+
+    setWaitlistState("saving");
+    setWaitlistMessage(null);
+
+    try {
+      const response = await fetch("/api/waitlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: waitlistEmail,
+          tier: waitlistTier,
+        }),
+      });
+      const payload = await response.json().catch(() => null) as { ok?: boolean; error?: string } | null;
+
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error || "Could not join the waitlist.");
+      }
+
+      setWaitlistState("success");
+      setWaitlistMessage(`You're on the ${waitlistTier} waitlist. We'll reach out when it opens.`);
+    } catch (error) {
+      setWaitlistState("error");
+      setWaitlistMessage(error instanceof Error ? error.message : "Could not join the waitlist.");
+    }
+  }
 
   const modal = (
     <AnimatePresence>
@@ -113,23 +152,36 @@ export default function PricingModal({ open, onClose }: PricingModalProps) {
 
               <div className="grid gap-4 px-6 py-6 md:grid-cols-3 md:items-stretch">
                 {TIERS.map((tier) => {
-                  const cta = tier.href ? (
-                    <Link
-                      href={tier.href}
+                  const isPaidTier = tier.name === "Ace" || tier.name === "Elite";
+                  const waitlistTierName = isPaidTier ? (tier.name as "Ace" | "Elite") : null;
+                  const isActiveWaitlist = waitlistTierName !== null && waitlistTier === waitlistTierName;
+                  const cta = !isPaidTier ? (
+                    <button
+                      type="button"
+                      disabled
+                      className="mt-5 inline-flex w-full items-center justify-center rounded-2xl border border-[#1E1E1E] bg-white/[0.04] px-4 py-3 text-[14px] font-semibold text-[#8A8A8A]"
+                    >
+                      {tier.ctaLabel}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!waitlistTierName) return;
+                        setWaitlistTier(waitlistTierName);
+                        setWaitlistState("idle");
+                        setWaitlistMessage(null);
+                        if (!waitlistEmail) {
+                          setWaitlistEmail(user?.primaryEmailAddress?.emailAddress ?? "");
+                        }
+                      }}
                       className={[
                         "mt-5 inline-flex w-full items-center justify-center rounded-2xl border px-4 py-3 text-[14px] font-semibold transition",
                         tier.featured
                           ? "border-[#2A5BFF] bg-[#1D4ED8] text-white hover:bg-[#2563EB]"
                           : "border-[#1E1E1E] bg-white/[0.06] text-white hover:bg-white/[0.1]",
+                        isActiveWaitlist ? "ring-2 ring-white/10" : "",
                       ].join(" ")}
-                    >
-                      {tier.ctaLabel}
-                    </Link>
-                  ) : (
-                    <button
-                      type="button"
-                      disabled
-                      className="mt-5 inline-flex w-full items-center justify-center rounded-2xl border border-[#1E1E1E] bg-white/[0.04] px-4 py-3 text-[14px] font-semibold text-[#8A8A8A]"
                     >
                       {tier.ctaLabel}
                     </button>
@@ -167,6 +219,41 @@ export default function PricingModal({ open, onClose }: PricingModalProps) {
                         ))}
                       </ul>
                       {cta}
+                      {isActiveWaitlist ? (
+                        <div className="mt-3 space-y-2">
+                          <input
+                            type="email"
+                            value={waitlistEmail}
+                            onChange={(event) => setWaitlistEmail(event.target.value)}
+                            placeholder="Email for launch updates"
+                            className="w-full rounded-2xl border border-white/[0.08] bg-black/20 px-4 py-3 text-[14px] text-white outline-none placeholder:text-[#6B7280] focus:border-white/[0.14]"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => void submitWaitlist()}
+                            disabled={waitlistState === "saving"}
+                            className={[
+                              "inline-flex w-full items-center justify-center rounded-2xl border px-4 py-3 text-[13px] font-semibold transition",
+                              tier.featured
+                                ? "border-[#2A5BFF] bg-white text-[#0A0A0A] hover:bg-white/90"
+                                : "border-white/[0.08] bg-white text-[#0A0A0A] hover:bg-white/90",
+                              waitlistState === "saving" ? "opacity-70" : "",
+                            ].join(" ")}
+                          >
+                            {waitlistState === "saving" ? "Joining..." : "Join The Waitlist"}
+                          </button>
+                          {waitlistMessage ? (
+                            <p
+                              className={[
+                                "text-[12px] leading-5",
+                                waitlistState === "success" ? "text-emerald-300" : "text-rose-300",
+                              ].join(" ")}
+                            >
+                              {waitlistMessage}
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </div>
                   );
                 })}
