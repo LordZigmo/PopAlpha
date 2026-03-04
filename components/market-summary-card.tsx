@@ -1,6 +1,7 @@
 import CardMarketIntelClient from "@/components/card-market-intel-client";
 import { computeLiquidity } from "@/lib/cards/liquidity";
 import { dbPublic } from "@/lib/db";
+import { getEurToUsdRate } from "@/lib/pricing/fx";
 
 type MarketSummaryCardProps = {
   canonicalSlug: string;
@@ -13,13 +14,6 @@ type MarketSummaryCardProps = {
   }>;
 };
 
-type MarketLatestRow = {
-  printing_id: string | null;
-  price_usd: number | null;
-  observed_at: string | null;
-  updated_at: string | null;
-};
-
 type HistoryPointRow = {
   ts: string;
   price: number;
@@ -27,8 +21,15 @@ type HistoryPointRow = {
 
 type PriceHistoryRow = {
   variant_ref: string | null;
+  provider: "JUSTTCG" | "POKEMON_TCG_API" | string;
+  currency: string | null;
   ts: string;
   price: number;
+};
+
+type FxRateRow = {
+  rate: number;
+  rate_date: string;
 };
 
 type CardMetricRow = {
@@ -57,7 +58,7 @@ function filterRecentDays(points: HistoryPointRow[], days: number): HistoryPoint
   });
 }
 
-function normalizeHistoryPoints(rows: PriceHistoryRow[]): HistoryPointRow[] {
+function normalizeHistoryPoints(rows: Array<{ ts: string; price: number }>): HistoryPointRow[] {
   if (rows.length === 0) return [];
   const dedupedByTs = new Map<string, number>();
   for (const row of rows) {
@@ -79,9 +80,10 @@ async function loadAllHistoryRows(params: {
   for (let from = 0; ; from += pageSize) {
     const { data, error } = await params.supabase
       .from("public_price_history")
-      .select("variant_ref, ts, price")
+      .select("variant_ref, provider, currency, ts, price")
       .eq("canonical_slug", params.canonicalSlug)
-      .eq("provider", "JUSTTCG")
+      .in("provider", ["JUSTTCG", "POKEMON_TCG_API"])
+      .eq("source_window", "snapshot")
       .order("ts", { ascending: false })
       .range(from, from + pageSize - 1);
 
@@ -94,6 +96,99 @@ async function loadAllHistoryRows(params: {
   return allRows;
 }
 
+function toIsoDate(value: string): string | null {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().slice(0, 10);
+}
+
+async function loadFxRates(params: {
+  supabase: ReturnType<typeof dbPublic>;
+  asOfDate: string | null;
+}): Promise<FxRateRow[]> {
+  if (!params.asOfDate) return [];
+  const { data, error } = await params.supabase
+    .from("fx_rates")
+    .select("rate, rate_date")
+    .eq("pair", "EURUSD")
+    .lte("rate_date", params.asOfDate)
+    .order("rate_date", { ascending: true });
+  if (error) return [];
+  return (data ?? []) as FxRateRow[];
+}
+
+function findRateForDate(fxRows: FxRateRow[], isoDate: string): number | null {
+  if (fxRows.length === 0) return null;
+  let lo = 0;
+  let hi = fxRows.length - 1;
+  let best: number | null = null;
+  while (lo <= hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    const rowDate = fxRows[mid]?.rate_date ?? "";
+    if (rowDate <= isoDate) {
+      best = fxRows[mid]?.rate ?? null;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return best;
+}
+
+function convertRowToUsd(row: PriceHistoryRow, fxRows: FxRateRow[]): number | null {
+  if (!Number.isFinite(row.price) || row.price <= 0) return null;
+  const currency = String(row.currency ?? "USD").trim().toUpperCase();
+  if (currency === "USD") return row.price;
+  if (currency !== "EUR") return row.price;
+
+  const isoDate = toIsoDate(row.ts);
+  const fxRate = (isoDate ? findRateForDate(fxRows, isoDate) : null) ?? getEurToUsdRate();
+  if (!Number.isFinite(fxRate) || fxRate <= 0) return null;
+  return Number((row.price * fxRate).toFixed(4));
+}
+
+function bucketHourIso(ts: string): string | null {
+  const date = new Date(ts);
+  if (Number.isNaN(date.getTime())) return null;
+  date.setUTCMinutes(0, 0, 0);
+  return date.toISOString();
+}
+
+function buildMergedHistory(rows: PriceHistoryRow[], fxRows: FxRateRow[]): HistoryPointRow[] {
+  if (rows.length === 0) return [];
+
+  const providerBuckets = new Map<string, number[]>();
+  for (const row of rows) {
+    const bucketTs = bucketHourIso(row.ts);
+    if (!bucketTs) continue;
+    const provider = String(row.provider ?? "").toUpperCase();
+    if (provider !== "JUSTTCG" && provider !== "POKEMON_TCG_API") continue;
+    const usdPrice = convertRowToUsd(row, fxRows);
+    if (!Number.isFinite(usdPrice) || usdPrice === null || usdPrice <= 0) continue;
+    const key = `${bucketTs}|${provider}`;
+    const current = providerBuckets.get(key) ?? [];
+    current.push(usdPrice);
+    providerBuckets.set(key, current);
+  }
+
+  const buckets = new Map<string, number[]>();
+  for (const [key, prices] of providerBuckets.entries()) {
+    if (prices.length === 0) continue;
+    const [bucketTs] = key.split("|");
+    const providerMean = prices.reduce((sum, value) => sum + value, 0) / prices.length;
+    const existing = buckets.get(bucketTs) ?? [];
+    existing.push(providerMean);
+    buckets.set(bucketTs, existing);
+  }
+
+  return [...buckets.entries()]
+    .map(([ts, providerMeans]) => {
+      const merged = providerMeans.reduce((sum, value) => sum + value, 0) / providerMeans.length;
+      return { ts, price: Number(merged.toFixed(4)) };
+    })
+    .sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
+}
+
 export default async function MarketSummaryCard({
   canonicalSlug,
   selectedPrintingId,
@@ -102,17 +197,8 @@ export default async function MarketSummaryCard({
 }: MarketSummaryCardProps) {
   const supabase = dbPublic();
   const printingIds = variants.map((variant) => variant.printingId);
-  const [marketLatestQuery, allHistoryRows, cardMetricsQuery, variantSignalsQuery] = printingIds.length > 0
+  const [allHistoryRows, cardMetricsQuery, variantSignalsQuery] = printingIds.length > 0
     ? await Promise.all([
-        supabase
-          .from("public_market_latest")
-          .select("printing_id, price_usd, observed_at, updated_at")
-          .eq("canonical_slug", canonicalSlug)
-          .in("printing_id", printingIds)
-          .eq("source", "JUSTTCG")
-          .eq("grade", "RAW")
-          .eq("price_type", "MARKET")
-          .order("updated_at", { ascending: false }),
         loadAllHistoryRows({ supabase, canonicalSlug }),
         supabase
           .from("public_card_metrics")
@@ -129,19 +215,17 @@ export default async function MarketSummaryCard({
           .in("printing_id", printingIds),
       ])
     : [
-        { data: [] as MarketLatestRow[] },
         [] as PriceHistoryRow[],
         { data: [] as CardMetricRow[] },
         { data: [] as VariantSignalRow[] },
       ];
 
-  const marketLatestRows = (marketLatestQuery.data ?? []) as MarketLatestRow[];
-  const latestByPrinting = new Map<string, MarketLatestRow>();
-  for (const row of marketLatestRows) {
-    const printingId = row.printing_id;
-    if (!printingId || latestByPrinting.has(printingId)) continue;
-    latestByPrinting.set(printingId, row);
-  }
+  const maxHistoryDate = allHistoryRows
+    .map((row) => toIsoDate(row.ts))
+    .filter((value): value is string => Boolean(value))
+    .sort()
+    .at(-1) ?? null;
+  const fxRows = await loadFxRates({ supabase, asOfDate: maxHistoryDate });
 
   const cardMetricRows = (cardMetricsQuery.data ?? []) as CardMetricRow[];
   const signalRows = (variantSignalsQuery.data ?? []) as VariantSignalRow[];
@@ -157,17 +241,19 @@ export default async function MarketSummaryCard({
   }
 
   const variantPayload = variants.map((variant) => {
-    const marketLatest = latestByPrinting.get(variant.printingId) ?? null;
     const rawVariantPrefix = `${variant.printingId}::RAW`;
-    const fullHistory = normalizeHistoryPoints(
+    const mergedHistory = buildMergedHistory(
       allHistoryRows.filter((row) => {
         const variantRef = row.variant_ref ?? "";
         return variantRef === rawVariantPrefix || variantRef.startsWith(`${rawVariantPrefix}::`);
-      })
+      }),
+      fxRows
     );
+    const fullHistory = normalizeHistoryPoints(mergedHistory);
     const history7d = filterRecentDays(fullHistory, 7);
     const history30d = filterRecentDays(fullHistory, 30);
     const history90d = filterRecentDays(fullHistory, 90);
+    const latestMergedPoint = fullHistory.at(-1) ?? null;
     const signalRow = signalsByPrinting.get(variant.printingId) ?? null;
     const metrics = cardMetricsByPrinting.get(variant.printingId) ?? null;
 
@@ -183,12 +269,12 @@ export default async function MarketSummaryCard({
     return {
       printingId: variant.printingId,
       label: variant.label,
-      currentPrice: marketLatest?.price_usd ?? null,
       marketBalancePrice:
         metrics?.trimmed_median_30d
         ?? metrics?.median_30d
         ?? null,
-      asOfTs: marketLatest?.observed_at ?? marketLatest?.updated_at ?? null,
+      currentPrice: latestMergedPoint?.price ?? null,
+      asOfTs: latestMergedPoint?.ts ?? null,
       history7d,
       history30d,
       history90d,
