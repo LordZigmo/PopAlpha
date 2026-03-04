@@ -164,22 +164,68 @@ function buildMergedHistory(rows: PriceHistoryRow[], fxRows: FxRateRow[]): Histo
     providerBuckets.set(key, current);
   }
 
-  const buckets = new Map<string, number[]>();
+  const providerSeries = new Map<string, Array<{ ts: string; ms: number; price: number }>>();
   for (const [key, prices] of providerBuckets.entries()) {
     if (prices.length === 0) continue;
-    const [bucketTs] = key.split("|");
-    const providerMean = prices.reduce((sum, value) => sum + value, 0) / prices.length;
-    const existing = buckets.get(bucketTs) ?? [];
-    existing.push(providerMean);
-    buckets.set(bucketTs, existing);
+    const [ts, provider] = key.split("|");
+    if (!ts || !provider) continue;
+    const ms = new Date(ts).getTime();
+    if (!Number.isFinite(ms)) continue;
+    const mean = prices.reduce((sum, value) => sum + value, 0) / prices.length;
+    const arr = providerSeries.get(provider) ?? [];
+    arr.push({ ts, ms, price: Number(mean.toFixed(4)) });
+    providerSeries.set(provider, arr);
   }
 
-  return [...buckets.entries()]
-    .map(([ts, providerMeans]) => {
-      const merged = providerMeans.reduce((sum, value) => sum + value, 0) / providerMeans.length;
-      return { ts, price: Number(merged.toFixed(4)) };
-    })
-    .sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
+  for (const [provider, points] of providerSeries.entries()) {
+    providerSeries.set(provider, [...points].sort((a, b) => a.ms - b.ms));
+  }
+
+  const allTimestamps = Array.from(
+    new Set(
+      [...providerSeries.values()]
+        .flat()
+        .map((point) => point.ts)
+    )
+  )
+    .sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+
+  const providers = [...providerSeries.keys()];
+  const pointerByProvider = new Map<string, number>(providers.map((provider) => [provider, 0]));
+  const latestByProvider = new Map<string, { ts: string; ms: number; price: number } | null>(providers.map((provider) => [provider, null]));
+
+  // Keep a provider's last reading available for merge for up to 72h so async update cadence
+  // doesn't create artificial end-of-line cliffs.
+  const MAX_CARRY_FORWARD_MS = 72 * 60 * 60 * 1000;
+
+  const mergedPoints: HistoryPointRow[] = [];
+  for (const ts of allTimestamps) {
+    const tsMs = new Date(ts).getTime();
+    if (!Number.isFinite(tsMs)) continue;
+
+    for (const provider of providers) {
+      const series = providerSeries.get(provider) ?? [];
+      let pointer = pointerByProvider.get(provider) ?? 0;
+      while (pointer < series.length && series[pointer]!.ms <= tsMs) {
+        latestByProvider.set(provider, series[pointer]!);
+        pointer += 1;
+      }
+      pointerByProvider.set(provider, pointer);
+    }
+
+    const activePrices: number[] = [];
+    for (const provider of providers) {
+      const latest = latestByProvider.get(provider);
+      if (!latest) continue;
+      if (tsMs - latest.ms > MAX_CARRY_FORWARD_MS) continue;
+      activePrices.push(latest.price);
+    }
+    if (activePrices.length === 0) continue;
+    const merged = activePrices.reduce((sum, value) => sum + value, 0) / activePrices.length;
+    mergedPoints.push({ ts, price: Number(merged.toFixed(4)) });
+  }
+
+  return mergedPoints;
 }
 
 export default async function MarketSummaryCard({
