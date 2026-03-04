@@ -32,7 +32,7 @@ export default function PopAlphaScoutPreview(props: PopAlphaScoutPreviewProps) {
             PopAlpha Scout
           </div>
           <p className="mt-1 text-[12px] font-medium tracking-[0.04em] text-emerald-200/85 sm:text-[13px]">
-            Pokemon-obsessed AI
+            Pokémon-obsessed AI
           </p>
         </div>
         <span className="inline-flex h-[2.25rem] items-center gap-2 self-start rounded-full border border-red-500/20 bg-red-500/10 px-3 text-[18px] font-semibold leading-none tracking-[-0.01em] text-red-100">

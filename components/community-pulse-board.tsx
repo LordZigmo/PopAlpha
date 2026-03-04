@@ -225,12 +225,12 @@ export default function CommunityPulseBoard({
 
       {!signedIn ? (
         <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#1E1E1E] bg-white/[0.03] px-5 py-4">
-          <p className="text-[15px] leading-6 text-[#A3A3A3]">Sign in to use your weekly votes and shape the tape.</p>
+          <p className="text-[15px] leading-6 text-[#A3A3A3]">Sign up to predict the Pokémon market!</p>
           <Link
-            href="/sign-in"
-            className="rounded-full border border-white/[0.08] bg-white/[0.05] px-4 py-2 text-[14px] font-semibold text-white transition hover:bg-white/[0.08]"
+            href="/sign-up"
+            className="rounded-2xl border border-white/[0.08] bg-white px-3.5 py-2 text-[12px] font-bold tracking-[0.08em] text-[#0A0A0A] transition hover:bg-white/90"
           >
-            Sign In to Vote
+            SIGN UP
           </Link>
         </div>
       ) : null}

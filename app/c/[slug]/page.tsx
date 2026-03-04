@@ -927,9 +927,9 @@ export default async function CanonicalCardPage({
         />
 
         <RelatedCarouselSection
-          title="From This Pokemon"
+          title="From This Pokémon"
           cards={relatedCarousels.fromPokemon}
-          emptyMessage="No other tracked cards from this Pokemon yet."
+          emptyMessage="No other tracked cards from this Pokémon yet."
         />
         </div>
       </div>

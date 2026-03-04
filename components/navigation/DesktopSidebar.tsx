@@ -36,7 +36,7 @@ export default function DesktopSidebar() {
                 PopAlpha Scout
               </div>
               <p className="mt-1 text-[11px] font-medium tracking-[0.04em] text-emerald-200/85">
-                Pokemon-obsessed AI
+                Pokémon-obsessed AI
               </p>
             </div>
             <span className="inline-flex h-[2rem] items-center gap-2 self-start rounded-full border border-red-500/20 bg-red-500/10 px-2.5 text-[15px] font-semibold leading-none tracking-[-0.01em] text-red-100">
@@ -48,7 +48,7 @@ export default function DesktopSidebar() {
             </span>
           </div>
           <p className="relative z-10 mt-4 text-[15px] font-medium leading-relaxed text-emerald-50">
-            The Pokemon market still looks selective, with attention clustering around a few chase names instead of spreading across the whole board. That usually means collector conviction is real, but still narrow, so the next read is whether confidence starts widening into deeper cards and sealed.
+            The Pokémon market still looks selective, with attention clustering around a few chase names instead of spreading across the whole board. That usually means collector conviction is real, but still narrow, so the next read is whether confidence starts widening into deeper cards and sealed.
           </p>
         </section>
 
