@@ -340,6 +340,13 @@ function formatUsdCompact(value: number | null | undefined): string {
   }).format(value);
 }
 
+function formatSignalScore(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "Forming";
+  const abs = Math.abs(value);
+  const formatted = abs >= 10 ? abs.toFixed(0) : abs.toFixed(1);
+  return `${value > 0 ? "+" : value < 0 ? "-" : ""}${formatted}%`;
+}
+
 function RelatedCarouselSection({
   title,
   cards,
@@ -661,6 +668,19 @@ export default async function CanonicalCardPage({
       value: latestRow?.price != null ? formatUsdCompact(latestRow.price) : "Forming",
     };
   });
+  const trendMetricValue = formatSignalScore(priceChangePct);
+  const breakoutMetricValue = snapshotData?.active_listings_7d != null
+    ? snapshotData.active_listings_7d <= 4
+      ? "Tight Supply"
+      : snapshotData.active_listings_7d <= 10
+        ? "Building"
+        : "Crowded"
+    : "Forming";
+  const valueMetricValue = edgeLabel && edgeFormatted
+    ? `${edgeFormatted} ${edgeLabel}`
+    : fairValue != null
+      ? `Fair ${formatUsdCompact(fairValue)}`
+      : "Forming";
 
   return (
     <PageShell>
@@ -805,6 +825,24 @@ export default async function CanonicalCardPage({
           summaryText={cardProfile?.summary_long ?? cardProfile?.summary_short ?? null}
         />
 
+        <section className="mt-6 mb-6 grid gap-2 sm:grid-cols-3">
+          <DerivedMetricTile
+            label="Trend"
+            value={trendMetricValue}
+            tone={priceChangePct != null ? (priceChangePct > 0 ? "positive" : priceChangePct < 0 ? "negative" : "neutral") : "neutral"}
+          />
+          <DerivedMetricTile
+            label="Breakout"
+            value={breakoutMetricValue}
+            tone={snapshotData?.active_listings_7d != null && snapshotData.active_listings_7d <= 4 ? "positive" : "neutral"}
+          />
+          <DerivedMetricTile
+            label="Value"
+            value={valueMetricValue}
+            tone={edgePercent != null ? (edgePercent < -1 ? "positive" : edgePercent > 1 ? "negative" : "neutral") : "neutral"}
+          />
+        </section>
+
         {/* ── Market Summary (enlarged chart) ──────────────────────────────── */}
         <MarketSummaryCard
           canonicalSlug={slug}
@@ -848,6 +886,10 @@ export default async function CanonicalCardPage({
         {currentCardPulse ? (
           <MarketPulse
             canonicalSlug={slug}
+            cardName={canonical.canonical_name}
+            setName={canonical.set_name}
+            imageUrl={selectedPrinting?.image_url ?? null}
+            changePct={vm?.change_24h_pct ?? vm?.change_7d_pct ?? null}
             bullishVotes={currentCardPulse.bullishVotes}
             bearishVotes={currentCardPulse.bearishVotes}
             userVote={currentCardPulse.userVote}
@@ -892,5 +934,38 @@ export default async function CanonicalCardPage({
         </div>
       </div>
     </PageShell>
+  );
+}
+
+function DerivedMetricTile({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: "positive" | "negative" | "neutral";
+}) {
+  const toneClass = tone === "positive"
+    ? "border-emerald-400/12 bg-emerald-400/[0.04] text-emerald-100"
+    : tone === "negative"
+      ? "border-red-400/12 bg-red-400/[0.04] text-red-100"
+      : "border-white/[0.06] bg-white/[0.03] text-[#F0F0F0]";
+
+  const subToneClass = tone === "positive"
+    ? "text-emerald-200/70"
+    : tone === "negative"
+      ? "text-red-200/70"
+      : "text-[#777]";
+
+  return (
+    <div className={`rounded-[20px] border px-4 py-3 backdrop-blur-sm ${toneClass}`}>
+      <p className={`text-[11px] font-semibold uppercase tracking-[0.12em] ${subToneClass}`}>
+        {label}
+      </p>
+      <p className="mt-1 text-[18px] font-semibold tracking-[-0.02em]">
+        {value}
+      </p>
+    </div>
   );
 }

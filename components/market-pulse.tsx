@@ -1,10 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import VotePieChart from "@/components/vote-pie-chart";
 
 type MarketPulseProps = {
   canonicalSlug: string;
+  cardName: string;
+  setName: string | null;
+  imageUrl: string | null;
+  changePct: number | null;
   bullishVotes: number;
   bearishVotes: number;
   userVote: "up" | "down" | null;
@@ -38,8 +43,19 @@ function formatVoteCount(count: number): string {
   return String(count);
 }
 
+function formatChange(pct: number | null): string {
+  if (pct == null || pct === 0) return "Flat";
+  const abs = Math.abs(pct);
+  const formatted = abs >= 10 ? abs.toFixed(0) : abs.toFixed(1);
+  return `${pct > 0 ? "+" : "-"}${formatted}%`;
+}
+
 export default function MarketPulse({
   canonicalSlug,
+  cardName,
+  setName,
+  imageUrl,
+  changePct,
   bullishVotes: initialBullish,
   bearishVotes: initialBearish,
   userVote: initialUserVote,
@@ -116,19 +132,55 @@ export default function MarketPulse({
         )}
       </div>
 
-      <div className="mt-1 flex items-center justify-center">
-        <VotePieChart upPct={bullishPct} downPct={bearishPct} size={112} />
-      </div>
+      <div className="rounded-[1.5rem] border border-white/[0.06] bg-[radial-gradient(circle_at_top_right,rgba(71,85,105,0.18),transparent_30%),rgba(255,255,255,0.02)] p-4 sm:p-5">
+        <div className="flex gap-5 sm:gap-6">
+          <Link
+            href={`/c/${encodeURIComponent(canonicalSlug)}`}
+            className="relative block aspect-[63/88] w-[112px] shrink-0 overflow-hidden rounded-[1.15rem] border border-white/[0.06] bg-[#0B0B0B]"
+          >
+            {imageUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={imageUrl} alt={cardName} className="h-full w-full object-cover" />
+            ) : null}
+          </Link>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <Link
+                  href={`/c/${encodeURIComponent(canonicalSlug)}`}
+                  className="line-clamp-2 text-[17px] font-semibold leading-6 text-white hover:text-[#DDE8FF] sm:text-[18px]"
+                >
+                  {cardName}
+                </Link>
+                <p className="mt-1.5 truncate text-[14px] text-[#6B7280]">{setName ?? "Unknown set"}</p>
+              </div>
+              <span
+                className="rounded-full border px-3 py-1.5 text-[13px] font-bold tabular-nums"
+                style={{
+                  color: (changePct ?? 0) >= 0 ? "#8DF0B4" : "#F5A1A7",
+                  borderColor: (changePct ?? 0) >= 0 ? "rgba(99,212,113,0.22)" : "rgba(245,161,167,0.22)",
+                  backgroundColor: (changePct ?? 0) >= 0 ? "rgba(99,212,113,0.08)" : "rgba(245,161,167,0.08)",
+                }}
+              >
+                {formatChange(changePct)}
+              </span>
+            </div>
 
-      <div className="mt-3 flex justify-between">
-        <span className="text-[14px] font-semibold tabular-nums" style={{ color: "#16A34A" }}>
-          {bullishPct.toFixed(0)}% Up
-        </span>
-        <span className="text-[14px] font-semibold tabular-nums" style={{ color: "#DC2626" }}>
-          {bearishPct.toFixed(0)}% Down
-        </span>
+            <div className="mt-4 flex items-center gap-4">
+              <VotePieChart upPct={bullishPct} downPct={bearishPct} size={96} />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between text-[14px] font-semibold">
+                  <span className="text-[#16A34A]">{bullishPct.toFixed(0)}% Up</span>
+                  <span className="text-[#DC2626]">{bearishPct.toFixed(0)}% Down</span>
+                </div>
+                <p className="mt-2 text-[14px] leading-6 text-[#777]">
+                  {total > 0 ? `${total} vote${total === 1 ? "" : "s"} on this contract this week.` : "No one has priced this one in yet."}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
-
       {/* Vote buttons */}
       <div className="mt-5 flex gap-3">
         <button
@@ -168,8 +220,6 @@ export default function MarketPulse({
       {error ? (
         <p className="mt-3 text-center text-[13px] text-[#FF9A9A]">{error}</p>
       ) : null}
-
-      {/* Countdown */}
       {countdown && (
         <p className="mt-4 text-center text-[14px] tabular-nums text-[#666]">
           {countdown}
