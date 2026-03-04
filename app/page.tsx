@@ -11,6 +11,7 @@ import HomepageSearch from "@/components/homepage-search";
 import SectionCarousel from "@/components/section-carousel";
 import CardTileMini from "@/components/card-tile-mini";
 import ProSectionLocked from "@/components/pro-section-locked";
+import TypewriterText from "@/components/typewriter-text";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +34,8 @@ const TRENDING_SET_PILLS = [
   "151",
   "Evolving Skies",
 ] as const;
+const HOMEPAGE_SCOUT_NARRATIVE =
+  "The Pokémon market still looks selective, with attention clustering around a few chase names instead of spreading across the whole board. That usually means collector conviction is real, but still narrow, so the next read is whether confidence starts widening into deeper cards and sealed.";
 
 type PopAlphaTier = "Trainer" | "Ace" | "Elite";
 
@@ -541,14 +544,13 @@ export default async function HomePage() {
               </div>
             ) : null}
           </div>
-          <p
+          <TypewriterText
+            text={userTier === "Trainer" ? HOMEPAGE_SCOUT_NARRATIVE : marketNarrative}
             className={[
               "relative z-10 mt-2 leading-relaxed",
               userTier === "Trainer" ? "text-[18px] font-medium text-emerald-50 sm:text-[19px]" : "text-base sm:text-[17px] text-[#D7DBE6]",
             ].join(" ")}
-          >
-            {marketNarrative}
-          </p>
+          />
         </div>
       </div>
 
@@ -638,7 +640,7 @@ export default async function HomePage() {
               </div>
             </div>
             <div className="relative z-10 mt-2 text-[18px] font-medium leading-relaxed text-[#E5EEFF] sm:text-[19px]">
-              <p>{acePreview.lead}</p>
+              <TypewriterText text={acePreview.lead} />
               {acePreview.remainder ? (
                 <div className="relative mt-2 overflow-hidden rounded-xl">
                   <p className="blur-[3px] select-none text-[#D9E8FF]/80">
@@ -712,7 +714,7 @@ export default async function HomePage() {
               </div>
             </div>
             <div className="relative z-10 mt-2 text-[18px] font-medium leading-relaxed text-violet-50 sm:text-[19px]">
-              <p>{elitePreview.lead}</p>
+              <TypewriterText text={elitePreview.lead} />
               {elitePreview.remainder ? (
                 <div className="relative mt-2 overflow-hidden rounded-xl">
                   <p className="blur-[3px] select-none text-violet-100/80">

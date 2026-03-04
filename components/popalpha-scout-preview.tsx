@@ -1,5 +1,6 @@
 import { Sparkles } from "lucide-react";
 import { buildPopAlphaScoutSummary } from "@/lib/ai/scout-summary";
+import TypewriterText from "@/components/typewriter-text";
 
 type PopAlphaScoutPreviewProps = {
   cardName: string;
@@ -65,9 +66,10 @@ export default function PopAlphaScoutPreview(props: PopAlphaScoutPreviewProps) {
         </div>
       </div>
 
-      <p className="relative z-10 mt-2 text-[18px] font-medium leading-relaxed text-emerald-50 sm:text-[19px]">
-        {summary}
-      </p>
+      <TypewriterText
+        text={summary}
+        className="relative z-10 mt-2 text-[18px] font-medium leading-relaxed text-emerald-50 sm:text-[19px]"
+      />
     </section>
   );
 }

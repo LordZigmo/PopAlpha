@@ -7,6 +7,7 @@ import PricingModal from "@/components/billing/pricing-modal";
 import LiveActivityFeed from "@/components/navigation/live-activity-feed";
 import TrendingSignalsList from "@/components/navigation/trending-signals-list";
 import ElitePromo from "@/components/sidebar/ElitePromo";
+import TypewriterText from "@/components/typewriter-text";
 import { Sparkles } from "lucide-react";
 
 export default function DesktopSidebar() {
@@ -53,9 +54,10 @@ export default function DesktopSidebar() {
               </span>
             </div>
           </div>
-          <p className="relative z-10 mt-4 text-[15px] font-medium leading-relaxed text-emerald-50">
-            The Pokémon market still looks selective, with attention clustering around a few chase names instead of spreading across the whole board. That usually means collector conviction is real, but still narrow, so the next read is whether confidence starts widening into deeper cards and sealed.
-          </p>
+          <TypewriterText
+            text="A few chase cards are still getting most of the attention, so the market feels focused instead of fully heated."
+            className="relative z-10 mt-4 text-[15px] font-medium leading-relaxed text-emerald-50"
+          />
         </section>
 
         <TrendingSignalsList />
