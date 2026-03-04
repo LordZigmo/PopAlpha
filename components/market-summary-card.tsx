@@ -83,7 +83,6 @@ async function loadAllHistoryRows(params: {
       .select("variant_ref, provider, currency, ts, price")
       .eq("canonical_slug", params.canonicalSlug)
       .in("provider", ["JUSTTCG", "POKEMON_TCG_API"])
-      .eq("source_window", "snapshot")
       .order("ts", { ascending: false })
       .range(from, from + pageSize - 1);
 
@@ -147,20 +146,14 @@ function convertRowToUsd(row: PriceHistoryRow, fxRows: FxRateRow[]): number | nu
   return Number((row.price * fxRate).toFixed(4));
 }
 
-function bucketHourIso(ts: string): string | null {
-  const date = new Date(ts);
-  if (Number.isNaN(date.getTime())) return null;
-  date.setUTCMinutes(0, 0, 0);
-  return date.toISOString();
-}
-
 function buildMergedHistory(rows: PriceHistoryRow[], fxRows: FxRateRow[]): HistoryPointRow[] {
   if (rows.length === 0) return [];
 
   const providerBuckets = new Map<string, number[]>();
   for (const row of rows) {
-    const bucketTs = bucketHourIso(row.ts);
-    if (!bucketTs) continue;
+    const parsedTs = new Date(row.ts);
+    if (Number.isNaN(parsedTs.getTime())) continue;
+    const bucketTs = parsedTs.toISOString();
     const provider = String(row.provider ?? "").toUpperCase();
     if (provider !== "JUSTTCG" && provider !== "POKEMON_TCG_API") continue;
     const usdPrice = convertRowToUsd(row, fxRows);
