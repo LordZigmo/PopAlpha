@@ -8,7 +8,9 @@
  */
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { currentUser } from "@clerk/nextjs/server";
 import CanonicalCardFloatingHero from "@/components/canonical-card-floating-hero";
+import CardModeToggle from "@/components/card-mode-toggle";
 import CardViewTracker from "@/components/card-view-tracker";
 import CollapsibleSection from "@/components/collapsible-section";
 import EbayListings from "@/components/ebay-listings";
@@ -16,9 +18,13 @@ import { GroupedSection, PageShell, Pill, SegmentedControl, StatStripItem } from
 import MarketPulse from "@/components/market-pulse";
 import MarketSummaryCard from "@/components/market-summary-card";
 import PopAlphaScoutPreview from "@/components/popalpha-scout-preview";
+import CardTileMini from "@/components/card-tile-mini";
+import type { HomepageCard } from "@/lib/data/homepage";
 import { buildEbaySearchQueries, type GradeSelection, type GradedSource } from "@/lib/ebay-query";
 import { buildPrintingPill } from "@/lib/cards/detail";
 import { getCardViewSnapshot } from "@/lib/data/card-views";
+import { getCommunityPulseSnapshot } from "@/lib/data/community-pulse";
+import { getRelatedCardCarousels } from "@/lib/data/related-cards";
 import { buildGradedVariantRef, buildRawVariantRef } from "@/lib/identity/variant-ref";
 import { dbPublic } from "@/lib/db";
 import { buildAssetViewModel } from "@/lib/data/assets";
@@ -26,6 +32,7 @@ import { buildAssetViewModel } from "@/lib/data/assets";
 type CanonicalCardRow = {
   slug: string;
   canonical_name: string;
+  subject: string | null;
   set_name: string | null;
   year: number | null;
   card_number: string | null;
@@ -333,6 +340,42 @@ function formatUsdCompact(value: number | null | undefined): string {
   }).format(value);
 }
 
+function RelatedCarouselSection({
+  title,
+  cards,
+  emptyMessage,
+}: {
+  title: string;
+  cards: HomepageCard[];
+  emptyMessage: string;
+}) {
+  return (
+    <section className="mt-8">
+      <div className="flex items-baseline gap-2">
+        <h2 className="text-[18px] font-semibold uppercase tracking-[0.06em] text-[#D4D4D8] sm:text-[20px]">
+          {title}
+        </h2>
+      </div>
+      <div
+        className="mt-3 flex gap-3 overflow-x-auto pb-2 lg:grid lg:grid-cols-5 lg:overflow-visible lg:pb-0"
+        style={{
+          scrollSnapType: "x mandatory",
+          WebkitOverflowScrolling: "touch",
+          scrollbarWidth: "none",
+        }}
+      >
+        {cards.length > 0 ? cards.map((card) => (
+          <CardTileMini key={`${title}-${card.slug}`} card={card} />
+        )) : (
+          <div className="flex min-h-[140px] w-full items-center justify-center text-[13px] text-[#444] lg:col-span-5">
+            {emptyMessage}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 export default async function CanonicalCardPage({
   params,
   searchParams,
@@ -351,6 +394,7 @@ export default async function CanonicalCardPage({
 }) {
   const { slug } = await params;
   const { printing, grade, mode, provider, bucket, marketWindow, debug, returnTo } = await searchParams;
+  const user = await currentUser();
   const supabase = dbPublic();
   const debugEnabled = debug === "1";
   const backHref = resolveBackHref(returnTo);
@@ -358,7 +402,7 @@ export default async function CanonicalCardPage({
 
   const { data: canonical } = await supabase
     .from("canonical_cards")
-    .select("slug, canonical_name, set_name, year, card_number")
+    .select("slug, canonical_name, subject, set_name, year, card_number")
     .eq("slug", slug)
     .maybeSingle<CanonicalCardRow>();
 
@@ -470,6 +514,29 @@ export default async function CanonicalCardPage({
       : Promise.resolve({ data: [] as GradedPriceHistoryRow[] }),
     getCardViewSnapshot(slug, 14),
   ]);
+  const relatedCarousels = await getRelatedCardCarousels({
+    slug,
+    canonicalName: canonical.canonical_name,
+    setName: canonical.set_name,
+    subject: canonical.subject,
+    limit: 5,
+  });
+  const cardPulseSnapshot = await getCommunityPulseSnapshot(
+    [{
+      slug,
+      name: canonical.canonical_name,
+      set_name: canonical.set_name,
+      year: canonical.year,
+      market_price: null,
+      change_pct: vm?.change_24h_pct ?? vm?.change_7d_pct ?? null,
+      change_window: vm?.change_24h_pct != null ? "24H" : vm?.change_7d_pct != null ? "7D" : null,
+      mover_tier: null,
+      image_url: selectedPrinting?.image_url ?? null,
+      sparkline_7d: [],
+    }],
+    user?.id ?? null,
+  );
+  const currentCardPulse = cardPulseSnapshot.cards[0] ?? null;
 
   const gradeSnapMap = {
     RAW: rawSnap.data,
@@ -518,6 +585,29 @@ export default async function CanonicalCardPage({
   ]
     .filter(Boolean)
     .join(" • ");
+
+  const rawModeHref = toggleHref(
+    slug,
+    selectedPrinting?.id ?? null,
+    debugEnabled,
+    returnTo,
+    {
+      mode: "RAW",
+      marketWindow: activeMarketWindow,
+    },
+  );
+  const gradedModeHref = toggleHref(
+    slug,
+    selectedPrinting?.id ?? null,
+    debugEnabled,
+    returnTo,
+    {
+      mode: "GRADED",
+      provider: activeProvider,
+      bucket: activeBucket,
+      marketWindow: activeMarketWindow,
+    },
+  );
 
   const currentRawPrice = viewMode === "RAW" ? vm?.price_now ?? null : null;
   const displayPrimaryPrice = currentRawPrice ?? snapshotData?.median_7d ?? null;
@@ -589,43 +679,54 @@ export default async function CanonicalCardPage({
             <p className="mt-1 text-[15px] font-semibold uppercase tracking-[0.1em] text-[#6B6B6B]">
               {subtitleText}
             </p>
-            {primaryPrice !== null && (
-              <div className="mt-3">
-                <div className="flex flex-wrap items-baseline gap-2.5">
-                  <span className="text-[46px] font-bold leading-none tracking-[-0.04em] tabular-nums text-[#F0F0F0] sm:text-[56px]">
-                    {primaryPrice}
-                  </span>
-                  {priceChangePct != null && priceChangePct !== 0 && (
-                    <span
-                      className="text-[20px] font-bold tabular-nums tracking-[-0.02em] sm:text-[24px]"
-                      style={{ color: priceChangeColor }}
-                    >
-                      {priceChangePct > 0 ? "+" : ""}{Math.abs(priceChangePct) >= 10 ? priceChangePct.toFixed(0) : priceChangePct.toFixed(1)}%
+            <div className="mt-3 flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                {primaryPrice !== null ? (
+                  <>
+                    <div className="flex flex-wrap items-baseline gap-2.5">
+                    <span className="text-[46px] font-bold leading-none tracking-[-0.04em] tabular-nums text-[#F0F0F0] sm:text-[56px]">
+                      {primaryPrice}
                     </span>
-                  )}
-                </div>
-                {fairValue != null && (
-                  <div className="mt-1.5 flex flex-wrap items-baseline gap-2">
-                    <span className="text-[15px] text-[#6B6B6B]">
-                      Fair Value <span className="font-semibold tabular-nums text-[#999]">{formatUsdCompact(fairValue)}</span>
-                    </span>
-                    {edgeLabel && edgeFormatted && (
+                    {priceChangePct != null && priceChangePct !== 0 && (
                       <span
-                        className="inline-flex items-center rounded-full border px-2 py-0.5 text-[12px] font-semibold"
-                        style={{
-                          color: edgeColor,
-                          borderColor: edgePercent != null && edgePercent < -1 ? "rgba(0,220,90,0.25)" : edgePercent != null && edgePercent > 1 ? "rgba(255,59,48,0.25)" : "rgba(107,107,107,0.25)",
-                          backgroundColor: edgePercent != null && edgePercent < -1 ? "rgba(0,220,90,0.08)" : edgePercent != null && edgePercent > 1 ? "rgba(255,59,48,0.08)" : "transparent",
-                        }}
+                        className="text-[20px] font-bold tabular-nums tracking-[-0.02em] sm:text-[24px]"
+                        style={{ color: priceChangeColor }}
                       >
-                        {edgeFormatted} {edgeLabel}
+                        {priceChangePct > 0 ? "+" : ""}{Math.abs(priceChangePct) >= 10 ? priceChangePct.toFixed(0) : priceChangePct.toFixed(1)}%
                       </span>
                     )}
-                  </div>
-                )}
-                <p className="mt-1 text-[14px] text-[#555]">{primaryPriceLabel}</p>
+                    </div>
+                    {fairValue != null && (
+                      <div className="mt-1.5 flex flex-wrap items-baseline gap-2">
+                        <span className="text-[15px] text-[#6B6B6B]">
+                          Fair Value <span className="font-semibold tabular-nums text-[#999]">{formatUsdCompact(fairValue)}</span>
+                        </span>
+                        {edgeLabel && edgeFormatted && (
+                          <span
+                            className="inline-flex items-center rounded-full border px-2 py-0.5 text-[12px] font-semibold"
+                            style={{
+                              color: edgeColor,
+                              borderColor: edgePercent != null && edgePercent < -1 ? "rgba(0,220,90,0.25)" : edgePercent != null && edgePercent > 1 ? "rgba(255,59,48,0.25)" : "rgba(107,107,107,0.25)",
+                              backgroundColor: edgePercent != null && edgePercent < -1 ? "rgba(0,220,90,0.08)" : edgePercent != null && edgePercent > 1 ? "rgba(255,59,48,0.08)" : "transparent",
+                            }}
+                          >
+                            {edgeFormatted} {edgeLabel}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    <p className="mt-1 text-[14px] text-[#555]">{primaryPriceLabel}</p>
+                  </>
+                ) : null}
               </div>
-            )}
+              <div className="shrink-0">
+                <CardModeToggle
+                  activeMode={viewMode}
+                  rawHref={rawModeHref}
+                  gradedHref={gradedModeHref}
+                />
+              </div>
+            </div>
             <div className="mt-3 flex flex-wrap items-start justify-between gap-2">
               <div className="flex flex-wrap gap-1.5">
                 {selectedPrinting && selectedPrintingLabel ? (
@@ -713,74 +814,53 @@ export default async function CanonicalCardPage({
         />
 
         {/* ── Variant selector ────────────────────────────────────────────── */}
+        {viewMode === "GRADED" ? (
         <GroupedSection title="Variant">
           <div className="space-y-4">
-            <div>
-              <p className="mb-2 text-[15px] font-semibold text-[#777]">Mode</p>
-              <SegmentedControl
-                items={VIEW_MODES.map((option) => ({
-                  key: option,
-                  label: option,
-                  href: toggleHref(
-                    slug,
-                    selectedPrinting?.id ?? null,
-                    debugEnabled,
-                    returnTo,
-                    {
-                      mode: option,
-                      provider: option === "GRADED" ? activeProvider : null,
-                      bucket: option === "GRADED" ? activeBucket : null,
+            {availableProviders.length > 0 && activeProvider ? (
+              <div>
+                <p className="mb-2 text-[15px] font-semibold text-[#777]">Grade</p>
+                <SegmentedControl
+                  items={availableBucketsForProvider.map((gradeBucket) => ({
+                    key: gradeBucket,
+                    label: gradeBucketLabel(gradeBucket),
+                    href: toggleHref(slug, selectedPrinting?.id ?? null, debugEnabled, returnTo, {
+                      mode: "GRADED",
+                      bucket: gradeBucket,
                       marketWindow: activeMarketWindow,
-                    },
-                  ),
-                  active: option === viewMode,
-                }))}
-              />
-            </div>
-            {viewMode === "GRADED" ? (
-              <>
-                {availableProviders.length > 0 && activeProvider ? (
-                  <>
-                    <div>
-                      <p className="mb-2 text-[15px] font-semibold text-[#777]">Grade</p>
-                      <SegmentedControl
-                        items={availableBucketsForProvider.map((gradeBucket) => ({
-                          key: gradeBucket,
-                          label: gradeBucketLabel(gradeBucket),
-                          href: toggleHref(slug, selectedPrinting?.id ?? null, debugEnabled, returnTo, {
-                            mode: "GRADED",
-                            bucket: gradeBucket,
-                            marketWindow: activeMarketWindow,
-                          }),
-                          active: gradeBucket === activeBucket,
-                        }))}
-                      />
-                    </div>
-                  </>
-                ) : (
-                  <div className="rounded-2xl border border-[#1E1E1E] bg-[#0D0D0D] px-4 py-3 text-sm text-[#6B6B6B]">
-                    No graded market data is available yet for this card.
-                  </div>
-                )}
-              </>
+                    }),
+                    active: gradeBucket === activeBucket,
+                  }))}
+                />
+              </div>
+            ) : null}
+            {availableProviders.length === 0 || !activeProvider ? (
+              <div className="rounded-2xl border border-[#1E1E1E] bg-[#0D0D0D] px-4 py-3 text-sm text-[#6B6B6B]">
+                No graded market data is available yet for this card.
+              </div>
             ) : null}
           </div>
         </GroupedSection>
+        ) : null}
 
         {/* ── Market Pulse ─────────────────────────────────────────────────
             Community sentiment vote — stub data, wire to DB later. */}
-        <MarketPulse
-          bullishVotes={0}
-          bearishVotes={0}
-          userVote={null}
-          resolvesAt={Date.now() + 6 * 24 * 60 * 60 * 1000 + 12 * 60 * 60 * 1000}
-        />
+        {currentCardPulse ? (
+          <MarketPulse
+            canonicalSlug={slug}
+            bullishVotes={currentCardPulse.bullishVotes}
+            bearishVotes={currentCardPulse.bearishVotes}
+            userVote={currentCardPulse.userVote}
+            resolvesAt={cardPulseSnapshot.weekEndsAt}
+          />
+        ) : null}
 
         <div className="pt-4 sm:pt-5">
           <CardViewTracker
             canonicalSlug={slug}
             initialTotalViews={viewSnapshot.totalViews}
             initialSeries={viewSnapshot.series}
+            locked
           />
         </div>
 
@@ -797,6 +877,18 @@ export default async function CanonicalCardPage({
             grade={legacyListingsGrade}
           />
         </CollapsibleSection>
+
+        <RelatedCarouselSection
+          title="From This Set"
+          cards={relatedCarousels.fromSet}
+          emptyMessage="No other tracked cards from this set yet."
+        />
+
+        <RelatedCarouselSection
+          title="From This Pokemon"
+          cards={relatedCarousels.fromPokemon}
+          emptyMessage="No other tracked cards from this Pokemon yet."
+        />
         </div>
       </div>
     </PageShell>

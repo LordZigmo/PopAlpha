@@ -12,6 +12,7 @@ type CardViewTrackerProps = {
   canonicalSlug: string;
   initialTotalViews: number;
   initialSeries: ViewHistoryPoint[];
+  locked?: boolean;
 };
 
 function formatCount(value: number): string {
@@ -44,6 +45,7 @@ export default function CardViewTracker({
   canonicalSlug,
   initialTotalViews,
   initialSeries,
+  locked = false,
 }: CardViewTrackerProps) {
   const [totalViews, setTotalViews] = useState(initialTotalViews);
   const [series, setSeries] = useState(initialSeries);
@@ -83,7 +85,7 @@ export default function CardViewTracker({
   const todayViews = series[series.length - 1]?.views ?? 0;
 
   return (
-    <section className="mb-6 rounded-[24px] border border-[#1E1E1E] bg-[#101010] px-4 py-4 sm:px-5 sm:py-5">
+    <section className="relative mb-6 overflow-hidden rounded-[24px] border border-[#1E1E1E] bg-[#101010] px-4 py-4 sm:px-5 sm:py-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-[13px] font-semibold uppercase tracking-[0.1em] text-[#777]">View Activity</p>
@@ -109,6 +111,14 @@ export default function CardViewTracker({
       <div className="mt-4">
         <ViewHistoryChart points={series} />
       </div>
+
+      {locked ? (
+        <div className="absolute inset-0 flex items-center justify-center bg-[#101010]/55 backdrop-blur-md">
+          <div className="inline-flex items-center justify-center rounded-full border border-blue-400/20 bg-[linear-gradient(135deg,rgba(96,165,250,0.95),rgba(59,130,246,0.92))] px-5 py-2.5 text-[12px] font-bold tracking-[0.12em] text-white shadow-[0_10px_24px_rgba(59,130,246,0.28)]">
+            GET PREMIUM
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

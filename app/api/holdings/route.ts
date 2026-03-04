@@ -13,7 +13,7 @@ export async function GET(req: Request) {
   const supabase = dbAdmin();
   const { data, error } = await supabase
     .from("holdings")
-    .select("id, canonical_slug, printing_id, grade, qty, price_paid_usd, acquired_on, venue")
+    .select("id, canonical_slug, printing_id, grade, qty, price_paid_usd, acquired_on, venue, cert_number")
     .eq("owner_clerk_id", auth.userId)
     .order("created_at", { ascending: false });
 
@@ -45,6 +45,9 @@ export async function POST(req: Request) {
   const price_paid_usd = typeof body.price_paid_usd === "number" ? body.price_paid_usd : -1;
   const acquired_on = typeof body.acquired_on === "string" && body.acquired_on ? body.acquired_on : null;
   const venue = typeof body.venue === "string" && body.venue ? body.venue.trim() : null;
+  const cert_number = typeof body.cert_number === "string" && body.cert_number.trim()
+    ? body.cert_number.trim()
+    : null;
 
   if (!canonical_slug) {
     return NextResponse.json({ ok: false, error: "canonical_slug is required." }, { status: 400 });
@@ -70,6 +73,7 @@ export async function POST(req: Request) {
     price_paid_usd,
     acquired_on,
     venue,
+    cert_number,
   });
 
   if (error) {

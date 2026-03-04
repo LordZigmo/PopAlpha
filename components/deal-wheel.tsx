@@ -49,6 +49,12 @@ function formatSignedPercent(value: number): string {
   return `${value > 0 ? "+" : value < 0 ? "-" : ""}${Math.abs(value).toFixed(digits)}%`;
 }
 
+function formatPercentOfMarket(value: number): string {
+  if (!Number.isFinite(value)) return "\u2014";
+  const digits = value >= 100 ? 0 : 1;
+  return `${value.toFixed(digits)}%`;
+}
+
 /** Smooth color interpolation based on price deviation percent */
 function interpolateColor(differencePercent: number): string {
   // Clamp to +-45% range
@@ -123,6 +129,7 @@ export default function DealWheel({ variants, selectedPrintingId }: DealWheelPro
   const accent = interpolateColor(verdict.differencePercent);
   const toneAccent = toneColor(verdict.tone);
   const insight = getDealWheelInsight(price, balancePrice);
+  const percentOfMarket = (price / balancePrice) * 100;
 
   const totalSteps = Math.round((max - min) / step);
   const rawIndex = (rawPrice - min) / step;
@@ -206,15 +213,10 @@ export default function DealWheel({ variants, selectedPrintingId }: DealWheelPro
             className="relative overflow-hidden rounded-2xl bg-[#0D0D0D]"
             style={{ height: 72 }}
           >
-            {/* Hairline selection indicators */}
-            <div
-              className="pointer-events-none absolute top-3 bottom-3 z-10"
-              style={{ left: `calc(50% - ${ITEM_W / 2 + 1}px)`, width: 1, background: "rgba(255,255,255,0.06)" }}
-            />
-            <div
-              className="pointer-events-none absolute top-3 bottom-3 z-10"
-              style={{ left: `calc(50% + ${ITEM_W / 2 + 1}px)`, width: 1, background: "rgba(255,255,255,0.06)" }}
-            />
+            {/* Center tick indicator */}
+            <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex justify-center">
+              <div className="h-5 w-px rounded-full bg-white/[0.16]" />
+            </div>
 
             {/* Gradient masks */}
             <div
@@ -286,11 +288,9 @@ export default function DealWheel({ variants, selectedPrintingId }: DealWheelPro
             </p>
             <div className="mt-2 inline-flex items-center gap-2">
               <Pill label={pillLabel} tone={verdict.tone} />
-              {verdict.tone !== "neutral" && (
-                <span className="text-[13px] tabular-nums text-[#6B6B6B]">
-                  {formatSignedUsd(verdict.difference)} ({formatSignedPercent(verdict.differencePercent)})
-                </span>
-              )}
+              <span className="text-[13px] tabular-nums text-[#6B6B6B]">
+                {formatSignedUsd(verdict.difference)} • {formatPercentOfMarket(percentOfMarket)} of market
+              </span>
             </div>
           </div>
 
@@ -311,9 +311,9 @@ export default function DealWheel({ variants, selectedPrintingId }: DealWheelPro
               </p>
             </div>
             <div className="rounded-2xl border border-white/[0.05] bg-[#151515] px-4 py-3">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#6B6B6B]">Variance</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#6B6B6B]">Of Market</p>
               <p className="mt-1 text-[22px] font-bold tabular-nums tracking-[-0.02em]" style={{ color: toneAccent }}>
-                {formatSignedPercent(verdict.differencePercent)}
+                {formatPercentOfMarket(percentOfMarket)}
               </p>
             </div>
           </div>

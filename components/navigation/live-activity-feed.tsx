@@ -4,18 +4,44 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 
-type LiveActivityCard = {
-  slug: string;
-  name: string;
-  set_name: string | null;
-  total_views: number;
-  last_viewed_at: string | null;
+type LiveFeedItem = {
+  href: string;
+  title: string;
+  detail: string;
+  at: string | null;
 };
 
 type LiveActivityResponse = {
   ok: boolean;
-  cards: LiveActivityCard[];
+  cards: Array<{
+    slug: string;
+    name: string;
+    set_name: string | null;
+    total_views: number;
+    last_viewed_at: string | null;
+  }>;
 };
+
+const MOCK_EVENTS: LiveFeedItem[] = [
+  {
+    href: "/c/prismatic-evolutions-161-umbreon-ex",
+    title: "User_X just added Umbreon ex to Watchlist",
+    detail: "Prismatic Evolutions",
+    at: new Date(Date.now() - 5 * 60_000).toISOString(),
+  },
+  {
+    href: "/c/sv-promo-xy-mew-ex",
+    title: "User_Y predicted a +5% move on Mew ex",
+    detail: "Fresh community signal",
+    at: new Date(Date.now() - 11 * 60_000).toISOString(),
+  },
+  {
+    href: "/c/151-199-charizard-ex",
+    title: "User_Z just checked Charizard ex",
+    detail: "151",
+    at: new Date(Date.now() - 19 * 60_000).toISOString(),
+  },
+];
 
 function timeAgo(iso: string | null): string {
   if (!iso) return "just now";
@@ -28,7 +54,7 @@ function timeAgo(iso: string | null): string {
 }
 
 export default function LiveActivityFeed() {
-  const [cards, setCards] = useState<LiveActivityCard[]>([]);
+  const [events, setEvents] = useState<LiveFeedItem[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -37,10 +63,20 @@ export default function LiveActivityFeed() {
       .then(async (response) => {
         const payload = (await response.json()) as LiveActivityResponse;
         if (!response.ok || cancelled) return;
-        setCards(payload.cards ?? []);
+        const nextCards = payload.cards ?? [];
+        if (nextCards.length > 0) {
+          setEvents(nextCards.slice(0, 4).map((card) => ({
+            href: `/c/${encodeURIComponent(card.slug)}`,
+            title: `A collector just checked ${card.name}`,
+            detail: card.set_name ?? "Market activity",
+            at: card.last_viewed_at,
+          })));
+        } else {
+          setEvents(MOCK_EVENTS);
+        }
       })
       .catch(() => {
-        if (!cancelled) setCards([]);
+        if (!cancelled) setEvents(MOCK_EVENTS);
       });
 
     return () => {
@@ -48,44 +84,44 @@ export default function LiveActivityFeed() {
     };
   }, []);
 
-  const loopedCards = useMemo(() => {
-    if (cards.length === 0) return [];
-    return cards.length > 1 ? [...cards, ...cards] : cards;
-  }, [cards]);
+  const loopedEvents = useMemo(() => {
+    if (events.length === 0) return [];
+    return events.length > 1 ? [...events, ...events] : events;
+  }, [events]);
 
   return (
     <div className="mt-4 rounded-[1.35rem] border border-[#1E1E1E] bg-[#101010] px-4 py-4">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#6B6B6B]">Live Activity</p>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#6B6B6B]">Live Feed</p>
         <span className="h-2 w-2 rounded-full bg-[#38BDF8]" />
       </div>
 
       <div className="mt-3 h-[168px] overflow-hidden">
-        {cards.length === 0 ? (
+        {events.length === 0 ? (
           <div className="flex h-full items-center justify-center rounded-[1rem] border border-dashed border-white/[0.06] text-[12px] text-[#666]">
-            No recent scans yet
+            No recent activity yet
           </div>
         ) : (
           <motion.div
             className="space-y-2"
-            animate={cards.length > 1 ? { y: [0, -(cards.length * 42)] } : undefined}
+            animate={events.length > 1 ? { y: [0, -(events.length * 50)] } : undefined}
             transition={
-              cards.length > 1
-                ? { duration: Math.max(8, cards.length * 3.2), repeat: Number.POSITIVE_INFINITY, ease: "linear" }
+              events.length > 1
+                ? { duration: Math.max(10, events.length * 3.4), repeat: Number.POSITIVE_INFINITY, ease: "linear" }
                 : undefined
             }
           >
-            {loopedCards.map((card, index) => (
+            {loopedEvents.map((event, index) => (
               <Link
-                key={`${card.slug}-${index}`}
-                href={`/c/${encodeURIComponent(card.slug)}`}
-                className="flex h-10 items-center justify-between gap-3 rounded-[0.95rem] border border-white/[0.03] bg-[#0B0B0B] px-3 transition hover:border-white/[0.08]"
+                key={`${event.href}-${index}`}
+                href={event.href}
+                className="flex min-h-12 items-center justify-between gap-3 rounded-[0.95rem] border border-white/[0.03] bg-[#0B0B0B] px-3 py-2 transition hover:border-white/[0.08]"
               >
                 <div className="min-w-0">
-                  <p className="truncate text-[12px] font-semibold text-white">{card.name}</p>
-                  <p className="truncate text-[11px] text-[#666]">{card.set_name ?? "Unknown set"}</p>
+                  <p className="truncate text-[12px] font-semibold text-white">{event.title}</p>
+                  <p className="truncate text-[11px] text-[#666]">{event.detail}</p>
                 </div>
-                <span className="shrink-0 text-[11px] text-[#7C8796]">{timeAgo(card.last_viewed_at)}</span>
+                <span className="shrink-0 text-[11px] text-[#7C8796]">{timeAgo(event.at)}</span>
               </Link>
             ))}
           </motion.div>

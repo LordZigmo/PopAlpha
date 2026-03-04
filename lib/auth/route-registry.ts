@@ -14,6 +14,8 @@
 
 export const PUBLIC_ROUTES = [
   "cards/live-activity",
+  "community-pulse/crowd",
+  "market-signals",
   "cards/[slug]/detail",
   "cards/[slug]/view",
   "search/cards",
@@ -62,6 +64,7 @@ export const USER_ROUTES = [
   "private-sales/[id]",
   "pro/signals",
   "holdings",
+  "holdings/summary",
   "onboarding/handle",
   "me",
   "me/push",

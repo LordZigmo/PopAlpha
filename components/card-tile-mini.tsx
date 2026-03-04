@@ -89,7 +89,10 @@ export default function CardTileMini({
             <img
               src={card.image_url}
               alt={card.name}
-              className="h-full w-full object-cover object-center transition duration-300 group-hover:scale-[1.03]"
+              className={[
+                "h-full w-full object-cover object-center transition-transform duration-300",
+                showTier ? "group-hover:scale-[1.02]" : "group-hover:scale-[1.03]",
+              ].join(" ")}
             />
           ) : (
             <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.06),transparent_65%)]">

@@ -1,15 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import VotePieChart from "@/components/vote-pie-chart";
 
 type MarketPulseProps = {
-  /** Total bullish votes — wire to DB later */
+  canonicalSlug: string;
   bullishVotes: number;
-  /** Total bearish votes — wire to DB later */
   bearishVotes: number;
-  /** Whether the current user has already voted — wire to auth/DB later */
-  userVote: "bullish" | "bearish" | null;
-  /** Epoch ms when the current voting window closes — wire to DB later */
+  userVote: "up" | "down" | null;
   resolvesAt: number | null;
 };
 
@@ -27,12 +25,21 @@ function formatCountdown(resolvesAt: number | null, now: number): string | null 
   return `Resolves in ${minutes}m ${pad(seconds)}s`;
 }
 
+type VoteResponse = {
+  ok: boolean;
+  vote?: "up" | "down";
+  bullishVotes?: number;
+  bearishVotes?: number;
+  error?: string;
+};
+
 function formatVoteCount(count: number): string {
   if (count >= 1000) return `${(count / 1000).toFixed(1)}k`;
   return String(count);
 }
 
 export default function MarketPulse({
+  canonicalSlug,
   bullishVotes: initialBullish,
   bearishVotes: initialBearish,
   userVote: initialUserVote,
@@ -54,13 +61,39 @@ export default function MarketPulse({
   const bearishPct = total > 0 ? (bearish / total) * 100 : 50;
   const hasVoted = userVote !== null;
   const countdown = formatCountdown(resolvesAt, now);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  function handleVote(vote: "bullish" | "bearish") {
-    if (hasVoted) return;
-    setUserVote(vote);
-    if (vote === "bullish") setBullish((v) => v + 1);
+  async function handleVote(vote: "up" | "down") {
+    if (hasVoted || pending) return;
+    setPending(true);
+    setError(null);
+
+    if (vote === "up") setBullish((v) => v + 1);
     else setBearish((v) => v + 1);
-    // TODO: POST vote to API
+    setUserVote(vote);
+
+    try {
+      const response = await fetch("/api/community-pulse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ canonicalSlug, direction: vote }),
+      });
+      const payload = (await response.json()) as VoteResponse;
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || "Could not record vote.");
+      }
+      if (typeof payload.bullishVotes === "number") setBullish(payload.bullishVotes);
+      if (typeof payload.bearishVotes === "number") setBearish(payload.bearishVotes);
+      if (payload.vote) setUserVote(payload.vote);
+    } catch (voteError) {
+      setUserVote(initialUserVote);
+      setBullish(initialBullish);
+      setBearish(initialBearish);
+      setError(voteError instanceof Error ? voteError.message : "Could not record vote.");
+    } finally {
+      setPending(false);
+    }
   }
 
   return (
@@ -83,73 +116,58 @@ export default function MarketPulse({
         )}
       </div>
 
-      {/* Split bar */}
-      <div className="flex h-3.5 w-full overflow-hidden rounded-full bg-[#1A1A1A]">
-        <div
-          className="rounded-l-full transition-all duration-500"
-          style={{
-            width: `${bullishPct}%`,
-            backgroundColor: "#377E5C",
-            minWidth: total > 0 ? "4px" : undefined,
-          }}
-        />
-        <div
-          className="rounded-r-full transition-all duration-500"
-          style={{
-            width: `${bearishPct}%`,
-            backgroundColor: "#7D4549",
-            minWidth: total > 0 ? "4px" : undefined,
-          }}
-        />
+      <div className="mt-1 flex items-center justify-center">
+        <VotePieChart upPct={bullishPct} downPct={bearishPct} size={112} />
       </div>
 
-      {/* Percentages */}
-      {total > 0 && (
-        <div className="mt-2 flex justify-between">
-          <span className="text-[14px] font-semibold tabular-nums" style={{ color: "#6BC99A" }}>
-            {bullishPct.toFixed(0)}% Bullish
-          </span>
-          <span className="text-[14px] font-semibold tabular-nums" style={{ color: "#D4797E" }}>
-            {bearishPct.toFixed(0)}% Bearish
-          </span>
-        </div>
-      )}
+      <div className="mt-3 flex justify-between">
+        <span className="text-[14px] font-semibold tabular-nums" style={{ color: "#16A34A" }}>
+          {bullishPct.toFixed(0)}% Up
+        </span>
+        <span className="text-[14px] font-semibold tabular-nums" style={{ color: "#DC2626" }}>
+          {bearishPct.toFixed(0)}% Down
+        </span>
+      </div>
 
       {/* Vote buttons */}
       <div className="mt-5 flex gap-3">
         <button
           type="button"
-          disabled={hasVoted}
-          onClick={() => handleVote("bullish")}
+          disabled={hasVoted || pending}
+          onClick={() => handleVote("up")}
           className={[
             "flex flex-1 items-center justify-center gap-2 rounded-xl border px-4 py-3.5 text-[16px] font-semibold transition-all duration-300",
-            hasVoted && userVote === "bullish"
+            hasVoted && userVote === "up"
               ? "border-[#377E5C] bg-[#377E5C]/15 text-[#6BC99A]"
               : hasVoted
                 ? "border-[#1E1E1E] bg-transparent text-[#333] cursor-default"
                 : "border-[#1E1E1E] bg-[#151515] text-[#AAA] hover:border-[#377E5C]/40 hover:text-[#6BC99A]",
           ].join(" ")}
         >
-          <span className="text-[16px]" aria-hidden="true">{hasVoted && userVote === "bullish" ? "\u{1F512}" : "\u{1F44D}"}</span>
+          <span className="text-[16px]" aria-hidden="true">{hasVoted && userVote === "up" ? "\u{1F512}" : "\u{1F44D}"}</span>
           Vote Up
         </button>
         <button
           type="button"
-          disabled={hasVoted}
-          onClick={() => handleVote("bearish")}
+          disabled={hasVoted || pending}
+          onClick={() => handleVote("down")}
           className={[
             "flex flex-1 items-center justify-center gap-2 rounded-xl border px-4 py-3.5 text-[16px] font-semibold transition-all duration-300",
-            hasVoted && userVote === "bearish"
+            hasVoted && userVote === "down"
               ? "border-[#7D4549] bg-[#7D4549]/15 text-[#D4797E]"
               : hasVoted
                 ? "border-[#1E1E1E] bg-transparent text-[#333] cursor-default"
                 : "border-[#1E1E1E] bg-[#151515] text-[#AAA] hover:border-[#7D4549]/40 hover:text-[#D4797E]",
           ].join(" ")}
         >
-          <span className="text-[16px]" aria-hidden="true">{hasVoted && userVote === "bearish" ? "\u{1F512}" : "\u{1F44E}"}</span>
+          <span className="text-[16px]" aria-hidden="true">{hasVoted && userVote === "down" ? "\u{1F512}" : "\u{1F44E}"}</span>
           Vote Down
         </button>
       </div>
+
+      {error ? (
+        <p className="mt-3 text-center text-[13px] text-[#FF9A9A]">{error}</p>
+      ) : null}
 
       {/* Countdown */}
       {countdown && (

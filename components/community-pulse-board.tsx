@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import type { CommunityPulseCard, CommunityVoteSide } from "@/lib/data/community-pulse";
+import VotePieChart from "@/components/vote-pie-chart";
 
 type CommunityPulseBoardProps = {
   cards: CommunityPulseCard[];
@@ -20,6 +21,20 @@ type VoteResponse = {
   bearishVotes?: number;
   votesRemaining?: number;
   error?: string;
+};
+
+type FollowedVoteEvent = {
+  canonicalSlug: string;
+  vote: CommunityVoteSide;
+  createdAt: string;
+  cardName: string | null;
+  setName: string | null;
+};
+
+type CommunityPulseStatusResponse = {
+  ok: boolean;
+  votesRemaining?: number;
+  followedVotes?: FollowedVoteEvent[];
 };
 
 function formatCountdown(weekEndsAt: number): string {
@@ -75,9 +90,41 @@ export default function CommunityPulseBoard({
   const [cards, setCards] = useState(initialCards);
   const [votesRemaining, setVotesRemaining] = useState(initialVotesRemaining);
   const [activeSlug, setActiveSlug] = useState<string | null>(null);
+  const [celebratingSlug, setCelebratingSlug] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [followedVotes, setFollowedVotes] = useState<FollowedVoteEvent[]>([]);
 
   const countdown = useMemo(() => formatCountdown(weekEndsAt), [weekEndsAt]);
+
+  useEffect(() => {
+    if (!signedIn) {
+      setFollowedVotes([]);
+      return;
+    }
+
+    let cancelled = false;
+
+    void fetch("/api/community-pulse", { cache: "no-store" })
+      .then(async (response) => {
+        const payload = (await response.json()) as CommunityPulseStatusResponse;
+        if (!response.ok || !payload.ok) {
+          throw new Error("Could not load community pulse status.");
+        }
+        if (!cancelled) {
+          if (typeof payload.votesRemaining === "number") {
+            setVotesRemaining(payload.votesRemaining);
+          }
+          setFollowedVotes(payload.followedVotes ?? []);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setFollowedVotes([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [signedIn]);
 
   async function castVote(cardSlug: string, direction: CommunityVoteSide) {
     if (!signedIn || activeSlug || votesRemaining <= 0) return;
@@ -87,6 +134,7 @@ export default function CommunityPulseBoard({
 
     setError(null);
     setActiveSlug(cardSlug);
+    setCelebratingSlug(cardSlug);
 
     setCards((previous) =>
       previous.map((card) =>
@@ -129,12 +177,23 @@ export default function CommunityPulseBoard({
       if (typeof payload.votesRemaining === "number") {
         setVotesRemaining(payload.votesRemaining);
       }
+      if (signedIn) {
+        const statusResponse = await fetch("/api/community-pulse", { cache: "no-store" });
+        const statusPayload = (await statusResponse.json()) as CommunityPulseStatusResponse;
+        if (statusResponse.ok && statusPayload.ok) {
+          if (typeof statusPayload.votesRemaining === "number") {
+            setVotesRemaining(statusPayload.votesRemaining);
+          }
+          setFollowedVotes(statusPayload.followedVotes ?? []);
+        }
+      }
     } catch (voteError) {
       setCards(initialCards);
       setVotesRemaining(initialVotesRemaining);
       setError(voteError instanceof Error ? voteError.message : "Could not record vote.");
     } finally {
       setActiveSlug(null);
+      setTimeout(() => setCelebratingSlug((current) => (current === cardSlug ? null : current)), 900);
     }
   }
 
@@ -173,6 +232,44 @@ export default function CommunityPulseBoard({
           >
             Sign In to Vote
           </Link>
+        </div>
+      ) : null}
+
+      {signedIn && followedVotes.length > 0 ? (
+        <div className="mt-5 rounded-[1.5rem] border border-white/[0.06] bg-white/[0.03] px-5 py-4">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex h-2.5 w-2.5 rounded-full bg-[#60A5FA] shadow-[0_0_10px_rgba(96,165,250,0.8)]" />
+            <p className="text-[15px] font-semibold text-white">People You Follow</p>
+          </div>
+          <div className="mt-3 space-y-2.5">
+            {followedVotes.slice(0, 4).map((event) => (
+              <Link
+                key={`${event.canonicalSlug}:${event.createdAt}:${event.vote}`}
+                href={`/c/${encodeURIComponent(event.canonicalSlug)}`}
+                className="flex items-center justify-between gap-3 rounded-2xl border border-white/[0.04] bg-black/[0.16] px-4 py-3 transition hover:border-white/[0.08]"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-[14px] font-semibold text-white">
+                    Someone you follow voted {event.vote === "up" ? "up" : "down"}
+                  </p>
+                  <p className="mt-1 truncate text-[13px] text-[#8A8A8A]">
+                    {event.cardName ?? event.canonicalSlug}
+                    {event.setName ? ` • ${event.setName}` : ""}
+                  </p>
+                </div>
+                <span
+                  className="shrink-0 rounded-full border px-3 py-1.5 text-[12px] font-bold uppercase tracking-[0.14em]"
+                  style={{
+                    color: event.vote === "up" ? "#93C5FD" : "#FDA4AF",
+                    borderColor: event.vote === "up" ? "rgba(147,197,253,0.24)" : "rgba(253,164,175,0.24)",
+                    backgroundColor: event.vote === "up" ? "rgba(147,197,253,0.08)" : "rgba(253,164,175,0.08)",
+                  }}
+                >
+                  {event.vote === "up" ? "Up" : "Down"}
+                </span>
+              </Link>
+            ))}
+          </div>
         </div>
       ) : null}
 
@@ -219,30 +316,45 @@ export default function CommunityPulseBoard({
                     </span>
                   </div>
 
-                  <div className="mt-4 overflow-hidden rounded-full border border-white/[0.04] bg-[#121212]">
-                    <div className="flex h-4 w-full">
-                      <motion.div
-                        className="rounded-l-full bg-[linear-gradient(90deg,#1D4ED8,#38BDF8)]"
-                        animate={{ width: `${upPct}%` }}
-                        transition={{ type: "spring", stiffness: 160, damping: 20 }}
-                      />
-                      <motion.div
-                        className="rounded-r-full bg-[linear-gradient(90deg,#F97316,#FB7185)]"
-                        animate={{ width: `${downPct}%` }}
-                        transition={{ type: "spring", stiffness: 160, damping: 20 }}
+                  <div className="mt-4 flex items-center gap-4">
+                    <div
+                      className={[
+                        "relative rounded-full",
+                        celebratingSlug === card.slug ? "shadow-[0_0_24px_rgba(34,197,94,0.18)]" : "",
+                      ].join(" ")}
+                    >
+                      <VotePieChart upPct={upPct} downPct={downPct} />
+                      {celebratingSlug === card.slug ? (
+                        <>
+                          {[
+                            { left: "14%", color: "#22C55E", delay: 0 },
+                            { left: "50%", color: "#FACC15", delay: 0.05 },
+                            { left: "78%", color: "#38BDF8", delay: 0.1 },
+                          ].map((spark) => (
+                            <motion.span
+                              key={`${card.slug}-${spark.left}-${spark.color}`}
+                              className="absolute top-1/2 h-1.5 w-1.5 rounded-full"
+                              style={{ left: spark.left, backgroundColor: spark.color }}
+                              initial={{ opacity: 0.9, y: -4, scale: 0.8 }}
+                              animate={{ opacity: 0, y: -22, scale: 1.35 }}
+                              transition={{ duration: 0.55, delay: spark.delay, ease: "easeOut" }}
+                            />
+                          ))}
+                        </>
+                      ) : null}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between text-[14px] font-semibold">
+                        <span className="text-[#16A34A]">{upPct.toFixed(0)}% think up</span>
+                        <span className="text-[#DC2626]">{downPct.toFixed(0)}% think down</span>
+                      </div>
+
+                      <FollowSignal
+                        followedUpCount={card.followedUpCount}
+                        followedDownCount={card.followedDownCount}
                       />
                     </div>
                   </div>
-
-                  <div className="mt-3 flex items-center justify-between text-[14px] font-semibold">
-                    <span className="text-[#93C5FD]">{upPct.toFixed(0)}% think up</span>
-                    <span className="text-[#FDA4AF]">{downPct.toFixed(0)}% think down</span>
-                  </div>
-
-                  <FollowSignal
-                    followedUpCount={card.followedUpCount}
-                    followedDownCount={card.followedDownCount}
-                  />
                 </div>
               </div>
 

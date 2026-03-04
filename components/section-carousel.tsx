@@ -20,12 +20,12 @@ export default function SectionCarousel({
   return (
     <section className="mt-8 lg:mx-auto lg:max-w-5xl lg:px-6">
       <div className="flex items-baseline gap-2 px-4 sm:px-6 lg:px-0">
-        {icon ? <span className="text-base">{icon}</span> : null}
-        <h2 className="text-[15px] font-semibold uppercase tracking-[0.08em] text-[#6B6B6B]">
+        {icon ? <span className="text-lg">{icon}</span> : null}
+        <h2 className="text-[18px] font-semibold uppercase tracking-[0.06em] text-[#D4D4D8] sm:text-[20px]">
           {title}
         </h2>
         {subtitle ? (
-          <span className="text-[13px] text-[#444]">{subtitle}</span>
+          <span className="text-[14px] text-[#8A8A8A]">{subtitle}</span>
         ) : null}
       </div>
 

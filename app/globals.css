@@ -287,6 +287,36 @@ body {
   animation: aiWordFade 350ms ease forwards;
 }
 
+@keyframes scoutHoloSweep {
+  0%, 12% {
+    opacity: 0;
+    transform: translate3d(-135%, 0, 0) skewX(-18deg);
+  }
+  20% {
+    opacity: 0.22;
+  }
+  35% {
+    opacity: 0.08;
+    transform: translate3d(240%, 0, 0) skewX(-18deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(240%, 0, 0) skewX(-18deg);
+  }
+}
+
+.scout-holo-shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(110, 231, 183, 0.02) 18%,
+    rgba(167, 243, 208, 0.16) 48%,
+    rgba(110, 231, 183, 0.03) 72%,
+    transparent 100%
+  );
+  animation: scoutHoloSweep 8s linear infinite;
+}
+
 .raw-json-panel .raw-json-content { grid-template-rows: 0fr; }
 .raw-json-panel[open] .raw-json-content { grid-template-rows: 1fr; margin-top: 0.5rem; }
 
