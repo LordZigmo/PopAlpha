@@ -219,7 +219,7 @@ export default function MarketSummaryCardClient({
               items={[
                 { label: `${effectiveWindow.toUpperCase()} Low`, value: formatUsd(low) },
                 { label: `${effectiveWindow.toUpperCase()} High`, value: formatUsd(high) },
-                { label: "Samples", value: sampleCount > 0 ? String(sampleCount) : "—" },
+                { label: "Sales", value: sampleCount > 0 ? String(sampleCount) : "—" },
                 { label: `${effectiveWindow.toUpperCase()} Change`, value: formatPercent(changeValue), tone: changeTone(changeValue) },
               ]}
             />

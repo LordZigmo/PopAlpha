@@ -25,6 +25,12 @@ type HistoryPointRow = {
   price: number;
 };
 
+type PriceHistoryRow = {
+  variant_ref: string | null;
+  ts: string;
+  price: number;
+};
+
 type CardMetricRow = {
   printing_id: string | null;
   active_listings_7d: number | null;
@@ -51,6 +57,43 @@ function filterRecentDays(points: HistoryPointRow[], days: number): HistoryPoint
   });
 }
 
+function normalizeHistoryPoints(rows: PriceHistoryRow[]): HistoryPointRow[] {
+  if (rows.length === 0) return [];
+  const dedupedByTs = new Map<string, number>();
+  for (const row of rows) {
+    if (!row.ts || !Number.isFinite(row.price)) continue;
+    dedupedByTs.set(row.ts, row.price);
+  }
+  return [...dedupedByTs.entries()]
+    .map(([ts, price]) => ({ ts, price }))
+    .sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
+}
+
+async function loadAllHistoryRows(params: {
+  supabase: ReturnType<typeof dbPublic>;
+  canonicalSlug: string;
+}): Promise<PriceHistoryRow[]> {
+  const pageSize = 1000;
+  const allRows: PriceHistoryRow[] = [];
+
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await params.supabase
+      .from("public_price_history")
+      .select("variant_ref, ts, price")
+      .eq("canonical_slug", params.canonicalSlug)
+      .eq("provider", "JUSTTCG")
+      .order("ts", { ascending: false })
+      .range(from, from + pageSize - 1);
+
+    if (error) throw new Error(`public_price_history query failed: ${error.message}`);
+    const batch = (data ?? []) as PriceHistoryRow[];
+    allRows.push(...batch);
+    if (batch.length < pageSize) break;
+  }
+
+  return allRows;
+}
+
 export default async function MarketSummaryCard({
   canonicalSlug,
   selectedPrintingId,
@@ -59,12 +102,7 @@ export default async function MarketSummaryCard({
 }: MarketSummaryCardProps) {
   const supabase = dbPublic();
   const printingIds = variants.map((variant) => variant.printingId);
-  const variantRefs = variants.map((variant) => variant.variantRef);
-  const history7dLimit = Math.max(120, variantRefs.length * 60);
-  const history30dLimit = Math.max(200, variantRefs.length * 120);
-  const history90dLimit = Math.max(400, variantRefs.length * 200);
-
-  const [marketLatestQuery, history7dQuery, history30dQuery, history90dQuery, cardMetricsQuery, variantSignalsQuery] = printingIds.length > 0 && variantRefs.length > 0
+  const [marketLatestQuery, allHistoryRows, cardMetricsQuery, variantSignalsQuery] = printingIds.length > 0
     ? await Promise.all([
         supabase
           .from("public_market_latest")
@@ -75,33 +113,7 @@ export default async function MarketSummaryCard({
           .eq("grade", "RAW")
           .eq("price_type", "MARKET")
           .order("updated_at", { ascending: false }),
-        supabase
-          .from("public_price_history")
-          .select("variant_ref, ts, price")
-          .eq("canonical_slug", canonicalSlug)
-          .eq("provider", "JUSTTCG")
-          .eq("source_window", "7d")
-          .in("variant_ref", variantRefs)
-          .order("ts", { ascending: false })
-          .limit(history7dLimit),
-        supabase
-          .from("public_price_history")
-          .select("variant_ref, ts, price")
-          .eq("canonical_slug", canonicalSlug)
-          .eq("provider", "JUSTTCG")
-          .eq("source_window", "30d")
-          .in("variant_ref", variantRefs)
-          .order("ts", { ascending: false })
-          .limit(history30dLimit),
-        supabase
-          .from("public_price_history")
-          .select("variant_ref, ts, price")
-          .eq("canonical_slug", canonicalSlug)
-          .eq("provider", "JUSTTCG")
-          .eq("source_window", "90d")
-          .in("variant_ref", variantRefs)
-          .order("ts", { ascending: false })
-          .limit(history90dLimit),
+        loadAllHistoryRows({ supabase, canonicalSlug }),
         supabase
           .from("public_card_metrics")
           .select("printing_id, active_listings_7d, median_30d, trimmed_median_30d, snapshot_count_30d, provider_price_changes_count_30d, low_30d, high_30d")
@@ -118,9 +130,7 @@ export default async function MarketSummaryCard({
       ])
     : [
         { data: [] as MarketLatestRow[] },
-        { data: [] as HistoryPointRow[] },
-        { data: [] as HistoryPointRow[] },
-        { data: [] as HistoryPointRow[] },
+        [] as PriceHistoryRow[],
         { data: [] as CardMetricRow[] },
         { data: [] as VariantSignalRow[] },
       ];
@@ -133,28 +143,6 @@ export default async function MarketSummaryCard({
     latestByPrinting.set(printingId, row);
   }
 
-  const history7dRows = (history7dQuery.data ?? []) as Array<HistoryPointRow & { variant_ref?: string }>;
-  const history30dRows = (history30dQuery.data ?? []) as Array<HistoryPointRow & { variant_ref?: string }>;
-  const history90dRows = (history90dQuery.data ?? []) as Array<HistoryPointRow & { variant_ref?: string }>;
-
-  const buildHistoryMap = (rows: Array<HistoryPointRow & { variant_ref?: string }>) => {
-    const map = new Map<string, HistoryPointRow[]>();
-    for (const row of rows) {
-      const variantRef = row.variant_ref;
-      if (!variantRef) continue;
-      const current = map.get(variantRef) ?? [];
-      current.push({ ts: row.ts, price: row.price });
-      map.set(variantRef, current);
-    }
-    for (const [variantRef, points] of map.entries()) {
-      map.set(variantRef, [...points].reverse());
-    }
-    return map;
-  };
-
-  const history7dByVariant = buildHistoryMap(history7dRows);
-  const history30dByVariant = buildHistoryMap(history30dRows);
-  const history90dByVariant = buildHistoryMap(history90dRows);
   const cardMetricRows = (cardMetricsQuery.data ?? []) as CardMetricRow[];
   const signalRows = (variantSignalsQuery.data ?? []) as VariantSignalRow[];
   const cardMetricsByPrinting = new Map<string, CardMetricRow>();
@@ -170,9 +158,16 @@ export default async function MarketSummaryCard({
 
   const variantPayload = variants.map((variant) => {
     const marketLatest = latestByPrinting.get(variant.printingId) ?? null;
-    const history30d = history30dByVariant.get(variant.variantRef) ?? [];
-    const cachedHistory7d = history7dByVariant.get(variant.variantRef) ?? [];
-    const history90d = history90dByVariant.get(variant.variantRef) ?? [];
+    const rawVariantPrefix = `${variant.printingId}::RAW`;
+    const fullHistory = normalizeHistoryPoints(
+      allHistoryRows.filter((row) => {
+        const variantRef = row.variant_ref ?? "";
+        return variantRef === rawVariantPrefix || variantRef.startsWith(`${rawVariantPrefix}::`);
+      })
+    );
+    const history7d = filterRecentDays(fullHistory, 7);
+    const history30d = filterRecentDays(fullHistory, 30);
+    const history90d = filterRecentDays(fullHistory, 90);
     const signalRow = signalsByPrinting.get(variant.printingId) ?? null;
     const metrics = cardMetricsByPrinting.get(variant.printingId) ?? null;
 
@@ -194,7 +189,7 @@ export default async function MarketSummaryCard({
         ?? metrics?.median_30d
         ?? null,
       asOfTs: marketLatest?.observed_at ?? marketLatest?.updated_at ?? null,
-      history7d: cachedHistory7d.length > 0 ? cachedHistory7d : filterRecentDays(history30d, 7),
+      history7d,
       history30d,
       history90d,
       activeListings7d: metrics?.active_listings_7d ?? null,
