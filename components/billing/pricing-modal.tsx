@@ -168,6 +168,10 @@ export default function PricingModal({ open, onClose }: PricingModalProps) {
                       type="button"
                       onClick={() => {
                         if (!waitlistTierName) return;
+                        if (isActiveWaitlist) {
+                          void submitWaitlist();
+                          return;
+                        }
                         setWaitlistTier(waitlistTierName);
                         setWaitlistState("idle");
                         setWaitlistMessage(null);
@@ -181,9 +185,13 @@ export default function PricingModal({ open, onClose }: PricingModalProps) {
                           ? "border-[#2A5BFF] bg-[#1D4ED8] text-white hover:bg-[#2563EB]"
                           : "border-[#1E1E1E] bg-white/[0.06] text-white hover:bg-white/[0.1]",
                         isActiveWaitlist ? "ring-2 ring-white/10" : "",
+                        waitlistState === "saving" && isActiveWaitlist ? "opacity-70" : "",
                       ].join(" ")}
+                      disabled={waitlistState === "saving" && isActiveWaitlist}
                     >
-                      {tier.ctaLabel}
+                      {isActiveWaitlist
+                        ? (waitlistState === "saving" ? "Joining..." : tier.ctaLabel)
+                        : tier.ctaLabel}
                     </button>
                   );
 
@@ -218,7 +226,6 @@ export default function PricingModal({ open, onClose }: PricingModalProps) {
                           </li>
                         ))}
                       </ul>
-                      {cta}
                       {isActiveWaitlist ? (
                         <div className="mt-3 space-y-2">
                           <input
@@ -228,31 +235,18 @@ export default function PricingModal({ open, onClose }: PricingModalProps) {
                             placeholder="Email for launch updates"
                             className="w-full rounded-2xl border border-white/[0.08] bg-black/20 px-4 py-3 text-[14px] text-white outline-none placeholder:text-[#6B7280] focus:border-white/[0.14]"
                           />
-                          <button
-                            type="button"
-                            onClick={() => void submitWaitlist()}
-                            disabled={waitlistState === "saving"}
-                            className={[
-                              "inline-flex w-full items-center justify-center rounded-2xl border px-4 py-3 text-[13px] font-semibold transition",
-                              tier.featured
-                                ? "border-[#2A5BFF] bg-white text-[#0A0A0A] hover:bg-white/90"
-                                : "border-white/[0.08] bg-white text-[#0A0A0A] hover:bg-white/90",
-                              waitlistState === "saving" ? "opacity-70" : "",
-                            ].join(" ")}
-                          >
-                            {waitlistState === "saving" ? "Joining..." : "Join The Waitlist"}
-                          </button>
-                          {waitlistMessage ? (
-                            <p
-                              className={[
-                                "text-[12px] leading-5",
-                                waitlistState === "success" ? "text-emerald-300" : "text-rose-300",
-                              ].join(" ")}
-                            >
-                              {waitlistMessage}
-                            </p>
-                          ) : null}
                         </div>
+                      ) : null}
+                      {cta}
+                      {isActiveWaitlist && waitlistMessage ? (
+                        <p
+                          className={[
+                            "mt-3 text-[12px] leading-5",
+                            waitlistState === "success" ? "text-emerald-300" : "text-rose-300",
+                          ].join(" ")}
+                        >
+                          {waitlistMessage}
+                        </p>
                       ) : null}
                     </div>
                   );
