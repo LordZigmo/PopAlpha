@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
+import { useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import { buildHighlightSegments, extractHighlightTokens } from "@/lib/search/highlight.mjs";
 import { useCardSearch } from "@/lib/search/use-card-search";
@@ -19,6 +20,13 @@ type CardSearchProps = {
 
 function joinClasses(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(" ");
+}
+
+function resolveTier(value: unknown): "Trainer" | "Ace" | "Elite" {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (normalized === "elite") return "Elite";
+  if (normalized === "ace") return "Ace";
+  return "Trainer";
 }
 
 function SearchSpinner() {
@@ -92,6 +100,7 @@ export default function CardSearch({
   borderless = false,
 }: CardSearchProps) {
   const router = useRouter();
+  const { user } = useUser();
   const listboxId = useId();
   const rootRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -100,6 +109,17 @@ export default function CardSearch({
   const [activeIndex, setActiveIndex] = useState(-1);
   const { results, isLoading, error, hasSearched } = useCardSearch(value);
   const highlightTokens = extractHighlightTokens(value);
+  const userTier = resolveTier(
+    user?.publicMetadata.subscriptionTier ?? user?.publicMetadata.tier ?? user?.publicMetadata.plan,
+  );
+
+  const submitButtonClassName = user
+    ? userTier === "Elite"
+      ? "border border-violet-400/20 bg-[linear-gradient(135deg,rgba(139,92,246,0.95),rgba(99,102,241,0.92))] text-white shadow-[0_8px_24px_rgba(99,102,241,0.28)]"
+      : userTier === "Trainer"
+        ? "border border-emerald-400/20 bg-[linear-gradient(135deg,rgba(16,185,129,0.95),rgba(5,150,105,0.92))] text-white shadow-[0_8px_24px_rgba(16,185,129,0.22)]"
+        : "border border-blue-400/20 bg-[linear-gradient(135deg,rgba(96,165,250,0.95),rgba(59,130,246,0.92))] text-white shadow-[0_8px_24px_rgba(59,130,246,0.28)]"
+    : "border border-blue-400/20 bg-[linear-gradient(135deg,rgba(96,165,250,0.95),rgba(59,130,246,0.92))] text-white shadow-[0_8px_24px_rgba(59,130,246,0.28)]";
 
   useEffect(() => {
     if (autoFocus) {
@@ -277,7 +297,8 @@ export default function CardSearch({
           <button
             type="submit"
             className={joinClasses(
-              "btn-accent flex shrink-0 items-center justify-center rounded-full",
+              "flex shrink-0 items-center justify-center rounded-full transition",
+              submitButtonClassName,
               sizeClasses.iconBtn,
             )}
             aria-label="Search"

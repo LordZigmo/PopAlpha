@@ -27,5 +27,19 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ ok: true, result: data });
+  // refresh_price_changes() — compute 24h/7d change percentages from price_history_points
+  let priceChangesResult: unknown = null;
+  let priceChangesError: string | null = null;
+  try {
+    const { data: pcData, error: pcError } = await supabase.rpc("refresh_price_changes");
+    if (pcError) {
+      priceChangesError = pcError.message;
+    } else {
+      priceChangesResult = pcData;
+    }
+  } catch (err) {
+    priceChangesError = err instanceof Error ? err.message : String(err);
+  }
+
+  return NextResponse.json({ ok: true, result: data, priceChanges: priceChangesResult, priceChangesError });
 }

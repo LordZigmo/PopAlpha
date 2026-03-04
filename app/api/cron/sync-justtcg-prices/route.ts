@@ -405,6 +405,27 @@ async function batchInsertIgnore<T extends Record<string, unknown>>(
   return { inserted, firstError };
 }
 
+async function batchInsertIgnorePerRow<T extends Record<string, unknown>>(
+  supabase: ReturnType<typeof dbAdmin>,
+  table: string,
+  rows: T[],
+): Promise<{ inserted: number; firstError: string | null }> {
+  let inserted = 0;
+  let firstError: string | null = null;
+
+  for (const row of rows) {
+    const { error } = await supabase.from(table).insert(row);
+    if (error) {
+      if (error.code === "23505") continue;
+      firstError ??= `${table}: ${error.message}`;
+      continue;
+    }
+    inserted += 1;
+  }
+
+  return { inserted, firstError };
+}
+
 function queuePrintingBackedVariantWrite(params: {
   jobName: string;
   providerSetId: string;
@@ -1174,6 +1195,14 @@ async function runNightlySync(params: {
     }
   }
 
+  // refresh_price_changes() — compute 24h/7d change percentages
+  try {
+    const { error: pcError } = await supabase.rpc("refresh_price_changes");
+    if (pcError) firstError ??= `refresh_price_changes: ${pcError.message}`;
+  } catch (err) {
+    firstError ??= `refresh_price_changes: ${err instanceof Error ? err.message : String(err)}`;
+  }
+
   if (updatedVariantKeyCount > 0) {
     const summaryRefresh = await refreshSetSummaryPipeline({
       supabase,
@@ -1841,12 +1870,10 @@ export async function GET(req: Request) {
     }
 
     if (legacyHistoryPoints.length > 0) {
-      const result = await batchInsertIgnore(
+      const result = await batchInsertIgnorePerRow(
         supabase,
         "price_history_points",
         legacyHistoryPoints as unknown as Record<string, unknown>[],
-        "canonical_slug,variant_ref,provider,ts",
-        "ts",
       );
       historyPointsWritten += result.inserted;
       firstError ??= result.firstError;
@@ -1873,6 +1900,16 @@ export async function GET(req: Request) {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     firstError ??= `refresh_card_metrics: ${msg}`;
+  }
+
+  // refresh_price_changes() — compute 24h/7d change percentages
+  let priceChangesResult: unknown = null;
+  try {
+    const { data } = await supabase.rpc("refresh_price_changes");
+    priceChangesResult = data;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    firstError ??= `refresh_price_changes: ${msg}`;
   }
 
   // variant_metrics — printing-backed rows upsert on canonical identity,
@@ -2021,6 +2058,7 @@ export async function GET(req: Request) {
     setSummaryRefreshError,
     firstError,
     metricsRefreshResult,
+    priceChangesResult,
     ...(isDebug && {
       debugSampleItem,
       debugProviderResponse,

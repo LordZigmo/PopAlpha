@@ -42,6 +42,10 @@ export type AssetMetrics = {
   provider_price_changes_count_30d: number | null;
   provider_as_of_ts: string | null;
 
+  // Pre-computed price change percentages (from refresh_price_changes)
+  change_pct_24h: number | null;
+  change_pct_7d: number | null;
+
   // PopAlpha derived signals
   signal_trend_strength: number | null;
   signal_breakout: number | null;
@@ -267,6 +271,7 @@ async function getLatestMetrics(slug: string): Promise<AssetMetrics | null> {
         "provider_price_relative_to_30d_range",
         "provider_min_price_all_time", "provider_max_price_all_time",
         "provider_price_changes_count_30d", "provider_as_of_ts",
+        "change_pct_24h", "change_pct_7d",
         "updated_at",
       ].join(", ")
     )
@@ -559,27 +564,6 @@ export type AssetViewModel = {
   } | null;
 };
 
-/** Compute % change from the price closest to N hours ago to price_now. */
-function computeChangePct(series: ChartPoint[], hoursAgo: number): number | null {
-  if (series.length < 2) return null;
-  const cutoffMs = Date.now() - hoursAgo * 60 * 60 * 1000;
-  const latestTs = new Date(series[series.length - 1].ts).getTime();
-  // If even the latest point is older than the cutoff, no meaningful change
-  if (latestTs <= cutoffMs) return null;
-  const priceNow = series[series.length - 1].price;
-  // Series is ts-asc. Walk forward, keep last point at-or-before cutoff.
-  let priceAtCutoff: number | null = null;
-  for (const pt of series) {
-    if (new Date(pt.ts).getTime() <= cutoffMs) {
-      priceAtCutoff = pt.price;
-    } else {
-      break;
-    }
-  }
-  if (priceAtCutoff === null || priceAtCutoff <= 0) return null;
-  return ((priceNow - priceAtCutoff) / priceAtCutoff) * 100;
-}
-
 /**
  * Builds a display-ready view model for an asset page.
  *
@@ -627,13 +611,16 @@ export async function buildAssetViewModel(
     ? await getChartSeries(slug, selectedVariantRef, days)
     : [];
 
-  // 4. Compute price metrics from series.
+  // 4. Compute price metrics from series + read pre-computed changes from card_metrics.
   const price_now = series.length > 0 ? series[series.length - 1].price : null;
   const prices = series.map((p) => p.price);
   const range_30d_low  = prices.length > 0 ? Math.min(...prices) : null;
   const range_30d_high = prices.length > 0 ? Math.max(...prices) : null;
-  const change_24h_pct = computeChangePct(series, 24);
-  const change_7d_pct  = computeChangePct(series, 168);
+
+  // Read pre-computed change percentages from card_metrics (populated by refresh_price_changes).
+  const metricsRow = await getLatestMetrics(slug);
+  const change_24h_pct = metricsRow?.change_pct_24h ?? null;
+  const change_7d_pct  = metricsRow?.change_pct_7d ?? null;
 
   // 5. Load the exact variant_metrics row for the selected variant.
   let signals: AssetViewModel["signals"] = null;
@@ -709,69 +696,6 @@ export async function buildAssetViewModel(
     reason,
     signals,
   };
-}
-
-// ── compute7dChangeBatch ─────────────────────────────────────────────────────
-
-/**
- * Batch-computes 7-day price change for a list of slugs.
- * Uses the same boundary-based method as homepage and card page:
- *   find price closest to 7d ago → compare to latest.
- * Returns Map<slug, changePct>.
- */
-export async function compute7dChangeBatch(slugs: string[]): Promise<Map<string, number>> {
-  if (slugs.length === 0) return new Map();
-
-  const supabase = dbPublic();
-  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-
-  const { data, error } = await supabase
-    .from("public_price_history")
-    .select("canonical_slug, variant_ref, ts, price")
-    .in("canonical_slug", slugs)
-    .eq("provider", "JUSTTCG")
-    .eq("source_window", "30d")
-    .gte("ts", sevenDaysAgo)
-    .order("ts", { ascending: true })
-    .limit(slugs.length * 200);
-
-  if (error) console.error("[compute7dChangeBatch]", error.message);
-
-  type HistRow = { canonical_slug: string; variant_ref: string; ts: string; price: number };
-  const slugVariants = new Map<string, Map<string, HistRow[]>>();
-  for (const row of (data ?? []) as HistRow[]) {
-    if (!slugVariants.has(row.canonical_slug)) slugVariants.set(row.canonical_slug, new Map());
-    const varMap = slugVariants.get(row.canonical_slug)!;
-    if (!varMap.has(row.variant_ref)) varMap.set(row.variant_ref, []);
-    varMap.get(row.variant_ref)!.push(row);
-  }
-
-  const cutoff7dMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
-  const changeMap = new Map<string, number>();
-
-  for (const [slug, varMap] of slugVariants) {
-    let best: HistRow[] = [];
-    for (const points of varMap.values()) {
-      if (points.length > best.length) best = points;
-    }
-    if (best.length < 2) continue;
-    const latestTs = new Date(best[best.length - 1].ts).getTime();
-    if (latestTs <= cutoff7dMs) continue;
-    const priceNow = best[best.length - 1].price;
-    let priceAtCutoff: number | null = null;
-    for (const pt of best) {
-      if (new Date(pt.ts).getTime() <= cutoff7dMs) {
-        priceAtCutoff = pt.price;
-      } else {
-        break;
-      }
-    }
-    if (priceAtCutoff !== null && priceAtCutoff > 0) {
-      changeMap.set(slug, ((priceNow - priceAtCutoff) / priceAtCutoff) * 100);
-    }
-  }
-
-  return changeMap;
 }
 
 // ── Re-export CHART_MIN_POINTS so page can check sufficiency ────────────────
