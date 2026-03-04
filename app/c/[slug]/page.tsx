@@ -458,6 +458,12 @@ export default async function CanonicalCardPage({
   const availableProviders = GRADED_SOURCES.filter((source) =>
     gradedAvailability.some((row) => row.provider === source)
   );
+  const scoutUpdatedAt =
+    [...gradedAvailability]
+      .map((row) => row.provider_as_of_ts)
+      .filter((value): value is string => typeof value === "string" && value.length > 0)
+      .sort()
+      .reverse()[0] ?? null;
   const requestedProvider = selectedProvider(provider);
   const activeProvider = (requestedProvider && availableProviders.includes(requestedProvider)
     ? requestedProvider
@@ -823,6 +829,7 @@ export default async function CanonicalCardPage({
           changeLabel={priceChangeLabel}
           activeListings7d={snapshotData?.active_listings_7d ?? null}
           summaryText={cardProfile?.summary_long ?? cardProfile?.summary_short ?? null}
+          updatedAt={scoutUpdatedAt}
         />
 
         <section className="mt-6 mb-6 grid gap-2 sm:grid-cols-3">

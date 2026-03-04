@@ -9,7 +9,22 @@ type PopAlphaScoutPreviewProps = {
   changeLabel: "24h" | "7d" | null;
   activeListings7d: number | null;
   summaryText?: string | null;
+  updatedAt?: string | null;
 };
+
+function formatUpdatedAgo(value: string | null | undefined): string {
+  if (!value) return "just now";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "just now";
+  const diffMs = Math.max(0, Date.now() - date.getTime());
+  const minutes = Math.floor(diffMs / 60000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
 
 export default function PopAlphaScoutPreview(props: PopAlphaScoutPreviewProps) {
   const summary = props.summaryText?.trim()
@@ -21,6 +36,7 @@ export default function PopAlphaScoutPreview(props: PopAlphaScoutPreviewProps) {
       changeLabel: props.changeLabel,
       activeListings7d: props.activeListings7d,
     }).summaryLong;
+  const updatedAgo = formatUpdatedAgo(props.updatedAt);
 
   return (
     <section className="relative mt-6 overflow-hidden rounded-2xl border border-[#63D471]/25 border-l-4 border-l-emerald-500 bg-emerald-500/10 px-4 py-3 shadow-[0_0_28px_rgba(16,185,129,0.20),0_18px_60px_rgba(0,0,0,0.24)] backdrop-blur-md">
@@ -35,13 +51,18 @@ export default function PopAlphaScoutPreview(props: PopAlphaScoutPreviewProps) {
             Pokémon-obsessed AI
           </p>
         </div>
-        <span className="inline-flex h-[2.25rem] items-center gap-2 self-start rounded-full border border-red-500/20 bg-red-500/10 px-3 text-[18px] font-semibold leading-none tracking-[-0.01em] text-red-100">
-          <span className="relative flex h-3.5 w-3.5 items-center justify-center">
-            <span className="absolute inline-flex h-3.5 w-3.5 rounded-full bg-red-500 opacity-75 animate-ping" />
-            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-red-400 shadow-[0_0_10px_rgba(239,68,68,0.9)]" />
+        <div className="flex shrink-0 flex-col items-end">
+          <span className="inline-flex h-[2.25rem] items-center gap-2 self-start rounded-full border border-red-500/20 bg-red-500/10 px-3 text-[18px] font-semibold leading-none tracking-[-0.01em] text-red-100">
+            <span className="relative flex h-3.5 w-3.5 items-center justify-center">
+              <span className="absolute inline-flex h-3.5 w-3.5 rounded-full bg-red-500 opacity-75 animate-ping" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-red-400 shadow-[0_0_10px_rgba(239,68,68,0.9)]" />
+            </span>
+            Live
           </span>
-          Live
-        </span>
+          <span className="mt-1 pr-1 text-[11px] font-medium tracking-[0.04em] text-emerald-200/75">
+            {updatedAgo}
+          </span>
+        </div>
       </div>
 
       <p className="relative z-10 mt-2 text-[18px] font-medium leading-relaxed text-emerald-50 sm:text-[19px]">

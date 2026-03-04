@@ -414,6 +414,7 @@ export default async function HomePage() {
   const losers = Array.isArray(data?.losers) ? data.losers : [];
   const trending = Array.isArray(data?.trending) ? data.trending : [];
   const asOf = timeAgo(data?.as_of ?? null);
+  const summaryUpdatedAgo = asOf || "just now";
   const userTier = getTierLabel(
     user?.publicMetadata.subscriptionTier ?? user?.publicMetadata.tier ?? user?.publicMetadata.plan,
   );
@@ -526,13 +527,18 @@ export default async function HomePage() {
                 ) : null}
             </div>
             {userTier === "Trainer" ? (
-              <span className="inline-flex h-[2.25rem] items-center gap-2 self-start rounded-full border border-red-500/20 bg-red-500/10 px-3 text-[18px] font-semibold leading-none tracking-[-0.01em] text-red-100">
-                <span className="relative flex h-3.5 w-3.5 items-center justify-center">
-                  <span className="absolute inline-flex h-3.5 w-3.5 rounded-full bg-red-500 opacity-75 animate-ping" />
-                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-red-400 shadow-[0_0_10px_rgba(239,68,68,0.9)]" />
+              <div className="flex shrink-0 flex-col items-end">
+                <span className="inline-flex h-[2.25rem] items-center gap-2 self-start rounded-full border border-red-500/20 bg-red-500/10 px-3 text-[18px] font-semibold leading-none tracking-[-0.01em] text-red-100">
+                  <span className="relative flex h-3.5 w-3.5 items-center justify-center">
+                    <span className="absolute inline-flex h-3.5 w-3.5 rounded-full bg-red-500 opacity-75 animate-ping" />
+                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-red-400 shadow-[0_0_10px_rgba(239,68,68,0.9)]" />
+                  </span>
+                  Live
                 </span>
-                Live
-              </span>
+                <span className="mt-1 pr-1 text-[11px] font-medium tracking-[0.04em] text-emerald-200/75">
+                  {summaryUpdatedAgo}
+                </span>
+              </div>
             ) : null}
           </div>
           <p
@@ -618,13 +624,18 @@ export default async function HomePage() {
                   Serious Collector with Serious Knowledge
                 </p>
               </div>
-              <span className="inline-flex h-[2.25rem] items-center gap-2 self-start rounded-full border border-red-500/20 bg-red-500/10 px-3 text-[18px] font-semibold leading-none tracking-[-0.01em] text-red-100">
-                <span className="relative flex h-3.5 w-3.5 items-center justify-center">
-                  <span className="absolute inline-flex h-3.5 w-3.5 rounded-full bg-red-500 opacity-75 animate-ping" />
-                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-red-400 shadow-[0_0_10px_rgba(239,68,68,0.9)]" />
+              <div className="flex shrink-0 flex-col items-end">
+                <span className="inline-flex h-[2.25rem] items-center gap-2 self-start rounded-full border border-red-500/20 bg-red-500/10 px-3 text-[18px] font-semibold leading-none tracking-[-0.01em] text-red-100">
+                  <span className="relative flex h-3.5 w-3.5 items-center justify-center">
+                    <span className="absolute inline-flex h-3.5 w-3.5 rounded-full bg-red-500 opacity-75 animate-ping" />
+                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-red-400 shadow-[0_0_10px_rgba(239,68,68,0.9)]" />
+                  </span>
+                  Live
                 </span>
-                Live
-              </span>
+                <span className="mt-1 pr-1 text-[11px] font-medium tracking-[0.04em] text-[#D6E6FF]/72">
+                  {summaryUpdatedAgo}
+                </span>
+              </div>
             </div>
             <div className="relative z-10 mt-2 text-[18px] font-medium leading-relaxed text-[#E5EEFF] sm:text-[19px]">
               <p>{acePreview.lead}</p>
@@ -687,13 +698,18 @@ export default async function HomePage() {
                   Highest Conviction Market Intelligence
                 </p>
               </div>
-              <span className="inline-flex h-[2.25rem] items-center gap-2 self-start rounded-full border border-red-500/20 bg-red-500/10 px-3 text-[18px] font-semibold leading-none tracking-[-0.01em] text-red-100">
-                <span className="relative flex h-3.5 w-3.5 items-center justify-center">
-                  <span className="absolute inline-flex h-3.5 w-3.5 rounded-full bg-red-500 opacity-75 animate-ping" />
-                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-red-400 shadow-[0_0_10px_rgba(239,68,68,0.9)]" />
+              <div className="flex shrink-0 flex-col items-end">
+                <span className="inline-flex h-[2.25rem] items-center gap-2 self-start rounded-full border border-red-500/20 bg-red-500/10 px-3 text-[18px] font-semibold leading-none tracking-[-0.01em] text-red-100">
+                  <span className="relative flex h-3.5 w-3.5 items-center justify-center">
+                    <span className="absolute inline-flex h-3.5 w-3.5 rounded-full bg-red-500 opacity-75 animate-ping" />
+                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-red-400 shadow-[0_0_10px_rgba(239,68,68,0.9)]" />
+                  </span>
+                  Live
                 </span>
-                Live
-              </span>
+                <span className="mt-1 pr-1 text-[11px] font-medium tracking-[0.04em] text-violet-100/72">
+                  {summaryUpdatedAgo}
+                </span>
+              </div>
             </div>
             <div className="relative z-10 mt-2 text-[18px] font-medium leading-relaxed text-violet-50 sm:text-[19px]">
               <p>{elitePreview.lead}</p>
