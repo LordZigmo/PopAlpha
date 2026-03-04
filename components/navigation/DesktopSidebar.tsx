@@ -19,10 +19,10 @@ export default function DesktopSidebar() {
           <p className="text-[18px] font-semibold tracking-[-0.03em] text-white">PopAlpha</p>
           <SignedOut>
             <Link
-              href="/sign-in"
-              className="rounded-2xl border border-[#1E1E1E] bg-white/[0.04] px-3 py-2 text-[12px] font-semibold text-white transition hover:bg-white/[0.08]"
+              href="/sign-up"
+              className="rounded-2xl border border-white/[0.08] bg-white px-3.5 py-2 text-[12px] font-bold tracking-[0.08em] text-[#0A0A0A] transition hover:bg-white/90"
             >
-              Sign In
+              SIGN UP
             </Link>
           </SignedOut>
         </div>
