@@ -13,6 +13,23 @@ export type CardDetailMetrics = {
   points30d: number | null;
 };
 
+export type CardDetailPriceCompare = {
+  justtcgPrice: number | null;
+  pokemontcgPrice: number | null;
+  marketPrice: number | null;
+  asOf: string | null;
+  providers: Array<{
+    provider: "JUSTTCG" | "POKEMON_TCG_API";
+    sourcePrice: number | null;
+    sourceCurrency: string | null;
+    usdPrice: number | null;
+    fxRateUsed: number | null;
+    fxSource: "FX_RATES_TABLE" | "ENV_EUR_TO_USD_RATE" | "IDENTITY" | "UNKNOWN";
+    fxAsOf: string | null;
+    asOf: string | null;
+  }>;
+};
+
 export type CardPrintingPill = {
   printingId: string;
   pillKey: string;
@@ -43,9 +60,11 @@ export type CardDetailResponse = {
       CardPrintingPill & {
         available: boolean;
         metrics: CardDetailMetrics | null;
+        pricing: CardDetailPriceCompare | null;
       }
     >;
   };
+  pricing: CardDetailPriceCompare | null;
   graded: {
     providers: Array<{
       provider: GradedProvider;

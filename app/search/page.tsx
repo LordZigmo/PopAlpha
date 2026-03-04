@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
 import { unstable_cache } from "next/cache";
-import { semanticSearchCards } from "@/app/actions/search";
 import { getCanonicalMarketPulseMap, type CanonicalMarketPulse } from "@/lib/data/market";
 import { dbPublic } from "@/lib/db";
 import { measureAsync } from "@/lib/perf";
@@ -574,45 +573,6 @@ async function loadSetSearchEnhancements(setName: string): Promise<{
   };
 }
 
-async function loadSemanticSearchRows(
-  query: string,
-  excludeSlugs: Set<string>,
-): Promise<SearchDisplayRow[]> {
-  const semanticMatches = await semanticSearchCards({
-    query,
-    limit: 8,
-  });
-
-  const filteredMatches = semanticMatches.filter((row) => !excludeSlugs.has(row.canonicalSlug));
-  if (filteredMatches.length === 0) return [];
-
-  const supabase = dbPublic();
-  const slugs = filteredMatches.map((row) => row.canonicalSlug);
-  const { data: printingsData } = await supabase
-    .from("card_printings")
-    .select("id, canonical_slug, set_name, card_number, language, finish, finish_detail, edition, stamp, image_url")
-    .in("canonical_slug", slugs)
-    .eq("language", "EN");
-
-  const printingsBySlug = new Map<string, PrintingRow[]>();
-  for (const printing of (printingsData ?? []) as PrintingRow[]) {
-    const bucket = printingsBySlug.get(printing.canonical_slug) ?? [];
-    bucket.push(printing);
-    printingsBySlug.set(printing.canonical_slug, bucket);
-  }
-
-  return filteredMatches.map((row) => ({
-    canonical_slug: row.canonicalSlug,
-    canonical_name: row.canonicalName,
-    set_name: row.setName,
-    year: row.year,
-    raw_price: row.marketPrice,
-    change_pct: null,
-    change_window: null,
-    primary_image_url: choosePrimaryPrinting(printingsBySlug.get(row.canonicalSlug) ?? [])?.image_url ?? null,
-  }));
-}
-
 export default async function SearchPage({
   searchParams,
 }: {
@@ -800,9 +760,6 @@ export default async function SearchPage({
       primary_image_url: primaryPrinting?.image_url ?? null,
     };
   });
-  const displaySlugSet = new Set(displayRows.map((row) => row.canonical_slug));
-  const semanticRows = await loadSemanticSearchRows(qNormalized, displaySlugSet);
-
   const resultSetNames = new Set(displayRows.map((r) => r.set_name).filter((s): s is string => s !== null));
   const matchedSetName = resultSetNames.size === 1 && displayRows.length >= 2 ? [...resultSetNames][0] ?? null : null;
   const { setSummary, chaseCards } = matchedSetName
@@ -825,7 +782,6 @@ export default async function SearchPage({
         <SearchResultsSection
           key={`${q}-${sort}-${result.page}-${pageSize}-${lang}-${setFilter}`}
           rows={displayRows}
-          semanticRows={semanticRows}
           chaseCards={chaseCards}
           total={result.total}
           page={result.page}

@@ -268,6 +268,18 @@ export function mapJustTcgPrinting(printing: string): JustTcgFinish {
 
   if (/\breverse\b/.test(p)) return "REVERSE_HOLO";
 
+  // Edition-only labels still imply the base non-holo printing when no foil
+  // signal is present, e.g. "1st Edition", "Unlimited".
+  if (
+    (/\b1st\s*edition\b/.test(p)
+      || /\bfirst\s*edition\b/.test(p)
+      || /\bunlimited\b/.test(p))
+    && !/\bholo(?:foil)?\b/.test(p)
+    && !/\bfoil\b/.test(p)
+  ) {
+    return "NON_HOLO";
+  }
+
   if (
     /\bnon\s*holo(?:foil)?\b/.test(p)
     || /\bnon\s*foil\b/.test(p)

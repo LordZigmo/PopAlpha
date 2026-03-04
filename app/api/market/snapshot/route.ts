@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { dbPublic } from "@/lib/db";
 import { measureAsync } from "@/lib/perf";
+import { averageProviderUsdPrice, buildProviderPriceDisplay } from "@/lib/pricing/provider-price-display";
 
 export const runtime = "nodejs";
 
@@ -8,6 +9,10 @@ type SnapshotRow = {
   canonical_slug: string;
   printing_id: string | null;
   grade: string;
+  justtcg_price: number | null;
+  pokemontcg_price: number | null;
+  market_price: number | null;
+  market_price_as_of: string | null;
   active_listings_7d: number | null;
   median_7d: number | null;
   median_30d: number | null;
@@ -29,7 +34,7 @@ export async function GET(req: Request) {
   let query = supabase
     .from("public_card_metrics")
     .select(
-      "canonical_slug, printing_id, grade, active_listings_7d, median_7d, median_30d, trimmed_median_30d, low_30d, high_30d"
+      "canonical_slug, printing_id, grade, justtcg_price, pokemontcg_price, market_price, market_price_as_of, active_listings_7d, median_7d, median_30d, trimmed_median_30d, low_30d, high_30d"
     )
     .eq("canonical_slug", slug)
     .eq("grade", grade)
@@ -38,16 +43,41 @@ export async function GET(req: Request) {
   query = printing ? query.eq("printing_id", printing) : query.is("printing_id", null);
 
   const result = await measureAsync("market.snapshot.query", { slug, printing: printing || null, grade }, async () => {
-    const { data, error } = await query.maybeSingle<SnapshotRow>();
-    return { data, error: error?.message ?? null };
+    const metricsResult = await query.maybeSingle<SnapshotRow>();
+    return {
+      data: metricsResult.data,
+      error: metricsResult.error?.message ?? null,
+    };
   });
 
   if (result.error) {
     return NextResponse.json({ ok: false, error: result.error }, { status: 500 });
   }
 
+  const justtcg = await buildProviderPriceDisplay({
+    supabase,
+    provider: "JUSTTCG",
+    sourcePrice: result.data?.justtcg_price ?? null,
+    sourceCurrency: "USD",
+    asOf: result.data?.market_price_as_of ?? null,
+  });
+  const pokemontcg = await buildProviderPriceDisplay({
+    supabase,
+    provider: "POKEMON_TCG_API",
+    sourcePrice: result.data?.pokemontcg_price ?? null,
+    sourceCurrency: "EUR",
+    asOf: result.data?.market_price_as_of ?? null,
+  });
+  const marketPriceUsd = averageProviderUsdPrice([justtcg, pokemontcg]) ?? result.data?.market_price ?? null;
+  const marketPriceAsOf = [justtcg.asOf, pokemontcg.asOf].filter(Boolean).sort().at(-1) ?? result.data?.market_price_as_of ?? null;
+
   return NextResponse.json({
     ok: true,
+    justtcgPrice: justtcg.usdPrice,
+    pokemontcgPrice: pokemontcg.usdPrice,
+    marketPrice: marketPriceUsd,
+    marketPriceAsOf,
+    providers: [justtcg, pokemontcg],
     active7d: result.data?.active_listings_7d ?? 0,
     median7d: result.data?.median_7d ?? null,
     median30d: result.data?.median_30d ?? null,

@@ -1,8 +1,14 @@
 import { dbPublic } from "@/lib/db";
 import {
+  averageProviderUsdPrice,
+  buildProviderPriceDisplay,
+  type ProviderPriceDisplay,
+} from "@/lib/pricing/provider-price-display";
+import {
   GRADED_PROVIDERS,
   GRADE_BUCKETS,
   type CardDetailMetrics,
+  type CardDetailPriceCompare,
   type CardDetailResponse,
   type CardPrintingPill,
   type GradeBucket,
@@ -35,6 +41,10 @@ type RawMetricRow = {
   printing_id: string | null;
   liquidity_score: number | null;
   snapshot_count_30d: number | null;
+  justtcg_price: number | null;
+  pokemontcg_price: number | null;
+  market_price: number | null;
+  market_price_as_of: string | null;
 };
 
 type RawSignalRow = {
@@ -128,6 +138,44 @@ function buildRawMetrics(metricsRow: RawMetricRow | null, signalRow: RawSignalRo
     asOf: signalRow?.provider_as_of_ts ?? null,
     liquidityScore: metricsRow?.liquidity_score ?? null,
     points30d: signalRow?.history_points_30d ?? metricsRow?.snapshot_count_30d ?? null,
+  };
+}
+
+async function buildPriceCompare(params: {
+  supabase: ReturnType<typeof dbPublic>;
+  metricsRow: RawMetricRow | null;
+  providerRows?: null;
+}): Promise<CardDetailPriceCompare | null> {
+  const { supabase, metricsRow } = params;
+
+  const justtcgDisplay = await buildProviderPriceDisplay({
+    supabase,
+    provider: "JUSTTCG",
+    sourcePrice: metricsRow?.justtcg_price ?? null,
+    sourceCurrency: "USD",
+    asOf: metricsRow?.market_price_as_of ?? null,
+  });
+
+  const pokemontcgDisplay = await buildProviderPriceDisplay({
+    supabase,
+    provider: "POKEMON_TCG_API",
+    sourcePrice: metricsRow?.pokemontcg_price ?? null,
+    sourceCurrency: "EUR",
+    asOf: metricsRow?.market_price_as_of ?? null,
+  });
+
+  if (!metricsRow && justtcgDisplay.usdPrice === null && pokemontcgDisplay.usdPrice === null) return null;
+
+  const providers: ProviderPriceDisplay[] = [justtcgDisplay, pokemontcgDisplay];
+  const usdAverage = averageProviderUsdPrice(providers);
+  const asOf = [justtcgDisplay.asOf, pokemontcgDisplay.asOf].filter(Boolean).sort().at(-1) ?? metricsRow?.market_price_as_of ?? null;
+
+  return {
+    justtcgPrice: justtcgDisplay.usdPrice,
+    pokemontcgPrice: pokemontcgDisplay.usdPrice,
+    marketPrice: usdAverage ?? metricsRow?.market_price ?? null,
+    asOf,
+    providers,
   };
 }
 
@@ -230,7 +278,7 @@ export async function buildCardDetailResponse(inputSlug: string): Promise<CardDe
       .order("id", { ascending: true }),
     supabase
       .from("public_card_metrics")
-      .select("printing_id, liquidity_score, snapshot_count_30d")
+      .select("printing_id, liquidity_score, snapshot_count_30d, justtcg_price, pokemontcg_price, market_price, market_price_as_of")
       .eq("canonical_slug", canonicalSlug)
       .eq("grade", "RAW"),
     supabase
@@ -265,26 +313,32 @@ export async function buildCardDetailResponse(inputSlug: string): Promise<CardDe
 
   const printingRows = (printings ?? []) as CardPrintingRow[];
   const rawMetricMap = new Map<string, RawMetricRow>();
+  let canonicalRawMetric: RawMetricRow | null = null;
   for (const row of (rawMetrics ?? []) as RawMetricRow[]) {
     if (row.printing_id) rawMetricMap.set(row.printing_id, row);
+    else if (!canonicalRawMetric) canonicalRawMetric = row;
   }
   const rawSignalMap = new Map<string, RawSignalRow>();
   for (const row of (rawSignals ?? []) as RawSignalRow[]) {
     if (row.printing_id) rawSignalMap.set(row.printing_id, row);
   }
-
-  const rawVariants = printingRows.map((row) => {
+  const rawVariants = await Promise.all(printingRows.map(async (row) => {
     const metricsRow = rawMetricMap.get(row.id) ?? null;
     const signalRow = rawSignalMap.get(row.id) ?? null;
     const metrics = buildRawMetrics(metricsRow, signalRow);
+    const pricing = await buildPriceCompare({
+      supabase,
+      metricsRow,
+    });
     return {
       ...buildPrintingPill(row),
       available:
         !!metrics &&
         Math.max(signalRow?.history_points_30d ?? 0, metricsRow?.snapshot_count_30d ?? 0) >= RAW_AVAILABILITY_THRESHOLD,
       metrics,
+      pricing,
     };
-  });
+  }));
 
   const gradedRows = ((gradedMetrics ?? []) as GradedMetricRow[])
     .filter((row): row is GradedMetricRow & { printing_id: string } => {
@@ -341,6 +395,10 @@ export async function buildCardDetailResponse(inputSlug: string): Promise<CardDe
     raw: {
       variants: rawVariants,
     },
+    pricing: await buildPriceCompare({
+      supabase,
+      metricsRow: canonicalRawMetric,
+    }),
     graded: {
       providers,
       grades,

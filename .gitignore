@@ -63,3 +63,4 @@ scripts/output/
 .supabase/
 
 .vercel
+.env*.local

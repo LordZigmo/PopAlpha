@@ -1,6 +1,14 @@
 {
   "crons": [
     {
+      "path": "/api/cron/ingest-fx-rates",
+      "schedule": "30 16 * * 1-5"
+    },
+    {
+      "path": "/api/cron/check-fx-rates-health",
+      "schedule": "45 16 * * 1-5"
+    },
+    {
       "path": "/api/cron/sync-canonical",
       "schedule": "0 4 * * *"
     },
@@ -9,12 +17,8 @@
       "schedule": "0 5 * * *"
     },
     {
-      "path": "/api/cron/sync-justtcg-prices",
+      "path": "/api/cron/run-justtcg-pipeline",
       "schedule": "0 */6 * * *"
-    },
-    {
-      "path": "/api/cron/sync-pokedata-prices",
-      "schedule": "30 6 * * *"
     },
     {
       "path": "/api/cron/refresh-card-metrics",
@@ -37,7 +41,7 @@
       "schedule": "30 9 * * *"
     },
     {
-      "path": "/api/cron/sync-pokemon-tcg-graded",
+      "path": "/api/cron/run-pokemontcg-pipeline",
       "schedule": "30 8 * * *"
     }
   ]

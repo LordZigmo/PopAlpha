@@ -12,18 +12,20 @@ loadEnv();
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const POSTGRES_CONNECTION_STRING =
-  process.env.POSTGRES_URL
-  || process.env.POSTGRES_URL_NON_POOLING
-  || process.env.DATABASE_URL
+  process.env.AI_NEON_DATABASE_URL
+  || process.env.POPALPHA_NEON_DATABASE_URL
+  || process.env.PopAlpha_NEON_DATABASE_URL
   || process.env.NEON_DATABASE_URL
   || process.env.POPALPHA_POSTGRES_URL
   || process.env.POPALPHA_POSTGRES_URL_NON_POOLING
-  || process.env.POPALPHA_DATABASE_URL
-  || process.env.POPALPHA_NEON_DATABASE_URL
   || process.env.PopAlpha_POSTGRES_URL
   || process.env.PopAlpha_POSTGRES_URL_NON_POOLING
+  || process.env.POPALPHA_DATABASE_URL
   || process.env.PopAlpha_DATABASE_URL
-  || process.env.PopAlpha_NEON_DATABASE_URL;
+  || process.env.POSTGRES_URL
+  || process.env.POSTGRES_URL_NON_POOLING
+  || process.env.DATABASE_URL
+  || null;
 
 if (POSTGRES_CONNECTION_STRING && !process.env.POSTGRES_URL) {
   process.env.POSTGRES_URL = POSTGRES_CONNECTION_STRING;
@@ -34,7 +36,7 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
 }
 
 if (!process.env.POSTGRES_URL) {
-  throw new Error("Missing POSTGRES_URL (or POSTGRES_URL_NON_POOLING / DATABASE_URL / NEON_DATABASE_URL).");
+  throw new Error("Missing AI_NEON_DATABASE_URL (or POSTGRES_URL-compatible fallback) for AI embeddings storage.");
 }
 
 const maxCardsRaw = Number.parseInt(process.argv[2] ?? "512", 10);

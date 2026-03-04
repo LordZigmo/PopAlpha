@@ -23,18 +23,19 @@ const EMBEDDING_BATCH_LIMIT = 100;
 
 function resolveVercelPostgresConnectionString(): string | null {
   const direct =
-    process.env.POSTGRES_URL?.trim()
-    || process.env.POSTGRES_URL_NON_POOLING?.trim()
-    || process.env.DATABASE_URL?.trim()
+    process.env.AI_NEON_DATABASE_URL?.trim()
+    || process.env.POPALPHA_NEON_DATABASE_URL?.trim()
+    || process.env.PopAlpha_NEON_DATABASE_URL?.trim()
     || process.env.NEON_DATABASE_URL?.trim()
     || process.env.POPALPHA_POSTGRES_URL?.trim()
     || process.env.POPALPHA_POSTGRES_URL_NON_POOLING?.trim()
-    || process.env.POPALPHA_DATABASE_URL?.trim()
-    || process.env.POPALPHA_NEON_DATABASE_URL?.trim()
     || process.env.PopAlpha_POSTGRES_URL?.trim()
     || process.env.PopAlpha_POSTGRES_URL_NON_POOLING?.trim()
+    || process.env.POPALPHA_DATABASE_URL?.trim()
     || process.env.PopAlpha_DATABASE_URL?.trim()
-    || process.env.PopAlpha_NEON_DATABASE_URL?.trim()
+    || process.env.POSTGRES_URL?.trim()
+    || process.env.POSTGRES_URL_NON_POOLING?.trim()
+    || process.env.DATABASE_URL?.trim()
     || null;
 
   if (direct && !process.env.POSTGRES_URL) {

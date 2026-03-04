@@ -1,0 +1,34 @@
+import { NextResponse } from "next/server";
+import { requireCron } from "@/lib/auth/require";
+import { runJustTcgPipeline } from "@/lib/backfill/provider-pipeline-orchestrator";
+
+export const runtime = "nodejs";
+export const maxDuration = 300;
+
+function parseOptionalInt(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const parsed = parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+export async function GET(req: Request) {
+  const auth = await requireCron(req);
+  if (!auth.ok) return auth.response;
+
+  const url = new URL(req.url);
+  const set = url.searchParams.get("set")?.trim() || undefined;
+  const force = url.searchParams.get("force") === "1";
+
+  const result = await runJustTcgPipeline({
+    providerSetId: set,
+    setLimit: parseOptionalInt(url.searchParams.get("sets")),
+    pageLimitPerSet: parseOptionalInt(url.searchParams.get("pages")),
+    maxRequests: parseOptionalInt(url.searchParams.get("maxRequests")),
+    payloadLimit: parseOptionalInt(url.searchParams.get("payloads")),
+    matchObservations: parseOptionalInt(url.searchParams.get("observations")),
+    timeseriesObservations: parseOptionalInt(url.searchParams.get("timeseriesObservations")),
+    force,
+  });
+
+  return NextResponse.json(result, { status: result.ok ? 200 : 500 });
+}

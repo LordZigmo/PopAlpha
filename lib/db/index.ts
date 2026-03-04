@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { warnIfPricingDbEnvLooksMixed } from "@/lib/db/env-guard";
 
 // ── Anon-key client (singleton) ──────────────────────────────────────────────
 
@@ -13,6 +14,7 @@ let _public: SupabaseClient | null = null;
  */
 export function dbPublic(): SupabaseClient {
   if (_public) return _public;
+  warnIfPricingDbEnvLooksMixed("public_client");
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !anonKey) {

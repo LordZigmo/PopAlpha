@@ -34,16 +34,24 @@ export const PUBLIC_ROUTES = [
 ];
 
 export const CRON_ROUTES = [
+  "cron/ingest-fx-rates",
+  "cron/check-fx-rates-health",
+  "cron/ingest-justtcg-raw",
+  "cron/ingest-pokemontcg-raw",
+  "cron/normalize-justtcg-raw",
+  "cron/normalize-pokemontcg-raw",
+  "cron/match-justtcg-normalized",
+  "cron/match-pokemontcg-normalized",
+  "cron/write-provider-timeseries",
+  "cron/run-justtcg-pipeline",
+  "cron/run-pokemontcg-pipeline",
   "cron/sync-canonical",
   "cron/sync-tcg-prices",
-  "cron/sync-justtcg-prices",
-  "cron/sync-pokedata-prices",
   "cron/refresh-card-metrics",
   "cron/refresh-card-embeddings",
   "cron/snapshot-price-history",
   "cron/refresh-derived-signals",
   "cron/refresh-set-summaries",
-  "cron/sync-pokemon-tcg-graded",
 ];
 
 export const ADMIN_ROUTES = [

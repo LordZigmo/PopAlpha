@@ -4,6 +4,8 @@ export type MarketChangeWindow = "24H" | "7D";
 
 type CanonicalMarketMetricRow = {
   canonical_slug: string;
+  justtcg_price: number | null;
+  pokemontcg_price: number | null;
   market_price: number | null;
   median_7d: number | null;
   change_pct_24h: number | null;
@@ -11,6 +13,8 @@ type CanonicalMarketMetricRow = {
 };
 
 export type CanonicalMarketPulse = {
+  justtcgPrice: number | null;
+  pokemontcgPrice: number | null;
   marketPrice: number | null;
   changePct: number | null;
   changeWindow: MarketChangeWindow | null;
@@ -23,19 +27,21 @@ function toFiniteNumber(value: number | null | undefined): number | null {
 export function resolveCanonicalMarketPulse(
   row: Partial<Omit<CanonicalMarketMetricRow, "canonical_slug">> | null | undefined,
 ): CanonicalMarketPulse {
+  const justtcgPrice = toFiniteNumber(row?.justtcg_price);
+  const pokemontcgPrice = toFiniteNumber(row?.pokemontcg_price);
   const marketPrice = toFiniteNumber(row?.market_price) ?? toFiniteNumber(row?.median_7d);
   const change24h = toFiniteNumber(row?.change_pct_24h);
 
   if (change24h !== null) {
-    return { marketPrice, changePct: change24h, changeWindow: "24H" };
+    return { justtcgPrice, pokemontcgPrice, marketPrice, changePct: change24h, changeWindow: "24H" };
   }
 
   const change7d = toFiniteNumber(row?.change_pct_7d);
   if (change7d !== null) {
-    return { marketPrice, changePct: change7d, changeWindow: "7D" };
+    return { justtcgPrice, pokemontcgPrice, marketPrice, changePct: change7d, changeWindow: "7D" };
   }
 
-  return { marketPrice, changePct: null, changeWindow: null };
+  return { justtcgPrice, pokemontcgPrice, marketPrice, changePct: null, changeWindow: null };
 }
 
 export async function getCanonicalMarketPulseMap(
@@ -47,7 +53,7 @@ export async function getCanonicalMarketPulseMap(
 
   const { data, error } = await supabase
     .from("public_card_metrics")
-    .select("canonical_slug, market_price, median_7d, change_pct_24h, change_pct_7d")
+    .select("canonical_slug, justtcg_price, pokemontcg_price, market_price, median_7d, change_pct_24h, change_pct_7d")
     .in("canonical_slug", slugs)
     .is("printing_id", null)
     .eq("grade", "RAW")

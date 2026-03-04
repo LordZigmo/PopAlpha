@@ -15,11 +15,13 @@
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { getRequiredEnvs } from "@/lib/env";
+import { warnIfPricingDbEnvLooksMixed } from "@/lib/db/env-guard";
 
 let _admin: SupabaseClient | null = null;
 
 export function dbAdmin(): SupabaseClient {
   if (_admin) return _admin;
+  warnIfPricingDbEnvLooksMixed("admin_client");
   const { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = getRequiredEnvs([
     "SUPABASE_URL",
     "SUPABASE_SERVICE_ROLE_KEY",
