@@ -31,6 +31,7 @@ type ObservationRow = {
   provider_card_id: string;
   provider_variant_id: string;
   asset_type: "single" | "sealed";
+  normalized_condition?: string | null;
   observed_price: number | null;
   currency: string;
   observed_at: string;
@@ -91,6 +92,7 @@ type TimeseriesResult = {
   observationsSkippedAlreadyWritten: number;
   observationsSkippedNoPrice: number;
   observationsSkippedNoCanonical: number;
+  observationsSkippedCondition: number;
   snapshotsUpserted: number;
   historyPointsUpserted: number;
   firstError: string | null;
@@ -116,6 +118,14 @@ function buildHistoryVariantRef(match: MatchRow): string {
   if (match.printing_id) return `${match.printing_id}::RAW::${match.provider_variant_id}`;
   if (match.canonical_slug) return `${match.canonical_slug}::RAW::${match.provider_variant_id}`;
   return `${match.provider.toLowerCase()}:${match.provider_variant_id}::RAW`;
+}
+
+function shouldWriteRawForCondition(provider: SupportedProvider, condition: string | null | undefined): boolean {
+  // Keep RAW market price comparable by using NM-only snapshots.
+  // PokemonTCG API observations are normalized as NM by design.
+  if (provider !== "JUSTTCG") return true;
+  const normalized = String(condition ?? "").trim().toLowerCase();
+  return normalized === "nm" || normalized === "mint";
 }
 
 async function loadCandidateRows(params: {
@@ -147,12 +157,12 @@ async function loadCandidateRows(params: {
     if (matchError) throw new Error(`provider_observation_matches(load by observationId): ${matchError.message}`);
     if (!matchData) return { rows: [], scanned: 0, skippedAlreadyWritten: 0 };
 
-    const { data: obsData, error: obsError } = await supabase
-      .from("provider_normalized_observations")
-      .select("id, provider, provider_set_id, provider_card_id, provider_variant_id, asset_type, observed_price, currency, observed_at, variant_ref")
-      .eq("id", matchData.provider_normalized_observation_id)
-      .eq("provider", params.provider)
-      .maybeSingle<ObservationRow>();
+      const { data: obsData, error: obsError } = await supabase
+        .from("provider_normalized_observations")
+        .select("id, provider, provider_set_id, provider_card_id, provider_variant_id, asset_type, normalized_condition, observed_price, currency, observed_at, variant_ref")
+        .eq("id", matchData.provider_normalized_observation_id)
+        .eq("provider", params.provider)
+        .maybeSingle<ObservationRow>();
     if (obsError) throw new Error(`provider_normalized_observations(load by observationId): ${obsError.message}`);
     if (!obsData) return { rows: [], scanned: 1, skippedAlreadyWritten: 0 };
 
@@ -204,7 +214,7 @@ async function loadCandidateRows(params: {
         .eq("match_status", "MATCHED"),
       supabase
         .from("provider_normalized_observations")
-        .select("id, provider, provider_set_id, provider_card_id, provider_variant_id, asset_type, observed_price, currency, observed_at, variant_ref")
+        .select("id, provider, provider_set_id, provider_card_id, provider_variant_id, asset_type, normalized_condition, observed_price, currency, observed_at, variant_ref")
         .in("id", selectedIds)
         .eq("provider", params.provider),
     ]);
@@ -249,6 +259,7 @@ export async function runProviderObservationTimeseries(opts: {
   let observationsSkippedAlreadyWritten = 0;
   let observationsSkippedNoPrice = 0;
   let observationsSkippedNoCanonical = 0;
+  let observationsSkippedCondition = 0;
   let snapshotsUpserted = 0;
   let historyPointsUpserted = 0;
   const sampleWrites: TimeseriesSample[] = [];
@@ -306,6 +317,10 @@ export async function runProviderObservationTimeseries(opts: {
         observationsSkippedNoCanonical += 1;
         continue;
       }
+      if (!shouldWriteRawForCondition(opts.provider, row.observation.normalized_condition)) {
+        observationsSkippedCondition += 1;
+        continue;
+      }
 
       const providerRef = buildProviderRef(opts.provider, row.match.provider_variant_id);
       const historyVariantRef = buildHistoryVariantRef(row.match);
@@ -316,8 +331,8 @@ export async function runProviderObservationTimeseries(opts: {
         canonical_slug: row.match.canonical_slug,
         printing_id: row.match.printing_id,
         grade: "RAW",
-        price_value: observedPrice,
-        currency: sourceCurrency,
+        price_value: observedPriceUsd,
+        currency: "USD",
         provider: opts.provider,
         provider_ref: providerRef,
         ingest_id: null,
@@ -329,8 +344,8 @@ export async function runProviderObservationTimeseries(opts: {
         variant_ref: historyVariantRef,
         provider: opts.provider,
         ts: row.observation.observed_at,
-        price: observedPrice,
-        currency: sourceCurrency,
+        price: observedPriceUsd,
+        currency: "USD",
         source_window: "snapshot",
       });
 
@@ -403,6 +418,7 @@ export async function runProviderObservationTimeseries(opts: {
     observationsSkippedAlreadyWritten,
     observationsSkippedNoPrice,
     observationsSkippedNoCanonical,
+    observationsSkippedCondition,
     snapshotsUpserted,
     historyPointsUpserted,
     firstError,
@@ -417,7 +433,7 @@ export async function runProviderObservationTimeseries(opts: {
         ok: result.ok,
         items_fetched: observationsProcessed,
         items_upserted: snapshotsUpserted + historyPointsUpserted,
-        items_failed: observationsSkippedNoPrice + observationsSkippedNoCanonical + (firstError ? 1 : 0),
+        items_failed: observationsSkippedNoPrice + observationsSkippedNoCanonical + observationsSkippedCondition + (firstError ? 1 : 0),
         ended_at: endedAt,
         meta: {
           mode: "timeseries-write",
@@ -431,6 +447,7 @@ export async function runProviderObservationTimeseries(opts: {
           observationsSkippedAlreadyWritten,
           observationsSkippedNoPrice,
           observationsSkippedNoCanonical,
+          observationsSkippedCondition,
           snapshotsUpserted,
           historyPointsUpserted,
           sampleWrites,

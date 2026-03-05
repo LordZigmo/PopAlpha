@@ -144,6 +144,56 @@ function normalizeLanguageToCanonical(value: string | null | undefined): string 
   return normalized.toUpperCase();
 }
 
+function unknownFinishTieBreakScore(providerFinish: string): number {
+  if (providerFinish === "NON_HOLO") return 6;
+  if (providerFinish === "HOLO") return 4;
+  if (providerFinish === "REVERSE_HOLO") return 2;
+  return 0;
+}
+
+function scoreRelaxedPrintingCandidate(params: {
+  row: PrintingRow;
+  observation: NormalizedObservationRow;
+}): number {
+  const { row, observation } = params;
+  let score = 0;
+  const finishMatches = row.finish === observation.normalized_finish;
+  const editionMatches = row.edition === observation.normalized_edition;
+
+  // Guardrail: never auto-adopt cross-finish or cross-edition matches.
+  if (!finishMatches && observation.normalized_finish !== "UNKNOWN" && row.finish !== "UNKNOWN") {
+    return -1000;
+  }
+  if (!editionMatches && row.edition !== "UNKNOWN") {
+    return -1000;
+  }
+
+  if (finishMatches) {
+    score += 50;
+  } else if (row.finish === "UNKNOWN") {
+    score += 5;
+  } else if (observation.normalized_finish === "UNKNOWN") {
+    score += unknownFinishTieBreakScore(row.finish);
+  }
+
+  if (editionMatches) {
+    score += 35;
+  } else {
+    score += 5;
+  }
+
+  const targetStamp = observation.normalized_stamp;
+  const localStamp = normalizeStampToken(row.stamp);
+  if (localStamp === targetStamp) {
+    score += 25;
+  } else if (localStamp === "NONE" || targetStamp === "NONE") {
+    // Keep candidate viable when one side has no explicit stamp.
+    score += 5;
+  }
+
+  return score;
+}
+
 function buildUnmatchedRow(
   observation: NormalizedObservationRow,
   nowIso: string,
@@ -524,9 +574,81 @@ function chooseSinglePrinting(params: {
     };
   }
 
+  // Recovery path from Jungle debugging: stamp/detail recovery only.
+  // Finish/edition mismatches are disqualified in scoreRelaxedPrintingCandidate().
+  const relaxedRanked = [...setRows].sort((left, right) =>
+    scoreRelaxedPrintingCandidate({ row: right, observation }) - scoreRelaxedPrintingCandidate({ row: left, observation })
+    || String(left.finish_detail ?? "").localeCompare(String(right.finish_detail ?? ""))
+    || left.id.localeCompare(right.id),
+  );
+
+  if (relaxedRanked.length > 0) {
+    const best = relaxedRanked[0];
+    const bestScore = scoreRelaxedPrintingCandidate({ row: best, observation });
+    if (bestScore < 0) {
+      return {
+        matched: false,
+        reason: "NO_PRINTING_MATCH_STRICT_FINISH_EDITION",
+        metadata: {
+          canonicalSetCode,
+          cardNumber,
+          language,
+          targetFinish: observation.normalized_finish,
+          targetEdition: observation.normalized_edition,
+        },
+      };
+    }
+    const tied = relaxedRanked.filter((row) => scoreRelaxedPrintingCandidate({ row, observation }) === bestScore);
+
+    if (tied.length === 1) {
+      return {
+        matched: true,
+        printing: best,
+        matchType: "PRINTING_PROVIDER_ADOPTABLE",
+        confidence: 0.82,
+        metadata: {
+          canonicalSetCode,
+          cardNumber,
+          language,
+          targetFinish: observation.normalized_finish,
+          localFinish: best.finish,
+          targetEdition: observation.normalized_edition,
+          localEdition: best.edition,
+          targetStamp,
+          localStamp: normalizeStampToken(best.stamp),
+        },
+      };
+    }
+
+    const topFinishDetail = String(tied[0]?.finish_detail ?? "");
+    const topFinishDetailRows = tied.filter((row) => String(row.finish_detail ?? "") === topFinishDetail);
+    if (topFinishDetailRows.length === 1) {
+      const chosen = topFinishDetailRows[0];
+      return {
+        matched: true,
+        printing: chosen,
+        matchType: "PRINTING_PROVIDER_ADOPTABLE_TIEBREAK_FINISH_DETAIL",
+        confidence: 0.8,
+        metadata: {
+          canonicalSetCode,
+          cardNumber,
+          language,
+          candidateCount: tied.length,
+          chosenFinishDetail: chosen.finish_detail ?? null,
+          targetFinish: observation.normalized_finish,
+          localFinish: chosen.finish,
+          targetEdition: observation.normalized_edition,
+          localEdition: chosen.edition,
+          targetStamp,
+          localStamp: normalizeStampToken(chosen.stamp),
+        },
+      };
+    }
+  }
+
   return {
     matched: false,
-    reason: "NO_STRICT_PRINTING_MATCH",
+    reason: "NO_PRINTING_MATCH_AFTER_PROVIDER_ADOPTABLE_FALLBACK",
     metadata: {
       canonicalSetCode,
       cardNumber,
