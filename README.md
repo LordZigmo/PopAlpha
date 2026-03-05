@@ -70,6 +70,16 @@ Optional flags:
 - `--days=30` controls the historical window (max 90).
 - `--refreshPipeline=0` skips the initial full latest-table refresh.
 
+Wiring a set into the pipeline (generalized across all sets):
+1. **Canonical cards + card_printings** – Ensure the set exists with EN printings (e.g. via PokemonTCG canonical import or provider-specific import).
+2. **Provider ingest + match** – Run JustTCG (or other provider) ingest and normalized match so `variant_metrics` and `price_history_points` get populated for that set’s printings.
+3. **Backfill** – Run `npm run sets:backfill-summaries` so `set_finish_summary_latest` and `set_summary_snapshots` are refreshed for all sets (including the new one). Cron does this daily; the script chunks by set and by variant keys to avoid timeouts.
+4. **Validate** – `python3 -m pytest -q tests_py/test_set_pipeline_wired.py` asserts every set with card_printings has at least one row in the set-summary views. Sets that have printings but no provider ingest/match yet will appear in the failure message; run ingest and match for those sets, then backfill again.
+
+To see **how many** sets are fully wired (historical cache, fresh snapshot, sorted, finish summary), run:
+`python3 -m pytest tests_py/test_set_pipeline_wired.py::test_count_fully_wired_sets -s`
+It prints e.g. "Fully wired: 18 of 20 sets" and lists any shortfall with reasons.
+
 Extending to new providers:
 - Keep provider-specific ingestion logic writing into `price_history_points` and `variant_metrics`.
 - Reuse the same canonical `variant_ref` / `printing_id` identity.
@@ -85,6 +95,8 @@ Query params:
 - `pageSize` (default `250`, capped at `250`)
 - `setId` (optional, e.g. `sv4pt5`)
 - `dryRun` (optional boolean)
+
+**API key:** The importer calls the official Pokemon TCG API (`api.pokemontcg.io`). Set `POKEMONTCG_API_KEY` (or `POKEMON_TCG_API_KEY`) in `.env.local` with a key from [dev.pokemontcg.io](https://dev.pokemontcg.io/) — do not use a RapidAPI key here.
 
 If `ADMIN_SECRET` is set, include request header:
 - `x-admin-secret: <ADMIN_SECRET>`
@@ -105,6 +117,11 @@ Import a specific set:
 ```bash
 curl -X POST "https://popalpha.ai/api/admin/import/pokemontcg-canonical?setId=sv4pt5&pageStart=1&maxPages=2"
 ```
+
+Import all sets (full Pokemon TCG catalog; 100+ sets):
+- Start the dev server (`npm run dev`), then in another terminal run:
+  `npm run import:pokemontcg-all`
+- The script paginates through all cards (no `setId`), calling the import endpoint until done. Uses `ADMIN_SECRET` from `.env.local`; defaults to `BASE_URL=http://localhost:3000`. For production, set `BASE_URL` to your app URL.
 
 Apply migrations locally:
 ```bash

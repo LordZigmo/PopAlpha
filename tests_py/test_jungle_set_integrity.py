@@ -124,3 +124,86 @@ def test_jungle_has_16_holo_and_16_non_holo_in_1_to_32_window():
     non_holo_count = len(non_holo_numbers)
     assert holo_count == 16, f"Expected 16 holo numbers in Jungle 1..32, got {holo_count}"
     assert non_holo_count == 16, f"Expected 16 non-holo numbers in Jungle 1..32, got {non_holo_count}"
+
+
+def test_jungle_set_summary_pipeline_has_finish_and_snapshot_rows():
+    """
+    Pipeline existence check for the Jungle template set.
+
+    Skips when Jungle has no set-summary data yet (backfill not run, or no price
+    history for Jungle). Run `npm run sets:backfill-summaries` and ensure Jungle
+    has variant/price data for rows to appear.
+    """
+    finish_rows = _rest_get(
+        "public_set_finish_summary",
+        {
+            "select": "set_id,set_name,finish,market_cap,card_count,updated_at",
+            "set_name": "ilike.jungle",
+            "limit": "50",
+        },
+    )
+    if not finish_rows:
+        pytest.skip(
+            "No Jungle rows in public_set_finish_summary. "
+            "Run `npm run sets:backfill-summaries` and ensure Jungle has price history (JustTCG ingest + match)."
+        )
+    assert all(str(r.get("finish", "")).strip() for r in finish_rows), "Expected finish to be present on all finish rows"
+
+    snapshot_rows = _rest_get(
+        "public_set_summaries",
+        {
+            "select": "set_id,set_name,as_of_date,market_cap,heat_score,updated_at",
+            "set_name": "ilike.jungle",
+            "order": "as_of_date.desc",
+            "limit": "5",
+        },
+    )
+    if not snapshot_rows:
+        pytest.skip(
+            "No Jungle rows in public_set_summaries. "
+            "Run `npm run sets:backfill-summaries` and ensure Jungle has price history."
+        )
+    assert any(str(r.get("set_id", "")).strip() == "jungle" for r in snapshot_rows), "Expected at least one Jungle snapshot with set_id='jungle'"
+
+
+def test_jungle_set_summary_metrics_are_sane():
+    """
+    Numerical sanity checks for the Jungle template set.
+
+    Skips when Jungle has no set-summary snapshots yet. When data exists, asserts
+    non-negative metrics and reasonable percentage bounds.
+    """
+    rows = _rest_get(
+        "public_set_summaries",
+        {
+            "select": "set_id,as_of_date,market_cap,market_cap_all_variants,change_7d_pct,change_30d_pct,heat_score,breakout_count,value_zone_count,trend_bullish_count,vote_count",
+            "set_id": "eq.jungle",
+            "order": "as_of_date.desc",
+            "limit": "10",
+        },
+    )
+    if not rows:
+        pytest.skip(
+            "No Jungle rows in public_set_summaries for set_id='jungle'. "
+            "Run `npm run sets:backfill-summaries` and ensure Jungle has price history."
+        )
+
+    for row in rows:
+        market_cap = row.get("market_cap")
+        market_cap_all = row.get("market_cap_all_variants")
+        heat_score = row.get("heat_score")
+
+        assert market_cap is None or float(market_cap) >= 0, "market_cap should be non-negative when present"
+        assert market_cap_all is None or float(market_cap_all) >= 0, "market_cap_all_variants should be non-negative when present"
+        assert heat_score is None or float(heat_score) >= 0, "heat_score should be non-negative when present"
+
+        for key in ("breakout_count", "value_zone_count", "trend_bullish_count", "vote_count"):
+            value = row.get(key)
+            assert value is None or int(value) >= 0, f"{key} should be non-negative when present"
+
+        for key in ("change_7d_pct", "change_30d_pct"):
+            value = row.get(key)
+            if value is None:
+                continue
+            pct = float(value)
+            assert -100.0 <= pct <= 1000.0, f"{key} looks unreasonable: {pct}"

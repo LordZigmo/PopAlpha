@@ -2,6 +2,16 @@ import { getRequiredEnv } from "@/lib/env";
 
 const BASE_URL = "https://api.pokemontcg.io/v2";
 
+function getApiKey(): string {
+  const key = process.env.POKEMONTCG_API_KEY?.trim();
+  if (!key) {
+    throw new Error(
+      "Missing POKEMONTCG_API_KEY. Get a key from https://dev.pokemontcg.io/ and set it in .env.local. Do not use POKEMON_TCG_API_KEY (RapidAPI) here."
+    );
+  }
+  return key;
+}
+
 export type PokemonTcgSet = {
   id: string;
   name: string;
@@ -52,7 +62,7 @@ export class PokemonTcgClient {
   private readonly apiKey: string;
 
   constructor() {
-    this.apiKey = getRequiredEnv("POKEMONTCG_API_KEY");
+    this.apiKey = getApiKey();
   }
 
   private async requestJson<T>(path: string, params: URLSearchParams, attempt = 0): Promise<T> {

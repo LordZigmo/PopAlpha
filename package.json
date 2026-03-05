@@ -12,6 +12,7 @@
     "ebay:deletion-setup": "node scripts/ebay-deletion-setup.mjs",
     "justtcg:backfill-live": "node scripts/backfill-justtcg-live.mjs",
     "sets:backfill-summaries": "node scripts/backfill-set-summaries.mjs",
+    "import:pokemontcg-all": "node scripts/import-all-pokemontcg-canonical.mjs",
     "justtcg:repair-sweep": "node scripts/sweep-justtcg-finish-repair.mjs",
     "watch:unknown-finishes": "node scripts/watch-unknown-finishes.mjs",
     "ai:refresh-embeddings": "node scripts/refresh-card-embeddings.mjs",
@@ -46,7 +47,8 @@
     "eslint-config-next": "16.1.6",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.2.1",
-    "typescript": "^5"
+    "typescript": "^5",
+    "undici": "^6.0.0"
   },
   "engines": {
     "node": "20.x"

@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/require";
 import { dbAdmin } from "@/lib/db/admin";
-import { getRequiredEnv } from "@/lib/env";
 import type { PokemonTcgCard, PokemonTcgSet } from "@/lib/pokemontcg/client";
 import { measureAsync } from "@/lib/perf";
 import { buildCanonicalSearchDoc, normalizeSearchText } from "@/lib/search/normalize.mjs";
@@ -258,8 +257,9 @@ function parseRetryAfterMs(retryAfter: string | null): number | null {
 
 async function fetchWithRetry(url: string, options: RequestInit, attempt = 1): Promise<Response> {
   const maxAttempts = 6;
+  const timeoutMs = 120_000; // 120s — API can be very slow from server
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 20_000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(url, {
       ...options,
@@ -268,6 +268,12 @@ async function fetchWithRetry(url: string, options: RequestInit, attempt = 1): P
     });
 
     if (response.ok) return response;
+    if (response.status === 404) {
+      const body = (await response.text()).slice(0, 300);
+      throw new Error(
+        `Pokemon TCG API returned 404. Use an API key from https://dev.pokemontcg.io/ (X-Api-Key). Do not use a RapidAPI key here. ${body ? `Body: ${body}` : ""}`
+      );
+    }
     if (!isRetryable(response.status) || attempt >= maxAttempts) {
       const body = (await response.text()).slice(0, 300);
       throw new Error(`PokemonTCG API error ${response.status}: ${body}`);
@@ -280,8 +286,10 @@ async function fetchWithRetry(url: string, options: RequestInit, attempt = 1): P
     return fetchWithRetry(url, options, attempt + 1);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    const isAbort = message.includes("aborted") || (error instanceof Error && error.name === "AbortError");
+    const displayMessage = isAbort ? `request timed out after ${timeoutMs / 1000}s` : message;
     if (attempt >= maxAttempts) {
-      throw new Error(`PokemonTCG fetch failed after ${attempt} attempts: ${message}`);
+      throw new Error(`PokemonTCG fetch failed after ${attempt} attempts: ${displayMessage}`);
     }
     const backoff = Math.min(10_000, 800 * 2 ** (attempt - 1));
     const jitter = Math.floor(Math.random() * 251);
@@ -311,16 +319,29 @@ async function updateRun(
   await supabase.from("ingest_runs").update(updates).eq("id", runId);
 }
 
+function getPokemonTcgApiKey(): string {
+  const key = process.env.POKEMONTCG_API_KEY?.trim();
+  if (!key) {
+    throw new Error(
+      "Missing POKEMONTCG_API_KEY. Get a key from https://dev.pokemontcg.io/ and set it in .env.local. Do not use POKEMON_TCG_API_KEY (RapidAPI) here."
+    );
+  }
+  return key;
+}
+
 export async function POST(req: Request) {
   const auth = await requireAdmin(req);
   if (!auth.ok) return auth.response;
 
   let apiKey = "";
   try {
-    apiKey = getRequiredEnv("POKEMONTCG_API_KEY");
+    apiKey = getPokemonTcgApiKey();
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : String(error) }, { status: 500 });
   }
+
+  // So you can confirm in the dev server terminal that the key is loaded (length only, not the key)
+  console.log("[pokemontcg-import] POKEMONTCG_API_KEY present, length:", apiKey.length);
 
   const startedAt = Date.now();
   const params = parseParams(req);
@@ -376,7 +397,7 @@ export async function POST(req: Request) {
       const pageParams = new URLSearchParams();
       pageParams.set("page", String(page));
       pageParams.set("pageSize", String(params.pageSize));
-      pageParams.set("select", "id,name,number,rarity,supertype,subtypes,types,set,images,tcgplayer");
+      // Omit select — some field names can trigger 404; full response is fine
       if (params.setId) {
         pageParams.set("q", `set.id:${params.setId}`);
       }
@@ -403,67 +424,82 @@ export async function POST(req: Request) {
         if (canonicalError) throw new Error(canonicalError.message);
         itemsUpserted += canonicalRows.length;
 
-        for (const prepared of preparedCards) {
-          const canonicalAliases = prepared.canonicalAliases.map((alias) => ({
+        const allCanonicalAliases = preparedCards.flatMap((prepared) =>
+          prepared.canonicalAliases.map((alias) => ({
             alias,
             alias_norm: normalizeSearchText(alias),
             canonical_slug: prepared.canonical.slug,
-          }));
-          if (canonicalAliases.length > 0) {
-            const { error: canonicalAliasError } = await supabase.from("card_aliases").upsert(canonicalAliases, {
-              onConflict: "alias,canonical_slug",
-            });
-            if (canonicalAliasError) {
-              itemsFailed += 1;
-            } else {
-              itemsUpserted += canonicalAliases.length;
+          }))
+        );
+        if (allCanonicalAliases.length > 0) {
+          const { error: canonicalAliasError } = await supabase.from("card_aliases").upsert(allCanonicalAliases, {
+            onConflict: "alias,canonical_slug",
+          });
+          if (canonicalAliasError) {
+            itemsFailed += allCanonicalAliases.length;
+          } else {
+            itemsUpserted += allCanonicalAliases.length;
+          }
+        }
+
+        const allPrintingRows = preparedCards.flatMap((prepared) =>
+          prepared.printings.map((printing) => ({
+            canonical_slug: prepared.canonical.slug,
+            set_name: printing.setName,
+            set_code: printing.setCode,
+            year: printing.year,
+            card_number: printing.cardNumber,
+            language: printing.language,
+            finish: printing.finish,
+            finish_detail: printing.finishDetail,
+            edition: printing.edition,
+            stamp: null,
+            rarity: printing.rarity,
+            image_url: printing.imageUrl,
+            source: "pokemontcg",
+            source_id: printing.sourceId,
+            updated_at: new Date().toISOString(),
+          }))
+        );
+
+        const BATCH = 100;
+        let printingUpsertFailed = 0;
+        const sourceIdToPrintingId = new Map<string, string>();
+        for (let i = 0; i < allPrintingRows.length; i += BATCH) {
+          const chunk = allPrintingRows.slice(i, i + BATCH);
+          const { data: inserted, error: printingError } = await supabase
+            .from("card_printings")
+            .upsert(chunk, { onConflict: "source,source_id" })
+            .select("id, source_id");
+          if (printingError) {
+            printingUpsertFailed += chunk.length;
+          } else {
+            itemsUpserted += chunk.length;
+            for (const row of inserted ?? []) {
+              sourceIdToPrintingId.set(row.source_id, row.id);
             }
           }
+        }
+        itemsFailed += printingUpsertFailed;
 
+        const allPrintingAliases: { alias: string; printing_id: string }[] = [];
+        for (const prepared of preparedCards) {
           for (const printing of prepared.printings) {
-            const { data: printingRow, error: printingError } = await supabase
-              .from("card_printings")
-              .upsert(
-                {
-                  canonical_slug: prepared.canonical.slug,
-                  set_name: printing.setName,
-                  set_code: printing.setCode,
-                  year: printing.year,
-                  card_number: printing.cardNumber,
-                  language: printing.language,
-                  finish: printing.finish,
-                  finish_detail: printing.finishDetail,
-                  edition: printing.edition,
-                  stamp: null,
-                  rarity: printing.rarity,
-                  image_url: printing.imageUrl,
-                  source: "pokemontcg",
-                  source_id: printing.sourceId,
-                  updated_at: new Date().toISOString(),
-                },
-                { onConflict: "source,source_id" }
-              )
-              .select("id")
-              .single<{ id: string }>();
-
-            if (printingError || !printingRow) {
-              itemsFailed += 1;
-              continue;
+            const printingId = sourceIdToPrintingId.get(printing.sourceId);
+            if (!printingId) continue;
+            for (const alias of printing.aliases) {
+              allPrintingAliases.push({ alias, printing_id: printingId });
             }
-            itemsUpserted += 1;
-
-            const printingAliases = printing.aliases.map((alias) => ({
-              alias,
-              printing_id: printingRow.id,
-            }));
-            if (printingAliases.length > 0) {
-              const { error: aliasError } = await supabase.from("printing_aliases").upsert(printingAliases, { onConflict: "alias" });
-              if (aliasError) {
-                itemsFailed += 1;
-              } else {
-                itemsUpserted += printingAliases.length;
-              }
-            }
+          }
+        }
+        const ALIAS_BATCH = 400;
+        for (let i = 0; i < allPrintingAliases.length; i += ALIAS_BATCH) {
+          const aliasChunk = allPrintingAliases.slice(i, i + ALIAS_BATCH);
+          const { error: aliasError } = await supabase.from("printing_aliases").upsert(aliasChunk, { onConflict: "alias" });
+          if (aliasError) {
+            itemsFailed += aliasChunk.length;
+          } else {
+            itemsUpserted += aliasChunk.length;
           }
         }
       }
@@ -566,6 +602,8 @@ export async function POST(req: Request) {
   } catch (error) {
     const elapsedMs = Date.now() - startedAt;
     const message = error instanceof Error ? error.message : String(error);
+    console.error("[pokemontcg-import] Error:", message);
+    if (error instanceof Error && error.stack) console.error(error.stack);
     await updateRun(runId, {
       status: "failed",
       ok: false,

@@ -117,23 +117,28 @@ if (includePipelineRefresh) {
     let pipelineResult = null;
 
     if (printingIds.length > 0) {
-      const { data: variantRows, error: variantError } = await withRetry(
-        `load_variant_keys_batch_${batchIndex + 1}`,
-        () => supabase
-          .from("variant_metrics")
-          .select("canonical_slug, variant_ref, provider, grade")
-          .eq("provider", "JUSTTCG")
-          .eq("grade", "RAW")
-          .in("printing_id", printingIds)
-          .limit(5000),
-      );
-
-      if (variantError) {
-        console.error(`Failed to load variant keys for batch ${batchIndex + 1}: ${variantError.message}`);
-        process.exit(1);
+      const IN_CHUNK_SIZE = 100;
+      const idChunks = chunk(printingIds, IN_CHUNK_SIZE);
+      const variantRows = [];
+      for (let i = 0; i < idChunks.length; i += 1) {
+        const { data: chunkRows, error: variantError } = await withRetry(
+          `load_variant_keys_batch_${batchIndex + 1}_chunk_${i + 1}`,
+          () => supabase
+            .from("variant_metrics")
+            .select("canonical_slug, variant_ref, provider, grade")
+            .eq("provider", "JUSTTCG")
+            .eq("grade", "RAW")
+            .in("printing_id", idChunks[i])
+            .limit(5000),
+        );
+        if (variantError) {
+          console.error(`Failed to load variant keys for batch ${batchIndex + 1} chunk ${i + 1}: ${variantError.message}`);
+          process.exit(1);
+        }
+        variantRows.push(...(chunkRows ?? []));
       }
 
-      const keys = (variantRows ?? []).map((row) => ({
+      const keys = variantRows.map((row) => ({
         canonical_slug: row.canonical_slug,
         variant_ref: row.variant_ref,
         provider: row.provider,
@@ -141,19 +146,24 @@ if (includePipelineRefresh) {
       }));
 
       if (keys.length > 0) {
-        const { data, error } = await withRetry(
-          `refresh_pipeline_batch_${batchIndex + 1}`,
-          () => supabase.rpc("refresh_set_summary_pipeline_for_variants", {
-            keys,
-            target_as_of_date: today,
-            lookback_days: lookbackDays,
-          }),
-        );
-        if (error) {
-          console.error(`refresh_set_summary_pipeline_for_variants failed for batch ${batchIndex + 1}: ${error.message}`);
-          process.exit(1);
+        const KEY_RPC_CHUNK_SIZE = 150;
+        const keyChunks = chunk(keys, KEY_RPC_CHUNK_SIZE);
+        for (let k = 0; k < keyChunks.length; k += 1) {
+          const { data, error } = await withRetry(
+            `refresh_pipeline_batch_${batchIndex + 1}_keys_${k + 1}_of_${keyChunks.length}`,
+            () => supabase.rpc("refresh_set_summary_pipeline_for_variants", {
+              keys: keyChunks[k],
+              target_as_of_date: today,
+              lookback_days: lookbackDays,
+            }),
+          );
+          if (error) {
+            console.error(`refresh_set_summary_pipeline_for_variants failed for batch ${batchIndex + 1} keys chunk ${k + 1}: ${error.message}`);
+            process.exit(1);
+          }
+          pipelineResult = data;
+          if (sleepMs > 0 && k < keyChunks.length - 1) await delay(sleepMs);
         }
-        pipelineResult = data;
       }
     }
 
