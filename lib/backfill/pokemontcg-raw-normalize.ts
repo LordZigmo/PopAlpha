@@ -577,7 +577,7 @@ export async function runPokemonTcgRawNormalize(opts: {
         const { data, error } = await supabase
           .from("provider_normalized_observations")
           .upsert(rows, {
-            onConflict: "provider,provider_variant_id,provider_raw_payload_id",
+            onConflict: "provider_raw_payload_id,provider_card_id,provider_variant_id",
           })
           .select("id");
 
