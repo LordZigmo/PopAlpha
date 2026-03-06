@@ -131,12 +131,18 @@ async function loadLastCursorSetCode(): Promise<string | null> {
     .eq("status", "finished")
     .eq("ok", true)
     .order("ended_at", { ascending: false })
-    .limit(1)
-    .maybeSingle<LastRunRow>();
+    .limit(100);
 
   if (error) throw new Error(`ingest_runs(last cursor): ${error.message}`);
-  const value = typeof data?.meta?.nextSetCode === "string" ? data.meta.nextSetCode.trim() : "";
-  return value || null;
+  const rows = (data ?? []) as LastRunRow[];
+  for (const row of rows) {
+    const providerSetId = typeof row.meta?.providerSetId === "string" ? row.meta.providerSetId.trim() : "";
+    // Ignore targeted runs (providerSetId present); they should not reset global ingest cursor.
+    if (providerSetId) continue;
+    const value = typeof row.meta?.nextSetCode === "string" ? row.meta.nextSetCode.trim() : "";
+    if (value) return value;
+  }
+  return null;
 }
 
 async function insertRawPayloadRow(params: {
