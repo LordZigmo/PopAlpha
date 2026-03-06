@@ -127,8 +127,9 @@ export async function runJustTcgPipeline(opts: {
   }
 
   const endedAt = new Date().toISOString();
+  const coreOk = !firstError;
   return {
-    ok: !firstError && !metricsRefreshError && !priceChangesRefreshError,
+    ok: coreOk,
     provider: "JUSTTCG",
     startedAt,
     endedAt,
@@ -222,8 +223,9 @@ export async function runPokemonTcgPipeline(opts: {
   }
 
   const endedAt = new Date().toISOString();
+  const coreOk = !firstError;
   return {
-    ok: !firstError && !metricsRefreshError && !priceChangesRefreshError,
+    ok: coreOk,
     provider: "SCRYDEX",
     startedAt,
     endedAt,
