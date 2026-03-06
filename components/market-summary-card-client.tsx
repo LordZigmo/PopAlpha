@@ -219,7 +219,7 @@ export default function MarketSummaryCardClient({
               <div className="flex items-center justify-between gap-3">
                 <div className="flex flex-col gap-0.5">
                   <span className="text-[13px] text-[#A8A8A8]">JustTCG</span>
-                  <span className="text-[11px] text-[#6B6B6B]">{formatRelativeTime(justtcgAsOfTs) ?? "--"}</span>
+                  <span className="text-[12px] text-[#8A8A8A]">Updated: {formatRelativeTime(justtcgAsOfTs) ?? "--"}</span>
                 </div>
                 <span className="text-[14px] font-semibold tabular-nums text-[#EDEDED]">
                   {formatUsd(justtcgPrice)}
@@ -228,7 +228,7 @@ export default function MarketSummaryCardClient({
               <div className="flex items-center justify-between gap-3">
                 <div className="flex flex-col gap-0.5">
                   <span className="text-[13px] text-[#A8A8A8]">Scrydex</span>
-                  <span className="text-[11px] text-[#6B6B6B]">{formatRelativeTime(scrydexAsOfTs) ?? "--"}</span>
+                  <span className="text-[12px] text-[#8A8A8A]">Updated: {formatRelativeTime(scrydexAsOfTs) ?? "--"}</span>
                 </div>
                 <span className="text-[14px] font-semibold tabular-nums text-[#EDEDED]">
                   {formatUsd(scrydexPrice)}
