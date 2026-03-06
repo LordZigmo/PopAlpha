@@ -91,7 +91,7 @@ function selectSetsFromCursor(sets: CanonicalSet[], setLimit: number, cursorSetC
 
 async function loadCanonicalSets(): Promise<CanonicalSet[]> {
   const supabase = dbAdmin();
-  const pageSize = 5000;
+  const pageSize = 1000;
   const seen = new Set<string>();
   const sets: CanonicalSet[] = [];
 
@@ -102,6 +102,7 @@ async function loadCanonicalSets(): Promise<CanonicalSet[]> {
       .eq("language", "EN")
       .not("set_code", "is", null)
       .not("set_name", "is", null)
+      .order("id", { ascending: true })
       .range(from, from + pageSize - 1);
 
     if (error) throw new Error(`card_printings: ${error.message}`);

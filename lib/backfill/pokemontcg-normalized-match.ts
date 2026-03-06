@@ -352,7 +352,7 @@ async function loadCardPrintings(setCodes: string[]): Promise<Map<string, Printi
   if (setCodes.length === 0) return new Map();
 
   const supabase = dbAdmin();
-  const pageSize = 2000;
+  const pageSize = 1000;
   const rows: PrintingRow[] = [];
 
   for (let from = 0; ; from += pageSize) {
@@ -360,6 +360,7 @@ async function loadCardPrintings(setCodes: string[]): Promise<Map<string, Printi
       .from("card_printings")
       .select("id, canonical_slug, set_code, card_number, language, finish, edition, stamp")
       .in("set_code", setCodes)
+      .order("id", { ascending: true })
       .range(from, from + pageSize - 1);
 
     if (error) {
