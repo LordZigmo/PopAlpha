@@ -15,20 +15,25 @@ export async function GET(req: Request) {
   const auth = await requireCron(req);
   if (!auth.ok) return auth.response;
 
-  const url = new URL(req.url);
-  const set = url.searchParams.get("set")?.trim() || undefined;
-  const force = url.searchParams.get("force") === "1";
+  try {
+    const url = new URL(req.url);
+    const set = url.searchParams.get("set")?.trim() || undefined;
+    const force = url.searchParams.get("force") === "1";
 
-  const result = await runPokemonTcgPipeline({
-    providerSetId: set,
-    setLimit: parseOptionalInt(url.searchParams.get("sets")),
-    pageLimitPerSet: parseOptionalInt(url.searchParams.get("pages")),
-    maxRequests: parseOptionalInt(url.searchParams.get("maxRequests")),
-    payloadLimit: parseOptionalInt(url.searchParams.get("payloads")),
-    matchObservations: parseOptionalInt(url.searchParams.get("observations")),
-    timeseriesObservations: parseOptionalInt(url.searchParams.get("timeseriesObservations")),
-    force,
-  });
+    const result = await runPokemonTcgPipeline({
+      providerSetId: set,
+      setLimit: parseOptionalInt(url.searchParams.get("sets")),
+      pageLimitPerSet: parseOptionalInt(url.searchParams.get("pages")),
+      maxRequests: parseOptionalInt(url.searchParams.get("maxRequests")),
+      payloadLimit: parseOptionalInt(url.searchParams.get("payloads")),
+      matchObservations: parseOptionalInt(url.searchParams.get("observations")),
+      timeseriesObservations: parseOptionalInt(url.searchParams.get("timeseriesObservations")),
+      force,
+    });
 
-  return NextResponse.json(result, { status: result.ok ? 200 : 500 });
+    return NextResponse.json(result, { status: result.ok ? 200 : 500 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ ok: false, error: message }, { status: 500 });
+  }
 }

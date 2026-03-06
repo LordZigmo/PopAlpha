@@ -46,7 +46,11 @@
     },
     {
       "path": "/api/cron/run-scrydex-pipeline",
-      "schedule": "30 8 * * *"
+      "schedule": "20 * * * *"
+    },
+    {
+      "path": "/api/cron/run-scrydex-retry",
+      "schedule": "50 * * * *"
     }
   ]
 }
