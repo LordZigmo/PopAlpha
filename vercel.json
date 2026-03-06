@@ -21,6 +21,10 @@
       "schedule": "5 * * * *"
     },
     {
+      "path": "/api/cron/run-justtcg-retry",
+      "schedule": "35 * * * *"
+    },
+    {
       "path": "/api/cron/refresh-card-metrics",
       "schedule": "15 */6 * * *"
     },

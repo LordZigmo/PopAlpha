@@ -17,6 +17,22 @@ const DEFAULT_RETRY_ATTEMPTS = process.env.JUSTTCG_RAW_RETRY_ATTEMPTS
 const DEFAULT_REQUEST_DELAY_MS = process.env.JUSTTCG_RAW_REQUEST_DELAY_MS
   ? parseInt(process.env.JUSTTCG_RAW_REQUEST_DELAY_MS, 10)
   : 125;
+const DEFAULT_SET_DELAY_MS = process.env.JUSTTCG_RAW_SET_DELAY_MS
+  ? parseInt(process.env.JUSTTCG_RAW_SET_DELAY_MS, 10)
+  : 250;
+const DEFAULT_COOLDOWN_MINUTES = process.env.JUSTTCG_RAW_COOLDOWN_MINUTES
+  ? parseInt(process.env.JUSTTCG_RAW_COOLDOWN_MINUTES, 10)
+  : 180;
+const DEFAULT_MAX_ADAPTIVE_DELAY_MS = process.env.JUSTTCG_RAW_MAX_ADAPTIVE_DELAY_MS
+  ? parseInt(process.env.JUSTTCG_RAW_MAX_ADAPTIVE_DELAY_MS, 10)
+  : 2000;
+const DEFAULT_FAILED_QUEUE_LIMIT = process.env.JUSTTCG_FAILED_SET_QUEUE_LIMIT
+  ? parseInt(process.env.JUSTTCG_FAILED_SET_QUEUE_LIMIT, 10)
+  : 200;
+const PRIORITY_SET_CODES = (process.env.JUSTTCG_PRIORITY_SET_CODES ?? "")
+  .split(",")
+  .map((value) => value.trim())
+  .filter((value) => value.length > 0);
 
 type CanonicalSet = {
   setCode: string;
@@ -42,6 +58,18 @@ type LastRunRow = {
   meta: Record<string, unknown> | null;
 };
 
+type IngestTarget = {
+  setCode: string | null;
+  setName: string | null;
+  providerSetId: string;
+};
+
+type IngestRunState = {
+  cursorSetCode: string | null;
+  failedSetQueue: string[];
+  cooldownByProviderSet: Record<string, string>;
+};
+
 type RawIngestResult = {
   ok: boolean;
   job: string;
@@ -59,6 +87,8 @@ type RawIngestResult = {
   sampleSetResults: RawIngestSetSummary[];
   warningCount: number;
   warningSamples: string[];
+  skippedCooldownSets: number;
+  skippedCooldownSamples: string[];
   firstError: string | null;
 };
 
@@ -101,7 +131,27 @@ function selectSetsFromCursor(sets: CanonicalSet[], setLimit: number, cursorSetC
   return selected;
 }
 
-async function loadLastCursorSetCode(): Promise<string | null> {
+function parseStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter((item) => item.length > 0);
+}
+
+function parseCooldownMap(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object") return {};
+  const output: Record<string, string> = {};
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (!key) continue;
+    if (typeof raw !== "string") continue;
+    const ms = new Date(raw).getTime();
+    if (!Number.isFinite(ms)) continue;
+    output[key] = raw;
+  }
+  return output;
+}
+
+async function loadLastRunState(): Promise<IngestRunState> {
   const supabase = dbAdmin();
   const { data, error } = await supabase
     .from("ingest_runs")
@@ -112,9 +162,21 @@ async function loadLastCursorSetCode(): Promise<string | null> {
     .limit(1)
     .maybeSingle<LastRunRow>();
 
-  if (error) throw new Error(`ingest_runs(last cursor): ${error.message}`);
-  const value = typeof data?.meta?.nextSetCode === "string" ? data.meta.nextSetCode.trim() : "";
-  return value || null;
+  if (error) throw new Error(`ingest_runs(last state): ${error.message}`);
+
+  const meta = data?.meta ?? {};
+  const cursorRaw = typeof meta.nextSetCode === "string"
+    ? meta.nextSetCode
+    : (typeof meta.cursorSetCode === "string" ? meta.cursorSetCode : "");
+  const cursorSetCode = cursorRaw.trim() || null;
+  const failedSetQueue = parseStringArray(meta.failedSetQueue);
+  const cooldownByProviderSet = parseCooldownMap(meta.cooldownByProviderSet);
+
+  return {
+    cursorSetCode,
+    failedSetQueue,
+    cooldownByProviderSet,
+  };
 }
 
 function delayMs(ms: number): Promise<void> {
@@ -178,6 +240,53 @@ async function loadProviderSetMap(setCodes: string[]): Promise<Map<string, strin
   return byCode;
 }
 
+function buildAllTargets(params: {
+  sets: CanonicalSet[];
+  providerSetMap: Map<string, string>;
+}): IngestTarget[] {
+  return params.sets.map((set) => ({
+    setCode: set.setCode,
+    setName: set.setName,
+    providerSetId: params.providerSetMap.get(set.setCode) ?? setNameToJustTcgId(set.setName),
+  }));
+}
+
+function normalizeFailedSetQueue(queue: string[]): string[] {
+  const unique = new Set<string>();
+  const output: string[] = [];
+  for (const value of queue) {
+    const trimmed = value.trim();
+    if (!trimmed || unique.has(trimmed)) continue;
+    unique.add(trimmed);
+    output.push(trimmed);
+  }
+  return output.slice(0, DEFAULT_FAILED_QUEUE_LIMIT);
+}
+
+function isSetInCooldown(params: {
+  providerSetId: string;
+  cooldownByProviderSet: Record<string, string>;
+  nowMs: number;
+}): { active: boolean; untilIso: string | null } {
+  const untilIso = params.cooldownByProviderSet[params.providerSetId] ?? null;
+  if (!untilIso) return { active: false, untilIso: null };
+  const untilMs = new Date(untilIso).getTime();
+  if (!Number.isFinite(untilMs)) return { active: false, untilIso: null };
+  if (untilMs <= params.nowMs) return { active: false, untilIso };
+  return { active: true, untilIso };
+}
+
+function pruneCooldowns(cooldownByProviderSet: Record<string, string>, nowMs: number): Record<string, string> {
+  const output: Record<string, string> = {};
+  for (const [providerSetId, untilIso] of Object.entries(cooldownByProviderSet)) {
+    const untilMs = new Date(untilIso).getTime();
+    if (!Number.isFinite(untilMs)) continue;
+    if (untilMs <= nowMs) continue;
+    output[providerSetId] = untilIso;
+  }
+  return output;
+}
+
 async function insertRawPayloadRow(params: {
   providerSetId: string;
   offset: number;
@@ -221,6 +330,7 @@ export async function runJustTcgRawIngest(opts: {
   providerSetId?: string | null;
   pageLimitPerSet?: number;
   maxRequests?: number;
+  retryOnly?: boolean;
 } = {}): Promise<RawIngestResult> {
   const supabase = dbAdmin();
   const startedAt = new Date().toISOString();
@@ -229,6 +339,10 @@ export async function runJustTcgRawIngest(opts: {
   const maxRequests = parsePositiveInt(opts.maxRequests, DEFAULT_MAX_REQUESTS);
   const retryAttempts = parsePositiveInt(DEFAULT_RETRY_ATTEMPTS, 2);
   const requestDelayMs = Math.max(0, parsePositiveInt(DEFAULT_REQUEST_DELAY_MS, 125));
+  const setDelayMs = Math.max(0, parsePositiveInt(DEFAULT_SET_DELAY_MS, 250));
+  const cooldownMinutes = parsePositiveInt(DEFAULT_COOLDOWN_MINUTES, 180);
+  const maxAdaptiveDelayMs = Math.max(requestDelayMs, parsePositiveInt(DEFAULT_MAX_ADAPTIVE_DELAY_MS, 2000));
+  const cooldownMs = cooldownMinutes * 60 * 1000;
 
   let firstError: string | null = null;
   let requestsMade = 0;
@@ -237,25 +351,84 @@ export async function runJustTcgRawIngest(opts: {
   let cardsFetched = 0;
   let failedRequests = 0;
   let setsProcessed = 0;
+  let skippedCooldownSets = 0;
   const sampleSetResults: RawIngestSetSummary[] = [];
   const warningSamples: string[] = [];
+  const skippedCooldownSamples: string[] = [];
+  let adaptiveDelayMs = requestDelayMs;
+  const nowMs = Date.now();
 
-  const cursorSetCode = opts.providerSetId ? null : await loadLastCursorSetCode();
+  const priorState = opts.providerSetId
+    ? { cursorSetCode: null, failedSetQueue: [] as string[], cooldownByProviderSet: {} as Record<string, string> }
+    : await loadLastRunState();
+  let failedSetQueue = normalizeFailedSetQueue(priorState.failedSetQueue);
+  let cooldownByProviderSet = pruneCooldowns(priorState.cooldownByProviderSet, nowMs);
+
   const targets = opts.providerSetId
     ? [{ setCode: null, setName: null, providerSetId: opts.providerSetId }]
     : await (async () => {
         const sets = await loadCanonicalSets();
-        const selectedSets = selectSetsFromCursor(sets, setLimit, cursorSetCode);
-        const providerSetMap = await loadProviderSetMap(selectedSets.map((set) => set.setCode));
-        return selectedSets.map((set) => ({
-          setCode: set.setCode,
-          setName: set.setName,
-          providerSetId: providerSetMap.get(set.setCode) ?? setNameToJustTcgId(set.setName),
-        }));
+        const providerSetMap = await loadProviderSetMap(sets.map((set) => set.setCode));
+        const allTargets = buildAllTargets({ sets, providerSetMap });
+        const byProviderSetId = new Map(allTargets.map((target) => [target.providerSetId, target] as const));
+        const bySetCode = new Map(allTargets.map((target) => [target.setCode, target] as const));
+        const cursorCandidates = selectSetsFromCursor(sets, sets.length, priorState.cursorSetCode)
+          .map((set) => bySetCode.get(set.setCode))
+          .filter((target): target is IngestTarget => Boolean(target));
+
+        const selectedTargets: IngestTarget[] = [];
+        const selectedProviderIds = new Set<string>();
+        const addIfEligible = (target: IngestTarget | undefined | null) => {
+          if (!target) return;
+          if (selectedTargets.length >= setLimit) return;
+          if (selectedProviderIds.has(target.providerSetId)) return;
+          const cooldown = isSetInCooldown({
+            providerSetId: target.providerSetId,
+            cooldownByProviderSet,
+            nowMs,
+          });
+          if (cooldown.active) {
+            skippedCooldownSets += 1;
+            if (skippedCooldownSamples.length < 25) {
+              skippedCooldownSamples.push(`set=${target.providerSetId} until=${cooldown.untilIso ?? "unknown"}`);
+            }
+            return;
+          }
+          selectedProviderIds.add(target.providerSetId);
+          selectedTargets.push(target);
+        };
+
+        for (const providerSetId of failedSetQueue) {
+          addIfEligible(byProviderSetId.get(providerSetId) ?? {
+            setCode: null,
+            setName: null,
+            providerSetId,
+          });
+        }
+        if (!opts.retryOnly) {
+          for (const setCode of PRIORITY_SET_CODES) addIfEligible(bySetCode.get(setCode) ?? null);
+          for (const target of cursorCandidates) {
+            addIfEligible(target);
+            if (selectedTargets.length >= setLimit) break;
+          }
+        }
+
+        const nextSetCode = opts.retryOnly
+          ? (priorState.cursorSetCode ?? null)
+          : (cursorCandidates.at(Math.min(setLimit, cursorCandidates.length) - 1)?.setCode ?? priorState.cursorSetCode ?? null);
+
+        return {
+          selectedTargets,
+          nextSetCode,
+        };
       })();
-  const nextSetCode = targets.length > 0 && !opts.providerSetId
-    ? (targets[targets.length - 1]?.setCode ?? null)
-    : null;
+  const resolvedTargets = Array.isArray(targets)
+    ? targets
+    : targets.selectedTargets;
+  const nextSetCode = Array.isArray(targets)
+    ? null
+    : targets.nextSetCode;
+  const cursorSetCode = priorState.cursorSetCode;
 
   const { data: runRow, error: runStartError } = await supabase
     .from("ingest_runs")
@@ -275,7 +448,10 @@ export async function runJustTcgRawIngest(opts: {
         providerSetId: opts.providerSetId ?? null,
         cursorSetCode,
         nextSetCode,
-        setsPlanned: targets.length,
+        setsPlanned: resolvedTargets.length,
+        skippedCooldownSets,
+        skippedCooldownSamples,
+        failedSetQueue,
       },
     })
     .select("id")
@@ -287,7 +463,7 @@ export async function runJustTcgRawIngest(opts: {
 
   const runId = runRow?.id ?? null;
 
-  for (const target of targets) {
+  for (const target of resolvedTargets) {
     if (requestsMade >= maxRequests) break;
     setsProcessed += 1;
 
@@ -296,6 +472,9 @@ export async function runJustTcgRawIngest(opts: {
     let offset = 0;
     let hasMore = false;
     let lastStatus: number | null = null;
+
+    let setHadSuccess = false;
+    let setHadRetryableFailure = false;
 
     while (requestsMade < maxRequests && pagesFetched < pageLimitPerSet) {
       const fetchedAt = new Date().toISOString();
@@ -314,8 +493,10 @@ export async function runJustTcgRawIngest(opts: {
 
         if (response.httpStatus >= 200 && response.httpStatus < 300) break;
         const shouldRetry = response.httpStatus === 429 || response.httpStatus >= 500;
+        if (response.httpStatus === 429) setHadRetryableFailure = true;
         if (!shouldRetry || attempts > retryAttempts) break;
-        const retryDelay = Math.min(2000, requestDelayMs * (attempts + 1) * 2);
+        adaptiveDelayMs = Math.min(maxAdaptiveDelayMs, Math.max(requestDelayMs, adaptiveDelayMs * 2));
+        const retryDelay = Math.min(maxAdaptiveDelayMs, adaptiveDelayMs * (attempts + 1));
         await delayMs(retryDelay);
       }
 
@@ -346,6 +527,11 @@ export async function runJustTcgRawIngest(opts: {
 
       if (response.httpStatus < 200 || response.httpStatus >= 300) {
         failedRequests += 1;
+        if (response.httpStatus === 429 || response.httpStatus >= 500) {
+          setHadRetryableFailure = true;
+          const cooldownUntil = new Date(Date.now() + cooldownMs).toISOString();
+          cooldownByProviderSet[target.providerSetId] = cooldownUntil;
+        }
         if (warningSamples.length < 25) {
           warningSamples.push(
             `set=${target.providerSetId} page=${page} status=${response.httpStatus} attempts=${attempts}`,
@@ -358,10 +544,20 @@ export async function runJustTcgRawIngest(opts: {
       cardsFetched += response.cards.length;
       cardsFetchedForSet += response.cards.length;
       hasMore = response.hasMore;
+      setHadSuccess = true;
+      adaptiveDelayMs = Math.max(requestDelayMs, Math.floor(adaptiveDelayMs * 0.9));
 
       if (!response.hasMore || response.cards.length === 0) break;
       offset += PAGE_LIMIT;
-      await delayMs(requestDelayMs);
+      await delayMs(adaptiveDelayMs);
+    }
+
+    if (setHadRetryableFailure) {
+      failedSetQueue = normalizeFailedSetQueue([...failedSetQueue, target.providerSetId]);
+    }
+    if (setHadSuccess) {
+      failedSetQueue = failedSetQueue.filter((providerSetId) => providerSetId !== target.providerSetId);
+      delete cooldownByProviderSet[target.providerSetId];
     }
 
     if (sampleSetResults.length < 25) {
@@ -375,7 +571,13 @@ export async function runJustTcgRawIngest(opts: {
         hasMore,
       });
     }
+
+    if (setDelayMs > 0) {
+      await delayMs(setDelayMs);
+    }
   }
+
+  cooldownByProviderSet = pruneCooldowns(cooldownByProviderSet, Date.now());
 
   const endedAt = new Date().toISOString();
   const result: RawIngestResult = {
@@ -384,7 +586,7 @@ export async function runJustTcgRawIngest(opts: {
     provider: PROVIDER,
     startedAt,
     endedAt,
-    setsPlanned: targets.length,
+    setsPlanned: resolvedTargets.length,
     setsProcessed,
     requestsMade,
     rawPayloadsInserted,
@@ -395,6 +597,8 @@ export async function runJustTcgRawIngest(opts: {
     sampleSetResults,
     warningCount: failedRequests,
     warningSamples,
+    skippedCooldownSets,
+    skippedCooldownSamples,
     firstError,
   };
 
@@ -416,7 +620,7 @@ export async function runJustTcgRawIngest(opts: {
           providerSetId: opts.providerSetId ?? null,
           cursorSetCode,
           nextSetCode,
-          setsPlanned: targets.length,
+          setsPlanned: resolvedTargets.length,
           setsProcessed,
           requestsMade,
           rawPayloadsInserted,
@@ -424,6 +628,11 @@ export async function runJustTcgRawIngest(opts: {
           sampleSetResults,
           warningCount: failedRequests,
           warningSamples,
+          skippedCooldownSets,
+          skippedCooldownSamples,
+          failedSetQueue,
+          cooldownByProviderSet,
+          adaptiveDelayMs,
           firstError,
         },
       })

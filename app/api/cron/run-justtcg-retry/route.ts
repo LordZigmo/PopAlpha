@@ -16,20 +16,17 @@ export async function GET(req: Request) {
   if (!auth.ok) return auth.response;
 
   const url = new URL(req.url);
-  const set = url.searchParams.get("set")?.trim() || undefined;
   const force = url.searchParams.get("force") === "1";
-  const retryOnly = url.searchParams.get("retryOnly") === "1";
 
   const result = await runJustTcgPipeline({
-    providerSetId: set,
-    setLimit: parseOptionalInt(url.searchParams.get("sets")),
+    setLimit: parseOptionalInt(url.searchParams.get("sets")) ?? 20,
     pageLimitPerSet: parseOptionalInt(url.searchParams.get("pages")),
     maxRequests: parseOptionalInt(url.searchParams.get("maxRequests")),
     payloadLimit: parseOptionalInt(url.searchParams.get("payloads")),
     matchObservations: parseOptionalInt(url.searchParams.get("observations")),
     timeseriesObservations: parseOptionalInt(url.searchParams.get("timeseriesObservations")),
     force,
-    retryOnly,
+    retryOnly: true,
   });
 
   return NextResponse.json(result, { status: result.ok ? 200 : 500 });

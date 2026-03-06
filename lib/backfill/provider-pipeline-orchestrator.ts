@@ -53,6 +53,7 @@ export async function runJustTcgPipeline(opts: {
   matchObservations?: number;
   timeseriesObservations?: number;
   force?: boolean;
+  retryOnly?: boolean;
 } = {}): Promise<PipelineResult> {
   const startedAt = new Date().toISOString();
   const steps: PipelineStep<object>[] = [];
@@ -63,6 +64,7 @@ export async function runJustTcgPipeline(opts: {
     setLimit: opts.setLimit,
     pageLimitPerSet: opts.pageLimitPerSet,
     maxRequests: opts.maxRequests,
+    retryOnly: opts.retryOnly === true,
   });
   steps.push({ name: "ingest", ok: ingest.ok, result: ingest });
   if (!ingest.ok && !hasIngestProgress(ingest)) {
