@@ -591,10 +591,33 @@ export async function runPokemonTcgRawNormalize(opts: {
           .select("id");
 
         if (error) {
-          throw new Error(`provider_normalized_observations(upsert): ${error.message}`);
+          const message = String(error.message ?? "");
+          const duplicateAffectError = "ON CONFLICT DO UPDATE command cannot affect row a second time";
+          if (!message.includes(duplicateAffectError)) {
+            throw new Error(`provider_normalized_observations(upsert): ${message}`);
+          }
+
+          // Defensive fallback for unexpected duplicate-key batches:
+          // retry row-by-row so one bad row does not fail the whole payload.
+          let fallbackCount = 0;
+          for (const row of dedupedRows) {
+            const { data: singleData, error: singleError } = await supabase
+              .from("provider_normalized_observations")
+              .upsert(row, {
+                onConflict: "provider_raw_payload_id,provider_card_id,provider_variant_id",
+              })
+              .select("id");
+            if (singleError) {
+              throw new Error(`provider_normalized_observations(upsert): ${singleError.message}`);
+            }
+            fallbackCount += (singleData ?? []).length;
+          }
+          insertedOrUpdated = fallbackCount;
+          observationsUpserted += insertedOrUpdated;
+        } else {
+          insertedOrUpdated = (data ?? []).length;
+          observationsUpserted += insertedOrUpdated;
         }
-        insertedOrUpdated = (data ?? []).length;
-        observationsUpserted += insertedOrUpdated;
       }
 
       if (samplePayloads.length < 25) {
