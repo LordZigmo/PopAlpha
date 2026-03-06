@@ -16,6 +16,8 @@ type MarketSummaryCardClientProps = {
     printingId: string;
     label: string;
     currentPrice: number | null;
+    justtcgPrice: number | null;
+    scrydexPrice: number | null;
     asOfTs: string | null;
     trendSlope7d?: number | null;
     history7d: HistoryPointRow[];
@@ -136,6 +138,8 @@ export default function MarketSummaryCardClient({
     ?? null;
 
   const currentPrice = activeVariant?.currentPrice ?? null;
+  const justtcgPrice = activeVariant?.justtcgPrice ?? null;
+  const scrydexPrice = activeVariant?.scrydexPrice ?? null;
   const asOfTs = activeVariant?.asOfTs ?? null;
   const history7d = activeVariant?.history7d ?? [];
   const history30d = activeVariant?.history30d ?? [];
@@ -196,12 +200,26 @@ export default function MarketSummaryCardClient({
           <div className="space-y-4">
             {/* Hero price */}
             <div className="flex items-baseline justify-between gap-2">
-              <span className="text-[38px] font-bold leading-none tracking-[-0.03em] tabular-nums text-[#F0F0F0] sm:text-[44px]">
-                {formatUsd(currentPrice)}
-              </span>
-              <span className="shrink-0 text-[14px] text-[#6B6B6B]">
-                {formatRelativeTime(asOfTs) ?? ""}
-              </span>
+              <div>
+                <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#8A8A8A]">
+                  Market Price (Blended)
+                </p>
+                <span className="text-[38px] font-bold leading-none tracking-[-0.03em] tabular-nums text-[#F0F0F0] sm:text-[44px]">
+                  {formatUsd(currentPrice)}
+                </span>
+              </div>
+              <span className="shrink-0 text-[14px] text-[#6B6B6B]">{formatRelativeTime(asOfTs) ?? ""}</span>
+            </div>
+
+            <div className="grid grid-cols-1 gap-2 rounded-2xl border border-white/[0.06] bg-[#151515] px-3 py-3 sm:grid-cols-2">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[13px] text-[#A8A8A8]">JustTCG</span>
+                <span className="text-[14px] font-semibold tabular-nums text-[#EDEDED]">{formatUsd(justtcgPrice)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[13px] text-[#A8A8A8]">Scrydex</span>
+                <span className="text-[14px] font-semibold tabular-nums text-[#EDEDED]">{formatUsd(scrydexPrice)}</span>
+              </div>
             </div>
 
             {/* Chart */}

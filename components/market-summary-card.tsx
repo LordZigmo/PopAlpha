@@ -21,7 +21,7 @@ type HistoryPointRow = {
 
 type PriceHistoryRow = {
   variant_ref: string | null;
-  provider: "JUSTTCG" | "POKEMON_TCG_API" | string;
+  provider: "JUSTTCG" | "SCRYDEX" | "POKEMON_TCG_API" | string;
   currency: string | null;
   ts: string;
   price: number;
@@ -70,6 +70,13 @@ function normalizeHistoryPoints(rows: Array<{ ts: string; price: number }>): His
     .sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
 }
 
+function normalizeProviderName(provider: string | null | undefined): "JUSTTCG" | "SCRYDEX" | null {
+  const normalized = String(provider ?? "").toUpperCase();
+  if (normalized === "JUSTTCG") return "JUSTTCG";
+  if (normalized === "SCRYDEX" || normalized === "POKEMON_TCG_API") return "SCRYDEX";
+  return null;
+}
+
 async function loadAllHistoryRows(params: {
   supabase: ReturnType<typeof dbPublic>;
   canonicalSlug: string;
@@ -82,7 +89,7 @@ async function loadAllHistoryRows(params: {
       .from("public_price_history")
       .select("variant_ref, provider, currency, ts, price")
       .eq("canonical_slug", params.canonicalSlug)
-      .in("provider", ["JUSTTCG", "POKEMON_TCG_API"])
+      .in("provider", ["JUSTTCG", "SCRYDEX", "POKEMON_TCG_API"])
       .order("ts", { ascending: false })
       .range(from, from + pageSize - 1);
 
@@ -154,8 +161,8 @@ function buildMergedHistory(rows: PriceHistoryRow[], fxRows: FxRateRow[]): Histo
     const parsedTs = new Date(row.ts);
     if (Number.isNaN(parsedTs.getTime())) continue;
     const bucketTs = parsedTs.toISOString();
-    const provider = String(row.provider ?? "").toUpperCase();
-    if (provider !== "JUSTTCG" && provider !== "POKEMON_TCG_API") continue;
+    const provider = normalizeProviderName(row.provider);
+    if (!provider) continue;
     const usdPrice = convertRowToUsd(row, fxRows);
     if (!Number.isFinite(usdPrice) || usdPrice === null || usdPrice <= 0) continue;
     const key = `${bucketTs}|${provider}`;
@@ -228,6 +235,36 @@ function buildMergedHistory(rows: PriceHistoryRow[], fxRows: FxRateRow[]): Histo
   return mergedPoints;
 }
 
+function latestProviderPrices(rows: PriceHistoryRow[], fxRows: FxRateRow[]): {
+  justtcgPrice: number | null;
+  scrydexPrice: number | null;
+} {
+  let justtcg: { tsMs: number; price: number } | null = null;
+  let scrydex: { tsMs: number; price: number } | null = null;
+
+  for (const row of rows) {
+    const provider = normalizeProviderName(row.provider);
+    if (!provider) continue;
+    const tsMs = new Date(row.ts).getTime();
+    if (!Number.isFinite(tsMs)) continue;
+    const usdPrice = convertRowToUsd(row, fxRows);
+    if (!Number.isFinite(usdPrice) || usdPrice === null || usdPrice <= 0) continue;
+
+    if (provider === "JUSTTCG" && (!justtcg || tsMs > justtcg.tsMs)) {
+      justtcg = { tsMs, price: usdPrice };
+      continue;
+    }
+    if (provider === "SCRYDEX" && (!scrydex || tsMs > scrydex.tsMs)) {
+      scrydex = { tsMs, price: usdPrice };
+    }
+  }
+
+  return {
+    justtcgPrice: justtcg?.price ?? null,
+    scrydexPrice: scrydex?.price ?? null,
+  };
+}
+
 export default async function MarketSummaryCard({
   canonicalSlug,
   selectedPrintingId,
@@ -281,13 +318,12 @@ export default async function MarketSummaryCard({
 
   const variantPayload = variants.map((variant) => {
     const rawVariantPrefix = `${variant.printingId}::RAW`;
-    const mergedHistory = buildMergedHistory(
-      allHistoryRows.filter((row) => {
-        const variantRef = row.variant_ref ?? "";
-        return variantRef === rawVariantPrefix || variantRef.startsWith(`${rawVariantPrefix}::`);
-      }),
-      fxRows
-    );
+    const variantRows = allHistoryRows.filter((row) => {
+      const variantRef = row.variant_ref ?? "";
+      return variantRef === rawVariantPrefix || variantRef.startsWith(`${rawVariantPrefix}::`);
+    });
+    const mergedHistory = buildMergedHistory(variantRows, fxRows);
+    const providerPrices = latestProviderPrices(variantRows, fxRows);
     const fullHistory = normalizeHistoryPoints(mergedHistory);
     const history7d = filterRecentDays(fullHistory, 7);
     const history30d = filterRecentDays(fullHistory, 30);
@@ -313,6 +349,8 @@ export default async function MarketSummaryCard({
         ?? metrics?.median_30d
         ?? null,
       currentPrice: latestMergedPoint?.price ?? null,
+      justtcgPrice: providerPrices.justtcgPrice,
+      scrydexPrice: providerPrices.scrydexPrice,
       asOfTs: latestMergedPoint?.ts ?? null,
       history7d,
       history30d,
