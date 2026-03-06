@@ -8,7 +8,10 @@ const ENDPOINT = "/en/expansions/{id}/cards";
 const DEFAULT_PAYLOADS_PER_RUN = process.env.SCRYDEX_NORMALIZE_PAYLOADS_PER_RUN
   ? parseInt(process.env.SCRYDEX_NORMALIZE_PAYLOADS_PER_RUN, 10)
   : 50;
-const RAW_SCAN_PAGE_SIZE = 50;
+const RAW_SCAN_PAGE_SIZE = 20;
+const PAYLOAD_LOAD_RETRIES = process.env.SCRYDEX_NORMALIZE_PAYLOAD_LOAD_RETRIES
+  ? parseInt(process.env.SCRYDEX_NORMALIZE_PAYLOAD_LOAD_RETRIES, 10)
+  : 2;
 
 type RawPayloadRow = {
   id: string;
@@ -90,6 +93,7 @@ type RawNormalizeResult = {
   payloadsProcessed: number;
   payloadsSkippedAlreadyNormalized: number;
   payloadsSkippedNonSuccess: number;
+  payloadsSkippedLoadError: number;
   observationsBuilt: number;
   observationsUpserted: number;
   singleObservations: number;
@@ -318,6 +322,7 @@ async function loadCandidatePayloads(params: {
   scanned: number;
   skippedAlreadyNormalized: number;
   skippedNonSuccess: number;
+  skippedLoadError: number;
 }> {
   const supabase = dbAdmin();
   const force = params.force === true || Boolean(params.rawPayloadId);
@@ -343,6 +348,7 @@ async function loadCandidatePayloads(params: {
       scanned: row.length,
       skippedAlreadyNormalized: 0,
       skippedNonSuccess,
+      skippedLoadError: 0,
     };
   }
 
@@ -350,6 +356,23 @@ async function loadCandidatePayloads(params: {
   let scanned = 0;
   let skippedAlreadyNormalized = 0;
   let skippedNonSuccess = 0;
+  let skippedLoadError = 0;
+
+  function isRetryableLoadError(message: string): boolean {
+    const text = message.toLowerCase();
+    return (
+      text.includes("statement timeout")
+      || text.includes("canceling statement")
+      || text.includes("web server is down")
+      || text.includes("error code 521")
+      || text.includes("fetch failed")
+      || text.includes("connection")
+    );
+  }
+
+  async function sleep(ms: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+  }
 
   for (let from = 0; selected.length < params.payloadLimit; from += RAW_SCAN_PAGE_SIZE) {
     let query = supabase
@@ -403,22 +426,33 @@ async function loadCandidatePayloads(params: {
     }
 
     if (selectedIds.length > 0) {
-      const { data: fullRows, error: fullRowsError } = await supabase
-        .from("provider_raw_payloads")
-        .select("id, provider, endpoint, params, response, status_code, fetched_at, request_hash, response_hash")
-        .in("id", selectedIds);
-
-      if (fullRowsError) {
-        throw new Error(`provider_raw_payloads(load selected): ${fullRowsError.message}`);
-      }
-
-      const fullRowsById = new Map<string, RawPayloadRow>();
-      for (const row of (fullRows ?? []) as RawPayloadRow[]) {
-        fullRowsById.set(row.id, row);
-      }
-
       for (const id of selectedIds) {
-        const fullRow = fullRowsById.get(id);
+        let fullRow: RawPayloadRow | null = null;
+        let lastError: string | null = null;
+
+        for (let attempt = 0; attempt <= PAYLOAD_LOAD_RETRIES; attempt += 1) {
+          const { data: loadedRow, error: loadError } = await supabase
+            .from("provider_raw_payloads")
+            .select("id, provider, endpoint, params, response, status_code, fetched_at, request_hash, response_hash")
+            .eq("id", id)
+            .eq("provider", PROVIDER)
+            .eq("endpoint", ENDPOINT)
+            .maybeSingle<RawPayloadRow>();
+
+          if (!loadError) {
+            fullRow = loadedRow ?? null;
+            break;
+          }
+
+          lastError = loadError.message ?? "unknown load error";
+          if (!isRetryableLoadError(lastError) || attempt >= PAYLOAD_LOAD_RETRIES) break;
+          await sleep(150 * (attempt + 1));
+        }
+
+        if (!fullRow && lastError) {
+          skippedLoadError += 1;
+          continue;
+        }
         if (!fullRow) continue;
         selected.push(fullRow);
         if (selected.length >= params.payloadLimit) break;
@@ -431,6 +465,7 @@ async function loadCandidatePayloads(params: {
     scanned,
     skippedAlreadyNormalized,
     skippedNonSuccess,
+    skippedLoadError,
   };
 }
 
@@ -448,6 +483,7 @@ export async function runPokemonTcgRawNormalize(opts: {
   let payloadsScanned = 0;
   let payloadsSkippedAlreadyNormalized = 0;
   let payloadsSkippedNonSuccess = 0;
+  let payloadsSkippedLoadError = 0;
   let payloadsProcessed = 0;
   let observationsBuilt = 0;
   let observationsUpserted = 0;
@@ -494,6 +530,7 @@ export async function runPokemonTcgRawNormalize(opts: {
     payloadsScanned = candidateResult.scanned;
     payloadsSkippedAlreadyNormalized = candidateResult.skippedAlreadyNormalized;
     payloadsSkippedNonSuccess = candidateResult.skippedNonSuccess;
+    payloadsSkippedLoadError = candidateResult.skippedLoadError;
 
     const nowIso = new Date().toISOString();
 
@@ -577,6 +614,7 @@ export async function runPokemonTcgRawNormalize(opts: {
     payloadsProcessed,
     payloadsSkippedAlreadyNormalized,
     payloadsSkippedNonSuccess,
+    payloadsSkippedLoadError,
     observationsBuilt,
     observationsUpserted,
     singleObservations,
@@ -606,6 +644,7 @@ export async function runPokemonTcgRawNormalize(opts: {
           payloadsProcessed,
           payloadsSkippedAlreadyNormalized,
           payloadsSkippedNonSuccess,
+          payloadsSkippedLoadError,
           observationsBuilt,
           observationsUpserted,
           samplePayloads,
