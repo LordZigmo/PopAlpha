@@ -5,11 +5,20 @@ const JOB = "scrydex_normalized_match";
 const DEFAULT_OBSERVATIONS_PER_RUN = process.env.POKEMONTCG_MATCH_OBSERVATIONS_PER_RUN
   ? parseInt(process.env.POKEMONTCG_MATCH_OBSERVATIONS_PER_RUN, 10)
   : 1200;
+const UNMATCHED_RETRY_HOURS = process.env.SCRYDEX_UNMATCHED_RETRY_HOURS
+  ? parseInt(process.env.SCRYDEX_UNMATCHED_RETRY_HOURS, 10)
+  : 6;
 const SCAN_PAGE_SIZE = 100;
 type ScanDirection = "newest" | "oldest";
 
 type ScanRow = {
   id: string;
+};
+
+type ExistingMatchRow = {
+  provider_normalized_observation_id: string;
+  match_status: "MATCHED" | "UNMATCHED";
+  updated_at: string | null;
 };
 
 type NormalizedObservationRow = {
@@ -109,6 +118,12 @@ type MatchDecision = MatchedDecision | UnmatchedDecision;
 function parsePositiveInt(value: number | undefined, fallback: number): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
   return Math.max(1, Math.floor(value));
+}
+
+function parseDateMs(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : null;
 }
 
 function normalizeStampToken(value: string | null | undefined): "NONE" | string {
@@ -219,6 +234,8 @@ async function loadCandidateObservations(params: {
   const selected: NormalizedObservationRow[] = [];
   let scanned = 0;
   let skippedAlreadyMatched = 0;
+  const unmatchedRetryMs = Math.max(1, UNMATCHED_RETRY_HOURS) * 60 * 60 * 1000;
+  const nowMs = Date.now();
 
   for (let from = 0; selected.length < params.observationLimit; from += SCAN_PAGE_SIZE) {
     let scanQuery = supabase
@@ -240,27 +257,37 @@ async function loadCandidateObservations(params: {
     if (scanRows.length === 0) break;
     scanned += scanRows.length;
 
-    let matchedIds = new Set<string>();
+    const existingById = new Map<string, ExistingMatchRow>();
     if (!force) {
       const { data: existingRows, error: existingError } = await supabase
         .from("provider_observation_matches")
-        .select("provider_normalized_observation_id")
+        .select("provider_normalized_observation_id, match_status, updated_at")
         .in("provider_normalized_observation_id", scanRows.map((row) => row.id));
 
       if (existingError) {
         throw new Error(`provider_observation_matches(scan existing): ${existingError.message}`);
       }
 
-      matchedIds = new Set(
-        (existingRows ?? []).map((row) => String((row as { provider_normalized_observation_id: string }).provider_normalized_observation_id)),
-      );
+      for (const row of (existingRows ?? []) as ExistingMatchRow[]) {
+        existingById.set(String(row.provider_normalized_observation_id), row);
+      }
     }
 
     const selectedIds: string[] = [];
     for (const row of scanRows) {
-      if (!force && matchedIds.has(row.id)) {
-        skippedAlreadyMatched += 1;
-        continue;
+      if (!force) {
+        const existing = existingById.get(row.id);
+        if (existing?.match_status === "MATCHED") {
+          skippedAlreadyMatched += 1;
+          continue;
+        }
+        if (existing?.match_status === "UNMATCHED") {
+          const updatedAtMs = parseDateMs(existing.updated_at);
+          if (updatedAtMs !== null && (nowMs - updatedAtMs) < unmatchedRetryMs) {
+            skippedAlreadyMatched += 1;
+            continue;
+          }
+        }
       }
       selectedIds.push(row.id);
       if (selected.length + selectedIds.length >= params.observationLimit) break;
