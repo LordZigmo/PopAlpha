@@ -574,9 +574,18 @@ export async function runPokemonTcgRawNormalize(opts: {
 
       let insertedOrUpdated = 0;
       if (rows.length > 0) {
+        // Postgres upsert cannot update the same target row twice in one statement.
+        // Deduplicate by the exact conflict key to keep the newest observation per key.
+        const dedupedRowsByKey = new Map<string, NormalizedObservationRow>();
+        for (const row of rows) {
+          const key = `${row.provider_raw_payload_id}::${row.provider_card_id}::${row.provider_variant_id}`;
+          dedupedRowsByKey.set(key, row);
+        }
+        const dedupedRows = [...dedupedRowsByKey.values()];
+
         const { data, error } = await supabase
           .from("provider_normalized_observations")
-          .upsert(rows, {
+          .upsert(dedupedRows, {
             onConflict: "provider_raw_payload_id,provider_card_id,provider_variant_id",
           })
           .select("id");
