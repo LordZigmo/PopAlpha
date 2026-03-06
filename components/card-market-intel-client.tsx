@@ -17,7 +17,9 @@ type VariantMetricPayload = {
   label: string;
   currentPrice: number | null;
   justtcgPrice: number | null;
+  justtcgAsOfTs: string | null;
   scrydexPrice: number | null;
+  scrydexAsOfTs: string | null;
   marketBalancePrice: number | null;
   asOfTs: string | null;
   trendSlope7d: number | null;
@@ -122,7 +124,9 @@ export default function CardMarketIntelClient({
           label: variant.label,
           currentPrice: variant.currentPrice,
           justtcgPrice: variant.justtcgPrice,
+          justtcgAsOfTs: variant.justtcgAsOfTs,
           scrydexPrice: variant.scrydexPrice,
+          scrydexAsOfTs: variant.scrydexAsOfTs,
           asOfTs: variant.asOfTs,
           trendSlope7d: variant.trendSlope7d,
           history7d: variant.history7d,

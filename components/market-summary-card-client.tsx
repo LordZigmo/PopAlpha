@@ -17,7 +17,9 @@ type MarketSummaryCardClientProps = {
     label: string;
     currentPrice: number | null;
     justtcgPrice: number | null;
+    justtcgAsOfTs: string | null;
     scrydexPrice: number | null;
+    scrydexAsOfTs: string | null;
     asOfTs: string | null;
     trendSlope7d?: number | null;
     history7d: HistoryPointRow[];
@@ -139,7 +141,9 @@ export default function MarketSummaryCardClient({
 
   const currentPrice = activeVariant?.currentPrice ?? null;
   const justtcgPrice = activeVariant?.justtcgPrice ?? null;
+  const justtcgAsOfTs = activeVariant?.justtcgAsOfTs ?? null;
   const scrydexPrice = activeVariant?.scrydexPrice ?? null;
+  const scrydexAsOfTs = activeVariant?.scrydexAsOfTs ?? null;
   const asOfTs = activeVariant?.asOfTs ?? null;
   const history7d = activeVariant?.history7d ?? [];
   const history30d = activeVariant?.history30d ?? [];
@@ -211,14 +215,24 @@ export default function MarketSummaryCardClient({
               <span className="shrink-0 text-[14px] text-[#6B6B6B]">{formatRelativeTime(asOfTs) ?? ""}</span>
             </div>
 
-            <div className="grid grid-cols-1 gap-2 rounded-2xl border border-white/[0.06] bg-[#151515] px-3 py-3 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-2 rounded-2xl border border-white/[0.06] bg-[#151515] px-3 py-3">
               <div className="flex items-center justify-between gap-3">
-                <span className="text-[13px] text-[#A8A8A8]">JustTCG</span>
-                <span className="text-[14px] font-semibold tabular-nums text-[#EDEDED]">{formatUsd(justtcgPrice)}</span>
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-[13px] text-[#A8A8A8]">JustTCG</span>
+                  <span className="text-[11px] text-[#6B6B6B]">{formatRelativeTime(justtcgAsOfTs) ?? "--"}</span>
+                </div>
+                <span className="text-[14px] font-semibold tabular-nums text-[#EDEDED]">
+                  {formatUsd(justtcgPrice)}
+                </span>
               </div>
               <div className="flex items-center justify-between gap-3">
-                <span className="text-[13px] text-[#A8A8A8]">Scrydex</span>
-                <span className="text-[14px] font-semibold tabular-nums text-[#EDEDED]">{formatUsd(scrydexPrice)}</span>
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-[13px] text-[#A8A8A8]">Scrydex</span>
+                  <span className="text-[11px] text-[#6B6B6B]">{formatRelativeTime(scrydexAsOfTs) ?? "--"}</span>
+                </div>
+                <span className="text-[14px] font-semibold tabular-nums text-[#EDEDED]">
+                  {formatUsd(scrydexPrice)}
+                </span>
               </div>
             </div>
 

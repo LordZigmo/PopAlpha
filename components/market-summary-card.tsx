@@ -237,10 +237,12 @@ function buildMergedHistory(rows: PriceHistoryRow[], fxRows: FxRateRow[]): Histo
 
 function latestProviderPrices(rows: PriceHistoryRow[], fxRows: FxRateRow[]): {
   justtcgPrice: number | null;
+  justtcgAsOfTs: string | null;
   scrydexPrice: number | null;
+  scrydexAsOfTs: string | null;
 } {
-  let justtcg: { tsMs: number; price: number } | null = null;
-  let scrydex: { tsMs: number; price: number } | null = null;
+  let justtcg: { tsMs: number; ts: string; price: number } | null = null;
+  let scrydex: { tsMs: number; ts: string; price: number } | null = null;
 
   for (const row of rows) {
     const provider = normalizeProviderName(row.provider);
@@ -251,17 +253,19 @@ function latestProviderPrices(rows: PriceHistoryRow[], fxRows: FxRateRow[]): {
     if (!Number.isFinite(usdPrice) || usdPrice === null || usdPrice <= 0) continue;
 
     if (provider === "JUSTTCG" && (!justtcg || tsMs > justtcg.tsMs)) {
-      justtcg = { tsMs, price: usdPrice };
+      justtcg = { tsMs, ts: row.ts, price: usdPrice };
       continue;
     }
     if (provider === "SCRYDEX" && (!scrydex || tsMs > scrydex.tsMs)) {
-      scrydex = { tsMs, price: usdPrice };
+      scrydex = { tsMs, ts: row.ts, price: usdPrice };
     }
   }
 
   return {
     justtcgPrice: justtcg?.price ?? null,
+    justtcgAsOfTs: justtcg?.ts ?? null,
     scrydexPrice: scrydex?.price ?? null,
+    scrydexAsOfTs: scrydex?.ts ?? null,
   };
 }
 
@@ -350,7 +354,9 @@ export default async function MarketSummaryCard({
         ?? null,
       currentPrice: latestMergedPoint?.price ?? null,
       justtcgPrice: providerPrices.justtcgPrice,
+      justtcgAsOfTs: providerPrices.justtcgAsOfTs,
       scrydexPrice: providerPrices.scrydexPrice,
+      scrydexAsOfTs: providerPrices.scrydexAsOfTs,
       asOfTs: latestMergedPoint?.ts ?? null,
       history7d,
       history30d,
