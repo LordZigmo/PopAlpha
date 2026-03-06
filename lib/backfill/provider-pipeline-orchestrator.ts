@@ -30,6 +30,20 @@ function toErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+function numberFromUnknown(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function hasIngestProgress(result: object): boolean {
+  const row = result as Record<string, unknown>;
+  return (
+    numberFromUnknown(row.rawPayloadsInserted) > 0
+    || numberFromUnknown(row.items_upserted) > 0
+    || numberFromUnknown(row.cardsFetched) > 0
+    || numberFromUnknown(row.items_fetched) > 0
+  );
+}
+
 export async function runJustTcgPipeline(opts: {
   providerSetId?: string | null;
   setLimit?: number;
@@ -51,7 +65,9 @@ export async function runJustTcgPipeline(opts: {
     maxRequests: opts.maxRequests,
   });
   steps.push({ name: "ingest", ok: ingest.ok, result: ingest });
-  if (!ingest.ok) firstError = ingest.firstError ?? "justtcg ingest failed";
+  if (!ingest.ok && !hasIngestProgress(ingest)) {
+    firstError = ingest.firstError ?? "justtcg ingest failed";
+  }
 
   if (!firstError) {
     const normalize = await runJustTcgRawNormalize({
@@ -144,7 +160,9 @@ export async function runPokemonTcgPipeline(opts: {
     maxRequests: opts.maxRequests,
   });
   steps.push({ name: "ingest", ok: ingest.ok, result: ingest });
-  if (!ingest.ok) firstError = ingest.firstError ?? "scrydex ingest failed";
+  if (!ingest.ok && !hasIngestProgress(ingest)) {
+    firstError = ingest.firstError ?? "scrydex ingest failed";
+  }
 
   if (!firstError) {
     const normalize = await runPokemonTcgRawNormalize({

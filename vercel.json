@@ -18,7 +18,7 @@
     },
     {
       "path": "/api/cron/run-justtcg-pipeline",
-      "schedule": "0 */6 * * *"
+      "schedule": "5 * * * *"
     },
     {
       "path": "/api/cron/refresh-card-metrics",

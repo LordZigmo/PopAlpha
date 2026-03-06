@@ -7,10 +7,16 @@ const JOB = "justtcg_raw_ingest";
 const PAGE_LIMIT = 20;
 const DEFAULT_SETS_PER_RUN = process.env.JUSTTCG_RAW_SETS_PER_RUN
   ? parseInt(process.env.JUSTTCG_RAW_SETS_PER_RUN, 10)
-  : 10;
+  : 40;
 const DEFAULT_MAX_REQUESTS = process.env.JUSTTCG_RAW_MAX_REQUESTS
   ? parseInt(process.env.JUSTTCG_RAW_MAX_REQUESTS, 10)
-  : 200;
+  : 400;
+const DEFAULT_RETRY_ATTEMPTS = process.env.JUSTTCG_RAW_RETRY_ATTEMPTS
+  ? parseInt(process.env.JUSTTCG_RAW_RETRY_ATTEMPTS, 10)
+  : 2;
+const DEFAULT_REQUEST_DELAY_MS = process.env.JUSTTCG_RAW_REQUEST_DELAY_MS
+  ? parseInt(process.env.JUSTTCG_RAW_REQUEST_DELAY_MS, 10)
+  : 125;
 
 type CanonicalSet = {
   setCode: string;
@@ -51,6 +57,8 @@ type RawIngestResult = {
   failedRequests: number;
   pageLimit: number;
   sampleSetResults: RawIngestSetSummary[];
+  warningCount: number;
+  warningSamples: string[];
   firstError: string | null;
 };
 
@@ -100,7 +108,6 @@ async function loadLastCursorSetCode(): Promise<string | null> {
     .select("meta")
     .eq("job", JOB)
     .eq("status", "finished")
-    .eq("ok", true)
     .order("ended_at", { ascending: false })
     .limit(1)
     .maybeSingle<LastRunRow>();
@@ -108,6 +115,11 @@ async function loadLastCursorSetCode(): Promise<string | null> {
   if (error) throw new Error(`ingest_runs(last cursor): ${error.message}`);
   const value = typeof data?.meta?.nextSetCode === "string" ? data.meta.nextSetCode.trim() : "";
   return value || null;
+}
+
+function delayMs(ms: number): Promise<void> {
+  if (!Number.isFinite(ms) || ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function loadCanonicalSets(): Promise<CanonicalSet[]> {
@@ -215,6 +227,8 @@ export async function runJustTcgRawIngest(opts: {
   const setLimit = parsePositiveInt(opts.setLimit, DEFAULT_SETS_PER_RUN);
   const pageLimitPerSet = parsePositiveInt(opts.pageLimitPerSet, 100);
   const maxRequests = parsePositiveInt(opts.maxRequests, DEFAULT_MAX_REQUESTS);
+  const retryAttempts = parsePositiveInt(DEFAULT_RETRY_ATTEMPTS, 2);
+  const requestDelayMs = Math.max(0, parsePositiveInt(DEFAULT_REQUEST_DELAY_MS, 125));
 
   let firstError: string | null = null;
   let requestsMade = 0;
@@ -224,6 +238,7 @@ export async function runJustTcgRawIngest(opts: {
   let failedRequests = 0;
   let setsProcessed = 0;
   const sampleSetResults: RawIngestSetSummary[] = [];
+  const warningSamples: string[] = [];
 
   const cursorSetCode = opts.providerSetId ? null : await loadLastCursorSetCode();
   const targets = opts.providerSetId
@@ -285,14 +300,30 @@ export async function runJustTcgRawIngest(opts: {
     while (requestsMade < maxRequests && pagesFetched < pageLimitPerSet) {
       const fetchedAt = new Date().toISOString();
       const page = Math.floor(offset / PAGE_LIMIT) + 1;
-      const response = await fetchJustTcgCardsPage(target.providerSetId, page, {
-        limit: PAGE_LIMIT,
-        offset,
-        priceHistoryDuration: "30d",
-      });
+      let response: Awaited<ReturnType<typeof fetchJustTcgCardsPage>> | null = null;
+      let attempts = 0;
+      while (attempts <= retryAttempts && requestsMade < maxRequests) {
+        attempts += 1;
+        response = await fetchJustTcgCardsPage(target.providerSetId, page, {
+          limit: PAGE_LIMIT,
+          offset,
+          priceHistoryDuration: "30d",
+        });
+        requestsMade += 1;
+        lastStatus = response.httpStatus;
 
-      requestsMade += 1;
-      lastStatus = response.httpStatus;
+        if (response.httpStatus >= 200 && response.httpStatus < 300) break;
+        const shouldRetry = response.httpStatus === 429 || response.httpStatus >= 500;
+        if (!shouldRetry || attempts > retryAttempts) break;
+        const retryDelay = Math.min(2000, requestDelayMs * (attempts + 1) * 2);
+        await delayMs(retryDelay);
+      }
+
+      if (!response) {
+        firstError ??= `JustTCG request failed without response for set ${target.providerSetId}`;
+        failedRequests += 1;
+        break;
+      }
 
       try {
         const rawInsert = await insertRawPayloadRow({
@@ -314,8 +345,12 @@ export async function runJustTcgRawIngest(opts: {
       pagesFetched += 1;
 
       if (response.httpStatus < 200 || response.httpStatus >= 300) {
-        firstError ??= `JustTCG ${response.httpStatus} for set ${target.providerSetId}`;
         failedRequests += 1;
+        if (warningSamples.length < 25) {
+          warningSamples.push(
+            `set=${target.providerSetId} page=${page} status=${response.httpStatus} attempts=${attempts}`,
+          );
+        }
         hasMore = false;
         break;
       }
@@ -326,6 +361,7 @@ export async function runJustTcgRawIngest(opts: {
 
       if (!response.hasMore || response.cards.length === 0) break;
       offset += PAGE_LIMIT;
+      await delayMs(requestDelayMs);
     }
 
     if (sampleSetResults.length < 25) {
@@ -343,7 +379,7 @@ export async function runJustTcgRawIngest(opts: {
 
   const endedAt = new Date().toISOString();
   const result: RawIngestResult = {
-    ok: failedRequests === 0 && firstError === null,
+    ok: firstError === null,
     job: JOB,
     provider: PROVIDER,
     startedAt,
@@ -357,6 +393,8 @@ export async function runJustTcgRawIngest(opts: {
     failedRequests,
     pageLimit: PAGE_LIMIT,
     sampleSetResults,
+    warningCount: failedRequests,
+    warningSamples,
     firstError,
   };
 
@@ -384,6 +422,8 @@ export async function runJustTcgRawIngest(opts: {
           rawPayloadsInserted,
           rawPayloadsDuplicate,
           sampleSetResults,
+          warningCount: failedRequests,
+          warningSamples,
           firstError,
         },
       })
