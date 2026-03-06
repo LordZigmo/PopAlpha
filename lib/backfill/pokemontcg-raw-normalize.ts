@@ -173,10 +173,7 @@ function getNumberField(value: unknown): number | null {
   return null;
 }
 
-function extractPriceCurrency(prices: unknown): { price: number | null; currency: "USD" | "EUR" } {
-  if (!prices || typeof prices !== "object") return { price: null, currency: "USD" };
-  const record = prices as Record<string, unknown>;
-
+function parseScrydexPriceObject(record: Record<string, unknown>): { price: number | null; currency: "USD" | "EUR" } {
   const directCurrency = typeof record.currency === "string" ? record.currency.trim().toUpperCase() : "";
   const directCandidates = [
     record.marketPrice,
@@ -204,6 +201,41 @@ function extractPriceCurrency(prices: unknown): { price: number | null; currency
 
   const eurValue = getNumberField(record.eur) ?? getNumberField(record.EUR);
   if (eurValue !== null) return { price: eurValue, currency: "EUR" };
+
+  return { price: null, currency: "USD" };
+}
+
+function extractPriceCurrency(prices: unknown): { price: number | null; currency: "USD" | "EUR" } {
+  if (Array.isArray(prices)) {
+    const rows = prices.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object");
+    if (rows.length === 0) return { price: null, currency: "USD" };
+
+    // Prefer raw NM market prices first, then any positive market/low value.
+    const rank = (row: Record<string, unknown>): number => {
+      const condition = String(row.condition ?? "").trim().toUpperCase();
+      const type = String(row.type ?? "").trim().toLowerCase();
+      const market = getNumberField(row.market);
+      const low = getNumberField(row.low);
+      let score = 0;
+      if (type === "raw") score += 100;
+      if (condition === "NM" || condition === "NEAR MINT") score += 50;
+      if (market !== null) score += 20;
+      if (low !== null) score += 10;
+      return score;
+    };
+
+    const sorted = [...rows].sort((a, b) => rank(b) - rank(a));
+    for (const row of sorted) {
+      const parsed = parseScrydexPriceObject(row);
+      if (parsed.price !== null) return parsed;
+    }
+    return { price: null, currency: "USD" };
+  }
+
+  if (!prices || typeof prices !== "object") return { price: null, currency: "USD" };
+  const record = prices as Record<string, unknown>;
+  const parsedDirect = parseScrydexPriceObject(record);
+  if (parsedDirect.price !== null) return parsedDirect;
 
   for (const value of Object.values(record)) {
     if (!value || typeof value !== "object") continue;

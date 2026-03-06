@@ -123,6 +123,8 @@ export async function fetchCardsPage(
   const params = new URLSearchParams();
   params.set("page", String(page));
   params.set("page_size", String(pageSize));
+  // Prices are opt-in for search/list endpoints in Scrydex docs.
+  params.set("include", "prices");
   const payload = await fetchScrydexJson<ScrydexListPayload<ScrydexCard>>(path, params, credentials);
   return payload;
 }
