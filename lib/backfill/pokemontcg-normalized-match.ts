@@ -4,8 +4,9 @@ const PROVIDER = "SCRYDEX";
 const JOB = "scrydex_normalized_match";
 const DEFAULT_OBSERVATIONS_PER_RUN = process.env.POKEMONTCG_MATCH_OBSERVATIONS_PER_RUN
   ? parseInt(process.env.POKEMONTCG_MATCH_OBSERVATIONS_PER_RUN, 10)
-  : 200;
+  : 1200;
 const SCAN_PAGE_SIZE = 100;
+type ScanDirection = "newest" | "oldest";
 
 type ScanRow = {
   id: string;
@@ -189,6 +190,7 @@ async function loadCandidateObservations(params: {
   providerSetId?: string | null;
   observationId?: string | null;
   force?: boolean;
+  scanDirection?: ScanDirection;
 }): Promise<{
   rows: NormalizedObservationRow[];
   scanned: number;
@@ -196,6 +198,7 @@ async function loadCandidateObservations(params: {
 }> {
   const supabase = dbAdmin();
   const force = params.force === true || Boolean(params.observationId);
+  const ascending = params.scanDirection === "oldest";
 
   if (params.observationId) {
     let query = supabase
@@ -222,8 +225,8 @@ async function loadCandidateObservations(params: {
       .from("provider_normalized_observations")
       .select("id")
       .eq("provider", PROVIDER)
-      .order("observed_at", { ascending: false })
-      .order("id", { ascending: false })
+      .order("observed_at", { ascending })
+      .order("id", { ascending })
       .range(from, from + SCAN_PAGE_SIZE - 1);
 
     if (params.providerSetId) {
@@ -432,6 +435,7 @@ export async function runPokemonTcgNormalizedMatch(opts: {
   providerSetId?: string | null;
   observationId?: string | null;
   force?: boolean;
+  scanDirection?: ScanDirection;
 } = {}): Promise<MatchResult> {
   const supabase = dbAdmin();
   const startedAt = new Date().toISOString();
@@ -463,6 +467,7 @@ export async function runPokemonTcgNormalizedMatch(opts: {
         providerSetId: opts.providerSetId ?? null,
         observationId: opts.observationId ?? null,
         force: opts.force === true,
+        scanDirection: opts.scanDirection ?? "newest",
       },
     })
     .select("id")
@@ -480,6 +485,7 @@ export async function runPokemonTcgNormalizedMatch(opts: {
       providerSetId: opts.providerSetId,
       observationId: opts.observationId,
       force: opts.force,
+      scanDirection: opts.scanDirection,
     });
 
     observationsScanned = candidateResult.scanned;
@@ -620,6 +626,7 @@ export async function runPokemonTcgNormalizedMatch(opts: {
           providerSetId: opts.providerSetId ?? null,
           observationId: opts.observationId ?? null,
           force: opts.force === true,
+          scanDirection: opts.scanDirection ?? "newest",
           observationsScanned,
           observationsProcessed,
           observationsSkippedAlreadyMatched,

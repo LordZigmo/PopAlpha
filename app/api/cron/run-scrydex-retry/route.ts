@@ -24,7 +24,8 @@ export async function GET(req: Request) {
       pageLimitPerSet: parseOptionalInt(url.searchParams.get("pages")),
       maxRequests: parseOptionalInt(url.searchParams.get("maxRequests")),
       payloadLimit: parseOptionalInt(url.searchParams.get("payloads")),
-      matchObservations: parseOptionalInt(url.searchParams.get("observations")),
+      matchObservations: parseOptionalInt(url.searchParams.get("observations")) ?? 1500,
+      matchScanDirection: "oldest",
       timeseriesObservations: parseOptionalInt(url.searchParams.get("timeseriesObservations")),
       force,
     });
