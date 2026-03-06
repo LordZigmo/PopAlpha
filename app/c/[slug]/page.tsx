@@ -58,6 +58,7 @@ type SnapshotRow = {
   low_30d: number | null;
   high_30d: number | null;
   market_price: number | null;
+  market_price_as_of: string | null;
   justtcg_price: number | null;
   scrydex_price: number | null;
   pokemontcg_price: number | null;
@@ -344,6 +345,18 @@ function formatUsdCompact(value: number | null | undefined): string {
   }).format(value);
 }
 
+function formatAsOf(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 function formatSignalScore(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return "Forming";
   const abs = Math.abs(value);
@@ -508,7 +521,7 @@ export default async function CanonicalCardPage({
       (["RAW", "PSA9", "PSA10"] as const).map((g) => {
         const q = supabase
           .from("public_card_metrics")
-          .select("active_listings_7d, median_7d, median_30d, trimmed_median_30d, low_30d, high_30d, market_price, justtcg_price, scrydex_price, pokemontcg_price")
+          .select("active_listings_7d, median_7d, median_30d, trimmed_median_30d, low_30d, high_30d, market_price, market_price_as_of, justtcg_price, scrydex_price, pokemontcg_price")
           .eq("canonical_slug", slug)
           .eq("grade", g);
         return (printingIdForQuery != null
@@ -628,6 +641,7 @@ export default async function CanonicalCardPage({
 
   const rawSourceJtcg = rawSnap.data?.justtcg_price ?? null;
   const rawSourceScrydex = rawSnap.data?.scrydex_price ?? rawSnap.data?.pokemontcg_price ?? null;
+  const rawSourceAsOf = formatAsOf(rawSnap.data?.market_price_as_of ?? null);
   const currentRawPrice = viewMode === "RAW"
     ? rawSnap.data?.market_price ?? vm?.price_now ?? null
     : null;
@@ -751,9 +765,16 @@ export default async function CanonicalCardPage({
                     )}
                     <p className="mt-1 text-[14px] text-[#555]">{primaryPriceLabel}</p>
                     {viewMode === "RAW" && (rawSourceJtcg != null || rawSourceScrydex != null) ? (
-                      <p className="mt-1 text-[13px] tabular-nums text-[#7A7A7A]">
-                        Sources: JustTCG {rawSourceJtcg != null ? formatUsdCompact(rawSourceJtcg) : "—"} • Scrydex {rawSourceScrydex != null ? formatUsdCompact(rawSourceScrydex) : "—"}
-                      </p>
+                      <div className="mt-1 text-[13px] tabular-nums text-[#7A7A7A]">
+                        <p>
+                          JustTCG: {rawSourceJtcg != null ? formatUsdCompact(rawSourceJtcg) : "—"}{" "}
+                          <span className="text-[#5E5E5E]">Updated: {rawSourceAsOf ?? "--"}</span>
+                        </p>
+                        <p>
+                          Scrydex: {rawSourceScrydex != null ? formatUsdCompact(rawSourceScrydex) : "—"}{" "}
+                          <span className="text-[#5E5E5E]">Updated: {rawSourceAsOf ?? "--"}</span>
+                        </p>
+                      </div>
                     ) : null}
                   </>
                 ) : null}
