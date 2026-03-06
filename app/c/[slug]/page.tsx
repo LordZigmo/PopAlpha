@@ -57,6 +57,10 @@ type SnapshotRow = {
   trimmed_median_30d: number | null;
   low_30d: number | null;
   high_30d: number | null;
+  market_price: number | null;
+  justtcg_price: number | null;
+  scrydex_price: number | null;
+  pokemontcg_price: number | null;
 };
 
 type CardProfileRow = {
@@ -504,7 +508,7 @@ export default async function CanonicalCardPage({
       (["RAW", "PSA9", "PSA10"] as const).map((g) => {
         const q = supabase
           .from("public_card_metrics")
-          .select("active_listings_7d, median_7d, median_30d, trimmed_median_30d, low_30d, high_30d")
+          .select("active_listings_7d, median_7d, median_30d, trimmed_median_30d, low_30d, high_30d, market_price, justtcg_price, scrydex_price, pokemontcg_price")
           .eq("canonical_slug", slug)
           .eq("grade", g);
         return (printingIdForQuery != null
@@ -622,11 +626,15 @@ export default async function CanonicalCardPage({
     },
   );
 
-  const currentRawPrice = viewMode === "RAW" ? vm?.price_now ?? null : null;
+  const rawSourceJtcg = rawSnap.data?.justtcg_price ?? null;
+  const rawSourceScrydex = rawSnap.data?.scrydex_price ?? rawSnap.data?.pokemontcg_price ?? null;
+  const currentRawPrice = viewMode === "RAW"
+    ? rawSnap.data?.market_price ?? vm?.price_now ?? null
+    : null;
   const displayPrimaryPrice = currentRawPrice ?? snapshotData?.median_7d ?? null;
   const primaryPrice = displayPrimaryPrice != null ? formatUsdCompact(displayPrimaryPrice) : null;
   const primaryPriceLabel = currentRawPrice != null
-    ? "Current market price"
+    ? "Current market price (JustTCG + Scrydex blend)"
     : `${selectedSnapshotGrade
       ? legacyGradeLabel(selectedSnapshotGrade)
       : activeProvider && activeBucket
@@ -742,6 +750,11 @@ export default async function CanonicalCardPage({
                       </div>
                     )}
                     <p className="mt-1 text-[14px] text-[#555]">{primaryPriceLabel}</p>
+                    {viewMode === "RAW" && (rawSourceJtcg != null || rawSourceScrydex != null) ? (
+                      <p className="mt-1 text-[13px] tabular-nums text-[#7A7A7A]">
+                        Sources: JustTCG {rawSourceJtcg != null ? formatUsdCompact(rawSourceJtcg) : "—"} • Scrydex {rawSourceScrydex != null ? formatUsdCompact(rawSourceScrydex) : "—"}
+                      </p>
+                    ) : null}
                   </>
                 ) : null}
               </div>
