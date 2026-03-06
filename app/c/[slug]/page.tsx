@@ -91,6 +91,12 @@ type GradedPriceHistoryRow = {
   ts: string;
 };
 
+type RawProviderHistoryRow = {
+  provider: string;
+  variant_ref: string;
+  ts: string;
+};
+
 function finishLabel(finish: CardPrintingRow["finish"]): string {
   const map: Record<CardPrintingRow["finish"], string> = {
     NON_HOLO: "Non-Holo",
@@ -357,6 +363,13 @@ function formatAsOf(value: string | null | undefined): string | null {
   });
 }
 
+function normalizeRawProviderName(provider: string | null | undefined): "JUSTTCG" | "SCRYDEX" | null {
+  const normalized = String(provider ?? "").trim().toUpperCase();
+  if (normalized === "JUSTTCG") return "JUSTTCG";
+  if (normalized === "SCRYDEX" || normalized === "POKEMON_TCG_API") return "SCRYDEX";
+  return null;
+}
+
 function formatSignalScore(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return "Forming";
   const abs = Math.abs(value);
@@ -516,7 +529,8 @@ export default async function CanonicalCardPage({
   // card_metrics rows are keyed by (canonical_slug, printing_id, grade).
   // For singles: printing_id = selected printing UUID. For sealed / no printing: printing_id IS NULL.
   const printingIdForQuery = selectedPrinting?.id ?? null;
-  const [[rawSnap, psa9Snap, psa10Snap], vm, gradedPriceHistoryQuery, viewSnapshot] = await Promise.all([
+  const rawVariantPrefix = printingIdForQuery ? `${printingIdForQuery}::RAW` : null;
+  const [[rawSnap, psa9Snap, psa10Snap], vm, gradedPriceHistoryQuery, rawProviderHistoryQuery, viewSnapshot] = await Promise.all([
     Promise.all(
       (["RAW", "PSA9", "PSA10"] as const).map((g) => {
         const q = supabase
@@ -542,6 +556,17 @@ export default async function CanonicalCardPage({
           .order("ts", { ascending: false })
           .limit(Math.max(gradedVariantRefsForActiveBucket.length * 4, 12))
       : Promise.resolve({ data: [] as GradedPriceHistoryRow[] }),
+    rawVariantPrefix
+      ? supabase
+          .from("public_price_history")
+          .select("provider, variant_ref, ts")
+          .eq("canonical_slug", slug)
+          .eq("source_window", "snapshot")
+          .in("provider", ["JUSTTCG", "SCRYDEX", "POKEMON_TCG_API"])
+          .ilike("variant_ref", `${rawVariantPrefix}%`)
+          .order("ts", { ascending: false })
+          .limit(300)
+      : Promise.resolve({ data: [] as RawProviderHistoryRow[] }),
     getCardViewSnapshot(slug, 14),
   ]);
   const relatedCarousels = await getRelatedCardCarousels({
@@ -574,6 +599,7 @@ export default async function CanonicalCardPage({
     PSA10: psa10Snap.data,
   } as const;
   const gradedPriceHistoryRows = (gradedPriceHistoryQuery.data ?? []) as GradedPriceHistoryRow[];
+  const rawProviderHistoryRows = (rawProviderHistoryQuery.data ?? []) as RawProviderHistoryRow[];
   const latestGradedPriceByVariantRef = new Map<string, GradedPriceHistoryRow>();
   for (const row of gradedPriceHistoryRows) {
     if (!row.variant_ref || latestGradedPriceByVariantRef.has(row.variant_ref)) continue;
@@ -641,7 +667,17 @@ export default async function CanonicalCardPage({
 
   const rawSourceJtcg = rawSnap.data?.justtcg_price ?? null;
   const rawSourceScrydex = rawSnap.data?.scrydex_price ?? rawSnap.data?.pokemontcg_price ?? null;
-  const rawSourceAsOf = formatAsOf(rawSnap.data?.market_price_as_of ?? null);
+  let rawSourceJtcgTs: string | null = null;
+  let rawSourceScrydexTs: string | null = null;
+  for (const row of rawProviderHistoryRows) {
+    const provider = normalizeRawProviderName(row.provider);
+    if (!provider) continue;
+    if (provider === "JUSTTCG" && !rawSourceJtcgTs) rawSourceJtcgTs = row.ts;
+    if (provider === "SCRYDEX" && !rawSourceScrydexTs) rawSourceScrydexTs = row.ts;
+    if (rawSourceJtcgTs && rawSourceScrydexTs) break;
+  }
+  const rawSourceAsOfJtcg = formatAsOf(rawSourceJtcgTs ?? rawSnap.data?.market_price_as_of ?? null);
+  const rawSourceAsOfScrydex = formatAsOf(rawSourceScrydexTs ?? rawSnap.data?.market_price_as_of ?? null);
   const currentRawPrice = viewMode === "RAW"
     ? rawSnap.data?.market_price ?? vm?.price_now ?? null
     : null;
@@ -768,11 +804,11 @@ export default async function CanonicalCardPage({
                       <div className="mt-1 text-[13px] tabular-nums text-[#7A7A7A]">
                         <p>
                           JustTCG: {rawSourceJtcg != null ? formatUsdCompact(rawSourceJtcg) : "—"}{" "}
-                          <span className="text-[#5E5E5E]">Updated: {rawSourceAsOf ?? "--"}</span>
+                          <span className="text-[#5E5E5E]">Updated: {rawSourceAsOfJtcg ?? "--"}</span>
                         </p>
                         <p>
                           Scrydex: {rawSourceScrydex != null ? formatUsdCompact(rawSourceScrydex) : "—"}{" "}
-                          <span className="text-[#5E5E5E]">Updated: {rawSourceAsOf ?? "--"}</span>
+                          <span className="text-[#5E5E5E]">Updated: {rawSourceAsOfScrydex ?? "--"}</span>
                         </p>
                       </div>
                     ) : null}
