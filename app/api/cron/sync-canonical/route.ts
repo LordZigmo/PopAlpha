@@ -1,7 +1,7 @@
 /**
  * Cron: sync-canonical
  *
- * Runs daily (vercel.json: "0 4 * * *") and pages through the full PokémonTCG
+ * Runs daily (vercel.json: "0 4 * * *") and pages through the full Scrydex
  * card catalog, upsetting canonical_cards + card_printings so "Unknown" fields
  * get filled in automatically over time.
  *
@@ -9,7 +9,7 @@
  * each run continues where the previous one left off. When the catalog end is
  * reached (items_fetched === 0), restarts from page 1 for a fresh full pass.
  *
- * At 2 pages × 250 cards per run the full ~20 k-card catalog cycles in ≈ 40 days;
+ * At 10 pages × 100 cards per run, catalog sync advances in small bounded chunks;
  * afterwards it keeps refreshing indefinitely.
  */
 
@@ -22,8 +22,8 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 const PAGES_PER_RUN = 10;
-const PAGE_SIZE = 250;
-const JOB = "pokemontcg_canonical_import";
+const PAGE_SIZE = 100;
+const JOB = "scrydex_canonical_import";
 
 type LastRunRow = {
   items_fetched: number;
@@ -84,7 +84,7 @@ export async function GET(req: Request) {
   let importResult: Record<string, unknown>;
   try {
     const response = await fetch(
-      `${baseUrl}/api/admin/import/pokemontcg-canonical?${params.toString()}`,
+      `${baseUrl}/api/admin/import/scrydex-canonical?${params.toString()}`,
       {
         method: "POST",
         headers: { "x-admin-secret": adminSecret },

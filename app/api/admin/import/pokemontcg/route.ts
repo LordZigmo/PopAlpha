@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { POST as runCanonicalImport } from "../pokemontcg-canonical/route";
+import { POST as runCanonicalImport } from "../scrydex-canonical/route";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -52,7 +52,7 @@ export async function POST(req: Request) {
   const forwardedMaxPages =
     maxPages > 0 ? maxPages : pageEnd !== null ? Math.max(1, pageEnd - pageStart + 1) : undefined;
 
-  const proxyUrl = new URL("http://internal/api/admin/import/pokemontcg-canonical");
+  const proxyUrl = new URL("http://internal/api/admin/import/scrydex-canonical");
   proxyUrl.searchParams.set("pageStart", String(pageStart));
   if (forwardedMaxPages) {
     proxyUrl.searchParams.set("maxPages", String(forwardedMaxPages));
@@ -60,9 +60,7 @@ export async function POST(req: Request) {
   if (pageSize) {
     proxyUrl.searchParams.set("pageSize", String(pageSize));
   }
-  if (setId) {
-    proxyUrl.searchParams.set("setId", setId);
-  }
+  if (setId) proxyUrl.searchParams.set("expansionId", setId);
   if (dryRun) {
     proxyUrl.searchParams.set("dryRun", "true");
   }

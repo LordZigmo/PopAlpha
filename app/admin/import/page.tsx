@@ -34,7 +34,7 @@ export default async function AdminImportPage() {
     const { data } = await supabase
       .from("ingest_runs")
       .select("id, status, ok, items_fetched, items_upserted, items_failed, error_text, started_at, ended_at")
-      .eq("job", "pokemontcg_canonical_import")
+      .eq("job", "scrydex_canonical_import")
       .order("started_at", { ascending: false })
       .limit(10);
     runs = (data ?? []) as IngestRunListRow[];
@@ -47,7 +47,7 @@ export default async function AdminImportPage() {
       <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
         <section className="glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
           <h1 className="text-app text-2xl font-semibold tracking-tight">Admin Import</h1>
-          <p className="text-muted mt-2 text-sm">Pokemon TCG API (English)</p>
+          <p className="text-muted mt-2 text-sm">Scrydex Pokemon API (English)</p>
           <div className="mt-3">
             <AdminImportRunner />
           </div>

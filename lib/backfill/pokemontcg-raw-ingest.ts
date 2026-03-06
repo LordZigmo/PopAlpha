@@ -1,22 +1,25 @@
 import crypto from "node:crypto";
 import { dbAdmin } from "@/lib/db/admin";
-import { fetchEpisodeCards } from "@/lib/providers/pokemon-tcg-api";
+import { fetchCardsPage, getScrydexCredentials, type ScrydexCard } from "@/lib/scrydex/client";
 
-const PROVIDER = "POKEMON_TCG_API";
-const JOB = "pokemontcg_raw_ingest";
-const ENDPOINT = "/episodes/cards";
-const PAGE_LIMIT = 20;
-const DEFAULT_SETS_PER_RUN = process.env.POKEMONTCG_RAW_SETS_PER_RUN
-  ? parseInt(process.env.POKEMONTCG_RAW_SETS_PER_RUN, 10)
+const PROVIDER = "SCRYDEX";
+const JOB = "scrydex_raw_ingest";
+const ENDPOINT = "/en/expansions/{id}/cards";
+const PAGE_LIMIT = 100;
+const DEFAULT_SETS_PER_RUN = process.env.SCRYDEX_RAW_SETS_PER_RUN
+  ? parseInt(process.env.SCRYDEX_RAW_SETS_PER_RUN, 10)
   : 10;
-const DEFAULT_MAX_REQUESTS = process.env.POKEMONTCG_RAW_MAX_REQUESTS
-  ? parseInt(process.env.POKEMONTCG_RAW_MAX_REQUESTS, 10)
+const DEFAULT_MAX_REQUESTS = process.env.SCRYDEX_RAW_MAX_REQUESTS
+  ? parseInt(process.env.SCRYDEX_RAW_MAX_REQUESTS, 10)
   : 200;
 
-type SetMapRow = {
-  canonical_set_code: string;
-  canonical_set_name: string | null;
-  provider_set_id: string;
+type CanonicalSet = {
+  setCode: string;
+  setName: string;
+};
+
+type LastRunRow = {
+  meta: Record<string, unknown> | null;
 };
 
 type RawIngestSetSummary = {
@@ -72,30 +75,68 @@ function isDuplicateInsertError(message: string | null | undefined): boolean {
   return text.includes("duplicate") || text.includes("unique");
 }
 
-async function loadTargetSets(params: {
-  setLimit: number;
-  providerSetId?: string | null;
-}): Promise<Array<{ setCode: string | null; setName: string | null; providerSetId: string }>> {
-  if (params.providerSetId) {
-    return [{ setCode: null, setName: null, providerSetId: params.providerSetId }];
+function selectSetsFromCursor(sets: CanonicalSet[], setLimit: number, cursorSetCode: string | null): CanonicalSet[] {
+  if (sets.length === 0) return [];
+  const limit = Math.min(Math.max(1, setLimit), sets.length);
+  if (!cursorSetCode) return sets.slice(0, limit);
+
+  const cursorIndex = sets.findIndex((row) => row.setCode === cursorSetCode);
+  const startIndex = cursorIndex >= 0 ? (cursorIndex + 1) % sets.length : 0;
+  const selected: CanonicalSet[] = [];
+  for (let i = 0; i < limit; i += 1) {
+    selected.push(sets[(startIndex + i) % sets.length]);
+  }
+  return selected;
+}
+
+async function loadCanonicalSets(): Promise<CanonicalSet[]> {
+  const supabase = dbAdmin();
+  const pageSize = 5000;
+  const seen = new Set<string>();
+  const sets: CanonicalSet[] = [];
+
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .from("card_printings")
+      .select("set_code, set_name")
+      .eq("language", "EN")
+      .not("set_code", "is", null)
+      .not("set_name", "is", null)
+      .range(from, from + pageSize - 1);
+
+    if (error) throw new Error(`card_printings: ${error.message}`);
+
+    const rows = data ?? [];
+    for (const row of rows) {
+      const setCode = String(row.set_code ?? "");
+      const setName = String(row.set_name ?? "");
+      if (!setCode || !setName || seen.has(setCode)) continue;
+      seen.add(setCode);
+      sets.push({ setCode, setName });
+    }
+
+    if (rows.length < pageSize) break;
   }
 
+  sets.sort((left, right) => left.setCode.localeCompare(right.setCode));
+  return sets;
+}
+
+async function loadLastCursorSetCode(): Promise<string | null> {
   const supabase = dbAdmin();
   const { data, error } = await supabase
-    .from("provider_set_map")
-    .select("canonical_set_code, canonical_set_name, provider_set_id")
-    .eq("provider", PROVIDER)
-    .gt("confidence", 0)
-    .order("canonical_set_code", { ascending: true })
-    .limit(params.setLimit);
+    .from("ingest_runs")
+    .select("meta")
+    .eq("job", JOB)
+    .eq("status", "finished")
+    .eq("ok", true)
+    .order("ended_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<LastRunRow>();
 
-  if (error) throw new Error(`provider_set_map: ${error.message}`);
-
-  return ((data ?? []) as SetMapRow[]).map((row) => ({
-    setCode: row.canonical_set_code,
-    setName: row.canonical_set_name ?? null,
-    providerSetId: row.provider_set_id,
-  }));
+  if (error) throw new Error(`ingest_runs(last cursor): ${error.message}`);
+  const value = typeof data?.meta?.nextSetCode === "string" ? data.meta.nextSetCode.trim() : "";
+  return value || null;
 }
 
 async function insertRawPayloadRow(params: {
@@ -111,17 +152,17 @@ async function insertRawPayloadRow(params: {
     provider: PROVIDER,
     endpoint: ENDPOINT,
     params: {
-      episodeId: providerSetId,
+      expansionId: providerSetId,
       page,
-      limit: PAGE_LIMIT,
+      page_size: PAGE_LIMIT,
     },
     response: body ?? {},
     status_code: statusCode,
     fetched_at: fetchedAt,
     request_hash: requestHash(ENDPOINT, {
-      episodeId: providerSetId,
+      expansionId: providerSetId,
       page,
-      limit: PAGE_LIMIT,
+      page_size: PAGE_LIMIT,
     }),
     response_hash: responseHash(body),
     canonical_slug: null,
@@ -155,16 +196,34 @@ export async function runPokemonTcgRawIngest(opts: {
   let setsProcessed = 0;
   const sampleSetResults: RawIngestSetSummary[] = [];
 
-  const targets = await loadTargetSets({
-    setLimit,
-    providerSetId: opts.providerSetId,
-  });
+  let credentials: ReturnType<typeof getScrydexCredentials>;
+  try {
+    credentials = getScrydexCredentials();
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : String(error));
+  }
+
+  const cursorSetCode = opts.providerSetId ? null : await loadLastCursorSetCode();
+  const targets = opts.providerSetId
+    ? [{ setCode: null, setName: null, providerSetId: opts.providerSetId }]
+    : await (async () => {
+        const sets = await loadCanonicalSets();
+        const selectedSets = selectSetsFromCursor(sets, setLimit, cursorSetCode);
+        return selectedSets.map((set) => ({
+          setCode: set.setCode,
+          setName: set.setName,
+          providerSetId: set.setCode,
+        }));
+      })();
+  const nextSetCode = targets.length > 0 && !opts.providerSetId
+    ? (targets[targets.length - 1]?.setCode ?? null)
+    : null;
 
   const { data: runRow, error: runStartError } = await supabase
     .from("ingest_runs")
     .insert({
       job: JOB,
-      source: "pokemontcg",
+      source: "scrydex",
       status: "started",
       ok: false,
       items_fetched: 0,
@@ -176,6 +235,8 @@ export async function runPokemonTcgRawIngest(opts: {
         pageLimitPerSet,
         maxRequests,
         providerSetId: opts.providerSetId ?? null,
+        cursorSetCode,
+        nextSetCode,
         setsPlanned: targets.length,
       },
     })
@@ -197,53 +258,43 @@ export async function runPokemonTcgRawIngest(opts: {
     let page = 1;
     let hasMore = false;
     let lastStatus: number | null = null;
-    const numericSetId = parseInt(target.providerSetId, 10);
-    if (!Number.isFinite(numericSetId)) {
-      firstError ??= `Invalid provider_set_id for ${PROVIDER}: ${target.providerSetId}`;
-      failedRequests += 1;
-      continue;
-    }
 
     while (requestsMade < maxRequests && pagesFetched < pageLimitPerSet) {
       const fetchedAt = new Date().toISOString();
-      const response = await fetchEpisodeCards(numericSetId, page);
-      const rawEnvelope = { data: response.cards };
 
       requestsMade += 1;
-      lastStatus = response.httpStatus;
-
       try {
+        const payload = await fetchCardsPage(page, PAGE_LIMIT, target.providerSetId, credentials);
+        const cards = payload.data ?? [];
+        const rawEnvelope: { data: ScrydexCard[] } = { data: cards };
+
         const rawInsert = await insertRawPayloadRow({
           providerSetId: target.providerSetId,
           page,
           body: rawEnvelope,
-          statusCode: response.httpStatus,
+          statusCode: 200,
           fetchedAt,
         });
         if (rawInsert.inserted) rawPayloadsInserted += 1;
         if (rawInsert.duplicate) rawPayloadsDuplicate += 1;
+
+        pagesFetched += 1;
+        lastStatus = 200;
+        cardsFetched += cards.length;
+        cardsFetchedForSet += cards.length;
+
+        hasMore = cards.length >= PAGE_LIMIT && (typeof payload.totalCount !== "number" || (page * PAGE_LIMIT) < payload.totalCount);
+        if (!hasMore || cards.length === 0) break;
+
+        page += 1;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         firstError ??= message;
         failedRequests += 1;
-        break;
-      }
-
-      pagesFetched += 1;
-
-      if (response.httpStatus < 200 || response.httpStatus >= 300) {
-        firstError ??= `${PROVIDER} ${response.httpStatus} for episode ${target.providerSetId}`;
-        failedRequests += 1;
+        lastStatus = 500;
         hasMore = false;
         break;
       }
-
-      cardsFetched += response.cards.length;
-      cardsFetchedForSet += response.cards.length;
-      hasMore = response.hasMore;
-
-      if (!response.hasMore || response.cards.length === 0) break;
-      page += 1;
     }
 
     if (sampleSetResults.length < 25) {
@@ -294,6 +345,8 @@ export async function runPokemonTcgRawIngest(opts: {
           pageLimitPerSet,
           maxRequests,
           providerSetId: opts.providerSetId ?? null,
+          cursorSetCode,
+          nextSetCode,
           setsPlanned: targets.length,
           setsProcessed,
           requestsMade,

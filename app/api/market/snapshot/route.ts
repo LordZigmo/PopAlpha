@@ -10,7 +10,8 @@ type SnapshotRow = {
   printing_id: string | null;
   grade: string;
   justtcg_price: number | null;
-  pokemontcg_price: number | null;
+  scrydex_price: number | null;
+  pokemontcg_price?: number | null;
   market_price: number | null;
   market_price_as_of: string | null;
   active_listings_7d: number | null;
@@ -34,7 +35,7 @@ export async function GET(req: Request) {
   let query = supabase
     .from("public_card_metrics")
     .select(
-      "canonical_slug, printing_id, grade, justtcg_price, pokemontcg_price, market_price, market_price_as_of, active_listings_7d, median_7d, median_30d, trimmed_median_30d, low_30d, high_30d"
+      "canonical_slug, printing_id, grade, justtcg_price, scrydex_price, pokemontcg_price, market_price, market_price_as_of, active_listings_7d, median_7d, median_30d, trimmed_median_30d, low_30d, high_30d"
     )
     .eq("canonical_slug", slug)
     .eq("grade", grade)
@@ -61,23 +62,24 @@ export async function GET(req: Request) {
     sourceCurrency: "USD",
     asOf: result.data?.market_price_as_of ?? null,
   });
-  const pokemontcg = await buildProviderPriceDisplay({
+  const scrydex = await buildProviderPriceDisplay({
     supabase,
-    provider: "POKEMON_TCG_API",
-    sourcePrice: result.data?.pokemontcg_price ?? null,
-    sourceCurrency: "EUR",
+    provider: "SCRYDEX",
+    sourcePrice: result.data?.scrydex_price ?? result.data?.pokemontcg_price ?? null,
+    sourceCurrency: "USD",
     asOf: result.data?.market_price_as_of ?? null,
   });
-  const marketPriceUsd = averageProviderUsdPrice([justtcg, pokemontcg]) ?? result.data?.market_price ?? null;
-  const marketPriceAsOf = [justtcg.asOf, pokemontcg.asOf].filter(Boolean).sort().at(-1) ?? result.data?.market_price_as_of ?? null;
+  const marketPriceUsd = averageProviderUsdPrice([justtcg, scrydex]) ?? result.data?.market_price ?? null;
+  const marketPriceAsOf = [justtcg.asOf, scrydex.asOf].filter(Boolean).sort().at(-1) ?? result.data?.market_price_as_of ?? null;
 
   return NextResponse.json({
     ok: true,
     justtcgPrice: justtcg.usdPrice,
-    pokemontcgPrice: pokemontcg.usdPrice,
+    scrydexPrice: scrydex.usdPrice,
+    pokemontcgPrice: scrydex.usdPrice,
     marketPrice: marketPriceUsd,
     marketPriceAsOf,
-    providers: [justtcg, pokemontcg],
+    providers: [justtcg, scrydex],
     active7d: result.data?.active_listings_7d ?? 0,
     median7d: result.data?.median_7d ?? null,
     median30d: result.data?.median_30d ?? null,

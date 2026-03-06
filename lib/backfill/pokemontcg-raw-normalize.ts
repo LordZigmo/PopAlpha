@@ -1,12 +1,12 @@
 import { dbAdmin } from "@/lib/db/admin";
 import { buildLegacyVariantRef } from "@/lib/providers/justtcg";
-import { normalizeCardNumber, type PtcgApiCard } from "@/lib/providers/pokemon-tcg-api";
+import type { ScrydexCard, ScrydexVariant } from "@/lib/scrydex/client";
 
-const PROVIDER = "POKEMON_TCG_API";
-const JOB = "pokemontcg_raw_normalize";
-const ENDPOINT = "/episodes/cards";
-const DEFAULT_PAYLOADS_PER_RUN = process.env.POKEMONTCG_NORMALIZE_PAYLOADS_PER_RUN
-  ? parseInt(process.env.POKEMONTCG_NORMALIZE_PAYLOADS_PER_RUN, 10)
+const PROVIDER = "SCRYDEX";
+const JOB = "scrydex_raw_normalize";
+const ENDPOINT = "/en/expansions/{id}/cards";
+const DEFAULT_PAYLOADS_PER_RUN = process.env.SCRYDEX_NORMALIZE_PAYLOADS_PER_RUN
+  ? parseInt(process.env.SCRYDEX_NORMALIZE_PAYLOADS_PER_RUN, 10)
   : 50;
 const RAW_SCAN_PAGE_SIZE = 50;
 
@@ -16,7 +16,7 @@ type RawPayloadRow = {
   endpoint: string;
   params: Record<string, unknown> | null;
   response: {
-    data?: PtcgApiCard[];
+    data?: ScrydexCard[];
   } | null;
   status_code: number;
   fetched_at: string;
@@ -51,9 +51,9 @@ type NormalizedObservationRow = {
   normalized_language: string;
   variant_ref: string;
   observed_price: number | null;
-  currency: "EUR";
+  currency: "USD" | "EUR";
   observed_at: string;
-  history_points_30d: Array<{ ts: string; price: number; currency: "EUR" }>;
+  history_points_30d: Array<{ ts: string; price: number; currency: "USD" | "EUR" }>;
   history_points_30d_count: number;
   metadata: Record<string, unknown>;
   updated_at: string;
@@ -99,46 +99,167 @@ type RawNormalizeResult = {
   sampleObservations: ObservationSample[];
 };
 
+type VariantObservation = {
+  variantName: string;
+  variantId: string;
+  observedPrice: number | null;
+  currency: "USD" | "EUR";
+  providerFinish: string | null;
+  normalizedFinish: "NON_HOLO" | "HOLO" | "REVERSE_HOLO" | "UNKNOWN";
+  normalizedEdition: "UNLIMITED" | "FIRST_EDITION";
+};
+
 function parsePositiveInt(value: number | undefined, fallback: number): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
   return Math.max(1, Math.floor(value));
 }
 
 function parseProviderSetId(params: Record<string, unknown> | null | undefined): string | null {
-  const raw = params?.episodeId;
+  const raw = params?.expansionId;
   const value = typeof raw === "string" ? raw.trim() : String(raw ?? "").trim();
   return value || null;
 }
 
-function normalizePrice(card: PtcgApiCard): number | null {
-  const market = card.prices?.cardmarket;
-  const candidates = [market?.lowest_near_mint, market?.["30d_average"], market?.["7d_average"]];
-  for (const value of candidates) {
-    if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
+function normalizeCardNumber(raw: string | null | undefined): string {
+  if (!raw) return "";
+  const trimmed = raw.trim().replace(/^#/, "");
+  const slashMatch = trimmed.match(/^(\d+)\//);
+  if (slashMatch) return String(parseInt(slashMatch[1], 10));
+  if (/^\d+$/.test(trimmed)) return String(parseInt(trimmed, 10));
+  const promoMatch = trimmed.match(/^([A-Za-z]+)(\d+)$/);
+  if (promoMatch) {
+    return `${promoMatch[1].toUpperCase()}${String(parseInt(promoMatch[2], 10))}`;
+  }
+  return trimmed;
+}
+
+function variantNameToFinish(variantName: string): {
+  providerFinish: string | null;
+  normalizedFinish: "NON_HOLO" | "HOLO" | "REVERSE_HOLO" | "UNKNOWN";
+  normalizedEdition: "UNLIMITED" | "FIRST_EDITION";
+} {
+  const lower = variantName.toLowerCase().replace(/[-_]+/g, "").trim();
+  if (!lower) {
+    return { providerFinish: null, normalizedFinish: "UNKNOWN", normalizedEdition: "UNLIMITED" };
+  }
+  if (lower.includes("1stedition") || lower.includes("firstedition")) {
+    return { providerFinish: variantName, normalizedFinish: "HOLO", normalizedEdition: "FIRST_EDITION" };
+  }
+  if (lower.includes("reverse")) {
+    return { providerFinish: variantName, normalizedFinish: "REVERSE_HOLO", normalizedEdition: "UNLIMITED" };
+  }
+  if (lower === "normal" || lower === "nonholo" || lower === "nonholofoil") {
+    return { providerFinish: variantName, normalizedFinish: "NON_HOLO", normalizedEdition: "UNLIMITED" };
+  }
+  if (lower.includes("holo") || lower.includes("foil")) {
+    return { providerFinish: variantName, normalizedFinish: "HOLO", normalizedEdition: "UNLIMITED" };
+  }
+  if (lower === "unknown") {
+    return { providerFinish: variantName, normalizedFinish: "UNKNOWN", normalizedEdition: "UNLIMITED" };
+  }
+  return { providerFinish: variantName, normalizedFinish: "UNKNOWN", normalizedEdition: "UNLIMITED" };
+}
+
+function getNumberField(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
   }
   return null;
 }
 
-function normalizeCardId(card: PtcgApiCard): string | null {
-  const tcgid = String(card.tcgid ?? "").trim();
-  if (tcgid) return tcgid;
-  const id = String(card.id ?? "").trim();
-  return id || null;
+function extractPriceCurrency(prices: unknown): { price: number | null; currency: "USD" | "EUR" } {
+  if (!prices || typeof prices !== "object") return { price: null, currency: "USD" };
+  const record = prices as Record<string, unknown>;
+
+  const directCurrency = typeof record.currency === "string" ? record.currency.trim().toUpperCase() : "";
+  const directCandidates = [
+    record.marketPrice,
+    record.market,
+    record.lowest_near_mint,
+    record.low,
+    record.mid,
+    record.average,
+    record.avg,
+    record.price,
+    record.value,
+  ];
+  for (const candidate of directCandidates) {
+    const value = getNumberField(candidate);
+    if (value !== null) {
+      return {
+        price: value,
+        currency: directCurrency === "EUR" ? "EUR" : "USD",
+      };
+    }
+  }
+
+  const usdValue = getNumberField(record.usd) ?? getNumberField(record.USD);
+  if (usdValue !== null) return { price: usdValue, currency: "USD" };
+
+  const eurValue = getNumberField(record.eur) ?? getNumberField(record.EUR);
+  if (eurValue !== null) return { price: eurValue, currency: "EUR" };
+
+  for (const value of Object.values(record)) {
+    if (!value || typeof value !== "object") continue;
+    const nested = extractPriceCurrency(value);
+    if (nested.price !== null) return nested;
+  }
+
+  return { price: null, currency: "USD" };
+}
+
+function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
+  const fallbackPrice = extractPriceCurrency((card as { prices?: unknown }).prices);
+  const variants = card.variants ?? [];
+  if (variants.length === 0) {
+    const fallbackFinish = variantNameToFinish("unknown");
+    return [{
+      variantName: "unknown",
+      variantId: "unknown",
+      observedPrice: fallbackPrice.price,
+      currency: fallbackPrice.currency,
+      providerFinish: fallbackFinish.providerFinish,
+      normalizedFinish: fallbackFinish.normalizedFinish,
+      normalizedEdition: fallbackFinish.normalizedEdition,
+    }];
+  }
+
+  const results: VariantObservation[] = [];
+  for (const variant of variants) {
+    const variantName = String((variant as ScrydexVariant).name ?? "unknown").trim() || "unknown";
+    const variantId = variantName.replace(/\s+/g, "_").toLowerCase();
+    const pricing = extractPriceCurrency((variant as ScrydexVariant).prices);
+    const finish = variantNameToFinish(variantName);
+    results.push({
+      variantName,
+      variantId,
+      observedPrice: pricing.price ?? fallbackPrice.price,
+      currency: pricing.price !== null ? pricing.currency : fallbackPrice.currency,
+      providerFinish: finish.providerFinish,
+      normalizedFinish: finish.normalizedFinish,
+      normalizedEdition: finish.normalizedEdition,
+    });
+  }
+
+  return results;
 }
 
 function buildObservationRow(params: {
   rawPayload: RawPayloadRow;
   providerSetId: string | null;
-  card: PtcgApiCard;
+  card: ScrydexCard;
+  variant: VariantObservation;
   normalizedAt: string;
 }): NormalizedObservationRow | null {
-  const { rawPayload, providerSetId, card, normalizedAt } = params;
-  const providerCardId = normalizeCardId(card);
+  const { rawPayload, providerSetId, card, variant, normalizedAt } = params;
+  const providerCardId = String(card.id ?? "").trim();
   if (!providerCardId) return null;
-  const providerVariantId = `${providerCardId}_raw_nm_en`;
-  const cardNumberRaw = card.card_number == null ? null : String(card.card_number).trim();
-  const normalizedCardNumber = cardNumberRaw ? normalizeCardNumber(cardNumberRaw) : null;
-  const observedPrice = normalizePrice(card);
+
+  const providerVariantId = `${providerCardId}:${variant.variantId}`;
+  const cardNumberRaw = String(card.number ?? card.printed_number ?? "").trim() || null;
+  const normalizedCardNumber = normalizeCardNumber(cardNumberRaw);
 
   return {
     provider_raw_payload_id: rawPayload.id,
@@ -148,28 +269,28 @@ function buildObservationRow(params: {
     provider_card_id: providerCardId,
     provider_variant_id: providerVariantId,
     asset_type: "single",
-    set_name: null,
+    set_name: card.expansion?.name?.trim() ?? null,
     card_name: String(card.name ?? "").trim() || providerCardId,
     card_number: cardNumberRaw,
     normalized_card_number: normalizedCardNumber || null,
-    provider_finish: null,
-    normalized_finish: "UNKNOWN",
-    normalized_edition: "UNLIMITED",
+    provider_finish: variant.providerFinish,
+    normalized_finish: variant.normalizedFinish,
+    normalized_edition: variant.normalizedEdition,
     normalized_stamp: "NONE",
     provider_condition: "Near Mint",
     normalized_condition: "nm",
-    provider_language: "English",
+    provider_language: card.language_code ?? "en",
     normalized_language: "en",
     variant_ref: buildLegacyVariantRef(
-      "normal",
-      "UNLIMITED",
+      variant.variantName,
+      variant.normalizedEdition,
       null,
       "Near Mint",
       "English",
       "RAW",
     ),
-    observed_price: observedPrice,
-    currency: "EUR",
+    observed_price: variant.observedPrice,
+    currency: variant.currency,
     observed_at: rawPayload.fetched_at,
     history_points_30d: [],
     history_points_30d_count: 0,
@@ -177,11 +298,11 @@ function buildObservationRow(params: {
       rawFetchedAt: rawPayload.fetched_at,
       requestHash: rawPayload.request_hash ?? null,
       responseHash: rawPayload.response_hash ?? null,
-      providerApiCardId: card.id ?? null,
-      providerTcgId: card.tcgid ?? null,
+      providerCardId: card.id ?? null,
       providerRarity: card.rarity ?? null,
-      providerEpisode: card.episode ?? null,
-      providerCardmarket: card.prices?.cardmarket ?? null,
+      providerExpansion: card.expansion ?? null,
+      providerVariant: variant.variantName,
+      providerVariantPricingCurrency: variant.currency,
     },
     updated_at: normalizedAt,
   };
@@ -210,7 +331,7 @@ async function loadCandidatePayloads(params: {
       .eq("endpoint", ENDPOINT);
 
     if (params.providerSetId) {
-      query = query.contains("params", { episodeId: params.providerSetId });
+      query = query.contains("params", { expansionId: params.providerSetId });
     }
 
     const { data, error } = await query.maybeSingle<RawPayloadRow>();
@@ -241,7 +362,7 @@ async function loadCandidatePayloads(params: {
       .range(from, from + RAW_SCAN_PAGE_SIZE - 1);
 
     if (params.providerSetId) {
-      query = query.contains("params", { episodeId: params.providerSetId });
+      query = query.contains("params", { expansionId: params.providerSetId });
     }
 
     const { data, error } = await query;
@@ -339,7 +460,7 @@ export async function runPokemonTcgRawNormalize(opts: {
     .from("ingest_runs")
     .insert({
       job: JOB,
-      source: "pokemontcg",
+      source: "scrydex",
       status: "started",
       ok: false,
       items_fetched: 0,
@@ -374,52 +495,60 @@ export async function runPokemonTcgRawNormalize(opts: {
     payloadsSkippedAlreadyNormalized = candidateResult.skippedAlreadyNormalized;
     payloadsSkippedNonSuccess = candidateResult.skippedNonSuccess;
 
+    const nowIso = new Date().toISOString();
+
     for (const rawPayload of candidateResult.payloads) {
       payloadsProcessed += 1;
       const providerSetId = parseProviderSetId(rawPayload.params);
-      const normalizedAt = new Date().toISOString();
-      const cards = Array.isArray(rawPayload.response?.data) ? rawPayload.response?.data ?? [] : [];
+      const cards = rawPayload.response?.data ?? [];
       const rows: NormalizedObservationRow[] = [];
 
       for (const card of cards) {
-        const row = buildObservationRow({
-          rawPayload,
-          providerSetId,
-          card,
-          normalizedAt,
-        });
-        if (!row) continue;
-        rows.push(row);
-        observationsBuilt += 1;
-        singleObservations += 1;
-        if (sampleObservations.length < 12) {
-          sampleObservations.push({
-            providerSetId: row.provider_set_id,
-            providerCardId: row.provider_card_id,
-            providerVariantId: row.provider_variant_id,
-            cardName: row.card_name,
-            cardNumber: row.card_number,
-            normalizedCardNumber: row.normalized_card_number,
-            observedPrice: row.observed_price,
-            observedAt: row.observed_at,
-            variantRef: row.variant_ref,
+        const variants = buildVariantObservations(card);
+        for (const variant of variants) {
+          const observation = buildObservationRow({
+            rawPayload,
+            providerSetId,
+            card,
+            variant,
+            normalizedAt: nowIso,
           });
+          if (!observation) continue;
+
+          rows.push(observation);
+          observationsBuilt += 1;
+          singleObservations += 1;
+
+          if (sampleObservations.length < 25) {
+            sampleObservations.push({
+              providerSetId,
+              providerCardId: observation.provider_card_id,
+              providerVariantId: observation.provider_variant_id,
+              cardName: observation.card_name,
+              cardNumber: observation.card_number,
+              normalizedCardNumber: observation.normalized_card_number,
+              observedPrice: observation.observed_price,
+              observedAt: observation.observed_at,
+              variantRef: observation.variant_ref,
+            });
+          }
         }
       }
 
+      let insertedOrUpdated = 0;
       if (rows.length > 0) {
         const { data, error } = await supabase
           .from("provider_normalized_observations")
           .upsert(rows, {
-            onConflict: "provider_raw_payload_id,provider_card_id,provider_variant_id",
+            onConflict: "provider,provider_variant_id,provider_raw_payload_id",
           })
           .select("id");
 
         if (error) {
-          throw new Error(`provider_normalized_observations: ${error.message}`);
+          throw new Error(`provider_normalized_observations(upsert): ${error.message}`);
         }
-
-        observationsUpserted += (data ?? []).length;
+        insertedOrUpdated = (data ?? []).length;
+        observationsUpserted += insertedOrUpdated;
       }
 
       if (samplePayloads.length < 25) {
@@ -428,7 +557,7 @@ export async function runPokemonTcgRawNormalize(opts: {
           providerSetId,
           cards: cards.length,
           observations: rows.length,
-          insertedOrUpdated: rows.length,
+          insertedOrUpdated,
         });
       }
     }
@@ -465,7 +594,7 @@ export async function runPokemonTcgRawNormalize(opts: {
         ok: result.ok,
         items_fetched: observationsBuilt,
         items_upserted: observationsUpserted,
-        items_failed: firstError ? 1 : 0,
+        items_failed: payloadsSkippedNonSuccess + (firstError ? 1 : 0),
         ended_at: endedAt,
         meta: {
           mode: "normalize-only",
@@ -477,8 +606,8 @@ export async function runPokemonTcgRawNormalize(opts: {
           payloadsProcessed,
           payloadsSkippedAlreadyNormalized,
           payloadsSkippedNonSuccess,
-          singleObservations,
-          sealedObservations,
+          observationsBuilt,
+          observationsUpserted,
           samplePayloads,
           sampleObservations,
           firstError,

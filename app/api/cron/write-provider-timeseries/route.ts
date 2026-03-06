@@ -16,10 +16,10 @@ function parseOptionalInt(value: string | null): number | undefined {
 
 function parseProviders(raw: string | null): SupportedProvider[] {
   const value = String(raw ?? "all").trim().toUpperCase();
-  if (value === "ALL") return ["JUSTTCG", "POKEMON_TCG_API"];
+  if (value === "ALL") return ["JUSTTCG", "SCRYDEX"];
   if (value === "JUSTTCG") return ["JUSTTCG"];
-  if (value === "POKEMON_TCG_API" || value === "POKEMONTCG") return ["POKEMON_TCG_API"];
-  return ["JUSTTCG", "POKEMON_TCG_API"];
+  if (value === "SCRYDEX" || value === "POKEMONTCG") return ["SCRYDEX"];
+  return ["JUSTTCG", "SCRYDEX"];
 }
 
 export async function GET(req: Request) {

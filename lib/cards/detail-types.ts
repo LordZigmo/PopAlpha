@@ -15,11 +15,12 @@ export type CardDetailMetrics = {
 
 export type CardDetailPriceCompare = {
   justtcgPrice: number | null;
+  scrydexPrice: number | null;
   pokemontcgPrice: number | null;
   marketPrice: number | null;
   asOf: string | null;
   providers: Array<{
-    provider: "JUSTTCG" | "POKEMON_TCG_API";
+    provider: "JUSTTCG" | "SCRYDEX";
     sourcePrice: number | null;
     sourceCurrency: string | null;
     usdPrice: number | null;

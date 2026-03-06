@@ -7,7 +7,7 @@ const DEFAULT_OBSERVATIONS_PER_RUN = process.env.PROVIDER_OBSERVATION_TIMESERIES
   : 300;
 const SCAN_PAGE_SIZE = 100;
 
-type SupportedProvider = "JUSTTCG" | "POKEMON_TCG_API";
+type SupportedProvider = "JUSTTCG" | "SCRYDEX";
 
 type MatchScanRow = {
   provider_normalized_observation_id: string;
@@ -104,10 +104,10 @@ function parsePositiveInt(value: number | undefined, fallback: number): number {
   return Math.max(1, Math.floor(value));
 }
 
-function normalizeCurrency(raw: string | null | undefined, provider: SupportedProvider): string {
+function normalizeCurrency(raw: string | null | undefined): string {
   const value = String(raw ?? "").trim().toUpperCase();
   if (value) return value;
-  return provider === "POKEMON_TCG_API" ? "EUR" : "USD";
+  return "USD";
 }
 
 function buildProviderRef(provider: SupportedProvider, providerVariantId: string): string {
@@ -122,7 +122,7 @@ function buildHistoryVariantRef(match: MatchRow): string {
 
 function shouldWriteRawForCondition(provider: SupportedProvider, condition: string | null | undefined): boolean {
   // Keep RAW market price comparable by using NM-only snapshots.
-  // PokemonTCG API observations are normalized as NM by design.
+  // Scrydex observations are normalized as NM by design.
   if (provider !== "JUSTTCG") return true;
   const normalized = String(condition ?? "").trim().toLowerCase();
   return normalized === "nm" || normalized === "mint";
@@ -324,7 +324,7 @@ export async function runProviderObservationTimeseries(opts: {
 
       const providerRef = buildProviderRef(opts.provider, row.match.provider_variant_id);
       const historyVariantRef = buildHistoryVariantRef(row.match);
-      const sourceCurrency = normalizeCurrency(row.observation.currency, opts.provider);
+      const sourceCurrency = normalizeCurrency(row.observation.currency);
       const observedPriceUsd = convertToUsd(observedPrice, sourceCurrency);
 
       snapshotRows.push({

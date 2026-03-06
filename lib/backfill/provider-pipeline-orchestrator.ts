@@ -15,7 +15,7 @@ type PipelineStep<T extends object> = {
 
 type PipelineResult = {
   ok: boolean;
-  provider: "JUSTTCG" | "POKEMON_TCG_API";
+  provider: "JUSTTCG" | "SCRYDEX";
   startedAt: string;
   endedAt: string;
   firstError: string | null;
@@ -144,7 +144,7 @@ export async function runPokemonTcgPipeline(opts: {
     maxRequests: opts.maxRequests,
   });
   steps.push({ name: "ingest", ok: ingest.ok, result: ingest });
-  if (!ingest.ok) firstError = ingest.firstError ?? "pokemontcg ingest failed";
+  if (!ingest.ok) firstError = ingest.firstError ?? "scrydex ingest failed";
 
   if (!firstError) {
     const normalize = await runPokemonTcgRawNormalize({
@@ -153,7 +153,7 @@ export async function runPokemonTcgPipeline(opts: {
       force: opts.force === true,
     });
     steps.push({ name: "normalize", ok: normalize.ok, result: normalize });
-    if (!normalize.ok) firstError = normalize.firstError ?? "pokemontcg normalize failed";
+    if (!normalize.ok) firstError = normalize.firstError ?? "scrydex normalize failed";
   }
 
   if (!firstError) {
@@ -163,18 +163,18 @@ export async function runPokemonTcgPipeline(opts: {
       force: opts.force === true,
     });
     steps.push({ name: "match", ok: match.ok, result: match });
-    if (!match.ok) firstError = match.firstError ?? "pokemontcg match failed";
+    if (!match.ok) firstError = match.firstError ?? "scrydex match failed";
   }
 
   if (!firstError) {
     const timeseries = await runProviderObservationTimeseries({
-      provider: "POKEMON_TCG_API",
+      provider: "SCRYDEX",
       providerSetId: opts.providerSetId ?? undefined,
       observationLimit: opts.timeseriesObservations ?? opts.matchObservations,
       force: opts.force === true,
     });
     steps.push({ name: "timeseries", ok: timeseries.ok, result: timeseries });
-    if (!timeseries.ok) firstError = timeseries.firstError ?? "pokemontcg timeseries failed";
+    if (!timeseries.ok) firstError = timeseries.firstError ?? "scrydex timeseries failed";
   }
 
   const supabase = dbAdmin();
@@ -204,7 +204,7 @@ export async function runPokemonTcgPipeline(opts: {
   const endedAt = new Date().toISOString();
   return {
     ok: !firstError && !metricsRefreshError && !priceChangesRefreshError,
-    provider: "POKEMON_TCG_API",
+    provider: "SCRYDEX",
     startedAt,
     endedAt,
     firstError,

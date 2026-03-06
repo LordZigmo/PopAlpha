@@ -43,7 +43,7 @@ export default function AdminImportRunner() {
         disabled={running}
         className="btn-accent rounded-[var(--radius-input)] border px-4 py-2 text-sm font-semibold disabled:opacity-60"
       >
-        {running ? "Importing..." : "Import English Pokemon"}
+        {running ? "Importing..." : "Import From Scrydex"}
       </button>
 
       {summary ? (

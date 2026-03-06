@@ -32,6 +32,10 @@ type RawIngestSetSummary = {
   hasMore: boolean;
 };
 
+type LastRunRow = {
+  meta: Record<string, unknown> | null;
+};
+
 type RawIngestResult = {
   ok: boolean;
   job: string;
@@ -73,6 +77,37 @@ function responseHash(body: unknown): string {
 function isDuplicateInsertError(message: string | null | undefined): boolean {
   const text = String(message ?? "").toLowerCase();
   return text.includes("duplicate") || text.includes("unique");
+}
+
+function selectSetsFromCursor(sets: CanonicalSet[], setLimit: number, cursorSetCode: string | null): CanonicalSet[] {
+  if (sets.length === 0) return [];
+  const limit = Math.min(Math.max(1, setLimit), sets.length);
+  if (!cursorSetCode) return sets.slice(0, limit);
+
+  const cursorIndex = sets.findIndex((row) => row.setCode === cursorSetCode);
+  const startIndex = cursorIndex >= 0 ? (cursorIndex + 1) % sets.length : 0;
+  const selected: CanonicalSet[] = [];
+  for (let i = 0; i < limit; i += 1) {
+    selected.push(sets[(startIndex + i) % sets.length]);
+  }
+  return selected;
+}
+
+async function loadLastCursorSetCode(): Promise<string | null> {
+  const supabase = dbAdmin();
+  const { data, error } = await supabase
+    .from("ingest_runs")
+    .select("meta")
+    .eq("job", JOB)
+    .eq("status", "finished")
+    .eq("ok", true)
+    .order("ended_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<LastRunRow>();
+
+  if (error) throw new Error(`ingest_runs(last cursor): ${error.message}`);
+  const value = typeof data?.meta?.nextSetCode === "string" ? data.meta.nextSetCode.trim() : "";
+  return value || null;
 }
 
 async function loadCanonicalSets(): Promise<CanonicalSet[]> {
@@ -190,17 +225,22 @@ export async function runJustTcgRawIngest(opts: {
   let setsProcessed = 0;
   const sampleSetResults: RawIngestSetSummary[] = [];
 
+  const cursorSetCode = opts.providerSetId ? null : await loadLastCursorSetCode();
   const targets = opts.providerSetId
     ? [{ setCode: null, setName: null, providerSetId: opts.providerSetId }]
     : await (async () => {
         const sets = await loadCanonicalSets();
-        const providerSetMap = await loadProviderSetMap(sets.map((set) => set.setCode));
-        return sets.slice(0, setLimit).map((set) => ({
+        const selectedSets = selectSetsFromCursor(sets, setLimit, cursorSetCode);
+        const providerSetMap = await loadProviderSetMap(selectedSets.map((set) => set.setCode));
+        return selectedSets.map((set) => ({
           setCode: set.setCode,
           setName: set.setName,
           providerSetId: providerSetMap.get(set.setCode) ?? setNameToJustTcgId(set.setName),
         }));
       })();
+  const nextSetCode = targets.length > 0 && !opts.providerSetId
+    ? (targets[targets.length - 1]?.setCode ?? null)
+    : null;
 
   const { data: runRow, error: runStartError } = await supabase
     .from("ingest_runs")
@@ -218,6 +258,8 @@ export async function runJustTcgRawIngest(opts: {
         pageLimitPerSet,
         maxRequests,
         providerSetId: opts.providerSetId ?? null,
+        cursorSetCode,
+        nextSetCode,
         setsPlanned: targets.length,
       },
     })
@@ -334,6 +376,8 @@ export async function runJustTcgRawIngest(opts: {
           pageLimitPerSet,
           maxRequests,
           providerSetId: opts.providerSetId ?? null,
+          cursorSetCode,
+          nextSetCode,
           setsPlanned: targets.length,
           setsProcessed,
           requestsMade,

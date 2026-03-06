@@ -519,7 +519,7 @@ export default async function CanonicalCardPage({
           .from("public_price_history")
           .select("variant_ref, price, currency, ts")
           .eq("canonical_slug", slug)
-          .eq("provider", "POKEMON_TCG_API")
+          .eq("provider", "SCRYDEX")
           .eq("source_window", "snapshot")
           .in("variant_ref", gradedVariantRefsForActiveBucket.map((entry) => entry.variantRef))
           .order("ts", { ascending: false })

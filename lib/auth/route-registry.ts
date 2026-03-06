@@ -44,6 +44,7 @@ export const CRON_ROUTES = [
   "cron/match-pokemontcg-normalized",
   "cron/write-provider-timeseries",
   "cron/run-justtcg-pipeline",
+  "cron/run-scrydex-pipeline",
   "cron/run-pokemontcg-pipeline",
   "cron/sync-canonical",
   "cron/sync-tcg-prices",
@@ -56,6 +57,7 @@ export const CRON_ROUTES = [
 
 export const ADMIN_ROUTES = [
   "admin/import/pokemontcg-canonical",
+  "admin/import/scrydex-canonical",
   "admin/import/pokemontcg",
   "admin/import/printings",
   "admin/psa-seeds",

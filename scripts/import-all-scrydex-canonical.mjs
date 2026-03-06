@@ -1,33 +1,32 @@
 #!/usr/bin/env node
 /**
- * Import all Pokemon TCG sets into the DB by repeatedly calling the canonical
- * import endpoint. Each request processes up to 5 pages (maxPages cap); we
- * continue until the API returns done=true.
+ * Import all Pokemon TCG cards (English) from Scrydex into the DB by repeatedly
+ * calling the Scrydex canonical import endpoint until done=true.
  *
  * Prerequisites:
  * - Dev server running: npm run dev (or set BASE_URL to your deployed app URL)
- * - .env.local has ADMIN_SECRET and the server has POKEMONTCG_API_KEY
+ * - .env.local has ADMIN_SECRET, SCRYDEX_API_KEY, SCRYDEX_TEAM_ID
  *
  * Usage (local; dev server must be running):
  *   npm run dev
  *   # in another terminal:
- *   npm run import:pokemontcg-all
+ *   npm run import:scrydex-all
  *
  * Usage (production):
- *   BASE_URL=https://popalpha.ai node scripts/import-all-pokemontcg-canonical.mjs
+ *   BASE_URL=https://popalpha.ai node scripts/import-all-scrydex-canonical.mjs
  */
 import dotenv from "dotenv";
 import { fetch, Agent } from "undici";
 
-console.log("[import-all-pokemontcg] Starting...");
+console.log("[import-all-scrydex] Starting...");
 
 dotenv.config({ path: ".env.local" });
 
 const BASE_URL = (process.env.BASE_URL || "http://localhost:3000").replace(/\/$/, "");
 const ADMIN_SECRET = process.env.ADMIN_SECRET?.trim();
-const PAGE_SIZE = 250;
+const PAGE_SIZE = 100;
 const MAX_PAGES_PER_REQUEST = 5;
-const REQUEST_TIMEOUT_MS = 35 * 60 * 1000;
+const REQUEST_TIMEOUT_MS = 15 * 60 * 1000;
 const DELAY_MS = 250;
 
 const fetchAgent = new Agent({
@@ -36,23 +35,21 @@ const fetchAgent = new Agent({
 });
 
 if (!ADMIN_SECRET) {
-  console.error("[import-all-pokemontcg] ERROR: ADMIN_SECRET is required in .env.local");
+  console.error("[import-all-scrydex] ERROR: ADMIN_SECRET is required in .env.local");
   process.exit(1);
 }
 
-console.log("[import-all-pokemontcg] Config ok, will call:", BASE_URL);
+console.log("[import-all-scrydex] Config ok, will call:", BASE_URL);
 
 async function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function importChunk(pageStart) {
-  const url = `${BASE_URL}/api/admin/import/pokemontcg-canonical?pageStart=${pageStart}&maxPages=${MAX_PAGES_PER_REQUEST}&pageSize=${PAGE_SIZE}`;
+  const url = `${BASE_URL}/api/admin/import/scrydex-canonical?pageStart=${pageStart}&maxPages=${MAX_PAGES_PER_REQUEST}&pageSize=${PAGE_SIZE}`;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  const progressInterval = setInterval(() => {
-    process.stdout.write(".");
-  }, 8000);
+  const progressInterval = setInterval(() => process.stdout.write("."), 5000);
   let res;
   try {
     res = await fetch(url, {
@@ -72,7 +69,7 @@ async function importChunk(pageStart) {
       code === "ECONNREFUSED"
         ? "Connection refused. Is the dev server running? Run: npm run dev"
         : err.name === "AbortError"
-          ? `Request timed out after ${REQUEST_TIMEOUT_MS / 1000}s. Try reducing MAX_PAGES_PER_REQUEST (currently ${MAX_PAGES_PER_REQUEST}).`
+          ? `Request timed out after ${REQUEST_TIMEOUT_MS / 1000}s.`
           : code
             ? `fetch failed (${code}). ${err.message}`
             : err.message;
@@ -96,11 +93,9 @@ async function importChunk(pageStart) {
 }
 
 async function main() {
-  console.log("Importing all Pokemon TCG sets (canonical cards + printings)...");
+  console.log("Importing all Pokemon TCG cards from Scrydex (canonical + printings)...");
   console.log("BASE_URL:", BASE_URL);
   console.log("Page size:", PAGE_SIZE, "| Max pages per request:", MAX_PAGES_PER_REQUEST);
-  console.log("");
-  console.log("First request may take 1–2 minutes (fewer pages per round to avoid timeouts). Please wait...");
   console.log("");
 
   let pageStart = 1;
@@ -112,7 +107,7 @@ async function main() {
   while (true) {
     round += 1;
     try {
-      console.log(`Round ${round}: requesting pageStart=${pageStart} (may take 1–3 min, dots every 8s)...`);
+      console.log(`Round ${round}: pageStart=${pageStart} ...`);
       const result = await importChunk(pageStart);
       const fetched = result.itemsFetched ?? 0;
       const upserted = result.itemsUpserted ?? 0;

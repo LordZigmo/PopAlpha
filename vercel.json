@@ -41,7 +41,7 @@
       "schedule": "30 9 * * *"
     },
     {
-      "path": "/api/cron/run-pokemontcg-pipeline",
+      "path": "/api/cron/run-scrydex-pipeline",
       "schedule": "30 8 * * *"
     }
   ]

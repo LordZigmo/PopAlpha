@@ -42,7 +42,8 @@ type RawMetricRow = {
   liquidity_score: number | null;
   snapshot_count_30d: number | null;
   justtcg_price: number | null;
-  pokemontcg_price: number | null;
+  scrydex_price: number | null;
+  pokemontcg_price?: number | null;
   market_price: number | null;
   market_price_as_of: string | null;
 };
@@ -156,23 +157,25 @@ async function buildPriceCompare(params: {
     asOf: metricsRow?.market_price_as_of ?? null,
   });
 
-  const pokemontcgDisplay = await buildProviderPriceDisplay({
+  const scrydexSourcePrice = metricsRow?.scrydex_price ?? metricsRow?.pokemontcg_price ?? null;
+  const scrydexDisplay = await buildProviderPriceDisplay({
     supabase,
-    provider: "POKEMON_TCG_API",
-    sourcePrice: metricsRow?.pokemontcg_price ?? null,
-    sourceCurrency: "EUR",
+    provider: "SCRYDEX",
+    sourcePrice: scrydexSourcePrice,
+    sourceCurrency: "USD",
     asOf: metricsRow?.market_price_as_of ?? null,
   });
 
-  if (!metricsRow && justtcgDisplay.usdPrice === null && pokemontcgDisplay.usdPrice === null) return null;
+  if (!metricsRow && justtcgDisplay.usdPrice === null && scrydexDisplay.usdPrice === null) return null;
 
-  const providers: ProviderPriceDisplay[] = [justtcgDisplay, pokemontcgDisplay];
+  const providers: ProviderPriceDisplay[] = [justtcgDisplay, scrydexDisplay];
   const usdAverage = averageProviderUsdPrice(providers);
-  const asOf = [justtcgDisplay.asOf, pokemontcgDisplay.asOf].filter(Boolean).sort().at(-1) ?? metricsRow?.market_price_as_of ?? null;
+  const asOf = [justtcgDisplay.asOf, scrydexDisplay.asOf].filter(Boolean).sort().at(-1) ?? metricsRow?.market_price_as_of ?? null;
 
   return {
     justtcgPrice: justtcgDisplay.usdPrice,
-    pokemontcgPrice: pokemontcgDisplay.usdPrice,
+    scrydexPrice: scrydexDisplay.usdPrice,
+    pokemontcgPrice: scrydexDisplay.usdPrice,
     marketPrice: usdAverage ?? metricsRow?.market_price ?? null,
     asOf,
     providers,
@@ -278,7 +281,7 @@ export async function buildCardDetailResponse(inputSlug: string): Promise<CardDe
       .order("id", { ascending: true }),
     supabase
       .from("public_card_metrics")
-      .select("printing_id, liquidity_score, snapshot_count_30d, justtcg_price, pokemontcg_price, market_price, market_price_as_of")
+      .select("printing_id, liquidity_score, snapshot_count_30d, justtcg_price, scrydex_price, pokemontcg_price, market_price, market_price_as_of")
       .eq("canonical_slug", canonicalSlug)
       .eq("grade", "RAW"),
     supabase

@@ -1,7 +1,7 @@
 import { dbAdmin } from "@/lib/db/admin";
 
-const PROVIDER = "POKEMON_TCG_API";
-const JOB = "pokemontcg_normalized_match";
+const PROVIDER = "SCRYDEX";
+const JOB = "scrydex_normalized_match";
 const DEFAULT_OBSERVATIONS_PER_RUN = process.env.POKEMONTCG_MATCH_OBSERVATIONS_PER_RUN
   ? parseInt(process.env.POKEMONTCG_MATCH_OBSERVATIONS_PER_RUN, 10)
   : 200;
@@ -308,6 +308,13 @@ async function loadProviderSetMap(providerSetIds: string[]): Promise<Map<string,
   for (const row of (data ?? []) as ProviderSetMapRow[]) {
     bySetId.set(row.provider_set_id, row.canonical_set_code);
   }
+  // Scrydex uses expansion ids that align with canonical set_code.
+  // If an explicit provider_set_map row is missing, fallback to identity.
+  for (const providerSetId of providerSetIds) {
+    if (!bySetId.has(providerSetId)) {
+      bySetId.set(providerSetId, providerSetId);
+    }
+  }
   return bySetId;
 }
 
@@ -444,7 +451,7 @@ export async function runPokemonTcgNormalizedMatch(opts: {
     .from("ingest_runs")
     .insert({
       job: JOB,
-      source: "pokemontcg",
+      source: "scrydex",
       status: "started",
       ok: false,
       items_fetched: 0,
