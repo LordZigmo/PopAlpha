@@ -2,9 +2,11 @@ import { dbAdmin } from "@/lib/db/admin";
 
 const PROVIDER = "SCRYDEX";
 const JOB = "scrydex_normalized_match";
-const DEFAULT_OBSERVATIONS_PER_RUN = process.env.POKEMONTCG_MATCH_OBSERVATIONS_PER_RUN
-  ? parseInt(process.env.POKEMONTCG_MATCH_OBSERVATIONS_PER_RUN, 10)
-  : 1200;
+const DEFAULT_OBSERVATIONS_PER_RUN = process.env.SCRYDEX_MATCH_OBSERVATIONS_PER_RUN
+  ? parseInt(process.env.SCRYDEX_MATCH_OBSERVATIONS_PER_RUN, 10)
+  : process.env.POKEMONTCG_MATCH_OBSERVATIONS_PER_RUN
+    ? parseInt(process.env.POKEMONTCG_MATCH_OBSERVATIONS_PER_RUN, 10)
+    : 1200;
 const UNMATCHED_RETRY_HOURS = process.env.SCRYDEX_UNMATCHED_RETRY_HOURS
   ? parseInt(process.env.SCRYDEX_UNMATCHED_RETRY_HOURS, 10)
   : 6;
@@ -701,4 +703,14 @@ export async function runPokemonTcgNormalizedMatch(opts: {
   }
 
   return result;
+}
+
+export async function runScrydexNormalizedMatch(opts: {
+  observationLimit?: number;
+  providerSetId?: string | null;
+  observationId?: string | null;
+  force?: boolean;
+  scanDirection?: ScanDirection;
+} = {}): Promise<MatchResult> {
+  return runPokemonTcgNormalizedMatch(opts);
 }

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/auth/require";
-import { runPokemonTcgPipeline } from "@/lib/backfill/provider-pipeline-orchestrator";
+import { runScrydexPipeline } from "@/lib/backfill/provider-pipeline-orchestrator";
 import { enqueuePipelineJob } from "@/lib/backfill/provider-pipeline-job-queue";
 
 export const runtime = "nodejs";
@@ -47,7 +47,7 @@ export async function GET(req: Request) {
       });
     }
 
-    const result = await runPokemonTcgPipeline({
+    const result = await runScrydexPipeline({
       setLimit: params.setLimit,
       pageLimitPerSet: params.pageLimitPerSet,
       maxRequests: params.maxRequests,

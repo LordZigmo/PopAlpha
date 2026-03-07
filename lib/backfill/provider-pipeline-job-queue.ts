@@ -1,5 +1,5 @@
 import { dbAdmin } from "@/lib/db/admin";
-import { runJustTcgPipeline, runPokemonTcgPipeline } from "@/lib/backfill/provider-pipeline-orchestrator";
+import { runJustTcgPipeline, runScrydexPipeline } from "@/lib/backfill/provider-pipeline-orchestrator";
 
 export type PipelineProvider = "JUSTTCG" | "SCRYDEX";
 export type PipelineJobKind = "PIPELINE" | "RETRY";
@@ -118,7 +118,7 @@ export async function executeClaimedPipelineJob(job: PipelineJobRow): Promise<{ 
       return { ok: result.ok, result, error: result.firstError ?? null };
     }
 
-    const result = await runPokemonTcgPipeline({
+    const result = await runScrydexPipeline({
       providerSetId: params.providerSetId ?? undefined,
       setLimit: params.setLimit,
       pageLimitPerSet: params.pageLimitPerSet,
@@ -158,4 +158,3 @@ export function retryDelayForAttempt(attempt: number): number {
   const base = Math.max(1, attempt);
   return Math.min(60 * 60, 60 * Math.pow(2, Math.min(base, 6)));
 }
-

@@ -1,9 +1,9 @@
 import { runJustTcgRawIngest } from "@/lib/backfill/justtcg-raw-ingest";
 import { runJustTcgRawNormalize } from "@/lib/backfill/justtcg-raw-normalize";
 import { runJustTcgNormalizedMatch } from "@/lib/backfill/justtcg-normalized-match";
-import { runPokemonTcgRawIngest } from "@/lib/backfill/pokemontcg-raw-ingest";
-import { runPokemonTcgRawNormalize } from "@/lib/backfill/pokemontcg-raw-normalize";
-import { runPokemonTcgNormalizedMatch } from "@/lib/backfill/pokemontcg-normalized-match";
+import { runScrydexRawIngest } from "@/lib/backfill/pokemontcg-raw-ingest";
+import { runScrydexRawNormalize } from "@/lib/backfill/pokemontcg-raw-normalize";
+import { runScrydexNormalizedMatch } from "@/lib/backfill/pokemontcg-normalized-match";
 import { runProviderObservationTimeseries } from "@/lib/backfill/provider-observation-timeseries";
 
 type PipelineStep<T extends object> = {
@@ -120,7 +120,7 @@ export async function runPokemonTcgPipeline(opts: {
   const steps: PipelineStep<object>[] = [];
   let firstError: string | null = null;
 
-  const ingest = await runPokemonTcgRawIngest({
+  const ingest = await runScrydexRawIngest({
     providerSetId: opts.providerSetId ?? undefined,
     setLimit: opts.setLimit,
     pageLimitPerSet: opts.pageLimitPerSet,
@@ -132,7 +132,7 @@ export async function runPokemonTcgPipeline(opts: {
   }
 
   if (!firstError) {
-    const normalize = await runPokemonTcgRawNormalize({
+    const normalize = await runScrydexRawNormalize({
       providerSetId: opts.providerSetId ?? undefined,
       payloadLimit: opts.payloadLimit,
       force: opts.force === true,
@@ -142,7 +142,7 @@ export async function runPokemonTcgPipeline(opts: {
   }
 
   if (!firstError) {
-    const match = await runPokemonTcgNormalizedMatch({
+    const match = await runScrydexNormalizedMatch({
       providerSetId: opts.providerSetId ?? undefined,
       observationLimit: opts.matchObservations,
       force: opts.force === true,
@@ -173,4 +173,18 @@ export async function runPokemonTcgPipeline(opts: {
     firstError,
     steps,
   };
+}
+
+export async function runScrydexPipeline(opts: {
+  providerSetId?: string | null;
+  setLimit?: number;
+  pageLimitPerSet?: number;
+  maxRequests?: number;
+  payloadLimit?: number;
+  matchObservations?: number;
+  timeseriesObservations?: number;
+  force?: boolean;
+  matchScanDirection?: "newest" | "oldest";
+} = {}): Promise<PipelineResult> {
+  return runPokemonTcgPipeline(opts);
 }

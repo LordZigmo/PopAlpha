@@ -721,3 +721,12 @@ export async function runPokemonTcgRawNormalize(opts: {
 
   return result;
 }
+
+export async function runScrydexRawNormalize(opts: {
+  payloadLimit?: number;
+  providerSetId?: string | null;
+  rawPayloadId?: string | null;
+  force?: boolean;
+} = {}): Promise<RawNormalizeResult> {
+  return runPokemonTcgRawNormalize(opts);
+}
