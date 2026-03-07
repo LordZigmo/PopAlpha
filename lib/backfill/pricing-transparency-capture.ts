@@ -1,6 +1,7 @@
 import { dbAdmin } from "@/lib/db/admin";
 import { getPricingTransparencySnapshot } from "@/lib/data/freshness";
 import { captureOutlierDiagnostics } from "@/lib/backfill/outlier-diagnostics-capture";
+import { deliverPricingThresholdAlerts } from "@/lib/backfill/pricing-threshold-alerts";
 
 export async function capturePricingTransparencySnapshot(): Promise<{ ok: boolean; id: number | null }> {
   const supabase = dbAdmin();
@@ -14,6 +15,12 @@ export async function capturePricingTransparencySnapshot(): Promise<{ ok: boolea
     console.warn("[capturePricingTransparencySnapshot:outliers]", error);
   }
   const snapshot = await getPricingTransparencySnapshot();
+  let alertDelivery = { candidates: 0, delivered: 0 };
+  try {
+    alertDelivery = await deliverPricingThresholdAlerts(snapshot);
+  } catch (error) {
+    console.warn("[capturePricingTransparencySnapshot:alerts]", error);
+  }
   const freshnessValue = snapshot.slo.find((row) => row.key === "freshness_24h");
   const { data, error } = await supabase
     .from("pricing_transparency_snapshots")
@@ -24,7 +31,10 @@ export async function capturePricingTransparencySnapshot(): Promise<{ ok: boolea
       queue_depth: snapshot.pipelineHealth.queueDepth,
       retry_depth: snapshot.pipelineHealth.retryDepth,
       failed_depth: snapshot.pipelineHealth.failedDepth,
-      payload: snapshot,
+      payload: {
+        ...snapshot,
+        alertDelivery,
+      },
     })
     .select("id")
     .single<{ id: number }>();

@@ -157,11 +157,6 @@ function percentile(sorted: number[], pct: number): number | null {
   return Number(sorted[idx].toFixed(2));
 }
 
-function mean(values: number[]): number | null {
-  if (values.length === 0) return null;
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
-}
-
 function toFinite(value: number | null | undefined): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
@@ -193,8 +188,7 @@ export async function getPricingTransparencySnapshot(): Promise<PricingTranspare
     outlierExcludedCountRes,
     outlierImpactedRowsRes,
     recentRawRowsRes,
-    backtestMetricsRes,
-    backtestHistoryRes,
+    backtestSnapshotRes,
   ] = await Promise.all([
     supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null),
     supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null).not("justtcg_price", "is", null).not("scrydex_price", "is", null),
@@ -215,18 +209,11 @@ export async function getPricingTransparencySnapshot(): Promise<PricingTranspare
     supabase.from("outlier_excluded_points").select("canonical_slug").gte("captured_at", iso24h).limit(10000),
     supabase.from("public_card_metrics").select("canonical_slug, change_pct_24h").eq("grade", "RAW").is("printing_id", null).not("change_pct_24h", "is", null).limit(10000),
     supabase
-      .from("public_card_metrics")
-      .select("canonical_slug, grade, market_price, active_listings_7d")
-      .in("grade", ["RAW", "PSA9", "PSA10"])
-      .is("printing_id", null)
-      .not("market_price", "is", null)
-      .limit(8000),
-    supabase
-      .from("public_price_history")
-      .select("canonical_slug, ts, price")
-      .eq("source_window", "snapshot")
-      .gte("ts", iso24h)
-      .limit(12000),
+      .from("realized_sales_backtest_snapshots")
+      .select("sample_size, mae, mape, payload, captured_at")
+      .order("captured_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ]);
 
   const totalRaw = totalRawRes.count ?? 0;
@@ -422,78 +409,23 @@ export async function getPricingTransparencySnapshot(): Promise<PricingTranspare
   if (!rRes.error) retryDepth = rRes.count ?? 0;
   if (!fRes.error) failedDepth = fRes.count ?? 0;
 
-  const backtestMetricRows = (backtestMetricsRes.data ?? []) as Array<{
-    canonical_slug: string;
-    grade: string;
-    market_price: number | null;
-    active_listings_7d: number | null;
-  }>;
-  const backtestHistoryRows = (backtestHistoryRes.data ?? []) as Array<{
-    canonical_slug: string;
-    ts: string;
-    price: number;
-  }>;
-  const latestRealizedBySlug = new Map<string, number[]>();
-  for (const row of backtestHistoryRows) {
-    if (!row.canonical_slug || !Number.isFinite(row.price) || row.price <= 0) continue;
-    const bucket = latestRealizedBySlug.get(row.canonical_slug) ?? [];
-    bucket.push(row.price);
-    latestRealizedBySlug.set(row.canonical_slug, bucket);
-  }
-  const medianRealizedBySlug = new Map<string, number>();
-  for (const [slug, prices] of latestRealizedBySlug.entries()) {
-    prices.sort((a, b) => a - b);
-    const mid = percentile(prices, 50);
-    if (mid != null) medianRealizedBySlug.set(slug, mid);
-  }
-  const slugsForBacktest = [...new Set(backtestMetricRows.map((row) => row.canonical_slug).filter(Boolean))];
-  const yearBySlug = new Map<string, number | null>();
-  for (let i = 0; i < slugsForBacktest.length; i += 500) {
-    const batch = slugsForBacktest.slice(i, i + 500);
-    const yearRes = await supabase
-      .from("canonical_cards")
-      .select("slug, year")
-      .in("slug", batch);
-    if (yearRes.error) continue;
-    for (const row of (yearRes.data ?? []) as Array<{ slug: string; year: number | null }>) {
-      yearBySlug.set(row.slug, row.year);
-    }
-  }
-  const segmentErrors = new Map<string, { abs: number[]; pct: number[] }>();
-  const totalAbs: number[] = [];
-  const totalPct: number[] = [];
-  for (const row of backtestMetricRows) {
-    const model = toFinite(row.market_price);
-    const realized = medianRealizedBySlug.get(row.canonical_slug) ?? null;
-    if (model == null || realized == null || realized <= 0) continue;
-    const absErr = Math.abs(model - realized);
-    const pctErr = (absErr / realized) * 100;
-    totalAbs.push(absErr);
-    totalPct.push(pctErr);
-
-    const year = yearBySlug.get(row.canonical_slug) ?? null;
-    const era = year != null && year <= 2004 ? "vintage" : "modern";
-    const graded = row.grade === "RAW" ? "raw" : "graded";
-    const liquidity = (row.active_listings_7d ?? 0) <= 4 ? "low-liquidity" : "high-liquidity";
-    const key = `${era}/${graded}/${liquidity}`;
-    const bucket = segmentErrors.get(key) ?? { abs: [], pct: [] };
-    bucket.abs.push(absErr);
-    bucket.pct.push(pctErr);
-    segmentErrors.set(key, bucket);
-  }
+  const latestBacktest = backtestSnapshotRes.error
+    ? null
+    : (backtestSnapshotRes.data as {
+      sample_size: number | null;
+      mae: number | null;
+      mape: number | null;
+      payload: {
+        bySegment?: Array<{ segment: string; sampleSize: number; mae: number | null; mape: number | null }>;
+      } | null;
+    } | null);
   const accuracyBacktest = {
-    sampleSize: totalAbs.length,
-    mae: mean(totalAbs) != null ? Number((mean(totalAbs) ?? 0).toFixed(4)) : null,
-    mape: mean(totalPct) != null ? Number((mean(totalPct) ?? 0).toFixed(2)) : null,
-    bySegment: [...segmentErrors.entries()]
-      .map(([segment, metrics]) => ({
-        segment,
-        sampleSize: metrics.abs.length,
-        mae: mean(metrics.abs) != null ? Number((mean(metrics.abs) ?? 0).toFixed(4)) : null,
-        mape: mean(metrics.pct) != null ? Number((mean(metrics.pct) ?? 0).toFixed(2)) : null,
-      }))
-      .sort((a, b) => b.sampleSize - a.sampleSize)
-      .slice(0, 12),
+    sampleSize: latestBacktest?.sample_size ?? 0,
+    mae: toFinite(latestBacktest?.mae),
+    mape: toFinite(latestBacktest?.mape),
+    bySegment: Array.isArray(latestBacktest?.payload?.bySegment)
+      ? latestBacktest.payload.bySegment.slice(0, 12)
+      : [],
   };
 
   function statusHighGood(value: number | null, good: number, warn: number): "healthy" | "warning" | "critical" {

@@ -14,6 +14,15 @@ type CanonicalMarketMetricRow = {
   pokemontcg_price?: number | null;
   market_price: number | null;
   median_7d: number | null;
+  market_confidence_score?: number | null;
+  market_low_confidence?: boolean | null;
+  market_blend_policy?: "NO_PRICE" | "SINGLE_PROVIDER" | "TRUST_WEIGHTED_BLEND" | "FALLBACK_STALE_OR_OUTLIER" | null;
+  market_provenance?: {
+    sourceMix?: {
+      justtcgWeight?: number;
+      scrydexWeight?: number;
+    };
+  } | null;
   change_pct_24h: number | null;
   change_pct_7d: number | null;
 };
@@ -110,7 +119,7 @@ export async function getCanonicalMarketPulseMap(
 
   const { data, error } = await supabase
     .from("public_card_metrics")
-    .select("canonical_slug, justtcg_price, scrydex_price, pokemontcg_price, market_price, median_7d, change_pct_24h, change_pct_7d")
+    .select("canonical_slug, justtcg_price, scrydex_price, pokemontcg_price, market_price, median_7d, market_confidence_score, market_low_confidence, market_blend_policy, market_provenance, change_pct_24h, change_pct_7d")
     .in("canonical_slug", slugs)
     .is("printing_id", null)
     .eq("grade", "RAW")
@@ -120,26 +129,6 @@ export async function getCanonicalMarketPulseMap(
     .from("canonical_raw_provider_parity")
     .select("canonical_slug, parity_status")
     .in("canonical_slug", slugs);
-
-  const [providerMetricsRes, providerCountsRes] = await Promise.all([
-    supabase
-      .from("public_variant_metrics")
-      .select("canonical_slug, provider, provider_as_of_ts")
-      .in("canonical_slug", slugs)
-      .eq("grade", "RAW")
-      .is("printing_id", null)
-      .in("provider", ["JUSTTCG", "SCRYDEX", "POKEMON_TCG_API"])
-      .limit(Math.max(200, slugs.length * 8)),
-    supabase
-      .from("public_price_history")
-      .select("canonical_slug, provider, ts")
-      .in("canonical_slug", slugs)
-      .in("provider", ["JUSTTCG", "SCRYDEX", "POKEMON_TCG_API"])
-      .eq("source_window", "snapshot")
-      .gte("ts", new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
-      .order("ts", { ascending: false })
-      .limit(Math.max(1000, slugs.length * 40)),
-  ]);
 
   if (error) {
     console.error("[getCanonicalMarketPulseMap]", error.message);
@@ -154,47 +143,33 @@ export async function getCanonicalMarketPulseMap(
     parityBySlug.set(row.canonical_slug, row.parity_status);
   }
 
-  const providerAsOf = new Map<string, { justtcgAsOf: string | null; scrydexAsOf: string | null }>();
-  for (const row of (providerMetricsRes.data ?? []) as Array<{
-    canonical_slug: string;
-    provider: string;
-    provider_as_of_ts: string | null;
-  }>) {
-    const slug = row.canonical_slug;
-    const bucket = providerAsOf.get(slug) ?? { justtcgAsOf: null, scrydexAsOf: null };
-    if (row.provider === "JUSTTCG" && row.provider_as_of_ts && (!bucket.justtcgAsOf || row.provider_as_of_ts > bucket.justtcgAsOf)) {
-      bucket.justtcgAsOf = row.provider_as_of_ts;
-    }
-    if ((row.provider === "SCRYDEX" || row.provider === "POKEMON_TCG_API") && row.provider_as_of_ts && (!bucket.scrydexAsOf || row.provider_as_of_ts > bucket.scrydexAsOf)) {
-      bucket.scrydexAsOf = row.provider_as_of_ts;
-    }
-    providerAsOf.set(slug, bucket);
-  }
-
-  const providerPoints = new Map<string, { justtcg: number; scrydex: number }>();
-  for (const row of (providerCountsRes.data ?? []) as Array<{ canonical_slug: string; provider: string }>) {
-    const slug = row.canonical_slug;
-    const bucket = providerPoints.get(slug) ?? { justtcg: 0, scrydex: 0 };
-    if (row.provider === "JUSTTCG") bucket.justtcg += 1;
-    if (row.provider === "SCRYDEX" || row.provider === "POKEMON_TCG_API") bucket.scrydex += 1;
-    providerPoints.set(slug, bucket);
-  }
-
   for (const row of (data ?? []) as CanonicalMarketMetricRow[]) {
     if (pulseMap.has(row.canonical_slug)) continue;
-    const asOf = providerAsOf.get(row.canonical_slug) ?? { justtcgAsOf: null, scrydexAsOf: null };
-    const points = providerPoints.get(row.canonical_slug) ?? { justtcg: 0, scrydex: 0 };
-    pulseMap.set(
-      row.canonical_slug,
-      resolveCanonicalMarketPulse(
-        row,
-        parityBySlug.get(row.canonical_slug) ?? "UNKNOWN",
-        [
-          { provider: "JUSTTCG", price: toFiniteNumber(row.justtcg_price), asOfTs: asOf.justtcgAsOf, points7d: points.justtcg },
-          { provider: "SCRYDEX", price: toFiniteNumber(row.scrydex_price ?? row.pokemontcg_price), asOfTs: asOf.scrydexAsOf, points7d: points.scrydex },
-        ],
-      ),
+    const resolved = resolveCanonicalMarketPulse(
+      row,
+      parityBySlug.get(row.canonical_slug) ?? "UNKNOWN",
     );
+    if (row.market_confidence_score !== null && row.market_confidence_score !== undefined) {
+      resolved.confidenceScore = Math.round(row.market_confidence_score);
+    }
+    if (typeof row.market_low_confidence === "boolean") {
+      resolved.lowConfidence = row.market_low_confidence;
+    }
+    if (row.market_blend_policy) {
+      resolved.blendPolicy = row.market_blend_policy;
+    }
+    const sourceMix = row.market_provenance?.sourceMix;
+    if (
+      sourceMix &&
+      typeof sourceMix.justtcgWeight === "number" &&
+      typeof sourceMix.scrydexWeight === "number"
+    ) {
+      resolved.sourceMix = {
+        justtcgWeight: sourceMix.justtcgWeight,
+        scrydexWeight: sourceMix.scrydexWeight,
+      };
+    }
+    pulseMap.set(row.canonical_slug, resolved);
   }
 
   return pulseMap;
