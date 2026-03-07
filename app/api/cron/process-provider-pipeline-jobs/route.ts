@@ -14,6 +14,10 @@ export const maxDuration = 300;
 type GlobalRefreshResult = {
   cardMetrics: unknown;
   cardMetricsError: string | null;
+  marketConfidence: unknown;
+  marketConfidenceError: string | null;
+  realizedBacktest: unknown;
+  realizedBacktestError: string | null;
   priceChanges: unknown;
   priceChangesError: string | null;
   parity: unknown;
@@ -24,6 +28,10 @@ async function runGlobalRefreshCycle(): Promise<GlobalRefreshResult> {
   const supabase = dbAdmin();
   let cardMetrics: unknown = null;
   let cardMetricsError: string | null = null;
+  let marketConfidence: unknown = null;
+  let marketConfidenceError: string | null = null;
+  let realizedBacktest: unknown = null;
+  let realizedBacktestError: string | null = null;
   let priceChanges: unknown = null;
   let priceChangesError: string | null = null;
   let parity: unknown = null;
@@ -35,6 +43,22 @@ async function runGlobalRefreshCycle(): Promise<GlobalRefreshResult> {
     else cardMetrics = data;
   } catch (err) {
     cardMetricsError = err instanceof Error ? err.message : String(err);
+  }
+
+  try {
+    const { data, error } = await supabase.rpc("refresh_card_market_confidence");
+    if (error) marketConfidenceError = error.message;
+    else marketConfidence = data;
+  } catch (err) {
+    marketConfidenceError = err instanceof Error ? err.message : String(err);
+  }
+
+  try {
+    const { data, error } = await supabase.rpc("refresh_realized_sales_backtest");
+    if (error) realizedBacktestError = error.message;
+    else realizedBacktest = data;
+  } catch (err) {
+    realizedBacktestError = err instanceof Error ? err.message : String(err);
   }
 
   try {
@@ -56,6 +80,10 @@ async function runGlobalRefreshCycle(): Promise<GlobalRefreshResult> {
   return {
     cardMetrics,
     cardMetricsError,
+    marketConfidence,
+    marketConfidenceError,
+    realizedBacktest,
+    realizedBacktestError,
     priceChanges,
     priceChangesError,
     parity,
@@ -74,7 +102,7 @@ export async function GET(req: Request) {
   if (!auth.ok) return auth.response;
 
   const url = new URL(req.url);
-  const limit = Math.max(1, Math.min(parseOptionalInt(url.searchParams.get("limit")) ?? 3, 3));
+  const limit = Math.max(1, Math.min(parseOptionalInt(url.searchParams.get("limit")) ?? 6, 6));
   const workerId = url.searchParams.get("workerId")?.trim() || "vercel-cron";
 
   const runs: Array<{

@@ -23,12 +23,12 @@ export async function GET(req: Request) {
   const executeInline = url.searchParams.get("execute") === "1";
   const params = {
     providerSetId: set ?? null,
-    setLimit: parseOptionalInt(url.searchParams.get("sets")) ?? 1,
+    setLimit: parseOptionalInt(url.searchParams.get("sets")) ?? 4,
     pageLimitPerSet: parseOptionalInt(url.searchParams.get("pages")),
-    maxRequests: parseOptionalInt(url.searchParams.get("maxRequests")) ?? 10,
-    payloadLimit: parseOptionalInt(url.searchParams.get("payloads")) ?? 5,
-    matchObservations: parseOptionalInt(url.searchParams.get("observations")) ?? 20,
-    timeseriesObservations: parseOptionalInt(url.searchParams.get("timeseriesObservations")) ?? 20,
+    maxRequests: parseOptionalInt(url.searchParams.get("maxRequests")) ?? 80,
+    payloadLimit: parseOptionalInt(url.searchParams.get("payloads")) ?? 60,
+    matchObservations: parseOptionalInt(url.searchParams.get("observations")) ?? 120,
+    timeseriesObservations: parseOptionalInt(url.searchParams.get("timeseriesObservations")) ?? 120,
     force,
   };
 

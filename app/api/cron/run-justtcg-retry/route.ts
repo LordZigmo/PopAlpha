@@ -20,12 +20,12 @@ export async function GET(req: Request) {
   const force = url.searchParams.get("force") === "1";
   const executeInline = url.searchParams.get("execute") === "1";
   const params = {
-    setLimit: parseOptionalInt(url.searchParams.get("sets")) ?? 1,
+    setLimit: parseOptionalInt(url.searchParams.get("sets")) ?? 3,
     pageLimitPerSet: parseOptionalInt(url.searchParams.get("pages")),
-    maxRequests: parseOptionalInt(url.searchParams.get("maxRequests")) ?? 8,
-    payloadLimit: parseOptionalInt(url.searchParams.get("payloads")) ?? 5,
-    matchObservations: parseOptionalInt(url.searchParams.get("observations")) ?? 15,
-    timeseriesObservations: parseOptionalInt(url.searchParams.get("timeseriesObservations")) ?? 15,
+    maxRequests: parseOptionalInt(url.searchParams.get("maxRequests")) ?? 60,
+    payloadLimit: parseOptionalInt(url.searchParams.get("payloads")) ?? 40,
+    matchObservations: parseOptionalInt(url.searchParams.get("observations")) ?? 90,
+    timeseriesObservations: parseOptionalInt(url.searchParams.get("timeseriesObservations")) ?? 90,
     force,
   };
 

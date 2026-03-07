@@ -2,6 +2,10 @@ import crypto from "node:crypto";
 import { dbAdmin } from "@/lib/db/admin";
 import { fetchCardsPage, getScrydexCredentials, type ScrydexCard } from "@/lib/scrydex/client";
 import { loadProviderSetIndex } from "@/lib/backfill/provider-set-index";
+import {
+  loadCoverageGapSetPriority,
+  loadHighValueStaleSetPriority,
+} from "@/lib/backfill/set-priority";
 
 const PROVIDER = "SCRYDEX";
 const JOB = "scrydex_raw_ingest";
@@ -160,8 +164,7 @@ async function loadCanonicalSetsFromProviderIndex(): Promise<CanonicalSet[]> {
 }
 
 async function maybeBackfillProviderSetMap(): Promise<number> {
-  // Weekly sync keeps provider_set_map warm for newly imported sets.
-  if (new Date().getUTCDay() !== 0) return 0;
+  // Keep provider_set_map warm every run for faster mapping convergence.
   const supabase = dbAdmin();
   const [knownResult, canonicalSets] = await Promise.all([
     supabase
@@ -295,12 +298,46 @@ export async function runPokemonTcgRawIngest(opts: {
         providerSetIndexBackfilled = await maybeBackfillProviderSetMap();
         const setsFromIndex = await loadCanonicalSetsFromProviderIndex();
         const sets = setsFromIndex.length > 0 ? setsFromIndex : await loadCanonicalSetsFromPrintings();
-        const selectedSets = selectSetsFromCursor(sets, setLimit, cursorSetCode);
-        return selectedSets.map((set) => ({
+        const allTargets = sets.map((set) => ({
           setCode: set.setCode,
           setName: set.setName,
           providerSetId: set.providerSetId ?? set.setCode,
         }));
+        const byProviderSetId = new Map(allTargets.map((target) => [target.providerSetId, target] as const));
+        const [highValuePrioritySetIds, coveragePrioritySetIds] = await Promise.all([
+          loadHighValueStaleSetPriority({
+            provider: "SCRYDEX",
+            targets: allTargets,
+            staleWindowHours: 24,
+            maxProviderSetIds: 300,
+          }),
+          loadCoverageGapSetPriority({
+            provider: "SCRYDEX",
+            targets: allTargets,
+            maxProviderSetIds: 300,
+          }),
+        ]);
+        const cursorTargets = selectSetsFromCursor(sets, sets.length, cursorSetCode)
+          .flatMap((set) => {
+            const target = byProviderSetId.get(set.providerSetId ?? set.setCode);
+            return target ? [target] : [];
+          });
+        const selectedTargets: Array<{ setCode: string | null; setName: string | null; providerSetId: string }> = [];
+        const seenProviderSetIds = new Set<string>();
+        const addTarget = (target: { setCode: string | null; setName: string | null; providerSetId: string } | null | undefined) => {
+          if (!target) return;
+          if (selectedTargets.length >= setLimit) return;
+          if (seenProviderSetIds.has(target.providerSetId)) return;
+          seenProviderSetIds.add(target.providerSetId);
+          selectedTargets.push(target);
+        };
+        for (const providerSetId of highValuePrioritySetIds) addTarget(byProviderSetId.get(providerSetId) ?? null);
+        for (const providerSetId of coveragePrioritySetIds) addTarget(byProviderSetId.get(providerSetId) ?? null);
+        for (const target of cursorTargets) {
+          addTarget(target);
+          if (selectedTargets.length >= setLimit) break;
+        }
+        return selectedTargets;
       })();
   const nextSetCode = targets.length > 0 && !opts.providerSetId
     ? (targets[targets.length - 1]?.setCode ?? null)

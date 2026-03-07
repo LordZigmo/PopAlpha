@@ -2,6 +2,10 @@ import crypto from "node:crypto";
 import { dbAdmin } from "@/lib/db/admin";
 import { fetchJustTcgCardsPage, setNameToJustTcgId } from "@/lib/providers/justtcg";
 import { loadProviderSetIndex } from "@/lib/backfill/provider-set-index";
+import {
+  loadCoverageGapSetPriority,
+  loadHighValueStaleSetPriority,
+} from "@/lib/backfill/set-priority";
 
 const PROVIDER = "JUSTTCG";
 const JOB = "justtcg_raw_ingest";
@@ -254,9 +258,7 @@ async function loadCanonicalSetsFromPrintings(): Promise<CanonicalSet[]> {
 }
 
 async function maybeBackfillProviderSetMap(): Promise<number> {
-  // Keep the default ingest path lightweight. Only scan canonical printings weekly
-  // to seed missing provider_set_map rows for new sets.
-  if (new Date().getUTCDay() !== 0) return 0;
+  // Keep provider_set_map warm every run so new sets are discoverable quickly.
   const supabase = dbAdmin();
   const [knownResult, canonicalSets] = await Promise.all([
     supabase
@@ -503,6 +505,19 @@ export async function runJustTcgRawIngest(opts: {
         }
         const byProviderSetId = new Map(allTargets.map((target) => [target.providerSetId, target] as const));
         const bySetCode = new Map(allTargets.map((target) => [target.setCode, target] as const));
+        const [highValuePrioritySetIds, coveragePrioritySetIds] = await Promise.all([
+          loadHighValueStaleSetPriority({
+            provider: "JUSTTCG",
+            targets: allTargets,
+            staleWindowHours: 24,
+            maxProviderSetIds: 300,
+          }),
+          loadCoverageGapSetPriority({
+            provider: "JUSTTCG",
+            targets: allTargets,
+            maxProviderSetIds: 300,
+          }),
+        ]);
         const cursorCandidates = sortTargetsByFreshness(
           selectSetsFromCursor(sets, sets.length, priorState.cursorSetCode)
             .flatMap((set) => {
@@ -540,6 +555,10 @@ export async function runJustTcgRawIngest(opts: {
             setName: null,
             providerSetId,
           });
+        }
+        if (!opts.retryOnly) {
+          for (const providerSetId of highValuePrioritySetIds) addIfEligible(byProviderSetId.get(providerSetId) ?? null);
+          for (const providerSetId of coveragePrioritySetIds) addIfEligible(byProviderSetId.get(providerSetId) ?? null);
         }
         if (!opts.retryOnly) {
           for (const setCode of PRIORITY_SET_CODES) addIfEligible(bySetCode.get(setCode) ?? null);
