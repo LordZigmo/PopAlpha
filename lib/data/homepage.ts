@@ -70,6 +70,14 @@ function compareMovementMagnitude(a: HomepageCard, b: HomepageCard): number {
   return a.name.localeCompare(b.name);
 }
 
+function deriveSparklineChangePct(points: number[]): number | null {
+  if (points.length < 2) return null;
+  const first = points[0];
+  const last = points[points.length - 1];
+  if (!(first > 0) || !Number.isFinite(first) || !Number.isFinite(last)) return null;
+  return ((last - first) / first) * 100;
+}
+
 export async function getHomepageData(): Promise<HomepageData> {
   let db;
   try {
@@ -245,17 +253,19 @@ export async function getHomepageData(): Promise<HomepageData> {
     ): HomepageCard {
       const card = cardMap.get(slug);
       const marketPulse = marketPulseMap.get(slug);
+      const sparkline = sparklineMap.get(slug) ?? [];
+      const fallbackChangePct = deriveSparklineChangePct(sparkline);
       return {
         slug,
         name: card?.canonical_name ?? slug,
         set_name: card?.set_name ?? null,
         year: card?.year ?? null,
         market_price: marketPulse?.marketPrice ?? overrides.fallbackPrice ?? null,
-        change_pct: marketPulse?.changePct ?? null,
-        change_window: marketPulse?.changeWindow ?? null,
+        change_pct: marketPulse?.changePct ?? fallbackChangePct ?? null,
+        change_window: marketPulse?.changeWindow ?? (fallbackChangePct !== null ? "7D" : null),
         image_url: imageMap.get(slug) ?? null,
         mover_tier: overrides.mover_tier ?? null,
-        sparkline_7d: sparklineMap.get(slug) ?? [],
+        sparkline_7d: sparkline,
       };
     }
 
