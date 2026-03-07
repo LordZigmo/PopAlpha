@@ -7,13 +7,13 @@
 const BASE_URL = "https://api.scrydex.com/pokemon/v1";
 const DEFAULT_TIMEOUT_MS = process.env.SCRYDEX_HTTP_TIMEOUT_MS
   ? Math.max(1000, parseInt(process.env.SCRYDEX_HTTP_TIMEOUT_MS, 10))
-  : 15000;
+  : 30000;
 const DEFAULT_RETRY_ATTEMPTS = process.env.SCRYDEX_HTTP_RETRY_ATTEMPTS
   ? Math.max(1, parseInt(process.env.SCRYDEX_HTTP_RETRY_ATTEMPTS, 10))
-  : 3;
+  : 4;
 const DEFAULT_RETRY_BACKOFF_MS = process.env.SCRYDEX_HTTP_RETRY_BACKOFF_MS
   ? Math.max(100, parseInt(process.env.SCRYDEX_HTTP_RETRY_BACKOFF_MS, 10))
-  : 500;
+  : 1200;
 
 export type ScrydexCredentials = {
   apiKey: string;

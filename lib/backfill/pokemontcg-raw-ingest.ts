@@ -23,6 +23,15 @@ const DEFAULT_RETRY_ATTEMPTS = process.env.SCRYDEX_RAW_RETRY_ATTEMPTS
 const DEFAULT_RETRY_BACKOFF_MS = process.env.SCRYDEX_RAW_RETRY_BACKOFF_MS
   ? parseInt(process.env.SCRYDEX_RAW_RETRY_BACKOFF_MS, 10)
   : 750;
+const MAX_SETS_PER_RUN_CAP = process.env.SCRYDEX_RAW_SETS_PER_RUN_CAP
+  ? parseInt(process.env.SCRYDEX_RAW_SETS_PER_RUN_CAP, 10)
+  : 6;
+const MAX_PAGE_LIMIT_PER_SET_CAP = process.env.SCRYDEX_RAW_PAGE_LIMIT_PER_SET_CAP
+  ? parseInt(process.env.SCRYDEX_RAW_PAGE_LIMIT_PER_SET_CAP, 10)
+  : 12;
+const MAX_REQUESTS_PER_RUN_CAP = process.env.SCRYDEX_RAW_MAX_REQUESTS_CAP
+  ? parseInt(process.env.SCRYDEX_RAW_MAX_REQUESTS_CAP, 10)
+  : 60;
 
 type CanonicalSet = {
   setCode: string;
@@ -268,9 +277,18 @@ export async function runPokemonTcgRawIngest(opts: {
 } = {}): Promise<RawIngestResult> {
   const supabase = dbAdmin();
   const startedAt = new Date().toISOString();
-  const setLimit = parsePositiveInt(opts.setLimit, DEFAULT_SETS_PER_RUN);
-  const pageLimitPerSet = parsePositiveInt(opts.pageLimitPerSet, 100);
-  const maxRequests = parsePositiveInt(opts.maxRequests, DEFAULT_MAX_REQUESTS);
+  const setLimit = Math.min(
+    parsePositiveInt(opts.setLimit, DEFAULT_SETS_PER_RUN),
+    Math.max(1, MAX_SETS_PER_RUN_CAP),
+  );
+  const pageLimitPerSet = Math.min(
+    parsePositiveInt(opts.pageLimitPerSet, 100),
+    Math.max(1, MAX_PAGE_LIMIT_PER_SET_CAP),
+  );
+  const maxRequests = Math.min(
+    parsePositiveInt(opts.maxRequests, DEFAULT_MAX_REQUESTS),
+    Math.max(1, MAX_REQUESTS_PER_RUN_CAP),
+  );
   const retryAttempts = parsePositiveInt(opts.retryAttempts, DEFAULT_RETRY_ATTEMPTS);
   const retryBackoffMs = parsePositiveInt(opts.retryBackoffMs, DEFAULT_RETRY_BACKOFF_MS);
 

@@ -27,6 +27,21 @@ type PipelineJobRow = {
   created_at: string;
 };
 
+const DEFAULT_STALE_RECLAIM_SECONDS = process.env.PIPELINE_JOB_STALE_RECLAIM_SECONDS
+  ? Math.max(60, parseInt(process.env.PIPELINE_JOB_STALE_RECLAIM_SECONDS, 10))
+  : 1800;
+const DEFAULT_JOB_TIMEOUT_MS = process.env.PIPELINE_JOB_TIMEOUT_MS
+  ? Math.max(5000, parseInt(process.env.PIPELINE_JOB_TIMEOUT_MS, 10))
+  : 240000;
+
+function timeoutResult(timeoutMs: number): { ok: boolean; result: unknown; error: string } {
+  return {
+    ok: false,
+    result: null,
+    error: `PIPELINE_JOB_TIMEOUT after ${Math.max(1, Math.floor(timeoutMs / 1000))}s`,
+  };
+}
+
 export async function enqueuePipelineJob(input: {
   provider: PipelineProvider;
   jobKind: PipelineJobKind;
@@ -70,9 +85,16 @@ export async function enqueuePipelineJob(input: {
   return { enqueued: true, jobId: data.id, reason: "queued" };
 }
 
-export async function claimNextPipelineJob(workerId: string): Promise<PipelineJobRow | null> {
+export async function claimNextPipelineJob(
+  workerId: string,
+  staleAfterSeconds: number = DEFAULT_STALE_RECLAIM_SECONDS,
+): Promise<PipelineJobRow | null> {
   const supabase = dbAdmin();
-  const { data, error } = await supabase.rpc("claim_pipeline_job", { p_worker: workerId });
+  const safeStaleAfterSeconds = Math.max(60, Math.floor(staleAfterSeconds));
+  const { data, error } = await supabase.rpc("claim_pipeline_job", {
+    p_worker: workerId,
+    p_stale_after_seconds: safeStaleAfterSeconds,
+  });
   if (error) throw new Error(`claim_pipeline_job: ${error.message}`);
   if (!data) return null;
   return data as PipelineJobRow;
@@ -99,12 +121,37 @@ function parseParams(raw: Record<string, unknown> | null | undefined): PipelineJ
   };
 }
 
-export async function executeClaimedPipelineJob(job: PipelineJobRow): Promise<{ ok: boolean; result: unknown; error: string | null }> {
+export async function executeClaimedPipelineJob(
+  job: PipelineJobRow,
+  opts: { timeoutMs?: number } = {},
+): Promise<{ ok: boolean; result: unknown; error: string | null }> {
   const params = parseParams(job.params_json);
+  const timeoutMs = Math.max(5000, Math.floor(opts.timeoutMs ?? DEFAULT_JOB_TIMEOUT_MS));
+  const timeoutPromise = new Promise<{ ok: boolean; result: unknown; error: string }>((resolve) => {
+    const timer = setTimeout(() => {
+      clearTimeout(timer);
+      resolve(timeoutResult(timeoutMs));
+    }, timeoutMs);
+  });
 
   try {
-    if (job.provider === "JUSTTCG") {
-      const result = await runJustTcgPipeline({
+    const workPromise = (async (): Promise<{ ok: boolean; result: unknown; error: string | null }> => {
+      if (job.provider === "JUSTTCG") {
+        const result = await runJustTcgPipeline({
+          providerSetId: params.providerSetId ?? undefined,
+          setLimit: params.setLimit,
+          pageLimitPerSet: params.pageLimitPerSet,
+          maxRequests: params.maxRequests,
+          payloadLimit: params.payloadLimit,
+          matchObservations: params.matchObservations,
+          timeseriesObservations: params.timeseriesObservations,
+          force: params.force === true,
+          retryOnly: job.job_kind === "RETRY",
+        });
+        return { ok: result.ok, result, error: result.firstError ?? null };
+      }
+
+      const result = await runScrydexPipeline({
         providerSetId: params.providerSetId ?? undefined,
         setLimit: params.setLimit,
         pageLimitPerSet: params.pageLimitPerSet,
@@ -113,23 +160,11 @@ export async function executeClaimedPipelineJob(job: PipelineJobRow): Promise<{ 
         matchObservations: params.matchObservations,
         timeseriesObservations: params.timeseriesObservations,
         force: params.force === true,
-        retryOnly: job.job_kind === "RETRY",
+        matchScanDirection: job.job_kind === "RETRY" ? "oldest" : "newest",
       });
       return { ok: result.ok, result, error: result.firstError ?? null };
-    }
-
-    const result = await runScrydexPipeline({
-      providerSetId: params.providerSetId ?? undefined,
-      setLimit: params.setLimit,
-      pageLimitPerSet: params.pageLimitPerSet,
-      maxRequests: params.maxRequests,
-      payloadLimit: params.payloadLimit,
-      matchObservations: params.matchObservations,
-      timeseriesObservations: params.timeseriesObservations,
-      force: params.force === true,
-      matchScanDirection: job.job_kind === "RETRY" ? "oldest" : "newest",
-    });
-    return { ok: result.ok, result, error: result.firstError ?? null };
+    })();
+    return await Promise.race([workPromise, timeoutPromise]);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return { ok: false, result: null, error: message };

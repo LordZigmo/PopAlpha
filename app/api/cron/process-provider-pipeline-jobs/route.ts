@@ -104,6 +104,20 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const limit = Math.max(1, Math.min(parseOptionalInt(url.searchParams.get("limit")) ?? 6, 6));
   const workerId = url.searchParams.get("workerId")?.trim() || "vercel-cron";
+  const staleAfterSeconds = Math.max(
+    60,
+    parseOptionalInt(url.searchParams.get("staleAfterSeconds"))
+      ?? (process.env.PIPELINE_JOB_STALE_RECLAIM_SECONDS
+        ? parseInt(process.env.PIPELINE_JOB_STALE_RECLAIM_SECONDS, 10)
+        : 1800),
+  );
+  const jobTimeoutMs = Math.max(
+    5000,
+    parseOptionalInt(url.searchParams.get("jobTimeoutMs"))
+      ?? (process.env.PIPELINE_JOB_TIMEOUT_MS
+        ? parseInt(process.env.PIPELINE_JOB_TIMEOUT_MS, 10)
+        : 240000),
+  );
 
   const runs: Array<{
     jobId: number;
@@ -114,10 +128,10 @@ export async function GET(req: Request) {
   }> = [];
 
   for (let i = 0; i < limit; i += 1) {
-    const claimed = await claimNextPipelineJob(workerId);
+    const claimed = await claimNextPipelineJob(workerId, staleAfterSeconds);
     if (!claimed) break;
 
-    const executed = await executeClaimedPipelineJob(claimed);
+    const executed = await executeClaimedPipelineJob(claimed, { timeoutMs: jobTimeoutMs });
     const retryDelaySeconds = executed.ok ? 0 : retryDelayForAttempt(claimed.attempts);
     await completePipelineJob({
       jobId: claimed.id,
@@ -145,6 +159,8 @@ export async function GET(req: Request) {
     ok: true,
     workerId,
     requestedLimit: limit,
+    staleAfterSeconds,
+    jobTimeoutMs,
     processed: runs.length,
     succeeded: runs.filter((row) => row.ok).length,
     failed: runs.filter((row) => !row.ok).length,

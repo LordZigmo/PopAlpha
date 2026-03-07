@@ -13,7 +13,13 @@ const UNMATCHED_RETRY_HOURS = process.env.SCRYDEX_UNMATCHED_RETRY_HOURS
 const MIN_AUTO_MATCH_CONFIDENCE = process.env.SCRYDEX_MIN_AUTO_MATCH_CONFIDENCE
   ? Number.parseFloat(process.env.SCRYDEX_MIN_AUTO_MATCH_CONFIDENCE)
   : 0.9;
+const DEFAULT_MATCH_MAX_RUNTIME_MS = process.env.SCRYDEX_MATCH_MAX_RUNTIME_MS
+  ? parseInt(process.env.SCRYDEX_MATCH_MAX_RUNTIME_MS, 10)
+  : 120000;
 const SCAN_PAGE_SIZE = 100;
+const STARTED_RUN_STALE_MULTIPLIER = process.env.SCRYDEX_MATCH_STALE_RUN_MULTIPLIER
+  ? parseInt(process.env.SCRYDEX_MATCH_STALE_RUN_MULTIPLIER, 10)
+  : 3;
 type ScanDirection = "newest" | "oldest";
 
 type ScanRow = {
@@ -125,6 +131,41 @@ function parsePositiveInt(value: number | undefined, fallback: number): number {
   return Math.max(1, Math.floor(value));
 }
 
+function hasDeadlinePassed(deadlineMs: number | null): boolean {
+  return typeof deadlineMs === "number" && Number.isFinite(deadlineMs) && Date.now() >= deadlineMs;
+}
+
+async function finalizeStaleStartedMatchRuns(maxRuntimeMs: number): Promise<number> {
+  const supabase = dbAdmin();
+  const staleAfterMs = Math.max(60000, maxRuntimeMs * Math.max(1, STARTED_RUN_STALE_MULTIPLIER));
+  const cutoffIso = new Date(Date.now() - staleAfterMs).toISOString();
+  const finalizedAt = new Date().toISOString();
+
+  const { data, error } = await supabase
+    .from("ingest_runs")
+    .update({
+      status: "finished",
+      ok: false,
+      ended_at: finalizedAt,
+      items_failed: 1,
+      meta: {
+        autoFinalized: true,
+        firstError: "AUTO_FINALIZED_STALE_STARTED_RUN",
+        finalizedAt,
+      },
+    })
+    .eq("job", JOB)
+    .eq("source", "scrydex")
+    .eq("status", "started")
+    .lt("started_at", cutoffIso)
+    .select("id");
+
+  if (error) {
+    throw new Error(`ingest_runs(finalize stale started): ${error.message}`);
+  }
+  return (data ?? []).length;
+}
+
 function parseDateMs(value: string | null | undefined): number | null {
   if (!value) return null;
   const ms = Date.parse(value);
@@ -211,14 +252,17 @@ async function loadCandidateObservations(params: {
   observationId?: string | null;
   force?: boolean;
   scanDirection?: ScanDirection;
+  deadlineMs?: number | null;
 }): Promise<{
   rows: NormalizedObservationRow[];
   scanned: number;
   skippedAlreadyMatched: number;
+  timedOut: boolean;
 }> {
   const supabase = dbAdmin();
   const force = params.force === true || Boolean(params.observationId);
   const ascending = params.scanDirection === "oldest";
+  let timedOut = false;
 
   if (params.observationId) {
     let query = supabase
@@ -233,7 +277,7 @@ async function loadCandidateObservations(params: {
 
     const { data, error } = await query.maybeSingle<NormalizedObservationRow>();
     if (error) throw new Error(`provider_normalized_observations(load by id): ${error.message}`);
-    return { rows: data ? [data] : [], scanned: data ? 1 : 0, skippedAlreadyMatched: 0 };
+    return { rows: data ? [data] : [], scanned: data ? 1 : 0, skippedAlreadyMatched: 0, timedOut: false };
   }
 
   const selected: NormalizedObservationRow[] = [];
@@ -243,6 +287,11 @@ async function loadCandidateObservations(params: {
   const nowMs = Date.now();
 
   for (let from = 0; selected.length < params.observationLimit; from += SCAN_PAGE_SIZE) {
+    if (hasDeadlinePassed(params.deadlineMs ?? null)) {
+      timedOut = true;
+      break;
+    }
+
     let scanQuery = supabase
       .from("provider_normalized_observations")
       .select("id")
@@ -280,6 +329,10 @@ async function loadCandidateObservations(params: {
 
     const selectedIds: string[] = [];
     for (const row of scanRows) {
+      if (hasDeadlinePassed(params.deadlineMs ?? null)) {
+        timedOut = true;
+        break;
+      }
       if (!force) {
         const existing = existingById.get(row.id);
         if (existing?.match_status === "MATCHED") {
@@ -315,14 +368,19 @@ async function loadCandidateObservations(params: {
     }
 
     for (const id of selectedIds) {
+      if (hasDeadlinePassed(params.deadlineMs ?? null)) {
+        timedOut = true;
+        break;
+      }
       const row = byId.get(id);
       if (!row) continue;
       selected.push(row);
       if (selected.length >= params.observationLimit) break;
     }
+    if (timedOut) break;
   }
 
-  return { rows: selected, scanned, skippedAlreadyMatched };
+  return { rows: selected, scanned, skippedAlreadyMatched, timedOut };
 }
 
 async function loadProviderSetMap(providerSetIds: string[]): Promise<Map<string, string>> {
@@ -469,10 +527,14 @@ export async function runPokemonTcgNormalizedMatch(opts: {
   observationId?: string | null;
   force?: boolean;
   scanDirection?: ScanDirection;
+  maxRuntimeMs?: number;
 } = {}): Promise<MatchResult> {
   const supabase = dbAdmin();
   const startedAt = new Date().toISOString();
   const observationLimit = parsePositiveInt(opts.observationLimit, DEFAULT_OBSERVATIONS_PER_RUN);
+  const maxRuntimeMs = parsePositiveInt(opts.maxRuntimeMs, DEFAULT_MATCH_MAX_RUNTIME_MS);
+  const deadlineMs = Date.now() + maxRuntimeMs;
+  const staleStartedRunsFinalized = await finalizeStaleStartedMatchRuns(maxRuntimeMs);
 
   let firstError: string | null = null;
   let observationsScanned = 0;
@@ -502,6 +564,8 @@ export async function runPokemonTcgNormalizedMatch(opts: {
         force: opts.force === true,
         scanDirection: opts.scanDirection ?? "newest",
         minAutoMatchConfidence: MIN_AUTO_MATCH_CONFIDENCE,
+        maxRuntimeMs,
+        staleStartedRunsFinalized,
       },
     })
     .select("id")
@@ -520,10 +584,21 @@ export async function runPokemonTcgNormalizedMatch(opts: {
       observationId: opts.observationId,
       force: opts.force,
       scanDirection: opts.scanDirection,
+      deadlineMs,
     });
+
+    if (candidateResult.timedOut) {
+      throw new Error(
+        `MATCH_RUNTIME_TIMEOUT_CANDIDATE_SCAN after ${Math.floor(maxRuntimeMs / 1000)}s`
+      );
+    }
 
     observationsScanned = candidateResult.scanned;
     observationsSkippedAlreadyMatched = candidateResult.skippedAlreadyMatched;
+
+    if (hasDeadlinePassed(deadlineMs)) {
+      throw new Error(`MATCH_RUNTIME_TIMEOUT_PRE_MATCH after ${Math.floor(maxRuntimeMs / 1000)}s`);
+    }
 
     const providerSetIds = Array.from(new Set(
       candidateResult.rows
@@ -536,6 +611,11 @@ export async function runPokemonTcgNormalizedMatch(opts: {
 
     const writes: MatchWriteRow[] = [];
     for (const observation of candidateResult.rows) {
+      if (hasDeadlinePassed(deadlineMs)) {
+        throw new Error(
+          `MATCH_RUNTIME_TIMEOUT_PROCESSING after ${Math.floor(maxRuntimeMs / 1000)}s`
+        );
+      }
       observationsProcessed += 1;
       const nowIso = new Date().toISOString();
 
@@ -688,6 +768,8 @@ export async function runPokemonTcgNormalizedMatch(opts: {
           force: opts.force === true,
           scanDirection: opts.scanDirection ?? "newest",
           minAutoMatchConfidence: MIN_AUTO_MATCH_CONFIDENCE,
+          maxRuntimeMs,
+          staleStartedRunsFinalized,
           observationsScanned,
           observationsProcessed,
           observationsSkippedAlreadyMatched,
@@ -711,6 +793,7 @@ export async function runScrydexNormalizedMatch(opts: {
   observationId?: string | null;
   force?: boolean;
   scanDirection?: ScanDirection;
+  maxRuntimeMs?: number;
 } = {}): Promise<MatchResult> {
   return runPokemonTcgNormalizedMatch(opts);
 }

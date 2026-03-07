@@ -23,7 +23,7 @@ export async function GET(req: Request) {
     const params = {
       setLimit: parseOptionalInt(url.searchParams.get("sets")) ?? 3,
       pageLimitPerSet: parseOptionalInt(url.searchParams.get("pages")),
-      maxRequests: parseOptionalInt(url.searchParams.get("maxRequests")) ?? 60,
+      maxRequests: parseOptionalInt(url.searchParams.get("maxRequests")) ?? 40,
       payloadLimit: parseOptionalInt(url.searchParams.get("payloads")) ?? 40,
       matchObservations: parseOptionalInt(url.searchParams.get("observations")) ?? 90,
       timeseriesObservations: parseOptionalInt(url.searchParams.get("timeseriesObservations")) ?? 90,

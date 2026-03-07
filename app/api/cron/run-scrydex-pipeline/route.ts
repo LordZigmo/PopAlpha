@@ -25,7 +25,7 @@ export async function GET(req: Request) {
       providerSetId: set ?? null,
       setLimit: parseOptionalInt(url.searchParams.get("sets")) ?? 4,
       pageLimitPerSet: parseOptionalInt(url.searchParams.get("pages")),
-      maxRequests: parseOptionalInt(url.searchParams.get("maxRequests")) ?? 80,
+      maxRequests: parseOptionalInt(url.searchParams.get("maxRequests")) ?? 50,
       payloadLimit: parseOptionalInt(url.searchParams.get("payloads")) ?? 60,
       matchObservations: parseOptionalInt(url.searchParams.get("observations")) ?? 120,
       timeseriesObservations: parseOptionalInt(url.searchParams.get("timeseriesObservations")) ?? 120,
