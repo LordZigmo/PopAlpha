@@ -45,6 +45,8 @@ export type HomepageData = {
 const SECTION_LIMIT = 5;
 /** Minimum 7d median to filter noise / $0 cards */
 const MIN_PRICE = 0.5;
+/** Top movers must have provider updates within this freshness window. */
+const TOP_MOVER_MAX_AGE_HOURS = 24;
 /** Minimum trade count for "sustained trending" vs noise */
 const MIN_CHANGES_TRENDING = 3;
 /** Over-fetch factor for variant metrics (we filter by price in JS) */
@@ -77,18 +79,21 @@ export async function getHomepageData(): Promise<HomepageData> {
   }
 
   try {
+    const topMoverFreshCutoffIso = new Date(Date.now() - TOP_MOVER_MAX_AGE_HOURS * 60 * 60 * 1000).toISOString();
+
     // ── Batch 1: movers + variant-level trend data ────────────────────────
     const [moversResult, losersVariantResult, trendingVariantResult] = await Promise.all([
       // 1. Top movers — hot/warming tiers, pre-joined with card_metrics prices
       db
         .from("public_variant_movers_priced")
-        .select("canonical_slug, mover_tier, tier_priority, median_7d, provider_trend_slope_7d, updated_at")
-        .eq("provider", "JUSTTCG")
+        .select("canonical_slug, provider, mover_tier, tier_priority, median_7d, provider_trend_slope_7d, updated_at")
+        .in("provider", ["JUSTTCG", "SCRYDEX", "POKEMON_TCG_API"])
         .eq("grade", "RAW")
         .in("mover_tier", ["hot", "warming"])
+        .gte("updated_at", topMoverFreshCutoffIso)
         .order("tier_priority", { ascending: true })
         .order("median_7d", { ascending: false })
-        .limit(SECTION_LIMIT * 5),
+        .limit(SECTION_LIMIT * 12),
 
       // 2. Losers — steepest negative trend slope from variant_metrics
       db
@@ -117,14 +122,21 @@ export async function getHomepageData(): Promise<HomepageData> {
     if (trendingVariantResult.error) console.error("[homepage] trending", trendingVariantResult.error.message);
 
     // ── Deduplicate movers by canonical_slug ──────────────────────────────
-    type MoverRow = { canonical_slug: string; mover_tier: string; tier_priority: number; median_7d: number | null; provider_trend_slope_7d: number | null; updated_at: string };
+    type MoverRow = {
+      canonical_slug: string;
+      provider: "JUSTTCG" | "SCRYDEX" | "POKEMON_TCG_API";
+      mover_tier: string;
+      tier_priority: number;
+      median_7d: number | null;
+      provider_trend_slope_7d: number | null;
+      updated_at: string;
+    };
     const dedupedMovers: MoverRow[] = [];
     const seenMovers = new Set<string>();
     for (const row of (moversResult.data ?? []) as MoverRow[]) {
       if (seenMovers.has(row.canonical_slug)) continue;
       seenMovers.add(row.canonical_slug);
       dedupedMovers.push(row);
-      if (dedupedMovers.length >= SECTION_LIMIT) break; // view already filters to priced cards
     }
 
     // Deduplicate variant results by canonical_slug (keep first = best slope)
@@ -236,8 +248,11 @@ export async function getHomepageData(): Promise<HomepageData> {
     const moversOut: HomepageCard[] = [];
     for (const r of dedupedMovers) {
       const marketPulse = marketPulseMap.get(r.canonical_slug);
-      // Movers are sourced from JustTCG; require a JustTCG price to avoid single-provider outliers.
-      if (!marketPulse || marketPulse.justtcgPrice == null) continue;
+      if (!marketPulse) continue;
+      const provider = r.provider === "POKEMON_TCG_API" ? "SCRYDEX" : r.provider;
+      // Require a price from the mover's source provider.
+      if (provider === "JUSTTCG" && marketPulse.justtcgPrice == null) continue;
+      if (provider === "SCRYDEX" && marketPulse.scrydexPrice == null) continue;
       moversOut.push(toCard(r.canonical_slug, {
         fallbackPrice: r.median_7d,
         mover_tier: r.mover_tier as HomepageCard["mover_tier"],
