@@ -1,4 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  resolveWeightedMarketPrice,
+  type ProviderInput,
+  type RawParityStatus,
+} from "@/lib/pricing/market-confidence";
 
 export type MarketChangeWindow = "24H" | "7D";
 
@@ -25,83 +30,74 @@ export type CanonicalMarketPulse = {
   marketPrice: number | null;
   changePct: number | null;
   changeWindow: MarketChangeWindow | null;
-  parityStatus: "MATCH" | "MISMATCH" | "MISSING_PROVIDER" | "UNKNOWN";
+  parityStatus: RawParityStatus;
+  blendPolicy?: "NO_PRICE" | "SINGLE_PROVIDER" | "TRUST_WEIGHTED_BLEND" | "FALLBACK_STALE_OR_OUTLIER";
+  confidenceScore?: number;
+  lowConfidence?: boolean;
+  sourceMix?: {
+    justtcgWeight: number;
+    scrydexWeight: number;
+  };
 };
 
 function toFiniteNumber(value: number | null | undefined): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function resolveRawMarketPrice(params: {
-  justtcgPrice: number | null;
-  scrydexPrice: number | null;
-  marketPrice: number | null;
-  median7d: number | null;
-  parityStatus: "MATCH" | "MISMATCH" | "MISSING_PROVIDER" | "UNKNOWN";
-}): number | null {
-  const { justtcgPrice, scrydexPrice, marketPrice, median7d, parityStatus } = params;
-  if (justtcgPrice !== null && scrydexPrice !== null) {
-    // Blend only when providers are cohort-compatible.
-    if (parityStatus !== "MATCH") return justtcgPrice;
-    const high = Math.max(justtcgPrice, scrydexPrice);
-    const low = Math.min(justtcgPrice, scrydexPrice);
-    // If providers are far apart, prefer JustTCG to avoid transient outliers.
-    if (low > 0 && high / low >= 3.5) return justtcgPrice;
-    return Number((((justtcgPrice + scrydexPrice) / 2)).toFixed(4));
-  }
-  if (justtcgPrice !== null) return justtcgPrice;
-  if (scrydexPrice !== null) return scrydexPrice;
-  return marketPrice ?? median7d;
-}
-
 export function resolveCanonicalMarketPulse(
   row: Partial<Omit<CanonicalMarketMetricRow, "canonical_slug">> | null | undefined,
-  parityStatus: "MATCH" | "MISMATCH" | "MISSING_PROVIDER" | "UNKNOWN" = "UNKNOWN",
+  parityStatus: RawParityStatus = "UNKNOWN",
+  providerInputs: ProviderInput[] = [],
 ): CanonicalMarketPulse {
   const justtcgPrice = toFiniteNumber(row?.justtcg_price);
   const scrydexPrice = toFiniteNumber(row?.scrydex_price) ?? toFiniteNumber(row?.pokemontcg_price);
-  const marketPrice = resolveRawMarketPrice({
+  const weighted = resolveWeightedMarketPrice({
+    providers: providerInputs.length > 0
+      ? providerInputs
+      : [
+        { provider: "JUSTTCG", price: justtcgPrice },
+        { provider: "SCRYDEX", price: scrydexPrice },
+      ],
+    parityStatus,
+    marketPriceFallback: toFiniteNumber(row?.market_price),
+    median7dFallback: toFiniteNumber(row?.median_7d),
+  });
+  const marketPrice = weighted.marketPrice;
+
+  const basePayload = {
     justtcgPrice,
     scrydexPrice,
-    marketPrice: toFiniteNumber(row?.market_price),
-    median7d: toFiniteNumber(row?.median_7d),
+    pokemontcgPrice: scrydexPrice,
+    marketPrice,
     parityStatus,
-  });
-  const change24h = toFiniteNumber(row?.change_pct_24h);
+    blendPolicy: weighted.blendPolicy,
+    confidenceScore: weighted.confidenceScore,
+    lowConfidence: weighted.lowConfidence,
+    sourceMix: weighted.sourceMix,
+  } satisfies Omit<CanonicalMarketPulse, "changePct" | "changeWindow">;
 
+  const change24h = toFiniteNumber(row?.change_pct_24h);
   if (change24h !== null) {
     return {
-      justtcgPrice,
-      scrydexPrice,
-      pokemontcgPrice: scrydexPrice,
-      marketPrice,
+      ...basePayload,
       changePct: change24h,
       changeWindow: "24H",
-      parityStatus,
     };
   }
 
   const change7d = toFiniteNumber(row?.change_pct_7d);
   if (change7d !== null) {
     return {
-      justtcgPrice,
-      scrydexPrice,
-      pokemontcgPrice: scrydexPrice,
-      marketPrice,
+      ...basePayload,
       changePct: change7d,
       changeWindow: "7D",
-      parityStatus,
     };
   }
 
   return {
-    justtcgPrice,
-    scrydexPrice,
-    pokemontcgPrice: scrydexPrice,
-    marketPrice,
+    ...basePayload,
     changePct: null,
     changeWindow: null,
-    parityStatus,
   };
 }
 
@@ -125,6 +121,26 @@ export async function getCanonicalMarketPulseMap(
     .select("canonical_slug, parity_status")
     .in("canonical_slug", slugs);
 
+  const [providerMetricsRes, providerCountsRes] = await Promise.all([
+    supabase
+      .from("public_variant_metrics")
+      .select("canonical_slug, provider, provider_as_of_ts")
+      .in("canonical_slug", slugs)
+      .eq("grade", "RAW")
+      .is("printing_id", null)
+      .in("provider", ["JUSTTCG", "SCRYDEX", "POKEMON_TCG_API"])
+      .limit(Math.max(200, slugs.length * 8)),
+    supabase
+      .from("public_price_history")
+      .select("canonical_slug, provider, ts")
+      .in("canonical_slug", slugs)
+      .in("provider", ["JUSTTCG", "SCRYDEX", "POKEMON_TCG_API"])
+      .eq("source_window", "snapshot")
+      .gte("ts", new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
+      .order("ts", { ascending: false })
+      .limit(Math.max(1000, slugs.length * 40)),
+  ]);
+
   if (error) {
     console.error("[getCanonicalMarketPulseMap]", error.message);
     return pulseMap;
@@ -138,9 +154,47 @@ export async function getCanonicalMarketPulseMap(
     parityBySlug.set(row.canonical_slug, row.parity_status);
   }
 
+  const providerAsOf = new Map<string, { justtcgAsOf: string | null; scrydexAsOf: string | null }>();
+  for (const row of (providerMetricsRes.data ?? []) as Array<{
+    canonical_slug: string;
+    provider: string;
+    provider_as_of_ts: string | null;
+  }>) {
+    const slug = row.canonical_slug;
+    const bucket = providerAsOf.get(slug) ?? { justtcgAsOf: null, scrydexAsOf: null };
+    if (row.provider === "JUSTTCG" && row.provider_as_of_ts && (!bucket.justtcgAsOf || row.provider_as_of_ts > bucket.justtcgAsOf)) {
+      bucket.justtcgAsOf = row.provider_as_of_ts;
+    }
+    if ((row.provider === "SCRYDEX" || row.provider === "POKEMON_TCG_API") && row.provider_as_of_ts && (!bucket.scrydexAsOf || row.provider_as_of_ts > bucket.scrydexAsOf)) {
+      bucket.scrydexAsOf = row.provider_as_of_ts;
+    }
+    providerAsOf.set(slug, bucket);
+  }
+
+  const providerPoints = new Map<string, { justtcg: number; scrydex: number }>();
+  for (const row of (providerCountsRes.data ?? []) as Array<{ canonical_slug: string; provider: string }>) {
+    const slug = row.canonical_slug;
+    const bucket = providerPoints.get(slug) ?? { justtcg: 0, scrydex: 0 };
+    if (row.provider === "JUSTTCG") bucket.justtcg += 1;
+    if (row.provider === "SCRYDEX" || row.provider === "POKEMON_TCG_API") bucket.scrydex += 1;
+    providerPoints.set(slug, bucket);
+  }
+
   for (const row of (data ?? []) as CanonicalMarketMetricRow[]) {
     if (pulseMap.has(row.canonical_slug)) continue;
-    pulseMap.set(row.canonical_slug, resolveCanonicalMarketPulse(row, parityBySlug.get(row.canonical_slug) ?? "UNKNOWN"));
+    const asOf = providerAsOf.get(row.canonical_slug) ?? { justtcgAsOf: null, scrydexAsOf: null };
+    const points = providerPoints.get(row.canonical_slug) ?? { justtcg: 0, scrydex: 0 };
+    pulseMap.set(
+      row.canonical_slug,
+      resolveCanonicalMarketPulse(
+        row,
+        parityBySlug.get(row.canonical_slug) ?? "UNKNOWN",
+        [
+          { provider: "JUSTTCG", price: toFiniteNumber(row.justtcg_price), asOfTs: asOf.justtcgAsOf, points7d: points.justtcg },
+          { provider: "SCRYDEX", price: toFiniteNumber(row.scrydex_price ?? row.pokemontcg_price), asOfTs: asOf.scrydexAsOf, points7d: points.scrydex },
+        ],
+      ),
+    );
   }
 
   return pulseMap;

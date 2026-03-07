@@ -28,6 +28,7 @@ import { getRelatedCardCarousels } from "@/lib/data/related-cards";
 import { buildGradedVariantRef, buildRawVariantRef } from "@/lib/identity/variant-ref";
 import { dbPublic } from "@/lib/db";
 import { buildAssetViewModel } from "@/lib/data/assets";
+import { resolveWeightedMarketPrice } from "@/lib/pricing/market-confidence";
 
 type CanonicalCardRow = {
   slug: string;
@@ -382,18 +383,34 @@ function normalizeRawProviderName(provider: string | null | undefined): "JUSTTCG
 function resolveRawDisplayPrice(params: {
   justtcg: number | null;
   scrydex: number | null;
+  justtcgAsOfTs: string | null;
+  scrydexAsOfTs: string | null;
+  justtcgPoints7d: number;
+  scrydexPoints7d: number;
   fallback: number | null;
   parityStatus: "MATCH" | "MISMATCH" | "MISSING_PROVIDER" | "UNKNOWN";
-}): number | null {
-  const { justtcg, scrydex, fallback, parityStatus } = params;
-  if (justtcg != null && scrydex != null) {
-    if (parityStatus !== "MATCH") return justtcg;
-    const high = Math.max(justtcg, scrydex);
-    const low = Math.min(justtcg, scrydex);
-    if (low > 0 && high / low >= 3.5) return justtcg;
-    return (justtcg + scrydex) / 2;
-  }
-  return justtcg ?? scrydex ?? fallback;
+}): {
+  marketPrice: number | null;
+  blendPolicy: string;
+  confidenceScore: number;
+  lowConfidence: boolean;
+  sourceMix: { justtcgWeight: number; scrydexWeight: number };
+} {
+  const weighted = resolveWeightedMarketPrice({
+    providers: [
+      { provider: "JUSTTCG", price: params.justtcg, asOfTs: params.justtcgAsOfTs, points7d: params.justtcgPoints7d },
+      { provider: "SCRYDEX", price: params.scrydex, asOfTs: params.scrydexAsOfTs, points7d: params.scrydexPoints7d },
+    ],
+    parityStatus: params.parityStatus,
+    marketPriceFallback: params.fallback,
+  });
+  return {
+    marketPrice: weighted.marketPrice ?? params.fallback,
+    blendPolicy: weighted.blendPolicy,
+    confidenceScore: weighted.confidenceScore,
+    lowConfidence: weighted.lowConfidence,
+    sourceMix: weighted.sourceMix,
+  };
 }
 
 function formatSignalScore(value: number | null | undefined): string {
@@ -741,20 +758,46 @@ export default async function CanonicalCardPage({
   }
   const rawSourceAsOfJtcg = formatAsOf(rawSourceJtcgTs);
   const rawSourceAsOfScrydex = formatAsOf(rawSourceScrydexTs);
-  const currentRawPrice = viewMode === "RAW"
+  let rawPointsJtcg7d = 0;
+  let rawPointsScrydex7d = 0;
+  const referenceTsMs = rawProviderHistoryRows
+    .map((row) => new Date(row.ts).getTime())
+    .filter((ts) => Number.isFinite(ts))
+    .sort((a, b) => b - a)[0] ?? 0;
+  const weekAgoMs = referenceTsMs - (7 * 24 * 60 * 60 * 1000);
+  for (const row of rawProviderHistoryRows) {
+    const provider = normalizeRawProviderName(row.provider);
+    const tsMs = new Date(row.ts).getTime();
+    if (!provider || !Number.isFinite(tsMs) || tsMs < weekAgoMs) continue;
+    if (provider === "JUSTTCG") rawPointsJtcg7d += 1;
+    if (provider === "SCRYDEX") rawPointsScrydex7d += 1;
+  }
+  const rawPricing = viewMode === "RAW"
     ? resolveRawDisplayPrice({
       justtcg: rawSourceJtcg,
       scrydex: rawSourceScrydex,
+      justtcgAsOfTs: rawSourceJtcgTs,
+      scrydexAsOfTs: rawSourceScrydexTs,
+      justtcgPoints7d: rawPointsJtcg7d,
+      scrydexPoints7d: rawPointsScrydex7d,
       fallback: rawSnap.data?.market_price ?? vm?.price_now ?? null,
       parityStatus: rawParityStatus,
     })
     : null;
+  const currentRawPrice = viewMode === "RAW"
+    ? rawPricing?.marketPrice ?? null
+    : null;
   const displayPrimaryPrice = currentRawPrice ?? snapshotData?.median_7d ?? null;
   const primaryPrice = displayPrimaryPrice != null ? formatUsdCompact(displayPrimaryPrice) : null;
   const primaryPriceLabel = currentRawPrice != null
-    ? (rawSourceJtcg != null && rawSourceScrydex != null && rawParityStatus === "MATCH"
-      ? "Current market price (JustTCG + Scrydex blend)"
-      : "Current market price (single-provider fallback)")
+    ? (() => {
+      const confidenceSuffix = rawPricing
+        ? ` · Confidence ${rawPricing.confidenceScore}%${rawPricing.lowConfidence ? " (low)" : ""} · Mix J${Math.round(rawPricing.sourceMix.justtcgWeight * 100)} / S${Math.round(rawPricing.sourceMix.scrydexWeight * 100)}`
+        : "";
+      if (rawPricing?.blendPolicy === "TRUST_WEIGHTED_BLEND") return `Current market price (trust-weighted blend)${confidenceSuffix}`;
+      if (rawPricing?.blendPolicy === "FALLBACK_STALE_OR_OUTLIER") return `Current market price (stale/outlier fallback)${confidenceSuffix}`;
+      return `Current market price (single-provider fallback)${confidenceSuffix}`;
+    })()
     : `${selectedSnapshotGrade
       ? legacyGradeLabel(selectedSnapshotGrade)
       : activeProvider && activeBucket

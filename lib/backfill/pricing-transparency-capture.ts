@@ -1,8 +1,18 @@
 import { dbAdmin } from "@/lib/db/admin";
 import { getPricingTransparencySnapshot } from "@/lib/data/freshness";
+import { captureOutlierDiagnostics } from "@/lib/backfill/outlier-diagnostics-capture";
 
 export async function capturePricingTransparencySnapshot(): Promise<{ ok: boolean; id: number | null }> {
   const supabase = dbAdmin();
+  try {
+    await captureOutlierDiagnostics({
+      lookbackHours: 24,
+      sampleLimit: 6000,
+      upsertLimit: 1500,
+    });
+  } catch (error) {
+    console.warn("[capturePricingTransparencySnapshot:outliers]", error);
+  }
   const snapshot = await getPricingTransparencySnapshot();
   const freshnessValue = snapshot.slo.find((row) => row.key === "freshness_24h");
   const { data, error } = await supabase
@@ -21,4 +31,3 @@ export async function capturePricingTransparencySnapshot(): Promise<{ ok: boolea
   if (error) throw new Error(`pricing_transparency_snapshots(insert): ${error.message}`);
   return { ok: true, id: data.id };
 }
-

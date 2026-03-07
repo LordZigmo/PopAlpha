@@ -87,6 +87,10 @@ export type PricingTransparencySnapshot = {
     ratioGte3p5Count: number;
     ratioGte3p5Pct: number | null;
   };
+  outlierDiagnostics24h: {
+    excludedPoints: number;
+    impactedCards: number;
+  };
   dataQualityFlags: {
     sentinel23456Count: number;
     pricedButMissingTsCount: number;
@@ -109,6 +113,23 @@ export type PricingTransparencySnapshot = {
     queueDepth: number | null;
     retryDepth: number | null;
     failedDepth: number | null;
+  };
+  anomalies: {
+    providerDivergenceGt80PctCount: number;
+    zeroChange24hCount: number;
+    nullChange24hCount: number;
+    setJumpGt40PctCount: number;
+  };
+  accuracyBacktest: {
+    sampleSize: number;
+    mae: number | null;
+    mape: number | null;
+    bySegment: Array<{
+      segment: string;
+      sampleSize: number;
+      mae: number | null;
+      mape: number | null;
+    }>;
   };
   slo: Array<{
     key: "freshness_24h" | "coverage_both" | "change_coverage" | "agreement_p90" | "sentinel_prices" | "pipeline_retry_depth";
@@ -136,6 +157,15 @@ function percentile(sorted: number[], pct: number): number | null {
   return Number(sorted[idx].toFixed(2));
 }
 
+function mean(values: number[]): number | null {
+  if (values.length === 0) return null;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function toFinite(value: number | null | undefined): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 export async function getPricingTransparencySnapshot(): Promise<PricingTransparencySnapshot> {
   const supabase = dbPublic();
   const now = new Date();
@@ -158,6 +188,13 @@ export async function getPricingTransparencySnapshot(): Promise<PricingTranspare
     just24hObsRes,
     scrydex24hObsRes,
     changeCoverageRes,
+    zeroChangeRes,
+    nullChangeRes,
+    outlierExcludedCountRes,
+    outlierImpactedRowsRes,
+    recentRawRowsRes,
+    backtestMetricsRes,
+    backtestHistoryRes,
   ] = await Promise.all([
     supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null),
     supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null).not("justtcg_price", "is", null).not("scrydex_price", "is", null),
@@ -172,6 +209,24 @@ export async function getPricingTransparencySnapshot(): Promise<PricingTranspare
     supabase.from("public_price_history").select("ts", { count: "exact", head: true }).eq("provider", "JUSTTCG").eq("source_window", "snapshot").gte("ts", iso24h),
     supabase.from("public_price_history").select("ts", { count: "exact", head: true }).in("provider", ["SCRYDEX", "POKEMON_TCG_API"]).eq("source_window", "snapshot").gte("ts", iso24h),
     supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null).or("change_pct_24h.not.is.null,change_pct_7d.not.is.null"),
+    supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null).eq("change_pct_24h", 0),
+    supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null).is("change_pct_24h", null),
+    supabase.from("outlier_excluded_points").select("id", { count: "exact", head: true }).gte("captured_at", iso24h),
+    supabase.from("outlier_excluded_points").select("canonical_slug").gte("captured_at", iso24h).limit(10000),
+    supabase.from("public_card_metrics").select("canonical_slug, change_pct_24h").eq("grade", "RAW").is("printing_id", null).not("change_pct_24h", "is", null).limit(10000),
+    supabase
+      .from("public_card_metrics")
+      .select("canonical_slug, grade, market_price, active_listings_7d")
+      .in("grade", ["RAW", "PSA9", "PSA10"])
+      .is("printing_id", null)
+      .not("market_price", "is", null)
+      .limit(8000),
+    supabase
+      .from("public_price_history")
+      .select("canonical_slug, ts, price")
+      .eq("source_window", "snapshot")
+      .gte("ts", iso24h)
+      .limit(12000),
   ]);
 
   const totalRaw = totalRawRes.count ?? 0;
@@ -192,6 +247,12 @@ export async function getPricingTransparencySnapshot(): Promise<PricingTranspare
   const missingChangePct = totalRaw > 0
     ? Number(((missingChangeCount / totalRaw) * 100).toFixed(2))
     : 0;
+  const zeroChange24hCount = zeroChangeRes.count ?? 0;
+  const nullChange24hCount = nullChangeRes.count ?? 0;
+  const outlierExcludedPoints24h = outlierExcludedCountRes.error ? 0 : (outlierExcludedCountRes.count ?? 0);
+  const outlierImpactedCards24h = outlierImpactedRowsRes.error
+    ? 0
+    : new Set((outlierImpactedRowsRes.data ?? []).map((row) => String((row as { canonical_slug: string }).canonical_slug))).size;
   let blendableMatch: number | null = null;
   let parityMismatch: number | null = null;
   const [matchParityRes, mismatchParityRes] = await Promise.all([
@@ -247,17 +308,42 @@ export async function getPricingTransparencySnapshot(): Promise<PricingTranspare
   const pairs = (agreementRes.data ?? []) as PairRow[];
   const spreads: number[] = [];
   let ratioGte3p5Count = 0;
+  let divergenceGt80PctCount = 0;
   for (const row of pairs) {
     const a = row.justtcg_price;
     const b = row.scrydex_price;
     if (!(a > 0 && b > 0)) continue;
     const mean = (a + b) / 2;
     spreads.push((Math.abs(a - b) / mean) * 100);
+    if ((Math.abs(a - b) / mean) * 100 >= 80) divergenceGt80PctCount += 1;
     const high = Math.max(a, b);
     const low = Math.min(a, b);
     if (low > 0 && high / low >= 3.5) ratioGte3p5Count += 1;
   }
   spreads.sort((a, b) => a - b);
+
+  const jumpRows = (recentRawRowsRes.data ?? []) as Array<{ canonical_slug: string; change_pct_24h: number | null }>;
+  const slugsForJump = jumpRows
+    .filter((row) => Math.abs(toFinite(row.change_pct_24h) ?? 0) >= 40)
+    .map((row) => row.canonical_slug)
+    .filter(Boolean);
+  let setJumpGt40PctCount = 0;
+  if (slugsForJump.length > 0) {
+    const uniqueSlugs = [...new Set(slugsForJump)];
+    const setNames = new Set<string>();
+    for (let i = 0; i < uniqueSlugs.length; i += 500) {
+      const batch = uniqueSlugs.slice(i, i + 500);
+      const setRes = await supabase
+        .from("canonical_cards")
+        .select("slug, set_name")
+        .in("slug", batch);
+      if (setRes.error) continue;
+      for (const row of (setRes.data ?? []) as Array<{ slug: string; set_name: string | null }>) {
+        if (row.set_name) setNames.add(row.set_name);
+      }
+    }
+    setJumpGt40PctCount = setNames.size;
+  }
 
   // Priced but missing timestamp.
   let pricedButMissingTsCount = 0;
@@ -336,6 +422,80 @@ export async function getPricingTransparencySnapshot(): Promise<PricingTranspare
   if (!rRes.error) retryDepth = rRes.count ?? 0;
   if (!fRes.error) failedDepth = fRes.count ?? 0;
 
+  const backtestMetricRows = (backtestMetricsRes.data ?? []) as Array<{
+    canonical_slug: string;
+    grade: string;
+    market_price: number | null;
+    active_listings_7d: number | null;
+  }>;
+  const backtestHistoryRows = (backtestHistoryRes.data ?? []) as Array<{
+    canonical_slug: string;
+    ts: string;
+    price: number;
+  }>;
+  const latestRealizedBySlug = new Map<string, number[]>();
+  for (const row of backtestHistoryRows) {
+    if (!row.canonical_slug || !Number.isFinite(row.price) || row.price <= 0) continue;
+    const bucket = latestRealizedBySlug.get(row.canonical_slug) ?? [];
+    bucket.push(row.price);
+    latestRealizedBySlug.set(row.canonical_slug, bucket);
+  }
+  const medianRealizedBySlug = new Map<string, number>();
+  for (const [slug, prices] of latestRealizedBySlug.entries()) {
+    prices.sort((a, b) => a - b);
+    const mid = percentile(prices, 50);
+    if (mid != null) medianRealizedBySlug.set(slug, mid);
+  }
+  const slugsForBacktest = [...new Set(backtestMetricRows.map((row) => row.canonical_slug).filter(Boolean))];
+  const yearBySlug = new Map<string, number | null>();
+  for (let i = 0; i < slugsForBacktest.length; i += 500) {
+    const batch = slugsForBacktest.slice(i, i + 500);
+    const yearRes = await supabase
+      .from("canonical_cards")
+      .select("slug, year")
+      .in("slug", batch);
+    if (yearRes.error) continue;
+    for (const row of (yearRes.data ?? []) as Array<{ slug: string; year: number | null }>) {
+      yearBySlug.set(row.slug, row.year);
+    }
+  }
+  const segmentErrors = new Map<string, { abs: number[]; pct: number[] }>();
+  const totalAbs: number[] = [];
+  const totalPct: number[] = [];
+  for (const row of backtestMetricRows) {
+    const model = toFinite(row.market_price);
+    const realized = medianRealizedBySlug.get(row.canonical_slug) ?? null;
+    if (model == null || realized == null || realized <= 0) continue;
+    const absErr = Math.abs(model - realized);
+    const pctErr = (absErr / realized) * 100;
+    totalAbs.push(absErr);
+    totalPct.push(pctErr);
+
+    const year = yearBySlug.get(row.canonical_slug) ?? null;
+    const era = year != null && year <= 2004 ? "vintage" : "modern";
+    const graded = row.grade === "RAW" ? "raw" : "graded";
+    const liquidity = (row.active_listings_7d ?? 0) <= 4 ? "low-liquidity" : "high-liquidity";
+    const key = `${era}/${graded}/${liquidity}`;
+    const bucket = segmentErrors.get(key) ?? { abs: [], pct: [] };
+    bucket.abs.push(absErr);
+    bucket.pct.push(pctErr);
+    segmentErrors.set(key, bucket);
+  }
+  const accuracyBacktest = {
+    sampleSize: totalAbs.length,
+    mae: mean(totalAbs) != null ? Number((mean(totalAbs) ?? 0).toFixed(4)) : null,
+    mape: mean(totalPct) != null ? Number((mean(totalPct) ?? 0).toFixed(2)) : null,
+    bySegment: [...segmentErrors.entries()]
+      .map(([segment, metrics]) => ({
+        segment,
+        sampleSize: metrics.abs.length,
+        mae: mean(metrics.abs) != null ? Number((mean(metrics.abs) ?? 0).toFixed(4)) : null,
+        mape: mean(metrics.pct) != null ? Number((mean(metrics.pct) ?? 0).toFixed(2)) : null,
+      }))
+      .sort((a, b) => b.sampleSize - a.sampleSize)
+      .slice(0, 12),
+  };
+
   function statusHighGood(value: number | null, good: number, warn: number): "healthy" | "warning" | "critical" {
     if (value === null) return "warning";
     if (value >= good) return "healthy";
@@ -363,6 +523,11 @@ export async function getPricingTransparencySnapshot(): Promise<PricingTranspare
   if (changeCoverageSlo !== "healthy") alerts.push(`Price-change coverage dropped (${changeCoverageCount}/${totalRaw} cards have change_pct).`);
   if (blendablePct !== null && blendablePct < 50) alerts.push(`Blendable parity coverage is low (${blendablePct.toFixed(2)}%).`);
   if (agreementSlo === "critical") alerts.push(`Provider spread is elevated (p90 ${p90Spread ?? 0}%).`);
+  if (divergenceGt80PctCount > 50) alerts.push(`Provider divergence spike: ${divergenceGt80PctCount} cards >80% spread.`);
+  if (setJumpGt40PctCount > 0) alerts.push(`Set-level jump alert: ${setJumpGt40PctCount} sets have >=40% 24h movers.`);
+  if (zeroChange24hCount > Math.max(100, Math.floor(totalRaw * 0.25))) {
+    alerts.push(`Zero-change spike: ${zeroChange24hCount} RAW cards reported 0% 24h change.`);
+  }
   if (sentinelSlo !== "healthy") alerts.push(`Sentinel price flags detected (${sentinelRes.count ?? 0}).`);
   if (retrySlo !== "healthy") alerts.push(`Pipeline retry queue depth elevated (${retryDepth ?? 0}).`);
 
@@ -395,6 +560,10 @@ export async function getPricingTransparencySnapshot(): Promise<PricingTranspare
       ratioGte3p5Count,
       ratioGte3p5Pct: spreads.length > 0 ? Number(((ratioGte3p5Count / spreads.length) * 100).toFixed(2)) : null,
     },
+    outlierDiagnostics24h: {
+      excludedPoints: outlierExcludedPoints24h,
+      impactedCards: outlierImpactedCards24h,
+    },
     dataQualityFlags: {
       sentinel23456Count: sentinelRes.count ?? 0,
       pricedButMissingTsCount,
@@ -418,6 +587,13 @@ export async function getPricingTransparencySnapshot(): Promise<PricingTranspare
       retryDepth,
       failedDepth,
     },
+    anomalies: {
+      providerDivergenceGt80PctCount: divergenceGt80PctCount,
+      zeroChange24hCount,
+      nullChange24hCount,
+      setJumpGt40PctCount,
+    },
+    accuracyBacktest,
     slo: [
       {
         key: "freshness_24h",

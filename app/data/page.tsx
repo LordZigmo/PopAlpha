@@ -139,6 +139,8 @@ export default async function DataPage() {
               <p className="text-[12px] uppercase tracking-[0.12em] text-[#7A7A7A]">Outlier Guardrails</p>
               <p className="mt-2 text-[14px] text-[#9CA3AF]">Ratio ≥ 3.5x: <span className="font-semibold text-[#E5E7EB]">{formatNumber(transparency.outlierGuardrails.ratioGte3p5Count)}</span></p>
               <p className="mt-1 text-[14px] text-[#9CA3AF]">Share of comparable: <span className="font-semibold text-[#E5E7EB]">{transparency.outlierGuardrails.ratioGte3p5Pct ?? 0}%</span></p>
+              <p className="mt-1 text-[14px] text-[#9CA3AF]">Excluded points (24h): <span className="font-semibold text-[#E5E7EB]">{formatNumber(transparency.outlierDiagnostics24h.excludedPoints)}</span></p>
+              <p className="mt-1 text-[14px] text-[#9CA3AF]">Impacted cards (24h): <span className="font-semibold text-[#E5E7EB]">{formatNumber(transparency.outlierDiagnostics24h.impactedCards)}</span></p>
             </div>
 
             <div className="rounded-xl border border-[#222] bg-[#0D0D0D] p-4">
@@ -158,6 +160,21 @@ export default async function DataPage() {
               <p className="mt-2 text-[14px] text-[#9CA3AF]">Queued: <span className="font-semibold text-[#E5E7EB]">{transparency.pipelineHealth.queueDepth ?? "n/a"}</span></p>
               <p className="mt-1 text-[14px] text-[#9CA3AF]">Retry: <span className="font-semibold text-[#E5E7EB]">{transparency.pipelineHealth.retryDepth ?? "n/a"}</span></p>
               <p className="mt-1 text-[14px] text-[#9CA3AF]">Failed: <span className="font-semibold text-[#E5E7EB]">{transparency.pipelineHealth.failedDepth ?? "n/a"}</span></p>
+            </div>
+
+            <div className="rounded-xl border border-[#222] bg-[#0D0D0D] p-4">
+              <p className="text-[12px] uppercase tracking-[0.12em] text-[#7A7A7A]">Anomaly Alerts (24h)</p>
+              <p className="mt-2 text-[14px] text-[#9CA3AF]">Divergence &gt;80%: <span className="font-semibold text-[#E5E7EB]">{formatNumber(transparency.anomalies.providerDivergenceGt80PctCount)}</span></p>
+              <p className="mt-1 text-[14px] text-[#9CA3AF]">Zero change spikes: <span className="font-semibold text-[#E5E7EB]">{formatNumber(transparency.anomalies.zeroChange24hCount)}</span></p>
+              <p className="mt-1 text-[14px] text-[#9CA3AF]">Null 24h change: <span className="font-semibold text-[#E5E7EB]">{formatNumber(transparency.anomalies.nullChange24hCount)}</span></p>
+              <p className="mt-1 text-[14px] text-[#9CA3AF]">Set jumps &gt;40%: <span className="font-semibold text-[#E5E7EB]">{formatNumber(transparency.anomalies.setJumpGt40PctCount)}</span></p>
+            </div>
+
+            <div className="rounded-xl border border-[#222] bg-[#0D0D0D] p-4">
+              <p className="text-[12px] uppercase tracking-[0.12em] text-[#7A7A7A]">Backtest Accuracy</p>
+              <p className="mt-2 text-[14px] text-[#9CA3AF]">Sample size: <span className="font-semibold text-[#E5E7EB]">{formatNumber(transparency.accuracyBacktest.sampleSize)}</span></p>
+              <p className="mt-1 text-[14px] text-[#9CA3AF]">MAE: <span className="font-semibold text-[#E5E7EB]">{transparency.accuracyBacktest.mae ?? "n/a"}</span></p>
+              <p className="mt-1 text-[14px] text-[#9CA3AF]">MAPE: <span className="font-semibold text-[#E5E7EB]">{transparency.accuracyBacktest.mape ?? "n/a"}%</span></p>
             </div>
           </div>
 
@@ -181,7 +198,7 @@ export default async function DataPage() {
           </div>
 
           <p className="mt-5 text-[12px] text-[#6B7280]">
-            Methodology: RAW market pricing is blended from JustTCG + Scrydex when both are available, with outlier guardrails when provider divergence is extreme.
+            Methodology: RAW market pricing is trust-weighted across JustTCG + Scrydex using freshness, volume, and agreement; robust MAD/IQR filtering excludes outliers before confidence bands are computed.
           </p>
         </section>
 
