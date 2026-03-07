@@ -13,6 +13,11 @@ type CanonicalMarketMetricRow = {
   change_pct_7d: number | null;
 };
 
+type CanonicalParityRow = {
+  canonical_slug: string;
+  parity_status: "MATCH" | "MISMATCH" | "MISSING_PROVIDER" | "UNKNOWN";
+};
+
 export type CanonicalMarketPulse = {
   justtcgPrice: number | null;
   scrydexPrice: number | null;
@@ -20,6 +25,7 @@ export type CanonicalMarketPulse = {
   marketPrice: number | null;
   changePct: number | null;
   changeWindow: MarketChangeWindow | null;
+  parityStatus: "MATCH" | "MISMATCH" | "MISSING_PROVIDER" | "UNKNOWN";
 };
 
 function toFiniteNumber(value: number | null | undefined): number | null {
@@ -31,9 +37,12 @@ function resolveRawMarketPrice(params: {
   scrydexPrice: number | null;
   marketPrice: number | null;
   median7d: number | null;
+  parityStatus: "MATCH" | "MISMATCH" | "MISSING_PROVIDER" | "UNKNOWN";
 }): number | null {
-  const { justtcgPrice, scrydexPrice, marketPrice, median7d } = params;
+  const { justtcgPrice, scrydexPrice, marketPrice, median7d, parityStatus } = params;
   if (justtcgPrice !== null && scrydexPrice !== null) {
+    // Blend only when providers are cohort-compatible.
+    if (parityStatus !== "MATCH") return justtcgPrice;
     const high = Math.max(justtcgPrice, scrydexPrice);
     const low = Math.min(justtcgPrice, scrydexPrice);
     // If providers are far apart, prefer JustTCG to avoid transient outliers.
@@ -47,6 +56,7 @@ function resolveRawMarketPrice(params: {
 
 export function resolveCanonicalMarketPulse(
   row: Partial<Omit<CanonicalMarketMetricRow, "canonical_slug">> | null | undefined,
+  parityStatus: "MATCH" | "MISMATCH" | "MISSING_PROVIDER" | "UNKNOWN" = "UNKNOWN",
 ): CanonicalMarketPulse {
   const justtcgPrice = toFiniteNumber(row?.justtcg_price);
   const scrydexPrice = toFiniteNumber(row?.scrydex_price) ?? toFiniteNumber(row?.pokemontcg_price);
@@ -55,6 +65,7 @@ export function resolveCanonicalMarketPulse(
     scrydexPrice,
     marketPrice: toFiniteNumber(row?.market_price),
     median7d: toFiniteNumber(row?.median_7d),
+    parityStatus,
   });
   const change24h = toFiniteNumber(row?.change_pct_24h);
 
@@ -66,6 +77,7 @@ export function resolveCanonicalMarketPulse(
       marketPrice,
       changePct: change24h,
       changeWindow: "24H",
+      parityStatus,
     };
   }
 
@@ -78,6 +90,7 @@ export function resolveCanonicalMarketPulse(
       marketPrice,
       changePct: change7d,
       changeWindow: "7D",
+      parityStatus,
     };
   }
 
@@ -88,6 +101,7 @@ export function resolveCanonicalMarketPulse(
     marketPrice,
     changePct: null,
     changeWindow: null,
+    parityStatus,
   };
 }
 
@@ -106,14 +120,27 @@ export async function getCanonicalMarketPulseMap(
     .eq("grade", "RAW")
     .order("updated_at", { ascending: false });
 
+  const { data: parityData, error: parityError } = await supabase
+    .from("canonical_raw_provider_parity")
+    .select("canonical_slug, parity_status")
+    .in("canonical_slug", slugs);
+
   if (error) {
     console.error("[getCanonicalMarketPulseMap]", error.message);
     return pulseMap;
   }
+  if (parityError) {
+    console.error("[getCanonicalMarketPulseMap:parity]", parityError.message);
+  }
+
+  const parityBySlug = new Map<string, CanonicalParityRow["parity_status"]>();
+  for (const row of (parityData ?? []) as CanonicalParityRow[]) {
+    parityBySlug.set(row.canonical_slug, row.parity_status);
+  }
 
   for (const row of (data ?? []) as CanonicalMarketMetricRow[]) {
     if (pulseMap.has(row.canonical_slug)) continue;
-    pulseMap.set(row.canonical_slug, resolveCanonicalMarketPulse(row));
+    pulseMap.set(row.canonical_slug, resolveCanonicalMarketPulse(row, parityBySlug.get(row.canonical_slug) ?? "UNKNOWN"));
   }
 
   return pulseMap;

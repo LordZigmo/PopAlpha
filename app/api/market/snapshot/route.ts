@@ -32,6 +32,10 @@ type ProviderHistoryAsOfRow = {
   ts: string;
 };
 
+type ParityRow = {
+  parity_status: "MATCH" | "MISMATCH" | "MISSING_PROVIDER" | "UNKNOWN";
+};
+
 function normalizeRawProviderName(provider: string | null | undefined): "JUSTTCG" | "SCRYDEX" | null {
   const normalized = String(provider ?? "").trim().toUpperCase();
   if (normalized === "JUSTTCG") return "JUSTTCG";
@@ -137,7 +141,16 @@ export async function GET(req: Request) {
     sourceCurrency: "USD",
     asOf: scrydexSourcePrice != null ? (scrydexAsOf ?? result.data?.market_price_as_of ?? null) : null,
   });
-  const marketPriceUsd = averageProviderUsdPrice([justtcg, scrydex]) ?? result.data?.market_price ?? null;
+  const { data: parityData } = await supabase
+    .from("canonical_raw_provider_parity")
+    .select("parity_status")
+    .eq("canonical_slug", slug)
+    .maybeSingle<ParityRow>();
+  const parityStatus = parityData?.parity_status ?? "UNKNOWN";
+  const shouldBlend = grade !== "RAW" || parityStatus === "MATCH";
+  const marketPriceUsd = shouldBlend
+    ? averageProviderUsdPrice([justtcg, scrydex]) ?? result.data?.market_price ?? null
+    : justtcg.usdPrice ?? scrydex.usdPrice ?? result.data?.market_price ?? null;
   const marketPriceAsOf = [justtcg.asOf, scrydex.asOf].filter(Boolean).sort().at(-1) ?? result.data?.market_price_as_of ?? null;
 
   return NextResponse.json({
@@ -147,6 +160,8 @@ export async function GET(req: Request) {
     pokemontcgPrice: scrydex.usdPrice,
     marketPrice: marketPriceUsd,
     marketPriceAsOf,
+    parityStatus,
+    blendPolicy: shouldBlend ? "BLEND_MATCHED" : "FALLBACK_SINGLE_PROVIDER",
     providers: [justtcg, scrydex],
     active7d: result.data?.active_listings_7d ?? 0,
     median7d: result.data?.median_7d ?? null,

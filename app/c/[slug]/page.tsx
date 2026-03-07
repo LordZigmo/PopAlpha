@@ -102,6 +102,10 @@ type RawProviderMetricRow = {
   provider_as_of_ts: string | null;
 };
 
+type RawParityRow = {
+  parity_status: "MATCH" | "MISMATCH" | "MISSING_PROVIDER" | "UNKNOWN";
+};
+
 function finishLabel(finish: CardPrintingRow["finish"]): string {
   const map: Record<CardPrintingRow["finish"], string> = {
     NON_HOLO: "Non-Holo",
@@ -375,6 +379,23 @@ function normalizeRawProviderName(provider: string | null | undefined): "JUSTTCG
   return null;
 }
 
+function resolveRawDisplayPrice(params: {
+  justtcg: number | null;
+  scrydex: number | null;
+  fallback: number | null;
+  parityStatus: "MATCH" | "MISMATCH" | "MISSING_PROVIDER" | "UNKNOWN";
+}): number | null {
+  const { justtcg, scrydex, fallback, parityStatus } = params;
+  if (justtcg != null && scrydex != null) {
+    if (parityStatus !== "MATCH") return justtcg;
+    const high = Math.max(justtcg, scrydex);
+    const low = Math.min(justtcg, scrydex);
+    if (low > 0 && high / low >= 3.5) return justtcg;
+    return (justtcg + scrydex) / 2;
+  }
+  return justtcg ?? scrydex ?? fallback;
+}
+
 function formatSignalScore(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return "Forming";
   const abs = Math.abs(value);
@@ -538,7 +559,7 @@ export default async function CanonicalCardPage({
   // Default RAW view should read canonical (printing_id IS NULL) unless user explicitly picks a printing.
   const rawPrintingIdForQuery = hasExplicitPrinting ? selectedPrinting?.id ?? null : null;
   const rawVariantPrefix = rawPrintingIdForQuery ? `${rawPrintingIdForQuery}::` : null;
-  const [[rawSnap, psa9Snap, psa10Snap], vm, gradedPriceHistoryQuery, rawProviderMetricsQuery, rawProviderHistoryQuery, viewSnapshot] = await Promise.all([
+  const [[rawSnap, psa9Snap, psa10Snap], vm, gradedPriceHistoryQuery, rawProviderMetricsQuery, rawProviderHistoryQuery, rawParityQuery, viewSnapshot] = await Promise.all([
     Promise.all(
       (["RAW", "PSA9", "PSA10"] as const).map((g) => {
         const q = supabase
@@ -591,6 +612,11 @@ export default async function CanonicalCardPage({
       }
       return q;
     })(),
+    supabase
+      .from("canonical_raw_provider_parity")
+      .select("parity_status")
+      .eq("canonical_slug", slug)
+      .maybeSingle<RawParityRow>(),
     getCardViewSnapshot(slug, 14),
   ]);
   const relatedCarousels = await getRelatedCardCarousels({
@@ -625,6 +651,7 @@ export default async function CanonicalCardPage({
   const gradedPriceHistoryRows = (gradedPriceHistoryQuery.data ?? []) as GradedPriceHistoryRow[];
   const rawProviderMetricRows = (rawProviderMetricsQuery.data ?? []) as RawProviderMetricRow[];
   const rawProviderHistoryRows = (rawProviderHistoryQuery.data ?? []) as RawProviderHistoryRow[];
+  const rawParityStatus = rawParityQuery.data?.parity_status ?? "UNKNOWN";
   const latestGradedPriceByVariantRef = new Map<string, GradedPriceHistoryRow>();
   for (const row of gradedPriceHistoryRows) {
     if (!row.variant_ref || latestGradedPriceByVariantRef.has(row.variant_ref)) continue;
@@ -715,12 +742,19 @@ export default async function CanonicalCardPage({
   const rawSourceAsOfJtcg = formatAsOf(rawSourceJtcgTs);
   const rawSourceAsOfScrydex = formatAsOf(rawSourceScrydexTs);
   const currentRawPrice = viewMode === "RAW"
-    ? rawSnap.data?.market_price ?? vm?.price_now ?? null
+    ? resolveRawDisplayPrice({
+      justtcg: rawSourceJtcg,
+      scrydex: rawSourceScrydex,
+      fallback: rawSnap.data?.market_price ?? vm?.price_now ?? null,
+      parityStatus: rawParityStatus,
+    })
     : null;
   const displayPrimaryPrice = currentRawPrice ?? snapshotData?.median_7d ?? null;
   const primaryPrice = displayPrimaryPrice != null ? formatUsdCompact(displayPrimaryPrice) : null;
   const primaryPriceLabel = currentRawPrice != null
-    ? "Current market price (JustTCG + Scrydex blend)"
+    ? (rawSourceJtcg != null && rawSourceScrydex != null && rawParityStatus === "MATCH"
+      ? "Current market price (JustTCG + Scrydex blend)"
+      : "Current market price (single-provider fallback)")
     : `${selectedSnapshotGrade
       ? legacyGradeLabel(selectedSnapshotGrade)
       : activeProvider && activeBucket

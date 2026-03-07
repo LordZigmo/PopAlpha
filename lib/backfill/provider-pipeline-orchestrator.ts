@@ -24,6 +24,8 @@ type PipelineResult = {
   metricsRefreshError: string | null;
   priceChangesRefresh: unknown;
   priceChangesRefreshError: string | null;
+  parityRefresh: unknown;
+  parityRefreshError: string | null;
 };
 
 function toErrorMessage(err: unknown): string {
@@ -107,6 +109,8 @@ export async function runJustTcgPipeline(opts: {
   let metricsRefreshError: string | null = null;
   let priceChangesRefresh: unknown = null;
   let priceChangesRefreshError: string | null = null;
+  let parityRefresh: unknown = null;
+  let parityRefreshError: string | null = null;
 
   if (!firstError) {
     try {
@@ -124,6 +128,14 @@ export async function runJustTcgPipeline(opts: {
     } catch (err) {
       priceChangesRefreshError = toErrorMessage(err);
     }
+
+    try {
+      const { data, error } = await supabase.rpc("refresh_canonical_raw_provider_parity", { p_window_days: 30 });
+      if (error) parityRefreshError = error.message;
+      else parityRefresh = data;
+    } catch (err) {
+      parityRefreshError = toErrorMessage(err);
+    }
   }
 
   const endedAt = new Date().toISOString();
@@ -139,6 +151,8 @@ export async function runJustTcgPipeline(opts: {
     metricsRefreshError,
     priceChangesRefresh,
     priceChangesRefreshError,
+    parityRefresh,
+    parityRefreshError,
   };
 }
 
@@ -205,6 +219,8 @@ export async function runPokemonTcgPipeline(opts: {
   let metricsRefreshError: string | null = null;
   let priceChangesRefresh: unknown = null;
   let priceChangesRefreshError: string | null = null;
+  let parityRefresh: unknown = null;
+  let parityRefreshError: string | null = null;
 
   if (!firstError) {
     try {
@@ -222,6 +238,14 @@ export async function runPokemonTcgPipeline(opts: {
     } catch (err) {
       priceChangesRefreshError = toErrorMessage(err);
     }
+
+    try {
+      const { data, error } = await supabase.rpc("refresh_canonical_raw_provider_parity", { p_window_days: 30 });
+      if (error) parityRefreshError = error.message;
+      else parityRefresh = data;
+    } catch (err) {
+      parityRefreshError = toErrorMessage(err);
+    }
   }
 
   const endedAt = new Date().toISOString();
@@ -237,5 +261,7 @@ export async function runPokemonTcgPipeline(opts: {
     metricsRefreshError,
     priceChangesRefresh,
     priceChangesRefreshError,
+    parityRefresh,
+    parityRefreshError,
   };
 }

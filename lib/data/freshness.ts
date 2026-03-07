@@ -67,6 +67,9 @@ export type PricingTransparencySnapshot = {
     scrydexOnly: number;
     none: number;
     bothPct: number;
+    blendableMatch: number | null;
+    blendableMatchPct: number | null;
+    parityMismatch: number | null;
   };
   stalenessBuckets: {
     under6h: number;
@@ -173,6 +176,14 @@ export async function getPricingTransparencySnapshot(): Promise<PricingTranspare
   const under72h = under72hRes.count ?? 0;
   const withTs = withTsRes.count ?? 0;
   const missingTs = Math.max(0, totalRaw - withTs);
+  let blendableMatch: number | null = null;
+  let parityMismatch: number | null = null;
+  const [matchParityRes, mismatchParityRes] = await Promise.all([
+    supabase.from("canonical_raw_provider_parity").select("canonical_slug", { count: "exact", head: true }).eq("parity_status", "MATCH"),
+    supabase.from("canonical_raw_provider_parity").select("canonical_slug", { count: "exact", head: true }).eq("parity_status", "MISMATCH"),
+  ]);
+  if (!matchParityRes.error) blendableMatch = matchParityRes.count ?? 0;
+  if (!mismatchParityRes.error) parityMismatch = mismatchParityRes.count ?? 0;
 
   // Provider freshness (distinct canonical cards via canonical RAW variant metrics rows).
   let providerFreshness = { justtcgPct: null as number | null, scrydexPct: null as number | null };
@@ -325,12 +336,14 @@ export async function getPricingTransparencySnapshot(): Promise<PricingTranspare
   const p90Spread = percentile(spreads, 90);
   const freshnessSlo = statusHighGood(under24h > 0 && totalRaw > 0 ? (under24h / totalRaw) * 100 : 0, 90, 80);
   const coverageSlo = statusHighGood(totalRaw > 0 ? (both / totalRaw) * 100 : 0, 60, 45);
+  const blendablePct = (blendableMatch !== null && totalRaw > 0) ? (blendableMatch / totalRaw) * 100 : null;
   const agreementSlo = statusLowGood(p90Spread, 45, 70);
   const sentinelSlo = statusLowGood(sentinelRes.count ?? 0, 0, 5);
   const retrySlo = statusLowGood(retryDepth, 5, 20);
   const alerts: string[] = [];
   if (freshnessSlo !== "healthy") alerts.push(`Freshness below SLO (${under24h}/${totalRaw} fresh in 24h).`);
   if (coverageSlo !== "healthy") alerts.push(`Dual-provider coverage below SLO (${both}/${totalRaw}).`);
+  if (blendablePct !== null && blendablePct < 50) alerts.push(`Blendable parity coverage is low (${blendablePct.toFixed(2)}%).`);
   if (agreementSlo === "critical") alerts.push(`Provider spread is elevated (p90 ${p90Spread ?? 0}%).`);
   if (sentinelSlo !== "healthy") alerts.push(`Sentinel price flags detected (${sentinelRes.count ?? 0}).`);
   if (retrySlo !== "healthy") alerts.push(`Pipeline retry queue depth elevated (${retryDepth ?? 0}).`);
@@ -344,6 +357,9 @@ export async function getPricingTransparencySnapshot(): Promise<PricingTranspare
       scrydexOnly,
       none,
       bothPct: totalRaw > 0 ? Number(((both / totalRaw) * 100).toFixed(2)) : 0,
+      blendableMatch,
+      blendableMatchPct: blendablePct !== null ? Number(blendablePct.toFixed(2)) : null,
+      parityMismatch,
     },
     stalenessBuckets: {
       under6h,
