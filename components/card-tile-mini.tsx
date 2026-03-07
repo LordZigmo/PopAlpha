@@ -111,17 +111,21 @@ export default function CardTileMini({
           {card.set_name ?? "Unknown set"}
         </p>
 
-        <div className="mt-2 flex items-center gap-1.5">
-          <span className="text-[14px] font-bold tabular-nums text-[#F0F0F0]">
-            {formatPrice(card.market_price)}
-          </span>
-          {showHotPremium ? (
-            <>
-              <HotMarker />
-              <Sparkline values={card.sparkline_7d} />
-            </>
-          ) : null}
-          <ChangeBadge pct={card.change_pct} windowLabel={card.change_window} />
+        <div className="mt-2 flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <span className="block truncate text-[14px] font-bold tabular-nums text-[#F0F0F0]">
+              {formatPrice(card.market_price)}
+            </span>
+            {showHotPremium ? (
+              <div className="mt-1 flex items-center gap-1.5">
+                <HotMarker />
+                <Sparkline values={card.sparkline_7d} />
+              </div>
+            ) : null}
+          </div>
+          <div className="shrink-0 pt-0.5">
+            <ChangeBadge pct={card.change_pct} windowLabel={card.change_window} />
+          </div>
         </div>
 
         {showTier && tier && !showHotPremium ? (

@@ -14,7 +14,7 @@ export default function ChangeBadge({
   const formatted = abs >= 10 ? abs.toFixed(0) : abs.toFixed(1);
   return (
     <span
-      className="text-[13px] font-semibold tabular-nums"
+      className="whitespace-nowrap text-[13px] font-semibold tabular-nums"
       style={{ color: up ? "#00DC5A" : "#FF3B30" }}
     >
       {up ? "\u25B2" : "\u25BC"} {up ? "+" : "-"}{formatted}%
