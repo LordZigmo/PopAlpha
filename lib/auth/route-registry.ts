@@ -53,6 +53,7 @@ export const CRON_ROUTES = [
   "cron/sync-tcg-prices",
   "cron/refresh-card-metrics",
   "cron/refresh-card-embeddings",
+  "cron/capture-pricing-transparency",
   "cron/snapshot-price-history",
   "cron/refresh-derived-signals",
   "cron/refresh-set-summaries",

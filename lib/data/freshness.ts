@@ -101,6 +101,24 @@ export type PricingTransparencySnapshot = {
     retryDepth: number | null;
     failedDepth: number | null;
   };
+  slo: Array<{
+    key: "freshness_24h" | "coverage_both" | "agreement_p90" | "sentinel_prices" | "pipeline_retry_depth";
+    label: string;
+    status: "healthy" | "warning" | "critical";
+    value: string;
+    target: string;
+  }>;
+  alerts: string[];
+};
+
+export type PricingTransparencyTrendPoint = {
+  capturedAt: string;
+  freshnessPct: number | null;
+  coverageBothPct: number | null;
+  p90SpreadPct: number | null;
+  queueDepth: number | null;
+  retryDepth: number | null;
+  failedDepth: number | null;
 };
 
 function percentile(sorted: number[], pct: number): number | null {
@@ -291,6 +309,32 @@ export async function getPricingTransparencySnapshot(): Promise<PricingTranspare
   if (!rRes.error) retryDepth = rRes.count ?? 0;
   if (!fRes.error) failedDepth = fRes.count ?? 0;
 
+  function statusHighGood(value: number | null, good: number, warn: number): "healthy" | "warning" | "critical" {
+    if (value === null) return "warning";
+    if (value >= good) return "healthy";
+    if (value >= warn) return "warning";
+    return "critical";
+  }
+  function statusLowGood(value: number | null, goodMax: number, warnMax: number): "healthy" | "warning" | "critical" {
+    if (value === null) return "warning";
+    if (value <= goodMax) return "healthy";
+    if (value <= warnMax) return "warning";
+    return "critical";
+  }
+
+  const p90Spread = percentile(spreads, 90);
+  const freshnessSlo = statusHighGood(under24h > 0 && totalRaw > 0 ? (under24h / totalRaw) * 100 : 0, 90, 80);
+  const coverageSlo = statusHighGood(totalRaw > 0 ? (both / totalRaw) * 100 : 0, 60, 45);
+  const agreementSlo = statusLowGood(p90Spread, 45, 70);
+  const sentinelSlo = statusLowGood(sentinelRes.count ?? 0, 0, 5);
+  const retrySlo = statusLowGood(retryDepth, 5, 20);
+  const alerts: string[] = [];
+  if (freshnessSlo !== "healthy") alerts.push(`Freshness below SLO (${under24h}/${totalRaw} fresh in 24h).`);
+  if (coverageSlo !== "healthy") alerts.push(`Dual-provider coverage below SLO (${both}/${totalRaw}).`);
+  if (agreementSlo === "critical") alerts.push(`Provider spread is elevated (p90 ${p90Spread ?? 0}%).`);
+  if (sentinelSlo !== "healthy") alerts.push(`Sentinel price flags detected (${sentinelRes.count ?? 0}).`);
+  if (retrySlo !== "healthy") alerts.push(`Pipeline retry queue depth elevated (${retryDepth ?? 0}).`);
+
   return {
     asOf,
     freshnessByProvider24h: providerFreshness,
@@ -311,7 +355,7 @@ export async function getPricingTransparencySnapshot(): Promise<PricingTranspare
     priceAgreement: {
       comparableCards: spreads.length,
       medianSpreadPct: percentile(spreads, 50),
-      p90SpreadPct: percentile(spreads, 90),
+      p90SpreadPct: p90Spread,
     },
     outlierGuardrails: {
       ratioGte3p5Count,
@@ -334,5 +378,72 @@ export async function getPricingTransparencySnapshot(): Promise<PricingTranspare
       retryDepth,
       failedDepth,
     },
+    slo: [
+      {
+        key: "freshness_24h",
+        label: "Freshness (24h)",
+        status: freshnessSlo,
+        value: `${(under24h > 0 && totalRaw > 0 ? (under24h / totalRaw) * 100 : 0).toFixed(2)}%`,
+        target: ">= 90%",
+      },
+      {
+        key: "coverage_both",
+        label: "Dual-Provider Coverage",
+        status: coverageSlo,
+        value: `${(totalRaw > 0 ? (both / totalRaw) * 100 : 0).toFixed(2)}%`,
+        target: ">= 60%",
+      },
+      {
+        key: "agreement_p90",
+        label: "Agreement p90 Spread",
+        status: agreementSlo,
+        value: `${(p90Spread ?? 0).toFixed(2)}%`,
+        target: "<= 45%",
+      },
+      {
+        key: "sentinel_prices",
+        label: "Sentinel Price Flags",
+        status: sentinelSlo,
+        value: String(sentinelRes.count ?? 0),
+        target: "0",
+      },
+      {
+        key: "pipeline_retry_depth",
+        label: "Pipeline Retry Depth",
+        status: retrySlo,
+        value: String(retryDepth ?? 0),
+        target: "<= 5",
+      },
+    ],
+    alerts,
   };
+}
+
+export async function getPricingTransparencyTrend(days = 7): Promise<PricingTransparencyTrendPoint[]> {
+  const supabase = dbPublic();
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  const { data, error } = await supabase
+    .from("pricing_transparency_snapshots")
+    .select("captured_at, freshness_pct, coverage_both_pct, p90_spread_pct, queue_depth, retry_depth, failed_depth")
+    .gte("captured_at", since)
+    .order("captured_at", { ascending: true })
+    .limit(300);
+  if (error) return [];
+  return ((data ?? []) as Array<{
+    captured_at: string;
+    freshness_pct: number | null;
+    coverage_both_pct: number | null;
+    p90_spread_pct: number | null;
+    queue_depth: number | null;
+    retry_depth: number | null;
+    failed_depth: number | null;
+  }>).map((row) => ({
+    capturedAt: row.captured_at,
+    freshnessPct: row.freshness_pct,
+    coverageBothPct: row.coverage_both_pct,
+    p90SpreadPct: row.p90_spread_pct,
+    queueDepth: row.queue_depth,
+    retryDepth: row.retry_depth,
+    failedDepth: row.failed_depth,
+  }));
 }
