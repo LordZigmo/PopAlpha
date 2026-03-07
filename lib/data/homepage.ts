@@ -249,7 +249,12 @@ export async function getHomepageData(): Promise<HomepageData> {
     // ── Assemble helpers ──────────────────────────────────────────────────
     function toCard(
       slug: string,
-      overrides: { fallbackPrice?: number | null; mover_tier?: HomepageCard["mover_tier"] } = {},
+      overrides: {
+        fallbackPrice?: number | null;
+        mover_tier?: HomepageCard["mover_tier"];
+        changePct?: number | null;
+        changeWindow?: "24H" | "7D" | null;
+      } = {},
     ): HomepageCard {
       const card = cardMap.get(slug);
       const marketPulse = marketPulseMap.get(slug);
@@ -261,8 +266,8 @@ export async function getHomepageData(): Promise<HomepageData> {
         set_name: card?.set_name ?? null,
         year: card?.year ?? null,
         market_price: marketPulse?.marketPrice ?? overrides.fallbackPrice ?? null,
-        change_pct: marketPulse?.changePct ?? fallbackChangePct ?? null,
-        change_window: marketPulse?.changeWindow ?? (fallbackChangePct !== null ? "7D" : null),
+        change_pct: marketPulse?.changePct ?? fallbackChangePct ?? overrides.changePct ?? null,
+        change_window: marketPulse?.changeWindow ?? (fallbackChangePct !== null ? "7D" : (overrides.changeWindow ?? null)),
         image_url: imageMap.get(slug) ?? null,
         mover_tier: overrides.mover_tier ?? null,
         sparkline_7d: sparkline,
@@ -284,9 +289,14 @@ export async function getHomepageData(): Promise<HomepageData> {
       if (providerPrice == null) return false;
       if (SENTINEL_PRICES.has(Number(providerPrice.toFixed(2)))) return false;
       if (providerPrice < MIN_PRICE) return false;
+      const trendPct = Number.isFinite(r.provider_trend_slope_7d ?? NaN)
+        ? Number((r.provider_trend_slope_7d as number).toFixed(2))
+        : null;
       moversOut.push(toCard(r.canonical_slug, {
         fallbackPrice: r.median_7d,
         mover_tier: r.mover_tier as HomepageCard["mover_tier"],
+        changePct: trendPct,
+        changeWindow: trendPct !== null ? "7D" : null,
       }));
       seenMoverSlugs.add(r.canonical_slug);
       return true;
