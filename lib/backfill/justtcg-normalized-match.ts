@@ -5,6 +5,9 @@ const JOB = "justtcg_normalized_match";
 const DEFAULT_OBSERVATIONS_PER_RUN = process.env.JUSTTCG_MATCH_OBSERVATIONS_PER_RUN
   ? parseInt(process.env.JUSTTCG_MATCH_OBSERVATIONS_PER_RUN, 10)
   : 200;
+const MIN_AUTO_MATCH_CONFIDENCE = process.env.JUSTTCG_MIN_AUTO_MATCH_CONFIDENCE
+  ? Number.parseFloat(process.env.JUSTTCG_MIN_AUTO_MATCH_CONFIDENCE)
+  : 0.9;
 const SCAN_PAGE_SIZE = 100;
 
 type ScanRow = {
@@ -774,6 +777,7 @@ export async function runJustTcgNormalizedMatch(opts: {
         providerSetId: opts.providerSetId ?? null,
         observationId: opts.observationId ?? null,
         force: opts.force === true,
+        minAutoMatchConfidence: MIN_AUTO_MATCH_CONFIDENCE,
       },
     })
     .select("id")
@@ -820,6 +824,32 @@ export async function runJustTcgNormalizedMatch(opts: {
 
       if (!decision.matched) {
         const row = buildUnmatchedRow(observation, nowIso, decision.reason, decision.metadata);
+        writes.push(row);
+        unmatchedCount += 1;
+        if (sampleMatches.length < 25) {
+          sampleMatches.push({
+            observationId: observation.id,
+            providerSetId: observation.provider_set_id,
+            providerCardId: observation.provider_card_id,
+            providerVariantId: observation.provider_variant_id,
+            assetType: observation.asset_type,
+            matchStatus: row.match_status,
+            printingId: null,
+            canonicalSlug: null,
+            matchType: null,
+            matchReason: row.match_reason,
+          });
+        }
+        continue;
+      }
+
+      if (decision.confidence < MIN_AUTO_MATCH_CONFIDENCE) {
+        const row = buildUnmatchedRow(observation, nowIso, "LOW_CONFIDENCE_MATCH_BLOCKED", {
+          ...decision.metadata,
+          proposedMatchType: decision.matchType,
+          proposedConfidence: decision.confidence,
+          minAutoMatchConfidence: MIN_AUTO_MATCH_CONFIDENCE,
+        });
         writes.push(row);
         unmatchedCount += 1;
         if (sampleMatches.length < 25) {
@@ -935,6 +965,7 @@ export async function runJustTcgNormalizedMatch(opts: {
           providerSetId: opts.providerSetId ?? null,
           observationId: opts.observationId ?? null,
           force: opts.force === true,
+          minAutoMatchConfidence: MIN_AUTO_MATCH_CONFIDENCE,
           observationsScanned,
           observationsProcessed,
           observationsSkippedAlreadyMatched,

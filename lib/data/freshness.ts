@@ -91,6 +91,12 @@ export type PricingTransparencySnapshot = {
     sentinel23456Count: number;
     pricedButMissingTsCount: number;
   };
+  changeCoverage: {
+    withChangePctCount: number;
+    withChangePct: number;
+    missingChangePctCount: number;
+    missingChangePct: number;
+  };
   ingestionVolume24h: {
     justtcgObservations: number | null;
     scrydexObservations: number | null;
@@ -105,7 +111,7 @@ export type PricingTransparencySnapshot = {
     failedDepth: number | null;
   };
   slo: Array<{
-    key: "freshness_24h" | "coverage_both" | "agreement_p90" | "sentinel_prices" | "pipeline_retry_depth";
+    key: "freshness_24h" | "coverage_both" | "change_coverage" | "agreement_p90" | "sentinel_prices" | "pipeline_retry_depth";
     label: string;
     status: "healthy" | "warning" | "critical";
     value: string;
@@ -151,6 +157,7 @@ export async function getPricingTransparencySnapshot(): Promise<PricingTranspare
     sentinelRes,
     just24hObsRes,
     scrydex24hObsRes,
+    changeCoverageRes,
   ] = await Promise.all([
     supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null),
     supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null).not("justtcg_price", "is", null).not("scrydex_price", "is", null),
@@ -164,6 +171,7 @@ export async function getPricingTransparencySnapshot(): Promise<PricingTranspare
     supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null).or("scrydex_price.eq.23456.78,justtcg_price.eq.23456.78"),
     supabase.from("public_price_history").select("ts", { count: "exact", head: true }).eq("provider", "JUSTTCG").eq("source_window", "snapshot").gte("ts", iso24h),
     supabase.from("public_price_history").select("ts", { count: "exact", head: true }).in("provider", ["SCRYDEX", "POKEMON_TCG_API"]).eq("source_window", "snapshot").gte("ts", iso24h),
+    supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null).or("change_pct_24h.not.is.null,change_pct_7d.not.is.null"),
   ]);
 
   const totalRaw = totalRawRes.count ?? 0;
@@ -176,6 +184,14 @@ export async function getPricingTransparencySnapshot(): Promise<PricingTranspare
   const under72h = under72hRes.count ?? 0;
   const withTs = withTsRes.count ?? 0;
   const missingTs = Math.max(0, totalRaw - withTs);
+  const changeCoverageCount = changeCoverageRes.count ?? 0;
+  const changeCoveragePct = totalRaw > 0
+    ? Number(((changeCoverageCount / totalRaw) * 100).toFixed(2))
+    : 0;
+  const missingChangeCount = Math.max(0, totalRaw - changeCoverageCount);
+  const missingChangePct = totalRaw > 0
+    ? Number(((missingChangeCount / totalRaw) * 100).toFixed(2))
+    : 0;
   let blendableMatch: number | null = null;
   let parityMismatch: number | null = null;
   const [matchParityRes, mismatchParityRes] = await Promise.all([
@@ -338,11 +354,13 @@ export async function getPricingTransparencySnapshot(): Promise<PricingTranspare
   const coverageSlo = statusHighGood(totalRaw > 0 ? (both / totalRaw) * 100 : 0, 60, 45);
   const blendablePct = (blendableMatch !== null && totalRaw > 0) ? (blendableMatch / totalRaw) * 100 : null;
   const agreementSlo = statusLowGood(p90Spread, 45, 70);
+  const changeCoverageSlo = statusHighGood(changeCoveragePct, 99.9, 99);
   const sentinelSlo = statusLowGood(sentinelRes.count ?? 0, 0, 5);
   const retrySlo = statusLowGood(retryDepth, 5, 20);
   const alerts: string[] = [];
   if (freshnessSlo !== "healthy") alerts.push(`Freshness below SLO (${under24h}/${totalRaw} fresh in 24h).`);
   if (coverageSlo !== "healthy") alerts.push(`Dual-provider coverage below SLO (${both}/${totalRaw}).`);
+  if (changeCoverageSlo !== "healthy") alerts.push(`Price-change coverage dropped (${changeCoverageCount}/${totalRaw} cards have change_pct).`);
   if (blendablePct !== null && blendablePct < 50) alerts.push(`Blendable parity coverage is low (${blendablePct.toFixed(2)}%).`);
   if (agreementSlo === "critical") alerts.push(`Provider spread is elevated (p90 ${p90Spread ?? 0}%).`);
   if (sentinelSlo !== "healthy") alerts.push(`Sentinel price flags detected (${sentinelRes.count ?? 0}).`);
@@ -381,6 +399,12 @@ export async function getPricingTransparencySnapshot(): Promise<PricingTranspare
       sentinel23456Count: sentinelRes.count ?? 0,
       pricedButMissingTsCount,
     },
+    changeCoverage: {
+      withChangePctCount: changeCoverageCount,
+      withChangePct: changeCoveragePct,
+      missingChangePctCount: missingChangeCount,
+      missingChangePct,
+    },
     ingestionVolume24h: {
       justtcgObservations: just24hObsRes.error ? null : (just24hObsRes.count ?? 0),
       scrydexObservations: scrydex24hObsRes.error ? null : (scrydex24hObsRes.count ?? 0),
@@ -408,6 +432,13 @@ export async function getPricingTransparencySnapshot(): Promise<PricingTranspare
         status: coverageSlo,
         value: `${(totalRaw > 0 ? (both / totalRaw) * 100 : 0).toFixed(2)}%`,
         target: ">= 60%",
+      },
+      {
+        key: "change_coverage",
+        label: "Price Change Coverage",
+        status: changeCoverageSlo,
+        value: `${changeCoveragePct.toFixed(2)}%`,
+        target: ">= 99.9%",
       },
       {
         key: "agreement_p90",

@@ -764,9 +764,12 @@ export default async function CanonicalCardPage({
 
   // 24h price change (fallback to 7d)
   const priceChangePct = vm?.change_24h_pct ?? vm?.change_7d_pct ?? null;
+  const displayPriceChangePct = typeof priceChangePct === "number" && Number.isFinite(priceChangePct)
+    ? priceChangePct
+    : 0;
   const priceChangeLabel = vm?.change_24h_pct != null ? "24h" : vm?.change_7d_pct != null ? "7d" : null;
-  const priceChangeColor = priceChangePct != null && priceChangePct !== 0
-    ? priceChangePct > 0 ? "#00DC5A" : "#FF3B30"
+  const priceChangeColor = displayPriceChangePct !== 0
+    ? displayPriceChangePct > 0 ? "#00DC5A" : "#FF3B30"
     : "#6B6B6B";
 
   // Fair Value + Edge
@@ -841,14 +844,12 @@ export default async function CanonicalCardPage({
                     <span className="text-[46px] font-bold leading-none tracking-[-0.04em] tabular-nums text-[#F0F0F0] sm:text-[56px]">
                       {primaryPrice}
                     </span>
-                    {priceChangePct != null && priceChangePct !== 0 && (
-                      <span
-                        className="text-[20px] font-bold tabular-nums tracking-[-0.02em] sm:text-[24px]"
-                        style={{ color: priceChangeColor }}
-                      >
-                        {priceChangePct > 0 ? "+" : ""}{Math.abs(priceChangePct) >= 10 ? priceChangePct.toFixed(0) : priceChangePct.toFixed(1)}%
-                      </span>
-                    )}
+                    <span
+                      className="text-[20px] font-bold tabular-nums tracking-[-0.02em] sm:text-[24px]"
+                      style={{ color: priceChangeColor }}
+                    >
+                      {displayPriceChangePct > 0 ? "+" : ""}{Math.abs(displayPriceChangePct) >= 10 ? displayPriceChangePct.toFixed(0) : displayPriceChangePct.toFixed(1)}%
+                    </span>
                     </div>
                     {fairValue != null && (
                       <div className="mt-1.5 flex flex-wrap items-baseline gap-2">

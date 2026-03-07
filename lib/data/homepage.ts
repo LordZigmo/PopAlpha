@@ -88,7 +88,7 @@ function pickNonZeroFiniteChange(...values: Array<number | null | undefined>): n
 
 function buildChangeCoverage(section: string, cards: HomepageCard[]) {
   const total = cards.length;
-  const missing = cards.filter((card) => card.change_pct == null || !Number.isFinite(card.change_pct) || card.change_pct === 0).length;
+  const missing = cards.filter((card) => card.change_pct == null || !Number.isFinite(card.change_pct)).length;
   const present = Math.max(0, total - missing);
   const missingPct = total > 0 ? Number(((missing / total) * 100).toFixed(1)) : 0;
   return { section, total, present, missing, missingPct };
