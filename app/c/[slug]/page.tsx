@@ -97,6 +97,11 @@ type RawProviderHistoryRow = {
   ts: string;
 };
 
+type RawProviderMetricRow = {
+  provider: string;
+  provider_as_of_ts: string | null;
+};
+
 function finishLabel(finish: CardPrintingRow["finish"]): string {
   const map: Record<CardPrintingRow["finish"], string> = {
     NON_HOLO: "Non-Holo",
@@ -530,7 +535,7 @@ export default async function CanonicalCardPage({
   // For singles: printing_id = selected printing UUID. For sealed / no printing: printing_id IS NULL.
   const printingIdForQuery = selectedPrinting?.id ?? null;
   const rawVariantPrefix = printingIdForQuery ? `${printingIdForQuery}::RAW` : null;
-  const [[rawSnap, psa9Snap, psa10Snap], vm, gradedPriceHistoryQuery, rawProviderHistoryQuery, viewSnapshot] = await Promise.all([
+  const [[rawSnap, psa9Snap, psa10Snap], vm, gradedPriceHistoryQuery, rawProviderMetricsQuery, rawProviderHistoryQuery, viewSnapshot] = await Promise.all([
     Promise.all(
       (["RAW", "PSA9", "PSA10"] as const).map((g) => {
         const q = supabase
@@ -556,6 +561,18 @@ export default async function CanonicalCardPage({
           .order("ts", { ascending: false })
           .limit(Math.max(gradedVariantRefsForActiveBucket.length * 4, 12))
       : Promise.resolve({ data: [] as GradedPriceHistoryRow[] }),
+    (() => {
+      const q = supabase
+        .from("public_variant_metrics")
+        .select("provider, provider_as_of_ts")
+        .eq("canonical_slug", slug)
+        .eq("grade", "RAW")
+        .in("provider", ["JUSTTCG", "SCRYDEX", "POKEMON_TCG_API"]);
+      return (printingIdForQuery != null
+        ? q.eq("printing_id", printingIdForQuery)
+        : q.is("printing_id", null)
+      ).limit(20);
+    })(),
     rawVariantPrefix
       ? supabase
           .from("public_price_history")
@@ -599,6 +616,7 @@ export default async function CanonicalCardPage({
     PSA10: psa10Snap.data,
   } as const;
   const gradedPriceHistoryRows = (gradedPriceHistoryQuery.data ?? []) as GradedPriceHistoryRow[];
+  const rawProviderMetricRows = (rawProviderMetricsQuery.data ?? []) as RawProviderMetricRow[];
   const rawProviderHistoryRows = (rawProviderHistoryQuery.data ?? []) as RawProviderHistoryRow[];
   const latestGradedPriceByVariantRef = new Map<string, GradedPriceHistoryRow>();
   for (const row of gradedPriceHistoryRows) {
@@ -669,6 +687,13 @@ export default async function CanonicalCardPage({
   const rawSourceScrydex = rawSnap.data?.scrydex_price ?? rawSnap.data?.pokemontcg_price ?? null;
   let rawSourceJtcgTs: string | null = null;
   let rawSourceScrydexTs: string | null = null;
+  for (const row of rawProviderMetricRows) {
+    const provider = normalizeRawProviderName(row.provider);
+    const ts = row.provider_as_of_ts;
+    if (!provider || !ts) continue;
+    if (provider === "JUSTTCG" && (!rawSourceJtcgTs || ts > rawSourceJtcgTs)) rawSourceJtcgTs = ts;
+    if (provider === "SCRYDEX" && (!rawSourceScrydexTs || ts > rawSourceScrydexTs)) rawSourceScrydexTs = ts;
+  }
   for (const row of rawProviderHistoryRows) {
     const provider = normalizeRawProviderName(row.provider);
     if (!provider) continue;
@@ -676,8 +701,8 @@ export default async function CanonicalCardPage({
     if (provider === "SCRYDEX" && !rawSourceScrydexTs) rawSourceScrydexTs = row.ts;
     if (rawSourceJtcgTs && rawSourceScrydexTs) break;
   }
-  const rawSourceAsOfJtcg = formatAsOf(rawSourceJtcgTs ?? rawSnap.data?.market_price_as_of ?? null);
-  const rawSourceAsOfScrydex = formatAsOf(rawSourceScrydexTs ?? rawSnap.data?.market_price_as_of ?? null);
+  const rawSourceAsOfJtcg = formatAsOf(rawSourceJtcgTs);
+  const rawSourceAsOfScrydex = formatAsOf(rawSourceScrydexTs);
   const currentRawPrice = viewMode === "RAW"
     ? rawSnap.data?.market_price ?? vm?.price_now ?? null
     : null;

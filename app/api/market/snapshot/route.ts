@@ -22,6 +22,23 @@ type SnapshotRow = {
   high_30d: number | null;
 };
 
+type ProviderAsOfRow = {
+  provider: string;
+  provider_as_of_ts: string | null;
+};
+
+type ProviderHistoryAsOfRow = {
+  provider: string;
+  ts: string;
+};
+
+function normalizeRawProviderName(provider: string | null | undefined): "JUSTTCG" | "SCRYDEX" | null {
+  const normalized = String(provider ?? "").trim().toUpperCase();
+  if (normalized === "JUSTTCG") return "JUSTTCG";
+  if (normalized === "SCRYDEX" || normalized === "POKEMON_TCG_API") return "SCRYDEX";
+  return null;
+}
+
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const slug = url.searchParams.get("slug")?.trim() ?? "";
@@ -55,19 +72,69 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: result.error }, { status: 500 });
   }
 
+  let providerAsOfQuery = supabase
+    .from("public_variant_metrics")
+    .select("provider, provider_as_of_ts")
+    .eq("canonical_slug", slug)
+    .eq("grade", grade)
+    .in("provider", ["JUSTTCG", "SCRYDEX", "POKEMON_TCG_API"])
+    .limit(50);
+
+  providerAsOfQuery = printing ? providerAsOfQuery.eq("printing_id", printing) : providerAsOfQuery.is("printing_id", null);
+  const providerAsOfResult = await providerAsOfQuery;
+  if (providerAsOfResult.error) {
+    return NextResponse.json({ ok: false, error: providerAsOfResult.error.message }, { status: 500 });
+  }
+
+  let justtcgAsOf: string | null = null;
+  let scrydexAsOf: string | null = null;
+  for (const row of (providerAsOfResult.data ?? []) as ProviderAsOfRow[]) {
+    const provider = normalizeRawProviderName(row.provider);
+    const ts = row.provider_as_of_ts;
+    if (!provider || !ts) continue;
+    if (provider === "JUSTTCG" && (!justtcgAsOf || ts > justtcgAsOf)) justtcgAsOf = ts;
+    if (provider === "SCRYDEX" && (!scrydexAsOf || ts > scrydexAsOf)) scrydexAsOf = ts;
+  }
+
+  if (grade === "RAW" && (!justtcgAsOf || !scrydexAsOf)) {
+    let historyQuery = supabase
+      .from("public_price_history")
+      .select("provider, ts")
+      .eq("canonical_slug", slug)
+      .in("provider", ["JUSTTCG", "SCRYDEX", "POKEMON_TCG_API"])
+      .order("ts", { ascending: false })
+      .limit(300);
+    if (printing) {
+      historyQuery = historyQuery.ilike("variant_ref", `${printing}::RAW%`);
+    } else {
+      historyQuery = historyQuery.ilike("variant_ref", "%::RAW%");
+    }
+    const historyResult = await historyQuery;
+    if (historyResult.error) {
+      return NextResponse.json({ ok: false, error: historyResult.error.message }, { status: 500 });
+    }
+    for (const row of (historyResult.data ?? []) as ProviderHistoryAsOfRow[]) {
+      const provider = normalizeRawProviderName(row.provider);
+      if (!provider) continue;
+      if (provider === "JUSTTCG" && !justtcgAsOf) justtcgAsOf = row.ts;
+      if (provider === "SCRYDEX" && !scrydexAsOf) scrydexAsOf = row.ts;
+      if (justtcgAsOf && scrydexAsOf) break;
+    }
+  }
+
   const justtcg = await buildProviderPriceDisplay({
     supabase,
     provider: "JUSTTCG",
     sourcePrice: result.data?.justtcg_price ?? null,
     sourceCurrency: "USD",
-    asOf: result.data?.market_price_as_of ?? null,
+    asOf: justtcgAsOf,
   });
   const scrydex = await buildProviderPriceDisplay({
     supabase,
     provider: "SCRYDEX",
     sourcePrice: result.data?.scrydex_price ?? result.data?.pokemontcg_price ?? null,
     sourceCurrency: "USD",
-    asOf: result.data?.market_price_as_of ?? null,
+    asOf: scrydexAsOf,
   });
   const marketPriceUsd = averageProviderUsdPrice([justtcg, scrydex]) ?? result.data?.market_price ?? null;
   const marketPriceAsOf = [justtcg.asOf, scrydex.asOf].filter(Boolean).sort().at(-1) ?? result.data?.market_price_as_of ?? null;

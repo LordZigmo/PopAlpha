@@ -12,6 +12,12 @@ const DEFAULT_SETS_PER_RUN = process.env.SCRYDEX_RAW_SETS_PER_RUN
 const DEFAULT_MAX_REQUESTS = process.env.SCRYDEX_RAW_MAX_REQUESTS
   ? parseInt(process.env.SCRYDEX_RAW_MAX_REQUESTS, 10)
   : 200;
+const DEFAULT_RETRY_ATTEMPTS = process.env.SCRYDEX_RAW_RETRY_ATTEMPTS
+  ? parseInt(process.env.SCRYDEX_RAW_RETRY_ATTEMPTS, 10)
+  : 3;
+const DEFAULT_RETRY_BACKOFF_MS = process.env.SCRYDEX_RAW_RETRY_BACKOFF_MS
+  ? parseInt(process.env.SCRYDEX_RAW_RETRY_BACKOFF_MS, 10)
+  : 750;
 
 type CanonicalSet = {
   setCode: string;
@@ -73,6 +79,24 @@ function responseHash(body: unknown): string {
 function isDuplicateInsertError(message: string | null | undefined): boolean {
   const text = String(message ?? "").toLowerCase();
   return text.includes("duplicate") || text.includes("unique");
+}
+
+function delayMs(ms: number): Promise<void> {
+  if (!Number.isFinite(ms) || ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetryableScrydexError(message: string): boolean {
+  const text = message.toLowerCase();
+  return text.includes(" 522")
+    || text.includes("timed out")
+    || text.includes("timeout")
+    || text.includes("fetch failed")
+    || text.includes("network")
+    || text.includes("socket")
+    || text.includes("econnreset")
+    || text.includes("etimedout")
+    || text.includes("eai_again");
 }
 
 function selectSetsFromCursor(sets: CanonicalSet[], setLimit: number, cursorSetCode: string | null): CanonicalSet[] {
@@ -189,12 +213,16 @@ export async function runPokemonTcgRawIngest(opts: {
   providerSetId?: string | null;
   pageLimitPerSet?: number;
   maxRequests?: number;
+  retryAttempts?: number;
+  retryBackoffMs?: number;
 } = {}): Promise<RawIngestResult> {
   const supabase = dbAdmin();
   const startedAt = new Date().toISOString();
   const setLimit = parsePositiveInt(opts.setLimit, DEFAULT_SETS_PER_RUN);
   const pageLimitPerSet = parsePositiveInt(opts.pageLimitPerSet, 100);
   const maxRequests = parsePositiveInt(opts.maxRequests, DEFAULT_MAX_REQUESTS);
+  const retryAttempts = parsePositiveInt(opts.retryAttempts, DEFAULT_RETRY_ATTEMPTS);
+  const retryBackoffMs = parsePositiveInt(opts.retryBackoffMs, DEFAULT_RETRY_BACKOFF_MS);
 
   let firstError: string | null = null;
   let requestsMade = 0;
@@ -243,6 +271,8 @@ export async function runPokemonTcgRawIngest(opts: {
         pageLimit: PAGE_LIMIT,
         pageLimitPerSet,
         maxRequests,
+        retryAttempts,
+        retryBackoffMs,
         providerSetId: opts.providerSetId ?? null,
         cursorSetCode,
         nextSetCode,
@@ -269,41 +299,55 @@ export async function runPokemonTcgRawIngest(opts: {
     let lastStatus: number | null = null;
 
     while (requestsMade < maxRequests && pagesFetched < pageLimitPerSet) {
-      const fetchedAt = new Date().toISOString();
+      let pageSucceeded = false;
+      for (let attempt = 1; attempt <= retryAttempts && requestsMade < maxRequests; attempt += 1) {
+        const fetchedAt = new Date().toISOString();
+        requestsMade += 1;
+        try {
+          const payload = await fetchCardsPage(page, PAGE_LIMIT, target.providerSetId, credentials);
+          const cards = payload.data ?? [];
+          const rawEnvelope: { data: ScrydexCard[] } = { data: cards };
 
-      requestsMade += 1;
-      try {
-        const payload = await fetchCardsPage(page, PAGE_LIMIT, target.providerSetId, credentials);
-        const cards = payload.data ?? [];
-        const rawEnvelope: { data: ScrydexCard[] } = { data: cards };
+          const rawInsert = await insertRawPayloadRow({
+            providerSetId: target.providerSetId,
+            page,
+            body: rawEnvelope,
+            statusCode: 200,
+            fetchedAt,
+          });
+          if (rawInsert.inserted) rawPayloadsInserted += 1;
+          if (rawInsert.duplicate) rawPayloadsDuplicate += 1;
 
-        const rawInsert = await insertRawPayloadRow({
-          providerSetId: target.providerSetId,
-          page,
-          body: rawEnvelope,
-          statusCode: 200,
-          fetchedAt,
-        });
-        if (rawInsert.inserted) rawPayloadsInserted += 1;
-        if (rawInsert.duplicate) rawPayloadsDuplicate += 1;
+          pagesFetched += 1;
+          lastStatus = 200;
+          cardsFetched += cards.length;
+          cardsFetchedForSet += cards.length;
 
-        pagesFetched += 1;
-        lastStatus = 200;
-        cardsFetched += cards.length;
-        cardsFetchedForSet += cards.length;
+          hasMore = cards.length >= PAGE_LIMIT && (typeof payload.totalCount !== "number" || (page * PAGE_LIMIT) < payload.totalCount);
+          if (!hasMore || cards.length === 0) {
+            pageSucceeded = true;
+            break;
+          }
 
-        hasMore = cards.length >= PAGE_LIMIT && (typeof payload.totalCount !== "number" || (page * PAGE_LIMIT) < payload.totalCount);
-        if (!hasMore || cards.length === 0) break;
-
-        page += 1;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        firstError ??= message;
-        failedRequests += 1;
-        lastStatus = 500;
-        hasMore = false;
-        break;
+          page += 1;
+          pageSucceeded = true;
+          break;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          const canRetry = attempt < retryAttempts && isRetryableScrydexError(message) && requestsMade < maxRequests;
+          if (canRetry) {
+            await delayMs(retryBackoffMs * attempt);
+            continue;
+          }
+          firstError ??= message;
+          failedRequests += 1;
+          lastStatus = 500;
+          hasMore = false;
+          pageSucceeded = false;
+          break;
+        }
       }
+      if (!pageSucceeded) break;
     }
 
     if (sampleSetResults.length < 25) {
@@ -353,6 +397,8 @@ export async function runPokemonTcgRawIngest(opts: {
           pageLimit: PAGE_LIMIT,
           pageLimitPerSet,
           maxRequests,
+          retryAttempts,
+          retryBackoffMs,
           providerSetId: opts.providerSetId ?? null,
           cursorSetCode,
           nextSetCode,
