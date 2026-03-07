@@ -159,9 +159,10 @@ export async function executeClaimedPipelineJob(
         payloadLimit: params.payloadLimit,
         matchObservations: params.matchObservations,
         timeseriesObservations: params.timeseriesObservations,
-        force: params.force === true,
-        matchScanDirection: job.job_kind === "RETRY" ? "oldest" : "newest",
-      });
+      force: params.force === true,
+      matchScanDirection: job.job_kind === "RETRY" ? "oldest" : "newest",
+      matchMode: job.job_kind === "RETRY" ? "backlog" : "incremental",
+    });
       return { ok: result.ok, result, error: result.firstError ?? null };
     })();
     return await Promise.race([workPromise, timeoutPromise]);

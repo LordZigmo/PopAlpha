@@ -115,6 +115,7 @@ export async function runPokemonTcgPipeline(opts: {
   timeseriesObservations?: number;
   force?: boolean;
   matchScanDirection?: "newest" | "oldest";
+  matchMode?: "incremental" | "backlog";
 } = {}): Promise<PipelineResult> {
   const startedAt = new Date().toISOString();
   const steps: PipelineStep<object>[] = [];
@@ -147,6 +148,7 @@ export async function runPokemonTcgPipeline(opts: {
       observationLimit: opts.matchObservations,
       force: opts.force === true,
       scanDirection: opts.matchScanDirection ?? "newest",
+      mode: opts.matchMode ?? "incremental",
     });
     steps.push({ name: "match", ok: match.ok, result: match });
     if (!match.ok) firstError = match.firstError ?? "scrydex match failed";
@@ -185,6 +187,7 @@ export async function runScrydexPipeline(opts: {
   timeseriesObservations?: number;
   force?: boolean;
   matchScanDirection?: "newest" | "oldest";
+  matchMode?: "incremental" | "backlog";
 } = {}): Promise<PipelineResult> {
   return runPokemonTcgPipeline(opts);
 }

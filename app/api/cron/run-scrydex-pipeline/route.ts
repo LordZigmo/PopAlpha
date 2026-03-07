@@ -57,6 +57,7 @@ export async function GET(req: Request) {
       payloadLimit: params.payloadLimit,
       matchObservations: params.matchObservations,
       timeseriesObservations: params.timeseriesObservations,
+      matchMode: "incremental",
       force: params.force,
     });
 

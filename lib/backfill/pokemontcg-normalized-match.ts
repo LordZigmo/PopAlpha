@@ -1,4 +1,6 @@
 import { dbAdmin } from "@/lib/db/admin";
+import { loadProviderSetIndex } from "@/lib/backfill/provider-set-index";
+import { loadHighValueStaleSetPriority } from "@/lib/backfill/set-priority";
 
 const PROVIDER = "SCRYDEX";
 const JOB = "scrydex_normalized_match";
@@ -16,11 +18,24 @@ const MIN_AUTO_MATCH_CONFIDENCE = process.env.SCRYDEX_MIN_AUTO_MATCH_CONFIDENCE
 const DEFAULT_MATCH_MAX_RUNTIME_MS = process.env.SCRYDEX_MATCH_MAX_RUNTIME_MS
   ? parseInt(process.env.SCRYDEX_MATCH_MAX_RUNTIME_MS, 10)
   : 120000;
+const DEFAULT_MATCH_MODE = process.env.SCRYDEX_MATCH_MODE?.trim().toLowerCase() === "backlog"
+  ? "backlog"
+  : "incremental";
+const INCREMENTAL_RECENT_WINDOW_HOURS = process.env.SCRYDEX_MATCH_RECENT_WINDOW_HOURS
+  ? parseInt(process.env.SCRYDEX_MATCH_RECENT_WINDOW_HOURS, 10)
+  : 8;
+const INCREMENTAL_MAX_SCAN_ROWS = process.env.SCRYDEX_MATCH_INCREMENTAL_MAX_SCAN_ROWS
+  ? parseInt(process.env.SCRYDEX_MATCH_INCREMENTAL_MAX_SCAN_ROWS, 10)
+  : 2500;
+const INCREMENTAL_HOT_SET_LIMIT = process.env.SCRYDEX_MATCH_HOT_SET_LIMIT
+  ? parseInt(process.env.SCRYDEX_MATCH_HOT_SET_LIMIT, 10)
+  : 40;
 const SCAN_PAGE_SIZE = 100;
 const STARTED_RUN_STALE_MULTIPLIER = process.env.SCRYDEX_MATCH_STALE_RUN_MULTIPLIER
   ? parseInt(process.env.SCRYDEX_MATCH_STALE_RUN_MULTIPLIER, 10)
   : 3;
 type ScanDirection = "newest" | "oldest";
+type MatchMode = "incremental" | "backlog";
 
 type ScanRow = {
   id: string;
@@ -252,6 +267,10 @@ async function loadCandidateObservations(params: {
   observationId?: string | null;
   force?: boolean;
   scanDirection?: ScanDirection;
+  mode?: MatchMode;
+  recentWindowHours?: number;
+  incrementalMaxScanRows?: number;
+  prioritizedProviderSetIds?: string[];
   deadlineMs?: number | null;
 }): Promise<{
   rows: NormalizedObservationRow[];
@@ -285,6 +304,115 @@ async function loadCandidateObservations(params: {
   let skippedAlreadyMatched = 0;
   const unmatchedRetryMs = Math.max(1, UNMATCHED_RETRY_HOURS) * 60 * 60 * 1000;
   const nowMs = Date.now();
+  const mode: MatchMode = params.mode ?? DEFAULT_MATCH_MODE;
+  const recentWindowHours = Math.max(1, params.recentWindowHours ?? INCREMENTAL_RECENT_WINDOW_HOURS);
+  const incrementalMaxScanRows = Math.max(100, params.incrementalMaxScanRows ?? INCREMENTAL_MAX_SCAN_ROWS);
+  const recentCutoffIso = new Date(nowMs - (recentWindowHours * 60 * 60 * 1000)).toISOString();
+
+  async function loadExistingMap(ids: string[]): Promise<Map<string, ExistingMatchRow>> {
+    if (ids.length === 0 || force) return new Map();
+    const { data: existingRows, error: existingError } = await supabase
+      .from("provider_observation_matches")
+      .select("provider_normalized_observation_id, match_status, updated_at")
+      .in("provider_normalized_observation_id", ids);
+
+    if (existingError) {
+      throw new Error(`provider_observation_matches(scan existing): ${existingError.message}`);
+    }
+
+    const out = new Map<string, ExistingMatchRow>();
+    for (const row of (existingRows ?? []) as ExistingMatchRow[]) {
+      out.set(String(row.provider_normalized_observation_id), row);
+    }
+    return out;
+  }
+
+  async function addSelectedIdsFromScan(scanRows: ScanRow[]): Promise<void> {
+    const existingById = await loadExistingMap(scanRows.map((row) => row.id));
+    const selectedIds: string[] = [];
+    for (const row of scanRows) {
+      if (hasDeadlinePassed(params.deadlineMs ?? null)) {
+        timedOut = true;
+        break;
+      }
+      if (!force) {
+        const existing = existingById.get(row.id);
+        if (existing?.match_status === "MATCHED") {
+          skippedAlreadyMatched += 1;
+          continue;
+        }
+        if (existing?.match_status === "UNMATCHED") {
+          const updatedAtMs = parseDateMs(existing.updated_at);
+          if (updatedAtMs !== null && (nowMs - updatedAtMs) < unmatchedRetryMs) {
+            skippedAlreadyMatched += 1;
+            continue;
+          }
+        }
+      }
+      selectedIds.push(row.id);
+      if (selected.length + selectedIds.length >= params.observationLimit) break;
+    }
+
+    if (selectedIds.length === 0 || timedOut) return;
+    const { data: fullRows, error: fullError } = await supabase
+      .from("provider_normalized_observations")
+      .select("id, provider, provider_set_id, provider_card_id, provider_variant_id, asset_type, normalized_card_number, normalized_finish, normalized_edition, normalized_stamp, normalized_language")
+      .in("id", selectedIds);
+
+    if (fullError) throw new Error(`provider_normalized_observations(load selected): ${fullError.message}`);
+    const byId = new Map<string, NormalizedObservationRow>();
+    for (const row of (fullRows ?? []) as NormalizedObservationRow[]) byId.set(row.id, row);
+    for (const id of selectedIds) {
+      const row = byId.get(id);
+      if (!row) continue;
+      selected.push(row);
+      if (selected.length >= params.observationLimit) break;
+    }
+  }
+
+  async function scanLoop(providerSetId: string | null, recentOnly: boolean, maxScanRows: number): Promise<void> {
+    for (let from = 0; selected.length < params.observationLimit && from < maxScanRows; from += SCAN_PAGE_SIZE) {
+      if (hasDeadlinePassed(params.deadlineMs ?? null)) {
+        timedOut = true;
+        break;
+      }
+      let scanQuery = supabase
+        .from("provider_normalized_observations")
+        .select("id")
+        .eq("provider", PROVIDER)
+        .order("observed_at", { ascending })
+        .order("id", { ascending })
+        .range(from, from + SCAN_PAGE_SIZE - 1);
+
+      if (providerSetId) scanQuery = scanQuery.eq("provider_set_id", providerSetId);
+      if (params.providerSetId) scanQuery = scanQuery.eq("provider_set_id", params.providerSetId);
+      if (recentOnly) scanQuery = scanQuery.gte("observed_at", recentCutoffIso);
+
+      const { data, error } = await scanQuery;
+      if (error) throw new Error(`provider_normalized_observations(scan): ${error.message}`);
+      const scanRows = (data ?? []) as ScanRow[];
+      if (scanRows.length === 0) break;
+      scanned += scanRows.length;
+      await addSelectedIdsFromScan(scanRows);
+      if (timedOut || selected.length >= params.observationLimit) break;
+    }
+  }
+
+  if (mode === "incremental" && !params.observationId) {
+    const prioritizedSetIds = (params.prioritizedProviderSetIds ?? []).slice(0, INCREMENTAL_HOT_SET_LIMIT);
+    if (params.providerSetId) {
+      await scanLoop(params.providerSetId, true, incrementalMaxScanRows);
+    } else {
+      for (const setId of prioritizedSetIds) {
+        await scanLoop(setId, true, Math.floor(incrementalMaxScanRows / Math.max(1, prioritizedSetIds.length)));
+        if (timedOut || selected.length >= params.observationLimit) break;
+      }
+      if (!timedOut && selected.length < params.observationLimit) {
+        await scanLoop(null, true, incrementalMaxScanRows);
+      }
+    }
+    return { rows: selected, scanned, skippedAlreadyMatched, timedOut };
+  }
 
   for (let from = 0; selected.length < params.observationLimit; from += SCAN_PAGE_SIZE) {
     if (hasDeadlinePassed(params.deadlineMs ?? null)) {
@@ -381,6 +509,22 @@ async function loadCandidateObservations(params: {
   }
 
   return { rows: selected, scanned, skippedAlreadyMatched, timedOut };
+}
+
+async function loadIncrementalHotProviderSetIds(maxProviderSetIds: number): Promise<string[]> {
+  const mapped = await loadProviderSetIndex("SCRYDEX");
+  if (mapped.length === 0) return [];
+  const targets = mapped.map((row) => ({
+    setCode: row.canonicalSetCode,
+    setName: row.canonicalSetName ?? row.canonicalSetCode,
+    providerSetId: row.providerSetId,
+  }));
+  return loadHighValueStaleSetPriority({
+    provider: "SCRYDEX",
+    targets,
+    staleWindowHours: 24,
+    maxProviderSetIds: Math.max(1, maxProviderSetIds),
+  });
 }
 
 async function loadProviderSetMap(providerSetIds: string[]): Promise<Map<string, string>> {
@@ -528,13 +672,20 @@ export async function runPokemonTcgNormalizedMatch(opts: {
   force?: boolean;
   scanDirection?: ScanDirection;
   maxRuntimeMs?: number;
+  mode?: MatchMode;
+  recentWindowHours?: number;
 } = {}): Promise<MatchResult> {
   const supabase = dbAdmin();
   const startedAt = new Date().toISOString();
   const observationLimit = parsePositiveInt(opts.observationLimit, DEFAULT_OBSERVATIONS_PER_RUN);
   const maxRuntimeMs = parsePositiveInt(opts.maxRuntimeMs, DEFAULT_MATCH_MAX_RUNTIME_MS);
+  const mode: MatchMode = opts.mode ?? DEFAULT_MATCH_MODE;
+  const recentWindowHours = Math.max(1, Math.floor(opts.recentWindowHours ?? INCREMENTAL_RECENT_WINDOW_HOURS));
   const deadlineMs = Date.now() + maxRuntimeMs;
   const staleStartedRunsFinalized = await finalizeStaleStartedMatchRuns(maxRuntimeMs);
+  const prioritizedProviderSetIds = mode === "incremental" && !opts.providerSetId
+    ? await loadIncrementalHotProviderSetIds(INCREMENTAL_HOT_SET_LIMIT)
+    : [];
 
   let firstError: string | null = null;
   let observationsScanned = 0;
@@ -558,11 +709,13 @@ export async function runPokemonTcgNormalizedMatch(opts: {
       items_failed: 0,
       meta: {
         mode: "match-only",
+        matchMode: mode,
         observationLimit,
         providerSetId: opts.providerSetId ?? null,
         observationId: opts.observationId ?? null,
         force: opts.force === true,
         scanDirection: opts.scanDirection ?? "newest",
+        recentWindowHours,
         minAutoMatchConfidence: MIN_AUTO_MATCH_CONFIDENCE,
         maxRuntimeMs,
         staleStartedRunsFinalized,
@@ -583,7 +736,10 @@ export async function runPokemonTcgNormalizedMatch(opts: {
       providerSetId: opts.providerSetId,
       observationId: opts.observationId,
       force: opts.force,
+      mode,
       scanDirection: opts.scanDirection,
+      recentWindowHours,
+      prioritizedProviderSetIds,
       deadlineMs,
     });
 
@@ -762,11 +918,13 @@ export async function runPokemonTcgNormalizedMatch(opts: {
         ended_at: endedAt,
         meta: {
           mode: "match-only",
+          matchMode: mode,
           observationLimit,
           providerSetId: opts.providerSetId ?? null,
           observationId: opts.observationId ?? null,
           force: opts.force === true,
           scanDirection: opts.scanDirection ?? "newest",
+          recentWindowHours,
           minAutoMatchConfidence: MIN_AUTO_MATCH_CONFIDENCE,
           maxRuntimeMs,
           staleStartedRunsFinalized,
@@ -794,6 +952,8 @@ export async function runScrydexNormalizedMatch(opts: {
   force?: boolean;
   scanDirection?: ScanDirection;
   maxRuntimeMs?: number;
+  mode?: MatchMode;
+  recentWindowHours?: number;
 } = {}): Promise<MatchResult> {
   return runPokemonTcgNormalizedMatch(opts);
 }
