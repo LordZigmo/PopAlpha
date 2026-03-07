@@ -4,9 +4,9 @@
  * Single server-side data loader for the homepage.
  * Uses dbPublic() only — no service-role access.
  *
- * Query plan (2 parallel batches, 6 queries total):
+ * Query plan (2 parallel batches, 7 queries total):
  *   Batch 1: movers (variant_movers) + variant metrics for losers/trending (parallel)
- *   Batch 2: canonical_cards metadata + card_metrics prices (parallel)
+ *   Batch 2: canonical_cards metadata + card_metrics prices + provider freshness (parallel)
  *   JS merge into HomepageData
  *
  * Why two tables?
@@ -51,6 +51,7 @@ const TOP_MOVER_MAX_AGE_HOURS = 24;
 const MIN_CHANGES_TRENDING = 3;
 /** Over-fetch factor for variant metrics (we filter by price in JS) */
 const VARIANT_FETCH_LIMIT = 60;
+const SENTINEL_PRICES = new Set([23456.78]);
 
 // ── Loader ──────────────────────────────────────────────────────────────────
 
@@ -121,7 +122,7 @@ export async function getHomepageData(): Promise<HomepageData> {
     if (losersVariantResult.error) console.error("[homepage] losers", losersVariantResult.error.message);
     if (trendingVariantResult.error) console.error("[homepage] trending", trendingVariantResult.error.message);
 
-    // ── Deduplicate movers by canonical_slug ──────────────────────────────
+    // ── Keep movers ordered, then dedupe after freshness filtering ───────
     type MoverRow = {
       canonical_slug: string;
       provider: "JUSTTCG" | "SCRYDEX" | "POKEMON_TCG_API";
@@ -131,13 +132,7 @@ export async function getHomepageData(): Promise<HomepageData> {
       provider_trend_slope_7d: number | null;
       updated_at: string;
     };
-    const dedupedMovers: MoverRow[] = [];
-    const seenMovers = new Set<string>();
-    for (const row of (moversResult.data ?? []) as MoverRow[]) {
-      if (seenMovers.has(row.canonical_slug)) continue;
-      seenMovers.add(row.canonical_slug);
-      dedupedMovers.push(row);
-    }
+    const moversRows = (moversResult.data ?? []) as MoverRow[];
 
     // Deduplicate variant results by canonical_slug (keep first = best slope)
     type VariantRow = { canonical_slug: string; provider_trend_slope_7d: number | null; provider_price_changes_count_30d: number | null; updated_at: string };
@@ -158,7 +153,7 @@ export async function getHomepageData(): Promise<HomepageData> {
 
     // ── Collect all unique slugs ──────────────────────────────────────────
     const allSlugs = new Set<string>();
-    for (const r of dedupedMovers) allSlugs.add(r.canonical_slug);
+    for (const r of moversRows) allSlugs.add(r.canonical_slug);
     for (const r of loserVariants) allSlugs.add(r.canonical_slug);
     for (const r of trendingVariants) allSlugs.add(r.canonical_slug);
 
@@ -167,7 +162,7 @@ export async function getHomepageData(): Promise<HomepageData> {
     const slugArray = [...allSlugs];
 
     // ── Batch 2: card metadata + prices (with change pcts) + images ────
-    const [cardsResult, marketPulseMap, imagesResult, sparklineResult] = await Promise.all([
+    const [cardsResult, marketPulseMap, imagesResult, sparklineResult, providerFreshnessResult] = await Promise.all([
       db
         .from("canonical_cards")
         .select("slug, canonical_name, set_name, year")
@@ -191,11 +186,21 @@ export async function getHomepageData(): Promise<HomepageData> {
         .eq("source_window", "7d")
         .order("ts", { ascending: false })
         .limit(Math.max(slugArray.length * 24, 120)),
+
+      db
+        .from("public_variant_metrics")
+        .select("canonical_slug, provider, provider_as_of_ts")
+        .eq("grade", "RAW")
+        .in("provider", ["JUSTTCG", "SCRYDEX", "POKEMON_TCG_API"])
+        .in("canonical_slug", slugArray)
+        .not("provider_as_of_ts", "is", null)
+        .limit(10000),
     ]);
 
     if (cardsResult.error) console.error("[homepage] cards", cardsResult.error.message);
     if (imagesResult.error) console.error("[homepage] images", imagesResult.error.message);
     if (sparklineResult.error) console.error("[homepage] sparkline", sparklineResult.error.message);
+    if (providerFreshnessResult.error) console.error("[homepage] provider freshness", providerFreshnessResult.error.message);
 
     // ── Build lookup maps ─────────────────────────────────────────────────
     type CardRow = { slug: string; canonical_name: string; set_name: string | null; year: number | null };
@@ -222,6 +227,16 @@ export async function getHomepageData(): Promise<HomepageData> {
     for (const [slug, points] of sparklineMap.entries()) {
       sparklineMap.set(slug, [...points].reverse());
     }
+    const providerFreshnessMap = new Map<string, string>();
+    for (const row of (providerFreshnessResult.data ?? []) as Array<{
+      canonical_slug: string;
+      provider: "JUSTTCG" | "SCRYDEX" | "POKEMON_TCG_API";
+      provider_as_of_ts: string;
+    }>) {
+      const key = `${row.canonical_slug}::${row.provider}`;
+      const prev = providerFreshnessMap.get(key);
+      if (!prev || row.provider_as_of_ts > prev) providerFreshnessMap.set(key, row.provider_as_of_ts);
+    }
 
     // ── Assemble helpers ──────────────────────────────────────────────────
     function toCard(
@@ -246,20 +261,28 @@ export async function getHomepageData(): Promise<HomepageData> {
 
     // ── Movers: view already guarantees price > 0 ─────────────────────────
     const moversOut: HomepageCard[] = [];
-    for (const r of dedupedMovers) {
+    const seenMoverSlugs = new Set<string>();
+    for (const r of moversRows) {
+      if (seenMoverSlugs.has(r.canonical_slug)) continue;
       const marketPulse = marketPulseMap.get(r.canonical_slug);
       if (!marketPulse) continue;
       const provider = r.provider === "POKEMON_TCG_API" ? "SCRYDEX" : r.provider;
+      const freshnessKey = `${r.canonical_slug}::${r.provider}`;
+      const providerAsOf = providerFreshnessMap.get(freshnessKey);
+      if (!providerAsOf || providerAsOf < topMoverFreshCutoffIso) continue;
       // Require a price from the mover's source provider.
-      if (provider === "JUSTTCG" && marketPulse.justtcgPrice == null) continue;
-      if (provider === "SCRYDEX" && marketPulse.scrydexPrice == null) continue;
+      const providerPrice = provider === "JUSTTCG" ? marketPulse.justtcgPrice : marketPulse.scrydexPrice;
+      if (providerPrice == null) continue;
+      if (SENTINEL_PRICES.has(Number(providerPrice.toFixed(2)))) continue;
+      if (providerPrice < MIN_PRICE) continue;
       moversOut.push(toCard(r.canonical_slug, {
         fallbackPrice: r.median_7d,
         mover_tier: r.mover_tier as HomepageCard["mover_tier"],
       }));
+      seenMoverSlugs.add(r.canonical_slug);
+      if (moversOut.length >= SECTION_LIMIT) break;
     }
     moversOut.sort(compareMovementMagnitude);
-    moversOut.splice(SECTION_LIMIT);
 
     // ── Losers: filter to cards with real prices above MIN_PRICE ─────────
     const losersOut: HomepageCard[] = [];
