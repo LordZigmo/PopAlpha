@@ -464,6 +464,7 @@ export default async function CanonicalCardPage({
   const printings = ((printingsData ?? []) as CardPrintingRow[]).sort(sortPrintings);
   const viewMode = selectedViewMode(mode, grade);
   const selectedPrinting = printings.find((row) => row.id === printing) ?? chooseDefaultPrinting(printings) ?? null;
+  const hasExplicitPrinting = Boolean(printing) && Boolean(printings.find((row) => row.id === printing));
   const selectedPrintingLabel = selectedPrinting ? printingOptionLabel(selectedPrinting) : null;
 
   const { data: gradedAvailabilityData } = selectedPrinting
@@ -533,8 +534,10 @@ export default async function CanonicalCardPage({
   // Fetch all three grade snapshots + view model in parallel.
   // card_metrics rows are keyed by (canonical_slug, printing_id, grade).
   // For singles: printing_id = selected printing UUID. For sealed / no printing: printing_id IS NULL.
-  const printingIdForQuery = selectedPrinting?.id ?? null;
-  const rawVariantPrefix = printingIdForQuery ? `${printingIdForQuery}::` : null;
+  const gradedPrintingIdForQuery = selectedPrinting?.id ?? null;
+  // Default RAW view should read canonical (printing_id IS NULL) unless user explicitly picks a printing.
+  const rawPrintingIdForQuery = hasExplicitPrinting ? selectedPrinting?.id ?? null : null;
+  const rawVariantPrefix = rawPrintingIdForQuery ? `${rawPrintingIdForQuery}::` : null;
   const [[rawSnap, psa9Snap, psa10Snap], vm, gradedPriceHistoryQuery, rawProviderMetricsQuery, rawProviderHistoryQuery, viewSnapshot] = await Promise.all([
     Promise.all(
       (["RAW", "PSA9", "PSA10"] as const).map((g) => {
@@ -543,13 +546,14 @@ export default async function CanonicalCardPage({
           .select("active_listings_7d, median_7d, median_30d, trimmed_median_30d, low_30d, high_30d, market_price, market_price_as_of, justtcg_price, scrydex_price, pokemontcg_price")
           .eq("canonical_slug", slug)
           .eq("grade", g);
-        return (printingIdForQuery != null
-          ? q.eq("printing_id", printingIdForQuery)
+        const effectivePrintingId = g === "RAW" ? rawPrintingIdForQuery : gradedPrintingIdForQuery;
+        return (effectivePrintingId != null
+          ? q.eq("printing_id", effectivePrintingId)
           : q.is("printing_id", null)
         ).maybeSingle<SnapshotRow>();
       })
     ),
-    buildAssetViewModel(slug, "RAW", 30, printingIdForQuery),
+    buildAssetViewModel(slug, "RAW", 30, rawPrintingIdForQuery),
     gradedVariantRefsForActiveBucket.length > 0
       ? supabase
           .from("public_price_history")
@@ -568,8 +572,8 @@ export default async function CanonicalCardPage({
         .eq("canonical_slug", slug)
         .eq("grade", "RAW")
         .in("provider", ["JUSTTCG", "SCRYDEX", "POKEMON_TCG_API"]);
-      return (printingIdForQuery != null
-        ? q.eq("printing_id", printingIdForQuery)
+      return (rawPrintingIdForQuery != null
+        ? q.eq("printing_id", rawPrintingIdForQuery)
         : q.is("printing_id", null)
       ).limit(20);
     })(),
