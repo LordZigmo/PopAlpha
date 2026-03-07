@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/auth/require";
 import { runJustTcgPipeline } from "@/lib/backfill/provider-pipeline-orchestrator";
+import { enqueuePipelineJob } from "@/lib/backfill/provider-pipeline-job-queue";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -17,15 +18,42 @@ export async function GET(req: Request) {
 
   const url = new URL(req.url);
   const force = url.searchParams.get("force") === "1";
+  const executeInline = url.searchParams.get("execute") === "1";
+  const params = {
+    setLimit: parseOptionalInt(url.searchParams.get("sets")) ?? 1,
+    pageLimitPerSet: parseOptionalInt(url.searchParams.get("pages")),
+    maxRequests: parseOptionalInt(url.searchParams.get("maxRequests")) ?? 15,
+    payloadLimit: parseOptionalInt(url.searchParams.get("payloads")) ?? 10,
+    matchObservations: parseOptionalInt(url.searchParams.get("observations")) ?? 30,
+    timeseriesObservations: parseOptionalInt(url.searchParams.get("timeseriesObservations")) ?? 30,
+    force,
+  };
+
+  if (!executeInline) {
+    const queued = await enqueuePipelineJob({
+      provider: "JUSTTCG",
+      jobKind: "RETRY",
+      params,
+      priority: 80,
+    });
+    return NextResponse.json({
+      ok: true,
+      queued: queued.enqueued,
+      jobId: queued.jobId,
+      reason: queued.reason,
+      mode: "queued",
+      params,
+    });
+  }
 
   const result = await runJustTcgPipeline({
-    setLimit: parseOptionalInt(url.searchParams.get("sets")) ?? 20,
-    pageLimitPerSet: parseOptionalInt(url.searchParams.get("pages")),
-    maxRequests: parseOptionalInt(url.searchParams.get("maxRequests")),
-    payloadLimit: parseOptionalInt(url.searchParams.get("payloads")),
-    matchObservations: parseOptionalInt(url.searchParams.get("observations")),
-    timeseriesObservations: parseOptionalInt(url.searchParams.get("timeseriesObservations")),
-    force,
+    setLimit: params.setLimit,
+    pageLimitPerSet: params.pageLimitPerSet,
+    maxRequests: params.maxRequests,
+    payloadLimit: params.payloadLimit,
+    matchObservations: params.matchObservations,
+    timeseriesObservations: params.timeseriesObservations,
+    force: params.force,
     retryOnly: true,
   });
 

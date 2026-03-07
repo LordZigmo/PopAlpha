@@ -48,6 +48,7 @@ export const CRON_ROUTES = [
   "cron/run-scrydex-pipeline",
   "cron/run-scrydex-retry",
   "cron/run-pokemontcg-pipeline",
+  "cron/process-provider-pipeline-jobs",
   "cron/sync-canonical",
   "cron/sync-tcg-prices",
   "cron/refresh-card-metrics",
