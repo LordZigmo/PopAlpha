@@ -78,6 +78,22 @@ function deriveSparklineChangePct(points: number[]): number | null {
   return ((last - first) / first) * 100;
 }
 
+function pickNonZeroFiniteChange(...values: Array<number | null | undefined>): number | null {
+  for (const value of values) {
+    if (typeof value !== "number" || !Number.isFinite(value) || value === 0) continue;
+    return value;
+  }
+  return null;
+}
+
+function buildChangeCoverage(section: string, cards: HomepageCard[]) {
+  const total = cards.length;
+  const missing = cards.filter((card) => card.change_pct == null || !Number.isFinite(card.change_pct) || card.change_pct === 0).length;
+  const present = Math.max(0, total - missing);
+  const missingPct = total > 0 ? Number(((missing / total) * 100).toFixed(1)) : 0;
+  return { section, total, present, missing, missingPct };
+}
+
 export async function getHomepageData(): Promise<HomepageData> {
   let db;
   try {
@@ -260,14 +276,26 @@ export async function getHomepageData(): Promise<HomepageData> {
       const marketPulse = marketPulseMap.get(slug);
       const sparkline = sparklineMap.get(slug) ?? [];
       const fallbackChangePct = deriveSparklineChangePct(sparkline);
+      const selectedChangePct = pickNonZeroFiniteChange(
+        marketPulse?.changePct,
+        overrides.changePct,
+        fallbackChangePct,
+      );
+      const selectedChangeWindow = selectedChangePct === marketPulse?.changePct
+        ? marketPulse?.changeWindow ?? null
+        : selectedChangePct === overrides.changePct
+          ? (overrides.changeWindow ?? null)
+          : selectedChangePct === fallbackChangePct
+            ? "7D"
+            : null;
       return {
         slug,
         name: card?.canonical_name ?? slug,
         set_name: card?.set_name ?? null,
         year: card?.year ?? null,
         market_price: marketPulse?.marketPrice ?? overrides.fallbackPrice ?? null,
-        change_pct: marketPulse?.changePct ?? fallbackChangePct ?? overrides.changePct ?? null,
-        change_window: marketPulse?.changeWindow ?? (fallbackChangePct !== null ? "7D" : (overrides.changeWindow ?? null)),
+        change_pct: selectedChangePct,
+        change_window: selectedChangeWindow,
         image_url: imageMap.get(slug) ?? null,
         mover_tier: overrides.mover_tier ?? null,
         sparkline_7d: sparkline,
@@ -282,8 +310,8 @@ export async function getHomepageData(): Promise<HomepageData> {
       const marketPulse = marketPulseMap.get(r.canonical_slug);
       if (!marketPulse) return false;
       const provider = r.provider === "POKEMON_TCG_API" ? "SCRYDEX" : r.provider;
-      const freshnessKey = `${r.canonical_slug}::${r.provider}`;
-      const providerAsOf = providerFreshnessMap.get(freshnessKey);
+      const providerAsOf = providerFreshnessMap.get(`${r.canonical_slug}::${r.provider}`)
+        ?? providerFreshnessMap.get(`${r.canonical_slug}::${provider}`);
       if (requireProviderAsOfFresh && (!providerAsOf || providerAsOf < topMoverFreshCutoffIso)) return false;
       const providerPrice = provider === "JUSTTCG" ? marketPulse.justtcgPrice : marketPulse.scrydexPrice;
       if (providerPrice == null) return false;
@@ -343,6 +371,16 @@ export async function getHomepageData(): Promise<HomepageData> {
       ...(trendingVariantResult.data ?? []).map((r: { updated_at?: string }) => r.updated_at),
     ].filter(Boolean) as string[];
     const as_of = timestamps.length > 0 ? timestamps.sort().reverse()[0] : null;
+
+    const coverage = [
+      buildChangeCoverage("movers", moversOut),
+      buildChangeCoverage("losers", losersOut),
+      buildChangeCoverage("trending", trendingOut),
+    ];
+    console.info("[homepage.telemetry.change_coverage]", JSON.stringify({
+      asOf: as_of,
+      coverage,
+    }));
 
     return { movers: moversOut, losers: losersOut, trending: trendingOut, as_of };
 

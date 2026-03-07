@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { dbAdmin } from "@/lib/db/admin";
 import { fetchJustTcgCardsPage, setNameToJustTcgId } from "@/lib/providers/justtcg";
+import { loadProviderSetIndex } from "@/lib/backfill/provider-set-index";
 
 const PROVIDER = "JUSTTCG";
 const JOB = "justtcg_raw_ingest";
@@ -37,11 +38,6 @@ const PRIORITY_SET_CODES = (process.env.JUSTTCG_PRIORITY_SET_CODES ?? "")
 type CanonicalSet = {
   setCode: string;
   setName: string;
-};
-
-type SetMapRow = {
-  canonical_set_code: string;
-  provider_set_id: string;
 };
 
 type ProviderSetHealthRow = {
@@ -222,7 +218,7 @@ function delayMs(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function loadCanonicalSets(): Promise<CanonicalSet[]> {
+async function loadCanonicalSetsFromPrintings(): Promise<CanonicalSet[]> {
   const supabase = dbAdmin();
   const pageSize = 5000;
   const seen = new Set<string>();
@@ -257,36 +253,45 @@ async function loadCanonicalSets(): Promise<CanonicalSet[]> {
   return sets;
 }
 
-async function loadProviderSetMap(setCodes: string[]): Promise<Map<string, string>> {
-  if (setCodes.length === 0) return new Map();
-
+async function maybeBackfillProviderSetMap(): Promise<number> {
+  // Keep the default ingest path lightweight. Only scan canonical printings weekly
+  // to seed missing provider_set_map rows for new sets.
+  if (new Date().getUTCDay() !== 0) return 0;
   const supabase = dbAdmin();
-  const { data, error } = await supabase
-    .from("provider_set_map")
-    .select("canonical_set_code, provider_set_id")
-    .eq("provider", PROVIDER)
-    .in("canonical_set_code", setCodes);
+  const [knownResult, canonicalSets] = await Promise.all([
+    supabase
+      .from("provider_set_map")
+      .select("canonical_set_code")
+      .eq("provider", PROVIDER),
+    loadCanonicalSetsFromPrintings(),
+  ]);
 
-  if (error) {
-    throw new Error(`provider_set_map: ${error.message}`);
+  if (knownResult.error) {
+    throw new Error(`provider_set_map(existing): ${knownResult.error.message}`);
   }
 
-  const byCode = new Map<string, string>();
-  for (const row of (data ?? []) as SetMapRow[]) {
-    byCode.set(row.canonical_set_code, row.provider_set_id);
-  }
-  return byCode;
-}
+  const knownSetCodes = new Set(
+    (knownResult.data ?? [])
+      .map((row) => String((row as { canonical_set_code: string | null }).canonical_set_code ?? "").trim())
+      .filter(Boolean),
+  );
 
-function buildAllTargets(params: {
-  sets: CanonicalSet[];
-  providerSetMap: Map<string, string>;
-}): IngestTarget[] {
-  return params.sets.map((set) => ({
-    setCode: set.setCode,
-    setName: set.setName,
-    providerSetId: params.providerSetMap.get(set.setCode) ?? setNameToJustTcgId(set.setName),
+  const missing = canonicalSets.filter((set) => !knownSetCodes.has(set.setCode)).slice(0, 250);
+  if (missing.length === 0) return 0;
+
+  const rows = missing.map((set) => ({
+    provider: PROVIDER,
+    canonical_set_code: set.setCode,
+    canonical_set_name: set.setName,
+    provider_set_id: setNameToJustTcgId(set.setName),
+    confidence: 0,
   }));
+
+  const { error } = await supabase
+    .from("provider_set_map")
+    .upsert(rows, { onConflict: "provider,canonical_set_code" });
+  if (error) throw new Error(`provider_set_map(backfill): ${error.message}`);
+  return rows.length;
 }
 
 function normalizeFailedSetQueue(queue: string[]): string[] {
@@ -440,6 +445,7 @@ export async function runJustTcgRawIngest(opts: {
   let failedRequests = 0;
   let setsProcessed = 0;
   let skippedCooldownSets = 0;
+  let providerSetIndexBackfilled = 0;
   const sampleSetResults: RawIngestSetSummary[] = [];
   const warningSamples: string[] = [];
   const skippedCooldownSamples: string[] = [];
@@ -455,9 +461,27 @@ export async function runJustTcgRawIngest(opts: {
   const targets = opts.providerSetId
     ? [{ setCode: null, setName: null, providerSetId: opts.providerSetId }]
     : await (async () => {
-        const sets = await loadCanonicalSets();
-        const providerSetMap = await loadProviderSetMap(sets.map((set) => set.setCode));
-        const allTargets = buildAllTargets({ sets, providerSetMap });
+        providerSetIndexBackfilled = await maybeBackfillProviderSetMap();
+        const providerSetIndex = await loadProviderSetIndex("JUSTTCG");
+        const allTargets = providerSetIndex.map((row) => ({
+          setCode: row.canonicalSetCode,
+          setName: row.canonicalSetName ?? row.canonicalSetCode,
+          providerSetId: row.providerSetId,
+        }));
+        if (allTargets.length === 0) {
+          const fallbackSets = await loadCanonicalSetsFromPrintings();
+          for (const set of fallbackSets) {
+            allTargets.push({
+              setCode: set.setCode,
+              setName: set.setName,
+              providerSetId: setNameToJustTcgId(set.setName),
+            });
+          }
+          warningSamples.push("provider_set_map index empty; using canonical printings fallback");
+        }
+        const sets = allTargets
+          .map((target) => ({ setCode: target.setCode ?? "", setName: target.setName ?? target.setCode ?? "" }))
+          .filter((set): set is CanonicalSet => Boolean(set.setCode && set.setName));
         const healthByProviderSet = await loadProviderSetHealth(allTargets.map((target) => target.providerSetId));
         const retryFromHealth = allTargets
           .map((target) => ({
@@ -564,6 +588,7 @@ export async function runJustTcgRawIngest(opts: {
         setsPlanned: resolvedTargets.length,
         skippedCooldownSets,
         skippedCooldownSamples,
+        providerSetIndexBackfilled,
         failedSetQueue,
       },
     })
@@ -804,6 +829,7 @@ export async function runJustTcgRawIngest(opts: {
           warningSamples,
           skippedCooldownSets,
           skippedCooldownSamples,
+          providerSetIndexBackfilled,
           failedSetQueue,
           cooldownByProviderSet,
           adaptiveDelayMs,

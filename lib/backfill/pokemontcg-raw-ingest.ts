@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { dbAdmin } from "@/lib/db/admin";
 import { fetchCardsPage, getScrydexCredentials, type ScrydexCard } from "@/lib/scrydex/client";
+import { loadProviderSetIndex } from "@/lib/backfill/provider-set-index";
 
 const PROVIDER = "SCRYDEX";
 const JOB = "scrydex_raw_ingest";
@@ -22,6 +23,7 @@ const DEFAULT_RETRY_BACKOFF_MS = process.env.SCRYDEX_RAW_RETRY_BACKOFF_MS
 type CanonicalSet = {
   setCode: string;
   setName: string;
+  providerSetId?: string | null;
 };
 
 type LastRunRow = {
@@ -113,7 +115,7 @@ function selectSetsFromCursor(sets: CanonicalSet[], setLimit: number, cursorSetC
   return selected;
 }
 
-async function loadCanonicalSets(): Promise<CanonicalSet[]> {
+async function loadCanonicalSetsFromPrintings(): Promise<CanonicalSet[]> {
   const supabase = dbAdmin();
   const pageSize = 1000;
   const seen = new Set<string>();
@@ -145,6 +147,51 @@ async function loadCanonicalSets(): Promise<CanonicalSet[]> {
 
   sets.sort((left, right) => left.setCode.localeCompare(right.setCode));
   return sets;
+}
+
+async function loadCanonicalSetsFromProviderIndex(): Promise<CanonicalSet[]> {
+  const mapped = await loadProviderSetIndex("SCRYDEX");
+  if (mapped.length === 0) return [];
+  return mapped.map((row) => ({
+    setCode: row.canonicalSetCode,
+    setName: row.canonicalSetName ?? row.canonicalSetCode,
+    providerSetId: row.providerSetId,
+  }));
+}
+
+async function maybeBackfillProviderSetMap(): Promise<number> {
+  // Weekly sync keeps provider_set_map warm for newly imported sets.
+  if (new Date().getUTCDay() !== 0) return 0;
+  const supabase = dbAdmin();
+  const [knownResult, canonicalSets] = await Promise.all([
+    supabase
+      .from("provider_set_map")
+      .select("canonical_set_code")
+      .eq("provider", PROVIDER),
+    loadCanonicalSetsFromPrintings(),
+  ]);
+  if (knownResult.error) throw new Error(`provider_set_map(existing): ${knownResult.error.message}`);
+
+  const knownSetCodes = new Set(
+    (knownResult.data ?? [])
+      .map((row) => String((row as { canonical_set_code: string | null }).canonical_set_code ?? "").trim())
+      .filter(Boolean),
+  );
+  const missing = canonicalSets.filter((set) => !knownSetCodes.has(set.setCode)).slice(0, 250);
+  if (missing.length === 0) return 0;
+
+  const rows = missing.map((set) => ({
+    provider: PROVIDER,
+    canonical_set_code: set.setCode,
+    canonical_set_name: set.setName,
+    provider_set_id: set.setCode,
+    confidence: 0,
+  }));
+  const { error } = await supabase
+    .from("provider_set_map")
+    .upsert(rows, { onConflict: "provider,canonical_set_code" });
+  if (error) throw new Error(`provider_set_map(backfill): ${error.message}`);
+  return rows.length;
 }
 
 async function loadLastCursorSetCode(): Promise<string | null> {
@@ -231,6 +278,7 @@ export async function runPokemonTcgRawIngest(opts: {
   let cardsFetched = 0;
   let failedRequests = 0;
   let setsProcessed = 0;
+  let providerSetIndexBackfilled = 0;
   const sampleSetResults: RawIngestSetSummary[] = [];
 
   let credentials: ReturnType<typeof getScrydexCredentials>;
@@ -244,12 +292,14 @@ export async function runPokemonTcgRawIngest(opts: {
   const targets = opts.providerSetId
     ? [{ setCode: null, setName: null, providerSetId: opts.providerSetId }]
     : await (async () => {
-        const sets = await loadCanonicalSets();
+        providerSetIndexBackfilled = await maybeBackfillProviderSetMap();
+        const setsFromIndex = await loadCanonicalSetsFromProviderIndex();
+        const sets = setsFromIndex.length > 0 ? setsFromIndex : await loadCanonicalSetsFromPrintings();
         const selectedSets = selectSetsFromCursor(sets, setLimit, cursorSetCode);
         return selectedSets.map((set) => ({
           setCode: set.setCode,
           setName: set.setName,
-          providerSetId: set.setCode,
+          providerSetId: set.providerSetId ?? set.setCode,
         }));
       })();
   const nextSetCode = targets.length > 0 && !opts.providerSetId
@@ -276,6 +326,7 @@ export async function runPokemonTcgRawIngest(opts: {
         providerSetId: opts.providerSetId ?? null,
         cursorSetCode,
         nextSetCode,
+        providerSetIndexBackfilled,
         setsPlanned: targets.length,
       },
     })
@@ -402,6 +453,7 @@ export async function runPokemonTcgRawIngest(opts: {
           providerSetId: opts.providerSetId ?? null,
           cursorSetCode,
           nextSetCode,
+          providerSetIndexBackfilled,
           setsPlanned: targets.length,
           setsProcessed,
           requestsMade,

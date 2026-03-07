@@ -9,7 +9,7 @@ export const metadata: Metadata = {
   title: "Data | PopAlpha",
   description: "Public data freshness monitor for canonical RAW card pricing.",
   alternates: {
-    canonical: "/Data",
+    canonical: "/data",
   },
 };
 

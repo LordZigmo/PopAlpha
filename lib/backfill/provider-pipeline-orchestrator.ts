@@ -1,4 +1,3 @@
-import { dbAdmin } from "@/lib/db/admin";
 import { runJustTcgRawIngest } from "@/lib/backfill/justtcg-raw-ingest";
 import { runJustTcgRawNormalize } from "@/lib/backfill/justtcg-raw-normalize";
 import { runJustTcgNormalizedMatch } from "@/lib/backfill/justtcg-normalized-match";
@@ -20,17 +19,7 @@ type PipelineResult = {
   endedAt: string;
   firstError: string | null;
   steps: PipelineStep<object>[];
-  metricsRefresh: unknown;
-  metricsRefreshError: string | null;
-  priceChangesRefresh: unknown;
-  priceChangesRefreshError: string | null;
-  parityRefresh: unknown;
-  parityRefreshError: string | null;
 };
-
-function toErrorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 function numberFromUnknown(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
@@ -104,40 +93,6 @@ export async function runJustTcgPipeline(opts: {
     if (!timeseries.ok) firstError = timeseries.firstError ?? "justtcg timeseries failed";
   }
 
-  const supabase = dbAdmin();
-  let metricsRefresh: unknown = null;
-  let metricsRefreshError: string | null = null;
-  let priceChangesRefresh: unknown = null;
-  let priceChangesRefreshError: string | null = null;
-  let parityRefresh: unknown = null;
-  let parityRefreshError: string | null = null;
-
-  if (!firstError) {
-    try {
-      const { data, error } = await supabase.rpc("refresh_card_metrics");
-      if (error) metricsRefreshError = error.message;
-      else metricsRefresh = data;
-    } catch (err) {
-      metricsRefreshError = toErrorMessage(err);
-    }
-
-    try {
-      const { data, error } = await supabase.rpc("refresh_price_changes");
-      if (error) priceChangesRefreshError = error.message;
-      else priceChangesRefresh = data;
-    } catch (err) {
-      priceChangesRefreshError = toErrorMessage(err);
-    }
-
-    try {
-      const { data, error } = await supabase.rpc("refresh_canonical_raw_provider_parity", { p_window_days: 30 });
-      if (error) parityRefreshError = error.message;
-      else parityRefresh = data;
-    } catch (err) {
-      parityRefreshError = toErrorMessage(err);
-    }
-  }
-
   const endedAt = new Date().toISOString();
   const coreOk = !firstError;
   return {
@@ -147,12 +102,6 @@ export async function runJustTcgPipeline(opts: {
     endedAt,
     firstError,
     steps,
-    metricsRefresh,
-    metricsRefreshError,
-    priceChangesRefresh,
-    priceChangesRefreshError,
-    parityRefresh,
-    parityRefreshError,
   };
 }
 
@@ -214,40 +163,6 @@ export async function runPokemonTcgPipeline(opts: {
     if (!timeseries.ok) firstError = timeseries.firstError ?? "scrydex timeseries failed";
   }
 
-  const supabase = dbAdmin();
-  let metricsRefresh: unknown = null;
-  let metricsRefreshError: string | null = null;
-  let priceChangesRefresh: unknown = null;
-  let priceChangesRefreshError: string | null = null;
-  let parityRefresh: unknown = null;
-  let parityRefreshError: string | null = null;
-
-  if (!firstError) {
-    try {
-      const { data, error } = await supabase.rpc("refresh_card_metrics");
-      if (error) metricsRefreshError = error.message;
-      else metricsRefresh = data;
-    } catch (err) {
-      metricsRefreshError = toErrorMessage(err);
-    }
-
-    try {
-      const { data, error } = await supabase.rpc("refresh_price_changes");
-      if (error) priceChangesRefreshError = error.message;
-      else priceChangesRefresh = data;
-    } catch (err) {
-      priceChangesRefreshError = toErrorMessage(err);
-    }
-
-    try {
-      const { data, error } = await supabase.rpc("refresh_canonical_raw_provider_parity", { p_window_days: 30 });
-      if (error) parityRefreshError = error.message;
-      else parityRefresh = data;
-    } catch (err) {
-      parityRefreshError = toErrorMessage(err);
-    }
-  }
-
   const endedAt = new Date().toISOString();
   const coreOk = !firstError;
   return {
@@ -257,11 +172,5 @@ export async function runPokemonTcgPipeline(opts: {
     endedAt,
     firstError,
     steps,
-    metricsRefresh,
-    metricsRefreshError,
-    priceChangesRefresh,
-    priceChangesRefreshError,
-    parityRefresh,
-    parityRefreshError,
   };
 }
