@@ -117,7 +117,7 @@ function volumeFactor(points7d: number): number {
   return 0.4 + (points7d / 80) * 0.6;
 }
 
-function robustFilterPrices(points: ObservationInput[]): { kept: ObservationInput[]; excluded: ExcludedObservation[] } {
+function robustFilterPrices<T extends ObservationInput>(points: T[]): { kept: T[]; excluded: ExcludedObservation[] } {
   if (points.length < 5) return { kept: points, excluded: [] };
 
   const prices = points.map((p) => p.price).sort((a, b) => a - b);
@@ -135,7 +135,7 @@ function robustFilterPrices(points: ObservationInput[]): { kept: ObservationInpu
   const iqrLow = q1 - iqr * 1.5;
   const iqrHigh = q3 + iqr * 1.5;
 
-  const kept: ObservationInput[] = [];
+  const kept: T[] = [];
   const excluded: ExcludedObservation[] = [];
 
   for (const point of points) {
@@ -164,7 +164,8 @@ export function computeConfidenceBand(params: {
   const nowMs = new Date(params.nowIso ?? new Date().toISOString()).getTime();
   const halfLifeHours = params.halfLifeHours ?? 72;
 
-  const observations = params.observations
+  type ObservationWithTs = ObservationInput & { tsMs: number };
+  const observations: ObservationWithTs[] = params.observations
     .map((row) => {
       const tsMs = new Date(row.ts).getTime();
       return {
@@ -172,7 +173,7 @@ export function computeConfidenceBand(params: {
         tsMs,
       };
     })
-    .filter((row) => Number.isFinite(row.tsMs) && row.price > 0 && Number.isFinite(row.price));
+    .filter((row): row is ObservationWithTs => Number.isFinite(row.tsMs) && row.price > 0 && Number.isFinite(row.price));
 
   if (observations.length === 0) {
     return {

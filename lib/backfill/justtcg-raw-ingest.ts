@@ -505,8 +505,10 @@ export async function runJustTcgRawIngest(opts: {
         const bySetCode = new Map(allTargets.map((target) => [target.setCode, target] as const));
         const cursorCandidates = sortTargetsByFreshness(
           selectSetsFromCursor(sets, sets.length, priorState.cursorSetCode)
-          .map((set) => bySetCode.get(set.setCode))
-          .filter((target): target is IngestTarget => Boolean(target)),
+            .flatMap((set) => {
+              const target = bySetCode.get(set.setCode);
+              return target ? [target] : [];
+            }),
           healthByProviderSet,
         );
 
