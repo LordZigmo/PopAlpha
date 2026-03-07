@@ -262,25 +262,37 @@ export async function getHomepageData(): Promise<HomepageData> {
     // ── Movers: view already guarantees price > 0 ─────────────────────────
     const moversOut: HomepageCard[] = [];
     const seenMoverSlugs = new Set<string>();
-    for (const r of moversRows) {
-      if (seenMoverSlugs.has(r.canonical_slug)) continue;
+    const pushMoverIfEligible = (r: MoverRow, requireProviderAsOfFresh: boolean): boolean => {
+      if (seenMoverSlugs.has(r.canonical_slug)) return false;
       const marketPulse = marketPulseMap.get(r.canonical_slug);
-      if (!marketPulse) continue;
+      if (!marketPulse) return false;
       const provider = r.provider === "POKEMON_TCG_API" ? "SCRYDEX" : r.provider;
       const freshnessKey = `${r.canonical_slug}::${r.provider}`;
       const providerAsOf = providerFreshnessMap.get(freshnessKey);
-      if (!providerAsOf || providerAsOf < topMoverFreshCutoffIso) continue;
-      // Require a price from the mover's source provider.
+      if (requireProviderAsOfFresh && (!providerAsOf || providerAsOf < topMoverFreshCutoffIso)) return false;
       const providerPrice = provider === "JUSTTCG" ? marketPulse.justtcgPrice : marketPulse.scrydexPrice;
-      if (providerPrice == null) continue;
-      if (SENTINEL_PRICES.has(Number(providerPrice.toFixed(2)))) continue;
-      if (providerPrice < MIN_PRICE) continue;
+      if (providerPrice == null) return false;
+      if (SENTINEL_PRICES.has(Number(providerPrice.toFixed(2)))) return false;
+      if (providerPrice < MIN_PRICE) return false;
       moversOut.push(toCard(r.canonical_slug, {
         fallbackPrice: r.median_7d,
         mover_tier: r.mover_tier as HomepageCard["mover_tier"],
       }));
       seenMoverSlugs.add(r.canonical_slug);
+      return true;
+    };
+
+    // Primary: strict provider-source freshness within 24h.
+    for (const r of moversRows) {
+      pushMoverIfEligible(r, true);
       if (moversOut.length >= SECTION_LIMIT) break;
+    }
+    // Fallback: if strict filter is too thin, allow mover rows already refreshed in 24h.
+    if (moversOut.length === 0) {
+      for (const r of moversRows) {
+        pushMoverIfEligible(r, false);
+        if (moversOut.length >= SECTION_LIMIT) break;
+      }
     }
     moversOut.sort(compareMovementMagnitude);
 
