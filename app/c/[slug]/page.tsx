@@ -534,7 +534,7 @@ export default async function CanonicalCardPage({
   // card_metrics rows are keyed by (canonical_slug, printing_id, grade).
   // For singles: printing_id = selected printing UUID. For sealed / no printing: printing_id IS NULL.
   const printingIdForQuery = selectedPrinting?.id ?? null;
-  const rawVariantPrefix = printingIdForQuery ? `${printingIdForQuery}::RAW` : null;
+  const rawVariantPrefix = printingIdForQuery ? `${printingIdForQuery}::` : null;
   const [[rawSnap, psa9Snap, psa10Snap], vm, gradedPriceHistoryQuery, rawProviderMetricsQuery, rawProviderHistoryQuery, viewSnapshot] = await Promise.all([
     Promise.all(
       (["RAW", "PSA9", "PSA10"] as const).map((g) => {
@@ -573,17 +573,20 @@ export default async function CanonicalCardPage({
         : q.is("printing_id", null)
       ).limit(20);
     })(),
-    rawVariantPrefix
-      ? supabase
-          .from("public_price_history")
-          .select("provider, variant_ref, ts")
-          .eq("canonical_slug", slug)
-          .eq("source_window", "snapshot")
-          .in("provider", ["JUSTTCG", "SCRYDEX", "POKEMON_TCG_API"])
-          .ilike("variant_ref", `${rawVariantPrefix}%`)
-          .order("ts", { ascending: false })
-          .limit(300)
-      : Promise.resolve({ data: [] as RawProviderHistoryRow[] }),
+    (() => {
+      let q = supabase
+        .from("public_price_history")
+        .select("provider, variant_ref, ts")
+        .eq("canonical_slug", slug)
+        .eq("source_window", "snapshot")
+        .in("provider", ["JUSTTCG", "SCRYDEX", "POKEMON_TCG_API"])
+        .order("ts", { ascending: false })
+        .limit(300);
+      if (rawVariantPrefix) {
+        q = q.ilike("variant_ref", `${rawVariantPrefix}%`);
+      }
+      return q;
+    })(),
     getCardViewSnapshot(slug, 14),
   ]);
   const relatedCarousels = await getRelatedCardCarousels({

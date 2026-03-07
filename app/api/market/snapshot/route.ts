@@ -105,9 +105,8 @@ export async function GET(req: Request) {
       .order("ts", { ascending: false })
       .limit(300);
     if (printing) {
-      historyQuery = historyQuery.ilike("variant_ref", `${printing}::RAW%`);
-    } else {
-      historyQuery = historyQuery.ilike("variant_ref", "%::RAW%");
+      // Accept canonical RAW refs regardless of provider-specific tail segments.
+      historyQuery = historyQuery.ilike("variant_ref", `${printing}::%`);
     }
     const historyResult = await historyQuery;
     if (historyResult.error) {
