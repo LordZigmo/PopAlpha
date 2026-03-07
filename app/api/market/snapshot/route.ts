@@ -121,19 +121,21 @@ export async function GET(req: Request) {
     }
   }
 
+  const justtcgSourcePrice = result.data?.justtcg_price ?? null;
+  const scrydexSourcePrice = result.data?.scrydex_price ?? result.data?.pokemontcg_price ?? null;
   const justtcg = await buildProviderPriceDisplay({
     supabase,
     provider: "JUSTTCG",
-    sourcePrice: result.data?.justtcg_price ?? null,
+    sourcePrice: justtcgSourcePrice,
     sourceCurrency: "USD",
-    asOf: justtcgAsOf,
+    asOf: justtcgSourcePrice != null ? justtcgAsOf : null,
   });
   const scrydex = await buildProviderPriceDisplay({
     supabase,
     provider: "SCRYDEX",
-    sourcePrice: result.data?.scrydex_price ?? result.data?.pokemontcg_price ?? null,
+    sourcePrice: scrydexSourcePrice,
     sourceCurrency: "USD",
-    asOf: scrydexAsOf,
+    asOf: scrydexSourcePrice != null ? (scrydexAsOf ?? result.data?.market_price_as_of ?? null) : null,
   });
   const marketPriceUsd = averageProviderUsdPrice([justtcg, scrydex]) ?? result.data?.market_price ?? null;
   const marketPriceAsOf = [justtcg.asOf, scrydex.asOf].filter(Boolean).sort().at(-1) ?? result.data?.market_price_as_of ?? null;

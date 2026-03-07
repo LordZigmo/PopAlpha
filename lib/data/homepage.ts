@@ -235,6 +235,9 @@ export async function getHomepageData(): Promise<HomepageData> {
     // ── Movers: view already guarantees price > 0 ─────────────────────────
     const moversOut: HomepageCard[] = [];
     for (const r of dedupedMovers) {
+      const marketPulse = marketPulseMap.get(r.canonical_slug);
+      // Movers are sourced from JustTCG; require a JustTCG price to avoid single-provider outliers.
+      if (!marketPulse || marketPulse.justtcgPrice == null) continue;
       moversOut.push(toCard(r.canonical_slug, {
         fallbackPrice: r.median_7d,
         mover_tier: r.mover_tier as HomepageCard["mover_tier"],

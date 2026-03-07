@@ -704,6 +704,10 @@ export default async function CanonicalCardPage({
     if (provider === "SCRYDEX" && !rawSourceScrydexTs) rawSourceScrydexTs = row.ts;
     if (rawSourceJtcgTs && rawSourceScrydexTs) break;
   }
+  if (rawSourceJtcg == null) rawSourceJtcgTs = null;
+  if (rawSourceScrydex != null && !rawSourceScrydexTs) {
+    rawSourceScrydexTs = rawSnap.data?.market_price_as_of ?? rawSourceJtcgTs;
+  }
   const rawSourceAsOfJtcg = formatAsOf(rawSourceJtcgTs);
   const rawSourceAsOfScrydex = formatAsOf(rawSourceScrydexTs);
   const currentRawPrice = viewMode === "RAW"
