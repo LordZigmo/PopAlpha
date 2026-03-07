@@ -35,6 +35,8 @@ export type HomepageCard = {
 
 export type HomepageData = {
   movers: HomepageCard[];
+  high_confidence_movers: HomepageCard[];
+  emerging_movers: HomepageCard[];
   losers: HomepageCard[];
   trending: HomepageCard[];
   as_of: string | null;
@@ -45,17 +47,29 @@ export type HomepageData = {
 const SECTION_LIMIT = 5;
 /** Minimum 7d median to filter noise / $0 cards */
 const MIN_PRICE = 0.5;
-/** Top movers must have provider updates within this freshness window. */
+/** Top movers must have market updates within this freshness window. */
 const TOP_MOVER_MAX_AGE_HOURS = 24;
 /** Minimum trade count for "sustained trending" vs noise */
 const MIN_CHANGES_TRENDING = 3;
 /** Over-fetch factor for variant metrics (we filter by price in JS) */
 const VARIANT_FETCH_LIMIT = 60;
 const SENTINEL_PRICES = new Set([23456.78]);
+const MIN_MOVER_CHANGE_PCT = 2.5;
+const MIN_CONFIDENCE_SCORE = 45;
+const MIN_MOVER_SAMPLE_SIZE_7D = 8;
+const HIGH_CONF_LIQUIDITY_MIN = 6;
+const EMERGING_LIQUIDITY_MAX = 5;
 
 // ── Loader ──────────────────────────────────────────────────────────────────
 
-const EMPTY: HomepageData = { movers: [], losers: [], trending: [], as_of: null };
+const EMPTY: HomepageData = {
+  movers: [],
+  high_confidence_movers: [],
+  emerging_movers: [],
+  losers: [],
+  trending: [],
+  as_of: null,
+};
 
 function compareMovementMagnitude(a: HomepageCard, b: HomepageCard): number {
   const aMove = typeof a.change_pct === "number" && Number.isFinite(a.change_pct) ? Math.abs(a.change_pct) : -1;
@@ -94,6 +108,24 @@ function buildChangeCoverage(section: string, cards: HomepageCard[]) {
   return { section, total, present, missing, missingPct };
 }
 
+function hoursSince(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  const ts = new Date(iso).getTime();
+  if (!Number.isFinite(ts)) return null;
+  return Math.max(0, (Date.now() - ts) / (60 * 60 * 1000));
+}
+
+function computeLiquidityWeight(activeListings7d: number | null | undefined): number {
+  if (!Number.isFinite(activeListings7d ?? NaN)) return 0.5;
+  const value = Math.max(0, activeListings7d ?? 0);
+  if (value <= 1) return 0.35;
+  if (value <= 3) return 0.55;
+  if (value <= 5) return 0.75;
+  if (value <= 10) return 0.95;
+  if (value <= 20) return 1.1;
+  return 1.25;
+}
+
 export async function getHomepageData(): Promise<HomepageData> {
   let db;
   try {
@@ -104,8 +136,6 @@ export async function getHomepageData(): Promise<HomepageData> {
   }
 
   try {
-    const topMoverFreshCutoffIso = new Date(Date.now() - TOP_MOVER_MAX_AGE_HOURS * 60 * 60 * 1000).toISOString();
-
     // ── Batch 1: movers + variant-level trend data ────────────────────────
     const [moversResult, losersVariantResult, trendingVariantResult] = await Promise.all([
       // 1. Top movers — hot/warming tiers, pre-joined with card_metrics prices
@@ -115,7 +145,6 @@ export async function getHomepageData(): Promise<HomepageData> {
         .in("provider", ["JUSTTCG", "SCRYDEX", "POKEMON_TCG_API"])
         .eq("grade", "RAW")
         .in("mover_tier", ["hot", "warming"])
-        .gte("updated_at", topMoverFreshCutoffIso)
         .order("tier_priority", { ascending: true })
         .order("median_7d", { ascending: false })
         .limit(SECTION_LIMIT * 12),
@@ -303,46 +332,67 @@ export async function getHomepageData(): Promise<HomepageData> {
     }
 
     // ── Movers: view already guarantees price > 0 ─────────────────────────
-    const moversOut: HomepageCard[] = [];
+    const highConfidenceMoversOut: HomepageCard[] = [];
+    const emergingMoversOut: HomepageCard[] = [];
     const seenMoverSlugs = new Set<string>();
-    const pushMoverIfEligible = (r: MoverRow, requireProviderAsOfFresh: boolean): boolean => {
+    const pushMoverIfEligible = (r: MoverRow): boolean => {
       if (seenMoverSlugs.has(r.canonical_slug)) return false;
       const marketPulse = marketPulseMap.get(r.canonical_slug);
       if (!marketPulse) return false;
       const provider = r.provider === "POKEMON_TCG_API" ? "SCRYDEX" : r.provider;
       const providerAsOf = providerFreshnessMap.get(`${r.canonical_slug}::${r.provider}`)
         ?? providerFreshnessMap.get(`${r.canonical_slug}::${provider}`);
-      if (requireProviderAsOfFresh && (!providerAsOf || providerAsOf < topMoverFreshCutoffIso)) return false;
       const providerPrice = provider === "JUSTTCG" ? marketPulse.justtcgPrice : marketPulse.scrydexPrice;
       if (providerPrice == null) return false;
       if (SENTINEL_PRICES.has(Number(providerPrice.toFixed(2)))) return false;
       if (providerPrice < MIN_PRICE) return false;
+      const changePct = pickNonZeroFiniteChange(
+        marketPulse.changePct,
+        Number.isFinite(r.provider_trend_slope_7d ?? NaN) ? Number((r.provider_trend_slope_7d as number).toFixed(2)) : null,
+      );
+      if (changePct == null || Math.abs(changePct) < MIN_MOVER_CHANGE_PCT) return false;
+      const confidenceScore = marketPulse.confidenceScore ?? 0;
+      const sampleSize7d = marketPulse.sampleCounts7d?.total ?? 0;
+      const stalenessHours = hoursSince(marketPulse.marketPriceAsOf ?? providerAsOf ?? null);
+      const isStale = stalenessHours === null || stalenessHours > TOP_MOVER_MAX_AGE_HOURS;
+      const lowConfidence = marketPulse.lowConfidence === true || confidenceScore < MIN_CONFIDENCE_SCORE;
+      const lowSample = sampleSize7d < MIN_MOVER_SAMPLE_SIZE_7D;
+      if (isStale || lowConfidence || lowSample) return false;
+      const activeListings7d = marketPulse.activeListings7d ?? 0;
+      const liquidityWeight = computeLiquidityWeight(activeListings7d);
+      const compositeScore = Math.abs(changePct) * (confidenceScore / 100) * liquidityWeight;
+      if (!(compositeScore > 0)) return false;
       const trendPct = Number.isFinite(r.provider_trend_slope_7d ?? NaN)
         ? Number((r.provider_trend_slope_7d as number).toFixed(2))
         : null;
-      moversOut.push(toCard(r.canonical_slug, {
+      const moverCard = toCard(r.canonical_slug, {
         fallbackPrice: r.median_7d,
         mover_tier: r.mover_tier as HomepageCard["mover_tier"],
-        changePct: trendPct,
-        changeWindow: trendPct !== null ? "7D" : null,
-      }));
+        changePct,
+        changeWindow: marketPulse.changeWindow ?? (trendPct !== null ? "7D" : null),
+      });
+      if (activeListings7d >= HIGH_CONF_LIQUIDITY_MIN) {
+        highConfidenceMoversOut.push(moverCard);
+      } else if (activeListings7d <= EMERGING_LIQUIDITY_MAX) {
+        emergingMoversOut.push(moverCard);
+      } else {
+        highConfidenceMoversOut.push(moverCard);
+      }
       seenMoverSlugs.add(r.canonical_slug);
       return true;
     };
 
-    // Primary: strict provider-source freshness within 24h.
     for (const r of moversRows) {
-      pushMoverIfEligible(r, true);
-      if (moversOut.length >= SECTION_LIMIT) break;
+      pushMoverIfEligible(r);
+      if (highConfidenceMoversOut.length >= SECTION_LIMIT && emergingMoversOut.length >= SECTION_LIMIT) break;
     }
-    // Fallback: if strict filter is too thin, allow mover rows already refreshed in 24h.
-    if (moversOut.length === 0) {
-      for (const r of moversRows) {
-        pushMoverIfEligible(r, false);
-        if (moversOut.length >= SECTION_LIMIT) break;
-      }
-    }
-    moversOut.sort(compareMovementMagnitude);
+    highConfidenceMoversOut.sort(compareMovementMagnitude);
+    highConfidenceMoversOut.splice(SECTION_LIMIT);
+    emergingMoversOut.sort(compareMovementMagnitude);
+    emergingMoversOut.splice(SECTION_LIMIT);
+    const moversOut = highConfidenceMoversOut.length > 0
+      ? [...highConfidenceMoversOut]
+      : [...emergingMoversOut];
 
     // ── Losers: filter to cards with real prices above MIN_PRICE ─────────
     const losersOut: HomepageCard[] = [];
@@ -374,6 +424,8 @@ export async function getHomepageData(): Promise<HomepageData> {
 
     const coverage = [
       buildChangeCoverage("movers", moversOut),
+      buildChangeCoverage("movers_high_confidence", highConfidenceMoversOut),
+      buildChangeCoverage("movers_emerging", emergingMoversOut),
       buildChangeCoverage("losers", losersOut),
       buildChangeCoverage("trending", trendingOut),
     ];
@@ -382,7 +434,14 @@ export async function getHomepageData(): Promise<HomepageData> {
       coverage,
     }));
 
-    return { movers: moversOut, losers: losersOut, trending: trendingOut, as_of };
+    return {
+      movers: moversOut,
+      high_confidence_movers: highConfidenceMoversOut,
+      emerging_movers: emergingMoversOut,
+      losers: losersOut,
+      trending: trendingOut,
+      as_of,
+    };
 
   } catch (err) {
     console.error("[homepage] getHomepageData failed:", err);

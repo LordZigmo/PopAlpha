@@ -13,6 +13,9 @@ type CanonicalMarketMetricRow = {
   scrydex_price: number | null;
   pokemontcg_price?: number | null;
   market_price: number | null;
+  market_price_as_of?: string | null;
+  active_listings_7d?: number | null;
+  snapshot_count_30d?: number | null;
   median_7d: number | null;
   market_confidence_score?: number | null;
   market_low_confidence?: boolean | null;
@@ -37,6 +40,9 @@ export type CanonicalMarketPulse = {
   scrydexPrice: number | null;
   pokemontcgPrice: number | null;
   marketPrice: number | null;
+  marketPriceAsOf?: string | null;
+  activeListings7d?: number | null;
+  snapshotCount30d?: number | null;
   changePct: number | null;
   changeWindow: MarketChangeWindow | null;
   parityStatus: RawParityStatus;
@@ -46,6 +52,11 @@ export type CanonicalMarketPulse = {
   sourceMix?: {
     justtcgWeight: number;
     scrydexWeight: number;
+  };
+  sampleCounts7d?: {
+    justtcg: number;
+    scrydex: number;
+    total: number;
   };
 };
 
@@ -78,6 +89,9 @@ export function resolveCanonicalMarketPulse(
     scrydexPrice,
     pokemontcgPrice: scrydexPrice,
     marketPrice,
+    marketPriceAsOf: row?.market_price_as_of ?? null,
+    activeListings7d: toFiniteNumber(row?.active_listings_7d),
+    snapshotCount30d: toFiniteNumber(row?.snapshot_count_30d),
     parityStatus,
     blendPolicy: weighted.blendPolicy,
     confidenceScore: weighted.confidenceScore,
@@ -119,7 +133,7 @@ export async function getCanonicalMarketPulseMap(
 
   const { data, error } = await supabase
     .from("public_card_metrics")
-    .select("canonical_slug, justtcg_price, scrydex_price, pokemontcg_price, market_price, median_7d, market_confidence_score, market_low_confidence, market_blend_policy, market_provenance, change_pct_24h, change_pct_7d")
+    .select("canonical_slug, justtcg_price, scrydex_price, pokemontcg_price, market_price, market_price_as_of, active_listings_7d, snapshot_count_30d, median_7d, market_confidence_score, market_low_confidence, market_blend_policy, market_provenance, change_pct_24h, change_pct_7d")
     .in("canonical_slug", slugs)
     .is("printing_id", null)
     .eq("grade", "RAW")
@@ -159,6 +173,9 @@ export async function getCanonicalMarketPulseMap(
       resolved.blendPolicy = row.market_blend_policy;
     }
     const sourceMix = row.market_provenance?.sourceMix;
+    const sampleCounts7d = (row.market_provenance as {
+      sampleCounts7d?: { justtcg?: number; scrydex?: number };
+    } | null)?.sampleCounts7d;
     if (
       sourceMix &&
       typeof sourceMix.justtcgWeight === "number" &&
@@ -167,6 +184,17 @@ export async function getCanonicalMarketPulseMap(
       resolved.sourceMix = {
         justtcgWeight: sourceMix.justtcgWeight,
         scrydexWeight: sourceMix.scrydexWeight,
+      };
+    }
+    if (
+      sampleCounts7d &&
+      typeof sampleCounts7d.justtcg === "number" &&
+      typeof sampleCounts7d.scrydex === "number"
+    ) {
+      resolved.sampleCounts7d = {
+        justtcg: Math.max(0, sampleCounts7d.justtcg),
+        scrydex: Math.max(0, sampleCounts7d.scrydex),
+        total: Math.max(0, sampleCounts7d.justtcg + sampleCounts7d.scrydex),
       };
     }
     pulseMap.set(row.canonical_slug, resolved);

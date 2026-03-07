@@ -26,7 +26,14 @@ function timeAgo(iso: string | null): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
-const EMPTY_DATA = { movers: [], losers: [], trending: [], as_of: null } as const;
+const EMPTY_DATA = {
+  movers: [],
+  high_confidence_movers: [],
+  emerging_movers: [],
+  losers: [],
+  trending: [],
+  as_of: null,
+} as const;
 const DATA_TIMEOUT_MS = 8_000; // under Vercel's 10s function limit
 const AI_TIMEOUT_MS = 4_000;
 const TRENDING_SET_PILLS = [
@@ -405,6 +412,8 @@ export default async function HomePage() {
     ]);
     console.log("[homepage] data resolved:", {
       movers: data?.movers?.length ?? 0,
+      high_confidence_movers: data?.high_confidence_movers?.length ?? 0,
+      emerging_movers: data?.emerging_movers?.length ?? 0,
       losers: data?.losers?.length ?? 0,
       trending: data?.trending?.length ?? 0,
     });
@@ -414,6 +423,8 @@ export default async function HomePage() {
   }
 
   const movers = Array.isArray(data?.movers) ? data.movers : [];
+  const highConfidenceMovers = Array.isArray(data?.high_confidence_movers) ? data.high_confidence_movers : [];
+  const emergingMovers = Array.isArray(data?.emerging_movers) ? data.emerging_movers : [];
   const losers = Array.isArray(data?.losers) ? data.losers : [];
   const trending = Array.isArray(data?.trending) ? data.trending : [];
   const asOf = timeAgo(data?.as_of ?? null);
@@ -554,15 +565,28 @@ export default async function HomePage() {
         </div>
       </div>
 
-      {/* ── Top Movers ───────────────────────────────────────────────── */}
-      <SectionCarousel title="Top Movers" icon="🔥" subtitle="7d">
-        {movers.length > 0
-          ? movers.slice(0, 5).map((card) => (
+      {/* ── High-Confidence Movers ───────────────────────────────────── */}
+      <SectionCarousel title="High-Confidence Movers" icon="🔥" subtitle="24h composite">
+        {highConfidenceMovers.length > 0
+          ? highConfidenceMovers.slice(0, 5).map((card) => (
               <CardTileMini key={card.slug} card={card} showTier />
             ))
           : null}
-        {movers.length === 0 ? (
-          <EmptySlot message="No mover data yet" />
+        {highConfidenceMovers.length === 0 ? (
+          <EmptySlot message="No high-confidence movers yet" />
+        ) : null}
+      </SectionCarousel>
+      <div className="mx-auto mt-6 max-w-5xl border-b border-white/5 px-4 sm:px-6 lg:px-0" />
+
+      {/* ── Emerging Movers ──────────────────────────────────────────── */}
+      <SectionCarousel title="Emerging Movers" icon="🌱" subtitle="low liquidity">
+        {emergingMovers.length > 0
+          ? emergingMovers.slice(0, 5).map((card) => (
+              <CardTileMini key={card.slug} card={card} showTier />
+            ))
+          : null}
+        {emergingMovers.length === 0 ? (
+          <EmptySlot message="No emerging movers yet" />
         ) : null}
       </SectionCarousel>
       <div className="mx-auto mt-6 max-w-5xl border-b border-white/5 px-4 sm:px-6 lg:px-0" />

@@ -77,6 +77,36 @@ function buildCandidates(snapshot: PricingTransparencySnapshot): AlertCandidate[
   return candidates;
 }
 
+async function computeMutedMoverStreakHours(params: {
+  currentMedianMove: number | null;
+  threshold: number;
+  lookbackHours: number;
+}): Promise<number> {
+  const current = params.currentMedianMove;
+  if (!(typeof current === "number" && Number.isFinite(current) && current > 0)) return 0;
+  if (current >= params.threshold) return 0;
+
+  const supabase = dbAdmin();
+  const { data, error } = await supabase
+    .from("pricing_transparency_snapshots")
+    .select("captured_at, payload")
+    .order("captured_at", { ascending: false })
+    .limit(Math.max(1, params.lookbackHours - 1));
+  if (error) return 1;
+
+  let streak = 1; // include current hour
+  for (const row of (data ?? []) as Array<{
+    payload: {
+      moversHealth?: { highConfidenceTop10MedianAbsChangePct?: number | null };
+    } | null;
+  }>) {
+    const prior = row.payload?.moversHealth?.highConfidenceTop10MedianAbsChangePct;
+    if (!(typeof prior === "number" && Number.isFinite(prior) && prior > 0 && prior < params.threshold)) break;
+    streak += 1;
+  }
+  return streak;
+}
+
 async function postJson(url: string, body: Record<string, unknown>): Promise<boolean> {
   try {
     const res = await fetch(url, {
@@ -97,6 +127,21 @@ export async function deliverPricingThresholdAlerts(snapshot: PricingTransparenc
   const webhookUrl = process.env.POPALPHA_ALERT_WEBHOOK_URL?.trim() ?? "";
   const slackWebhookUrl = process.env.POPALPHA_SLACK_WEBHOOK_URL?.trim() ?? "";
   const candidates = buildCandidates(snapshot);
+  const mutedMoverStreak = await computeMutedMoverStreakHours({
+    currentMedianMove: snapshot.moversHealth.highConfidenceTop10MedianAbsChangePct,
+    threshold: 3,
+    lookbackHours: 6,
+  });
+  if (mutedMoverStreak >= 6) {
+    candidates.push({
+      metric: "top_movers_muted_streak",
+      severity: (snapshot.moversHealth.highConfidenceTop10MedianAbsChangePct ?? 0) < 2 ? "critical" : "warning",
+      message: `Top-10 mover median stayed below 3% for ${mutedMoverStreak}h (now ${(snapshot.moversHealth.highConfidenceTop10MedianAbsChangePct ?? 0).toFixed(2)}%).`,
+      value: snapshot.moversHealth.highConfidenceTop10MedianAbsChangePct ?? 0,
+      threshold: 3,
+      comparator: "lte",
+    });
+  }
   if (!webhookUrl && !slackWebhookUrl) {
     return { candidates: candidates.length, delivered: 0 };
   }

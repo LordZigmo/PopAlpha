@@ -131,6 +131,12 @@ export type PricingTransparencySnapshot = {
       mape: number | null;
     }>;
   };
+  moversHealth: {
+    highConfidenceCount: number;
+    emergingCount: number;
+    highConfidenceTop10MedianAbsChangePct: number | null;
+    emergingTop10MedianAbsChangePct: number | null;
+  };
   slo: Array<{
     key: "freshness_24h" | "coverage_both" | "change_coverage" | "agreement_p90" | "sentinel_prices" | "pipeline_retry_depth";
     label: string;
@@ -161,6 +167,15 @@ function toFinite(value: number | null | undefined): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function computeLiquidityWeight(activeListings7d: number): number {
+  if (activeListings7d <= 1) return 0.35;
+  if (activeListings7d <= 3) return 0.55;
+  if (activeListings7d <= 5) return 0.75;
+  if (activeListings7d <= 10) return 0.95;
+  if (activeListings7d <= 20) return 1.1;
+  return 1.25;
+}
+
 export async function getPricingTransparencySnapshot(): Promise<PricingTransparencySnapshot> {
   const supabase = dbPublic();
   const now = new Date();
@@ -189,6 +204,7 @@ export async function getPricingTransparencySnapshot(): Promise<PricingTranspare
     outlierImpactedRowsRes,
     recentRawRowsRes,
     backtestSnapshotRes,
+    moversHealthRowsRes,
   ] = await Promise.all([
     supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null),
     supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null).not("justtcg_price", "is", null).not("scrydex_price", "is", null),
@@ -214,6 +230,12 @@ export async function getPricingTransparencySnapshot(): Promise<PricingTranspare
       .order("captured_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
+    supabase
+      .from("public_card_metrics")
+      .select("canonical_slug, change_pct_24h, change_pct_7d, market_confidence_score, market_low_confidence, market_provenance, market_price_as_of, active_listings_7d")
+      .eq("grade", "RAW")
+      .is("printing_id", null)
+      .limit(15000),
   ]);
 
   const totalRaw = totalRawRes.count ?? 0;
@@ -428,6 +450,48 @@ export async function getPricingTransparencySnapshot(): Promise<PricingTranspare
       : [],
   };
 
+  const moverRows = (moversHealthRowsRes.data ?? []) as Array<{
+    canonical_slug: string;
+    change_pct_24h: number | null;
+    change_pct_7d: number | null;
+    market_confidence_score: number | null;
+    market_low_confidence: boolean | null;
+    market_provenance: {
+      sampleCounts7d?: { justtcg?: number; scrydex?: number };
+    } | null;
+    market_price_as_of: string | null;
+    active_listings_7d: number | null;
+  }>;
+  const highConfidenceScores: number[] = [];
+  const emergingScores: number[] = [];
+  for (const row of moverRows) {
+    const changePct = Math.abs(toFinite(row.change_pct_24h) ?? toFinite(row.change_pct_7d) ?? 0);
+    if (changePct < 2.5) continue;
+    const confidenceScore = toFinite(row.market_confidence_score) ?? 0;
+    if (row.market_low_confidence === true || confidenceScore < 45) continue;
+    const asOfMs = row.market_price_as_of ? new Date(row.market_price_as_of).getTime() : NaN;
+    if (!Number.isFinite(asOfMs) || (Date.now() - asOfMs) > (24 * 60 * 60 * 1000)) continue;
+    const sampleCounts7d = row.market_provenance?.sampleCounts7d;
+    const sampleSize7d = (toFinite(sampleCounts7d?.justtcg) ?? 0) + (toFinite(sampleCounts7d?.scrydex) ?? 0);
+    if (sampleSize7d < 8) continue;
+    const activeListings7d = Math.max(0, toFinite(row.active_listings_7d) ?? 0);
+    const liquidityWeight = computeLiquidityWeight(activeListings7d);
+    const score = changePct * (confidenceScore / 100) * liquidityWeight;
+    if (!(score > 0)) continue;
+    if (activeListings7d >= 6) highConfidenceScores.push(changePct);
+    else if (activeListings7d <= 5) emergingScores.push(changePct);
+  }
+  highConfidenceScores.sort((a, b) => b - a);
+  emergingScores.sort((a, b) => b - a);
+  const highConfidenceTop10 = highConfidenceScores.slice(0, 10).sort((a, b) => a - b);
+  const emergingTop10 = emergingScores.slice(0, 10).sort((a, b) => a - b);
+  const moversHealth = {
+    highConfidenceCount: highConfidenceScores.length,
+    emergingCount: emergingScores.length,
+    highConfidenceTop10MedianAbsChangePct: percentile(highConfidenceTop10, 50),
+    emergingTop10MedianAbsChangePct: percentile(emergingTop10, 50),
+  };
+
   function statusHighGood(value: number | null, good: number, warn: number): "healthy" | "warning" | "critical" {
     if (value === null) return "warning";
     if (value >= good) return "healthy";
@@ -457,6 +521,9 @@ export async function getPricingTransparencySnapshot(): Promise<PricingTranspare
   if (agreementSlo === "critical") alerts.push(`Provider spread is elevated (p90 ${p90Spread ?? 0}%).`);
   if (divergenceGt80PctCount > 50) alerts.push(`Provider divergence spike: ${divergenceGt80PctCount} cards >80% spread.`);
   if (setJumpGt40PctCount > 0) alerts.push(`Set-level jump alert: ${setJumpGt40PctCount} sets have >=40% 24h movers.`);
+  if ((moversHealth.highConfidenceTop10MedianAbsChangePct ?? 0) > 0 && (moversHealth.highConfidenceTop10MedianAbsChangePct ?? 0) < 3) {
+    alerts.push(`Top movers are muted (top-10 median move ${moversHealth.highConfidenceTop10MedianAbsChangePct?.toFixed(2)}%).`);
+  }
   if (zeroChange24hCount > Math.max(100, Math.floor(totalRaw * 0.25))) {
     alerts.push(`Zero-change spike: ${zeroChange24hCount} RAW cards reported 0% 24h change.`);
   }
@@ -526,6 +593,7 @@ export async function getPricingTransparencySnapshot(): Promise<PricingTranspare
       setJumpGt40PctCount,
     },
     accuracyBacktest,
+    moversHealth,
     slo: [
       {
         key: "freshness_24h",
