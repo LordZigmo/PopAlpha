@@ -34,10 +34,11 @@ export async function GET(req: Request) {
       : Promise.resolve({ data: [], error: null }),
     printingIds.length > 0
       ? supabase
-          .from("card_external_mappings")
-          .select("id, canonical_slug, printing_id, external_id, meta, created_at")
-          .eq("source", "JUSTTCG")
-          .eq("mapping_type", "printing")
+          .from("provider_card_map")
+          .select("provider, canonical_slug, printing_id, provider_card_id, provider_variant_id, mapping_status, match_confidence, metadata, updated_at")
+          .eq("provider", "JUSTTCG")
+          .eq("asset_type", "single")
+          .eq("mapping_status", "MATCHED")
           .in("printing_id", printingIds)
       : Promise.resolve({ data: [], error: null }),
   ]);

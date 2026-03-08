@@ -5,6 +5,8 @@ import { runScrydexRawIngest } from "@/lib/backfill/pokemontcg-raw-ingest";
 import { runScrydexRawNormalize } from "@/lib/backfill/pokemontcg-raw-normalize";
 import { runScrydexNormalizedMatch } from "@/lib/backfill/pokemontcg-normalized-match";
 import { runProviderObservationTimeseries } from "@/lib/backfill/provider-observation-timeseries";
+import { runProviderObservationVariantMetrics } from "@/lib/backfill/provider-observation-variant-metrics";
+import { refreshPipelineRollupsForVariantKeys } from "@/lib/backfill/provider-pipeline-rollups";
 
 type PipelineStep<T extends object> = {
   name: string;
@@ -43,6 +45,7 @@ export async function runJustTcgPipeline(opts: {
   payloadLimit?: number;
   matchObservations?: number;
   timeseriesObservations?: number;
+  metricsObservations?: number;
   force?: boolean;
   retryOnly?: boolean;
 } = {}): Promise<PipelineResult> {
@@ -93,6 +96,24 @@ export async function runJustTcgPipeline(opts: {
     if (!timeseries.ok) firstError = timeseries.firstError ?? "justtcg timeseries failed";
   }
 
+  if (!firstError) {
+    const variantMetrics = await runProviderObservationVariantMetrics({
+      provider: "JUSTTCG",
+      providerSetId: opts.providerSetId ?? undefined,
+      observationLimit: opts.metricsObservations ?? opts.timeseriesObservations ?? opts.matchObservations,
+    });
+    steps.push({ name: "variant_metrics", ok: variantMetrics.ok, result: variantMetrics });
+    if (!variantMetrics.ok) firstError = variantMetrics.firstError ?? "justtcg variant metrics failed";
+
+    if (!firstError) {
+      const rollups = await refreshPipelineRollupsForVariantKeys({
+        keys: variantMetrics.touchedVariantKeys,
+      });
+      steps.push({ name: "targeted_rollups", ok: rollups.ok, result: rollups });
+      if (!rollups.ok) firstError = rollups.firstError ?? "justtcg targeted rollups failed";
+    }
+  }
+
   const endedAt = new Date().toISOString();
   const coreOk = !firstError;
   return {
@@ -113,6 +134,7 @@ export async function runPokemonTcgPipeline(opts: {
   payloadLimit?: number;
   matchObservations?: number;
   timeseriesObservations?: number;
+  metricsObservations?: number;
   force?: boolean;
   matchScanDirection?: "newest" | "oldest";
   matchMode?: "incremental" | "backlog";
@@ -165,6 +187,24 @@ export async function runPokemonTcgPipeline(opts: {
     if (!timeseries.ok) firstError = timeseries.firstError ?? "scrydex timeseries failed";
   }
 
+  if (!firstError) {
+    const variantMetrics = await runProviderObservationVariantMetrics({
+      provider: "SCRYDEX",
+      providerSetId: opts.providerSetId ?? undefined,
+      observationLimit: opts.metricsObservations ?? opts.timeseriesObservations ?? opts.matchObservations,
+    });
+    steps.push({ name: "variant_metrics", ok: variantMetrics.ok, result: variantMetrics });
+    if (!variantMetrics.ok) firstError = variantMetrics.firstError ?? "scrydex variant metrics failed";
+
+    if (!firstError) {
+      const rollups = await refreshPipelineRollupsForVariantKeys({
+        keys: variantMetrics.touchedVariantKeys,
+      });
+      steps.push({ name: "targeted_rollups", ok: rollups.ok, result: rollups });
+      if (!rollups.ok) firstError = rollups.firstError ?? "scrydex targeted rollups failed";
+    }
+  }
+
   const endedAt = new Date().toISOString();
   const coreOk = !firstError;
   return {
@@ -185,6 +225,7 @@ export async function runScrydexPipeline(opts: {
   payloadLimit?: number;
   matchObservations?: number;
   timeseriesObservations?: number;
+  metricsObservations?: number;
   force?: boolean;
   matchScanDirection?: "newest" | "oldest";
   matchMode?: "incremental" | "backlog";

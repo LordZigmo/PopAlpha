@@ -474,6 +474,7 @@ export async function POST(req: Request) {
       supabase.from("market_latest").select("printing_id", { count: "exact", head: true }).eq("printing_id", printing.id),
       supabase.from("price_snapshots").select("printing_id", { count: "exact", head: true }).eq("printing_id", printing.id),
       supabase.from("variant_metrics").select("printing_id", { count: "exact", head: true }).eq("printing_id", printing.id),
+      supabase.from("provider_card_map").select("printing_id", { count: "exact", head: true }).eq("provider", "JUSTTCG").eq("printing_id", printing.id),
       supabase.from("card_external_mappings").select("printing_id", { count: "exact", head: true }).eq("printing_id", printing.id),
       supabase.from("provider_ingests").select("printing_id", { count: "exact", head: true }).eq("printing_id", printing.id),
     ]);

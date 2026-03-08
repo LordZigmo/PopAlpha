@@ -1,4 +1,12 @@
 import { dbAdmin } from "@/lib/db/admin";
+import {
+  buildProviderCardMapKey,
+  buildProviderCardMapUpsertRow,
+  dedupeProviderCardMapUpsertRows,
+  loadProviderCardMapByKeys,
+  type ProviderCardMapRow,
+  type ProviderCardMapUpsertRow,
+} from "@/lib/backfill/provider-card-map";
 import { loadProviderSetIndex } from "@/lib/backfill/provider-set-index";
 import { loadHighValueStaleSetPriority } from "@/lib/backfill/set-priority";
 
@@ -59,6 +67,7 @@ type NormalizedObservationRow = {
   normalized_edition: "UNLIMITED" | "FIRST_EDITION";
   normalized_stamp: "NONE" | "POKEMON_CENTER";
   normalized_language: string;
+  observed_at: string;
 };
 
 type ProviderSetMapRow = {
@@ -140,6 +149,37 @@ type UnmatchedDecision = {
 };
 
 type MatchDecision = MatchedDecision | UnmatchedDecision;
+
+function buildMatchedRowFromProviderCardMap(
+  observation: NormalizedObservationRow,
+  providerCardMap: ProviderCardMapRow,
+  nowIso: string,
+): MatchWriteRow | null {
+  if (providerCardMap.mapping_status !== "MATCHED") return null;
+  if (providerCardMap.asset_type !== observation.asset_type) return null;
+  if (!providerCardMap.canonical_slug || !providerCardMap.printing_id) return null;
+
+  return {
+    provider_normalized_observation_id: observation.id,
+    provider: PROVIDER,
+    asset_type: observation.asset_type,
+    provider_set_id: observation.provider_set_id,
+    provider_card_id: observation.provider_card_id,
+    provider_variant_id: observation.provider_variant_id,
+    canonical_slug: providerCardMap.canonical_slug,
+    printing_id: providerCardMap.printing_id,
+    match_status: "MATCHED",
+    match_type: providerCardMap.match_type ?? "PROVIDER_CARD_MAP",
+    match_confidence: providerCardMap.match_confidence ?? 1,
+    match_reason: null,
+    metadata: {
+      ...(providerCardMap.metadata ?? {}),
+      providerKey: providerCardMap.provider_key,
+      resolvedFrom: "provider_card_map",
+    },
+    updated_at: nowIso,
+  };
+}
 
 function parsePositiveInt(value: number | undefined, fallback: number): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
@@ -286,7 +326,7 @@ async function loadCandidateObservations(params: {
   if (params.observationId) {
     let query = supabase
       .from("provider_normalized_observations")
-      .select("id, provider, provider_set_id, provider_card_id, provider_variant_id, asset_type, normalized_card_number, normalized_finish, normalized_edition, normalized_stamp, normalized_language")
+      .select("id, provider, provider_set_id, provider_card_id, provider_variant_id, asset_type, normalized_card_number, normalized_finish, normalized_edition, normalized_stamp, normalized_language, observed_at")
       .eq("id", params.observationId)
       .eq("provider", PROVIDER);
 
@@ -356,7 +396,7 @@ async function loadCandidateObservations(params: {
     if (selectedIds.length === 0 || timedOut) return;
     const { data: fullRows, error: fullError } = await supabase
       .from("provider_normalized_observations")
-      .select("id, provider, provider_set_id, provider_card_id, provider_variant_id, asset_type, normalized_card_number, normalized_finish, normalized_edition, normalized_stamp, normalized_language")
+      .select("id, provider, provider_set_id, provider_card_id, provider_variant_id, asset_type, normalized_card_number, normalized_finish, normalized_edition, normalized_stamp, normalized_language, observed_at")
       .in("id", selectedIds);
 
     if (fullError) throw new Error(`provider_normalized_observations(load selected): ${fullError.message}`);
@@ -483,7 +523,7 @@ async function loadCandidateObservations(params: {
 
     const { data: fullRows, error: fullError } = await supabase
       .from("provider_normalized_observations")
-      .select("id, provider, provider_set_id, provider_card_id, provider_variant_id, asset_type, normalized_card_number, normalized_finish, normalized_edition, normalized_stamp, normalized_language")
+      .select("id, provider, provider_set_id, provider_card_id, provider_variant_id, asset_type, normalized_card_number, normalized_finish, normalized_edition, normalized_stamp, normalized_language, observed_at")
       .in("id", selectedIds);
 
     if (fullError) {
@@ -633,10 +673,52 @@ function chooseSinglePrinting(params: {
     };
   }
 
+  const providerVariantToken = String(observation.provider_variant_id ?? "")
+    .split(":")
+    .at(-1)
+    ?.toLowerCase()
+    .replace(/[^a-z0-9]+/g, "") ?? "";
+  const isBasicProviderVariant = new Set([
+    "unknown",
+    "normal",
+    "nonholo",
+    "nonholofoil",
+    "holo",
+    "holofoil",
+    "foil",
+    "reverse",
+    "reversefoil",
+    "reverseholo",
+    "reverseholofoil",
+    "pokeballreverseholofoil",
+    "masterballreverseholofoil",
+    "duskballreverseholofoil",
+    "energyreverseholofoil",
+    "rocketreverseholofoil",
+    "quickballreverseholofoil",
+  ]).has(providerVariantToken);
+
   if (setRows.length === 1) {
+    const onlyPrinting = setRows[0];
+    if (onlyPrinting.finish === "UNKNOWN" && isBasicProviderVariant) {
+      return {
+        matched: true,
+        printing: onlyPrinting,
+        matchType: "PRINTING_NUMBER_ONLY_CANONICAL_UNKNOWN",
+        confidence: 0.93,
+        metadata: {
+          canonicalSetCode,
+          cardNumber,
+          language,
+          providerVariantToken,
+          canonicalFinish: onlyPrinting.finish,
+        },
+      };
+    }
+
     return {
       matched: true,
-      printing: setRows[0],
+      printing: onlyPrinting,
       matchType: "PRINTING_NUMBER_ONLY",
       confidence: 0.88,
       metadata: { canonicalSetCode, cardNumber, language },
@@ -761,11 +843,17 @@ export async function runPokemonTcgNormalizedMatch(opts: {
         .map((row) => row.provider_set_id)
         .filter((value): value is string => Boolean(value)),
     ));
+    const providerCardMapByKey = await loadProviderCardMapByKeys({
+      provider: PROVIDER,
+      providerKeys: candidateResult.rows.map((row) =>
+        buildProviderCardMapKey(row.provider_card_id, row.provider_variant_id)),
+    });
     const providerSetMap = await loadProviderSetMap(providerSetIds);
     const setCodes = Array.from(new Set(providerSetMap.values()));
     const printingsBySetCode = await loadCardPrintings(setCodes);
 
     const writes: MatchWriteRow[] = [];
+    const providerCardMapWrites: ProviderCardMapUpsertRow[] = [];
     for (const observation of candidateResult.rows) {
       if (hasDeadlinePassed(deadlineMs)) {
         throw new Error(
@@ -774,11 +862,70 @@ export async function runPokemonTcgNormalizedMatch(opts: {
       }
       observationsProcessed += 1;
       const nowIso = new Date().toISOString();
+      const providerKey = buildProviderCardMapKey(observation.provider_card_id, observation.provider_variant_id);
+      const existingProviderCardMap = opts.force
+        ? null
+        : (providerCardMapByKey.get(providerKey) ?? null);
+
+      const reusedRow = existingProviderCardMap
+        ? buildMatchedRowFromProviderCardMap(observation, existingProviderCardMap, nowIso)
+        : null;
+      if (reusedRow) {
+        writes.push(reusedRow);
+        providerCardMapWrites.push(buildProviderCardMapUpsertRow({
+          provider: PROVIDER,
+          assetType: observation.asset_type,
+          providerSetId: observation.provider_set_id,
+          providerCardId: observation.provider_card_id,
+          providerVariantId: observation.provider_variant_id,
+          canonicalSlug: reusedRow.canonical_slug,
+          printingId: reusedRow.printing_id,
+          mappingStatus: "MATCHED",
+          matchType: reusedRow.match_type,
+          matchConfidence: reusedRow.match_confidence,
+          matchReason: null,
+          mappingSource: "PIPELINE",
+          metadata: reusedRow.metadata,
+          observedAt: observation.observed_at,
+          matchedAt: nowIso,
+          updatedAt: nowIso,
+        }));
+        matchedCount += 1;
+        singlesMatched += 1;
+        if (sampleMatches.length < 25) {
+          sampleMatches.push({
+            observationId: observation.id,
+            providerSetId: observation.provider_set_id,
+            providerCardId: observation.provider_card_id,
+            providerVariantId: observation.provider_variant_id,
+            assetType: observation.asset_type,
+            matchStatus: reusedRow.match_status,
+            printingId: reusedRow.printing_id,
+            canonicalSlug: reusedRow.canonical_slug,
+            matchType: reusedRow.match_type,
+            matchReason: null,
+          });
+        }
+        continue;
+      }
 
       const providerSetId = String(observation.provider_set_id ?? "").trim();
       if (!providerSetId) {
         const row = buildUnmatchedRow(observation, nowIso, "MISSING_PROVIDER_SET_ID");
         writes.push(row);
+        providerCardMapWrites.push(buildProviderCardMapUpsertRow({
+          provider: PROVIDER,
+          assetType: observation.asset_type,
+          providerSetId: observation.provider_set_id,
+          providerCardId: observation.provider_card_id,
+          providerVariantId: observation.provider_variant_id,
+          mappingStatus: "UNMATCHED",
+          matchReason: row.match_reason,
+          mappingSource: "PIPELINE",
+          metadata: row.metadata,
+          observedAt: observation.observed_at,
+          updatedAt: nowIso,
+        }));
         unmatchedCount += 1;
         continue;
       }
@@ -787,6 +934,19 @@ export async function runPokemonTcgNormalizedMatch(opts: {
       if (!canonicalSetCode) {
         const row = buildUnmatchedRow(observation, nowIso, "MISSING_PROVIDER_SET_MAP", { providerSetId });
         writes.push(row);
+        providerCardMapWrites.push(buildProviderCardMapUpsertRow({
+          provider: PROVIDER,
+          assetType: observation.asset_type,
+          providerSetId: observation.provider_set_id,
+          providerCardId: observation.provider_card_id,
+          providerVariantId: observation.provider_variant_id,
+          mappingStatus: "UNMATCHED",
+          matchReason: row.match_reason,
+          mappingSource: "PIPELINE",
+          metadata: row.metadata,
+          observedAt: observation.observed_at,
+          updatedAt: nowIso,
+        }));
         unmatchedCount += 1;
         continue;
       }
@@ -801,6 +961,19 @@ export async function runPokemonTcgNormalizedMatch(opts: {
       if (!decision.matched) {
         const row = buildUnmatchedRow(observation, nowIso, decision.reason, decision.metadata);
         writes.push(row);
+        providerCardMapWrites.push(buildProviderCardMapUpsertRow({
+          provider: PROVIDER,
+          assetType: observation.asset_type,
+          providerSetId: observation.provider_set_id,
+          providerCardId: observation.provider_card_id,
+          providerVariantId: observation.provider_variant_id,
+          mappingStatus: "UNMATCHED",
+          matchReason: row.match_reason,
+          mappingSource: "PIPELINE",
+          metadata: row.metadata,
+          observedAt: observation.observed_at,
+          updatedAt: nowIso,
+        }));
         unmatchedCount += 1;
         if (sampleMatches.length < 25) {
           sampleMatches.push({
@@ -827,6 +1000,19 @@ export async function runPokemonTcgNormalizedMatch(opts: {
           minAutoMatchConfidence: MIN_AUTO_MATCH_CONFIDENCE,
         });
         writes.push(row);
+        providerCardMapWrites.push(buildProviderCardMapUpsertRow({
+          provider: PROVIDER,
+          assetType: observation.asset_type,
+          providerSetId: observation.provider_set_id,
+          providerCardId: observation.provider_card_id,
+          providerVariantId: observation.provider_variant_id,
+          mappingStatus: "UNMATCHED",
+          matchReason: row.match_reason,
+          mappingSource: "PIPELINE",
+          metadata: row.metadata,
+          observedAt: observation.observed_at,
+          updatedAt: nowIso,
+        }));
         unmatchedCount += 1;
         if (sampleMatches.length < 25) {
           sampleMatches.push({
@@ -854,6 +1040,24 @@ export async function runPokemonTcgNormalizedMatch(opts: {
         decision.metadata,
       );
       writes.push(row);
+      providerCardMapWrites.push(buildProviderCardMapUpsertRow({
+        provider: PROVIDER,
+        assetType: observation.asset_type,
+        providerSetId: observation.provider_set_id,
+        providerCardId: observation.provider_card_id,
+        providerVariantId: observation.provider_variant_id,
+        canonicalSlug: row.canonical_slug,
+        printingId: row.printing_id,
+        mappingStatus: "MATCHED",
+        matchType: row.match_type,
+        matchConfidence: row.match_confidence,
+        matchReason: null,
+        mappingSource: "PIPELINE",
+        metadata: row.metadata,
+        observedAt: observation.observed_at,
+        matchedAt: nowIso,
+        updatedAt: nowIso,
+      }));
       matchedCount += 1;
       singlesMatched += 1;
       if (sampleMatches.length < 25) {
@@ -873,6 +1077,17 @@ export async function runPokemonTcgNormalizedMatch(opts: {
     }
 
     if (writes.length > 0) {
+      const dedupedProviderCardMapWrites = dedupeProviderCardMapUpsertRows(providerCardMapWrites);
+      const { error: providerCardMapError } = await supabase
+        .from("provider_card_map")
+        .upsert(dedupedProviderCardMapWrites, {
+          onConflict: "provider,provider_key",
+        });
+
+      if (providerCardMapError) {
+        throw new Error(`provider_card_map: ${providerCardMapError.message}`);
+      }
+
       const { error } = await supabase
         .from("provider_observation_matches")
         .upsert(writes, {

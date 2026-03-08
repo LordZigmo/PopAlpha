@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/auth/require";
+import { buildProviderCardMapKey } from "@/lib/backfill/provider-card-map";
 import { dbAdmin } from "@/lib/db/admin";
+import { buildProviderHistoryVariantRef } from "@/lib/identity/variant-ref.mjs";
 
-type MatchRow = {
-  provider_normalized_observation_id: string;
+type ProviderCardMapRow = {
   provider: string;
+  provider_card_id: string;
   provider_variant_id: string;
   canonical_slug: string | null;
   printing_id: string | null;
@@ -57,11 +59,6 @@ type HistoryRow = {
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-function buildHistoryVariantRef(printingId: string | null, canonicalSlug: string, providerVariantId: string): string {
-  if (printingId) return `${printingId}::RAW::${providerVariantId}`;
-  return `${canonicalSlug}::RAW::${providerVariantId}`;
-}
-
 export async function GET(req: Request) {
   const auth = await requireCron(req);
   if (!auth.ok) return auth.response;
@@ -104,28 +101,28 @@ export async function GET(req: Request) {
     for (const row of (printingRows ?? []) as PrintingMetaRow[]) printingMetaById.set(row.id, row);
   }
 
-  let matchQuery = supabase
-    .from("provider_observation_matches")
-    .select("provider_normalized_observation_id, provider, provider_variant_id, canonical_slug, printing_id")
-    .eq("match_status", "MATCHED")
+  let mappingQuery = supabase
+    .from("provider_card_map")
+    .select("provider, provider_card_id, provider_variant_id, canonical_slug, printing_id")
+    .eq("mapping_status", "MATCHED")
     .eq("canonical_slug", slug);
 
   if (printingId) {
-    matchQuery = matchQuery.eq("printing_id", printingId);
+    mappingQuery = mappingQuery.eq("printing_id", printingId);
   } else {
-    matchQuery = matchQuery.not("printing_id", "is", null);
+    mappingQuery = mappingQuery.not("printing_id", "is", null);
   }
 
-  const { data: matchRows, error: matchError } = await matchQuery;
-  if (matchError) return NextResponse.json({ ok: false, error: matchError.message }, { status: 500 });
+  const { data: mappingRows, error: mappingError } = await mappingQuery;
+  if (mappingError) return NextResponse.json({ ok: false, error: mappingError.message }, { status: 500 });
 
-  const matches = (matchRows ?? []) as MatchRow[];
-  if (matches.length === 0) {
+  const mappings = (mappingRows ?? []) as ProviderCardMapRow[];
+  if (mappings.length === 0) {
     return NextResponse.json({ ok: true, slug, printingId, readings: [] });
   }
 
-  const byProvider = new Map<string, MatchRow[]>();
-  for (const row of matches) {
+  const byProvider = new Map<string, ProviderCardMapRow[]>();
+  for (const row of mappings) {
     const bucket = byProvider.get(row.provider) ?? [];
     bucket.push(row);
     byProvider.set(row.provider, bucket);
@@ -134,18 +131,24 @@ export async function GET(req: Request) {
   const readings = [];
 
   for (const [provider, providerMatches] of byProvider.entries()) {
-    const observationIds = providerMatches.map((row) => row.provider_normalized_observation_id);
+    const providerVariantIds = Array.from(new Set(providerMatches.map((row) => row.provider_variant_id)));
     const { data: observationRows, error: obsError } = await supabase
       .from("provider_normalized_observations")
       .select("id, provider_set_id, provider_card_id, provider_variant_id, card_name, card_number, normalized_card_number, normalized_finish, normalized_edition, normalized_stamp, normalized_condition, normalized_language, observed_price, currency, observed_at, variant_ref")
-      .in("id", observationIds)
+      .eq("provider", provider)
+      .in("provider_variant_id", providerVariantIds)
       .order("observed_at", { ascending: false })
-      .limit(limit);
+      .limit(Math.max(limit, providerVariantIds.length * limit));
     if (obsError) return NextResponse.json({ ok: false, error: obsError.message }, { status: 500 });
 
     const observations = (observationRows ?? []) as ObservationRow[];
     const latest = observations[0] ?? null;
-    const matchByObservationId = new Map(providerMatches.map((m) => [m.provider_normalized_observation_id, m] as const));
+    const mappingByKey = new Map(
+      providerMatches.map((mapping) => [
+        buildProviderCardMapKey(mapping.provider_card_id, mapping.provider_variant_id),
+        mapping,
+      ] as const),
+    );
 
     let snapshots: SnapshotRow[] = [];
     if (latest) {
@@ -163,8 +166,13 @@ export async function GET(req: Request) {
 
     let history: HistoryRow[] = [];
     if (latest) {
-      const matched = matchByObservationId.get(latest.id);
-      const historyVariantRef = buildHistoryVariantRef(matched?.printing_id ?? null, slug, latest.provider_variant_id);
+      const matched = mappingByKey.get(buildProviderCardMapKey(latest.provider_card_id, latest.provider_variant_id));
+      const historyVariantRef = buildProviderHistoryVariantRef({
+        printingId: matched?.printing_id ?? null,
+        canonicalSlug: matched?.canonical_slug ?? slug,
+        provider,
+        providerVariantId: latest.provider_variant_id,
+      });
       const { data: historyRows, error: historyError } = await supabase
         .from("price_history_points")
         .select("ts, price, currency, source_window")

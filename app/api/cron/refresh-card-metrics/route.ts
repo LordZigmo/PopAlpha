@@ -1,12 +1,10 @@
 /**
  * Cron: refresh-card-metrics
  *
- * Calls refresh_card_metrics() to recompute the card_metrics analytics table
- * from the unified price source (price_snapshots + legacy listing_observations).
+ * Calls the full refresh-card-metrics sweep.
  *
- * This is also called inline at the end of sync-justtcg-prices, so this
- * standalone endpoint is useful for ad-hoc refreshes or if other providers
- * are added with their own schedules.
+ * Provider pipelines now refresh touched cards inline with targeted rollups;
+ * this endpoint remains the periodic full-dataset backstop.
  */
 
 import { NextResponse } from "next/server";

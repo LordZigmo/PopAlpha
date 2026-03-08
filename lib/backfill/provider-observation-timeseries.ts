@@ -1,4 +1,10 @@
 import { dbAdmin } from "@/lib/db/admin";
+import {
+  buildProviderCardMapKey,
+  loadProviderCardMapByKeys,
+  type ProviderCardMapRow,
+} from "@/lib/backfill/provider-card-map";
+import { buildProviderHistoryVariantRef } from "@/lib/identity/variant-ref.mjs";
 import { convertToUsd } from "@/lib/pricing/fx";
 
 const JOB = "provider_observation_timeseries";
@@ -11,17 +17,6 @@ type SupportedProvider = "JUSTTCG" | "SCRYDEX";
 
 type MatchScanRow = {
   provider_normalized_observation_id: string;
-};
-
-type MatchRow = {
-  provider_normalized_observation_id: string;
-  provider: string;
-  provider_set_id: string | null;
-  provider_card_id: string;
-  provider_variant_id: string;
-  canonical_slug: string | null;
-  printing_id: string | null;
-  match_status: "MATCHED" | "UNMATCHED";
 };
 
 type ObservationRow = {
@@ -39,7 +34,7 @@ type ObservationRow = {
 };
 
 type CandidateRow = {
-  match: MatchRow;
+  mapping: ProviderCardMapRow;
   observation: ObservationRow;
 };
 
@@ -114,12 +109,6 @@ function buildProviderRef(provider: SupportedProvider, providerVariantId: string
   return `${provider.toLowerCase()}:${providerVariantId}`;
 }
 
-function buildHistoryVariantRef(match: MatchRow): string {
-  if (match.printing_id) return `${match.printing_id}::RAW::${match.provider_variant_id}`;
-  if (match.canonical_slug) return `${match.canonical_slug}::RAW::${match.provider_variant_id}`;
-  return `${match.provider.toLowerCase()}:${match.provider_variant_id}::RAW`;
-}
-
 function shouldWriteRawForCondition(provider: SupportedProvider, condition: string | null | undefined): boolean {
   // Keep RAW market price comparable by using NM-only snapshots.
   // Scrydex observations are normalized as NM by design.
@@ -144,7 +133,7 @@ async function loadCandidateRows(params: {
   if (params.observationId) {
     let matchQuery = supabase
       .from("provider_observation_matches")
-      .select("provider_normalized_observation_id, provider, provider_set_id, provider_card_id, provider_variant_id, canonical_slug, printing_id, match_status")
+      .select("provider_normalized_observation_id")
       .eq("provider", params.provider)
       .eq("provider_normalized_observation_id", params.observationId)
       .eq("match_status", "MATCHED");
@@ -153,21 +142,31 @@ async function loadCandidateRows(params: {
       matchQuery = matchQuery.eq("provider_set_id", params.providerSetId);
     }
 
-    const { data: matchData, error: matchError } = await matchQuery.maybeSingle<MatchRow>();
+    const { data: matchData, error: matchError } = await matchQuery.maybeSingle<MatchScanRow>();
     if (matchError) throw new Error(`provider_observation_matches(load by observationId): ${matchError.message}`);
     if (!matchData) return { rows: [], scanned: 0, skippedAlreadyWritten: 0 };
 
-      const { data: obsData, error: obsError } = await supabase
-        .from("provider_normalized_observations")
-        .select("id, provider, provider_set_id, provider_card_id, provider_variant_id, asset_type, normalized_condition, observed_price, currency, observed_at, variant_ref")
-        .eq("id", matchData.provider_normalized_observation_id)
-        .eq("provider", params.provider)
-        .maybeSingle<ObservationRow>();
+    const { data: obsData, error: obsError } = await supabase
+      .from("provider_normalized_observations")
+      .select("id, provider, provider_set_id, provider_card_id, provider_variant_id, asset_type, normalized_condition, observed_price, currency, observed_at, variant_ref")
+      .eq("id", matchData.provider_normalized_observation_id)
+      .eq("provider", params.provider)
+      .maybeSingle<ObservationRow>();
     if (obsError) throw new Error(`provider_normalized_observations(load by observationId): ${obsError.message}`);
     if (!obsData) return { rows: [], scanned: 1, skippedAlreadyWritten: 0 };
 
+    const providerKey = buildProviderCardMapKey(obsData.provider_card_id, obsData.provider_variant_id);
+    const providerCardMapByKey = await loadProviderCardMapByKeys({
+      provider: params.provider,
+      providerKeys: [providerKey],
+    });
+    const mapping = providerCardMapByKey.get(providerKey) ?? null;
+    if (!mapping || mapping.mapping_status !== "MATCHED" || !mapping.canonical_slug) {
+      return { rows: [], scanned: 1, skippedAlreadyWritten: 0 };
+    }
+
     return {
-      rows: [{ match: matchData, observation: obsData }],
+      rows: [{ mapping, observation: obsData }],
       scanned: 1,
       skippedAlreadyWritten: 0,
     };
@@ -205,36 +204,35 @@ async function loadCandidateRows(params: {
 
     if (selectedIds.length === 0) continue;
 
-    const [{ data: matchRows, error: matchLoadError }, { data: observationRows, error: obsLoadError }] = await Promise.all([
-      supabase
-        .from("provider_observation_matches")
-        .select("provider_normalized_observation_id, provider, provider_set_id, provider_card_id, provider_variant_id, canonical_slug, printing_id, match_status")
-        .in("provider_normalized_observation_id", selectedIds)
-        .eq("provider", params.provider)
-        .eq("match_status", "MATCHED"),
+    const [{ data: observationRows, error: obsLoadError }] = await Promise.all([
       supabase
         .from("provider_normalized_observations")
         .select("id, provider, provider_set_id, provider_card_id, provider_variant_id, asset_type, normalized_condition, observed_price, currency, observed_at, variant_ref")
         .in("id", selectedIds)
         .eq("provider", params.provider),
     ]);
-    if (matchLoadError) throw new Error(`provider_observation_matches(load selected): ${matchLoadError.message}`);
     if (obsLoadError) throw new Error(`provider_normalized_observations(load selected): ${obsLoadError.message}`);
 
-    const matchByObservationId = new Map<string, MatchRow>();
-    for (const row of (matchRows ?? []) as MatchRow[]) {
-      matchByObservationId.set(row.provider_normalized_observation_id, row);
-    }
     const obsById = new Map<string, ObservationRow>();
     for (const row of (observationRows ?? []) as ObservationRow[]) {
       obsById.set(row.id, row);
     }
+    const providerCardMapByKey = await loadProviderCardMapByKeys({
+      provider: params.provider,
+      providerKeys: (observationRows ?? []).map((row) =>
+        buildProviderCardMapKey(
+          String((row as ObservationRow).provider_card_id),
+          String((row as ObservationRow).provider_variant_id),
+        )),
+    });
 
     for (const id of selectedIds) {
-      const match = matchByObservationId.get(id);
       const observation = obsById.get(id);
-      if (!match || !observation) continue;
-      selected.push({ match, observation });
+      if (!observation) continue;
+      const providerKey = buildProviderCardMapKey(observation.provider_card_id, observation.provider_variant_id);
+      const mapping = providerCardMapByKey.get(providerKey) ?? null;
+      if (!mapping || mapping.mapping_status !== "MATCHED" || !mapping.canonical_slug) continue;
+      selected.push({ mapping, observation });
       if (selected.length >= params.observationLimit) break;
     }
   }
@@ -313,7 +311,7 @@ export async function runProviderObservationTimeseries(opts: {
         observationsSkippedNoPrice += 1;
         continue;
       }
-      if (!row.match.canonical_slug) {
+      if (!row.mapping.canonical_slug) {
         observationsSkippedNoCanonical += 1;
         continue;
       }
@@ -322,14 +320,19 @@ export async function runProviderObservationTimeseries(opts: {
         continue;
       }
 
-      const providerRef = buildProviderRef(opts.provider, row.match.provider_variant_id);
-      const historyVariantRef = buildHistoryVariantRef(row.match);
+      const providerRef = buildProviderRef(opts.provider, row.observation.provider_variant_id);
+      const historyVariantRef = buildProviderHistoryVariantRef({
+        printingId: row.mapping.printing_id,
+        canonicalSlug: row.mapping.canonical_slug,
+        provider: opts.provider,
+        providerVariantId: row.observation.provider_variant_id,
+      });
       const sourceCurrency = normalizeCurrency(row.observation.currency);
       const observedPriceUsd = convertToUsd(observedPrice, sourceCurrency);
 
       snapshotRows.push({
-        canonical_slug: row.match.canonical_slug,
-        printing_id: row.match.printing_id,
+        canonical_slug: row.mapping.canonical_slug,
+        printing_id: row.mapping.printing_id,
         grade: "RAW",
         price_value: observedPriceUsd,
         currency: "USD",
@@ -340,7 +343,7 @@ export async function runProviderObservationTimeseries(opts: {
       });
 
       historyRows.push({
-        canonical_slug: row.match.canonical_slug,
+        canonical_slug: row.mapping.canonical_slug,
         variant_ref: historyVariantRef,
         provider: opts.provider,
         ts: row.observation.observed_at,
@@ -355,8 +358,8 @@ export async function runProviderObservationTimeseries(opts: {
           providerSetId: row.observation.provider_set_id,
           providerCardId: row.observation.provider_card_id,
           providerVariantId: row.observation.provider_variant_id,
-          canonicalSlug: row.match.canonical_slug,
-          printingId: row.match.printing_id,
+          canonicalSlug: row.mapping.canonical_slug,
+          printingId: row.mapping.printing_id,
           providerRef,
           historyVariantRef,
           observedPrice,

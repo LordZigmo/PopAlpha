@@ -19,6 +19,34 @@ function chunk(values, size) {
   return chunks;
 }
 
+function normalizeSetName(value) {
+  return String(value ?? "").trim();
+}
+
+function addSetRow(setMap, sourceCounts, source, setId, setName) {
+  const normalizedSetId = String(setId ?? "").trim();
+  const normalizedSetName = normalizeSetName(setName);
+  if (!normalizedSetId || !normalizedSetName) return;
+
+  const existing = setMap.get(normalizedSetId);
+  if (!existing) {
+    setMap.set(normalizedSetId, { setId: normalizedSetId, setName: normalizedSetName, source });
+    sourceCounts[source] = (sourceCounts[source] ?? 0) + 1;
+    return;
+  }
+
+  const priority = {
+    card_printings: 4,
+    set_summary_snapshots: 3,
+    set_finish_summary_latest: 2,
+    variant_price_latest: 1,
+  };
+  if ((priority[source] ?? 0) > (priority[existing.source] ?? 0)) {
+    existing.setName = normalizedSetName;
+    existing.source = source;
+  }
+}
+
 const SUPABASE_URL = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
 
@@ -54,30 +82,105 @@ async function withRetry(label, fn, attempts = 3) {
   throw new Error(`${label}: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
 }
 
-const { data: setRows, error: setError } = await withRetry(
-  "load_set_universe",
-  () => supabase
-    .from("card_printings")
-    .select("set_name")
-    .not("set_name", "is", null)
-    .eq("language", "EN")
-    .limit(20000),
-);
+const [
+  { data: printingSetRows, error: printingSetError },
+  { data: snapshotSetRows, error: snapshotSetError },
+  { data: finishSetRows, error: finishSetError },
+  { data: pricedSetRows, error: pricedSetError },
+] = await Promise.all([
+  withRetry(
+    "load_set_universe_card_printings",
+    () => supabase
+      .from("card_printings")
+      .select("set_name")
+      .not("set_name", "is", null)
+      .eq("language", "EN")
+      .limit(50000),
+  ),
+  withRetry(
+    "load_set_universe_set_summary_snapshots",
+    () => supabase
+      .from("set_summary_snapshots")
+      .select("set_id, set_name")
+      .not("set_id", "is", null)
+      .not("set_name", "is", null)
+      .limit(50000),
+  ),
+  withRetry(
+    "load_set_universe_set_finish_summary_latest",
+    () => supabase
+      .from("set_finish_summary_latest")
+      .select("set_id, set_name")
+      .not("set_id", "is", null)
+      .not("set_name", "is", null)
+      .limit(50000),
+  ),
+  withRetry(
+    "load_set_universe_variant_price_latest",
+    () => supabase
+      .from("variant_price_latest")
+      .select("set_id, set_name")
+      .not("set_id", "is", null)
+      .not("set_name", "is", null)
+      .limit(50000),
+  ),
+]);
 
-if (setError) {
-  console.error(`Failed to load set universe: ${setError.message}`);
+if (printingSetError) {
+  console.error(`Failed to load set universe from card_printings: ${printingSetError.message}`);
+  process.exit(1);
+}
+
+if (pricedSetError) {
+  console.error(`Failed to load set universe from variant_price_latest: ${pricedSetError.message}`);
+  process.exit(1);
+}
+
+if (snapshotSetError) {
+  console.error(`Failed to load set universe from set_summary_snapshots: ${snapshotSetError.message}`);
+  process.exit(1);
+}
+
+if (finishSetError) {
+  console.error(`Failed to load set universe from set_finish_summary_latest: ${finishSetError.message}`);
   process.exit(1);
 }
 
 const setMap = new Map();
-for (const row of setRows ?? []) {
-  const setName = String(row.set_name ?? "").trim();
+const universeSources = {
+  card_printings: 0,
+  set_summary_snapshots: 0,
+  set_finish_summary_latest: 0,
+  variant_price_latest: 0,
+};
+
+for (const row of printingSetRows ?? []) {
+  const setName = normalizeSetName(row.set_name);
   if (!setName) continue;
   const setId = buildSetId(setName);
   if (!setId) continue;
-  if (!setMap.has(setId)) {
-    setMap.set(setId, { setId, setName });
-  }
+  addSetRow(setMap, universeSources, "card_printings", setId, setName);
+}
+
+for (const row of pricedSetRows ?? []) {
+  const setName = normalizeSetName(row.set_name);
+  const setId = String(row.set_id ?? "").trim() || buildSetId(setName);
+  if (!setId || !setName) continue;
+  addSetRow(setMap, universeSources, "variant_price_latest", setId, setName);
+}
+
+for (const row of finishSetRows ?? []) {
+  const setName = normalizeSetName(row.set_name);
+  const setId = String(row.set_id ?? "").trim() || buildSetId(setName);
+  if (!setId || !setName) continue;
+  addSetRow(setMap, universeSources, "set_finish_summary_latest", setId, setName);
+}
+
+for (const row of snapshotSetRows ?? []) {
+  const setName = normalizeSetName(row.set_name);
+  const setId = String(row.set_id ?? "").trim() || buildSetId(setName);
+  if (!setId || !setName) continue;
+  addSetRow(setMap, universeSources, "set_summary_snapshots", setId, setName);
 }
 
 const setUniverse = [...setMap.values()].sort((left, right) => left.setName.localeCompare(right.setName));
@@ -86,6 +189,7 @@ const setBatches = chunk(setUniverse, setBatchSize);
 console.log(JSON.stringify({
   step: "load_set_universe",
   sets: setUniverse.length,
+  sources: universeSources,
   setBatchSize,
   batches: setBatches.length,
   days,
@@ -98,37 +202,37 @@ if (includePipelineRefresh) {
     const batchSetIds = batch.map((row) => row.setId);
     const batchSetNames = batch.map((row) => row.setName);
 
-    const { data: printings, error: printingsError } = await withRetry(
-      `load_printings_batch_${batchIndex + 1}`,
+    const { data: canonicalCards, error: canonicalCardsError } = await withRetry(
+      `load_canonical_cards_batch_${batchIndex + 1}`,
       () => supabase
-        .from("card_printings")
-        .select("id")
+        .from("canonical_cards")
+        .select("slug")
         .in("set_name", batchSetNames)
-        .eq("language", "EN")
-        .limit(5000),
+        .or("language.eq.EN,language.is.null")
+        .limit(10000),
     );
 
-    if (printingsError) {
-      console.error(`Failed to load printings for batch ${batchIndex + 1}: ${printingsError.message}`);
+    if (canonicalCardsError) {
+      console.error(`Failed to load canonical cards for batch ${batchIndex + 1}: ${canonicalCardsError.message}`);
       process.exit(1);
     }
 
-    const printingIds = (printings ?? []).map((row) => row.id).filter(Boolean);
+    const canonicalSlugs = [...new Set((canonicalCards ?? []).map((row) => row.slug).filter(Boolean))];
     let pipelineResult = null;
 
-    if (printingIds.length > 0) {
+    if (canonicalSlugs.length > 0) {
       const IN_CHUNK_SIZE = 100;
-      const idChunks = chunk(printingIds, IN_CHUNK_SIZE);
+      const slugChunks = chunk(canonicalSlugs, IN_CHUNK_SIZE);
       const variantRows = [];
-      for (let i = 0; i < idChunks.length; i += 1) {
+      for (let i = 0; i < slugChunks.length; i += 1) {
         const { data: chunkRows, error: variantError } = await withRetry(
           `load_variant_keys_batch_${batchIndex + 1}_chunk_${i + 1}`,
           () => supabase
             .from("variant_metrics")
             .select("canonical_slug, variant_ref, provider, grade")
-            .eq("provider", "JUSTTCG")
             .eq("grade", "RAW")
-            .in("printing_id", idChunks[i])
+            .not("printing_id", "is", null)
+            .in("canonical_slug", slugChunks[i])
             .limit(5000),
         );
         if (variantError) {
@@ -138,12 +242,20 @@ if (includePipelineRefresh) {
         variantRows.push(...(chunkRows ?? []));
       }
 
-      const keys = variantRows.map((row) => ({
-        canonical_slug: row.canonical_slug,
-        variant_ref: row.variant_ref,
-        provider: row.provider,
-        grade: row.grade,
-      }));
+      const dedupedKeys = new Map();
+      for (const row of variantRows) {
+        if (!row?.canonical_slug || !row?.variant_ref || !row?.provider || !row?.grade) continue;
+        dedupedKeys.set(
+          `${row.canonical_slug}::${row.variant_ref}::${row.provider}::${row.grade}`,
+          {
+            canonical_slug: row.canonical_slug,
+            variant_ref: row.variant_ref,
+            provider: row.provider,
+            grade: row.grade,
+          },
+        );
+      }
+      const keys = [...dedupedKeys.values()];
 
       if (keys.length > 0) {
         const KEY_RPC_CHUNK_SIZE = 150;

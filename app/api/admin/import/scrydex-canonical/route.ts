@@ -12,6 +12,10 @@ import { buildCanonicalSearchDoc, normalizeSearchText } from "@/lib/search/norma
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+function providerCanonicalImportEnabled(): boolean {
+  return process.env.ALLOW_PROVIDER_CANONICAL_IMPORT === "1";
+}
+
 type IngestRunRow = { id: string };
 
 type CanonicalRow = {
@@ -251,6 +255,16 @@ async function updateRun(
 export async function POST(req: Request) {
   const auth = await requireAdmin(req);
   if (!auth.ok) return auth.response;
+
+  if (!providerCanonicalImportEnabled()) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "Provider-driven canonical import is disabled. Canonical identity must come from the canonical JSON source of truth.",
+      },
+      { status: 409 }
+    );
+  }
 
   let credentials: ReturnType<typeof getScrydexCredentials>;
   try {

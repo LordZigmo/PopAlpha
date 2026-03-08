@@ -57,6 +57,10 @@ type SetRow = { slug: string; set_name: string | null };
 
 export type PricingTransparencySnapshot = {
   asOf: string;
+  snapshotCoverage24h: {
+    cardsWithSnapshotCount: number | null;
+    cardsWithSnapshotPct: number | null;
+  };
   freshnessByProvider24h: {
     justtcgPct: number | null;
     scrydexPct: number | null;
@@ -271,36 +275,38 @@ export async function getPricingTransparencySnapshot(): Promise<PricingTranspare
   if (!matchParityRes.error) blendableMatch = matchParityRes.count ?? 0;
   if (!mismatchParityRes.error) parityMismatch = mismatchParityRes.count ?? 0;
 
-  // Provider freshness (distinct canonical cards via canonical RAW variant metrics rows).
+  // Provider freshness (distinct canonical cards with snapshot observations in the
+  // last 24h). Canonical RAW variant_metrics rows are not the live freshness source.
+  let snapshotCoverage24h = {
+    cardsWithSnapshotCount: null as number | null,
+    cardsWithSnapshotPct: null as number | null,
+  };
   let providerFreshness = { justtcgPct: null as number | null, scrydexPct: null as number | null };
   const providerRowsRes = await supabase
-    .from("public_variant_metrics")
-    .select("provider, canonical_slug, provider_as_of_ts")
-    .eq("grade", "RAW")
-    .is("printing_id", null)
-    .in("provider", ["JUSTTCG", "SCRYDEX", "POKEMON_TCG_API"])
-    .limit(10000);
+    .from("public_price_history")
+    .select("provider, canonical_slug")
+    .eq("source_window", "snapshot")
+    .gte("ts", iso24h)
+    .limit(25000);
   if (!providerRowsRes.error) {
-    const latest = new Map<string, { justtcg: string | null; scrydex: string | null }>();
-    for (const row of (providerRowsRes.data ?? []) as Array<{ provider: string; canonical_slug: string; provider_as_of_ts: string | null }>) {
+    const anyFresh = new Set<string>();
+    const justtcgFresh = new Set<string>();
+    const scrydexFresh = new Set<string>();
+    for (const row of (providerRowsRes.data ?? []) as Array<{ provider: string; canonical_slug: string }>) {
       const slug = row.canonical_slug;
       if (!slug) continue;
-      const bucket = latest.get(slug) ?? { justtcg: null, scrydex: null };
-      if (row.provider === "JUSTTCG" && row.provider_as_of_ts && (!bucket.justtcg || row.provider_as_of_ts > bucket.justtcg)) {
-        bucket.justtcg = row.provider_as_of_ts;
-      }
-      if ((row.provider === "SCRYDEX" || row.provider === "POKEMON_TCG_API") && row.provider_as_of_ts && (!bucket.scrydex || row.provider_as_of_ts > bucket.scrydex)) {
-        bucket.scrydex = row.provider_as_of_ts;
-      }
-      latest.set(slug, bucket);
+      anyFresh.add(slug);
+      if (row.provider === "JUSTTCG") justtcgFresh.add(slug);
+      if (row.provider === "SCRYDEX" || row.provider === "POKEMON_TCG_API") scrydexFresh.add(slug);
     }
-    const all = [...latest.values()];
-    const jFresh = all.filter((r) => r.justtcg && r.justtcg >= iso24h).length;
-    const sFresh = all.filter((r) => r.scrydex && r.scrydex >= iso24h).length;
-    if (all.length > 0) {
+    if (totalRaw > 0) {
+      snapshotCoverage24h = {
+        cardsWithSnapshotCount: anyFresh.size,
+        cardsWithSnapshotPct: Number(((anyFresh.size / totalRaw) * 100).toFixed(2)),
+      };
       providerFreshness = {
-        justtcgPct: Number(((jFresh / all.length) * 100).toFixed(2)),
-        scrydexPct: Number(((sFresh / all.length) * 100).toFixed(2)),
+        justtcgPct: Number(((justtcgFresh.size / totalRaw) * 100).toFixed(2)),
+        scrydexPct: Number(((scrydexFresh.size / totalRaw) * 100).toFixed(2)),
       };
     }
   }
@@ -532,6 +538,7 @@ export async function getPricingTransparencySnapshot(): Promise<PricingTranspare
 
   return {
     asOf,
+    snapshotCoverage24h,
     freshnessByProvider24h: providerFreshness,
     coverage: {
       both,

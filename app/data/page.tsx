@@ -106,6 +106,22 @@ export default async function DataPage() {
 
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <div className="rounded-xl border border-[#222] bg-[#0D0D0D] p-4">
+              <p className="text-[12px] uppercase tracking-[0.12em] text-[#7A7A7A]">Snapshot Coverage (24h)</p>
+              <p className="mt-2 text-[14px] text-[#9CA3AF]">
+                Canonical cards with at least one snapshot:
+                {" "}
+                <span className="font-semibold text-[#E5E7EB]">
+                  {transparency.snapshotCoverage24h.cardsWithSnapshotCount != null
+                    ? `${formatNumber(transparency.snapshotCoverage24h.cardsWithSnapshotCount)} (${transparency.snapshotCoverage24h.cardsWithSnapshotPct ?? 0}%)`
+                    : "n/a"}
+                </span>
+              </p>
+              <p className="mt-1 text-[12px] text-[#6B7280]">
+                Distinct canonical RAW cards with any provider snapshot in the last 24 hours.
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-[#222] bg-[#0D0D0D] p-4">
               <p className="text-[12px] uppercase tracking-[0.12em] text-[#7A7A7A]">Provider Freshness (24h)</p>
               <p className="mt-2 text-[14px] text-[#9CA3AF]">JustTCG: <span className="font-semibold text-[#E5E7EB]">{transparency.freshnessByProvider24h.justtcgPct ?? 0}%</span></p>
               <p className="mt-1 text-[14px] text-[#9CA3AF]">Scrydex: <span className="font-semibold text-[#E5E7EB]">{transparency.freshnessByProvider24h.scrydexPct ?? 0}%</span></p>

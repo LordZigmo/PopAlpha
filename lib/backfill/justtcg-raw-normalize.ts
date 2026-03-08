@@ -2,6 +2,7 @@ import { dbAdmin } from "@/lib/db/admin";
 import {
   buildLegacyVariantRef,
   classifyJustTcgCard,
+  extractJustTcgVariantAnalytics,
   mapJustTcgPrinting,
   normalizeCardNumber,
   normalizeCondition,
@@ -260,6 +261,7 @@ function buildObservationRow(params: {
   const observedAt = normalizeJustTcgEpochToIso(variant.lastUpdated ?? null) ?? rawPayload.fetched_at;
   const historyPoints = buildNormalizedHistoryPoints(variant);
   const fallbackProviderSetId = String(card.set ?? "").trim() || null;
+  const analytics = extractJustTcgVariantAnalytics(variant);
 
   return {
     provider_raw_payload_id: rawPayload.id,
@@ -307,6 +309,7 @@ function buildObservationRow(params: {
       providerPageMeta: rawPayload.response?.meta ?? null,
       providerEnvelopeMeta: rawPayload.response?._metadata ?? null,
       historyFieldUsed: (variant.priceHistory?.length ?? 0) > 0 ? "priceHistory" : "priceHistory30d",
+      providerAnalytics: analytics,
     },
     updated_at: normalizedAt,
   };

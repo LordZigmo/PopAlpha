@@ -1,4 +1,10 @@
 import crypto from "node:crypto";
+import {
+  buildProviderCardMapUpsertRow,
+  dedupeProviderCardMapUpsertRows,
+  type ProviderCardMapUpsertRow,
+} from "@/lib/backfill/provider-card-map";
+import { refreshDerivedSignalsForVariantKeys } from "@/lib/backfill/provider-derived-signals";
 import { buildRawVariantRef } from "@/lib/identity/variant-ref";
 import { dbAdmin } from "@/lib/db/admin";
 import {
@@ -15,13 +21,14 @@ import {
   type JustTcgVariant,
 } from "@/lib/providers/justtcg";
 
+// Debug/manual repair path only. Production ingestion should use the
+// normalized provider pipelines plus targeted rollups.
 const PROVIDER = "JUSTTCG";
 const JOB = "backfill_justtcg_set";
 const MAX_PAGES = 50;
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_FAILURE_SAMPLES = 25;
 const MAX_SUCCESS_SAMPLES = 10;
-const SIGNAL_REFRESH_BATCH_SIZE = 100;
 
 export type BackfillJustTcgSetOptions = {
   language?: "EN";
@@ -310,24 +317,6 @@ async function batchInsertIgnore(table: string, rows: Record<string, unknown>[],
   }
   return { inserted, firstError };
 }
-async function refreshSignalsInBatches(keys: Array<Record<string, unknown>>) {
-  if (keys.length === 0) return { rowsUpdated: 0, firstError: null as string | null };
-  const supabase = dbAdmin();
-  let rowsUpdated = 0;
-  let firstError: string | null = null;
-
-  for (let i = 0; i < keys.length; i += SIGNAL_REFRESH_BATCH_SIZE) {
-    const batch = keys.slice(i, i + SIGNAL_REFRESH_BATCH_SIZE);
-    const { data, error } = await supabase.rpc("refresh_derived_signals_for_variants", { keys: batch });
-    if (error) {
-      firstError ??= error.message;
-      continue;
-    }
-    rowsUpdated += Number((data as { rowsUpdated?: number } | null)?.rowsUpdated ?? 0);
-  }
-
-  return { rowsUpdated, firstError };
-}
 async function fetchCardsForWindow(providerSetId: string, requestedWindow: string, endpointLabel: string) {
   const pages: JustTcgCard[] = [];
   const auditRows: Array<Record<string, unknown>> = [];
@@ -547,6 +536,7 @@ export async function backfillJustTcgSet(setKey: string, options: BackfillJustTc
     }
 
     const mappingRows: Record<string, unknown>[] = [];
+    const providerCardMapRows: ProviderCardMapUpsertRow[] = [];
     const ingestRows: Record<string, unknown>[] = [];
     const providerRawRows: Record<string, unknown>[] = [];
     const priceSnapshotRows: Record<string, unknown>[] = [];
@@ -681,6 +671,30 @@ export async function backfillJustTcgSet(setKey: string, options: BackfillJustTc
         card_id: best.card.id, source: PROVIDER, mapping_type: "printing", external_id: best.variant.id, canonical_slug: printing.canonical_slug, printing_id: printing.id,
         meta: { provider_set_id: providerSetId, provider_card_id: best.card.id, provider_variant_id: best.variant.id, provider_card_number: best.card.number, provider_printing: best.variant.printing ?? null, match_confidence: Math.min(1, best.score / 215), match_notes: best.notes },
       });
+      providerCardMapRows.push(buildProviderCardMapUpsertRow({
+        provider: PROVIDER,
+        assetType: "single",
+        providerSetId,
+        providerCardId: best.card.id,
+        providerVariantId: best.variant.id,
+        canonicalSlug: printing.canonical_slug,
+        printingId: printing.id,
+        mappingStatus: "MATCHED",
+        matchType: "LEGACY_BACKFILL",
+        matchConfidence: Math.min(1, best.score / 215),
+        matchReason: null,
+        mappingSource: "LEGACY_CARD_EXTERNAL_MAPPING",
+        metadata: {
+          provider_set_id: providerSetId,
+          provider_card_number: best.card.number,
+          provider_printing: best.variant.printing ?? null,
+          match_notes: best.notes,
+          created_by: JOB,
+        },
+        observedAt,
+        matchedAt: observedAt,
+        updatedAt: nowIso,
+      }));
       priceSnapshotRows.push({
         canonical_slug: printing.canonical_slug,
         printing_id: printing.id,
@@ -723,8 +737,11 @@ export async function backfillJustTcgSet(setKey: string, options: BackfillJustTc
         const { error } = await supabase.from("provider_raw_payloads").insert(providerRawRows);
         if (error) pushFailure({ canonical_slug: printings[0].canonical_slug, printing_id: printings[0].id, code: "DB_UPSERT_FAILED", detail: `provider_raw_payloads: ${error.message}` }, true);
       }
+      const dedupedProviderCardMapRows = dedupeProviderCardMapUpsertRows(providerCardMapRows);
+      const providerCardMapResult = await batchUpsert("provider_card_map", dedupedProviderCardMapRows as unknown as Record<string, unknown>[], "provider,provider_key");
+      mappingUpserts = providerCardMapResult.upserted;
+      if (providerCardMapResult.firstError) pushFailure({ canonical_slug: printings[0].canonical_slug, printing_id: printings[0].id, code: "DB_UPSERT_FAILED", detail: providerCardMapResult.firstError }, true);
       const mappingResult = await batchUpsert("card_external_mappings", mappingRows, "source,mapping_type,printing_id");
-      mappingUpserts = mappingResult.upserted;
       if (mappingResult.firstError) pushFailure({ canonical_slug: printings[0].canonical_slug, printing_id: printings[0].id, code: "DB_UPSERT_FAILED", detail: mappingResult.firstError }, true);
       const snapshotResult = await batchUpsert("price_snapshots", priceSnapshotRows, "provider,provider_ref");
       if (snapshotResult.firstError) pushFailure({ canonical_slug: printings[0].canonical_slug, printing_id: printings[0].id, code: "DB_UPSERT_FAILED", detail: snapshotResult.firstError }, true);
@@ -744,13 +761,16 @@ export async function backfillJustTcgSet(setKey: string, options: BackfillJustTc
         }
       }
       if (updatedVariantKeys.length > 0) {
-        const { rowsUpdated, firstError: batchSignalError } = await refreshSignalsInBatches(updatedVariantKeys);
-        if (batchSignalError) {
+        const signalRefresh = await refreshDerivedSignalsForVariantKeys({
+          provider: PROVIDER,
+          keys: updatedVariantKeys,
+        });
+        if (!signalRefresh.ok) {
           const { data: fallbackData, error: fallbackError } = await supabase.rpc("refresh_derived_signals");
           if (fallbackError) pushFailure({ canonical_slug: printings[0].canonical_slug, printing_id: printings[0].id, code: "DB_UPSERT_FAILED", detail: `signals refresh failed: ${fallbackError.message}` }, true);
           else signalsRowsUpdated = Number((fallbackData as { rowsUpdated?: number } | null)?.rowsUpdated ?? (fallbackData as number | null) ?? 0);
         } else {
-          signalsRowsUpdated = rowsUpdated;
+          signalsRowsUpdated = signalRefresh.signalRowsUpdated;
         }
       }
       // Adopt JustTCG stamps + finishes into card_printings (provider is authoritative)

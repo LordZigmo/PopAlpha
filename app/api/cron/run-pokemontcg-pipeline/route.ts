@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/auth/require";
 import { runScrydexPipeline } from "@/lib/backfill/provider-pipeline-orchestrator";
+import { getQueuedBatchPreset } from "@/lib/backfill/provider-pipeline-batch-config";
 import { enqueuePipelineJob } from "@/lib/backfill/provider-pipeline-job-queue";
 
 export const runtime = "nodejs";
@@ -21,14 +22,16 @@ export async function GET(req: Request) {
     const set = url.searchParams.get("set")?.trim() || undefined;
     const force = url.searchParams.get("force") === "1";
     const executeInline = url.searchParams.get("execute") === "1";
+    const defaults = getQueuedBatchPreset("SCRYDEX", "PIPELINE");
     const params = {
       providerSetId: set ?? null,
-      setLimit: parseOptionalInt(url.searchParams.get("sets")) ?? 1,
+      setLimit: parseOptionalInt(url.searchParams.get("sets")) ?? defaults.setLimit,
       pageLimitPerSet: parseOptionalInt(url.searchParams.get("pages")),
-      maxRequests: parseOptionalInt(url.searchParams.get("maxRequests")) ?? 10,
-      payloadLimit: parseOptionalInt(url.searchParams.get("payloads")) ?? 5,
-      matchObservations: parseOptionalInt(url.searchParams.get("observations")) ?? 20,
-      timeseriesObservations: parseOptionalInt(url.searchParams.get("timeseriesObservations")) ?? 20,
+      maxRequests: parseOptionalInt(url.searchParams.get("maxRequests")) ?? defaults.maxRequests,
+      payloadLimit: parseOptionalInt(url.searchParams.get("payloads")) ?? defaults.payloadLimit,
+      matchObservations: parseOptionalInt(url.searchParams.get("observations")) ?? defaults.matchObservations,
+      timeseriesObservations: parseOptionalInt(url.searchParams.get("timeseriesObservations")) ?? defaults.timeseriesObservations,
+      metricsObservations: parseOptionalInt(url.searchParams.get("metricsObservations")) ?? defaults.metricsObservations,
       force,
     };
 
@@ -57,6 +60,7 @@ export async function GET(req: Request) {
       payloadLimit: params.payloadLimit,
       matchObservations: params.matchObservations,
       timeseriesObservations: params.timeseriesObservations,
+      metricsObservations: params.metricsObservations,
       matchMode: "incremental",
       force: params.force,
     });

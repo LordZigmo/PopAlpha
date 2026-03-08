@@ -1,11 +1,11 @@
 /**
  * Cron: refresh-derived-signals
  *
- * Calls refresh_derived_signals() to compute PopAlpha branded signals
- * (Trend Strength, Breakout Score, Value Zone) into variant_metrics.
+ * Backstop reconcile for PopAlpha branded signals in variant_metrics.
+ * The new provider pipeline now refreshes touched variants inline; this
+ * route remains as a full-dataset repair pass.
  *
- * Runs nightly at 8am UTC — after sync-justtcg-prices (6am) writes
- * provider_* fields into variant_metrics.
+ * Runs nightly as a repair pass after the scheduled market refresh jobs.
  *
  * Auth: Authorization: Bearer <CRON_SECRET>.
  * ?secret= is a temporary deprecated fallback for manual debugging.

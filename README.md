@@ -174,8 +174,8 @@ SUPABASE_URL=https://<your-project-ref>.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=<your_supabase_service_role_key>
 
 # Supabase browser credentials (only needed by browser code)
-NEXT_PUBLIC_SUPABASE_URL=https://<your-project-ref>.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=<your_supabase_anon_key>
+NEXT_PUBLIC_SUPABASE_URL=https://nbveknrnvcgeyysqrtkl.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5idmVrbnJudmNnZXl5c3FydGtsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE5ODY4NTMsImV4cCI6MjA4NzU2Mjg1M30.22dNHZBM5WaDmOu8dNSMdpSY61VtA_QH_Ett5xCEDPU
 
 # Existing app secrets (used by other routes)
 CRON_SECRET=<any-long-random-string>

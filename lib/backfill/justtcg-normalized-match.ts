@@ -1,4 +1,12 @@
 import { dbAdmin } from "@/lib/db/admin";
+import {
+  buildProviderCardMapKey,
+  buildProviderCardMapUpsertRow,
+  dedupeProviderCardMapUpsertRows,
+  loadProviderCardMapByKeys,
+  type ProviderCardMapRow,
+  type ProviderCardMapUpsertRow,
+} from "@/lib/backfill/provider-card-map";
 
 const PROVIDER = "JUSTTCG";
 const JOB = "justtcg_normalized_match";
@@ -82,6 +90,38 @@ type MatchSample = {
   matchType: string | null;
   matchReason: string | null;
 };
+
+function buildMatchedRowFromProviderCardMap(
+  observation: NormalizedObservationRow,
+  providerCardMap: ProviderCardMapRow,
+  nowIso: string,
+): MatchWriteRow | null {
+  if (providerCardMap.mapping_status !== "MATCHED") return null;
+  if (providerCardMap.asset_type !== observation.asset_type) return null;
+  if (!providerCardMap.canonical_slug) return null;
+  if (observation.asset_type === "single" && !providerCardMap.printing_id) return null;
+
+  return {
+    provider_normalized_observation_id: observation.id,
+    provider: PROVIDER,
+    asset_type: observation.asset_type,
+    provider_set_id: observation.provider_set_id,
+    provider_card_id: observation.provider_card_id,
+    provider_variant_id: observation.provider_variant_id,
+    canonical_slug: providerCardMap.canonical_slug,
+    printing_id: providerCardMap.printing_id,
+    match_status: "MATCHED",
+    match_type: providerCardMap.match_type ?? "PROVIDER_CARD_MAP",
+    match_confidence: providerCardMap.match_confidence ?? 1,
+    match_reason: null,
+    metadata: {
+      ...(providerCardMap.metadata ?? {}),
+      providerKey: providerCardMap.provider_key,
+      resolvedFrom: "provider_card_map",
+    },
+    updated_at: nowIso,
+  };
+}
 
 type MatchedDecision = {
   matched: true;
@@ -805,15 +845,68 @@ export async function runJustTcgNormalizedMatch(opts: {
         .map((row) => row.provider_set_id)
         .filter((value): value is string => Boolean(value)),
     ));
+    const providerCardMapByKey = await loadProviderCardMapByKeys({
+      provider: PROVIDER,
+      providerKeys: candidateResult.rows.map((row) =>
+        buildProviderCardMapKey(row.provider_card_id, row.provider_variant_id)),
+    });
     const providerSetMap = await loadProviderSetMap(providerSetIds);
     const setCodes = Array.from(new Set(providerSetMap.values()));
     const printingsBySetCode = await loadCardPrintings(setCodes);
     const sealedCanonicalSlugs = await ensureSealedCanonicalSlugs(candidateResult.rows);
 
     const writes: MatchWriteRow[] = [];
+    const providerCardMapWrites: ProviderCardMapUpsertRow[] = [];
     for (const observation of candidateResult.rows) {
       observationsProcessed += 1;
       const nowIso = new Date().toISOString();
+      const providerKey = buildProviderCardMapKey(observation.provider_card_id, observation.provider_variant_id);
+      const existingProviderCardMap = opts.force
+        ? null
+        : (providerCardMapByKey.get(providerKey) ?? null);
+
+      const reusedRow = existingProviderCardMap
+        ? buildMatchedRowFromProviderCardMap(observation, existingProviderCardMap, nowIso)
+        : null;
+      if (reusedRow) {
+        writes.push(reusedRow);
+        providerCardMapWrites.push(buildProviderCardMapUpsertRow({
+          provider: PROVIDER,
+          assetType: observation.asset_type,
+          providerSetId: observation.provider_set_id,
+          providerCardId: observation.provider_card_id,
+          providerVariantId: observation.provider_variant_id,
+          canonicalSlug: reusedRow.canonical_slug,
+          printingId: reusedRow.printing_id,
+          mappingStatus: "MATCHED",
+          matchType: reusedRow.match_type,
+          matchConfidence: reusedRow.match_confidence,
+          matchReason: null,
+          mappingSource: "PIPELINE",
+          metadata: reusedRow.metadata,
+          observedAt: observation.observed_at,
+          matchedAt: nowIso,
+          updatedAt: nowIso,
+        }));
+        matchedCount += 1;
+        if (observation.asset_type === "single") singlesMatched += 1;
+        else sealedMatched += 1;
+        if (sampleMatches.length < 25) {
+          sampleMatches.push({
+            observationId: observation.id,
+            providerSetId: observation.provider_set_id,
+            providerCardId: observation.provider_card_id,
+            providerVariantId: observation.provider_variant_id,
+            assetType: observation.asset_type,
+            matchStatus: reusedRow.match_status,
+            printingId: reusedRow.printing_id,
+            canonicalSlug: reusedRow.canonical_slug,
+            matchType: reusedRow.match_type,
+            matchReason: null,
+          });
+        }
+        continue;
+      }
 
       const decision = chooseObservationMatch({
         observation,
@@ -825,6 +918,23 @@ export async function runJustTcgNormalizedMatch(opts: {
       if (!decision.matched) {
         const row = buildUnmatchedRow(observation, nowIso, decision.reason, decision.metadata);
         writes.push(row);
+        providerCardMapWrites.push(buildProviderCardMapUpsertRow({
+          provider: PROVIDER,
+          assetType: observation.asset_type,
+          providerSetId: observation.provider_set_id,
+          providerCardId: observation.provider_card_id,
+          providerVariantId: observation.provider_variant_id,
+          canonicalSlug: null,
+          printingId: null,
+          mappingStatus: "UNMATCHED",
+          matchType: null,
+          matchConfidence: null,
+          matchReason: row.match_reason,
+          mappingSource: "PIPELINE",
+          metadata: row.metadata,
+          observedAt: observation.observed_at,
+          updatedAt: nowIso,
+        }));
         unmatchedCount += 1;
         if (sampleMatches.length < 25) {
           sampleMatches.push({
@@ -851,6 +961,23 @@ export async function runJustTcgNormalizedMatch(opts: {
           minAutoMatchConfidence: MIN_AUTO_MATCH_CONFIDENCE,
         });
         writes.push(row);
+        providerCardMapWrites.push(buildProviderCardMapUpsertRow({
+          provider: PROVIDER,
+          assetType: observation.asset_type,
+          providerSetId: observation.provider_set_id,
+          providerCardId: observation.provider_card_id,
+          providerVariantId: observation.provider_variant_id,
+          canonicalSlug: null,
+          printingId: null,
+          mappingStatus: "UNMATCHED",
+          matchType: null,
+          matchConfidence: null,
+          matchReason: row.match_reason,
+          mappingSource: "PIPELINE",
+          metadata: row.metadata,
+          observedAt: observation.observed_at,
+          updatedAt: nowIso,
+        }));
         unmatchedCount += 1;
         if (sampleMatches.length < 25) {
           sampleMatches.push({
@@ -895,6 +1022,24 @@ export async function runJustTcgNormalizedMatch(opts: {
             updated_at: nowIso,
           };
       writes.push(row);
+      providerCardMapWrites.push(buildProviderCardMapUpsertRow({
+        provider: PROVIDER,
+        assetType: observation.asset_type,
+        providerSetId: observation.provider_set_id,
+        providerCardId: observation.provider_card_id,
+        providerVariantId: observation.provider_variant_id,
+        canonicalSlug: row.canonical_slug,
+        printingId: row.printing_id,
+        mappingStatus: "MATCHED",
+        matchType: row.match_type,
+        matchConfidence: row.match_confidence,
+        matchReason: null,
+        mappingSource: "PIPELINE",
+        metadata: row.metadata,
+        observedAt: observation.observed_at,
+        matchedAt: nowIso,
+        updatedAt: nowIso,
+      }));
       matchedCount += 1;
       if (observation.asset_type === "single") singlesMatched += 1;
       else sealedMatched += 1;
@@ -916,6 +1061,17 @@ export async function runJustTcgNormalizedMatch(opts: {
     }
 
     if (writes.length > 0) {
+      const dedupedProviderCardMapWrites = dedupeProviderCardMapUpsertRows(providerCardMapWrites);
+      const { error: providerCardMapError } = await supabase
+        .from("provider_card_map")
+        .upsert(dedupedProviderCardMapWrites, {
+          onConflict: "provider,provider_key",
+        });
+
+      if (providerCardMapError) {
+        throw new Error(`provider_card_map: ${providerCardMapError.message}`);
+      }
+
       const { error } = await supabase
         .from("provider_observation_matches")
         .upsert(writes, {

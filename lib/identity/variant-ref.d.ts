@@ -26,4 +26,10 @@ export function buildVariantRef(input: {
   provider?: GradedVariantProvider | null;
   grade?: string;
 }): string;
+export function buildProviderHistoryVariantRef(input: {
+  printingId?: string | null;
+  canonicalSlug?: string | null;
+  provider: string;
+  providerVariantId: string;
+}): string;
 export function parseVariantRef(variantRef: string | null | undefined): ParsedVariantRef | null;

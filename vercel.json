@@ -9,14 +9,6 @@
       "schedule": "45 16 * * 1-5"
     },
     {
-      "path": "/api/cron/sync-canonical",
-      "schedule": "0 4 * * *"
-    },
-    {
-      "path": "/api/cron/sync-tcg-prices",
-      "schedule": "0 5 * * *"
-    },
-    {
       "path": "/api/cron/run-justtcg-pipeline",
       "schedule": "5,35 * * * *"
     },

@@ -155,6 +155,13 @@ type CardsEnvelope = {
 
 export type JustTcgFinish = "NON_HOLO" | "HOLO" | "REVERSE_HOLO" | "UNKNOWN";
 
+export type JustTcgVariantAnalytics = {
+  provider_trend_slope_7d: number | null;
+  provider_cov_price_30d: number | null;
+  provider_price_relative_to_30d_range: number | null;
+  provider_price_changes_count_30d: number | null;
+};
+
 function parseJustTcgPatternStampLabel(value: string | null | undefined): string | null {
   const normalized = normalizeJustTcgLabel(value);
   if (!normalized) return null;
@@ -502,6 +509,29 @@ export function isSealedCanonicalSlug(slug: string): boolean {
   return slug.startsWith("sealed:");
 }
 
+export function extractJustTcgVariantAnalytics(variant: JustTcgVariant): JustTcgVariantAnalytics {
+  // Prefer provider's 30d COV; fall back to stddev / latest price when absent.
+  const provider_cov_price_30d =
+    variant.covPrice30d != null
+      ? variant.covPrice30d
+      : variant.stddevPopPrice30d != null && variant.price > 0
+        ? parseFloat((variant.stddevPopPrice30d / variant.price).toFixed(4))
+        : null;
+
+  // Activity proxy: prefer 30d count; fall back to 7d if 30d is absent.
+  const provider_price_changes_count_30d =
+    variant.priceChangesCount30d != null
+      ? variant.priceChangesCount30d
+      : (variant.priceChangesCount7d ?? null);
+
+  return {
+    provider_trend_slope_7d: variant.trendSlope7d ?? null,
+    provider_cov_price_30d,
+    provider_price_relative_to_30d_range: variant.priceRelativeTo30dRange ?? null,
+    provider_price_changes_count_30d,
+  };
+}
+
 /**
  * Map a JustTCG variant to our MetricsSnapshot DTO.
  * Returns null if the variant has no usable price.
@@ -514,16 +544,7 @@ export function mapVariantToMetrics(
   asOfTs: string,
 ): MetricsSnapshot | null {
   if (!variant.price || variant.price <= 0) return null;
-
-  // Prefer provider's cov; fall back to stddev/price if cov absent.
-  // COV is stored as a ratio (e.g. 0.12), NOT a percentage (e.g. 12).
-  // The provider already returns covPrice* as a ratio; the fallback computes it the same way.
-  const provider_cov_price_30d =
-    variant.covPrice30d != null
-      ? variant.covPrice30d
-      : variant.stddevPopPrice30d != null && variant.price > 0
-        ? parseFloat((variant.stddevPopPrice30d / variant.price).toFixed(4))
-        : null;
+  const analytics = extractJustTcgVariantAnalytics(variant);
 
   const provider_cov_price_7d =
     variant.covPrice7d != null
@@ -532,12 +553,6 @@ export function mapVariantToMetrics(
         ? parseFloat((variant.stddevPopPrice7d / variant.price).toFixed(4))
         : null;
 
-  // Activity proxy: prefer 30d count; fall back to 7d if 30d is absent.
-  const provider_price_changes_count_30d =
-    variant.priceChangesCount30d != null
-      ? variant.priceChangesCount30d
-      : (variant.priceChangesCount7d ?? null);
-
   return {
     canonical_slug,
     printing_id,
@@ -545,16 +560,16 @@ export function mapVariantToMetrics(
     provider: "JUSTTCG",
     provider_as_of_ts: asOfTs,
     price_value: variant.price,
-    provider_trend_slope_7d: variant.trendSlope7d ?? null,
+    provider_trend_slope_7d: analytics.provider_trend_slope_7d,
     provider_trend_slope_30d: variant.trendSlope30d ?? null,
     provider_cov_price_7d,
-    provider_cov_price_30d,
-    provider_price_relative_to_30d_range: variant.priceRelativeTo30dRange ?? null,
+    provider_cov_price_30d: analytics.provider_cov_price_30d,
+    provider_price_relative_to_30d_range: analytics.provider_price_relative_to_30d_range,
     provider_min_price_all_time: variant.minPriceAllTime ?? null,
     provider_min_price_all_time_date: variant.minPriceAllTimeDate ?? null,
     provider_max_price_all_time: variant.maxPriceAllTime ?? null,
     provider_max_price_all_time_date: variant.maxPriceAllTimeDate ?? null,
-    provider_price_changes_count_30d,
+    provider_price_changes_count_30d: analytics.provider_price_changes_count_30d,
   };
 }
 

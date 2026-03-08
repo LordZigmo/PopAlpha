@@ -23,6 +23,12 @@ const DEFAULT_RETRY_ATTEMPTS = process.env.SCRYDEX_RAW_RETRY_ATTEMPTS
 const DEFAULT_RETRY_BACKOFF_MS = process.env.SCRYDEX_RAW_RETRY_BACKOFF_MS
   ? parseInt(process.env.SCRYDEX_RAW_RETRY_BACKOFF_MS, 10)
   : 750;
+const DEFAULT_COOLDOWN_MINUTES = process.env.SCRYDEX_RAW_COOLDOWN_MINUTES
+  ? parseInt(process.env.SCRYDEX_RAW_COOLDOWN_MINUTES, 10)
+  : 180;
+const DEFAULT_FAILED_QUEUE_LIMIT = process.env.SCRYDEX_FAILED_SET_QUEUE_LIMIT
+  ? parseInt(process.env.SCRYDEX_FAILED_SET_QUEUE_LIMIT, 10)
+  : 200;
 const MAX_SETS_PER_RUN_CAP = process.env.SCRYDEX_RAW_SETS_PER_RUN_CAP
   ? parseInt(process.env.SCRYDEX_RAW_SETS_PER_RUN_CAP, 10)
   : 6;
@@ -41,6 +47,56 @@ type CanonicalSet = {
 
 type LastRunRow = {
   meta: Record<string, unknown> | null;
+};
+
+type ProviderSetHealthRow = {
+  provider: string;
+  provider_set_id: string;
+  canonical_set_code: string | null;
+  canonical_set_name: string | null;
+  last_attempt_at: string | null;
+  last_success_at: string | null;
+  last_429_at: string | null;
+  last_status_code: number | null;
+  consecutive_429: number | null;
+  cooldown_until: string | null;
+  next_retry_at: string | null;
+  last_error: string | null;
+  requests_last_run: number | null;
+  pages_last_run: number | null;
+  cards_last_run: number | null;
+  updated_at: string | null;
+};
+
+type ProviderSetHealthUpsertRow = {
+  provider: string;
+  provider_set_id: string;
+  canonical_set_code: string | null;
+  canonical_set_name: string | null;
+  last_attempt_at: string | null;
+  last_success_at: string | null;
+  last_429_at: string | null;
+  last_status_code: number | null;
+  consecutive_429: number;
+  cooldown_until: string | null;
+  next_retry_at: string | null;
+  last_error: string | null;
+  requests_last_run: number;
+  pages_last_run: number;
+  cards_last_run: number;
+  updated_at: string;
+};
+
+type IngestTarget = {
+  setCode: string | null;
+  setName: string | null;
+  providerSetId: string;
+};
+
+type IngestRunState = {
+  cursorSetCode: string | null;
+  failedSetQueue: string[];
+  cooldownByProviderSet: Record<string, string>;
 };
 
 type RawIngestSetSummary = {
@@ -68,6 +124,10 @@ type RawIngestResult = {
   failedRequests: number;
   pageLimit: number;
   sampleSetResults: RawIngestSetSummary[];
+  warningCount: number;
+  warningSamples: string[];
+  skippedCooldownSets: number;
+  skippedCooldownSamples: string[];
   firstError: string | null;
 };
 
@@ -126,6 +186,142 @@ function selectSetsFromCursor(sets: CanonicalSet[], setLimit: number, cursorSetC
     selected.push(sets[(startIndex + i) % sets.length]);
   }
   return selected;
+}
+
+function parseStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter((item) => item.length > 0);
+}
+
+function parseCooldownMap(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object") return {};
+  const output: Record<string, string> = {};
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (!key || typeof raw !== "string") continue;
+    const ms = Date.parse(raw);
+    if (!Number.isFinite(ms)) continue;
+    output[key] = raw;
+  }
+  return output;
+}
+
+async function loadLastRunState(): Promise<IngestRunState> {
+  const supabase = dbAdmin();
+  const { data, error } = await supabase
+    .from("ingest_runs")
+    .select("meta")
+    .eq("job", JOB)
+    .eq("status", "finished")
+    .order("ended_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<LastRunRow>();
+
+  if (error) throw new Error(`ingest_runs(last state): ${error.message}`);
+
+  const meta = data?.meta ?? {};
+  const cursorRaw = typeof meta.nextSetCode === "string"
+    ? meta.nextSetCode
+    : (typeof meta.cursorSetCode === "string" ? meta.cursorSetCode : "");
+  return {
+    cursorSetCode: cursorRaw.trim() || null,
+    failedSetQueue: parseStringArray(meta.failedSetQueue),
+    cooldownByProviderSet: parseCooldownMap(meta.cooldownByProviderSet),
+  };
+}
+
+function normalizeFailedSetQueue(queue: string[]): string[] {
+  const unique = new Set<string>();
+  const output: string[] = [];
+  for (const value of queue) {
+    const trimmed = value.trim();
+    if (!trimmed || unique.has(trimmed)) continue;
+    unique.add(trimmed);
+    output.push(trimmed);
+  }
+  return output.slice(0, DEFAULT_FAILED_QUEUE_LIMIT);
+}
+
+function isSetInCooldown(params: {
+  providerSetId: string;
+  cooldownByProviderSet: Record<string, string>;
+  nowMs: number;
+}): { active: boolean; untilIso: string | null } {
+  const untilIso = params.cooldownByProviderSet[params.providerSetId] ?? null;
+  if (!untilIso) return { active: false, untilIso: null };
+  const untilMs = Date.parse(untilIso);
+  if (!Number.isFinite(untilMs)) return { active: false, untilIso: null };
+  if (untilMs <= params.nowMs) return { active: false, untilIso };
+  return { active: true, untilIso };
+}
+
+function pruneCooldowns(cooldownByProviderSet: Record<string, string>, nowMs: number): Record<string, string> {
+  const output: Record<string, string> = {};
+  for (const [providerSetId, untilIso] of Object.entries(cooldownByProviderSet)) {
+    const untilMs = Date.parse(untilIso);
+    if (!Number.isFinite(untilMs) || untilMs <= nowMs) continue;
+    output[providerSetId] = untilIso;
+  }
+  return output;
+}
+
+function toMs(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function maxIso(left: string | null | undefined, right: string | null | undefined): string | null {
+  const leftMs = toMs(left);
+  const rightMs = toMs(right);
+  if (leftMs === null && rightMs === null) return null;
+  if (leftMs === null) return right ?? null;
+  if (rightMs === null) return left ?? null;
+  return leftMs >= rightMs ? (left ?? null) : (right ?? null);
+}
+
+function sortTargetsByFreshness(
+  targets: IngestTarget[],
+  healthByProviderSet: Map<string, ProviderSetHealthRow>,
+): IngestTarget[] {
+  return [...targets].sort((a, b) => {
+    const ah = healthByProviderSet.get(a.providerSetId);
+    const bh = healthByProviderSet.get(b.providerSetId);
+    const aSuccess = toMs(ah?.last_success_at) ?? 0;
+    const bSuccess = toMs(bh?.last_success_at) ?? 0;
+    if (aSuccess !== bSuccess) return aSuccess - bSuccess;
+    const aAttempt = toMs(ah?.last_attempt_at) ?? 0;
+    const bAttempt = toMs(bh?.last_attempt_at) ?? 0;
+    if (aAttempt !== bAttempt) return aAttempt - bAttempt;
+    return String(a.setCode ?? "").localeCompare(String(b.setCode ?? ""));
+  });
+}
+
+async function loadProviderSetHealth(providerSetIds: string[]): Promise<Map<string, ProviderSetHealthRow>> {
+  if (providerSetIds.length === 0) return new Map();
+  const supabase = dbAdmin();
+  const { data, error } = await supabase
+    .from("provider_set_health")
+    .select(
+      "provider, provider_set_id, canonical_set_code, canonical_set_name, last_attempt_at, last_success_at, last_429_at, last_status_code, consecutive_429, cooldown_until, next_retry_at, last_error, requests_last_run, pages_last_run, cards_last_run, updated_at",
+    )
+    .eq("provider", PROVIDER)
+    .in("provider_set_id", providerSetIds);
+  if (error) throw new Error(`provider_set_health(load): ${error.message}`);
+
+  const bySetId = new Map<string, ProviderSetHealthRow>();
+  for (const row of (data ?? []) as ProviderSetHealthRow[]) {
+    bySetId.set(row.provider_set_id, row);
+  }
+  return bySetId;
+}
+
+function extractScrydexHttpStatus(message: string | null | undefined): number | null {
+  const match = String(message ?? "").match(/api error (\d{3})/i);
+  if (!match) return null;
+  const status = Number.parseInt(match[1] ?? "", 10);
+  return Number.isFinite(status) ? status : null;
 }
 
 async function loadCanonicalSetsFromPrintings(): Promise<CanonicalSet[]> {
@@ -206,29 +402,6 @@ async function maybeBackfillProviderSetMap(): Promise<number> {
   return rows.length;
 }
 
-async function loadLastCursorSetCode(): Promise<string | null> {
-  const supabase = dbAdmin();
-  const { data, error } = await supabase
-    .from("ingest_runs")
-    .select("meta")
-    .eq("job", JOB)
-    .eq("status", "finished")
-    .eq("ok", true)
-    .order("ended_at", { ascending: false })
-    .limit(100);
-
-  if (error) throw new Error(`ingest_runs(last cursor): ${error.message}`);
-  const rows = (data ?? []) as LastRunRow[];
-  for (const row of rows) {
-    const providerSetId = typeof row.meta?.providerSetId === "string" ? row.meta.providerSetId.trim() : "";
-    // Ignore targeted runs (providerSetId present); they should not reset global ingest cursor.
-    if (providerSetId) continue;
-    const value = typeof row.meta?.nextSetCode === "string" ? row.meta.nextSetCode.trim() : "";
-    if (value) return value;
-  }
-  return null;
-}
-
 async function insertRawPayloadRow(params: {
   providerSetId: string;
   page: number;
@@ -291,6 +464,8 @@ export async function runPokemonTcgRawIngest(opts: {
   );
   const retryAttempts = parsePositiveInt(opts.retryAttempts, DEFAULT_RETRY_ATTEMPTS);
   const retryBackoffMs = parsePositiveInt(opts.retryBackoffMs, DEFAULT_RETRY_BACKOFF_MS);
+  const cooldownMinutes = parsePositiveInt(DEFAULT_COOLDOWN_MINUTES, 180);
+  const cooldownMs = cooldownMinutes * 60 * 1000;
 
   let firstError: string | null = null;
   let requestsMade = 0;
@@ -299,8 +474,12 @@ export async function runPokemonTcgRawIngest(opts: {
   let cardsFetched = 0;
   let failedRequests = 0;
   let setsProcessed = 0;
+  let skippedCooldownSets = 0;
   let providerSetIndexBackfilled = 0;
   const sampleSetResults: RawIngestSetSummary[] = [];
+  const warningSamples: string[] = [];
+  const skippedCooldownSamples: string[] = [];
+  const nowMs = Date.now();
 
   let credentials: ReturnType<typeof getScrydexCredentials>;
   try {
@@ -309,19 +488,46 @@ export async function runPokemonTcgRawIngest(opts: {
     throw new Error(error instanceof Error ? error.message : String(error));
   }
 
-  const cursorSetCode = opts.providerSetId ? null : await loadLastCursorSetCode();
+  const priorState = opts.providerSetId
+    ? { cursorSetCode: null, failedSetQueue: [] as string[], cooldownByProviderSet: {} as Record<string, string> }
+    : await loadLastRunState();
+  let failedSetQueue = normalizeFailedSetQueue(priorState.failedSetQueue);
+  let cooldownByProviderSet = pruneCooldowns(priorState.cooldownByProviderSet, nowMs);
+
   const targets = opts.providerSetId
-    ? [{ setCode: null, setName: null, providerSetId: opts.providerSetId }]
+    ? {
+        selectedTargets: [{ setCode: null, setName: null, providerSetId: opts.providerSetId }],
+        nextSetCode: null as string | null,
+      }
     : await (async () => {
         providerSetIndexBackfilled = await maybeBackfillProviderSetMap();
         const setsFromIndex = await loadCanonicalSetsFromProviderIndex();
         const sets = setsFromIndex.length > 0 ? setsFromIndex : await loadCanonicalSetsFromPrintings();
-        const allTargets = sets.map((set) => ({
+        const allTargets: IngestTarget[] = sets.map((set) => ({
           setCode: set.setCode,
           setName: set.setName,
           providerSetId: set.providerSetId ?? set.setCode,
         }));
         const byProviderSetId = new Map(allTargets.map((target) => [target.providerSetId, target] as const));
+        const healthByProviderSet = await loadProviderSetHealth(allTargets.map((target) => target.providerSetId));
+        const retryFromHealth = allTargets
+          .map((target) => ({
+            providerSetId: target.providerSetId,
+            health: healthByProviderSet.get(target.providerSetId),
+          }))
+          .filter((row) => (row.health?.consecutive_429 ?? 0) > 0)
+          .filter((row) => {
+            const nextRetryMs = toMs(row.health?.next_retry_at ?? null);
+            return nextRetryMs === null || nextRetryMs <= nowMs;
+          })
+          .map((row) => row.providerSetId);
+        failedSetQueue = normalizeFailedSetQueue([...retryFromHealth, ...failedSetQueue]);
+        for (const target of allTargets) {
+          const health = healthByProviderSet.get(target.providerSetId);
+          if (!health?.cooldown_until) continue;
+          const merged = maxIso(cooldownByProviderSet[target.providerSetId] ?? null, health.cooldown_until);
+          if (merged) cooldownByProviderSet[target.providerSetId] = merged;
+        }
         const [highValuePrioritySetIds, coveragePrioritySetIds] = await Promise.all([
           loadHighValueStaleSetPriority({
             provider: "SCRYDEX",
@@ -335,31 +541,60 @@ export async function runPokemonTcgRawIngest(opts: {
             maxProviderSetIds: 300,
           }),
         ]);
-        const cursorTargets = selectSetsFromCursor(sets, sets.length, cursorSetCode)
-          .flatMap((set) => {
-            const target = byProviderSetId.get(set.providerSetId ?? set.setCode);
-            return target ? [target] : [];
-          });
-        const selectedTargets: Array<{ setCode: string | null; setName: string | null; providerSetId: string }> = [];
+        const cursorTargets = sortTargetsByFreshness(
+          selectSetsFromCursor(sets, sets.length, priorState.cursorSetCode)
+            .flatMap((set) => {
+              const target = byProviderSetId.get(set.providerSetId ?? set.setCode);
+              return target ? [target] : [];
+            }),
+          healthByProviderSet,
+        );
+        const selectedTargets: IngestTarget[] = [];
         const seenProviderSetIds = new Set<string>();
-        const addTarget = (target: { setCode: string | null; setName: string | null; providerSetId: string } | null | undefined) => {
+        const addTarget = (target: IngestTarget | null | undefined) => {
           if (!target) return;
           if (selectedTargets.length >= setLimit) return;
           if (seenProviderSetIds.has(target.providerSetId)) return;
+          const cooldown = isSetInCooldown({
+            providerSetId: target.providerSetId,
+            cooldownByProviderSet,
+            nowMs,
+          });
+          if (cooldown.active) {
+            skippedCooldownSets += 1;
+            if (skippedCooldownSamples.length < 25) {
+              skippedCooldownSamples.push(`set=${target.providerSetId} until=${cooldown.untilIso ?? "unknown"}`);
+            }
+            return;
+          }
           seenProviderSetIds.add(target.providerSetId);
           selectedTargets.push(target);
         };
+        for (const providerSetId of failedSetQueue) {
+          addTarget(byProviderSetId.get(providerSetId) ?? {
+            setCode: null,
+            setName: null,
+            providerSetId,
+          });
+        }
         for (const providerSetId of highValuePrioritySetIds) addTarget(byProviderSetId.get(providerSetId) ?? null);
         for (const providerSetId of coveragePrioritySetIds) addTarget(byProviderSetId.get(providerSetId) ?? null);
         for (const target of cursorTargets) {
           addTarget(target);
           if (selectedTargets.length >= setLimit) break;
         }
-        return selectedTargets;
+        const nextSetCode = cursorTargets.at(Math.min(setLimit, cursorTargets.length) - 1)?.setCode
+          ?? priorState.cursorSetCode
+          ?? null;
+        return { selectedTargets, nextSetCode };
       })();
-  const nextSetCode = targets.length > 0 && !opts.providerSetId
-    ? (targets[targets.length - 1]?.setCode ?? null)
-    : null;
+  const resolvedTargets = Array.isArray(targets) ? targets : targets.selectedTargets;
+  const nextSetCode = Array.isArray(targets) ? null : targets.nextSetCode;
+  const cursorSetCode = priorState.cursorSetCode;
+  const providerSetHealthBySet = await loadProviderSetHealth(
+    resolvedTargets.map((target) => target.providerSetId),
+  );
+  const providerSetHealthUpserts: ProviderSetHealthUpsertRow[] = [];
 
   const { data: runRow, error: runStartError } = await supabase
     .from("ingest_runs")
@@ -382,7 +617,10 @@ export async function runPokemonTcgRawIngest(opts: {
         cursorSetCode,
         nextSetCode,
         providerSetIndexBackfilled,
-        setsPlanned: targets.length,
+        setsPlanned: resolvedTargets.length,
+        skippedCooldownSets,
+        skippedCooldownSamples,
+        failedSetQueue,
       },
     })
     .select("id")
@@ -394,7 +632,7 @@ export async function runPokemonTcgRawIngest(opts: {
 
   const runId = runRow?.id ?? null;
 
-  for (const target of targets) {
+  for (const target of resolvedTargets) {
     if (requestsMade >= maxRequests) break;
     setsProcessed += 1;
 
@@ -403,12 +641,17 @@ export async function runPokemonTcgRawIngest(opts: {
     let page = 1;
     let hasMore = false;
     let lastStatus: number | null = null;
+    let requestAttemptsForSet = 0;
+    let setLastError: string | null = null;
+    let setHadSuccess = false;
+    let setHadRetryableFailure = false;
 
     while (requestsMade < maxRequests && pagesFetched < pageLimitPerSet) {
       let pageSucceeded = false;
       for (let attempt = 1; attempt <= retryAttempts && requestsMade < maxRequests; attempt += 1) {
         const fetchedAt = new Date().toISOString();
         requestsMade += 1;
+        requestAttemptsForSet += 1;
         try {
           const payload = await fetchCardsPage(page, PAGE_LIMIT, target.providerSetId, credentials);
           const cards = payload.data ?? [];
@@ -428,6 +671,7 @@ export async function runPokemonTcgRawIngest(opts: {
           lastStatus = 200;
           cardsFetched += cards.length;
           cardsFetchedForSet += cards.length;
+          setHadSuccess = true;
 
           hasMore = cards.length >= PAGE_LIMIT && (typeof payload.totalCount !== "number" || (page * PAGE_LIMIT) < payload.totalCount);
           if (!hasMore || cards.length === 0) {
@@ -440,20 +684,44 @@ export async function runPokemonTcgRawIngest(opts: {
           break;
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          const canRetry = attempt < retryAttempts && isRetryableScrydexError(message) && requestsMade < maxRequests;
+          const statusCode = extractScrydexHttpStatus(message);
+          if (statusCode !== null) {
+            lastStatus = statusCode;
+          } else if (lastStatus === null && isRetryableScrydexError(message)) {
+            lastStatus = 522;
+          }
+          const shouldCooldown = statusCode === 429 || (typeof statusCode === "number" && statusCode >= 500);
+          if (shouldCooldown) setHadRetryableFailure = true;
+          setLastError = message;
+          const canRetry = attempt < retryAttempts && (shouldCooldown || isRetryableScrydexError(message)) && requestsMade < maxRequests;
           if (canRetry) {
             await delayMs(retryBackoffMs * attempt);
             continue;
           }
           firstError ??= message;
           failedRequests += 1;
-          lastStatus = 500;
+          if (shouldCooldown) {
+            cooldownByProviderSet[target.providerSetId] = new Date(Date.now() + cooldownMs).toISOString();
+          }
+          if (warningSamples.length < 25) {
+            warningSamples.push(
+              `set=${target.providerSetId} page=${page} status=${lastStatus ?? "error"} attempts=${attempt}`,
+            );
+          }
           hasMore = false;
           pageSucceeded = false;
           break;
         }
       }
       if (!pageSucceeded) break;
+    }
+
+    if (setHadRetryableFailure) {
+      failedSetQueue = normalizeFailedSetQueue([...failedSetQueue, target.providerSetId]);
+    }
+    if (setHadSuccess) {
+      failedSetQueue = failedSetQueue.filter((providerSetId) => providerSetId !== target.providerSetId);
+      delete cooldownByProviderSet[target.providerSetId];
     }
 
     if (sampleSetResults.length < 25) {
@@ -467,16 +735,75 @@ export async function runPokemonTcgRawIngest(opts: {
         hasMore,
       });
     }
+
+    const previousHealth = providerSetHealthBySet.get(target.providerSetId);
+    const nowIso = new Date().toISOString();
+    const consecutive429 = lastStatus === 429
+      ? (Math.max(0, previousHealth?.consecutive_429 ?? 0) + 1)
+      : 0;
+    const cooldownUntil = cooldownByProviderSet[target.providerSetId] ?? null;
+    const healthRow: ProviderSetHealthUpsertRow = {
+      provider: PROVIDER,
+      provider_set_id: target.providerSetId,
+      canonical_set_code: target.setCode,
+      canonical_set_name: target.setName,
+      last_attempt_at: nowIso,
+      last_success_at: setHadSuccess ? nowIso : (previousHealth?.last_success_at ?? null),
+      last_429_at: lastStatus === 429 ? nowIso : (previousHealth?.last_429_at ?? null),
+      last_status_code: lastStatus,
+      consecutive_429: consecutive429,
+      cooldown_until: cooldownUntil,
+      next_retry_at: cooldownUntil,
+      last_error: setLastError,
+      requests_last_run: requestAttemptsForSet,
+      pages_last_run: pagesFetched,
+      cards_last_run: cardsFetchedForSet,
+      updated_at: nowIso,
+    };
+    providerSetHealthUpserts.push(healthRow);
+    providerSetHealthBySet.set(target.providerSetId, {
+      provider: PROVIDER,
+      provider_set_id: target.providerSetId,
+      canonical_set_code: target.setCode,
+      canonical_set_name: target.setName,
+      last_attempt_at: healthRow.last_attempt_at,
+      last_success_at: healthRow.last_success_at,
+      last_429_at: healthRow.last_429_at,
+      last_status_code: healthRow.last_status_code,
+      consecutive_429: healthRow.consecutive_429,
+      cooldown_until: healthRow.cooldown_until,
+      next_retry_at: healthRow.next_retry_at,
+      last_error: healthRow.last_error,
+      requests_last_run: healthRow.requests_last_run,
+      pages_last_run: healthRow.pages_last_run,
+      cards_last_run: healthRow.cards_last_run,
+      updated_at: healthRow.updated_at,
+    });
+  }
+
+  cooldownByProviderSet = pruneCooldowns(cooldownByProviderSet, Date.now());
+
+  if (providerSetHealthUpserts.length > 0) {
+    const dedupedByProviderSet = new Map<string, ProviderSetHealthUpsertRow>();
+    for (const row of providerSetHealthUpserts) {
+      dedupedByProviderSet.set(row.provider_set_id, row);
+    }
+    const { error: healthUpsertError } = await supabase
+      .from("provider_set_health")
+      .upsert([...dedupedByProviderSet.values()], { onConflict: "provider,provider_set_id" });
+    if (healthUpsertError) {
+      firstError ??= `provider_set_health(upsert): ${healthUpsertError.message}`;
+    }
   }
 
   const endedAt = new Date().toISOString();
   const result: RawIngestResult = {
-    ok: failedRequests === 0 && firstError === null,
+    ok: firstError === null,
     job: JOB,
     provider: PROVIDER,
     startedAt,
     endedAt,
-    setsPlanned: targets.length,
+    setsPlanned: resolvedTargets.length,
     setsProcessed,
     requestsMade,
     rawPayloadsInserted,
@@ -485,6 +812,10 @@ export async function runPokemonTcgRawIngest(opts: {
     failedRequests,
     pageLimit: PAGE_LIMIT,
     sampleSetResults,
+    warningCount: failedRequests,
+    warningSamples,
+    skippedCooldownSets,
+    skippedCooldownSamples,
     firstError,
   };
 
@@ -509,12 +840,19 @@ export async function runPokemonTcgRawIngest(opts: {
           cursorSetCode,
           nextSetCode,
           providerSetIndexBackfilled,
-          setsPlanned: targets.length,
+          setsPlanned: resolvedTargets.length,
           setsProcessed,
           requestsMade,
           rawPayloadsInserted,
           rawPayloadsDuplicate,
           sampleSetResults,
+          warningCount: failedRequests,
+          warningSamples,
+          skippedCooldownSets,
+          skippedCooldownSamples,
+          failedSetQueue,
+          cooldownByProviderSet,
+          providerSetHealthRowsWritten: providerSetHealthUpserts.length,
           firstError,
         },
       })

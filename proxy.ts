@@ -80,8 +80,8 @@ const clerkHandler = clerkMiddleware(async (auth, req: NextRequest) => {
   const { pathname } = req.nextUrl;
 
   // Canonicalize mixed-case page route aliases.
-  if (pathname === "/data") {
-    return NextResponse.redirect(new URL("/Data", req.url), 308);
+  if (pathname === "/Data") {
+    return NextResponse.redirect(new URL("/data", req.url), 308);
   }
 
   // Only classify API routes and protected pages — other pages pass through

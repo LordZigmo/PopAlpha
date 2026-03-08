@@ -1,7 +1,13 @@
 """
-Generalized check: every set that has card_printings (EN) is wired into the
+Generalized check: every set in the summary backfill universe is wired into the
 pricing/summary pipeline (has rows in set_finish_summary_latest and
-set_summary_snapshots). Same normalization as lib/sets/summary-core.mjs buildSetId.
+set_summary_snapshots). The universe is:
+- imported EN printings (`card_printings`)
+- existing set summaries (`set_summary_snapshots`)
+- existing finish summaries (`set_finish_summary_latest`)
+- provider-priced sets already present in `variant_price_latest`
+
+Same normalization as lib/sets/summary-core.mjs buildSetId.
 """
 import json
 import os
@@ -80,56 +86,120 @@ def build_set_id(set_name: Optional[str]) -> Optional[str]:
     return normalized or None
 
 
-def test_all_sets_wired_into_pipeline():
+def load_summary_universe_set_ids() -> set[str]:
     """
-    Every set that has EN card_printings must have at least one row in
-    public_set_summaries and public_set_finish_summary (i.e. fully wired
-    into the pricing/summary pipeline). Run `npm run sets:backfill-summaries`
-    after adding or fixing sets.
+    Match scripts/backfill-set-summaries.mjs:
+    - EN set names from card_printings
+    - existing summary-backed set ids/names from set_summary_snapshots
+    - existing finish-summary set ids/names from set_finish_summary_latest
+    - provider-backed set ids/names from variant_price_latest
     """
-    # Set universe from card_printings (EN) – same as backfill script
+    set_ids: set[str] = set()
+
     printing_rows = _rest_get(
         "card_printings",
         {
             "select": "set_name",
             "language": "eq.EN",
-            "limit": "20000",
+            "limit": "50000",
         },
     )
-    set_names = {
-        str(r.get("set_name", "")).strip()
-        for r in printing_rows
-        if r.get("set_name") is not None and str(r.get("set_name", "")).strip()
-    }
-    set_ids_from_printings = set()
-    for name in set_names:
-        sid = build_set_id(name)
+    for row in printing_rows:
+        set_name = str(row.get("set_name", "")).strip()
+        if not set_name:
+            continue
+        sid = build_set_id(set_name)
         if sid:
-            set_ids_from_printings.add(sid)
+            set_ids.add(sid)
 
-    if not set_ids_from_printings:
-        pytest.skip("No EN sets found in card_printings.")
+    summary_rows = _rest_get(
+        "public_set_summaries",
+        {
+            "select": "set_id,set_name",
+            "limit": "50000",
+        },
+    )
+    for row in summary_rows:
+        set_id = str(row.get("set_id", "")).strip()
+        if set_id:
+            set_ids.add(set_id)
+            continue
+        set_name = str(row.get("set_name", "")).strip()
+        sid = build_set_id(set_name)
+        if sid:
+            set_ids.add(sid)
+
+    finish_rows = _rest_get(
+        "public_set_finish_summary",
+        {
+            "select": "set_id,set_name",
+            "limit": "50000",
+        },
+    )
+    for row in finish_rows:
+        set_id = str(row.get("set_id", "")).strip()
+        if set_id:
+            set_ids.add(set_id)
+            continue
+        set_name = str(row.get("set_name", "")).strip()
+        sid = build_set_id(set_name)
+        if sid:
+            set_ids.add(sid)
+
+    priced_rows = _rest_get(
+        "variant_price_latest",
+        {
+            "select": "set_id,set_name",
+            "set_id": "not.is.null",
+            "set_name": "not.is.null",
+            "limit": "50000",
+        },
+    )
+    for row in priced_rows:
+        set_id = str(row.get("set_id", "")).strip()
+        if set_id:
+            set_ids.add(set_id)
+            continue
+        set_name = str(row.get("set_name", "")).strip()
+        sid = build_set_id(set_name)
+        if sid:
+            set_ids.add(sid)
+
+    return set_ids
+
+
+def test_all_sets_wired_into_pipeline():
+    """
+    Every set in the summary backfill universe must have at least one row in
+    public_set_summaries and public_set_finish_summary (i.e. fully wired into
+    the pricing/summary pipeline). Run `npm run sets:backfill-summaries`
+    after adding or fixing sets.
+    """
+    set_ids_in_universe = load_summary_universe_set_ids()
+
+    if not set_ids_in_universe:
+        pytest.skip("No sets found in the summary backfill universe.")
 
     # Sets that have pipeline data (snapshots)
     snapshot_rows = _rest_get(
         "public_set_summaries",
-        {"select": "set_id", "limit": "500"},
+        {"select": "set_id", "limit": "5000"},
     )
     set_ids_in_summaries = {str(r.get("set_id", "")).strip() for r in snapshot_rows if r.get("set_id")}
 
     # Sets that have pipeline data (finish summary)
     finish_rows = _rest_get(
         "public_set_finish_summary",
-        {"select": "set_id", "limit": "500"},
+        {"select": "set_id", "limit": "5000"},
     )
     set_ids_in_finish = {str(r.get("set_id", "")).strip() for r in finish_rows if r.get("set_id")}
 
-    missing_from_summaries = set_ids_from_printings - set_ids_in_summaries
-    missing_from_finish = set_ids_from_printings - set_ids_in_finish
+    missing_from_summaries = set_ids_in_universe - set_ids_in_summaries
+    missing_from_finish = set_ids_in_universe - set_ids_in_finish
     missing = missing_from_summaries | missing_from_finish
 
     assert not missing, (
-        "Sets with card_printings but not fully wired into the pipeline "
+        "Sets in the summary backfill universe but not fully wired into the pipeline "
         "(missing from set_summary_snapshots and/or set_finish_summary_latest): "
         f"{sorted(missing)}. Run `npm run sets:backfill-summaries` and ensure each set has variant/price data."
     )
@@ -151,7 +221,7 @@ def test_count_fully_wired_sets():
     - Finish summary: at least one row in set_finish_summary_latest for that set.
 
     Reports:
-    - Total sets in DB (card_printings EN) – the universe you have imported.
+    - Total sets in the summary backfill universe.
     - How many of those have any pipeline data (snapshots).
     - How many of those with pipeline data are fully wired.
 
@@ -162,22 +232,7 @@ def test_count_fully_wired_sets():
     today = date.today()
     fresh_cutoff = today - timedelta(days=MAX_STALE_DAYS)
 
-    # Total sets in DB (card_printings EN) – full universe we know about
-    printing_rows = _rest_get(
-        "card_printings",
-        {"select": "set_name", "language": "eq.EN", "limit": "50000"},
-    )
-    set_names_db = {
-        str(r.get("set_name", "")).strip()
-        for r in printing_rows
-        if r.get("set_name") is not None and str(r.get("set_name", "")).strip()
-    }
-    set_ids_in_db = set()
-    for name in set_names_db:
-        sid = build_set_id(name)
-        if sid:
-            set_ids_in_db.add(sid)
-    total_sets_in_db = len(set_ids_in_db)
+    total_sets_in_db = len(load_summary_universe_set_ids())
 
     # All snapshot rows (set_id, as_of_date, market_cap) – bulk fetch
     snapshot_rows = _rest_get(
@@ -214,7 +269,7 @@ def test_count_fully_wired_sets():
     # All finish summary rows (set_id only)
     finish_rows = _rest_get(
         "public_set_finish_summary",
-        {"select": "set_id", "limit": "500"},
+        {"select": "set_id", "limit": "5000"},
     )
     set_ids_with_finish = {str(r.get("set_id", "")).strip() for r in finish_rows if r.get("set_id")}
 
@@ -254,7 +309,7 @@ def test_count_fully_wired_sets():
     total = len(by_set)
     count = len(fully_wired)
     sets_with_pipeline = total
-    print("\nSets in DB (card_printings EN): {}".format(total_sets_in_db))
+    print("\nSets in summary backfill universe: {}".format(total_sets_in_db))
     print("With pipeline data (snapshots): {}".format(sets_with_pipeline))
     print("Fully wired: {} of {}".format(count, sets_with_pipeline))
     if total_sets_in_db < 50:
@@ -266,4 +321,3 @@ def test_count_fully_wired_sets():
         for sid, reason in sorted(not_fully_wired, key=lambda x: x[0]):
             print("  - {}: {}".format(sid, reason))
     assert count >= 0 and total >= 0, "pipeline data missing"
-

@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/auth/require";
 import { buildJustTcgSetSearchTerms } from "@/lib/providers/justtcg-set-search";
+import { buildProviderCardMapUpsertRow } from "@/lib/backfill/provider-card-map";
 import {
   fetchJustTcgCards,
   jtFetchRaw,
@@ -250,10 +251,11 @@ export async function POST(req: Request) {
   const printingIds = Array.from(new Set(trackedCandidates.map((row) => row.printing_id)));
 
   const { data: existingMappings } = await supabase
-    .from("card_external_mappings")
+    .from("provider_card_map")
     .select("printing_id")
-    .eq("source", PROVIDER)
-    .eq("mapping_type", "printing")
+    .eq("provider", PROVIDER)
+    .eq("asset_type", "single")
+    .eq("mapping_status", "MATCHED")
     .in("printing_id", printingIds);
 
   const alreadyMapped = new Set((existingMappings ?? []).map((row) => row.printing_id));
@@ -435,14 +437,48 @@ export async function POST(req: Request) {
           match_notes: bestVariant.notes,
         },
       };
+      const providerCardMapRow = buildProviderCardMapUpsertRow({
+        provider: PROVIDER,
+        assetType: "single",
+        providerSetId,
+        providerCardId: best.card.id,
+        providerVariantId: bestVariant.variant.id,
+        canonicalSlug: tracked.canonical_slug,
+        printingId: tracked.printing_id,
+        mappingStatus: "MATCHED",
+        matchType: "TRACKED_BACKFILL",
+        matchConfidence: Math.min(1, bestVariant.score / 170),
+        matchReason: null,
+        mappingSource: "MANUAL",
+        metadata: {
+          provider_set_id: providerSetId,
+          provider_card_number: best.card.number,
+          provider_printing: bestVariant.variant.printing ?? null,
+          match_notes: bestVariant.notes,
+          created_by: JOB,
+        },
+        observedAt: now,
+        matchedAt: now,
+        updatedAt: now,
+      });
 
       const { error: upsertError } = await supabase
-        .from("card_external_mappings")
-        .upsert(mappingRow, { onConflict: "source,mapping_type,printing_id" });
+        .from("provider_card_map")
+        .upsert(providerCardMapRow, { onConflict: "provider,provider_key" });
 
       if (upsertError) {
         hardFailCount += 1;
         firstError ??= upsertError.message;
+        continue;
+      }
+
+      const { error: legacyUpsertError } = await supabase
+        .from("card_external_mappings")
+        .upsert(mappingRow, { onConflict: "source,mapping_type,printing_id" });
+
+      if (legacyUpsertError) {
+        hardFailCount += 1;
+        firstError ??= legacyUpsertError.message;
         continue;
       }
 

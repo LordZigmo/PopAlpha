@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/auth/require";
 import { runJustTcgPipeline } from "@/lib/backfill/provider-pipeline-orchestrator";
+import { getQueuedBatchPreset } from "@/lib/backfill/provider-pipeline-batch-config";
 import { enqueuePipelineJob } from "@/lib/backfill/provider-pipeline-job-queue";
 
 export const runtime = "nodejs";
@@ -21,14 +22,16 @@ export async function GET(req: Request) {
   const force = url.searchParams.get("force") === "1";
   const retryOnly = url.searchParams.get("retryOnly") === "1";
   const executeInline = url.searchParams.get("execute") === "1";
+  const defaults = getQueuedBatchPreset("JUSTTCG", retryOnly ? "RETRY" : "PIPELINE");
   const params = {
     providerSetId: set ?? null,
-    setLimit: parseOptionalInt(url.searchParams.get("sets")) ?? 4,
+    setLimit: parseOptionalInt(url.searchParams.get("sets")) ?? defaults.setLimit,
     pageLimitPerSet: parseOptionalInt(url.searchParams.get("pages")),
-    maxRequests: parseOptionalInt(url.searchParams.get("maxRequests")) ?? 80,
-    payloadLimit: parseOptionalInt(url.searchParams.get("payloads")) ?? 60,
-    matchObservations: parseOptionalInt(url.searchParams.get("observations")) ?? 120,
-    timeseriesObservations: parseOptionalInt(url.searchParams.get("timeseriesObservations")) ?? 120,
+    maxRequests: parseOptionalInt(url.searchParams.get("maxRequests")) ?? defaults.maxRequests,
+    payloadLimit: parseOptionalInt(url.searchParams.get("payloads")) ?? defaults.payloadLimit,
+    matchObservations: parseOptionalInt(url.searchParams.get("observations")) ?? defaults.matchObservations,
+    timeseriesObservations: parseOptionalInt(url.searchParams.get("timeseriesObservations")) ?? defaults.timeseriesObservations,
+    metricsObservations: parseOptionalInt(url.searchParams.get("metricsObservations")) ?? defaults.metricsObservations,
     force,
   };
 
@@ -58,6 +61,7 @@ export async function GET(req: Request) {
     payloadLimit: params.payloadLimit,
     matchObservations: params.matchObservations,
     timeseriesObservations: params.timeseriesObservations,
+    metricsObservations: params.metricsObservations,
     force: params.force,
     retryOnly,
   });

@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/auth/require";
-import { dbAdmin } from "@/lib/db/admin";
 import {
   claimNextPipelineJob,
   completePipelineJob,
@@ -10,86 +9,6 @@ import {
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
-
-type GlobalRefreshResult = {
-  cardMetrics: unknown;
-  cardMetricsError: string | null;
-  marketConfidence: unknown;
-  marketConfidenceError: string | null;
-  realizedBacktest: unknown;
-  realizedBacktestError: string | null;
-  priceChanges: unknown;
-  priceChangesError: string | null;
-  parity: unknown;
-  parityError: string | null;
-};
-
-async function runGlobalRefreshCycle(): Promise<GlobalRefreshResult> {
-  const supabase = dbAdmin();
-  let cardMetrics: unknown = null;
-  let cardMetricsError: string | null = null;
-  let marketConfidence: unknown = null;
-  let marketConfidenceError: string | null = null;
-  let realizedBacktest: unknown = null;
-  let realizedBacktestError: string | null = null;
-  let priceChanges: unknown = null;
-  let priceChangesError: string | null = null;
-  let parity: unknown = null;
-  let parityError: string | null = null;
-
-  try {
-    const { data, error } = await supabase.rpc("refresh_card_metrics");
-    if (error) cardMetricsError = error.message;
-    else cardMetrics = data;
-  } catch (err) {
-    cardMetricsError = err instanceof Error ? err.message : String(err);
-  }
-
-  try {
-    const { data, error } = await supabase.rpc("refresh_card_market_confidence");
-    if (error) marketConfidenceError = error.message;
-    else marketConfidence = data;
-  } catch (err) {
-    marketConfidenceError = err instanceof Error ? err.message : String(err);
-  }
-
-  try {
-    const { data, error } = await supabase.rpc("refresh_realized_sales_backtest");
-    if (error) realizedBacktestError = error.message;
-    else realizedBacktest = data;
-  } catch (err) {
-    realizedBacktestError = err instanceof Error ? err.message : String(err);
-  }
-
-  try {
-    const { data, error } = await supabase.rpc("refresh_price_changes");
-    if (error) priceChangesError = error.message;
-    else priceChanges = data;
-  } catch (err) {
-    priceChangesError = err instanceof Error ? err.message : String(err);
-  }
-
-  try {
-    const { data, error } = await supabase.rpc("refresh_canonical_raw_provider_parity", { p_window_days: 30 });
-    if (error) parityError = error.message;
-    else parity = data;
-  } catch (err) {
-    parityError = err instanceof Error ? err.message : String(err);
-  }
-
-  return {
-    cardMetrics,
-    cardMetricsError,
-    marketConfidence,
-    marketConfidenceError,
-    realizedBacktest,
-    realizedBacktestError,
-    priceChanges,
-    priceChangesError,
-    parity,
-    parityError,
-  };
-}
 
 function parseOptionalInt(value: string | null): number | undefined {
   if (!value) return undefined;
@@ -104,19 +23,19 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const limit = Math.max(1, Math.min(parseOptionalInt(url.searchParams.get("limit")) ?? 6, 6));
   const workerId = url.searchParams.get("workerId")?.trim() || "vercel-cron";
-  const staleAfterSeconds = Math.max(
-    60,
-    parseOptionalInt(url.searchParams.get("staleAfterSeconds"))
-      ?? (process.env.PIPELINE_JOB_STALE_RECLAIM_SECONDS
-        ? parseInt(process.env.PIPELINE_JOB_STALE_RECLAIM_SECONDS, 10)
-        : 1800),
-  );
   const jobTimeoutMs = Math.max(
     5000,
     parseOptionalInt(url.searchParams.get("jobTimeoutMs"))
       ?? (process.env.PIPELINE_JOB_TIMEOUT_MS
         ? parseInt(process.env.PIPELINE_JOB_TIMEOUT_MS, 10)
         : 240000),
+  );
+  const staleAfterSeconds = Math.max(
+    60,
+    parseOptionalInt(url.searchParams.get("staleAfterSeconds"))
+      ?? (process.env.PIPELINE_JOB_STALE_RECLAIM_SECONDS
+        ? parseInt(process.env.PIPELINE_JOB_STALE_RECLAIM_SECONDS, 10)
+        : Math.max(360, Math.ceil(jobTimeoutMs / 1000) + 120)),
   );
 
   const runs: Array<{
@@ -125,35 +44,52 @@ export async function GET(req: Request) {
     kind: string;
     ok: boolean;
     error: string | null;
+    completionError?: string | null;
   }> = [];
 
   for (let i = 0; i < limit; i += 1) {
     const claimed = await claimNextPipelineJob(workerId, staleAfterSeconds);
     if (!claimed) break;
 
-    const executed = await executeClaimedPipelineJob(claimed, { timeoutMs: jobTimeoutMs });
-    const retryDelaySeconds = executed.ok ? 0 : retryDelayForAttempt(claimed.attempts);
-    await completePipelineJob({
-      jobId: claimed.id,
-      ok: executed.ok,
-      result: executed.result,
-      error: executed.error,
-      retryDelaySeconds,
-    });
+    let executed = {
+      ok: false,
+      result: null as unknown,
+      error: "PIPELINE_JOB_UNSETTLED" as string | null,
+    };
+    try {
+      executed = await executeClaimedPipelineJob(claimed, { timeoutMs: jobTimeoutMs });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      executed = { ok: false, result: null, error: message };
+    }
+
+    let completionError: string | null = null;
+    try {
+      const retryDelaySeconds = executed.ok ? 0 : retryDelayForAttempt(claimed.attempts);
+      await completePipelineJob({
+        jobId: claimed.id,
+        ok: executed.ok,
+        result: executed.result,
+        error: executed.error,
+        retryDelaySeconds,
+      });
+    } catch (error) {
+      completionError = error instanceof Error ? error.message : String(error);
+    }
 
     runs.push({
       jobId: claimed.id,
       provider: claimed.provider,
       kind: claimed.job_kind,
-      ok: executed.ok,
-      error: executed.error,
+      ok: executed.ok && !completionError,
+      error: completionError
+        ? [executed.error, `completion: ${completionError}`].filter(Boolean).join(" | ")
+        : executed.error,
+      completionError,
     });
-  }
 
-  const shouldRunGlobalRefresh = runs.length > 0;
-  const globalRefresh = shouldRunGlobalRefresh
-    ? await runGlobalRefreshCycle()
-    : null;
+    if (completionError) break;
+  }
 
   return NextResponse.json({
     ok: true,
@@ -165,6 +101,6 @@ export async function GET(req: Request) {
     succeeded: runs.filter((row) => row.ok).length,
     failed: runs.filter((row) => !row.ok).length,
     runs,
-    globalRefresh,
+    refreshMode: "inline-targeted-rollups",
   });
 }

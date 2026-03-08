@@ -1,16 +1,9 @@
 /**
  * Cron: sync-canonical
  *
- * Runs daily (vercel.json: "0 4 * * *") and pages through the full Scrydex
- * card catalog, upsetting canonical_cards + card_printings so "Unknown" fields
- * get filled in automatically over time.
- *
- * Cursor strategy: reads the last page processed from `ingest_runs.meta` so
- * each run continues where the previous one left off. When the catalog end is
- * reached (items_fetched === 0), restarts from page 1 for a fresh full pass.
- *
- * At 10 pages × 100 cards per run, catalog sync advances in small bounded chunks;
- * afterwards it keeps refreshing indefinitely.
+ * Intentionally paused unless legacy provider-driven canonical import is
+ * explicitly re-enabled. Canonical identity should come from the canonical
+ * source of truth, not from Scrydex provider payloads.
  */
 
 import { NextResponse } from "next/server";
@@ -43,6 +36,14 @@ function resolveBaseUrl(): string {
 export async function GET(req: Request) {
   const auth = await requireCron(req);
   if (!auth.ok) return auth.response;
+
+  if (process.env.ALLOW_PROVIDER_CANONICAL_IMPORT !== "1") {
+    return NextResponse.json({
+      ok: true,
+      skipped: true,
+      reason: "provider_canonical_import_disabled",
+    });
+  }
 
   const adminSecret = process.env.ADMIN_SECRET?.trim();
   if (!adminSecret) {
