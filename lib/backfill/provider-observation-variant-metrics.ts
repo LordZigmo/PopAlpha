@@ -23,6 +23,12 @@ type MatchScanRow = {
   provider_normalized_observation_id: string;
 };
 
+type VariantMetricsStateRow = {
+  canonical_slug: string;
+  variant_ref: string;
+  provider_as_of_ts: string | null;
+};
+
 type NormalizedHistoryPoint = {
   ts: string;
   price: number;
@@ -254,10 +260,47 @@ function extractProviderAnalytics(params: {
   };
 }
 
+async function loadExistingMetricsState(
+  provider: SupportedProvider,
+  rows: CandidateRow[],
+): Promise<Map<string, string>> {
+  const candidateKeys = rows
+    .filter((row) => Boolean(row.mapping.canonical_slug && row.mapping.printing_id))
+    .map((row) => ({
+      canonicalSlug: String(row.mapping.canonical_slug),
+      variantRef: buildRawVariantRef(String(row.mapping.printing_id)),
+    }));
+  const canonicalSlugs = [...new Set(candidateKeys.map((row) => row.canonicalSlug).filter(Boolean))];
+  const variantRefs = [...new Set(candidateKeys.map((row) => row.variantRef).filter(Boolean))];
+  if (canonicalSlugs.length === 0 || variantRefs.length === 0) return new Map();
+
+  const supabase = dbAdmin();
+  const { data, error } = await supabase
+    .from("variant_metrics")
+    .select("canonical_slug, variant_ref, provider_as_of_ts")
+    .eq("provider", provider)
+    .eq("grade", "RAW")
+    .in("canonical_slug", canonicalSlugs)
+    .in("variant_ref", variantRefs);
+  if (error) throw new Error(`variant_metrics(load existing): ${error.message}`);
+
+  const metricsAsOfByKey = new Map<string, string>();
+  for (const row of (data ?? []) as VariantMetricsStateRow[]) {
+    const canonicalSlug = String(row.canonical_slug ?? "").trim();
+    const variantRef = String(row.variant_ref ?? "").trim();
+    const providerAsOfTs = String(row.provider_as_of_ts ?? "").trim();
+    if (!canonicalSlug || !variantRef || !providerAsOfTs) continue;
+    metricsAsOfByKey.set(`${canonicalSlug}::${variantRef}`, providerAsOfTs);
+  }
+
+  return metricsAsOfByKey;
+}
+
 async function loadCandidateRows(params: {
   provider: SupportedProvider;
   observationLimit: number;
   providerSetId?: string | null;
+  force?: boolean;
 }): Promise<{
   rows: CandidateRow[];
   scanned: number;
@@ -326,6 +369,7 @@ async function loadCandidateRows(params: {
       providerKeys: observations.map((row) => buildProviderCardMapKey(row.provider_card_id, row.provider_variant_id)),
     });
 
+    const candidateRows: CandidateRow[] = [];
     for (const observationId of selectedIds) {
       const observation = observationById.get(observationId);
       if (!observation) continue;
@@ -334,7 +378,23 @@ async function loadCandidateRows(params: {
       if (!mapping || mapping.mapping_status !== "MATCHED" || !mapping.canonical_slug || !mapping.printing_id) {
         continue;
       }
-      selected.push({ mapping, observation });
+      candidateRows.push({ mapping, observation });
+    }
+
+    const existingMetricsByKey = !params.force && candidateRows.length > 0
+      ? await loadExistingMetricsState(params.provider, candidateRows)
+      : null;
+
+    for (const row of candidateRows) {
+      if (!params.force && existingMetricsByKey) {
+        const metricsKey = `${row.mapping.canonical_slug}::${buildRawVariantRef(String(row.mapping.printing_id))}`;
+        const providerAsOfTs = existingMetricsByKey.get(metricsKey) ?? null;
+        if (providerAsOfTs && providerAsOfTs >= row.observation.observed_at) {
+          continue;
+        }
+      }
+
+      selected.push(row);
       if (selected.length >= params.observationLimit) break;
     }
   }
@@ -386,6 +446,7 @@ export async function runProviderObservationVariantMetrics(opts: {
   provider: SupportedProvider;
   observationLimit?: number;
   providerSetId?: string | null;
+  force?: boolean;
 }): Promise<VariantMetricsResult> {
   const supabase = dbAdmin();
   const startedAt = new Date().toISOString();
@@ -420,6 +481,7 @@ export async function runProviderObservationVariantMetrics(opts: {
         provider: opts.provider,
         observationLimit,
         providerSetId: opts.providerSetId ?? null,
+        force: opts.force === true,
       },
     })
     .select("id")
@@ -435,6 +497,7 @@ export async function runProviderObservationVariantMetrics(opts: {
       provider: opts.provider,
       observationLimit,
       providerSetId: opts.providerSetId,
+      force: opts.force === true,
     });
     observationsScanned = candidateResult.scanned;
 
@@ -601,6 +664,7 @@ export async function runProviderObservationVariantMetrics(opts: {
           provider: opts.provider,
           observationLimit,
           providerSetId: opts.providerSetId ?? null,
+          force: opts.force === true,
           observationsScanned,
           observationsProcessed,
           observationsSkippedNoMatch,

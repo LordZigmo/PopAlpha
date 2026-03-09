@@ -20,6 +20,16 @@ type MatchScanRow = {
   provider_normalized_observation_id: string;
 };
 
+type PriceSnapshotStateRow = {
+  provider_ref: string | null;
+  observed_at: string;
+};
+
+type PriceHistoryStateRow = {
+  variant_ref: string;
+  ts: string;
+};
+
 type ObservationRow = {
   id: string;
   provider: string;
@@ -113,6 +123,15 @@ function buildProviderRef(provider: SupportedProvider, providerVariantId: string
   return `${provider.toLowerCase()}:${providerVariantId}`;
 }
 
+function buildHistoryVariantRef(row: CandidateRow, provider: SupportedProvider): string {
+  return buildProviderHistoryVariantRef({
+    printingId: row.mapping.printing_id,
+    canonicalSlug: row.mapping.canonical_slug,
+    provider,
+    providerVariantId: row.observation.provider_variant_id,
+  });
+}
+
 function shouldWriteRawForCondition(provider: SupportedProvider, condition: string | null | undefined): boolean {
   // Keep RAW market price comparable by using NM-only snapshots.
   // Scrydex observations now preserve the selected provider condition, but we
@@ -152,6 +171,75 @@ function parseTrendAnchorPoints(
   }
 
   return anchors;
+}
+
+async function loadExistingWriteState(
+  provider: SupportedProvider,
+  rows: CandidateRow[],
+): Promise<{
+  snapshotObservedAtByProviderRef: Map<string, string>;
+  writtenSnapshotHistoryKeys: Set<string>;
+}> {
+  const supabase = dbAdmin();
+  const providerRefs = [...new Set(
+    rows
+      .map((row) => buildProviderRef(provider, row.observation.provider_variant_id))
+      .filter(Boolean),
+  )];
+  const historyVariantRefs = [...new Set(
+    rows
+      .map((row) => buildHistoryVariantRef(row, provider))
+      .filter(Boolean),
+  )];
+  const observedAts = [...new Set(
+    rows
+      .map((row) => row.observation.observed_at)
+      .filter(Boolean),
+  )];
+
+  const snapshotObservedAtByProviderRef = new Map<string, string>();
+  const writtenSnapshotHistoryKeys = new Set<string>();
+
+  if (providerRefs.length > 0) {
+    const { data, error } = await supabase
+      .from("price_snapshots")
+      .select("provider_ref, observed_at")
+      .eq("provider", provider)
+      .in("provider_ref", providerRefs);
+    if (error) throw new Error(`price_snapshots(load existing): ${error.message}`);
+
+    for (const row of (data ?? []) as PriceSnapshotStateRow[]) {
+      const providerRef = String(row.provider_ref ?? "").trim();
+      if (!providerRef || !row.observed_at) continue;
+      const existingObservedAt = snapshotObservedAtByProviderRef.get(providerRef) ?? null;
+      if (!existingObservedAt || existingObservedAt < row.observed_at) {
+        snapshotObservedAtByProviderRef.set(providerRef, row.observed_at);
+      }
+    }
+  }
+
+  if (historyVariantRefs.length > 0 && observedAts.length > 0) {
+    const { data, error } = await supabase
+      .from("price_history_points")
+      .select("variant_ref, ts")
+      .eq("provider", provider)
+      .eq("source_window", "snapshot")
+      .in("variant_ref", historyVariantRefs)
+      .in("ts", observedAts);
+    if (error) throw new Error(`price_history_points(load existing): ${error.message}`);
+
+    for (const row of (data ?? []) as PriceHistoryStateRow[]) {
+      const variantRef = String(row.variant_ref ?? "").trim();
+      const ts = String(row.ts ?? "").trim();
+      if (!variantRef || !ts) continue;
+      writtenSnapshotHistoryKeys.add(`${variantRef}::${ts}`);
+    }
+  }
+
+  return {
+    snapshotObservedAtByProviderRef,
+    writtenSnapshotHistoryKeys,
+  };
 }
 
 async function loadCandidateRows(params: {
@@ -211,7 +299,7 @@ async function loadCandidateRows(params: {
 
   const selected: CandidateRow[] = [];
   let scanned = 0;
-  const skippedAlreadyWritten = 0;
+  let skippedAlreadyWritten = 0;
 
   for (let from = 0; selected.length < params.observationLimit; from += SCAN_PAGE_SIZE) {
     let scanQuery = supabase
@@ -263,13 +351,37 @@ async function loadCandidateRows(params: {
         )),
     });
 
+    const candidateRows: CandidateRow[] = [];
     for (const id of selectedIds) {
       const observation = obsById.get(id);
       if (!observation) continue;
       const providerKey = buildProviderCardMapKey(observation.provider_card_id, observation.provider_variant_id);
       const mapping = providerCardMapByKey.get(providerKey) ?? null;
       if (!mapping || mapping.mapping_status !== "MATCHED" || !mapping.canonical_slug) continue;
-      selected.push({ mapping, observation });
+      candidateRows.push({ mapping, observation });
+    }
+
+    let existingWriteState: Awaited<ReturnType<typeof loadExistingWriteState>> | null = null;
+    if (!params.force && candidateRows.length > 0) {
+      existingWriteState = await loadExistingWriteState(params.provider, candidateRows);
+    }
+
+    for (const row of candidateRows) {
+      if (!params.force && existingWriteState) {
+        const providerRef = buildProviderRef(params.provider, row.observation.provider_variant_id);
+        const historyVariantRef = buildHistoryVariantRef(row, params.provider);
+        const latestSnapshotObservedAt = existingWriteState.snapshotObservedAtByProviderRef.get(providerRef) ?? null;
+        const historySnapshotKey = `${historyVariantRef}::${row.observation.observed_at}`;
+        const snapshotCurrent = latestSnapshotObservedAt !== null
+          && latestSnapshotObservedAt >= row.observation.observed_at;
+        const historyCurrent = existingWriteState.writtenSnapshotHistoryKeys.has(historySnapshotKey);
+        if (snapshotCurrent && historyCurrent) {
+          skippedAlreadyWritten += 1;
+          continue;
+        }
+      }
+
+      selected.push(row);
       if (selected.length >= params.observationLimit) break;
     }
   }

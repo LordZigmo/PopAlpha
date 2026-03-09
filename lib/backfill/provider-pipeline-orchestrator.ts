@@ -23,6 +23,20 @@ type PipelineResult = {
   steps: PipelineStep<object>[];
 };
 
+type TouchedVariantKey = {
+  canonical_slug: string;
+  variant_ref: string;
+  provider: string;
+  grade: string;
+};
+
+const MAX_STAGE_DRAIN_PASSES = process.env.PROVIDER_PIPELINE_STAGE_MAX_PASSES
+  ? Math.max(1, parseInt(process.env.PROVIDER_PIPELINE_STAGE_MAX_PASSES, 10))
+  : 50;
+const PIPELINE_DRAIN_RESERVE_MS = process.env.PROVIDER_PIPELINE_DRAIN_RESERVE_MS
+  ? Math.max(0, parseInt(process.env.PROVIDER_PIPELINE_DRAIN_RESERVE_MS, 10))
+  : 15000;
+
 function numberFromUnknown(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
@@ -79,6 +93,64 @@ function hasIngestProgress(result: object): boolean {
   );
 }
 
+function hasPipelineTimeRemaining(deadlineMs: number | null | undefined): boolean {
+  if (typeof deadlineMs !== "number" || !Number.isFinite(deadlineMs)) return true;
+  return (deadlineMs - Date.now()) > PIPELINE_DRAIN_RESERVE_MS;
+}
+
+function runtimeBudgetFromDeadline(deadlineMs: number | null | undefined): number | undefined {
+  if (typeof deadlineMs !== "number" || !Number.isFinite(deadlineMs)) return undefined;
+  return Math.max(1000, deadlineMs - Date.now());
+}
+
+async function drainPipelineStage<T extends {
+  ok: boolean;
+  firstError?: string | null;
+}>(opts: {
+  name: string;
+  steps: PipelineStep<object>[];
+  run: () => Promise<T>;
+  errorMessage: string;
+  requestedField: string;
+  processedField: string;
+  deadlineMs?: number | null;
+  extractTouchedVariantKeys?: (result: T) => TouchedVariantKey[];
+}): Promise<{
+  firstError: string | null;
+  touchedVariantKeys: TouchedVariantKey[];
+}> {
+  let touchedVariantKeys: TouchedVariantKey[] = [];
+
+  for (let pass = 0; pass < MAX_STAGE_DRAIN_PASSES; pass += 1) {
+    if (pass > 0 && !hasPipelineTimeRemaining(opts.deadlineMs)) break;
+
+    const result = await opts.run();
+    opts.steps.push({ name: opts.name, ok: result.ok, result });
+    if (!result.ok) {
+      return {
+        firstError: result.firstError ?? opts.errorMessage,
+        touchedVariantKeys,
+      };
+    }
+
+    if (opts.extractTouchedVariantKeys) {
+      touchedVariantKeys = mergeTouchedVariantKeys(
+        touchedVariantKeys,
+        opts.extractTouchedVariantKeys(result),
+      );
+    }
+
+    const requested = numberFromUnknown((result as Record<string, unknown>)[opts.requestedField]);
+    const processed = numberFromUnknown((result as Record<string, unknown>)[opts.processedField]);
+    if (requested <= 0 || processed <= 0 || processed < requested) break;
+  }
+
+  return {
+    firstError: null,
+    touchedVariantKeys,
+  };
+}
+
 export async function runJustTcgPipeline(opts: {
   providerSetId?: string | null;
   setLimit?: number;
@@ -90,16 +162,13 @@ export async function runJustTcgPipeline(opts: {
   metricsObservations?: number;
   force?: boolean;
   retryOnly?: boolean;
+  deadlineMs?: number | null;
 } = {}): Promise<PipelineResult> {
   const startedAt = new Date().toISOString();
   const steps: PipelineStep<object>[] = [];
   let firstError: string | null = null;
-  let timeseriesTouchedKeys: Array<{
-    canonical_slug: string;
-    variant_ref: string;
-    provider: string;
-    grade: string;
-  }> = [];
+  let timeseriesTouchedKeys: TouchedVariantKey[] = [];
+  let variantMetricsTouchedKeys: TouchedVariantKey[] = [];
 
   const ingest = await runJustTcgRawIngest({
     providerSetId: opts.providerSetId ?? undefined,
@@ -114,50 +183,82 @@ export async function runJustTcgPipeline(opts: {
   }
 
   if (!firstError) {
-    const normalize = await runJustTcgRawNormalize({
-      providerSetId: opts.providerSetId ?? undefined,
-      payloadLimit: opts.payloadLimit,
-      force: opts.force === true,
+    const normalize = await drainPipelineStage({
+      name: "normalize",
+      steps,
+      run: () => runJustTcgRawNormalize({
+        providerSetId: opts.providerSetId ?? undefined,
+        payloadLimit: opts.payloadLimit,
+        force: opts.force === true,
+      }),
+      errorMessage: "justtcg normalize failed",
+      requestedField: "payloadsRequested",
+      processedField: "payloadsProcessed",
+      deadlineMs: opts.deadlineMs,
     });
-    steps.push({ name: "normalize", ok: normalize.ok, result: normalize });
-    if (!normalize.ok) firstError = normalize.firstError ?? "justtcg normalize failed";
+    if (normalize.firstError) firstError = normalize.firstError;
   }
 
   if (!firstError) {
-    const match = await runJustTcgNormalizedMatch({
-      providerSetId: opts.providerSetId ?? undefined,
-      observationLimit: opts.matchObservations,
-      force: opts.force === true,
+    const match = await drainPipelineStage({
+      name: "match",
+      steps,
+      run: () => runJustTcgNormalizedMatch({
+        providerSetId: opts.providerSetId ?? undefined,
+        observationLimit: opts.matchObservations,
+        force: opts.force === true,
+      }),
+      errorMessage: "justtcg match failed",
+      requestedField: "observationsRequested",
+      processedField: "observationsProcessed",
+      deadlineMs: opts.deadlineMs,
     });
-    steps.push({ name: "match", ok: match.ok, result: match });
-    if (!match.ok) firstError = match.firstError ?? "justtcg match failed";
+    if (match.firstError) firstError = match.firstError;
   }
 
   if (!firstError) {
-    const timeseries = await runProviderObservationTimeseries({
-      provider: "JUSTTCG",
-      providerSetId: opts.providerSetId ?? undefined,
-      observationLimit: opts.timeseriesObservations ?? opts.matchObservations,
-      force: opts.force === true,
+    const timeseries = await drainPipelineStage({
+      name: "timeseries",
+      steps,
+      run: () => runProviderObservationTimeseries({
+        provider: "JUSTTCG",
+        providerSetId: opts.providerSetId ?? undefined,
+        observationLimit: opts.timeseriesObservations ?? opts.matchObservations,
+        force: opts.force === true,
+      }),
+      errorMessage: "justtcg timeseries failed",
+      requestedField: "observationsRequested",
+      processedField: "observationsProcessed",
+      deadlineMs: opts.deadlineMs,
+      extractTouchedVariantKeys: (result) => result.touchedVariantKeys,
     });
-    steps.push({ name: "timeseries", ok: timeseries.ok, result: timeseries });
-    if (!timeseries.ok) firstError = timeseries.firstError ?? "justtcg timeseries failed";
+    if (timeseries.firstError) firstError = timeseries.firstError;
     timeseriesTouchedKeys = timeseries.touchedVariantKeys;
   }
 
   if (!firstError) {
-    const variantMetrics = await runProviderObservationVariantMetrics({
-      provider: "JUSTTCG",
-      providerSetId: opts.providerSetId ?? undefined,
-      observationLimit: opts.metricsObservations ?? opts.timeseriesObservations ?? opts.matchObservations,
+    const variantMetrics = await drainPipelineStage({
+      name: "variant_metrics",
+      steps,
+      run: () => runProviderObservationVariantMetrics({
+        provider: "JUSTTCG",
+        providerSetId: opts.providerSetId ?? undefined,
+        observationLimit: opts.metricsObservations ?? opts.timeseriesObservations ?? opts.matchObservations,
+        force: opts.force === true,
+      }),
+      errorMessage: "justtcg variant metrics failed",
+      requestedField: "observationsRequested",
+      processedField: "observationsProcessed",
+      deadlineMs: opts.deadlineMs,
+      extractTouchedVariantKeys: (result) => result.touchedVariantKeys,
     });
-    steps.push({ name: "variant_metrics", ok: variantMetrics.ok, result: variantMetrics });
-    if (!variantMetrics.ok) firstError = variantMetrics.firstError ?? "justtcg variant metrics failed";
+    if (variantMetrics.firstError) firstError = variantMetrics.firstError;
+    variantMetricsTouchedKeys = variantMetrics.touchedVariantKeys;
 
     if (!firstError) {
       const rollupKeys = mergeTouchedVariantKeys(
         timeseriesTouchedKeys,
-        variantMetrics.touchedVariantKeys,
+        variantMetricsTouchedKeys,
       );
       const rollups = await refreshPipelineRollupsForVariantKeys({
         keys: rollupKeys,
@@ -191,16 +292,13 @@ export async function runPokemonTcgPipeline(opts: {
   force?: boolean;
   matchScanDirection?: "newest" | "oldest";
   matchMode?: "incremental" | "backlog";
+  deadlineMs?: number | null;
 } = {}): Promise<PipelineResult> {
   const startedAt = new Date().toISOString();
   const steps: PipelineStep<object>[] = [];
   let firstError: string | null = null;
-  let timeseriesTouchedKeys: Array<{
-    canonical_slug: string;
-    variant_ref: string;
-    provider: string;
-    grade: string;
-  }> = [];
+  let timeseriesTouchedKeys: TouchedVariantKey[] = [];
+  let variantMetricsTouchedKeys: TouchedVariantKey[] = [];
 
   const ingest = await runScrydexRawIngest({
     providerSetId: opts.providerSetId ?? undefined,
@@ -214,52 +312,85 @@ export async function runPokemonTcgPipeline(opts: {
   }
 
   if (!firstError) {
-    const normalize = await runScrydexRawNormalize({
-      providerSetId: opts.providerSetId ?? undefined,
-      payloadLimit: opts.payloadLimit,
-      force: opts.force === true,
+    const normalize = await drainPipelineStage({
+      name: "normalize",
+      steps,
+      run: () => runScrydexRawNormalize({
+        providerSetId: opts.providerSetId ?? undefined,
+        payloadLimit: opts.payloadLimit,
+        force: opts.force === true,
+      }),
+      errorMessage: "scrydex normalize failed",
+      requestedField: "payloadsRequested",
+      processedField: "payloadsProcessed",
+      deadlineMs: opts.deadlineMs,
     });
-    steps.push({ name: "normalize", ok: normalize.ok, result: normalize });
-    if (!normalize.ok) firstError = normalize.firstError ?? "scrydex normalize failed";
+    if (normalize.firstError) firstError = normalize.firstError;
   }
 
   if (!firstError) {
-    const match = await runScrydexNormalizedMatch({
-      providerSetId: opts.providerSetId ?? undefined,
-      observationLimit: opts.matchObservations,
-      force: opts.force === true,
-      scanDirection: opts.matchScanDirection ?? "newest",
-      mode: opts.matchMode ?? "incremental",
+    const match = await drainPipelineStage({
+      name: "match",
+      steps,
+      run: () => runScrydexNormalizedMatch({
+        providerSetId: opts.providerSetId ?? undefined,
+        observationLimit: opts.matchObservations,
+        force: opts.force === true,
+        scanDirection: opts.matchScanDirection ?? "newest",
+        mode: opts.matchMode ?? "incremental",
+        maxRuntimeMs: runtimeBudgetFromDeadline(opts.deadlineMs),
+      }),
+      errorMessage: "scrydex match failed",
+      requestedField: "observationsRequested",
+      processedField: "observationsProcessed",
+      deadlineMs: opts.deadlineMs,
     });
-    steps.push({ name: "match", ok: match.ok, result: match });
-    if (!match.ok) firstError = match.firstError ?? "scrydex match failed";
+    if (match.firstError) firstError = match.firstError;
   }
 
   if (!firstError) {
-    const timeseries = await runProviderObservationTimeseries({
-      provider: "SCRYDEX",
-      providerSetId: opts.providerSetId ?? undefined,
-      observationLimit: opts.timeseriesObservations ?? opts.matchObservations,
-      force: opts.force === true,
+    const timeseries = await drainPipelineStage({
+      name: "timeseries",
+      steps,
+      run: () => runProviderObservationTimeseries({
+        provider: "SCRYDEX",
+        providerSetId: opts.providerSetId ?? undefined,
+        observationLimit: opts.timeseriesObservations ?? opts.matchObservations,
+        force: opts.force === true,
+      }),
+      errorMessage: "scrydex timeseries failed",
+      requestedField: "observationsRequested",
+      processedField: "observationsProcessed",
+      deadlineMs: opts.deadlineMs,
+      extractTouchedVariantKeys: (result) => result.touchedVariantKeys,
     });
-    steps.push({ name: "timeseries", ok: timeseries.ok, result: timeseries });
-    if (!timeseries.ok) firstError = timeseries.firstError ?? "scrydex timeseries failed";
+    if (timeseries.firstError) firstError = timeseries.firstError;
     timeseriesTouchedKeys = timeseries.touchedVariantKeys;
   }
 
   if (!firstError) {
-    const variantMetrics = await runProviderObservationVariantMetrics({
-      provider: "SCRYDEX",
-      providerSetId: opts.providerSetId ?? undefined,
-      observationLimit: opts.metricsObservations ?? opts.timeseriesObservations ?? opts.matchObservations,
+    const variantMetrics = await drainPipelineStage({
+      name: "variant_metrics",
+      steps,
+      run: () => runProviderObservationVariantMetrics({
+        provider: "SCRYDEX",
+        providerSetId: opts.providerSetId ?? undefined,
+        observationLimit: opts.metricsObservations ?? opts.timeseriesObservations ?? opts.matchObservations,
+        force: opts.force === true,
+      }),
+      errorMessage: "scrydex variant metrics failed",
+      requestedField: "observationsRequested",
+      processedField: "observationsProcessed",
+      deadlineMs: opts.deadlineMs,
+      extractTouchedVariantKeys: (result) => result.touchedVariantKeys,
     });
-    steps.push({ name: "variant_metrics", ok: variantMetrics.ok, result: variantMetrics });
-    if (!variantMetrics.ok) firstError = variantMetrics.firstError ?? "scrydex variant metrics failed";
+    if (variantMetrics.firstError) firstError = variantMetrics.firstError;
+    variantMetricsTouchedKeys = variantMetrics.touchedVariantKeys;
 
     if (!firstError) {
       const rollupKeys = mergeTouchedVariantKeys(
         timeseriesTouchedKeys,
-        variantMetrics.touchedVariantKeys,
+        variantMetricsTouchedKeys,
       );
       const rollups = await refreshPipelineRollupsForVariantKeys({
         keys: rollupKeys,
@@ -293,6 +424,7 @@ export async function runScrydexPipeline(opts: {
   force?: boolean;
   matchScanDirection?: "newest" | "oldest";
   matchMode?: "incremental" | "backlog";
+  deadlineMs?: number | null;
 } = {}): Promise<PipelineResult> {
   return runPokemonTcgPipeline(opts);
 }

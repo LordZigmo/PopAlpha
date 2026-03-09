@@ -204,6 +204,7 @@ export async function executeClaimedPipelineJob(
     parseParams(job.params_json),
   );
   const timeoutMs = Math.max(5000, Math.floor(opts.timeoutMs ?? DEFAULT_JOB_TIMEOUT_MS));
+  const deadlineMs = Date.now() + timeoutMs;
   const timeoutPromise = new Promise<{ ok: boolean; result: unknown; error: string }>((resolve) => {
     const timer = setTimeout(() => {
       clearTimeout(timer);
@@ -232,6 +233,7 @@ export async function executeClaimedPipelineJob(
           metricsObservations: params.metricsObservations,
           force: params.force === true,
           retryOnly: job.job_kind === "RETRY",
+          deadlineMs,
         });
         return { ok: result.ok, result, error: result.firstError ?? null };
       }
@@ -248,6 +250,7 @@ export async function executeClaimedPipelineJob(
         force: params.force === true,
         matchScanDirection: job.job_kind === "RETRY" ? "oldest" : "newest",
         matchMode: job.job_kind === "RETRY" ? "backlog" : "incremental",
+        deadlineMs,
       });
       return { ok: result.ok, result, error: result.firstError ?? null };
     })();
