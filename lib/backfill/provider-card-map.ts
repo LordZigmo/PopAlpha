@@ -173,7 +173,8 @@ export async function loadProviderCardMapByKeys(params: {
 
   const supabase = dbAdmin();
   const rows: ProviderCardMapRow[] = [];
-  const pageSize = 500;
+  // Provider keys are long composite ids; smaller chunks avoid oversized REST queries.
+  const pageSize = 100;
 
   for (let i = 0; i < providerKeys.length; i += pageSize) {
     const chunk = providerKeys.slice(i, i + pageSize);
