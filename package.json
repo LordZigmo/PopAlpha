@@ -15,6 +15,7 @@
     "import:pokemontcg-all": "node scripts/import-all-scrydex-canonical.mjs",
     "import:scrydex-all": "node scripts/import-all-scrydex-canonical.mjs",
     "import:scrydex-missing-printings": "node scripts/import-scrydex-canonical-direct.mjs --only-missing",
+    "report:set-efficiency": "node scripts/report-set-efficiency.mjs",
     "justtcg:repair-sweep": "node scripts/sweep-justtcg-finish-repair.mjs",
     "watch:unknown-finishes": "node scripts/watch-unknown-finishes.mjs",
     "ai:refresh-embeddings": "node scripts/refresh-card-embeddings.mjs",

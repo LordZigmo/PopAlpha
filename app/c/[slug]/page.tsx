@@ -18,6 +18,7 @@ import { GroupedSection, PageShell, Pill, SegmentedControl, StatStripItem } from
 import MarketPulse from "@/components/market-pulse";
 import MarketSummaryCard from "@/components/market-summary-card";
 import PopAlphaScoutPreview from "@/components/popalpha-scout-preview";
+import PokeTraceBetaCard from "@/components/poketrace-beta-card";
 import CardTileMini from "@/components/card-tile-mini";
 import type { HomepageCard } from "@/lib/data/homepage";
 import { buildEbaySearchQueries, type GradeSelection, type GradedSource } from "@/lib/ebay-query";
@@ -925,6 +926,12 @@ export default async function CanonicalCardPage({
                           <span className="text-[#5E5E5E]">Updated: {rawSourceAsOfScrydex ?? "--"}</span>
                         </p>
                       </div>
+                    ) : null}
+                    {viewMode === "RAW" ? (
+                      <PokeTraceBetaCard
+                        slug={slug}
+                        printingId={selectedPrinting?.id ?? null}
+                      />
                     ) : null}
                   </>
                 ) : null}

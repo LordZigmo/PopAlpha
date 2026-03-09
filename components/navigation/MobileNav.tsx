@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
 import { motion } from "framer-motion";
 import { Camera, Home, PieChart, UserCircle, Users } from "lucide-react";
+import { POKETRACE_CAMERA_HREF } from "@/lib/poketrace/ui-paths";
 
 type NavTab = {
   href: string;
@@ -122,8 +123,8 @@ export default function MobileNav() {
             className="-mt-7"
           >
             <Link
-              href="/search?intent=camera"
-              aria-label="Open camera tools"
+              href={POKETRACE_CAMERA_HREF}
+              aria-label="Open Poketrace camera"
               className="flex h-16 w-16 items-center justify-center rounded-[1.6rem] border border-[#5BA2FF]/35 bg-gradient-to-br from-[#1D4ED8] to-[#312E81] shadow-[0_20px_45px_rgba(29,78,216,0.38)]"
             >
               <Camera className="text-white" size={26} strokeWidth={2.3} />

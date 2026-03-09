@@ -5,6 +5,8 @@ import { dbPublic } from "@/lib/db";
 import { measureAsync } from "@/lib/perf";
 import SearchResultsSection from "@/components/search-results-section";
 import CardSearch from "@/components/card-search";
+import PokeTraceCameraBetaPanel from "@/components/poketrace-camera-beta-panel";
+import { POKETRACE_CAMERA_HREF } from "@/lib/poketrace/ui-paths";
 import { parseSearchSort, sortSearchResults } from "@/lib/search/sort.mjs";
 import { getLatestSetSummarySnapshot, type SetSummarySnapshot } from "@/lib/sets/summary";
 
@@ -12,6 +14,7 @@ type SearchSort = "relevance" | "market-price" | "newest" | "oldest";
 
 type SearchParams = {
   q?: string;
+  intent?: string;
   page?: string;
   pageSize?: string;
   lang?: string;
@@ -580,6 +583,8 @@ export default async function SearchPage({
 }) {
   const params = await searchParams;
   const q = (params.q ?? "").trim();
+  const intent = (params.intent ?? "").trim().toLowerCase();
+  const cameraIntent = intent === "camera";
   const qNormalized = normalizeQuery(q);
   const parsedNumber = extractCardNumber(qNormalized);
   const nameHint = extractNameHint(qNormalized);
@@ -595,21 +600,46 @@ export default async function SearchPage({
     return (
       <main className="app-shell">
         <div className="mx-auto w-full max-w-5xl px-4 py-12 sm:px-6">
-          <section className="mx-auto w-full max-w-3xl pt-10 text-center sm:pt-14">
-            <h1 className="text-app text-6xl font-semibold tracking-tight sm:text-7xl">PopAlpha</h1>
-            <p className="text-muted mx-auto mt-4 max-w-2xl text-sm sm:text-base">
-              Smarter TCG Market Insights.
-            </p>
+          {cameraIntent ? (
+            <>
+              <PokeTraceCameraBetaPanel className="mt-0" />
+              <section className="mx-auto w-full max-w-3xl pt-8 text-center sm:pt-10">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#7DB6FF]">
+                  PokeTrace Search
+                </p>
+                <p className="text-muted mx-auto mt-3 max-w-2xl text-sm sm:text-base">
+                  Search is still available if you want to jump straight to a card instead of using the camera beta.
+                </p>
 
-            <CardSearch
-              className="mx-auto mt-7 w-full max-w-3xl"
-              size="search"
-              placeholder="Search"
-              autoFocus
-              enableGlobalShortcut
-              submitMode="active-or-search"
-            />
-          </section>
+                <CardSearch
+                  className="mx-auto mt-6 w-full max-w-3xl"
+                  size="search"
+                  placeholder="Search"
+                  autoFocus={false}
+                  enableGlobalShortcut
+                  submitMode="active-or-search"
+                  cameraHref={POKETRACE_CAMERA_HREF}
+                />
+              </section>
+            </>
+          ) : (
+            <section className="mx-auto w-full max-w-3xl pt-10 text-center sm:pt-14">
+              <h1 className="text-app text-6xl font-semibold tracking-tight sm:text-7xl">PopAlpha</h1>
+              <p className="text-muted mx-auto mt-4 max-w-2xl text-sm sm:text-base">
+                Smarter TCG Market Insights.
+              </p>
+
+              <CardSearch
+                className="mx-auto mt-7 w-full max-w-3xl"
+                size="search"
+                placeholder="Search"
+                autoFocus
+                enableGlobalShortcut
+                submitMode="active-or-search"
+                cameraHref={POKETRACE_CAMERA_HREF}
+              />
+            </section>
+          )}
         </div>
       </main>
     );

@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
+import { POKETRACE_CAMERA_HREF } from "@/lib/poketrace/ui-paths";
 import { buildHighlightSegments, extractHighlightTokens } from "@/lib/search/highlight.mjs";
 import { useCardSearch } from "@/lib/search/use-card-search";
 
@@ -16,6 +17,7 @@ type CardSearchProps = {
   submitMode?: "active-only" | "active-or-search";
   className?: string;
   borderless?: boolean;
+  cameraHref?: string | null;
 };
 
 function joinClasses(...values: Array<string | false | null | undefined>) {
@@ -98,6 +100,7 @@ export default function CardSearch({
   submitMode = "active-only",
   className,
   borderless = false,
+  cameraHref = POKETRACE_CAMERA_HREF,
 }: CardSearchProps) {
   const router = useRouter();
   const { user } = useUser();
@@ -282,9 +285,15 @@ export default function CardSearch({
         />
         <button
           type="button"
+          onClick={() => {
+            if (!cameraHref) return;
+            closeDropdown();
+            router.push(cameraHref);
+          }}
           className={joinClasses(
             "flex shrink-0 items-center justify-center rounded-full transition text-[var(--color-muted)] hover:text-[var(--color-text)]",
             sizeClasses.iconBtn,
+            cameraHref ? "cursor-pointer" : "cursor-default opacity-60",
           )}
           aria-label="Camera search"
         >
