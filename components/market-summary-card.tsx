@@ -1,4 +1,9 @@
 import CardMarketIntelClient from "@/components/card-market-intel-client";
+import type {
+  HistoryPointRow,
+  RawCardMarketVariant,
+  RawCardMarketVariantInput,
+} from "@/components/raw-card-variant-types";
 import { computeLiquidity } from "@/lib/cards/liquidity";
 import { dbPublic } from "@/lib/db";
 import { getEurToUsdRate } from "@/lib/pricing/fx";
@@ -7,21 +12,14 @@ type MarketSummaryCardProps = {
   canonicalSlug: string;
   selectedPrintingId: string | null;
   selectedWindow: "7d" | "30d" | "90d";
-  variants: Array<{
-    printingId: string;
-    label: string;
-    variantRef: string;
-  }>;
+  variants: RawCardMarketVariantInput[];
 };
 
-type HistoryPointRow = {
-  ts: string;
-  price: number;
-};
+type SupportedProvider = "JUSTTCG" | "SCRYDEX";
 
 type PriceHistoryRow = {
   variant_ref: string | null;
-  provider: "JUSTTCG" | "SCRYDEX" | "POKEMON_TCG_API" | string;
+  provider: string | null;
   currency: string | null;
   ts: string;
   price: number;
@@ -35,18 +33,34 @@ type FxRateRow = {
 type CardMetricRow = {
   printing_id: string | null;
   active_listings_7d: number | null;
+  market_price: number | null;
+  market_price_as_of: string | null;
+  change_pct_7d: number | null;
   median_30d: number | null;
   trimmed_median_30d: number | null;
   snapshot_count_30d: number | null;
   provider_price_changes_count_30d: number | null;
   low_30d: number | null;
   high_30d: number | null;
+  justtcg_price: number | null;
+  scrydex_price: number | null;
+  pokemontcg_price: number | null;
 };
 
 type VariantSignalRow = {
   printing_id: string | null;
+  provider: string | null;
+  provider_as_of_ts: string | null;
   history_points_30d: number | null;
   provider_trend_slope_7d: number | null;
+};
+
+type ProviderSeries = {
+  provider: SupportedProvider;
+  variantRef: string;
+  points: HistoryPointRow[];
+  latestTs: string | null;
+  score: number;
 };
 
 function filterRecentDays(points: HistoryPointRow[], days: number): HistoryPointRow[] {
@@ -58,7 +72,7 @@ function filterRecentDays(points: HistoryPointRow[], days: number): HistoryPoint
   });
 }
 
-function normalizeHistoryPoints(rows: Array<{ ts: string; price: number }>): HistoryPointRow[] {
+function normalizeHistoryPoints(rows: HistoryPointRow[]): HistoryPointRow[] {
   if (rows.length === 0) return [];
   const dedupedByTs = new Map<string, number>();
   for (const row of rows) {
@@ -70,11 +84,17 @@ function normalizeHistoryPoints(rows: Array<{ ts: string; price: number }>): His
     .sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
 }
 
-function normalizeProviderName(provider: string | null | undefined): "JUSTTCG" | "SCRYDEX" | null {
-  const normalized = String(provider ?? "").toUpperCase();
+function normalizeProviderName(provider: string | null | undefined): SupportedProvider | null {
+  const normalized = String(provider ?? "").trim().toUpperCase();
   if (normalized === "JUSTTCG") return "JUSTTCG";
   if (normalized === "SCRYDEX" || normalized === "POKEMON_TCG_API") return "SCRYDEX";
   return null;
+}
+
+function toIsoDate(value: string): string | null {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().slice(0, 10);
 }
 
 async function loadAllHistoryRows(params: {
@@ -83,6 +103,7 @@ async function loadAllHistoryRows(params: {
 }): Promise<PriceHistoryRow[]> {
   const pageSize = 1000;
   const allRows: PriceHistoryRow[] = [];
+  const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
 
   for (let from = 0; ; from += pageSize) {
     const { data, error } = await params.supabase
@@ -90,7 +111,9 @@ async function loadAllHistoryRows(params: {
       .select("variant_ref, provider, currency, ts, price")
       .eq("canonical_slug", params.canonicalSlug)
       .in("provider", ["JUSTTCG", "SCRYDEX", "POKEMON_TCG_API"])
-      .order("ts", { ascending: false })
+      .eq("source_window", "snapshot")
+      .gte("ts", since)
+      .order("ts", { ascending: true })
       .range(from, from + pageSize - 1);
 
     if (error) throw new Error(`public_price_history query failed: ${error.message}`);
@@ -100,12 +123,6 @@ async function loadAllHistoryRows(params: {
   }
 
   return allRows;
-}
-
-function toIsoDate(value: string): string | null {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return date.toISOString().slice(0, 10);
 }
 
 async function loadFxRates(params: {
@@ -153,152 +170,231 @@ function convertRowToUsd(row: PriceHistoryRow, fxRows: FxRateRow[]): number | nu
   return Number((row.price * fxRate).toFixed(4));
 }
 
-function buildMergedHistory(rows: PriceHistoryRow[], fxRows: FxRateRow[]): HistoryPointRow[] {
-  if (rows.length === 0) return [];
-
-  const providerBuckets = new Map<string, number[]>();
-  for (const row of rows) {
-    const parsedTs = new Date(row.ts);
-    if (Number.isNaN(parsedTs.getTime())) continue;
-    const bucketTs = parsedTs.toISOString();
-    const provider = normalizeProviderName(row.provider);
-    if (!provider) continue;
-    const usdPrice = convertRowToUsd(row, fxRows);
-    if (!Number.isFinite(usdPrice) || usdPrice === null || usdPrice <= 0) continue;
-    const key = `${bucketTs}|${provider}`;
-    const current = providerBuckets.get(key) ?? [];
-    current.push(usdPrice);
-    providerBuckets.set(key, current);
-  }
-
-  const providerSeries = new Map<string, Array<{ ts: string; ms: number; price: number }>>();
-  for (const [key, prices] of providerBuckets.entries()) {
-    if (prices.length === 0) continue;
-    const [ts, provider] = key.split("|");
-    if (!ts || !provider) continue;
-    const ms = new Date(ts).getTime();
-    if (!Number.isFinite(ms)) continue;
-    const mean = prices.reduce((sum, value) => sum + value, 0) / prices.length;
-    const arr = providerSeries.get(provider) ?? [];
-    arr.push({ ts, ms, price: Number(mean.toFixed(4)) });
-    providerSeries.set(provider, arr);
-  }
-
-  for (const [provider, points] of providerSeries.entries()) {
-    providerSeries.set(provider, [...points].sort((a, b) => a.ms - b.ms));
-  }
-
-  const allTimestamps = Array.from(
-    new Set(
-      [...providerSeries.values()]
-        .flat()
-        .map((point) => point.ts)
-    )
-  )
-    .sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
-
-  const providers = [...providerSeries.keys()];
-  const pointerByProvider = new Map<string, number>(providers.map((provider) => [provider, 0]));
-  const latestByProvider = new Map<string, { ts: string; ms: number; price: number } | null>(providers.map((provider) => [provider, null]));
-
-  // Keep a provider's last reading available for merge for up to 72h so async update cadence
-  // doesn't create artificial end-of-line cliffs.
-  const MAX_CARRY_FORWARD_MS = 72 * 60 * 60 * 1000;
-
-  const mergedPoints: HistoryPointRow[] = [];
-  for (const ts of allTimestamps) {
-    const tsMs = new Date(ts).getTime();
-    if (!Number.isFinite(tsMs)) continue;
-
-    for (const provider of providers) {
-      const series = providerSeries.get(provider) ?? [];
-      let pointer = pointerByProvider.get(provider) ?? 0;
-      while (pointer < series.length && series[pointer]!.ms <= tsMs) {
-        latestByProvider.set(provider, series[pointer]!);
-        pointer += 1;
-      }
-      pointerByProvider.set(provider, pointer);
-    }
-
-    const activePrices: number[] = [];
-    for (const provider of providers) {
-      const latest = latestByProvider.get(provider);
-      if (!latest) continue;
-      if (tsMs - latest.ms > MAX_CARRY_FORWARD_MS) continue;
-      activePrices.push(latest.price);
-    }
-    if (activePrices.length === 0) continue;
-    const merged = activePrices.reduce((sum, value) => sum + value, 0) / activePrices.length;
-    mergedPoints.push({ ts, price: Number(merged.toFixed(4)) });
-  }
-
-  return mergedPoints;
+function historyPrintingId(variantRef: string | null | undefined): string | null {
+  const rawValue = String(variantRef ?? "").trim();
+  if (!rawValue.includes("::")) return null;
+  return rawValue.split("::")[0] ?? null;
 }
 
-function latestProviderPrices(rows: PriceHistoryRow[], fxRows: FxRateRow[]): {
-  justtcgPrice: number | null;
-  justtcgAsOfTs: string | null;
-  scrydexPrice: number | null;
-  scrydexAsOfTs: string | null;
-} {
-  let justtcg: { tsMs: number; ts: string; price: number } | null = null;
-  let scrydex: { tsMs: number; ts: string; price: number } | null = null;
+function historyToken(variantRef: string | null | undefined): string {
+  const rawValue = String(variantRef ?? "").trim();
+  if (!rawValue) return "";
+  const parts = rawValue.split("::");
+  const source = parts.length >= 3 ? parts[1] : rawValue;
+  const trailing = source.split(":").at(-1) ?? source;
+  return trailing.replace(/[^a-z0-9]+/gi, "").toLowerCase();
+}
+
+function expectedStampToken(stamp: string | null): string | null {
+  switch (String(stamp ?? "").trim().toUpperCase()) {
+    case "POKE_BALL_PATTERN":
+      return "pokeball";
+    case "MASTER_BALL_PATTERN":
+      return "masterball";
+    case "DUSK_BALL_PATTERN":
+      return "duskball";
+    case "QUICK_BALL_PATTERN":
+      return "quickball";
+    case "ENERGY_PATTERN":
+      return "energy";
+    case "ROCKET_PATTERN":
+      return "rocket";
+    case "POKEMON_CENTER":
+      return "pokemoncenter";
+    case "W_STAMP":
+      return "wstamp";
+    case "PRERELEASE_STAMP":
+      return "prerelease";
+    default:
+      return null;
+  }
+}
+
+function hasSpecialStampToken(token: string): boolean {
+  return [
+    "pokeball",
+    "masterball",
+    "duskball",
+    "quickball",
+    "energy",
+    "rocket",
+    "pokemoncenter",
+    "wstamp",
+    "prerelease",
+  ].some((value) => token.includes(value));
+}
+
+function providerVariantMatchScore(
+  provider: SupportedProvider,
+  variantRef: string,
+  input: RawCardMarketVariantInput,
+): number {
+  if (provider !== "SCRYDEX") return 0;
+
+  const token = historyToken(variantRef);
+  if (!token) return 0;
+
+  let score = 0;
+  const expectedEdition = input.edition === "FIRST_EDITION" ? "FIRST_EDITION" : "UNLIMITED";
+  const expectedFinish = input.finish;
+  const stampToken = expectedStampToken(input.stamp);
+
+  if (expectedEdition === "FIRST_EDITION") {
+    score += token.includes("firstedition") || token.includes("1stedition") ? 300 : -300;
+  } else {
+    score += token.includes("firstedition") || token.includes("1stedition") ? -300 : 150;
+  }
+
+  if (stampToken) {
+    score += token.includes(stampToken) ? 500 : -500;
+  } else {
+    score += hasSpecialStampToken(token) ? -350 : 150;
+  }
+
+  if (expectedFinish === "NON_HOLO") {
+    if (["normal", "nonholo", "nonholofoil", "unlimited", "unlimitedshadowless"].includes(token)) score += 400;
+    else if (token.includes("reverse")) score -= 250;
+    else if (token.includes("holo") || token.includes("foil")) score -= 200;
+    else score += 40;
+  } else if (expectedFinish === "REVERSE_HOLO") {
+    if (token.includes("reverse")) score += 400;
+    else if (token.includes("holo") || token.includes("foil")) score += 50;
+    else if (token === "normal" || token.includes("nonholo")) score -= 250;
+  } else if (expectedFinish === "HOLO") {
+    if (stampToken && token.includes(stampToken)) score += 350;
+    else if (token.includes("reverse")) score -= 150;
+    else if (token.includes("holo") || token.includes("foil")) score += 350;
+    else if (token === "normal" || token.includes("nonholo")) score -= 250;
+  } else if (token === "normal") {
+    score += 50;
+  }
+
+  if (token === "normal") score += 40;
+  else if (token === "holofoil") score += 20;
+  else if (token === "reverseholofoil") score += 20;
+
+  return score;
+}
+
+function buildProviderSeries(rows: PriceHistoryRow[], fxRows: FxRateRow[]): ProviderSeries[] {
+  const seriesByKey = new Map<string, ProviderSeries>();
 
   for (const row of rows) {
     const provider = normalizeProviderName(row.provider);
-    if (!provider) continue;
-    const tsMs = new Date(row.ts).getTime();
-    if (!Number.isFinite(tsMs)) continue;
-    const usdPrice = convertRowToUsd(row, fxRows);
-    if (!Number.isFinite(usdPrice) || usdPrice === null || usdPrice <= 0) continue;
+    const variantRef = String(row.variant_ref ?? "").trim();
+    if (!provider || !variantRef) continue;
+    const price = convertRowToUsd(row, fxRows);
+    if (!Number.isFinite(price) || price === null || price <= 0) continue;
 
-    if (provider === "JUSTTCG" && (!justtcg || tsMs > justtcg.tsMs)) {
-      justtcg = { tsMs, ts: row.ts, price: usdPrice };
-      continue;
-    }
-    if (provider === "SCRYDEX" && (!scrydex || tsMs > scrydex.tsMs)) {
-      scrydex = { tsMs, ts: row.ts, price: usdPrice };
-    }
+    const key = `${provider}|${variantRef}`;
+    const current = seriesByKey.get(key) ?? {
+      provider,
+      variantRef,
+      points: [],
+      latestTs: null,
+      score: 0,
+    };
+    current.points.push({ ts: row.ts, price });
+    if (!current.latestTs || row.ts > current.latestTs) current.latestTs = row.ts;
+    seriesByKey.set(key, current);
   }
 
-  return {
-    justtcgPrice: justtcg?.price ?? null,
-    justtcgAsOfTs: justtcg?.ts ?? null,
-    scrydexPrice: scrydex?.price ?? null,
-    scrydexAsOfTs: scrydex?.ts ?? null,
-  };
+  return [...seriesByKey.values()].map((entry) => ({
+    ...entry,
+    points: normalizeHistoryPoints(entry.points),
+  }));
 }
 
-export default async function MarketSummaryCard({
-  canonicalSlug,
-  selectedPrintingId,
-  selectedWindow,
-  variants,
-}: MarketSummaryCardProps) {
+function compareIsoDesc(left: string | null, right: string | null): number {
+  if (left === right) return 0;
+  if (!left) return 1;
+  if (!right) return -1;
+  return right.localeCompare(left);
+}
+
+function chooseProviderSeries(
+  series: ProviderSeries[],
+  provider: SupportedProvider,
+  input: RawCardMarketVariantInput,
+): ProviderSeries | null {
+  const canonicalRef = `${input.printingId}::RAW`;
+  const candidates = series
+    .filter((entry) => entry.provider === provider)
+    .map((entry) => ({
+      ...entry,
+      score:
+        (entry.variantRef === canonicalRef ? 1000 : 0)
+        + providerVariantMatchScore(provider, entry.variantRef, input),
+    }));
+
+  if (candidates.length === 0) return null;
+
+  return [...candidates].sort((left, right) => {
+    const scoreDelta = right.score - left.score;
+    if (scoreDelta !== 0) return scoreDelta;
+    const tsDelta = compareIsoDesc(left.latestTs, right.latestTs);
+    if (tsDelta !== 0) return tsDelta;
+    const pointDelta = right.points.length - left.points.length;
+    if (pointDelta !== 0) return pointDelta;
+    return left.variantRef.localeCompare(right.variantRef);
+  })[0] ?? null;
+}
+
+function chooseSignalRow(rows: VariantSignalRow[]): VariantSignalRow | null {
+  const supportedRows = rows.filter((row) => normalizeProviderName(row.provider) !== null);
+  if (supportedRows.length === 0) return null;
+
+  return [...supportedRows].sort((left, right) => {
+    const leftProvider = normalizeProviderName(left.provider);
+    const rightProvider = normalizeProviderName(right.provider);
+    if (leftProvider !== rightProvider) {
+      return leftProvider === "SCRYDEX" ? -1 : 1;
+    }
+    const tsDelta = compareIsoDesc(left.provider_as_of_ts, right.provider_as_of_ts);
+    if (tsDelta !== 0) return tsDelta;
+    return (right.history_points_30d ?? 0) - (left.history_points_30d ?? 0);
+  })[0] ?? null;
+}
+
+export async function loadRawCardMarketVariants(params: {
+  canonicalSlug: string;
+  variants: RawCardMarketVariantInput[];
+}): Promise<RawCardMarketVariant[]> {
   const supabase = dbPublic();
-  const printingIds = variants.map((variant) => variant.printingId);
-  const [allHistoryRows, cardMetricsQuery, variantSignalsQuery] = printingIds.length > 0
-    ? await Promise.all([
-        loadAllHistoryRows({ supabase, canonicalSlug }),
-        supabase
-          .from("public_card_metrics")
-          .select("printing_id, active_listings_7d, median_30d, trimmed_median_30d, snapshot_count_30d, provider_price_changes_count_30d, low_30d, high_30d")
-          .eq("canonical_slug", canonicalSlug)
-          .eq("grade", "RAW")
-          .in("printing_id", printingIds),
-        supabase
-          .from("public_variant_metrics")
-          .select("printing_id, history_points_30d, provider_trend_slope_7d")
-          .eq("canonical_slug", canonicalSlug)
-          .eq("provider", "JUSTTCG")
-          .eq("grade", "RAW")
-          .in("printing_id", printingIds),
-      ])
-    : [
-        [] as PriceHistoryRow[],
-        { data: [] as CardMetricRow[] },
-        { data: [] as VariantSignalRow[] },
-      ];
+  const printingIds = params.variants.map((variant) => variant.printingId);
+  if (printingIds.length === 0) return [];
+
+  const [allHistoryRows, cardMetricsQuery, variantSignalsQuery] = await Promise.all([
+    loadAllHistoryRows({ supabase, canonicalSlug: params.canonicalSlug }),
+    supabase
+      .from("public_card_metrics")
+      .select([
+        "printing_id",
+        "active_listings_7d",
+        "market_price",
+        "market_price_as_of",
+        "change_pct_7d",
+        "median_30d",
+        "trimmed_median_30d",
+        "snapshot_count_30d",
+        "provider_price_changes_count_30d",
+        "low_30d",
+        "high_30d",
+        "justtcg_price",
+        "scrydex_price",
+        "pokemontcg_price",
+      ].join(", "))
+      .eq("canonical_slug", params.canonicalSlug)
+      .eq("grade", "RAW")
+      .in("printing_id", printingIds),
+    supabase
+      .from("public_variant_metrics")
+      .select("printing_id, provider, provider_as_of_ts, history_points_30d, provider_trend_slope_7d")
+      .eq("canonical_slug", params.canonicalSlug)
+      .eq("grade", "RAW")
+      .in("provider", ["JUSTTCG", "SCRYDEX", "POKEMON_TCG_API"])
+      .in("printing_id", printingIds),
+  ]);
 
   const maxHistoryDate = allHistoryRows
     .map((row) => toIsoDate(row.ts))
@@ -307,36 +403,41 @@ export default async function MarketSummaryCard({
     .at(-1) ?? null;
   const fxRows = await loadFxRates({ supabase, asOfDate: maxHistoryDate });
 
-  const cardMetricRows = (cardMetricsQuery.data ?? []) as CardMetricRow[];
-  const signalRows = (variantSignalsQuery.data ?? []) as VariantSignalRow[];
   const cardMetricsByPrinting = new Map<string, CardMetricRow>();
-  for (const row of cardMetricRows) {
+  for (const row of (cardMetricsQuery.data ?? []) as unknown as CardMetricRow[]) {
     if (!row.printing_id || cardMetricsByPrinting.has(row.printing_id)) continue;
     cardMetricsByPrinting.set(row.printing_id, row);
   }
-  const signalsByPrinting = new Map<string, VariantSignalRow>();
-  for (const row of signalRows) {
-    if (!row.printing_id || signalsByPrinting.has(row.printing_id)) continue;
-    signalsByPrinting.set(row.printing_id, row);
+
+  const signalRowsByPrinting = new Map<string, VariantSignalRow[]>();
+  for (const row of (variantSignalsQuery.data ?? []) as unknown as VariantSignalRow[]) {
+    if (!row.printing_id) continue;
+    const current = signalRowsByPrinting.get(row.printing_id) ?? [];
+    current.push(row);
+    signalRowsByPrinting.set(row.printing_id, current);
   }
 
-  const variantPayload = variants.map((variant) => {
-    const rawVariantPrefix = `${variant.printingId}::RAW`;
-    const variantRows = allHistoryRows.filter((row) => {
-      const variantRef = row.variant_ref ?? "";
-      return variantRef === rawVariantPrefix || variantRef.startsWith(`${rawVariantPrefix}::`);
-    });
-    const mergedHistory = buildMergedHistory(variantRows, fxRows);
-    const providerPrices = latestProviderPrices(variantRows, fxRows);
-    const fullHistory = normalizeHistoryPoints(mergedHistory);
-    const history7d = filterRecentDays(fullHistory, 7);
-    const history30d = filterRecentDays(fullHistory, 30);
-    const history90d = filterRecentDays(fullHistory, 90);
-    const latestMergedPoint = fullHistory.at(-1) ?? null;
-    const signalRow = signalsByPrinting.get(variant.printingId) ?? null;
-    const metrics = cardMetricsByPrinting.get(variant.printingId) ?? null;
+  const historyRowsByPrinting = new Map<string, PriceHistoryRow[]>();
+  for (const row of allHistoryRows) {
+    const printingId = historyPrintingId(row.variant_ref);
+    if (!printingId) continue;
+    const current = historyRowsByPrinting.get(printingId) ?? [];
+    current.push(row);
+    historyRowsByPrinting.set(printingId, current);
+  }
 
-    const liq = computeLiquidity({
+  return params.variants.map((variant) => {
+    const printingHistoryRows = historyRowsByPrinting.get(variant.printingId) ?? [];
+    const series = buildProviderSeries(printingHistoryRows, fxRows);
+    const scrydexSeries = chooseProviderSeries(series, "SCRYDEX", variant);
+    const justtcgSeries = chooseProviderSeries(series, "JUSTTCG", variant);
+    const preferredSeries = scrydexSeries ?? justtcgSeries ?? series[0] ?? null;
+    const preferredHistory = preferredSeries?.points ?? [];
+    const latestHistoryPoint = preferredHistory.at(-1) ?? null;
+    const metrics = cardMetricsByPrinting.get(variant.printingId) ?? null;
+    const signalRow = chooseSignalRow(signalRowsByPrinting.get(variant.printingId) ?? []);
+
+    const liquidity = computeLiquidity({
       priceChanges30d: metrics?.provider_price_changes_count_30d ?? null,
       snapshotCount30d: metrics?.snapshot_count_30d ?? null,
       low30d: metrics?.low_30d ?? null,
@@ -344,23 +445,24 @@ export default async function MarketSummaryCard({
       median30d: metrics?.median_30d ?? null,
     });
 
-    // Signal columns are paywalled — always null from public views.
     return {
       printingId: variant.printingId,
       label: variant.label,
-      marketBalancePrice:
-        metrics?.trimmed_median_30d
-        ?? metrics?.median_30d
-        ?? null,
-      currentPrice: latestMergedPoint?.price ?? null,
-      justtcgPrice: providerPrices.justtcgPrice,
-      justtcgAsOfTs: providerPrices.justtcgAsOfTs,
-      scrydexPrice: providerPrices.scrydexPrice,
-      scrydexAsOfTs: providerPrices.scrydexAsOfTs,
-      asOfTs: latestMergedPoint?.ts ?? null,
-      history7d,
-      history30d,
-      history90d,
+      descriptorLabel: variant.descriptorLabel,
+      imageUrl: variant.imageUrl,
+      rarity: variant.rarity,
+      currentPrice: metrics?.market_price ?? latestHistoryPoint?.price ?? null,
+      changePct7d: metrics?.change_pct_7d ?? null,
+      justtcgPrice: metrics?.justtcg_price ?? null,
+      justtcgAsOfTs: justtcgSeries?.latestTs ?? null,
+      scrydexPrice: metrics?.scrydex_price ?? metrics?.pokemontcg_price ?? null,
+      scrydexAsOfTs: scrydexSeries?.latestTs ?? null,
+      marketBalancePrice: metrics?.trimmed_median_30d ?? metrics?.median_30d ?? null,
+      asOfTs: metrics?.market_price_as_of ?? latestHistoryPoint?.ts ?? null,
+      trendSlope7d: signalRow?.provider_trend_slope_7d ?? null,
+      history7d: filterRecentDays(preferredHistory, 7),
+      history30d: filterRecentDays(preferredHistory, 30),
+      history90d: filterRecentDays(preferredHistory, 90),
       activeListings7d: metrics?.active_listings_7d ?? null,
       signalTrend: null,
       signalTrendLabel: null,
@@ -368,19 +470,30 @@ export default async function MarketSummaryCard({
       signalBreakoutLabel: null,
       signalValue: null,
       signalValueLabel: null,
-      trendSlope7d: signalRow?.provider_trend_slope_7d ?? null,
       signalsHistoryPoints30d:
         signalRow?.history_points_30d === null || signalRow?.history_points_30d === undefined
           ? null
           : Number(signalRow.history_points_30d),
-      signalsAsOfTs: null,
-      liquidityScore: liq?.score ?? null,
-      liquidityTier: liq?.tier ?? null,
-      liquidityTone: liq?.tone ?? "neutral" as const,
+      signalsAsOfTs: signalRow?.provider_as_of_ts ?? null,
+      liquidityScore: liquidity?.score ?? null,
+      liquidityTier: liquidity?.tier ?? null,
+      liquidityTone: liquidity?.tone ?? "neutral",
       liquidityPriceChanges30d: metrics?.provider_price_changes_count_30d ?? null,
       liquiditySnapshotCount30d: metrics?.snapshot_count_30d ?? null,
-      liquiditySpreadPercent: liq?.spreadPercent ?? null,
+      liquiditySpreadPercent: liquidity?.spreadPercent ?? null,
     };
+  });
+}
+
+export default async function MarketSummaryCard({
+  canonicalSlug,
+  selectedPrintingId,
+  selectedWindow,
+  variants,
+}: MarketSummaryCardProps) {
+  const variantPayload = await loadRawCardMarketVariants({
+    canonicalSlug,
+    variants,
   });
 
   return (

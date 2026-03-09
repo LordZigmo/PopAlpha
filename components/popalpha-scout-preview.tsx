@@ -1,3 +1,5 @@
+"use client";
+
 import { Sparkles } from "lucide-react";
 import { buildPopAlphaScoutSummary } from "@/lib/ai/scout-summary";
 import TypewriterText from "@/components/typewriter-text";

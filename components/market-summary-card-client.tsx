@@ -5,11 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { GroupCard, GroupedSection } from "@/components/ios-grouped-ui";
 import PriceTickerStrip from "@/components/price-ticker-strip";
 import EnhancedChart from "@/components/enhanced-chart";
-
-type HistoryPointRow = {
-  ts: string;
-  price: number;
-};
+import type { HistoryPointRow } from "@/components/raw-card-variant-types";
 
 type MarketSummaryCardClientProps = {
   variants: Array<{
@@ -21,6 +17,7 @@ type MarketSummaryCardClientProps = {
     scrydexPrice: number | null;
     scrydexAsOfTs: string | null;
     asOfTs: string | null;
+    changePct7d: number | null;
     trendSlope7d?: number | null;
     history7d: HistoryPointRow[];
     history30d: HistoryPointRow[];
@@ -145,6 +142,7 @@ export default function MarketSummaryCardClient({
   const scrydexPrice = activeVariant?.scrydexPrice ?? null;
   const scrydexAsOfTs = activeVariant?.scrydexAsOfTs ?? null;
   const asOfTs = activeVariant?.asOfTs ?? null;
+  const changePct7d = activeVariant?.changePct7d ?? null;
   const history7d = activeVariant?.history7d ?? [];
   const history30d = activeVariant?.history30d ?? [];
   const history90d = activeVariant?.history90d ?? [];
@@ -162,7 +160,9 @@ export default function MarketSummaryCardClient({
         ? "7d"
         : "30d";
 
-  const changeValue = computeChange(chartSeries);
+  const changeValue = effectiveWindow === "7d"
+    ? changePct7d ?? computeChange(chartSeries)
+    : computeChange(chartSeries);
   const { low, high } = computeLowHigh(chartSeries);
   const sampleCount = chartSeries.length;
 
@@ -177,6 +177,7 @@ export default function MarketSummaryCardClient({
 
   function setVariant(nextPrintingId: string) {
     onVariantChange?.(nextPrintingId);
+    if (onVariantChange) return;
     if (typeof window === "undefined") return;
     const url = new URL(window.location.href);
     url.searchParams.set("printing", nextPrintingId);
@@ -206,7 +207,7 @@ export default function MarketSummaryCardClient({
             <div className="flex items-baseline justify-between gap-2">
               <div>
                 <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#8A8A8A]">
-                  Market Price (Blended)
+                  Market Price
                 </p>
                 <span className="text-[38px] font-bold leading-none tracking-[-0.03em] tabular-nums text-[#F0F0F0] sm:text-[44px]">
                   {formatUsd(currentPrice)}

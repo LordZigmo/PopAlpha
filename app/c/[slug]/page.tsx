@@ -16,9 +16,10 @@ import CollapsibleSection from "@/components/collapsible-section";
 import EbayListings from "@/components/ebay-listings";
 import { GroupedSection, PageShell, Pill, SegmentedControl, StatStripItem } from "@/components/ios-grouped-ui";
 import MarketPulse from "@/components/market-pulse";
-import MarketSummaryCard from "@/components/market-summary-card";
+import MarketSummaryCard, { loadRawCardMarketVariants } from "@/components/market-summary-card";
 import PopAlphaScoutPreview from "@/components/popalpha-scout-preview";
-import PokeTraceBetaCard from "@/components/poketrace-beta-card";
+import RawCardMarketSurface from "@/components/raw-card-market-surface";
+import type { RawCardMarketVariantInput } from "@/components/raw-card-variant-types";
 import CardTileMini from "@/components/card-tile-mini";
 import type { HomepageCard } from "@/lib/data/homepage";
 import { buildEbaySearchQueries, type GradeSelection, type GradedSource } from "@/lib/ebay-query";
@@ -26,7 +27,7 @@ import { buildPrintingPill } from "@/lib/cards/detail";
 import { getCardViewSnapshot } from "@/lib/data/card-views";
 import { getCommunityPulseSnapshot } from "@/lib/data/community-pulse";
 import { getRelatedCardCarousels } from "@/lib/data/related-cards";
-import { buildGradedVariantRef, buildRawVariantRef } from "@/lib/identity/variant-ref";
+import { buildGradedVariantRef } from "@/lib/identity/variant-ref";
 import { dbPublic } from "@/lib/db";
 import { buildAssetViewModel } from "@/lib/data/assets";
 import { resolveWeightedMarketPrice } from "@/lib/pricing/market-confidence";
@@ -692,17 +693,28 @@ export default async function CanonicalCardPage({
     grade: queryGradeSelection,
     provider: viewMode === "GRADED" ? activeProvider : null,
   });
-  const rawVariantOptions = [...printings]
+  const rawVariantOptions: RawCardMarketVariantInput[] = [...printings]
     .sort((a, b) => {
       const finishDelta = rawVariantSortPriority(a) - rawVariantSortPriority(b);
       if (finishDelta !== 0) return finishDelta;
       return sortPrintings(a, b);
     })
     .map((row) => ({
-    printingId: row.id,
-    label: rawVariantSegmentLabel(row, printings),
-    variantRef: buildRawVariantRef(row.id),
-  }));
+      printingId: row.id,
+      label: rawVariantSegmentLabel(row, printings),
+      descriptorLabel: printingOptionLabel(row),
+      imageUrl: row.image_url,
+      rarity: row.rarity,
+      finish: row.finish,
+      edition: row.edition,
+      stamp: row.stamp,
+    }));
+  const rawVariantPayload = viewMode === "RAW"
+    ? await loadRawCardMarketVariants({
+        canonicalSlug: slug,
+        variants: rawVariantOptions,
+      })
+    : [];
 
   const subtitleText = [
     canonical.set_name,
@@ -861,16 +873,82 @@ export default async function CanonicalCardPage({
     : fairValue != null
       ? `Fair ${formatUsdCompact(fairValue)}`
       : "Forming";
+  const rawPulseSnapshot = currentCardPulse
+    ? {
+        bullishVotes: currentCardPulse.bullishVotes,
+        bearishVotes: currentCardPulse.bearishVotes,
+        userVote: currentCardPulse.userVote,
+        resolvesAt: cardPulseSnapshot.weekEndsAt,
+      }
+    : null;
+  const commonTailSections = (
+    <>
+      <div className="pt-4 sm:pt-5">
+        <CardViewTracker
+          canonicalSlug={slug}
+          initialTotalViews={viewSnapshot.totalViews}
+          initialSeries={viewSnapshot.series}
+          locked
+        />
+      </div>
+
+      <CollapsibleSection title="Live eBay Listings" defaultOpen={false} badge={<Pill label="Live" tone="neutral" size="small" />}>
+        <EbayListings
+          queries={ebayQueries}
+          canonicalSlug={slug}
+          canonicalName={canonical.canonical_name}
+          setName={canonical.set_name}
+          cardNumber={canonical.card_number}
+          finish={selectedPrinting?.finish ?? null}
+          printingId={selectedPrinting?.id ?? null}
+          grade={legacyListingsGrade}
+        />
+      </CollapsibleSection>
+
+      <RelatedCarouselSection
+        title="From This Set"
+        cards={relatedCarousels.fromSet}
+        emptyMessage="No other tracked cards from this set yet."
+      />
+
+      <RelatedCarouselSection
+        title="From This Pokémon"
+        cards={relatedCarousels.fromPokemon}
+        emptyMessage="No other tracked cards from this Pokémon yet."
+      />
+    </>
+  );
 
   return (
     <PageShell>
-      <CanonicalCardFloatingHero
-        imageUrl={selectedPrinting?.image_url ?? null}
-        altText={canonical.canonical_name}
-      />
+      {viewMode === "RAW" ? (
+        <RawCardMarketSurface
+          canonicalSlug={slug}
+          canonicalName={canonical.canonical_name}
+          subtitleText={subtitleText}
+          setName={canonical.set_name}
+          cardNumber={canonical.card_number}
+          canonicalSetHref={canonicalSetHref}
+          variants={rawVariantPayload}
+          selectedPrintingId={selectedPrinting?.id ?? null}
+          selectedWindow={activeMarketWindow}
+          rawHref={rawModeHref}
+          gradedHref={gradedModeHref}
+          scoutSummaryText={cardProfile?.summary_long ?? cardProfile?.summary_short ?? null}
+          scoutUpdatedAt={scoutUpdatedAt}
+          currentCardPulse={rawPulseSnapshot}
+        >
+          {commonTailSections}
+        </RawCardMarketSurface>
+      ) : (
+        <>
+          <CanonicalCardFloatingHero
+            imageUrl={selectedPrinting?.image_url ?? null}
+            altText={canonical.canonical_name}
+          />
 
-      <div id="content" className="content-sheet">
-        <div className="mx-auto max-w-5xl px-4 pb-[max(env(safe-area-inset-bottom),2.5rem)] pt-8 sm:px-6 sm:pb-[max(env(safe-area-inset-bottom),3.5rem)]">
+          <div id="content" className="content-sheet">
+            <div className="mx-auto max-w-5xl px-4 pb-[max(env(safe-area-inset-bottom),2.5rem)] pt-8 sm:px-6 sm:pb-[max(env(safe-area-inset-bottom),3.5rem)]">
           {/* ── Card identity + price ──────────────────────────────────── */}
           <div className="mb-6">
             <h1 className="text-[36px] font-semibold leading-tight tracking-[-0.035em] text-[#F0F0F0] sm:text-[44px]">
@@ -914,24 +992,6 @@ export default async function CanonicalCardPage({
                       </div>
                     )}
                     <p className="mt-1 text-[14px] text-[#555]">{primaryPriceLabel}</p>
-                    {viewMode === "RAW" && (rawSourceJtcg != null || rawSourceScrydex != null) ? (
-                      <div className="mt-1 text-[13px] tabular-nums text-[#7A7A7A]">
-                        <p>
-                          JustTCG: {rawSourceJtcg != null ? formatUsdCompact(rawSourceJtcg) : "—"}{" "}
-                          <span className="text-[#5E5E5E]">Updated: {rawSourceAsOfJtcg ?? "--"}</span>
-                        </p>
-                        <p>
-                          Scrydex: {rawSourceScrydex != null ? formatUsdCompact(rawSourceScrydex) : "—"}{" "}
-                          <span className="text-[#5E5E5E]">Updated: {rawSourceAsOfScrydex ?? "--"}</span>
-                        </p>
-                      </div>
-                    ) : null}
-                    {viewMode === "RAW" ? (
-                      <PokeTraceBetaCard
-                        slug={slug}
-                        printingId={selectedPrinting?.id ?? null}
-                      />
-                    ) : null}
                   </>
                 ) : null}
               </div>
@@ -1094,42 +1154,11 @@ export default async function CanonicalCardPage({
           />
         ) : null}
 
-        <div className="pt-4 sm:pt-5">
-          <CardViewTracker
-            canonicalSlug={slug}
-            initialTotalViews={viewSnapshot.totalViews}
-            initialSeries={viewSnapshot.series}
-            locked
-          />
-        </div>
-
-        {/* ── Live eBay Listings ──────────────────────────────────────────── */}
-        <CollapsibleSection title="Live eBay Listings" defaultOpen={false} badge={<Pill label="Live" tone="neutral" size="small" />}>
-          <EbayListings
-            queries={ebayQueries}
-            canonicalSlug={slug}
-            canonicalName={canonical.canonical_name}
-            setName={canonical.set_name}
-            cardNumber={canonical.card_number}
-            finish={selectedPrinting?.finish ?? null}
-            printingId={selectedPrinting?.id ?? null}
-            grade={legacyListingsGrade}
-          />
-        </CollapsibleSection>
-
-        <RelatedCarouselSection
-          title="From This Set"
-          cards={relatedCarousels.fromSet}
-          emptyMessage="No other tracked cards from this set yet."
-        />
-
-        <RelatedCarouselSection
-          title="From This Pokémon"
-          cards={relatedCarousels.fromPokemon}
-          emptyMessage="No other tracked cards from this Pokémon yet."
-        />
-        </div>
-      </div>
+              {commonTailSections}
+            </div>
+          </div>
+        </>
+      )}
     </PageShell>
   );
 }
