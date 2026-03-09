@@ -1,7 +1,6 @@
 import crypto from "node:crypto";
 import { dbAdmin } from "@/lib/db/admin";
 import { fetchCardsPage, getScrydexCredentials, type ScrydexCard } from "@/lib/scrydex/client";
-import { loadProviderSetIndex } from "@/lib/backfill/provider-set-index";
 import {
   loadCoverageGapSetPriority,
   loadHighValueStaleSetPriority,
@@ -43,6 +42,12 @@ type CanonicalSet = {
   setCode: string;
   setName: string;
   providerSetId?: string | null;
+};
+
+type ProviderSetMapRow = {
+  canonical_set_code: string;
+  canonical_set_name: string | null;
+  provider_set_id: string;
 };
 
 type LastRunRow = {
@@ -359,13 +364,56 @@ async function loadCanonicalSetsFromPrintings(): Promise<CanonicalSet[]> {
 }
 
 async function loadCanonicalSetsFromProviderIndex(): Promise<CanonicalSet[]> {
-  const mapped = await loadProviderSetIndex("SCRYDEX");
-  if (mapped.length === 0) return [];
-  return mapped.map((row) => ({
-    setCode: row.canonicalSetCode,
-    setName: row.canonicalSetName ?? row.canonicalSetCode,
-    providerSetId: row.providerSetId,
-  }));
+  const supabase = dbAdmin();
+  const { data, error } = await supabase
+    .from("provider_set_map")
+    .select("canonical_set_code, canonical_set_name, provider_set_id")
+    .eq("provider", PROVIDER)
+    .not("provider_set_id", "is", null)
+    .order("canonical_set_code", { ascending: true });
+
+  if (error) throw new Error(`provider_set_map(scrydex index): ${error.message}`);
+
+  const sets: CanonicalSet[] = [];
+  for (const row of (data ?? []) as ProviderSetMapRow[]) {
+    const setCode = String(row.canonical_set_code ?? "").trim();
+    const providerSetId = String(row.provider_set_id ?? "").trim();
+    if (!setCode || !providerSetId) continue;
+    sets.push({
+      setCode,
+      setName: row.canonical_set_name?.trim() || setCode,
+      providerSetId,
+    });
+  }
+
+  return sets;
+}
+
+async function loadCanonicalSetsForScrydex(): Promise<CanonicalSet[]> {
+  const [setsFromPrintings, setsFromProviderMap] = await Promise.all([
+    loadCanonicalSetsFromPrintings(),
+    loadCanonicalSetsFromProviderIndex(),
+  ]);
+
+  const bySetCode = new Map<string, CanonicalSet>();
+  for (const set of setsFromPrintings) {
+    bySetCode.set(set.setCode, {
+      setCode: set.setCode,
+      setName: set.setName,
+      providerSetId: set.setCode,
+    });
+  }
+
+  for (const set of setsFromProviderMap) {
+    const existing = bySetCode.get(set.setCode);
+    bySetCode.set(set.setCode, {
+      setCode: set.setCode,
+      setName: set.setName || existing?.setName || set.setCode,
+      providerSetId: set.providerSetId ?? existing?.providerSetId ?? set.setCode,
+    });
+  }
+
+  return [...bySetCode.values()].sort((left, right) => left.setCode.localeCompare(right.setCode));
 }
 
 async function maybeBackfillProviderSetMap(): Promise<number> {
@@ -501,8 +549,7 @@ export async function runPokemonTcgRawIngest(opts: {
       }
     : await (async () => {
         providerSetIndexBackfilled = await maybeBackfillProviderSetMap();
-        const setsFromIndex = await loadCanonicalSetsFromProviderIndex();
-        const sets = setsFromIndex.length > 0 ? setsFromIndex : await loadCanonicalSetsFromPrintings();
+        const sets = await loadCanonicalSetsForScrydex();
         const allTargets: IngestTarget[] = sets.map((set) => ({
           setCode: set.setCode,
           setName: set.setName,
@@ -595,6 +642,14 @@ export async function runPokemonTcgRawIngest(opts: {
     resolvedTargets.map((target) => target.providerSetId),
   );
   const providerSetHealthUpserts: ProviderSetHealthUpsertRow[] = [];
+  const providerSetMapUpserts: Array<{
+    provider: string;
+    canonical_set_code: string;
+    canonical_set_name: string;
+    provider_set_id: string;
+    confidence: number;
+    last_verified_at: string;
+  }> = [];
 
   const { data: runRow, error: runStartError } = await supabase
     .from("ingest_runs")
@@ -779,6 +834,17 @@ export async function runPokemonTcgRawIngest(opts: {
       cards_last_run: healthRow.cards_last_run,
       updated_at: healthRow.updated_at,
     });
+
+    if (setHadSuccess && cardsFetchedForSet > 0 && target.setCode) {
+      providerSetMapUpserts.push({
+        provider: PROVIDER,
+        canonical_set_code: target.setCode,
+        canonical_set_name: target.setName ?? target.setCode,
+        provider_set_id: target.providerSetId,
+        confidence: 1,
+        last_verified_at: nowIso,
+      });
+    }
   }
 
   cooldownByProviderSet = pruneCooldowns(cooldownByProviderSet, Date.now());
@@ -793,6 +859,19 @@ export async function runPokemonTcgRawIngest(opts: {
       .upsert([...dedupedByProviderSet.values()], { onConflict: "provider,provider_set_id" });
     if (healthUpsertError) {
       firstError ??= `provider_set_health(upsert): ${healthUpsertError.message}`;
+    }
+  }
+
+  if (providerSetMapUpserts.length > 0) {
+    const dedupedBySetCode = new Map<string, typeof providerSetMapUpserts[number]>();
+    for (const row of providerSetMapUpserts) {
+      dedupedBySetCode.set(row.canonical_set_code, row);
+    }
+    const { error: providerSetMapError } = await supabase
+      .from("provider_set_map")
+      .upsert([...dedupedBySetCode.values()], { onConflict: "provider,canonical_set_code" });
+    if (providerSetMapError) {
+      firstError ??= `provider_set_map(verify): ${providerSetMapError.message}`;
     }
   }
 
