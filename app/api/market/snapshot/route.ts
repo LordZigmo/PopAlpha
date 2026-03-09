@@ -225,7 +225,7 @@ export async function GET(req: Request) {
   const lowConfidence = weighted.lowConfidence || confidenceBand.lowConfidence;
 
   const marketPriceUsd = weighted.marketPrice ?? confidenceBand.fairValue ?? result.data?.market_price ?? null;
-  const marketPriceAsOf = [justtcg.asOf, scrydex.asOf].filter(Boolean).sort().at(-1) ?? result.data?.market_price_as_of ?? null;
+  const marketPriceAsOf = scrydex.asOf ?? justtcg.asOf ?? result.data?.market_price_as_of ?? null;
 
   return NextResponse.json({
     ok: true,

@@ -19,7 +19,7 @@ type CanonicalMarketMetricRow = {
   median_7d: number | null;
   market_confidence_score?: number | null;
   market_low_confidence?: boolean | null;
-  market_blend_policy?: "NO_PRICE" | "SINGLE_PROVIDER" | "TRUST_WEIGHTED_BLEND" | "FALLBACK_STALE_OR_OUTLIER" | null;
+  market_blend_policy?: "NO_PRICE" | "SCRYDEX_PRIMARY" | "SINGLE_PROVIDER" | "FALLBACK_STALE_OR_OUTLIER" | null;
   market_provenance?: {
     sourceMix?: {
       justtcgWeight?: number;
@@ -46,7 +46,7 @@ export type CanonicalMarketPulse = {
   changePct: number | null;
   changeWindow: MarketChangeWindow | null;
   parityStatus: RawParityStatus;
-  blendPolicy?: "NO_PRICE" | "SINGLE_PROVIDER" | "TRUST_WEIGHTED_BLEND" | "FALLBACK_STALE_OR_OUTLIER";
+  blendPolicy?: "NO_PRICE" | "SCRYDEX_PRIMARY" | "SINGLE_PROVIDER" | "FALLBACK_STALE_OR_OUTLIER";
   confidenceScore?: number;
   lowConfidence?: boolean;
   sourceMix?: {
@@ -82,7 +82,7 @@ export function resolveCanonicalMarketPulse(
     marketPriceFallback: toFiniteNumber(row?.market_price),
     median7dFallback: toFiniteNumber(row?.median_7d),
   });
-  const marketPrice = weighted.marketPrice;
+  const marketPrice = toFiniteNumber(row?.market_price) ?? weighted.marketPrice;
 
   const basePayload = {
     justtcgPrice,
@@ -93,20 +93,11 @@ export function resolveCanonicalMarketPulse(
     activeListings7d: toFiniteNumber(row?.active_listings_7d),
     snapshotCount30d: toFiniteNumber(row?.snapshot_count_30d),
     parityStatus,
-    blendPolicy: weighted.blendPolicy,
-    confidenceScore: weighted.confidenceScore,
-    lowConfidence: weighted.lowConfidence,
+    blendPolicy: row?.market_blend_policy ?? weighted.blendPolicy,
+    confidenceScore: toFiniteNumber(row?.market_confidence_score) ?? weighted.confidenceScore,
+    lowConfidence: typeof row?.market_low_confidence === "boolean" ? row.market_low_confidence : weighted.lowConfidence,
     sourceMix: weighted.sourceMix,
   } satisfies Omit<CanonicalMarketPulse, "changePct" | "changeWindow">;
-
-  const change24h = toFiniteNumber(row?.change_pct_24h);
-  if (change24h !== null) {
-    return {
-      ...basePayload,
-      changePct: change24h,
-      changeWindow: "24H",
-    };
-  }
 
   const change7d = toFiniteNumber(row?.change_pct_7d);
   if (change7d !== null) {

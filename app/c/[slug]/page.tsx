@@ -651,8 +651,8 @@ export default async function CanonicalCardPage({
       set_name: canonical.set_name,
       year: canonical.year,
       market_price: null,
-      change_pct: vm?.change_24h_pct ?? vm?.change_7d_pct ?? null,
-      change_window: vm?.change_24h_pct != null ? "24H" : vm?.change_7d_pct != null ? "7D" : null,
+      change_pct: vm?.change_7d_pct ?? null,
+      change_window: vm?.change_7d_pct != null ? "7D" : null,
       mover_tier: null,
       image_url: selectedPrinting?.image_url ?? null,
       sparkline_7d: [],
@@ -795,7 +795,7 @@ export default async function CanonicalCardPage({
       const confidenceSuffix = rawPricing
         ? ` · Confidence ${rawPricing.confidenceScore}%${rawPricing.lowConfidence ? " (low)" : ""} · Mix J${Math.round(rawPricing.sourceMix.justtcgWeight * 100)} / S${Math.round(rawPricing.sourceMix.scrydexWeight * 100)}`
         : "";
-      if (rawPricing?.blendPolicy === "TRUST_WEIGHTED_BLEND") return `Current market price (trust-weighted blend)${confidenceSuffix}`;
+      if (rawPricing?.blendPolicy === "SCRYDEX_PRIMARY") return `Current market price (Scrydex primary)${confidenceSuffix}`;
       if (rawPricing?.blendPolicy === "FALLBACK_STALE_OR_OUTLIER") return `Current market price (stale/outlier fallback)${confidenceSuffix}`;
       return `Current market price (single-provider fallback)${confidenceSuffix}`;
     })()
@@ -806,12 +806,11 @@ export default async function CanonicalCardPage({
         : "Graded market"
     } · 7-day median ask`;
 
-  // 24h price change (fallback to 7d)
-  const priceChangePct = vm?.change_24h_pct ?? vm?.change_7d_pct ?? null;
+  const priceChangePct = vm?.change_7d_pct ?? null;
   const displayPriceChangePct = typeof priceChangePct === "number" && Number.isFinite(priceChangePct)
     ? priceChangePct
     : 0;
-  const priceChangeLabel = vm?.change_24h_pct != null ? "24h" : vm?.change_7d_pct != null ? "7d" : null;
+  const priceChangeLabel = vm?.change_7d_pct != null ? "7d" : null;
   const priceChangeColor = displayPriceChangePct !== 0
     ? displayPriceChangePct > 0 ? "#00DC5A" : "#FF3B30"
     : "#6B6B6B";
@@ -1087,7 +1086,7 @@ export default async function CanonicalCardPage({
             cardName={canonical.canonical_name}
             setName={canonical.set_name}
             imageUrl={selectedPrinting?.image_url ?? null}
-            changePct={vm?.change_24h_pct ?? vm?.change_7d_pct ?? null}
+            changePct={vm?.change_7d_pct ?? null}
             bullishVotes={currentCardPulse.bullishVotes}
             bearishVotes={currentCardPulse.bearishVotes}
             userVote={currentCardPulse.userVote}

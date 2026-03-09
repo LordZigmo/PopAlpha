@@ -47,8 +47,8 @@ export type WeightedMarketPriceResult = {
   marketPrice: number | null;
   blendPolicy:
     | "NO_PRICE"
+    | "SCRYDEX_PRIMARY"
     | "SINGLE_PROVIDER"
-    | "TRUST_WEIGHTED_BLEND"
     | "FALLBACK_STALE_OR_OUTLIER";
   providerWeights: ProviderWeight[];
   confidenceScore: number;
@@ -308,28 +308,33 @@ export function resolveWeightedMarketPrice(params: {
 
   let marketPrice: number | null = null;
   let blendPolicy: WeightedMarketPriceResult["blendPolicy"] = "NO_PRICE";
-
-  if (weights.length === 1) {
-    marketPrice = providers[0]?.price ?? fallbackPrice;
-    blendPolicy = "SINGLE_PROVIDER";
-  } else if (totalWeight <= 0.01) {
-    marketPrice = just?.price ?? scry?.price ?? fallbackPrice;
-    blendPolicy = "FALLBACK_STALE_OR_OUTLIER";
-  } else {
-    const weightedPrice = weights.reduce((sum, row) => {
-      const provider = byProvider.get(row.provider);
-      if (!provider) return sum;
-      return sum + provider.price * row.weight;
-    }, 0) / totalWeight;
-    marketPrice = round(weightedPrice, 4);
-    blendPolicy = weights.some((row) => row.excludedReason) ? "FALLBACK_STALE_OR_OUTLIER" : "TRUST_WEIGHTED_BLEND";
-  }
-
   const normalizedWeights = totalWeight > 0
     ? weights.map((row) => ({ ...row, weight: row.weight / totalWeight }))
     : weights.map((row) => ({ ...row, weight: 0 }));
-  const justWeight = normalizedWeights.find((row) => row.provider === "JUSTTCG")?.weight ?? 0;
-  const scrydexWeight = normalizedWeights.find((row) => row.provider === "SCRYDEX")?.weight ?? 0;
+  const scrydexWeight = normalizedWeights.find((row) => row.provider === "SCRYDEX") ?? null;
+  const justtcgWeight = normalizedWeights.find((row) => row.provider === "JUSTTCG") ?? null;
+  const scrydexPreferred = scry && scrydexWeight?.excludedReason == null;
+  const justtcgPreferred = just && justtcgWeight?.excludedReason == null;
+
+  if (scry && scrydexPreferred) {
+    marketPrice = scry.price;
+    blendPolicy = "SCRYDEX_PRIMARY";
+  } else if (just && justtcgPreferred) {
+    marketPrice = just.price;
+    blendPolicy = scry ? "FALLBACK_STALE_OR_OUTLIER" : "SINGLE_PROVIDER";
+  } else if (scry) {
+    marketPrice = scry.price;
+    blendPolicy = "FALLBACK_STALE_OR_OUTLIER";
+  } else if (just) {
+    marketPrice = just.price;
+    blendPolicy = "SINGLE_PROVIDER";
+  } else if (fallbackPrice != null) {
+    marketPrice = fallbackPrice;
+    blendPolicy = "FALLBACK_STALE_OR_OUTLIER";
+  }
+
+  const justWeight = justtcgWeight?.weight ?? 0;
+  const scrydexMix = scrydexWeight?.weight ?? 0;
 
   const availabilityScore = providers.length === 2 ? 1 : 0.55;
   const freshnessScore = normalizedWeights.reduce((sum, row) => {
@@ -355,10 +360,10 @@ export function resolveWeightedMarketPrice(params: {
       weight: round(row.weight, 4),
     })),
     confidenceScore,
-    lowConfidence: confidenceScore < 45 || providers.length === 1,
+    lowConfidence: confidenceScore < 45 || (providers.length === 1 && !scry),
     sourceMix: {
       justtcgWeight: round(justWeight, 4),
-      scrydexWeight: round(scrydexWeight, 4),
+      scrydexWeight: round(scrydexMix, 4),
     },
     providerDivergencePct: divergencePct != null ? round(divergencePct, 2) : null,
   };

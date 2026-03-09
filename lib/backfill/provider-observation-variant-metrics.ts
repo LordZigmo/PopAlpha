@@ -139,8 +139,7 @@ function toFiniteNumber(value: unknown): number | null {
   return null;
 }
 
-function shouldWriteRawForCondition(provider: SupportedProvider, condition: string | null | undefined): boolean {
-  if (provider !== "JUSTTCG") return true;
+function shouldWriteRawForCondition(_provider: SupportedProvider, condition: string | null | undefined): boolean {
   const normalized = String(condition ?? "").trim().toLowerCase();
   return normalized === "nm" || normalized === "mint";
 }

@@ -133,11 +133,7 @@ function buildHistoryVariantRef(row: CandidateRow, provider: SupportedProvider):
   });
 }
 
-function shouldWriteRawForCondition(provider: SupportedProvider, condition: string | null | undefined): boolean {
-  // Keep RAW market price comparable by using NM-only snapshots.
-  // Scrydex observations now preserve the selected provider condition, but we
-  // still only enforce the NM gate for JustTCG today.
-  if (provider !== "JUSTTCG") return true;
+function shouldWriteRawForCondition(_provider: SupportedProvider, condition: string | null | undefined): boolean {
   const normalized = String(condition ?? "").trim().toLowerCase();
   return normalized === "nm" || normalized === "mint";
 }

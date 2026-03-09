@@ -190,7 +190,7 @@ async function buildPriceCompare(params: {
 
   const providers: ProviderPriceDisplay[] = [justtcgDisplay, scrydexDisplay];
   const usdAverage = averageProviderUsdPrice(providers);
-  const asOf = [justtcgDisplay.asOf, scrydexDisplay.asOf].filter(Boolean).sort().at(-1) ?? metricsRow?.market_price_as_of ?? null;
+  const asOf = scrydexDisplay.asOf ?? justtcgDisplay.asOf ?? metricsRow?.market_price_as_of ?? null;
 
   return {
     justtcgPrice: justtcgDisplay.usdPrice,

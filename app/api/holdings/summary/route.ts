@@ -25,7 +25,6 @@ type PrintingRow = {
 type MetricRow = {
   canonical_slug: string;
   market_price: number | null;
-  change_pct_24h: number | null;
   change_pct_7d: number | null;
 };
 
@@ -87,7 +86,7 @@ export async function GET(req: Request) {
 
     const { data: metricData, error: metricError } = await supabase
       .from("public_card_metrics")
-      .select("canonical_slug, market_price, change_pct_24h, change_pct_7d")
+      .select("canonical_slug, market_price, change_pct_7d")
       .in("canonical_slug", uniqueSlugs)
       .eq("grade", "RAW");
 
@@ -121,9 +120,8 @@ export async function GET(req: Request) {
       if (row.canonical_slug && row.market_price != null && !marketPriceMap.has(row.canonical_slug)) {
         marketPriceMap.set(row.canonical_slug, row.market_price);
       }
-      const nextChange = row.change_pct_24h ?? row.change_pct_7d;
-      if (!row.canonical_slug || nextChange == null || changeMap.has(row.canonical_slug)) continue;
-      changeMap.set(row.canonical_slug, nextChange);
+      if (!row.canonical_slug || row.change_pct_7d == null || changeMap.has(row.canonical_slug)) continue;
+      changeMap.set(row.canonical_slug, row.change_pct_7d);
     }
     const hotSlugSet = new Set(
       ((hotMoverData ?? []) as HotMoverRow[]).map((row) => row.canonical_slug).filter(Boolean),
