@@ -2,10 +2,16 @@
 -- canonical RAW compare rows do not duplicate when null-printing snapshots
 -- already exist. This is idempotent on fresh environments where the corrected
 -- 20260309234500 file has already been applied.
+--
+-- Replay safety: only patch when the older broken snippets are present.
+-- Fresh environments may already have the corrected function bodies from the
+-- checked-in 20260309234500 migration, and formatting differences in
+-- pg_get_functiondef() should not make this migration fail.
 
 do $$
 declare
   v_def text;
+  v_changed boolean;
   v_old_provider_compare text := $q$  provider_compare as (
     select * from printing_compare
     union all
@@ -43,46 +49,44 @@ $q$;
   v_old_insert_source text := $q$  from ranked r$q$;
   v_new_insert_source text := $q$  from deduped_ranked r$q$;
 begin
-  v_def := pg_get_functiondef('public.refresh_card_metrics()'::regprocedure);
-  if position(v_old_provider_compare in v_def) > 0 then
-    v_def := replace(v_def, v_old_provider_compare, v_new_provider_compare);
-  elsif position(v_new_provider_compare in v_def) = 0 then
-    raise exception 'refresh_card_metrics(): provider_compare snippet not found';
+  if to_regprocedure('public.refresh_card_metrics()') is not null then
+    v_changed := false;
+    v_def := pg_get_functiondef('public.refresh_card_metrics()'::regprocedure);
+    if position(v_old_provider_compare in v_def) > 0 then
+      v_def := replace(v_def, v_old_provider_compare, v_new_provider_compare);
+      v_changed := true;
+    end if;
+    if position(v_old_rank_tail in v_def) > 0 then
+      v_def := replace(v_def, v_old_rank_tail, v_new_rank_tail);
+      v_changed := true;
+    end if;
+    if position(v_old_insert_source in v_def) > 0 then
+      v_def := replace(v_def, v_old_insert_source, v_new_insert_source);
+      v_changed := true;
+    end if;
+    if v_changed then
+      execute v_def;
+    end if;
   end if;
 
-  if position(v_old_rank_tail in v_def) > 0 then
-    v_def := replace(v_def, v_old_rank_tail, v_new_rank_tail);
-  elsif position(v_new_rank_tail in v_def) = 0 then
-    raise exception 'refresh_card_metrics(): ranked tail snippet not found';
+  if to_regprocedure('public.refresh_card_metrics_for_variants(jsonb)') is not null then
+    v_changed := false;
+    v_def := pg_get_functiondef('public.refresh_card_metrics_for_variants(jsonb)'::regprocedure);
+    if position(v_old_provider_compare in v_def) > 0 then
+      v_def := replace(v_def, v_old_provider_compare, v_new_provider_compare);
+      v_changed := true;
+    end if;
+    if position(v_old_rank_tail in v_def) > 0 then
+      v_def := replace(v_def, v_old_rank_tail, v_new_rank_tail);
+      v_changed := true;
+    end if;
+    if position(v_old_insert_source in v_def) > 0 then
+      v_def := replace(v_def, v_old_insert_source, v_new_insert_source);
+      v_changed := true;
+    end if;
+    if v_changed then
+      execute v_def;
+    end if;
   end if;
-
-  if position(v_old_insert_source in v_def) > 0 then
-    v_def := replace(v_def, v_old_insert_source, v_new_insert_source);
-  elsif position(v_new_insert_source in v_def) = 0 then
-    raise exception 'refresh_card_metrics(): insert source snippet not found';
-  end if;
-
-  execute v_def;
-
-  v_def := pg_get_functiondef('public.refresh_card_metrics_for_variants(jsonb)'::regprocedure);
-  if position(v_old_provider_compare in v_def) > 0 then
-    v_def := replace(v_def, v_old_provider_compare, v_new_provider_compare);
-  elsif position(v_new_provider_compare in v_def) = 0 then
-    raise exception 'refresh_card_metrics_for_variants(jsonb): provider_compare snippet not found';
-  end if;
-
-  if position(v_old_rank_tail in v_def) > 0 then
-    v_def := replace(v_def, v_old_rank_tail, v_new_rank_tail);
-  elsif position(v_new_rank_tail in v_def) = 0 then
-    raise exception 'refresh_card_metrics_for_variants(jsonb): ranked tail snippet not found';
-  end if;
-
-  if position(v_old_insert_source in v_def) > 0 then
-    v_def := replace(v_def, v_old_insert_source, v_new_insert_source);
-  elsif position(v_new_insert_source in v_def) = 0 then
-    raise exception 'refresh_card_metrics_for_variants(jsonb): insert source snippet not found';
-  end if;
-
-  execute v_def;
 end;
 $$;
