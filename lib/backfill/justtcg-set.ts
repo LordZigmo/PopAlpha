@@ -61,6 +61,17 @@ type HistoryRow = {
   currency: string;
   source_window: "7d" | "30d" | "90d" | "365d" | "full";
 };
+type ExternalMappingUpsertRow = Record<string, unknown> & {
+  source: string;
+  external_id: string;
+};
+type ExistingExternalMappingRow = {
+  id: string;
+  source: string | null;
+  external_id: string | null;
+  mapping_type: string | null;
+  printing_id: string | null;
+};
 export type BackfillJustTcgSetResult = {
   ok: boolean; runId: string | null; setKey: string; canonicalSetName: string; providerSetId: string; language: "EN";
   aggressive: boolean; dryRun: boolean; providerWindowRequested: string; providerWindowUsed: string; providerRequestsUsed: number;
@@ -300,6 +311,145 @@ async function batchUpsert(table: string, rows: Record<string, unknown>[], onCon
     if (error) { firstError ??= `${table}: ${error.message}`; continue; }
     upserted += batch.length;
   }
+  return { upserted, firstError };
+}
+function dedupeExternalMappingRows(rows: ExternalMappingUpsertRow[]): ExternalMappingUpsertRow[] {
+  const deduped = new Map<string, ExternalMappingUpsertRow>();
+  for (const row of rows) {
+    const source = String(row.source ?? "").trim();
+    const externalId = String(row.external_id ?? "").trim();
+    if (!source || !externalId) continue;
+    deduped.set(`${source}::${externalId}`, row);
+  }
+  return [...deduped.values()];
+}
+function dedupeHydratedExternalMappingRows(rows: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  const deduped = new Map<string, Record<string, unknown>>();
+  for (const row of rows) {
+    const id = String(row.id ?? "").trim();
+    if (id) {
+      deduped.set(`id::${id}`, row);
+      continue;
+    }
+    const source = String(row.source ?? "").trim();
+    const externalId = String(row.external_id ?? "").trim();
+    if (!source || !externalId) continue;
+    deduped.set(`external::${source}::${externalId}`, row);
+  }
+  return [...deduped.values()];
+}
+function dedupeRowsByConflictKeys(
+  rows: Array<Record<string, unknown>>,
+  keys: string[],
+): Array<Record<string, unknown>> {
+  const deduped = new Map<string, Record<string, unknown>>();
+  for (const row of rows) {
+    const key = keys.map((field) => String(row[field] ?? "")).join("::");
+    if (!key) continue;
+    deduped.set(key, row);
+  }
+  return [...deduped.values()];
+}
+async function batchMergeExternalMappings(rows: ExternalMappingUpsertRow[], batchSize = 100) {
+  if (rows.length === 0) return { upserted: 0, firstError: null as string | null };
+
+  const supabase = dbAdmin();
+  let upserted = 0;
+  let firstError: string | null = null;
+  const dedupedRows = dedupeExternalMappingRows(rows);
+
+  for (let i = 0; i < dedupedRows.length; i += batchSize) {
+    const batch = dedupedRows.slice(i, i + batchSize);
+    const rowsBySource = new Map<string, ExternalMappingUpsertRow[]>();
+
+    for (const row of batch) {
+      const source = String(row.source ?? "").trim();
+      if (!source) continue;
+      const sourceRows = rowsBySource.get(source) ?? [];
+      sourceRows.push(row);
+      rowsBySource.set(source, sourceRows);
+    }
+
+    const hydratedRows: Array<Record<string, unknown>> = [];
+
+    for (const [source, sourceRows] of rowsBySource) {
+      const externalIds = sourceRows
+        .map((row) => String(row.external_id ?? "").trim())
+        .filter((value) => value.length > 0);
+      const printingIds = sourceRows
+        .map((row) => String(row.printing_id ?? "").trim())
+        .filter((value) => value.length > 0);
+
+      const existingByExternal = new Map<string, ExistingExternalMappingRow>();
+      const existingByPrinting = new Map<string, ExistingExternalMappingRow>();
+
+      if (externalIds.length > 0) {
+        const { data, error } = await supabase
+          .from("card_external_mappings")
+          .select("id, source, external_id, mapping_type, printing_id")
+          .eq("source", source)
+          .in("external_id", externalIds);
+        if (error) {
+          firstError ??= `card_external_mappings(select by external_id): ${error.message}`;
+          continue;
+        }
+        for (const row of (data ?? []) as ExistingExternalMappingRow[]) {
+          const externalId = String(row.external_id ?? "").trim();
+          if (!externalId) continue;
+          existingByExternal.set(`${source}::${externalId}`, row);
+        }
+      }
+
+      if (printingIds.length > 0) {
+        const { data, error } = await supabase
+          .from("card_external_mappings")
+          .select("id, source, external_id, mapping_type, printing_id")
+          .eq("source", source)
+          .eq("mapping_type", "printing")
+          .in("printing_id", printingIds);
+        if (error) {
+          firstError ??= `card_external_mappings(select by printing_id): ${error.message}`;
+          continue;
+        }
+        for (const row of (data ?? []) as ExistingExternalMappingRow[]) {
+          const printingId = String(row.printing_id ?? "").trim();
+          if (!printingId) continue;
+          existingByPrinting.set(`${source}::printing::${printingId}`, row);
+        }
+      }
+
+      for (const row of sourceRows) {
+        const externalId = String(row.external_id ?? "").trim();
+        const printingId = String(row.printing_id ?? "").trim();
+        const existing = existingByExternal.get(`${source}::${externalId}`)
+          ?? existingByPrinting.get(`${source}::printing::${printingId}`);
+        hydratedRows.push(existing?.id ? { ...row, id: existing.id } : row);
+      }
+    }
+
+    const dedupedHydratedRows = dedupeHydratedExternalMappingRows(hydratedRows);
+    const rowsToUpdate = dedupedHydratedRows.filter((row) => String(row.id ?? "").trim().length > 0);
+    const rowsToInsert = dedupedHydratedRows.filter((row) => String(row.id ?? "").trim().length === 0);
+
+    if (rowsToUpdate.length > 0) {
+      const { error } = await supabase.from("card_external_mappings").upsert(rowsToUpdate, { onConflict: "id" });
+      if (error) {
+        firstError ??= `card_external_mappings(update): ${error.message}`;
+        continue;
+      }
+      upserted += rowsToUpdate.length;
+    }
+
+    if (rowsToInsert.length > 0) {
+      const { error } = await supabase.from("card_external_mappings").insert(rowsToInsert);
+      if (error) {
+        firstError ??= `card_external_mappings(insert): ${error.message}`;
+        continue;
+      }
+      upserted += rowsToInsert.length;
+    }
+  }
+
   return { upserted, firstError };
 }
 async function batchInsertIgnore(table: string, rows: Record<string, unknown>[], onConflict: string, selectColumn?: string, batchSize = 500) {
@@ -741,11 +891,13 @@ export async function backfillJustTcgSet(setKey: string, options: BackfillJustTc
       const providerCardMapResult = await batchUpsert("provider_card_map", dedupedProviderCardMapRows as unknown as Record<string, unknown>[], "provider,provider_key");
       mappingUpserts = providerCardMapResult.upserted;
       if (providerCardMapResult.firstError) pushFailure({ canonical_slug: printings[0].canonical_slug, printing_id: printings[0].id, code: "DB_UPSERT_FAILED", detail: providerCardMapResult.firstError }, true);
-      const mappingResult = await batchUpsert("card_external_mappings", mappingRows, "source,mapping_type,printing_id");
+      const mappingResult = await batchMergeExternalMappings(mappingRows as ExternalMappingUpsertRow[]);
       if (mappingResult.firstError) pushFailure({ canonical_slug: printings[0].canonical_slug, printing_id: printings[0].id, code: "DB_UPSERT_FAILED", detail: mappingResult.firstError }, true);
-      const snapshotResult = await batchUpsert("price_snapshots", priceSnapshotRows, "provider,provider_ref");
+      const dedupedPriceSnapshotRows = dedupeRowsByConflictKeys(priceSnapshotRows, ["provider", "provider_ref"]);
+      const snapshotResult = await batchUpsert("price_snapshots", dedupedPriceSnapshotRows, "provider,provider_ref");
       if (snapshotResult.firstError) pushFailure({ canonical_slug: printings[0].canonical_slug, printing_id: printings[0].id, code: "DB_UPSERT_FAILED", detail: snapshotResult.firstError }, true);
-      const marketLatestResult = await batchUpsert("market_latest", marketLatestRows, "card_id,source,grade,price_type");
+      const dedupedMarketLatestRows = dedupeRowsByConflictKeys(marketLatestRows, ["card_id", "source", "grade", "price_type"]);
+      const marketLatestResult = await batchUpsert("market_latest", dedupedMarketLatestRows, "card_id,source,grade,price_type");
       marketLatestWritten = marketLatestResult.upserted;
       if (marketLatestResult.firstError) pushFailure({ canonical_slug: printings[0].canonical_slug, printing_id: printings[0].id, code: "DB_UPSERT_FAILED", detail: marketLatestResult.firstError }, true);
       const historyResult = await batchInsertIgnore("price_history_points", historyRows, "provider,variant_ref,ts,source_window", "ts");

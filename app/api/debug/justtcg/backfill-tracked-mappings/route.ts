@@ -54,6 +54,9 @@ type CanonicalContext = {
 type JustTcgSetSearchEnvelope = {
   data?: Array<{ id: string; name: string }>;
 };
+type ExistingExternalMappingRow = {
+  id: string;
+};
 
 function requestHash(provider: string, endpoint: string, params: Record<string, unknown>): string {
   const str = JSON.stringify({ provider, endpoint, params });
@@ -472,13 +475,46 @@ export async function POST(req: Request) {
         continue;
       }
 
-      const { error: legacyUpsertError } = await supabase
+      const { data: existingByExternal, error: existingByExternalError } = await supabase
         .from("card_external_mappings")
-        .upsert(mappingRow, { onConflict: "source,mapping_type,printing_id" });
+        .select("id")
+        .eq("source", PROVIDER)
+        .eq("external_id", bestVariant.variant.id)
+        .limit(1)
+        .maybeSingle<ExistingExternalMappingRow>();
 
-      if (legacyUpsertError) {
+      let existingMappingId = existingByExternal?.id ?? null;
+      let selectMappingError = existingByExternalError?.message ?? null;
+
+      if (!existingMappingId && !selectMappingError) {
+        const { data: existingByPrinting, error: existingByPrintingError } = await supabase
+          .from("card_external_mappings")
+          .select("id")
+          .eq("source", PROVIDER)
+          .eq("mapping_type", "printing")
+          .eq("printing_id", tracked.printing_id)
+          .limit(1)
+          .maybeSingle<ExistingExternalMappingRow>();
+        if (existingByPrintingError) {
+          selectMappingError = existingByPrintingError.message;
+        } else {
+          existingMappingId = existingByPrinting?.id ?? null;
+        }
+      }
+
+      const legacyWrite = selectMappingError
+        ? { error: { message: selectMappingError } }
+        : existingMappingId
+          ? await supabase
+            .from("card_external_mappings")
+            .upsert({ ...mappingRow, id: existingMappingId }, { onConflict: "id" })
+          : await supabase
+            .from("card_external_mappings")
+            .insert(mappingRow);
+
+      if (legacyWrite.error) {
         hardFailCount += 1;
-        firstError ??= legacyUpsertError.message;
+        firstError ??= legacyWrite.error.message;
         continue;
       }
 

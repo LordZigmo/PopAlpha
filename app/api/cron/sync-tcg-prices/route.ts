@@ -20,7 +20,6 @@ export async function GET(req: Request) {
     ok: true,
     retired: true,
     replacement: [
-      "/api/cron/run-justtcg-pipeline",
       "/api/cron/run-scrydex-pipeline",
       "/api/cron/process-provider-pipeline-jobs",
     ],

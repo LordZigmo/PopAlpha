@@ -3,6 +3,7 @@ import { requireCron } from "@/lib/auth/require";
 import { runJustTcgPipeline } from "@/lib/backfill/provider-pipeline-orchestrator";
 import { getQueuedBatchPreset } from "@/lib/backfill/provider-pipeline-batch-config";
 import { enqueuePipelineJob } from "@/lib/backfill/provider-pipeline-job-queue";
+import { buildProviderIngestionDisabledPayload, providerIngestionEnabled } from "@/lib/backfill/provider-registry";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -16,6 +17,9 @@ function parseOptionalInt(value: string | null): number | undefined {
 export async function GET(req: Request) {
   const auth = await requireCron(req);
   if (!auth.ok) return auth.response;
+  if (!providerIngestionEnabled("JUSTTCG")) {
+    return NextResponse.json(buildProviderIngestionDisabledPayload("JUSTTCG"));
+  }
 
   const url = new URL(req.url);
   const set = url.searchParams.get("set")?.trim() || undefined;

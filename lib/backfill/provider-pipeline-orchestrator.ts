@@ -11,6 +11,8 @@ import { runProviderObservationTimeseries } from "@/lib/backfill/provider-observ
 import { runProviderObservationVariantMetrics } from "@/lib/backfill/provider-observation-variant-metrics";
 import { refreshPipelineRollupsForVariantKeys } from "@/lib/backfill/provider-pipeline-rollups";
 import {
+  buildProviderIngestionDisabledPayload,
+  providerIngestionEnabled,
   providerSupportsAnalytics,
   type AnalyticsPipelineProvider,
   type BackendPipelineProvider,
@@ -28,6 +30,9 @@ type PipelineResult = {
   startedAt: string;
   endedAt: string;
   firstError: string | null;
+  retired?: boolean;
+  preservedDataAvailable?: boolean;
+  reason?: string;
   steps: PipelineStep<object>[];
 };
 
@@ -296,6 +301,15 @@ const PROVIDER_PIPELINE_HANDLERS: Record<BackendPipelineProvider, ProviderPipeli
 async function runProviderPipeline(provider: BackendPipelineProvider, opts: PipelineOptions = {}): Promise<PipelineResult> {
   const handlers = PROVIDER_PIPELINE_HANDLERS[provider];
   const startedAt = new Date().toISOString();
+  if (!providerIngestionEnabled(provider)) {
+    return {
+      ...buildProviderIngestionDisabledPayload(provider),
+      startedAt,
+      endedAt: new Date().toISOString(),
+      firstError: null,
+      steps: [],
+    };
+  }
   const steps: PipelineStep<object>[] = [];
   let firstError: string | null = null;
   let timeseriesTouchedKeys: TouchedVariantKey[] = [];

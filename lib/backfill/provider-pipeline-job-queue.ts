@@ -1,5 +1,9 @@
 import { dbAdmin } from "@/lib/db/admin";
 import {
+  providerIngestionDisabledReason,
+  providerIngestionEnabled,
+} from "@/lib/backfill/provider-registry";
+import {
   runJustTcgPipeline,
   runPokeTracePipeline,
   runScrydexPipeline,
@@ -124,6 +128,14 @@ export async function enqueuePipelineJob(input: {
   priority?: number;
   maxAttempts?: number;
 }): Promise<{ enqueued: boolean; jobId: number | null; reason: string }> {
+  if (!providerIngestionEnabled(input.provider)) {
+    return {
+      enqueued: false,
+      jobId: null,
+      reason: providerIngestionDisabledReason(input.provider),
+    };
+  }
+
   const supabase = dbAdmin();
   const safeParams = {
     ...input.params,

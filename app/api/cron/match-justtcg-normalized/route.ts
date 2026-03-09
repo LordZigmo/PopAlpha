@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/auth/require";
 import { runJustTcgNormalizedMatch } from "@/lib/backfill/justtcg-normalized-match";
+import { buildProviderIngestionDisabledPayload, providerIngestionEnabled } from "@/lib/backfill/provider-registry";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -14,6 +15,9 @@ function parseOptionalInt(value: string | null): number | undefined {
 export async function GET(req: Request) {
   const auth = await requireCron(req);
   if (!auth.ok) return auth.response;
+  if (!providerIngestionEnabled("JUSTTCG")) {
+    return NextResponse.json(buildProviderIngestionDisabledPayload("JUSTTCG"));
+  }
 
   const url = new URL(req.url);
   const observations = url.searchParams.get("observations");
