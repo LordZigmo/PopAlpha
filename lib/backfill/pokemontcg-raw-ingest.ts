@@ -4,6 +4,7 @@ import { fetchCardsPage, getScrydexCredentials, type ScrydexCard } from "@/lib/s
 import {
   loadCoverageGapSetPriority,
   loadHighValueStaleSetPriority,
+  loadRecentSetConsistencyPriority,
 } from "@/lib/backfill/set-priority";
 
 const PROVIDER = "SCRYDEX";
@@ -122,6 +123,7 @@ type RawIngestResult = {
   endedAt: string;
   setsPlanned: number;
   setsProcessed: number;
+  selectedProviderSetIds: string[];
   requestsMade: number;
   rawPayloadsInserted: number;
   rawPayloadsDuplicate: number;
@@ -575,7 +577,14 @@ export async function runPokemonTcgRawIngest(opts: {
           const merged = maxIso(cooldownByProviderSet[target.providerSetId] ?? null, health.cooldown_until);
           if (merged) cooldownByProviderSet[target.providerSetId] = merged;
         }
-        const [highValuePrioritySetIds, coveragePrioritySetIds] = await Promise.all([
+        const [recentConsistencySetIds, highValuePrioritySetIds, coveragePrioritySetIds] = await Promise.all([
+          loadRecentSetConsistencyPriority({
+            provider: "SCRYDEX",
+            targets: allTargets,
+            yearFrom: 2024,
+            freshWindowHours: 24,
+            maxProviderSetIds: 300,
+          }),
           loadHighValueStaleSetPriority({
             provider: "SCRYDEX",
             targets: allTargets,
@@ -624,6 +633,7 @@ export async function runPokemonTcgRawIngest(opts: {
             providerSetId,
           });
         }
+        for (const providerSetId of recentConsistencySetIds) addTarget(byProviderSetId.get(providerSetId) ?? null);
         for (const providerSetId of highValuePrioritySetIds) addTarget(byProviderSetId.get(providerSetId) ?? null);
         for (const providerSetId of coveragePrioritySetIds) addTarget(byProviderSetId.get(providerSetId) ?? null);
         for (const target of cursorTargets) {
@@ -884,6 +894,7 @@ export async function runPokemonTcgRawIngest(opts: {
     endedAt,
     setsPlanned: resolvedTargets.length,
     setsProcessed,
+    selectedProviderSetIds: resolvedTargets.map((target) => target.providerSetId),
     requestsMade,
     rawPayloadsInserted,
     rawPayloadsDuplicate,
@@ -921,6 +932,7 @@ export async function runPokemonTcgRawIngest(opts: {
           providerSetIndexBackfilled,
           setsPlanned: resolvedTargets.length,
           setsProcessed,
+          selectedProviderSetIds: resolvedTargets.map((target) => target.providerSetId),
           requestsMade,
           rawPayloadsInserted,
           rawPayloadsDuplicate,

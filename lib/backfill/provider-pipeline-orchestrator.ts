@@ -103,6 +103,24 @@ function runtimeBudgetFromDeadline(deadlineMs: number | null | undefined): numbe
   return Math.max(1000, deadlineMs - Date.now());
 }
 
+function resolveSingleProviderSetId(
+  requestedProviderSetId: string | null | undefined,
+  ingestResult: object,
+): string | undefined {
+  const requested = String(requestedProviderSetId ?? "").trim();
+  if (requested) return requested;
+
+  const rawSelectedProviderSetIds = (ingestResult as { selectedProviderSetIds?: unknown[] }).selectedProviderSetIds;
+  const selectedProviderSetIds = Array.isArray(rawSelectedProviderSetIds)
+    ? rawSelectedProviderSetIds
+      .map((value) => String(value ?? "").trim())
+      .filter((value) => value.length > 0)
+    : [];
+  const uniqueProviderSetIds = [...new Set(selectedProviderSetIds)];
+  if (uniqueProviderSetIds.length === 1) return uniqueProviderSetIds[0];
+  return undefined;
+}
+
 async function drainPipelineStage<T extends {
   ok: boolean;
   firstError?: string | null;
@@ -310,13 +328,14 @@ export async function runPokemonTcgPipeline(opts: {
   if (!ingest.ok && !hasIngestProgress(ingest)) {
     firstError = ingest.firstError ?? "scrydex ingest failed";
   }
+  const effectiveProviderSetId = resolveSingleProviderSetId(opts.providerSetId, ingest);
 
   if (!firstError) {
     const normalize = await drainPipelineStage({
       name: "normalize",
       steps,
       run: () => runScrydexRawNormalize({
-        providerSetId: opts.providerSetId ?? undefined,
+        providerSetId: effectiveProviderSetId,
         payloadLimit: opts.payloadLimit,
         force: opts.force === true,
       }),
@@ -333,7 +352,7 @@ export async function runPokemonTcgPipeline(opts: {
       name: "match",
       steps,
       run: () => runScrydexNormalizedMatch({
-        providerSetId: opts.providerSetId ?? undefined,
+        providerSetId: effectiveProviderSetId,
         observationLimit: opts.matchObservations,
         force: opts.force === true,
         scanDirection: opts.matchScanDirection ?? "newest",
@@ -354,7 +373,7 @@ export async function runPokemonTcgPipeline(opts: {
       steps,
       run: () => runProviderObservationTimeseries({
         provider: "SCRYDEX",
-        providerSetId: opts.providerSetId ?? undefined,
+        providerSetId: effectiveProviderSetId,
         observationLimit: opts.timeseriesObservations ?? opts.matchObservations,
         force: opts.force === true,
       }),
@@ -374,7 +393,7 @@ export async function runPokemonTcgPipeline(opts: {
       steps,
       run: () => runProviderObservationVariantMetrics({
         provider: "SCRYDEX",
-        providerSetId: opts.providerSetId ?? undefined,
+        providerSetId: effectiveProviderSetId,
         observationLimit: opts.metricsObservations ?? opts.timeseriesObservations ?? opts.matchObservations,
         force: opts.force === true,
       }),

@@ -8,7 +8,10 @@ import {
   type ProviderCardMapUpsertRow,
 } from "@/lib/backfill/provider-card-map";
 import { loadProviderSetIndex } from "@/lib/backfill/provider-set-index";
-import { loadHighValueStaleSetPriority } from "@/lib/backfill/set-priority";
+import {
+  loadHighValueStaleSetPriority,
+  loadRecentSetConsistencyPriority,
+} from "@/lib/backfill/set-priority";
 
 const PROVIDER = "SCRYDEX";
 const JOB = "scrydex_normalized_match";
@@ -621,12 +624,25 @@ async function loadIncrementalHotProviderSetIds(maxProviderSetIds: number): Prom
     setName: row.canonicalSetName ?? row.canonicalSetCode,
     providerSetId: row.providerSetId,
   }));
-  return loadHighValueStaleSetPriority({
-    provider: "SCRYDEX",
-    targets,
-    staleWindowHours: 24,
-    maxProviderSetIds: Math.max(1, maxProviderSetIds),
-  });
+  const [recentConsistencySetIds, highValueSetIds] = await Promise.all([
+    loadRecentSetConsistencyPriority({
+      provider: "SCRYDEX",
+      targets,
+      yearFrom: 2024,
+      freshWindowHours: 24,
+      maxProviderSetIds: Math.max(1, maxProviderSetIds),
+    }),
+    loadHighValueStaleSetPriority({
+      provider: "SCRYDEX",
+      targets,
+      staleWindowHours: 24,
+      maxProviderSetIds: Math.max(1, maxProviderSetIds),
+    }),
+  ]);
+  return [...new Set([...recentConsistencySetIds, ...highValueSetIds])].slice(
+    0,
+    Math.max(1, maxProviderSetIds),
+  );
 }
 
 async function loadProviderSetMap(providerSetIds: string[]): Promise<Map<string, string>> {
