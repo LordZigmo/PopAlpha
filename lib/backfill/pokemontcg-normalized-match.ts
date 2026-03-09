@@ -39,6 +39,7 @@ const INCREMENTAL_HOT_SET_LIMIT = process.env.SCRYDEX_MATCH_HOT_SET_LIMIT
   ? parseInt(process.env.SCRYDEX_MATCH_HOT_SET_LIMIT, 10)
   : 40;
 const SCAN_PAGE_SIZE = 100;
+const MATCH_UPSERT_BATCH_SIZE = 250;
 const STARTED_RUN_STALE_MULTIPLIER = process.env.SCRYDEX_MATCH_STALE_RUN_MULTIPLIER
   ? parseInt(process.env.SCRYDEX_MATCH_STALE_RUN_MULTIPLIER, 10)
   : 3;
@@ -301,6 +302,58 @@ function buildMatchedRow(
   };
 }
 
+function dedupeMatchWriteRows(rows: MatchWriteRow[]): MatchWriteRow[] {
+  const deduped = new Map<string, MatchWriteRow>();
+  for (const row of rows) {
+    deduped.set(row.provider_normalized_observation_id, row);
+  }
+  return Array.from(deduped.values());
+}
+
+function chunkRows<T>(rows: T[], size: number): T[][] {
+  const chunkSize = Math.max(1, Math.floor(size));
+  const chunks: T[][] = [];
+  for (let index = 0; index < rows.length; index += chunkSize) {
+    chunks.push(rows.slice(index, index + chunkSize));
+  }
+  return chunks;
+}
+
+async function upsertMatchWriteRows(
+  rows: MatchWriteRow[],
+): Promise<void> {
+  const supabase = dbAdmin();
+  const dedupedRows = dedupeMatchWriteRows(rows);
+
+  for (const batch of chunkRows(dedupedRows, MATCH_UPSERT_BATCH_SIZE)) {
+    const { error } = await supabase
+      .from("provider_observation_matches")
+      .upsert(batch, {
+        onConflict: "provider_normalized_observation_id",
+      });
+
+    if (!error) continue;
+
+    const message = error.message ?? "unknown error";
+    const isDuplicateConflict = message.includes("cannot affect row a second time");
+    if (!isDuplicateConflict || batch.length === 1) {
+      throw new Error(`provider_observation_matches: ${message}`);
+    }
+
+    for (const row of batch) {
+      const { error: rowError } = await supabase
+        .from("provider_observation_matches")
+        .upsert(row, {
+          onConflict: "provider_normalized_observation_id",
+        });
+
+      if (rowError) {
+        throw new Error(`provider_observation_matches: ${rowError.message}`);
+      }
+    }
+  }
+}
+
 async function loadCandidateObservations(params: {
   observationLimit: number;
   providerSetId?: string | null;
@@ -340,6 +393,7 @@ async function loadCandidateObservations(params: {
   }
 
   const selected: NormalizedObservationRow[] = [];
+  const selectedObservationIds = new Set<string>();
   let scanned = 0;
   let skippedAlreadyMatched = 0;
   const unmatchedRetryMs = Math.max(1, UNMATCHED_RETRY_HOURS) * 60 * 60 * 1000;
@@ -375,6 +429,9 @@ async function loadCandidateObservations(params: {
         timedOut = true;
         break;
       }
+      if (selectedObservationIds.has(row.id)) {
+        continue;
+      }
       if (!force) {
         const existing = existingById.get(row.id);
         if (existing?.match_status === "MATCHED") {
@@ -390,6 +447,7 @@ async function loadCandidateObservations(params: {
         }
       }
       selectedIds.push(row.id);
+      selectedObservationIds.add(row.id);
       if (selected.length + selectedIds.length >= params.observationLimit) break;
     }
 
@@ -501,6 +559,9 @@ async function loadCandidateObservations(params: {
         timedOut = true;
         break;
       }
+      if (selectedObservationIds.has(row.id)) {
+        continue;
+      }
       if (!force) {
         const existing = existingById.get(row.id);
         if (existing?.match_status === "MATCHED") {
@@ -516,6 +577,7 @@ async function loadCandidateObservations(params: {
         }
       }
       selectedIds.push(row.id);
+      selectedObservationIds.add(row.id);
       if (selected.length + selectedIds.length >= params.observationLimit) break;
     }
 
@@ -1088,15 +1150,7 @@ export async function runPokemonTcgNormalizedMatch(opts: {
         throw new Error(`provider_card_map: ${providerCardMapError.message}`);
       }
 
-      const { error } = await supabase
-        .from("provider_observation_matches")
-        .upsert(writes, {
-          onConflict: "provider_normalized_observation_id",
-        });
-
-      if (error) {
-        throw new Error(`provider_observation_matches: ${error.message}`);
-      }
+      await upsertMatchWriteRows(writes);
     }
   } catch (error) {
     firstError = error instanceof Error ? error.message : String(error);
