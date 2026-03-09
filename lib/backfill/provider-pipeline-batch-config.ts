@@ -1,4 +1,6 @@
-export type PipelineBatchProvider = "JUSTTCG" | "SCRYDEX";
+import type { BackendPipelineProvider } from "@/lib/backfill/provider-registry";
+
+export type PipelineBatchProvider = BackendPipelineProvider;
 export type PipelineBatchKind = "PIPELINE" | "RETRY";
 
 export type PipelineBatchParams = {
@@ -75,6 +77,32 @@ const QUEUED_BATCH_PRESETS: Record<PipelineBatchProvider, ProviderPresetMap> = {
       matchObservations: 100,
       timeseriesObservations: 100,
       metricsObservations: 100,
+    },
+  },
+  POKETRACE: {
+    PIPELINE: {
+      setLimit: 1,
+      maxRequests: 3,
+      payloadLimit: 6,
+      matchObservations: 120,
+      timeseriesObservations: 120,
+      metricsObservations: 120,
+    },
+    RETRY: {
+      setLimit: 1,
+      maxRequests: 2,
+      payloadLimit: 4,
+      matchObservations: 80,
+      timeseriesObservations: 80,
+      metricsObservations: 80,
+    },
+    MINIMAL: {
+      setLimit: 1,
+      maxRequests: 1,
+      payloadLimit: 2,
+      matchObservations: 40,
+      timeseriesObservations: 40,
+      metricsObservations: 40,
     },
   },
 };

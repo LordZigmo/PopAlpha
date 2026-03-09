@@ -4,9 +4,17 @@ import { runJustTcgNormalizedMatch } from "@/lib/backfill/justtcg-normalized-mat
 import { runScrydexRawIngest } from "@/lib/backfill/pokemontcg-raw-ingest";
 import { runScrydexRawNormalize } from "@/lib/backfill/pokemontcg-raw-normalize";
 import { runScrydexNormalizedMatch } from "@/lib/backfill/pokemontcg-normalized-match";
+import { runPokeTraceRawIngest } from "@/lib/backfill/poketrace-raw-ingest";
+import { runPokeTraceRawNormalize } from "@/lib/backfill/poketrace-raw-normalize";
+import { runPokeTraceNormalizedMatch } from "@/lib/backfill/poketrace-normalized-match";
 import { runProviderObservationTimeseries } from "@/lib/backfill/provider-observation-timeseries";
 import { runProviderObservationVariantMetrics } from "@/lib/backfill/provider-observation-variant-metrics";
 import { refreshPipelineRollupsForVariantKeys } from "@/lib/backfill/provider-pipeline-rollups";
+import {
+  providerSupportsAnalytics,
+  type AnalyticsPipelineProvider,
+  type BackendPipelineProvider,
+} from "@/lib/backfill/provider-registry";
 
 type PipelineStep<T extends object> = {
   name: string;
@@ -16,7 +24,7 @@ type PipelineStep<T extends object> = {
 
 type PipelineResult = {
   ok: boolean;
-  provider: "JUSTTCG" | "SCRYDEX";
+  provider: BackendPipelineProvider;
   startedAt: string;
   endedAt: string;
   firstError: string | null;
@@ -169,7 +177,7 @@ async function drainPipelineStage<T extends {
   };
 }
 
-export async function runJustTcgPipeline(opts: {
+type PipelineOptions = {
   providerSetId?: string | null;
   setLimit?: number;
   pageLimitPerSet?: number;
@@ -180,153 +188,123 @@ export async function runJustTcgPipeline(opts: {
   metricsObservations?: number;
   force?: boolean;
   retryOnly?: boolean;
-  deadlineMs?: number | null;
-} = {}): Promise<PipelineResult> {
-  const startedAt = new Date().toISOString();
-  const steps: PipelineStep<object>[] = [];
-  let firstError: string | null = null;
-  let timeseriesTouchedKeys: TouchedVariantKey[] = [];
-  let variantMetricsTouchedKeys: TouchedVariantKey[] = [];
-
-  const ingest = await runJustTcgRawIngest({
-    providerSetId: opts.providerSetId ?? undefined,
-    setLimit: opts.setLimit,
-    pageLimitPerSet: opts.pageLimitPerSet,
-    maxRequests: opts.maxRequests,
-    retryOnly: opts.retryOnly === true,
-  });
-  steps.push({ name: "ingest", ok: ingest.ok, result: ingest });
-  if (!ingest.ok && !hasIngestProgress(ingest)) {
-    firstError = ingest.firstError ?? "justtcg ingest failed";
-  }
-
-  if (!firstError) {
-    const normalize = await drainPipelineStage({
-      name: "normalize",
-      steps,
-      run: () => runJustTcgRawNormalize({
-        providerSetId: opts.providerSetId ?? undefined,
-        payloadLimit: opts.payloadLimit,
-        force: opts.force === true,
-      }),
-      errorMessage: "justtcg normalize failed",
-      requestedField: "payloadsRequested",
-      processedField: "payloadsProcessed",
-      deadlineMs: opts.deadlineMs,
-    });
-    if (normalize.firstError) firstError = normalize.firstError;
-  }
-
-  if (!firstError) {
-    const match = await drainPipelineStage({
-      name: "match",
-      steps,
-      run: () => runJustTcgNormalizedMatch({
-        providerSetId: opts.providerSetId ?? undefined,
-        observationLimit: opts.matchObservations,
-        force: opts.force === true,
-      }),
-      errorMessage: "justtcg match failed",
-      requestedField: "observationsRequested",
-      processedField: "observationsProcessed",
-      deadlineMs: opts.deadlineMs,
-    });
-    if (match.firstError) firstError = match.firstError;
-  }
-
-  if (!firstError) {
-    const timeseries = await drainPipelineStage({
-      name: "timeseries",
-      steps,
-      run: () => runProviderObservationTimeseries({
-        provider: "JUSTTCG",
-        providerSetId: opts.providerSetId ?? undefined,
-        observationLimit: opts.timeseriesObservations ?? opts.matchObservations,
-        force: opts.force === true,
-      }),
-      errorMessage: "justtcg timeseries failed",
-      requestedField: "observationsRequested",
-      processedField: "observationsProcessed",
-      deadlineMs: opts.deadlineMs,
-      extractTouchedVariantKeys: (result) => result.touchedVariantKeys,
-    });
-    if (timeseries.firstError) firstError = timeseries.firstError;
-    timeseriesTouchedKeys = timeseries.touchedVariantKeys;
-  }
-
-  if (!firstError) {
-    const variantMetrics = await drainPipelineStage({
-      name: "variant_metrics",
-      steps,
-      run: () => runProviderObservationVariantMetrics({
-        provider: "JUSTTCG",
-        providerSetId: opts.providerSetId ?? undefined,
-        observationLimit: opts.metricsObservations ?? opts.timeseriesObservations ?? opts.matchObservations,
-        force: opts.force === true,
-      }),
-      errorMessage: "justtcg variant metrics failed",
-      requestedField: "observationsRequested",
-      processedField: "observationsProcessed",
-      deadlineMs: opts.deadlineMs,
-      extractTouchedVariantKeys: (result) => result.touchedVariantKeys,
-    });
-    if (variantMetrics.firstError) firstError = variantMetrics.firstError;
-    variantMetricsTouchedKeys = variantMetrics.touchedVariantKeys;
-
-    if (!firstError) {
-      const rollupKeys = mergeTouchedVariantKeys(
-        timeseriesTouchedKeys,
-        variantMetricsTouchedKeys,
-      );
-      const rollups = await refreshPipelineRollupsForVariantKeys({
-        keys: rollupKeys,
-      });
-      steps.push({ name: "targeted_rollups", ok: rollups.ok, result: rollups });
-      if (!rollups.ok) firstError = rollups.firstError ?? "justtcg targeted rollups failed";
-    }
-  }
-
-  const endedAt = new Date().toISOString();
-  const coreOk = !firstError;
-  return {
-    ok: coreOk,
-    provider: "JUSTTCG",
-    startedAt,
-    endedAt,
-    firstError,
-    steps,
-  };
-}
-
-export async function runPokemonTcgPipeline(opts: {
-  providerSetId?: string | null;
-  setLimit?: number;
-  pageLimitPerSet?: number;
-  maxRequests?: number;
-  payloadLimit?: number;
-  matchObservations?: number;
-  timeseriesObservations?: number;
-  metricsObservations?: number;
-  force?: boolean;
   matchScanDirection?: "newest" | "oldest";
   matchMode?: "incremental" | "backlog";
   deadlineMs?: number | null;
-} = {}): Promise<PipelineResult> {
+};
+
+type PipelineStageResult = {
+  ok: boolean;
+  firstError?: string | null;
+};
+
+type ProviderPipelineHandlers = {
+  provider: BackendPipelineProvider;
+  ingestErrorMessage: string;
+  normalizeErrorMessage: string;
+  matchErrorMessage: string;
+  timeseriesErrorMessage?: string;
+  variantMetricsErrorMessage?: string;
+  analyticsProvider?: AnalyticsPipelineProvider;
+  runIngest: (opts: PipelineOptions) => Promise<PipelineStageResult & object>;
+  runNormalize: (opts: PipelineOptions, effectiveProviderSetId: string | undefined) => Promise<PipelineStageResult & object>;
+  runMatch: (opts: PipelineOptions, effectiveProviderSetId: string | undefined) => Promise<PipelineStageResult & object>;
+};
+
+const PROVIDER_PIPELINE_HANDLERS: Record<BackendPipelineProvider, ProviderPipelineHandlers> = {
+  JUSTTCG: {
+    provider: "JUSTTCG",
+    ingestErrorMessage: "justtcg ingest failed",
+    normalizeErrorMessage: "justtcg normalize failed",
+    matchErrorMessage: "justtcg match failed",
+    timeseriesErrorMessage: "justtcg timeseries failed",
+    variantMetricsErrorMessage: "justtcg variant metrics failed",
+    analyticsProvider: "JUSTTCG",
+    runIngest: (opts) => runJustTcgRawIngest({
+      providerSetId: opts.providerSetId ?? undefined,
+      setLimit: opts.setLimit,
+      pageLimitPerSet: opts.pageLimitPerSet,
+      maxRequests: opts.maxRequests,
+      retryOnly: opts.retryOnly === true,
+    }),
+    runNormalize: (opts, effectiveProviderSetId) => runJustTcgRawNormalize({
+      providerSetId: effectiveProviderSetId,
+      payloadLimit: opts.payloadLimit,
+      force: opts.force === true,
+    }),
+    runMatch: (opts, effectiveProviderSetId) => runJustTcgNormalizedMatch({
+      providerSetId: effectiveProviderSetId,
+      observationLimit: opts.matchObservations,
+      force: opts.force === true,
+    }),
+  },
+  SCRYDEX: {
+    provider: "SCRYDEX",
+    ingestErrorMessage: "scrydex ingest failed",
+    normalizeErrorMessage: "scrydex normalize failed",
+    matchErrorMessage: "scrydex match failed",
+    timeseriesErrorMessage: "scrydex timeseries failed",
+    variantMetricsErrorMessage: "scrydex variant metrics failed",
+    analyticsProvider: "SCRYDEX",
+    runIngest: (opts) => runScrydexRawIngest({
+      providerSetId: opts.providerSetId ?? undefined,
+      setLimit: opts.setLimit,
+      pageLimitPerSet: opts.pageLimitPerSet,
+      maxRequests: opts.maxRequests,
+    }),
+    runNormalize: (opts, effectiveProviderSetId) => runScrydexRawNormalize({
+      providerSetId: effectiveProviderSetId,
+      payloadLimit: opts.payloadLimit,
+      force: opts.force === true,
+    }),
+    runMatch: (opts, effectiveProviderSetId) => runScrydexNormalizedMatch({
+      providerSetId: effectiveProviderSetId,
+      observationLimit: opts.matchObservations,
+      force: opts.force === true,
+      scanDirection: opts.matchScanDirection ?? "newest",
+      mode: opts.matchMode ?? "incremental",
+      maxRuntimeMs: runtimeBudgetFromDeadline(opts.deadlineMs),
+    }),
+  },
+  POKETRACE: {
+    provider: "POKETRACE",
+    ingestErrorMessage: "poketrace ingest failed",
+    normalizeErrorMessage: "poketrace normalize failed",
+    matchErrorMessage: "poketrace match failed",
+    runIngest: (opts) => runPokeTraceRawIngest({
+      providerSetId: opts.providerSetId ?? undefined,
+      setLimit: opts.setLimit,
+      pageLimitPerSet: opts.pageLimitPerSet,
+      maxRequests: opts.maxRequests,
+    }),
+    runNormalize: (opts, effectiveProviderSetId) => runPokeTraceRawNormalize({
+      providerSetId: effectiveProviderSetId,
+      payloadLimit: opts.payloadLimit,
+      force: opts.force === true,
+    }),
+    runMatch: (opts, effectiveProviderSetId) => runPokeTraceNormalizedMatch({
+      providerSetId: effectiveProviderSetId,
+      observationLimit: opts.matchObservations,
+      force: opts.force === true,
+      scanDirection: opts.matchScanDirection ?? "newest",
+      mode: opts.matchMode ?? "incremental",
+      maxRuntimeMs: runtimeBudgetFromDeadline(opts.deadlineMs),
+    }),
+  },
+};
+
+async function runProviderPipeline(provider: BackendPipelineProvider, opts: PipelineOptions = {}): Promise<PipelineResult> {
+  const handlers = PROVIDER_PIPELINE_HANDLERS[provider];
   const startedAt = new Date().toISOString();
   const steps: PipelineStep<object>[] = [];
   let firstError: string | null = null;
   let timeseriesTouchedKeys: TouchedVariantKey[] = [];
   let variantMetricsTouchedKeys: TouchedVariantKey[] = [];
 
-  const ingest = await runScrydexRawIngest({
-    providerSetId: opts.providerSetId ?? undefined,
-    setLimit: opts.setLimit,
-    pageLimitPerSet: opts.pageLimitPerSet,
-    maxRequests: opts.maxRequests,
-  });
+  const ingest = await handlers.runIngest(opts);
   steps.push({ name: "ingest", ok: ingest.ok, result: ingest });
   if (!ingest.ok && !hasIngestProgress(ingest)) {
-    firstError = ingest.firstError ?? "scrydex ingest failed";
+    firstError = ingest.firstError ?? handlers.ingestErrorMessage;
   }
   const effectiveProviderSetId = resolveSingleProviderSetId(opts.providerSetId, ingest);
 
@@ -334,12 +312,11 @@ export async function runPokemonTcgPipeline(opts: {
     const normalize = await drainPipelineStage({
       name: "normalize",
       steps,
-      run: () => runScrydexRawNormalize({
-        providerSetId: effectiveProviderSetId,
-        payloadLimit: opts.payloadLimit,
-        force: opts.force === true,
-      }),
-      errorMessage: "scrydex normalize failed",
+      run: () => handlers.runNormalize(opts, effectiveProviderSetId) as Promise<{
+        ok: boolean;
+        firstError?: string | null;
+      }>,
+      errorMessage: handlers.normalizeErrorMessage,
       requestedField: "payloadsRequested",
       processedField: "payloadsProcessed",
       deadlineMs: opts.deadlineMs,
@@ -351,15 +328,11 @@ export async function runPokemonTcgPipeline(opts: {
     const match = await drainPipelineStage({
       name: "match",
       steps,
-      run: () => runScrydexNormalizedMatch({
-        providerSetId: effectiveProviderSetId,
-        observationLimit: opts.matchObservations,
-        force: opts.force === true,
-        scanDirection: opts.matchScanDirection ?? "newest",
-        mode: opts.matchMode ?? "incremental",
-        maxRuntimeMs: runtimeBudgetFromDeadline(opts.deadlineMs),
-      }),
-      errorMessage: "scrydex match failed",
+      run: () => handlers.runMatch(opts, effectiveProviderSetId) as Promise<{
+        ok: boolean;
+        firstError?: string | null;
+      }>,
+      errorMessage: handlers.matchErrorMessage,
       requestedField: "observationsRequested",
       processedField: "observationsProcessed",
       deadlineMs: opts.deadlineMs,
@@ -367,17 +340,17 @@ export async function runPokemonTcgPipeline(opts: {
     if (match.firstError) firstError = match.firstError;
   }
 
-  if (!firstError) {
+  if (!firstError && providerSupportsAnalytics(provider)) {
     const timeseries = await drainPipelineStage({
       name: "timeseries",
       steps,
       run: () => runProviderObservationTimeseries({
-        provider: "SCRYDEX",
+        provider,
         providerSetId: effectiveProviderSetId,
         observationLimit: opts.timeseriesObservations ?? opts.matchObservations,
         force: opts.force === true,
       }),
-      errorMessage: "scrydex timeseries failed",
+      errorMessage: handlers.timeseriesErrorMessage ?? `${provider.toLowerCase()} timeseries failed`,
       requestedField: "observationsRequested",
       processedField: "observationsProcessed",
       deadlineMs: opts.deadlineMs,
@@ -387,17 +360,17 @@ export async function runPokemonTcgPipeline(opts: {
     timeseriesTouchedKeys = timeseries.touchedVariantKeys;
   }
 
-  if (!firstError) {
+  if (!firstError && providerSupportsAnalytics(provider)) {
     const variantMetrics = await drainPipelineStage({
       name: "variant_metrics",
       steps,
       run: () => runProviderObservationVariantMetrics({
-        provider: "SCRYDEX",
+        provider,
         providerSetId: effectiveProviderSetId,
         observationLimit: opts.metricsObservations ?? opts.timeseriesObservations ?? opts.matchObservations,
         force: opts.force === true,
       }),
-      errorMessage: "scrydex variant metrics failed",
+      errorMessage: handlers.variantMetricsErrorMessage ?? `${provider.toLowerCase()} variant metrics failed`,
       requestedField: "observationsRequested",
       processedField: "observationsProcessed",
       deadlineMs: opts.deadlineMs,
@@ -415,7 +388,7 @@ export async function runPokemonTcgPipeline(opts: {
         keys: rollupKeys,
       });
       steps.push({ name: "targeted_rollups", ok: rollups.ok, result: rollups });
-      if (!rollups.ok) firstError = rollups.firstError ?? "scrydex targeted rollups failed";
+      if (!rollups.ok) firstError = rollups.firstError ?? `${provider.toLowerCase()} targeted rollups failed`;
     }
   }
 
@@ -423,12 +396,16 @@ export async function runPokemonTcgPipeline(opts: {
   const coreOk = !firstError;
   return {
     ok: coreOk,
-    provider: "SCRYDEX",
+    provider,
     startedAt,
     endedAt,
     firstError,
     steps,
   };
+}
+
+export async function runJustTcgPipeline(opts: PipelineOptions = {}): Promise<PipelineResult> {
+  return runProviderPipeline("JUSTTCG", opts);
 }
 
 export async function runScrydexPipeline(opts: {
@@ -445,5 +422,20 @@ export async function runScrydexPipeline(opts: {
   matchMode?: "incremental" | "backlog";
   deadlineMs?: number | null;
 } = {}): Promise<PipelineResult> {
-  return runPokemonTcgPipeline(opts);
+  return runProviderPipeline("SCRYDEX", opts);
+}
+
+export async function runPokeTracePipeline(opts: {
+  providerSetId?: string | null;
+  setLimit?: number;
+  pageLimitPerSet?: number;
+  maxRequests?: number;
+  payloadLimit?: number;
+  matchObservations?: number;
+  force?: boolean;
+  matchScanDirection?: "newest" | "oldest";
+  matchMode?: "incremental" | "backlog";
+  deadlineMs?: number | null;
+} = {}): Promise<PipelineResult> {
+  return runProviderPipeline("POKETRACE", opts);
 }

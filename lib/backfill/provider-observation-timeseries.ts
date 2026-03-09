@@ -4,6 +4,7 @@ import {
   loadProviderCardMapByKeys,
   type ProviderCardMapRow,
 } from "@/lib/backfill/provider-card-map";
+import type { AnalyticsPipelineProvider } from "@/lib/backfill/provider-registry";
 import { type VariantSignalRefreshKey } from "@/lib/backfill/provider-derived-signals";
 import { buildProviderHistoryVariantRef } from "@/lib/identity/variant-ref.mjs";
 import { convertToUsd } from "@/lib/pricing/fx";
@@ -14,7 +15,7 @@ const DEFAULT_OBSERVATIONS_PER_RUN = process.env.PROVIDER_OBSERVATION_TIMESERIES
   : 300;
 const SCAN_PAGE_SIZE = 100;
 
-type SupportedProvider = "JUSTTCG" | "SCRYDEX";
+export type SupportedProvider = AnalyticsPipelineProvider;
 
 type MatchScanRow = {
   provider_normalized_observation_id: string;
@@ -633,5 +634,3 @@ export async function runProviderObservationTimeseries(opts: {
 
   return result;
 }
-
-export type { SupportedProvider };

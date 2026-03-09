@@ -8,6 +8,7 @@ import {
   refreshDerivedSignalsForVariantKeys,
   type VariantSignalRefreshKey,
 } from "@/lib/backfill/provider-derived-signals";
+import type { AnalyticsPipelineProvider } from "@/lib/backfill/provider-registry";
 import { buildRawVariantRef } from "@/lib/identity/variant-ref.mjs";
 
 const JOB = "provider_observation_variant_metrics";
@@ -17,7 +18,7 @@ const DEFAULT_OBSERVATIONS_PER_RUN = process.env.PROVIDER_OBSERVATION_VARIANT_ME
 const SCAN_PAGE_SIZE = 100;
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
-type SupportedProvider = "JUSTTCG" | "SCRYDEX";
+type SupportedProvider = AnalyticsPipelineProvider;
 
 type MatchScanRow = {
   provider_normalized_observation_id: string;

@@ -1,4 +1,5 @@
 import { dbAdmin } from "@/lib/db/admin";
+import type { BackendPipelineProvider } from "@/lib/backfill/provider-registry";
 
 export type ProviderSetIndexRow = {
   canonicalSetCode: string;
@@ -14,7 +15,7 @@ type ProviderSetMapRow = {
   confidence: number | null;
 };
 
-export async function loadProviderSetIndex(provider: "JUSTTCG" | "SCRYDEX"): Promise<ProviderSetIndexRow[]> {
+export async function loadProviderSetIndex(provider: BackendPipelineProvider): Promise<ProviderSetIndexRow[]> {
   const supabase = dbAdmin();
   const { data, error } = await supabase
     .from("provider_set_map")
@@ -43,4 +44,3 @@ export async function loadProviderSetIndex(provider: "JUSTTCG" | "SCRYDEX"): Pro
   }
   return [...deduped.values()];
 }
-

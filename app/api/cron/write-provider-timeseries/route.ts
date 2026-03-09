@@ -4,6 +4,10 @@ import {
   runProviderObservationTimeseries,
   type SupportedProvider,
 } from "@/lib/backfill/provider-observation-timeseries";
+import {
+  ANALYTICS_PIPELINE_PROVIDERS,
+  isAnalyticsPipelineProvider,
+} from "@/lib/backfill/provider-registry";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -16,10 +20,10 @@ function parseOptionalInt(value: string | null): number | undefined {
 
 function parseProviders(raw: string | null): SupportedProvider[] {
   const value = String(raw ?? "all").trim().toUpperCase();
-  if (value === "ALL") return ["JUSTTCG", "SCRYDEX"];
-  if (value === "JUSTTCG") return ["JUSTTCG"];
-  if (value === "SCRYDEX" || value === "POKEMONTCG") return ["SCRYDEX"];
-  return ["JUSTTCG", "SCRYDEX"];
+  if (value === "ALL") return [...ANALYTICS_PIPELINE_PROVIDERS];
+  if (value === "POKEMONTCG") return ["SCRYDEX"];
+  if (isAnalyticsPipelineProvider(value)) return [value];
+  return [...ANALYTICS_PIPELINE_PROVIDERS];
 }
 
 export async function GET(req: Request) {

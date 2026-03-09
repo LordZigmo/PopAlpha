@@ -1,7 +1,8 @@
 import { dbAdmin } from "@/lib/db/admin";
 import { buildSetId } from "@/lib/sets/summary-core.mjs";
+import type { BackendPipelineProvider } from "@/lib/backfill/provider-registry";
 
-export type PriorityProvider = "JUSTTCG" | "SCRYDEX";
+export type PriorityProvider = BackendPipelineProvider;
 
 export type IngestTarget = {
   setCode: string | null;

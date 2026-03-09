@@ -1,5 +1,9 @@
 import { dbAdmin } from "@/lib/db/admin";
-import { runJustTcgPipeline, runScrydexPipeline } from "@/lib/backfill/provider-pipeline-orchestrator";
+import {
+  runJustTcgPipeline,
+  runPokeTracePipeline,
+  runScrydexPipeline,
+} from "@/lib/backfill/provider-pipeline-orchestrator";
 import {
   applyQueuedBatchPreset,
   type PipelineBatchKind,
@@ -238,7 +242,20 @@ export async function executeClaimedPipelineJob(
         return { ok: result.ok, result, error: result.firstError ?? null };
       }
 
-      const result = await runScrydexPipeline({
+      const sharedParams: {
+        providerSetId?: string | null;
+        setLimit?: number;
+        pageLimitPerSet?: number;
+        maxRequests?: number;
+        payloadLimit?: number;
+        matchObservations?: number;
+        timeseriesObservations?: number;
+        metricsObservations?: number;
+        force?: boolean;
+        matchScanDirection?: "newest" | "oldest";
+        matchMode?: "incremental" | "backlog";
+        deadlineMs?: number | null;
+      } = {
         providerSetId: params.providerSetId ?? undefined,
         setLimit: params.setLimit,
         pageLimitPerSet: params.pageLimitPerSet,
@@ -251,7 +268,10 @@ export async function executeClaimedPipelineJob(
         matchScanDirection: job.job_kind === "RETRY" ? "oldest" : "newest",
         matchMode: job.job_kind === "RETRY" ? "backlog" : "incremental",
         deadlineMs,
-      });
+      };
+      const result = job.provider === "POKETRACE"
+        ? await runPokeTracePipeline(sharedParams)
+        : await runScrydexPipeline(sharedParams);
       return { ok: result.ok, result, error: result.firstError ?? null };
     })();
     return await Promise.race([workPromise, timeoutPromise]);

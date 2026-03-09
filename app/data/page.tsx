@@ -13,7 +13,7 @@ export const metadata: Metadata = {
   },
 };
 
-export const revalidate = 300;
+export const dynamic = "force-dynamic";
 
 function formatNumber(value: number): string {
   return new Intl.NumberFormat("en-US").format(value);
@@ -34,11 +34,44 @@ function formatTimestamp(value: string): string {
 }
 
 export default async function DataPage() {
-  const [monitor, transparency, trend] = await Promise.all([
-    getCanonicalRawFreshnessMonitor(24),
-    getPricingTransparencySnapshot(),
-    getPricingTransparencyTrend(7),
-  ]);
+  let monitor;
+  let transparency;
+  let trend;
+
+  try {
+    [monitor, transparency, trend] = await Promise.all([
+      getCanonicalRawFreshnessMonitor(24),
+      getPricingTransparencySnapshot(),
+      getPricingTransparencyTrend(7),
+    ]);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[data/page] failed to load freshness monitor", message);
+
+    return (
+      <main className="min-h-screen bg-[#0A0A0A] px-4 py-12 text-[#F0F0F0] sm:px-6">
+        <div className="mx-auto max-w-4xl">
+          <section className="rounded-[28px] border border-[#1E1E1E] bg-[#101010] p-6 sm:p-8">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6B6B6B]">
+              Public Data Monitor
+            </p>
+            <h1 className="mt-3 text-[28px] font-semibold leading-[1.02] tracking-[-0.05em] sm:text-[44px]">
+              Canonical RAW Price Freshness (24h)
+            </h1>
+            <div className="mt-6 rounded-2xl border border-[#78350F] bg-[#1C1917] p-5">
+              <p className="text-[12px] uppercase tracking-[0.14em] text-[#FBBF24]">
+                Temporarily Unavailable
+              </p>
+              <p className="mt-2 text-[15px] text-[#D1D5DB]">
+                Live freshness metrics could not be loaded right now. The page is request-time only, so this does not block deploys.
+              </p>
+            </div>
+          </section>
+        </div>
+      </main>
+    );
+  }
+
   const statusTone: Record<"healthy" | "warning" | "critical", string> = {
     healthy: "text-[#4ADE80] border-[#14532D] bg-[#052E16]",
     warning: "text-[#FBBF24] border-[#78350F] bg-[#1C1917]",

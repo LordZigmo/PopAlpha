@@ -116,6 +116,7 @@ type RawIngestResult = {
   endedAt: string;
   setsPlanned: number;
   setsProcessed: number;
+  selectedProviderSetIds: string[];
   requestsMade: number;
   rawPayloadsInserted: number;
   rawPayloadsDuplicate: number;
@@ -807,6 +808,7 @@ export async function runJustTcgRawIngest(opts: {
     endedAt,
     setsPlanned: resolvedTargets.length,
     setsProcessed,
+    selectedProviderSetIds: resolvedTargets.map((target) => target.providerSetId),
     requestsMade,
     rawPayloadsInserted,
     rawPayloadsDuplicate,
@@ -842,6 +844,7 @@ export async function runJustTcgRawIngest(opts: {
           nextSetCode,
           setsPlanned: resolvedTargets.length,
           setsProcessed,
+          selectedProviderSetIds: resolvedTargets.map((target) => target.providerSetId),
           requestsMade,
           rawPayloadsInserted,
           rawPayloadsDuplicate,
