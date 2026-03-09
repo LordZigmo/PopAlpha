@@ -4,6 +4,7 @@ import {
   loadProviderCardMapByKeys,
   type ProviderCardMapRow,
 } from "@/lib/backfill/provider-card-map";
+import { type VariantSignalRefreshKey } from "@/lib/backfill/provider-derived-signals";
 import { buildProviderHistoryVariantRef } from "@/lib/identity/variant-ref.mjs";
 import { convertToUsd } from "@/lib/pricing/fx";
 
@@ -31,6 +32,8 @@ type ObservationRow = {
   currency: string;
   observed_at: string;
   variant_ref: string;
+  history_points_30d?: Array<{ ts?: string; price?: number; currency?: string }> | null;
+  metadata?: Record<string, unknown> | null;
 };
 
 type CandidateRow = {
@@ -57,7 +60,7 @@ type PriceHistoryWriteRow = {
   ts: string;
   price: number;
   currency: string;
-  source_window: "snapshot";
+  source_window: string;
 };
 
 type TimeseriesSample = {
@@ -92,6 +95,7 @@ type TimeseriesResult = {
   historyPointsUpserted: number;
   firstError: string | null;
   sampleWrites: TimeseriesSample[];
+  touchedVariantKeys: VariantSignalRefreshKey[];
 };
 
 function parsePositiveInt(value: number | undefined, fallback: number): number {
@@ -111,10 +115,43 @@ function buildProviderRef(provider: SupportedProvider, providerVariantId: string
 
 function shouldWriteRawForCondition(provider: SupportedProvider, condition: string | null | undefined): boolean {
   // Keep RAW market price comparable by using NM-only snapshots.
-  // Scrydex observations are normalized as NM by design.
+  // Scrydex observations now preserve the selected provider condition, but we
+  // still only enforce the NM gate for JustTCG today.
   if (provider !== "JUSTTCG") return true;
   const normalized = String(condition ?? "").trim().toLowerCase();
   return normalized === "nm" || normalized === "mint";
+}
+
+function parseTrendAnchorPoints(
+  metadata: Record<string, unknown> | null | undefined,
+): Array<{
+  ts: string;
+  price: number;
+  currency: string;
+  sourceWindow: string;
+}> {
+  const raw = metadata?.providerTrendAnchorPoints;
+  if (!Array.isArray(raw)) return [];
+
+  const anchors: Array<{
+    ts: string;
+    price: number;
+    currency: string;
+    sourceWindow: string;
+  }> = [];
+
+  for (const item of raw) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const row = item as Record<string, unknown>;
+    const ts = String(row.ts ?? "").trim();
+    const price = typeof row.price === "number" ? row.price : Number.parseFloat(String(row.price ?? ""));
+    const currency = normalizeCurrency(String(row.currency ?? "USD"));
+    const sourceWindow = String(row.sourceWindow ?? "").trim();
+    if (!ts || !Number.isFinite(price) || price <= 0 || !sourceWindow) continue;
+    anchors.push({ ts, price, currency, sourceWindow });
+  }
+
+  return anchors;
 }
 
 async function loadCandidateRows(params: {
@@ -148,7 +185,7 @@ async function loadCandidateRows(params: {
 
     const { data: obsData, error: obsError } = await supabase
       .from("provider_normalized_observations")
-      .select("id, provider, provider_set_id, provider_card_id, provider_variant_id, asset_type, normalized_condition, observed_price, currency, observed_at, variant_ref")
+      .select("id, provider, provider_set_id, provider_card_id, provider_variant_id, asset_type, normalized_condition, observed_price, currency, observed_at, variant_ref, history_points_30d, metadata")
       .eq("id", matchData.provider_normalized_observation_id)
       .eq("provider", params.provider)
       .maybeSingle<ObservationRow>();
@@ -207,7 +244,7 @@ async function loadCandidateRows(params: {
     const [{ data: observationRows, error: obsLoadError }] = await Promise.all([
       supabase
         .from("provider_normalized_observations")
-        .select("id, provider, provider_set_id, provider_card_id, provider_variant_id, asset_type, normalized_condition, observed_price, currency, observed_at, variant_ref")
+        .select("id, provider, provider_set_id, provider_card_id, provider_variant_id, asset_type, normalized_condition, observed_price, currency, observed_at, variant_ref, history_points_30d, metadata")
         .in("id", selectedIds)
         .eq("provider", params.provider),
     ]);
@@ -261,6 +298,7 @@ export async function runProviderObservationTimeseries(opts: {
   let snapshotsUpserted = 0;
   let historyPointsUpserted = 0;
   const sampleWrites: TimeseriesSample[] = [];
+  let touchedVariantKeys: VariantSignalRefreshKey[] = [];
 
   const { data: runRow, error: runStartError } = await supabase
     .from("ingest_runs")
@@ -352,6 +390,19 @@ export async function runProviderObservationTimeseries(opts: {
         source_window: "snapshot",
       });
 
+      for (const point of parseTrendAnchorPoints(row.observation.metadata)) {
+        const anchorPriceUsd = convertToUsd(point.price, point.currency);
+        historyRows.push({
+          canonical_slug: row.mapping.canonical_slug,
+          variant_ref: historyVariantRef,
+          provider: opts.provider,
+          ts: point.ts,
+          price: anchorPriceUsd,
+          currency: "USD",
+          source_window: point.sourceWindow,
+        });
+      }
+
       if (sampleWrites.length < 25) {
         sampleWrites.push({
           observationId: row.observation.id,
@@ -386,6 +437,12 @@ export async function runProviderObservationTimeseries(opts: {
 
     const dedupedSnapshotRows = [...dedupedSnapshotsByKey.values()];
     const dedupedHistoryRows = [...dedupedHistoryByKey.values()];
+    touchedVariantKeys = dedupedHistoryRows.map((row) => ({
+      canonical_slug: row.canonical_slug,
+      variant_ref: row.variant_ref,
+      provider: row.provider,
+      grade: "RAW",
+    }));
 
     if (dedupedSnapshotRows.length > 0) {
       const { data, error } = await supabase
@@ -426,6 +483,7 @@ export async function runProviderObservationTimeseries(opts: {
     historyPointsUpserted,
     firstError,
     sampleWrites,
+    touchedVariantKeys,
   };
 
   if (runId) {
@@ -454,6 +512,7 @@ export async function runProviderObservationTimeseries(opts: {
           snapshotsUpserted,
           historyPointsUpserted,
           sampleWrites,
+          touchedVariantKeys: touchedVariantKeys.slice(0, 100),
           firstError,
         },
       })

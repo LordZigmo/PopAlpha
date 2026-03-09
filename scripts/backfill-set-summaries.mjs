@@ -55,11 +55,16 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
   process.exit(1);
 }
 
-const days = Math.max(1, Math.min(parseInt(parseArg("days", "30"), 10) || 30, 90));
+const days = Math.max(1, Math.min(parseInt(parseArg("days", "30"), 10) || 30, 365));
 const includePipelineRefresh = parseArg("refreshPipeline", "1") !== "0";
 const setBatchSize = Math.max(1, Math.min(parseInt(parseArg("setBatchSize", "8"), 10) || 8, 25));
 const sleepMs = Math.max(0, Math.min(parseInt(parseArg("sleepMs", "150"), 10) || 150, 5000));
 const lookbackDays = Math.min(days + 35, 365);
+const onlySetIds = parseArg("onlySetIds", "")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
+const onlySetIdSet = new Set(onlySetIds);
 const today = new Date().toISOString().slice(0, 10);
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
@@ -183,7 +188,9 @@ for (const row of snapshotSetRows ?? []) {
   addSetRow(setMap, universeSources, "set_summary_snapshots", setId, setName);
 }
 
-const setUniverse = [...setMap.values()].sort((left, right) => left.setName.localeCompare(right.setName));
+const setUniverse = [...setMap.values()]
+  .filter((row) => onlySetIdSet.size === 0 || onlySetIdSet.has(row.setId))
+  .sort((left, right) => left.setName.localeCompare(right.setName));
 const setBatches = chunk(setUniverse, setBatchSize);
 
 console.log(JSON.stringify({
@@ -194,6 +201,7 @@ console.log(JSON.stringify({
   batches: setBatches.length,
   days,
   lookbackDays,
+  onlySetIds,
 }, null, 2));
 
 if (includePipelineRefresh) {
@@ -201,6 +209,19 @@ if (includePipelineRefresh) {
     const batch = setBatches[batchIndex];
     const batchSetIds = batch.map((row) => row.setId);
     const batchSetNames = batch.map((row) => row.setName);
+
+    const { data: snapshotHistoryRows, error: snapshotHistoryError } = await withRetry(
+      `backfill_snapshot_history_batch_${batchIndex + 1}`,
+      () => supabase.rpc("backfill_snapshot_history_points_for_sets", {
+        only_set_ids: batchSetIds,
+        p_window_days: lookbackDays,
+      }),
+    );
+
+    if (snapshotHistoryError) {
+      console.error(`backfill_snapshot_history_points_for_sets failed for batch ${batchIndex + 1}: ${snapshotHistoryError.message}`);
+      process.exit(1);
+    }
 
     const { data: canonicalCards, error: canonicalCardsError } = await withRetry(
       `load_canonical_cards_batch_${batchIndex + 1}`,
@@ -224,6 +245,7 @@ if (includePipelineRefresh) {
       const IN_CHUNK_SIZE = 100;
       const slugChunks = chunk(canonicalSlugs, IN_CHUNK_SIZE);
       const variantRows = [];
+      const historyRows = [];
       for (let i = 0; i < slugChunks.length; i += 1) {
         const { data: chunkRows, error: variantError } = await withRetry(
           `load_variant_keys_batch_${batchIndex + 1}_chunk_${i + 1}`,
@@ -240,6 +262,22 @@ if (includePipelineRefresh) {
           process.exit(1);
         }
         variantRows.push(...(chunkRows ?? []));
+
+        const { data: historyChunkRows, error: historyError } = await withRetry(
+          `load_history_keys_batch_${batchIndex + 1}_chunk_${i + 1}`,
+          () => supabase
+            .from("price_history_points")
+            .select("canonical_slug, variant_ref, provider")
+            .eq("source_window", "snapshot")
+            .like("variant_ref", "%::RAW")
+            .in("canonical_slug", slugChunks[i])
+            .limit(10000),
+        );
+        if (historyError) {
+          console.error(`Failed to load history keys for batch ${batchIndex + 1} chunk ${i + 1}: ${historyError.message}`);
+          process.exit(1);
+        }
+        historyRows.push(...(historyChunkRows ?? []));
       }
 
       const dedupedKeys = new Map();
@@ -252,6 +290,18 @@ if (includePipelineRefresh) {
             variant_ref: row.variant_ref,
             provider: row.provider,
             grade: row.grade,
+          },
+        );
+      }
+      for (const row of historyRows) {
+        if (!row?.canonical_slug || !row?.variant_ref || !row?.provider) continue;
+        dedupedKeys.set(
+          `${row.canonical_slug}::${row.variant_ref}::${row.provider}::RAW`,
+          {
+            canonical_slug: row.canonical_slug,
+            variant_ref: row.variant_ref,
+            provider: row.provider,
+            grade: "RAW",
           },
         );
       }
@@ -307,6 +357,7 @@ if (includePipelineRefresh) {
       batch: batchIndex + 1,
       totalBatches: setBatches.length,
       setIds: batchSetIds,
+      snapshotHistoryRows,
       pipelineResult,
       snapshotRows,
       finishRows,

@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { getEurToUsdRateAt } from "@/lib/pricing/fx";
+import { getCurrencyToUsdRateAt } from "@/lib/pricing/fx";
 
 export type ProviderName = "JUSTTCG" | "SCRYDEX";
 
@@ -9,7 +9,7 @@ export type ProviderPriceDisplay = {
   sourceCurrency: string | null;
   usdPrice: number | null;
   fxRateUsed: number | null;
-  fxSource: "FX_RATES_TABLE" | "ENV_EUR_TO_USD_RATE" | "IDENTITY" | "UNKNOWN";
+  fxSource: "FX_RATES_TABLE" | "ENV_EUR_TO_USD_RATE" | "ENV_JPY_TO_USD_RATE" | "IDENTITY" | "UNKNOWN";
   fxAsOf: string | null;
   asOf: string | null;
 };
@@ -39,9 +39,10 @@ export async function buildProviderPriceDisplay(params: {
   if (sourceCurrency === "USD") {
     fxRateUsed = 1;
     fxSource = "IDENTITY";
-  } else if (sourceCurrency === "EUR") {
-    const fx = await getEurToUsdRateAt({
+  } else if (sourceCurrency === "EUR" || sourceCurrency === "JPY") {
+    const fx = await getCurrencyToUsdRateAt({
       supabase: params.supabase,
+      currency: sourceCurrency,
       asOf: params.asOf,
     });
     fxRateUsed = fx.rate;
@@ -49,7 +50,7 @@ export async function buildProviderPriceDisplay(params: {
     fxAsOf = fx.fxAsOf;
   }
 
-  const usdPrice = sourcePrice !== null && sourceCurrency === "EUR" && fxRateUsed
+  const usdPrice = sourcePrice !== null && (sourceCurrency === "EUR" || sourceCurrency === "JPY") && fxRateUsed
     ? Number((sourcePrice * fxRateUsed).toFixed(4))
     : sourcePrice !== null && sourceCurrency === "USD"
       ? sourcePrice

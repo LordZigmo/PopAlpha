@@ -27,6 +27,48 @@ function numberFromUnknown(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+function mergeTouchedVariantKeys(
+  ...groups: Array<Array<{
+    canonical_slug?: string | null;
+    variant_ref?: string | null;
+    provider?: string | null;
+    grade?: string | null;
+  }> | null | undefined>
+): Array<{
+  canonical_slug: string;
+  variant_ref: string;
+  provider: string;
+  grade: string;
+}> {
+  const deduped = new Map<string, {
+    canonical_slug: string;
+    variant_ref: string;
+    provider: string;
+    grade: string;
+  }>();
+
+  for (const group of groups) {
+    for (const raw of group ?? []) {
+      const canonicalSlug = String(raw?.canonical_slug ?? "").trim();
+      const variantRef = String(raw?.variant_ref ?? "").trim();
+      const provider = String(raw?.provider ?? "").trim().toUpperCase();
+      const grade = String(raw?.grade ?? "RAW").trim().toUpperCase() || "RAW";
+      if (!canonicalSlug || !variantRef || !provider || !grade) continue;
+      deduped.set(
+        `${canonicalSlug}::${variantRef}::${provider}::${grade}`,
+        {
+          canonical_slug: canonicalSlug,
+          variant_ref: variantRef,
+          provider,
+          grade,
+        },
+      );
+    }
+  }
+
+  return [...deduped.values()];
+}
+
 function hasIngestProgress(result: object): boolean {
   const row = result as Record<string, unknown>;
   return (
@@ -52,6 +94,12 @@ export async function runJustTcgPipeline(opts: {
   const startedAt = new Date().toISOString();
   const steps: PipelineStep<object>[] = [];
   let firstError: string | null = null;
+  let timeseriesTouchedKeys: Array<{
+    canonical_slug: string;
+    variant_ref: string;
+    provider: string;
+    grade: string;
+  }> = [];
 
   const ingest = await runJustTcgRawIngest({
     providerSetId: opts.providerSetId ?? undefined,
@@ -94,6 +142,7 @@ export async function runJustTcgPipeline(opts: {
     });
     steps.push({ name: "timeseries", ok: timeseries.ok, result: timeseries });
     if (!timeseries.ok) firstError = timeseries.firstError ?? "justtcg timeseries failed";
+    timeseriesTouchedKeys = timeseries.touchedVariantKeys;
   }
 
   if (!firstError) {
@@ -106,8 +155,12 @@ export async function runJustTcgPipeline(opts: {
     if (!variantMetrics.ok) firstError = variantMetrics.firstError ?? "justtcg variant metrics failed";
 
     if (!firstError) {
+      const rollupKeys = mergeTouchedVariantKeys(
+        timeseriesTouchedKeys,
+        variantMetrics.touchedVariantKeys,
+      );
       const rollups = await refreshPipelineRollupsForVariantKeys({
-        keys: variantMetrics.touchedVariantKeys,
+        keys: rollupKeys,
       });
       steps.push({ name: "targeted_rollups", ok: rollups.ok, result: rollups });
       if (!rollups.ok) firstError = rollups.firstError ?? "justtcg targeted rollups failed";
@@ -142,6 +195,12 @@ export async function runPokemonTcgPipeline(opts: {
   const startedAt = new Date().toISOString();
   const steps: PipelineStep<object>[] = [];
   let firstError: string | null = null;
+  let timeseriesTouchedKeys: Array<{
+    canonical_slug: string;
+    variant_ref: string;
+    provider: string;
+    grade: string;
+  }> = [];
 
   const ingest = await runScrydexRawIngest({
     providerSetId: opts.providerSetId ?? undefined,
@@ -185,6 +244,7 @@ export async function runPokemonTcgPipeline(opts: {
     });
     steps.push({ name: "timeseries", ok: timeseries.ok, result: timeseries });
     if (!timeseries.ok) firstError = timeseries.firstError ?? "scrydex timeseries failed";
+    timeseriesTouchedKeys = timeseries.touchedVariantKeys;
   }
 
   if (!firstError) {
@@ -197,8 +257,12 @@ export async function runPokemonTcgPipeline(opts: {
     if (!variantMetrics.ok) firstError = variantMetrics.firstError ?? "scrydex variant metrics failed";
 
     if (!firstError) {
+      const rollupKeys = mergeTouchedVariantKeys(
+        timeseriesTouchedKeys,
+        variantMetrics.touchedVariantKeys,
+      );
       const rollups = await refreshPipelineRollupsForVariantKeys({
-        keys: variantMetrics.touchedVariantKeys,
+        keys: rollupKeys,
       });
       steps.push({ name: "targeted_rollups", ok: rollups.ok, result: rollups });
       if (!rollups.ok) firstError = rollups.firstError ?? "scrydex targeted rollups failed";

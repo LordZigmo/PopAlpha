@@ -25,7 +25,7 @@ export type CardDetailPriceCompare = {
     sourceCurrency: string | null;
     usdPrice: number | null;
     fxRateUsed: number | null;
-    fxSource: "FX_RATES_TABLE" | "ENV_EUR_TO_USD_RATE" | "IDENTITY" | "UNKNOWN";
+    fxSource: "FX_RATES_TABLE" | "ENV_EUR_TO_USD_RATE" | "ENV_JPY_TO_USD_RATE" | "IDENTITY" | "UNKNOWN";
     fxAsOf: string | null;
     asOf: string | null;
   }>;

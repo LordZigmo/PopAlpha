@@ -1,5 +1,5 @@
 import { dbAdmin } from "@/lib/db/admin";
-import { buildLegacyVariantRef } from "@/lib/providers/justtcg";
+import { buildLegacyVariantRef, normalizeCondition } from "@/lib/providers/justtcg";
 import type { ScrydexCard, ScrydexVariant } from "@/lib/scrydex/client";
 
 const PROVIDER = "SCRYDEX";
@@ -54,9 +54,9 @@ type NormalizedObservationRow = {
   normalized_language: string;
   variant_ref: string;
   observed_price: number | null;
-  currency: "USD" | "EUR";
+  currency: "USD" | "EUR" | "JPY";
   observed_at: string;
-  history_points_30d: Array<{ ts: string; price: number; currency: "USD" | "EUR" }>;
+  history_points_30d: Array<{ ts: string; price: number; currency: "USD" | "EUR" | "JPY" }>;
   history_points_30d_count: number;
   metadata: Record<string, unknown>;
   updated_at: string;
@@ -107,11 +107,44 @@ type VariantObservation = {
   variantName: string;
   variantId: string;
   observedPrice: number | null;
-  currency: "USD" | "EUR";
+  currency: "USD" | "EUR" | "JPY";
   providerFinish: string | null;
   normalizedFinish: "NON_HOLO" | "HOLO" | "REVERSE_HOLO" | "UNKNOWN";
   normalizedEdition: "UNLIMITED" | "FIRST_EDITION";
+  providerCondition: string | null;
+  normalizedCondition: string;
+  trendAnchorPoints: TrendAnchorPoint[];
 };
+
+type TrendAnchorPoint = {
+  lookbackDays: number;
+  price: number;
+  currency: "USD" | "EUR" | "JPY";
+  sourceWindow: "30d" | "180d";
+};
+
+type ScrydexCurrency = "USD" | "EUR" | "JPY";
+
+type SelectedScrydexPriceEntry = {
+  price: number;
+  currency: ScrydexCurrency;
+  row: Record<string, unknown>;
+  providerCondition: string | null;
+  normalizedCondition: string;
+};
+
+const SCRYDEX_TREND_WINDOWS: Array<{
+  key: string;
+  lookbackDays: number;
+  sourceWindow: "30d" | "180d";
+}> = [
+  { key: "days_1", lookbackDays: 1, sourceWindow: "30d" },
+  { key: "days_7", lookbackDays: 7, sourceWindow: "30d" },
+  { key: "days_14", lookbackDays: 14, sourceWindow: "30d" },
+  { key: "days_30", lookbackDays: 30, sourceWindow: "30d" },
+  { key: "days_90", lookbackDays: 90, sourceWindow: "180d" },
+  { key: "days_180", lookbackDays: 180, sourceWindow: "180d" },
+];
 
 function parsePositiveInt(value: number | undefined, fallback: number): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
@@ -173,8 +206,15 @@ function getNumberField(value: unknown): number | null {
   return null;
 }
 
-function parseScrydexPriceObject(record: Record<string, unknown>): { price: number | null; currency: "USD" | "EUR" } {
-  const directCurrency = typeof record.currency === "string" ? record.currency.trim().toUpperCase() : "";
+function normalizeScrydexCurrency(raw: unknown): ScrydexCurrency {
+  const value = String(raw ?? "").trim().toUpperCase();
+  if (value === "EUR") return "EUR";
+  if (value === "JPY") return "JPY";
+  return "USD";
+}
+
+function parseScrydexPriceObject(record: Record<string, unknown>): { price: number | null; currency: ScrydexCurrency } {
+  const directCurrency = normalizeScrydexCurrency(record.currency);
   const directCandidates = [
     record.marketPrice,
     record.market,
@@ -191,7 +231,7 @@ function parseScrydexPriceObject(record: Record<string, unknown>): { price: numb
     if (value !== null) {
       return {
         price: value,
-        currency: directCurrency === "EUR" ? "EUR" : "USD",
+        currency: directCurrency,
       };
     }
   }
@@ -202,10 +242,13 @@ function parseScrydexPriceObject(record: Record<string, unknown>): { price: numb
   const eurValue = getNumberField(record.eur) ?? getNumberField(record.EUR);
   if (eurValue !== null) return { price: eurValue, currency: "EUR" };
 
+  const jpyValue = getNumberField(record.jpy) ?? getNumberField(record.JPY);
+  if (jpyValue !== null) return { price: jpyValue, currency: "JPY" };
+
   return { price: null, currency: "USD" };
 }
 
-function extractPriceCurrency(prices: unknown): { price: number | null; currency: "USD" | "EUR" } {
+function extractPriceCurrency(prices: unknown): { price: number | null; currency: ScrydexCurrency } {
   if (Array.isArray(prices)) {
     const rows = prices.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object");
     if (rows.length === 0) return { price: null, currency: "USD" };
@@ -246,8 +289,103 @@ function extractPriceCurrency(prices: unknown): { price: number | null; currency
   return { price: null, currency: "USD" };
 }
 
+function rankScrydexPriceEntry(row: Record<string, unknown>): number {
+  const condition = String(row.condition ?? "").trim().toUpperCase();
+  const type = String(row.type ?? "").trim().toLowerCase();
+  const market = getNumberField(row.market);
+  const low = getNumberField(row.low);
+  let score = 0;
+  if (type === "raw") score += 100;
+  if (condition === "NM" || condition === "NEAR MINT") score += 50;
+  if (market !== null) score += 20;
+  if (low !== null) score += 10;
+  return score;
+}
+
+function normalizeScrydexCondition(condition: unknown): {
+  providerCondition: string | null;
+  normalizedCondition: string;
+} {
+  const providerCondition = typeof condition === "string" && condition.trim()
+    ? condition.trim()
+    : null;
+  return {
+    providerCondition,
+    normalizedCondition: providerCondition ? normalizeCondition(providerCondition) : "nm",
+  };
+}
+
+function selectPreferredScrydexPriceEntry(prices: unknown): SelectedScrydexPriceEntry | null {
+  if (Array.isArray(prices)) {
+    const rows = prices
+      .filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object")
+      .sort((left, right) => rankScrydexPriceEntry(right) - rankScrydexPriceEntry(left));
+    for (const row of rows) {
+      const parsed = parseScrydexPriceObject(row);
+      if (parsed.price !== null) {
+        const condition = normalizeScrydexCondition(row.condition);
+        return {
+          price: parsed.price,
+          currency: parsed.currency,
+          row,
+          providerCondition: condition.providerCondition,
+          normalizedCondition: condition.normalizedCondition,
+        };
+      }
+    }
+    return null;
+  }
+
+  if (!prices || typeof prices !== "object") return null;
+  const row = prices as Record<string, unknown>;
+  const parsed = parseScrydexPriceObject(row);
+  if (parsed.price === null) return null;
+  const condition = normalizeScrydexCondition(row.condition);
+  return {
+    price: parsed.price,
+    currency: parsed.currency,
+    row,
+    providerCondition: condition.providerCondition,
+    normalizedCondition: condition.normalizedCondition,
+  };
+}
+
+function extractTrendAnchorPoints(prices: unknown): TrendAnchorPoint[] {
+  const selected = selectPreferredScrydexPriceEntry(prices);
+  if (!selected) return [];
+
+  const trends = (
+    selected.row.trends
+    && typeof selected.row.trends === "object"
+    && !Array.isArray(selected.row.trends)
+  ) ? selected.row.trends as Record<string, unknown> : null;
+  if (!trends) return [];
+
+  const anchors: TrendAnchorPoint[] = [];
+  for (const window of SCRYDEX_TREND_WINDOWS) {
+    const trendRow = trends[window.key];
+    if (!trendRow || typeof trendRow !== "object" || Array.isArray(trendRow)) continue;
+    const priceChange = getNumberField((trendRow as Record<string, unknown>).price_change);
+    if (priceChange === null) continue;
+    const anchorPrice = Number((selected.price - priceChange).toFixed(4));
+    if (!Number.isFinite(anchorPrice) || anchorPrice <= 0) continue;
+    anchors.push({
+      lookbackDays: window.lookbackDays,
+      price: anchorPrice,
+      currency: selected.currency,
+      sourceWindow: window.sourceWindow,
+    });
+  }
+
+  return anchors;
+}
+
 function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
-  const fallbackPrice = extractPriceCurrency((card as { prices?: unknown }).prices);
+  const fallbackSelection = selectPreferredScrydexPriceEntry((card as { prices?: unknown }).prices);
+  const fallbackPrice = fallbackSelection
+    ? { price: fallbackSelection.price, currency: fallbackSelection.currency }
+    : extractPriceCurrency((card as { prices?: unknown }).prices);
+  const fallbackTrendAnchorPoints = extractTrendAnchorPoints((card as { prices?: unknown }).prices);
   const variants = card.variants ?? [];
   if (variants.length === 0) {
     const fallbackFinish = variantNameToFinish("unknown");
@@ -259,6 +397,9 @@ function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
       providerFinish: fallbackFinish.providerFinish,
       normalizedFinish: fallbackFinish.normalizedFinish,
       normalizedEdition: fallbackFinish.normalizedEdition,
+      providerCondition: fallbackSelection?.providerCondition ?? null,
+      normalizedCondition: fallbackSelection?.normalizedCondition ?? "nm",
+      trendAnchorPoints: fallbackTrendAnchorPoints,
     }];
   }
 
@@ -266,7 +407,10 @@ function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
   for (const variant of variants) {
     const variantName = String((variant as ScrydexVariant).name ?? "unknown").trim() || "unknown";
     const variantId = variantName.replace(/\s+/g, "_").toLowerCase();
-    const pricing = extractPriceCurrency((variant as ScrydexVariant).prices);
+    const pricingSelection = selectPreferredScrydexPriceEntry((variant as ScrydexVariant).prices);
+    const pricing = pricingSelection
+      ? { price: pricingSelection.price, currency: pricingSelection.currency }
+      : extractPriceCurrency((variant as ScrydexVariant).prices);
     const finish = variantNameToFinish(variantName);
     results.push({
       variantName,
@@ -276,6 +420,11 @@ function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
       providerFinish: finish.providerFinish,
       normalizedFinish: finish.normalizedFinish,
       normalizedEdition: finish.normalizedEdition,
+      providerCondition: pricingSelection?.providerCondition ?? fallbackSelection?.providerCondition ?? null,
+      normalizedCondition: pricingSelection?.normalizedCondition ?? fallbackSelection?.normalizedCondition ?? "nm",
+      trendAnchorPoints: pricing.price !== null
+        ? extractTrendAnchorPoints((variant as ScrydexVariant).prices)
+        : fallbackTrendAnchorPoints,
     });
   }
 
@@ -296,6 +445,24 @@ function buildObservationRow(params: {
   const providerVariantId = `${providerCardId}:${variant.variantId}`;
   const cardNumberRaw = String(card.number ?? card.printed_number ?? "").trim() || null;
   const normalizedCardNumber = normalizeCardNumber(cardNumberRaw);
+  const observedAtMs = Date.parse(rawPayload.fetched_at);
+  const providerTrendAnchorPoints = Number.isFinite(observedAtMs)
+    ? variant.trendAnchorPoints
+      .map((point) => ({
+        ts: new Date(observedAtMs - (point.lookbackDays * 24 * 60 * 60 * 1000)).toISOString(),
+        price: point.price,
+        currency: point.currency,
+        sourceWindow: point.sourceWindow,
+      }))
+      .filter((point) => point.price > 0 && point.ts < rawPayload.fetched_at)
+    : [];
+  const historyPoints30d = providerTrendAnchorPoints
+    .filter((point) => point.sourceWindow === "30d")
+    .map((point) => ({
+      ts: point.ts,
+      price: point.price,
+      currency: point.currency,
+    }));
 
   return {
     provider_raw_payload_id: rawPayload.id,
@@ -313,23 +480,23 @@ function buildObservationRow(params: {
     normalized_finish: variant.normalizedFinish,
     normalized_edition: variant.normalizedEdition,
     normalized_stamp: "NONE",
-    provider_condition: "Near Mint",
-    normalized_condition: "nm",
+    provider_condition: variant.providerCondition,
+    normalized_condition: variant.normalizedCondition,
     provider_language: card.language_code ?? "en",
     normalized_language: "en",
     variant_ref: buildLegacyVariantRef(
       variant.variantName,
       variant.normalizedEdition,
       null,
-      "Near Mint",
+      variant.providerCondition ?? "Near Mint",
       "English",
       "RAW",
     ),
     observed_price: variant.observedPrice,
     currency: variant.currency,
     observed_at: rawPayload.fetched_at,
-    history_points_30d: [],
-    history_points_30d_count: 0,
+    history_points_30d: historyPoints30d,
+    history_points_30d_count: historyPoints30d.length,
     metadata: {
       rawFetchedAt: rawPayload.fetched_at,
       requestHash: rawPayload.request_hash ?? null,
@@ -338,7 +505,10 @@ function buildObservationRow(params: {
       providerRarity: card.rarity ?? null,
       providerExpansion: card.expansion ?? null,
       providerVariant: variant.variantName,
+      providerCondition: variant.providerCondition,
+      normalizedCondition: variant.normalizedCondition,
       providerVariantPricingCurrency: variant.currency,
+      providerTrendAnchorPoints,
     },
     updated_at: normalizedAt,
   };
