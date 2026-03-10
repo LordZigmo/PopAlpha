@@ -127,6 +127,22 @@ export default function LiveActivityFeed() {
         <span className="h-2 w-2 rounded-full bg-[#38BDF8]" />
       </div>
 
+      <SignedOut>
+        <div className="pointer-events-none absolute inset-x-4 top-1/2 z-10 flex -translate-y-1/2 justify-center">
+          <div className="pointer-events-auto flex flex-col items-center gap-3 rounded-[1.2rem] border border-white/10 bg-[#090909]/88 px-5 py-5 text-center shadow-[0_18px_45px_rgba(0,0,0,0.35)] backdrop-blur-md">
+            <p className="max-w-[13rem] text-[12px] font-medium leading-5 text-[#CFCFCF]">
+              Sign up to follow live collector activity as it happens.
+            </p>
+            <Link
+              href="/sign-up"
+              className="rounded-2xl border border-white bg-white px-4 py-2 text-[12px] font-bold tracking-[0.08em] text-[#0A0A0A] transition hover:opacity-90"
+            >
+              SIGN UP
+            </Link>
+          </div>
+        </div>
+      </SignedOut>
+
       <div className="relative mt-3 h-[168px] overflow-hidden">
         <SignedOut>
           <div
@@ -134,19 +150,6 @@ export default function LiveActivityFeed() {
             className="pointer-events-none h-full select-none blur-[5px] opacity-45 saturate-50"
           >
             {feedContent}
-          </div>
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <div className="pointer-events-auto flex flex-col items-center gap-3 rounded-[1.2rem] border border-white/10 bg-[#090909]/88 px-5 py-5 text-center shadow-[0_18px_45px_rgba(0,0,0,0.35)] backdrop-blur-md">
-              <p className="max-w-[13rem] text-[12px] font-medium leading-5 text-[#CFCFCF]">
-                Sign up to follow live collector activity as it happens.
-              </p>
-              <Link
-                href="/sign-up"
-                className="rounded-2xl border border-white bg-white px-4 py-2 text-[12px] font-bold tracking-[0.08em] text-[#0A0A0A] transition hover:opacity-90"
-              >
-                SIGN UP
-              </Link>
-            </div>
           </div>
         </SignedOut>
         <SignedIn>{feedContent}</SignedIn>
