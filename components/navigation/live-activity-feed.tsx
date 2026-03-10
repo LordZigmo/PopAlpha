@@ -1,5 +1,6 @@
 "use client";
 
+import { SignedIn, SignedOut } from "@clerk/nextjs";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
@@ -89,43 +90,66 @@ export default function LiveActivityFeed() {
     return events.length > 1 ? [...events, ...events] : events;
   }, [events]);
 
+  const feedContent = events.length === 0 ? (
+    <div className="flex h-full items-center justify-center rounded-[1rem] border border-dashed border-white/[0.06] text-[12px] text-[#666]">
+      No recent activity yet
+    </div>
+  ) : (
+    <motion.div
+      className="space-y-2"
+      animate={events.length > 1 ? { y: [0, -(events.length * 50)] } : undefined}
+      transition={
+        events.length > 1
+          ? { duration: Math.max(10, events.length * 3.4), repeat: Number.POSITIVE_INFINITY, ease: "linear" }
+          : undefined
+      }
+    >
+      {loopedEvents.map((event, index) => (
+        <Link
+          key={`${event.href}-${index}`}
+          href={event.href}
+          className="flex min-h-12 items-center justify-between gap-3 rounded-[0.95rem] border border-white/[0.03] bg-[#0B0B0B] px-3 py-2 transition hover:border-white/[0.08]"
+        >
+          <div className="min-w-0">
+            <p className="truncate text-[12px] font-semibold text-white">{event.title}</p>
+            <p className="truncate text-[11px] text-[#666]">{event.detail}</p>
+          </div>
+          <span className="shrink-0 text-[11px] text-[#7C8796]">{timeAgo(event.at)}</span>
+        </Link>
+      ))}
+    </motion.div>
+  );
+
   return (
-    <div className="mt-4 rounded-[1.35rem] border border-[#1E1E1E] bg-[#101010] px-4 py-4">
+    <div className="relative mt-4 overflow-hidden rounded-[1.35rem] border border-[#1E1E1E] bg-[#101010] px-4 py-4">
       <div className="flex items-center justify-between gap-3">
         <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#6B6B6B]">Live Feed</p>
         <span className="h-2 w-2 rounded-full bg-[#38BDF8]" />
       </div>
 
-      <div className="mt-3 h-[168px] overflow-hidden">
-        {events.length === 0 ? (
-          <div className="flex h-full items-center justify-center rounded-[1rem] border border-dashed border-white/[0.06] text-[12px] text-[#666]">
-            No recent activity yet
-          </div>
-        ) : (
-          <motion.div
-            className="space-y-2"
-            animate={events.length > 1 ? { y: [0, -(events.length * 50)] } : undefined}
-            transition={
-              events.length > 1
-                ? { duration: Math.max(10, events.length * 3.4), repeat: Number.POSITIVE_INFINITY, ease: "linear" }
-                : undefined
-            }
+      <div className="relative mt-3 h-[168px] overflow-hidden">
+        <SignedOut>
+          <div
+            aria-hidden="true"
+            className="pointer-events-none h-full select-none blur-[5px] opacity-45 saturate-50"
           >
-            {loopedEvents.map((event, index) => (
+            {feedContent}
+          </div>
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <div className="pointer-events-auto flex flex-col items-center gap-3 rounded-[1.2rem] border border-white/10 bg-[#090909]/88 px-5 py-5 text-center shadow-[0_18px_45px_rgba(0,0,0,0.35)] backdrop-blur-md">
+              <p className="max-w-[13rem] text-[12px] font-medium leading-5 text-[#CFCFCF]">
+                Sign up to follow live collector activity as it happens.
+              </p>
               <Link
-                key={`${event.href}-${index}`}
-                href={event.href}
-                className="flex min-h-12 items-center justify-between gap-3 rounded-[0.95rem] border border-white/[0.03] bg-[#0B0B0B] px-3 py-2 transition hover:border-white/[0.08]"
+                href="/sign-up"
+                className="rounded-2xl border border-white bg-white px-4 py-2 text-[12px] font-bold tracking-[0.08em] text-[#0A0A0A] transition hover:opacity-90"
               >
-                <div className="min-w-0">
-                  <p className="truncate text-[12px] font-semibold text-white">{event.title}</p>
-                  <p className="truncate text-[11px] text-[#666]">{event.detail}</p>
-                </div>
-                <span className="shrink-0 text-[11px] text-[#7C8796]">{timeAgo(event.at)}</span>
+                SIGN UP
               </Link>
-            ))}
-          </motion.div>
-        )}
+            </div>
+          </div>
+        </SignedOut>
+        <SignedIn>{feedContent}</SignedIn>
       </div>
     </div>
   );
