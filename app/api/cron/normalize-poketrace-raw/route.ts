@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/auth/require";
-import { runJustTcgRawNormalize } from "@/lib/backfill/justtcg-raw-normalize";
-import { buildProviderIngestionDisabledPayload, providerIngestionEnabled } from "@/lib/backfill/provider-registry";
+import { runPokeTraceRawNormalize } from "@/lib/backfill/poketrace-raw-normalize";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -15,18 +14,14 @@ function parseOptionalInt(value: string | null): number | undefined {
 export async function GET(req: Request) {
   const auth = await requireCron(req);
   if (!auth.ok) return auth.response;
-  const url = new URL(req.url);
-  const allowRetired = url.searchParams.get("allowRetired") === "1";
-  if (!providerIngestionEnabled("JUSTTCG") && !allowRetired) {
-    return NextResponse.json(buildProviderIngestionDisabledPayload("JUSTTCG"));
-  }
 
+  const url = new URL(req.url);
   const payloadLimit = url.searchParams.get("payloads");
   const providerSetId = url.searchParams.get("set");
   const rawPayloadId = url.searchParams.get("rawId");
   const force = url.searchParams.get("force") === "1";
 
-  const result = await runJustTcgRawNormalize({
+  const result = await runPokeTraceRawNormalize({
     payloadLimit: parseOptionalInt(payloadLimit),
     providerSetId: providerSetId?.trim() || undefined,
     rawPayloadId: rawPayloadId?.trim() || undefined,
@@ -34,8 +29,5 @@ export async function GET(req: Request) {
   });
 
   const status = result.ok ? 200 : 500;
-  return NextResponse.json({
-    ...result,
-    retiredProviderBypass: allowRetired && !providerIngestionEnabled("JUSTTCG"),
-  }, { status });
+  return NextResponse.json(result, { status });
 }

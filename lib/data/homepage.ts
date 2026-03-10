@@ -5,17 +5,16 @@
  * Uses dbPublic() only — no service-role access.
  *
  * Query plan (2 parallel batches, 7 queries total):
- *   Batch 1: movers (variant_movers) + variant metrics for losers/trending (parallel)
- *   Batch 2: canonical_cards metadata + card_metrics prices + provider freshness (parallel)
+ *   Batch 1: positive 24h movers + negative 24h drops + 7d trending (parallel)
+ *   Batch 2: canonical_cards metadata + canonical market pulse + images + sparklines (parallel)
  *   JS merge into HomepageData
  *
- * Why two tables?
- *   - variant_metrics has provider_trend_slope_7d (for losers/trending)
- *   - card_metrics has canonical market price + deltas (for display)
- *   - refresh_card_metrics() doesn't copy trend data to canonical rows
+ * Why two data sources?
+ *   - public_card_metrics is the homepage source of truth for current 24h movers/drops
+ *   - public_variant_metrics still supplies the 7d sustained trending section
  */
 
-import { getCanonicalMarketPulseMap } from "@/lib/data/market";
+import { getCanonicalMarketPulseMap, type CanonicalMarketPulse } from "@/lib/data/market";
 import { dbPublic } from "@/lib/db";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -42,6 +41,58 @@ export type HomepageData = {
   as_of: string | null;
 };
 
+type ChangeCandidateRow = {
+  canonical_slug: string;
+  market_price: number | null;
+  market_price_as_of: string | null;
+  change_pct_24h: number | null;
+  market_confidence_score: number | null;
+  market_low_confidence: boolean | null;
+  active_listings_7d: number | null;
+};
+
+type VariantRow = {
+  canonical_slug: string;
+  provider_trend_slope_7d: number | null;
+  provider_price_changes_count_30d: number | null;
+  updated_at: string;
+};
+
+type CardRow = {
+  slug: string;
+  canonical_name: string;
+  set_name: string | null;
+  year: number | null;
+};
+
+type ImageRow = {
+  canonical_slug: string;
+  image_url: string;
+};
+
+type SparklineRow = {
+  canonical_slug: string;
+  price: number | null;
+};
+
+type HomepageLogger = Pick<Console, "error" | "info">;
+
+type HomepageDataOverrides = {
+  positiveChangeRows?: ChangeCandidateRow[];
+  negativeChangeRows?: ChangeCandidateRow[];
+  trendingVariants?: VariantRow[];
+  cards?: CardRow[];
+  marketPulseMap?: Map<string, CanonicalMarketPulse>;
+  images?: ImageRow[];
+  sparklineRows?: SparklineRow[];
+};
+
+export type HomepageDataOptions = {
+  now?: () => number;
+  logger?: HomepageLogger;
+  dataOverrides?: HomepageDataOverrides;
+};
+
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const SECTION_LIMIT = 5;
@@ -51,12 +102,11 @@ const MIN_PRICE = 0.5;
 const TOP_MOVER_MAX_AGE_HOURS = 24;
 /** Minimum trade count for "sustained trending" vs noise */
 const MIN_CHANGES_TRENDING = 3;
-/** Over-fetch factor for variant metrics (we filter by price in JS) */
-const VARIANT_FETCH_LIMIT = 60;
+/** Over-fetch factor for candidate lists (we filter in JS) */
+const CANDIDATE_FETCH_LIMIT = 80;
 const SENTINEL_PRICES = new Set([23456.78]);
 const MIN_MOVER_CHANGE_PCT = 2.5;
 const MIN_CONFIDENCE_SCORE = 45;
-const MIN_MOVER_SAMPLE_SIZE_7D = 8;
 const HIGH_CONF_LIQUIDITY_MIN = 6;
 const EMERGING_LIQUIDITY_MAX = 5;
 
@@ -71,6 +121,8 @@ const EMPTY: HomepageData = {
   as_of: null,
 };
 
+const DEFAULT_LOGGER: HomepageLogger = console;
+
 function compareMovementMagnitude(a: HomepageCard, b: HomepageCard): number {
   const aMove = typeof a.change_pct === "number" && Number.isFinite(a.change_pct) ? Math.abs(a.change_pct) : -1;
   const bMove = typeof b.change_pct === "number" && Number.isFinite(b.change_pct) ? Math.abs(b.change_pct) : -1;
@@ -84,20 +136,26 @@ function compareMovementMagnitude(a: HomepageCard, b: HomepageCard): number {
   return a.name.localeCompare(b.name);
 }
 
+function compareChangeDescending(a: HomepageCard, b: HomepageCard): number {
+  const aChange = typeof a.change_pct === "number" && Number.isFinite(a.change_pct) ? a.change_pct : Number.NEGATIVE_INFINITY;
+  const bChange = typeof b.change_pct === "number" && Number.isFinite(b.change_pct) ? b.change_pct : Number.NEGATIVE_INFINITY;
+  if (aChange !== bChange) return bChange - aChange;
+  return compareMovementMagnitude(a, b);
+}
+
+function compareChangeAscending(a: HomepageCard, b: HomepageCard): number {
+  const aChange = typeof a.change_pct === "number" && Number.isFinite(a.change_pct) ? a.change_pct : Number.POSITIVE_INFINITY;
+  const bChange = typeof b.change_pct === "number" && Number.isFinite(b.change_pct) ? b.change_pct : Number.POSITIVE_INFINITY;
+  if (aChange !== bChange) return aChange - bChange;
+  return compareMovementMagnitude(a, b);
+}
+
 function deriveSparklineChangePct(points: number[]): number | null {
   if (points.length < 2) return null;
   const first = points[0];
   const last = points[points.length - 1];
   if (!(first > 0) || !Number.isFinite(first) || !Number.isFinite(last)) return null;
   return ((last - first) / first) * 100;
-}
-
-function pickNonZeroFiniteChange(...values: Array<number | null | undefined>): number | null {
-  for (const value of values) {
-    if (typeof value !== "number" || !Number.isFinite(value) || value === 0) continue;
-    return value;
-  }
-  return null;
 }
 
 function buildChangeCoverage(section: string, cards: HomepageCard[]) {
@@ -108,11 +166,11 @@ function buildChangeCoverage(section: string, cards: HomepageCard[]) {
   return { section, total, present, missing, missingPct };
 }
 
-function hoursSince(iso: string | null | undefined): number | null {
+function hoursSince(iso: string | null | undefined, nowMs = Date.now()): number | null {
   if (!iso) return null;
   const ts = new Date(iso).getTime();
   if (!Number.isFinite(ts)) return null;
-  return Math.max(0, (Date.now() - ts) / (60 * 60 * 1000));
+  return Math.max(0, (nowMs - ts) / (60 * 60 * 1000));
 }
 
 function computeLiquidityWeight(activeListings7d: number | null | undefined): number {
@@ -126,151 +184,174 @@ function computeLiquidityWeight(activeListings7d: number | null | undefined): nu
   return 1.25;
 }
 
-export async function getHomepageData(): Promise<HomepageData> {
-  let db;
-  try {
-    db = dbPublic();
-  } catch (err) {
-    console.error("[homepage] dbPublic() init failed:", err);
-    return EMPTY;
+function dedupVariants(rows: VariantRow[], limit: number): VariantRow[] {
+  const seen = new Set<string>();
+  const out: VariantRow[] = [];
+  for (const row of rows) {
+    if (seen.has(row.canonical_slug)) continue;
+    seen.add(row.canonical_slug);
+    out.push(row);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+export async function getHomepageData(options: HomepageDataOptions = {}): Promise<HomepageData> {
+  const now = options.now ?? Date.now;
+  const logger = options.logger ?? DEFAULT_LOGGER;
+  const overrides = options.dataOverrides ?? null;
+  let db: ReturnType<typeof dbPublic> | undefined;
+
+  if (!overrides) {
+    try {
+      db = dbPublic();
+    } catch (err) {
+      logger.error("[homepage] dbPublic() init failed:", err);
+      return EMPTY;
+    }
   }
 
   try {
-    // ── Batch 1: movers + variant-level trend data ────────────────────────
-    const [moversResult, losersVariantResult, trendingVariantResult] = await Promise.all([
-      // 1. Top movers — hot/warming tiers, pre-joined with card_metrics prices
-      db
-        .from("public_variant_movers_priced")
-        .select("canonical_slug, provider, mover_tier, tier_priority, median_7d, provider_trend_slope_7d, updated_at")
-        .in("provider", ["JUSTTCG", "SCRYDEX", "POKEMON_TCG_API"])
-        .eq("grade", "RAW")
-        .in("mover_tier", ["hot", "warming"])
-        .order("tier_priority", { ascending: true })
-        .order("median_7d", { ascending: false })
-        .limit(SECTION_LIMIT * 12),
+    const nowMs = now();
+    const freshnessCutoffIso = new Date(nowMs - TOP_MOVER_MAX_AGE_HOURS * 60 * 60 * 1000).toISOString();
 
-      // 2. Losers — steepest negative trend slope from variant_metrics
-      db
-        .from("public_variant_metrics")
-        .select("canonical_slug, provider_trend_slope_7d, provider_price_changes_count_30d, updated_at")
-        .eq("provider", "JUSTTCG")
-        .eq("grade", "RAW")
-        .lt("provider_trend_slope_7d", 0)
-        .order("provider_trend_slope_7d", { ascending: true })
-        .limit(VARIANT_FETCH_LIMIT),
+    let positiveChangeRows: ChangeCandidateRow[] = [];
+    let negativeChangeRows: ChangeCandidateRow[] = [];
+    let trendingVariants: VariantRow[] = [];
+    let cardsRows: CardRow[] = [];
+    let marketPulseMap = new Map<string, CanonicalMarketPulse>();
+    let imageRows: ImageRow[] = [];
+    let sparklineRows: SparklineRow[] = [];
 
-      // 3. Trending — positive slope with activity from variant_metrics
-      db
-        .from("public_variant_metrics")
-        .select("canonical_slug, provider_trend_slope_7d, provider_price_changes_count_30d, updated_at")
-        .eq("provider", "JUSTTCG")
-        .eq("grade", "RAW")
-        .gt("provider_trend_slope_7d", 0)
-        .gte("provider_price_changes_count_30d", MIN_CHANGES_TRENDING)
-        .order("provider_trend_slope_7d", { ascending: false })
-        .limit(VARIANT_FETCH_LIMIT),
-    ]);
+    if (overrides) {
+      positiveChangeRows = overrides.positiveChangeRows ?? [];
+      negativeChangeRows = overrides.negativeChangeRows ?? [];
+      trendingVariants = dedupVariants(overrides.trendingVariants ?? [], CANDIDATE_FETCH_LIMIT);
+      cardsRows = overrides.cards ?? [];
+      marketPulseMap = overrides.marketPulseMap ?? new Map<string, CanonicalMarketPulse>();
+      imageRows = overrides.images ?? [];
+      sparklineRows = overrides.sparklineRows ?? [];
+    } else {
+      const client = db;
+      if (!client) return EMPTY;
 
-    if (moversResult.error) console.error("[homepage] movers", moversResult.error.message);
-    if (losersVariantResult.error) console.error("[homepage] losers", losersVariantResult.error.message);
-    if (trendingVariantResult.error) console.error("[homepage] trending", trendingVariantResult.error.message);
+      // ── Batch 1: movers + variant-level trend data ────────────────────────
+      const [positiveChangeResult, negativeChangeResult, trendingVariantResult] = await Promise.all([
+        // 1. Top movers — fresh positive 24h moves from canonical card metrics
+        client
+          .from("public_card_metrics")
+          .select("canonical_slug, market_price, market_price_as_of, change_pct_24h, market_confidence_score, market_low_confidence, active_listings_7d")
+          .eq("grade", "RAW")
+          .is("printing_id", null)
+          .gte("market_price", MIN_PRICE)
+          .gte("market_price_as_of", freshnessCutoffIso)
+          .not("change_pct_24h", "is", null)
+          .gt("change_pct_24h", 0)
+          .order("change_pct_24h", { ascending: false })
+          .order("market_confidence_score", { ascending: false })
+          .limit(CANDIDATE_FETCH_LIMIT),
 
-    // ── Keep movers ordered, then dedupe after freshness filtering ───────
-    type MoverRow = {
-      canonical_slug: string;
-      provider: "JUSTTCG" | "SCRYDEX" | "POKEMON_TCG_API";
-      mover_tier: string;
-      tier_priority: number;
-      median_7d: number | null;
-      provider_trend_slope_7d: number | null;
-      updated_at: string;
-    };
-    const moversRows = (moversResult.data ?? []) as MoverRow[];
+        // 2. Biggest drops — fresh negative 24h moves from canonical card metrics
+        client
+          .from("public_card_metrics")
+          .select("canonical_slug, market_price, market_price_as_of, change_pct_24h, market_confidence_score, market_low_confidence, active_listings_7d")
+          .eq("grade", "RAW")
+          .is("printing_id", null)
+          .gte("market_price", MIN_PRICE)
+          .gte("market_price_as_of", freshnessCutoffIso)
+          .not("change_pct_24h", "is", null)
+          .lt("change_pct_24h", 0)
+          .order("change_pct_24h", { ascending: true })
+          .order("market_confidence_score", { ascending: false })
+          .limit(CANDIDATE_FETCH_LIMIT),
 
-    // Deduplicate variant results by canonical_slug (keep first = best slope)
-    type VariantRow = { canonical_slug: string; provider_trend_slope_7d: number | null; provider_price_changes_count_30d: number | null; updated_at: string };
-    function dedupVariants(rows: VariantRow[], limit: number): VariantRow[] {
-      const seen = new Set<string>();
-      const out: VariantRow[] = [];
-      for (const row of rows) {
-        if (seen.has(row.canonical_slug)) continue;
-        seen.add(row.canonical_slug);
-        out.push(row);
-        if (out.length >= limit) break;
-      }
-      return out;
+        // 3. Trending — positive slope with activity from variant_metrics
+        client
+          .from("public_variant_metrics")
+          .select("canonical_slug, provider_trend_slope_7d, provider_price_changes_count_30d, updated_at")
+          .eq("provider", "JUSTTCG")
+          .eq("grade", "RAW")
+          .gt("provider_trend_slope_7d", 0)
+          .gte("provider_price_changes_count_30d", MIN_CHANGES_TRENDING)
+          .order("provider_trend_slope_7d", { ascending: false })
+          .limit(CANDIDATE_FETCH_LIMIT),
+      ]);
+
+      if (positiveChangeResult.error) logger.error("[homepage] movers_24h", positiveChangeResult.error.message);
+      if (negativeChangeResult.error) logger.error("[homepage] drops_24h", negativeChangeResult.error.message);
+      if (trendingVariantResult.error) logger.error("[homepage] trending", trendingVariantResult.error.message);
+
+      positiveChangeRows = (positiveChangeResult.data ?? []) as ChangeCandidateRow[];
+      negativeChangeRows = (negativeChangeResult.data ?? []) as ChangeCandidateRow[];
+      trendingVariants = dedupVariants((trendingVariantResult.data ?? []) as VariantRow[], CANDIDATE_FETCH_LIMIT);
     }
-
-    const loserVariants = dedupVariants((losersVariantResult.data ?? []) as VariantRow[], VARIANT_FETCH_LIMIT);
-    const trendingVariants = dedupVariants((trendingVariantResult.data ?? []) as VariantRow[], VARIANT_FETCH_LIMIT);
 
     // ── Collect all unique slugs ──────────────────────────────────────────
     const allSlugs = new Set<string>();
-    for (const r of moversRows) allSlugs.add(r.canonical_slug);
-    for (const r of loserVariants) allSlugs.add(r.canonical_slug);
+    for (const r of positiveChangeRows) allSlugs.add(r.canonical_slug);
+    for (const r of negativeChangeRows) allSlugs.add(r.canonical_slug);
     for (const r of trendingVariants) allSlugs.add(r.canonical_slug);
 
     if (allSlugs.size === 0) return EMPTY;
 
     const slugArray = [...allSlugs];
 
-    // ── Batch 2: card metadata + prices (with change pcts) + images ────
-    const [cardsResult, marketPulseMap, imagesResult, sparklineResult, providerFreshnessResult] = await Promise.all([
-      db
-        .from("canonical_cards")
-        .select("slug, canonical_name, set_name, year")
-        .in("slug", slugArray),
+    if (!overrides) {
+      const client = db;
+      if (!client) return EMPTY;
 
-      getCanonicalMarketPulseMap(db, slugArray),
+      // ── Batch 2: card metadata + prices (with change pcts) + images ────
+      const [cardsResult, loadedMarketPulseMap, imagesResult, sparklineResult] = await Promise.all([
+        client
+          .from("canonical_cards")
+          .select("slug, canonical_name, set_name, year")
+          .in("slug", slugArray),
 
-      db
-        .from("card_printings")
-        .select("canonical_slug, image_url")
-        .in("canonical_slug", slugArray)
-        .eq("language", "EN")
-        .not("image_url", "is", null)
-        .limit(slugArray.length * 3),
+        getCanonicalMarketPulseMap(client, slugArray),
 
-      db
-        .from("public_price_history")
-        .select("canonical_slug, ts, price")
-        .in("canonical_slug", slugArray)
-        .eq("provider", "JUSTTCG")
-        .eq("source_window", "7d")
-        .order("ts", { ascending: false })
-        .limit(Math.max(slugArray.length * 24, 120)),
+        client
+          .from("card_printings")
+          .select("canonical_slug, image_url")
+          .in("canonical_slug", slugArray)
+          .eq("language", "EN")
+          .not("image_url", "is", null)
+          .limit(slugArray.length * 3),
 
-      db
-        .from("public_variant_metrics")
-        .select("canonical_slug, provider, provider_as_of_ts")
-        .eq("grade", "RAW")
-        .in("provider", ["JUSTTCG", "SCRYDEX", "POKEMON_TCG_API"])
-        .in("canonical_slug", slugArray)
-        .not("provider_as_of_ts", "is", null)
-        .limit(10000),
-    ]);
+        client
+          .from("public_price_history")
+          .select("canonical_slug, ts, price")
+          .in("canonical_slug", slugArray)
+          .eq("provider", "JUSTTCG")
+          .eq("source_window", "7d")
+          .order("ts", { ascending: false })
+          .limit(Math.max(slugArray.length * 24, 120)),
+      ]);
 
-    if (cardsResult.error) console.error("[homepage] cards", cardsResult.error.message);
-    if (imagesResult.error) console.error("[homepage] images", imagesResult.error.message);
-    if (sparklineResult.error) console.error("[homepage] sparkline", sparklineResult.error.message);
-    if (providerFreshnessResult.error) console.error("[homepage] provider freshness", providerFreshnessResult.error.message);
+      if (cardsResult.error) logger.error("[homepage] cards", cardsResult.error.message);
+      if (imagesResult.error) logger.error("[homepage] images", imagesResult.error.message);
+      if (sparklineResult.error) logger.error("[homepage] sparkline", sparklineResult.error.message);
+
+      cardsRows = (cardsResult.data ?? []) as CardRow[];
+      marketPulseMap = loadedMarketPulseMap;
+      imageRows = (imagesResult.data ?? []) as ImageRow[];
+      sparklineRows = (sparklineResult.data ?? []) as SparklineRow[];
+    }
 
     // ── Build lookup maps ─────────────────────────────────────────────────
-    type CardRow = { slug: string; canonical_name: string; set_name: string | null; year: number | null };
     const cardMap = new Map<string, CardRow>();
-    for (const c of (cardsResult.data ?? []) as CardRow[]) {
+    for (const c of cardsRows) {
       cardMap.set(c.slug, c);
     }
 
     const imageMap = new Map<string, string>();
-    for (const row of (imagesResult.data ?? []) as { canonical_slug: string; image_url: string }[]) {
+    for (const row of imageRows) {
       if (!imageMap.has(row.canonical_slug) && row.image_url) {
         imageMap.set(row.canonical_slug, row.image_url);
       }
     }
 
     const sparklineMap = new Map<string, number[]>();
-    for (const row of (sparklineResult.data ?? []) as { canonical_slug: string; price: number | null }[]) {
+    for (const row of sparklineRows) {
       if (!row.canonical_slug || row.price == null) continue;
       const current = sparklineMap.get(row.canonical_slug) ?? [];
       if (current.length >= 7) continue;
@@ -279,16 +360,6 @@ export async function getHomepageData(): Promise<HomepageData> {
     }
     for (const [slug, points] of sparklineMap.entries()) {
       sparklineMap.set(slug, [...points].reverse());
-    }
-    const providerFreshnessMap = new Map<string, string>();
-    for (const row of (providerFreshnessResult.data ?? []) as Array<{
-      canonical_slug: string;
-      provider: "JUSTTCG" | "SCRYDEX" | "POKEMON_TCG_API";
-      provider_as_of_ts: string;
-    }>) {
-      const key = `${row.canonical_slug}::${row.provider}`;
-      const prev = providerFreshnessMap.get(key);
-      if (!prev || row.provider_as_of_ts > prev) providerFreshnessMap.set(key, row.provider_as_of_ts);
     }
 
     // ── Assemble helpers ──────────────────────────────────────────────────
@@ -299,24 +370,36 @@ export async function getHomepageData(): Promise<HomepageData> {
         mover_tier?: HomepageCard["mover_tier"];
         changePct?: number | null;
         changeWindow?: "24H" | "7D" | null;
+        preferOverrideChange?: boolean;
+        allowSparklineFallback?: boolean;
       } = {},
     ): HomepageCard {
       const card = cardMap.get(slug);
       const marketPulse = marketPulseMap.get(slug);
       const sparkline = sparklineMap.get(slug) ?? [];
-      const fallbackChangePct = deriveSparklineChangePct(sparkline);
-      const selectedChangePct = pickNonZeroFiniteChange(
-        marketPulse?.changePct,
-        overrides.changePct,
-        fallbackChangePct,
-      );
-      const selectedChangeWindow = selectedChangePct === marketPulse?.changePct
-        ? marketPulse?.changeWindow ?? null
-        : selectedChangePct === overrides.changePct
-          ? (overrides.changeWindow ?? null)
-          : selectedChangePct === fallbackChangePct
-            ? "7D"
-            : null;
+      const fallbackChangePct = overrides.allowSparklineFallback === false ? null : deriveSparklineChangePct(sparkline);
+      const overrideChangePct = typeof overrides.changePct === "number" && Number.isFinite(overrides.changePct)
+        ? overrides.changePct
+        : null;
+      const marketChangePct = typeof marketPulse?.changePct === "number" && Number.isFinite(marketPulse.changePct)
+        ? marketPulse.changePct
+        : null;
+      let selectedChangePct: number | null = null;
+      let selectedChangeWindow: "24H" | "7D" | null = null;
+
+      if (overrides.preferOverrideChange && overrideChangePct !== null) {
+        selectedChangePct = overrideChangePct;
+        selectedChangeWindow = overrides.changeWindow ?? null;
+      } else if (marketChangePct !== null) {
+        selectedChangePct = marketChangePct;
+        selectedChangeWindow = marketPulse?.changeWindow ?? null;
+      } else if (overrideChangePct !== null) {
+        selectedChangePct = overrideChangePct;
+        selectedChangeWindow = overrides.changeWindow ?? null;
+      } else if (fallbackChangePct !== null) {
+        selectedChangePct = fallbackChangePct;
+        selectedChangeWindow = "7D";
+      }
       return {
         slug,
         name: card?.canonical_name ?? slug,
@@ -331,45 +414,39 @@ export async function getHomepageData(): Promise<HomepageData> {
       };
     }
 
-    // ── Movers: view already guarantees price > 0 ─────────────────────────
+    // ── Movers: strict 24h cards with fresh market prices ─────────────────
     const highConfidenceMoversOut: HomepageCard[] = [];
     const emergingMoversOut: HomepageCard[] = [];
+    const allMoversOut: HomepageCard[] = [];
     const seenMoverSlugs = new Set<string>();
-    const pushMoverIfEligible = (r: MoverRow): boolean => {
+    const pushMoverIfEligible = (r: ChangeCandidateRow): boolean => {
       if (seenMoverSlugs.has(r.canonical_slug)) return false;
       const marketPulse = marketPulseMap.get(r.canonical_slug);
       if (!marketPulse) return false;
-      const provider = r.provider === "POKEMON_TCG_API" ? "SCRYDEX" : r.provider;
-      const providerAsOf = providerFreshnessMap.get(`${r.canonical_slug}::${r.provider}`)
-        ?? providerFreshnessMap.get(`${r.canonical_slug}::${provider}`);
-      const providerPrice = provider === "JUSTTCG" ? marketPulse.justtcgPrice : marketPulse.scrydexPrice;
-      if (providerPrice == null) return false;
-      if (SENTINEL_PRICES.has(Number(providerPrice.toFixed(2)))) return false;
-      if (providerPrice < MIN_PRICE) return false;
-      const changePct = pickNonZeroFiniteChange(
-        marketPulse.changePct,
-        Number.isFinite(r.provider_trend_slope_7d ?? NaN) ? Number((r.provider_trend_slope_7d as number).toFixed(2)) : null,
-      );
-      if (changePct == null || Math.abs(changePct) < MIN_MOVER_CHANGE_PCT) return false;
-      const confidenceScore = marketPulse.confidenceScore ?? 0;
-      const sampleSize7d = marketPulse.sampleCounts7d?.total ?? 0;
-      const stalenessHours = hoursSince(marketPulse.marketPriceAsOf ?? providerAsOf ?? null);
+      const marketPrice = marketPulse.marketPrice ?? r.market_price ?? null;
+      if (marketPrice == null) return false;
+      if (SENTINEL_PRICES.has(Number(marketPrice.toFixed(2)))) return false;
+      if (marketPrice < MIN_PRICE) return false;
+      const changePct = typeof r.change_pct_24h === "number" && Number.isFinite(r.change_pct_24h)
+        ? Number(r.change_pct_24h.toFixed(2))
+        : marketPulse.changePct24h;
+      if (changePct == null || changePct < MIN_MOVER_CHANGE_PCT) return false;
+      const confidenceScore = marketPulse.confidenceScore ?? r.market_confidence_score ?? 0;
+      const stalenessHours = hoursSince(marketPulse.marketPriceAsOf ?? r.market_price_as_of ?? null, nowMs);
       const isStale = stalenessHours === null || stalenessHours > TOP_MOVER_MAX_AGE_HOURS;
-      const lowConfidence = marketPulse.lowConfidence === true || confidenceScore < MIN_CONFIDENCE_SCORE;
-      const lowSample = sampleSize7d < MIN_MOVER_SAMPLE_SIZE_7D;
-      if (isStale || lowConfidence || lowSample) return false;
-      const activeListings7d = marketPulse.activeListings7d ?? 0;
+      const lowConfidence = marketPulse.lowConfidence === true || r.market_low_confidence === true || confidenceScore < MIN_CONFIDENCE_SCORE;
+      if (isStale || lowConfidence) return false;
+      const activeListings7d = marketPulse.activeListings7d ?? r.active_listings_7d ?? 0;
       const liquidityWeight = computeLiquidityWeight(activeListings7d);
       const compositeScore = Math.abs(changePct) * (confidenceScore / 100) * liquidityWeight;
       if (!(compositeScore > 0)) return false;
-      const trendPct = Number.isFinite(r.provider_trend_slope_7d ?? NaN)
-        ? Number((r.provider_trend_slope_7d as number).toFixed(2))
-        : null;
       const moverCard = toCard(r.canonical_slug, {
-        fallbackPrice: r.median_7d,
-        mover_tier: r.mover_tier as HomepageCard["mover_tier"],
+        fallbackPrice: r.market_price,
+        mover_tier: activeListings7d >= HIGH_CONF_LIQUIDITY_MIN ? "hot" : "warming",
         changePct,
-        changeWindow: marketPulse.changeWindow ?? (trendPct !== null ? "7D" : null),
+        changeWindow: "24H",
+        preferOverrideChange: true,
+        allowSparklineFallback: false,
       });
       if (activeListings7d >= HIGH_CONF_LIQUIDITY_MIN) {
         highConfidenceMoversOut.push(moverCard);
@@ -378,30 +455,46 @@ export async function getHomepageData(): Promise<HomepageData> {
       } else {
         highConfidenceMoversOut.push(moverCard);
       }
+      allMoversOut.push(moverCard);
       seenMoverSlugs.add(r.canonical_slug);
       return true;
     };
 
-    for (const r of moversRows) {
+    for (const r of positiveChangeRows) {
       pushMoverIfEligible(r);
       if (highConfidenceMoversOut.length >= SECTION_LIMIT && emergingMoversOut.length >= SECTION_LIMIT) break;
     }
-    highConfidenceMoversOut.sort(compareMovementMagnitude);
+    highConfidenceMoversOut.sort(compareChangeDescending);
     highConfidenceMoversOut.splice(SECTION_LIMIT);
-    emergingMoversOut.sort(compareMovementMagnitude);
+    emergingMoversOut.sort(compareChangeDescending);
     emergingMoversOut.splice(SECTION_LIMIT);
-    const moversOut = highConfidenceMoversOut.length > 0
-      ? [...highConfidenceMoversOut]
-      : [...emergingMoversOut];
+    allMoversOut.sort(compareChangeDescending);
+    const moversOut = allMoversOut.slice(0, SECTION_LIMIT);
 
-    // ── Losers: filter to cards with real prices above MIN_PRICE ─────────
+    // ── Biggest drops: strict 24h losers only ─────────────────────────────
     const losersOut: HomepageCard[] = [];
-    for (const r of loserVariants) {
-      const price = marketPulseMap.get(r.canonical_slug)?.marketPrice ?? null;
+    for (const r of negativeChangeRows) {
+      const marketPulse = marketPulseMap.get(r.canonical_slug);
+      if (!marketPulse) continue;
+      const price = marketPulse.marketPrice ?? r.market_price ?? null;
       if (price == null || price < MIN_PRICE) continue;
-      losersOut.push(toCard(r.canonical_slug));
+      const stalenessHours = hoursSince(marketPulse.marketPriceAsOf ?? r.market_price_as_of ?? null, nowMs);
+      if (stalenessHours === null || stalenessHours > TOP_MOVER_MAX_AGE_HOURS) continue;
+      const confidenceScore = marketPulse.confidenceScore ?? r.market_confidence_score ?? 0;
+      if (marketPulse.lowConfidence === true || r.market_low_confidence === true || confidenceScore < MIN_CONFIDENCE_SCORE) continue;
+      const changePct = typeof r.change_pct_24h === "number" && Number.isFinite(r.change_pct_24h)
+        ? Number(r.change_pct_24h.toFixed(2))
+        : marketPulse.changePct24h;
+      if (changePct == null || changePct >= 0) continue;
+      losersOut.push(toCard(r.canonical_slug, {
+        fallbackPrice: r.market_price,
+        changePct,
+        changeWindow: "24H",
+        preferOverrideChange: true,
+        allowSparklineFallback: false,
+      }));
     }
-    losersOut.sort(compareMovementMagnitude);
+    losersOut.sort(compareChangeAscending);
     losersOut.splice(SECTION_LIMIT);
 
     // ── Trending: filter to cards with real prices above MIN_PRICE ────────
@@ -409,16 +502,24 @@ export async function getHomepageData(): Promise<HomepageData> {
     for (const r of trendingVariants) {
       const price = marketPulseMap.get(r.canonical_slug)?.marketPrice ?? null;
       if (price == null || price < MIN_PRICE) continue;
-      trendingOut.push(toCard(r.canonical_slug));
+      const trendPct = Number.isFinite(r.provider_trend_slope_7d ?? NaN)
+        ? Number((r.provider_trend_slope_7d as number).toFixed(2))
+        : null;
+      trendingOut.push(toCard(r.canonical_slug, {
+        changePct: trendPct,
+        changeWindow: trendPct !== null ? "7D" : null,
+        preferOverrideChange: true,
+        allowSparklineFallback: false,
+      }));
     }
-    trendingOut.sort(compareMovementMagnitude);
+    trendingOut.sort(compareChangeDescending);
     trendingOut.splice(SECTION_LIMIT);
 
     // ── Derive as_of ──────────────────────────────────────────────────────
     const timestamps = [
-      ...(moversResult.data ?? []).map((r: { updated_at?: string }) => r.updated_at),
-      ...(losersVariantResult.data ?? []).map((r: { updated_at?: string }) => r.updated_at),
-      ...(trendingVariantResult.data ?? []).map((r: { updated_at?: string }) => r.updated_at),
+      ...positiveChangeRows.map((r) => r.market_price_as_of),
+      ...negativeChangeRows.map((r) => r.market_price_as_of),
+      ...trendingVariants.map((r) => r.updated_at),
     ].filter(Boolean) as string[];
     const as_of = timestamps.length > 0 ? timestamps.sort().reverse()[0] : null;
 
@@ -429,7 +530,7 @@ export async function getHomepageData(): Promise<HomepageData> {
       buildChangeCoverage("losers", losersOut),
       buildChangeCoverage("trending", trendingOut),
     ];
-    console.info("[homepage.telemetry.change_coverage]", JSON.stringify({
+    logger.info("[homepage.telemetry.change_coverage]", JSON.stringify({
       asOf: as_of,
       coverage,
     }));
@@ -444,7 +545,7 @@ export async function getHomepageData(): Promise<HomepageData> {
     };
 
   } catch (err) {
-    console.error("[homepage] getHomepageData failed:", err);
+    logger.error("[homepage] getHomepageData failed:", err);
     return EMPTY;
   }
 }

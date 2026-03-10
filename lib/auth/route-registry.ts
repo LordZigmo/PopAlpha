@@ -41,6 +41,7 @@ export const CRON_ROUTES = [
   "cron/ingest-justtcg-raw",
   "cron/ingest-pokemontcg-raw",
   "cron/normalize-justtcg-raw",
+  "cron/normalize-poketrace-raw",
   "cron/normalize-pokemontcg-raw",
   "cron/match-justtcg-normalized",
   "cron/match-pokemontcg-normalized",

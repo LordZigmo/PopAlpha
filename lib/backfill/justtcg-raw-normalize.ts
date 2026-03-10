@@ -1,4 +1,5 @@
 import { dbAdmin } from "@/lib/db/admin";
+import { ensureProviderRawPayloadLineageId } from "@/lib/backfill/provider-raw-payload-lineage";
 import {
   buildLegacyVariantRef,
   classifyJustTcgCard,
@@ -51,6 +52,7 @@ type NormalizedHistoryPoint = {
 
 type NormalizedObservationRow = {
   provider_raw_payload_id: string;
+  provider_raw_payload_lineage_id: string;
   provider: string;
   endpoint: string;
   provider_set_id: string | null;
@@ -242,13 +244,14 @@ function buildNormalizedHistoryPoints(variant: JustTcgVariant): NormalizedHistor
 
 function buildObservationRow(params: {
   rawPayload: RawPayloadRow;
+  providerRawPayloadLineageId: string;
   providerSetId: string | null;
   card: JustTcgCard;
   variant: JustTcgVariant;
   assetType: "single" | "sealed";
   normalizedAt: string;
 }): NormalizedObservationRow | null {
-  const { rawPayload, providerSetId, card, variant, assetType, normalizedAt } = params;
+  const { rawPayload, providerRawPayloadLineageId, providerSetId, card, variant, assetType, normalizedAt } = params;
   const providerCardId = String(card.id ?? "").trim();
   const providerVariantId = String(variant.id ?? "").trim();
   if (!providerCardId || !providerVariantId) return null;
@@ -265,6 +268,7 @@ function buildObservationRow(params: {
 
   return {
     provider_raw_payload_id: rawPayload.id,
+    provider_raw_payload_lineage_id: providerRawPayloadLineageId,
     provider: PROVIDER,
     endpoint: ENDPOINT,
     provider_set_id: providerSetId ?? fallbackProviderSetId,
@@ -540,6 +544,7 @@ export async function runJustTcgRawNormalize(opts: {
       const providerSetId = parseProviderSetId(rawPayload.params);
       const normalizedAt = new Date().toISOString();
       const cards = Array.isArray(rawPayload.response?.data) ? rawPayload.response?.data ?? [] : [];
+      const providerRawPayloadLineageId = await ensureProviderRawPayloadLineageId(supabase, rawPayload.id);
       const rows: NormalizedObservationRow[] = [];
 
       for (const card of cards) {
@@ -547,6 +552,7 @@ export async function runJustTcgRawNormalize(opts: {
         for (const variant of card.variants ?? []) {
           const row = buildObservationRow({
             rawPayload,
+            providerRawPayloadLineageId,
             providerSetId,
             card,
             variant,
@@ -588,7 +594,7 @@ export async function runJustTcgRawNormalize(opts: {
         const { data, error } = await supabase
           .from("provider_normalized_observations")
           .upsert(rows, {
-            onConflict: "provider_raw_payload_id,provider_card_id,provider_variant_id",
+            onConflict: "provider_raw_payload_lineage_id,provider_card_id,provider_variant_id",
           })
           .select("id");
 

@@ -43,6 +43,8 @@ export type CanonicalMarketPulse = {
   marketPriceAsOf?: string | null;
   activeListings7d?: number | null;
   snapshotCount30d?: number | null;
+  changePct24h: number | null;
+  changePct7d: number | null;
   changePct: number | null;
   changeWindow: MarketChangeWindow | null;
   parityStatus: RawParityStatus;
@@ -83,6 +85,8 @@ export function resolveCanonicalMarketPulse(
     median7dFallback: toFiniteNumber(row?.median_7d),
   });
   const marketPrice = toFiniteNumber(row?.market_price) ?? weighted.marketPrice;
+  const change24h = toFiniteNumber(row?.change_pct_24h);
+  const change7d = toFiniteNumber(row?.change_pct_7d);
 
   const basePayload = {
     justtcgPrice,
@@ -92,6 +96,8 @@ export function resolveCanonicalMarketPulse(
     marketPriceAsOf: row?.market_price_as_of ?? null,
     activeListings7d: toFiniteNumber(row?.active_listings_7d),
     snapshotCount30d: toFiniteNumber(row?.snapshot_count_30d),
+    changePct24h: change24h,
+    changePct7d: change7d,
     parityStatus,
     blendPolicy: row?.market_blend_policy ?? weighted.blendPolicy,
     confidenceScore: toFiniteNumber(row?.market_confidence_score) ?? weighted.confidenceScore,
@@ -99,7 +105,14 @@ export function resolveCanonicalMarketPulse(
     sourceMix: weighted.sourceMix,
   } satisfies Omit<CanonicalMarketPulse, "changePct" | "changeWindow">;
 
-  const change7d = toFiniteNumber(row?.change_pct_7d);
+  if (change24h !== null) {
+    return {
+      ...basePayload,
+      changePct: change24h,
+      changeWindow: "24H",
+    };
+  }
+
   if (change7d !== null) {
     return {
       ...basePayload,

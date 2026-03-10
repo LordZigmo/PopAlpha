@@ -26,6 +26,21 @@ function timeAgo(iso: string | null): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
+function formatExactTimestamp(iso: string | null): string | null {
+  if (!iso) return null;
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZoneName: "short",
+  }).format(parsed);
+}
+
 const EMPTY_DATA = {
   movers: [],
   high_confidence_movers: [],
@@ -429,6 +444,8 @@ export default async function HomePage() {
   const trending = Array.isArray(data?.trending) ? data.trending : [];
   const asOf = timeAgo(data?.as_of ?? null);
   const summaryUpdatedAgo = asOf || "just now";
+  const railUpdatedLabel = data?.as_of && asOf ? `Updated ${asOf}` : null;
+  const railUpdatedTitle = formatExactTimestamp(data?.as_of ?? null);
   const userTier = getTierLabel(
     user?.publicMetadata.subscriptionTier ?? user?.publicMetadata.tier ?? user?.publicMetadata.plan,
   );
@@ -566,7 +583,14 @@ export default async function HomePage() {
       </div>
 
       {/* ── High-Confidence Movers ───────────────────────────────────── */}
-      <SectionCarousel title="High-Confidence Movers" icon="🔥" subtitle="24h composite">
+      <SectionCarousel
+        title="High-Confidence Movers"
+        icon="🔥"
+        subtitle="past 24h"
+        stamp={railUpdatedLabel}
+        stampTitle={railUpdatedTitle}
+        stampDateTime={data?.as_of ?? null}
+      >
         {highConfidenceMovers.length > 0
           ? highConfidenceMovers.slice(0, 5).map((card) => (
               <CardTileMini key={card.slug} card={card} showTier />
@@ -579,7 +603,14 @@ export default async function HomePage() {
       <div className="mx-auto mt-6 max-w-5xl border-b border-white/5 px-4 sm:px-6 lg:px-0" />
 
       {/* ── Emerging Movers ──────────────────────────────────────────── */}
-      <SectionCarousel title="Emerging Movers" icon="🌱" subtitle="low liquidity">
+      <SectionCarousel
+        title="Emerging Movers"
+        icon="🌱"
+        subtitle="past 24h, low liquidity"
+        stamp={railUpdatedLabel}
+        stampTitle={railUpdatedTitle}
+        stampDateTime={data?.as_of ?? null}
+      >
         {emergingMovers.length > 0
           ? emergingMovers.slice(0, 5).map((card) => (
               <CardTileMini key={card.slug} card={card} showTier />
@@ -592,7 +623,14 @@ export default async function HomePage() {
       <div className="mx-auto mt-6 max-w-5xl border-b border-white/5 px-4 sm:px-6 lg:px-0" />
 
       {/* ── Top Losers ───────────────────────────────────────────────── */}
-      <SectionCarousel title="Biggest Drops" icon="📉" subtitle="7d trend">
+      <SectionCarousel
+        title="Biggest Drops"
+        icon="📉"
+        subtitle="past 24h"
+        stamp={railUpdatedLabel}
+        stampTitle={railUpdatedTitle}
+        stampDateTime={data?.as_of ?? null}
+      >
         {losers.length > 0
           ? losers.slice(0, 5).map((card) => (
               <CardTileMini key={card.slug} card={card} />
@@ -604,7 +642,14 @@ export default async function HomePage() {
       </SectionCarousel>
 
       {/* ── Trending ─────────────────────────────────────────────────── */}
-      <SectionCarousel title="Trending" icon="📈" subtitle="7d sustained">
+      <SectionCarousel
+        title="Trending"
+        icon="📈"
+        subtitle="7d sustained"
+        stamp={railUpdatedLabel}
+        stampTitle={railUpdatedTitle}
+        stampDateTime={data?.as_of ?? null}
+      >
         {trending.length > 0
           ? trending.slice(0, 5).map((card) => (
               <CardTileMini key={card.slug} card={card} />
