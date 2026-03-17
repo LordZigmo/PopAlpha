@@ -1,6 +1,11 @@
 import { dbAdmin } from "@/lib/db/admin";
 import { ensureProviderRawPayloadLineageId } from "@/lib/backfill/provider-raw-payload-lineage";
 import { buildLegacyVariantRef, normalizeCondition } from "@/lib/providers/justtcg";
+import {
+  parseScrydexVariantSemantics,
+  type ScrydexNormalizedEdition,
+  type ScrydexNormalizedFinish,
+} from "@/lib/backfill/scrydex-variant-semantics";
 import type { ScrydexCard, ScrydexVariant } from "@/lib/scrydex/client";
 
 const PROVIDER = "SCRYDEX";
@@ -47,9 +52,9 @@ type NormalizedObservationRow = {
   card_number: string | null;
   normalized_card_number: string | null;
   provider_finish: string | null;
-  normalized_finish: "NON_HOLO" | "HOLO" | "REVERSE_HOLO" | "UNKNOWN";
-  normalized_edition: "UNLIMITED" | "FIRST_EDITION";
-  normalized_stamp: "NONE" | "POKEMON_CENTER";
+  normalized_finish: ScrydexNormalizedFinish;
+  normalized_edition: ScrydexNormalizedEdition;
+  normalized_stamp: string;
   provider_condition: string | null;
   normalized_condition: string;
   provider_language: string | null;
@@ -111,8 +116,12 @@ type VariantObservation = {
   observedPrice: number | null;
   currency: "USD" | "EUR" | "JPY";
   providerFinish: string | null;
-  normalizedFinish: "NON_HOLO" | "HOLO" | "REVERSE_HOLO" | "UNKNOWN";
-  normalizedEdition: "UNLIMITED" | "FIRST_EDITION";
+  normalizedFinish: ScrydexNormalizedFinish;
+  normalizedEdition: ScrydexNormalizedEdition;
+  normalizedStamp: string;
+  stampLabel: string | null;
+  hasSpecialVariantToken: boolean;
+  specialVariantToken: string | null;
   providerCondition: string | null;
   normalizedCondition: string;
   trendAnchorPoints: TrendAnchorPoint[];
@@ -170,33 +179,6 @@ function normalizeCardNumber(raw: string | null | undefined): string {
     return `${promoMatch[1].toUpperCase()}${String(parseInt(promoMatch[2], 10))}`;
   }
   return trimmed;
-}
-
-function variantNameToFinish(variantName: string): {
-  providerFinish: string | null;
-  normalizedFinish: "NON_HOLO" | "HOLO" | "REVERSE_HOLO" | "UNKNOWN";
-  normalizedEdition: "UNLIMITED" | "FIRST_EDITION";
-} {
-  const lower = variantName.toLowerCase().replace(/[-_]+/g, "").trim();
-  if (!lower) {
-    return { providerFinish: null, normalizedFinish: "UNKNOWN", normalizedEdition: "UNLIMITED" };
-  }
-  if (lower.includes("1stedition") || lower.includes("firstedition")) {
-    return { providerFinish: variantName, normalizedFinish: "HOLO", normalizedEdition: "FIRST_EDITION" };
-  }
-  if (lower.includes("reverse")) {
-    return { providerFinish: variantName, normalizedFinish: "REVERSE_HOLO", normalizedEdition: "UNLIMITED" };
-  }
-  if (lower === "normal" || lower === "nonholo" || lower === "nonholofoil") {
-    return { providerFinish: variantName, normalizedFinish: "NON_HOLO", normalizedEdition: "UNLIMITED" };
-  }
-  if (lower.includes("holo") || lower.includes("foil")) {
-    return { providerFinish: variantName, normalizedFinish: "HOLO", normalizedEdition: "UNLIMITED" };
-  }
-  if (lower === "unknown") {
-    return { providerFinish: variantName, normalizedFinish: "UNKNOWN", normalizedEdition: "UNLIMITED" };
-  }
-  return { providerFinish: variantName, normalizedFinish: "UNKNOWN", normalizedEdition: "UNLIMITED" };
 }
 
 function getNumberField(value: unknown): number | null {
@@ -390,15 +372,19 @@ function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
   const fallbackTrendAnchorPoints = extractTrendAnchorPoints((card as { prices?: unknown }).prices);
   const variants = card.variants ?? [];
   if (variants.length === 0) {
-    const fallbackFinish = variantNameToFinish("unknown");
+    const fallbackSemantics = parseScrydexVariantSemantics("unknown");
     return [{
       variantName: "unknown",
       variantId: "unknown",
       observedPrice: fallbackPrice.price,
       currency: fallbackPrice.currency,
-      providerFinish: fallbackFinish.providerFinish,
-      normalizedFinish: fallbackFinish.normalizedFinish,
-      normalizedEdition: fallbackFinish.normalizedEdition,
+      providerFinish: fallbackSemantics.providerFinish,
+      normalizedFinish: fallbackSemantics.normalizedFinish,
+      normalizedEdition: fallbackSemantics.normalizedEdition,
+      normalizedStamp: fallbackSemantics.normalizedStamp,
+      stampLabel: fallbackSemantics.stampLabel,
+      hasSpecialVariantToken: fallbackSemantics.hasSpecialVariantToken,
+      specialVariantToken: fallbackSemantics.specialVariantToken,
       providerCondition: fallbackSelection?.providerCondition ?? null,
       normalizedCondition: fallbackSelection?.normalizedCondition ?? "nm",
       trendAnchorPoints: fallbackTrendAnchorPoints,
@@ -413,15 +399,19 @@ function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
     const pricing = pricingSelection
       ? { price: pricingSelection.price, currency: pricingSelection.currency }
       : extractPriceCurrency((variant as ScrydexVariant).prices);
-    const finish = variantNameToFinish(variantName);
+    const semantics = parseScrydexVariantSemantics(variantName);
     results.push({
       variantName,
       variantId,
       observedPrice: pricing.price ?? fallbackPrice.price,
       currency: pricing.price !== null ? pricing.currency : fallbackPrice.currency,
-      providerFinish: finish.providerFinish,
-      normalizedFinish: finish.normalizedFinish,
-      normalizedEdition: finish.normalizedEdition,
+      providerFinish: semantics.providerFinish,
+      normalizedFinish: semantics.normalizedFinish,
+      normalizedEdition: semantics.normalizedEdition,
+      normalizedStamp: semantics.normalizedStamp,
+      stampLabel: semantics.stampLabel,
+      hasSpecialVariantToken: semantics.hasSpecialVariantToken,
+      specialVariantToken: semantics.specialVariantToken,
       providerCondition: pricingSelection?.providerCondition ?? fallbackSelection?.providerCondition ?? null,
       normalizedCondition: pricingSelection?.normalizedCondition ?? fallbackSelection?.normalizedCondition ?? "nm",
       trendAnchorPoints: pricing.price !== null
@@ -483,7 +473,7 @@ function buildObservationRow(params: {
     provider_finish: variant.providerFinish,
     normalized_finish: variant.normalizedFinish,
     normalized_edition: variant.normalizedEdition,
-    normalized_stamp: "NONE",
+    normalized_stamp: variant.normalizedStamp,
     provider_condition: variant.providerCondition,
     normalized_condition: variant.normalizedCondition,
     provider_language: card.language_code ?? "en",
@@ -491,7 +481,7 @@ function buildObservationRow(params: {
     variant_ref: buildLegacyVariantRef(
       variant.variantName,
       variant.normalizedEdition,
-      null,
+      variant.stampLabel,
       variant.providerCondition ?? "Near Mint",
       "English",
       "RAW",
@@ -509,6 +499,9 @@ function buildObservationRow(params: {
       providerRarity: card.rarity ?? null,
       providerExpansion: card.expansion ?? null,
       providerVariant: variant.variantName,
+      normalizedStamp: variant.normalizedStamp,
+      hasSpecialVariantToken: variant.hasSpecialVariantToken,
+      specialVariantToken: variant.specialVariantToken,
       providerCondition: variant.providerCondition,
       normalizedCondition: variant.normalizedCondition,
       providerVariantPricingCurrency: variant.currency,

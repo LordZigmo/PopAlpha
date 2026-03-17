@@ -114,6 +114,15 @@ function parsePositiveInt(value: number | undefined, fallback: number): number {
   return Math.max(1, Math.floor(value));
 }
 
+function chunkValues<T>(values: T[], size: number): T[][] {
+  const chunkSize = Math.max(1, Math.floor(size));
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += chunkSize) {
+    chunks.push(values.slice(index, index + chunkSize));
+  }
+  return chunks;
+}
+
 function normalizeCurrency(raw: string | null | undefined): string {
   const value = String(raw ?? "").trim().toUpperCase();
   if (value) return value;
@@ -386,6 +395,87 @@ async function loadCandidateRows(params: {
   return { rows: selected, scanned, skippedAlreadyWritten };
 }
 
+async function cleanupStaleProviderVariantWrites(params: {
+  provider: SupportedProvider;
+  providerSetId?: string | null;
+  observationId?: string | null;
+  updatedSinceIso?: string | null;
+}): Promise<void> {
+  const supabase = dbAdmin();
+  const staleProviderVariantIds = new Set<string>();
+
+  if (params.observationId) {
+    const { data: observation, error: observationError } = await supabase
+      .from("provider_normalized_observations")
+      .select("provider_card_id, provider_variant_id")
+      .eq("id", params.observationId)
+      .eq("provider", params.provider)
+      .maybeSingle<{ provider_card_id: string; provider_variant_id: string }>();
+    if (observationError) {
+      throw new Error(`provider_normalized_observations(load cleanup observation): ${observationError.message}`);
+    }
+    if (observation?.provider_card_id && observation?.provider_variant_id) {
+      const providerKey = buildProviderCardMapKey(observation.provider_card_id, observation.provider_variant_id);
+      const providerCardMapByKey = await loadProviderCardMapByKeys({
+        provider: params.provider,
+        providerKeys: [providerKey],
+      });
+      const mapping = providerCardMapByKey.get(providerKey) ?? null;
+      if (!mapping || mapping.mapping_status !== "MATCHED") {
+        staleProviderVariantIds.add(observation.provider_variant_id);
+      }
+    }
+  }
+
+  if (params.providerSetId) {
+    let query = supabase
+      .from("provider_card_map")
+      .select("provider_variant_id")
+      .eq("provider", params.provider)
+      .eq("provider_set_id", params.providerSetId)
+      .eq("mapping_status", "UNMATCHED");
+
+    if (params.updatedSinceIso) {
+      query = query.gte("updated_at", params.updatedSinceIso);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      throw new Error(`provider_card_map(load stale variants): ${error.message}`);
+    }
+    for (const row of (data ?? []) as Array<{ provider_variant_id: string | null }>) {
+      const providerVariantId = String(row.provider_variant_id ?? "").trim();
+      if (providerVariantId) staleProviderVariantIds.add(providerVariantId);
+    }
+  }
+
+  const providerVariantIds = [...staleProviderVariantIds];
+  if (providerVariantIds.length === 0) return;
+
+  const providerRefs = providerVariantIds.map((providerVariantId) => buildProviderRef(params.provider, providerVariantId));
+  for (const providerRefChunk of chunkValues(providerRefs, 100)) {
+    const { error } = await supabase
+      .from("price_snapshots")
+      .delete()
+      .eq("provider", params.provider)
+      .in("provider_ref", providerRefChunk);
+    if (error) {
+      throw new Error(`price_snapshots(delete stale): ${error.message}`);
+    }
+  }
+
+  for (const providerVariantId of providerVariantIds) {
+    const { error } = await supabase
+      .from("price_history_points")
+      .delete()
+      .eq("provider", params.provider)
+      .like("variant_ref", `%::${providerVariantId}::RAW`);
+    if (error) {
+      throw new Error(`price_history_points(delete stale): ${error.message}`);
+    }
+  }
+}
+
 export async function runProviderObservationTimeseries(opts: {
   provider: SupportedProvider;
   observationLimit?: number;
@@ -437,6 +527,14 @@ export async function runProviderObservationTimeseries(opts: {
   const runId = runRow?.id ?? null;
 
   try {
+    const cleanupScopeIso = new Date(Date.now() - (12 * 60 * 60 * 1000)).toISOString();
+    await cleanupStaleProviderVariantWrites({
+      provider: opts.provider,
+      providerSetId: opts.providerSetId,
+      observationId: opts.observationId,
+      updatedSinceIso: cleanupScopeIso,
+    });
+
     const candidateResult = await loadCandidateRows({
       provider: opts.provider,
       observationLimit,
