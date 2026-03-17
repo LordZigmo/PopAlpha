@@ -107,7 +107,6 @@ async function loadAllHistoryRows(params: {
       .select("variant_ref, provider, currency, ts, price")
       .eq("canonical_slug", params.canonicalSlug)
       .in("provider", ["SCRYDEX", "POKEMON_TCG_API"])
-      .eq("source_window", "snapshot")
       .gte("ts", since)
       .order("ts", { ascending: true })
       .range(from, from + pageSize - 1);

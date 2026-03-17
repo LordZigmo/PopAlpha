@@ -43,10 +43,15 @@ export default function CardMarketIntelClient({
   onVariantChange,
 }: CardMarketIntelClientProps) {
   const [internalPrintingId, setInternalPrintingId] = useState<string | null>(selectedPrintingId);
+  const [activeWindow, setActiveWindow] = useState<"7d" | "30d" | "90d">(selectedWindow);
 
   useEffect(() => {
     setInternalPrintingId(selectedPrintingId);
   }, [selectedPrintingId]);
+
+  useEffect(() => {
+    setActiveWindow(selectedWindow);
+  }, [selectedWindow]);
 
   const activePrintingId = onVariantChange ? selectedPrintingId : internalPrintingId;
   const handleVariantChange = onVariantChange ?? setInternalPrintingId;
@@ -55,6 +60,13 @@ export default function CardMarketIntelClient({
     variants.find((variant) => variant.printingId === activePrintingId)
     ?? variants[0]
     ?? null;
+
+  const activeHistoryPoints =
+    activeWindow === "90d" && (activeVariant?.history90d?.length ?? 0) > 0
+      ? activeVariant?.history90d?.length ?? 0
+      : activeWindow === "7d" && (activeVariant?.history7d?.length ?? 0) > 0
+        ? activeVariant?.history7d?.length ?? 0
+        : activeVariant?.history30d?.length ?? 0;
 
   const hasSignals = !!(
     activeVariant
@@ -65,7 +77,7 @@ export default function CardMarketIntelClient({
     )
   );
 
-  const confidence = signalConfidenceLabel(activeVariant?.signalsHistoryPoints30d ?? null);
+  const confidence = signalConfidenceLabel(activeVariant?.currentPrice !== null ? activeHistoryPoints : null);
 
   return (
     <>
@@ -108,6 +120,7 @@ export default function CardMarketIntelClient({
         selectedPrintingId={activeVariant?.printingId ?? selectedPrintingId}
         selectedWindow={selectedWindow}
         onVariantChange={handleVariantChange}
+        onWindowChange={setActiveWindow}
       />
 
       <DealWheel
@@ -130,7 +143,7 @@ export default function CardMarketIntelClient({
         />
       ) : null}
 
-      {activeVariant?.currentPrice !== null && (activeVariant?.signalsHistoryPoints30d != null || activeVariant?.signalsAsOfTs) ? (
+      {activeVariant?.currentPrice !== null && activeHistoryPoints > 0 ? (
         <div className="mt-5 flex flex-wrap items-center gap-2.5">
           {/* Confidence badge */}
           <span
@@ -151,9 +164,9 @@ export default function CardMarketIntelClient({
           </span>
 
           {/* Sample size */}
-          {activeVariant?.signalsHistoryPoints30d != null && (
+          {activeHistoryPoints > 0 && (
             <span className="text-[13px] tabular-nums text-[#555]">
-              {activeVariant.signalsHistoryPoints30d} live price points
+              {activeHistoryPoints} live price points ({activeWindow.toUpperCase()})
             </span>
           )}
 

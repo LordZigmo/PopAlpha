@@ -26,6 +26,7 @@ type MarketSummaryCardClientProps = {
   selectedPrintingId: string | null;
   selectedWindow: "7d" | "30d" | "90d";
   onVariantChange?: (printingId: string) => void;
+  onWindowChange?: (windowKey: WindowKey) => void;
 };
 
 function formatUsd(value: number | null | undefined): string {
@@ -82,6 +83,35 @@ type WindowKey = "7d" | "30d" | "90d";
 
 const WINDOWS: WindowKey[] = ["7d", "30d", "90d"];
 
+function resolveActiveWindow(params: {
+  activeWindow: WindowKey;
+  history7d: HistoryPointRow[];
+  history30d: HistoryPointRow[];
+  history90d: HistoryPointRow[];
+}): { chartSeries: HistoryPointRow[]; effectiveWindow: WindowKey } {
+  const {
+    activeWindow,
+    history7d,
+    history30d,
+    history90d,
+  } = params;
+
+  const chartSeries =
+    activeWindow === "90d" && history90d.length > 0
+      ? history90d
+      : activeWindow === "7d" && history7d.length > 0
+        ? history7d
+        : history30d;
+  const effectiveWindow: WindowKey =
+    activeWindow === "90d" && history90d.length > 0
+      ? "90d"
+      : activeWindow === "7d" && history7d.length > 0
+        ? "7d"
+        : "30d";
+
+  return { chartSeries, effectiveWindow };
+}
+
 function WindowTabs({ active, onChange }: { active: WindowKey; onChange: (w: WindowKey) => void }) {
   const trackRef = useRef<HTMLDivElement>(null);
   const activeIndex = WINDOWS.indexOf(active);
@@ -124,12 +154,17 @@ export default function MarketSummaryCardClient({
   selectedPrintingId,
   selectedWindow,
   onVariantChange,
+  onWindowChange,
 }: MarketSummaryCardClientProps) {
   const [activeWindow, setActiveWindow] = useState<WindowKey>(selectedWindow);
 
   useEffect(() => {
     setActiveWindow(selectedWindow);
   }, [selectedWindow]);
+
+  useEffect(() => {
+    onWindowChange?.(activeWindow);
+  }, [activeWindow, onWindowChange]);
 
   const activeVariant =
     variants.find((variant) => variant.printingId === selectedPrintingId)
@@ -145,18 +180,12 @@ export default function MarketSummaryCardClient({
   const history30d = activeVariant?.history30d ?? [];
   const history90d = activeVariant?.history90d ?? [];
 
-  const chartSeries =
-    activeWindow === "90d" && history90d.length > 0
-      ? history90d
-      : activeWindow === "7d" && history7d.length > 0
-        ? history7d
-        : history30d;
-  const effectiveWindow: WindowKey =
-    activeWindow === "90d" && history90d.length > 0
-      ? "90d"
-      : activeWindow === "7d" && history7d.length > 0
-        ? "7d"
-        : "30d";
+  const { chartSeries, effectiveWindow } = resolveActiveWindow({
+    activeWindow,
+    history7d,
+    history30d,
+    history90d,
+  });
 
   const changeValue = effectiveWindow === "7d"
     ? changePct7d ?? computeChange(chartSeries)
