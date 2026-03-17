@@ -62,9 +62,6 @@ type SnapshotRow = {
   high_30d: number | null;
   market_price: number | null;
   market_price_as_of: string | null;
-  justtcg_price: number | null;
-  scrydex_price: number | null;
-  pokemontcg_price: number | null;
 };
 
 type CardProfileRow = {
@@ -98,11 +95,6 @@ type RawProviderHistoryRow = {
   provider: string;
   variant_ref: string;
   ts: string;
-};
-
-type RawProviderMetricRow = {
-  provider: string;
-  provider_as_of_ts: string | null;
 };
 
 type RawParityRow = {
@@ -375,21 +367,16 @@ function formatAsOf(value: string | null | undefined): string | null {
   });
 }
 
-function normalizeRawProviderName(provider: string | null | undefined): "JUSTTCG" | "SCRYDEX" | null {
+function normalizeRawProviderName(provider: string | null | undefined): "SCRYDEX" | null {
   const normalized = String(provider ?? "").trim().toUpperCase();
-  if (normalized === "JUSTTCG") return "JUSTTCG";
   if (normalized === "SCRYDEX" || normalized === "POKEMON_TCG_API") return "SCRYDEX";
   return null;
 }
 
 function resolveRawDisplayPrice(params: {
-  justtcg: number | null;
   scrydex: number | null;
-  justtcgAsOfTs: string | null;
   scrydexAsOfTs: string | null;
-  justtcgPoints7d: number;
   scrydexPoints7d: number;
-  fallback: number | null;
   parityStatus: "MATCH" | "MISMATCH" | "MISSING_PROVIDER" | "UNKNOWN";
 }): {
   marketPrice: number | null;
@@ -400,18 +387,20 @@ function resolveRawDisplayPrice(params: {
 } {
   const weighted = resolveWeightedMarketPrice({
     providers: [
-      { provider: "JUSTTCG", price: params.justtcg, asOfTs: params.justtcgAsOfTs, points7d: params.justtcgPoints7d },
       { provider: "SCRYDEX", price: params.scrydex, asOfTs: params.scrydexAsOfTs, points7d: params.scrydexPoints7d },
     ],
     parityStatus: params.parityStatus,
-    marketPriceFallback: params.fallback,
+    marketPriceFallback: null,
   });
   return {
-    marketPrice: weighted.marketPrice ?? params.fallback,
-    blendPolicy: weighted.blendPolicy,
-    confidenceScore: weighted.confidenceScore,
-    lowConfidence: weighted.lowConfidence,
-    sourceMix: weighted.sourceMix,
+    marketPrice: params.scrydex,
+    blendPolicy: params.scrydex !== null ? "SCRYDEX_PRIMARY" : "NO_PRICE",
+    confidenceScore: params.scrydex !== null ? weighted.confidenceScore : 0,
+    lowConfidence: params.scrydex === null ? true : weighted.lowConfidence,
+    sourceMix: {
+      justtcgWeight: 0,
+      scrydexWeight: params.scrydex !== null ? 1 : 0,
+    },
   };
 }
 
@@ -578,12 +567,12 @@ export default async function CanonicalCardPage({
   // Default RAW view should read canonical (printing_id IS NULL) unless user explicitly picks a printing.
   const rawPrintingIdForQuery = hasExplicitPrinting ? selectedPrinting?.id ?? null : null;
   const rawVariantPrefix = rawPrintingIdForQuery ? `${rawPrintingIdForQuery}::` : null;
-  const [[rawSnap, psa9Snap, psa10Snap], vm, gradedPriceHistoryQuery, rawProviderMetricsQuery, rawProviderHistoryQuery, rawParityQuery, viewSnapshot] = await Promise.all([
+  const [[rawSnap, psa9Snap, psa10Snap], vm, gradedPriceHistoryQuery, rawProviderHistoryQuery, rawParityQuery, viewSnapshot] = await Promise.all([
     Promise.all(
       (["RAW", "PSA9", "PSA10"] as const).map((g) => {
         const q = supabase
           .from("public_card_metrics")
-          .select("active_listings_7d, median_7d, median_30d, trimmed_median_30d, low_30d, high_30d, market_price, market_price_as_of, justtcg_price, scrydex_price, pokemontcg_price")
+          .select("active_listings_7d, median_7d, median_30d, trimmed_median_30d, low_30d, high_30d, market_price, market_price_as_of")
           .eq("canonical_slug", slug)
           .eq("grade", g);
         const effectivePrintingId = g === "RAW" ? rawPrintingIdForQuery : gradedPrintingIdForQuery;
@@ -606,24 +595,12 @@ export default async function CanonicalCardPage({
           .limit(Math.max(gradedVariantRefsForActiveBucket.length * 4, 12))
       : Promise.resolve({ data: [] as GradedPriceHistoryRow[] }),
     (() => {
-      const q = supabase
-        .from("public_variant_metrics")
-        .select("provider, provider_as_of_ts")
-        .eq("canonical_slug", slug)
-        .eq("grade", "RAW")
-        .in("provider", ["JUSTTCG", "SCRYDEX", "POKEMON_TCG_API"]);
-      return (rawPrintingIdForQuery != null
-        ? q.eq("printing_id", rawPrintingIdForQuery)
-        : q.is("printing_id", null)
-      ).limit(20);
-    })(),
-    (() => {
       let q = supabase
         .from("public_price_history")
         .select("provider, variant_ref, ts")
         .eq("canonical_slug", slug)
         .eq("source_window", "snapshot")
-        .in("provider", ["JUSTTCG", "SCRYDEX", "POKEMON_TCG_API"])
+        .in("provider", ["SCRYDEX", "POKEMON_TCG_API"])
         .order("ts", { ascending: false })
         .limit(300);
       if (rawVariantPrefix) {
@@ -668,7 +645,6 @@ export default async function CanonicalCardPage({
     PSA10: psa10Snap.data,
   } as const;
   const gradedPriceHistoryRows = (gradedPriceHistoryQuery.data ?? []) as GradedPriceHistoryRow[];
-  const rawProviderMetricRows = (rawProviderMetricsQuery.data ?? []) as RawProviderMetricRow[];
   const rawProviderHistoryRows = (rawProviderHistoryQuery.data ?? []) as RawProviderHistoryRow[];
   const rawParityStatus = rawParityQuery.data?.parity_status ?? "UNKNOWN";
   const latestGradedPriceByVariantRef = new Map<string, GradedPriceHistoryRow>();
@@ -747,69 +723,43 @@ export default async function CanonicalCardPage({
     },
   );
 
-  const rawSourceJtcg = rawSnap.data?.justtcg_price ?? null;
-  const rawSourceScrydex = rawSnap.data?.scrydex_price ?? rawSnap.data?.pokemontcg_price ?? null;
-  let rawSourceJtcgTs: string | null = null;
-  let rawSourceScrydexTs: string | null = null;
-  for (const row of rawProviderMetricRows) {
-    const provider = normalizeRawProviderName(row.provider);
-    const ts = row.provider_as_of_ts;
-    if (!provider || !ts) continue;
-    if (provider === "JUSTTCG" && (!rawSourceJtcgTs || ts > rawSourceJtcgTs)) rawSourceJtcgTs = ts;
-    if (provider === "SCRYDEX" && (!rawSourceScrydexTs || ts > rawSourceScrydexTs)) rawSourceScrydexTs = ts;
-  }
-  for (const row of rawProviderHistoryRows) {
-    const provider = normalizeRawProviderName(row.provider);
-    if (!provider) continue;
-    if (provider === "JUSTTCG" && !rawSourceJtcgTs) rawSourceJtcgTs = row.ts;
-    if (provider === "SCRYDEX" && !rawSourceScrydexTs) rawSourceScrydexTs = row.ts;
-    if (rawSourceJtcgTs && rawSourceScrydexTs) break;
-  }
-  if (rawSourceJtcg == null) rawSourceJtcgTs = null;
-  if (rawSourceScrydex != null && !rawSourceScrydexTs) {
-    rawSourceScrydexTs = rawSnap.data?.market_price_as_of ?? rawSourceJtcgTs;
-  }
-  const rawSourceAsOfJtcg = formatAsOf(rawSourceJtcgTs);
-  const rawSourceAsOfScrydex = formatAsOf(rawSourceScrydexTs);
-  let rawPointsJtcg7d = 0;
+  const rawSourceScrydex = rawSnap.data?.market_price ?? null;
+  const rawSourceScrydexTs = rawSourceScrydex !== null ? (rawSnap.data?.market_price_as_of ?? null) : null;
   let rawPointsScrydex7d = 0;
-  const referenceTsMs = rawProviderHistoryRows
-    .map((row) => new Date(row.ts).getTime())
-    .filter((ts) => Number.isFinite(ts))
-    .sort((a, b) => b - a)[0] ?? 0;
-  const weekAgoMs = referenceTsMs - (7 * 24 * 60 * 60 * 1000);
-  for (const row of rawProviderHistoryRows) {
-    const provider = normalizeRawProviderName(row.provider);
-    const tsMs = new Date(row.ts).getTime();
-    if (!provider || !Number.isFinite(tsMs) || tsMs < weekAgoMs) continue;
-    if (provider === "JUSTTCG") rawPointsJtcg7d += 1;
-    if (provider === "SCRYDEX") rawPointsScrydex7d += 1;
+  if (rawSourceScrydex !== null) {
+    const referenceTsMs = rawProviderHistoryRows
+      .map((row) => new Date(row.ts).getTime())
+      .filter((ts) => Number.isFinite(ts))
+      .sort((a, b) => b - a)[0] ?? 0;
+    const weekAgoMs = referenceTsMs - (7 * 24 * 60 * 60 * 1000);
+    for (const row of rawProviderHistoryRows) {
+      const provider = normalizeRawProviderName(row.provider);
+      const tsMs = new Date(row.ts).getTime();
+      if (!provider || !Number.isFinite(tsMs) || tsMs < weekAgoMs) continue;
+      if (provider === "SCRYDEX") rawPointsScrydex7d += 1;
+    }
   }
   const rawPricing = viewMode === "RAW"
     ? resolveRawDisplayPrice({
-      justtcg: rawSourceJtcg,
       scrydex: rawSourceScrydex,
-      justtcgAsOfTs: rawSourceJtcgTs,
       scrydexAsOfTs: rawSourceScrydexTs,
-      justtcgPoints7d: rawPointsJtcg7d,
       scrydexPoints7d: rawPointsScrydex7d,
-      fallback: rawSnap.data?.market_price ?? vm?.price_now ?? null,
       parityStatus: rawParityStatus,
     })
     : null;
   const currentRawPrice = viewMode === "RAW"
     ? rawPricing?.marketPrice ?? null
     : null;
-  const displayPrimaryPrice = currentRawPrice ?? snapshotData?.median_7d ?? null;
+  const displayPrimaryPrice = viewMode === "RAW"
+    ? currentRawPrice
+    : (snapshotData?.median_7d ?? null);
   const primaryPrice = displayPrimaryPrice != null ? formatUsdCompact(displayPrimaryPrice) : null;
   const primaryPriceLabel = currentRawPrice != null
     ? (() => {
       const confidenceSuffix = rawPricing
-        ? ` · Confidence ${rawPricing.confidenceScore}%${rawPricing.lowConfidence ? " (low)" : ""} · Mix J${Math.round(rawPricing.sourceMix.justtcgWeight * 100)} / S${Math.round(rawPricing.sourceMix.scrydexWeight * 100)}`
+        ? ` · Confidence ${rawPricing.confidenceScore}%${rawPricing.lowConfidence ? " (low)" : ""}`
         : "";
-      if (rawPricing?.blendPolicy === "SCRYDEX_PRIMARY") return `Current market price (Scrydex primary)${confidenceSuffix}`;
-      if (rawPricing?.blendPolicy === "FALLBACK_STALE_OR_OUTLIER") return `Current market price (stale/outlier fallback)${confidenceSuffix}`;
-      return `Current market price (single-provider fallback)${confidenceSuffix}`;
+      return `Current market price (Scrydex)${confidenceSuffix}`;
     })()
     : `${selectedSnapshotGrade
       ? legacyGradeLabel(selectedSnapshotGrade)

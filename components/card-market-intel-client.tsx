@@ -119,16 +119,18 @@ export default function CardMarketIntelClient({
         selectedPrintingId={activeVariant?.printingId ?? selectedPrintingId}
       />
 
-      <LiquidityModule
-        score={activeVariant?.liquidityScore ?? null}
-        tier={activeVariant?.liquidityTier ?? null}
-        tone={activeVariant?.liquidityTone ?? "neutral"}
-        priceChanges30d={activeVariant?.liquidityPriceChanges30d ?? null}
-        snapshotCount30d={activeVariant?.liquiditySnapshotCount30d ?? null}
-        spreadPercent={activeVariant?.liquiditySpreadPercent ?? null}
-      />
+      {activeVariant?.currentPrice !== null ? (
+        <LiquidityModule
+          score={activeVariant?.liquidityScore ?? null}
+          tier={activeVariant?.liquidityTier ?? null}
+          tone={activeVariant?.liquidityTone ?? "neutral"}
+          priceChanges30d={activeVariant?.liquidityPriceChanges30d ?? null}
+          snapshotCount30d={activeVariant?.liquiditySnapshotCount30d ?? null}
+          spreadPercent={activeVariant?.liquiditySpreadPercent ?? null}
+        />
+      ) : null}
 
-      {(activeVariant?.signalsHistoryPoints30d != null || activeVariant?.signalsAsOfTs) ? (
+      {activeVariant?.currentPrice !== null && (activeVariant?.signalsHistoryPoints30d != null || activeVariant?.signalsAsOfTs) ? (
         <div className="mt-5 flex flex-wrap items-center gap-2.5">
           {/* Confidence badge */}
           <span
@@ -151,7 +153,7 @@ export default function CardMarketIntelClient({
           {/* Sample size */}
           {activeVariant?.signalsHistoryPoints30d != null && (
             <span className="text-[13px] tabular-nums text-[#555]">
-              {activeVariant.signalsHistoryPoints30d} data points
+              {activeVariant.signalsHistoryPoints30d} live price points
             </span>
           )}
 

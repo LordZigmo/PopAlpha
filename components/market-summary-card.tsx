@@ -15,7 +15,7 @@ type MarketSummaryCardProps = {
   variants: RawCardMarketVariantInput[];
 };
 
-type SupportedProvider = "JUSTTCG" | "SCRYDEX";
+type SupportedProvider = "SCRYDEX";
 
 type PriceHistoryRow = {
   variant_ref: string | null;
@@ -42,9 +42,6 @@ type CardMetricRow = {
   provider_price_changes_count_30d: number | null;
   low_30d: number | null;
   high_30d: number | null;
-  justtcg_price: number | null;
-  scrydex_price: number | null;
-  pokemontcg_price: number | null;
 };
 
 type VariantSignalRow = {
@@ -86,7 +83,6 @@ function normalizeHistoryPoints(rows: HistoryPointRow[]): HistoryPointRow[] {
 
 function normalizeProviderName(provider: string | null | undefined): SupportedProvider | null {
   const normalized = String(provider ?? "").trim().toUpperCase();
-  if (normalized === "JUSTTCG") return "JUSTTCG";
   if (normalized === "SCRYDEX" || normalized === "POKEMON_TCG_API") return "SCRYDEX";
   return null;
 }
@@ -110,7 +106,7 @@ async function loadAllHistoryRows(params: {
       .from("public_price_history")
       .select("variant_ref, provider, currency, ts, price")
       .eq("canonical_slug", params.canonicalSlug)
-      .in("provider", ["JUSTTCG", "SCRYDEX", "POKEMON_TCG_API"])
+      .in("provider", ["SCRYDEX", "POKEMON_TCG_API"])
       .eq("source_window", "snapshot")
       .gte("ts", since)
       .order("ts", { ascending: true })
@@ -380,9 +376,6 @@ export async function loadRawCardMarketVariants(params: {
         "provider_price_changes_count_30d",
         "low_30d",
         "high_30d",
-        "justtcg_price",
-        "scrydex_price",
-        "pokemontcg_price",
       ].join(", "))
       .eq("canonical_slug", params.canonicalSlug)
       .eq("grade", "RAW")
@@ -392,7 +385,7 @@ export async function loadRawCardMarketVariants(params: {
       .select("printing_id, provider, provider_as_of_ts, history_points_30d, provider_trend_slope_7d")
       .eq("canonical_slug", params.canonicalSlug)
       .eq("grade", "RAW")
-      .in("provider", ["JUSTTCG", "SCRYDEX", "POKEMON_TCG_API"])
+      .in("provider", ["SCRYDEX", "POKEMON_TCG_API"])
       .in("printing_id", printingIds),
   ]);
 
@@ -430,12 +423,13 @@ export async function loadRawCardMarketVariants(params: {
     const printingHistoryRows = historyRowsByPrinting.get(variant.printingId) ?? [];
     const series = buildProviderSeries(printingHistoryRows, fxRows);
     const scrydexSeries = chooseProviderSeries(series, "SCRYDEX", variant);
-    const justtcgSeries = chooseProviderSeries(series, "JUSTTCG", variant);
-    const preferredSeries = scrydexSeries ?? justtcgSeries ?? series[0] ?? null;
+    const preferredSeries = scrydexSeries ?? series[0] ?? null;
     const preferredHistory = preferredSeries?.points ?? [];
-    const latestHistoryPoint = preferredHistory.at(-1) ?? null;
     const metrics = cardMetricsByPrinting.get(variant.printingId) ?? null;
     const signalRow = chooseSignalRow(signalRowsByPrinting.get(variant.printingId) ?? []);
+    const liveScrydexPrice = metrics?.market_price ?? null;
+    const hasLivePrice = liveScrydexPrice !== null;
+    const liveScrydexAsOfTs = hasLivePrice ? (metrics?.market_price_as_of ?? null) : null;
 
     const liquidity = computeLiquidity({
       priceChanges30d: metrics?.provider_price_changes_count_30d ?? null,
@@ -451,36 +445,33 @@ export async function loadRawCardMarketVariants(params: {
       descriptorLabel: variant.descriptorLabel,
       imageUrl: variant.imageUrl,
       rarity: variant.rarity,
-      currentPrice: metrics?.market_price ?? latestHistoryPoint?.price ?? null,
+      currentPrice: liveScrydexPrice,
       changePct7d: metrics?.change_pct_7d ?? null,
-      justtcgPrice: metrics?.justtcg_price ?? null,
-      justtcgAsOfTs: justtcgSeries?.latestTs ?? null,
-      scrydexPrice: metrics?.scrydex_price ?? metrics?.pokemontcg_price ?? null,
-      scrydexAsOfTs: scrydexSeries?.latestTs ?? null,
+      justtcgPrice: null,
+      justtcgAsOfTs: null,
+      scrydexPrice: liveScrydexPrice,
+      scrydexAsOfTs: liveScrydexAsOfTs,
       marketBalancePrice: metrics?.trimmed_median_30d ?? metrics?.median_30d ?? null,
-      asOfTs: metrics?.market_price_as_of ?? latestHistoryPoint?.ts ?? null,
+      asOfTs: liveScrydexAsOfTs,
       trendSlope7d: signalRow?.provider_trend_slope_7d ?? null,
       history7d: filterRecentDays(preferredHistory, 7),
       history30d: filterRecentDays(preferredHistory, 30),
       history90d: filterRecentDays(preferredHistory, 90),
-      activeListings7d: metrics?.active_listings_7d ?? null,
+      activeListings7d: hasLivePrice ? (metrics?.active_listings_7d ?? null) : null,
       signalTrend: null,
       signalTrendLabel: null,
       signalBreakout: null,
       signalBreakoutLabel: null,
       signalValue: null,
       signalValueLabel: null,
-      signalsHistoryPoints30d:
-        signalRow?.history_points_30d === null || signalRow?.history_points_30d === undefined
-          ? null
-          : Number(signalRow.history_points_30d),
-      signalsAsOfTs: signalRow?.provider_as_of_ts ?? null,
-      liquidityScore: liquidity?.score ?? null,
-      liquidityTier: liquidity?.tier ?? null,
+      signalsHistoryPoints30d: hasLivePrice ? (metrics?.snapshot_count_30d ?? null) : null,
+      signalsAsOfTs: hasLivePrice ? liveScrydexAsOfTs : null,
+      liquidityScore: hasLivePrice ? (liquidity?.score ?? null) : null,
+      liquidityTier: hasLivePrice ? (liquidity?.tier ?? null) : null,
       liquidityTone: liquidity?.tone ?? "neutral",
-      liquidityPriceChanges30d: metrics?.provider_price_changes_count_30d ?? null,
-      liquiditySnapshotCount30d: metrics?.snapshot_count_30d ?? null,
-      liquiditySpreadPercent: liquidity?.spreadPercent ?? null,
+      liquidityPriceChanges30d: hasLivePrice ? (metrics?.provider_price_changes_count_30d ?? null) : null,
+      liquiditySnapshotCount30d: hasLivePrice ? (metrics?.snapshot_count_30d ?? null) : null,
+      liquiditySpreadPercent: hasLivePrice ? (liquidity?.spreadPercent ?? null) : null,
     };
   });
 }

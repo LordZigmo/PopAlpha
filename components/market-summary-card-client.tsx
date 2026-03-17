@@ -137,8 +137,6 @@ export default function MarketSummaryCardClient({
     ?? null;
 
   const currentPrice = activeVariant?.currentPrice ?? null;
-  const justtcgPrice = activeVariant?.justtcgPrice ?? null;
-  const justtcgAsOfTs = activeVariant?.justtcgAsOfTs ?? null;
   const scrydexPrice = activeVariant?.scrydexPrice ?? null;
   const scrydexAsOfTs = activeVariant?.scrydexAsOfTs ?? null;
   const asOfTs = activeVariant?.asOfTs ?? null;
@@ -164,7 +162,7 @@ export default function MarketSummaryCardClient({
     ? changePct7d ?? computeChange(chartSeries)
     : computeChange(chartSeries);
   const { low, high } = computeLowHigh(chartSeries);
-  const sampleCount = chartSeries.length;
+  const sampleCount = currentPrice !== null ? chartSeries.length : 0;
 
   function setWindow(nextWindow: WindowKey) {
     setActiveWindow(nextWindow);
@@ -219,15 +217,6 @@ export default function MarketSummaryCardClient({
             <div className="grid grid-cols-1 gap-2 rounded-2xl border border-white/[0.06] bg-[#151515] px-3 py-3">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex flex-col gap-0.5">
-                  <span className="text-[13px] text-[#A8A8A8]">JustTCG</span>
-                  <span className="text-[12px] text-[#8A8A8A]">Updated: {formatRelativeTime(justtcgAsOfTs) ?? "--"}</span>
-                </div>
-                <span className="text-[14px] font-semibold tabular-nums text-[#EDEDED]">
-                  {formatUsd(justtcgPrice)}
-                </span>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex flex-col gap-0.5">
                   <span className="text-[13px] text-[#A8A8A8]">Scrydex</span>
                   <span className="text-[12px] text-[#8A8A8A]">Updated: {formatRelativeTime(scrydexAsOfTs) ?? "--"}</span>
                 </div>
@@ -252,7 +241,7 @@ export default function MarketSummaryCardClient({
               items={[
                 { label: `${effectiveWindow.toUpperCase()} Low`, value: formatUsd(low) },
                 { label: `${effectiveWindow.toUpperCase()} High`, value: formatUsd(high) },
-                { label: "Sales", value: sampleCount > 0 ? String(sampleCount) : "—" },
+                { label: "Price points", value: sampleCount > 0 ? String(sampleCount) : "—" },
                 { label: `${effectiveWindow.toUpperCase()} Change`, value: formatPercent(changeValue), tone: changeTone(changeValue) },
               ]}
             />
