@@ -1,5 +1,6 @@
 import { dbAdmin } from "@/lib/db/admin";
 import { ensureProviderRawPayloadLineageId } from "@/lib/backfill/provider-raw-payload-lineage";
+import { retrySupabaseWriteOperation } from "@/lib/backfill/supabase-write-retry";
 import { buildLegacyVariantRef, normalizeCondition } from "@/lib/providers/justtcg";
 import {
   parseScrydexVariantSemantics,
@@ -783,40 +784,51 @@ export async function runPokemonTcgRawNormalize(opts: {
           dedupedRowsByKey.set(key, row);
         }
         const dedupedRows = [...dedupedRowsByKey.values()];
+        const duplicateAffectError = "ON CONFLICT DO UPDATE command cannot affect row a second time";
+        const batchResult = await retrySupabaseWriteOperation(
+          "provider_normalized_observations(upsert batch)",
+          async () => {
+            const { data, error } = await supabase
+              .from("provider_normalized_observations")
+              .upsert(dedupedRows, {
+                onConflict: "provider_raw_payload_lineage_id,provider_card_id,provider_variant_id",
+              })
+              .select("id");
 
-        const { data, error } = await supabase
-          .from("provider_normalized_observations")
-          .upsert(dedupedRows, {
-            onConflict: "provider_raw_payload_lineage_id,provider_card_id,provider_variant_id",
-          })
-          .select("id");
+            if (error) {
+              const message = String(error.message ?? "");
+              if (!message.includes(duplicateAffectError)) throw new Error(message);
+              return { duplicateConflict: true, data: [] as Array<{ id: string }> };
+            }
 
-        if (error) {
-          const message = String(error.message ?? "");
-          const duplicateAffectError = "ON CONFLICT DO UPDATE command cannot affect row a second time";
-          if (!message.includes(duplicateAffectError)) {
-            throw new Error(`provider_normalized_observations(upsert): ${message}`);
-          }
+            return { duplicateConflict: false, data: (data ?? []) as Array<{ id: string }> };
+          },
+        );
 
+        if (batchResult.duplicateConflict) {
           // Defensive fallback for unexpected duplicate-key batches:
           // retry row-by-row so one bad row does not fail the whole payload.
           let fallbackCount = 0;
           for (const row of dedupedRows) {
-            const { data: singleData, error: singleError } = await supabase
-              .from("provider_normalized_observations")
-              .upsert(row, {
-                onConflict: "provider_raw_payload_lineage_id,provider_card_id,provider_variant_id",
-              })
-              .select("id");
-            if (singleError) {
-              throw new Error(`provider_normalized_observations(upsert): ${singleError.message}`);
-            }
-            fallbackCount += (singleData ?? []).length;
+            const singleData = await retrySupabaseWriteOperation(
+              "provider_normalized_observations(upsert row)",
+              async () => {
+                const { data: singleData, error: singleError } = await supabase
+                  .from("provider_normalized_observations")
+                  .upsert(row, {
+                    onConflict: "provider_raw_payload_lineage_id,provider_card_id,provider_variant_id",
+                  })
+                  .select("id");
+                if (singleError) throw new Error(singleError.message);
+                return (singleData ?? []) as Array<{ id: string }>;
+              },
+            );
+            fallbackCount += singleData.length;
           }
           insertedOrUpdated = fallbackCount;
           observationsUpserted += insertedOrUpdated;
         } else {
-          insertedOrUpdated = (data ?? []).length;
+          insertedOrUpdated = batchResult.data.length;
           observationsUpserted += insertedOrUpdated;
         }
       }

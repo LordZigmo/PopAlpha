@@ -4,6 +4,10 @@ import {
   loadProviderCardMapByKeys,
   type ProviderCardMapRow,
 } from "@/lib/backfill/provider-card-map";
+import {
+  isRetryableSupabaseWriteErrorMessage,
+  retrySupabaseWriteOperation,
+} from "@/lib/backfill/supabase-write-retry";
 import type { AnalyticsPipelineProvider } from "@/lib/backfill/provider-registry";
 import { type VariantSignalRefreshKey } from "@/lib/backfill/provider-derived-signals";
 import { buildProviderHistoryVariantRef } from "@/lib/identity/variant-ref.mjs";
@@ -14,6 +18,8 @@ const DEFAULT_OBSERVATIONS_PER_RUN = process.env.PROVIDER_OBSERVATION_TIMESERIES
   ? parseInt(process.env.PROVIDER_OBSERVATION_TIMESERIES_OBSERVATIONS_PER_RUN, 10)
   : 300;
 const SCAN_PAGE_SIZE = 100;
+const STALE_DELETE_PROVIDER_REF_CHUNK_SIZE = 100;
+const STALE_DELETE_VARIANT_FILTER_CHUNK_SIZE = 20;
 
 export type SupportedProvider = AnalyticsPipelineProvider;
 
@@ -26,9 +32,19 @@ type PriceSnapshotStateRow = {
   observed_at: string;
 };
 
+type CleanupSnapshotRow = {
+  provider_ref: string | null;
+  canonical_slug: string | null;
+  printing_id: string | null;
+};
+
 type PriceHistoryStateRow = {
   variant_ref: string;
   ts: string;
+};
+
+type CleanupHistoryVariantRefRow = {
+  variant_ref: string | null;
 };
 
 type ObservationRow = {
@@ -131,6 +147,27 @@ function normalizeCurrency(raw: string | null | undefined): string {
 
 function buildProviderRef(provider: SupportedProvider, providerVariantId: string): string {
   return `${provider.toLowerCase()}:${providerVariantId}`;
+}
+
+function buildStaleVariantRefLikeFilter(providerVariantId: string): string {
+  return `variant_ref.like.%::${providerVariantId}::RAW`;
+}
+
+function extractProviderVariantIdFromProviderRef(provider: SupportedProvider, providerRef: string): string | null {
+  const normalized = String(providerRef ?? "").trim();
+  const prefix = `${provider.toLowerCase()}:`;
+  if (!normalized.startsWith(prefix)) return null;
+  const providerVariantId = normalized.slice(prefix.length).trim();
+  return providerVariantId || null;
+}
+
+function extractProviderVariantIdFromVariantRef(variantRef: string): string | null {
+  const normalized = String(variantRef ?? "").trim();
+  if (!normalized) return null;
+  const parts = normalized.split("::");
+  if (parts.length < 3) return null;
+  const providerVariantId = parts.at(-2)?.trim();
+  return providerVariantId || null;
 }
 
 function buildHistoryVariantRef(row: CandidateRow, provider: SupportedProvider): string {
@@ -453,26 +490,126 @@ async function cleanupStaleProviderVariantWrites(params: {
   if (providerVariantIds.length === 0) return;
 
   const providerRefs = providerVariantIds.map((providerVariantId) => buildProviderRef(params.provider, providerVariantId));
-  for (const providerRefChunk of chunkValues(providerRefs, 100)) {
-    const { error } = await supabase
-      .from("price_snapshots")
-      .delete()
-      .eq("provider", params.provider)
-      .in("provider_ref", providerRefChunk);
-    if (error) {
-      throw new Error(`price_snapshots(delete stale): ${error.message}`);
-    }
+  const { data: cleanupSnapshotRows, error: cleanupSnapshotError } = await supabase
+    .from("price_snapshots")
+    .select("provider_ref, canonical_slug, printing_id")
+    .eq("provider", params.provider)
+    .in("provider_ref", providerRefs);
+  if (cleanupSnapshotError) {
+    throw new Error(`price_snapshots(load stale history refs): ${cleanupSnapshotError.message}`);
   }
 
-  for (const providerVariantId of providerVariantIds) {
-    const { error } = await supabase
-      .from("price_history_points")
-      .delete()
-      .eq("provider", params.provider)
-      .like("variant_ref", `%::${providerVariantId}::RAW`);
-    if (error) {
-      throw new Error(`price_history_points(delete stale): ${error.message}`);
+  const exactHistoryVariantRefs = new Set<string>();
+  const providerVariantIdsWithExactRefs = new Set<string>();
+  for (const row of (cleanupSnapshotRows ?? []) as CleanupSnapshotRow[]) {
+    const providerRef = String(row.provider_ref ?? "").trim();
+    const canonicalSlug = String(row.canonical_slug ?? "").trim();
+    const providerVariantId = providerRef
+      ? extractProviderVariantIdFromProviderRef(params.provider, providerRef)
+      : null;
+    if (!providerVariantId || !canonicalSlug) continue;
+    exactHistoryVariantRefs.add(buildProviderHistoryVariantRef({
+      printingId: row.printing_id,
+      canonicalSlug,
+      provider: params.provider,
+      providerVariantId,
+    }));
+    providerVariantIdsWithExactRefs.add(providerVariantId);
+  }
+
+  const providerRefChunks = chunkValues(providerRefs, STALE_DELETE_PROVIDER_REF_CHUNK_SIZE);
+  for (let chunkIndex = 0; chunkIndex < providerRefChunks.length; chunkIndex += 1) {
+    const providerRefChunk = providerRefChunks[chunkIndex];
+    await retrySupabaseWriteOperation(
+      `price_snapshots(delete stale chunk ${chunkIndex + 1}/${providerRefChunks.length})`,
+      async () => {
+        const { error } = await supabase
+          .from("price_snapshots")
+          .delete()
+          .eq("provider", params.provider)
+          .in("provider_ref", providerRefChunk);
+        if (error) throw new Error(error.message);
+      },
+    );
+  }
+
+  const exactHistoryVariantRefChunks = chunkValues([...exactHistoryVariantRefs], STALE_DELETE_PROVIDER_REF_CHUNK_SIZE);
+  for (let chunkIndex = 0; chunkIndex < exactHistoryVariantRefChunks.length; chunkIndex += 1) {
+    const historyVariantRefChunk = exactHistoryVariantRefChunks[chunkIndex];
+    await retrySupabaseWriteOperation(
+      `price_history_points(delete stale exact chunk ${chunkIndex + 1}/${exactHistoryVariantRefChunks.length})`,
+      async () => {
+        const { error } = await supabase
+          .from("price_history_points")
+          .delete()
+          .eq("provider", params.provider)
+          .in("variant_ref", historyVariantRefChunk);
+        if (error) throw new Error(error.message);
+      },
+    );
+  }
+
+  const unresolvedProviderVariantIds = providerVariantIds.filter(
+    (providerVariantId) => !providerVariantIdsWithExactRefs.has(providerVariantId),
+  );
+  const providerVariantIdChunks = chunkValues(unresolvedProviderVariantIds, STALE_DELETE_VARIANT_FILTER_CHUNK_SIZE);
+  for (let chunkIndex = 0; chunkIndex < providerVariantIdChunks.length; chunkIndex += 1) {
+    const providerVariantIdChunk = providerVariantIdChunks[chunkIndex];
+    const resolvedVariantRefs = new Set<string>();
+    const resolvedProviderVariantIds = new Set<string>();
+    for (const providerVariantId of providerVariantIdChunk) {
+      const { data: historyVariantRefRows, error: historyVariantRefLookupError } = await supabase
+        .from("price_history_points")
+        .select("variant_ref")
+        .eq("provider", params.provider)
+        .like("variant_ref", `%::${providerVariantId}::RAW`);
+      if (historyVariantRefLookupError) {
+        throw new Error(`price_history_points(load stale variant refs): ${historyVariantRefLookupError.message}`);
+      }
+
+      for (const row of (historyVariantRefRows ?? []) as CleanupHistoryVariantRefRow[]) {
+        const variantRef = String(row.variant_ref ?? "").trim();
+        const resolvedProviderVariantId = extractProviderVariantIdFromVariantRef(variantRef);
+        if (!variantRef || !resolvedProviderVariantId) continue;
+        resolvedVariantRefs.add(variantRef);
+        resolvedProviderVariantIds.add(resolvedProviderVariantId);
+      }
     }
+
+    const resolvedVariantRefChunks = chunkValues([...resolvedVariantRefs], STALE_DELETE_PROVIDER_REF_CHUNK_SIZE);
+    for (let resolvedChunkIndex = 0; resolvedChunkIndex < resolvedVariantRefChunks.length; resolvedChunkIndex += 1) {
+      const resolvedVariantRefChunk = resolvedVariantRefChunks[resolvedChunkIndex];
+      await retrySupabaseWriteOperation(
+        `price_history_points(delete stale resolved chunk ${chunkIndex + 1}.${resolvedChunkIndex + 1}/${providerVariantIdChunks.length}.${resolvedVariantRefChunks.length})`,
+        async () => {
+          const { error } = await supabase
+            .from("price_history_points")
+            .delete()
+            .eq("provider", params.provider)
+            .in("variant_ref", resolvedVariantRefChunk);
+          if (error) throw new Error(error.message);
+        },
+      );
+    }
+
+    const fallbackProviderVariantIds = providerVariantIdChunk.filter(
+      (providerVariantId) => !resolvedProviderVariantIds.has(providerVariantId),
+    );
+    if (fallbackProviderVariantIds.length === 0) continue;
+    const fallbackOrFilter = fallbackProviderVariantIds
+      .map((providerVariantId) => buildStaleVariantRefLikeFilter(providerVariantId))
+      .join(",");
+    await retrySupabaseWriteOperation(
+      `price_history_points(delete stale chunk ${chunkIndex + 1}/${providerVariantIdChunks.length})`,
+      async () => {
+        const { error } = await supabase
+          .from("price_history_points")
+          .delete()
+          .eq("provider", params.provider)
+          .or(fallbackOrFilter);
+        if (error) throw new Error(error.message);
+      },
+    );
   }
 }
 
@@ -528,12 +665,23 @@ export async function runProviderObservationTimeseries(opts: {
 
   try {
     const cleanupScopeIso = new Date(Date.now() - (12 * 60 * 60 * 1000)).toISOString();
-    await cleanupStaleProviderVariantWrites({
-      provider: opts.provider,
-      providerSetId: opts.providerSetId,
-      observationId: opts.observationId,
-      updatedSinceIso: cleanupScopeIso,
-    });
+    try {
+      await cleanupStaleProviderVariantWrites({
+        provider: opts.provider,
+        providerSetId: opts.providerSetId,
+        observationId: opts.observationId,
+        updatedSinceIso: cleanupScopeIso,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const scopedCleanup = Boolean(opts.providerSetId || opts.observationId);
+      if (!scopedCleanup || !isRetryableSupabaseWriteErrorMessage(message)) {
+        throw error;
+      }
+      console.warn(
+        `[provider_observation_timeseries] stale cleanup skipped for ${opts.provider}:${opts.providerSetId ?? opts.observationId}: ${message}`,
+      );
+    }
 
     const candidateResult = await loadCandidateRows({
       provider: opts.provider,
@@ -652,21 +800,33 @@ export async function runProviderObservationTimeseries(opts: {
     }));
 
     if (dedupedSnapshotRows.length > 0) {
-      const { data, error } = await supabase
-        .from("price_snapshots")
-        .upsert(dedupedSnapshotRows, { onConflict: "provider,provider_ref" })
-        .select("id");
-      if (error) throw new Error(`price_snapshots(upsert): ${error.message}`);
-      snapshotsUpserted = (data ?? []).length;
+      const data = await retrySupabaseWriteOperation(
+        "price_snapshots(upsert)",
+        async () => {
+          const { data, error } = await supabase
+            .from("price_snapshots")
+            .upsert(dedupedSnapshotRows, { onConflict: "provider,provider_ref" })
+            .select("id");
+          if (error) throw new Error(error.message);
+          return (data ?? []) as Array<{ id: string }>;
+        },
+      );
+      snapshotsUpserted = data.length;
     }
 
     if (dedupedHistoryRows.length > 0) {
-      const { data, error } = await supabase
-        .from("price_history_points")
-        .upsert(dedupedHistoryRows, { onConflict: "provider,variant_ref,ts,source_window" })
-        .select("id");
-      if (error) throw new Error(`price_history_points(upsert): ${error.message}`);
-      historyPointsUpserted = (data ?? []).length;
+      const data = await retrySupabaseWriteOperation(
+        "price_history_points(upsert)",
+        async () => {
+          const { data, error } = await supabase
+            .from("price_history_points")
+            .upsert(dedupedHistoryRows, { onConflict: "provider,variant_ref,ts,source_window" })
+            .select("id");
+          if (error) throw new Error(error.message);
+          return (data ?? []) as Array<{ id: string }>;
+        },
+      );
+      historyPointsUpserted = data.length;
     }
   } catch (error) {
     firstError = error instanceof Error ? error.message : String(error);

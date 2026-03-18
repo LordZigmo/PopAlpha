@@ -33,6 +33,22 @@
       "schedule": "*/10 * * * *"
     },
     {
+      "path": "/api/cron/run-scrydex-2024plus-daily/1",
+      "schedule": "5 7 * * *"
+    },
+    {
+      "path": "/api/cron/run-scrydex-2024plus-daily/2",
+      "schedule": "20 7 * * *"
+    },
+    {
+      "path": "/api/cron/run-scrydex-2024plus-daily/3",
+      "schedule": "35 7 * * *"
+    },
+    {
+      "path": "/api/cron/run-scrydex-2024plus-daily/4",
+      "schedule": "50 7 * * *"
+    },
+    {
       "path": "/api/cron/run-scrydex-retry",
       "schedule": "*/15 * * * *"
     },

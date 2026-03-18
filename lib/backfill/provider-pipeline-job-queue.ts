@@ -142,15 +142,20 @@ export async function enqueuePipelineJob(input: {
     providerSetId: input.params.providerSetId ?? null,
   };
 
-  const { data: existing, error: existingError } = await supabase
+  let existingQuery = supabase
     .from("pipeline_jobs")
     .select("id, status")
     .eq("provider", input.provider)
     .eq("job_kind", input.jobKind)
     .in("status", ["QUEUED", "RUNNING", "RETRY"])
     .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle<{ id: number; status: string }>();
+    .limit(1);
+
+  if (safeParams.providerSetId) {
+    existingQuery = existingQuery.contains("params_json", { providerSetId: safeParams.providerSetId });
+  }
+
+  const { data: existing, error: existingError } = await existingQuery.maybeSingle<{ id: number; status: string }>();
   if (existingError) throw new Error(`pipeline_jobs(existing): ${existingError.message}`);
   if (existing?.id) {
     return { enqueued: false, jobId: existing.id, reason: `existing_${existing.status.toLowerCase()}` };

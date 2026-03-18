@@ -1,5 +1,6 @@
 import { dbAdmin } from "@/lib/db/admin";
 import { ensureProviderRawPayloadLineageId } from "@/lib/backfill/provider-raw-payload-lineage";
+import { retrySupabaseWriteOperation } from "@/lib/backfill/supabase-write-retry";
 import {
   buildLegacyVariantRef,
   classifyJustTcgCard,
@@ -591,18 +592,22 @@ export async function runJustTcgRawNormalize(opts: {
       }
 
       if (rows.length > 0) {
-        const { data, error } = await supabase
-          .from("provider_normalized_observations")
-          .upsert(rows, {
-            onConflict: "provider_raw_payload_lineage_id,provider_card_id,provider_variant_id",
-          })
-          .select("id");
+        const data = await retrySupabaseWriteOperation(
+          "provider_normalized_observations(upsert)",
+          async () => {
+            const { data, error } = await supabase
+              .from("provider_normalized_observations")
+              .upsert(rows, {
+                onConflict: "provider_raw_payload_lineage_id,provider_card_id,provider_variant_id",
+              })
+              .select("id");
 
-        if (error) {
-          throw new Error(`provider_normalized_observations: ${error.message}`);
-        }
+            if (error) throw new Error(error.message);
+            return (data ?? []) as Array<{ id: string }>;
+          },
+        );
 
-        observationsUpserted += (data ?? []).length;
+        observationsUpserted += data.length;
       }
 
       if (samplePayloads.length < 25) {
