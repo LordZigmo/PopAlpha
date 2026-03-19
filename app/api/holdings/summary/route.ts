@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireOnboarded } from "@/lib/auth/require";
 import { getCommunityVoteWeekStart } from "@/lib/data/community-pulse";
-import { dbAdmin } from "@/lib/db/admin";
+import { createServerSupabaseUserClient } from "@/lib/db/user";
 
 export const runtime = "nodejs";
 
@@ -37,12 +37,18 @@ type CommunityVoteRow = {
   vote_side: "up" | "down";
 };
 
+type CommunityVoteTotalsRow = {
+  canonical_slug: string;
+  bullish_votes: number;
+  bearish_votes: number;
+};
+
 export async function GET(req: Request) {
   const auth = await requireOnboarded(req);
   if (!auth.ok) return auth.response;
 
   try {
-    const supabase = dbAdmin();
+    const supabase = await createServerSupabaseUserClient();
     const { data: holdingsData, error: holdingsError } = await supabase
       .from("holdings")
       .select("canonical_slug, qty, created_at")
@@ -139,20 +145,20 @@ export async function GET(req: Request) {
     const votedSlugs = [...new Set(((myVotes ?? []) as CommunityVoteRow[]).map((row) => row.canonical_slug).filter(Boolean))];
     let accuracyScore: number | null = null;
     if (votedSlugs.length > 0) {
-      const { data: allVotesForMyCards, error: allVotesError } = await supabase
-        .from("community_card_votes")
-        .select("canonical_slug, vote_side")
+      const { data: voteTotals, error: allVotesError } = await supabase
+        .from("public_community_vote_totals")
+        .select("canonical_slug, bullish_votes, bearish_votes")
         .eq("week_start", weekStart)
         .in("canonical_slug", votedSlugs);
 
       if (allVotesError) throw new Error(allVotesError.message);
 
       const voteTallies = new Map<string, { up: number; down: number }>();
-      for (const row of (allVotesForMyCards ?? []) as CommunityVoteRow[]) {
-        const bucket = voteTallies.get(row.canonical_slug) ?? { up: 0, down: 0 };
-        if (row.vote_side === "up") bucket.up += 1;
-        else bucket.down += 1;
-        voteTallies.set(row.canonical_slug, bucket);
+      for (const row of (voteTotals ?? []) as CommunityVoteTotalsRow[]) {
+        voteTallies.set(row.canonical_slug, {
+          up: row.bullish_votes ?? 0,
+          down: row.bearish_votes ?? 0,
+        });
       }
 
       let score = 0;

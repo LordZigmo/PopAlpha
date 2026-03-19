@@ -45,6 +45,7 @@ type ChangeCandidateRow = {
   canonical_slug: string;
   market_price: number | null;
   market_price_as_of: string | null;
+  snapshot_count_30d: number | null;
   change_pct_24h: number | null;
   market_confidence_score: number | null;
   market_low_confidence: boolean | null;
@@ -98,6 +99,8 @@ export type HomepageDataOptions = {
 const SECTION_LIMIT = 5;
 /** Minimum 7d median to filter noise / $0 cards */
 const MIN_PRICE = 0.5;
+/** Homepage mover rails should only show cards above this market price. */
+const MIN_MOVER_PRICE = 1;
 /** Top movers must have market updates within this freshness window. */
 const TOP_MOVER_MAX_AGE_HOURS = 24;
 /** Minimum trade count for "sustained trending" vs noise */
@@ -109,6 +112,9 @@ const MIN_MOVER_CHANGE_PCT = 2.5;
 const MIN_CONFIDENCE_SCORE = 45;
 const HIGH_CONF_LIQUIDITY_MIN = 6;
 const EMERGING_LIQUIDITY_MAX = 5;
+const MOVER_LOOKBACK_DAYS = 30;
+const MIN_MOVER_COVERAGE_RATIO = 0.9;
+const MIN_MOVER_SNAPSHOT_COUNT_30D = Math.ceil(MOVER_LOOKBACK_DAYS * MIN_MOVER_COVERAGE_RATIO);
 
 // ── Loader ──────────────────────────────────────────────────────────────────
 
@@ -240,11 +246,12 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
         // 1. Top movers — fresh positive 24h moves from canonical card metrics
         client
           .from("public_card_metrics")
-          .select("canonical_slug, market_price, market_price_as_of, change_pct_24h, market_confidence_score, market_low_confidence, active_listings_7d")
+          .select("canonical_slug, market_price, market_price_as_of, snapshot_count_30d, change_pct_24h, market_confidence_score, market_low_confidence, active_listings_7d")
           .eq("grade", "RAW")
           .is("printing_id", null)
-          .gte("market_price", MIN_PRICE)
+          .gte("market_price", MIN_MOVER_PRICE)
           .gte("market_price_as_of", freshnessCutoffIso)
+          .gte("snapshot_count_30d", MIN_MOVER_SNAPSHOT_COUNT_30D)
           .not("change_pct_24h", "is", null)
           .gt("change_pct_24h", 0)
           .order("change_pct_24h", { ascending: false })
@@ -254,11 +261,12 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
         // 2. Biggest drops — fresh negative 24h moves from canonical card metrics
         client
           .from("public_card_metrics")
-          .select("canonical_slug, market_price, market_price_as_of, change_pct_24h, market_confidence_score, market_low_confidence, active_listings_7d")
+          .select("canonical_slug, market_price, market_price_as_of, snapshot_count_30d, change_pct_24h, market_confidence_score, market_low_confidence, active_listings_7d")
           .eq("grade", "RAW")
           .is("printing_id", null)
-          .gte("market_price", MIN_PRICE)
+          .gte("market_price", MIN_MOVER_PRICE)
           .gte("market_price_as_of", freshnessCutoffIso)
+          .gte("snapshot_count_30d", MIN_MOVER_SNAPSHOT_COUNT_30D)
           .not("change_pct_24h", "is", null)
           .lt("change_pct_24h", 0)
           .order("change_pct_24h", { ascending: true })
@@ -426,7 +434,9 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
       const marketPrice = marketPulse.marketPrice ?? r.market_price ?? null;
       if (marketPrice == null) return false;
       if (SENTINEL_PRICES.has(Number(marketPrice.toFixed(2)))) return false;
-      if (marketPrice < MIN_PRICE) return false;
+      if (marketPrice < MIN_MOVER_PRICE) return false;
+      const snapshotCount30d = marketPulse.snapshotCount30d ?? r.snapshot_count_30d ?? 0;
+      if (snapshotCount30d < MIN_MOVER_SNAPSHOT_COUNT_30D) return false;
       const changePct = typeof r.change_pct_24h === "number" && Number.isFinite(r.change_pct_24h)
         ? Number(r.change_pct_24h.toFixed(2))
         : marketPulse.changePct24h;
@@ -477,7 +487,9 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
       const marketPulse = marketPulseMap.get(r.canonical_slug);
       if (!marketPulse) continue;
       const price = marketPulse.marketPrice ?? r.market_price ?? null;
-      if (price == null || price < MIN_PRICE) continue;
+      if (price == null || price < MIN_MOVER_PRICE) continue;
+      const snapshotCount30d = marketPulse.snapshotCount30d ?? r.snapshot_count_30d ?? 0;
+      if (snapshotCount30d < MIN_MOVER_SNAPSHOT_COUNT_30D) continue;
       const stalenessHours = hoursSince(marketPulse.marketPriceAsOf ?? r.market_price_as_of ?? null, nowMs);
       if (stalenessHours === null || stalenessHours > TOP_MOVER_MAX_AGE_HOURS) continue;
       const confidenceScore = marketPulse.confidenceScore ?? r.market_confidence_score ?? 0;

@@ -255,12 +255,8 @@ export default function RawCardMarketSurface({
                     <p className="mt-1 text-[14px] text-[#555]">
                       {formattedAsOf ? `Near-mint market price · Updated ${formattedAsOf}` : "Near-mint market price"}
                     </p>
-                    {(activeVariant?.justtcgPrice != null || activeVariant?.scrydexPrice != null) ? (
+                    {activeVariant?.scrydexPrice != null ? (
                       <div className="mt-1 text-[13px] tabular-nums text-[#7A7A7A]">
-                        <p>
-                          JustTCG: {activeVariant?.justtcgPrice != null ? formatUsdCompact(activeVariant.justtcgPrice) : "—"}{" "}
-                          <span className="text-[#5E5E5E]">Updated: {formatAsOf(activeVariant?.justtcgAsOfTs ?? null) ?? "--"}</span>
-                        </p>
                         <p>
                           Scrydex: {activeVariant?.scrydexPrice != null ? formatUsdCompact(activeVariant.scrydexPrice) : "—"}{" "}
                           <span className="text-[#5E5E5E]">Updated: {formatAsOf(activeVariant?.scrydexAsOfTs ?? null) ?? "--"}</span>

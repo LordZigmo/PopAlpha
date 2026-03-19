@@ -161,6 +161,11 @@ export type PricingTransparencyTrendPoint = {
   failedDepth: number | null;
 };
 
+type PricingTransparencySnapshotRow = {
+  captured_at: string;
+  payload: PricingTransparencySnapshot | null;
+};
+
 function percentile(sorted: number[], pct: number): number | null {
   if (sorted.length === 0) return null;
   const idx = Math.max(0, Math.min(sorted.length - 1, Math.floor((pct / 100) * sorted.length)));
@@ -181,6 +186,26 @@ function computeLiquidityWeight(activeListings7d: number): number {
 }
 
 export async function getPricingTransparencySnapshot(): Promise<PricingTransparencySnapshot> {
+  const supabase = dbPublic();
+  const { data, error } = await supabase
+    .from("pricing_transparency_snapshots")
+    .select("captured_at, payload")
+    .order("captured_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<PricingTransparencySnapshotRow>();
+
+  if (error) {
+    throw new Error(`pricing_transparency_snapshots(latest): ${error.message}`);
+  }
+
+  if (!data?.payload) {
+    throw new Error("pricing_transparency_snapshots has no captured payload yet.");
+  }
+
+  return data.payload;
+}
+
+export async function computePricingTransparencySnapshot(): Promise<PricingTransparencySnapshot> {
   const supabase = dbPublic();
   const now = new Date();
   const asOf = now.toISOString();

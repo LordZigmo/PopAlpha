@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require";
-import { dbPublic } from "@/lib/db";
+import { createServerSupabaseUserClient } from "@/lib/db/user";
 import { ensureAppUser } from "@/lib/data/app-user";
 import { getCommunityVoteWeekEndMs, getCommunityVoteWeekStart, type CommunityVoteSide } from "@/lib/data/community-pulse";
 
@@ -30,13 +30,18 @@ type UserVoteWeekRow = {
   votes_remaining: number;
 };
 
+type CommunityVoteTotalsRow = {
+  bullish_votes: number;
+  bearish_votes: number;
+};
+
 export async function GET(req: Request) {
   const auth = await requireUser(req);
   if (!auth.ok) return auth.response;
 
   try {
     await ensureAppUser(auth.userId);
-    const db = dbPublic();
+    const db = await createServerSupabaseUserClient();
     const weekStart = getCommunityVoteWeekStart();
 
     const [{ data: weeklyUsage, error: weeklyError }, { data: followees, error: followError }] = await Promise.all([
@@ -120,7 +125,7 @@ export async function POST(req: Request) {
 
   try {
     await ensureAppUser(auth.userId);
-    const db = dbPublic();
+    const db = await createServerSupabaseUserClient();
     const weekStart = getCommunityVoteWeekStart();
 
     const [{ data: existingVote, error: existingError }, { data: weeklyUsage, error: countError }] = await Promise.all([
@@ -135,7 +140,8 @@ export async function POST(req: Request) {
         .from("community_user_vote_weeks")
         .select("votes_used, votes_remaining")
         .eq("voter_id", auth.userId)
-        .eq("week_start", weekStart),
+        .eq("week_start", weekStart)
+        .maybeSingle<UserVoteWeekRow>(),
     ]);
 
     if (existingError) throw new Error(existingError.message);
@@ -148,9 +154,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const usageRow = Array.isArray(weeklyUsage)
-      ? (weeklyUsage[0] as UserVoteWeekRow | undefined)
-      : (weeklyUsage as UserVoteWeekRow | null);
+    const usageRow = weeklyUsage ?? null;
     const votesUsed = usageRow?.votes_used ?? 0;
     if (votesUsed >= WEEKLY_VOTE_LIMIT) {
       return NextResponse.json(
@@ -168,26 +172,20 @@ export async function POST(req: Request) {
 
     if (insertError) throw new Error(insertError.message);
 
-    const { data: slugVotes, error: tallyError } = await db
-      .from("community_card_votes")
-      .select("vote_side")
+    const { data: totals, error: tallyError } = await db
+      .from("public_community_vote_totals")
+      .select("bullish_votes, bearish_votes")
       .eq("canonical_slug", canonicalSlug)
-      .eq("week_start", weekStart);
+      .eq("week_start", weekStart)
+      .maybeSingle<CommunityVoteTotalsRow>();
 
     if (tallyError) throw new Error(tallyError.message);
-
-    let bullishVotes = 0;
-    let bearishVotes = 0;
-    for (const row of (slugVotes ?? []) as VoteRow[]) {
-      if (row.vote_side === "up") bullishVotes += 1;
-      else bearishVotes += 1;
-    }
 
     return NextResponse.json({
       ok: true,
       vote: direction,
-      bullishVotes,
-      bearishVotes,
+      bullishVotes: totals?.bullish_votes ?? 0,
+      bearishVotes: totals?.bearish_votes ?? 0,
       votesRemaining: Math.max(0, (usageRow?.votes_remaining ?? WEEKLY_VOTE_LIMIT) - 1),
       weekEndsAt: getCommunityVoteWeekEndMs(),
     });

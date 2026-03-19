@@ -35,8 +35,8 @@ public final class PopAlphaCardClassifier {
     private let modelStore: ModelStore
 
     public init(
-        bundle: Bundle = .main,
-        modelName: String = "PopAlphaRFDETR"
+        bundle: Bundle = ScannerResourceBundle.bundle,
+        modelName: String = "PopAlphaRFDETRLive"
     ) throws {
         guard let modelURL = bundle.url(forResource: modelName, withExtension: "mlmodelc") else {
             throw PopAlphaCardClassifierError.modelNotFound(modelName)

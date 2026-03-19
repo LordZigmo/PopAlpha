@@ -212,13 +212,13 @@ async function loadPublicHistoryRows(params: {
       query = query.eq("variant_ref", params.variantRef);
     }
 
-    const { data, error } = await query;
+    const { data, error } = await query.returns<PublicHistoryRow[]>();
     if (error) {
       console.error(params.errorLabel, params.slug, params.variantRef ?? null, error.message);
       continue;
     }
     if ((data ?? []).length > 0) {
-      return (data ?? []) as PublicHistoryRow[];
+      return data ?? [];
     }
   }
 

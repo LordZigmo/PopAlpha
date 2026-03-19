@@ -1,21 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import {
+  parseSharedCardSearchResponse,
+  type SharedCardSearchResult,
+} from "@/lib/cards/shared-card";
 
-export type CardSearchResult = {
-  canonical_slug: string;
-  canonical_name: string;
-  set_name: string | null;
-  card_number: string | null;
-  year: number | null;
-  primary_image_url: string | null;
-};
-
-type SearchResponse = {
-  ok: boolean;
-  cards?: CardSearchResult[];
-  error?: string;
-};
+export type CardSearchResult = SharedCardSearchResult;
 
 export function useCardSearch(query: string, delayMs = 240) {
   const [results, setResults] = useState<CardSearchResult[]>([]);
@@ -55,7 +46,7 @@ export function useCardSearch(query: string, delayMs = 240) {
           throw new Error(`Search request failed with ${response.status}`);
         }
 
-        const payload = (await response.json()) as SearchResponse;
+        const payload = parseSharedCardSearchResponse(await response.json());
         if (!payload.ok) {
           throw new Error(payload.error ?? "Search unavailable");
         }

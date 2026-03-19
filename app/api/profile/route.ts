@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require";
-import { dbPublic } from "@/lib/db";
+import { createServerSupabaseUserClient } from "@/lib/db/user";
 import { ensureAppUser, updateAppProfile } from "@/lib/data/app-user";
 import { validateHandle } from "@/lib/handles";
 
@@ -23,7 +23,7 @@ export async function GET(req: Request) {
 
   try {
     const user = await ensureAppUser(auth.userId);
-    const db = dbPublic();
+    const db = await createServerSupabaseUserClient();
     const { data: posts, error } = await db
       .from("profile_posts")
       .select("id, body, created_at")
@@ -31,14 +31,20 @@ export async function GET(req: Request) {
       .order("created_at", { ascending: false })
       .limit(25);
 
-    const { data: stats, error: statsError } = await db
-      .from("public_profile_social_stats")
-      .select("post_count, follower_count, following_count")
-      .eq("clerk_user_id", auth.userId)
-      .maybeSingle<{ post_count: number; follower_count: number; following_count: number }>();
+    const [
+      { count: postCount, error: postCountError },
+      { count: followerCount, error: followerCountError },
+      { count: followingCount, error: followingCountError },
+    ] = await Promise.all([
+      db.from("profile_posts").select("id", { count: "exact", head: true }).eq("owner_id", auth.userId),
+      db.from("profile_follows").select("followee_id", { count: "exact", head: true }).eq("followee_id", auth.userId),
+      db.from("profile_follows").select("follower_id", { count: "exact", head: true }).eq("follower_id", auth.userId),
+    ]);
 
     if (error) throw new Error(error.message);
-    if (statsError) throw new Error(statsError.message);
+    if (postCountError) throw new Error(postCountError.message);
+    if (followerCountError) throw new Error(followerCountError.message);
+    if (followingCountError) throw new Error(followingCountError.message);
 
     const postIds = (posts ?? []).map((post) => post.id);
     const { data: mentions, error: mentionsError } = postIds.length > 0
@@ -68,7 +74,11 @@ export async function GET(req: Request) {
       ok: true,
       profile: toProfilePayload(user),
       posts: hydratedPosts,
-      stats: stats ?? { post_count: 0, follower_count: 0, following_count: 0 },
+      stats: {
+        post_count: postCount ?? 0,
+        follower_count: followerCount ?? 0,
+        following_count: followingCount ?? 0,
+      },
     });
   } catch (error) {
     return NextResponse.json(

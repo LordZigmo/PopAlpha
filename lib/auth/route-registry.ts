@@ -8,8 +8,8 @@
  * Every route key is the path segment after /api/ with dynamic segments
  * written as [param], e.g. "cards/[slug]/detail", "private-sales/[id]".
  *
- * The "debug" prefix is treated as a subtree — individual debug routes
- * do NOT need to be listed here.
+ * Every API route, including debug routes, must be listed here explicitly
+ * so build-time guardrails can enforce the trust model per route.
  */
 
 export const PUBLIC_ROUTES = [
@@ -49,11 +49,13 @@ export const CRON_ROUTES = [
   "cron/run-justtcg-pipeline",
   "cron/run-justtcg-retry",
   "cron/run-scrydex-pipeline",
+  "cron/backfill-scrydex-price-history",
   "cron/run-scrydex-2024plus-daily/[chunk]",
   "cron/run-scrydex-retry",
   "cron/run-poketrace-pipeline",
   "cron/run-pokemontcg-pipeline",
   "cron/process-provider-pipeline-jobs",
+  "cron/process-ebay-deletion-receipts",
   "cron/sync-canonical",
   "cron/sync-tcg-prices",
   "cron/refresh-card-metrics",
@@ -66,11 +68,33 @@ export const CRON_ROUTES = [
 ];
 
 export const ADMIN_ROUTES = [
+  "admin/ebay-deletion-tasks",
+  "admin/ebay-deletion-tasks/[id]",
   "admin/import/pokemontcg-canonical",
   "admin/import/scrydex-canonical",
   "admin/import/pokemontcg",
   "admin/import/printings",
   "admin/psa-seeds",
+];
+
+export const DEBUG_ROUTES = [
+  "debug/asset-inspect",
+  "debug/justtcg-inspect",
+  "debug/justtcg-match-summary",
+  "debug/justtcg-normalized-signals",
+  "debug/justtcg-raw-signals",
+  "debug/justtcg-unmatched-diagnostics",
+  "debug/justtcg/backfill-first-edition-printings",
+  "debug/justtcg/backfill-set",
+  "debug/justtcg/backfill-tracked-mappings",
+  "debug/justtcg/precheck-repair-sets",
+  "debug/justtcg/repair-pokeball-stamp",
+  "debug/justtcg/repair-set-finishes",
+  "debug/market-summary",
+  "debug/provider-price-readings",
+  "debug/tracked-assets",
+  "debug/tracked-assets/seed",
+  "debug/tracked-refresh-diagnostics",
 ];
 
 export const INGEST_ROUTES = [

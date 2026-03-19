@@ -1,24 +1,11 @@
-// Build-time check: every app/api/ route.ts file must be classified
-// in lib/auth/route-registry.ts (or live under the debug/ subtree).
-//
-// Usage:  node scripts/check-route-coverage.mjs
-// Exit 1 on failure so it can gate `npm run build`.
-
 import fs from "node:fs";
 import path from "node:path";
+import { FIXED_ROUTE_CLASSIFICATIONS } from "./security-guardrails.config.mjs";
+import { readRouteRegistry, routeKeyFromFilePath } from "./lib/route-registry.mjs";
 
 const ROOT = process.cwd();
+const registry = readRouteRegistry();
 
-// ── 1. Parse route-registry.ts to extract all classified route keys ─────────
-const registryPath = path.join(ROOT, "lib", "auth", "route-registry.ts");
-const registrySource = fs.readFileSync(registryPath, "utf8");
-
-// Every route key in the file is a double-quoted string inside an array.
-const classifiedKeys = new Set(
-  [...registrySource.matchAll(/"([^"]+)"/g)].map((m) => m[1]),
-);
-
-// ── 2. Glob app/api/**/route.ts to find all actual API routes ───────────────
 function walk(dir, files = []) {
   if (!fs.existsSync(dir)) return files;
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -36,23 +23,40 @@ function walk(dir, files = []) {
 const apiDir = path.join(ROOT, "app", "api");
 const routeFiles = walk(apiDir);
 
-// ── 3. Convert each file path to a route key ────────────────────────────────
-// app/api/cron/sync-canonical/route.ts  →  "cron/sync-canonical"
-// app/api/cards/[slug]/detail/route.ts  →  "cards/[slug]/detail"
-function toRouteKey(filePath) {
-  const rel = path.relative(apiDir, filePath).replace(/\\/g, "/");
-  // Strip trailing /route.ts
-  return rel.replace(/\/route\.ts$/, "");
+const registryEntries = [
+  ["public", registry.publicRoutes],
+  ["cron", registry.cronRoutes],
+  ["admin", registry.adminRoutes],
+  ["debug", registry.debugRoutes],
+  ["ingest", registry.ingestRoutes],
+  ["user", registry.userRoutes],
+];
+
+const classifiedKeys = new Set();
+const duplicates = [];
+
+for (const [kind, routes] of registryEntries) {
+  for (const routeKey of routes) {
+    if (classifiedKeys.has(routeKey)) {
+      duplicates.push({ kind, routeKey });
+      continue;
+    }
+    classifiedKeys.add(routeKey);
+  }
 }
 
-// ── 4. Check each route is classified ───────────────────────────────────────
+if (duplicates.length > 0) {
+  console.error("route-coverage check FAILED — duplicate API route classifications:");
+  for (const { kind, routeKey } of duplicates) {
+    console.error(`  - ${routeKey} appears more than once (latest duplicate in ${kind.toUpperCase()}_ROUTES)`);
+  }
+  process.exit(1);
+}
+
 const unclassified = [];
 
 for (const file of routeFiles) {
-  const key = toRouteKey(file);
-
-  // Debug subtree is handled by prefix — individual routes don't need listing
-  if (key.startsWith("debug/") || key === "debug") continue;
+  const key = routeKeyFromFilePath(file);
 
   if (!classifiedKeys.has(key)) {
     unclassified.push(key);
@@ -67,6 +71,31 @@ if (unclassified.length > 0) {
   console.error(
     "\nAdd each route to the appropriate array in lib/auth/route-registry.ts",
   );
+  process.exit(1);
+}
+
+function routeKindForKey(routeKey) {
+  for (const [kind, routes] of registryEntries) {
+    if (routes.has(routeKey)) return kind;
+  }
+  return null;
+}
+
+const lockedClassificationFailures = [];
+for (const [routeKey, expectedKind] of Object.entries(FIXED_ROUTE_CLASSIFICATIONS)) {
+  const actualKind = routeKindForKey(routeKey);
+  if (actualKind !== expectedKind) {
+    lockedClassificationFailures.push({ routeKey, expectedKind, actualKind });
+  }
+}
+
+if (lockedClassificationFailures.length > 0) {
+  console.error("route-coverage check FAILED — locked route classifications drifted:");
+  for (const failure of lockedClassificationFailures) {
+    console.error(
+      `  - ${failure.routeKey} must stay classified as ${failure.expectedKind}, but is currently ${failure.actualKind ?? "unclassified"}`,
+    );
+  }
   process.exit(1);
 }
 

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { validateHandle } from "@/lib/handles";
-import { dbAdmin } from "@/lib/db/admin";
+import { dbPublic } from "@/lib/db";
 import { createRateLimiter } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
@@ -36,17 +36,16 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, available: false, reason: result.reason });
   }
 
-  const db = dbAdmin();
-  const { count, error } = await db
-    .from("app_users")
-    .select("*", { count: "exact", head: true })
-    .eq("handle_norm", result.normalized);
+  const db = dbPublic();
+  const { data, error } = await db.rpc("is_handle_available", {
+    desired_handle_norm: result.normalized,
+  });
 
   if (error) {
     console.error("[handles/availability]", error.message);
     return NextResponse.json({ ok: false, error: "Internal error." }, { status: 500 });
   }
 
-  const available = (count ?? 0) === 0;
+  const available = data === true;
   return NextResponse.json({ ok: true, available });
 }

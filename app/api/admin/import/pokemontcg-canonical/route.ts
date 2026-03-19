@@ -1,4 +1,9 @@
-import { POST as runScrydexCanonicalImport } from "../scrydex-canonical/route";
+import { NextResponse } from "next/server";
+import { requireAdmin } from "@/lib/auth/require";
+import {
+  parseLegacyPokemonTcgCanonicalRequest,
+  runScrydexCanonicalImport,
+} from "@/lib/admin/scrydex-canonical-import";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,25 +20,9 @@ export const dynamic = "force-dynamic";
  * - dryRun     -> dryRun
  */
 export async function POST(req: Request) {
-  const url = new URL(req.url);
-  const proxyUrl = new URL("http://internal/api/admin/import/scrydex-canonical");
+  const auth = await requireAdmin(req);
+  if (!auth.ok) return auth.response;
 
-  const pageStart = url.searchParams.get("pageStart");
-  const maxPages = url.searchParams.get("maxPages");
-  const pageSize = url.searchParams.get("pageSize");
-  const setId = url.searchParams.get("setId");
-  const dryRun = url.searchParams.get("dryRun");
-
-  if (pageStart) proxyUrl.searchParams.set("pageStart", pageStart);
-  if (maxPages) proxyUrl.searchParams.set("maxPages", maxPages);
-  if (pageSize) proxyUrl.searchParams.set("pageSize", pageSize);
-  if (setId) proxyUrl.searchParams.set("expansionId", setId);
-  if (dryRun) proxyUrl.searchParams.set("dryRun", dryRun);
-
-  const forwardedRequest = new Request(proxyUrl.toString(), {
-    method: "POST",
-    headers: req.headers,
-  });
-
-  return runScrydexCanonicalImport(forwardedRequest);
+  const result = await runScrydexCanonicalImport(parseLegacyPokemonTcgCanonicalRequest(req));
+  return NextResponse.json(result.body, { status: result.status });
 }

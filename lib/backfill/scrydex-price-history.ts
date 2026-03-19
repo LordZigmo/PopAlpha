@@ -282,9 +282,10 @@ async function fetchAllProviderCardMapRows(select: string): Promise<ProviderCard
       .eq("provider", PROVIDER)
       .order("provider_set_id", { ascending: true })
       .order("provider_card_id", { ascending: true })
-      .range(from, from + 999);
+      .range(from, from + 999)
+      .returns<ProviderCardMapSummaryRow[]>();
     if (error) throw new Error(`provider_card_map(load): ${error.message}`);
-    const batch = (data ?? []) as ProviderCardMapSummaryRow[];
+    const batch = data ?? [];
     rows.push(...batch);
     if (batch.length < 1000) break;
   }
@@ -303,9 +304,10 @@ export async function loadScrydexSetFootprints(): Promise<ScrydexSetFootprint[]>
           .select("canonical_set_code, canonical_set_name, provider_set_id")
           .eq("provider", PROVIDER)
           .order("provider_set_id", { ascending: true })
-          .range(from, from + 999);
+          .range(from, from + 999)
+          .returns<ProviderSetMapRow[]>();
         if (error) throw new Error(`provider_set_map(load): ${error.message}`);
-        const batch = (data ?? []) as ProviderSetMapRow[];
+        const batch = data ?? [];
         rows.push(...batch);
         if (batch.length < 1000) break;
       }
@@ -539,9 +541,10 @@ async function loadScrydexCardHistoryTargets(params: {
       .eq("mapping_status", "MATCHED")
       .order("provider_card_id", { ascending: true })
       .order("provider_variant_id", { ascending: true })
-      .range(from, from + 999);
+      .range(from, from + 999)
+      .returns<ProviderCardMapSummaryRow[]>();
     if (error) throw new Error(`provider_card_map(load set targets): ${error.message}`);
-    const batch = (data ?? []) as ProviderCardMapSummaryRow[];
+    const batch = data ?? [];
     rows.push(...batch);
     if (batch.length < 1000) break;
   }
@@ -593,9 +596,10 @@ async function loadExistingSnapshotDayKeys(variantRefs: string[], sinceIso: stri
       .eq("provider", PROVIDER)
       .eq("source_window", "snapshot")
       .in("variant_ref", chunk)
-      .gte("ts", sinceIso);
+      .gte("ts", sinceIso)
+      .returns<PriceHistoryStateRow[]>();
     if (error) throw new Error(`price_history_points(load existing history days): ${error.message}`);
-    for (const row of (data ?? []) as PriceHistoryStateRow[]) {
+    for (const row of data ?? []) {
       const variantRef = normalizeText(row.variant_ref);
       const dayKey = extractDayKey(row.ts);
       if (!variantRef || !dayKey) continue;

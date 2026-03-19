@@ -6,68 +6,93 @@ import UIKit
 @available(iOS 17.0, *)
 public struct ScannerView: View {
     @ObservedObject private var viewModel: ScannerViewModel
+    private let overlay: any ScannerOverlay
 
-    public init(viewModel: ScannerViewModel) {
+    public init(
+        viewModel: ScannerViewModel,
+        overlay: any ScannerOverlay = GlassMorphScannerOverlay()
+    ) {
         self.viewModel = viewModel
+        self.overlay = overlay
     }
 
     public var body: some View {
         GeometryReader { geometry in
             ZStack {
-                ScannerCameraPreview(engine: viewModel.visionEngine)
-                    .ignoresSafeArea()
-
-                scannerOverlay(in: geometry.size)
-                    .allowsHitTesting(false)
-
-                if let recognizedCardID = viewModel.recognizedCardID {
-                    banner(cardID: recognizedCardID)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                if viewModel.useMockData {
+                    ScannerSimulatorPreview()
+                } else {
+                    ScannerCameraPreview(engine: viewModel.visionEngine)
                 }
+            }
+            .ignoresSafeArea()
+            .overlay {
+                overlay.makeOverlay(
+                    context: ScannerOverlayContext(
+                        size: geometry.size,
+                        isScanning: viewModel.isScanning,
+                        recognizedCard: viewModel.recognizedCard,
+                        debugIndexLabel: viewModel.debugIndexLabel,
+                        useMockData: viewModel.useMockData
+                    )
+                )
+                .allowsHitTesting(false)
             }
             .background(Color.black)
             .animation(.easeInOut(duration: 0.2), value: viewModel.recognizedCardID)
-        }
-    }
-
-    @ViewBuilder
-    private func scannerOverlay(in size: CGSize) -> some View {
-        let cardAspectRatio = CGFloat(2.5 / 3.5)
-        let boxWidth = min(size.width * 0.72, size.height * 0.45 * cardAspectRatio)
-        let boxHeight = boxWidth / cardAspectRatio
-
-        RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .stroke(viewModel.isScanning ? Color.green.opacity(0.95) : Color.yellow.opacity(0.95), lineWidth: 3)
-            .frame(width: boxWidth, height: boxHeight)
-            .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(.black.opacity(0.12))
-            )
-            .shadow(color: .black.opacity(0.35), radius: 18, y: 12)
-    }
-
-    @ViewBuilder
-    private func banner(cardID: String) -> some View {
-        VStack {
-            Spacer()
-
-            VStack(spacing: 4) {
-                Text("Card Found!")
-                    .font(.headline.weight(.semibold))
-                Text(cardID)
-                    .font(.subheadline.monospaced())
-                    .lineLimit(1)
+            .task(id: viewModel.simulatorTaskID) {
+                await maybeTriggerSimulatorDetection()
             }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(.black.opacity(0.78))
-            )
-            .padding(.bottom, 32)
         }
-        .padding(.horizontal, 20)
+    }
+
+    private func maybeTriggerSimulatorDetection() async {
+        guard viewModel.useMockData, viewModel.isScanning, viewModel.recognizedCard == nil else {
+            return
+        }
+
+        try? await Task.sleep(for: .milliseconds(650))
+
+        guard !Task.isCancelled else {
+            return
+        }
+
+        await MainActor.run {
+            viewModel.triggerMockDetection()
+        }
+    }
+}
+
+@available(iOS 17.0, *)
+private struct ScannerSimulatorPreview: View {
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color.black,
+                    Color(red: 0.08, green: 0.11, blue: 0.17)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+
+            VStack(spacing: 10) {
+                Image(systemName: "iphone.gen3.radiowaves.left.and.right")
+                    .font(.system(size: 38, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+
+                Text("Simulator Mode")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.white)
+
+                Text("Mock card data will drive the found-card flow.")
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.75))
+                    .multilineTextAlignment(.center)
+            }
+            .padding(24)
+        }
     }
 }
 

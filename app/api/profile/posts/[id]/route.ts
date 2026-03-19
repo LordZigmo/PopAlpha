@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require";
-import { dbPublic } from "@/lib/db";
+import { createServerSupabaseUserClient } from "@/lib/db/user";
 import { replacePostMentions, resolveSlashMentions } from "@/lib/profile/post-mentions";
 
 export const runtime = "nodejs";
@@ -31,30 +31,19 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }
 
   try {
-    const db = dbPublic();
-    const { data: existing, error: lookupError } = await db
-      .from("profile_posts")
-      .select("owner_id")
-      .eq("id", postId)
-      .maybeSingle<{ owner_id: string }>();
-
-    if (lookupError) throw new Error(lookupError.message);
-    if (!existing) {
-      return NextResponse.json({ ok: false, error: "Post not found." }, { status: 404 });
-    }
-    if (existing.owner_id !== auth.userId) {
-      return NextResponse.json({ ok: false, error: "Forbidden." }, { status: 403 });
-    }
+    const db = await createServerSupabaseUserClient();
 
     const { data: updated, error } = await db
       .from("profile_posts")
       .update({ body: nextText })
       .eq("id", postId)
-      .eq("owner_id", auth.userId)
       .select("id, body, created_at")
-      .single();
+      .maybeSingle();
 
     if (error) throw new Error(error.message);
+    if (!updated) {
+      return NextResponse.json({ ok: false, error: "Post not found." }, { status: 404 });
+    }
     const mentions = await resolveSlashMentions(db, nextText);
     await replacePostMentions(db, postId, mentions);
     const { data: mentionRows, error: mentionError } = await db
@@ -84,28 +73,19 @@ export async function DELETE(_: Request, { params }: { params: Promise<{ id: str
   }
 
   try {
-    const db = dbPublic();
-    const { data: existing, error: lookupError } = await db
-      .from("profile_posts")
-      .select("owner_id")
-      .eq("id", postId)
-      .maybeSingle<{ owner_id: string }>();
+    const db = await createServerSupabaseUserClient();
 
-    if (lookupError) throw new Error(lookupError.message);
-    if (!existing) {
-      return NextResponse.json({ ok: false, error: "Post not found." }, { status: 404 });
-    }
-    if (existing.owner_id !== auth.userId) {
-      return NextResponse.json({ ok: false, error: "Forbidden." }, { status: 403 });
-    }
-
-    const { error } = await db
+    const { data: deleted, error } = await db
       .from("profile_posts")
       .delete()
       .eq("id", postId)
-      .eq("owner_id", auth.userId);
+      .select("id")
+      .maybeSingle();
 
     if (error) throw new Error(error.message);
+    if (!deleted) {
+      return NextResponse.json({ ok: false, error: "Post not found." }, { status: 404 });
+    }
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json(

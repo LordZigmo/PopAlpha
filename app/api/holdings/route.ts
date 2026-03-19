@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireOnboarded } from "@/lib/auth/require";
-import { dbAdmin } from "@/lib/db/admin";
+import { createServerSupabaseUserClient } from "@/lib/db/user";
 
 export const runtime = "nodejs";
 
@@ -10,7 +10,7 @@ export async function GET(req: Request) {
   const auth = await requireOnboarded(req);
   if (!auth.ok) return auth.response;
 
-  const supabase = dbAdmin();
+  const supabase = await createServerSupabaseUserClient();
   const { data, error } = await supabase
     .from("holdings")
     .select("id, canonical_slug, printing_id, grade, qty, price_paid_usd, acquired_on, venue, cert_number")
@@ -62,8 +62,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "price_paid_usd must be >= 0." }, { status: 400 });
   }
 
-  // Owner-scoped insert — never accept user_id from body
-  const supabase = dbAdmin();
+  const supabase = await createServerSupabaseUserClient();
   const { error } = await supabase.from("holdings").insert({
     owner_clerk_id: auth.userId,
     canonical_slug,
