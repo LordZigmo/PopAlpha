@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require";
-import { dbPublic } from "@/lib/db";
+import { createServerSupabaseUserClient } from "@/lib/db/user";
 import { ensureAppUser } from "@/lib/data/app-user";
 import { replacePostMentions, resolveSlashMentions } from "@/lib/profile/post-mentions";
 
@@ -28,7 +28,7 @@ export async function POST(req: Request) {
 
   try {
     await ensureAppUser(auth.userId);
-    const db = dbPublic();
+    const db = await createServerSupabaseUserClient();
     const mentions = await resolveSlashMentions(db, rawText);
     const { data: post, error } = await db
       .from("profile_posts")

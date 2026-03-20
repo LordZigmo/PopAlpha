@@ -1,4 +1,5 @@
 import { dbPublic } from "@/lib/db";
+import { createServerSupabaseUserClient } from "@/lib/db/user";
 import type { HomepageCard } from "@/lib/data/homepage";
 
 export type CommunityVoteSide = "up" | "down";
@@ -30,6 +31,12 @@ type VoteRow = {
   canonical_slug: string;
   vote_side: CommunityVoteSide;
   voter_id: string;
+};
+
+type VoteTotalsRow = {
+  canonical_slug: string;
+  bullish_votes: number;
+  bearish_votes: number;
 };
 
 type FollowRow = {
@@ -91,40 +98,50 @@ export async function getCommunityPulseSnapshot(
     };
   }
 
-  const db = dbPublic();
+  const publicDb = dbPublic();
+  const aggregatePromise = publicDb
+    .from("public_community_vote_totals")
+    .select("canonical_slug, bullish_votes, bearish_votes")
+    .eq("week_start", weekStart)
+    .in("canonical_slug", slugs);
 
-  const [voteResult, userVotesResult, followeesResult] = await Promise.all([
-    db
-      .from("community_card_votes")
-      .select("canonical_slug, vote_side, voter_id")
-      .eq("week_start", weekStart)
-      .in("canonical_slug", slugs),
-    userId
-      ? db
-          .from("community_card_votes")
-          .select("canonical_slug")
-          .eq("week_start", weekStart)
-          .eq("voter_id", userId)
-      : Promise.resolve({ data: [] as Array<{ canonical_slug: string }>, error: null }),
-    userId
-      ? db
-          .from("profile_follows")
-          .select("followee_id")
-          .eq("follower_id", userId)
-      : Promise.resolve({ data: [] as FollowRow[], error: null }),
-  ]);
+  const [aggregateResult, accessibleVotesResult, followeesResult] = userId
+    ? await (async () => {
+        const userDb = await createServerSupabaseUserClient();
+        return Promise.all([
+          aggregatePromise,
+          userDb
+            .from("community_card_votes")
+            .select("canonical_slug, vote_side, voter_id")
+            .eq("week_start", weekStart)
+            .in("canonical_slug", slugs),
+          userDb
+            .from("profile_follows")
+            .select("followee_id")
+            .eq("follower_id", userId),
+        ]);
+      })()
+    : await Promise.all([
+        aggregatePromise,
+        Promise.resolve({ data: [] as VoteRow[], error: null }),
+        Promise.resolve({ data: [] as FollowRow[], error: null }),
+      ]);
 
-  if (voteResult.error) console.error("[community-pulse] votes", voteResult.error.message);
-  if (userVotesResult.error) console.error("[community-pulse] user votes", userVotesResult.error.message);
+  if (aggregateResult.error) console.error("[community-pulse] aggregate votes", aggregateResult.error.message);
+  if (accessibleVotesResult.error) console.error("[community-pulse] accessible votes", accessibleVotesResult.error.message);
   if (followeesResult.error) console.error("[community-pulse] followees", followeesResult.error.message);
 
-  const voteRows = (voteResult.data ?? []) as VoteRow[];
+  const aggregateRows = (aggregateResult.data ?? []) as VoteTotalsRow[];
+  const voteRows = (accessibleVotesResult.data ?? []) as VoteRow[];
   const followeeIds = new Set(
     ((followeesResult.data ?? []) as FollowRow[]).map((row) => row.followee_id).filter(Boolean),
   );
 
   const userVotesUsed = userId
-    ? Math.min(WEEKLY_VOTE_LIMIT, ((userVotesResult.data ?? []) as Array<{ canonical_slug: string }>).length)
+    ? Math.min(
+        WEEKLY_VOTE_LIMIT,
+        voteRows.filter((row) => row.voter_id === userId).length,
+      )
     : 0;
 
   const counts = new Map<string, {
@@ -136,9 +153,10 @@ export async function getCommunityPulseSnapshot(
   }>();
 
   for (const slug of slugs) {
+    const aggregate = aggregateRows.find((row) => row.canonical_slug === slug);
     counts.set(slug, {
-      up: 0,
-      down: 0,
+      up: aggregate?.bullish_votes ?? 0,
+      down: aggregate?.bearish_votes ?? 0,
       userVote: null,
       followedUpCount: 0,
       followedDownCount: 0,
@@ -148,9 +166,6 @@ export async function getCommunityPulseSnapshot(
   for (const row of voteRows) {
     const bucket = counts.get(row.canonical_slug);
     if (!bucket) continue;
-
-    if (row.vote_side === "up") bucket.up += 1;
-    else bucket.down += 1;
 
     if (userId && row.voter_id === userId) {
       bucket.userVote = row.vote_side;

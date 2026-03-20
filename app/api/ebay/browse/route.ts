@@ -1,13 +1,7 @@
 import { NextResponse } from "next/server";
+import { getEbayAppAccessToken, getEbayBaseUrl } from "@/lib/ebay/api";
 
 export const runtime = "nodejs";
-
-type TokenCache = {
-  accessToken: string;
-  expiresAt: number;
-};
-
-let tokenCache: TokenCache | null = null;
 
 type EbayBrowseItem = {
   itemId?: string;
@@ -25,11 +19,6 @@ type EbayBrowseResponse = {
   itemSummaries?: EbayBrowseItem[];
   total?: number;
 };
-
-function getEbayBaseUrl(): string {
-  const env = (process.env.EBAY_ENV ?? "production").trim().toLowerCase();
-  return env === "sandbox" ? "https://api.sandbox.ebay.com" : "https://api.ebay.com";
-}
 
 function parseLimit(raw: string | null): number {
   const value = Number.parseInt(raw ?? "", 10);
@@ -155,49 +144,6 @@ function evaluateRequestedCard(
   return { matches: true, score };
 }
 
-async function getAppAccessToken(): Promise<string> {
-  const now = Date.now();
-  if (tokenCache && tokenCache.expiresAt > now + 20_000) {
-    return tokenCache.accessToken;
-  }
-
-  const clientId = process.env.EBAY_CLIENT_ID?.trim() ?? "";
-  const clientSecret = process.env.EBAY_CLIENT_SECRET?.trim() ?? "";
-  if (!clientId || !clientSecret) {
-    throw new Error("Missing EBAY_CLIENT_ID or EBAY_CLIENT_SECRET.");
-  }
-
-  const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
-  const tokenUrl = `${getEbayBaseUrl()}/identity/v1/oauth2/token`;
-  const body = new URLSearchParams({
-    grant_type: "client_credentials",
-    scope: "https://api.ebay.com/oauth/api_scope",
-  });
-
-  const response = await fetch(tokenUrl, {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${credentials}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: body.toString(),
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`eBay token request failed (${response.status}): ${text}`);
-  }
-
-  const payload = (await response.json()) as { access_token: string; expires_in?: number };
-  const expiresIn = typeof payload.expires_in === "number" ? payload.expires_in : 7200;
-  tokenCache = {
-    accessToken: payload.access_token,
-    expiresAt: now + expiresIn * 1000,
-  };
-  return payload.access_token;
-}
-
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const queries = url.searchParams.getAll("q").map(normalizeQuery).filter(Boolean);
@@ -217,7 +163,7 @@ export async function GET(req: Request) {
   }
 
   try {
-    const token = await getAppAccessToken();
+    const token = await getEbayAppAccessToken();
     const browseUrl = `${getEbayBaseUrl()}/buy/browse/v1/item_summary/search`;
     const dedupedItems = new Map<string, ReturnType<typeof mapBrowseItem> & { _matchScore?: number }>();
 

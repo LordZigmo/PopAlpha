@@ -1,20 +1,18 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require";
-import { dbPublic } from "@/lib/db";
+import { createServerSupabaseUserClient } from "@/lib/db/user";
 import { ensureAppUser } from "@/lib/data/app-user";
 
 export const runtime = "nodejs";
 
 async function resolveHandle(handle: string): Promise<string | null> {
-  const db = dbPublic();
-  const { data, error } = await db
-    .from("app_users")
-    .select("clerk_user_id")
-    .eq("handle_norm", handle.trim().toLowerCase())
-    .maybeSingle<{ clerk_user_id: string }>();
+  const db = await createServerSupabaseUserClient();
+  const { data, error } = await db.rpc("resolve_profile_handle", {
+    desired_handle_norm: handle.trim().toLowerCase(),
+  });
 
   if (error) throw new Error(error.message);
-  return data?.clerk_user_id ?? null;
+  return typeof data === "string" && data ? data : null;
 }
 
 export async function POST(req: Request) {
@@ -40,7 +38,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Profile not found." }, { status: 404 });
     }
 
-    const db = dbPublic();
+    const db = await createServerSupabaseUserClient();
     const { error } = await db.from("profile_follows").upsert(
       {
         follower_id: auth.userId,
@@ -74,7 +72,7 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ ok: false, error: "Profile not found." }, { status: 404 });
     }
 
-    const db = dbPublic();
+    const db = await createServerSupabaseUserClient();
     const { error } = await db
       .from("profile_follows")
       .delete()

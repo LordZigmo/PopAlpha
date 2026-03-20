@@ -100,6 +100,8 @@ const CHART_DAYS_DEFAULT = 30;
 const CHART_POINT_LIMIT = 2000;
 const CHART_MIN_POINTS = 5;    // warn below this, but still return
 const SIGNAL_MIN_POINTS = 10;  // minimum history points to show signals
+const RAW_HISTORY_PROVIDERS = ["SCRYDEX", "POKEMON_TCG_API"] as const;
+const LEGACY_HISTORY_PROVIDERS = ["JUSTTCG"] as const;
 
 // ── Internal helpers ────────────────────────────────────────────────────────
 
@@ -117,6 +119,8 @@ type VariantHistoryStat = {
   variantRef: string;
   points: number;
   latestTs: string | null;
+  printingId: string | null;
+  providerRank: number;
 };
 
 type ParsedLegacyVariantRef = {
@@ -128,28 +132,130 @@ type ParsedLegacyVariantRef = {
   grade: string;
 };
 
-async function getRecentVariantStats(slug: string, days = 30): Promise<VariantHistoryStat[]> {
+type HistoryQueryProfile = {
+  providers: readonly string[];
+  sourceWindow: "snapshot" | "30d";
+};
+
+type PublicHistoryRow = {
+  variant_ref: string | null;
+  ts: string | null;
+  provider: string | null;
+  price?: number | string | null;
+};
+
+function getHistoryQueryProfiles(params: {
+  grade: string;
+  isSealed: boolean;
+}): HistoryQueryProfile[] {
+  if (params.grade === "RAW" && !params.isSealed) {
+    return [
+      { providers: RAW_HISTORY_PROVIDERS, sourceWindow: "snapshot" },
+      { providers: LEGACY_HISTORY_PROVIDERS, sourceWindow: "30d" },
+    ];
+  }
+  return [{ providers: LEGACY_HISTORY_PROVIDERS, sourceWindow: "30d" }];
+}
+
+function normalizeHistoryProviderName(provider: string | null | undefined): "SCRYDEX" | "JUSTTCG" | null {
+  const normalized = String(provider ?? "").trim().toUpperCase();
+  if (normalized === "SCRYDEX" || normalized === "POKEMON_TCG_API") return "SCRYDEX";
+  if (normalized === "JUSTTCG") return "JUSTTCG";
+  return null;
+}
+
+function historyProviderRank(provider: string | null | undefined): number {
+  const normalized = normalizeHistoryProviderName(provider);
+  if (normalized === "SCRYDEX") return 0;
+  if (normalized === "JUSTTCG") return 1;
+  return 2;
+}
+
+export function extractRawVariantPrintingId(variantRef: string): string | null {
+  const rawValue = String(variantRef ?? "").trim();
+  if (!rawValue.endsWith("::RAW")) return null;
+  const [printingId] = rawValue.split("::");
+  const normalized = printingId?.trim() ?? "";
+  return normalized || null;
+}
+
+function compareIsoDesc(left: string | null, right: string | null): number {
+  if (left === right) return 0;
+  if (!left) return 1;
+  if (!right) return -1;
+  return right.localeCompare(left);
+}
+
+async function loadPublicHistoryRows(params: {
+  slug: string;
+  since: string;
+  select: string;
+  limit: number;
+  ascending: boolean;
+  variantRef?: string | null;
+  profiles: HistoryQueryProfile[];
+  errorLabel: string;
+}): Promise<PublicHistoryRow[]> {
   const supabase = dbPublic();
+  for (const profile of params.profiles) {
+    let query = supabase
+      .from("public_price_history")
+      .select(params.select)
+      .eq("canonical_slug", params.slug)
+      .in("provider", [...profile.providers])
+      .eq("source_window", profile.sourceWindow)
+      .gte("ts", params.since)
+      .order("ts", { ascending: params.ascending })
+      .limit(params.limit);
+
+    if (params.variantRef) {
+      query = query.eq("variant_ref", params.variantRef);
+    }
+
+    const { data, error } = await query.returns<PublicHistoryRow[]>();
+    if (error) {
+      console.error(params.errorLabel, params.slug, params.variantRef ?? null, error.message);
+      continue;
+    }
+    if ((data ?? []).length > 0) {
+      return data ?? [];
+    }
+  }
+
+  return [];
+}
+
+async function getRecentVariantStats(
+  slug: string,
+  days = 30,
+  options: { grade?: string; isSealed?: boolean } = {},
+): Promise<VariantHistoryStat[]> {
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
-
-  const { data, error } = await supabase
-    .from("public_price_history")
-    .select("variant_ref, ts")
-    .eq("canonical_slug", slug)
-    .eq("provider", "JUSTTCG")
-    .eq("source_window", "30d")
-    // NM filtering: canonical refs (uuid::RAW) are inherently NM;
-    // legacy refs with :lp:/:mp: are rare and deprioritized by point count.
-    .gte("ts", since)
-    .limit(CHART_POINT_LIMIT);
-
-  if (error) console.error("[getRecentVariantStats]", slug, error.message);
+  const rows = await loadPublicHistoryRows({
+    slug,
+    since,
+    select: "variant_ref, ts, provider",
+    limit: CHART_POINT_LIMIT,
+    ascending: false,
+    profiles: getHistoryQueryProfiles({
+      grade: options.grade ?? "RAW",
+      isSealed: options.isSealed ?? isSealedSlug(slug),
+    }),
+    errorLabel: "[getRecentVariantStats]",
+  });
 
   const stats = new Map<string, VariantHistoryStat>();
-  for (const row of data ?? []) {
-    const variantRef = row.variant_ref as string;
-    const ts = (row.ts as string | null) ?? null;
-    const current = stats.get(variantRef) ?? { variantRef, points: 0, latestTs: null };
+  for (const row of rows) {
+    const variantRef = String(row.variant_ref ?? "").trim();
+    if (!variantRef) continue;
+    const ts = row.ts ?? null;
+    const current = stats.get(variantRef) ?? {
+      variantRef,
+      points: 0,
+      latestTs: null,
+      printingId: extractRawVariantPrintingId(variantRef),
+      providerRank: historyProviderRank(row.provider),
+    };
     current.points += 1;
     if (ts && (!current.latestTs || ts > current.latestTs)) {
       current.latestTs = ts;
@@ -158,6 +264,7 @@ async function getRecentVariantStats(slug: string, days = 30): Promise<VariantHi
   }
 
   return [...stats.values()].sort((a, b) => {
+    if (a.providerRank !== b.providerRank) return a.providerRank - b.providerRank;
     if (b.points !== a.points) return b.points - a.points;
     if (a.latestTs === b.latestTs) return a.variantRef.localeCompare(b.variantRef);
     if (!a.latestTs) return 1;
@@ -179,8 +286,14 @@ function parseLegacyVariantRef(variantRef: string): ParsedLegacyVariantRef | nul
   return null;
 }
 
-function variantRefsCompatible(source: string, candidate: string): boolean {
+export function variantRefsCompatible(source: string, candidate: string): boolean {
   if (source === candidate) return true;
+
+  const leftRawPrintingId = extractRawVariantPrintingId(source);
+  const rightRawPrintingId = extractRawVariantPrintingId(candidate);
+  if (leftRawPrintingId && rightRawPrintingId) {
+    return leftRawPrintingId === rightRawPrintingId;
+  }
 
   const leftCanonical = parseCanonicalVariantRef(source);
   const rightCanonical = parseCanonicalVariantRef(candidate);
@@ -213,8 +326,11 @@ function variantRefsCompatible(source: string, candidate: string): boolean {
  * 1. most history points
  * 2. most recent point timestamp
  */
-export async function getDefaultVariantRef(slug: string): Promise<string | null> {
-  const stats = await getRecentVariantStats(slug, 30);
+export async function getDefaultVariantRef(
+  slug: string,
+  options: { grade?: string; isSealed?: boolean } = {},
+): Promise<string | null> {
+  const stats = await getRecentVariantStats(slug, 30, options);
   return stats[0]?.variantRef ?? null;
 }
 
@@ -228,24 +344,31 @@ export async function getChartSeries(
   slug: string,
   variantRef: string,
   days = CHART_DAYS_DEFAULT,
+  options: { grade?: string; isSealed?: boolean } = {},
 ): Promise<ChartPoint[]> {
-  const supabase = dbPublic();
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  const rows = await loadPublicHistoryRows({
+    slug,
+    since,
+    select: "ts, price, provider, variant_ref",
+    limit: CHART_POINT_LIMIT,
+    ascending: true,
+    variantRef,
+    profiles: getHistoryQueryProfiles({
+      grade: options.grade ?? "RAW",
+      isSealed: options.isSealed ?? isSealedSlug(slug),
+    }),
+    errorLabel: "[getChartSeries]",
+  });
 
-  const { data, error } = await supabase
-    .from("public_price_history")
-    .select("ts, price")
-    .eq("canonical_slug", slug)
-    .eq("variant_ref", variantRef)
-    .eq("provider", "JUSTTCG")
-    .eq("source_window", "30d")
-    .gte("ts", since)
-    .order("ts", { ascending: true })
-    .limit(CHART_POINT_LIMIT);
-
-  if (error) console.error("[getChartSeries]", slug, variantRef, error.message);
-
-  return (data ?? []).map((r) => ({ ts: r.ts as string, price: Number(r.price) }));
+  return rows
+    .map((row) => {
+      const ts = row.ts ?? null;
+      const price = Number(row.price);
+      if (!ts || !Number.isFinite(price)) return null;
+      return { ts, price };
+    })
+    .filter((row): row is ChartPoint => row !== null);
 }
 
 // ── getLatestMetrics ────────────────────────────────────────────────────────
@@ -255,12 +378,16 @@ export async function getChartSeries(
  * Uses DISTINCT ON equivalent: orders by updated_at DESC and takes limit 1.
  * Returns null if no metrics row exists — never throws.
  */
-async function getLatestMetrics(slug: string): Promise<AssetMetrics | null> {
+async function getLatestMetrics(
+  slug: string,
+  grade = "RAW",
+  printingId: string | null = null,
+): Promise<AssetMetrics | null> {
   const supabase = dbPublic();
 
   // Signal columns (signal_trend_strength, signal_breakout, signal_value_zone, signals_as_of_ts)
   // are excluded from public_card_metrics — paywalled behind pro views.
-  const { data, error } = await supabase
+  let query = supabase
     .from("public_card_metrics")
     .select(
       [
@@ -276,12 +403,13 @@ async function getLatestMetrics(slug: string): Promise<AssetMetrics | null> {
       ].join(", ")
     )
     .eq("canonical_slug", slug)
-    // For sealed: printing_id IS NULL. For singles with the canonical aggregate: also NULL.
-    .is("printing_id", null)
-    .eq("grade", "RAW")
+    .eq("grade", grade)
     .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle<AssetMetrics>();
+    .limit(1);
+
+  query = printingId ? query.eq("printing_id", printingId) : query.is("printing_id", null);
+
+  const { data, error } = await query.maybeSingle<AssetMetrics>();
 
   if (error) console.error("[getLatestMetrics]", slug, error.message);
 
@@ -327,12 +455,12 @@ export async function getAssetPageData(
   // Load metrics, defaultVariantRef, chart in parallel.
   const [metrics, defaultVariantRef] = await Promise.all([
     getLatestMetrics(slug),
-    getDefaultVariantRef(slug),
+    getDefaultVariantRef(slug, { isSealed }),
   ]);
 
   // Load chart only if we have a variant ref.
   const chartSeries = defaultVariantRef
-    ? await getChartSeries(slug, defaultVariantRef, days)
+    ? await getChartSeries(slug, defaultVariantRef, days, { isSealed })
     : [];
 
   return {
@@ -593,22 +721,20 @@ export async function buildAssetViewModel(
   const isSealed = isSealedSlug(slug) || canonical.variant === "SEALED";
 
   // 2. Determine the single variant_ref we should display.
-  const recentVariantStats = await getRecentVariantStats(slug, 30);
+  const recentVariantStats = await getRecentVariantStats(slug, 30, { grade, isSealed });
   const preferredVariantStats = preferredPrintingId
-    ? recentVariantStats.filter((row) => {
-        const parsed = parseCanonicalVariantRef(row.variantRef);
-        return parsed?.printingId === preferredPrintingId;
-      })
+    ? recentVariantStats.filter((row) => row.printingId === preferredPrintingId)
     : [];
-  const selectedVariantRef = preferredVariantStats[0]?.variantRef ?? recentVariantStats[0]?.variantRef ?? null;
-  const selectedVariantPoints = recentVariantStats[0]?.points ?? 0;
+  const selectedVariant = preferredVariantStats[0] ?? recentVariantStats[0] ?? null;
+  const selectedVariantRef = selectedVariant?.variantRef ?? null;
+  const selectedVariantPoints = selectedVariant?.points ?? 0;
   const availableVariantRefs = recentVariantStats
     .filter((row) => row.points >= SIGNAL_MIN_POINTS)
     .map((row) => row.variantRef);
 
   // 3. Chart series for the selected variant.
   const series = selectedVariantRef
-    ? await getChartSeries(slug, selectedVariantRef, days)
+    ? await getChartSeries(slug, selectedVariantRef, days, { grade, isSealed })
     : [];
 
   // 4. Compute price metrics from series + read pre-computed changes from card_metrics.
@@ -618,7 +744,11 @@ export async function buildAssetViewModel(
   const range_30d_high = prices.length > 0 ? Math.max(...prices) : null;
 
   // Read pre-computed change percentages from card_metrics (populated by refresh_price_changes).
-  const metricsRow = await getLatestMetrics(slug);
+  const metricsRow = await getLatestMetrics(
+    slug,
+    grade,
+    grade === "RAW" && !isSealed ? preferredPrintingId : null,
+  );
   const change_24h_pct = metricsRow?.change_pct_24h ?? null;
   const change_7d_pct  = metricsRow?.change_pct_7d ?? null;
 
@@ -632,46 +762,55 @@ export async function buildAssetViewModel(
   if (!selectedVariantRef) {
     reason = "no_history";
   } else {
+    const historyProviders = [...new Set(
+      getHistoryQueryProfiles({ grade, isSealed }).flatMap((profile) => [...profile.providers]),
+    )];
     // Signal columns (signal_trend, signal_breakout, signal_value, signals_as_of_ts)
     // are paywalled — no longer in public_variant_metrics. Only request what's available.
     const { data: vmRows, error: vmError } = await supabase
       .from("public_variant_metrics")
-      .select("variant_ref, history_points_30d, provider_as_of_ts")
+      .select("variant_ref, provider, history_points_30d, provider_as_of_ts")
       .eq("canonical_slug", slug)
-      .eq("provider", "JUSTTCG")
       .eq("grade", grade)
-      .order("history_points_30d", { ascending: false })
-      .limit(10);
+      .in("provider", historyProviders)
+      .order("provider_as_of_ts", { ascending: false })
+      .limit(20);
 
     if (vmError) console.error("[buildAssetViewModel] variant_metrics", slug, vmError.message);
 
-    const vmRow = (vmRows ?? []).find((row) => row.variant_ref === selectedVariantRef)
-      ?? (vmRows ?? []).find((row) => variantRefsCompatible(selectedVariantRef, row.variant_ref as string))
+    const typedVmRows = (vmRows ?? []) as Array<{
+      variant_ref: string;
+      provider: string | null;
+      history_points_30d: number | null;
+      provider_as_of_ts: string | null;
+    }>;
+    const vmRow = [...typedVmRows]
+      .filter((row) => variantRefsCompatible(selectedVariantRef, row.variant_ref))
+      .sort((left, right) => {
+        const providerDelta = historyProviderRank(left.provider) - historyProviderRank(right.provider);
+        if (providerDelta !== 0) return providerDelta;
+        const tsDelta = compareIsoDesc(left.provider_as_of_ts, right.provider_as_of_ts);
+        if (tsDelta !== 0) return tsDelta;
+        return (right.history_points_30d ?? 0) - (left.history_points_30d ?? 0);
+      })[0]
       ?? null;
 
     const typedVmRow = vmRow as {
       variant_ref: string;
+      provider: string | null;
       history_points_30d: number | null;
       provider_as_of_ts: string | null;
     } | null;
 
-    provider_as_of_ts = typedVmRow?.provider_as_of_ts ?? null;
+    provider_as_of_ts = typedVmRow?.provider_as_of_ts ?? metricsRow?.provider_as_of_ts ?? null;
     // signals_as_of_ts not available in public view — paywalled.
-    signals_history_points_30d = typedVmRow?.history_points_30d ?? null;
-
-    const selectedPoints = (preferredVariantStats.find((row) => row.variantRef === selectedVariantRef)?.points
-      ?? recentVariantStats.find((row) => row.variantRef === selectedVariantRef)?.points
-      ?? selectedVariantPoints);
-    const enoughHistory =
-      Math.max(selectedPoints, typedVmRow?.history_points_30d ?? 0) >= SIGNAL_MIN_POINTS;
+    const computedHistoryPoints = Math.max(selectedVariantPoints, typedVmRow?.history_points_30d ?? 0);
+    signals_history_points_30d = computedHistoryPoints > 0 ? computedHistoryPoints : null;
+    const enoughHistory = computedHistoryPoints >= SIGNAL_MIN_POINTS;
 
     // Signal columns are paywalled — not available in public_variant_metrics.
     // Signals will always be null here; pro users get them via /api/pro/signals.
-    if (!enoughHistory) {
-      reason = "insufficient_recent_activity";
-    } else {
-      reason = "insufficient_recent_activity";
-    }
+    reason = enoughHistory ? null : "insufficient_recent_activity";
   }
 
   return {

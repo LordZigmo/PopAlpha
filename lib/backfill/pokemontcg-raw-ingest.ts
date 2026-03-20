@@ -29,6 +29,20 @@ const DEFAULT_COOLDOWN_MINUTES = process.env.SCRYDEX_RAW_COOLDOWN_MINUTES
 const DEFAULT_FAILED_QUEUE_LIMIT = process.env.SCRYDEX_FAILED_SET_QUEUE_LIMIT
   ? parseInt(process.env.SCRYDEX_FAILED_SET_QUEUE_LIMIT, 10)
   : 200;
+const HOT_SLOT_INTERVAL = process.env.SCRYDEX_HOT_SLOT_INTERVAL
+  ? Math.max(2, parseInt(process.env.SCRYDEX_HOT_SLOT_INTERVAL, 10))
+  : 6;
+const HOT_SET_LIMIT = process.env.SCRYDEX_HOT_SET_LIMIT
+  ? Math.max(1, parseInt(process.env.SCRYDEX_HOT_SET_LIMIT, 10))
+  : 10;
+const PINNED_HOT_SET_IDS = (() => {
+  const defaults = ["sv3pt5"];
+  const configured = String(process.env.SCRYDEX_PINNED_HOT_SET_IDS ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return normalizeStringList([...defaults, ...configured]);
+})();
 const MAX_SETS_PER_RUN_CAP = process.env.SCRYDEX_RAW_SETS_PER_RUN_CAP
   ? parseInt(process.env.SCRYDEX_RAW_SETS_PER_RUN_CAP, 10)
   : 6;
@@ -101,6 +115,8 @@ type IngestTarget = {
 
 type IngestRunState = {
   cursorSetCode: string | null;
+  hotCursorProviderSetId: string | null;
+  selectionPhase: number;
   failedSetQueue: string[];
   cooldownByProviderSet: Record<string, string>;
 };
@@ -138,9 +154,31 @@ type RawIngestResult = {
   firstError: string | null;
 };
 
+type TargetSelectionPlan = {
+  selectedTargets: IngestTarget[];
+  nextSetCode: string | null;
+  nextHotProviderSetId: string | null;
+  nextSelectionPhase: number;
+  hotSlotCount: number;
+  baselineSlotCount: number;
+  hotProviderSetIds: string[];
+};
+
 function parsePositiveInt(value: number | undefined, fallback: number): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
   return Math.max(1, Math.floor(value));
+}
+
+function normalizeStringList(values: string[]): string[] {
+  const seen = new Set<string>();
+  const output: string[] = [];
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    output.push(trimmed);
+  }
+  return output;
 }
 
 function requestHash(endpoint: string, params: Record<string, unknown>): string {
@@ -195,6 +233,26 @@ function selectSetsFromCursor(sets: CanonicalSet[], setLimit: number, cursorSetC
   return selected;
 }
 
+function rotateItemsFromCursor<T>(params: {
+  items: T[];
+  limit: number;
+  cursor: string | null;
+  getKey: (item: T) => string;
+}): T[] {
+  if (params.items.length === 0) return [];
+  const limit = Math.min(Math.max(1, params.limit), params.items.length);
+  const cursor = String(params.cursor ?? "").trim();
+  if (!cursor) return params.items.slice(0, limit);
+
+  const cursorIndex = params.items.findIndex((item) => params.getKey(item) === cursor);
+  const startIndex = cursorIndex >= 0 ? (cursorIndex + 1) % params.items.length : 0;
+  const output: T[] = [];
+  for (let i = 0; i < limit; i += 1) {
+    output.push(params.items[(startIndex + i) % params.items.length]);
+  }
+  return output;
+}
+
 function parseStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value
@@ -222,17 +280,33 @@ async function loadLastRunState(): Promise<IngestRunState> {
     .eq("job", JOB)
     .eq("status", "finished")
     .order("ended_at", { ascending: false })
-    .limit(1)
-    .maybeSingle<LastRunRow>();
+    .limit(20);
 
   if (error) throw new Error(`ingest_runs(last state): ${error.message}`);
 
-  const meta = data?.meta ?? {};
+  let meta: Record<string, unknown> = {};
+  for (const row of ((data ?? []) as LastRunRow[])) {
+    const candidate = row.meta ?? {};
+    const providerSetId = typeof candidate.providerSetId === "string"
+      ? candidate.providerSetId.trim()
+      : "";
+    if (providerSetId) continue;
+    meta = candidate;
+    break;
+  }
   const cursorRaw = typeof meta.nextSetCode === "string"
     ? meta.nextSetCode
     : (typeof meta.cursorSetCode === "string" ? meta.cursorSetCode : "");
+  const hotCursorRaw = typeof meta.nextHotProviderSetId === "string"
+    ? meta.nextHotProviderSetId
+    : (typeof meta.hotCursorProviderSetId === "string" ? meta.hotCursorProviderSetId : "");
+  const selectionPhaseRaw = typeof meta.nextSelectionPhase === "number"
+    ? meta.nextSelectionPhase
+    : (typeof meta.selectionPhase === "number" ? meta.selectionPhase : 0);
   return {
     cursorSetCode: cursorRaw.trim() || null,
+    hotCursorProviderSetId: hotCursorRaw.trim() || null,
+    selectionPhase: Number.isFinite(selectionPhaseRaw) ? Math.max(0, Math.floor(selectionPhaseRaw)) : 0,
     failedSetQueue: parseStringArray(meta.failedSetQueue),
     cooldownByProviderSet: parseCooldownMap(meta.cooldownByProviderSet),
   };
@@ -303,6 +377,130 @@ function sortTargetsByFreshness(
     if (aAttempt !== bAttempt) return aAttempt - bAttempt;
     return String(a.setCode ?? "").localeCompare(String(b.setCode ?? ""));
   });
+}
+
+function buildHotProviderSetIds(params: {
+  allTargets: IngestTarget[];
+  recentConsistencySetIds: string[];
+  highValuePrioritySetIds: string[];
+  coveragePrioritySetIds: string[];
+}): string[] {
+  const byProviderSetId = new Map(params.allTargets.map((target) => [target.providerSetId, target] as const));
+  const output: string[] = [];
+  const seen = new Set<string>();
+  const add = (providerSetId: string | null | undefined) => {
+    const trimmed = String(providerSetId ?? "").trim();
+    if (!trimmed || seen.has(trimmed) || !byProviderSetId.has(trimmed)) return;
+    seen.add(trimmed);
+    output.push(trimmed);
+  };
+
+  for (const providerSetId of PINNED_HOT_SET_IDS) add(providerSetId);
+  for (const providerSetId of params.recentConsistencySetIds) add(providerSetId);
+  for (const providerSetId of params.highValuePrioritySetIds) add(providerSetId);
+  for (const providerSetId of params.coveragePrioritySetIds) add(providerSetId);
+
+  return output.slice(0, HOT_SET_LIMIT);
+}
+
+export function planScrydexTargetSelection(params: {
+  availableTargets: IngestTarget[];
+  failedSetQueue: string[];
+  hotProviderSetIds: string[];
+  setLimit: number;
+  cursorSetCode: string | null;
+  hotCursorProviderSetId: string | null;
+  selectionPhase: number;
+  hotSlotInterval?: number;
+}): TargetSelectionPlan {
+  const setLimit = Math.max(1, Math.floor(params.setLimit));
+  const hotSlotInterval = Math.max(2, Math.floor(params.hotSlotInterval ?? HOT_SLOT_INTERVAL));
+  const byProviderSetId = new Map(params.availableTargets.map((target) => [target.providerSetId, target] as const));
+  const hotProviderSetIds = normalizeStringList(params.hotProviderSetIds).filter((providerSetId) => byProviderSetId.has(providerSetId));
+  const hotTargetSet = new Set(hotProviderSetIds);
+  const hotTargets = hotProviderSetIds.flatMap((providerSetId) => {
+    const target = byProviderSetId.get(providerSetId);
+    return target ? [target] : [];
+  });
+  const baselineTargets = params.availableTargets.filter((target) => !hotTargetSet.has(target.providerSetId));
+  const fallbackBaselineTargets = baselineTargets.length > 0 ? baselineTargets : params.availableTargets;
+  const baselineRing = rotateItemsFromCursor({
+    items: fallbackBaselineTargets,
+    limit: fallbackBaselineTargets.length || params.availableTargets.length,
+    cursor: params.cursorSetCode,
+    getKey: (target) => String(target.setCode ?? target.providerSetId),
+  });
+  const hotRing = rotateItemsFromCursor({
+    items: hotTargets,
+    limit: hotTargets.length,
+    cursor: params.hotCursorProviderSetId,
+    getKey: (target) => target.providerSetId,
+  });
+
+  const selectedTargets: IngestTarget[] = [];
+  const seenProviderSetIds = new Set<string>();
+  let baselineIndex = 0;
+  let hotIndex = 0;
+  let selectionPhase = Math.max(0, Math.floor(params.selectionPhase));
+  let hotSlotCount = 0;
+  let baselineSlotCount = 0;
+
+  const takeNext = (ring: IngestTarget[], kind: "HOT" | "BASELINE"): IngestTarget | null => {
+    let index = kind === "HOT" ? hotIndex : baselineIndex;
+    while (index < ring.length) {
+      const target = ring[index];
+      index += 1;
+      if (!target || seenProviderSetIds.has(target.providerSetId)) continue;
+      if (kind === "HOT") hotIndex = index;
+      else baselineIndex = index;
+      return target;
+    }
+    if (kind === "HOT") hotIndex = index;
+    else baselineIndex = index;
+    return null;
+  };
+
+  const pushTarget = (target: IngestTarget) => {
+    seenProviderSetIds.add(target.providerSetId);
+    selectedTargets.push(target);
+    if (hotTargetSet.has(target.providerSetId)) hotSlotCount += 1;
+    else baselineSlotCount += 1;
+    selectionPhase += 1;
+  };
+
+  for (const providerSetId of params.failedSetQueue) {
+    if (selectedTargets.length >= setLimit) break;
+    const target = byProviderSetId.get(providerSetId);
+    if (!target || seenProviderSetIds.has(providerSetId)) continue;
+    pushTarget(target);
+  }
+
+  while (selectedTargets.length < setLimit) {
+    const wantsHotSlot = hotRing.length > 0 && ((selectionPhase + 1) % hotSlotInterval === 0);
+    let target = wantsHotSlot ? takeNext(hotRing, "HOT") : takeNext(baselineRing, "BASELINE");
+    if (!target) {
+      target = wantsHotSlot ? takeNext(baselineRing, "BASELINE") : takeNext(hotRing, "HOT");
+    }
+    if (!target) break;
+    pushTarget(target);
+  }
+
+  const nextSetCode = baselineIndex > 0
+    ? String(baselineRing[Math.min(baselineIndex, baselineRing.length) - 1]?.setCode ?? "").trim() || params.cursorSetCode
+    : params.cursorSetCode;
+  const nextHotProviderSetId = hotIndex > 0
+    ? hotRing[Math.min(hotIndex, hotRing.length) - 1]?.providerSetId ?? params.hotCursorProviderSetId
+    : params.hotCursorProviderSetId;
+
+  return {
+    selectedTargets,
+    nextSetCode,
+    nextHotProviderSetId,
+    nextSelectionPhase: selectionPhase,
+    hotSlotCount,
+    baselineSlotCount,
+    hotProviderSetIds,
+  };
 }
 
 async function loadProviderSetHealth(providerSetIds: string[]): Promise<Map<string, ProviderSetHealthRow>> {
@@ -539,7 +737,13 @@ export async function runPokemonTcgRawIngest(opts: {
   }
 
   const priorState = opts.providerSetId
-    ? { cursorSetCode: null, failedSetQueue: [] as string[], cooldownByProviderSet: {} as Record<string, string> }
+    ? {
+        cursorSetCode: null,
+        hotCursorProviderSetId: null,
+        selectionPhase: 0,
+        failedSetQueue: [] as string[],
+        cooldownByProviderSet: {} as Record<string, string>,
+      }
     : await loadLastRunState();
   let failedSetQueue = normalizeFailedSetQueue(priorState.failedSetQueue);
   let cooldownByProviderSet = pruneCooldowns(priorState.cooldownByProviderSet, nowMs);
@@ -548,6 +752,11 @@ export async function runPokemonTcgRawIngest(opts: {
     ? {
         selectedTargets: [{ setCode: null, setName: null, providerSetId: opts.providerSetId }],
         nextSetCode: null as string | null,
+        nextHotProviderSetId: null as string | null,
+        nextSelectionPhase: priorState.selectionPhase,
+        hotProviderSetIds: [] as string[],
+        hotSlotCount: 0,
+        baselineSlotCount: 0,
       }
     : await (async () => {
         providerSetIndexBackfilled = await maybeBackfillProviderSetMap();
@@ -597,20 +806,14 @@ export async function runPokemonTcgRawIngest(opts: {
             maxProviderSetIds: 300,
           }),
         ]);
-        const cursorTargets = sortTargetsByFreshness(
-          selectSetsFromCursor(sets, sets.length, priorState.cursorSetCode)
-            .flatMap((set) => {
-              const target = byProviderSetId.get(set.providerSetId ?? set.setCode);
-              return target ? [target] : [];
-            }),
-          healthByProviderSet,
-        );
-        const selectedTargets: IngestTarget[] = [];
-        const seenProviderSetIds = new Set<string>();
-        const addTarget = (target: IngestTarget | null | undefined) => {
-          if (!target) return;
-          if (selectedTargets.length >= setLimit) return;
-          if (seenProviderSetIds.has(target.providerSetId)) return;
+        const hotProviderSetIds = buildHotProviderSetIds({
+          allTargets,
+          recentConsistencySetIds,
+          highValuePrioritySetIds,
+          coveragePrioritySetIds,
+        });
+        const availableTargets: IngestTarget[] = [];
+        for (const target of allTargets) {
           const cooldown = isSetInCooldown({
             providerSetId: target.providerSetId,
             cooldownByProviderSet,
@@ -621,33 +824,32 @@ export async function runPokemonTcgRawIngest(opts: {
             if (skippedCooldownSamples.length < 25) {
               skippedCooldownSamples.push(`set=${target.providerSetId} until=${cooldown.untilIso ?? "unknown"}`);
             }
-            return;
+            continue;
           }
-          seenProviderSetIds.add(target.providerSetId);
-          selectedTargets.push(target);
-        };
-        for (const providerSetId of failedSetQueue) {
-          addTarget(byProviderSetId.get(providerSetId) ?? {
-            setCode: null,
-            setName: null,
-            providerSetId,
-          });
+          availableTargets.push(target);
         }
-        for (const providerSetId of recentConsistencySetIds) addTarget(byProviderSetId.get(providerSetId) ?? null);
-        for (const providerSetId of highValuePrioritySetIds) addTarget(byProviderSetId.get(providerSetId) ?? null);
-        for (const providerSetId of coveragePrioritySetIds) addTarget(byProviderSetId.get(providerSetId) ?? null);
-        for (const target of cursorTargets) {
-          addTarget(target);
-          if (selectedTargets.length >= setLimit) break;
-        }
-        const nextSetCode = cursorTargets.at(Math.min(setLimit, cursorTargets.length) - 1)?.setCode
-          ?? priorState.cursorSetCode
-          ?? null;
-        return { selectedTargets, nextSetCode };
+
+        return planScrydexTargetSelection({
+          availableTargets,
+          failedSetQueue,
+          hotProviderSetIds,
+          setLimit,
+          cursorSetCode: priorState.cursorSetCode,
+          hotCursorProviderSetId: priorState.hotCursorProviderSetId,
+          selectionPhase: priorState.selectionPhase,
+          hotSlotInterval: HOT_SLOT_INTERVAL,
+        });
       })();
   const resolvedTargets = Array.isArray(targets) ? targets : targets.selectedTargets;
   const nextSetCode = Array.isArray(targets) ? null : targets.nextSetCode;
+  const nextHotProviderSetId = Array.isArray(targets) ? null : targets.nextHotProviderSetId;
+  const nextSelectionPhase = Array.isArray(targets) ? priorState.selectionPhase : targets.nextSelectionPhase;
+  const hotProviderSetIds = Array.isArray(targets) ? [] : targets.hotProviderSetIds;
+  const hotSlotCount = Array.isArray(targets) ? 0 : targets.hotSlotCount;
+  const baselineSlotCount = Array.isArray(targets) ? 0 : targets.baselineSlotCount;
   const cursorSetCode = priorState.cursorSetCode;
+  const hotCursorProviderSetId = priorState.hotCursorProviderSetId;
+  const selectionPhase = priorState.selectionPhase;
   const providerSetHealthBySet = await loadProviderSetHealth(
     resolvedTargets.map((target) => target.providerSetId),
   );
@@ -681,6 +883,14 @@ export async function runPokemonTcgRawIngest(opts: {
         providerSetId: opts.providerSetId ?? null,
         cursorSetCode,
         nextSetCode,
+        hotCursorProviderSetId,
+        nextHotProviderSetId,
+        selectionPhase,
+        nextSelectionPhase,
+        hotSlotInterval: HOT_SLOT_INTERVAL,
+        hotProviderSetIds,
+        hotSlotCount,
+        baselineSlotCount,
         providerSetIndexBackfilled,
         setsPlanned: resolvedTargets.length,
         skippedCooldownSets,
@@ -929,6 +1139,14 @@ export async function runPokemonTcgRawIngest(opts: {
           providerSetId: opts.providerSetId ?? null,
           cursorSetCode,
           nextSetCode,
+          hotCursorProviderSetId,
+          nextHotProviderSetId,
+          selectionPhase,
+          nextSelectionPhase,
+          hotSlotInterval: HOT_SLOT_INTERVAL,
+          hotProviderSetIds,
+          hotSlotCount,
+          baselineSlotCount,
           providerSetIndexBackfilled,
           setsPlanned: resolvedTargets.length,
           setsProcessed,

@@ -1,3 +1,4 @@
+import Image from "next/image";
 import { redirect } from "next/navigation";
 import { unstable_cache } from "next/cache";
 import { getCanonicalMarketPulseMap, type CanonicalMarketPulse } from "@/lib/data/market";
@@ -624,7 +625,18 @@ export default async function SearchPage({
             </>
           ) : (
             <section className="mx-auto w-full max-w-3xl pt-10 text-center sm:pt-14">
-              <h1 className="text-app text-6xl font-semibold tracking-tight sm:text-7xl">PopAlpha</h1>
+              <div className="flex items-center justify-center gap-6">
+                <Image
+                  src="/brand/popalpha-icon.svg"
+                  alt=""
+                  aria-hidden="true"
+                  width={132}
+                  height={132}
+                  className="h-28 w-28 shrink-0 sm:h-32 sm:w-32"
+                  priority
+                />
+                <h1 className="text-app text-7xl font-semibold tracking-tight sm:text-[5.5rem]">PopAlpha</h1>
+              </div>
               <p className="text-muted mx-auto mt-4 max-w-2xl text-sm sm:text-base">
                 Smarter TCG Market Insights.
               </p>

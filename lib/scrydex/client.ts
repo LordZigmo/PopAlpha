@@ -76,6 +76,62 @@ export type ScrydexListPayload<T> = {
   totalCount: number;
 };
 
+type ScrydexRawListPayload<T> = {
+  data?: T[];
+  page?: number;
+  pageSize?: number;
+  page_size?: number;
+  totalCount?: number;
+  total_count?: number;
+  count?: number;
+};
+
+export type ScrydexPriceHistoryEntry = {
+  variant?: string;
+  condition?: string;
+  grade?: string;
+  company?: string;
+  is_perfect?: boolean;
+  is_signed?: boolean;
+  is_error?: boolean;
+  type?: string;
+  low?: number;
+  mid?: number;
+  high?: number;
+  market?: number;
+  currency?: string;
+};
+
+export type ScrydexPriceHistoryDay = {
+  date: string;
+  prices?: ScrydexPriceHistoryEntry[];
+};
+
+function normalizeScrydexListPayload<T>(payload: ScrydexRawListPayload<T>): ScrydexListPayload<T> {
+  const data = Array.isArray(payload.data) ? payload.data : [];
+  const page = typeof payload.page === "number" && Number.isFinite(payload.page)
+    ? payload.page
+    : 1;
+  const pageSize = typeof payload.pageSize === "number" && Number.isFinite(payload.pageSize)
+    ? payload.pageSize
+    : typeof payload.page_size === "number" && Number.isFinite(payload.page_size)
+      ? payload.page_size
+      : data.length;
+  const totalCount = typeof payload.totalCount === "number" && Number.isFinite(payload.totalCount)
+    ? payload.totalCount
+    : typeof payload.total_count === "number" && Number.isFinite(payload.total_count)
+      ? payload.total_count
+      : typeof payload.count === "number" && Number.isFinite(payload.count)
+        ? payload.count
+        : data.length;
+  return {
+    data,
+    page,
+    pageSize,
+    totalCount,
+  };
+}
+
 async function sleep(ms: number) {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -174,12 +230,12 @@ export async function fetchExpansionsPage(
   const params = new URLSearchParams();
   params.set("page", String(page));
   params.set("page_size", String(pageSize));
-  const payload = await fetchScrydexJson<ScrydexListPayload<ScrydexExpansion>>(
+  const payload = await fetchScrydexJson<ScrydexRawListPayload<ScrydexExpansion>>(
     "/en/expansions",
     params,
     credentials
   );
-  return payload;
+  return normalizeScrydexListPayload(payload);
 }
 
 /** Fetch English cards with pagination. Max 100 per page. */
@@ -197,6 +253,33 @@ export async function fetchCardsPage(
   params.set("page_size", String(pageSize));
   // Prices are opt-in for search/list endpoints in Scrydex docs.
   params.set("include", "prices");
-  const payload = await fetchScrydexJson<ScrydexListPayload<ScrydexCard>>(path, params, credentials);
-  return payload;
+  const payload = await fetchScrydexJson<ScrydexRawListPayload<ScrydexCard>>(path, params, credentials);
+  return normalizeScrydexListPayload(payload);
+}
+
+export async function fetchCardPriceHistoryPage(
+  cardId: string,
+  page: number,
+  pageSize: number,
+  credentials: ScrydexCredentials,
+  days?: number,
+): Promise<ScrydexListPayload<ScrydexPriceHistoryDay>> {
+  const normalizedCardId = String(cardId ?? "").trim();
+  if (!normalizedCardId) {
+    throw new Error("cardId is required");
+  }
+
+  const params = new URLSearchParams();
+  params.set("page", String(page));
+  params.set("page_size", String(pageSize));
+  if (typeof days === "number" && Number.isFinite(days) && days > 0) {
+    params.set("days", String(Math.floor(days)));
+  }
+
+  const payload = await fetchScrydexJson<ScrydexRawListPayload<ScrydexPriceHistoryDay>>(
+    `/cards/${encodeURIComponent(normalizedCardId)}/price_history`,
+    params,
+    credentials,
+  );
+  return normalizeScrydexListPayload(payload);
 }

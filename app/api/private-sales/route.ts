@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require";
-import { dbPublic } from "@/lib/db";
+import { createServerSupabaseUserClient } from "@/lib/db/user";
 
 export const runtime = "nodejs";
 
@@ -36,12 +36,12 @@ export async function GET(req: Request) {
   }
 
   try {
-    const supabase = dbPublic();
+    const supabase = await createServerSupabaseUserClient();
     const { data, error } = await supabase
       .from("private_sales")
       .select("id, cert, price, currency, sold_at, fees, payment_method, notes, created_at")
       .eq("cert", cert)
-      .eq("owner_id", userId)
+      .eq("owner_clerk_id", userId)
       .order("sold_at", { ascending: false })
       .returns<PrivateSaleRow[]>();
 
@@ -93,7 +93,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    const supabase = dbPublic();
+    const supabase = await createServerSupabaseUserClient();
 
     const { data, error } = await supabase
       .from("private_sales")
@@ -105,7 +105,7 @@ export async function POST(req: Request) {
         fees,
         payment_method: paymentMethod,
         notes,
-        owner_id: userId,
+        owner_clerk_id: userId,
       })
       .select("id, cert, price, currency, sold_at, fees, payment_method, notes, created_at")
       .single<PrivateSaleRow>();

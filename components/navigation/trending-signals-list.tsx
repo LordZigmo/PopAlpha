@@ -1,5 +1,6 @@
 "use client";
 
+import { SignedIn, SignedOut } from "@clerk/nextjs";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
@@ -84,43 +85,75 @@ export default function TrendingSignalsList() {
     };
   }, []);
 
+  const signalCards = (
+    <div className="mt-3 space-y-2.5">
+      <Link
+        href={`/c/${encodeURIComponent(bullishLeader.slug)}`}
+        className="block rounded-[0.95rem] border border-white/[0.03] bg-[#0B0B0B] px-3 py-3 transition hover:border-white/[0.08]"
+      >
+        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#6B7280]">1. The Bullish Leader</p>
+        <p className="mt-1 text-[12px] font-semibold text-white">{bullishLeader.name}</p>
+        <p className="mt-1 text-[11px] text-[#8A8A8A]">{bullishLeader.set_name ?? "Community board"}</p>
+        <p className="mt-1 text-[11px] text-[#8DF0B4]">{bullishLeader.up_pct}% think up across {bullishLeader.vote_count} votes</p>
+      </Link>
+
+      <Link
+        href={`/c/${encodeURIComponent(mostWatched.slug)}`}
+        className="block rounded-[0.95rem] border border-white/[0.03] bg-[#0B0B0B] px-3 py-3 transition hover:border-white/[0.08]"
+      >
+        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#6B7280]">2. The Most Watched</p>
+        <p className="mt-1 text-[12px] font-semibold text-white">{mostWatched.name}</p>
+        <p className="mt-1 text-[11px] text-[#8A8A8A]">{mostWatched.set_name ?? "Watchlist surge"}</p>
+        <p className="mt-1 text-[11px] text-[#D4D4D8]">{mostWatched.add_count} users added it to their watchlist in the last hour</p>
+      </Link>
+
+      <Link
+        href={`/c/${encodeURIComponent(divergence.slug)}`}
+        className="block rounded-[0.95rem] border border-white/[0.03] bg-[#0B0B0B] px-3 py-3 transition hover:border-white/[0.08]"
+      >
+        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#6B7280]">3. The Divergence</p>
+        <p className="mt-1 text-[12px] font-semibold text-white">{divergence.name}</p>
+        <p className="mt-1 text-[11px] text-[#8A8A8A]">{divergence.set_name ?? "Watching, not voting"}</p>
+        <p className="mt-1 text-[11px] text-[#D4D4D8]">{divergence.total_views} views, but only {divergence.vote_count} people priced a move</p>
+      </Link>
+    </div>
+  );
+
   return (
-    <div className="mt-4 rounded-[1.35rem] border border-[#1E1E1E] bg-[#101010] px-4 py-4">
+    <div className="relative mt-4 overflow-hidden rounded-[1.35rem] border border-[#1E1E1E] bg-[#101010] px-4 py-4">
       <div className="flex items-center justify-between gap-3">
         <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#6B6B6B]">Trending Signals</p>
         <span className="h-2 w-2 rounded-full bg-[#8B5CF6]" />
       </div>
 
-      <div className="mt-3 space-y-2.5">
-        <Link
-          href={`/c/${encodeURIComponent(bullishLeader.slug)}`}
-          className="block rounded-[0.95rem] border border-white/[0.03] bg-[#0B0B0B] px-3 py-3 transition hover:border-white/[0.08]"
-        >
-          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#6B7280]">1. The Bullish Leader</p>
-          <p className="mt-1 text-[12px] font-semibold text-white">{bullishLeader.name}</p>
-          <p className="mt-1 text-[11px] text-[#8A8A8A]">{bullishLeader.set_name ?? "Community board"}</p>
-          <p className="mt-1 text-[11px] text-[#8DF0B4]">{bullishLeader.up_pct}% think up across {bullishLeader.vote_count} votes</p>
-        </Link>
+      <SignedOut>
+        <div className="pointer-events-none absolute inset-x-4 top-1/2 z-10 flex -translate-y-1/2 justify-center">
+          <div className="pointer-events-auto flex flex-col items-center gap-3 rounded-[1.2rem] border border-white/10 bg-[#090909]/88 px-5 py-5 text-center shadow-[0_18px_45px_rgba(0,0,0,0.35)] backdrop-blur-md">
+            <p className="max-w-[13rem] text-[12px] font-medium leading-5 text-[#CFCFCF]">
+              Sign up to unlock the live market signals collectors are watching right now.
+            </p>
+            <Link
+              href="/sign-up"
+              className="rounded-2xl border border-white bg-white px-4 py-2 text-[12px] font-bold tracking-[0.08em] text-[#0A0A0A] transition hover:opacity-90"
+            >
+              SIGN UP
+            </Link>
+          </div>
+        </div>
+      </SignedOut>
 
-        <Link
-          href={`/c/${encodeURIComponent(mostWatched.slug)}`}
-          className="block rounded-[0.95rem] border border-white/[0.03] bg-[#0B0B0B] px-3 py-3 transition hover:border-white/[0.08]"
-        >
-          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#6B7280]">2. The Most Watched</p>
-          <p className="mt-1 text-[12px] font-semibold text-white">{mostWatched.name}</p>
-          <p className="mt-1 text-[11px] text-[#8A8A8A]">{mostWatched.set_name ?? "Watchlist surge"}</p>
-          <p className="mt-1 text-[11px] text-[#D4D4D8]">{mostWatched.add_count} users added it to their watchlist in the last hour</p>
-        </Link>
-
-        <Link
-          href={`/c/${encodeURIComponent(divergence.slug)}`}
-          className="block rounded-[0.95rem] border border-white/[0.03] bg-[#0B0B0B] px-3 py-3 transition hover:border-white/[0.08]"
-        >
-          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#6B7280]">3. The Divergence</p>
-          <p className="mt-1 text-[12px] font-semibold text-white">{divergence.name}</p>
-          <p className="mt-1 text-[11px] text-[#8A8A8A]">{divergence.set_name ?? "Watching, not voting"}</p>
-          <p className="mt-1 text-[11px] text-[#D4D4D8]">{divergence.total_views} views, but only {divergence.vote_count} people priced a move</p>
-        </Link>
+      <div className="relative">
+        <SignedOut>
+          <div
+            aria-hidden="true"
+            className="pointer-events-none select-none blur-[5px] opacity-45 saturate-50"
+          >
+            {signalCards}
+          </div>
+        </SignedOut>
+        <SignedIn>
+          {signalCards}
+        </SignedIn>
       </div>
     </div>
   );

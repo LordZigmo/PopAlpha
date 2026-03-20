@@ -15,11 +15,12 @@ function parseOptionalInt(value: string | null): number | undefined {
 export async function GET(req: Request) {
   const auth = await requireCron(req);
   if (!auth.ok) return auth.response;
-  if (!providerIngestionEnabled("JUSTTCG")) {
+  const url = new URL(req.url);
+  const allowRetired = url.searchParams.get("allowRetired") === "1";
+  if (!providerIngestionEnabled("JUSTTCG") && !allowRetired) {
     return NextResponse.json(buildProviderIngestionDisabledPayload("JUSTTCG"));
   }
 
-  const url = new URL(req.url);
   const payloadLimit = url.searchParams.get("payloads");
   const providerSetId = url.searchParams.get("set");
   const rawPayloadId = url.searchParams.get("rawId");
@@ -33,5 +34,8 @@ export async function GET(req: Request) {
   });
 
   const status = result.ok ? 200 : 500;
-  return NextResponse.json(result, { status });
+  return NextResponse.json({
+    ...result,
+    retiredProviderBypass: allowRetired && !providerIngestionEnabled("JUSTTCG"),
+  }, { status });
 }

@@ -4,6 +4,7 @@ import {
   PUBLIC_ROUTES,
   CRON_ROUTES,
   ADMIN_ROUTES,
+  DEBUG_ROUTES,
   INGEST_ROUTES,
   USER_ROUTES,
 } from "@/lib/auth/route-registry";
@@ -15,6 +16,7 @@ import {
 const PUBLIC_SET = new Set(PUBLIC_ROUTES);
 const CRON_SET = new Set(CRON_ROUTES);
 const ADMIN_SET = new Set(ADMIN_ROUTES);
+const DEBUG_SET = new Set(DEBUG_ROUTES);
 const INGEST_SET = new Set(INGEST_ROUTES);
 const USER_SET = new Set(USER_ROUTES);
 
@@ -45,18 +47,16 @@ function toRouteKey(pathname: string): string {
   return stripped;
 }
 
-type RouteClass = "public" | "cron" | "admin" | "ingest" | "user" | "debug" | "page-auth" | "unknown";
+type RouteClass = "public" | "cron" | "admin" | "debug" | "ingest" | "user" | "page-auth" | "unknown";
 
 function classifyRoute(pathname: string): RouteClass {
   // API routes
   if (pathname.startsWith("/api/")) {
-    // Debug routes — entire subtree
-    if (pathname.startsWith("/api/debug/")) return "debug";
-
     const key = toRouteKey(pathname);
     if (PUBLIC_SET.has(key)) return "public";
     if (CRON_SET.has(key)) return "cron";
     if (ADMIN_SET.has(key)) return "admin";
+    if (DEBUG_SET.has(key)) return "debug";
     if (INGEST_SET.has(key)) return "ingest";
     if (USER_SET.has(key)) return "user";
 

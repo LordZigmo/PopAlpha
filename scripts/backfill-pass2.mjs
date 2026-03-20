@@ -3,6 +3,10 @@ import 'dotenv/config';
 const SECRET = process.env.CRON_SECRET;
 const BASE = 'http://localhost:3000';
 
+if (!SECRET) {
+  throw new Error('CRON_SECRET is required.');
+}
+
 // Sets that failed in pass 1 but have known correct JustTCG IDs from probing
 const OVERRIDES = {
   // XY era
@@ -51,12 +55,16 @@ for (const [name, providerSetId] of Object.entries(OVERRIDES)) {
     set: key,
     canonicalSetName: name,
     providerSetId,
-    secret: SECRET,
   });
   const url = `${BASE}/api/debug/justtcg/backfill-set?${params}`;
   const t0 = Date.now();
   try {
-    const resp = await fetch(url, { method: 'POST' });
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${SECRET}`,
+      },
+    });
     const data = await resp.json();
     const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
     const matched = data.matchedCount ?? 0;

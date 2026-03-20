@@ -69,27 +69,9 @@ export async function buildProviderPriceDisplay(params: {
 }
 
 export function averageProviderUsdPrice(rows: ProviderPriceDisplay[]): number | null {
-  const cleanRows = rows
-    .map((row) => ({
-      provider: row.provider,
-      price: row.usdPrice,
-    }))
-    .filter((row): row is { provider: ProviderName; price: number } => typeof row.price === "number" && Number.isFinite(row.price) && row.price > 0);
-  if (cleanRows.length === 0) return null;
-  if (cleanRows.length === 1) return cleanRows[0].price;
-
-  const justtcg = cleanRows.find((row) => row.provider === "JUSTTCG")?.price ?? null;
-  const scrydex = cleanRows.find((row) => row.provider === "SCRYDEX")?.price ?? null;
-
-  // Guard against one provider drifting wildly and poisoning the blended RAW market price.
-  if (justtcg !== null && scrydex !== null) {
-    const high = Math.max(justtcg, scrydex);
-    const low = Math.min(justtcg, scrydex);
-    if (low > 0 && high / low >= 3.5) {
-      return justtcg;
-    }
-  }
-
-  const total = cleanRows.reduce((sum, row) => sum + row.price, 0);
-  return Number((total / cleanRows.length).toFixed(4));
+  const justtcg = rows.find((row) => row.provider === "JUSTTCG")?.usdPrice ?? null;
+  const scrydex = rows.find((row) => row.provider === "SCRYDEX")?.usdPrice ?? null;
+  if (typeof scrydex === "number" && Number.isFinite(scrydex) && scrydex > 0) return scrydex;
+  if (typeof justtcg === "number" && Number.isFinite(justtcg) && justtcg > 0) return justtcg;
+  return null;
 }

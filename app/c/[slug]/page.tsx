@@ -6,9 +6,11 @@
  * iOS grouped rules: matte dark surfaces, consistent radii and spacing, restrained separators,
  * and touch targets sized for mobile-first interaction.
  */
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { currentUser } from "@clerk/nextjs/server";
+import { cache } from "react";
 import CanonicalCardFloatingHero from "@/components/canonical-card-floating-hero";
 import CardModeToggle from "@/components/card-mode-toggle";
 import CardViewTracker from "@/components/card-view-tracker";
@@ -16,9 +18,10 @@ import CollapsibleSection from "@/components/collapsible-section";
 import EbayListings from "@/components/ebay-listings";
 import { GroupedSection, PageShell, Pill, SegmentedControl, StatStripItem } from "@/components/ios-grouped-ui";
 import MarketPulse from "@/components/market-pulse";
-import MarketSummaryCard from "@/components/market-summary-card";
+import MarketSummaryCard, { loadRawCardMarketVariants } from "@/components/market-summary-card";
 import PopAlphaScoutPreview from "@/components/popalpha-scout-preview";
-import PokeTraceBetaCard from "@/components/poketrace-beta-card";
+import RawCardMarketSurface from "@/components/raw-card-market-surface";
+import type { RawCardMarketVariantInput } from "@/components/raw-card-variant-types";
 import CardTileMini from "@/components/card-tile-mini";
 import type { HomepageCard } from "@/lib/data/homepage";
 import { buildEbaySearchQueries, type GradeSelection, type GradedSource } from "@/lib/ebay-query";
@@ -26,7 +29,7 @@ import { buildPrintingPill } from "@/lib/cards/detail";
 import { getCardViewSnapshot } from "@/lib/data/card-views";
 import { getCommunityPulseSnapshot } from "@/lib/data/community-pulse";
 import { getRelatedCardCarousels } from "@/lib/data/related-cards";
-import { buildGradedVariantRef, buildRawVariantRef } from "@/lib/identity/variant-ref";
+import { buildGradedVariantRef } from "@/lib/identity/variant-ref";
 import { dbPublic } from "@/lib/db";
 import { buildAssetViewModel } from "@/lib/data/assets";
 import { resolveWeightedMarketPrice } from "@/lib/pricing/market-confidence";
@@ -61,14 +64,17 @@ type SnapshotRow = {
   high_30d: number | null;
   market_price: number | null;
   market_price_as_of: string | null;
-  justtcg_price: number | null;
-  scrydex_price: number | null;
-  pokemontcg_price: number | null;
 };
 
 type CardProfileRow = {
   summary_short: string;
   summary_long: string | null;
+};
+
+type CanonicalCardPageBaseData = {
+  canonical: CanonicalCardRow | null;
+  printings: CardPrintingRow[];
+  cardProfile: CardProfileRow | null;
 };
 
 const DEFAULT_BACK_HREF = "/search";
@@ -97,11 +103,6 @@ type RawProviderHistoryRow = {
   provider: string;
   variant_ref: string;
   ts: string;
-};
-
-type RawProviderMetricRow = {
-  provider: string;
-  provider_as_of_ts: string | null;
 };
 
 type RawParityRow = {
@@ -173,6 +174,32 @@ function chooseDefaultPrinting(printings: CardPrintingRow[]): CardPrintingRow | 
   })[0] ?? null;
 }
 
+const getCanonicalCardPageBaseData = cache(async (slug: string): Promise<CanonicalCardPageBaseData> => {
+  const supabase = dbPublic();
+  const [{ data: canonical }, { data: printingsData }, { data: cardProfile }] = await Promise.all([
+    supabase
+      .from("canonical_cards")
+      .select("slug, canonical_name, subject, set_name, year, card_number")
+      .eq("slug", slug)
+      .maybeSingle<CanonicalCardRow>(),
+    supabase
+      .from("card_printings")
+      .select("id, language, set_code, finish, finish_detail, edition, stamp, image_url, rarity")
+      .eq("canonical_slug", slug),
+    supabase
+      .from("card_profiles")
+      .select("summary_short, summary_long")
+      .eq("card_slug", slug)
+      .maybeSingle<CardProfileRow>(),
+  ]);
+
+  return {
+    canonical: canonical ?? null,
+    printings: ((printingsData ?? []) as CardPrintingRow[]).sort(sortPrintings),
+    cardProfile: cardProfile ?? null,
+  };
+});
+
 function selectedGrade(gradeRaw: string | undefined): GradeSelection {
   const upper = (gradeRaw ?? "RAW").toUpperCase();
   if (upper === "PSA9" || upper === "PSA10" || upper === "RAW") return upper;
@@ -190,6 +217,88 @@ function legacyGradeToBucket(gradeRaw: string | undefined): GradeBucket | null {
   if (parsed === "PSA9") return "G9";
   if (parsed === "PSA10") return "G10";
   return null;
+}
+
+function buildCanonicalCardMetadataTitle(canonical: CanonicalCardRow): string {
+  const identityBits = [
+    canonical.canonical_name,
+    canonical.set_name,
+    canonical.card_number ? `#${canonical.card_number}` : null,
+  ].filter(Boolean);
+
+  return `${identityBits.join(" · ")} | PopAlpha`;
+}
+
+function buildCanonicalCardMetadataDescription(
+  canonical: CanonicalCardRow,
+  cardProfile: CardProfileRow | null,
+  selectedPrinting: CardPrintingRow | null,
+): string {
+  const profileSummary = cardProfile?.summary_short?.trim();
+  if (profileSummary) return profileSummary;
+
+  const identityBits = [
+    canonical.set_name ? `from ${canonical.set_name}` : null,
+    canonical.card_number ? `#${canonical.card_number}` : null,
+    canonical.year ? String(canonical.year) : null,
+  ].filter(Boolean);
+  const printingLabel = selectedPrinting ? printingOptionLabel(selectedPrinting) : null;
+  const subjectLabel = canonical.subject?.trim() ? `${canonical.subject.trim()} collectors` : "card collectors";
+
+  return [
+    `Track ${canonical.canonical_name}${identityBits.length > 0 ? ` ${identityBits.join(" · ")}` : ""} on PopAlpha.`,
+    printingLabel ? `${printingLabel} pricing, market signals, and collector context for ${subjectLabel}.` : `Pricing, market signals, and collector context for ${subjectLabel}.`,
+  ].join(" ");
+}
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}): Promise<Metadata> {
+  const { slug } = await params;
+  const { canonical, printings, cardProfile } = await getCanonicalCardPageBaseData(slug);
+
+  if (!canonical) {
+    return {
+      title: "Card Not Found | PopAlpha",
+      robots: {
+        index: false,
+        follow: false,
+      },
+    };
+  }
+
+  const selectedPrinting = chooseDefaultPrinting(printings);
+  const title = buildCanonicalCardMetadataTitle(canonical);
+  const description = buildCanonicalCardMetadataDescription(canonical, cardProfile, selectedPrinting);
+  const canonicalPath = `/c/${encodeURIComponent(slug)}`;
+  const primaryImageUrl = selectedPrinting?.image_url ?? null;
+
+  return {
+    title,
+    description,
+    alternates: {
+      canonical: canonicalPath,
+    },
+    openGraph: {
+      title,
+      description,
+      url: canonicalPath,
+      siteName: "PopAlpha",
+      type: "website",
+      images: [
+        ...(primaryImageUrl ? [{ url: primaryImageUrl, alt: canonical.canonical_name }] : []),
+        { url: "/opengraph-image", alt: "PopAlpha" },
+      ],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+      images: primaryImageUrl ? [primaryImageUrl] : ["/twitter-image"],
+    },
+  };
 }
 
 function selectedBucket(bucketRaw: string | undefined, gradeRaw: string | undefined): GradeBucket | null {
@@ -374,21 +483,16 @@ function formatAsOf(value: string | null | undefined): string | null {
   });
 }
 
-function normalizeRawProviderName(provider: string | null | undefined): "JUSTTCG" | "SCRYDEX" | null {
+function normalizeRawProviderName(provider: string | null | undefined): "SCRYDEX" | null {
   const normalized = String(provider ?? "").trim().toUpperCase();
-  if (normalized === "JUSTTCG") return "JUSTTCG";
   if (normalized === "SCRYDEX" || normalized === "POKEMON_TCG_API") return "SCRYDEX";
   return null;
 }
 
 function resolveRawDisplayPrice(params: {
-  justtcg: number | null;
   scrydex: number | null;
-  justtcgAsOfTs: string | null;
   scrydexAsOfTs: string | null;
-  justtcgPoints7d: number;
   scrydexPoints7d: number;
-  fallback: number | null;
   parityStatus: "MATCH" | "MISMATCH" | "MISSING_PROVIDER" | "UNKNOWN";
 }): {
   marketPrice: number | null;
@@ -399,18 +503,20 @@ function resolveRawDisplayPrice(params: {
 } {
   const weighted = resolveWeightedMarketPrice({
     providers: [
-      { provider: "JUSTTCG", price: params.justtcg, asOfTs: params.justtcgAsOfTs, points7d: params.justtcgPoints7d },
       { provider: "SCRYDEX", price: params.scrydex, asOfTs: params.scrydexAsOfTs, points7d: params.scrydexPoints7d },
     ],
     parityStatus: params.parityStatus,
-    marketPriceFallback: params.fallback,
+    marketPriceFallback: null,
   });
   return {
-    marketPrice: weighted.marketPrice ?? params.fallback,
-    blendPolicy: weighted.blendPolicy,
-    confidenceScore: weighted.confidenceScore,
-    lowConfidence: weighted.lowConfidence,
-    sourceMix: weighted.sourceMix,
+    marketPrice: params.scrydex,
+    blendPolicy: params.scrydex !== null ? "SCRYDEX_PRIMARY" : "NO_PRICE",
+    confidenceScore: params.scrydex !== null ? weighted.confidenceScore : 0,
+    lowConfidence: params.scrydex === null ? true : weighted.lowConfidence,
+    sourceMix: {
+      justtcgWeight: 0,
+      scrydexWeight: params.scrydex !== null ? 1 : 0,
+    },
   };
 }
 
@@ -480,27 +586,10 @@ export default async function CanonicalCardPage({
   const debugEnabled = debug === "1";
   const backHref = resolveBackHref(returnTo);
   const activeMarketWindow = selectedMarketWindow(marketWindow);
-
-  const { data: canonical } = await supabase
-    .from("canonical_cards")
-    .select("slug, canonical_name, subject, set_name, year, card_number")
-    .eq("slug", slug)
-    .maybeSingle<CanonicalCardRow>();
+  const { canonical, printings, cardProfile } = await getCanonicalCardPageBaseData(slug);
 
   if (!canonical) notFound();
 
-  const { data: printingsData } = await supabase
-    .from("card_printings")
-    .select("id, language, set_code, finish, finish_detail, edition, stamp, image_url, rarity")
-    .eq("canonical_slug", slug);
-
-  const { data: cardProfile } = await supabase
-    .from("card_profiles")
-    .select("summary_short, summary_long")
-    .eq("card_slug", slug)
-    .maybeSingle<CardProfileRow>();
-
-  const printings = ((printingsData ?? []) as CardPrintingRow[]).sort(sortPrintings);
   const viewMode = selectedViewMode(mode, grade);
   const selectedPrinting = printings.find((row) => row.id === printing) ?? chooseDefaultPrinting(printings) ?? null;
   const hasExplicitPrinting = Boolean(printing) && Boolean(printings.find((row) => row.id === printing));
@@ -577,12 +666,12 @@ export default async function CanonicalCardPage({
   // Default RAW view should read canonical (printing_id IS NULL) unless user explicitly picks a printing.
   const rawPrintingIdForQuery = hasExplicitPrinting ? selectedPrinting?.id ?? null : null;
   const rawVariantPrefix = rawPrintingIdForQuery ? `${rawPrintingIdForQuery}::` : null;
-  const [[rawSnap, psa9Snap, psa10Snap], vm, gradedPriceHistoryQuery, rawProviderMetricsQuery, rawProviderHistoryQuery, rawParityQuery, viewSnapshot] = await Promise.all([
+  const [[rawSnap, psa9Snap, psa10Snap], vm, gradedPriceHistoryQuery, rawProviderHistoryQuery, rawParityQuery, viewSnapshot] = await Promise.all([
     Promise.all(
       (["RAW", "PSA9", "PSA10"] as const).map((g) => {
         const q = supabase
           .from("public_card_metrics")
-          .select("active_listings_7d, median_7d, median_30d, trimmed_median_30d, low_30d, high_30d, market_price, market_price_as_of, justtcg_price, scrydex_price, pokemontcg_price")
+          .select("active_listings_7d, median_7d, median_30d, trimmed_median_30d, low_30d, high_30d, market_price, market_price_as_of")
           .eq("canonical_slug", slug)
           .eq("grade", g);
         const effectivePrintingId = g === "RAW" ? rawPrintingIdForQuery : gradedPrintingIdForQuery;
@@ -605,24 +694,12 @@ export default async function CanonicalCardPage({
           .limit(Math.max(gradedVariantRefsForActiveBucket.length * 4, 12))
       : Promise.resolve({ data: [] as GradedPriceHistoryRow[] }),
     (() => {
-      const q = supabase
-        .from("public_variant_metrics")
-        .select("provider, provider_as_of_ts")
-        .eq("canonical_slug", slug)
-        .eq("grade", "RAW")
-        .in("provider", ["JUSTTCG", "SCRYDEX", "POKEMON_TCG_API"]);
-      return (rawPrintingIdForQuery != null
-        ? q.eq("printing_id", rawPrintingIdForQuery)
-        : q.is("printing_id", null)
-      ).limit(20);
-    })(),
-    (() => {
       let q = supabase
         .from("public_price_history")
         .select("provider, variant_ref, ts")
         .eq("canonical_slug", slug)
         .eq("source_window", "snapshot")
-        .in("provider", ["JUSTTCG", "SCRYDEX", "POKEMON_TCG_API"])
+        .in("provider", ["SCRYDEX", "POKEMON_TCG_API"])
         .order("ts", { ascending: false })
         .limit(300);
       if (rawVariantPrefix) {
@@ -651,8 +728,10 @@ export default async function CanonicalCardPage({
       set_name: canonical.set_name,
       year: canonical.year,
       market_price: null,
-      change_pct: vm?.change_24h_pct ?? vm?.change_7d_pct ?? null,
-      change_window: vm?.change_24h_pct != null ? "24H" : vm?.change_7d_pct != null ? "7D" : null,
+      change_pct: vm?.change_7d_pct ?? null,
+      change_window: vm?.change_7d_pct != null ? "7D" : null,
+      confidence_score: null,
+      low_confidence: null,
       mover_tier: null,
       image_url: selectedPrinting?.image_url ?? null,
       sparkline_7d: [],
@@ -667,7 +746,6 @@ export default async function CanonicalCardPage({
     PSA10: psa10Snap.data,
   } as const;
   const gradedPriceHistoryRows = (gradedPriceHistoryQuery.data ?? []) as GradedPriceHistoryRow[];
-  const rawProviderMetricRows = (rawProviderMetricsQuery.data ?? []) as RawProviderMetricRow[];
   const rawProviderHistoryRows = (rawProviderHistoryQuery.data ?? []) as RawProviderHistoryRow[];
   const rawParityStatus = rawParityQuery.data?.parity_status ?? "UNKNOWN";
   const latestGradedPriceByVariantRef = new Map<string, GradedPriceHistoryRow>();
@@ -692,17 +770,28 @@ export default async function CanonicalCardPage({
     grade: queryGradeSelection,
     provider: viewMode === "GRADED" ? activeProvider : null,
   });
-  const rawVariantOptions = [...printings]
+  const rawVariantOptions: RawCardMarketVariantInput[] = [...printings]
     .sort((a, b) => {
       const finishDelta = rawVariantSortPriority(a) - rawVariantSortPriority(b);
       if (finishDelta !== 0) return finishDelta;
       return sortPrintings(a, b);
     })
     .map((row) => ({
-    printingId: row.id,
-    label: rawVariantSegmentLabel(row, printings),
-    variantRef: buildRawVariantRef(row.id),
-  }));
+      printingId: row.id,
+      label: rawVariantSegmentLabel(row, printings),
+      descriptorLabel: printingOptionLabel(row),
+      imageUrl: row.image_url,
+      rarity: row.rarity,
+      finish: row.finish,
+      edition: row.edition,
+      stamp: row.stamp,
+    }));
+  const rawVariantPayload = viewMode === "RAW"
+    ? await loadRawCardMarketVariants({
+        canonicalSlug: slug,
+        variants: rawVariantOptions,
+      })
+    : [];
 
   const subtitleText = [
     canonical.set_name,
@@ -735,69 +824,43 @@ export default async function CanonicalCardPage({
     },
   );
 
-  const rawSourceJtcg = rawSnap.data?.justtcg_price ?? null;
-  const rawSourceScrydex = rawSnap.data?.scrydex_price ?? rawSnap.data?.pokemontcg_price ?? null;
-  let rawSourceJtcgTs: string | null = null;
-  let rawSourceScrydexTs: string | null = null;
-  for (const row of rawProviderMetricRows) {
-    const provider = normalizeRawProviderName(row.provider);
-    const ts = row.provider_as_of_ts;
-    if (!provider || !ts) continue;
-    if (provider === "JUSTTCG" && (!rawSourceJtcgTs || ts > rawSourceJtcgTs)) rawSourceJtcgTs = ts;
-    if (provider === "SCRYDEX" && (!rawSourceScrydexTs || ts > rawSourceScrydexTs)) rawSourceScrydexTs = ts;
-  }
-  for (const row of rawProviderHistoryRows) {
-    const provider = normalizeRawProviderName(row.provider);
-    if (!provider) continue;
-    if (provider === "JUSTTCG" && !rawSourceJtcgTs) rawSourceJtcgTs = row.ts;
-    if (provider === "SCRYDEX" && !rawSourceScrydexTs) rawSourceScrydexTs = row.ts;
-    if (rawSourceJtcgTs && rawSourceScrydexTs) break;
-  }
-  if (rawSourceJtcg == null) rawSourceJtcgTs = null;
-  if (rawSourceScrydex != null && !rawSourceScrydexTs) {
-    rawSourceScrydexTs = rawSnap.data?.market_price_as_of ?? rawSourceJtcgTs;
-  }
-  const rawSourceAsOfJtcg = formatAsOf(rawSourceJtcgTs);
-  const rawSourceAsOfScrydex = formatAsOf(rawSourceScrydexTs);
-  let rawPointsJtcg7d = 0;
+  const rawSourceScrydex = rawSnap.data?.market_price ?? null;
+  const rawSourceScrydexTs = rawSourceScrydex !== null ? (rawSnap.data?.market_price_as_of ?? null) : null;
   let rawPointsScrydex7d = 0;
-  const referenceTsMs = rawProviderHistoryRows
-    .map((row) => new Date(row.ts).getTime())
-    .filter((ts) => Number.isFinite(ts))
-    .sort((a, b) => b - a)[0] ?? 0;
-  const weekAgoMs = referenceTsMs - (7 * 24 * 60 * 60 * 1000);
-  for (const row of rawProviderHistoryRows) {
-    const provider = normalizeRawProviderName(row.provider);
-    const tsMs = new Date(row.ts).getTime();
-    if (!provider || !Number.isFinite(tsMs) || tsMs < weekAgoMs) continue;
-    if (provider === "JUSTTCG") rawPointsJtcg7d += 1;
-    if (provider === "SCRYDEX") rawPointsScrydex7d += 1;
+  if (rawSourceScrydex !== null) {
+    const referenceTsMs = rawProviderHistoryRows
+      .map((row) => new Date(row.ts).getTime())
+      .filter((ts) => Number.isFinite(ts))
+      .sort((a, b) => b - a)[0] ?? 0;
+    const weekAgoMs = referenceTsMs - (7 * 24 * 60 * 60 * 1000);
+    for (const row of rawProviderHistoryRows) {
+      const provider = normalizeRawProviderName(row.provider);
+      const tsMs = new Date(row.ts).getTime();
+      if (!provider || !Number.isFinite(tsMs) || tsMs < weekAgoMs) continue;
+      if (provider === "SCRYDEX") rawPointsScrydex7d += 1;
+    }
   }
   const rawPricing = viewMode === "RAW"
     ? resolveRawDisplayPrice({
-      justtcg: rawSourceJtcg,
       scrydex: rawSourceScrydex,
-      justtcgAsOfTs: rawSourceJtcgTs,
       scrydexAsOfTs: rawSourceScrydexTs,
-      justtcgPoints7d: rawPointsJtcg7d,
       scrydexPoints7d: rawPointsScrydex7d,
-      fallback: rawSnap.data?.market_price ?? vm?.price_now ?? null,
       parityStatus: rawParityStatus,
     })
     : null;
   const currentRawPrice = viewMode === "RAW"
     ? rawPricing?.marketPrice ?? null
     : null;
-  const displayPrimaryPrice = currentRawPrice ?? snapshotData?.median_7d ?? null;
+  const displayPrimaryPrice = viewMode === "RAW"
+    ? currentRawPrice
+    : (snapshotData?.median_7d ?? null);
   const primaryPrice = displayPrimaryPrice != null ? formatUsdCompact(displayPrimaryPrice) : null;
   const primaryPriceLabel = currentRawPrice != null
     ? (() => {
       const confidenceSuffix = rawPricing
-        ? ` · Confidence ${rawPricing.confidenceScore}%${rawPricing.lowConfidence ? " (low)" : ""} · Mix J${Math.round(rawPricing.sourceMix.justtcgWeight * 100)} / S${Math.round(rawPricing.sourceMix.scrydexWeight * 100)}`
+        ? ` · Confidence ${rawPricing.confidenceScore}%${rawPricing.lowConfidence ? " (low)" : ""}`
         : "";
-      if (rawPricing?.blendPolicy === "TRUST_WEIGHTED_BLEND") return `Current market price (trust-weighted blend)${confidenceSuffix}`;
-      if (rawPricing?.blendPolicy === "FALLBACK_STALE_OR_OUTLIER") return `Current market price (stale/outlier fallback)${confidenceSuffix}`;
-      return `Current market price (single-provider fallback)${confidenceSuffix}`;
+      return `Current market price (Scrydex)${confidenceSuffix}`;
     })()
     : `${selectedSnapshotGrade
       ? legacyGradeLabel(selectedSnapshotGrade)
@@ -806,12 +869,11 @@ export default async function CanonicalCardPage({
         : "Graded market"
     } · 7-day median ask`;
 
-  // 24h price change (fallback to 7d)
-  const priceChangePct = vm?.change_24h_pct ?? vm?.change_7d_pct ?? null;
+  const priceChangePct = vm?.change_7d_pct ?? null;
   const displayPriceChangePct = typeof priceChangePct === "number" && Number.isFinite(priceChangePct)
     ? priceChangePct
     : 0;
-  const priceChangeLabel = vm?.change_24h_pct != null ? "24h" : vm?.change_7d_pct != null ? "7d" : null;
+  const priceChangeLabel = vm?.change_7d_pct != null ? "7d" : null;
   const priceChangeColor = displayPriceChangePct !== 0
     ? displayPriceChangePct > 0 ? "#00DC5A" : "#FF3B30"
     : "#6B6B6B";
@@ -862,16 +924,82 @@ export default async function CanonicalCardPage({
     : fairValue != null
       ? `Fair ${formatUsdCompact(fairValue)}`
       : "Forming";
+  const rawPulseSnapshot = currentCardPulse
+    ? {
+        bullishVotes: currentCardPulse.bullishVotes,
+        bearishVotes: currentCardPulse.bearishVotes,
+        userVote: currentCardPulse.userVote,
+        resolvesAt: cardPulseSnapshot.weekEndsAt,
+      }
+    : null;
+  const commonTailSections = (
+    <>
+      <div className="pt-4 sm:pt-5">
+        <CardViewTracker
+          canonicalSlug={slug}
+          initialTotalViews={viewSnapshot.totalViews}
+          initialSeries={viewSnapshot.series}
+          locked
+        />
+      </div>
+
+      <CollapsibleSection title="Live eBay Listings" defaultOpen={false} badge={<Pill label="Live" tone="neutral" size="small" />}>
+        <EbayListings
+          queries={ebayQueries}
+          canonicalSlug={slug}
+          canonicalName={canonical.canonical_name}
+          setName={canonical.set_name}
+          cardNumber={canonical.card_number}
+          finish={selectedPrinting?.finish ?? null}
+          printingId={selectedPrinting?.id ?? null}
+          grade={legacyListingsGrade}
+        />
+      </CollapsibleSection>
+
+      <RelatedCarouselSection
+        title="From This Set"
+        cards={relatedCarousels.fromSet}
+        emptyMessage="No other tracked cards from this set yet."
+      />
+
+      <RelatedCarouselSection
+        title="From This Pokémon"
+        cards={relatedCarousels.fromPokemon}
+        emptyMessage="No other tracked cards from this Pokémon yet."
+      />
+    </>
+  );
 
   return (
     <PageShell>
-      <CanonicalCardFloatingHero
-        imageUrl={selectedPrinting?.image_url ?? null}
-        altText={canonical.canonical_name}
-      />
+      {viewMode === "RAW" ? (
+        <RawCardMarketSurface
+          canonicalSlug={slug}
+          canonicalName={canonical.canonical_name}
+          subtitleText={subtitleText}
+          setName={canonical.set_name}
+          cardNumber={canonical.card_number}
+          canonicalSetHref={canonicalSetHref}
+          variants={rawVariantPayload}
+          selectedPrintingId={selectedPrinting?.id ?? null}
+          selectedWindow={activeMarketWindow}
+          rawHref={rawModeHref}
+          gradedHref={gradedModeHref}
+          scoutSummaryText={cardProfile?.summary_long ?? cardProfile?.summary_short ?? null}
+          scoutUpdatedAt={scoutUpdatedAt}
+          currentCardPulse={rawPulseSnapshot}
+        >
+          {commonTailSections}
+        </RawCardMarketSurface>
+      ) : (
+        <>
+          <CanonicalCardFloatingHero
+            imageUrl={selectedPrinting?.image_url ?? null}
+            altText={canonical.canonical_name}
+          />
 
-      <div id="content" className="content-sheet">
-        <div className="mx-auto max-w-5xl px-4 pb-[max(env(safe-area-inset-bottom),2.5rem)] pt-8 sm:px-6 sm:pb-[max(env(safe-area-inset-bottom),3.5rem)]">
+          <div id="content" className="content-sheet">
+            <div className="mx-auto max-w-5xl px-4 pb-[max(env(safe-area-inset-bottom),2.5rem)] pt-8 sm:px-6 sm:pb-[max(env(safe-area-inset-bottom),3.5rem)]">
           {/* ── Card identity + price ──────────────────────────────────── */}
           <div className="mb-6">
             <h1 className="text-[36px] font-semibold leading-tight tracking-[-0.035em] text-[#F0F0F0] sm:text-[44px]">
@@ -915,24 +1043,6 @@ export default async function CanonicalCardPage({
                       </div>
                     )}
                     <p className="mt-1 text-[14px] text-[#555]">{primaryPriceLabel}</p>
-                    {viewMode === "RAW" && (rawSourceJtcg != null || rawSourceScrydex != null) ? (
-                      <div className="mt-1 text-[13px] tabular-nums text-[#7A7A7A]">
-                        <p>
-                          JustTCG: {rawSourceJtcg != null ? formatUsdCompact(rawSourceJtcg) : "—"}{" "}
-                          <span className="text-[#5E5E5E]">Updated: {rawSourceAsOfJtcg ?? "--"}</span>
-                        </p>
-                        <p>
-                          Scrydex: {rawSourceScrydex != null ? formatUsdCompact(rawSourceScrydex) : "—"}{" "}
-                          <span className="text-[#5E5E5E]">Updated: {rawSourceAsOfScrydex ?? "--"}</span>
-                        </p>
-                      </div>
-                    ) : null}
-                    {viewMode === "RAW" ? (
-                      <PokeTraceBetaCard
-                        slug={slug}
-                        printingId={selectedPrinting?.id ?? null}
-                      />
-                    ) : null}
                   </>
                 ) : null}
               </div>
@@ -1087,7 +1197,7 @@ export default async function CanonicalCardPage({
             cardName={canonical.canonical_name}
             setName={canonical.set_name}
             imageUrl={selectedPrinting?.image_url ?? null}
-            changePct={vm?.change_24h_pct ?? vm?.change_7d_pct ?? null}
+            changePct={vm?.change_7d_pct ?? null}
             bullishVotes={currentCardPulse.bullishVotes}
             bearishVotes={currentCardPulse.bearishVotes}
             userVote={currentCardPulse.userVote}
@@ -1095,42 +1205,11 @@ export default async function CanonicalCardPage({
           />
         ) : null}
 
-        <div className="pt-4 sm:pt-5">
-          <CardViewTracker
-            canonicalSlug={slug}
-            initialTotalViews={viewSnapshot.totalViews}
-            initialSeries={viewSnapshot.series}
-            locked
-          />
-        </div>
-
-        {/* ── Live eBay Listings ──────────────────────────────────────────── */}
-        <CollapsibleSection title="Live eBay Listings" defaultOpen={false} badge={<Pill label="Live" tone="neutral" size="small" />}>
-          <EbayListings
-            queries={ebayQueries}
-            canonicalSlug={slug}
-            canonicalName={canonical.canonical_name}
-            setName={canonical.set_name}
-            cardNumber={canonical.card_number}
-            finish={selectedPrinting?.finish ?? null}
-            printingId={selectedPrinting?.id ?? null}
-            grade={legacyListingsGrade}
-          />
-        </CollapsibleSection>
-
-        <RelatedCarouselSection
-          title="From This Set"
-          cards={relatedCarousels.fromSet}
-          emptyMessage="No other tracked cards from this set yet."
-        />
-
-        <RelatedCarouselSection
-          title="From This Pokémon"
-          cards={relatedCarousels.fromPokemon}
-          emptyMessage="No other tracked cards from this Pokémon yet."
-        />
-        </div>
-      </div>
+              {commonTailSections}
+            </div>
+          </div>
+        </>
+      )}
     </PageShell>
   );
 }

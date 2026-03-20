@@ -51,6 +51,7 @@ next-env.d.ts
 
 # External datasets
 pokemon-tcg-data/
+pokemon_card_detector-1/
 
 # Local runtime state
 scripts/import-state.json
@@ -58,6 +59,10 @@ scripts/justtcg-live-state.json
 
 # Generated artifacts
 scripts/output/
+rf-detr-base.pth
+ios/Sources/Features/Scanner/training_runs/
+ios/Sources/Features/Scanner/ai_env/*
+!ios/Sources/Features/Scanner/ai_env/download_data.py
 
 # Supabase local temp
 .supabase/

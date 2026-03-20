@@ -9,6 +9,7 @@ import {
   type VariantSignalRefreshKey,
 } from "@/lib/backfill/provider-derived-signals";
 import type { AnalyticsPipelineProvider } from "@/lib/backfill/provider-registry";
+import { retrySupabaseWriteOperation } from "@/lib/backfill/supabase-write-retry";
 import { buildRawVariantRef } from "@/lib/identity/variant-ref.mjs";
 
 const JOB = "provider_observation_variant_metrics";
@@ -139,8 +140,7 @@ function toFiniteNumber(value: unknown): number | null {
   return null;
 }
 
-function shouldWriteRawForCondition(provider: SupportedProvider, condition: string | null | undefined): boolean {
-  if (provider !== "JUSTTCG") return true;
+function shouldWriteRawForCondition(_provider: SupportedProvider, condition: string | null | undefined): boolean {
   const normalized = String(condition ?? "").trim().toLowerCase();
   return normalized === "nm" || normalized === "mint";
 }
@@ -604,12 +604,18 @@ export async function runProviderObservationVariantMetrics(opts: {
         provider: row.provider,
         grade: row.grade,
       }));
-      const { data, error } = await supabase
-        .from("variant_metrics")
-        .upsert(writes, { onConflict: "canonical_slug,printing_id,provider,grade" })
-        .select("id");
-      if (error) throw new Error(`variant_metrics(upsert): ${error.message}`);
-      metricsRowsUpserted = (data ?? []).length;
+      const data = await retrySupabaseWriteOperation(
+        "variant_metrics(upsert)",
+        async () => {
+          const { data, error } = await supabase
+            .from("variant_metrics")
+            .upsert(writes, { onConflict: "canonical_slug,printing_id,provider,grade" })
+            .select("id");
+          if (error) throw new Error(error.message);
+          return (data ?? []) as Array<{ id: string }>;
+        },
+      );
+      metricsRowsUpserted = data.length;
 
       const signalRefresh = await refreshDerivedSignalsForVariantKeys({
         provider: opts.provider,

@@ -2,24 +2,32 @@
 # PopAlpha PokemonTCG Importer
 # ==============================
 
-$baseUrl = "https://popalpha.ai/api/admin/import/pokemontcg-canonical"
-$adminSecret = "83e6903877bed690a3571143fe5eeeab117d8302a1b930ccb31f6851bb0570bf"  # set to your ADMIN_SECRET only if the route requires it
+param(
+    [string]$BaseUrl = "https://popalpha.ai/api/admin/import/pokemontcg-canonical",
+    [string]$AdminSecret = $env:ADMIN_SECRET
+)
+
 $pageStart = 1
 $maxPages = 1          # how many pages per invocation (keep 1 for safety)
 $pageSize = 50        # 50 max per PokemonTCG API
 $retryLimit = 10
 $delaySeconds = 2
 
+if ([string]::IsNullOrWhiteSpace($AdminSecret)) {
+    Write-Host "ADMIN_SECRET env var or -AdminSecret is required."
+    exit 1
+}
+
 Write-Host "Starting PokemonTCG canonical import loop..."
 Write-Host "---------------------------------------------"
 
 while ($true) {
 
-    $uri = "${baseUrl}?pageStart=$pageStart&maxPages=$maxPages&pageSize=$pageSize"
+    $uri = "${BaseUrl}?pageStart=$pageStart&maxPages=$maxPages&pageSize=$pageSize"
 
     $headers = @{}
-    if ($adminSecret -ne "") {
-        $headers["x-admin-secret"] = $adminSecret
+    if ($AdminSecret -ne "") {
+        $headers["x-admin-secret"] = $AdminSecret
     }
 
     $attempt = 1

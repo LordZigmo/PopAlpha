@@ -1,5 +1,10 @@
 import { createHash } from "crypto";
 import { NextResponse } from "next/server";
+import { dbAdmin } from "@/lib/db/admin";
+import {
+  buildEbayDeletionReceiptRow,
+  handleEbayDeletionNotification,
+} from "@/lib/ebay/deletion-notification";
 
 export const runtime = "nodejs";
 
@@ -27,23 +32,21 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  // Require X-EBAY-SIGNATURE header to be present.
-  // TODO: implement full JWS signature verification before processing real deletion data.
-  const sig = req.headers.get("X-EBAY-SIGNATURE");
-  if (!sig) {
-    return NextResponse.json(
-      { received: false, error: "Missing X-EBAY-SIGNATURE header." },
-      { status: 401 },
-    );
-  }
+  return handleEbayDeletionNotification(req, {
+    persistReceipt: async ({ payload, verification }) => {
+      const { error } = await dbAdmin()
+        .from("ebay_deletion_notification_receipts")
+        .insert(buildEbayDeletionReceiptRow({ payload, verification }));
 
-  let payload: unknown;
-  try {
-    payload = await req.json();
-  } catch {
-    return NextResponse.json({ received: false, error: "Invalid JSON body." }, { status: 400 });
-  }
+      if (!error) {
+        return { stored: true };
+      }
 
-  console.log("[ebay.deletion-notification] received", payload);
-  return NextResponse.json({ received: true });
+      if (error.code === "23505") {
+        return { stored: false };
+      }
+
+      throw error;
+    },
+  });
 }
