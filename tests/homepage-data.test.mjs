@@ -250,8 +250,13 @@ export async function runHomepageDataTests() {
   );
 
   assert.deepEqual(
-    data.high_confidence_movers.map((card) => ({ slug: card.slug, mover_tier: card.mover_tier })),
-    [{ slug: "alpha-high", mover_tier: "hot" }],
+    data.high_confidence_movers.map((card) => ({
+      slug: card.slug,
+      mover_tier: card.mover_tier,
+      confidence_score: card.confidence_score,
+      low_confidence: card.low_confidence,
+    })),
+    [{ slug: "alpha-high", mover_tier: "hot", confidence_score: 94, low_confidence: false }],
   );
 
   assert.deepEqual(

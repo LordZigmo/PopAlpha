@@ -626,17 +626,15 @@ export default async function SearchPage({
           ) : (
             <section className="mx-auto w-full max-w-3xl pt-10 text-center sm:pt-14">
               <div className="flex items-center justify-center gap-6">
-                <span className="flex h-28 w-28 items-center justify-center overflow-hidden rounded-[28px] border border-white/10 bg-black/55 shadow-[0_28px_72px_rgba(0,0,0,0.34)]">
-                  <Image
-                    src="/brand/popalpha-icon.svg"
-                    alt=""
-                    aria-hidden="true"
-                    width={92}
-                    height={92}
-                    className="h-[5.5rem] w-[5.5rem]"
-                    priority
-                  />
-                </span>
+                <Image
+                  src="/brand/popalpha-icon.svg"
+                  alt=""
+                  aria-hidden="true"
+                  width={132}
+                  height={132}
+                  className="h-28 w-28 shrink-0 sm:h-32 sm:w-32"
+                  priority
+                />
                 <h1 className="text-app text-7xl font-semibold tracking-tight sm:text-[5.5rem]">PopAlpha</h1>
               </div>
               <p className="text-muted mx-auto mt-4 max-w-2xl text-sm sm:text-base">

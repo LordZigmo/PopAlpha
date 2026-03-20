@@ -429,7 +429,6 @@ export default async function HomePage() {
     console.log("[homepage] data resolved:", {
       movers: data?.movers?.length ?? 0,
       high_confidence_movers: data?.high_confidence_movers?.length ?? 0,
-      emerging_movers: data?.emerging_movers?.length ?? 0,
       losers: data?.losers?.length ?? 0,
       trending: data?.trending?.length ?? 0,
     });
@@ -440,7 +439,6 @@ export default async function HomePage() {
 
   const movers = Array.isArray(data?.movers) ? data.movers : [];
   const highConfidenceMovers = Array.isArray(data?.high_confidence_movers) ? data.high_confidence_movers : [];
-  const emergingMovers = Array.isArray(data?.emerging_movers) ? data.emerging_movers : [];
   const losers = Array.isArray(data?.losers) ? data.losers : [];
   const trending = Array.isArray(data?.trending) ? data.trending : [];
   const asOf = timeAgo(data?.as_of ?? null);
@@ -491,17 +489,15 @@ export default async function HomePage() {
         <div className="flex items-baseline justify-between gap-4">
           <div>
             <div className="flex items-center gap-5">
-              <span className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-[24px] border border-white/10 bg-black/55 shadow-[0_24px_64px_rgba(0,0,0,0.34)]">
-                <Image
-                  src="/brand/popalpha-icon.svg"
-                  alt=""
-                  aria-hidden="true"
-                  width={72}
-                  height={72}
-                  className="h-[4.5rem] w-[4.5rem]"
-                  priority
-                />
-              </span>
+              <Image
+                src="/brand/popalpha-icon.svg"
+                alt=""
+                aria-hidden="true"
+                width={112}
+                height={112}
+                className="h-24 w-24 shrink-0 sm:h-28 sm:w-28"
+                priority
+              />
               <h1 className="text-5xl font-bold tracking-tight sm:text-6xl">PopAlpha</h1>
             </div>
             <p className="mt-1 text-[13px] text-[#7A7A7A]">
@@ -599,15 +595,14 @@ export default async function HomePage() {
       {/* ── High-Confidence Movers ───────────────────────────────────── */}
       <SectionCarousel
         title="High-Confidence Movers"
-        icon="🔥"
-        subtitle="past 24h"
+        subtitle="24h gains with strong price confidence"
         stamp={railUpdatedLabel}
         stampTitle={railUpdatedTitle}
         stampDateTime={data?.as_of ?? null}
       >
         {highConfidenceMovers.length > 0
           ? highConfidenceMovers.slice(0, 5).map((card) => (
-              <CardTileMini key={card.slug} card={card} showTier />
+              <CardTileMini key={card.slug} card={card} />
             ))
           : null}
         {highConfidenceMovers.length === 0 ? (
@@ -616,31 +611,11 @@ export default async function HomePage() {
       </SectionCarousel>
       <div className="mx-auto mt-6 max-w-5xl border-b border-white/5 px-4 sm:px-6 lg:px-0" />
 
-      {/* ── Emerging Movers ──────────────────────────────────────────── */}
-      <SectionCarousel
-        title="Emerging Movers"
-        icon="🌱"
-        subtitle="past 24h, low liquidity"
-        stamp={railUpdatedLabel}
-        stampTitle={railUpdatedTitle}
-        stampDateTime={data?.as_of ?? null}
-      >
-        {emergingMovers.length > 0
-          ? emergingMovers.slice(0, 5).map((card) => (
-              <CardTileMini key={card.slug} card={card} showTier />
-            ))
-          : null}
-        {emergingMovers.length === 0 ? (
-          <EmptySlot message="No emerging movers yet" />
-        ) : null}
-      </SectionCarousel>
-      <div className="mx-auto mt-6 max-w-5xl border-b border-white/5 px-4 sm:px-6 lg:px-0" />
-
       {/* ── Top Losers ───────────────────────────────────────────────── */}
       <SectionCarousel
         title="Biggest Drops"
         icon="📉"
-        subtitle="past 24h"
+        subtitle="24h pullbacks, liquid + confirmed"
         stamp={railUpdatedLabel}
         stampTitle={railUpdatedTitle}
         stampDateTime={data?.as_of ?? null}

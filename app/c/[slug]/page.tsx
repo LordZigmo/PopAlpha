@@ -730,6 +730,8 @@ export default async function CanonicalCardPage({
       market_price: null,
       change_pct: vm?.change_7d_pct ?? null,
       change_window: vm?.change_7d_pct != null ? "7D" : null,
+      confidence_score: null,
+      low_confidence: null,
       mover_tier: null,
       image_url: selectedPrinting?.image_url ?? null,
       sparkline_7d: [],

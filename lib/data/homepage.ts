@@ -27,6 +27,8 @@ export type HomepageCard = {
   market_price: number | null;
   change_pct: number | null;
   change_window: "24H" | "7D" | null;
+  confidence_score: number | null;
+  low_confidence: boolean | null;
   mover_tier: "hot" | "warming" | "cooling" | "cold" | null;
   image_url: string | null;
   sparkline_7d: number[];
@@ -416,6 +418,12 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
         market_price: marketPulse?.marketPrice ?? overrides.fallbackPrice ?? null,
         change_pct: selectedChangePct,
         change_window: selectedChangeWindow,
+        confidence_score: typeof marketPulse?.confidenceScore === "number"
+          ? Math.round(marketPulse.confidenceScore)
+          : null,
+        low_confidence: typeof marketPulse?.lowConfidence === "boolean"
+          ? marketPulse.lowConfidence
+          : null,
         image_url: imageMap.get(slug) ?? null,
         mover_tier: overrides.mover_tier ?? null,
         sparkline_7d: sparkline,

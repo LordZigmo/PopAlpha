@@ -1,79 +1,63 @@
-"use client";
-
 import Link from "next/link";
-import { motion } from "framer-motion";
 import type { HomepageCard } from "@/lib/data/homepage";
 import ChangeBadge from "@/components/change-badge";
-
-const TIER_STYLES: Record<string, { label: string; color: string; bg: string }> = {
-  hot: { label: "Hot", color: "#FFB86B", bg: "rgba(255,184,107,0.1)" },
-  warming: { label: "Warming", color: "#FFD60A", bg: "rgba(255,214,10,0.08)" },
-  cooling: { label: "Cooling", color: "#64D2FF", bg: "rgba(100,210,255,0.08)" },
-  cold: { label: "Cold", color: "#FF3B30", bg: "rgba(255,59,48,0.08)" },
-};
 
 function formatPrice(n: number | null): string {
   if (n == null || n <= 0) return "--";
   return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-function Sparkline({ values }: { values: number[] }) {
-  if (values.length < 2) {
-    return <div className="h-5 w-12 rounded-full bg-white/[0.03]" />;
+function getConfidenceVisual(score: number | null, lowConfidence: boolean | null | undefined) {
+  if (typeof score !== "number" || !Number.isFinite(score)) return null;
+
+  const clamped = Math.max(0, Math.min(100, Math.round(score)));
+  if (lowConfidence || clamped < 55) {
+    return {
+      score: clamped,
+      label: "Low",
+      color: "#FF8A80",
+      fill: "rgba(255,138,128,0.9)",
+    };
   }
-
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min || 1;
-  const points = values
-    .map((value, index) => {
-      const x = (index / Math.max(values.length - 1, 1)) * 44;
-      const y = 16 - ((value - min) / range) * 12;
-      return `${x},${y}`;
-    })
-    .join(" ");
-
-  const rising = values[values.length - 1] >= values[0];
-
-  return (
-    <svg viewBox="0 0 44 18" className="h-5 w-12 overflow-visible" aria-hidden="true">
-      <polyline
-        fill="none"
-        stroke={rising ? "#7DD3FC" : "#94A3B8"}
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        points={points}
-      />
-    </svg>
-  );
-}
-
-function HotMarker() {
-  return (
-    <motion.span
-      className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[rgba(255,132,68,0.12)] text-[#FF9A5F]"
-      animate={{ scale: [1, 1.08, 1], rotate: [0, -5, 4, 0] }}
-      transition={{ duration: 1.6, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut" }}
-      aria-label="Hot"
-      title="Hot"
-    >
-      <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 fill-current" aria-hidden="true">
-        <path d="M13.6 2.3c.5 2.4-.6 4-1.7 5.5-.9 1.2-1.7 2.3-1.7 3.9 0 1.5.9 2.7 2.5 2.7 2.2 0 3.9-1.9 3.9-4.6 0-1.3-.5-2.8-1.8-4.4 3.7 1.6 5.8 5 5.8 8.7 0 4.5-3.4 7.6-8 7.6-4.4 0-7.6-2.9-7.6-7 0-3.4 2-5.7 4.6-7.8 1.4-1.1 2.8-2.3 4-4.6Z" />
-      </svg>
-    </motion.span>
-  );
+  if (clamped >= 85) {
+    return {
+      score: clamped,
+      label: "High",
+      color: "#63D471",
+      fill: "rgba(99,212,113,0.95)",
+    };
+  }
+  if (clamped >= 70) {
+    return {
+      score: clamped,
+      label: "Solid",
+      color: "#7DD3FC",
+      fill: "rgba(125,211,252,0.95)",
+    };
+  }
+  return {
+    score: clamped,
+    label: "Watch",
+    color: "#FACC15",
+    fill: "rgba(250,204,21,0.95)",
+  };
 }
 
 export default function CardTileMini({
   card,
-  showTier = false,
 }: {
   card: HomepageCard;
-  showTier?: boolean;
 }) {
-  const tier = card.mover_tier ? TIER_STYLES[card.mover_tier] : null;
-  const showHotPremium = showTier && card.mover_tier === "hot";
+  const confidence = getConfidenceVisual(card.confidence_score, card.low_confidence);
+  const filledSegments = confidence
+    ? confidence.score >= 85
+      ? 4
+      : confidence.score >= 70
+        ? 3
+        : confidence.score >= 55
+          ? 2
+          : 1
+    : 0;
 
   return (
     <Link
@@ -89,10 +73,7 @@ export default function CardTileMini({
             <img
               src={card.image_url}
               alt={card.name}
-              className={[
-                "h-full w-full object-cover object-center transition-transform duration-300",
-                showTier ? "group-hover:scale-[1.02]" : "group-hover:scale-[1.03]",
-              ].join(" ")}
+              className="h-full w-full object-cover object-center transition-transform duration-300 group-hover:scale-[1.03]"
             />
           ) : (
             <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.06),transparent_65%)]">
@@ -116,25 +97,40 @@ export default function CardTileMini({
             <span className="block truncate text-[14px] font-bold tabular-nums text-[#F0F0F0]">
               {formatPrice(card.market_price)}
             </span>
-            {showHotPremium ? (
-              <div className="mt-1 flex items-center gap-1.5">
-                <HotMarker />
-                <Sparkline values={card.sparkline_7d} />
-              </div>
-            ) : null}
           </div>
           <div className="shrink-0 pt-0.5">
             <ChangeBadge pct={card.change_pct} windowLabel={card.change_window} />
           </div>
         </div>
 
-        {showTier && tier && !showHotPremium ? (
-          <span
-            className="mt-2 inline-flex w-fit items-center rounded-full px-2 py-0.5 text-[10px] font-semibold"
-            style={{ color: tier.color, backgroundColor: tier.bg }}
-          >
-            {tier.label}
-          </span>
+        {confidence ? (
+          <div className="mt-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#8A8A8A]">
+                Price Confidence
+              </span>
+              <span
+                className="shrink-0 text-[11px] font-semibold tabular-nums"
+                style={{ color: confidence.color }}
+              >
+                {confidence.label} {confidence.score}
+              </span>
+            </div>
+            <div
+              className="mt-1 flex gap-1"
+              aria-label={`Price confidence ${confidence.score} out of 100`}
+            >
+              {Array.from({ length: 4 }, (_, index) => (
+                <span
+                  key={index}
+                  className="h-1.5 flex-1 rounded-full"
+                  style={{
+                    backgroundColor: index < filledSegments ? confidence.fill : "rgba(255,255,255,0.07)",
+                  }}
+                />
+              ))}
+            </div>
+          </div>
         ) : null}
       </div>
     </Link>
