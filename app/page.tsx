@@ -210,7 +210,14 @@ export default async function HomePage() {
       {/* ── Nav ──────────────────────────────────────────────────── */}
       <header className="fixed inset-x-0 top-0 z-50 border-b border-white/[0.04] bg-[#0A0A0A]/80 backdrop-blur-xl">
         <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-5 sm:px-8">
-          <Link href="/" className="text-[16px] font-bold tracking-tight text-white">
+          <Link href="/" className="flex items-center gap-2 text-[16px] font-bold tracking-tight text-white">
+            <Image
+              src="/brand/popalpha-icon.svg"
+              alt="PopAlpha logo"
+              width={28}
+              height={28}
+              className="rounded-md"
+            />
             PopAlpha
           </Link>
           <nav className="flex items-center gap-5">
@@ -417,9 +424,13 @@ export default async function HomePage() {
             {/* Brief header */}
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-3">
-                <div className="flex h-7 w-7 items-center justify-center rounded-md bg-emerald-500/10">
-                  <BarChart3 size={14} className="text-emerald-400" />
-                </div>
+                <Image
+                  src="/brand/popalpha-icon.svg"
+                  alt=""
+                  width={28}
+                  height={28}
+                  className="rounded-md"
+                />
                 <div>
                   <h2 className="text-[13px] font-semibold tracking-tight text-white">
                     AI Market Brief
