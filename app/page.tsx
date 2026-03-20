@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { currentUser } from "@clerk/nextjs/server";
 import { generateText } from "ai";
@@ -489,7 +490,20 @@ export default async function HomePage() {
       <div className="mx-auto max-w-5xl px-4 pt-16 sm:px-6 sm:pt-20">
         <div className="flex items-baseline justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">PopAlpha</h1>
+            <div className="flex items-center gap-3">
+              <span className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-[14px] border border-white/10 bg-black/55 shadow-[0_16px_40px_rgba(0,0,0,0.32)]">
+                <Image
+                  src="/brand/popalpha-icon.svg"
+                  alt=""
+                  aria-hidden="true"
+                  width={38}
+                  height={38}
+                  className="h-9 w-9"
+                  priority
+                />
+              </span>
+              <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">PopAlpha</h1>
+            </div>
             <p className="mt-1 text-[13px] text-[#7A7A7A]">
               The AI that knows the market and loves the cards.
               {asOf ? <span className="ml-2 text-[#676767]">{asOf}</span> : null}

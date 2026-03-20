@@ -6,9 +6,11 @@
  * iOS grouped rules: matte dark surfaces, consistent radii and spacing, restrained separators,
  * and touch targets sized for mobile-first interaction.
  */
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { currentUser } from "@clerk/nextjs/server";
+import { cache } from "react";
 import CanonicalCardFloatingHero from "@/components/canonical-card-floating-hero";
 import CardModeToggle from "@/components/card-mode-toggle";
 import CardViewTracker from "@/components/card-view-tracker";
@@ -67,6 +69,12 @@ type SnapshotRow = {
 type CardProfileRow = {
   summary_short: string;
   summary_long: string | null;
+};
+
+type CanonicalCardPageBaseData = {
+  canonical: CanonicalCardRow | null;
+  printings: CardPrintingRow[];
+  cardProfile: CardProfileRow | null;
 };
 
 const DEFAULT_BACK_HREF = "/search";
@@ -166,6 +174,32 @@ function chooseDefaultPrinting(printings: CardPrintingRow[]): CardPrintingRow | 
   })[0] ?? null;
 }
 
+const getCanonicalCardPageBaseData = cache(async (slug: string): Promise<CanonicalCardPageBaseData> => {
+  const supabase = dbPublic();
+  const [{ data: canonical }, { data: printingsData }, { data: cardProfile }] = await Promise.all([
+    supabase
+      .from("canonical_cards")
+      .select("slug, canonical_name, subject, set_name, year, card_number")
+      .eq("slug", slug)
+      .maybeSingle<CanonicalCardRow>(),
+    supabase
+      .from("card_printings")
+      .select("id, language, set_code, finish, finish_detail, edition, stamp, image_url, rarity")
+      .eq("canonical_slug", slug),
+    supabase
+      .from("card_profiles")
+      .select("summary_short, summary_long")
+      .eq("card_slug", slug)
+      .maybeSingle<CardProfileRow>(),
+  ]);
+
+  return {
+    canonical: canonical ?? null,
+    printings: ((printingsData ?? []) as CardPrintingRow[]).sort(sortPrintings),
+    cardProfile: cardProfile ?? null,
+  };
+});
+
 function selectedGrade(gradeRaw: string | undefined): GradeSelection {
   const upper = (gradeRaw ?? "RAW").toUpperCase();
   if (upper === "PSA9" || upper === "PSA10" || upper === "RAW") return upper;
@@ -183,6 +217,88 @@ function legacyGradeToBucket(gradeRaw: string | undefined): GradeBucket | null {
   if (parsed === "PSA9") return "G9";
   if (parsed === "PSA10") return "G10";
   return null;
+}
+
+function buildCanonicalCardMetadataTitle(canonical: CanonicalCardRow): string {
+  const identityBits = [
+    canonical.canonical_name,
+    canonical.set_name,
+    canonical.card_number ? `#${canonical.card_number}` : null,
+  ].filter(Boolean);
+
+  return `${identityBits.join(" · ")} | PopAlpha`;
+}
+
+function buildCanonicalCardMetadataDescription(
+  canonical: CanonicalCardRow,
+  cardProfile: CardProfileRow | null,
+  selectedPrinting: CardPrintingRow | null,
+): string {
+  const profileSummary = cardProfile?.summary_short?.trim();
+  if (profileSummary) return profileSummary;
+
+  const identityBits = [
+    canonical.set_name ? `from ${canonical.set_name}` : null,
+    canonical.card_number ? `#${canonical.card_number}` : null,
+    canonical.year ? String(canonical.year) : null,
+  ].filter(Boolean);
+  const printingLabel = selectedPrinting ? printingOptionLabel(selectedPrinting) : null;
+  const subjectLabel = canonical.subject?.trim() ? `${canonical.subject.trim()} collectors` : "card collectors";
+
+  return [
+    `Track ${canonical.canonical_name}${identityBits.length > 0 ? ` ${identityBits.join(" · ")}` : ""} on PopAlpha.`,
+    printingLabel ? `${printingLabel} pricing, market signals, and collector context for ${subjectLabel}.` : `Pricing, market signals, and collector context for ${subjectLabel}.`,
+  ].join(" ");
+}
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}): Promise<Metadata> {
+  const { slug } = await params;
+  const { canonical, printings, cardProfile } = await getCanonicalCardPageBaseData(slug);
+
+  if (!canonical) {
+    return {
+      title: "Card Not Found | PopAlpha",
+      robots: {
+        index: false,
+        follow: false,
+      },
+    };
+  }
+
+  const selectedPrinting = chooseDefaultPrinting(printings);
+  const title = buildCanonicalCardMetadataTitle(canonical);
+  const description = buildCanonicalCardMetadataDescription(canonical, cardProfile, selectedPrinting);
+  const canonicalPath = `/c/${encodeURIComponent(slug)}`;
+  const primaryImageUrl = selectedPrinting?.image_url ?? null;
+
+  return {
+    title,
+    description,
+    alternates: {
+      canonical: canonicalPath,
+    },
+    openGraph: {
+      title,
+      description,
+      url: canonicalPath,
+      siteName: "PopAlpha",
+      type: "website",
+      images: [
+        ...(primaryImageUrl ? [{ url: primaryImageUrl, alt: canonical.canonical_name }] : []),
+        { url: "/opengraph-image", alt: "PopAlpha" },
+      ],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+      images: primaryImageUrl ? [primaryImageUrl] : ["/twitter-image"],
+    },
+  };
 }
 
 function selectedBucket(bucketRaw: string | undefined, gradeRaw: string | undefined): GradeBucket | null {
@@ -470,27 +586,10 @@ export default async function CanonicalCardPage({
   const debugEnabled = debug === "1";
   const backHref = resolveBackHref(returnTo);
   const activeMarketWindow = selectedMarketWindow(marketWindow);
-
-  const { data: canonical } = await supabase
-    .from("canonical_cards")
-    .select("slug, canonical_name, subject, set_name, year, card_number")
-    .eq("slug", slug)
-    .maybeSingle<CanonicalCardRow>();
+  const { canonical, printings, cardProfile } = await getCanonicalCardPageBaseData(slug);
 
   if (!canonical) notFound();
 
-  const { data: printingsData } = await supabase
-    .from("card_printings")
-    .select("id, language, set_code, finish, finish_detail, edition, stamp, image_url, rarity")
-    .eq("canonical_slug", slug);
-
-  const { data: cardProfile } = await supabase
-    .from("card_profiles")
-    .select("summary_short, summary_long")
-    .eq("card_slug", slug)
-    .maybeSingle<CardProfileRow>();
-
-  const printings = ((printingsData ?? []) as CardPrintingRow[]).sort(sortPrintings);
   const viewMode = selectedViewMode(mode, grade);
   const selectedPrinting = printings.find((row) => row.id === printing) ?? chooseDefaultPrinting(printings) ?? null;
   const hasExplicitPrinting = Boolean(printing) && Boolean(printings.find((row) => row.id === printing));
