@@ -107,7 +107,7 @@ export default function CardTileMini({
           <div className="mt-2">
             <div className="flex items-center justify-between gap-2">
               <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#8A8A8A]">
-                Price Confidence
+                Confidence
               </span>
               <span
                 className="shrink-0 text-[11px] font-semibold tabular-nums"
