@@ -510,6 +510,41 @@ body {
   .chart-last-node { filter: none; }
 }
 
+/* ── Homepage premium styles ── */
+.homepage-root {
+  background:
+    radial-gradient(ellipse 80% 40% at 50% 0%, rgba(0, 180, 216, 0.03) 0%, transparent 60%),
+    #0A0A0A;
+}
+
+.homepage-search-wrap:focus-within {
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.homepage-brief {
+  transition: border-color 200ms ease;
+}
+
+.homepage-brief:hover {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.homepage-cta-card {
+  transition: border-color 200ms ease;
+}
+
+.homepage-cta-card:hover {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Hide scrollbars on homepage card carousels */
+.homepage-root [style*="scrollbar-width"] {
+  -ms-overflow-style: none;
+}
+.homepage-root [style*="scrollbar-width"]::-webkit-scrollbar {
+  display: none;
+}
+
 /* Compatibility layer for existing Tailwind color classes during token migration */
 .text-neutral-900, .text-neutral-950, .text-neutral-100, .text-neutral-50, .text-neutral-800, .text-neutral-700 { color: var(--color-text) !important; }
 .text-neutral-600, .text-neutral-500, .text-neutral-400, .text-neutral-300, .text-neutral-200 { color: var(--color-muted) !important; }
