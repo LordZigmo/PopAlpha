@@ -308,7 +308,7 @@ export default async function HomePage() {
             }}
           >
             {highConfidenceMovers.slice(0, 5).map((card) => (
-              <CardTileMini key={card.slug} card={card} showTier />
+              <CardTileMini key={card.slug} card={card} />
             ))}
           </div>
         </section>
