@@ -19,14 +19,14 @@ export const metadata: Metadata = {
   manifest: "/manifest.webmanifest",
   icons: {
     icon: [
-      { url: "/icon", sizes: "512x512", type: "image/png" },
-      { url: "/brand/popalpha-icon.svg", type: "image/svg+xml" },
+      { url: "/icon?v=3", sizes: "512x512", type: "image/png" },
+      { url: "/brand/popalpha-icon.svg?v=3", type: "image/svg+xml" },
     ],
     apple: [
-      { url: "/apple-icon", sizes: "180x180", type: "image/png" },
+      { url: "/apple-icon?v=3", sizes: "180x180", type: "image/png" },
     ],
     shortcut: [
-      { url: "/icon", sizes: "512x512", type: "image/png" },
+      { url: "/icon?v=3", sizes: "512x512", type: "image/png" },
     ],
   },
   alternates: {

@@ -11,19 +11,19 @@ export default function manifest(): MetadataRoute.Manifest {
     theme_color: "#090909",
     icons: [
       {
-        src: "/brand/popalpha-icon.svg",
+        src: "/brand/popalpha-icon.svg?v=3",
         sizes: "any",
         type: "image/svg+xml",
         purpose: "any",
       },
       {
-        src: "/icon",
+        src: "/icon?v=3",
         sizes: "512x512",
         type: "image/png",
         purpose: "any",
       },
       {
-        src: "/apple-icon",
+        src: "/apple-icon?v=3",
         sizes: "180x180",
         type: "image/png",
         purpose: "any",

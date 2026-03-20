@@ -15,8 +15,8 @@ self.addEventListener("push", (event) => {
       url: payload.url || "/",
     },
     tag: payload.tag || "popalpha-alert",
-    badge: "/icon",
-    icon: "/icon",
+    badge: "/icon?v=3",
+    icon: "/icon?v=3",
   };
 
   event.waitUntil(self.registration.showNotification(title, options));

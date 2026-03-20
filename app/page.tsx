@@ -490,19 +490,19 @@ export default async function HomePage() {
       <div className="mx-auto max-w-5xl px-4 pt-16 sm:px-6 sm:pt-20">
         <div className="flex items-baseline justify-between gap-4">
           <div>
-            <div className="flex items-center gap-3">
-              <span className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-[14px] border border-white/10 bg-black/55 shadow-[0_16px_40px_rgba(0,0,0,0.32)]">
+            <div className="flex items-center gap-5">
+              <span className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-[24px] border border-white/10 bg-black/55 shadow-[0_24px_64px_rgba(0,0,0,0.34)]">
                 <Image
                   src="/brand/popalpha-icon.svg"
                   alt=""
                   aria-hidden="true"
-                  width={38}
-                  height={38}
-                  className="h-9 w-9"
+                  width={72}
+                  height={72}
+                  className="h-[4.5rem] w-[4.5rem]"
                   priority
                 />
               </span>
-              <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">PopAlpha</h1>
+              <h1 className="text-5xl font-bold tracking-tight sm:text-6xl">PopAlpha</h1>
             </div>
             <p className="mt-1 text-[13px] text-[#7A7A7A]">
               The AI that knows the market and loves the cards.
