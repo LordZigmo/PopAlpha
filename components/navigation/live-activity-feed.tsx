@@ -1,8 +1,8 @@
 "use client";
 
-import { SignedIn, SignedOut } from "@clerk/nextjs";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { useSafeUser } from "@/lib/auth/use-safe-user";
 import { motion } from "framer-motion";
 
 type LiveFeedItem = {
@@ -55,6 +55,7 @@ function timeAgo(iso: string | null): string {
 }
 
 export default function LiveActivityFeed() {
+  const { user } = useSafeUser();
   const [events, setEvents] = useState<LiveFeedItem[]>([]);
 
   useEffect(() => {
@@ -127,7 +128,7 @@ export default function LiveActivityFeed() {
         <span className="h-2 w-2 rounded-full bg-[#38BDF8]" />
       </div>
 
-      <SignedOut>
+      {!user ? (
         <div className="pointer-events-none absolute inset-x-4 top-1/2 z-10 flex -translate-y-1/2 justify-center">
           <div className="pointer-events-auto flex flex-col items-center gap-3 rounded-[1.2rem] border border-white/10 bg-[#090909]/88 px-5 py-5 text-center shadow-[0_18px_45px_rgba(0,0,0,0.35)] backdrop-blur-md">
             <p className="max-w-[13rem] text-[12px] font-medium leading-5 text-[#CFCFCF]">
@@ -141,18 +142,19 @@ export default function LiveActivityFeed() {
             </Link>
           </div>
         </div>
-      </SignedOut>
+      ) : null}
 
       <div className="relative mt-3 h-[168px] overflow-hidden">
-        <SignedOut>
+        {!user ? (
           <div
             aria-hidden="true"
             className="pointer-events-none h-full select-none blur-[5px] opacity-45 saturate-50"
           >
             {feedContent}
           </div>
-        </SignedOut>
-        <SignedIn>{feedContent}</SignedIn>
+        ) : (
+          feedContent
+        )}
       </div>
     </div>
   );

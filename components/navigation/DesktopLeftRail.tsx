@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
-import { SignedIn, SignedOut, useUser } from "@clerk/nextjs";
+import { useSafeUser } from "@/lib/auth/use-safe-user";
 import { Home, PieChart, Plus, Users } from "lucide-react";
 
 const DESKTOP_LEFT_RAIL_WIDTH = "md:w-[min(30vw,22rem)]";
@@ -89,7 +89,7 @@ function NavItem({
 
 export default function DesktopLeftRail() {
   const pathname = usePathname();
-  const { user } = useUser();
+  const { user } = useSafeUser();
   const currentPath = pathname ?? "/";
   const tier = resolveTier(
     user?.publicMetadata.subscriptionTier ?? user?.publicMetadata.tier ?? user?.publicMetadata.plan,
@@ -295,8 +295,8 @@ export default function DesktopLeftRail() {
           <section className="rounded-[1.8rem] border border-white/[0.06] bg-zinc-900/40 p-5">
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6B6B6B]">Identity</p>
             <div className="mt-4 flex items-center gap-4">
-              <SignedIn>
-                {user?.imageUrl ? (
+              {user ? (
+                user.imageUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={user.imageUrl}
@@ -305,15 +305,14 @@ export default function DesktopLeftRail() {
                   />
                 ) : (
                   <div className="flex h-14 w-14 items-center justify-center rounded-[1.1rem] bg-white/[0.04] text-[18px] font-semibold text-white">
-                    {(user?.firstName?.[0] ?? user?.username?.[0] ?? "P").toUpperCase()}
+                    {(user.firstName?.[0] ?? user.username?.[0] ?? "P").toUpperCase()}
                   </div>
-                )}
-              </SignedIn>
-              <SignedOut>
+                )
+              ) : (
                 <div className="flex h-14 w-14 items-center justify-center rounded-[1.1rem] bg-white/[0.04] text-[18px] font-semibold text-white">
                   P
                 </div>
-              </SignedOut>
+              )}
               <div className="min-w-0">
                 <p className="truncate text-[16px] font-semibold text-white">
                   {user?.fullName ?? user?.username ?? "PopAlpha User"}

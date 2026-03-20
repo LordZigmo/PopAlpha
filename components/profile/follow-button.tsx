@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useUser } from "@clerk/nextjs";
+import { useSafeUser } from "@/lib/auth/use-safe-user";
 import Link from "next/link";
 
 export default function FollowButton({
@@ -11,7 +11,7 @@ export default function FollowButton({
   handle: string;
   initialFollowers: number;
 }) {
-  const { user, isLoaded } = useUser();
+  const { user, isLoaded } = useSafeUser();
   const [following, setFollowing] = useState(false);
   const [followers, setFollowers] = useState(initialFollowers);
   const [pending, setPending] = useState(false);

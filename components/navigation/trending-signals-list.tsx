@@ -1,8 +1,8 @@
 "use client";
 
-import { SignedIn, SignedOut } from "@clerk/nextjs";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { useSafeUser } from "@/lib/auth/use-safe-user";
 
 type SignalPayload = {
   ok: boolean;
@@ -58,6 +58,7 @@ const DEMO: ResolvedSignals = {
 };
 
 export default function TrendingSignalsList() {
+  const { user } = useSafeUser();
   const [signals, setSignals] = useState<ResolvedSignals>(DEMO);
   const bullishLeader = signals.bullishLeader;
   const mostWatched = signals.mostWatched;
@@ -126,7 +127,7 @@ export default function TrendingSignalsList() {
         <span className="h-2 w-2 rounded-full bg-[#8B5CF6]" />
       </div>
 
-      <SignedOut>
+      {!user ? (
         <div className="pointer-events-none absolute inset-x-4 top-1/2 z-10 flex -translate-y-1/2 justify-center">
           <div className="pointer-events-auto flex flex-col items-center gap-3 rounded-[1.2rem] border border-white/10 bg-[#090909]/88 px-5 py-5 text-center shadow-[0_18px_45px_rgba(0,0,0,0.35)] backdrop-blur-md">
             <p className="max-w-[13rem] text-[12px] font-medium leading-5 text-[#CFCFCF]">
@@ -140,20 +141,19 @@ export default function TrendingSignalsList() {
             </Link>
           </div>
         </div>
-      </SignedOut>
+      ) : null}
 
       <div className="relative">
-        <SignedOut>
+        {!user ? (
           <div
             aria-hidden="true"
             className="pointer-events-none select-none blur-[5px] opacity-45 saturate-50"
           >
             {signalCards}
           </div>
-        </SignedOut>
-        <SignedIn>
-          {signalCards}
-        </SignedIn>
+        ) : (
+          signalCards
+        )}
       </div>
     </div>
   );

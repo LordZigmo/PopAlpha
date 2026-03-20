@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { Suspense } from "react";
 import { usePathname } from "next/navigation";
-import { SignedOut } from "@clerk/nextjs";
+import { useSafeUser } from "@/lib/auth/use-safe-user";
 import AppShell from "@/components/layout/AppShell";
 import ThemeToggle from "@/components/theme-toggle";
 import NavSearchForm from "@/components/nav-search-form";
@@ -48,16 +48,9 @@ function PortfolioLink({ fixed = false }: { fixed?: boolean }) {
   );
 }
 
-function AuthBlock() {
-  return (
-    <SignedOut>
-      <AuthCtaLink />
-    </SignedOut>
-  );
-}
-
 export default function AppChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const { user } = useSafeUser();
   const isSetsPage = pathname?.startsWith("/sets") ?? false;
 
   // Auth / onboarding pages get no chrome at all
@@ -127,7 +120,7 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
             {!isSetsPage ? <ThemeToggle /> : null}
             <PortfolioLink />
             <AboutLink />
-            <AuthBlock />
+            {!user ? <AuthCtaLink /> : null}
           </nav>
         </div>
       </header>
