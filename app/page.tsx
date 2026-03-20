@@ -799,7 +799,7 @@ export default async function HomePage() {
               </div>
               <Link
                 href="/sign-up"
-                className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-white px-5 py-2.5 text-[13px] font-semibold text-[#0A0A0A] transition hover:bg-white/90"
+                className="homepage-cta-btn inline-flex shrink-0 items-center gap-2 rounded-lg px-5 py-2.5 text-[13px] font-semibold"
               >
                 Get started free
                 <ArrowRight size={14} />
