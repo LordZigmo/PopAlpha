@@ -6,7 +6,6 @@ import { Suspense } from "react";
 import { usePathname } from "next/navigation";
 import { SignedOut } from "@clerk/nextjs";
 import AppShell from "@/components/layout/AppShell";
-import MobileNav from "@/components/navigation/MobileNav";
 import ThemeToggle from "@/components/theme-toggle";
 import NavSearchForm from "@/components/nav-search-form";
 
@@ -73,16 +72,7 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
   }
 
   // Home, search, about, and card detail pages use their own layout — no header
-  if (pathname === "/") {
-    return (
-      <div className="min-h-screen bg-transparent">
-        {children}
-        <MobileNav />
-      </div>
-    );
-  }
-
-  if (pathname === "/search" || pathname === "/about" || pathname.startsWith("/c/")) {
+  if (pathname === "/" || pathname === "/search" || pathname === "/about" || pathname.startsWith("/c/")) {
     return (
       <AppShell>
         {children}

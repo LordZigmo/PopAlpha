@@ -26,19 +26,19 @@ type LiveActivityResponse = {
 const MOCK_EVENTS: LiveFeedItem[] = [
   {
     href: "/c/prismatic-evolutions-161-umbreon-ex",
-    title: "A collector added Umbreon ex to a watchlist",
+    title: "User_X just added Umbreon ex to Watchlist",
     detail: "Prismatic Evolutions",
     at: new Date(Date.now() - 5 * 60_000).toISOString(),
   },
   {
     href: "/c/sv-promo-xy-mew-ex",
-    title: "A collector priced upside into Mew ex",
-    detail: "Fresh community conviction",
+    title: "User_Y predicted a +5% move on Mew ex",
+    detail: "Fresh community signal",
     at: new Date(Date.now() - 11 * 60_000).toISOString(),
   },
   {
     href: "/c/151-199-charizard-ex",
-    title: "A collector drilled into Charizard ex",
+    title: "User_Z just checked Charizard ex",
     detail: "151",
     at: new Date(Date.now() - 19 * 60_000).toISOString(),
   },
@@ -123,7 +123,7 @@ export default function LiveActivityFeed() {
   return (
     <div className="relative mt-4 overflow-hidden rounded-[1.35rem] border border-[#1E1E1E] bg-[#101010] px-4 py-4">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#6B6B6B]">Live activity</p>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#6B6B6B]">Live Feed</p>
         <span className="h-2 w-2 rounded-full bg-[#38BDF8]" />
       </div>
 
@@ -131,13 +131,13 @@ export default function LiveActivityFeed() {
         <div className="pointer-events-none absolute inset-x-4 top-1/2 z-10 flex -translate-y-1/2 justify-center">
           <div className="pointer-events-auto flex flex-col items-center gap-3 rounded-[1.2rem] border border-white/10 bg-[#090909]/88 px-5 py-5 text-center shadow-[0_18px_45px_rgba(0,0,0,0.35)] backdrop-blur-md">
             <p className="max-w-[13rem] text-[12px] font-medium leading-5 text-[#CFCFCF]">
-              Create a free account to follow live collector activity and return to your saved names faster.
+              Sign up to follow live collector activity as it happens.
             </p>
             <Link
               href="/sign-up"
               className="rounded-2xl border border-white bg-white px-4 py-2 text-[12px] font-bold tracking-[0.08em] text-[#0A0A0A] transition hover:opacity-90"
             >
-              CREATE ACCOUNT
+              SIGN UP
             </Link>
           </div>
         </div>
