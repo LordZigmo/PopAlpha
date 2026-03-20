@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { Suspense } from "react";
 import { usePathname } from "next/navigation";
@@ -84,8 +85,18 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
       <header className="fixed inset-x-0 top-0 z-50 border-b border-[#1E1E1E] bg-[#0A0A0A]/95">
         <div className="mx-auto flex h-14 max-w-5xl items-center gap-3 px-4 sm:px-6 md:max-w-[calc(100vw-min(30vw,22rem)-20rem)] md:px-6">
           {/* Logo */}
-          <Link href="/" className="text-app shrink-0 text-[15px] font-bold tracking-tight">
-            PopAlpha
+          <Link href="/" className="text-app shrink-0 flex items-center gap-2.5 text-[15px] font-bold tracking-tight">
+            <span className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-[10px] border border-white/10 bg-black/60 shadow-[0_10px_25px_rgba(0,0,0,0.35)]">
+              <Image
+                src="/brand/popalpha-icon.svg"
+                alt="PopAlpha logo"
+                width={28}
+                height={28}
+                className="h-7 w-7"
+                priority
+              />
+            </span>
+            <span>PopAlpha</span>
           </Link>
 
           {/* Search — wrapped in Suspense because useSearchParams() requires it */}
