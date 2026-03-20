@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { useUser } from "@clerk/nextjs";
+import { useSafeUser } from "@/lib/auth/use-safe-user";
 
 type PricingModalProps = {
   open: boolean;
@@ -61,7 +61,7 @@ const TIERS: TierConfig[] = [
 ];
 
 export default function PricingModal({ open, onClose }: PricingModalProps) {
-  const { user } = useUser();
+  const { user } = useSafeUser();
   const [mounted, setMounted] = useState(false);
   const [waitlistTier, setWaitlistTier] = useState<"Ace" | "Elite" | null>(null);
   const [waitlistEmail, setWaitlistEmail] = useState("");

@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { SignedOut } from "@clerk/nextjs";
+import { useSafeUser } from "@/lib/auth/use-safe-user";
 import PricingModal from "@/components/billing/pricing-modal";
 import LiveActivityFeed from "@/components/navigation/live-activity-feed";
 import TrendingSignalsList from "@/components/navigation/trending-signals-list";
@@ -12,13 +12,14 @@ import { Sparkles } from "lucide-react";
 
 export default function DesktopSidebar() {
   const [pricingOpen, setPricingOpen] = React.useState(false);
+  const { user } = useSafeUser();
 
   return (
     <aside className="fixed inset-y-0 right-0 z-40 hidden w-80 md:flex">
       <div className="sticky top-0 flex h-screen w-full flex-col overflow-y-auto border-l border-[#1E1E1E] bg-[#0A0A0A]/95 px-5 py-6 backdrop-blur-xl">
         <div className="mb-6 flex items-center justify-between gap-3">
           <p className="text-[18px] font-semibold tracking-[-0.03em] text-white">PopAlpha</p>
-          <SignedOut>
+          {!user ? (
             <Link
               href="/sign-up"
               className="rounded-2xl border px-3.5 py-2 text-[12px] font-bold tracking-[0.08em] transition hover:opacity-90"
@@ -26,7 +27,7 @@ export default function DesktopSidebar() {
             >
               SIGN UP
             </Link>
-          </SignedOut>
+          ) : null}
         </div>
 
         <section className="relative shrink-0 overflow-hidden rounded-[1.7rem] border border-[#63D471]/25 border-l-4 border-l-emerald-500 bg-emerald-500/10 px-5 py-5 shadow-[0_0_28px_rgba(16,185,129,0.12)] backdrop-blur-md">
