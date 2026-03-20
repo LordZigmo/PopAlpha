@@ -51,7 +51,7 @@ export default function PopAlphaScoutPreview(props: PopAlphaScoutPreviewProps) {
             PopAlpha Scout
           </div>
           <p className="mt-1 text-[12px] font-medium tracking-[0.04em] text-emerald-200/85 sm:text-[13px]">
-            Pokémon-obsessed AI
+            AI market brief
           </p>
         </div>
         <div className="flex shrink-0 flex-col items-end">

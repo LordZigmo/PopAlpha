@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import CardSearch from "@/components/card-search";
 
 const SEARCH_EXAMPLES = [
-  "Start with a pokemon...",
+  "Search a card, set, or cert...",
   "Bubble Mew",
   "Base Set Charizard",
   "Paldean Fates",

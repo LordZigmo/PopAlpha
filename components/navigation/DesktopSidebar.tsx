@@ -24,7 +24,7 @@ export default function DesktopSidebar() {
               className="rounded-2xl border px-3.5 py-2 text-[12px] font-bold tracking-[0.08em] transition hover:opacity-90"
               style={{ backgroundColor: "#FFFFFF", color: "#0A0A0A", borderColor: "#FFFFFF" }}
             >
-              SIGN UP
+              CREATE ACCOUNT
             </Link>
           </SignedOut>
         </div>
@@ -38,7 +38,7 @@ export default function DesktopSidebar() {
                 PopAlpha Scout
               </div>
               <p className="mt-1 text-[11px] font-medium tracking-[0.04em] text-emerald-200/85">
-                Pokémon-obsessed AI
+                AI market brief
               </p>
             </div>
             <div className="flex shrink-0 flex-col items-end">
@@ -55,7 +55,7 @@ export default function DesktopSidebar() {
             </div>
           </div>
           <TypewriterText
-            text="A few chase cards are still getting most of the attention, so the market feels focused instead of fully heated."
+            text="Leadership is still concentrated in a few chase cards, so the market looks selective instead of broadly overheated."
             className="relative z-10 mt-4 text-[15px] font-medium leading-relaxed text-emerald-50"
           />
         </section>

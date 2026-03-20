@@ -25,11 +25,11 @@ const TIERS: TierConfig[] = [
     name: "Trainer",
     price: "$0",
     cadence: "/month",
-    blurb: "Get your footing in the market and start seeing your collection like it finally matters.",
+    blurb: "Start with the live board, search any card, and get the free Scout market brief.",
     bullets: [
-      "Browse cards, sets, and price movement",
-      "Use the free PopAlpha Scout experience",
-      "Get the foundation for market tracking",
+      "Search cards, sets, and certs",
+      "Use the free PopAlpha Scout market brief",
+      "Track live movers and current pricing",
     ],
     ctaLabel: "Current Free Tier",
   },
@@ -37,25 +37,25 @@ const TIERS: TierConfig[] = [
     name: "Ace",
     price: "$12.99",
     cadence: "/month",
-    blurb: "Move from curious collector to confident operator with sharper reads and faster conviction.",
+    blurb: "Step into a deeper signal layer with faster reads and more conviction-ready market context.",
     bullets: [
-      "Higher-performance AI analysis",
-      "Deeper tools for active collectors",
-      "A faster path from noise to signal",
+      "More advanced AI market reads",
+      "Deeper signal tools for active collectors",
+      "A faster path from noise to conviction",
     ],
-    ctaLabel: "Join The Waitlist",
+    ctaLabel: "Join Waitlist",
   },
   {
     name: "Elite",
     price: "$19.99",
     cadence: "/month",
-    blurb: "See the market the way serious money does, with the signal layer built for high-conviction decisions.",
+    blurb: "Get the full premium intelligence layer built for serious collectors and higher-conviction decisions.",
     bullets: [
       "Full premium intelligence access",
-      "Whale Radar and top-tier signal visibility",
-      "The strongest workflow for serious tracking",
+      "Top-tier signal visibility and deeper tracking",
+      "The strongest workflow for serious market monitoring",
     ],
-    ctaLabel: "Join The Waitlist",
+    ctaLabel: "Join Waitlist",
     featured: true,
   },
 ];
@@ -144,7 +144,7 @@ export default function PricingModal({ open, onClose }: PricingModalProps) {
               <div className="border-b border-white/[0.05] bg-[radial-gradient(circle_at_top_left,rgba(29,78,216,0.18),transparent_38%),radial-gradient(circle_at_top_right,rgba(79,70,229,0.14),transparent_34%)] px-6 py-5">
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <h2 className="text-[28px] font-semibold tracking-[-0.04em] text-white">Start Your Journey</h2>
+                    <h2 className="text-[28px] font-semibold tracking-[-0.04em] text-white">Choose Your Signal Layer</h2>
                   </div>
                   <button
                     type="button"

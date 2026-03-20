@@ -2,6 +2,10 @@ import Link from "next/link";
 import type { HomepageCard } from "@/lib/data/homepage";
 import ChangeBadge from "@/components/change-badge";
 
+function joinClasses(...values: Array<string | false | null | undefined>) {
+  return values.filter(Boolean).join(" ");
+}
+
 function formatPrice(n: number | null): string {
   if (n == null || n <= 0) return "--";
   return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -45,8 +49,10 @@ function getConfidenceVisual(score: number | null, lowConfidence: boolean | null
 
 export default function CardTileMini({
   card,
+  className,
 }: {
   card: HomepageCard;
+  className?: string;
 }) {
   const confidence = getConfidenceVisual(card.confidence_score, card.low_confidence);
   const filledSegments = confidence
@@ -62,7 +68,7 @@ export default function CardTileMini({
   return (
     <Link
       href={`/c/${encodeURIComponent(card.slug)}`}
-      className="group flex w-[172px] shrink-0 flex-col lg:w-auto"
+      className={joinClasses("group flex w-[172px] shrink-0 flex-col lg:w-auto", className)}
       style={{ scrollSnapAlign: "start" }}
     >
       <div className="relative overflow-hidden rounded-[1.05rem] p-[1px]">

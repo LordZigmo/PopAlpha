@@ -21,10 +21,11 @@ function formatUsd(value: number | null): string {
   }).format(value);
 }
 
-function formatSignedPct(value: number | null): string | null {
+function formatPct(value: number | null, options: { absolute?: boolean } = {}): string | null {
   if (value === null || !Number.isFinite(value)) return null;
   const abs = Math.abs(value);
   const formatted = abs >= 10 ? abs.toFixed(0) : abs.toFixed(1);
+  if (options.absolute) return `${formatted}%`;
   return `${value > 0 ? "+" : value < 0 ? "-" : ""}${formatted}%`;
 }
 
@@ -38,40 +39,45 @@ export function buildPopAlphaScoutSummary({
 }: PopAlphaScoutSummaryInput): PopAlphaScoutSummary {
   const priceText = formatUsd(marketPrice);
   const fairValueText = fairValue !== null ? formatUsd(fairValue) : null;
-  const changeText = formatSignedPct(changePct);
+  const signedChangeText = formatPct(changePct);
+  const absoluteChangeText = formatPct(changePct, { absolute: true });
 
-  let openingLine = `Okay, so ${cardName} is trading around ${priceText}, which is kind of wild if you have been watching this one.`;
-  if (changeText && changeLabel) {
+  let openingLine = `${cardName} is trading near ${priceText}.`;
+  if (absoluteChangeText && changeLabel) {
     openingLine = changePct! > 0
-      ? `Okay, so ${cardName} is trading around ${priceText}, and it is up ${changeText} over the last ${changeLabel}, which is making it feel pretty lively.`
+      ? `${cardName} is trading near ${priceText}, up ${absoluteChangeText} over the last ${changeLabel}.`
       : changePct! < 0
-        ? `Okay, so ${cardName} is trading around ${priceText}, after a ${changeText} move over the last ${changeLabel}, so the market cooled off a bit.`
-        : `Okay, so ${cardName} is trading around ${priceText}, and it has been basically flat over the last ${changeLabel}.`;
+        ? `${cardName} is trading near ${priceText}, down ${absoluteChangeText} over the last ${changeLabel}.`
+        : `${cardName} is trading near ${priceText}, flat over the last ${changeLabel}.`;
   }
 
-  let valueLine = "I am still waiting on enough fair-value data to really map this one out.";
+  let valueLine = "Fair value is still forming, so price discovery matters more than mean reversion right now.";
   if (marketPrice !== null && fairValue !== null && fairValue > 0) {
     const edgePct = ((marketPrice - fairValue) / fairValue) * 100;
     if (edgePct <= -1) {
-      valueLine = `By my notes, that is below our fair value mark near ${fairValueText}, so this might actually be a pretty nice pickup for the binder.`;
+      valueLine = `That sits below our fair value near ${fairValueText}, which puts it back into a potential value zone if demand holds.`;
     } else if (edgePct >= 1) {
-      valueLine = `By my notes, that is above our fair value mark near ${fairValueText}, so people are definitely paying extra for it right now.`;
+      valueLine = `That sits above our fair value near ${fairValueText}, so buyers are still paying a premium to get exposure here.`;
     } else {
-      valueLine = `By my notes, that is almost exactly on top of our fair value mark near ${fairValueText}, which is honestly weirdly tidy.`;
+      valueLine = `That is sitting almost exactly on top of our fair value near ${fairValueText}, so the signal is coming more from momentum than from mispricing.`;
     }
   }
 
-  let supplyLine = "Supply is still kind of fuzzy from here.";
+  let supplyLine = "Supply depth is still thin, so the next listing cycle matters.";
   if (activeListings7d !== null) {
     if (activeListings7d <= 4) {
-      supplyLine = `There were only ${activeListings7d} live listings over the last 7 days, so supply looks pretty tight for a chase like this.`;
+      supplyLine = `Supply looks tight with only ${activeListings7d} active listings over the last 7 days, so fresh demand can still move this quickly.`;
+    } else if (activeListings7d <= 10) {
+      supplyLine = `Supply is active with ${activeListings7d} listings over the last 7 days, which gives buyers room without forcing panic pricing.`;
     } else {
-      supplyLine = `There were ${activeListings7d} live listings over the last 7 days, so there is enough on the board that you do not have to panic-buy it.`;
+      supplyLine = `Supply is deeper with ${activeListings7d} listings over the last 7 days, so the move will need steady demand to keep extending.`;
     }
   }
 
   return {
-    summaryShort: openingLine,
+    summaryShort: signedChangeText && changeLabel
+      ? `${cardName} is trading near ${priceText}, ${signedChangeText} over the last ${changeLabel}.`
+      : openingLine,
     summaryLong: `${openingLine} ${valueLine} ${supplyLine}`,
   };
 }
