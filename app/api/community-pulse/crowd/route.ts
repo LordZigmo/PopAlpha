@@ -6,7 +6,8 @@ export const runtime = "nodejs";
 
 type VoteRow = {
   canonical_slug: string;
-  vote_side: "up" | "down";
+  bullish_votes: number;
+  bearish_votes: number;
 };
 
 export async function GET() {
@@ -15,8 +16,8 @@ export async function GET() {
     const weekStart = getCommunityVoteWeekStart();
 
     const { data: votes, error } = await db
-      .from("community_card_votes")
-      .select("canonical_slug, vote_side")
+      .from("public_community_vote_totals")
+      .select("canonical_slug, bullish_votes, bearish_votes")
       .eq("week_start", weekStart)
       .limit(500);
 
@@ -25,10 +26,10 @@ export async function GET() {
     const tallies = new Map<string, { up: number; down: number }>();
     for (const row of (votes ?? []) as VoteRow[]) {
       if (!row.canonical_slug) continue;
-      const bucket = tallies.get(row.canonical_slug) ?? { up: 0, down: 0 };
-      if (row.vote_side === "up") bucket.up += 1;
-      else bucket.down += 1;
-      tallies.set(row.canonical_slug, bucket);
+      tallies.set(row.canonical_slug, {
+        up: row.bullish_votes ?? 0,
+        down: row.bearish_votes ?? 0,
+      });
     }
 
     const candidates = [...tallies.entries()]

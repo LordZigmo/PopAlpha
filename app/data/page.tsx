@@ -247,7 +247,7 @@ export default async function DataPage() {
           </div>
 
           <p className="mt-5 text-[12px] text-[#6B7280]">
-            Methodology: RAW market pricing is trust-weighted across JustTCG + Scrydex using freshness, volume, and agreement; robust MAD/IQR filtering excludes outliers before confidence bands are computed.
+            Methodology: RAW market pricing is Scrydex-first, with JustTCG used only when Scrydex is missing or stale; confidence still accounts for freshness, sample size, parity, and outlier filtering.
           </p>
         </section>
 

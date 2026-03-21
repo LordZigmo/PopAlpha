@@ -148,8 +148,8 @@ body {
   position: relative;
   margin-top: -35vh;
   border-radius: 28px 28px 0 0;
-  background: var(--color-background);
-  box-shadow: none;
+  background: #0A0A0A;
+  box-shadow: 0 -1px 0 rgba(255, 255, 255, 0.04);
 }
 
 [data-style="glass"] .glass-target {
@@ -508,6 +508,46 @@ body {
   .fade-slide-up, .engine-line { animation: none; opacity: 1; }
   .sliding-pill-bg { transition: none; }
   .chart-last-node { filter: none; }
+}
+
+/* ── Homepage premium styles ── */
+.hp-root {
+  background: #050505;
+}
+
+.hp-headline-accent {
+  background: linear-gradient(135deg, #00B4D8 0%, #00DC5A 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.hp-btn-primary {
+  background: white !important;
+  color: #0A0A0A !important;
+  transition: background 180ms ease, transform 180ms ease;
+}
+
+.hp-btn-primary:hover {
+  background: #e0e0e0 !important;
+  transform: translateY(-1px);
+}
+
+.hp-terminal {
+  background: #080808;
+  box-shadow: 0 32px 80px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.03);
+}
+
+.hp-scout-card {
+  transition: border-color 280ms ease;
+}
+
+.hp-scout-card:hover {
+  border-color: rgba(16, 185, 129, 0.15);
+}
+
+.hp-cta {
+  background: #080808;
 }
 
 /* Compatibility layer for existing Tailwind color classes during token migration */

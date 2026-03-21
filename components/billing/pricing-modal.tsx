@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { useUser } from "@clerk/nextjs";
+import { useSafeUser } from "@/lib/auth/use-safe-user";
 
 type PricingModalProps = {
   open: boolean;
@@ -61,10 +61,12 @@ const TIERS: TierConfig[] = [
 ];
 
 export default function PricingModal({ open, onClose }: PricingModalProps) {
-  const { user } = useUser();
+  const { user } = useSafeUser();
   const [mounted, setMounted] = useState(false);
   const [waitlistTier, setWaitlistTier] = useState<"Ace" | "Elite" | null>(null);
   const [waitlistEmail, setWaitlistEmail] = useState("");
+  const [waitlistWebsite, setWaitlistWebsite] = useState("");
+  const [waitlistFormStartedAtMs, setWaitlistFormStartedAtMs] = useState<number | null>(null);
   const [waitlistState, setWaitlistState] = useState<"idle" | "saving" | "success" | "error">("idle");
   const [waitlistMessage, setWaitlistMessage] = useState<string | null>(null);
 
@@ -77,6 +79,8 @@ export default function PricingModal({ open, onClose }: PricingModalProps) {
     setWaitlistTier(null);
     setWaitlistState("idle");
     setWaitlistMessage(null);
+    setWaitlistWebsite("");
+    setWaitlistFormStartedAtMs(Date.now());
     setWaitlistEmail(user?.primaryEmailAddress?.emailAddress ?? "");
   }, [open, user?.primaryEmailAddress?.emailAddress]);
 
@@ -95,6 +99,8 @@ export default function PricingModal({ open, onClose }: PricingModalProps) {
         body: JSON.stringify({
           email: waitlistEmail,
           tier: waitlistTier,
+          website: waitlistWebsite,
+          formStartedAtMs: waitlistFormStartedAtMs,
         }),
       });
       const payload = await response.json().catch(() => null) as { ok?: boolean; error?: string } | null;
@@ -235,6 +241,17 @@ export default function PricingModal({ open, onClose }: PricingModalProps) {
                             placeholder="Email for launch updates"
                             className="w-full rounded-2xl border border-white/[0.08] bg-black/20 px-4 py-3 text-[14px] text-white outline-none placeholder:text-[#6B7280] focus:border-white/[0.14]"
                           />
+                          <div className="sr-only" aria-hidden="true">
+                            <label htmlFor={`${tier.name}-website`}>Website</label>
+                            <input
+                              id={`${tier.name}-website`}
+                              type="url"
+                              autoComplete="off"
+                              tabIndex={-1}
+                              value={waitlistWebsite}
+                              onChange={(event) => setWaitlistWebsite(event.target.value)}
+                            />
+                          </div>
                         </div>
                       ) : null}
                       {cta}

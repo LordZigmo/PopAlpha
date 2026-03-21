@@ -5,43 +5,49 @@ import { warnIfPricingDbEnvLooksMixed } from "@/lib/db/env-guard";
 
 let _public: SupabaseClient | null = null;
 
-/**
- * Anon-key Supabase client. Respects RLS.
- * Use for: public reads, user-route queries, page data, lib helpers.
- *
- * With RLS disabled this has identical access to the service-role client.
- * When RLS is enabled, public tables will need anon-read policies.
- */
-export function dbPublic(): SupabaseClient {
-  if (_public) return _public;
-  warnIfPricingDbEnvLooksMixed("public_client");
+function getPublicConfig() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !anonKey) {
     throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY");
   }
-  _public = createClient(url, anonKey);
+
+  return { url, anonKey };
+}
+
+/**
+ * Anon-key Supabase client. Respects RLS.
+ * Use for: public reads, user-route queries, page data, lib helpers.
+ */
+export function dbPublic(): SupabaseClient {
+  if (_public) return _public;
+  warnIfPricingDbEnvLooksMixed("public_client");
+  const { url, anonKey } = getPublicConfig();
+  _public = createClient(url, anonKey, {
+    auth: {
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+      persistSession: false,
+    },
+  });
   return _public;
 }
 
 // ── Per-request user client ──────────────────────────────────────────────────
 
 /**
- * Per-request Supabase client authenticated with a user JWT. Respects RLS.
- *
- * When Clerk JWT templates are configured for Supabase:
- *   const { getToken } = await auth();
- *   const token = await getToken({ template: "supabase" });
- *   const client = dbUser(token);
+ * Per-request Supabase client authenticated with a Clerk session token.
+ * Supabase consumes the token through the official `accessToken` hook.
  */
 export function dbUser(jwt: string): SupabaseClient {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anonKey) {
-    throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY");
-  }
+  const { url, anonKey } = getPublicConfig();
   return createClient(url, anonKey, {
-    global: { headers: { Authorization: `Bearer ${jwt}` } },
+    accessToken: async () => jwt,
+    auth: {
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+      persistSession: false,
+    },
   });
 }
 

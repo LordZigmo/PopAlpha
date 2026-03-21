@@ -100,7 +100,7 @@ function ResultCard({
       href={`/cards/${encodeURIComponent(row.canonical_slug)}?returnTo=${encodeURIComponent(currentSearchHref)}`}
       className={`group block transition duration-200 hover:-translate-y-0.5 ${className ?? ""}`.trim()}
     >
-      <div className="relative aspect-[63/88] overflow-hidden rounded-[var(--radius-card)] border-app border bg-surface-soft/24">
+      <div className="relative aspect-[63/88] overflow-hidden rounded-xl border border-white/[0.06] bg-[#111]">
         {row.primary_image_url ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -109,23 +109,21 @@ function ResultCard({
             className="h-full w-full object-cover object-center transition duration-200 group-hover:scale-[1.02]"
           />
         ) : (
-          <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.08),transparent_65%)] p-4">
-            <div className="rounded-[var(--radius-input)] border-app border bg-surface/35 px-3 py-2 text-center">
-              <p className="text-app text-xs font-semibold">Image pending</p>
-            </div>
+          <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.04),transparent_65%)] p-4">
+            <p className="text-[11px] text-[#444]">No image</p>
           </div>
         )}
       </div>
-      <div className="mt-1 min-w-0 px-0.5 sm:mt-2 sm:px-1">
-        <p className="text-app truncate text-[11px] font-semibold sm:text-sm">{row.canonical_name}</p>
-        <p className="text-muted mt-0.5 hidden truncate text-xs sm:block">
-          {row.year ? `${row.year}` : "Year unknown"}
-          {row.set_name ? ` • ${row.set_name}` : ""}
+      <div className="mt-2 min-w-0 px-0.5">
+        <p className="truncate text-[12px] font-semibold text-[#eee] sm:text-[13px]">{row.canonical_name}</p>
+        <p className="mt-0.5 hidden truncate text-[11px] text-[#555] sm:block">
+          {row.year ? `${row.year}` : ""}
+          {row.set_name ? `${row.year ? " · " : ""}${row.set_name}` : ""}
         </p>
         {row.raw_price != null ? (
-          <div className="mt-0.5 flex items-center gap-1">
-            <span className="text-[10px] font-semibold sm:text-xs" style={{ color: "var(--color-accent)" }}>
-              {formatCurrency(row.raw_price)} RAW
+          <div className="mt-1 flex items-center gap-1.5">
+            <span className="text-[11px] font-semibold tabular-nums text-[#ccc] sm:text-[12px]">
+              {formatCurrency(row.raw_price)}
             </span>
             <ChangeBadge pct={row.change_pct} windowLabel={row.change_window} />
           </div>
@@ -245,25 +243,25 @@ export default function SearchResultsSection({
   }
 
   return (
-    <section className="mt-6">
+    <section className="mt-8">
       {matchedSetName && (
         <div className="mb-6">
-          <h2 className="text-[28px] font-semibold tracking-tight text-[#F0F0F0] sm:text-[36px]">
+          <h2 className="text-[22px] font-bold tracking-tight text-white sm:text-[28px]">
             {matchedSetName}
           </h2>
           <ExpandableSetDescription text={setDescription} />
         </div>
       )}
-      <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="text-muted text-xs">{total} results.</p>
+          <p className="text-[12px] text-[#666]">{total} results</p>
         </div>
-        <label className="flex items-center gap-2 text-sm">
-          <span className="text-muted">Sort:</span>
+        <label className="flex items-center gap-2 text-[13px]">
+          <span className="text-[#666]">Sort:</span>
           <select
             value={sort}
             onChange={(event) => updateSort(event.target.value)}
-            className="input-themed h-9 min-w-[10rem] rounded-[var(--radius-input)] px-3 text-sm"
+            className="h-8 min-w-[10rem] rounded-lg border border-white/[0.08] bg-[#111] px-3 text-[13px] text-[#ccc] outline-none focus:border-white/[0.14]"
             aria-label="Sort search results"
           >
             {SEARCH_SORTS.map((option) => (
@@ -283,45 +281,45 @@ export default function SearchResultsSection({
 
       {sortedRows.length === 0 ? (
         <div>
-          <p className="text-app text-sm font-semibold">No matches found.</p>
-          <p className="text-muted mt-1 text-sm">Try adding set name, year, or card number.</p>
+          <p className="text-[14px] font-semibold text-white">No matches found.</p>
+          <p className="mt-1 text-[13px] text-[#666]">Try adding set name, year, or card number.</p>
         </div>
       ) : (
         <>
           {matchedSetName && setSummary ? (
-            <div className="mb-6 rounded-[var(--radius-card)] border-app border bg-surface-soft/22 p-4 sm:p-5">
+            <div className="mb-6 rounded-xl border border-white/[0.06] bg-[#0E0E0E] p-4 sm:p-5">
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <div>
-                  <p className="text-muted text-[11px] uppercase tracking-[0.16em]">Market Cap</p>
-                  <p className="text-app mt-1 text-lg font-semibold">{formatCurrency(setSummary.marketCap)}</p>
+                  <p className="text-[10px] font-medium uppercase tracking-widest text-[#555]">Market Cap</p>
+                  <p className="mt-1 text-[16px] font-bold tabular-nums text-white">{formatCurrency(setSummary.marketCap)}</p>
                 </div>
                 <div>
-                  <p className="text-muted text-[11px] uppercase tracking-[0.16em]">7D Change</p>
-                  <p className="text-app mt-1 text-lg font-semibold">{formatPercent(setSummary.change7dPct)}</p>
+                  <p className="text-[10px] font-medium uppercase tracking-widest text-[#555]">7D Change</p>
+                  <p className="mt-1 text-[16px] font-bold tabular-nums text-white">{formatPercent(setSummary.change7dPct)}</p>
                 </div>
                 <div>
-                  <p className="text-muted text-[11px] uppercase tracking-[0.16em]">30D Change</p>
-                  <p className="text-app mt-1 text-lg font-semibold">{formatPercent(setSummary.change30dPct)}</p>
+                  <p className="text-[10px] font-medium uppercase tracking-widest text-[#555]">30D Change</p>
+                  <p className="mt-1 text-[16px] font-bold tabular-nums text-white">{formatPercent(setSummary.change30dPct)}</p>
                 </div>
                 <div>
-                  <p className="text-muted text-[11px] uppercase tracking-[0.16em]">Heat Score</p>
-                  <p className="text-app mt-1 text-lg font-semibold">{setSummary.heatScore.toFixed(1)}</p>
+                  <p className="text-[10px] font-medium uppercase tracking-widest text-[#555]">Heat Score</p>
+                  <p className="mt-1 text-[16px] font-bold tabular-nums text-white">{setSummary.heatScore.toFixed(1)}</p>
                 </div>
                 <div>
-                  <p className="text-muted text-[11px] uppercase tracking-[0.16em]">Breakouts</p>
-                  <p className="text-app mt-1 text-base font-semibold">{setSummary.breakoutCount}</p>
+                  <p className="text-[10px] font-medium uppercase tracking-widest text-[#555]">Breakouts</p>
+                  <p className="mt-1 text-[14px] font-semibold tabular-nums text-[#ccc]">{setSummary.breakoutCount}</p>
                 </div>
                 <div>
-                  <p className="text-muted text-[11px] uppercase tracking-[0.16em]">Value Zone</p>
-                  <p className="text-app mt-1 text-base font-semibold">{setSummary.valueZoneCount}</p>
+                  <p className="text-[10px] font-medium uppercase tracking-widest text-[#555]">Value Zone</p>
+                  <p className="mt-1 text-[14px] font-semibold tabular-nums text-[#ccc]">{setSummary.valueZoneCount}</p>
                 </div>
                 <div>
-                  <p className="text-muted text-[11px] uppercase tracking-[0.16em]">Bullish Trends</p>
-                  <p className="text-app mt-1 text-base font-semibold">{setSummary.trendBullishCount}</p>
+                  <p className="text-[10px] font-medium uppercase tracking-widest text-[#555]">Bullish Trends</p>
+                  <p className="mt-1 text-[14px] font-semibold tabular-nums text-[#ccc]">{setSummary.trendBullishCount}</p>
                 </div>
                 <div>
-                  <p className="text-muted text-[11px] uppercase tracking-[0.16em]">Sentiment</p>
-                  <p className="text-app mt-1 text-base font-semibold">
+                  <p className="text-[10px] font-medium uppercase tracking-widest text-[#555]">Sentiment</p>
+                  <p className="mt-1 text-[14px] font-semibold tabular-nums text-[#ccc]">
                     {setSummary.sentimentUpPct == null ? "N/A" : formatPercent(setSummary.sentimentUpPct)}
                   </p>
                 </div>
@@ -331,8 +329,8 @@ export default function SearchResultsSection({
 
           {featuredChaseCards.length > 0 ? (
             <div className="mb-6">
-              <h3 className="text-app text-sm font-semibold uppercase tracking-[0.18em]">Chase Cards</h3>
-              <p className="text-muted mt-1 text-xs">Highest current RAW market prices in this set.</p>
+              <h3 className="text-[12px] font-semibold uppercase tracking-widest text-[#888]">Chase Cards</h3>
+              <p className="mt-1 text-[11px] text-[#555]">Highest current RAW market prices in this set.</p>
               <div className="mt-3 grid grid-cols-3 gap-2 sm:gap-3 lg:grid-cols-4">
                 {featuredChaseCards.map((row, index) => (
                   <ResultCard
@@ -361,17 +359,17 @@ export default function SearchResultsSection({
         </>
       )}
 
-      <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="mt-6 flex flex-col gap-4 border-t border-white/[0.04] pt-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
-          <span className="text-muted text-xs">
+          <span className="text-[11px] text-[#555]">
             Page {page} of {totalPages}
           </span>
-          <label className="flex items-center gap-2 text-xs">
-            <span className="text-muted">Per page:</span>
+          <label className="flex items-center gap-2 text-[12px]">
+            <span className="text-[#666]">Per page:</span>
             <select
               value={pageSize}
               onChange={(event) => updatePageSize(event.target.value)}
-              className="input-themed h-8 min-w-[5rem] rounded-[var(--radius-input)] px-2 text-xs"
+              className="h-7 min-w-[5rem] rounded-md border border-white/[0.08] bg-[#111] px-2 text-[12px] text-[#ccc] outline-none focus:border-white/[0.14]"
               aria-label="Cards per search page"
             >
               {PAGE_SIZE_OPTIONS.map((option) => (
@@ -381,7 +379,7 @@ export default function SearchResultsSection({
               ))}
             </select>
           </label>
-          <fieldset className="flex items-center gap-3 text-xs">
+          <fieldset className="flex items-center gap-3 text-[12px]">
             <legend className="sr-only">Market data filter</legend>
             <label className="flex items-center gap-1.5">
               <input
@@ -389,9 +387,9 @@ export default function SearchResultsSection({
                 name="priced-filter"
                 checked={!pricedOnly}
                 onChange={() => updatePricedOnly(false)}
-                className="h-3.5 w-3.5 accent-[var(--color-accent)]"
+                className="h-3.5 w-3.5 accent-[#00B4D8]"
               />
-              <span className="text-muted">All cards</span>
+              <span className="text-[#666]">All cards</span>
             </label>
             <label className="flex items-center gap-1.5">
               <input
@@ -399,26 +397,26 @@ export default function SearchResultsSection({
                 name="priced-filter"
                 checked={pricedOnly}
                 onChange={() => updatePricedOnly(true)}
-                className="h-3.5 w-3.5 accent-[var(--color-accent)]"
+                className="h-3.5 w-3.5 accent-[#00B4D8]"
               />
-              <span className="text-muted">Market data only</span>
+              <span className="text-[#666]">Market data only</span>
             </label>
           </fieldset>
         </div>
         <div className="flex items-center gap-2">
           {prevHref ? (
-            <Link href={prevHref} className="btn-ghost rounded-[var(--radius-input)] border px-3 py-1.5 text-xs">
+            <Link href={prevHref} className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-[12px] font-medium text-[#ccc] transition hover:bg-white/[0.08]">
               Prev
             </Link>
           ) : (
-            <span className="border-app rounded-[var(--radius-input)] border px-3 py-1.5 text-xs text-muted">Prev</span>
+            <span className="rounded-lg border border-white/[0.04] px-3 py-1.5 text-[12px] text-[#333]">Prev</span>
           )}
           {nextHref ? (
-            <Link href={nextHref} className="btn-ghost rounded-[var(--radius-input)] border px-3 py-1.5 text-xs">
+            <Link href={nextHref} className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-[12px] font-medium text-[#ccc] transition hover:bg-white/[0.08]">
               Next
             </Link>
           ) : (
-            <span className="border-app rounded-[var(--radius-input)] border px-3 py-1.5 text-xs text-muted">Next</span>
+            <span className="rounded-lg border border-white/[0.04] px-3 py-1.5 text-[12px] text-[#333]">Next</span>
           )}
         </div>
       </div>

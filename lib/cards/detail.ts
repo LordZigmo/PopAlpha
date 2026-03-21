@@ -1,6 +1,5 @@
 import { dbPublic } from "@/lib/db";
 import {
-  averageProviderUsdPrice,
   buildProviderPriceDisplay,
   type ProviderPriceDisplay,
 } from "@/lib/pricing/provider-price-display";
@@ -102,9 +101,8 @@ function stampPillLabel(stamp: string): string {
   return toTitleLabel(stamp);
 }
 
-function normalizeRawProviderName(provider: string | null | undefined): "JUSTTCG" | "SCRYDEX" | null {
+function normalizeRawProviderName(provider: string | null | undefined): "SCRYDEX" | null {
   const normalized = String(provider ?? "").trim().toUpperCase();
-  if (normalized === "JUSTTCG") return "JUSTTCG";
   if (normalized === "SCRYDEX" || normalized === "POKEMON_TCG_API") return "SCRYDEX";
   return null;
 }
@@ -137,67 +135,45 @@ export function buildPrintingPill(row: CardPrintingRow): CardPrintingPill {
   };
 }
 
-function buildRawMetrics(metricsRow: RawMetricRow | null, signalRows: RawSignalRow[]): CardDetailMetrics | null {
-  if (!metricsRow && signalRows.length === 0) return null;
-  let latestAsOf: string | null = null;
-  let points30d = metricsRow?.snapshot_count_30d ?? null;
-  for (const row of signalRows) {
-    if (row.provider_as_of_ts && (!latestAsOf || row.provider_as_of_ts > latestAsOf)) {
-      latestAsOf = row.provider_as_of_ts;
-    }
-    const rowPoints = row.history_points_30d;
-    if (typeof rowPoints === "number" && Number.isFinite(rowPoints)) {
-      points30d = points30d === null ? rowPoints : Math.max(points30d, rowPoints);
-    }
-  }
+function buildRawMetrics(metricsRow: RawMetricRow | null, _signalRows: RawSignalRow[]): CardDetailMetrics | null {
+  if (!metricsRow) return null;
+  const hasLivePrice = metricsRow.market_price !== null;
   // Signal columns (trend, breakout, valueZone) are paywalled — always null from public views.
   return {
     trend: null,
     breakout: null,
     valueZone: null,
-    asOf: latestAsOf,
-    liquidityScore: metricsRow?.liquidity_score ?? null,
-    points30d,
+    asOf: hasLivePrice ? metricsRow.market_price_as_of : null,
+    liquidityScore: hasLivePrice ? (metricsRow.liquidity_score ?? null) : null,
+    points30d: hasLivePrice ? (metricsRow.snapshot_count_30d ?? null) : null,
   };
 }
 
 async function buildPriceCompare(params: {
   supabase: ReturnType<typeof dbPublic>;
   metricsRow: RawMetricRow | null;
-  providerAsOfByProvider?: Partial<Record<"JUSTTCG" | "SCRYDEX", string | null>>;
 }): Promise<CardDetailPriceCompare | null> {
   const { supabase, metricsRow } = params;
-  const providerAsOfByProvider = params.providerAsOfByProvider ?? {};
+  const scrydexSourcePrice = metricsRow?.market_price ?? null;
+  const scrydexAsOf = scrydexSourcePrice !== null ? (metricsRow?.market_price_as_of ?? null) : null;
+  if (scrydexSourcePrice === null) return null;
 
-  const justtcgDisplay = await buildProviderPriceDisplay({
-    supabase,
-    provider: "JUSTTCG",
-    sourcePrice: metricsRow?.justtcg_price ?? null,
-    sourceCurrency: "USD",
-    asOf: providerAsOfByProvider.JUSTTCG ?? null,
-  });
-
-  const scrydexSourcePrice = metricsRow?.scrydex_price ?? metricsRow?.pokemontcg_price ?? null;
   const scrydexDisplay = await buildProviderPriceDisplay({
     supabase,
     provider: "SCRYDEX",
     sourcePrice: scrydexSourcePrice,
     sourceCurrency: "USD",
-    asOf: providerAsOfByProvider.SCRYDEX ?? null,
+    asOf: scrydexAsOf,
   });
 
-  if (!metricsRow && justtcgDisplay.usdPrice === null && scrydexDisplay.usdPrice === null) return null;
-
-  const providers: ProviderPriceDisplay[] = [justtcgDisplay, scrydexDisplay];
-  const usdAverage = averageProviderUsdPrice(providers);
-  const asOf = [justtcgDisplay.asOf, scrydexDisplay.asOf].filter(Boolean).sort().at(-1) ?? metricsRow?.market_price_as_of ?? null;
+  const providers: ProviderPriceDisplay[] = [scrydexDisplay];
 
   return {
-    justtcgPrice: justtcgDisplay.usdPrice,
+    justtcgPrice: null,
     scrydexPrice: scrydexDisplay.usdPrice,
-    pokemontcgPrice: scrydexDisplay.usdPrice,
-    marketPrice: usdAverage ?? metricsRow?.market_price ?? null,
-    asOf,
+    pokemontcgPrice: null,
+    marketPrice: scrydexDisplay.usdPrice,
+    asOf: scrydexAsOf,
     providers,
   };
 }
@@ -309,7 +285,7 @@ export async function buildCardDetailResponse(inputSlug: string): Promise<CardDe
       .select("printing_id, provider, provider_as_of_ts, history_points_30d")
       .eq("canonical_slug", canonicalSlug)
       .eq("grade", "RAW")
-      .in("provider", ["JUSTTCG", "SCRYDEX", "POKEMON_TCG_API"])
+      .in("provider", ["SCRYDEX", "POKEMON_TCG_API"])
       .not("printing_id", "is", null),
     supabase
       .from("public_variant_metrics")
@@ -352,24 +328,15 @@ export async function buildCardDetailResponse(inputSlug: string): Promise<CardDe
     const metricsRow = rawMetricMap.get(row.id) ?? null;
     const signalRows = rawSignalMap.get(row.id) ?? [];
     const metrics = buildRawMetrics(metricsRow, signalRows);
-    const providerAsOfByProvider: Partial<Record<"JUSTTCG" | "SCRYDEX", string | null>> = {};
-    for (const signalRow of signalRows) {
-      const provider = normalizeRawProviderName(signalRow.provider);
-      const ts = signalRow.provider_as_of_ts;
-      if (!provider || !ts) continue;
-      const current = providerAsOfByProvider[provider];
-      if (!current || ts > current) providerAsOfByProvider[provider] = ts;
-    }
     const pricing = await buildPriceCompare({
       supabase,
       metricsRow,
-      providerAsOfByProvider,
     });
     return {
       ...buildPrintingPill(row),
       available:
         !!metrics &&
-        Math.max(...signalRows.map((item) => item.history_points_30d ?? 0), metricsRow?.snapshot_count_30d ?? 0) >= RAW_AVAILABILITY_THRESHOLD,
+        (metrics.points30d ?? 0) >= RAW_AVAILABILITY_THRESHOLD,
       metrics,
       pricing,
     };

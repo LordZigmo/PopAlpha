@@ -12,6 +12,11 @@ import {
   loadHighValueStaleSetPriority,
   loadRecentSetConsistencyPriority,
 } from "@/lib/backfill/set-priority";
+import {
+  hasScrydexSpecialVariantToken,
+  normalizeScrydexStampToken,
+  normalizeScrydexVariantToken,
+} from "@/lib/backfill/scrydex-variant-semantics";
 
 const PROVIDER = "SCRYDEX";
 const JOB = "scrydex_normalized_match";
@@ -69,7 +74,7 @@ type NormalizedObservationRow = {
   normalized_card_number: string | null;
   normalized_finish: "NON_HOLO" | "HOLO" | "REVERSE_HOLO" | "UNKNOWN";
   normalized_edition: "UNLIMITED" | "FIRST_EDITION";
-  normalized_stamp: "NONE" | "POKEMON_CENTER";
+  normalized_stamp: string;
   normalized_language: string;
   observed_at: string;
 };
@@ -229,16 +234,6 @@ function parseDateMs(value: string | null | undefined): number | null {
   if (!value) return null;
   const ms = Date.parse(value);
   return Number.isFinite(ms) ? ms : null;
-}
-
-function normalizeStampToken(value: string | null | undefined): "NONE" | string {
-  const text = String(value ?? "").trim();
-  if (!text) return "NONE";
-  const normalized = text
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-  return normalized || "NONE";
 }
 
 function normalizeLanguageToCanonical(value: string | null | undefined): string {
@@ -708,7 +703,7 @@ async function loadCardPrintings(setCodes: string[]): Promise<Map<string, Printi
   return bySetCode;
 }
 
-function chooseSinglePrinting(params: {
+export function chooseSinglePrinting(params: {
   observation: NormalizedObservationRow;
   canonicalSetCode: string;
   printingRows: PrintingRow[];
@@ -734,11 +729,11 @@ function chooseSinglePrinting(params: {
     };
   }
 
-  const targetStamp = observation.normalized_stamp;
+  const targetStamp = normalizeScrydexStampToken(observation.normalized_stamp);
   const strictRows = setRows.filter((row) =>
     row.finish === observation.normalized_finish
     && row.edition === observation.normalized_edition
-    && normalizeStampToken(row.stamp) === targetStamp
+    && normalizeScrydexStampToken(row.stamp) === targetStamp
   );
 
   if (strictRows.length === 1) {
@@ -751,11 +746,29 @@ function chooseSinglePrinting(params: {
     };
   }
 
-  const providerVariantToken = String(observation.provider_variant_id ?? "")
-    .split(":")
-    .at(-1)
-    ?.toLowerCase()
-    .replace(/[^a-z0-9]+/g, "") ?? "";
+  const providerVariantToken = normalizeScrydexVariantToken(
+    String(observation.provider_variant_id ?? "").split(":").at(-1) ?? "",
+  );
+  const hasSpecialVariantToken = (
+    targetStamp !== "NONE"
+    || hasScrydexSpecialVariantToken(providerVariantToken)
+  );
+  if (hasSpecialVariantToken) {
+    return {
+      matched: false,
+      reason: "SPECIAL_VARIANT_EXACT_MATCH_REQUIRED",
+      metadata: {
+        canonicalSetCode,
+        cardNumber,
+        language,
+        providerVariantToken,
+        targetStamp,
+        candidates: setRows.length,
+        strictCandidates: strictRows.length,
+      },
+    };
+  }
+
   const isBasicProviderVariant = new Set([
     "unknown",
     "normal",
@@ -768,12 +781,6 @@ function chooseSinglePrinting(params: {
     "reversefoil",
     "reverseholo",
     "reverseholofoil",
-    "pokeballreverseholofoil",
-    "masterballreverseholofoil",
-    "duskballreverseholofoil",
-    "energyreverseholofoil",
-    "rocketreverseholofoil",
-    "quickballreverseholofoil",
   ]).has(providerVariantToken);
 
   if (setRows.length === 1) {
@@ -806,7 +813,7 @@ function chooseSinglePrinting(params: {
   const preferredRows = setRows.filter((row) =>
     row.finish === "NON_HOLO"
     && row.edition === "UNLIMITED"
-    && normalizeStampToken(row.stamp) === "NONE"
+    && normalizeScrydexStampToken(row.stamp) === "NONE"
   );
   if (preferredRows.length === 1) {
     return {

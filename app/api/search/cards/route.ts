@@ -173,7 +173,13 @@ export async function GET(req: Request) {
     aliasRows,
     query: normalized,
     limit: RESULT_LIMIT,
-  });
+  }).map((card) => ({
+    id: card.canonical_slug,
+    name: card.canonical_name,
+    set: card.set_name,
+    price: null,
+    ...card,
+  }));
 
   return NextResponse.json({ ok: true, cards });
 }

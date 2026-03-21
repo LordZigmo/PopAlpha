@@ -48,24 +48,17 @@ export function runVariantRefTests() {
       provider: "JUSTTCG",
       providerVariantId: "variant-123",
     }),
-    `${printingId}::RAW`,
+    `${printingId}::variant-123::RAW`,
   );
 
-  assert.deepEqual(
-    parseVariantRef(
-      buildProviderHistoryVariantRef({
-        printingId,
-        canonicalSlug: "base-4-charizard",
-        provider: "SCRYDEX",
-        providerVariantId: "variant-456",
-      }),
-    ),
-    {
+  assert.equal(
+    buildProviderHistoryVariantRef({
       printingId,
-      mode: "RAW",
-      provider: null,
-      gradeBucket: "RAW",
-    },
+      canonicalSlug: "base-4-charizard",
+      provider: "SCRYDEX",
+      providerVariantId: "variant-456",
+    }),
+    `${printingId}::variant-456::RAW`,
   );
 
   assert.equal(
@@ -75,7 +68,7 @@ export function runVariantRefTests() {
       provider: "JUSTTCG",
       providerVariantId: "variant-789",
     }),
-    "sealed:sv1-booster-box::RAW::variant-789",
+    "sealed:sv1-booster-box::variant-789::RAW",
   );
 
   assert.equal(

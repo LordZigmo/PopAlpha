@@ -1,5 +1,7 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { cache } from "react";
 import { getCanonicalMarketPulseMap } from "@/lib/data/market";
 import { getSetSummaryPageData } from "@/lib/sets/summary";
 import ChangeBadge from "@/components/change-badge";
@@ -28,6 +30,11 @@ type CardEntry = {
   rawPrice: number | null;
   changePct: number | null;
   changeWindow: "24H" | "7D" | null;
+};
+
+type SetPageBaseData = {
+  summary: Awaited<ReturnType<typeof getSetSummaryPageData>>;
+  cards: CanonicalRow[];
 };
 
 function formatUsd(value: number | null | undefined, digits = 2): string {
@@ -96,21 +103,103 @@ function chooseBestImage(printings: PrintingRow[]): string | null {
   return sorted[0]?.image_url ?? null;
 }
 
+const getSetPageBaseData = cache(async (setName: string): Promise<SetPageBaseData> => {
+  const supabase = dbPublic();
+  const [summary, cardsResult] = await Promise.all([
+    getSetSummaryPageData(setName),
+    supabase
+      .from("canonical_cards")
+      .select("slug, canonical_name, year, card_number")
+      .eq("set_name", setName)
+      .order("card_number", { ascending: true })
+      .limit(500),
+  ]);
+
+  return {
+    summary,
+    cards: (cardsResult.data ?? []) as CanonicalRow[],
+  };
+});
+
+function formatSignedPercent(value: number | null | undefined): string | null {
+  if (value === null || value === undefined || !Number.isFinite(value)) return null;
+  return `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
+}
+
+function buildSetMetadataDescription(
+  setName: string,
+  cards: CanonicalRow[],
+  summary: Awaited<ReturnType<typeof getSetSummaryPageData>>,
+): string {
+  const detailBits = [`${cards.length} cards tracked`];
+  const primaryTrend = summary.snapshot?.change7dPct ?? summary.snapshot?.change30dPct ?? null;
+  const primaryTrendWindow = summary.snapshot?.change7dPct != null ? "7D" : summary.snapshot?.change30dPct != null ? "30D" : null;
+  const trendLabel = formatSignedPercent(primaryTrend);
+
+  if (trendLabel && primaryTrendWindow) {
+    detailBits.push(`${trendLabel} over ${primaryTrendWindow}`);
+  }
+
+  if ((summary.snapshot?.marketCap ?? 0) > 0) {
+    detailBits.push(`${formatUsd(summary.snapshot?.marketCap, 0)} tracked market cap`);
+  }
+
+  return `Browse ${setName} on PopAlpha. ${detailBits.join(" · ")}. Explore the set's top cards, pricing coverage, and market momentum.`;
+}
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ setName: string }>;
+}): Promise<Metadata> {
+  const { setName } = await params;
+  const decodedSetName = decodeURIComponent(setName);
+  const { summary, cards } = await getSetPageBaseData(decodedSetName);
+
+  if (!cards.length) {
+    return {
+      title: "Set Not Found | PopAlpha",
+      robots: {
+        index: false,
+        follow: false,
+      },
+    };
+  }
+
+  const title = `${decodedSetName} Set Prices | PopAlpha`;
+  const description = buildSetMetadataDescription(decodedSetName, cards, summary);
+  const canonicalPath = `/sets/${encodeURIComponent(decodedSetName)}`;
+
+  return {
+    title,
+    description,
+    alternates: {
+      canonical: canonicalPath,
+    },
+    openGraph: {
+      title,
+      description,
+      url: canonicalPath,
+      siteName: "PopAlpha",
+      type: "website",
+      images: [
+        { url: "/opengraph-image", alt: "PopAlpha" },
+      ],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+      images: ["/twitter-image"],
+    },
+  };
+}
+
 export default async function SetBrowserPage({ params }: { params: Promise<{ setName: string }> }) {
   const { setName } = await params;
   const decodedSetName = decodeURIComponent(setName);
   const supabase = dbPublic();
-  const summary = await getSetSummaryPageData(decodedSetName);
-
-  // Fetch all cards in this set
-  const { data: cardsRaw } = await supabase
-    .from("canonical_cards")
-    .select("slug, canonical_name, year, card_number")
-    .eq("set_name", decodedSetName)
-    .order("card_number", { ascending: true })
-    .limit(500);
-
-  const cards = (cardsRaw ?? []) as CanonicalRow[];
+  const { summary, cards } = await getSetPageBaseData(decodedSetName);
   if (!cards.length) notFound();
 
   const slugs = cards.map((c) => c.slug);

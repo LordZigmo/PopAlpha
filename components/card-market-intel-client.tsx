@@ -5,47 +5,14 @@ import { useEffect, useState } from "react";
 import DealWheel from "@/components/deal-wheel";
 import LiquidityModule from "@/components/liquidity-module";
 import MarketSummaryCardClient from "@/components/market-summary-card-client";
+import type { RawCardMarketVariant } from "@/components/raw-card-variant-types";
 import SignalGauge from "@/components/signal-gauge";
 
-type HistoryPointRow = {
-  ts: string;
-  price: number;
-};
-
-type VariantMetricPayload = {
-  printingId: string;
-  label: string;
-  currentPrice: number | null;
-  justtcgPrice: number | null;
-  justtcgAsOfTs: string | null;
-  scrydexPrice: number | null;
-  scrydexAsOfTs: string | null;
-  marketBalancePrice: number | null;
-  asOfTs: string | null;
-  trendSlope7d: number | null;
-  history7d: HistoryPointRow[];
-  history30d: HistoryPointRow[];
-  history90d: HistoryPointRow[];
-  signalTrend: number | null;
-  signalTrendLabel: string | null;
-  signalBreakout: number | null;
-  signalBreakoutLabel: string | null;
-  signalValue: number | null;
-  signalValueLabel: string | null;
-  signalsHistoryPoints30d: number | null;
-  signalsAsOfTs: string | null;
-  liquidityScore: number | null;
-  liquidityTier: string | null;
-  liquidityTone: "warning" | "neutral" | "positive";
-  liquidityPriceChanges30d: number | null;
-  liquiditySnapshotCount30d: number | null;
-  liquiditySpreadPercent: number | null;
-};
-
 type CardMarketIntelClientProps = {
-  variants: VariantMetricPayload[];
+  variants: RawCardMarketVariant[];
   selectedPrintingId: string | null;
   selectedWindow: "7d" | "30d" | "90d";
+  onVariantChange?: (printingId: string) => void;
 };
 
 function signalConfidenceLabel(points30d: number | null): { label: string; tone: "positive" | "warning" | "negative" | "neutral" } {
@@ -73,17 +40,33 @@ export default function CardMarketIntelClient({
   variants,
   selectedPrintingId,
   selectedWindow,
+  onVariantChange,
 }: CardMarketIntelClientProps) {
-  const [activePrintingId, setActivePrintingId] = useState<string | null>(selectedPrintingId);
+  const [internalPrintingId, setInternalPrintingId] = useState<string | null>(selectedPrintingId);
+  const [activeWindow, setActiveWindow] = useState<"7d" | "30d" | "90d">(selectedWindow);
 
   useEffect(() => {
-    setActivePrintingId(selectedPrintingId);
+    setInternalPrintingId(selectedPrintingId);
   }, [selectedPrintingId]);
+
+  useEffect(() => {
+    setActiveWindow(selectedWindow);
+  }, [selectedWindow]);
+
+  const activePrintingId = onVariantChange ? selectedPrintingId : internalPrintingId;
+  const handleVariantChange = onVariantChange ?? setInternalPrintingId;
 
   const activeVariant =
     variants.find((variant) => variant.printingId === activePrintingId)
     ?? variants[0]
     ?? null;
+
+  const activeHistoryPoints =
+    activeWindow === "90d" && (activeVariant?.history90d?.length ?? 0) > 0
+      ? activeVariant?.history90d?.length ?? 0
+      : activeWindow === "7d" && (activeVariant?.history7d?.length ?? 0) > 0
+        ? activeVariant?.history7d?.length ?? 0
+        : activeVariant?.history30d?.length ?? 0;
 
   const hasSignals = !!(
     activeVariant
@@ -94,7 +77,7 @@ export default function CardMarketIntelClient({
     )
   );
 
-  const confidence = signalConfidenceLabel(activeVariant?.signalsHistoryPoints30d ?? null);
+  const confidence = signalConfidenceLabel(activeVariant?.currentPrice !== null ? activeHistoryPoints : null);
 
   return (
     <>
@@ -128,6 +111,7 @@ export default function CardMarketIntelClient({
           scrydexPrice: variant.scrydexPrice,
           scrydexAsOfTs: variant.scrydexAsOfTs,
           asOfTs: variant.asOfTs,
+          changePct7d: variant.changePct7d,
           trendSlope7d: variant.trendSlope7d,
           history7d: variant.history7d,
           history30d: variant.history30d,
@@ -135,7 +119,8 @@ export default function CardMarketIntelClient({
         }))}
         selectedPrintingId={activeVariant?.printingId ?? selectedPrintingId}
         selectedWindow={selectedWindow}
-        onVariantChange={setActivePrintingId}
+        onVariantChange={handleVariantChange}
+        onWindowChange={setActiveWindow}
       />
 
       <DealWheel
@@ -147,16 +132,18 @@ export default function CardMarketIntelClient({
         selectedPrintingId={activeVariant?.printingId ?? selectedPrintingId}
       />
 
-      <LiquidityModule
-        score={activeVariant?.liquidityScore ?? null}
-        tier={activeVariant?.liquidityTier ?? null}
-        tone={activeVariant?.liquidityTone ?? "neutral"}
-        priceChanges30d={activeVariant?.liquidityPriceChanges30d ?? null}
-        snapshotCount30d={activeVariant?.liquiditySnapshotCount30d ?? null}
-        spreadPercent={activeVariant?.liquiditySpreadPercent ?? null}
-      />
+      {activeVariant?.currentPrice !== null ? (
+        <LiquidityModule
+          score={activeVariant?.liquidityScore ?? null}
+          tier={activeVariant?.liquidityTier ?? null}
+          tone={activeVariant?.liquidityTone ?? "neutral"}
+          priceChanges30d={activeVariant?.liquidityPriceChanges30d ?? null}
+          snapshotCount30d={activeVariant?.liquiditySnapshotCount30d ?? null}
+          spreadPercent={activeVariant?.liquiditySpreadPercent ?? null}
+        />
+      ) : null}
 
-      {(activeVariant?.signalsHistoryPoints30d != null || activeVariant?.signalsAsOfTs) ? (
+      {activeVariant?.currentPrice !== null && activeHistoryPoints > 0 ? (
         <div className="mt-5 flex flex-wrap items-center gap-2.5">
           {/* Confidence badge */}
           <span
@@ -177,9 +164,9 @@ export default function CardMarketIntelClient({
           </span>
 
           {/* Sample size */}
-          {activeVariant?.signalsHistoryPoints30d != null && (
+          {activeHistoryPoints > 0 && (
             <span className="text-[13px] tabular-nums text-[#555]">
-              {activeVariant.signalsHistoryPoints30d} data points
+              {activeHistoryPoints} live price points ({activeWindow.toUpperCase()})
             </span>
           )}
 

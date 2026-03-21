@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import Link from "next/link";
-import { SignOutButton, useUser } from "@clerk/nextjs";
+import { SignOutButton } from "@clerk/nextjs";
+import { useSafeUser } from "@/lib/auth/use-safe-user";
 import { Camera, Pencil } from "lucide-react";
 import PostBody, { type PostMention } from "@/components/profile/post-body";
 
@@ -94,7 +95,7 @@ function formatCurrency(value: number | null | undefined): string {
 }
 
 export default function ProfilePage() {
-  const { user, isLoaded } = useUser();
+  const { user, isLoaded } = useSafeUser();
   const [appProfile, setAppProfile] = useState<AppProfile | null>(null);
   const [posts, setPosts] = useState<ProfilePost[]>([]);
   const [stats, setStats] = useState({ post_count: 0, follower_count: 0, following_count: 0 });

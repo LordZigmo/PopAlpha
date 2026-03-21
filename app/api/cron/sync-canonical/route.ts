@@ -9,6 +9,7 @@
 import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/auth/require";
 import { dbAdmin } from "@/lib/db/admin";
+import { runScrydexCanonicalImport } from "@/lib/admin/scrydex-canonical-import";
 
 export const runtime = "nodejs";
 
@@ -23,16 +24,6 @@ type LastRunRow = {
   meta: Record<string, unknown> | null;
 };
 
-function resolveBaseUrl(): string {
-  // VERCEL_PROJECT_PRODUCTION_URL is the stable prod URL (Pro+).
-  // VERCEL_URL is the deployment URL (set on all plans, but may be preview).
-  // Fall back to localhost for local dev.
-  const prod = process.env.VERCEL_PROJECT_PRODUCTION_URL;
-  const deployment = process.env.VERCEL_URL;
-  const host = prod ?? deployment;
-  return host ? `https://${host}` : "http://localhost:3000";
-}
-
 export async function GET(req: Request) {
   const auth = await requireCron(req);
   if (!auth.ok) return auth.response;
@@ -43,14 +34,6 @@ export async function GET(req: Request) {
       skipped: true,
       reason: "provider_canonical_import_disabled",
     });
-  }
-
-  const adminSecret = process.env.ADMIN_SECRET?.trim();
-  if (!adminSecret) {
-    return NextResponse.json(
-      { ok: false, error: "ADMIN_SECRET env var is not configured." },
-      { status: 500 }
-    );
   }
 
   // ── Determine which page to start on ─────────────────────────────────────
@@ -74,33 +57,18 @@ export async function GET(req: Request) {
   // If the previous run fetched 0 cards the catalog is exhausted — restart.
   const pageStart = lastItemsFetched === 0 ? 1 : lastPageProcessed + 1;
 
-  // ── Call the canonical importer ───────────────────────────────────────────
-  const baseUrl = resolveBaseUrl();
-  const params = new URLSearchParams({
-    pageStart: String(pageStart),
-    maxPages: String(PAGES_PER_RUN),
-    pageSize: String(PAGE_SIZE),
+  const importResult = await runScrydexCanonicalImport({
+    pageStart,
+    maxPages: PAGES_PER_RUN,
+    pageSize: PAGE_SIZE,
+    expansionId: null,
+    dryRun: false,
   });
-
-  let importResult: Record<string, unknown>;
-  try {
-    const response = await fetch(
-      `${baseUrl}/api/admin/import/scrydex-canonical?${params.toString()}`,
-      {
-        method: "POST",
-        headers: { "x-admin-secret": adminSecret },
-      }
-    );
-    importResult = (await response.json()) as Record<string, unknown>;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return NextResponse.json({ ok: false, error: message }, { status: 500 });
-  }
 
   return NextResponse.json({
-    ok: importResult.ok ?? false,
+    ok: importResult.body.ok ?? false,
     pageStart,
     pagesPerRun: PAGES_PER_RUN,
-    ...importResult,
-  });
+    ...importResult.body,
+  }, { status: importResult.status });
 }

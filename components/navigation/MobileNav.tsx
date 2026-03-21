@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useUser } from "@clerk/nextjs";
+import { useSafeUser } from "@/lib/auth/use-safe-user";
 import { motion } from "framer-motion";
 import { Camera, Home, PieChart, UserCircle, Users } from "lucide-react";
 import { POKETRACE_CAMERA_HREF } from "@/lib/poketrace/ui-paths";
@@ -88,7 +88,7 @@ function TabLink({
 
 export default function MobileNav() {
   const pathname = usePathname();
-  const { user } = useUser();
+  const { user } = useSafeUser();
   const resolvedPath = pathname ?? "/";
   const profileHref = user ? "/profile" : "/sign-in";
 

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { PushSubscription } from "web-push";
 import { requireUser } from "@/lib/auth/require";
-import { dbAdmin } from "@/lib/db/admin";
+import { createServerSupabaseUserClient } from "@/lib/db/user";
 import { sendWebPush } from "@/lib/push/web-push";
 
 export const runtime = "nodejs";
@@ -16,7 +16,7 @@ export async function POST(req: Request) {
   if (!auth.ok) return auth.response;
 
   try {
-    const db = dbAdmin();
+    const db = await createServerSupabaseUserClient();
     const { data, error } = await db
       .from("push_subscriptions")
       .select("endpoint, subscription")

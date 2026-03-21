@@ -1,3 +1,5 @@
+import "server-only";
+
 /**
  * Service-role Supabase client. Bypasses RLS.
  *

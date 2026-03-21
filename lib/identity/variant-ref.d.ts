@@ -26,10 +26,18 @@ export function buildVariantRef(input: {
   provider?: GradedVariantProvider | null;
   grade?: string;
 }): string;
+/**
+ * Provider-history keys keep providerVariantId for RAW market history.
+ * They are storage keys and may differ from canonical display variant refs.
+ */
 export function buildProviderHistoryVariantRef(input: {
   printingId?: string | null;
   canonicalSlug?: string | null;
   provider: string;
   providerVariantId: string;
 }): string;
+/**
+ * Parses canonical display variant refs only.
+ * Provider-history RAW keys are intentionally outside this parser contract.
+ */
 export function parseVariantRef(variantRef: string | null | undefined): ParsedVariantRef | null;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { useUser } from "@clerk/nextjs";
+import { useSafeUser } from "@/lib/auth/use-safe-user";
 import { useRouter } from "next/navigation";
 import { POKETRACE_CAMERA_HREF } from "@/lib/poketrace/ui-paths";
 import { buildHighlightSegments, extractHighlightTokens } from "@/lib/search/highlight.mjs";
@@ -103,7 +103,7 @@ export default function CardSearch({
   cameraHref = POKETRACE_CAMERA_HREF,
 }: CardSearchProps) {
   const router = useRouter();
-  const { user } = useUser();
+  const { user } = useSafeUser();
   const listboxId = useId();
   const rootRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);

@@ -1,5 +1,12 @@
 import { dbAdmin } from "@/lib/db/admin";
+import { ensureProviderRawPayloadLineageId } from "@/lib/backfill/provider-raw-payload-lineage";
+import { retrySupabaseWriteOperation } from "@/lib/backfill/supabase-write-retry";
 import { buildLegacyVariantRef, normalizeCondition } from "@/lib/providers/justtcg";
+import {
+  parseScrydexVariantSemantics,
+  type ScrydexNormalizedEdition,
+  type ScrydexNormalizedFinish,
+} from "@/lib/backfill/scrydex-variant-semantics";
 import type { ScrydexCard, ScrydexVariant } from "@/lib/scrydex/client";
 
 const PROVIDER = "SCRYDEX";
@@ -34,6 +41,7 @@ type RawPayloadScanRow = {
 
 type NormalizedObservationRow = {
   provider_raw_payload_id: string;
+  provider_raw_payload_lineage_id: string;
   provider: string;
   endpoint: string;
   provider_set_id: string | null;
@@ -45,9 +53,9 @@ type NormalizedObservationRow = {
   card_number: string | null;
   normalized_card_number: string | null;
   provider_finish: string | null;
-  normalized_finish: "NON_HOLO" | "HOLO" | "REVERSE_HOLO" | "UNKNOWN";
-  normalized_edition: "UNLIMITED" | "FIRST_EDITION";
-  normalized_stamp: "NONE" | "POKEMON_CENTER";
+  normalized_finish: ScrydexNormalizedFinish;
+  normalized_edition: ScrydexNormalizedEdition;
+  normalized_stamp: string;
   provider_condition: string | null;
   normalized_condition: string;
   provider_language: string | null;
@@ -109,8 +117,12 @@ type VariantObservation = {
   observedPrice: number | null;
   currency: "USD" | "EUR" | "JPY";
   providerFinish: string | null;
-  normalizedFinish: "NON_HOLO" | "HOLO" | "REVERSE_HOLO" | "UNKNOWN";
-  normalizedEdition: "UNLIMITED" | "FIRST_EDITION";
+  normalizedFinish: ScrydexNormalizedFinish;
+  normalizedEdition: ScrydexNormalizedEdition;
+  normalizedStamp: string;
+  stampLabel: string | null;
+  hasSpecialVariantToken: boolean;
+  specialVariantToken: string | null;
   providerCondition: string | null;
   normalizedCondition: string;
   trendAnchorPoints: TrendAnchorPoint[];
@@ -168,33 +180,6 @@ function normalizeCardNumber(raw: string | null | undefined): string {
     return `${promoMatch[1].toUpperCase()}${String(parseInt(promoMatch[2], 10))}`;
   }
   return trimmed;
-}
-
-function variantNameToFinish(variantName: string): {
-  providerFinish: string | null;
-  normalizedFinish: "NON_HOLO" | "HOLO" | "REVERSE_HOLO" | "UNKNOWN";
-  normalizedEdition: "UNLIMITED" | "FIRST_EDITION";
-} {
-  const lower = variantName.toLowerCase().replace(/[-_]+/g, "").trim();
-  if (!lower) {
-    return { providerFinish: null, normalizedFinish: "UNKNOWN", normalizedEdition: "UNLIMITED" };
-  }
-  if (lower.includes("1stedition") || lower.includes("firstedition")) {
-    return { providerFinish: variantName, normalizedFinish: "HOLO", normalizedEdition: "FIRST_EDITION" };
-  }
-  if (lower.includes("reverse")) {
-    return { providerFinish: variantName, normalizedFinish: "REVERSE_HOLO", normalizedEdition: "UNLIMITED" };
-  }
-  if (lower === "normal" || lower === "nonholo" || lower === "nonholofoil") {
-    return { providerFinish: variantName, normalizedFinish: "NON_HOLO", normalizedEdition: "UNLIMITED" };
-  }
-  if (lower.includes("holo") || lower.includes("foil")) {
-    return { providerFinish: variantName, normalizedFinish: "HOLO", normalizedEdition: "UNLIMITED" };
-  }
-  if (lower === "unknown") {
-    return { providerFinish: variantName, normalizedFinish: "UNKNOWN", normalizedEdition: "UNLIMITED" };
-  }
-  return { providerFinish: variantName, normalizedFinish: "UNKNOWN", normalizedEdition: "UNLIMITED" };
 }
 
 function getNumberField(value: unknown): number | null {
@@ -388,15 +373,19 @@ function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
   const fallbackTrendAnchorPoints = extractTrendAnchorPoints((card as { prices?: unknown }).prices);
   const variants = card.variants ?? [];
   if (variants.length === 0) {
-    const fallbackFinish = variantNameToFinish("unknown");
+    const fallbackSemantics = parseScrydexVariantSemantics("unknown");
     return [{
       variantName: "unknown",
       variantId: "unknown",
       observedPrice: fallbackPrice.price,
       currency: fallbackPrice.currency,
-      providerFinish: fallbackFinish.providerFinish,
-      normalizedFinish: fallbackFinish.normalizedFinish,
-      normalizedEdition: fallbackFinish.normalizedEdition,
+      providerFinish: fallbackSemantics.providerFinish,
+      normalizedFinish: fallbackSemantics.normalizedFinish,
+      normalizedEdition: fallbackSemantics.normalizedEdition,
+      normalizedStamp: fallbackSemantics.normalizedStamp,
+      stampLabel: fallbackSemantics.stampLabel,
+      hasSpecialVariantToken: fallbackSemantics.hasSpecialVariantToken,
+      specialVariantToken: fallbackSemantics.specialVariantToken,
       providerCondition: fallbackSelection?.providerCondition ?? null,
       normalizedCondition: fallbackSelection?.normalizedCondition ?? "nm",
       trendAnchorPoints: fallbackTrendAnchorPoints,
@@ -411,15 +400,19 @@ function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
     const pricing = pricingSelection
       ? { price: pricingSelection.price, currency: pricingSelection.currency }
       : extractPriceCurrency((variant as ScrydexVariant).prices);
-    const finish = variantNameToFinish(variantName);
+    const semantics = parseScrydexVariantSemantics(variantName);
     results.push({
       variantName,
       variantId,
       observedPrice: pricing.price ?? fallbackPrice.price,
       currency: pricing.price !== null ? pricing.currency : fallbackPrice.currency,
-      providerFinish: finish.providerFinish,
-      normalizedFinish: finish.normalizedFinish,
-      normalizedEdition: finish.normalizedEdition,
+      providerFinish: semantics.providerFinish,
+      normalizedFinish: semantics.normalizedFinish,
+      normalizedEdition: semantics.normalizedEdition,
+      normalizedStamp: semantics.normalizedStamp,
+      stampLabel: semantics.stampLabel,
+      hasSpecialVariantToken: semantics.hasSpecialVariantToken,
+      specialVariantToken: semantics.specialVariantToken,
       providerCondition: pricingSelection?.providerCondition ?? fallbackSelection?.providerCondition ?? null,
       normalizedCondition: pricingSelection?.normalizedCondition ?? fallbackSelection?.normalizedCondition ?? "nm",
       trendAnchorPoints: pricing.price !== null
@@ -433,12 +426,13 @@ function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
 
 function buildObservationRow(params: {
   rawPayload: RawPayloadRow;
+  providerRawPayloadLineageId: string;
   providerSetId: string | null;
   card: ScrydexCard;
   variant: VariantObservation;
   normalizedAt: string;
 }): NormalizedObservationRow | null {
-  const { rawPayload, providerSetId, card, variant, normalizedAt } = params;
+  const { rawPayload, providerRawPayloadLineageId, providerSetId, card, variant, normalizedAt } = params;
   const providerCardId = String(card.id ?? "").trim();
   if (!providerCardId) return null;
 
@@ -466,6 +460,7 @@ function buildObservationRow(params: {
 
   return {
     provider_raw_payload_id: rawPayload.id,
+    provider_raw_payload_lineage_id: providerRawPayloadLineageId,
     provider: PROVIDER,
     endpoint: ENDPOINT,
     provider_set_id: providerSetId,
@@ -479,7 +474,7 @@ function buildObservationRow(params: {
     provider_finish: variant.providerFinish,
     normalized_finish: variant.normalizedFinish,
     normalized_edition: variant.normalizedEdition,
-    normalized_stamp: "NONE",
+    normalized_stamp: variant.normalizedStamp,
     provider_condition: variant.providerCondition,
     normalized_condition: variant.normalizedCondition,
     provider_language: card.language_code ?? "en",
@@ -487,7 +482,7 @@ function buildObservationRow(params: {
     variant_ref: buildLegacyVariantRef(
       variant.variantName,
       variant.normalizedEdition,
-      null,
+      variant.stampLabel,
       variant.providerCondition ?? "Near Mint",
       "English",
       "RAW",
@@ -505,6 +500,9 @@ function buildObservationRow(params: {
       providerRarity: card.rarity ?? null,
       providerExpansion: card.expansion ?? null,
       providerVariant: variant.variantName,
+      normalizedStamp: variant.normalizedStamp,
+      hasSpecialVariantToken: variant.hasSpecialVariantToken,
+      specialVariantToken: variant.specialVariantToken,
       providerCondition: variant.providerCondition,
       normalizedCondition: variant.normalizedCondition,
       providerVariantPricingCurrency: variant.currency,
@@ -740,6 +738,7 @@ export async function runPokemonTcgRawNormalize(opts: {
       payloadsProcessed += 1;
       const providerSetId = parseProviderSetId(rawPayload.params);
       const cards = rawPayload.response?.data ?? [];
+      const providerRawPayloadLineageId = await ensureProviderRawPayloadLineageId(supabase, rawPayload.id);
       const rows: NormalizedObservationRow[] = [];
 
       for (const card of cards) {
@@ -747,6 +746,7 @@ export async function runPokemonTcgRawNormalize(opts: {
         for (const variant of variants) {
           const observation = buildObservationRow({
             rawPayload,
+            providerRawPayloadLineageId,
             providerSetId,
             card,
             variant,
@@ -780,44 +780,55 @@ export async function runPokemonTcgRawNormalize(opts: {
         // Deduplicate by the exact conflict key to keep the newest observation per key.
         const dedupedRowsByKey = new Map<string, NormalizedObservationRow>();
         for (const row of rows) {
-          const key = `${row.provider_raw_payload_id}::${row.provider_card_id}::${row.provider_variant_id}`;
+          const key = `${row.provider_raw_payload_lineage_id}::${row.provider_card_id}::${row.provider_variant_id}`;
           dedupedRowsByKey.set(key, row);
         }
         const dedupedRows = [...dedupedRowsByKey.values()];
+        const duplicateAffectError = "ON CONFLICT DO UPDATE command cannot affect row a second time";
+        const batchResult = await retrySupabaseWriteOperation(
+          "provider_normalized_observations(upsert batch)",
+          async () => {
+            const { data, error } = await supabase
+              .from("provider_normalized_observations")
+              .upsert(dedupedRows, {
+                onConflict: "provider_raw_payload_lineage_id,provider_card_id,provider_variant_id",
+              })
+              .select("id");
 
-        const { data, error } = await supabase
-          .from("provider_normalized_observations")
-          .upsert(dedupedRows, {
-            onConflict: "provider_raw_payload_id,provider_card_id,provider_variant_id",
-          })
-          .select("id");
+            if (error) {
+              const message = String(error.message ?? "");
+              if (!message.includes(duplicateAffectError)) throw new Error(message);
+              return { duplicateConflict: true, data: [] as Array<{ id: string }> };
+            }
 
-        if (error) {
-          const message = String(error.message ?? "");
-          const duplicateAffectError = "ON CONFLICT DO UPDATE command cannot affect row a second time";
-          if (!message.includes(duplicateAffectError)) {
-            throw new Error(`provider_normalized_observations(upsert): ${message}`);
-          }
+            return { duplicateConflict: false, data: (data ?? []) as Array<{ id: string }> };
+          },
+        );
 
+        if (batchResult.duplicateConflict) {
           // Defensive fallback for unexpected duplicate-key batches:
           // retry row-by-row so one bad row does not fail the whole payload.
           let fallbackCount = 0;
           for (const row of dedupedRows) {
-            const { data: singleData, error: singleError } = await supabase
-              .from("provider_normalized_observations")
-              .upsert(row, {
-                onConflict: "provider_raw_payload_id,provider_card_id,provider_variant_id",
-              })
-              .select("id");
-            if (singleError) {
-              throw new Error(`provider_normalized_observations(upsert): ${singleError.message}`);
-            }
-            fallbackCount += (singleData ?? []).length;
+            const singleData = await retrySupabaseWriteOperation(
+              "provider_normalized_observations(upsert row)",
+              async () => {
+                const { data: singleData, error: singleError } = await supabase
+                  .from("provider_normalized_observations")
+                  .upsert(row, {
+                    onConflict: "provider_raw_payload_lineage_id,provider_card_id,provider_variant_id",
+                  })
+                  .select("id");
+                if (singleError) throw new Error(singleError.message);
+                return (singleData ?? []) as Array<{ id: string }>;
+              },
+            );
+            fallbackCount += singleData.length;
           }
           insertedOrUpdated = fallbackCount;
           observationsUpserted += insertedOrUpdated;
         } else {
-          insertedOrUpdated = (data ?? []).length;
+          insertedOrUpdated = batchResult.data.length;
           observationsUpserted += insertedOrUpdated;
         }
       }

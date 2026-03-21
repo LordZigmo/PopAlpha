@@ -5,11 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { GroupCard, GroupedSection } from "@/components/ios-grouped-ui";
 import PriceTickerStrip from "@/components/price-ticker-strip";
 import EnhancedChart from "@/components/enhanced-chart";
-
-type HistoryPointRow = {
-  ts: string;
-  price: number;
-};
+import type { HistoryPointRow } from "@/components/raw-card-variant-types";
 
 type MarketSummaryCardClientProps = {
   variants: Array<{
@@ -21,6 +17,7 @@ type MarketSummaryCardClientProps = {
     scrydexPrice: number | null;
     scrydexAsOfTs: string | null;
     asOfTs: string | null;
+    changePct7d: number | null;
     trendSlope7d?: number | null;
     history7d: HistoryPointRow[];
     history30d: HistoryPointRow[];
@@ -29,6 +26,7 @@ type MarketSummaryCardClientProps = {
   selectedPrintingId: string | null;
   selectedWindow: "7d" | "30d" | "90d";
   onVariantChange?: (printingId: string) => void;
+  onWindowChange?: (windowKey: WindowKey) => void;
 };
 
 function formatUsd(value: number | null | undefined): string {
@@ -85,6 +83,35 @@ type WindowKey = "7d" | "30d" | "90d";
 
 const WINDOWS: WindowKey[] = ["7d", "30d", "90d"];
 
+function resolveActiveWindow(params: {
+  activeWindow: WindowKey;
+  history7d: HistoryPointRow[];
+  history30d: HistoryPointRow[];
+  history90d: HistoryPointRow[];
+}): { chartSeries: HistoryPointRow[]; effectiveWindow: WindowKey } {
+  const {
+    activeWindow,
+    history7d,
+    history30d,
+    history90d,
+  } = params;
+
+  const chartSeries =
+    activeWindow === "90d" && history90d.length > 0
+      ? history90d
+      : activeWindow === "7d" && history7d.length > 0
+        ? history7d
+        : history30d;
+  const effectiveWindow: WindowKey =
+    activeWindow === "90d" && history90d.length > 0
+      ? "90d"
+      : activeWindow === "7d" && history7d.length > 0
+        ? "7d"
+        : "30d";
+
+  return { chartSeries, effectiveWindow };
+}
+
 function WindowTabs({ active, onChange }: { active: WindowKey; onChange: (w: WindowKey) => void }) {
   const trackRef = useRef<HTMLDivElement>(null);
   const activeIndex = WINDOWS.indexOf(active);
@@ -127,6 +154,7 @@ export default function MarketSummaryCardClient({
   selectedPrintingId,
   selectedWindow,
   onVariantChange,
+  onWindowChange,
 }: MarketSummaryCardClientProps) {
   const [activeWindow, setActiveWindow] = useState<WindowKey>(selectedWindow);
 
@@ -134,37 +162,36 @@ export default function MarketSummaryCardClient({
     setActiveWindow(selectedWindow);
   }, [selectedWindow]);
 
+  useEffect(() => {
+    onWindowChange?.(activeWindow);
+  }, [activeWindow, onWindowChange]);
+
   const activeVariant =
     variants.find((variant) => variant.printingId === selectedPrintingId)
     ?? variants[0]
     ?? null;
 
   const currentPrice = activeVariant?.currentPrice ?? null;
-  const justtcgPrice = activeVariant?.justtcgPrice ?? null;
-  const justtcgAsOfTs = activeVariant?.justtcgAsOfTs ?? null;
   const scrydexPrice = activeVariant?.scrydexPrice ?? null;
   const scrydexAsOfTs = activeVariant?.scrydexAsOfTs ?? null;
   const asOfTs = activeVariant?.asOfTs ?? null;
+  const changePct7d = activeVariant?.changePct7d ?? null;
   const history7d = activeVariant?.history7d ?? [];
   const history30d = activeVariant?.history30d ?? [];
   const history90d = activeVariant?.history90d ?? [];
 
-  const chartSeries =
-    activeWindow === "90d" && history90d.length > 0
-      ? history90d
-      : activeWindow === "7d" && history7d.length > 0
-        ? history7d
-        : history30d;
-  const effectiveWindow: WindowKey =
-    activeWindow === "90d" && history90d.length > 0
-      ? "90d"
-      : activeWindow === "7d" && history7d.length > 0
-        ? "7d"
-        : "30d";
+  const { chartSeries, effectiveWindow } = resolveActiveWindow({
+    activeWindow,
+    history7d,
+    history30d,
+    history90d,
+  });
 
-  const changeValue = computeChange(chartSeries);
+  const changeValue = effectiveWindow === "7d"
+    ? changePct7d ?? computeChange(chartSeries)
+    : computeChange(chartSeries);
   const { low, high } = computeLowHigh(chartSeries);
-  const sampleCount = chartSeries.length;
+  const sampleCount = currentPrice !== null ? chartSeries.length : 0;
 
   function setWindow(nextWindow: WindowKey) {
     setActiveWindow(nextWindow);
@@ -177,6 +204,7 @@ export default function MarketSummaryCardClient({
 
   function setVariant(nextPrintingId: string) {
     onVariantChange?.(nextPrintingId);
+    if (onVariantChange) return;
     if (typeof window === "undefined") return;
     const url = new URL(window.location.href);
     url.searchParams.set("printing", nextPrintingId);
@@ -206,7 +234,7 @@ export default function MarketSummaryCardClient({
             <div className="flex items-baseline justify-between gap-2">
               <div>
                 <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#8A8A8A]">
-                  Market Price (Blended)
+                  Market Price
                 </p>
                 <span className="text-[38px] font-bold leading-none tracking-[-0.03em] tabular-nums text-[#F0F0F0] sm:text-[44px]">
                   {formatUsd(currentPrice)}
@@ -216,15 +244,6 @@ export default function MarketSummaryCardClient({
             </div>
 
             <div className="grid grid-cols-1 gap-2 rounded-2xl border border-white/[0.06] bg-[#151515] px-3 py-3">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex flex-col gap-0.5">
-                  <span className="text-[13px] text-[#A8A8A8]">JustTCG</span>
-                  <span className="text-[12px] text-[#8A8A8A]">Updated: {formatRelativeTime(justtcgAsOfTs) ?? "--"}</span>
-                </div>
-                <span className="text-[14px] font-semibold tabular-nums text-[#EDEDED]">
-                  {formatUsd(justtcgPrice)}
-                </span>
-              </div>
               <div className="flex items-center justify-between gap-3">
                 <div className="flex flex-col gap-0.5">
                   <span className="text-[13px] text-[#A8A8A8]">Scrydex</span>
@@ -251,7 +270,7 @@ export default function MarketSummaryCardClient({
               items={[
                 { label: `${effectiveWindow.toUpperCase()} Low`, value: formatUsd(low) },
                 { label: `${effectiveWindow.toUpperCase()} High`, value: formatUsd(high) },
-                { label: "Sales", value: sampleCount > 0 ? String(sampleCount) : "—" },
+                { label: "Price points", value: sampleCount > 0 ? String(sampleCount) : "—" },
                 { label: `${effectiveWindow.toUpperCase()} Change`, value: formatPercent(changeValue), tone: changeTone(changeValue) },
               ]}
             />

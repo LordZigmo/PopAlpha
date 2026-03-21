@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { currentUser } from "@clerk/nextjs/server";
 import { generateText } from "ai";
@@ -8,6 +9,8 @@ import { getPopAlphaModel } from "@/lib/ai/models";
 import HomepageSearch from "@/components/homepage-search";
 import CardTileMini from "@/components/card-tile-mini";
 import TypewriterText from "@/components/typewriter-text";
+import HomepageMobileNav from "@/components/homepage-mobile-nav";
+import { Search, ArrowRight, Activity, TrendingUp } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -42,6 +45,7 @@ const EMPTY_DATA = {
   losers: [],
   trending: [],
   as_of: null,
+  prices_refreshed_today: 0,
 } as const;
 const DATA_TIMEOUT_MS = 8_000;
 const AI_TIMEOUT_MS = 4_000;
@@ -95,9 +99,8 @@ function buildMarketNarrative(
   return `${leader} has the cleanest momentum on the board right now, but the rest of the market still looks selective instead of overheated.`;
 }
 
-function buildAceNarrativeFallback(
+function deriveSignalChips(
   movers: HomepageCard[],
-  trending: HomepageCard[],
   losers: HomepageCard[],
   communityCards: Array<{
     name: string;
@@ -602,9 +605,20 @@ export default async function Home() {
                 </div>
               </div>
             </div>
-          </div>
+          ) : null}
+        </section>
+      ) : null}
+
+      {/* ══════════════════════════════════════════════════════════════
+          SECTION 5 — AI MARKET BRIEF
+          ══════════════════════════════════════════════════════════════ */}
+      <section className="mx-auto max-w-[1200px] px-6 pt-12 pb-8 sm:px-10 sm:pt-20 sm:pb-12">
+        <div className="max-w-[480px]">
+          <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-400/80">PopAlpha Scout</span>
+          <h2 className="mt-1 text-[clamp(1.4rem,3vw,2rem)] font-bold tracking-[-0.03em] text-white">
+            Daily reads on where conviction is building
+          </h2>
         </div>
-      </section>
 
       {/* ── Trending Rail ───────────────────────────────────────────────── */}
       <section className="border-t border-white/[0.04] py-16 sm:py-20">

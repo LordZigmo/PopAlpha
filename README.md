@@ -1,6 +1,54 @@
 # PopAlpha
 
-PopAlpha is a Next.js app for alternative-asset data workflows.
+PopAlpha is a Next.js app for Pokemon collectibles intelligence.
+It helps collectors understand raw card prices, variant-level market behavior, and set-level trends quickly, with an interface designed to feel legible, modern, and trustworthy.
+
+## What This Repo Is
+
+- Product focus: raw Pokemon card singles, variant-aware pricing, market signals, set summaries, portfolio/watchlist tooling, and collector-facing market context.
+- Product goal: reduce uncertainty for collectors by surfacing the most useful information fast, with credible metrics and low-noise UX.
+- Current stack: Next.js App Router, React, TypeScript, Supabase, Clerk, Vercel Analytics, and provider ingestion/backfill scripts.
+- Working style: user-facing pages and APIs live in `app/`, shared UI in `components/`, business logic and integrations in `lib/`, and operational scripts/runbooks in `scripts/` and `docs/`.
+
+## Key Surfaces
+
+- `/`: homepage with market narrative, movers, community pulse, and search-led discovery.
+- `/c/[slug]`: canonical card detail pages with pricing, variants, signals, and market intelligence.
+- `/sets` and `/sets/[setName]`: set discovery and set-level summary views.
+- `/portfolio`, `/watchlist`, `/profile`, and `/u/[handle]`: collector account and social surfaces.
+- `/data`: public freshness and pricing-transparency monitor.
+- `/internal/admin`, `app/api/cron/**`, and import/backfill scripts: operator and ingestion surfaces.
+
+## Architecture At A Glance
+
+- Identity model: canonical cards and printings are the foundation for provider matching, price history, and variant metrics.
+- Data flow: provider ingest writes raw payloads and normalized observations, then downstream jobs refresh latest-price tables, price history, derived signals, and set summaries.
+- Delivery model: public pages aim to read precomputed or cheap-to-query views instead of assembling heavy analytics on each request.
+- Trust model: auth is intentionally segmented across public, user, admin, and cron surfaces; see `docs/auth.md` before adding protected routes.
+
+## Repo Map
+
+- `app/`: App Router pages, layouts, route handlers, metadata, and top-level UX surfaces.
+- `components/`: shared UI building blocks and page-specific presentation components.
+- `lib/`: pricing logic, auth helpers, provider clients, backfill pipelines, data loaders, and domain models.
+- `supabase/` and `sql/`: migrations, policies, and database operations.
+- `scripts/`: imports, backfills, checks, and maintenance tooling.
+- `docs/`: focused runbooks and project context for auth, security, debug flows, provider setup, and brand/UX direction.
+- `tests/` and `tests_py/`: Node and Python verification coverage.
+
+## Key Docs
+
+- Brand and UX Manifest: `docs/brand-ux-manifest.md`
+- Auth model and route trust: `docs/auth.md`
+- Scrydex setup: `docs/SCRYDEX_SETUP.md`
+- Debug endpoints and checks: `docs/debug.md`
+- Database performance runbook: `docs/database-performance-runbook.md`
+- Security runbooks: `docs/security/rls-readiness.md`, `docs/security/ebay-deletion-review-runbook.md`
+
+## How To Read This README
+
+The sections below are deeper implementation notes, historical workstream context, and operational runbooks for specific features and pipelines.
+If you are new to the repo, start with the sections above, then jump into the feature-specific notes that match the area you are changing.
 
 ## PSA cert lookup vertical slice
 

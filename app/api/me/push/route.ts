@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require";
-import { dbAdmin } from "@/lib/db/admin";
+import { createServerSupabaseUserClient } from "@/lib/db/user";
 import { isWebPushConfigured } from "@/lib/push/web-push";
 
 export const runtime = "nodejs";
@@ -24,7 +24,7 @@ export async function GET(req: Request) {
   if (!auth.ok) return auth.response;
 
   try {
-    const db = dbAdmin();
+    const db = await createServerSupabaseUserClient();
     const { count, error } = await db
       .from("push_subscriptions")
       .select("*", { count: "exact", head: true })
@@ -65,7 +65,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    const db = dbAdmin();
+    const db = await createServerSupabaseUserClient();
     const now = new Date().toISOString();
     const { error } = await db.from("push_subscriptions").upsert(
       {
@@ -109,7 +109,7 @@ export async function DELETE(req: Request) {
   }
 
   try {
-    const db = dbAdmin();
+    const db = await createServerSupabaseUserClient();
     const { error } = await db
       .from("push_subscriptions")
       .delete()

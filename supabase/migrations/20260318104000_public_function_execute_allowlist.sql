@@ -1,0 +1,25 @@
+revoke execute on function public.card_printings_set_updated_at() from public, anon, authenticated;
+revoke execute on function public.decks_set_updated_at() from public, anon, authenticated;
+revoke execute on function public.ensure_provider_raw_payload_lineage(uuid) from public, anon, authenticated;
+revoke execute on function public.fx_rates_set_updated_at() from public, anon, authenticated;
+revoke execute on function public.normalize_set_id(text) from public, anon, authenticated;
+revoke execute on function public.pipeline_jobs_set_updated_at() from public, anon, authenticated;
+revoke execute on function public.preferred_canonical_raw_printing(text) from public, anon, authenticated;
+revoke execute on function public.provider_card_map_set_updated_at() from public, anon, authenticated;
+revoke execute on function public.provider_normalized_observations_sync_lineage() from public, anon, authenticated;
+revoke execute on function public.provider_raw_payload_lineages_set_updated_at() from public, anon, authenticated;
+revoke execute on function public.provider_variant_match_score(text, text, text, text, text) from public, anon, authenticated;
+revoke execute on function public.refresh_set_finish_summary_latest(text[]) from public, anon, authenticated;
+revoke execute on function public.refresh_set_summary_pipeline(date, integer) from public, anon, authenticated;
+revoke execute on function public.refresh_set_summary_pipeline_for_variants(jsonb, date, integer) from public, anon, authenticated;
+revoke execute on function public.refresh_set_summary_snapshots(date, text[]) from public, anon, authenticated;
+revoke execute on function public.refresh_variant_price_daily(integer) from public, anon, authenticated;
+revoke execute on function public.refresh_variant_price_daily_for_variants(jsonb, integer) from public, anon, authenticated;
+revoke execute on function public.refresh_variant_price_latest_for_variants(jsonb) from public, anon, authenticated;
+revoke execute on function public.refresh_variant_signals_latest_for_variants(jsonb) from public, anon, authenticated;
+revoke execute on function public.set_waitlist_signups_updated_at() from public, anon, authenticated;
+
+grant execute on function public.is_handle_available(text) to anon, authenticated;
+grant execute on function public.record_card_page_view(text) to anon, authenticated;
+grant execute on function public.requesting_clerk_user_id() to authenticated;
+grant execute on function public.resolve_profile_handle(text) to authenticated;
