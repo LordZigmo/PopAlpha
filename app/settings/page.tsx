@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { SignOutButton, useUser } from "@clerk/nextjs";
+import { SignOutButton } from "@clerk/nextjs";
+import { useSafeUser } from "@/lib/auth/use-safe-user";
 import PricingModal from "@/components/billing/pricing-modal";
 import PushNotificationToggle from "@/components/settings/push-notification-toggle";
 import ThemeToggle from "@/components/theme-toggle";
@@ -83,7 +84,7 @@ function SettingToggle({
 }
 
 export default function SettingsPage() {
-  const { user, isLoaded } = useUser();
+  const { user, isLoaded } = useSafeUser();
   const [settings, setSettings] = useState<SettingsDraft>(DEFAULT_SETTINGS);
   const [loadingSettings, setLoadingSettings] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);

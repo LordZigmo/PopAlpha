@@ -9,8 +9,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { currentUser } from "@clerk/nextjs/server";
+import Image from "next/image";
 import { cache } from "react";
+import { clerkEnabled } from "@/lib/auth/clerk-enabled";
 import CanonicalCardFloatingHero from "@/components/canonical-card-floating-hero";
 import CardModeToggle from "@/components/card-mode-toggle";
 import CardViewTracker from "@/components/card-view-tracker";
@@ -581,7 +582,15 @@ export default async function CanonicalCardPage({
 }) {
   const { slug } = await params;
   const { printing, grade, mode, provider, bucket, marketWindow, debug, returnTo } = await searchParams;
-  const user = await currentUser();
+  let user: { id: string } | null = null;
+  if (clerkEnabled) {
+    try {
+      const { currentUser } = await import("@clerk/nextjs/server");
+      user = await currentUser();
+    } catch {
+      user = null;
+    }
+  }
   const supabase = dbPublic();
   const debugEnabled = debug === "1";
   const backHref = resolveBackHref(returnTo);
@@ -970,8 +979,30 @@ export default async function CanonicalCardPage({
     </>
   );
 
+  const cardPageNav = (
+    <header className="fixed inset-x-0 top-0 z-50 border-b border-white/[0.04] bg-[#0A0A0A]/80 backdrop-blur-xl">
+      <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-5 sm:px-8">
+        <div className="flex items-center gap-4">
+          <Link href={backHref} aria-label="Back" className="flex h-9 w-9 items-center justify-center rounded-full border border-white/[0.06] bg-white/[0.03] text-[#999] transition hover:bg-white/[0.06] hover:text-white">
+            <span className="text-[20px] leading-none">‹</span>
+          </Link>
+          <Link href="/" className="flex items-center gap-2">
+            <Image src="/brand/popalpha-icon-transparent.svg" alt="PopAlpha" width={28} height={28} className="h-7 w-7" />
+            <span className="text-[15px] font-bold tracking-tight text-white">PopAlpha</span>
+          </Link>
+        </div>
+        <nav className="flex items-center gap-5">
+          <Link href="/search" className="hidden text-[13px] font-medium text-[#666] transition hover:text-white sm:block">Search</Link>
+          <Link href="/sets" className="hidden text-[13px] font-medium text-[#666] transition hover:text-white sm:block">Sets</Link>
+          <Link href="/portfolio" className="hidden text-[13px] font-medium text-[#666] transition hover:text-white sm:block">Portfolio</Link>
+        </nav>
+      </div>
+    </header>
+  );
+
   return (
     <PageShell>
+      {cardPageNav}
       {viewMode === "RAW" ? (
         <RawCardMarketSurface
           canonicalSlug={slug}
