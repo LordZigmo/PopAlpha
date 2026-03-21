@@ -70,8 +70,13 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
 
-  // Home, search, about, and card detail pages use their own layout — no header
-  if (pathname === "/" || pathname === "/search" || pathname === "/about" || pathname.startsWith("/c/")) {
+  // Landing page gets no chrome at all — it has its own full-width layout
+  if (pathname === "/") {
+    return <>{children}</>;
+  }
+
+  // Search, about, and card detail pages use their own layout — no header
+  if (pathname === "/search" || pathname === "/about" || pathname.startsWith("/c/")) {
     return (
       <AppShell>
         {children}
