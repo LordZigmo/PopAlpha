@@ -69,8 +69,13 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
 
-  // Search, about, and card detail pages use AppShell with sidebars — no header
-  if (pathname === "/search" || pathname === "/about" || pathname.startsWith("/c/")) {
+  // Search pages get a clean, full-width layout — no sidebars
+  if (pathname === "/search") {
+    return <>{children}</>;
+  }
+
+  // About and card detail pages use AppShell with sidebars — no header
+  if (pathname === "/about" || pathname.startsWith("/c/")) {
     return (
       <AppShell>
         {children}

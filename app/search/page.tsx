@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { unstable_cache } from "next/cache";
 import { getCanonicalMarketPulseMap, type CanonicalMarketPulse } from "@/lib/data/market";
@@ -599,21 +600,31 @@ export default async function SearchPage({
 
   if (!q) {
     return (
-      <main className="app-shell">
-        <div className="mx-auto w-full max-w-5xl px-4 py-12 sm:px-6">
+      <div className="min-h-screen bg-[#0A0A0A] text-[#F0F0F0]">
+        {/* Nav */}
+        <header className="fixed inset-x-0 top-0 z-50 border-b border-white/[0.04] bg-[#0A0A0A]/80 backdrop-blur-xl">
+          <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-5 sm:px-8">
+            <Link href="/" className="text-[16px] font-bold tracking-tight text-white">PopAlpha</Link>
+            <nav className="flex items-center gap-5">
+              <Link href="/sets" className="hidden text-[13px] font-medium text-[#666] transition hover:text-white sm:block">Sets</Link>
+              <Link href="/portfolio" className="hidden text-[13px] font-medium text-[#666] transition hover:text-white sm:block">Portfolio</Link>
+            </nav>
+          </div>
+        </header>
+
+        <div className="mx-auto w-full max-w-4xl px-5 pt-28 pb-20 sm:px-8 sm:pt-32">
           {cameraIntent ? (
             <>
               <PokeTraceCameraBetaPanel className="mt-0" />
-              <section className="mx-auto w-full max-w-3xl pt-8 text-center sm:pt-10">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#7DB6FF]">
+              <section className="mx-auto w-full max-w-2xl pt-8 text-center sm:pt-10">
+                <p className="text-[11px] font-semibold uppercase tracking-widest text-[#7DB6FF]">
                   PokeTrace Search
                 </p>
-                <p className="text-muted mx-auto mt-3 max-w-2xl text-sm sm:text-base">
+                <p className="mx-auto mt-3 max-w-xl text-[14px] text-[#888]">
                   Search is still available if you want to jump straight to a card instead of using the camera beta.
                 </p>
-
                 <CardSearch
-                  className="mx-auto mt-6 w-full max-w-3xl"
+                  className="mx-auto mt-6 w-full max-w-2xl"
                   size="search"
                   placeholder="Search"
                   autoFocus={false}
@@ -624,25 +635,24 @@ export default async function SearchPage({
               </section>
             </>
           ) : (
-            <section className="mx-auto w-full max-w-3xl pt-10 text-center sm:pt-14">
-              <div className="flex items-center justify-center gap-6">
+            <section className="mx-auto w-full max-w-2xl pt-10 text-center sm:pt-16">
+              <div className="flex items-center justify-center gap-5">
                 <Image
-                  src="/brand/popalpha-icon.svg"
+                  src="/brand/popalpha-icon-transparent.svg"
                   alt=""
                   aria-hidden="true"
-                  width={132}
-                  height={132}
-                  className="h-28 w-28 shrink-0 sm:h-32 sm:w-32"
+                  width={120}
+                  height={120}
+                  className="hidden shrink-0 sm:block"
                   priority
                 />
-                <h1 className="text-app text-7xl font-semibold tracking-tight sm:text-[5.5rem]">PopAlpha</h1>
+                <h1 className="text-[clamp(2.5rem,8vw,4.5rem)] font-bold tracking-tight text-white">PopAlpha</h1>
               </div>
-              <p className="text-muted mx-auto mt-4 max-w-2xl text-sm sm:text-base">
-                Smarter TCG Market Insights.
+              <p className="mx-auto mt-4 max-w-md text-[14px] text-[#888]">
+                Live market intelligence for Pokémon collectors.
               </p>
-
               <CardSearch
-                className="mx-auto mt-7 w-full max-w-3xl"
+                className="mx-auto mt-8 w-full max-w-2xl"
                 size="search"
                 placeholder="Search"
                 autoFocus
@@ -653,7 +663,7 @@ export default async function SearchPage({
             </section>
           )}
         </div>
-      </main>
+      </div>
     );
   }
 
@@ -809,11 +819,22 @@ export default async function SearchPage({
     : { setSummary: null, chaseCards: [] };
 
   return (
-    <main className="app-shell">
-      <div className="mx-auto max-w-5xl px-4 py-4 sm:px-6 sm:py-5">
-        <section className="mx-auto w-full max-w-3xl pt-1 sm:pt-2">
+    <div className="min-h-screen bg-[#0A0A0A] text-[#F0F0F0]">
+      {/* Nav */}
+      <header className="fixed inset-x-0 top-0 z-50 border-b border-white/[0.04] bg-[#0A0A0A]/80 backdrop-blur-xl">
+        <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-5 sm:px-8">
+          <Link href="/" className="text-[16px] font-bold tracking-tight text-white">PopAlpha</Link>
+          <nav className="flex items-center gap-5">
+            <Link href="/sets" className="hidden text-[13px] font-medium text-[#666] transition hover:text-white sm:block">Sets</Link>
+            <Link href="/portfolio" className="hidden text-[13px] font-medium text-[#666] transition hover:text-white sm:block">Portfolio</Link>
+          </nav>
+        </div>
+      </header>
+
+      <div className="mx-auto max-w-7xl px-5 pt-20 pb-20 sm:px-8 sm:pt-22">
+        <section className="mx-auto w-full max-w-2xl pt-1 sm:pt-2">
           <CardSearch
-            className="mx-auto w-full max-w-3xl"
+            className="mx-auto w-full max-w-2xl"
             size="search"
             placeholder="Search"
             enableGlobalShortcut
@@ -843,6 +864,6 @@ export default async function SearchPage({
           }}
         />
       </div>
-    </main>
+    </div>
   );
 }

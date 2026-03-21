@@ -513,8 +513,12 @@ body {
 /* ── Homepage premium styles ── */
 .homepage-root {
   background:
-    radial-gradient(ellipse 80% 40% at 50% 0%, rgba(0, 180, 216, 0.03) 0%, transparent 60%),
+    radial-gradient(ellipse 50% 30% at 50% 0%, rgba(0, 180, 216, 0.025) 0%, transparent 60%),
     #0A0A0A;
+}
+
+.homepage-search-wrap {
+  transition: border-color 200ms ease, box-shadow 200ms ease;
 }
 
 .homepage-search-wrap:focus-within {
@@ -526,7 +530,7 @@ body {
 }
 
 .homepage-brief:hover {
-  border-color: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.08);
 }
 
 .homepage-cta-card {
@@ -534,10 +538,20 @@ body {
 }
 
 .homepage-cta-card:hover {
-  border-color: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.08);
 }
 
-/* Hide scrollbars on homepage card carousels */
+.homepage-cta-btn {
+  background-color: #ffffff !important;
+  color: #0A0A0A !important;
+  transition: background-color 200ms ease;
+}
+
+.homepage-cta-btn:hover {
+  background-color: #e5e5e5 !important;
+}
+
+/* Hide scrollbars on homepage carousels */
 .homepage-root [style*="scrollbar-width"] {
   -ms-overflow-style: none;
 }
