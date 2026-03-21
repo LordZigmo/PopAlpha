@@ -148,8 +148,8 @@ body {
   position: relative;
   margin-top: -35vh;
   border-radius: 28px 28px 0 0;
-  background: var(--color-background);
-  box-shadow: none;
+  background: #0A0A0A;
+  box-shadow: 0 -1px 0 rgba(255, 255, 255, 0.04);
 }
 
 [data-style="glass"] .glass-target {
@@ -511,52 +511,43 @@ body {
 }
 
 /* ── Homepage premium styles ── */
-.homepage-root {
-  background:
-    radial-gradient(ellipse 50% 30% at 50% 0%, rgba(0, 180, 216, 0.025) 0%, transparent 60%),
-    #0A0A0A;
+.hp-root {
+  background: #050505;
 }
 
-.homepage-search-wrap {
-  transition: border-color 200ms ease, box-shadow 200ms ease;
+.hp-headline-accent {
+  background: linear-gradient(135deg, #00B4D8 0%, #00DC5A 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
-.homepage-search-wrap:focus-within {
-  border-color: rgba(255, 255, 255, 0.14);
-}
-
-.homepage-brief {
-  transition: border-color 200ms ease;
-}
-
-.homepage-brief:hover {
-  border-color: rgba(255, 255, 255, 0.08);
-}
-
-.homepage-cta-card {
-  transition: border-color 200ms ease;
-}
-
-.homepage-cta-card:hover {
-  border-color: rgba(255, 255, 255, 0.08);
-}
-
-.homepage-cta-btn {
-  background-color: #ffffff !important;
+.hp-btn-primary {
+  background: white !important;
   color: #0A0A0A !important;
-  transition: background-color 200ms ease;
+  transition: background 180ms ease, transform 180ms ease;
 }
 
-.homepage-cta-btn:hover {
-  background-color: #e5e5e5 !important;
+.hp-btn-primary:hover {
+  background: #e0e0e0 !important;
+  transform: translateY(-1px);
 }
 
-/* Hide scrollbars on homepage carousels */
-.homepage-root [style*="scrollbar-width"] {
-  -ms-overflow-style: none;
+.hp-terminal {
+  background: #080808;
+  box-shadow: 0 32px 80px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.03);
 }
-.homepage-root [style*="scrollbar-width"]::-webkit-scrollbar {
-  display: none;
+
+.hp-scout-card {
+  transition: border-color 280ms ease;
+}
+
+.hp-scout-card:hover {
+  border-color: rgba(16, 185, 129, 0.15);
+}
+
+.hp-cta {
+  background: #080808;
 }
 
 /* Compatibility layer for existing Tailwind color classes during token migration */
