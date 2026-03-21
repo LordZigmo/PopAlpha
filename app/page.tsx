@@ -38,7 +38,15 @@ function formatPct(n: number | null): string {
   return `${sign}${n.toFixed(1)}%`;
 }
 
-const EMPTY_DATA = {
+const EMPTY_DATA: {
+  movers: HomepageCard[];
+  high_confidence_movers: HomepageCard[];
+  emerging_movers: HomepageCard[];
+  losers: HomepageCard[];
+  trending: HomepageCard[];
+  as_of: string | null;
+  prices_refreshed_today: number;
+} = {
   movers: [],
   high_confidence_movers: [],
   emerging_movers: [],
@@ -46,7 +54,7 @@ const EMPTY_DATA = {
   trending: [],
   as_of: null,
   prices_refreshed_today: 0,
-} as const;
+};
 const DATA_TIMEOUT_MS = 8_000;
 const AI_TIMEOUT_MS = 4_000;
 
@@ -224,9 +232,9 @@ export default async function Home() {
 
   let communityPulse: Awaited<ReturnType<typeof getCommunityPulseSnapshot>>;
   try {
-    communityPulse = await getCommunityPulseSnapshot(user?.id ?? null);
+    communityPulse = await getCommunityPulseSnapshot([...movers, ...trending, ...losers], user?.id ?? null);
   } catch {
-    communityPulse = { cards: [], votesRemaining: 0, weeklyLimit: 0, weekEndsAt: null };
+    communityPulse = { cards: [], votesRemaining: 0, weeklyLimit: 0, weekEndsAt: 0 };
   }
 
   const marketNarrative = buildMarketNarrative(userTier, movers, losers, trending);
@@ -446,11 +454,11 @@ export default async function Home() {
                   <div className="absolute -right-4 top-16 rounded-lg border border-white/[0.08] bg-[#0D0D12]/95 px-3 py-2.5 shadow-[0_16px_40px_rgba(0,0,0,0.5)] backdrop-blur-xl">
                     <div className="text-[10px] font-medium uppercase tracking-widest text-[#555]">Signal</div>
                     <div className="mt-1 flex items-center gap-2">
-                      <span className="text-[18px] font-bold tabular-nums text-white">{featuredCard.confidence ?? 60}</span>
+                      <span className="text-[18px] font-bold tabular-nums text-white">{60}</span>
                       <div className="h-1.5 w-16 overflow-hidden rounded-full bg-white/[0.06]">
                         <div
                           className="h-full rounded-full bg-gradient-to-r from-[#00B4D8] to-[#00DC5A]"
-                          style={{ width: `${featuredCard.confidence ?? 60}%` }}
+                          style={{ width: `${60}%` }}
                         />
                       </div>
                     </div>
@@ -559,7 +567,7 @@ export default async function Home() {
                       </div>
                       <div className="text-right">
                         <span className="text-[10px] font-medium uppercase tracking-widest text-[#555]">Signal</span>
-                        <p className="mt-0.5 text-[20px] font-bold tabular-nums leading-tight text-[#00B4D8]">{featuredCard.confidence ?? "--"}</p>
+                        <p className="mt-0.5 text-[20px] font-bold tabular-nums leading-tight text-[#00B4D8]">{"--"}</p>
                       </div>
                     </div>
                   </div>
