@@ -64,23 +64,13 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
 
-  // Homepage gets a clean, full-width layout — no sidebars, no header
+  // Landing page gets no chrome at all — it has its own full-width layout
   if (pathname === "/") {
     return <>{children}</>;
   }
 
-  // Search pages get a clean, full-width layout — no sidebars
-  if (pathname === "/search") {
-    return <>{children}</>;
-  }
-
-  // Card detail pages get clean full-width — no sidebars
-  if (pathname.startsWith("/c/")) {
-    return <>{children}</>;
-  }
-
-  // About page uses AppShell with sidebars — no header
-  if (pathname === "/about") {
+  // Search, about, and card detail pages use their own layout — no header
+  if (pathname === "/search" || pathname === "/about" || pathname.startsWith("/c/")) {
     return (
       <AppShell>
         {children}
