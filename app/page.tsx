@@ -264,9 +264,9 @@ export default async function HomePage() {
                 <Image
                   src="/brand/popalpha-icon-transparent.svg"
                   alt="PopAlpha logo"
-                  width={64}
-                  height={64}
-                  className="mt-1 hidden shrink-0 sm:block"
+                  width={120}
+                  height={120}
+                  className="hidden shrink-0 sm:block"
                 />
                 <h1 className="text-[clamp(1.75rem,4.5vw,2.75rem)] font-bold leading-[1.1] tracking-tight text-white">
                   Live market intelligence
@@ -281,10 +281,10 @@ export default async function HomePage() {
 
               {/* Search surface */}
               <div className="mt-6 sm:mt-8">
-                <div className="homepage-search-wrap max-w-xl rounded-xl border border-white/[0.08] bg-[#111]/80 p-1 shadow-[0_12px_40px_rgba(0,0,0,0.3)] backdrop-blur-xl transition-all focus-within:border-white/[0.14] focus-within:shadow-[0_12px_40px_rgba(0,0,0,0.4),0_0_0_1px_rgba(0,180,216,0.12)]">
+                <div className="max-w-xl">
                   <Suspense
                     fallback={
-                      <div className="flex h-[48px] items-center gap-3 rounded-lg bg-white/[0.03] px-4">
+                      <div className="flex h-[48px] items-center gap-3 px-4">
                         <Search size={16} className="text-[#555]" />
                         <span className="text-[14px] text-[#555]">Search cards...</span>
                       </div>
