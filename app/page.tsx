@@ -210,14 +210,7 @@ export default async function HomePage() {
       {/* ── Nav ──────────────────────────────────────────────────── */}
       <header className="fixed inset-x-0 top-0 z-50 border-b border-white/[0.04] bg-[#0A0A0A]/80 backdrop-blur-xl">
         <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-5 sm:px-8">
-          <Link href="/" className="flex items-center gap-2 text-[16px] font-bold tracking-tight text-white">
-            <Image
-              src="/brand/popalpha-icon.svg"
-              alt="PopAlpha logo"
-              width={28}
-              height={28}
-              className="rounded-md"
-            />
+          <Link href="/" className="text-[16px] font-bold tracking-tight text-white">
             PopAlpha
           </Link>
           <nav className="flex items-center gap-5">
@@ -267,11 +260,20 @@ export default async function HomePage() {
           <div className="grid items-start gap-8 lg:grid-cols-[1fr_380px] lg:gap-12">
             {/* Left: headline + search */}
             <div className="max-w-2xl pt-2">
-              <h1 className="text-[clamp(1.75rem,4.5vw,2.75rem)] font-bold leading-[1.1] tracking-tight text-white">
-                Live market intelligence
-                <br />
-                <span className="text-[#666]">for Pokémon collectors</span>
-              </h1>
+              <div className="flex items-start gap-4 sm:gap-5">
+                <Image
+                  src="/brand/popalpha-icon-transparent.svg"
+                  alt="PopAlpha logo"
+                  width={64}
+                  height={64}
+                  className="mt-1 hidden shrink-0 sm:block"
+                />
+                <h1 className="text-[clamp(1.75rem,4.5vw,2.75rem)] font-bold leading-[1.1] tracking-tight text-white">
+                  Live market intelligence
+                  <br />
+                  <span className="text-[#666]">for Pokémon collectors</span>
+                </h1>
+              </div>
 
               <p className="mt-4 max-w-md text-[15px] leading-relaxed text-[#888]">
                 Track prices, spot conviction, and follow meaningful movement. AI-powered signal across raw, sealed, and graded.
