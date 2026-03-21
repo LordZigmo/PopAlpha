@@ -41,6 +41,7 @@ export type HomepageData = {
   losers: HomepageCard[];
   trending: HomepageCard[];
   as_of: string | null;
+  prices_refreshed_today: number;
 };
 
 type ChangeCandidateRow = {
@@ -127,6 +128,7 @@ const EMPTY: HomepageData = {
   losers: [],
   trending: [],
   as_of: null,
+  prices_refreshed_today: 0,
 };
 
 const DEFAULT_LOGGER: HomepageLogger = console;
@@ -230,6 +232,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
     let marketPulseMap = new Map<string, CanonicalMarketPulse>();
     let imageRows: ImageRow[] = [];
     let sparklineRows: SparklineRow[] = [];
+    let pricesRefreshedToday = 0;
 
     if (overrides) {
       positiveChangeRows = overrides.positiveChangeRows ?? [];
@@ -243,8 +246,8 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
       const client = db;
       if (!client) return EMPTY;
 
-      // ── Batch 1: movers + variant-level trend data ────────────────────────
-      const [positiveChangeResult, negativeChangeResult, trendingVariantResult] = await Promise.all([
+      // ── Batch 1: movers + variant-level trend data + freshness count ────
+      const [positiveChangeResult, negativeChangeResult, trendingVariantResult, refreshedCountResult] = await Promise.all([
         // 1. Top movers — fresh positive 24h moves from canonical card metrics
         client
           .from("public_card_metrics")
@@ -285,15 +288,25 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
           .gte("provider_price_changes_count_30d", MIN_CHANGES_TRENDING)
           .order("provider_trend_slope_7d", { ascending: false })
           .limit(CANDIDATE_FETCH_LIMIT),
+
+        // 4. Count of cards with a fresh price update in the last 24h
+        client
+          .from("public_card_metrics")
+          .select("canonical_slug", { count: "exact", head: true })
+          .eq("grade", "RAW")
+          .is("printing_id", null)
+          .gte("market_price_as_of", freshnessCutoffIso),
       ]);
 
       if (positiveChangeResult.error) logger.error("[homepage] movers_24h", positiveChangeResult.error.message);
       if (negativeChangeResult.error) logger.error("[homepage] drops_24h", negativeChangeResult.error.message);
       if (trendingVariantResult.error) logger.error("[homepage] trending", trendingVariantResult.error.message);
+      if (refreshedCountResult.error) logger.error("[homepage] refreshed_count", refreshedCountResult.error.message);
 
       positiveChangeRows = (positiveChangeResult.data ?? []) as ChangeCandidateRow[];
       negativeChangeRows = (negativeChangeResult.data ?? []) as ChangeCandidateRow[];
       trendingVariants = dedupVariants((trendingVariantResult.data ?? []) as VariantRow[], CANDIDATE_FETCH_LIMIT);
+      pricesRefreshedToday = refreshedCountResult.count ?? 0;
     }
 
     // ── Collect all unique slugs ──────────────────────────────────────────
@@ -562,6 +575,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
       losers: losersOut,
       trending: trendingOut,
       as_of,
+      prices_refreshed_today: pricesRefreshedToday,
     };
 
   } catch (err) {

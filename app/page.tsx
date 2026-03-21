@@ -56,6 +56,7 @@ const EMPTY_DATA = {
   losers: [],
   trending: [],
   as_of: null,
+  prices_refreshed_today: 0,
 } as const;
 
 const DATA_TIMEOUT_MS = 8_000;
@@ -192,12 +193,7 @@ export default async function HomePage() {
   const takeaway = deriveTakeaway(highConfidenceMovers, losers);
 
   // Proof metrics
-  const totalCards = new Set([
-    ...highConfidenceMovers.map((c) => c.slug),
-    ...movers.map((c) => c.slug),
-    ...losers.map((c) => c.slug),
-    ...trending.map((c) => c.slug),
-  ]).size;
+  const pricesRefreshed = data?.prices_refreshed_today ?? 0;
   const activeSets = new Set([
     ...highConfidenceMovers.map((c) => c.set_name),
     ...movers.map((c) => c.set_name),
@@ -362,8 +358,8 @@ export default async function HomePage() {
                   <p className="mt-0.5 text-[20px] font-bold tabular-nums text-white">{activeSets > 0 ? `${activeSets}+` : "50+"}</p>
                 </div>
                 <div className="bg-[#0E0E0E] px-5 py-3.5">
-                  <span className="text-[10px] font-medium uppercase tracking-widest text-[#555]">Signals today</span>
-                  <p className="mt-0.5 text-[20px] font-bold tabular-nums text-white">{totalCards > 0 ? totalCards : "--"}</p>
+                  <span className="text-[10px] font-medium uppercase tracking-widest text-[#555]">Prices refreshed</span>
+                  <p className="mt-0.5 text-[20px] font-bold tabular-nums text-white">{pricesRefreshed > 0 ? pricesRefreshed.toLocaleString() : "--"}</p>
                 </div>
                 <div className="bg-[#0E0E0E] px-5 py-3.5">
                   <span className="text-[10px] font-medium uppercase tracking-widest text-[#555]">Coverage</span>
