@@ -27,7 +27,7 @@ export default function ProSectionLocked({
   title,
   icon,
   description,
-  buttonLabel = "GO PREMIUM",
+  buttonLabel = "Unlock Pro",
 }: {
   title: string;
   icon?: string;

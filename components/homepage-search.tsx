@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import CardSearch from "@/components/card-search";
 
 const SEARCH_EXAMPLES = [
-  "Start with a pokemon...",
+  "Search cards, sets, slabs, or sealed",
   "Bubble Mew",
   "Base Set Charizard",
   "Paldean Fates",
@@ -78,7 +78,7 @@ export default function HomepageSearch() {
   return (
     <CardSearch
       size="hero"
-      placeholder={placeholder || "Search cards..."}
+      placeholder={placeholder || "Search cards, sets, slabs, or sealed"}
       autoFocus
       enableGlobalShortcut
       submitMode="active-or-search"

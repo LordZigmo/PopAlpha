@@ -206,7 +206,7 @@ export default function CommunityPulseBoard({
   if (cards.length === 0) {
     return (
       <div className="rounded-[1.75rem] border border-dashed border-white/[0.08] bg-[#111]/50 px-6 py-7">
-        <p className="text-[15px] leading-6 text-[#666]">The board is waiting for more cards before predictions open.</p>
+        <p className="text-[15px] leading-6 text-[#666]">We need a few more cards before voting opens.</p>
       </div>
     );
   }
@@ -219,7 +219,7 @@ export default function CommunityPulseBoard({
             <span className="inline-flex h-3 w-3 rounded-full bg-[#63D471] shadow-[0_0_12px_rgba(99,212,113,0.9)]" />
             <h3 className="text-[22px] font-semibold tracking-[-0.02em] text-white sm:text-[24px]">Community Pulse</h3>
           </div>
-          <p className="mt-2 text-[15px] leading-6 text-[#9A9A9A]">Spend your weekly votes on whether these cards move up or down next.</p>
+          <p className="mt-2 text-[15px] leading-6 text-[#9A9A9A]">Use your weekly votes on the cards you think move next.</p>
         </div>
         <div className="flex items-center gap-2.5 rounded-full border border-white/[0.06] bg-white/[0.03] px-4 py-2 text-[14px]">
           <span className="font-bold text-white">{votesRemaining}</span>
@@ -231,13 +231,13 @@ export default function CommunityPulseBoard({
 
       {!signedIn ? (
         <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#1E1E1E] bg-white/[0.03] px-5 py-4">
-          <p className="text-[15px] leading-6 text-[#A3A3A3]">Sign up to predict the Pokémon market!</p>
+          <p className="text-[15px] leading-6 text-[#A3A3A3]">Sign up to vote on where these cards go next.</p>
           <Link
             href="/sign-up"
             className="rounded-2xl border px-3.5 py-2 text-[12px] font-bold tracking-[0.08em] transition hover:opacity-90"
             style={{ backgroundColor: "#FFFFFF", color: "#0A0A0A", borderColor: "#FFFFFF" }}
           >
-            SIGN UP
+            Sign up
           </Link>
         </div>
       ) : null}
