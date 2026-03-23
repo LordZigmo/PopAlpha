@@ -1,8 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
-  type ProviderInput,
   type RawParityStatus,
 } from "@/lib/pricing/market-confidence";
+import {
+  computeCanonicalMarketStrength,
+  type MarketDirection,
+} from "@/lib/data/market-strength";
 
 export type MarketChangeWindow = "24H" | "7D";
 
@@ -13,9 +16,14 @@ type CanonicalMarketMetricRow = {
   pokemontcg_price?: number | null;
   market_price: number | null;
   market_price_as_of?: string | null;
+  liquidity_score?: number | null;
   active_listings_7d?: number | null;
   snapshot_count_30d?: number | null;
   median_7d: number | null;
+  provider_trend_slope_7d?: number | null;
+  provider_cov_price_30d?: number | null;
+  provider_price_relative_to_30d_range?: number | null;
+  provider_price_changes_count_30d?: number | null;
   market_confidence_score?: number | null;
   market_low_confidence?: boolean | null;
   market_blend_policy?: "NO_PRICE" | "SCRYDEX_PRIMARY" | null;
@@ -40,6 +48,7 @@ export type CanonicalMarketPulse = {
   pokemontcgPrice: number | null;
   marketPrice: number | null;
   marketPriceAsOf?: string | null;
+  liquidityScore?: number | null;
   activeListings7d?: number | null;
   snapshotCount30d?: number | null;
   changePct24h: number | null;
@@ -50,6 +59,8 @@ export type CanonicalMarketPulse = {
   blendPolicy?: "NO_PRICE" | "SCRYDEX_PRIMARY";
   confidenceScore?: number;
   lowConfidence?: boolean;
+  marketStrengthScore?: number | null;
+  marketDirection?: MarketDirection | null;
   sourceMix?: {
     justtcgWeight: number;
     scrydexWeight: number;
@@ -68,7 +79,6 @@ function toFiniteNumber(value: number | null | undefined): number | null {
 export function resolveCanonicalMarketPulse(
   row: Partial<Omit<CanonicalMarketMetricRow, "canonical_slug">> | null | undefined,
   parityStatus: RawParityStatus = "UNKNOWN",
-  _providerInputs: ProviderInput[] = [],
 ): CanonicalMarketPulse {
   const marketPrice = toFiniteNumber(row?.market_price);
   const scrydexPrice = marketPrice;
@@ -80,6 +90,26 @@ export function resolveCanonicalMarketPulse(
     : 0;
   const change24h = marketPrice !== null ? toFiniteNumber(row?.change_pct_24h) : null;
   const change7d = marketPrice !== null ? toFiniteNumber(row?.change_pct_7d) : null;
+  const confidenceScore = marketPrice !== null
+    ? (toFiniteNumber(row?.market_confidence_score) ?? undefined)
+    : undefined;
+  const lowConfidence = marketPrice === null
+    ? true
+    : (typeof row?.market_low_confidence === "boolean" ? row.market_low_confidence : false);
+  const marketStrength = computeCanonicalMarketStrength({
+    trendSlope7d: row?.provider_trend_slope_7d,
+    covPrice30d: row?.provider_cov_price_30d,
+    priceRelativeTo30dRange: row?.provider_price_relative_to_30d_range,
+    priceChangesCount30d: row?.provider_price_changes_count_30d,
+    latestPrice: marketPrice,
+    snapshotCount30d: row?.snapshot_count_30d,
+    confidenceScore,
+    lowConfidence,
+    liquidityScore: row?.liquidity_score,
+    activeListings7d: row?.active_listings_7d,
+    changePct24h: change24h,
+    changePct7d: change7d,
+  });
 
   const basePayload = {
     justtcgPrice: null,
@@ -87,18 +117,17 @@ export function resolveCanonicalMarketPulse(
     pokemontcgPrice: null,
     marketPrice,
     marketPriceAsOf: marketPrice !== null ? row?.market_price_as_of ?? null : null,
+    liquidityScore: marketPrice !== null ? toFiniteNumber(row?.liquidity_score) : null,
     activeListings7d: marketPrice !== null ? toFiniteNumber(row?.active_listings_7d) : null,
     snapshotCount30d: marketPrice !== null ? toFiniteNumber(row?.snapshot_count_30d) : null,
     changePct24h: change24h,
     changePct7d: change7d,
     parityStatus,
     blendPolicy: marketPrice !== null ? "SCRYDEX_PRIMARY" : "NO_PRICE",
-    confidenceScore: marketPrice !== null
-      ? (toFiniteNumber(row?.market_confidence_score) ?? undefined)
-      : 0,
-    lowConfidence: marketPrice === null
-      ? true
-      : (typeof row?.market_low_confidence === "boolean" ? row.market_low_confidence : false),
+    confidenceScore,
+    lowConfidence,
+    marketStrengthScore: marketStrength.marketStrengthScore,
+    marketDirection: marketStrength.marketDirection,
     sourceMix: {
       justtcgWeight: 0,
       scrydexWeight: marketPrice !== null ? 1 : 0,
@@ -142,7 +171,7 @@ export async function getCanonicalMarketPulseMap(
 
   const { data, error } = await supabase
     .from("public_card_metrics")
-    .select("canonical_slug, justtcg_price, scrydex_price, pokemontcg_price, market_price, market_price_as_of, active_listings_7d, snapshot_count_30d, median_7d, market_confidence_score, market_low_confidence, market_blend_policy, market_provenance, change_pct_24h, change_pct_7d")
+    .select("canonical_slug, justtcg_price, scrydex_price, pokemontcg_price, market_price, market_price_as_of, liquidity_score, active_listings_7d, snapshot_count_30d, median_7d, provider_trend_slope_7d, provider_cov_price_30d, provider_price_relative_to_30d_range, provider_price_changes_count_30d, market_confidence_score, market_low_confidence, market_blend_policy, market_provenance, change_pct_24h, change_pct_7d")
     .in("canonical_slug", slugs)
     .is("printing_id", null)
     .eq("grade", "RAW")

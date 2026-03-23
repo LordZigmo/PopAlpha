@@ -23,6 +23,8 @@ function buildPulse(overrides = {}) {
     parityStatus: "UNKNOWN",
     confidenceScore: 90,
     lowConfidence: false,
+    marketStrengthScore: null,
+    marketDirection: null,
     sourceMix: { justtcgWeight: 1, scrydexWeight: 0 },
     sampleCounts7d: { justtcg: 0, scrydex: 0, total: 0 },
     ...overrides,
@@ -131,6 +133,8 @@ export async function runHomepageDataTests() {
             changeWindow: "7D",
             confidenceScore: 94,
             lowConfidence: false,
+            marketStrengthScore: 81,
+            marketDirection: "bullish",
             sampleCounts7d: { justtcg: 4, scrydex: 0, total: 4 },
           }),
         ],
@@ -179,6 +183,8 @@ export async function runHomepageDataTests() {
             changeWindow: "7D",
             confidenceScore: 92,
             lowConfidence: false,
+            marketStrengthScore: 68,
+            marketDirection: "bullish",
             sampleCounts7d: { justtcg: 6, scrydex: 0, total: 6 },
           }),
         ],
@@ -195,6 +201,8 @@ export async function runHomepageDataTests() {
             changeWindow: "7D",
             confidenceScore: 90,
             lowConfidence: false,
+            marketStrengthScore: 64,
+            marketDirection: "bearish",
             sampleCounts7d: { justtcg: 6, scrydex: 0, total: 6 },
           }),
         ],
@@ -238,6 +246,8 @@ export async function runHomepageDataTests() {
         { canonical_slug: "alpha-high", price: 1.01 },
         { canonical_slug: "alpha-high", price: 1.12 },
       ],
+      pricesRefreshedToday: 8126,
+      trackedCardsWithLivePrice: 10444,
     },
   });
 
@@ -255,8 +265,17 @@ export async function runHomepageDataTests() {
       mover_tier: card.mover_tier,
       confidence_score: card.confidence_score,
       low_confidence: card.low_confidence,
+      market_strength_score: card.market_strength_score,
+      market_direction: card.market_direction,
     })),
-    [{ slug: "alpha-high", mover_tier: "hot", confidence_score: 94, low_confidence: false }],
+    [{
+      slug: "alpha-high",
+      mover_tier: "hot",
+      confidence_score: 94,
+      low_confidence: false,
+      market_strength_score: 81,
+      market_direction: "bullish",
+    }],
   );
 
   assert.deepEqual(
@@ -270,9 +289,16 @@ export async function runHomepageDataTests() {
   );
 
   assert.deepEqual(
+    data.losers.map((card) => ({ slug: card.slug, market_strength_score: card.market_strength_score, market_direction: card.market_direction })),
+    [{ slug: "gamma-drop", market_strength_score: 64, market_direction: "bearish" }],
+  );
+
+  assert.deepEqual(
     data.trending.map((card) => ({ slug: card.slug, change_pct: card.change_pct, change_window: card.change_window })),
     [{ slug: "trend-card", change_pct: 6.5, change_window: "7D" }],
   );
 
   assert.equal(data.as_of, freshIso);
+  assert.equal(data.prices_refreshed_today, 8126);
+  assert.equal(data.tracked_cards_with_live_price, 10444);
 }

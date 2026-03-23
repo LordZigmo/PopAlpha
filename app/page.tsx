@@ -34,6 +34,41 @@ function formatPct(n: number | null): string {
   return `${sign}${n.toFixed(1)}%`;
 }
 
+function formatMarketStrength(score: number | null): string {
+  if (score == null || !Number.isFinite(score)) return "--";
+  return `${Math.round(score)}`;
+}
+
+function formatCount(value: number | null): string {
+  if (value == null || !Number.isFinite(value)) return "--";
+  return new Intl.NumberFormat("en-US", {
+    notation: value >= 1000 ? "compact" : "standard",
+    maximumFractionDigits: value >= 1000 ? 1 : 0,
+  }).format(value);
+}
+
+function getDirectionMeta(direction: HomepageCard["market_direction"]) {
+  if (direction === "bullish") {
+    return {
+      label: "Bullish",
+      textClass: "text-[#00DC5A]",
+    };
+  }
+  if (direction === "bearish") {
+    return {
+      label: "Bearish",
+      textClass: "text-[#FF6B6B]",
+    };
+  }
+  if (direction === "flat") {
+    return {
+      label: "Flat",
+      textClass: "text-[#D1D5DB]",
+    };
+  }
+  return null;
+}
+
 const EMPTY_DATA: {
   movers: HomepageCard[];
   high_confidence_movers: HomepageCard[];
@@ -41,7 +76,8 @@ const EMPTY_DATA: {
   losers: HomepageCard[];
   trending: HomepageCard[];
   as_of: string | null;
-  prices_refreshed_today: number;
+  prices_refreshed_today: number | null;
+  tracked_cards_with_live_price: number | null;
 } = {
   movers: [],
   high_confidence_movers: [],
@@ -49,7 +85,8 @@ const EMPTY_DATA: {
   losers: [],
   trending: [],
   as_of: null,
-  prices_refreshed_today: 0,
+  prices_refreshed_today: null,
+  tracked_cards_with_live_price: null,
 };
 const DATA_TIMEOUT_MS = 8_000;
 const AI_TIMEOUT_MS = 4_000;
@@ -242,7 +279,16 @@ export default async function Home() {
     data = { ...EMPTY_DATA };
   }
 
-  const { movers, high_confidence_movers: highConfidenceMovers, emerging_movers: emergingMovers, losers, trending, as_of } = data;
+  const {
+    movers,
+    high_confidence_movers: highConfidenceMovers,
+    emerging_movers: emergingMovers,
+    losers,
+    trending,
+    as_of,
+    prices_refreshed_today: pricesRefreshedToday,
+    tracked_cards_with_live_price: trackedCardsWithLivePrice,
+  } = data;
   const asOf = timeAgo(as_of);
 
   let communityPulse: Awaited<ReturnType<typeof getCommunityPulseSnapshot>>;
@@ -261,21 +307,24 @@ export default async function Home() {
   );
   const acePreview = splitAcePreview(aceSummary);
 
-  // Merge all cards for hero showcase — use every bucket so hero is never empty
-  const allUniqueCards = [...highConfidenceMovers, ...movers, ...trending, ...losers]
+  // Hero showcase stays on live market movers so every value comes from canonical market data.
+  const heroMarketCards = [...highConfidenceMovers, ...emergingMovers, ...movers, ...losers]
     .filter((c, i, arr) => arr.findIndex((x) => x.slug === c.slug) === i);
 
-  // Featured card = highest positive 24h change (the day's biggest gainer)
-  const topGainer = [...allUniqueCards]
-    .filter((c) => (c.change_pct ?? 0) > 0)
-    .sort((a, b) => (b.change_pct ?? 0) - (a.change_pct ?? 0))[0] ?? allUniqueCards[0] ?? null;
+  // Featured card = highest positive 24h move from the live market rails.
+  const topGainer = [...heroMarketCards]
+    .filter((c) => c.change_window === "24H" && (c.change_pct ?? 0) > 0)
+    .sort((a, b) => (b.change_pct ?? 0) - (a.change_pct ?? 0))[0] ?? heroMarketCards[0] ?? null;
   const featuredCard = topGainer;
 
-  // Hero panel cards: show the rest, sorted by absolute change magnitude
-  const heroCards = allUniqueCards
+  // Hero panel cards only show the rest of the live market set.
+  const heroCards = heroMarketCards
     .filter((c) => c.slug !== featuredCard?.slug)
     .sort((a, b) => Math.abs(b.change_pct ?? 0) - Math.abs(a.change_pct ?? 0))
     .slice(0, 5);
+  const strongMoverCards = highConfidenceMovers
+    .filter((card) => card.slug !== featuredCard?.slug)
+    .slice(0, 4);
 
   const trendingCards = trending.slice(0, 5);
   const dropCards = losers.slice(0, 5);
@@ -336,7 +385,7 @@ export default async function Home() {
                   <span className="relative inline-flex h-2 w-2 rounded-full bg-[#00DC5A]" />
                 </span>
                 <span className="text-[12px] font-medium tracking-wide text-[#00B4D8]">
-                  {asOf ? `Signal refreshed ${asOf}` : "Signal refreshed live"}
+                  {asOf ? `Market data refreshed ${asOf}` : "Market data refreshed live"}
                 </span>
               </div>
 
@@ -465,18 +514,28 @@ export default async function Home() {
                 </div>
 
                 {/* Floating Confidence Badge */}
-                {featuredCard && (
+                {featuredCard && featuredCard.market_strength_score !== null && (
                   <div className="absolute -right-4 top-16 rounded-lg border border-white/[0.08] bg-[#0D0D12]/95 px-3 py-2.5 shadow-[0_16px_40px_rgba(0,0,0,0.5)] backdrop-blur-xl">
-                    <div className="text-[10px] font-medium uppercase tracking-widest text-[#555]">Signal</div>
+                    <div className="text-[10px] font-medium uppercase tracking-widest text-[#555]">Market Strength</div>
                     <div className="mt-1 flex items-center gap-2">
-                      <span className="text-[18px] font-bold tabular-nums text-white">{60}</span>
+                      <span className="text-[18px] font-bold tabular-nums text-white">
+                        {formatMarketStrength(featuredCard.market_strength_score)}
+                      </span>
                       <div className="h-1.5 w-16 overflow-hidden rounded-full bg-white/[0.06]">
                         <div
                           className="h-full rounded-full bg-gradient-to-r from-[#00B4D8] to-[#00DC5A]"
-                          style={{ width: `${60}%` }}
+                          style={{ width: `${featuredCard.market_strength_score}%` }}
                         />
                       </div>
                     </div>
+                    {getDirectionMeta(featuredCard.market_direction) ? (
+                      <div className="mt-1 text-[10px] font-medium uppercase tracking-[0.1em] text-[#777]">
+                        Direction{" "}
+                        <span className={getDirectionMeta(featuredCard.market_direction)?.textClass}>
+                          {getDirectionMeta(featuredCard.market_direction)?.label}
+                        </span>
+                      </div>
+                    ) : null}
                   </div>
                 )}
               </div>
@@ -490,11 +549,11 @@ export default async function Home() {
         <div className="mx-auto max-w-[1400px] px-5 sm:px-8">
           <div className="grid grid-cols-2 gap-px sm:grid-cols-3 lg:grid-cols-5">
             {[
-              { value: "10,000+", label: "Cards tracked" },
-              { value: "8,000+", label: "Live price updates" },
+              { value: formatCount(trackedCardsWithLivePrice), label: "Cards with live price" },
+              { value: formatCount(pricesRefreshedToday), label: "Prices refreshed today" },
               { value: "Raw · Sealed · Graded", label: "Coverage across formats" },
               { value: "AI", label: "Market briefs" },
-              { value: "Scored", label: "Confidence signals" },
+              { value: "Scored", label: "Market strength" },
             ].map((stat) => (
               <div key={stat.label} className="flex flex-col items-center justify-center py-6">
                 <span className="text-[15px] font-bold tracking-tight text-white sm:text-[17px]">{stat.value}</span>
@@ -575,14 +634,19 @@ export default async function Home() {
                         <p className="mt-0.5 text-[20px] font-bold tabular-nums leading-tight text-white">{formatPrice(featuredCard.market_price)}</p>
                       </div>
                       <div className="text-center">
-                        <span className="text-[10px] font-medium uppercase tracking-widest text-[#555]">24h</span>
-                        <p className={`mt-0.5 text-[20px] font-bold tabular-nums leading-tight ${(featuredCard.change_pct ?? 0) >= 0 ? "text-[#00DC5A]" : "text-[#FF3B30]"}`}>
+                        <span className="text-[10px] font-medium uppercase tracking-widest text-[#555]">Direction</span>
+                        <p className={`mt-0.5 text-[18px] font-bold leading-tight ${getDirectionMeta(featuredCard.market_direction)?.textClass ?? "text-[#D1D5DB]"}`}>
+                          {getDirectionMeta(featuredCard.market_direction)?.label ?? "--"}
+                        </p>
+                        <p className={`mt-0.5 text-[13px] font-semibold tabular-nums ${(featuredCard.change_pct ?? 0) >= 0 ? "text-[#00DC5A]" : "text-[#FF6B6B]"}`}>
                           {formatPct(featuredCard.change_pct)}
                         </p>
                       </div>
                       <div className="text-right">
-                        <span className="text-[10px] font-medium uppercase tracking-widest text-[#555]">Signal</span>
-                        <p className="mt-0.5 text-[20px] font-bold tabular-nums leading-tight text-[#00B4D8]">{"--"}</p>
+                        <span className="text-[10px] font-medium uppercase tracking-widest text-[#555]">Market Strength</span>
+                        <p className="mt-0.5 text-[20px] font-bold tabular-nums leading-tight text-[#00B4D8]">
+                          {formatMarketStrength(featuredCard.market_strength_score)}
+                        </p>
                       </div>
                     </div>
                   </div>
@@ -599,10 +663,10 @@ export default async function Home() {
                   <span className="rounded-md bg-[#00DC5A]/10 px-2 py-0.5 text-[10px] font-bold text-[#00DC5A]">24H</span>
                 </div>
                 <div className="grid gap-2 sm:grid-cols-2">
-                  {highConfidenceMovers.slice(1, 5).map((card) => (
+                  {strongMoverCards.map((card) => (
                     <MoverCard key={card.slug} card={card} />
                   ))}
-                  {highConfidenceMovers.length <= 1 && (
+                  {strongMoverCards.length === 0 && (
                     <div className="col-span-2 flex h-24 items-center justify-center rounded-xl border border-white/[0.04] text-[13px] text-[#444]">
                       No high-confidence movers yet
                     </div>
@@ -843,7 +907,7 @@ export default async function Home() {
           <div className="text-center">
             <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#00B4D8]">The Collector&apos;s Edge</span>
             <h2 className="mt-3 text-[clamp(1.5rem,3vw,2.5rem)] font-bold tracking-tight text-white">
-              Beyond price: context, conviction, and signal
+              Beyond price: context, conviction, and market strength
             </h2>
             <p className="mx-auto mt-4 max-w-xl text-[15px] leading-relaxed text-[#666]">
               PopAlpha combines live pricing, confidence scoring, momentum tracking, and AI market briefs in one collector-native workflow.
@@ -855,7 +919,7 @@ export default async function Home() {
               {
                 icon: "🔍",
                 title: "Instant market context",
-                desc: "Search or scan any card to see price, signal, and recent market context in seconds.",
+                desc: "Search or scan any card to see price, market strength, and recent market context in seconds.",
                 accent: "#00B4D8",
               },
               {
@@ -873,7 +937,7 @@ export default async function Home() {
               {
                 icon: "💼",
                 title: "Portfolio intelligence",
-                desc: "Track value, monitor signal shifts, and follow raw, sealed, and graded exposure.",
+                desc: "Track value, monitor strength shifts, and follow raw, sealed, and graded exposure.",
                 accent: "#FFD700",
               },
             ].map((feature) => (
@@ -915,14 +979,14 @@ export default async function Home() {
               },
               {
                 step: "02",
-                title: "Read the signal",
-                desc: "See price action, confidence score, momentum tier, and AI context in one view.",
+                title: "Read the market",
+                desc: "See price action, confidence score, market strength, and AI context in one view.",
                 accent: "#7C3AED",
               },
               {
                 step: "03",
                 title: "Track and act",
-                desc: "Save key names to your watchlist or portfolio and act when signal strengthens or fades.",
+                desc: "Save key names to your watchlist or portfolio and act when strength builds or fades.",
                 accent: "#00DC5A",
               },
             ].map((item, i) => (
@@ -950,9 +1014,9 @@ export default async function Home() {
       <section className="border-t border-white/[0.04] py-16 sm:py-24">
         <div className="mx-auto max-w-[1400px] px-5 sm:px-8">
           <div className="text-center">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#FFD700]">Why Signal Beats Raw Price</span>
+            <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#FFD700]">Why Market Strength Beats Raw Price</span>
             <h2 className="mt-3 text-[clamp(1.5rem,3vw,2.25rem)] font-bold tracking-tight text-white">
-              Price tells you what happened. Signal tells you what matters.
+              Price tells you what happened. Market strength shows how real the move is.
             </h2>
           </div>
 
@@ -973,7 +1037,7 @@ export default async function Home() {
               {
                 label: "PopAlpha",
                 items: [
-                  "Price + confidence + signal",
+                  "Price + confidence + market strength",
                   "AI market briefs",
                   "Momentum and conviction tracking",
                   "Portfolio and watchlist tools",
@@ -1023,7 +1087,7 @@ export default async function Home() {
             <span className="bg-gradient-to-r from-[#00B4D8] to-[#00DC5A] bg-clip-text text-transparent">and conviction</span>
           </h2>
           <p className="mx-auto mt-5 max-w-md text-[15px] leading-relaxed text-[#666]">
-            Search free, scan any card, and explore the live market. Upgrade for AI briefs, scored signal, and portfolio tools.
+            Search free, scan any card, and explore the live market. Upgrade for AI briefs, market strength, and portfolio tools.
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
             <Link
@@ -1072,6 +1136,7 @@ export default async function Home() {
 
 function MoverCard({ card }: { card: HomepageCard }) {
   const isPositive = (card.change_pct ?? 0) >= 0;
+  const directionMeta = getDirectionMeta(card.market_direction);
   return (
     <Link
       href={`/c/${encodeURIComponent(card.slug)}`}
@@ -1101,6 +1166,21 @@ function MoverCard({ card }: { card: HomepageCard }) {
               {formatPct(card.change_pct)}
             </span>
           </div>
+          {(card.market_strength_score !== null || directionMeta) ? (
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#666]">
+                Market Strength{" "}
+                <span className="text-[#D4D4D8]">
+                  {formatMarketStrength(card.market_strength_score)}
+                </span>
+              </span>
+              {directionMeta ? (
+                <span className={`text-[11px] font-semibold ${directionMeta.textClass}`}>
+                  {directionMeta.label}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
         </div>
         {card.mover_tier === "hot" && (
           <span className="shrink-0 self-start rounded-md bg-[#FF6B35]/10 px-1.5 py-0.5 text-[10px] font-bold text-[#FF6B35]">HOT</span>

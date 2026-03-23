@@ -34,6 +34,8 @@ function toHomepageCard(
     change_window: market?.changeWindow ?? null,
     confidence_score: market?.confidenceScore ?? null,
     low_confidence: market?.lowConfidence ?? null,
+    market_strength_score: market?.marketStrengthScore ?? null,
+    market_direction: market?.marketDirection ?? null,
     mover_tier: null,
     image_url: row.primary_image_url ?? null,
     sparkline_7d: [],

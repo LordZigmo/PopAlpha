@@ -146,6 +146,8 @@ export async function getTopViewedCards(days = 7, limit = 5): Promise<HomepageCa
         change_window: market?.changeWindow ?? null,
         confidence_score: market?.confidenceScore ?? null,
         low_confidence: market?.lowConfidence ?? null,
+        market_strength_score: market?.marketStrengthScore ?? null,
+        market_direction: market?.marketDirection ?? null,
         mover_tier: null,
         image_url: card.primary_image_url ?? null,
         sparkline_7d: [],

@@ -15,6 +15,7 @@
  */
 
 import { getCanonicalMarketPulseMap, type CanonicalMarketPulse } from "@/lib/data/market";
+import type { MarketDirection } from "@/lib/data/market-strength";
 import { dbPublic } from "@/lib/db";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -29,6 +30,8 @@ export type HomepageCard = {
   change_window: "24H" | "7D" | null;
   confidence_score: number | null;
   low_confidence: boolean | null;
+  market_strength_score: number | null;
+  market_direction: MarketDirection | null;
   mover_tier: "hot" | "warming" | "cooling" | "cold" | null;
   image_url: string | null;
   sparkline_7d: number[];
@@ -41,7 +44,8 @@ export type HomepageData = {
   losers: HomepageCard[];
   trending: HomepageCard[];
   as_of: string | null;
-  prices_refreshed_today: number;
+  prices_refreshed_today: number | null;
+  tracked_cards_with_live_price: number | null;
 };
 
 type ChangeCandidateRow = {
@@ -89,6 +93,8 @@ type HomepageDataOverrides = {
   marketPulseMap?: Map<string, CanonicalMarketPulse>;
   images?: ImageRow[];
   sparklineRows?: SparklineRow[];
+  pricesRefreshedToday?: number | null;
+  trackedCardsWithLivePrice?: number | null;
 };
 
 export type HomepageDataOptions = {
@@ -128,7 +134,8 @@ const EMPTY: HomepageData = {
   losers: [],
   trending: [],
   as_of: null,
-  prices_refreshed_today: 0,
+  prices_refreshed_today: null,
+  tracked_cards_with_live_price: null,
 };
 
 const DEFAULT_LOGGER: HomepageLogger = console;
@@ -232,7 +239,8 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
     let marketPulseMap = new Map<string, CanonicalMarketPulse>();
     let imageRows: ImageRow[] = [];
     let sparklineRows: SparklineRow[] = [];
-    let pricesRefreshedToday = 0;
+    let pricesRefreshedToday: number | null = null;
+    let trackedCardsWithLivePrice: number | null = null;
 
     if (overrides) {
       positiveChangeRows = overrides.positiveChangeRows ?? [];
@@ -242,12 +250,14 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
       marketPulseMap = overrides.marketPulseMap ?? new Map<string, CanonicalMarketPulse>();
       imageRows = overrides.images ?? [];
       sparklineRows = overrides.sparklineRows ?? [];
+      pricesRefreshedToday = overrides.pricesRefreshedToday ?? null;
+      trackedCardsWithLivePrice = overrides.trackedCardsWithLivePrice ?? null;
     } else {
       const client = db;
       if (!client) return EMPTY;
 
-      // ── Batch 1: movers + variant-level trend data + freshness count ────
-      const [positiveChangeResult, negativeChangeResult, trendingVariantResult, refreshedCountResult] = await Promise.all([
+      // ── Batch 1: movers + variant-level trend data + canonical counts ──
+      const [positiveChangeResult, negativeChangeResult, trendingVariantResult, refreshedCountResult, trackedCountResult] = await Promise.all([
         // 1. Top movers — fresh positive 24h moves from canonical card metrics
         client
           .from("public_card_metrics")
@@ -295,18 +305,29 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
           .select("canonical_slug", { count: "exact", head: true })
           .eq("grade", "RAW")
           .is("printing_id", null)
+          .not("market_price", "is", null)
           .gte("market_price_as_of", freshnessCutoffIso),
+
+        // 5. Count of canonical RAW cards with a live market price
+        client
+          .from("public_card_metrics")
+          .select("canonical_slug", { count: "exact", head: true })
+          .eq("grade", "RAW")
+          .is("printing_id", null)
+          .not("market_price", "is", null),
       ]);
 
       if (positiveChangeResult.error) logger.error("[homepage] movers_24h", positiveChangeResult.error.message);
       if (negativeChangeResult.error) logger.error("[homepage] drops_24h", negativeChangeResult.error.message);
       if (trendingVariantResult.error) logger.error("[homepage] trending", trendingVariantResult.error.message);
       if (refreshedCountResult.error) logger.error("[homepage] refreshed_count", refreshedCountResult.error.message);
+      if (trackedCountResult.error) logger.error("[homepage] tracked_count", trackedCountResult.error.message);
 
       positiveChangeRows = (positiveChangeResult.data ?? []) as ChangeCandidateRow[];
       negativeChangeRows = (negativeChangeResult.data ?? []) as ChangeCandidateRow[];
       trendingVariants = dedupVariants((trendingVariantResult.data ?? []) as VariantRow[], CANDIDATE_FETCH_LIMIT);
-      pricesRefreshedToday = refreshedCountResult.count ?? 0;
+      pricesRefreshedToday = refreshedCountResult.count ?? null;
+      trackedCardsWithLivePrice = trackedCountResult.count ?? null;
     }
 
     // ── Collect all unique slugs ──────────────────────────────────────────
@@ -315,7 +336,13 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
     for (const r of negativeChangeRows) allSlugs.add(r.canonical_slug);
     for (const r of trendingVariants) allSlugs.add(r.canonical_slug);
 
-    if (allSlugs.size === 0) return EMPTY;
+    if (allSlugs.size === 0) {
+      return {
+        ...EMPTY,
+        prices_refreshed_today: pricesRefreshedToday,
+        tracked_cards_with_live_price: trackedCardsWithLivePrice,
+      };
+    }
 
     const slugArray = [...allSlugs];
 
@@ -437,6 +464,10 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
         low_confidence: typeof marketPulse?.lowConfidence === "boolean"
           ? marketPulse.lowConfidence
           : null,
+        market_strength_score: typeof marketPulse?.marketStrengthScore === "number"
+          ? Math.round(marketPulse.marketStrengthScore)
+          : null,
+        market_direction: marketPulse?.marketDirection ?? null,
         image_url: imageMap.get(slug) ?? null,
         mover_tier: overrides.mover_tier ?? null,
         sparkline_7d: sparkline,
@@ -576,6 +607,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
       trending: trendingOut,
       as_of,
       prices_refreshed_today: pricesRefreshedToday,
+      tracked_cards_with_live_price: trackedCardsWithLivePrice,
     };
 
   } catch (err) {
