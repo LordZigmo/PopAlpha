@@ -5,7 +5,6 @@ import type { ReactNode } from "react";
  * Mobile: CSS-only scroll-snap. Desktop: 5-column grid.
  */
 export default function SectionCarousel({
-  id,
   title,
   subtitle,
   icon,
@@ -15,7 +14,6 @@ export default function SectionCarousel({
   children,
   empty,
 }: {
-  id?: string;
   title: string;
   subtitle?: string;
   icon?: string;
@@ -26,7 +24,7 @@ export default function SectionCarousel({
   empty?: string;
 }) {
   return (
-    <section id={id} className="mt-8 lg:mx-auto lg:max-w-5xl lg:px-6">
+    <section className="mt-8 lg:mx-auto lg:max-w-5xl lg:px-6">
       <div className="flex items-center justify-between gap-3 px-4 sm:px-6 lg:px-0">
         <div className="flex min-w-0 items-baseline gap-2">
           {icon ? <span className="text-lg">{icon}</span> : null}
