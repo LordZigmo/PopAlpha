@@ -437,12 +437,13 @@ export default async function Home() {
     .slice(0, 4);
   const heroAverageStrength = averageValues(heroPulseCards.map((card) => card.market_strength_score));
   const heroLeadingSet = getLeadingSet(heroMarketCards);
+  const heroPulseRows = heroPulseCards.slice(0, 3);
   const heroBrief = buildHeroBrief(
     heroPulseCards,
     heroLeadingSet,
     marketNarrative || "The market is still taking shape.",
   );
-  const focusPills = buildFocusPills([...heroPulseCards, ...trending, ...movers], TRENDING_SET_PILLS, 3);
+  const focusPills = buildFocusPills([...heroPulseCards, ...trending, ...movers], TRENDING_SET_PILLS, 2);
   const heroStats = [
     { value: formatCount(trackedCardsWithLivePrice), label: "Live prices" },
     { value: formatCount(pricesRefreshedToday), label: "Refreshed today" },
@@ -569,80 +570,73 @@ export default async function Home() {
             </div>
 
             {/* Right: Product Composition */}
-            <div className="relative w-full max-w-[620px] lg:justify-self-end">
-              <div className="pointer-events-none absolute inset-0 rounded-[36px] bg-[radial-gradient(circle_at_top,rgba(0,180,216,0.1),transparent_46%)] blur-3xl" />
+            <div className="relative w-full max-w-[620px] lg:justify-self-end lg:pt-10">
+              <div className="pointer-events-none absolute left-4 top-2 h-[280px] w-[280px] rounded-full bg-[#2FD0E3]/[0.15] blur-[120px]" />
+              <div className="pointer-events-none absolute bottom-6 right-8 h-[220px] w-[220px] rounded-full bg-[#0F766E]/[0.1] blur-[110px]" />
 
-              <div className="relative overflow-hidden rounded-[30px] bg-[linear-gradient(180deg,rgba(13,17,22,0.96),rgba(9,11,15,0.98))] px-4 py-5 shadow-[0_28px_80px_rgba(0,0,0,0.42)] ring-1 ring-white/[0.06] backdrop-blur-2xl sm:px-5">
+              <div className="relative z-20 max-w-[540px] overflow-hidden rounded-[34px] bg-[linear-gradient(145deg,rgba(20,32,42,0.98),rgba(8,13,18,0.98)_72%)] px-6 py-6 shadow-[0_34px_90px_rgba(0,0,0,0.48)] ring-1 ring-white/[0.08] backdrop-blur-2xl sm:px-7 sm:py-7">
+                <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-[linear-gradient(180deg,rgba(84,216,232,0.12),transparent)]" />
                 <div className="relative">
                   <div className="flex items-center justify-between gap-4">
-                    <span className="text-[14px] font-semibold tracking-tight text-white">Market Pulse</span>
-                    <span className="inline-flex items-center gap-2 text-[11px] text-[#7DE29B]">
-                      <span className="h-2 w-2 rounded-full bg-[#00DC5A]" />
-                      Live
+                    <span className="text-[12px] font-medium text-[#98E7F3]">PopAlpha AI Brief</span>
+                    <span className="text-[11px] text-[#8D97A2]">
+                      {asOf ? `Updated ${asOf}` : "Live"}
                     </span>
                   </div>
 
-                  <div className="mt-4 space-y-1">
-                    {heroPulseCards.map((card, index) => (
-                      <Link
-                        key={card.slug}
-                        href={`/c/${encodeURIComponent(card.slug)}`}
-                        className="group flex items-center gap-3 rounded-2xl px-1.5 py-2.5 transition-colors hover:bg-white/[0.03]"
-                      >
-                        <span className="w-5 shrink-0 text-center text-[11px] tabular-nums text-[#5F6873]">
-                          {index + 1}
-                        </span>
-                        {card.image_url ? (
-                          <img
-                            src={card.image_url}
-                            alt=""
-                            className="h-14 w-10 rounded-[10px] object-cover shadow-[0_10px_24px_rgba(0,0,0,0.32)] transition-transform duration-200 group-hover:scale-[1.02]"
-                          />
-                        ) : (
-                          <div className="h-14 w-10 rounded-[10px] bg-gradient-to-b from-[#1A2230] to-[#0A0E15] shadow-[0_10px_24px_rgba(0,0,0,0.32)]" />
-                        )}
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-[13px] font-semibold text-[#EEF2F6] group-hover:text-white">{card.name}</p>
-                          <p className="truncate text-[11px] text-[#6D7682]">{card.set_name ?? "Live market"}</p>
-                        </div>
-                        <div className="shrink-0 text-right">
-                          <p className="text-[13px] font-semibold tabular-nums text-white">{formatPrice(card.market_price)}</p>
-                          <div className="mt-1.5 flex items-center justify-end gap-2">
-                            <p className={`text-[12px] font-semibold tabular-nums ${(card.change_pct ?? 0) >= 0 ? "text-[#5CE07D]" : "text-[#FF7E78]"}`}>
-                              {formatPct(card.change_pct)}
-                            </p>
-                            {card.market_strength_score != null ? (
-                              <div className="h-[3px] w-10 overflow-hidden rounded-full bg-white/[0.08]">
-                                <div
-                                  className="h-full rounded-full bg-[#42D6E8]"
-                                  style={{ width: `${Math.max(8, Math.min(100, card.market_strength_score))}%` }}
-                                />
-                              </div>
-                            ) : null}
-                          </div>
-                        </div>
-                      </Link>
-                    ))}
-                    {heroPulseCards.length === 0 && (
-                      <div className="flex min-h-28 items-center justify-center rounded-2xl px-4 text-center text-[13px] text-[#707A86]">
-                        Live movers will appear here as fresh price action clears the confidence threshold.
+                  <p className="mt-8 max-w-[13ch] text-[clamp(2rem,3.2vw,3rem)] font-semibold leading-[1.02] tracking-[-0.055em] text-white">
+                    {heroBrief.lead}
+                  </p>
+                  {heroBrief.secondary ? (
+                    <p className="mt-4 text-[13px] text-[#94A0AB]">{heroBrief.secondary}</p>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="relative z-10 mt-5 overflow-hidden rounded-[28px] bg-[linear-gradient(180deg,rgba(10,14,18,0.94),rgba(7,10,14,0.98))] px-4 pb-5 pt-4 shadow-[0_24px_70px_rgba(0,0,0,0.34)] ring-1 ring-white/[0.05] backdrop-blur-xl sm:px-5 sm:pb-6 lg:ml-14 lg:mt-[-64px] lg:w-[84%] lg:pt-24">
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-[13px] font-medium text-[#D7DDE4]">Market Pulse</span>
+                  <span className="inline-flex items-center gap-2 text-[11px] text-[#7DE29B]">
+                    <span className="h-2 w-2 rounded-full bg-[#00DC5A]" />
+                    Live
+                  </span>
+                </div>
+
+                <div className="mt-4 space-y-1.5">
+                  {heroPulseRows.map((card, index) => (
+                    <Link
+                      key={card.slug}
+                      href={`/c/${encodeURIComponent(card.slug)}`}
+                      className="group grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-2xl px-1.5 py-2.5 transition-colors hover:bg-white/[0.03]"
+                    >
+                      <span className="w-4 text-center text-[11px] tabular-nums text-[#5E6772]">{index + 1}</span>
+                      <div className="min-w-0">
+                        <p className="truncate text-[13px] font-semibold text-[#EEF2F6] group-hover:text-white">{card.name}</p>
+                        <p className="truncate text-[11px] text-[#6C7681]">{card.set_name ?? "Live market"}</p>
                       </div>
-                    )}
-                  </div>
-
-                  <div className="mt-5 border-t border-white/[0.06] pt-4">
-                    <div className="flex items-start justify-between gap-4">
-                      <span className="text-[11px] font-medium text-[#8CDBE8]">PopAlpha AI Brief</span>
-                      <span className="text-[11px] text-[#7B8591]">{asOf || "Live"}</span>
+                      <div className="text-right">
+                        <p className="text-[13px] font-semibold tabular-nums text-white">{formatPrice(card.market_price)}</p>
+                        <div className="mt-1.5 flex items-center justify-end gap-2">
+                          <p className={`text-[12px] font-semibold tabular-nums ${(card.change_pct ?? 0) >= 0 ? "text-[#5CE07D]" : "text-[#FF7E78]"}`}>
+                            {formatPct(card.change_pct)}
+                          </p>
+                          {card.market_strength_score != null ? (
+                            <div className="h-[3px] w-9 overflow-hidden rounded-full bg-white/[0.08]">
+                              <div
+                                className="h-full rounded-full bg-[#42D6E8]"
+                                style={{ width: `${Math.max(8, Math.min(100, card.market_strength_score))}%` }}
+                              />
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    </Link>
+                  ))}
+                  {heroPulseRows.length === 0 && (
+                    <div className="flex min-h-28 items-center justify-center rounded-2xl px-4 text-center text-[13px] text-[#707A86]">
+                      Live movers will appear here as fresh price action clears the confidence threshold.
                     </div>
-
-                    <p className="mt-2.5 max-w-[28rem] text-[18px] font-medium leading-8 text-[#F1F5F8]">
-                      {heroBrief.lead}
-                    </p>
-                    {heroBrief.secondary ? (
-                      <p className="mt-1.5 text-[12px] text-[#7B8591]">{heroBrief.secondary}</p>
-                    ) : null}
-                  </div>
+                  )}
                 </div>
               </div>
             </div>
