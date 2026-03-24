@@ -106,10 +106,9 @@ const TRENDING_SET_PILLS = [
   "Paldean Fates",
 ] as const;
 
-const HERO_HEADLINE = "Market Intelligence";
-const HERO_HEADLINE_ACCENT = "for Pokemon Collectors";
-const HERO_SUBHEADLINE =
-  "Live pricing, market strength, and PopAlpha AI briefs that show what is moving, why it is moving, and what deserves your attention.";
+const HERO_HEADLINE = "Market intelligence";
+const HERO_HEADLINE_ACCENT = "for Pokemon collectors";
+const HERO_SUBHEADLINE = "Live prices, market signals, and AI briefs in one place.";
 const HERO_PRIMARY_CTA = "Start free";
 const HERO_SECONDARY_CTA = "Explore live market";
 const HOMEPAGE_SCOUT_NARRATIVE =
@@ -249,45 +248,53 @@ function buildFocusPills(cards: HomepageCard[], fallback: readonly string[], lim
   return pills;
 }
 
-function buildHeroBriefBullets(
+function buildHeroBrief(
   pulseCards: HomepageCard[],
   leaderSet: { name: string | null; count: number },
-  strongMoverCards: HomepageCard[],
-): string[] {
-  if (pulseCards.length === 0) {
-    return [
-      "Fresh movers surface here as live prices refresh.",
-      "Market strength stays muted until real follow-through appears.",
-      "PopAlpha AI updates the read as leadership changes.",
-    ];
+  fallback: string,
+): { lead: string; secondary: string | null } {
+  const featured = pulseCards[0] ?? null;
+  const positiveCount = pulseCards.filter((card) => (card.change_pct ?? 0) > 0).length;
+
+  if (leaderSet.name && leaderSet.count >= 3) {
+    return {
+      lead: `Momentum is clustering in ${leaderSet.name}.`,
+      secondary: `${leaderSet.count} cards are moving together.`,
+    };
   }
 
-  const bullets: string[] = [];
+  if (featured && leaderSet.name && featured.set_name === leaderSet.name && leaderSet.count >= 2) {
+    return {
+      lead: `${featured.name} is setting the pace in ${leaderSet.name}.`,
+      secondary: `${leaderSet.count} cards are participating.`,
+    };
+  }
 
   if (leaderSet.name && leaderSet.count >= 2) {
-    bullets.push(`${leaderSet.count} cards in ${leaderSet.name} are outperforming in the live pulse`);
-  } else if (pulseCards[0]?.set_name) {
-    bullets.push(`${pulseCards[0].set_name} is still setting the tone for the live board`);
+    return {
+      lead: `Momentum is forming in ${leaderSet.name}.`,
+      secondary: `${leaderSet.count} cards are moving together.`,
+    };
   }
 
-  const strongScoreCount = pulseCards.filter((card) => (card.market_strength_score ?? 0) >= 60).length;
-  const averageStrength = averageValues(pulseCards.map((card) => card.market_strength_score));
-  if (strongScoreCount >= 2) {
-    bullets.push(`${strongScoreCount} lead names are clearing a 60+ market-strength score`);
-  } else if (averageStrength !== null) {
-    bullets.push(`Signal quality is averaging ${averageStrength}/100 across the lead names`);
-  } else if (strongMoverCards.length > 0) {
-    bullets.push(`${strongMoverCards.length} movers are still holding leadership as fresh prices refresh`);
-  }
-
-  const positiveCount = pulseCards.filter((card) => (card.change_pct ?? 0) > 0).length;
   if (positiveCount >= 3) {
-    bullets.push("Move looks broad enough to watch as real set-level momentum");
-  } else {
-    bullets.push("Breadth is still selective, so follow-through matters more than one-card spikes");
+    return {
+      lead: "Today's strength is broad, not isolated.",
+      secondary: `${positiveCount} names are participating.`,
+    };
   }
 
-  return bullets.slice(0, 3);
+  if (featured) {
+    return {
+      lead: `${featured.name} is setting the pace today.`,
+      secondary: featured.set_name ?? null,
+    };
+  }
+
+  return {
+    lead: fallback,
+    secondary: null,
+  };
 }
 
 async function generateAceSummary(
@@ -430,18 +437,18 @@ export default async function Home() {
     .slice(0, 4);
   const heroAverageStrength = averageValues(heroPulseCards.map((card) => card.market_strength_score));
   const heroLeadingSet = getLeadingSet(heroMarketCards);
-  const heroBriefLead =
-    acePreview.lead
-    || marketNarrative
-    || "The live board is still taking shape, but PopAlpha is already separating real momentum from noise.";
-  const heroBriefBullets = buildHeroBriefBullets(heroPulseCards, heroLeadingSet, strongMoverCards);
-  const focusPills = buildFocusPills([...heroPulseCards, ...trending, ...movers], TRENDING_SET_PILLS);
+  const heroBrief = buildHeroBrief(
+    heroPulseCards,
+    heroLeadingSet,
+    marketNarrative || "The market is still taking shape.",
+  );
+  const focusPills = buildFocusPills([...heroPulseCards, ...trending, ...movers], TRENDING_SET_PILLS, 3);
   const heroStats = [
-    { value: formatCount(trackedCardsWithLivePrice), label: "Live prices tracked" },
-    { value: formatCount(pricesRefreshedToday), label: "Cards refreshed today" },
+    { value: formatCount(trackedCardsWithLivePrice), label: "Live prices" },
+    { value: formatCount(pricesRefreshedToday), label: "Refreshed today" },
     { value: "Raw • Sealed • Graded", label: "Coverage" },
-    { value: "Live", label: "AI briefs generated" },
-    { value: heroAverageStrength != null ? `${heroAverageStrength}/100` : "Scored live", label: "Signal quality scored" },
+    { value: "Live", label: "AI brief" },
+    { value: heroAverageStrength != null ? `${heroAverageStrength}/100` : "Live", label: "Signal score" },
   ] as const;
 
   const trendingCards = trending.slice(0, 5);
@@ -490,26 +497,23 @@ export default async function Home() {
       {/* ── Hero ────────────────────────────────────────────────────────── */}
       <section className="relative overflow-hidden pt-16">
         <div className="pointer-events-none absolute inset-0">
-          <div className="absolute -top-28 left-[12%] h-[460px] w-[460px] rounded-full bg-[#00B4D8]/[0.08] blur-[120px]" />
-          <div className="absolute right-[10%] top-10 h-[360px] w-[360px] rounded-full bg-[#14B8A6]/[0.08] blur-[110px]" />
-          <div className="absolute inset-x-0 top-0 h-40 bg-[linear-gradient(180deg,rgba(0,180,216,0.06),transparent)]" />
+          <div className="absolute -top-24 left-[12%] h-[420px] w-[420px] rounded-full bg-[#00B4D8]/[0.06] blur-[130px]" />
+          <div className="absolute right-[10%] top-10 h-[320px] w-[320px] rounded-full bg-[#14B8A6]/[0.05] blur-[120px]" />
         </div>
 
         <div className="relative mx-auto max-w-[1400px] px-5 pb-14 pt-12 sm:px-8 sm:pt-20 lg:pb-20">
           <div className="grid items-start gap-12 lg:grid-cols-[minmax(0,1fr)_560px] lg:gap-16 xl:grid-cols-[minmax(0,1fr)_600px]">
             {/* Left: Headline + Search */}
             <div className="max-w-[640px]">
-              <div className="inline-flex items-center gap-2 rounded-full border border-[#00B4D8]/15 bg-[#07161B]/90 px-3.5 py-1.5 shadow-[0_14px_40px_rgba(0,0,0,0.25)]">
+              <div className="inline-flex items-center gap-2 rounded-full bg-white/[0.03] px-3 py-1.5 text-[12px] text-[#9EB2C2]">
                 <span className="relative flex h-2 w-2">
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#00DC5A] opacity-75" />
                   <span className="relative inline-flex h-2 w-2 rounded-full bg-[#00DC5A]" />
                 </span>
-                <span className="text-[11px] font-medium uppercase tracking-[0.16em] text-[#7ADCEC]">
-                  {asOf ? `Market data refreshed ${asOf}` : "Market data refreshed live"}
-                </span>
+                <span>{asOf ? `Live ${asOf}` : "Live now"}</span>
               </div>
 
-              <h1 className="mt-7 text-[clamp(2.75rem,5vw,4.35rem)] font-semibold leading-[0.98] tracking-[-0.05em] text-white">
+              <h1 className="mt-7 max-w-[11ch] text-[clamp(2.9rem,5vw,4.45rem)] font-semibold leading-[0.96] tracking-[-0.055em] text-white">
                 {HERO_HEADLINE}
                 <br />
                 <span className="bg-gradient-to-r from-[#9BE7F6] via-[#36D6E7] to-[#00C7B7] bg-clip-text text-transparent">
@@ -517,39 +521,25 @@ export default async function Home() {
                 </span>
               </h1>
 
-              <p className="mt-6 max-w-xl text-[17px] leading-8 text-[#9AA3AE] sm:text-[18px]">
+              <p className="mt-5 max-w-lg text-[17px] leading-8 text-[#98A2AE] sm:text-[18px]">
                 {HERO_SUBHEADLINE}
               </p>
 
-              <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-[13px] text-[#B7C0CB]">
-                {["Live pricing", "Signal quality", "PopAlpha AI briefs"].map((item) => (
-                  <span key={item} className="inline-flex items-center gap-2">
-                    <span className="h-1.5 w-1.5 rounded-full bg-[#48D8E7]" />
-                    {item}
-                  </span>
-                ))}
-              </div>
-
               {/* Search Bar */}
               <div className="mt-9 max-w-[560px]">
-                <div className="mb-3 flex items-center justify-between gap-3 px-1 text-[11px] font-medium uppercase tracking-[0.18em] text-[#697381]">
-                  <span>Search the live market</span>
-                  <span className="hidden sm:inline">Press / to focus</span>
-                </div>
-                <div className="overflow-hidden rounded-[28px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(18,22,29,0.96),rgba(10,12,16,0.98))] p-1.5 shadow-[0_24px_70px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+                <div className="overflow-hidden rounded-[28px] bg-[linear-gradient(180deg,rgba(18,22,29,0.92),rgba(10,12,16,0.96))] p-1.5 shadow-[0_24px_70px_rgba(0,0,0,0.38)] ring-1 ring-white/[0.06] backdrop-blur-xl">
                   <Suspense
                     fallback={<div className="h-[60px] rounded-full bg-white/[0.03]" />}
                   >
                     <HomepageSearch />
                   </Suspense>
                 </div>
-                <div className="mt-4 flex flex-wrap items-center gap-2.5">
-                  <span className="mr-1 text-[11px] font-medium uppercase tracking-[0.18em] text-[#697381]">In focus</span>
+                <div className="mt-4 flex flex-wrap items-center gap-2">
                   {focusPills.map((name) => (
                     <Link
                       key={name}
                       href={`/search?q=${encodeURIComponent(name)}`}
-                      className="rounded-full border border-white/[0.06] bg-white/[0.03] px-3.5 py-1.5 text-[12px] font-medium text-[#A1AAB5] transition-all hover:border-[#36D6E7]/35 hover:bg-white/[0.05] hover:text-white"
+                      className="rounded-full bg-white/[0.04] px-3 py-1.5 text-[12px] font-medium text-[#A0A9B4] transition-all hover:bg-white/[0.07] hover:text-white"
                     >
                       {name}
                     </Link>
@@ -580,128 +570,78 @@ export default async function Home() {
 
             {/* Right: Product Composition */}
             <div className="relative w-full max-w-[620px] lg:justify-self-end">
-              <div className="pointer-events-none absolute inset-0 rounded-[36px] bg-[radial-gradient(circle_at_top,rgba(0,180,216,0.14),transparent_44%)] blur-2xl" />
+              <div className="pointer-events-none absolute inset-0 rounded-[36px] bg-[radial-gradient(circle_at_top,rgba(0,180,216,0.1),transparent_46%)] blur-3xl" />
 
-              <div className="relative overflow-hidden rounded-[32px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(14,18,24,0.96),rgba(7,9,13,0.98))] p-4 shadow-[0_30px_90px_rgba(0,0,0,0.45)] backdrop-blur-2xl sm:p-5">
-                <div className="pointer-events-none absolute inset-x-10 top-0 h-20 bg-[linear-gradient(180deg,rgba(93,221,239,0.08),transparent)]" />
-
-                <div className="relative space-y-4">
-                  <div className="rounded-[24px] border border-white/[0.06] bg-white/[0.02] p-4 sm:p-5">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-[#09222A] text-[#63E2F0]">
-                          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M2 12h4l3-9 4 18 3-9h4" />
-                          </svg>
-                        </div>
-                        <div>
-                          <span className="text-[14px] font-semibold tracking-tight text-white">Market Pulse</span>
-                          <p className="text-[12px] text-[#798290]">Live leaders on the board right now</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 rounded-full bg-[#0C1B19] px-3 py-1 text-[11px] font-medium text-[#66E28E]">
-                        <span className="h-2 w-2 rounded-full bg-[#00DC5A]" />
-                        Live
-                      </div>
-                    </div>
-
-                    <div className="mt-5 space-y-1.5">
-                      {heroPulseCards.map((card, index) => (
-                        <Link
-                          key={card.slug}
-                          href={`/c/${encodeURIComponent(card.slug)}`}
-                          className="group flex items-center gap-3 rounded-2xl px-2 py-2.5 transition-colors hover:bg-white/[0.04]"
-                        >
-                          <span className="w-5 shrink-0 text-center text-[11px] font-medium tabular-nums text-[#5C6570]">
-                            {index + 1}
-                          </span>
-                          {card.image_url ? (
-                            <img
-                              src={card.image_url}
-                              alt=""
-                              className="h-14 w-10 rounded-[10px] object-cover shadow-[0_10px_24px_rgba(0,0,0,0.35)] transition-transform duration-200 group-hover:scale-[1.03]"
-                            />
-                          ) : (
-                            <div className="h-14 w-10 rounded-[10px] bg-gradient-to-b from-[#1A2230] to-[#0A0E15] shadow-[0_10px_24px_rgba(0,0,0,0.35)]" />
-                          )}
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2">
-                              <p className="truncate text-[13px] font-semibold text-[#F2F5F7] group-hover:text-white">{card.name}</p>
-                              {card.mover_tier === "hot" ? (
-                                <span className="rounded-full bg-[#3A1C14] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.16em] text-[#FF9B6B]">
-                                  Hot
-                                </span>
-                              ) : null}
-                            </div>
-                            <p className="truncate text-[11px] text-[#6E7784]">{card.set_name ?? "Live market"}</p>
-                          </div>
-                          <div className="shrink-0 text-right">
-                            <p className="text-[13px] font-semibold tabular-nums text-white">{formatPrice(card.market_price)}</p>
-                            <p className={`mt-1 text-[12px] font-semibold tabular-nums ${(card.change_pct ?? 0) >= 0 ? "text-[#5CE07D]" : "text-[#FF7E78]"}`}>
-                              {formatPct(card.change_pct)}
-                            </p>
-                          </div>
-                        </Link>
-                      ))}
-                      {heroPulseCards.length === 0 && (
-                        <div className="flex min-h-28 items-center justify-center rounded-2xl border border-white/[0.05] bg-white/[0.02] px-4 text-center text-[13px] text-[#707A86]">
-                          Live movers will appear here as fresh price action clears the confidence threshold.
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="mt-4 rounded-2xl border border-white/[0.05] bg-[#0E1218] px-4 py-3.5">
-                      <div className="flex items-center justify-between gap-4">
-                        <div>
-                          <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-[#66707C]">Signal quality</p>
-                          <p className="mt-1 text-[13px] leading-6 text-[#B4BDC8]">
-                            {heroAverageStrength != null
-                              ? `Average market strength is ${heroAverageStrength}/100 across the current leaders.`
-                              : "Market strength will surface here as cards build enough conviction."}
-                          </p>
-                        </div>
-                        {heroAverageStrength != null ? (
-                          <div className="w-20 shrink-0">
-                            <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.07]">
-                              <div
-                                className="h-full rounded-full bg-gradient-to-r from-[#36D6E7] to-[#00D4AA]"
-                                style={{ width: `${Math.max(10, Math.min(100, heroAverageStrength))}%` }}
-                              />
-                            </div>
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
+              <div className="relative overflow-hidden rounded-[30px] bg-[linear-gradient(180deg,rgba(13,17,22,0.96),rgba(9,11,15,0.98))] px-4 py-5 shadow-[0_28px_80px_rgba(0,0,0,0.42)] ring-1 ring-white/[0.06] backdrop-blur-2xl sm:px-5">
+                <div className="relative">
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-[14px] font-semibold tracking-tight text-white">Market Pulse</span>
+                    <span className="inline-flex items-center gap-2 text-[11px] text-[#7DE29B]">
+                      <span className="h-2 w-2 rounded-full bg-[#00DC5A]" />
+                      Live
+                    </span>
                   </div>
 
-                  <div className="rounded-[24px] border border-[#1F5660]/45 bg-[linear-gradient(180deg,rgba(7,26,31,0.95),rgba(10,13,19,0.98))] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+                  <div className="mt-4 space-y-1">
+                    {heroPulseCards.map((card, index) => (
+                      <Link
+                        key={card.slug}
+                        href={`/c/${encodeURIComponent(card.slug)}`}
+                        className="group flex items-center gap-3 rounded-2xl px-1.5 py-2.5 transition-colors hover:bg-white/[0.03]"
+                      >
+                        <span className="w-5 shrink-0 text-center text-[11px] tabular-nums text-[#5F6873]">
+                          {index + 1}
+                        </span>
+                        {card.image_url ? (
+                          <img
+                            src={card.image_url}
+                            alt=""
+                            className="h-14 w-10 rounded-[10px] object-cover shadow-[0_10px_24px_rgba(0,0,0,0.32)] transition-transform duration-200 group-hover:scale-[1.02]"
+                          />
+                        ) : (
+                          <div className="h-14 w-10 rounded-[10px] bg-gradient-to-b from-[#1A2230] to-[#0A0E15] shadow-[0_10px_24px_rgba(0,0,0,0.32)]" />
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-[13px] font-semibold text-[#EEF2F6] group-hover:text-white">{card.name}</p>
+                          <p className="truncate text-[11px] text-[#6D7682]">{card.set_name ?? "Live market"}</p>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <p className="text-[13px] font-semibold tabular-nums text-white">{formatPrice(card.market_price)}</p>
+                          <div className="mt-1.5 flex items-center justify-end gap-2">
+                            <p className={`text-[12px] font-semibold tabular-nums ${(card.change_pct ?? 0) >= 0 ? "text-[#5CE07D]" : "text-[#FF7E78]"}`}>
+                              {formatPct(card.change_pct)}
+                            </p>
+                            {card.market_strength_score != null ? (
+                              <div className="h-[3px] w-10 overflow-hidden rounded-full bg-white/[0.08]">
+                                <div
+                                  className="h-full rounded-full bg-[#42D6E8]"
+                                  style={{ width: `${Math.max(8, Math.min(100, card.market_strength_score))}%` }}
+                                />
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+                      </Link>
+                    ))}
+                    {heroPulseCards.length === 0 && (
+                      <div className="flex min-h-28 items-center justify-center rounded-2xl px-4 text-center text-[13px] text-[#707A86]">
+                        Live movers will appear here as fresh price action clears the confidence threshold.
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mt-5 border-t border-white/[0.06] pt-4">
                     <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#79DDEC]">PopAlpha AI Brief</span>
-                        <p className="mt-1 text-[12px] text-[#84909B]">Interpretation layer for the live market</p>
-                      </div>
-                      <div className="inline-flex items-center gap-2 rounded-full border border-white/[0.06] bg-white/[0.03] px-3 py-1 text-[11px] font-medium text-[#C2CBD5]">
-                        <span className="h-1.5 w-1.5 rounded-full bg-[#48D8E7]" />
-                        {asOf ? `Updated ${asOf}` : "Live read"}
-                      </div>
+                      <span className="text-[11px] font-medium text-[#8CDBE8]">PopAlpha AI Brief</span>
+                      <span className="text-[11px] text-[#7B8591]">{asOf || "Live"}</span>
                     </div>
 
-                    <p className="mt-5 max-w-[32rem] text-[16px] font-medium leading-7 text-[#EDF3F7] sm:text-[17px]">
-                      {heroBriefLead}
+                    <p className="mt-2.5 max-w-[28rem] text-[18px] font-medium leading-8 text-[#F1F5F8]">
+                      {heroBrief.lead}
                     </p>
-
-                    <ul className="mt-4 space-y-3">
-                      {heroBriefBullets.map((bullet) => (
-                        <li key={bullet} className="flex items-start gap-3 text-[13px] leading-6 text-[#B8C3CE]">
-                          <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[#48D8E7]" />
-                          <span>{bullet}</span>
-                        </li>
-                      ))}
-                    </ul>
-
-                    <div className="mt-5 border-t border-white/[0.06] pt-4 text-[12px] text-[#82909C]">
-                      Built from live pricing, market-strength scoring, and breadth across the active board.
-                    </div>
+                    {heroBrief.secondary ? (
+                      <p className="mt-1.5 text-[12px] text-[#7B8591]">{heroBrief.secondary}</p>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -713,17 +653,16 @@ export default async function Home() {
       {/* ── Trust Strip ─────────────────────────────────────────────────── */}
       <section className="border-y border-white/[0.04] bg-[#07090D]">
         <div className="mx-auto max-w-[1400px] px-5 sm:px-8">
-          <div className="py-5 sm:py-6">
-            <div className="overflow-hidden rounded-[24px] border border-white/[0.05] bg-[#0B0E13]">
-              <div className="grid gap-px bg-white/[0.04] sm:grid-cols-2 lg:grid-cols-5">
-                {heroStats.map((stat) => (
-                  <div key={stat.label} className="bg-[#0B0E13] px-5 py-5 sm:px-6">
-                    <span className="text-[16px] font-semibold tracking-tight text-white sm:text-[18px]">{stat.value}</span>
-                    <p className="mt-1 text-[11px] font-medium uppercase tracking-[0.16em] text-[#65707C]">{stat.label}</p>
-                  </div>
-                ))}
+          <div className="grid gap-y-6 py-6 sm:grid-cols-2 lg:grid-cols-5 lg:gap-y-0">
+            {heroStats.map((stat, index) => (
+              <div
+                key={stat.label}
+                className={`${index > 0 ? "lg:border-l lg:border-white/[0.05] lg:pl-6" : ""} ${index < heroStats.length - 1 ? "lg:pr-6" : ""}`}
+              >
+                <span className="text-[16px] font-semibold tracking-tight text-white sm:text-[18px]">{stat.value}</span>
+                <p className="mt-1 text-[12px] text-[#6D7783]">{stat.label}</p>
               </div>
-            </div>
+            ))}
           </div>
         </div>
       </section>
