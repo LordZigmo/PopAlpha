@@ -248,7 +248,18 @@ function buildFocusPills(cards: HomepageCard[], fallback: readonly string[], lim
   return pills;
 }
 
-function buildHeroBrief(
+function splitIntoSentences(text: string): string[] {
+  return text
+    .replace(/\s*\n+\s*/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .match(/[^.!?]+[.!?]+(?:\s|$)|[^.!?]+$/g)
+    ?.map((sentence) => sentence.trim())
+    .filter(Boolean)
+    ?? [];
+}
+
+function buildHeroBriefFallback(
   pulseCards: HomepageCard[],
   leaderSet: { name: string | null; count: number },
   fallback: string,
@@ -294,6 +305,25 @@ function buildHeroBrief(
   return {
     lead: fallback,
     secondary: null,
+  };
+}
+
+function buildHeroBrief(
+  summary: string,
+  pulseCards: HomepageCard[],
+  leaderSet: { name: string | null; count: number },
+  fallback: string,
+): { lead: string; secondary: string | null } {
+  const summarySentences = splitIntoSentences(summary);
+  const fallbackBrief = buildHeroBriefFallback(pulseCards, leaderSet, fallback);
+
+  if (summarySentences.length === 0) {
+    return fallbackBrief;
+  }
+
+  return {
+    lead: summarySentences[0] ?? fallbackBrief.lead,
+    secondary: summarySentences.slice(1, 3).join(" ").trim() || fallbackBrief.secondary,
   };
 }
 
@@ -439,6 +469,7 @@ export default async function Home() {
   const heroLeadingSet = getLeadingSet(heroMarketCards);
   const heroPulseRows = heroPulseCards.slice(0, 3);
   const heroBrief = buildHeroBrief(
+    aceSummary,
     heroPulseCards,
     heroLeadingSet,
     marketNarrative || "The market is still taking shape.",
@@ -584,11 +615,13 @@ export default async function Home() {
                     </span>
                   </div>
 
-                  <p className="mt-8 max-w-[13ch] text-[clamp(2rem,3.2vw,3rem)] font-semibold leading-[1.02] tracking-[-0.055em] text-white">
+                  <p className="mt-8 max-w-[17ch] text-[clamp(1.7rem,2.8vw,2.45rem)] font-semibold leading-[1.06] tracking-[-0.045em] text-white">
                     {heroBrief.lead}
                   </p>
                   {heroBrief.secondary ? (
-                    <p className="mt-4 text-[13px] text-[#94A0AB]">{heroBrief.secondary}</p>
+                    <p className="mt-5 max-w-[34rem] text-[14px] leading-7 text-[#94A0AB]">
+                      {heroBrief.secondary}
+                    </p>
                   ) : null}
                 </div>
               </div>
@@ -607,9 +640,23 @@ export default async function Home() {
                     <Link
                       key={card.slug}
                       href={`/c/${encodeURIComponent(card.slug)}`}
-                      className="group grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-2xl px-1.5 py-2.5 transition-colors hover:bg-white/[0.03]"
+                      className="group grid grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-3 rounded-2xl px-1.5 py-2.5 transition-colors hover:bg-white/[0.03]"
                     >
                       <span className="w-4 text-center text-[11px] tabular-nums text-[#5E6772]">{index + 1}</span>
+                      <div className="relative h-12 w-8 shrink-0 overflow-hidden rounded-[10px] bg-[linear-gradient(180deg,rgba(28,35,46,0.92),rgba(12,16,22,0.98))] ring-1 ring-white/[0.08]">
+                        {card.image_url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={card.image_url}
+                            alt={card.name}
+                            className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
+                          />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center text-[8px] font-medium uppercase tracking-[0.16em] text-[#72808E]">
+                            Card
+                          </div>
+                        )}
+                      </div>
                       <div className="min-w-0">
                         <p className="truncate text-[13px] font-semibold text-[#EEF2F6] group-hover:text-white">{card.name}</p>
                         <p className="truncate text-[11px] text-[#6C7681]">{card.set_name ?? "Live market"}</p>
