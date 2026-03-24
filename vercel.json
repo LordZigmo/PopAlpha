@@ -46,7 +46,7 @@
     },
     {
       "path": "/api/cron/run-scrydex-2024plus-catchup",
-      "schedule": "20 */8 * * *"
+      "schedule": "20 */4 * * *"
     },
     {
       "path": "/api/cron/run-justtcg-pipeline",
