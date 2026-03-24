@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { currentUser } from "@clerk/nextjs/server";
 import { generateText } from "ai";
@@ -682,8 +683,16 @@ export default async function Home() {
       <nav className="fixed inset-x-0 top-0 z-50 border-b border-white/[0.06] bg-[#060608]/80 backdrop-blur-2xl">
         <div className="mx-auto flex h-16 max-w-[1400px] items-center justify-between px-5 sm:px-8">
           <div className="flex items-center gap-8">
-            <Link href="/" className="flex items-center gap-2.5">
-              <span className="text-lg font-bold tracking-tight text-white">PopAlpha</span>
+            <Link href="/" className="flex items-center gap-3">
+              <Image
+                src="/brand/popalpha-icon-transparent.svg"
+                alt="PopAlpha logo"
+                width={36}
+                height={36}
+                className="h-9 w-9 shrink-0"
+                priority
+              />
+              <span className="text-[19px] font-bold tracking-tight text-white">PopAlpha</span>
             </Link>
             <div className="hidden items-center gap-1 md:flex">
               {["Explore", "Market", "Sets", "Portfolio", "Briefs"].map((item) => (
@@ -797,7 +806,16 @@ export default async function Home() {
                 <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-[linear-gradient(180deg,rgba(84,216,232,0.12),transparent)]" />
                 <div className="relative">
                   <div className="flex items-center justify-between gap-4">
-                    <span className="text-[12px] font-medium text-[#98E7F3]">PopAlpha AI Brief</span>
+                    <div className="flex items-center gap-3">
+                      <Image
+                        src="/brand/popalpha-icon-transparent.svg"
+                        alt="PopAlpha logo"
+                        width={48}
+                        height={48}
+                        className="h-12 w-12 shrink-0"
+                      />
+                      <span className="text-[12px] font-medium text-[#98E7F3]">PopAlpha AI Brief</span>
+                    </div>
                     <span className="text-[11px] text-[#8D97A2]">
                       {asOf ? `Updated ${asOf}` : "Live"}
                     </span>
