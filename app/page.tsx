@@ -115,6 +115,90 @@ const HOMEPAGE_SCOUT_NARRATIVE =
   "The market still looks selective today. A few chase cards are leading, but the move has not spread across the whole board. The next thing to watch is whether strength moves into deeper cards and sealed.";
 
 type PopAlphaTier = "Trainer" | "Ace" | "Elite";
+type HomepageSummaryCommunityCard = {
+  name: string;
+  setName: string | null;
+  bullishVotes: number;
+  bearishVotes: number;
+  changePct: number | null;
+};
+type HomepageSummaryConfig = {
+  version: string;
+  modelTier: PopAlphaTier;
+  modelLabel: string;
+  timeoutMs: number;
+  logKey: string;
+  sourceLimits: {
+    topMovers: number;
+    trending: number;
+    losers: number;
+    communityPulse: number;
+  };
+  pricingUsdPerMillionTokens: {
+    input: number;
+    output: number;
+  };
+  system: {
+    role: string;
+    style: readonly string[];
+    structure: readonly string[];
+    guardrails: readonly string[];
+  };
+  prompt: {
+    task: string;
+    focus: readonly string[];
+  };
+};
+
+const HOMEPAGE_SUMMARY_CONFIG = {
+  version: "homepage-summary-v2",
+  modelTier: "Ace",
+  modelLabel: "gemini-2.0-flash",
+  timeoutMs: AI_TIMEOUT_MS,
+  logKey: "[homepage.ai-summary]",
+  sourceLimits: {
+    topMovers: 2,
+    trending: 2,
+    losers: 1,
+    communityPulse: 3,
+  },
+  pricingUsdPerMillionTokens: {
+    input: 0.1,
+    output: 0.4,
+  },
+  system: {
+    role: "You are PopAlpha Ace Summary, a premium market note for the homepage.",
+    style: [
+      "Write in plain English at about an 8th-grade reading level.",
+      "Use short sentences and common words.",
+      "Sound calm, sharp, and useful.",
+      "Focus on why the market matters for collectors, not just what moved.",
+      "Avoid hype, slang, and heavy finance jargon.",
+    ],
+    structure: [
+      "Use the supplied market, set, pullback, and community vote signals.",
+      "Write exactly 2 short paragraphs.",
+      "Use no more than 2 sentences per paragraph.",
+      "Paragraph 1 should explain where strength is concentrating or whether the market is broadening.",
+      "Paragraph 2 should explain whether collector conviction confirms the move and what deserves attention next.",
+    ],
+    guardrails: [
+      "Talk about the market in general terms.",
+      "Refer to sets, clusters, breadth, and conviction rather than individual cards.",
+      "Do not mention specific cards by name.",
+      "Do not mention being an AI, and do not invent metrics.",
+    ],
+  },
+  prompt: {
+    task: "Write a short market-wide read for collectors using only the supplied homepage and community pulse data.",
+    focus: [
+      "Explain the clearest source of strength or weakness.",
+      "Say whether the move looks concentrated or broad.",
+      "Say whether community conviction is confirming the move.",
+      "Keep the read value-driven, concise, and useful.",
+    ],
+  },
+} as const satisfies HomepageSummaryConfig;
 
 function getTierLabel(value: unknown): PopAlphaTier {
   const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
@@ -152,37 +236,55 @@ function buildMarketNarrative(
   return `${leader} looks strongest right now, but the rest of the market still feels selective.`;
 }
 
+function rankSetCounts(setNames: Array<string | null | undefined>): Array<{ name: string; count: number }> {
+  const counts = new Map<string, number>();
+
+  for (const value of setNames) {
+    const setName = value?.trim();
+    if (!setName) continue;
+    counts.set(setName, (counts.get(setName) ?? 0) + 1);
+  }
+
+  return [...counts.entries()]
+    .sort((left, right) => {
+      if (right[1] !== left[1]) return right[1] - left[1];
+      return left[0].localeCompare(right[0]);
+    })
+    .map(([name, count]) => ({ name, count }));
+}
+
 function buildAceNarrativeFallback(
   movers: HomepageCard[],
   trending: HomepageCard[],
   losers: HomepageCard[],
-  communityCards: Array<{
-    name: string;
-    setName: string | null;
-    bullishVotes: number;
-    bearishVotes: number;
-    changePct: number | null;
-  }>,
+  communityCards: HomepageSummaryCommunityCard[],
 ): string {
-  const leader = movers[0];
-  const trend = trending[0];
-  const laggard = losers[0];
-  const communityLeader = communityCards[0];
-  const communityTotal = communityLeader ? communityLeader.bullishVotes + communityLeader.bearishVotes : 0;
-  const communityPct = communityLeader && communityTotal > 0
-    ? Math.round((communityLeader.bullishVotes / communityTotal) * 100)
+  const rankedSets = rankSetCounts([
+    ...movers.map((card) => card.set_name),
+    ...trending.map((card) => card.set_name),
+    ...losers.map((card) => card.set_name),
+  ]);
+  const leaderSet = rankedSets[0] ?? null;
+  const runnerUpSet = rankedSets[1] ?? null;
+  const communitySets = rankSetCounts(communityCards.map((card) => card.setName));
+  const communityVotes = communityCards.reduce((totals, card) => ({
+    bullish: totals.bullish + card.bullishVotes,
+    total: totals.total + card.bullishVotes + card.bearishVotes,
+  }), { bullish: 0, total: 0 });
+  const communityPct = communityVotes.total > 0
+    ? Math.round((communityVotes.bullish / communityVotes.total) * 100)
     : null;
 
-  if (leader && trend && laggard) {
-    return `${leader.name} is leading right now, and ${trend.set_name ?? trend.name} is helping keep that move alive. ${laggard.name} is weaker, so this still looks selective, not broad.\n\n${communityLeader ? `${communityLeader.name} is also getting about ${communityPct ?? 50}% bullish votes in Community Pulse.` : "Community Pulse will show if the crowd agrees."} If those votes keep lining up with price strength, conviction is getting stronger.`;
+  if (leaderSet && leaderSet.count >= 3) {
+    return `${leaderSet.name} is setting the tone, and strength still looks concentrated rather than broad. The rest of the market is participating more selectively.\n\n${communityPct != null ? `Community Pulse is ${communityPct}% bullish${communitySets[0] ? `, with the clearest support around ${communitySets[0].name}.` : "."}` : "Community Pulse will show whether broader conviction starts to build."} Watch for leadership to spread into more sets.`;
   }
-  if (leader) {
-    return `${leader.name} is the clearest leader right now. The rest of the market still does not look too hot.\n\n${communityLeader ? `Community Pulse is also leaning toward ${communityLeader.name}.` : "Next, watch if the crowd keeps backing the same leader."} If price strength and collector interest stay together, the move is more likely to hold.`;
+  if (leaderSet && runnerUpSet) {
+    return `Leadership is split between ${leaderSet.name} and ${runnerUpSet.name}, so the market still looks selective. No single pocket has fully taken control yet.\n\n${communityPct != null ? `Community Pulse is ${communityPct}% bullish, which suggests collectors are leaning constructive but still waiting for confirmation.` : "Community Pulse will show whether collectors start to agree on one pocket of strength."} Watch for one area to separate from the rest of the board.`;
   }
-  if (trend) {
-    return `${trend.set_name ?? trend.name} is getting a lot of attention, but the board still does not feel crowded. The market is still picking its leaders.\n\n${communityLeader ? `${communityLeader.name} is also picking up community votes.` : "Next, watch if that attention turns into stronger prices."} If it does, one pocket of the market could pull ahead fast.`;
+  if (leaderSet) {
+    return `${leaderSet.name} looks strongest right now, but breadth is still limited. The rest of the board has not moved in a decisive way yet.\n\n${communityPct != null ? `Community Pulse is ${communityPct}% bullish${communitySets[0] ? `, with the clearest support around ${communitySets[0].name}.` : "."}` : "Community Pulse will show whether conviction starts to align with price strength."} Watch for follow-through beyond the current leader.`;
   }
-  return "The board is still taking shape. The strongest action is still narrow, so the next clear leader has not fully broken out yet.\n\nCommunity Pulse still matters because it can show where real conviction starts first. Watch for cards that keep holding attention, price, and repeat votes at the same time.";
+  return "The board is still taking shape. The strongest action is still narrow, so the next clear leader has not fully broken out yet.\n\nCommunity Pulse still matters because it can show where real conviction starts first. Watch for attention, price strength, and repeat support to start aligning in the same pocket of the market.";
 }
 
 function normalizeAceSummary(text: string): string {
@@ -202,6 +304,129 @@ function splitAcePreview(text: string): { lead: string; remainder: string } {
   const firstSentence = flattened.match(/[^.!?]+[.!?]+(?:\s|$)|[^.!?]+$/)?.[0]?.trim() ?? flattened;
   const remainder = flattened.slice(firstSentence.length).trim();
   return { lead: firstSentence, remainder };
+}
+
+function buildHomepageSummaryContext(
+  config: HomepageSummaryConfig,
+  movers: HomepageCard[],
+  trending: HomepageCard[],
+  losers: HomepageCard[],
+  communityCards: HomepageSummaryCommunityCard[],
+): string {
+  const moverSample = movers.slice(0, config.sourceLimits.topMovers);
+  const trendingSample = trending.slice(0, config.sourceLimits.trending);
+  const loserSample = losers.slice(0, config.sourceLimits.losers);
+  const communitySample = communityCards.slice(0, config.sourceLimits.communityPulse);
+  const marketSample = [...moverSample, ...trendingSample, ...loserSample];
+  const rankedSets = rankSetCounts(marketSample.map((card) => card.set_name));
+  const moverSets = rankSetCounts(moverSample.map((card) => card.set_name));
+  const communitySets = rankSetCounts(communitySample.map((card) => card.setName));
+  const positiveSignals = marketSample.filter((card) => (card.change_pct ?? 0) > 0).length;
+  const negativeSignals = marketSample.filter((card) => (card.change_pct ?? 0) < 0).length;
+  const averageMoverChange = averageValues(moverSample.map((card) => card.change_pct));
+  const averageTrendChange = averageValues(trendingSample.map((card) => card.change_pct));
+  const pullbackChange = loserSample[0]?.change_pct ?? null;
+  const communityVotes = communitySample.reduce((totals, card) => ({
+    bullish: totals.bullish + card.bullishVotes,
+    total: totals.total + card.bullishVotes + card.bearishVotes,
+  }), { bullish: 0, total: 0 });
+  const communityBullishPct = communityVotes.total > 0
+    ? Math.round((communityVotes.bullish / communityVotes.total) * 100)
+    : null;
+
+  return [
+    `Market breadth: ${positiveSignals} positive reads, ${negativeSignals} negative reads, ${rankedSets.length} active sets in focus.`,
+    moverSets[0]
+      ? `Strength concentration: ${moverSets[0].name} leads the strongest live movers${moverSets[1] ? `, with ${moverSets[1].name} also showing follow-through.` : "."}`
+      : "Strength concentration: No single set is clearly leading yet.",
+    `Pricing signal: strongest movers average ${averageMoverChange != null ? `${averageMoverChange.toFixed(1)}%` : "unknown"}, trending cards average ${averageTrendChange != null ? `${averageTrendChange.toFixed(1)}%` : "unknown"}, and the sharpest pullback is ${pullbackChange != null ? `${pullbackChange.toFixed(1)}%` : "unknown"}.`,
+    communityBullishPct != null
+      ? `Community pulse: ${communityBullishPct}% bullish across ${communityVotes.total} votes${communitySets[0] ? `, with the clearest support around ${communitySets[0].name}.` : "."}`
+      : "Community pulse: No clear vote consensus yet.",
+  ].join("\n");
+}
+
+function buildHomepageSummaryPrompt(config: HomepageSummaryConfig, topContext: string): { system: string; prompt: string } {
+  return {
+    system: [
+      config.system.role,
+      ...config.system.style,
+      ...config.system.structure,
+      ...config.system.guardrails,
+    ].join(" "),
+    prompt: [
+      config.prompt.task,
+      ...config.prompt.focus,
+      "",
+      topContext,
+    ].join("\n"),
+  };
+}
+
+function estimateHomepageSummaryCostUsd(
+  config: HomepageSummaryConfig,
+  usage: {
+    inputTokens: number | undefined;
+    outputTokens: number | undefined;
+  },
+): number | null {
+  const inputTokens = usage.inputTokens;
+  const outputTokens = usage.outputTokens;
+
+  if (inputTokens == null && outputTokens == null) return null;
+
+  const inputCost = ((inputTokens ?? 0) / 1_000_000) * config.pricingUsdPerMillionTokens.input;
+  const outputCost = ((outputTokens ?? 0) / 1_000_000) * config.pricingUsdPerMillionTokens.output;
+  return Number((inputCost + outputCost).toFixed(6));
+}
+
+function logHomepageSummaryUsage(
+  config: HomepageSummaryConfig,
+  usage: {
+    inputTokens: number | undefined;
+    outputTokens: number | undefined;
+    totalTokens: number | undefined;
+  },
+  meta: {
+    durationMs: number;
+    finishReason: string;
+  },
+): void {
+  console.info(config.logKey, JSON.stringify({
+    event: "usage",
+    version: config.version,
+    modelTier: config.modelTier,
+    modelLabel: config.modelLabel,
+    durationMs: meta.durationMs,
+    finishReason: meta.finishReason,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    totalTokens: usage.totalTokens,
+    estimatedCostUsd: estimateHomepageSummaryCostUsd(config, usage),
+  }));
+}
+
+function getHomepageSummaryFailureReason(error: unknown): string {
+  if (error instanceof Error) {
+    if (error.name === "AbortError") return "timeout";
+    return error.message || error.name;
+  }
+  return "unknown";
+}
+
+function logHomepageSummaryFallback(
+  config: HomepageSummaryConfig,
+  durationMs: number,
+  reason: string,
+): void {
+  console.info(config.logKey, JSON.stringify({
+    event: "fallback",
+    version: config.version,
+    modelTier: config.modelTier,
+    modelLabel: config.modelLabel,
+    durationMs,
+    reason,
+  }));
 }
 
 function averageValues(values: Array<number | null | undefined>): number | null {
@@ -264,20 +489,12 @@ function buildHeroBriefFallback(
   leaderSet: { name: string | null; count: number },
   fallback: string,
 ): { lead: string; secondary: string | null } {
-  const featured = pulseCards[0] ?? null;
   const positiveCount = pulseCards.filter((card) => (card.change_pct ?? 0) > 0).length;
 
   if (leaderSet.name && leaderSet.count >= 3) {
     return {
       lead: `Momentum is clustering in ${leaderSet.name}.`,
       secondary: `${leaderSet.count} cards are moving together.`,
-    };
-  }
-
-  if (featured && leaderSet.name && featured.set_name === leaderSet.name && leaderSet.count >= 2) {
-    return {
-      lead: `${featured.name} is setting the pace in ${leaderSet.name}.`,
-      secondary: `${leaderSet.count} cards are participating.`,
     };
   }
 
@@ -295,10 +512,10 @@ function buildHeroBriefFallback(
     };
   }
 
-  if (featured) {
+  if (leaderSet.name) {
     return {
-      lead: `${featured.name} is setting the pace today.`,
-      secondary: featured.set_name ?? null,
+      lead: `${leaderSet.name} looks strongest right now.`,
+      secondary: "Breadth is still selective.",
     };
   }
 
@@ -331,64 +548,35 @@ async function generateAceSummary(
   movers: HomepageCard[],
   trending: HomepageCard[],
   losers: HomepageCard[],
-  communityCards: Array<{
-    name: string;
-    setName: string | null;
-    bullishVotes: number;
-    bearishVotes: number;
-    changePct: number | null;
-  }>,
+  communityCards: HomepageSummaryCommunityCard[],
 ): Promise<string> {
   const fallback = buildAceNarrativeFallback(movers, trending, losers, communityCards);
-  const topContext = [
-    ...movers.slice(0, 2).map((c, i) =>
-      `Top mover ${i + 1}: ${c.name} (${c.set_name ?? "Unknown"}) at ${c.market_price != null ? `$${c.market_price}` : "unknown"} with ${c.change_pct != null ? `${c.change_pct.toFixed(2)}%` : "unknown"} change.`,
-    ),
-    ...trending.slice(0, 2).map((c, i) =>
-      `Trending ${i + 1}: ${c.name} (${c.set_name ?? "Unknown"}) at ${c.market_price != null ? `$${c.market_price}` : "unknown"} with ${c.change_pct != null ? `${c.change_pct.toFixed(2)}%` : "unknown"} change.`,
-    ),
-    ...losers.slice(0, 1).map((c) =>
-      `Biggest drop: ${c.name} (${c.set_name ?? "Unknown"}) with ${c.change_pct != null ? `${c.change_pct.toFixed(2)}%` : "unknown"} change.`,
-    ),
-    ...communityCards.slice(0, 3).map((c, i) => {
-      const total = c.bullishVotes + c.bearishVotes;
-      const pct = total > 0 ? Math.round((c.bullishVotes / total) * 100) : 50;
-      return `Community pulse ${i + 1}: ${c.name} (${c.setName ?? "Unknown"}) has ${pct}% bullish across ${total} votes.`;
-    }),
-  ].join("\n");
+  const topContext = buildHomepageSummaryContext(HOMEPAGE_SUMMARY_CONFIG, movers, trending, losers, communityCards);
+  const { system, prompt } = buildHomepageSummaryPrompt(HOMEPAGE_SUMMARY_CONFIG, topContext);
+  const abortController = new AbortController();
+  const timeoutId = setTimeout(() => abortController.abort(), HOMEPAGE_SUMMARY_CONFIG.timeoutMs);
+  const startedAt = performance.now();
 
   try {
-    const result = await Promise.race([
-      generateText({
-        model: getPopAlphaModel("Ace"),
-        system: [
-          "You are PopAlpha Ace Summary, a premium market note for the homepage.",
-          "Write in plain English at about an 8th-grade reading level.",
-          "Use short sentences and common words.",
-          "Sound calm, sharp, and useful.",
-          "Avoid hype, slang, and heavy finance jargon.",
-          "Use the supplied price, trend, loser, and community vote signals.",
-          "Write exactly 2 short paragraphs.",
-          "Use no more than 2 sentences per paragraph.",
-          "Paragraph 1 should say what part of the market looks strongest.",
-          "Paragraph 2 should say whether community votes support the move and what to watch next.",
-          "Do not mention being an AI, and do not invent metrics.",
-        ].join(" "),
-        prompt: [
-          "Summarize the market using only the supplied homepage and community pulse data.",
-          "Call out the strongest pocket of momentum.",
-          "Say whether the crowd is backing that move or lagging it.",
-          "Keep the read short, clear, and useful.",
-          "",
-          topContext,
-        ].join("\n"),
-      }),
-      new Promise<{ text: string }>((resolve) =>
-        setTimeout(() => resolve({ text: fallback }), AI_TIMEOUT_MS),
-      ),
-    ]);
+    const result = await generateText({
+      model: getPopAlphaModel(HOMEPAGE_SUMMARY_CONFIG.modelTier),
+      abortSignal: abortController.signal,
+      system,
+      prompt,
+    });
+    clearTimeout(timeoutId);
+    logHomepageSummaryUsage(HOMEPAGE_SUMMARY_CONFIG, result.totalUsage, {
+      durationMs: Math.round(performance.now() - startedAt),
+      finishReason: result.finishReason,
+    });
     return normalizeAceSummary(result.text) || fallback;
-  } catch {
+  } catch (error) {
+    clearTimeout(timeoutId);
+    logHomepageSummaryFallback(
+      HOMEPAGE_SUMMARY_CONFIG,
+      Math.round(performance.now() - startedAt),
+      getHomepageSummaryFailureReason(error),
+    );
     return fallback;
   }
 }
