@@ -50,6 +50,7 @@ export const CRON_ROUTES = [
   "cron/run-justtcg-retry",
   "cron/run-scrydex-pipeline",
   "cron/backfill-scrydex-price-history",
+  "cron/run-scrydex-2024plus-catchup",
   "cron/run-scrydex-2024plus-daily/[chunk]",
   "cron/run-scrydex-retry",
   "cron/run-poketrace-pipeline",

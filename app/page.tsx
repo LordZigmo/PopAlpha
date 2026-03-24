@@ -69,6 +69,13 @@ function getDirectionMeta(direction: HomepageCard["market_direction"]) {
   return null;
 }
 
+function getChangeWindowBadge(cards: HomepageCard[], fallback = "Live"): string {
+  const windows = [...new Set(cards.map((card) => card.change_window).filter((value): value is "24H" | "7D" => value === "24H" || value === "7D"))];
+  if (windows.length === 0) return fallback;
+  if (windows.length === 1) return windows[0];
+  return "24H + 7D";
+}
+
 const EMPTY_DATA: {
   movers: HomepageCard[];
   high_confidence_movers: HomepageCard[];
@@ -307,14 +314,21 @@ export default async function Home() {
   );
   const acePreview = splitAcePreview(aceSummary);
 
-  // Hero showcase stays on live market movers so every value comes from canonical market data.
-  const heroMarketCards = [...highConfidenceMovers, ...emergingMovers, ...movers, ...losers]
+  // Hero showcase stays on live market movers and falls back to trending only if those rails are empty.
+  const liveMarketCards = [...highConfidenceMovers, ...emergingMovers, ...movers, ...losers]
+    .filter((c, i, arr) => arr.findIndex((x) => x.slug === c.slug) === i);
+  const heroMarketCards = (liveMarketCards.length > 0 ? liveMarketCards : trending)
     .filter((c, i, arr) => arr.findIndex((x) => x.slug === c.slug) === i);
 
-  // Featured card = highest positive 24h move from the live market rails.
-  const topGainer = [...heroMarketCards]
-    .filter((c) => c.change_window === "24H" && (c.change_pct ?? 0) > 0)
-    .sort((a, b) => (b.change_pct ?? 0) - (a.change_pct ?? 0))[0] ?? heroMarketCards[0] ?? null;
+  // Featured card prefers a real mover with a scored market-strength read.
+  const positiveHeroCards = [...heroMarketCards]
+    .filter((card) => (card.change_pct ?? 0) > 0)
+    .sort((left, right) => (right.change_pct ?? 0) - (left.change_pct ?? 0));
+  const topGainer = positiveHeroCards.find((card) => card.market_strength_score !== null)
+    ?? positiveHeroCards[0]
+    ?? heroMarketCards.find((card) => card.market_strength_score !== null)
+    ?? heroMarketCards[0]
+    ?? null;
   const featuredCard = topGainer;
 
   // Hero panel cards only show the rest of the live market set.
@@ -322,12 +336,14 @@ export default async function Home() {
     .filter((c) => c.slug !== featuredCard?.slug)
     .sort((a, b) => Math.abs(b.change_pct ?? 0) - Math.abs(a.change_pct ?? 0))
     .slice(0, 5);
-  const strongMoverCards = highConfidenceMovers
+  const strongMoverCards = (highConfidenceMovers.length > 0 ? highConfidenceMovers : movers)
     .filter((card) => card.slug !== featuredCard?.slug)
     .slice(0, 4);
 
   const trendingCards = trending.slice(0, 5);
   const dropCards = losers.slice(0, 5);
+  const strongMoversBadge = getChangeWindowBadge(strongMoverCards.length > 0 ? strongMoverCards : movers, "Live");
+  const pullbacksBadge = getChangeWindowBadge(dropCards, "Live");
 
   return (
     <div className="landing-shell min-h-screen bg-[#060608] text-[#F0F0F0]">
@@ -550,7 +566,7 @@ export default async function Home() {
           <div className="grid grid-cols-2 gap-px sm:grid-cols-3 lg:grid-cols-5">
             {[
               { value: formatCount(trackedCardsWithLivePrice), label: "Cards with live price" },
-              { value: formatCount(pricesRefreshedToday), label: "Prices refreshed today" },
+              { value: formatCount(pricesRefreshedToday), label: "Recent price updates" },
               { value: "Raw · Sealed · Graded", label: "Coverage across formats" },
               { value: "AI", label: "Market briefs" },
               { value: "Scored", label: "Market strength" },
@@ -660,7 +676,7 @@ export default async function Home() {
               <div>
                 <div className="mb-3 flex items-center gap-2">
                   <span className="text-[13px] font-semibold text-white">Strong Movers</span>
-                  <span className="rounded-md bg-[#00DC5A]/10 px-2 py-0.5 text-[10px] font-bold text-[#00DC5A]">24H</span>
+                  <span className="rounded-md bg-[#00DC5A]/10 px-2 py-0.5 text-[10px] font-bold text-[#00DC5A]">{strongMoversBadge}</span>
                 </div>
                 <div className="grid gap-2 sm:grid-cols-2">
                   {strongMoverCards.map((card) => (
@@ -678,7 +694,7 @@ export default async function Home() {
               <div>
                 <div className="mb-3 flex items-center gap-2">
                   <span className="text-[13px] font-semibold text-white">Largest Pullbacks</span>
-                  <span className="rounded-md bg-[#FF3B30]/10 px-2 py-0.5 text-[10px] font-bold text-[#FF3B30]">24H</span>
+                  <span className="rounded-md bg-[#FF3B30]/10 px-2 py-0.5 text-[10px] font-bold text-[#FF3B30]">{pullbacksBadge}</span>
                 </div>
                 <div className="grid gap-2 sm:grid-cols-2">
                   {dropCards.slice(0, 4).map((card) => (

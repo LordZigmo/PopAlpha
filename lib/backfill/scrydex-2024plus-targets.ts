@@ -1,35 +1,23 @@
-export const SCRYDEX_2024_PLUS_PROVIDER_SET_IDS = [
-  "sv4pt5",
-  "sv5",
-  "sv6",
-  "sv6pt5",
-  "sv7",
-  "sv8",
-  "tcgp-A1",
-  "tcgp-A1a",
-  "tcgp-PA",
-  "mcd24",
-  "me1",
-  "me2",
-  "mep",
-  "rsv10pt5",
-  "sv10",
-  "sv8pt5",
-  "sv9",
-  "tcgp-A2",
-  "tcgp-A2a",
-  "tcgp-A2b",
-  "tcgp-A3",
-  "tcgp-A3a",
-  "tcgp-A3b",
-  "tcgp-A4",
-  "tcgp-A4a",
-  "tcgp-A4b",
-  "tcgp-B1",
-  "tcgp-PB",
-  "zsv10pt5",
-  "me2pt5",
+export const SCRYDEX_2024_PLUS_TARGETS = [
+  { providerSetId: "sv4pt5", setCode: "sv4pt5", setName: "Paldean Fates" },
+  { providerSetId: "sv5", setCode: "sv5", setName: "Temporal Forces" },
+  { providerSetId: "sv6", setCode: "sv6", setName: "Twilight Masquerade" },
+  { providerSetId: "sv6pt5", setCode: "sv6pt5", setName: "Shrouded Fable" },
+  { providerSetId: "sv7", setCode: "sv7", setName: "Stellar Crown" },
+  { providerSetId: "sv8", setCode: "sv8", setName: "Surging Sparks" },
+  { providerSetId: "mcd24", setCode: "mcd24", setName: "McDonald's Collection 2024" },
+  { providerSetId: "me1", setCode: "me1", setName: "Mega Evolution" },
+  { providerSetId: "me2", setCode: "me2", setName: "Phantasmal Flames" },
+  { providerSetId: "mep", setCode: "mep", setName: "Mega Evolution Black Star Promos" },
+  { providerSetId: "rsv10pt5", setCode: "rsv10pt5", setName: "White Flare" },
+  { providerSetId: "sv10", setCode: "sv10", setName: "Destined Rivals" },
+  { providerSetId: "sv8pt5", setCode: "sv8pt5", setName: "Prismatic Evolutions" },
+  { providerSetId: "sv9", setCode: "sv9", setName: "Journey Together" },
+  { providerSetId: "zsv10pt5", setCode: "zsv10pt5", setName: "Black Bolt" },
+  { providerSetId: "me2pt5", setCode: "me2pt5", setName: "Ascended Heroes" },
 ] as const;
+
+export const SCRYDEX_2024_PLUS_PROVIDER_SET_IDS = SCRYDEX_2024_PLUS_TARGETS.map((target) => target.providerSetId);
 
 export const SCRYDEX_2024_PLUS_DAILY_CHUNK_COUNT = 4;
 
@@ -60,4 +48,8 @@ export function getScrydex2024PlusDailyChunk(chunkNumber: number): string[] {
     throw new Error(`Invalid Scrydex 2024+ daily chunk ${chunkNumber}`);
   }
   return chunks[index];
+}
+
+export function getScrydex2024PlusTarget(providerSetId: string) {
+  return SCRYDEX_2024_PLUS_TARGETS.find((target) => target.providerSetId === providerSetId) ?? null;
 }

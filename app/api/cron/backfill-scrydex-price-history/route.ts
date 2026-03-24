@@ -28,6 +28,7 @@ export async function GET(req: Request) {
     const maxCards = parseOptionalInt(url.searchParams.get("maxCards"));
     const captureToday = url.searchParams.get("captureToday") !== "0";
     const dryRun = url.searchParams.get("dryRun") === "1";
+    const missingOnly = url.searchParams.get("missingOnly") === "1";
     const payloadLimit = parseOptionalInt(url.searchParams.get("payloads"));
     const matchObservations = parseOptionalInt(url.searchParams.get("observations")) ?? 1000;
     const timeseriesObservations = parseOptionalInt(url.searchParams.get("timeseriesObservations")) ?? matchObservations;
@@ -46,6 +47,7 @@ export async function GET(req: Request) {
         captureToday,
         days,
         maxCards: maxCards ?? null,
+        missingOnly,
         plan,
       });
     }
@@ -72,6 +74,7 @@ export async function GET(req: Request) {
         providerSetId: selectedSet.providerSetId,
         days,
         maxCards,
+        onlyMissingRecentHistory: missingOnly,
       });
 
       ok = ok && (capture?.ok ?? true) && history.ok;
@@ -93,6 +96,7 @@ export async function GET(req: Request) {
       captureToday,
       days,
       maxCards: maxCards ?? null,
+      missingOnly,
       estimatedCredits: plan.estimatedCredits,
       selectedSetCount: plan.selectedSets.length,
       skippedSetCount: plan.skippedSets.length,

@@ -29,10 +29,6 @@
       "schedule": "30 9 * * *"
     },
     {
-      "path": "/api/cron/run-scrydex-pipeline",
-      "schedule": "*/10 * * * *"
-    },
-    {
       "path": "/api/cron/run-scrydex-2024plus-daily/1",
       "schedule": "5 7 * * *"
     },
@@ -49,8 +45,16 @@
       "schedule": "50 7 * * *"
     },
     {
-      "path": "/api/cron/run-scrydex-retry",
-      "schedule": "*/15 * * * *"
+      "path": "/api/cron/run-scrydex-2024plus-catchup",
+      "schedule": "20 */8 * * *"
+    },
+    {
+      "path": "/api/cron/run-justtcg-pipeline",
+      "schedule": "10 */2 * * *"
+    },
+    {
+      "path": "/api/cron/run-justtcg-retry",
+      "schedule": "40 */8 * * *"
     },
     {
       "path": "/api/cron/process-provider-pipeline-jobs",

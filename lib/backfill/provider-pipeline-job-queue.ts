@@ -3,6 +3,7 @@ import {
   providerIngestionDisabledReason,
   providerIngestionEnabled,
 } from "@/lib/backfill/provider-registry";
+import { getProviderCooldownState } from "@/lib/backfill/provider-cooldown";
 import {
   runJustTcgPipeline,
   runPokeTracePipeline,
@@ -141,6 +142,15 @@ export async function enqueuePipelineJob(input: {
     ...input.params,
     providerSetId: input.params.providerSetId ?? null,
   };
+
+  const providerCooldown = await getProviderCooldownState(input.provider);
+  if (providerCooldown.active && safeParams.force !== true) {
+    return {
+      enqueued: false,
+      jobId: null,
+      reason: "provider_cooldown_active",
+    };
+  }
 
   let existingQuery = supabase
     .from("pipeline_jobs")

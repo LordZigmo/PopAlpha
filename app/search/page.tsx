@@ -11,6 +11,7 @@ import PokeTraceCameraBetaPanel from "@/components/poketrace-camera-beta-panel";
 import { POKETRACE_CAMERA_HREF } from "@/lib/poketrace/ui-paths";
 import { parseSearchSort, sortSearchResults } from "@/lib/search/sort.mjs";
 import { getLatestSetSummarySnapshot, type SetSummarySnapshot } from "@/lib/sets/summary";
+import { isPhysicalPokemonSet } from "@/lib/sets/physical";
 
 type SearchSort = "relevance" | "market-price" | "newest" | "oldest";
 
@@ -74,6 +75,14 @@ type SearchDisplayRow = {
   change_window: "24H" | "7D" | null;
   primary_image_url: string | null;
 };
+
+function isPhysicalSearchCard(row: { set_name: string | null }): boolean {
+  return isPhysicalPokemonSet({ setName: row.set_name });
+}
+
+function isPhysicalSearchPrinting(row: { set_name: string | null }): boolean {
+  return isPhysicalPokemonSet({ setName: row.set_name });
+}
 
 const DEFAULT_PAGE_SIZE = 24;
 const ALLOWED_PAGE_SIZES = new Set([24, 48, 96]);
@@ -338,10 +347,10 @@ async function runBroadSearch(params: {
     printingQuery,
   ]);
 
-  const subjectRows = (subjectRowsRaw ?? []) as CanonicalCardRow[];
-  const startsRows = (startsRowsRaw ?? []) as CanonicalCardRow[];
-  const containsRows = (containsRowsRaw ?? []) as CanonicalCardRow[];
-  const matchedPrintings = (matchedPrintingsRaw ?? []) as PrintingRow[];
+  const subjectRows = ((subjectRowsRaw ?? []) as CanonicalCardRow[]).filter(isPhysicalSearchCard);
+  const startsRows = ((startsRowsRaw ?? []) as CanonicalCardRow[]).filter(isPhysicalSearchCard);
+  const containsRows = ((containsRowsRaw ?? []) as CanonicalCardRow[]).filter(isPhysicalSearchCard);
+  const matchedPrintings = ((matchedPrintingsRaw ?? []) as PrintingRow[]).filter(isPhysicalSearchPrinting);
 
   const canonicalBySlug = new Map<string, CanonicalCardRow>();
   const scoreBySlug = new Map<string, number>();
@@ -420,6 +429,7 @@ async function runBroadSearch(params: {
   if (missingSlugs.length > 0) {
     const { data: missingRows } = await supabase.from("canonical_cards").select(fields).in("slug", missingSlugs);
     for (const row of (missingRows ?? []) as CanonicalCardRow[]) {
+      if (!isPhysicalSearchCard(row)) continue;
       canonicalBySlug.set(row.slug, row);
     }
   }
@@ -440,7 +450,7 @@ async function runBroadSearch(params: {
       : getCanonicalMarketPulseMap(supabase, pageSlugs),
   ]);
   const pagePrintingsRaw = pagePrintingsResult.data;
-  const pagePrintings = (pagePrintingsRaw ?? []) as PrintingRow[];
+  const pagePrintings = ((pagePrintingsRaw ?? []) as PrintingRow[]).filter(isPhysicalSearchPrinting);
   const printingsBySlug = new Map<string, PrintingRow[]>();
   for (const printing of pagePrintings) {
     const current = printingsBySlug.get(printing.canonical_slug) ?? [];
@@ -723,7 +733,7 @@ export default async function SearchPage({
         .maybeSingle<{ set_name: string | null }>()
     );
 
-    if (exactSetRow?.set_name) {
+    if (exactSetRow?.set_name && isPhysicalPokemonSet({ setName: exactSetRow.set_name })) {
       setFilter = exactSetRow.set_name;
     }
   }
@@ -739,7 +749,9 @@ export default async function SearchPage({
         .ilike("set_name", `%${qNormalized}%`)
         .limit(1)
         .maybeSingle<{ set_name: string | null }>();
-      inferredSetHint = setHintRow?.set_name ?? "";
+      inferredSetHint = isPhysicalPokemonSet({ setName: setHintRow?.set_name ?? null })
+        ? (setHintRow?.set_name ?? "")
+        : "";
     }
     if (!inferredSetHint) {
       const tokens = nameHint.split(/\s+/).filter((token) => token.length > 0);

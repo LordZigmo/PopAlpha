@@ -545,6 +545,10 @@ export async function computePricingTransparencySnapshot(): Promise<PricingTrans
   const sentinelSlo = statusLowGood(sentinelRes.count ?? 0, 0, 5);
   const retrySlo = statusLowGood(retryDepth, 5, 20);
   const alerts: string[] = [];
+  const providerObservationCount24h = (just24hObsRes.count ?? 0) + (scrydex24hObsRes.count ?? 0);
+  const freshRawCards24h = under24h;
+  if (providerObservationCount24h === 0) alerts.push("Hard alert: zero JustTCG/Scrydex snapshot observations in 24h.");
+  if (freshRawCards24h === 0) alerts.push("Hard alert: zero fresh RAW cards in 24h.");
   if (freshnessSlo !== "healthy") alerts.push(`Freshness below SLO (${under24h}/${totalRaw} fresh in 24h).`);
   if (coverageSlo !== "healthy") alerts.push(`Dual-provider coverage below SLO (${both}/${totalRaw}).`);
   if (changeCoverageSlo !== "healthy") alerts.push(`Price-change coverage dropped (${changeCoverageCount}/${totalRaw} cards have change_pct).`);

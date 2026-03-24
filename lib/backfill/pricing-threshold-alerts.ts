@@ -19,6 +19,31 @@ function hourBucket(iso: string): string {
 function buildCandidates(snapshot: PricingTransparencySnapshot): AlertCandidate[] {
   const candidates: AlertCandidate[] = [];
   const freshnessPct = Number.parseFloat(snapshot.slo.find((row) => row.key === "freshness_24h")?.value ?? "0");
+  const freshRawCards24h = (snapshot.stalenessBuckets.under6h ?? 0) + (snapshot.stalenessBuckets.h6to24 ?? 0);
+  const providerObservations24h = (snapshot.ingestionVolume24h.justtcgObservations ?? 0)
+    + (snapshot.ingestionVolume24h.scrydexObservations ?? 0);
+  if (providerObservations24h === 0) {
+    candidates.push({
+      metric: "zero_provider_observations_24h",
+      severity: "critical",
+      message: "Hard alert: zero JustTCG/Scrydex snapshot observations in 24h.",
+      value: 0,
+      threshold: 0,
+      comparator: "lte",
+    });
+  }
+
+  if (freshRawCards24h === 0) {
+    candidates.push({
+      metric: "zero_fresh_raw_cards_24h",
+      severity: "critical",
+      message: "Hard alert: zero fresh RAW cards in 24h.",
+      value: 0,
+      threshold: 0,
+      comparator: "lte",
+    });
+  }
+
   if (Number.isFinite(freshnessPct) && freshnessPct <= 85) {
     candidates.push({
       metric: "freshness_24h",

@@ -256,6 +256,7 @@ const PROVIDER_PIPELINE_HANDLERS: Record<BackendPipelineProvider, ProviderPipeli
       setLimit: opts.setLimit,
       pageLimitPerSet: opts.pageLimitPerSet,
       maxRequests: opts.maxRequests,
+      force: opts.force === true,
     }),
     runNormalize: (opts, effectiveProviderSetId) => runScrydexRawNormalize({
       providerSetId: effectiveProviderSetId,

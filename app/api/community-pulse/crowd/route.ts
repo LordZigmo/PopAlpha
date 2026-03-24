@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { dbPublic } from "@/lib/db";
 import { getCommunityVoteWeekStart } from "@/lib/data/community-pulse";
+import { isPhysicalPokemonSet } from "@/lib/sets/physical";
 
 export const runtime = "nodejs";
 
@@ -57,11 +58,15 @@ export async function GET() {
 
     if (cardError) throw new Error(cardError.message);
 
-    const cardMap = new Map((cards ?? []).map((row) => [row.slug, row] as const));
+    const cardMap = new Map(
+      (cards ?? [])
+        .filter((row) => isPhysicalPokemonSet({ setName: row.set_name }))
+        .map((row) => [row.slug, row] as const),
+    );
 
     return NextResponse.json({
       ok: true,
-      cards: candidates.map((entry) => {
+      cards: candidates.filter((entry) => cardMap.has(entry.slug)).map((entry) => {
         const card = cardMap.get(entry.slug);
         return {
           slug: entry.slug,

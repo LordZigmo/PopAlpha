@@ -46,6 +46,7 @@ export async function runHomepageDataTests() {
           market_price_as_of: freshIso,
           snapshot_count_30d: 30,
           change_pct_24h: 14.2,
+          change_pct_7d: 4.2,
           market_confidence_score: 94,
           market_low_confidence: false,
           active_listings_7d: 7,
@@ -56,6 +57,7 @@ export async function runHomepageDataTests() {
           market_price_as_of: freshIso,
           snapshot_count_30d: 30,
           change_pct_24h: 22.1,
+          change_pct_7d: 3.6,
           market_confidence_score: 93,
           market_low_confidence: false,
           active_listings_7d: 4,
@@ -66,6 +68,7 @@ export async function runHomepageDataTests() {
           market_price_as_of: freshIso,
           snapshot_count_30d: 26,
           change_pct_24h: 18.4,
+          change_pct_7d: 5.1,
           market_confidence_score: 91,
           market_low_confidence: false,
           active_listings_7d: 4,
@@ -76,6 +79,7 @@ export async function runHomepageDataTests() {
           market_price_as_of: freshIso,
           snapshot_count_30d: 27,
           change_pct_24h: 11.3,
+          change_pct_7d: 4.7,
           market_confidence_score: 92,
           market_low_confidence: false,
           active_listings_7d: 4,
@@ -88,6 +92,7 @@ export async function runHomepageDataTests() {
           market_price_as_of: earlierIso,
           snapshot_count_30d: 29,
           change_pct_24h: -9.7,
+          change_pct_7d: -6.8,
           market_confidence_score: 90,
           market_low_confidence: false,
           active_listings_7d: 8,
@@ -98,6 +103,7 @@ export async function runHomepageDataTests() {
           market_price_as_of: earlierIso,
           snapshot_count_30d: 25,
           change_pct_24h: -12.6,
+          change_pct_7d: -7.9,
           market_confidence_score: 92,
           market_low_confidence: false,
           active_listings_7d: 8,
@@ -301,4 +307,87 @@ export async function runHomepageDataTests() {
   assert.equal(data.as_of, freshIso);
   assert.equal(data.prices_refreshed_today, 8126);
   assert.equal(data.tracked_cards_with_live_price, 10444);
+
+  const fallbackData = await getHomepageData({
+    now: () => FIXED_NOW,
+    logger: NOOP_LOGGER,
+    dataOverrides: {
+      positiveChangeRows: [
+        {
+          canonical_slug: "fallback-up",
+          market_price: 1.62,
+          market_price_as_of: freshIso,
+          snapshot_count_30d: 28,
+          change_pct_24h: null,
+          change_pct_7d: 16.4,
+          market_confidence_score: 67,
+          market_low_confidence: false,
+          active_listings_7d: 7,
+        },
+      ],
+      negativeChangeRows: [
+        {
+          canonical_slug: "fallback-down",
+          market_price: 2.44,
+          market_price_as_of: freshIso,
+          snapshot_count_30d: 29,
+          change_pct_24h: null,
+          change_pct_7d: -12.8,
+          market_confidence_score: 66,
+          market_low_confidence: false,
+          active_listings_7d: 6,
+        },
+      ],
+      trendingVariants: [],
+      cards: [
+        { slug: "fallback-up", canonical_name: "Fallback Up", set_name: "Fallback Set", year: 2026 },
+        { slug: "fallback-down", canonical_name: "Fallback Down", set_name: "Fallback Set", year: 2026 },
+      ],
+      marketPulseMap: new Map([
+        [
+          "fallback-up",
+          buildPulse({
+            marketPrice: 1.62,
+            marketPriceAsOf: freshIso,
+            activeListings7d: 7,
+            snapshotCount30d: 28,
+            changePct24h: null,
+            changePct7d: 16.4,
+            changePct: 16.4,
+            changeWindow: "7D",
+            confidenceScore: 67,
+            lowConfidence: false,
+            marketStrengthScore: 72,
+            marketDirection: "bullish",
+          }),
+        ],
+        [
+          "fallback-down",
+          buildPulse({
+            marketPrice: 2.44,
+            marketPriceAsOf: freshIso,
+            activeListings7d: 6,
+            snapshotCount30d: 29,
+            changePct24h: null,
+            changePct7d: -12.8,
+            changePct: -12.8,
+            changeWindow: "7D",
+            confidenceScore: 66,
+            lowConfidence: false,
+            marketStrengthScore: 69,
+            marketDirection: "bearish",
+          }),
+        ],
+      ]),
+    },
+  });
+
+  assert.deepEqual(
+    fallbackData.movers.map((card) => ({ slug: card.slug, change_pct: card.change_pct, change_window: card.change_window })),
+    [{ slug: "fallback-up", change_pct: 16.4, change_window: "7D" }],
+  );
+  assert.deepEqual(
+    fallbackData.losers.map((card) => ({ slug: card.slug, change_pct: card.change_pct, change_window: card.change_window })),
+    [{ slug: "fallback-down", change_pct: -12.8, change_window: "7D" }],
+  );
 }

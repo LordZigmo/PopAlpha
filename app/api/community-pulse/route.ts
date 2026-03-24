@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/auth/require";
 import { createServerSupabaseUserClient } from "@/lib/db/user";
 import { ensureAppUser } from "@/lib/data/app-user";
 import { getCommunityVoteWeekEndMs, getCommunityVoteWeekStart, type CommunityVoteSide } from "@/lib/data/community-pulse";
+import { isPhysicalPokemonSet } from "@/lib/sets/physical";
 
 export const runtime = "nodejs";
 
@@ -33,6 +34,11 @@ type UserVoteWeekRow = {
 type CommunityVoteTotalsRow = {
   bullish_votes: number;
   bearish_votes: number;
+};
+
+type CanonicalCardRow = {
+  slug: string;
+  set_name: string | null;
 };
 
 export async function GET(req: Request) {
@@ -73,7 +79,7 @@ export async function GET(req: Request) {
         .limit(8);
 
       if (error) throw new Error(error.message);
-      followedVotes = (data ?? []) as FeedEventRow[];
+      followedVotes = ((data ?? []) as FeedEventRow[]).filter((row) => isPhysicalPokemonSet({ setName: row.set_name }));
     }
 
     return NextResponse.json({
@@ -128,7 +134,7 @@ export async function POST(req: Request) {
     const db = await createServerSupabaseUserClient();
     const weekStart = getCommunityVoteWeekStart();
 
-    const [{ data: existingVote, error: existingError }, { data: weeklyUsage, error: countError }] = await Promise.all([
+    const [{ data: existingVote, error: existingError }, { data: weeklyUsage, error: countError }, { data: canonicalCard, error: canonicalError }] = await Promise.all([
       db
         .from("community_card_votes")
         .select("vote_side")
@@ -142,10 +148,23 @@ export async function POST(req: Request) {
         .eq("voter_id", auth.userId)
         .eq("week_start", weekStart)
         .maybeSingle<UserVoteWeekRow>(),
+      db
+        .from("canonical_cards")
+        .select("slug, set_name")
+        .eq("slug", canonicalSlug)
+        .maybeSingle<CanonicalCardRow>(),
     ]);
 
     if (existingError) throw new Error(existingError.message);
     if (countError) throw new Error(countError.message);
+    if (canonicalError) throw new Error(canonicalError.message);
+
+    if (!canonicalCard || !isPhysicalPokemonSet({ setName: canonicalCard.set_name })) {
+      return NextResponse.json(
+        { ok: false, error: "Card not found." },
+        { status: 404 },
+      );
+    }
 
     if (existingVote) {
       return NextResponse.json(

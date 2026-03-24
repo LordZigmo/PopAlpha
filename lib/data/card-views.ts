@@ -1,6 +1,7 @@
 import { dbPublic } from "@/lib/db";
 import type { HomepageCard } from "@/lib/data/homepage";
 import { getCanonicalMarketPulseMap } from "@/lib/data/market";
+import { isPhysicalPokemonSet } from "@/lib/sets/physical";
 
 export type CardViewPoint = {
   date: string;
@@ -135,6 +136,7 @@ export async function getTopViewedCards(days = 7, limit = 5): Promise<HomepageCa
     .map((slug) => {
       const card = cardMap.get(slug);
       if (!card) return null;
+      if (!isPhysicalPokemonSet({ setName: card.set_name })) return null;
       const market = marketMap.get(slug);
       const result: HomepageCard = {
         slug,

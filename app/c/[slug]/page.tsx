@@ -34,6 +34,7 @@ import { buildGradedVariantRef } from "@/lib/identity/variant-ref";
 import { dbPublic } from "@/lib/db";
 import { buildAssetViewModel } from "@/lib/data/assets";
 import { resolveWeightedMarketPrice } from "@/lib/pricing/market-confidence";
+import { isPhysicalPokemonSet } from "@/lib/sets/physical";
 
 type CanonicalCardRow = {
   slug: string;
@@ -79,11 +80,10 @@ type CanonicalCardPageBaseData = {
 };
 
 const DEFAULT_BACK_HREF = "/search";
-const VIEW_MODES = ["RAW", "GRADED"] as const;
 const GRADED_SOURCES = ["PSA", "TAG", "BGS", "CGC"] as const;
 const GRADE_BUCKETS = ["LE_7", "G8", "G9", "G10"] as const;
 
-type ViewMode = (typeof VIEW_MODES)[number];
+type ViewMode = "RAW" | "GRADED";
 type GradeBucket = (typeof GRADE_BUCKETS)[number];
 
 type GradedAvailabilityRow = {
@@ -195,7 +195,7 @@ const getCanonicalCardPageBaseData = cache(async (slug: string): Promise<Canonic
   ]);
 
   return {
-    canonical: canonical ?? null,
+    canonical: canonical && isPhysicalPokemonSet({ setName: canonical.set_name }) ? canonical : null,
     printings: ((printingsData ?? []) as CardPrintingRow[]).sort(sortPrintings),
     cardProfile: cardProfile ?? null,
   };
@@ -470,18 +470,6 @@ function formatUsdCompact(value: number | null | undefined): string {
     currency: "USD",
     maximumFractionDigits: value >= 1000 ? 0 : 2,
   }).format(value);
-}
-
-function formatAsOf(value: string | null | undefined): string | null {
-  if (!value) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return date.toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
 }
 
 function normalizeRawProviderName(provider: string | null | undefined): "SCRYDEX" | null {

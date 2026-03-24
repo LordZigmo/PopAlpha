@@ -8,6 +8,7 @@ import {
   type PokeTraceCard,
   type PokeTraceSet,
 } from "@/lib/poketrace/client";
+import { isPhysicalPokemonSet } from "@/lib/sets/physical";
 
 const PROVIDER = "POKETRACE";
 const JOB = "poketrace_raw_ingest";
@@ -579,6 +580,7 @@ async function loadCanonicalSetsFromPrintings(): Promise<CanonicalSet[]> {
       const setCode = String(row.set_code ?? "");
       const setName = String(row.set_name ?? "");
       const providerSetId = normalizeProviderSetSlugFromCanonical(setName);
+      if (!isPhysicalPokemonSet({ setCode, setName })) continue;
       if (!setCode || !setName || !providerSetId || seen.has(setCode)) continue;
       seen.add(setCode);
       sets.push({ setCode, setName, providerSetId, mapConfidence: 0 });
@@ -606,6 +608,7 @@ async function loadCanonicalSetsFromProviderIndex(): Promise<CanonicalSet[]> {
   for (const row of (data ?? []) as ProviderSetMapRow[]) {
     const setCode = String(row.canonical_set_code ?? "").trim();
     const providerSetId = String(row.provider_set_id ?? "").trim();
+    if (!isPhysicalPokemonSet({ setCode, setName: row.canonical_set_name })) continue;
     if (!setCode || !providerSetId) continue;
     sets.push({
       setCode,

@@ -6,6 +6,12 @@ import {
   loadHighValueStaleSetPriority,
   loadRecentSetConsistencyPriority,
 } from "@/lib/backfill/set-priority";
+import { isPhysicalPokemonSet } from "@/lib/sets/physical";
+import {
+  getProviderCooldownState,
+  isProviderCreditCapError,
+  markProviderCreditCapCooldown,
+} from "@/lib/backfill/provider-cooldown";
 
 const PROVIDER = "SCRYDEX";
 const JOB = "scrydex_raw_ingest";
@@ -219,20 +225,6 @@ function isRetryableScrydexError(message: string): boolean {
     || text.includes("eai_again");
 }
 
-function selectSetsFromCursor(sets: CanonicalSet[], setLimit: number, cursorSetCode: string | null): CanonicalSet[] {
-  if (sets.length === 0) return [];
-  const limit = Math.min(Math.max(1, setLimit), sets.length);
-  if (!cursorSetCode) return sets.slice(0, limit);
-
-  const cursorIndex = sets.findIndex((row) => row.setCode === cursorSetCode);
-  const startIndex = cursorIndex >= 0 ? (cursorIndex + 1) % sets.length : 0;
-  const selected: CanonicalSet[] = [];
-  for (let i = 0; i < limit; i += 1) {
-    selected.push(sets[(startIndex + i) % sets.length]);
-  }
-  return selected;
-}
-
 function rotateItemsFromCursor<T>(params: {
   items: T[];
   limit: number;
@@ -360,23 +352,6 @@ function maxIso(left: string | null | undefined, right: string | null | undefine
   if (leftMs === null) return right ?? null;
   if (rightMs === null) return left ?? null;
   return leftMs >= rightMs ? (left ?? null) : (right ?? null);
-}
-
-function sortTargetsByFreshness(
-  targets: IngestTarget[],
-  healthByProviderSet: Map<string, ProviderSetHealthRow>,
-): IngestTarget[] {
-  return [...targets].sort((a, b) => {
-    const ah = healthByProviderSet.get(a.providerSetId);
-    const bh = healthByProviderSet.get(b.providerSetId);
-    const aSuccess = toMs(ah?.last_success_at) ?? 0;
-    const bSuccess = toMs(bh?.last_success_at) ?? 0;
-    if (aSuccess !== bSuccess) return aSuccess - bSuccess;
-    const aAttempt = toMs(ah?.last_attempt_at) ?? 0;
-    const bAttempt = toMs(bh?.last_attempt_at) ?? 0;
-    if (aAttempt !== bAttempt) return aAttempt - bAttempt;
-    return String(a.setCode ?? "").localeCompare(String(b.setCode ?? ""));
-  });
 }
 
 function buildHotProviderSetIds(params: {
@@ -551,6 +526,7 @@ async function loadCanonicalSetsFromPrintings(): Promise<CanonicalSet[]> {
     for (const row of rows) {
       const setCode = String(row.set_code ?? "");
       const setName = String(row.set_name ?? "");
+      if (!isPhysicalPokemonSet({ setCode, setName })) continue;
       if (!setCode || !setName || seen.has(setCode)) continue;
       seen.add(setCode);
       sets.push({ setCode, setName });
@@ -578,6 +554,7 @@ async function loadCanonicalSetsFromProviderIndex(): Promise<CanonicalSet[]> {
   for (const row of (data ?? []) as ProviderSetMapRow[]) {
     const setCode = String(row.canonical_set_code ?? "").trim();
     const providerSetId = String(row.provider_set_id ?? "").trim();
+    if (!isPhysicalPokemonSet({ setCode, setName: row.canonical_set_name })) continue;
     if (!setCode || !providerSetId) continue;
     sets.push({
       setCode,
@@ -695,6 +672,7 @@ export async function runPokemonTcgRawIngest(opts: {
   maxRequests?: number;
   retryAttempts?: number;
   retryBackoffMs?: number;
+  force?: boolean;
 } = {}): Promise<RawIngestResult> {
   const supabase = dbAdmin();
   const startedAt = new Date().toISOString();
@@ -728,6 +706,11 @@ export async function runPokemonTcgRawIngest(opts: {
   const warningSamples: string[] = [];
   const skippedCooldownSamples: string[] = [];
   const nowMs = Date.now();
+  const providerCooldownState = await getProviderCooldownState(PROVIDER);
+  const providerCooldownActive = providerCooldownState.active && opts.force !== true;
+  let providerCooldownUntil = providerCooldownState.cooldownUntil;
+  let providerCooldownError = providerCooldownState.lastError;
+  let providerCooldownTriggered = providerCooldownActive;
 
   let credentials: ReturnType<typeof getScrydexCredentials>;
   try {
@@ -758,6 +741,16 @@ export async function runPokemonTcgRawIngest(opts: {
         hotSlotCount: 0,
         baselineSlotCount: 0,
       }
+    : providerCooldownActive
+      ? {
+          selectedTargets: [] as IngestTarget[],
+          nextSetCode: priorState.cursorSetCode,
+          nextHotProviderSetId: priorState.hotCursorProviderSetId,
+          nextSelectionPhase: priorState.selectionPhase,
+          hotProviderSetIds: [] as string[],
+          hotSlotCount: 0,
+          baselineSlotCount: 0,
+        }
     : await (async () => {
         providerSetIndexBackfilled = await maybeBackfillProviderSetMap();
         const sets = await loadCanonicalSetsForScrydex();
@@ -766,7 +759,6 @@ export async function runPokemonTcgRawIngest(opts: {
           setName: set.setName,
           providerSetId: set.providerSetId ?? set.setCode,
         }));
-        const byProviderSetId = new Map(allTargets.map((target) => [target.providerSetId, target] as const));
         const healthByProviderSet = await loadProviderSetHealth(allTargets.map((target) => target.providerSetId));
         const retryFromHealth = allTargets
           .map((target) => ({
@@ -863,6 +855,12 @@ export async function runPokemonTcgRawIngest(opts: {
     last_verified_at: string;
   }> = [];
 
+  if (providerCooldownActive && warningSamples.length < 25) {
+    warningSamples.push(
+      `provider cooldown active until=${providerCooldownUntil ?? "unknown"} reason=${providerCooldownError ?? "credit cap"}`,
+    );
+  }
+
   const { data: runRow, error: runStartError } = await supabase
     .from("ingest_runs")
     .insert({
@@ -908,6 +906,7 @@ export async function runPokemonTcgRawIngest(opts: {
   const runId = runRow?.id ?? null;
 
   for (const target of resolvedTargets) {
+    if (providerCooldownTriggered) break;
     if (requestsMade >= maxRequests) break;
     setsProcessed += 1;
 
@@ -960,24 +959,33 @@ export async function runPokemonTcgRawIngest(opts: {
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           const statusCode = extractScrydexHttpStatus(message);
+          const creditCapHit = isProviderCreditCapError(PROVIDER, message);
           if (statusCode !== null) {
             lastStatus = statusCode;
           } else if (lastStatus === null && isRetryableScrydexError(message)) {
             lastStatus = 522;
           }
-          const shouldCooldown = statusCode === 429 || (typeof statusCode === "number" && statusCode >= 500);
+          const shouldCooldown = creditCapHit || statusCode === 429 || (typeof statusCode === "number" && statusCode >= 500);
           if (shouldCooldown) setHadRetryableFailure = true;
           setLastError = message;
-          const canRetry = attempt < retryAttempts && (shouldCooldown || isRetryableScrydexError(message)) && requestsMade < maxRequests;
+          const canRetry = !creditCapHit
+            && attempt < retryAttempts
+            && (shouldCooldown || isRetryableScrydexError(message))
+            && requestsMade < maxRequests;
           if (canRetry) {
             await delayMs(retryBackoffMs * attempt);
             continue;
           }
-          firstError ??= message;
           failedRequests += 1;
-          if (shouldCooldown) {
-            cooldownByProviderSet[target.providerSetId] = new Date(Date.now() + cooldownMs).toISOString();
+          if (creditCapHit) {
+            providerCooldownTriggered = true;
+            providerCooldownError = message;
+            providerCooldownUntil = new Date(Date.now() + cooldownMs).toISOString();
           }
+          if (shouldCooldown) {
+            cooldownByProviderSet[target.providerSetId] = providerCooldownUntil ?? new Date(Date.now() + cooldownMs).toISOString();
+          }
+          if (!creditCapHit) firstError ??= message;
           if (warningSamples.length < 25) {
             warningSamples.push(
               `set=${target.providerSetId} page=${page} status=${lastStatus ?? "error"} attempts=${attempt}`,
@@ -1068,6 +1076,16 @@ export async function runPokemonTcgRawIngest(opts: {
   }
 
   cooldownByProviderSet = pruneCooldowns(cooldownByProviderSet, Date.now());
+
+  if (providerCooldownTriggered && providerCooldownUntil && providerCooldownError) {
+    await markProviderCreditCapCooldown({
+      provider: PROVIDER,
+      statusCode: 403,
+      errorMessage: providerCooldownError,
+      canonicalSetCode: PROVIDER,
+      canonicalSetName: "SCRYDEX provider cooldown",
+    });
+  }
 
   if (providerSetHealthUpserts.length > 0) {
     const dedupedByProviderSet = new Map<string, ProviderSetHealthUpsertRow>();
@@ -1178,6 +1196,7 @@ export async function runScrydexRawIngest(opts: {
   maxRequests?: number;
   retryAttempts?: number;
   retryBackoffMs?: number;
+  force?: boolean;
 } = {}): Promise<RawIngestResult> {
   return runPokemonTcgRawIngest(opts);
 }

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { buildSetId } from "@/lib/sets/summary-core.mjs";
 import { dbPublic } from "@/lib/db";
+import { isPhysicalPokemonSet } from "@/lib/sets/physical";
 
 type SetEntry = {
   set_name: string;
@@ -89,6 +90,7 @@ export default async function SetsPage() {
   const sets: SetEntry[] = [];
   for (const entry of catalogData.data ?? []) {
     if (!entry?.set_name) continue;
+    if (!isPhysicalPokemonSet({ setName: entry.set_name })) continue;
     const key = entry.set_name;
     const summary = key ? summaryMap.get(key) : undefined;
     sets.push({

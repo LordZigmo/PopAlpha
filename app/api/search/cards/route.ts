@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { dbPublic } from "@/lib/db";
 import { buildSearchCardResults } from "@/lib/search/cards.mjs";
 import { normalizeSearchInput } from "@/lib/search/normalize.mjs";
+import { isPhysicalPokemonSet } from "@/lib/sets/physical";
 
 export const runtime = "nodejs";
 
@@ -22,6 +23,10 @@ type AliasRow = {
   canonical_slug: string;
   alias_norm: string;
 };
+
+function isPhysicalSearchRow(row: { set_name: string | null }): boolean {
+  return isPhysicalPokemonSet({ setName: row.set_name });
+}
 
 function isNumericToken(token: string): boolean {
   return /^\d+$/.test(token);
@@ -134,7 +139,7 @@ export async function GET(req: Request) {
       year: row.year,
       primary_image_url: row.primary_image_url ?? null,
       search_doc_norm: row.search_doc_norm ?? "",
-    })),
+    })).filter(isPhysicalSearchRow),
   ) as CanonicalRow[];
 
   const aliasRows = (aliasTokenResult.data ?? []) as AliasRow[];
@@ -163,7 +168,7 @@ export async function GET(req: Request) {
       year: row.year,
       primary_image_url: row.primary_image_url ?? null,
       search_doc_norm: row.search_doc_norm ?? "",
-    }));
+    })).filter(isPhysicalSearchRow);
   }
 
   const canonicalRows = dedupeBySlug([...directRows, ...aliasCanonicalRows]);

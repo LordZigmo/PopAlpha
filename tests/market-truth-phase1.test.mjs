@@ -74,6 +74,49 @@ export function runMarketTruthPhase1Tests() {
   assert.ok(blendedRow.marketStrengthScore !== null);
   assert.equal(blendedRow.marketDirection, "bullish");
 
+  const enrichedFromVariantSignals = resolveCanonicalMarketPulse(
+    {
+      justtcg_price: null,
+      scrydex_price: 1.98,
+      pokemontcg_price: null,
+      market_price: 1.98,
+      market_price_as_of: "2026-03-20T22:00:17.594Z",
+      liquidity_score: 100,
+      active_listings_7d: 8,
+      snapshot_count_30d: 46,
+      median_7d: 1.44,
+      provider_trend_slope_7d: null,
+      provider_cov_price_30d: null,
+      provider_price_relative_to_30d_range: null,
+      provider_price_changes_count_30d: null,
+      market_confidence_score: 64,
+      market_low_confidence: false,
+      market_blend_policy: "SCRYDEX_PRIMARY",
+      market_provenance: {
+        sourceMix: { justtcgWeight: 0, scrydexWeight: 1 },
+        sampleCounts7d: { justtcg: 0, scrydex: 5 },
+      },
+      change_pct_24h: null,
+      change_pct_7d: 63.63636363636363,
+    },
+    "MATCH",
+    {
+      canonical_slug: "journey-together-56-lillie-s-clefairy-ex",
+      provider: "JUSTTCG",
+      provider_trend_slope_7d: 0.0773078206122944,
+      provider_cov_price_30d: 0.172906057805584,
+      provider_price_relative_to_30d_range: 0.352941176470588,
+      provider_price_changes_count_30d: 104,
+      history_points_30d: 111,
+      provider_as_of_ts: "2026-03-02T13:15:54.514341Z",
+      updated_at: "2026-03-02T13:15:54.514341Z",
+    },
+  );
+
+  assert.ok(enrichedFromVariantSignals.marketStrengthScore !== null);
+  assert.ok(enrichedFromVariantSignals.marketStrengthScore >= 60);
+  assert.equal(enrichedFromVariantSignals.marketDirection, "bullish");
+
   const scrydexOnly = resolveCanonicalMarketPulse({
     justtcg_price: null,
     scrydex_price: 0.94,

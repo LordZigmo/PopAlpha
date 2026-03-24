@@ -1,14 +1,83 @@
 import assert from "node:assert/strict";
 import {
+  buildScrydexRecentHistoryCatchupPlan,
+  calculateScrydexDailyCaptureRequests,
+  calculateScrydexHistoryBackfillCredits,
   historyDateToSnapshotTs,
   isMissingScrydexCardHistoryErrorMessage,
   isRetryableHistoryWriteErrorMessage,
   providerVariantIdToScrydexToken,
   retryHistoryWriteOperation,
   selectScrydexRawHistoryPrice,
+  summarizeScrydexRecentHistoryCoverage,
 } from "../lib/backfill/scrydex-price-history.ts";
 
 async function runScrydexPriceHistoryTests() {
+  assert.equal(calculateScrydexDailyCaptureRequests(0), 1);
+  assert.equal(calculateScrydexDailyCaptureRequests(245), 3);
+  assert.equal(calculateScrydexHistoryBackfillCredits(5), 15);
+
+  assert.deepEqual(
+    summarizeScrydexRecentHistoryCoverage({
+      expectedCardCount: 245,
+      matchedCardCount: 200,
+      cardsWithRecentSnapshot: 150,
+      recentHistoryDays: 90,
+    }),
+    {
+      recentHistoryDays: 90,
+      cardsWithRecentSnapshot: 150,
+      cardsMissingRecentSnapshot: 50,
+      cardsMissingMappings: 45,
+      needsHistoryCatchup: true,
+    },
+  );
+
+  const recentPlan = buildScrydexRecentHistoryCatchupPlan({
+    audits: [
+      {
+        providerSetId: "sv10",
+        setCode: "sv10",
+        setName: "Destined Rivals",
+        expectedCardCount: 244,
+        providerCardCount: 244,
+        matchedCardCount: 244,
+        dailyCaptureRequests: 3,
+        historyBackfillRequests: 244,
+        historyBackfillCredits: 732,
+        priorityReasons: [],
+        recentHistoryDays: 90,
+        cardsWithRecentSnapshot: 44,
+        cardsMissingRecentSnapshot: 200,
+        cardsMissingMappings: 0,
+        needsHistoryCatchup: true,
+      },
+      {
+        providerSetId: "sv9",
+        setCode: "sv9",
+        setName: "Journey Together",
+        expectedCardCount: 190,
+        providerCardCount: 190,
+        matchedCardCount: 190,
+        dailyCaptureRequests: 2,
+        historyBackfillRequests: 190,
+        historyBackfillCredits: 570,
+        priorityReasons: [],
+        recentHistoryDays: 90,
+        cardsWithRecentSnapshot: 130,
+        cardsMissingRecentSnapshot: 60,
+        cardsMissingMappings: 0,
+        needsHistoryCatchup: true,
+      },
+    ],
+    maxCredits: 450,
+  });
+  assert.equal(recentPlan.estimatedCredits, 450);
+  assert.equal(recentPlan.plannedCards, 150);
+  assert.equal(recentPlan.selectedSets.length, 1);
+  assert.equal(recentPlan.selectedSets[0].providerSetId, "sv10");
+  assert.equal(recentPlan.selectedSets[0].plannedCardCount, 150);
+
   assert.equal(historyDateToSnapshotTs("2026-03-17"), "2026-03-17T12:00:00.000Z");
   assert.equal(providerVariantIdToScrydexToken("sv3pt5-7:reverseHolofoil"), "reverseholofoil");
   assert.equal(providerVariantIdToScrydexToken("sv3pt5-7:pokemonCenterStamp"), "pokemoncenterstamp");

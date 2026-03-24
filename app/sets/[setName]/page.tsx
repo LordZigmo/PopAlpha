@@ -6,6 +6,7 @@ import { getCanonicalMarketPulseMap } from "@/lib/data/market";
 import { getSetSummaryPageData } from "@/lib/sets/summary";
 import ChangeBadge from "@/components/change-badge";
 import { dbPublic } from "@/lib/db";
+import { isPhysicalPokemonSet } from "@/lib/sets/physical";
 
 type CanonicalRow = {
   slug: string;
@@ -154,6 +155,15 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { setName } = await params;
   const decodedSetName = decodeURIComponent(setName);
+  if (!isPhysicalPokemonSet({ setName: decodedSetName })) {
+    return {
+      title: "Set Not Found | PopAlpha",
+      robots: {
+        index: false,
+        follow: false,
+      },
+    };
+  }
   const { summary, cards } = await getSetPageBaseData(decodedSetName);
 
   if (!cards.length) {
@@ -198,6 +208,7 @@ export async function generateMetadata({
 export default async function SetBrowserPage({ params }: { params: Promise<{ setName: string }> }) {
   const { setName } = await params;
   const decodedSetName = decodeURIComponent(setName);
+  if (!isPhysicalPokemonSet({ setName: decodedSetName })) notFound();
   const supabase = dbPublic();
   const { summary, cards } = await getSetPageBaseData(decodedSetName);
   if (!cards.length) notFound();

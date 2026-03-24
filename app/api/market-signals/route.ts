@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCommunityVoteWeekStart } from "@/lib/data/community-pulse";
 import { dbPublic } from "@/lib/db";
+import { isPhysicalPokemonSet } from "@/lib/sets/physical";
 
 export const runtime = "nodejs";
 
@@ -63,7 +64,11 @@ export async function GET() {
 
     if (cardsError) throw new Error(cardsError.message);
 
-    const cardMap = new Map((cards ?? []).map((row) => [row.slug, row] as const));
+    const cardMap = new Map(
+      (cards ?? [])
+        .filter((row) => isPhysicalPokemonSet({ setName: row.set_name }))
+        .map((row) => [row.slug, row] as const),
+    );
 
     const bullishLeader = [...voteMap.entries()]
       .map(([slug, counts]) => {
@@ -71,13 +76,14 @@ export async function GET() {
         const upPct = total > 0 ? (counts.up / total) * 100 : 0;
         return { slug, upPct, total };
       })
-      .filter((entry) => entry.total > 0)
+      .filter((entry) => entry.total > 0 && cardMap.has(entry.slug))
       .sort((a, b) => {
         if (b.upPct !== a.upPct) return b.upPct - a.upPct;
         return b.total - a.total;
       })[0] ?? null;
 
     const mostWatched = [...viewMap.entries()]
+      .filter(([slug]) => cardMap.has(slug))
       .sort((a, b) => b[1] - a[1])[0] ?? null;
 
     const divergence = [...viewMap.entries()]
@@ -86,6 +92,7 @@ export async function GET() {
         const totalVotes = counts.up + counts.down;
         return { slug, totalViews, totalVotes };
       })
+      .filter((entry) => cardMap.has(entry.slug))
       .sort((a, b) => {
         const scoreA = a.totalViews - a.totalVotes * 5;
         const scoreB = b.totalViews - b.totalVotes * 5;

@@ -6,6 +6,7 @@ import {
   loadCoverageGapSetPriority,
   loadHighValueStaleSetPriority,
 } from "@/lib/backfill/set-priority";
+import { isPhysicalPokemonSet } from "@/lib/sets/physical";
 
 const PROVIDER = "JUSTTCG";
 const JOB = "justtcg_raw_ingest";
@@ -246,6 +247,7 @@ async function loadCanonicalSetsFromPrintings(): Promise<CanonicalSet[]> {
     for (const row of rows) {
       const setCode = String(row.set_code ?? "");
       const setName = String(row.set_name ?? "");
+      if (!isPhysicalPokemonSet({ setCode, setName })) continue;
       if (!setCode || !setName || seen.has(setCode)) continue;
       seen.add(setCode);
       sets.push({ setCode, setName });

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { dbPublic } from "@/lib/db";
+import { isPhysicalPokemonSet } from "@/lib/sets/physical";
 
 export const runtime = "nodejs";
 
@@ -10,7 +11,7 @@ export async function GET() {
       .from("public_card_page_view_totals")
       .select("canonical_slug, total_views, last_viewed_at")
       .order("last_viewed_at", { ascending: false })
-      .limit(8);
+      .limit(24);
 
     if (totalsError) throw new Error(totalsError.message);
 
@@ -27,7 +28,9 @@ export async function GET() {
     if (cardsError) throw new Error(cardsError.message);
 
     const cardMap = new Map(
-      (cards ?? []).map((card) => [card.slug, card] as const),
+      (cards ?? [])
+        .filter((card) => isPhysicalPokemonSet({ setName: card.set_name }))
+        .map((card) => [card.slug, card] as const),
     );
 
     const payload = (totals ?? [])

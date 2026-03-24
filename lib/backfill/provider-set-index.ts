@@ -1,5 +1,6 @@
 import { dbAdmin } from "@/lib/db/admin";
 import type { BackendPipelineProvider } from "@/lib/backfill/provider-registry";
+import { isPhysicalPokemonSet } from "@/lib/sets/physical";
 
 export type ProviderSetIndexRow = {
   canonicalSetCode: string;
@@ -32,6 +33,7 @@ export async function loadProviderSetIndex(provider: BackendPipelineProvider): P
     const canonicalSetCode = String(row.canonical_set_code ?? "").trim();
     const providerSetId = String(row.provider_set_id ?? "").trim();
     if (!canonicalSetCode || !providerSetId) continue;
+    if (!isPhysicalPokemonSet({ setCode: canonicalSetCode, setName: row.canonical_set_name })) continue;
     if (deduped.has(canonicalSetCode)) continue;
     deduped.set(canonicalSetCode, {
       canonicalSetCode,

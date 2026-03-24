@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { dbPublic } from "@/lib/db";
 import { measureAsync } from "@/lib/perf";
+import { isPhysicalPokemonSet } from "@/lib/sets/physical";
 
 export const runtime = "nodejs";
 
@@ -49,6 +50,7 @@ export async function GET(req: Request) {
   });
 
   const cards = cardsRaw
+    .filter((card) => isPhysicalPokemonSet({ setName: card.set_name }))
     .sort((a, b) => {
       const scoreA = scoreText(a.canonical_name, q) * 10 + scoreText(a.set_name, q);
       const scoreB = scoreText(b.canonical_name, q) * 10 + scoreText(b.set_name, q);
