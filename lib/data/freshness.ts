@@ -13,6 +13,15 @@ function normalizeWindowHours(windowHours: number): number {
   return Math.max(1, Math.floor(windowHours));
 }
 
+function normalizeWindowDays(windowDays: number): number {
+  return Math.max(1, Math.floor(windowDays));
+}
+
+function parseMonitorNumber(value: unknown): number {
+  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 export async function getCanonicalRawFreshnessMonitors(windowHoursList: number[]): Promise<CanonicalRawFreshnessMonitor[]> {
   const supabase = dbPublic();
   const asOfDate = new Date();
@@ -78,6 +87,51 @@ export async function getCanonicalRawFreshnessMonitors(windowHoursList: number[]
 export async function getCanonicalRawFreshnessMonitor(windowHours = 24): Promise<CanonicalRawFreshnessMonitor> {
   const [monitor] = await getCanonicalRawFreshnessMonitors([windowHours]);
   return monitor;
+}
+
+type CanonicalRawDailyFreshnessMonitorRow = {
+  window_days: number | string;
+  window_hours: number | string;
+  as_of: string;
+  cutoff_iso: string;
+  total_canonical_raw: number | string | null;
+  fresh_canonical_raw: number | string | null;
+  fresh_pct: number | string | null;
+};
+
+export async function getCanonicalRawRollingDailyFreshnessMonitors(windowDaysList: number[]): Promise<CanonicalRawFreshnessMonitor[]> {
+  const supabase = dbPublic();
+  const uniqueWindowDays = [...new Set(windowDaysList.map(normalizeWindowDays))];
+  const { data, error } = await supabase
+    .rpc("get_canonical_raw_daily_freshness_monitors", { p_window_days: uniqueWindowDays })
+    .returns<CanonicalRawDailyFreshnessMonitorRow[]>();
+
+  if (error) {
+    throw new Error(`freshness(daily-coverage): ${error.message}`);
+  }
+
+  const monitorsByWindowDays = new Map<number, CanonicalRawFreshnessMonitor>();
+
+  for (const row of data ?? []) {
+    const windowDays = normalizeWindowDays(parseMonitorNumber(row.window_days));
+    monitorsByWindowDays.set(windowDays, {
+      windowHours: normalizeWindowHours(parseMonitorNumber(row.window_hours) || (windowDays * 24)),
+      asOf: row.as_of,
+      cutoffIso: row.cutoff_iso,
+      totalCanonicalRaw: parseMonitorNumber(row.total_canonical_raw),
+      freshCanonicalRaw: parseMonitorNumber(row.fresh_canonical_raw),
+      freshPct: parseMonitorNumber(row.fresh_pct),
+    });
+  }
+
+  return windowDaysList.map((windowDays) => {
+    const normalizedWindowDays = normalizeWindowDays(windowDays);
+    const monitor = monitorsByWindowDays.get(normalizedWindowDays);
+    if (!monitor) {
+      throw new Error(`freshness(daily-coverage missing:${normalizedWindowDays}d): monitor was not computed`);
+    }
+    return monitor;
+  });
 }
 
 type PairRow = { justtcg_price: number; scrydex_price: number };

@@ -38,6 +38,15 @@ const DEFAULT_HISTORY_WRITE_RETRY_ATTEMPTS = process.env.SCRYDEX_HISTORY_WRITE_R
 const DEFAULT_HISTORY_WRITE_RETRY_BACKOFF_MS = process.env.SCRYDEX_HISTORY_WRITE_RETRY_BACKOFF_MS
   ? Math.max(0, parseInt(process.env.SCRYDEX_HISTORY_WRITE_RETRY_BACKOFF_MS, 10))
   : 400;
+const DEFAULT_DAILY_REQUEST_BUDGET_FALLBACK = process.env.SCRYDEX_DAILY_REQUEST_BUDGET_FALLBACK
+  ? Math.max(1, parseInt(process.env.SCRYDEX_DAILY_REQUEST_BUDGET_FALLBACK, 10))
+  : 120;
+const DEFAULT_DAILY_REQUEST_BUDGET_HEADROOM = process.env.SCRYDEX_DAILY_REQUEST_BUDGET_HEADROOM
+  ? Math.max(1, parseFloat(process.env.SCRYDEX_DAILY_REQUEST_BUDGET_HEADROOM))
+  : 1;
+const DEFAULT_DAILY_REQUEST_BUDGET_LOOKBACK_HOURS = process.env.SCRYDEX_DAILY_REQUEST_BUDGET_LOOKBACK_HOURS
+  ? Math.max(1, parseInt(process.env.SCRYDEX_DAILY_REQUEST_BUDGET_LOOKBACK_HOURS, 10))
+  : 24;
 const WRITE_CHUNK_SIZE = 500;
 // Supabase REST GET queries for variant_ref IN-lists become unstable around 200 refs for large sets.
 const QUERY_CHUNK_SIZE = 100;
@@ -69,6 +78,13 @@ type ProviderSetMapRow = {
   canonical_set_code: string | null;
   canonical_set_name: string | null;
   provider_set_id: string | null;
+};
+
+type ProviderSetHealthRow = {
+  provider_set_id: string | null;
+  last_success_at: string | null;
+  requests_last_run: number | null;
+  cards_last_run: number | null;
 };
 
 type PriceHistoryStateRow = {
@@ -167,6 +183,29 @@ export type ScrydexHistoryBackfillPlan = {
   selectedSets: ScrydexSetFootprint[];
   skippedSets: ScrydexSetFootprint[];
   estimatedCredits: number;
+};
+
+export type ScrydexDailyCapturePlanRow = ScrydexSetFootprint & {
+  priorityWeight: number;
+};
+
+export type ScrydexDailyCapturePlanChunk = {
+  chunkNumber: number;
+  plannedRequests: number;
+  providerSetIds: string[];
+  selectedSets: ScrydexDailyCapturePlanRow[];
+};
+
+export type ScrydexDailyCapturePlan = {
+  ok: true;
+  generatedAt: string;
+  chunkCount: number;
+  totalAvailableRequests: number;
+  maxRequests: number;
+  recentSuccessfulRequests: number;
+  selectedSets: ScrydexDailyCapturePlanRow[];
+  skippedSets: ScrydexDailyCapturePlanRow[];
+  chunks: ScrydexDailyCapturePlanChunk[];
 };
 
 export type ScrydexHistoryBackfillResult = {
@@ -577,6 +616,319 @@ export async function loadScrydexSetFootprints(opts: {
 
   footprints.sort((left, right) => left.providerSetId.localeCompare(right.providerSetId));
   return footprints;
+}
+
+function buildPriorityRankMap(providerSetIds: string[]): Map<string, number> {
+  const normalized = normalizeStringList(providerSetIds);
+  const size = normalized.length;
+  return new Map(
+    normalized.map((providerSetId, index) => [providerSetId, Math.max(1, size - index)] as const),
+  );
+}
+
+function calculateDailyCapturePriorityDensity(row: ScrydexDailyCapturePlanRow): number {
+  return row.dailyCaptureRequests > 0 ? row.priorityWeight / row.dailyCaptureRequests : row.priorityWeight;
+}
+
+function appendPriorityReason(
+  row: ScrydexDailyCapturePlanRow,
+  reason: string,
+): ScrydexDailyCapturePlanRow {
+  if (row.priorityReasons.includes(reason)) return row;
+  return {
+    ...row,
+    priorityReasons: [...row.priorityReasons, reason],
+  };
+}
+
+async function loadRecentSuccessfulScrydexRequests(opts: {
+  providerSetIds?: string[];
+  lookbackHours?: number;
+} = {}): Promise<number> {
+  const supabase = dbAdmin();
+  const lookbackHours = Math.max(1, Math.floor(opts.lookbackHours ?? DEFAULT_DAILY_REQUEST_BUDGET_LOOKBACK_HOURS));
+  const sinceIso = new Date(Date.now() - (lookbackHours * 60 * 60 * 1000)).toISOString();
+  const providerSetIds = normalizeStringList(opts.providerSetIds ?? []);
+
+  const loadRows = async (providerSetIdChunk?: string[]): Promise<ProviderSetHealthRow[]> => {
+    const rows: ProviderSetHealthRow[] = [];
+    for (let from = 0; ; from += 1000) {
+      let query = supabase
+        .from("provider_set_health")
+        .select("provider_set_id, last_success_at, requests_last_run, cards_last_run")
+        .eq("provider", PROVIDER)
+        .gte("last_success_at", sinceIso)
+        .gt("cards_last_run", 0)
+        .order("provider_set_id", { ascending: true });
+      if (providerSetIdChunk && providerSetIdChunk.length > 0) {
+        query = query.in("provider_set_id", providerSetIdChunk);
+      }
+      const { data, error } = await query
+        .range(from, from + 999)
+        .returns<ProviderSetHealthRow[]>();
+      if (error) throw new Error(`provider_set_health(load recent successful requests): ${error.message}`);
+      const batch = data ?? [];
+      rows.push(...batch);
+      if (batch.length < 1000) break;
+    }
+    return rows;
+  };
+
+  const rows = providerSetIds.length === 0
+    ? await loadRows()
+    : (await Promise.all(
+      chunkValues(providerSetIds, 200).map((providerSetIdChunk) => loadRows(providerSetIdChunk)),
+    )).flat();
+
+  return rows.reduce((sum, row) => {
+    const providerSetId = normalizeText(row.provider_set_id);
+    if (!providerSetId || providerSetId === "__provider__") return sum;
+    return sum + Math.max(0, Math.floor(row.requests_last_run ?? 0));
+  }, 0);
+}
+
+function resolveScrydexDailyRequestBudget(params: {
+  totalAvailableRequests: number;
+  recentSuccessfulRequests: number;
+  maxRequests?: number;
+  fallback?: number;
+  headroom?: number;
+}): number {
+  const totalAvailableRequests = Math.max(0, Math.floor(params.totalAvailableRequests));
+  if (totalAvailableRequests <= 0) return 0;
+
+  if (typeof params.maxRequests === "number" && Number.isFinite(params.maxRequests)) {
+    return Math.min(totalAvailableRequests, Math.max(0, Math.floor(params.maxRequests)));
+  }
+
+  const fallback = Math.max(1, Math.floor(params.fallback ?? DEFAULT_DAILY_REQUEST_BUDGET_FALLBACK));
+  const headroom = Number.isFinite(params.headroom)
+    ? Math.max(1, Number(params.headroom))
+    : DEFAULT_DAILY_REQUEST_BUDGET_HEADROOM;
+  const learnedBudget = params.recentSuccessfulRequests > 0
+    ? Math.max(1, Math.ceil(params.recentSuccessfulRequests * headroom))
+    : fallback;
+  return Math.min(totalAvailableRequests, learnedBudget);
+}
+
+function buildScrydexDailyCapturePlanRows(params: {
+  footprints: ScrydexSetFootprint[];
+  recentConsistencySetIds: string[];
+  highValuePrioritySetIds: string[];
+  coveragePrioritySetIds: string[];
+  explicitSetIds?: string[];
+}): ScrydexDailyCapturePlanRow[] {
+  const pinnedSetIds = new Set(PINNED_HOT_SET_IDS);
+  const explicitRankMap = buildPriorityRankMap(params.explicitSetIds ?? []);
+  const recentRankMap = buildPriorityRankMap(params.recentConsistencySetIds);
+  const highValueRankMap = buildPriorityRankMap(params.highValuePrioritySetIds);
+  const coverageRankMap = buildPriorityRankMap(params.coveragePrioritySetIds);
+
+  return params.footprints
+    .filter((footprint) => footprint.matchedCardCount > 0 && footprint.dailyCaptureRequests > 0)
+    .map((footprint) => {
+      const cardsPerRequest = footprint.matchedCardCount / footprint.dailyCaptureRequests;
+      const matchCoverage = footprint.expectedCardCount > 0
+        ? footprint.matchedCardCount / footprint.expectedCardCount
+        : 0;
+      const priorityReasons: string[] = [];
+
+      if (explicitRankMap.has(footprint.providerSetId)) priorityReasons.push("explicit");
+      if (pinnedSetIds.has(footprint.providerSetId)) priorityReasons.push("pinned");
+      if (recentRankMap.has(footprint.providerSetId)) priorityReasons.push("recent-consistency");
+      if (highValueRankMap.has(footprint.providerSetId)) priorityReasons.push("high-value-stale");
+      if (coverageRankMap.has(footprint.providerSetId)) priorityReasons.push("coverage-gap");
+      if (cardsPerRequest >= 90) priorityReasons.push("high-yield");
+      else if (cardsPerRequest >= 60) priorityReasons.push("efficient");
+      if (priorityReasons.length === 0) priorityReasons.push("matched");
+
+      let priorityWeight = 0;
+      if (explicitRankMap.has(footprint.providerSetId)) {
+        priorityWeight += (explicitRankMap.get(footprint.providerSetId) ?? 0) * 400000;
+      }
+      if (pinnedSetIds.has(footprint.providerSetId)) priorityWeight += 20000000;
+      priorityWeight += (recentRankMap.get(footprint.providerSetId) ?? 0) * 200000;
+      priorityWeight += (highValueRankMap.get(footprint.providerSetId) ?? 0) * 120000;
+      priorityWeight += (coverageRankMap.get(footprint.providerSetId) ?? 0) * 60000;
+      priorityWeight += Math.round(cardsPerRequest * 1000);
+      priorityWeight += footprint.matchedCardCount * 100;
+      priorityWeight += Math.round(matchCoverage * 1000);
+
+      return {
+        ...footprint,
+        priorityReasons,
+        priorityWeight,
+      };
+    })
+    .sort((left, right) => {
+      const densityDelta = calculateDailyCapturePriorityDensity(right) - calculateDailyCapturePriorityDensity(left);
+      if (densityDelta !== 0) return densityDelta;
+      if (right.priorityWeight !== left.priorityWeight) return right.priorityWeight - left.priorityWeight;
+      const leftCardsPerRequest = left.matchedCardCount / left.dailyCaptureRequests;
+      const rightCardsPerRequest = right.matchedCardCount / right.dailyCaptureRequests;
+      if (rightCardsPerRequest !== leftCardsPerRequest) return rightCardsPerRequest - leftCardsPerRequest;
+      if (right.matchedCardCount !== left.matchedCardCount) return right.matchedCardCount - left.matchedCardCount;
+      if (left.dailyCaptureRequests !== right.dailyCaptureRequests) {
+        return left.dailyCaptureRequests - right.dailyCaptureRequests;
+      }
+      return left.providerSetId.localeCompare(right.providerSetId);
+    });
+}
+
+function buildBalancedScrydexDailyCapturePlanChunks(params: {
+  selectedSets: ScrydexDailyCapturePlanRow[];
+  chunkCount: number;
+}): ScrydexDailyCapturePlanChunk[] {
+  const chunkCount = Math.max(1, Math.floor(params.chunkCount));
+  const chunks = Array.from({ length: chunkCount }, (_, index) => ({
+    chunkNumber: index + 1,
+    plannedRequests: 0,
+    providerSetIds: [] as string[],
+    selectedSets: [] as ScrydexDailyCapturePlanRow[],
+  }));
+
+  const assignmentOrder = [...params.selectedSets].sort((left, right) => {
+    if (right.dailyCaptureRequests !== left.dailyCaptureRequests) {
+      return right.dailyCaptureRequests - left.dailyCaptureRequests;
+    }
+    const densityDelta = calculateDailyCapturePriorityDensity(right) - calculateDailyCapturePriorityDensity(left);
+    if (densityDelta !== 0) return densityDelta;
+    if (right.priorityWeight !== left.priorityWeight) return right.priorityWeight - left.priorityWeight;
+    return left.providerSetId.localeCompare(right.providerSetId);
+  });
+
+  for (const row of assignmentOrder) {
+    const targetChunk = chunks.reduce((best, candidate) => {
+      if (candidate.plannedRequests !== best.plannedRequests) {
+        return candidate.plannedRequests < best.plannedRequests ? candidate : best;
+      }
+      if (candidate.selectedSets.length !== best.selectedSets.length) {
+        return candidate.selectedSets.length < best.selectedSets.length ? candidate : best;
+      }
+      return candidate.chunkNumber < best.chunkNumber ? candidate : best;
+    });
+    targetChunk.selectedSets.push(row);
+    targetChunk.plannedRequests += row.dailyCaptureRequests;
+  }
+
+  return chunks.map((chunk) => {
+    const selectedSets = [...chunk.selectedSets].sort((left, right) => {
+      const densityDelta = calculateDailyCapturePriorityDensity(right) - calculateDailyCapturePriorityDensity(left);
+      if (densityDelta !== 0) return densityDelta;
+      if (right.priorityWeight !== left.priorityWeight) return right.priorityWeight - left.priorityWeight;
+      return left.providerSetId.localeCompare(right.providerSetId);
+    });
+    return {
+      chunkNumber: chunk.chunkNumber,
+      plannedRequests: chunk.plannedRequests,
+      providerSetIds: selectedSets.map((row) => row.providerSetId),
+      selectedSets,
+    };
+  });
+}
+
+export async function planScrydexDailyCapture(opts: {
+  providerSetIds?: string[];
+  chunkCount?: number;
+  maxRequests?: number;
+  lookbackHours?: number;
+  requestBudgetHeadroom?: number;
+} = {}): Promise<ScrydexDailyCapturePlan> {
+  const explicitSetIds = normalizeStringList(opts.providerSetIds ?? []);
+  const chunkCount = Math.max(1, Math.floor(opts.chunkCount ?? 8));
+  const lookbackHours = Math.max(1, Math.floor(opts.lookbackHours ?? DEFAULT_DAILY_REQUEST_BUDGET_LOOKBACK_HOURS));
+  const footprints = await loadScrydexSetFootprints({ providerSetIds: explicitSetIds });
+  const candidateFootprints = footprints.filter((footprint) => (
+    footprint.matchedCardCount > 0 && footprint.dailyCaptureRequests > 0
+  ));
+  const totalAvailableRequests = candidateFootprints.reduce((sum, footprint) => (
+    sum + Math.max(0, footprint.dailyCaptureRequests)
+  ), 0);
+  const recentSuccessfulRequests = await loadRecentSuccessfulScrydexRequests({
+    providerSetIds: explicitSetIds,
+    lookbackHours,
+  });
+  const maxRequests = resolveScrydexDailyRequestBudget({
+    totalAvailableRequests,
+    recentSuccessfulRequests,
+    maxRequests: opts.maxRequests,
+    headroom: opts.requestBudgetHeadroom,
+  });
+
+  let orderedRows: ScrydexDailyCapturePlanRow[];
+  if (explicitSetIds.length > 0) {
+    orderedRows = buildScrydexDailyCapturePlanRows({
+      footprints: candidateFootprints,
+      recentConsistencySetIds: [],
+      highValuePrioritySetIds: [],
+      coveragePrioritySetIds: [],
+      explicitSetIds,
+    });
+  } else {
+    const targets: SetPriorityTarget[] = candidateFootprints.map((footprint) => ({
+        setCode: footprint.setCode,
+        setName: footprint.setName,
+        providerSetId: footprint.providerSetId,
+      }));
+
+    const [recentConsistencySetIds, highValuePrioritySetIds, coveragePrioritySetIds] = await Promise.all([
+      loadRecentSetConsistencyPriority({
+        provider: PROVIDER,
+        targets,
+        yearFrom: 2024,
+        freshWindowHours: 24,
+        maxProviderSetIds: 300,
+      }),
+      loadHighValueStaleSetPriority({
+        provider: PROVIDER,
+        targets,
+        staleWindowHours: 24,
+        maxProviderSetIds: 300,
+      }),
+      loadCoverageGapSetPriority({
+        provider: PROVIDER,
+        targets,
+        maxProviderSetIds: 300,
+      }),
+    ]);
+
+    orderedRows = buildScrydexDailyCapturePlanRows({
+      footprints: candidateFootprints,
+      recentConsistencySetIds,
+      highValuePrioritySetIds,
+      coveragePrioritySetIds,
+    });
+  }
+
+  const selectedSets: ScrydexDailyCapturePlanRow[] = [];
+  const skippedSets: ScrydexDailyCapturePlanRow[] = [];
+  let plannedRequests = 0;
+  for (const row of orderedRows) {
+    const nextPlannedRequests = plannedRequests + row.dailyCaptureRequests;
+    if (nextPlannedRequests <= maxRequests) {
+      selectedSets.push(row);
+      plannedRequests = nextPlannedRequests;
+      continue;
+    }
+    skippedSets.push(appendPriorityReason(row, "over-budget"));
+  }
+
+  const chunks = buildBalancedScrydexDailyCapturePlanChunks({
+    selectedSets,
+    chunkCount,
+  });
+
+  return {
+    ok: true,
+    generatedAt: new Date().toISOString(),
+    chunkCount,
+    totalAvailableRequests,
+    maxRequests,
+    recentSuccessfulRequests,
+    selectedSets,
+    skippedSets,
+    chunks,
+  };
 }
 
 export function buildScrydexRecentHistoryCatchupPlan(params: {

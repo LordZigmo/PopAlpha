@@ -2,8 +2,7 @@ import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/auth/require";
 import { enqueuePipelineJob } from "@/lib/backfill/provider-pipeline-job-queue";
 import { getProviderCooldownState } from "@/lib/backfill/provider-cooldown";
-import { loadScrydexSetFootprints } from "@/lib/backfill/scrydex-price-history";
-import { splitProviderSetIdsIntoDailyChunks } from "@/lib/backfill/scrydex-2024plus-targets";
+import { planScrydexDailyCapture } from "@/lib/backfill/scrydex-price-history";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -39,6 +38,7 @@ export async function GET(
     const matchObservations = parseOptionalInt(url.searchParams.get("observations")) ?? 500;
     const timeseriesObservations = parseOptionalInt(url.searchParams.get("timeseriesObservations")) ?? matchObservations;
     const metricsObservations = parseOptionalInt(url.searchParams.get("metricsObservations")) ?? timeseriesObservations;
+    const maxRequests = parseOptionalInt(url.searchParams.get("maxRequests"));
     const force = url.searchParams.get("force") === "1";
 
     const providerCooldown = await getProviderCooldownState("SCRYDEX");
@@ -57,21 +57,26 @@ export async function GET(
       });
     }
 
-    const footprints = await loadScrydexSetFootprints();
-    const allProviderSetIds = footprints
-      .map((footprint) => footprint.providerSetId)
-      .filter((providerSetId) => providerSetId.length > 0);
-    const providerSetIds = splitProviderSetIdsIntoDailyChunks(allProviderSetIds, SCRYDEX_DAILY_CHUNK_COUNT)[chunkNumber - 1] ?? [];
-    const footprintBySet = new Map(footprints.map((footprint) => [footprint.providerSetId, footprint] as const));
+    const plan = await planScrydexDailyCapture({
+      chunkCount: SCRYDEX_DAILY_CHUNK_COUNT,
+      maxRequests,
+    });
+    const chunkPlan = plan.chunks[chunkNumber - 1] ?? {
+      chunkNumber,
+      plannedRequests: 0,
+      providerSetIds: [],
+      selectedSets: [],
+    };
+    const providerSetIds = chunkPlan.providerSetIds;
 
     const runs = [];
     let ok = true;
     let plannedRequests = 0;
     let queuedJobs = 0;
 
-    for (const providerSetId of providerSetIds) {
-      const footprint = footprintBySet.get(providerSetId);
-      const dailyCaptureRequests = Math.max(1, footprint?.dailyCaptureRequests ?? 1);
+    for (const selectedSet of chunkPlan.selectedSets) {
+      const providerSetId = selectedSet.providerSetId;
+      const dailyCaptureRequests = Math.max(1, selectedSet.dailyCaptureRequests);
       plannedRequests += dailyCaptureRequests;
 
       const queued = await enqueuePipelineJob({
@@ -95,12 +100,14 @@ export async function GET(
       ok = ok && (queued.enqueued || queued.reason.startsWith("existing_") || queued.reason === "provider_cooldown_active");
       runs.push({
         providerSetId,
-        setCode: footprint?.setCode ?? providerSetId,
-        setName: footprint?.setName ?? providerSetId,
-        expectedCardCount: footprint?.expectedCardCount ?? 0,
-        providerCardCount: footprint?.providerCardCount ?? 0,
-        matchedCardCount: footprint?.matchedCardCount ?? 0,
+        setCode: selectedSet.setCode ?? providerSetId,
+        setName: selectedSet.setName ?? providerSetId,
+        expectedCardCount: selectedSet.expectedCardCount,
+        providerCardCount: selectedSet.providerCardCount,
+        matchedCardCount: selectedSet.matchedCardCount,
         dailyCaptureRequests,
+        priorityWeight: selectedSet.priorityWeight,
+        priorityReasons: selectedSet.priorityReasons,
         enqueued: queued.enqueued,
         jobId: queued.jobId,
         reason: queued.reason,
@@ -112,8 +119,13 @@ export async function GET(
       mode: "queued",
       chunk: chunkNumber,
       chunkCount: SCRYDEX_DAILY_CHUNK_COUNT,
+      generatedAt: plan.generatedAt,
+      totalAvailableRequests: plan.totalAvailableRequests,
+      maxRequests: plan.maxRequests,
+      recentSuccessfulRequests: plan.recentSuccessfulRequests,
       providerSetIds,
-      plannedRequests,
+      plannedRequests: chunkPlan.plannedRequests || plannedRequests,
+      selectedSets: plan.selectedSets.length,
       queuedJobs,
       runs,
     }, { status: ok ? 200 : 500 });

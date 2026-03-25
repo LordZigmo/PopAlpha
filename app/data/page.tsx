@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import {
-  getCanonicalRawFreshnessMonitors,
+  getCanonicalRawFreshnessMonitor,
+  getCanonicalRawRollingDailyFreshnessMonitors,
   getPricingTransparencySnapshot,
   getPricingTransparencyTrend,
   type CanonicalRawFreshnessMonitor,
@@ -37,11 +38,7 @@ export const metadata: Metadata = {
 export const dynamic = "force-dynamic";
 
 const PRIMARY_FRESHNESS_WINDOW_HOURS = 24;
-const EXTENDED_FRESHNESS_WINDOW_HOURS = [24 * 7, 24 * 30, 24 * 90] as const;
-const ALL_FRESHNESS_WINDOW_HOURS = [
-  PRIMARY_FRESHNESS_WINDOW_HOURS,
-  ...EXTENDED_FRESHNESS_WINDOW_HOURS,
-] as const;
+const EXTENDED_FRESHNESS_WINDOW_DAYS = [7, 30, 90] as const;
 
 function formatNumber(value: number): string {
   return new Intl.NumberFormat("en-US").format(value);
@@ -86,11 +83,19 @@ function FreshnessIndicatorCard({
   monitor,
   title,
   compact = false,
+  mode = "recent_update",
 }: {
   monitor: CanonicalRawFreshnessMonitor;
   title: string;
   compact?: boolean;
+  mode?: "recent_update" | "daily_coverage";
 }) {
+  const windowDayCount = Math.max(1, Math.round(monitor.windowHours / 24));
+  const detailCopy = mode === "daily_coverage"
+    ? `${formatNumber(monitor.freshCanonicalRaw)} of ${formatNumber(monitor.totalCanonicalRaw)} canonical RAW cards have at least one recorded price on each trailing UTC day in the last ${windowDayCount} days.`
+    : `${formatNumber(monitor.freshCanonicalRaw)} of ${formatNumber(monitor.totalCanonicalRaw)} canonical RAW cards have updated price data in the last ${formatFreshnessWindowDuration(monitor.windowHours)}.`;
+  const cutoffLabel = mode === "daily_coverage" ? "Coverage window starts" : "Freshness window cutoff";
+
   return (
     <div className={`rounded-2xl border border-[#262626] bg-[#0D0D0D] ${compact ? "p-4" : "p-5"}`}>
       <p className="text-[12px] uppercase tracking-[0.14em] text-[#888]">
@@ -100,41 +105,35 @@ function FreshnessIndicatorCard({
         {monitor.freshPct.toFixed(2)}%
       </p>
       <p className="mt-2 text-[15px] text-[#9CA3AF]">
-        {formatNumber(monitor.freshCanonicalRaw)} of {formatNumber(monitor.totalCanonicalRaw)} canonical RAW cards
-        {" "}
-        have updated price data in the last {formatFreshnessWindowDuration(monitor.windowHours)}.
+        {detailCopy}
       </p>
 
       <div className="mt-4 space-y-1 text-[13px] text-[#7A7A7A]">
         <p>As of: {formatTimestamp(monitor.asOf)}</p>
-        <p>Freshness window cutoff: {formatTimestamp(monitor.cutoffIso)}</p>
+        <p>{cutoffLabel}: {formatTimestamp(monitor.cutoffIso)}</p>
       </div>
     </div>
   );
 }
 
 export default async function DataPage() {
-  const [monitorResult, transparencyResult, trendResult] = await Promise.allSettled([
-    getCanonicalRawFreshnessMonitors([...ALL_FRESHNESS_WINDOW_HOURS]),
+  const [primaryMonitorResult, extendedMonitorResult, transparencyResult, trendResult] = await Promise.allSettled([
+    getCanonicalRawFreshnessMonitor(PRIMARY_FRESHNESS_WINDOW_HOURS),
+    getCanonicalRawRollingDailyFreshnessMonitors([...EXTENDED_FRESHNESS_WINDOW_DAYS]),
     getPricingTransparencySnapshot(),
     getPricingTransparencyTrend(7),
   ]);
 
-  const freshnessMonitors = monitorResult.status === "fulfilled" ? monitorResult.value : null;
+  const primaryMonitor = primaryMonitorResult.status === "fulfilled" ? primaryMonitorResult.value : null;
+  const extendedMonitors = extendedMonitorResult.status === "fulfilled" ? extendedMonitorResult.value : [];
   const transparency = transparencyResult.status === "fulfilled" ? transparencyResult.value : null;
   const trend = trendResult.status === "fulfilled" ? trendResult.value : null;
-  const freshnessMonitorByWindow = freshnessMonitors
-    ? new Map(freshnessMonitors.map((monitor) => [monitor.windowHours, monitor] as const))
-    : null;
-  const primaryMonitor = freshnessMonitorByWindow?.get(PRIMARY_FRESHNESS_WINDOW_HOURS) ?? null;
-  const extendedMonitors = freshnessMonitorByWindow
-    ? EXTENDED_FRESHNESS_WINDOW_HOURS
-      .map((windowHours) => freshnessMonitorByWindow.get(windowHours))
-      .filter((monitor): monitor is CanonicalRawFreshnessMonitor => monitor != null)
-    : [];
 
-  if (monitorResult.status === "rejected") {
-    console.error("[data/page] failed to load price freshness", getLoadErrorMessage(monitorResult.reason));
+  if (primaryMonitorResult.status === "rejected") {
+    console.error("[data/page] failed to load price freshness (24h)", getLoadErrorMessage(primaryMonitorResult.reason));
+  }
+  if (extendedMonitorResult.status === "rejected") {
+    console.error("[data/page] failed to load rolling daily price freshness", getLoadErrorMessage(extendedMonitorResult.reason));
   }
   if (transparencyResult.status === "rejected") {
     console.error("[data/page] failed to load pricing transparency snapshot", getLoadErrorMessage(transparencyResult.reason));
@@ -181,10 +180,10 @@ export default async function DataPage() {
         <section className="mt-6 rounded-[28px] border border-[#1E1E1E] bg-[#101010] p-6 sm:p-8">
           <h2 className="text-[22px] font-semibold tracking-[-0.03em] sm:text-[28px]">Price Freshness (7d / 30d / 90d)</h2>
           <p className="mt-1 text-[13px] text-[#7A7A7A]">
-            The same canonical RAW freshness query, expanded to longer windows.
+            A card only counts as fresh when it has at least one recorded price on every trailing UTC day inside the window.
           </p>
 
-          {extendedMonitors.length === EXTENDED_FRESHNESS_WINDOW_HOURS.length ? (
+          {extendedMonitors.length === EXTENDED_FRESHNESS_WINDOW_DAYS.length ? (
             <div className="mt-6 grid gap-4 lg:grid-cols-3">
               {extendedMonitors.map((monitor) => (
                 <FreshnessIndicatorCard
@@ -192,6 +191,7 @@ export default async function DataPage() {
                   monitor={monitor}
                   title={formatFreshnessWindowCardTitle(monitor.windowHours)}
                   compact
+                  mode="daily_coverage"
                 />
               ))}
             </div>

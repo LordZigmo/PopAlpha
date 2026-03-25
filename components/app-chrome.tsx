@@ -25,8 +25,13 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
 
-  // Search and card detail pages use their own layout — no shared default header
-  if (pathname === "/search" || pathname.startsWith("/c/")) {
+  // Card detail pages compose their own shell so page state can drive the contextual rail.
+  if (pathname.startsWith("/c/")) {
+    return <>{children}</>;
+  }
+
+  // Search keeps the shared dashboard shell but skips the generic top header.
+  if (pathname === "/search") {
     return (
       <AppShell>
         {children}

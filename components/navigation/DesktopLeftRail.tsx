@@ -288,160 +288,166 @@ export default function DesktopLeftRail() {
     }
   }
 
+  const railSections = (
+    <>
+      <section className="rounded-[1.8rem] border border-white/[0.06] bg-zinc-900/40 p-5">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6B6B6B]">Identity</p>
+        <div className="mt-4 flex items-center gap-4">
+          {user ? (
+            user.imageUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={user.imageUrl}
+                alt={user.fullName ?? user.username ?? "User avatar"}
+                className="h-14 w-14 rounded-[1.1rem] object-cover ring-1 ring-white/[0.06]"
+              />
+            ) : (
+              <div className="flex h-14 w-14 items-center justify-center rounded-[1.1rem] bg-white/[0.04] text-[18px] font-semibold text-white">
+                {(user.firstName?.[0] ?? user.username?.[0] ?? "P").toUpperCase()}
+              </div>
+            )
+          ) : (
+            <div className="flex h-14 w-14 items-center justify-center rounded-[1.1rem] bg-white/[0.04] text-[18px] font-semibold text-white">
+              P
+            </div>
+          )}
+          <div className="min-w-0">
+            <p className="truncate text-[16px] font-semibold text-white">
+              {user?.fullName ?? user?.username ?? "PopAlpha User"}
+            </p>
+            <p className="mt-1 font-mono text-[13px] font-semibold text-[#D4D4D8]">
+              ${collectionValue.toLocaleString(undefined, {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}
+            </p>
+            <span
+              className={[
+                "mt-2 inline-flex rounded-full border px-3 py-1 text-[12px] font-bold uppercase tracking-[0.16em]",
+                tierBadgeClass(tier),
+              ].join(" ")}
+            >
+              {tier}
+            </span>
+            <div className="mt-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#6B7280]">Alpha Rank</p>
+              <p className="mt-1 text-[12px] font-semibold text-[#A1A1AA]">
+                Accuracy{" "}
+                <span className="font-mono text-white">
+                  {accuracyScore != null ? `${accuracyScore}%` : "—"}
+                </span>
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="mt-5 rounded-[1.8rem] border border-white/[0.06] bg-zinc-900/40 p-4">
+        <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6B6B6B]">Navigation</p>
+        <div className="mt-3 space-y-1.5">
+          <NavItem href="/" label="Home" icon={Home} active={currentPath === "/"} />
+          <NavItem
+            href="/profile"
+            label="Profile"
+            icon={Users}
+            active={currentPath === "/profile" || currentPath.startsWith("/profile/") || currentPath.startsWith("/u/")}
+          />
+          <NavItem
+            href="/portfolio"
+            label="Portfolio"
+            icon={PieChart}
+            active={currentPath === "/portfolio" || currentPath.startsWith("/portfolio/")}
+          />
+        </div>
+      </section>
+
+      <section className="mt-5 rounded-[1.8rem] border border-white/[0.06] bg-zinc-900/40 p-5">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6B6B6B]">Motivation</p>
+        <div className="mt-4 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-[15px] font-semibold text-white">Master Set Completion</p>
+            <p className="mt-1 text-[13px] text-[#8A8A8A]">
+              {summaryLoaded
+                ? (summary?.setName ?? "Build your first set")
+                : "Loading..."}
+            </p>
+          </div>
+          <p className="text-[15px] font-bold text-[#8DF0B4]">
+            {summary?.percent ?? 0}%
+          </p>
+        </div>
+        <div className="mt-3 overflow-hidden rounded-full bg-white/[0.04]">
+          <div className="h-1.5 rounded-full bg-[linear-gradient(90deg,#3B82F6,#4F46E5)]" style={{ width: progressWidth }} />
+        </div>
+        <p className="mt-2 text-[12px] text-[#6B7280]">
+          {summary
+            ? `${summary.ownedCount} of ${summary.totalCount} tracked cards completed.`
+            : "Add cards to start tracking set completion."}
+        </p>
+      </section>
+
+      <section className="mt-5 flex-1 rounded-[1.8rem] border border-white/[0.06] bg-zinc-900/40 p-5">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6B6B6B]">Focus</p>
+            <p className="mt-3 text-[15px] font-semibold text-white">Personal Watchlist</p>
+          </div>
+          <button
+            type="button"
+            onClick={openAddModal}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.05] text-white transition hover:bg-white/[0.08]"
+            aria-label="Add to portfolio"
+            title="Add to portfolio"
+          >
+            <Plus size={16} strokeWidth={2.4} />
+          </button>
+        </div>
+        <div className="mt-4 space-y-2.5">
+          {watchlist.length > 0 ? watchlist.slice(0, 5).map((item) => (
+            <Link
+              key={item.slug}
+              href={`/c/${encodeURIComponent(item.slug)}`}
+              className="flex items-center gap-3 rounded-[1rem] border border-[#1E1E1E] bg-[#0B0B0B] px-3 py-3 text-[#D4D4D4] transition hover:border-white/[0.06] hover:text-white"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <div className="h-4 w-4 shrink-0 overflow-hidden rounded-[0.2rem] border border-white/[0.06] bg-white/[0.03]">
+                    {item.imageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={item.imageUrl} alt={item.name} className="h-full w-full object-cover" />
+                    ) : null}
+                  </div>
+                  <p className="truncate text-[14px] font-semibold">{item.name}</p>
+                </div>
+                <p className="truncate text-[12px] text-[#6B7280]">{item.setName ?? "Unknown set"}</p>
+              </div>
+              <div className="flex items-center gap-1.5">
+                {item.isHotMover ? <span className="h-2 w-2 rounded-full bg-[#EF4444] animate-pulse" /> : null}
+                <span className="font-mono text-[12px] font-semibold text-[#E4E4E7]">
+                  {item.currentPrice != null
+                    ? `$${item.currentPrice.toLocaleString(undefined, {
+                        minimumFractionDigits: item.currentPrice >= 10 ? 0 : 2,
+                        maximumFractionDigits: item.currentPrice >= 10 ? 0 : 2,
+                      })}`
+                    : "—"}
+                </span>
+              </div>
+            </Link>
+          )) : (
+            <div className="rounded-[1rem] border border-dashed border-white/[0.06] bg-[#0B0B0B] px-4 py-4 text-[13px] text-[#6B7280]">
+              Add your first card to start a watchlist here.
+            </div>
+          )}
+        </div>
+      </section>
+    </>
+  );
+
   return (
     <>
       <aside className={`fixed inset-y-0 left-0 z-30 hidden ${DESKTOP_LEFT_RAIL_WIDTH} md:block`}>
         <div className="sticky top-0 flex h-screen w-full flex-col border-r border-[#1E1E1E] bg-[#0A0A0A]/92 px-5 py-6 backdrop-blur-xl">
-          <section className="rounded-[1.8rem] border border-white/[0.06] bg-zinc-900/40 p-5">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6B6B6B]">Identity</p>
-            <div className="mt-4 flex items-center gap-4">
-              {user ? (
-                user.imageUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={user.imageUrl}
-                    alt={user.fullName ?? user.username ?? "User avatar"}
-                    className="h-14 w-14 rounded-[1.1rem] object-cover ring-1 ring-white/[0.06]"
-                  />
-                ) : (
-                  <div className="flex h-14 w-14 items-center justify-center rounded-[1.1rem] bg-white/[0.04] text-[18px] font-semibold text-white">
-                    {(user.firstName?.[0] ?? user.username?.[0] ?? "P").toUpperCase()}
-                  </div>
-                )
-              ) : (
-                <div className="flex h-14 w-14 items-center justify-center rounded-[1.1rem] bg-white/[0.04] text-[18px] font-semibold text-white">
-                  P
-                </div>
-              )}
-              <div className="min-w-0">
-                <p className="truncate text-[16px] font-semibold text-white">
-                  {user?.fullName ?? user?.username ?? "PopAlpha User"}
-                </p>
-                <p className="mt-1 font-mono text-[13px] font-semibold text-[#D4D4D8]">
-                  ${collectionValue.toLocaleString(undefined, {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
-                </p>
-                <span
-                  className={[
-                    "mt-2 inline-flex rounded-full border px-3 py-1 text-[12px] font-bold uppercase tracking-[0.16em]",
-                    tierBadgeClass(tier),
-                  ].join(" ")}
-                >
-                  {tier}
-                </span>
-                <div className="mt-2">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#6B7280]">Alpha Rank</p>
-                  <p className="mt-1 text-[12px] font-semibold text-[#A1A1AA]">
-                    Accuracy{" "}
-                    <span className="font-mono text-white">
-                      {accuracyScore != null ? `${accuracyScore}%` : "—"}
-                    </span>
-                  </p>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <section className="mt-5 rounded-[1.8rem] border border-white/[0.06] bg-zinc-900/40 p-4">
-            <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6B6B6B]">Navigation</p>
-            <div className="mt-3 space-y-1.5">
-              <NavItem href="/" label="Home" icon={Home} active={currentPath === "/"} />
-              <NavItem
-                href="/profile"
-                label="Profile"
-                icon={Users}
-                active={currentPath === "/profile" || currentPath.startsWith("/profile/") || currentPath.startsWith("/u/")}
-              />
-              <NavItem
-                href="/portfolio"
-                label="Portfolio"
-                icon={PieChart}
-                active={currentPath === "/portfolio" || currentPath.startsWith("/portfolio/")}
-              />
-            </div>
-          </section>
-
-          <section className="mt-5 rounded-[1.8rem] border border-white/[0.06] bg-zinc-900/40 p-5">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6B6B6B]">Motivation</p>
-            <div className="mt-4 flex items-center justify-between gap-3">
-              <div>
-                <p className="text-[15px] font-semibold text-white">Master Set Completion</p>
-                <p className="mt-1 text-[13px] text-[#8A8A8A]">
-                  {summaryLoaded
-                    ? (summary?.setName ?? "Build your first set")
-                    : "Loading..."}
-                </p>
-              </div>
-              <p className="text-[15px] font-bold text-[#8DF0B4]">
-                {summary?.percent ?? 0}%
-              </p>
-            </div>
-            <div className="mt-3 overflow-hidden rounded-full bg-white/[0.04]">
-              <div className="h-1.5 rounded-full bg-[linear-gradient(90deg,#3B82F6,#4F46E5)]" style={{ width: progressWidth }} />
-            </div>
-            <p className="mt-2 text-[12px] text-[#6B7280]">
-              {summary
-                ? `${summary.ownedCount} of ${summary.totalCount} tracked cards completed.`
-                : "Add cards to start tracking set completion."}
-            </p>
-          </section>
-
-          <section className="mt-5 flex-1 rounded-[1.8rem] border border-white/[0.06] bg-zinc-900/40 p-5">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6B6B6B]">Focus</p>
-                <p className="mt-3 text-[15px] font-semibold text-white">Personal Watchlist</p>
-              </div>
-              <button
-                type="button"
-                onClick={openAddModal}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.05] text-white transition hover:bg-white/[0.08]"
-                aria-label="Add to portfolio"
-                title="Add to portfolio"
-              >
-                <Plus size={16} strokeWidth={2.4} />
-              </button>
-            </div>
-            <div className="mt-4 space-y-2.5">
-              {watchlist.length > 0 ? watchlist.slice(0, 5).map((item) => (
-                <Link
-                  key={item.slug}
-                  href={`/c/${encodeURIComponent(item.slug)}`}
-                  className="flex items-center gap-3 rounded-[1rem] border border-[#1E1E1E] bg-[#0B0B0B] px-3 py-3 text-[#D4D4D4] transition hover:border-white/[0.06] hover:text-white"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <div className="h-4 w-4 shrink-0 overflow-hidden rounded-[0.2rem] border border-white/[0.06] bg-white/[0.03]">
-                        {item.imageUrl ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={item.imageUrl} alt={item.name} className="h-full w-full object-cover" />
-                        ) : null}
-                      </div>
-                      <p className="truncate text-[14px] font-semibold">{item.name}</p>
-                    </div>
-                    <p className="truncate text-[12px] text-[#6B7280]">{item.setName ?? "Unknown set"}</p>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    {item.isHotMover ? <span className="h-2 w-2 rounded-full bg-[#EF4444] animate-pulse" /> : null}
-                    <span className="font-mono text-[12px] font-semibold text-[#E4E4E7]">
-                      {item.currentPrice != null
-                        ? `$${item.currentPrice.toLocaleString(undefined, {
-                            minimumFractionDigits: item.currentPrice >= 10 ? 0 : 2,
-                            maximumFractionDigits: item.currentPrice >= 10 ? 0 : 2,
-                          })}`
-                        : "—"}
-                    </span>
-                  </div>
-                </Link>
-              )) : (
-                <div className="rounded-[1rem] border border-dashed border-white/[0.06] bg-[#0B0B0B] px-4 py-4 text-[13px] text-[#6B7280]">
-                  Add your first card to start a watchlist here.
-                </div>
-              )}
-            </div>
-          </section>
+          {railSections}
         </div>
       </aside>
 

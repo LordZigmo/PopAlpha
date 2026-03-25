@@ -9,15 +9,16 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import Image from "next/image";
 import { cache } from "react";
 import { clerkEnabled } from "@/lib/auth/clerk-enabled";
 import CanonicalCardFloatingHero from "@/components/canonical-card-floating-hero";
+import CanonicalCardContextRail from "@/components/canonical-card/CanonicalCardContextRail";
 import CardModeToggle from "@/components/card-mode-toggle";
 import CardViewTracker from "@/components/card-view-tracker";
 import CollapsibleSection from "@/components/collapsible-section";
 import EbayListings from "@/components/ebay-listings";
-import { GroupedSection, PageShell, Pill, SegmentedControl, StatStripItem } from "@/components/ios-grouped-ui";
+import { GroupedSection, Pill, SegmentedControl, StatStripItem } from "@/components/ios-grouped-ui";
+import CanonicalCardShell from "@/components/layout/CanonicalCardShell";
 import MarketPulse from "@/components/market-pulse";
 import MarketSummaryCard, { loadRawCardMarketVariants } from "@/components/market-summary-card";
 import PopAlphaScoutPreview from "@/components/popalpha-scout-preview";
@@ -32,6 +33,7 @@ import { getCommunityPulseSnapshot } from "@/lib/data/community-pulse";
 import { getRelatedCardCarousels } from "@/lib/data/related-cards";
 import { buildGradedVariantRef } from "@/lib/identity/variant-ref";
 import { dbPublic } from "@/lib/db";
+import { createServerSupabaseUserClient } from "@/lib/db/user";
 import { buildAssetViewModel } from "@/lib/data/assets";
 import { resolveWeightedMarketPrice } from "@/lib/pricing/market-confidence";
 import { isPhysicalPokemonSet } from "@/lib/sets/physical";
@@ -71,6 +73,10 @@ type SnapshotRow = {
 type CardProfileRow = {
   summary_short: string;
   summary_long: string | null;
+};
+
+type HoldingQtyRow = {
+  qty: number | null;
 };
 
 type CanonicalCardPageBaseData = {
@@ -200,6 +206,33 @@ const getCanonicalCardPageBaseData = cache(async (slug: string): Promise<Canonic
     cardProfile: cardProfile ?? null,
   };
 });
+
+async function loadCanonicalCardPortfolioContext(params: {
+  userId: string | null;
+  canonicalSlug: string;
+}): Promise<{ lots: number; units: number } | null> {
+  if (!params.userId || !clerkEnabled) return null;
+
+  try {
+    const supabase = await createServerSupabaseUserClient();
+    const { data, error } = await supabase
+      .from("holdings")
+      .select("qty")
+      .eq("owner_clerk_id", params.userId)
+      .eq("canonical_slug", params.canonicalSlug)
+      .returns<HoldingQtyRow[]>();
+
+    if (error) throw new Error(error.message);
+
+    const rows = data ?? [];
+    return {
+      lots: rows.length,
+      units: rows.reduce((sum, row) => sum + Math.max(0, Math.floor(row.qty ?? 0)), 0),
+    };
+  } catch {
+    return null;
+  }
+}
 
 function selectedGrade(gradeRaw: string | undefined): GradeSelection {
   const upper = (gradeRaw ?? "RAW").toUpperCase();
@@ -520,13 +553,15 @@ function RelatedCarouselSection({
   title,
   cards,
   emptyMessage,
+  sectionId,
 }: {
   title: string;
   cards: HomepageCard[];
   emptyMessage: string;
+  sectionId?: string;
 }) {
   return (
-    <section className="mt-8">
+    <section id={sectionId} className="mt-8 scroll-mt-20">
       <div className="flex items-baseline gap-2">
         <h2 className="text-[18px] font-semibold uppercase tracking-[0.06em] text-[#D4D4D8] sm:text-[20px]">
           {title}
@@ -711,32 +746,38 @@ export default async function CanonicalCardPage({
       .maybeSingle<RawParityRow>(),
     getCardViewSnapshot(slug, 14),
   ]);
-  const relatedCarousels = await getRelatedCardCarousels({
-    slug,
-    canonicalName: canonical.canonical_name,
-    setName: canonical.set_name,
-    subject: canonical.subject,
-    limit: 5,
-  });
-  const cardPulseSnapshot = await getCommunityPulseSnapshot(
-    [{
+  const [relatedCarousels, cardPulseSnapshot, portfolioContext] = await Promise.all([
+    getRelatedCardCarousels({
       slug,
-      name: canonical.canonical_name,
-      set_name: canonical.set_name,
-      year: canonical.year,
-      market_price: null,
-      change_pct: vm?.change_7d_pct ?? null,
-      change_window: vm?.change_7d_pct != null ? "7D" : null,
-      confidence_score: null,
-      low_confidence: null,
-      market_strength_score: null,
-      market_direction: null,
-      mover_tier: null,
-      image_url: selectedPrinting?.image_url ?? null,
-      sparkline_7d: [],
-    }],
-    user?.id ?? null,
-  );
+      canonicalName: canonical.canonical_name,
+      setName: canonical.set_name,
+      subject: canonical.subject,
+      limit: 5,
+    }),
+    getCommunityPulseSnapshot(
+      [{
+        slug,
+        name: canonical.canonical_name,
+        set_name: canonical.set_name,
+        year: canonical.year,
+        market_price: null,
+        change_pct: vm?.change_7d_pct ?? null,
+        change_window: vm?.change_7d_pct != null ? "7D" : null,
+        confidence_score: null,
+        low_confidence: null,
+        market_strength_score: null,
+        market_direction: null,
+        mover_tier: null,
+        image_url: selectedPrinting?.image_url ?? null,
+        sparkline_7d: [],
+      }],
+      user?.id ?? null,
+    ),
+    loadCanonicalCardPortfolioContext({
+      userId: user?.id ?? null,
+      canonicalSlug: slug,
+    }),
+  ]);
   const currentCardPulse = cardPulseSnapshot.cards[0] ?? null;
 
   const gradeSnapMap = {
@@ -931,9 +972,16 @@ export default async function CanonicalCardPage({
         resolvesAt: cardPulseSnapshot.weekEndsAt,
       }
     : null;
+  const sectionLinks = [
+    { href: "#content", label: "Overview" },
+    { href: "#card-views", label: "Views" },
+    { href: "#live-listings", label: "Listings" },
+    { href: "#related-set", label: "From This Set" },
+    { href: "#related-pokemon", label: "From This Pokémon" },
+  ];
   const commonTailSections = (
     <>
-      <div className="pt-4 sm:pt-5">
+      <div id="card-views" className="scroll-mt-20 pt-4 sm:pt-5">
         <CardViewTracker
           canonicalSlug={slug}
           initialTotalViews={viewSnapshot.totalViews}
@@ -942,26 +990,30 @@ export default async function CanonicalCardPage({
         />
       </div>
 
-      <CollapsibleSection title="Live eBay Listings" defaultOpen={false} badge={<Pill label="Live" tone="neutral" size="small" />}>
-        <EbayListings
-          queries={ebayQueries}
-          canonicalSlug={slug}
-          canonicalName={canonical.canonical_name}
-          setName={canonical.set_name}
-          cardNumber={canonical.card_number}
-          finish={selectedPrinting?.finish ?? null}
-          printingId={selectedPrinting?.id ?? null}
-          grade={legacyListingsGrade}
-        />
-      </CollapsibleSection>
+      <div id="live-listings" className="scroll-mt-20">
+        <CollapsibleSection title="Live eBay Listings" defaultOpen={false} badge={<Pill label="Live" tone="neutral" size="small" />}>
+          <EbayListings
+            queries={ebayQueries}
+            canonicalSlug={slug}
+            canonicalName={canonical.canonical_name}
+            setName={canonical.set_name}
+            cardNumber={canonical.card_number}
+            finish={selectedPrinting?.finish ?? null}
+            printingId={selectedPrinting?.id ?? null}
+            grade={legacyListingsGrade}
+          />
+        </CollapsibleSection>
+      </div>
 
       <RelatedCarouselSection
+        sectionId="related-set"
         title="From This Set"
         cards={relatedCarousels.fromSet}
         emptyMessage="No other tracked cards from this set yet."
       />
 
       <RelatedCarouselSection
+        sectionId="related-pokemon"
         title="From This Pokémon"
         cards={relatedCarousels.fromPokemon}
         emptyMessage="No other tracked cards from this Pokémon yet."
@@ -969,30 +1021,34 @@ export default async function CanonicalCardPage({
     </>
   );
 
-  const cardPageNav = (
-    <header className="fixed inset-x-0 top-0 z-50 border-b border-white/[0.04] bg-[#0A0A0A]/80 backdrop-blur-xl">
-      <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-5 sm:px-8">
-        <div className="flex items-center gap-4">
-          <Link href={backHref} aria-label="Back" className="flex h-9 w-9 items-center justify-center rounded-full border border-white/[0.06] bg-white/[0.03] text-[#999] transition hover:bg-white/[0.06] hover:text-white">
-            <span className="text-[20px] leading-none">‹</span>
-          </Link>
-          <Link href="/" className="flex items-center gap-2">
-            <Image src="/brand/popalpha-icon-transparent.svg" alt="PopAlpha" width={28} height={28} className="h-7 w-7" />
-            <span className="text-[15px] font-bold tracking-tight text-white">PopAlpha</span>
-          </Link>
-        </div>
-        <nav className="flex items-center gap-5">
-          <Link href="/search" className="hidden text-[13px] font-medium text-[#666] transition hover:text-white sm:block">Search</Link>
-          <Link href="/sets" className="hidden text-[13px] font-medium text-[#666] transition hover:text-white sm:block">Sets</Link>
-          <Link href="/portfolio" className="hidden text-[13px] font-medium text-[#666] transition hover:text-white sm:block">Portfolio</Link>
-        </nav>
-      </div>
-    </header>
+  const contextRail = (
+    <CanonicalCardContextRail
+      canonicalName={canonical.canonical_name}
+      subtitleText={subtitleText}
+      imageUrl={selectedPrinting?.image_url ?? null}
+      selectedPrintingLabel={selectedPrintingLabel}
+      primaryPrice={primaryPrice}
+      primaryPriceLabel={primaryPriceLabel}
+      marketStatusLabel={marketStatus.label}
+      marketStatusTone={marketStatus.tone}
+      rawHref={rawModeHref}
+      gradedHref={gradedModeHref}
+      viewMode={viewMode}
+      canonicalSetHref={canonicalSetHref}
+      totalViews={viewSnapshot.totalViews}
+      activeListings7d={snapshotData?.active_listings_7d ?? null}
+      bullishVotes={currentCardPulse?.bullishVotes ?? 0}
+      bearishVotes={currentCardPulse?.bearishVotes ?? 0}
+      portfolioContext={portfolioContext}
+      isSignedIn={Boolean(user)}
+      sectionLinks={sectionLinks}
+      relatedFromSet={relatedCarousels.fromSet}
+      relatedFromPokemon={relatedCarousels.fromPokemon}
+    />
   );
 
   return (
-    <PageShell>
-      {cardPageNav}
+    <CanonicalCardShell backHref={backHref} rightRail={contextRail}>
       {viewMode === "RAW" ? (
         <RawCardMarketSurface
           canonicalSlug={slug}
@@ -1231,7 +1287,7 @@ export default async function CanonicalCardPage({
           </div>
         </>
       )}
-    </PageShell>
+    </CanonicalCardShell>
   );
 }
 
