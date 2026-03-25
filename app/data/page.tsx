@@ -76,7 +76,7 @@ export default async function DataPage() {
               Public Data Monitor
             </p>
             <h1 className="mt-3 text-[28px] font-semibold leading-[1.02] tracking-[-0.05em] sm:text-[44px]">
-              Canonical RAW Price Freshness (24h)
+              Price Freshness (24h)
             </h1>
             <div className="mt-6 rounded-2xl border border-[#78350F] bg-[#1C1917] p-5">
               <p className="text-[12px] uppercase tracking-[0.14em] text-[#FBBF24]">
@@ -106,7 +106,7 @@ export default async function DataPage() {
             Public Data Monitor
           </p>
           <h1 className="mt-3 text-[28px] font-semibold leading-[1.02] tracking-[-0.05em] sm:text-[44px]">
-            Canonical RAW Price Freshness (24h)
+            Price Freshness (24h)
           </h1>
 
           <div className="mt-6 rounded-2xl border border-[#262626] bg-[#0D0D0D] p-5">

@@ -7,6 +7,7 @@ import { getHomepageData, type HomepageCard } from "@/lib/data/homepage";
 import { getCommunityPulseSnapshot } from "@/lib/data/community-pulse";
 import { getPopAlphaModel } from "@/lib/ai/models";
 import HomepageSearch from "@/components/homepage-search";
+import SiteHeader from "@/components/site-header";
 import TypewriterText from "@/components/typewriter-text";
 
 export const dynamic = "force-dynamic";
@@ -687,49 +688,11 @@ export default async function Home() {
 
   return (
     <div className="landing-shell min-h-screen bg-[#060608] text-[#F0F0F0]">
-      {/* ── Navbar ──────────────────────────────────────────────────────── */}
-      <nav className="fixed inset-x-0 top-0 z-50 border-b border-white/[0.06] bg-[#060608]/80 backdrop-blur-2xl">
-        <div className="mx-auto flex h-16 max-w-[1400px] items-center justify-between px-5 sm:px-8">
-          <div className="flex items-center gap-8">
-            <Link href="/" className="flex items-center gap-3">
-              <Image
-                src="/brand/popalpha-icon-transparent.svg"
-                alt="PopAlpha logo"
-                width={36}
-                height={36}
-                className="h-9 w-9 shrink-0"
-                priority
-              />
-              <span className="text-[19px] font-bold tracking-tight text-white">PopAlpha</span>
-            </Link>
-            <div className="hidden items-center gap-1 md:flex">
-              {["Explore", "Market", "Sets", "Portfolio", "Briefs"].map((item) => (
-                <Link
-                  key={item}
-                  href={item === "Explore" ? "/search" : item === "Market" ? "/" : item === "Sets" ? "/sets" : item === "Portfolio" ? "/portfolio" : "/about"}
-                  className="rounded-lg px-3 py-1.5 text-[13px] font-medium text-[#8A8A8E] transition-colors hover:bg-white/[0.04] hover:text-white"
-                >
-                  {item}
-                </Link>
-              ))}
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <Link
-              href="/sign-in"
-              className="hidden rounded-lg px-3 py-1.5 text-[13px] font-medium text-[#8A8A8E] transition-colors hover:text-white sm:block"
-            >
-              Sign in
-            </Link>
-            <Link
-              href="/sign-up"
-              className="rounded-full bg-[#00B4D8] px-4 py-2 text-[13px] font-semibold text-[#060608] transition-all hover:bg-[#00C9F0] hover:shadow-[0_0_20px_rgba(0,180,216,0.3)]"
-            >
-              Start free
-            </Link>
-          </div>
-        </div>
-      </nav>
+      <SiteHeader
+        showSignIn={!user}
+        primaryCta={user ? { label: "Profile", href: "/profile" } : { label: "Start free", href: "/sign-up" }}
+        logoPriority
+      />
 
       {/* ── Hero ────────────────────────────────────────────────────────── */}
       <section className="relative overflow-hidden pt-16">

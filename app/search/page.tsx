@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import Image from "next/image";
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { unstable_cache } from "next/cache";
 import { getCanonicalMarketPulseMap, type CanonicalMarketPulse } from "@/lib/data/market";
@@ -9,6 +8,7 @@ import { measureAsync } from "@/lib/perf";
 import SearchResultsSection from "@/components/search-results-section";
 import CardSearch from "@/components/card-search";
 import PokeTraceCameraBetaPanel from "@/components/poketrace-camera-beta-panel";
+import SiteHeader from "@/components/site-header";
 import { POKETRACE_CAMERA_HREF } from "@/lib/poketrace/ui-paths";
 import { parseSearchSort, sortSearchResults } from "@/lib/search/sort.mjs";
 import { getLatestSetSummarySnapshot, type SetSummarySnapshot } from "@/lib/sets/summary";
@@ -640,16 +640,7 @@ export default async function SearchPage({
   if (!q) {
     return (
       <div className="min-h-screen bg-[#0A0A0A] text-[#F0F0F0]">
-        {/* Nav */}
-        <header className="fixed inset-x-0 top-0 z-50 border-b border-white/[0.04] bg-[#0A0A0A]/80 backdrop-blur-xl">
-          <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-5 sm:px-8">
-            <Link href="/" className="text-[16px] font-bold tracking-tight text-white">PopAlpha</Link>
-            <nav className="flex items-center gap-5">
-              <Link href="/sets" className="hidden text-[13px] font-medium text-[#666] transition hover:text-white sm:block">Sets</Link>
-              <Link href="/portfolio" className="hidden text-[13px] font-medium text-[#666] transition hover:text-white sm:block">Portfolio</Link>
-            </nav>
-          </div>
-        </header>
+        <SiteHeader />
 
         <div className="mx-auto w-full max-w-4xl px-5 pt-28 pb-20 sm:px-8 sm:pt-32">
           {cameraIntent ? (
@@ -861,16 +852,7 @@ export default async function SearchPage({
 
   return (
     <div className="min-h-screen bg-[#0A0A0A] text-[#F0F0F0]">
-      {/* Nav */}
-      <header className="fixed inset-x-0 top-0 z-50 border-b border-white/[0.04] bg-[#0A0A0A]/80 backdrop-blur-xl">
-        <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-5 sm:px-8">
-          <Link href="/" className="text-[16px] font-bold tracking-tight text-white">PopAlpha</Link>
-          <nav className="flex items-center gap-5">
-            <Link href="/sets" className="hidden text-[13px] font-medium text-[#666] transition hover:text-white sm:block">Sets</Link>
-            <Link href="/portfolio" className="hidden text-[13px] font-medium text-[#666] transition hover:text-white sm:block">Portfolio</Link>
-          </nav>
-        </div>
-      </header>
+      <SiteHeader />
 
       <div className="mx-auto max-w-7xl px-5 pt-20 pb-20 sm:px-8 sm:pt-22">
         <section className="mx-auto w-full max-w-2xl pt-1 sm:pt-2">

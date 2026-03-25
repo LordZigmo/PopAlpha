@@ -1,57 +1,13 @@
 "use client";
 
-import Image from "next/image";
-import Link from "next/link";
-import { Suspense } from "react";
 import { usePathname } from "next/navigation";
 import { useSafeUser } from "@/lib/auth/use-safe-user";
 import AppShell from "@/components/layout/AppShell";
-import ThemeToggle from "@/components/theme-toggle";
-import NavSearchForm from "@/components/nav-search-form";
-
-function AboutLink({ fixed = false }: { fixed?: boolean }) {
-  return (
-    <Link
-      href="/about"
-      className={[
-        "rounded-[var(--radius-input)] border border-[#1E1E1E] px-3 py-1.5 text-xs font-semibold text-[#6B6B6B] transition hover:text-[#F0F0F0]",
-        fixed ? "bg-[#0A0A0A]/80 backdrop-blur-sm" : "",
-      ].join(" ")}
-    >
-      About
-    </Link>
-  );
-}
-
-function AuthCtaLink({ className = "" }: { className?: string }) {
-  return (
-    <Link
-      href="/sign-in"
-      className={`rounded-[var(--radius-input)] border border-[#F0F0F0] bg-[#F0F0F0] px-3 py-1.5 text-xs font-semibold text-[#0A0A0A] transition hover:bg-transparent hover:text-[#F0F0F0] ${className}`}
-    >
-      Sign In / Sign Up
-    </Link>
-  );
-}
-
-function PortfolioLink({ fixed = false }: { fixed?: boolean }) {
-  return (
-    <Link
-      href="/portfolio"
-      className={[
-        "rounded-[var(--radius-input)] border border-[#1E1E1E] px-3 py-1.5 text-xs font-semibold text-[#6B6B6B] transition hover:text-[#F0F0F0]",
-        fixed ? "bg-[#0A0A0A]/80 backdrop-blur-sm" : "",
-      ].join(" ")}
-    >
-      Portfolio
-    </Link>
-  );
-}
+import SiteHeader from "@/components/site-header";
 
 export default function AppChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { user } = useSafeUser();
-  const isSetsPage = pathname?.startsWith("/sets") ?? false;
 
   // Auth / onboarding pages get no chrome at all
   if (
@@ -69,8 +25,8 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
 
-  // Search, about, and card detail pages use their own layout — no header
-  if (pathname === "/search" || pathname === "/about" || pathname.startsWith("/c/")) {
+  // Search and card detail pages use their own layout — no shared default header
+  if (pathname === "/search" || pathname.startsWith("/c/")) {
     return (
       <AppShell>
         {children}
@@ -80,53 +36,14 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
 
   return (
     <AppShell>
-      <header className="fixed inset-x-0 top-0 z-50 border-b border-[#1E1E1E] bg-[#0A0A0A]/95">
-        <div className="mx-auto flex h-14 max-w-5xl items-center gap-3 px-4 sm:px-6 md:max-w-[calc(100vw-min(30vw,22rem)-20rem)] md:px-6">
-          {/* Logo */}
-          <Link href="/" className="text-app shrink-0 flex items-center gap-2.5 text-[15px] font-bold tracking-tight">
-            <Image
-              src="/brand/popalpha-icon.svg"
-              alt="PopAlpha logo"
-              width={36}
-              height={36}
-              className="h-9 w-9 shrink-0"
-              priority
-            />
-            <span>PopAlpha</span>
-          </Link>
-
-          {/* Search — wrapped in Suspense because useSearchParams() requires it */}
-          <Suspense
-            fallback={
-              <div className="flex min-w-0 flex-1 items-center gap-2">
-                <div
-                  className="input-themed h-9 flex-1 rounded-full opacity-40"
-                  aria-hidden="true"
-                />
-              </div>
-            }
-          >
-            <NavSearchForm borderless={isSetsPage} />
-          </Suspense>
-
-          {/* Right-side nav */}
-          <nav className="ml-auto flex shrink-0 items-center gap-2">
-            <Link
-              href="/sets"
-              className="hidden rounded-[var(--radius-input)] border border-[#1E1E1E] px-3 py-1.5 text-xs font-semibold text-[#6B6B6B] transition hover:text-[#F0F0F0] sm:block"
-            >
-              Sets
-            </Link>
-            {!isSetsPage ? <ThemeToggle /> : null}
-            <PortfolioLink />
-            <AboutLink />
-            {!user ? <AuthCtaLink /> : null}
-          </nav>
-        </div>
-      </header>
+      <SiteHeader
+        showSignIn={!user}
+        primaryCta={user ? { label: "Profile", href: "/profile" } : { label: "Start free", href: "/sign-up" }}
+        innerClassName="mx-auto flex h-16 max-w-5xl items-center justify-between px-5 sm:px-8 md:max-w-[calc(100vw-min(30vw,22rem)-20rem)]"
+      />
 
       {/* Push content below the fixed header */}
-      <div className="pt-14">{children}</div>
+      <div className="pt-16">{children}</div>
     </AppShell>
   );
 }
