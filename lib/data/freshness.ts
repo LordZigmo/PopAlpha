@@ -111,8 +111,9 @@ export async function getCanonicalRawRollingDailyFreshnessMonitors(windowDaysLis
   }
 
   const monitorsByWindowDays = new Map<number, CanonicalRawFreshnessMonitor>();
+  const rows = Array.isArray(data) ? data : [];
 
-  for (const row of data ?? []) {
+  for (const row of rows) {
     const windowDays = normalizeWindowDays(parseMonitorNumber(row.window_days));
     monitorsByWindowDays.set(windowDays, {
       windowHours: normalizeWindowHours(parseMonitorNumber(row.window_hours) || (windowDays * 24)),
