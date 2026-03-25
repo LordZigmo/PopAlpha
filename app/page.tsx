@@ -108,7 +108,7 @@ const TRENDING_SET_PILLS = [
 ] as const;
 
 const HERO_HEADLINE = "Market intelligence";
-const HERO_HEADLINE_ACCENT = "for Pokemon collectors";
+const HERO_HEADLINE_ACCENT = "for Pokémon collectors";
 const HERO_SUBHEADLINE = "Live prices, market signals, and AI briefs in one place.";
 const HERO_PRIMARY_CTA = "Start free";
 const HERO_SECONDARY_CTA = "Explore live market";
@@ -656,7 +656,7 @@ export default async function Home() {
     .slice(0, 4);
   const heroAverageStrength = averageValues(heroPulseCards.map((card) => card.market_strength_score));
   const heroLeadingSet = getLeadingSet(heroMarketCards);
-  const heroPulseRows = heroPulseCards.slice(0, 3);
+  const heroPulseSlides = heroPulseCards.slice(0, 4);
   const heroBrief = buildHeroBrief(
     aceSummary,
     heroPulseCards,
@@ -731,9 +731,9 @@ export default async function Home() {
         </div>
 
         <div className="relative mx-auto max-w-[1400px] px-5 pb-14 pt-12 sm:px-8 sm:pt-20 lg:pb-20">
-          <div className="grid items-start gap-12 lg:grid-cols-[minmax(0,1fr)_560px] lg:gap-16 xl:grid-cols-[minmax(0,1fr)_600px]">
+          <div className="grid items-start gap-12 lg:grid-cols-[minmax(0,1.2fr)_500px] lg:gap-10 xl:grid-cols-[minmax(0,1.12fr)_560px]">
             {/* Left: Headline + Search */}
-            <div className="max-w-[640px]">
+            <div className="relative z-30 isolate max-w-[780px] lg:pr-12 xl:pr-16">
               <div className="inline-flex items-center gap-2 rounded-full bg-white/[0.03] px-3 py-1.5 text-[12px] text-[#9EB2C2]">
                 <span className="relative flex h-2 w-2">
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#00DC5A] opacity-75" />
@@ -742,10 +742,9 @@ export default async function Home() {
                 <span>{asOf ? `Live ${asOf}` : "Live now"}</span>
               </div>
 
-              <h1 className="mt-7 max-w-[11ch] text-[clamp(2.9rem,5vw,4.45rem)] font-semibold leading-[0.96] tracking-[-0.055em] text-white">
-                {HERO_HEADLINE}
-                <br />
-                <span className="bg-gradient-to-r from-[#9BE7F6] via-[#36D6E7] to-[#00C7B7] bg-clip-text text-transparent">
+              <h1 className="relative z-40 mt-7 text-[clamp(3.45rem,5.95vw,5rem)] font-semibold leading-[0.86] tracking-[-0.058em] text-white">
+                <span className="block sm:whitespace-nowrap">{HERO_HEADLINE}</span>
+                <span className="mt-1 inline-block pr-[0.08em] bg-gradient-to-r from-[#9BE7F6] via-[#36D6E7] to-[#00C7B7] bg-clip-text text-transparent sm:whitespace-nowrap">
                   {HERO_HEADLINE_ACCENT}
                 </span>
               </h1>
@@ -798,7 +797,7 @@ export default async function Home() {
             </div>
 
             {/* Right: Product Composition */}
-            <div className="relative w-full max-w-[620px] lg:justify-self-end lg:pt-10">
+            <div className="relative z-0 w-full max-w-[600px] lg:justify-self-end lg:pt-10">
               <div className="pointer-events-none absolute left-4 top-2 h-[280px] w-[280px] rounded-full bg-[#2FD0E3]/[0.15] blur-[120px]" />
               <div className="pointer-events-none absolute bottom-6 right-8 h-[220px] w-[220px] rounded-full bg-[#0F766E]/[0.1] blur-[110px]" />
 
@@ -821,76 +820,135 @@ export default async function Home() {
                     </span>
                   </div>
 
-                  <p className="mt-8 max-w-[17ch] text-[clamp(1.7rem,2.8vw,2.45rem)] font-semibold leading-[1.06] tracking-[-0.045em] text-white">
-                    {heroBrief.lead}
-                  </p>
-                  {heroBrief.secondary ? (
-                    <p className="mt-5 max-w-[34rem] text-[14px] leading-7 text-[#94A0AB]">
-                      {heroBrief.secondary}
+                  <div className="mt-6 rounded-xl border border-white/[0.04] bg-white/[0.02] p-4">
+                    <span className="text-[10px] font-semibold uppercase tracking-widest text-[#5F6A76]">Today&apos;s Read</span>
+                    <p className="mt-2 text-[15px] font-medium leading-relaxed text-[#D4DCE4]">
+                      {heroBrief.lead}
                     </p>
-                  ) : null}
+                    {heroBrief.secondary ? (
+                      <p className="mt-3 text-[14px] leading-relaxed text-[#94A0AB]">
+                        {heroBrief.secondary}
+                      </p>
+                    ) : null}
+                  </div>
                 </div>
               </div>
 
               <div className="relative z-10 mt-5 overflow-hidden rounded-[28px] bg-[linear-gradient(180deg,rgba(10,14,18,0.94),rgba(7,10,14,0.98))] px-4 pb-5 pt-4 shadow-[0_24px_70px_rgba(0,0,0,0.34)] ring-1 ring-white/[0.05] backdrop-blur-xl sm:px-5 sm:pb-6 lg:ml-14 lg:mt-[-64px] lg:w-[84%] lg:pt-24">
-                <div className="flex items-center justify-between gap-4">
-                  <span className="text-[13px] font-medium text-[#D7DDE4]">Market Pulse</span>
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <span className="text-[13px] font-medium text-[#D7DDE4]">Market Pulse</span>
+                    <p className="mt-1 text-[11px] text-[#6E7782]">
+                      {heroPulseSlides.length > 0 ? `${heroPulseSlides.length} movers in focus` : "Live market"}
+                    </p>
+                  </div>
                   <span className="inline-flex items-center gap-2 text-[11px] text-[#7DE29B]">
                     <span className="h-2 w-2 rounded-full bg-[#00DC5A]" />
                     Live
                   </span>
                 </div>
 
-                <div className="mt-4 space-y-1.5">
-                  {heroPulseRows.map((card, index) => (
-                    <Link
-                      key={card.slug}
-                      href={`/c/${encodeURIComponent(card.slug)}`}
-                      className="group grid grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-3 rounded-2xl px-1.5 py-2.5 transition-colors hover:bg-white/[0.03]"
+                {heroPulseSlides.length > 0 ? (
+                  <>
+                    <div
+                      className="landing-scroll-rail mt-4 flex gap-3 overflow-x-auto pb-2"
+                      style={{ scrollSnapType: "x mandatory" }}
                     >
-                      <span className="w-4 text-center text-[11px] tabular-nums text-[#5E6772]">{index + 1}</span>
-                      <div className="relative h-12 w-8 shrink-0 overflow-hidden rounded-[10px] bg-[linear-gradient(180deg,rgba(28,35,46,0.92),rgba(12,16,22,0.98))] ring-1 ring-white/[0.08]">
-                        {card.image_url ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={card.image_url}
-                            alt={card.name}
-                            className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
-                          />
-                        ) : (
-                          <div className="flex h-full w-full items-center justify-center text-[8px] font-medium uppercase tracking-[0.16em] text-[#72808E]">
-                            Card
-                          </div>
-                        )}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="truncate text-[13px] font-semibold text-[#EEF2F6] group-hover:text-white">{card.name}</p>
-                        <p className="truncate text-[11px] text-[#6C7681]">{card.set_name ?? "Live market"}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-[13px] font-semibold tabular-nums text-white">{formatPrice(card.market_price)}</p>
-                        <div className="mt-1.5 flex items-center justify-end gap-2">
-                          <p className={`text-[12px] font-semibold tabular-nums ${(card.change_pct ?? 0) >= 0 ? "text-[#5CE07D]" : "text-[#FF7E78]"}`}>
-                            {formatPct(card.change_pct)}
-                          </p>
-                          {card.market_strength_score != null ? (
-                            <div className="h-[3px] w-9 overflow-hidden rounded-full bg-white/[0.08]">
-                              <div
-                                className="h-full rounded-full bg-[#42D6E8]"
-                                style={{ width: `${Math.max(8, Math.min(100, card.market_strength_score))}%` }}
-                              />
+                      {heroPulseSlides.map((card, index) => {
+                        const directionMeta = getDirectionMeta(card.market_direction);
+
+                        return (
+                          <Link
+                            key={card.slug}
+                            href={`/c/${encodeURIComponent(card.slug)}`}
+                            className="group w-[84%] min-w-[240px] shrink-0 rounded-[24px] border border-white/[0.05] bg-[linear-gradient(180deg,rgba(16,21,27,0.96),rgba(9,12,17,0.98))] p-4 transition-all hover:border-white/[0.1] hover:bg-[linear-gradient(180deg,rgba(19,25,32,0.98),rgba(10,14,20,0.99))] sm:w-[72%]"
+                            style={{ scrollSnapAlign: "start" }}
+                          >
+                            <div className="relative overflow-hidden rounded-[20px] bg-[linear-gradient(180deg,rgba(20,27,34,0.94),rgba(11,15,21,0.98))] p-4 ring-1 ring-white/[0.05]">
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="rounded-full bg-white/[0.04] px-2.5 py-1 text-[10px] font-semibold tracking-[0.16em] text-[#6F7A86]">
+                                  {String(index + 1).padStart(2, "0")}
+                                </span>
+                                {card.market_strength_score != null ? (
+                                  <span className="text-[11px] font-medium text-[#7FC8D3]">
+                                    {formatMarketStrength(card.market_strength_score)}
+                                  </span>
+                                ) : null}
+                              </div>
+
+                              <div className="mt-3 flex min-h-[176px] items-center justify-center">
+                                {card.image_url ? (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img
+                                    src={card.image_url}
+                                    alt={card.name}
+                                    className="h-[164px] w-auto rounded-[14px] object-contain shadow-[0_18px_40px_rgba(0,0,0,0.38)] transition-transform duration-200 group-hover:scale-[1.02]"
+                                  />
+                                ) : (
+                                  <div className="flex h-[164px] w-[116px] items-center justify-center rounded-[14px] bg-[linear-gradient(180deg,rgba(26,33,42,0.92),rgba(12,16,22,0.98))] text-[10px] font-medium uppercase tracking-[0.18em] text-[#72808E]">
+                                    Card
+                                  </div>
+                                )}
+                              </div>
                             </div>
-                          ) : null}
-                        </div>
-                      </div>
-                    </Link>
-                  ))}
-                  {heroPulseRows.length === 0 && (
-                    <div className="flex min-h-28 items-center justify-center rounded-2xl px-4 text-center text-[13px] text-[#707A86]">
-                      Live movers will appear here as fresh price action clears the confidence threshold.
+
+                            <div className="mt-4">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="truncate text-[15px] font-semibold text-[#EEF2F6] group-hover:text-white">{card.name}</p>
+                                  <p className="mt-1 truncate text-[11px] text-[#6C7681]">{card.set_name ?? "Live market"}</p>
+                                </div>
+                                {directionMeta ? (
+                                  <span className={`rounded-full bg-white/[0.03] px-2.5 py-1 text-[10px] font-medium ${directionMeta.textClass}`}>
+                                    {directionMeta.label}
+                                  </span>
+                                ) : null}
+                              </div>
+
+                              <div className="mt-4 flex items-end justify-between gap-4">
+                                <div>
+                                  <p className="text-[10px] font-medium uppercase tracking-[0.16em] text-[#56606B]">Market price</p>
+                                  <p className="mt-1 text-[20px] font-semibold tabular-nums text-white">{formatPrice(card.market_price)}</p>
+                                </div>
+                                <div className="text-right">
+                                  <p className="text-[10px] font-medium uppercase tracking-[0.16em] text-[#56606B]">Move</p>
+                                  <p className={`mt-1 text-[18px] font-semibold tabular-nums ${(card.change_pct ?? 0) >= 0 ? "text-[#5CE07D]" : "text-[#FF7E78]"}`}>
+                                    {formatPct(card.change_pct)}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="mt-4 flex items-center gap-3">
+                                <div className="h-[4px] flex-1 overflow-hidden rounded-full bg-white/[0.08]">
+                                  <div
+                                    className="h-full rounded-full bg-[#42D6E8]"
+                                    style={{ width: `${Math.max(10, Math.min(100, card.market_strength_score ?? 0))}%` }}
+                                  />
+                                </div>
+                                <span className="text-[11px] text-[#7B8590]">
+                                  {card.change_window ?? "Live"}
+                                </span>
+                              </div>
+                            </div>
+                          </Link>
+                        );
+                      })}
                     </div>
-                  )}
-                </div>
+
+                    <div className="mt-3 flex items-center gap-2">
+                      {heroPulseSlides.map((card, index) => (
+                        <span
+                          key={card.slug}
+                          className={`h-[3px] rounded-full ${index === 0 ? "w-8 bg-[#42D6E8]" : "w-4 bg-white/[0.14]"}`}
+                        />
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <div className="mt-4 flex min-h-28 items-center justify-center rounded-2xl px-4 text-center text-[13px] text-[#707A86]">
+                    Live movers will appear here as fresh price action clears the confidence threshold.
+                  </div>
+                )}
               </div>
             </div>
           </div>

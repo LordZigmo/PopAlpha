@@ -48,6 +48,7 @@ next-env.d.ts
 
 # Local agent/editor config
 .claude/
+.codex/
 
 # External datasets
 pokemon-tcg-data/
