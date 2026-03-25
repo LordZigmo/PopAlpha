@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import {
-  getCanonicalRawFreshnessMonitor,
+  getCanonicalRawFreshnessMonitors,
   getPricingTransparencySnapshot,
   getPricingTransparencyTrend,
+  type CanonicalRawFreshnessMonitor,
 } from "@/lib/data/freshness";
 
 const title = "Data | PopAlpha";
@@ -35,6 +36,13 @@ export const metadata: Metadata = {
 
 export const dynamic = "force-dynamic";
 
+const PRIMARY_FRESHNESS_WINDOW_HOURS = 24;
+const EXTENDED_FRESHNESS_WINDOW_HOURS = [24 * 7, 24 * 30, 24 * 90] as const;
+const ALL_FRESHNESS_WINDOW_HOURS = [
+  PRIMARY_FRESHNESS_WINDOW_HOURS,
+  ...EXTENDED_FRESHNESS_WINDOW_HOURS,
+] as const;
+
 function formatNumber(value: number): string {
   return new Intl.NumberFormat("en-US").format(value);
 }
@@ -57,16 +65,73 @@ function getLoadErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function formatFreshnessWindowDuration(windowHours: number): string {
+  if (windowHours === 24) return "24 hours";
+  if (windowHours % 24 === 0) {
+    const dayCount = windowHours / 24;
+    return `${dayCount} day${dayCount === 1 ? "" : "s"}`;
+  }
+  return `${windowHours} hour${windowHours === 1 ? "" : "s"}`;
+}
+
+function formatFreshnessWindowCardTitle(windowHours: number): string {
+  if (windowHours % 24 === 0) {
+    const dayCount = windowHours / 24;
+    return `${dayCount}-Day Window`;
+  }
+  return `${windowHours}-Hour Window`;
+}
+
+function FreshnessIndicatorCard({
+  monitor,
+  title,
+  compact = false,
+}: {
+  monitor: CanonicalRawFreshnessMonitor;
+  title: string;
+  compact?: boolean;
+}) {
+  return (
+    <div className={`rounded-2xl border border-[#262626] bg-[#0D0D0D] ${compact ? "p-4" : "p-5"}`}>
+      <p className="text-[12px] uppercase tracking-[0.14em] text-[#888]">
+        {title}
+      </p>
+      <p className={`mt-2 font-semibold leading-none tracking-[-0.04em] text-[#4ADE80] ${compact ? "text-[36px] sm:text-[44px]" : "text-[44px] sm:text-[56px]"}`}>
+        {monitor.freshPct.toFixed(2)}%
+      </p>
+      <p className="mt-2 text-[15px] text-[#9CA3AF]">
+        {formatNumber(monitor.freshCanonicalRaw)} of {formatNumber(monitor.totalCanonicalRaw)} canonical RAW cards
+        {" "}
+        have updated price data in the last {formatFreshnessWindowDuration(monitor.windowHours)}.
+      </p>
+
+      <div className="mt-4 space-y-1 text-[13px] text-[#7A7A7A]">
+        <p>As of: {formatTimestamp(monitor.asOf)}</p>
+        <p>Freshness window cutoff: {formatTimestamp(monitor.cutoffIso)}</p>
+      </div>
+    </div>
+  );
+}
+
 export default async function DataPage() {
   const [monitorResult, transparencyResult, trendResult] = await Promise.allSettled([
-    getCanonicalRawFreshnessMonitor(24),
+    getCanonicalRawFreshnessMonitors([...ALL_FRESHNESS_WINDOW_HOURS]),
     getPricingTransparencySnapshot(),
     getPricingTransparencyTrend(7),
   ]);
 
-  const monitor = monitorResult.status === "fulfilled" ? monitorResult.value : null;
+  const freshnessMonitors = monitorResult.status === "fulfilled" ? monitorResult.value : null;
   const transparency = transparencyResult.status === "fulfilled" ? transparencyResult.value : null;
   const trend = trendResult.status === "fulfilled" ? trendResult.value : null;
+  const freshnessMonitorByWindow = freshnessMonitors
+    ? new Map(freshnessMonitors.map((monitor) => [monitor.windowHours, monitor] as const))
+    : null;
+  const primaryMonitor = freshnessMonitorByWindow?.get(PRIMARY_FRESHNESS_WINDOW_HOURS) ?? null;
+  const extendedMonitors = freshnessMonitorByWindow
+    ? EXTENDED_FRESHNESS_WINDOW_HOURS
+      .map((windowHours) => freshnessMonitorByWindow.get(windowHours))
+      .filter((monitor): monitor is CanonicalRawFreshnessMonitor => monitor != null)
+    : [];
 
   if (monitorResult.status === "rejected") {
     console.error("[data/page] failed to load price freshness", getLoadErrorMessage(monitorResult.reason));
@@ -95,24 +160,10 @@ export default async function DataPage() {
             Price Freshness (24h)
           </h1>
 
-          {monitor ? (
+          {primaryMonitor ? (
             <>
-              <div className="mt-6 rounded-2xl border border-[#262626] bg-[#0D0D0D] p-5">
-                <p className="text-[12px] uppercase tracking-[0.14em] text-[#888]">
-                  Coverage
-                </p>
-                <p className="mt-2 text-[44px] font-semibold leading-none tracking-[-0.04em] text-[#4ADE80] sm:text-[56px]">
-                  {monitor.freshPct.toFixed(2)}%
-                </p>
-                <p className="mt-2 text-[15px] text-[#9CA3AF]">
-                  {formatNumber(monitor.freshCanonicalRaw)} of {formatNumber(monitor.totalCanonicalRaw)} canonical RAW cards
-                  have updated price data in the last 24 hours.
-                </p>
-              </div>
-
-              <div className="mt-4 space-y-1 text-[13px] text-[#7A7A7A]">
-                <p>As of: {formatTimestamp(monitor.asOf)}</p>
-                <p>Freshness window cutoff: {formatTimestamp(monitor.cutoffIso)}</p>
+              <div className="mt-6">
+                <FreshnessIndicatorCard monitor={primaryMonitor} title="Coverage" />
               </div>
             </>
           ) : (
@@ -122,6 +173,35 @@ export default async function DataPage() {
               </p>
               <p className="mt-2 text-[15px] text-[#D1D5DB]">
                 Live price freshness could not be loaded right now. We will keep trying this request-time query on each refresh.
+              </p>
+            </div>
+          )}
+        </section>
+
+        <section className="mt-6 rounded-[28px] border border-[#1E1E1E] bg-[#101010] p-6 sm:p-8">
+          <h2 className="text-[22px] font-semibold tracking-[-0.03em] sm:text-[28px]">Price Freshness (7d / 30d / 90d)</h2>
+          <p className="mt-1 text-[13px] text-[#7A7A7A]">
+            The same canonical RAW freshness query, expanded to longer windows.
+          </p>
+
+          {extendedMonitors.length === EXTENDED_FRESHNESS_WINDOW_HOURS.length ? (
+            <div className="mt-6 grid gap-4 lg:grid-cols-3">
+              {extendedMonitors.map((monitor) => (
+                <FreshnessIndicatorCard
+                  key={monitor.windowHours}
+                  monitor={monitor}
+                  title={formatFreshnessWindowCardTitle(monitor.windowHours)}
+                  compact
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="mt-6 rounded-2xl border border-[#78350F] bg-[#1C1917] p-5">
+              <p className="text-[12px] uppercase tracking-[0.14em] text-[#FBBF24]">
+                Temporarily Unavailable
+              </p>
+              <p className="mt-2 text-[15px] text-[#D1D5DB]">
+                Longer-window price freshness could not be loaded right now. We will keep trying this request-time query on each refresh.
               </p>
             </div>
           )}

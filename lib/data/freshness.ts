@@ -9,46 +9,75 @@ export type CanonicalRawFreshnessMonitor = {
   freshPct: number;
 };
 
-export async function getCanonicalRawFreshnessMonitor(windowHours = 24): Promise<CanonicalRawFreshnessMonitor> {
-  const supabase = dbPublic();
-  const asOf = new Date().toISOString();
-  const cutoffIso = new Date(Date.now() - windowHours * 60 * 60 * 1000).toISOString();
+function normalizeWindowHours(windowHours: number): number {
+  return Math.max(1, Math.floor(windowHours));
+}
 
-  const [totalResult, freshResult] = await Promise.all([
-    supabase
-      .from("public_card_metrics")
-      .select("canonical_slug", { count: "exact", head: true })
-      .eq("grade", "RAW")
-      .is("printing_id", null),
-    supabase
+export async function getCanonicalRawFreshnessMonitors(windowHoursList: number[]): Promise<CanonicalRawFreshnessMonitor[]> {
+  const supabase = dbPublic();
+  const asOfDate = new Date();
+  const asOf = asOfDate.toISOString();
+  const uniqueWindowHours = [...new Set(windowHoursList.map(normalizeWindowHours))];
+  const windowConfigs = uniqueWindowHours.map((windowHours) => ({
+    windowHours,
+    cutoffIso: new Date(asOfDate.getTime() - windowHours * 60 * 60 * 1000).toISOString(),
+  }));
+
+  const totalResult = await supabase
+    .from("public_card_metrics")
+    .select("canonical_slug", { count: "exact", head: true })
+    .eq("grade", "RAW")
+    .is("printing_id", null);
+
+  const freshResults = await Promise.all(windowConfigs.map(async (config) => ({
+    ...config,
+    result: await supabase
       .from("public_card_metrics")
       .select("canonical_slug", { count: "exact", head: true })
       .eq("grade", "RAW")
       .is("printing_id", null)
-      .gte("market_price_as_of", cutoffIso),
-  ]);
+      .gte("market_price_as_of", config.cutoffIso),
+  })));
 
   if (totalResult.error) {
     throw new Error(`freshness(total): ${totalResult.error.message}`);
   }
-  if (freshResult.error) {
-    throw new Error(`freshness(fresh): ${freshResult.error.message}`);
-  }
 
   const totalCanonicalRaw = totalResult.count ?? 0;
-  const freshCanonicalRaw = freshResult.count ?? 0;
-  const freshPct = totalCanonicalRaw > 0
-    ? Number(((freshCanonicalRaw / totalCanonicalRaw) * 100).toFixed(2))
-    : 0;
+  const monitorsByWindow = new Map<number, CanonicalRawFreshnessMonitor>();
 
-  return {
-    windowHours,
-    asOf,
-    cutoffIso,
-    totalCanonicalRaw,
-    freshCanonicalRaw,
-    freshPct,
-  };
+  for (const { windowHours, cutoffIso, result } of freshResults) {
+    if (result.error) {
+      throw new Error(`freshness(fresh:${windowHours}h): ${result.error.message}`);
+    }
+    const freshCanonicalRaw = result.count ?? 0;
+    const freshPct = totalCanonicalRaw > 0
+      ? Number(((freshCanonicalRaw / totalCanonicalRaw) * 100).toFixed(2))
+      : 0;
+
+    monitorsByWindow.set(windowHours, {
+      windowHours,
+      asOf,
+      cutoffIso,
+      totalCanonicalRaw,
+      freshCanonicalRaw,
+      freshPct,
+    });
+  }
+
+  return windowHoursList.map((windowHours) => {
+    const normalizedWindowHours = normalizeWindowHours(windowHours);
+    const monitor = monitorsByWindow.get(normalizedWindowHours);
+    if (!monitor) {
+      throw new Error(`freshness(missing:${normalizedWindowHours}h): monitor was not computed`);
+    }
+    return monitor;
+  });
+}
+
+export async function getCanonicalRawFreshnessMonitor(windowHours = 24): Promise<CanonicalRawFreshnessMonitor> {
+  const [monitor] = await getCanonicalRawFreshnessMonitors([windowHours]);
+  return monitor;
 }
 
 type PairRow = { justtcg_price: number; scrydex_price: number };
