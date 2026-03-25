@@ -114,6 +114,8 @@ const MIN_PRICE = 0.5;
 const MIN_MOVER_PRICE = 1;
 /** Homepage live rails should tolerate missed runs and keep using recent real market data. */
 const RECENT_MARKET_MAX_AGE_HOURS = 72;
+/** Homepage hero freshness count is a true 24-hour stat. */
+const REFRESHED_TODAY_MAX_AGE_HOURS = 24;
 /** Minimum trade count for "sustained trending" vs noise */
 const MIN_CHANGES_TRENDING = 3;
 /** Over-fetch factor for candidate lists (we filter in JS) */
@@ -298,6 +300,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
   try {
     const nowMs = now();
     const recentMarketCutoffIso = new Date(nowMs - RECENT_MARKET_MAX_AGE_HOURS * 60 * 60 * 1000).toISOString();
+    const refreshedTodayCutoffIso = new Date(nowMs - REFRESHED_TODAY_MAX_AGE_HOURS * 60 * 60 * 1000).toISOString();
 
     let positiveChangeRows: ChangeCandidateRow[] = [];
     let negativeChangeRows: ChangeCandidateRow[] = [];
@@ -369,7 +372,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
           .eq("grade", "RAW")
           .is("printing_id", null)
           .not("market_price", "is", null)
-          .gte("market_price_as_of", recentMarketCutoffIso),
+          .gte("market_price_as_of", refreshedTodayCutoffIso),
 
         // 5. Count of canonical RAW cards with a live market price
         client

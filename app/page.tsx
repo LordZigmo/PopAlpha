@@ -666,7 +666,7 @@ export default async function Home() {
   const focusPills = buildFocusPills([...heroPulseCards, ...trending, ...movers], TRENDING_SET_PILLS, 2);
   const heroStats = [
     { value: formatCount(trackedCardsWithLivePrice), label: "Live prices" },
-    { value: formatCount(pricesRefreshedToday), label: "Refreshed today" },
+    { value: formatCount(pricesRefreshedToday), label: "Refreshed 24h" },
     { value: "Raw • Sealed • Graded", label: "Coverage" },
     { value: "Live", label: "AI brief" },
     { value: heroAverageStrength != null ? `${heroAverageStrength}/100` : "Live", label: "Signal score" },

@@ -409,6 +409,7 @@ export const INTERNAL_ROUTE_TRUST_CONTRACTS = {
   "cron/run-justtcg-retry": cronSecretRoute("cron/internal automation"),
   "cron/run-pokemontcg-pipeline": cronSecretRoute("cron/internal automation"),
   "cron/run-poketrace-pipeline": cronSecretRoute("cron/internal automation"),
+  "cron/run-scrydex-daily/[chunk]": cronSecretRoute("cron/internal automation"),
   "cron/run-scrydex-2024plus-catchup": cronSecretRoute("cron/internal automation"),
   "cron/run-scrydex-2024plus-daily/[chunk]": cronSecretRoute("cron/internal automation"),
   "cron/run-scrydex-pipeline": cronSecretRoute("cron/internal automation"),

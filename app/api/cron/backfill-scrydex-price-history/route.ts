@@ -9,6 +9,9 @@ import {
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
+const DEFAULT_BACKFILL_SET_LIMIT = 24;
+const DEFAULT_BACKFILL_MAX_CREDITS = 10000;
+
 function parseOptionalInt(value: string | null): number | undefined {
   if (!value) return undefined;
   const parsed = parseInt(value, 10);
@@ -22,9 +25,12 @@ export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
     const providerSetId = url.searchParams.get("set")?.trim() || null;
-    const hotSetLimit = Math.max(1, Math.min(parseOptionalInt(url.searchParams.get("sets")) ?? 1, 10));
+    const hotSetLimit = Math.max(
+      1,
+      Math.min(parseOptionalInt(url.searchParams.get("sets")) ?? DEFAULT_BACKFILL_SET_LIMIT, 48),
+    );
     const days = Math.max(1, Math.min(parseOptionalInt(url.searchParams.get("days")) ?? 90, 180));
-    const maxCredits = Math.max(1, parseOptionalInt(url.searchParams.get("maxCredits")) ?? 3000);
+    const maxCredits = Math.max(1, parseOptionalInt(url.searchParams.get("maxCredits")) ?? DEFAULT_BACKFILL_MAX_CREDITS);
     const maxCards = parseOptionalInt(url.searchParams.get("maxCards"));
     const captureToday = url.searchParams.get("captureToday") !== "0";
     const dryRun = url.searchParams.get("dryRun") === "1";
