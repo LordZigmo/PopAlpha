@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -12,6 +13,34 @@ import { POKETRACE_CAMERA_HREF } from "@/lib/poketrace/ui-paths";
 import { parseSearchSort, sortSearchResults } from "@/lib/search/sort.mjs";
 import { getLatestSetSummarySnapshot, type SetSummarySnapshot } from "@/lib/sets/summary";
 import { isPhysicalPokemonSet } from "@/lib/sets/physical";
+
+const title = "Search | PopAlpha";
+const description = "Search live Pokemon card prices, movers, and card detail pages across the PopAlpha market.";
+const canonicalPath = "/search";
+
+export const metadata: Metadata = {
+  title,
+  description,
+  alternates: {
+    canonical: canonicalPath,
+  },
+  openGraph: {
+    title,
+    description,
+    url: canonicalPath,
+    siteName: "PopAlpha",
+    type: "website",
+    images: [
+      { url: "/opengraph-image", alt: "PopAlpha" },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title,
+    description,
+    images: ["/twitter-image"],
+  },
+};
 
 type SearchSort = "relevance" | "market-price" | "newest" | "oldest";
 

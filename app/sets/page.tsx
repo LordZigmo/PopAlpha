@@ -1,7 +1,36 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { buildSetId } from "@/lib/sets/summary-core.mjs";
 import { dbPublic } from "@/lib/db";
 import { isPhysicalPokemonSet } from "@/lib/sets/physical";
+
+const title = "Sets | PopAlpha";
+const description = "Browse Pokemon card sets with live market heat, recent movement, and set-level summaries.";
+const canonicalPath = "/sets";
+
+export const metadata: Metadata = {
+  title,
+  description,
+  alternates: {
+    canonical: canonicalPath,
+  },
+  openGraph: {
+    title,
+    description,
+    url: canonicalPath,
+    siteName: "PopAlpha",
+    type: "website",
+    images: [
+      { url: "/opengraph-image", alt: "PopAlpha" },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title,
+    description,
+    images: ["/twitter-image"],
+  },
+};
 
 type SetEntry = {
   set_name: string;

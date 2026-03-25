@@ -5,11 +5,31 @@ import {
   getPricingTransparencyTrend,
 } from "@/lib/data/freshness";
 
+const title = "Data | PopAlpha";
+const description = "Public data freshness monitor for canonical RAW card pricing.";
+const canonicalPath = "/data";
+
 export const metadata: Metadata = {
-  title: "Data | PopAlpha",
-  description: "Public data freshness monitor for canonical RAW card pricing.",
+  title,
+  description,
   alternates: {
-    canonical: "/data",
+    canonical: canonicalPath,
+  },
+  openGraph: {
+    title,
+    description,
+    url: canonicalPath,
+    siteName: "PopAlpha",
+    type: "website",
+    images: [
+      { url: "/opengraph-image", alt: "PopAlpha" },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title,
+    description,
+    images: ["/twitter-image"],
   },
 };
 

@@ -40,12 +40,9 @@ function formatMarketStrength(score: number | null): string {
   return `${Math.round(score)}`;
 }
 
-function formatCount(value: number | null): string {
+function formatExactCount(value: number | null): string {
   if (value == null || !Number.isFinite(value)) return "--";
-  return new Intl.NumberFormat("en-US", {
-    notation: value >= 1000 ? "compact" : "standard",
-    maximumFractionDigits: value >= 1000 ? 1 : 0,
-  }).format(value);
+  return new Intl.NumberFormat("en-US").format(value);
 }
 
 function getDirectionMeta(direction: HomepageCard["market_direction"]) {
@@ -109,7 +106,7 @@ const TRENDING_SET_PILLS = [
 
 const HERO_HEADLINE = "Market intelligence";
 const HERO_HEADLINE_ACCENT = "for Pokémon collectors";
-const HERO_SUBHEADLINE = "Live prices, market signals, and AI briefs in one place.";
+const HERO_SUBHEADLINE = "See live Pokemon card prices, today's movers, and grounded market context built from the feed.";
 const HERO_PRIMARY_CTA = "Start free";
 const HERO_SECONDARY_CTA = "Explore live market";
 const HOMEPAGE_SCOUT_NARRATIVE =
@@ -654,7 +651,6 @@ export default async function Home() {
   const heroPulseCards = (featuredCard ? [featuredCard, ...heroCards] : heroCards)
     .filter((card, index, cards) => cards.findIndex((entry) => entry.slug === card.slug) === index)
     .slice(0, 4);
-  const heroAverageStrength = averageValues(heroPulseCards.map((card) => card.market_strength_score));
   const heroLeadingSet = getLeadingSet(heroMarketCards);
   const heroPulseSlides = heroPulseCards.slice(0, 4);
   const heroBrief = buildHeroBrief(
@@ -664,12 +660,24 @@ export default async function Home() {
     marketNarrative || "The market is still taking shape.",
   );
   const focusPills = buildFocusPills([...heroPulseCards, ...trending, ...movers], TRENDING_SET_PILLS, 2);
+  const livePriceCount = formatExactCount(trackedCardsWithLivePrice);
+  const refreshedCount = formatExactCount(pricesRefreshedToday);
+  const heroProofCopy = trackedCardsWithLivePrice !== null && pricesRefreshedToday !== null
+    ? `${livePriceCount} live card prices are on the board, with ${refreshedCount} refreshed in the last 24 hours.`
+    : "Live prices, fresh movers, and grounded market context update throughout the day.";
+  const heroBriefGrounding = trackedCardsWithLivePrice !== null && pricesRefreshedToday !== null
+    ? `Grounded in ${livePriceCount} live prices and ${refreshedCount} refreshed cards from the last 24 hours.`
+    : "Grounded in live market pricing and request-time refresh rails.";
+  const heroProofStats = [
+    { value: livePriceCount, label: "Canonical RAW cards with live prices" },
+    { value: refreshedCount, label: "Cards refreshed in the last 24 hours" },
+    { value: asOf ? `Live ${asOf}` : "Live", label: "Latest market update" },
+  ] as const;
   const heroStats = [
-    { value: formatCount(trackedCardsWithLivePrice), label: "Live prices" },
-    { value: formatCount(pricesRefreshedToday), label: "Refreshed 24h" },
-    { value: "Raw • Sealed • Graded", label: "Coverage" },
-    { value: "Live", label: "AI brief" },
-    { value: heroAverageStrength != null ? `${heroAverageStrength}/100` : "Live", label: "Signal score" },
+    { value: livePriceCount, label: "Live card prices", href: "/search" },
+    { value: refreshedCount, label: "Refreshed 24h", href: "/data" },
+    { value: asOf ? `Live ${asOf}` : "Live", label: "Last market update", href: "/data" },
+    { value: "Open", label: "Public data monitor", href: "/data" },
   ] as const;
 
   const trendingCards = trending.slice(0, 5);
@@ -753,6 +761,41 @@ export default async function Home() {
                 {HERO_SUBHEADLINE}
               </p>
 
+              <div className="mt-7 max-w-[660px] rounded-[24px] border border-[#16303A] bg-[linear-gradient(180deg,rgba(8,16,22,0.94),rgba(7,12,18,0.98))] p-4 shadow-[0_20px_55px_rgba(0,0,0,0.28)] ring-1 ring-white/[0.04] sm:p-5">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="max-w-[430px]">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#7DD3FC]">
+                      Public Proof
+                    </p>
+                    <p className="mt-2 text-[14px] leading-6 text-[#D6DEE6] sm:text-[15px]">
+                      {heroProofCopy}
+                    </p>
+                  </div>
+                  <Link
+                    href="/data"
+                    className="inline-flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.03] px-4 py-2 text-[12px] font-semibold text-[#E7EDF2] transition-all hover:border-white/[0.15] hover:bg-white/[0.06] hover:text-white"
+                  >
+                    View data monitor
+                  </Link>
+                </div>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                  {heroProofStats.map((stat) => (
+                    <div
+                      key={stat.label}
+                      className="rounded-[18px] border border-white/[0.05] bg-white/[0.02] px-4 py-3"
+                    >
+                      <p className="text-[18px] font-semibold tracking-tight text-white">
+                        {stat.value}
+                      </p>
+                      <p className="mt-1 text-[11px] leading-5 text-[#7B8793]">
+                        {stat.label}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
               {/* Search Bar */}
               <div className="mt-9 max-w-[560px]">
                 <div className="overflow-hidden rounded-[28px] bg-[linear-gradient(180deg,rgba(18,22,29,0.92),rgba(10,12,16,0.96))] p-1.5 shadow-[0_24px_70px_rgba(0,0,0,0.38)] ring-1 ring-white/[0.06] backdrop-blur-xl">
@@ -813,7 +856,10 @@ export default async function Home() {
                         height={48}
                         className="h-12 w-12 shrink-0"
                       />
-                      <span className="text-[12px] font-medium text-[#98E7F3]">PopAlpha AI Brief</span>
+                      <div>
+                        <span className="text-[12px] font-medium text-[#98E7F3]">Grounded Market Brief</span>
+                        <p className="mt-1 text-[11px] text-[#7B8793]">Built from live price rails, not static homepage copy.</p>
+                      </div>
                     </div>
                     <span className="text-[11px] text-[#8D97A2]">
                       {asOf ? `Updated ${asOf}` : "Live"}
@@ -821,7 +867,15 @@ export default async function Home() {
                   </div>
 
                   <div className="mt-6 rounded-xl border border-white/[0.04] bg-white/[0.02] p-4">
-                    <span className="text-[10px] font-semibold uppercase tracking-widest text-[#5F6A76]">Today&apos;s Read</span>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-[10px] font-semibold uppercase tracking-widest text-[#5F6A76]">Today&apos;s Read</span>
+                      <Link
+                        href="/data"
+                        className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#7DD3FC] transition-colors hover:text-white"
+                      >
+                        Proof
+                      </Link>
+                    </div>
                     <p className="mt-2 text-[15px] font-medium leading-relaxed text-[#D4DCE4]">
                       {heroBrief.lead}
                     </p>
@@ -830,6 +884,9 @@ export default async function Home() {
                         {heroBrief.secondary}
                       </p>
                     ) : null}
+                    <p className="mt-4 text-[12px] leading-relaxed text-[#7B8793]">
+                      {heroBriefGrounding}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -958,15 +1015,16 @@ export default async function Home() {
       {/* ── Trust Strip ─────────────────────────────────────────────────── */}
       <section className="border-y border-white/[0.04] bg-[#07090D]">
         <div className="mx-auto max-w-[1400px] px-5 sm:px-8">
-          <div className="grid gap-y-6 py-6 sm:grid-cols-2 lg:grid-cols-5 lg:gap-y-0">
+          <div className="grid gap-y-6 py-6 sm:grid-cols-2 lg:grid-cols-4 lg:gap-y-0">
             {heroStats.map((stat, index) => (
-              <div
+              <Link
                 key={stat.label}
+                href={stat.href}
                 className={`${index > 0 ? "lg:border-l lg:border-white/[0.05] lg:pl-6" : ""} ${index < heroStats.length - 1 ? "lg:pr-6" : ""}`}
               >
-                <span className="text-[16px] font-semibold tracking-tight text-white sm:text-[18px]">{stat.value}</span>
+                <span className="text-[16px] font-semibold tracking-tight text-white transition-colors hover:text-[#9BE7F6] sm:text-[18px]">{stat.value}</span>
                 <p className="mt-1 text-[12px] text-[#6D7783]">{stat.label}</p>
-              </div>
+              </Link>
             ))}
           </div>
         </div>

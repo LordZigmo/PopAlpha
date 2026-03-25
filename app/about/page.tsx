@@ -1,10 +1,30 @@
 import type { Metadata } from "next";
 
+const title = "About | PopAlpha";
+const description = "What PopAlpha tracks, how the data works, and what the platform is building.";
+const canonicalPath = "/about";
+
 export const metadata: Metadata = {
-  title: "About | PopAlpha",
-  description: "What PopAlpha tracks, how the data works, and what the platform is building.",
+  title,
+  description,
   alternates: {
-    canonical: "/about",
+    canonical: canonicalPath,
+  },
+  openGraph: {
+    title,
+    description,
+    url: canonicalPath,
+    siteName: "PopAlpha",
+    type: "website",
+    images: [
+      { url: "/opengraph-image", alt: "PopAlpha" },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title,
+    description,
+    images: ["/twitter-image"],
   },
 };
 
@@ -21,10 +41,10 @@ export default function AboutPage() {
           </h1>
           <div className="mt-6 space-y-5 text-[15px] leading-7 text-[#A0A0A0] sm:text-[16px]">
             <p>
-              If you've ever stood at a card show with your phone out, flipping between eBay listings and price charts, you know the feeling.
+              If you&apos;ve ever stood at a card show with your phone out, flipping between eBay listings and price charts, you know the feeling.
             </p>
             <div>
-              <p>You're trying to figure out:</p>
+              <p>You&apos;re trying to figure out:</p>
               <ul className="mt-3 list-disc space-y-1 pl-5 marker:text-[#D0D0D0]">
                 <li className="pl-1">Is this a fair price?</li>
                 <li className="pl-1">Is this card trending up?</li>
@@ -32,9 +52,9 @@ export default function AboutPage() {
                 <li className="pl-1">Am I about to overpay?</li>
               </ul>
             </div>
-            <p>We've felt that pain too.</p>
+            <p>We&apos;ve felt that pain too.</p>
             <p>
-              Sometimes you don't just want a list of past sales. You want the vibe of the card. Is it hot? Quiet? Undervalued? Overhyped?
+              Sometimes you don&apos;t just want a list of past sales. You want the vibe of the card. Is it hot? Quiet? Undervalued? Overhyped?
             </p>
             <p>PopAlpha was built to give you that answer in seconds.</p>
           </div>
@@ -55,7 +75,7 @@ export default function AboutPage() {
                 <li className="pl-1">Real Pokemon card sale prices</li>
                 <li className="pl-1">Variant-specific price changes</li>
                 <li className="pl-1">Market trends</li>
-                <li className="pl-1">A Market Balance Price (our estimate of what's fair right now)</li>
+                <li className="pl-1">A Market Balance Price (our estimate of what&apos;s fair right now)</li>
                 <li className="pl-1">Set summaries to help you learn more about each release</li>
               </ul>
             </div>
@@ -70,7 +90,7 @@ export default function AboutPage() {
           <div className="mt-4 space-y-5 text-[15px] leading-7 text-[#A0A0A0] sm:text-[16px]">
             <p>We got tired of doing mental math at card shows.</p>
             <p>Averaging eBay sold listings. Guessing what felt fair. Trying to learn about a card while someone waited for an offer.</p>
-            <p>The Pokemon market has grown a lot. But the tools haven't kept up.</p>
+            <p>The Pokemon market has grown a lot. But the tools haven&apos;t kept up.</p>
             <p>So we built the tool we wished we had.</p>
           </div>
         </section>
@@ -83,7 +103,7 @@ export default function AboutPage() {
             To make Pokemon card collecting easier, smarter, and more fun.
           </p>
           <p className="mt-4 text-[15px] leading-7 text-[#A0A0A0] sm:text-[16px]">
-            Whether you're buying your first single or building a serious collection, PopAlpha helps you understand the market without the stress.
+            Whether you&apos;re buying your first single or building a serious collection, PopAlpha helps you understand the market without the stress.
           </p>
         </section>
       </div>
