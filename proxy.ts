@@ -19,6 +19,23 @@ const ADMIN_SET = new Set(ADMIN_ROUTES);
 const DEBUG_SET = new Set(DEBUG_ROUTES);
 const INGEST_SET = new Set(INGEST_ROUTES);
 const USER_SET = new Set(USER_ROUTES);
+const ALL_ROUTE_KEYS = [
+  ...PUBLIC_ROUTES,
+  ...CRON_ROUTES,
+  ...ADMIN_ROUTES,
+  ...DEBUG_ROUTES,
+  ...INGEST_ROUTES,
+  ...USER_ROUTES,
+];
+const ALL_ROUTE_SET = new Set(ALL_ROUTE_KEYS);
+const DYNAMIC_ROUTE_PATTERNS = ALL_ROUTE_KEYS
+  .filter((routeKey) => routeKey.includes("["))
+  .map((routeKey) => ({
+    routeKey,
+    segments: routeKey.split("/"),
+    staticSegmentCount: routeKey.split("/").filter((segment) => !(segment.startsWith("[") && segment.endsWith("]"))).length,
+  }))
+  .sort((a, b) => b.staticSegmentCount - a.staticSegmentCount);
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -32,16 +49,24 @@ const USER_SET = new Set(USER_ROUTES);
 function toRouteKey(pathname: string): string {
   // Strip /api/ prefix
   const stripped = pathname.replace(/^\/api\//, "");
-  const segments = stripped.split("/");
-
-  // Known patterns with dynamic segments:
-  // cards/[slug]/detail → segment[1] is the slug
-  // private-sales/[id] → segment[1] is the id
-  if (segments[0] === "cards" && segments.length === 3 && segments[2] === "detail") {
-    return "cards/[slug]/detail";
+  if (ALL_ROUTE_SET.has(stripped)) {
+    return stripped;
   }
-  if (segments[0] === "private-sales" && segments.length === 2 && segments[1] !== "") {
-    return "private-sales/[id]";
+
+  const segments = stripped.split("/");
+  for (const pattern of DYNAMIC_ROUTE_PATTERNS) {
+    if (pattern.segments.length !== segments.length) continue;
+
+    const matches = pattern.segments.every((patternSegment, index) => {
+      if (patternSegment.startsWith("[") && patternSegment.endsWith("]")) {
+        return segments[index] !== "";
+      }
+      return patternSegment === segments[index];
+    });
+
+    if (matches) {
+      return pattern.routeKey;
+    }
   }
 
   return stripped;
