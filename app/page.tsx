@@ -1,4 +1,4 @@
-import { Suspense } from "react";
+import { Suspense, type CSSProperties } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { currentUser } from "@clerk/nextjs/server";
@@ -1205,9 +1205,9 @@ export default async function Home() {
                   <span className="text-[13px] font-semibold text-white">Strong Movers</span>
                   <span className="rounded-md bg-[#00DC5A]/10 px-2 py-0.5 text-[10px] font-bold text-[#00DC5A]">{strongMoversBadge}</span>
                 </div>
-                <div className="grid gap-2 sm:grid-cols-2">
+                <div className="grid gap-4 sm:grid-cols-2">
                   {strongMoverCards.map((card) => (
-                    <MoverCard key={card.slug} card={card} />
+                    <SignalCard key={card.slug} card={card} />
                   ))}
                   {strongMoverCards.length === 0 && (
                     <div className="col-span-2 flex h-24 items-center justify-center rounded-xl border border-white/[0.04] text-[13px] text-[#444]">
@@ -1223,9 +1223,9 @@ export default async function Home() {
                   <span className="text-[13px] font-semibold text-white">Largest Pullbacks</span>
                   <span className="rounded-md bg-[#FF3B30]/10 px-2 py-0.5 text-[10px] font-bold text-[#FF3B30]">{pullbacksBadge}</span>
                 </div>
-                <div className="grid gap-2 sm:grid-cols-2">
+                <div className="grid gap-4 sm:grid-cols-2">
                   {dropCards.slice(0, 4).map((card) => (
-                    <MoverCard key={card.slug} card={card} />
+                    <SignalCard key={card.slug} card={card} />
                   ))}
                   {dropCards.length === 0 && (
                     <div className="col-span-2 flex h-24 items-center justify-center rounded-xl border border-white/[0.04] text-[13px] text-[#444]">
@@ -1257,37 +1257,12 @@ export default async function Home() {
             style={{ scrollSnapType: "x mandatory" }}
           >
             {trendingCards.map((card) => (
-              <Link
+              <SignalCard
                 key={card.slug}
-                href={`/c/${encodeURIComponent(card.slug)}`}
-                className="group w-[220px] shrink-0 overflow-hidden rounded-2xl border border-white/[0.06] bg-[#0C0C10] transition-all hover:border-[#00B4D8]/20 hover:shadow-[0_12px_40px_rgba(0,180,216,0.08)] sm:w-[240px]"
+                card={card}
+                className="w-[220px] shrink-0 sm:w-[240px]"
                 style={{ scrollSnapAlign: "start" }}
-              >
-                {/* Card image with premium framing */}
-                <div className="relative overflow-hidden bg-gradient-to-b from-[#12121a] to-[#0C0C10] p-4 pb-3">
-                  <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/[0.02] to-transparent" />
-                  {card.image_url ? (
-                    <img
-                      src={card.image_url}
-                      alt={card.name}
-                      className="relative mx-auto aspect-[63/88] w-full rounded-lg object-cover shadow-[0_12px_35px_rgba(0,0,0,0.5)] transition-transform duration-300 group-hover:scale-[1.04] group-hover:shadow-[0_16px_45px_rgba(0,0,0,0.6)]"
-                    />
-                  ) : (
-                    <div className="mx-auto aspect-[63/88] w-full rounded-lg bg-gradient-to-br from-[#1a1a2e] to-[#0a0a12] shadow-[0_12px_35px_rgba(0,0,0,0.5)]" />
-                  )}
-                </div>
-                {/* Card details */}
-                <div className="px-4 pb-4">
-                  <p className="truncate text-[14px] font-semibold text-[#E4E4E7] group-hover:text-white">{card.name}</p>
-                  <p className="mt-0.5 truncate text-[11px] text-[#555]">{card.set_name}</p>
-                  <div className="mt-2.5 flex items-center justify-between border-t border-white/[0.04] pt-2.5">
-                    <span className="text-[15px] font-bold tabular-nums text-white">{formatPrice(card.market_price)}</span>
-                    <span className={`rounded-md px-1.5 py-0.5 text-[12px] font-bold tabular-nums ${(card.change_pct ?? 0) >= 0 ? "bg-[#00DC5A]/10 text-[#00DC5A]" : "bg-[#FF3B30]/10 text-[#FF3B30]"}`}>
-                      {formatPct(card.change_pct)}
-                    </span>
-                  </div>
-                </div>
-              </Link>
+              />
             ))}
             {trendingCards.length === 0 && (
               <div className="flex h-40 w-full items-center justify-center text-[13px] text-[#444]">
@@ -1308,35 +1283,13 @@ export default async function Home() {
                 style={{ scrollSnapType: "x mandatory" }}
               >
                 {emergingMovers.slice(0, 5).map((card) => (
-                  <Link
+                  <SignalCard
                     key={card.slug}
-                    href={`/c/${encodeURIComponent(card.slug)}`}
-                    className="group w-[220px] shrink-0 overflow-hidden rounded-2xl border border-white/[0.06] bg-[#0C0C10] transition-all hover:border-[#00DC5A]/20 hover:shadow-[0_12px_40px_rgba(0,220,90,0.06)] sm:w-[240px]"
+                    card={card}
+                    className="w-[220px] shrink-0 sm:w-[240px]"
+                    hoverTone="green"
                     style={{ scrollSnapAlign: "start" }}
-                  >
-                    <div className="relative overflow-hidden bg-gradient-to-b from-[#12121a] to-[#0C0C10] p-4 pb-3">
-                      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/[0.02] to-transparent" />
-                      {card.image_url ? (
-                        <img
-                          src={card.image_url}
-                          alt={card.name}
-                          className="relative mx-auto aspect-[63/88] w-full rounded-lg object-cover shadow-[0_12px_35px_rgba(0,0,0,0.5)] transition-transform duration-300 group-hover:scale-[1.04]"
-                        />
-                      ) : (
-                        <div className="mx-auto aspect-[63/88] w-full rounded-lg bg-gradient-to-br from-[#1a1a2e] to-[#0a0a12] shadow-[0_12px_35px_rgba(0,0,0,0.5)]" />
-                      )}
-                    </div>
-                    <div className="px-4 pb-4">
-                      <p className="truncate text-[14px] font-semibold text-[#E4E4E7]">{card.name}</p>
-                      <p className="mt-0.5 truncate text-[11px] text-[#555]">{card.set_name}</p>
-                    </div>
-                    <div className="px-4 pb-4 flex items-center justify-between border-t border-white/[0.04] pt-2.5 -mt-1">
-                      <span className="text-[15px] font-bold tabular-nums text-white">{formatPrice(card.market_price)}</span>
-                      <span className={`rounded-md px-1.5 py-0.5 text-[12px] font-bold tabular-nums ${(card.change_pct ?? 0) >= 0 ? "bg-[#00DC5A]/10 text-[#00DC5A]" : "bg-[#FF3B30]/10 text-[#FF3B30]"}`}>
-                        {formatPct(card.change_pct)}
-                      </span>
-                    </div>
-                  </Link>
+                  />
                 ))}
               </div>
             </div>
@@ -1677,57 +1630,48 @@ export default async function Home() {
 
 /* ─── Sub-components ───────────────────────────────────────────────────────── */
 
-function MoverCard({ card }: { card: HomepageCard }) {
-  const isPositive = (card.change_pct ?? 0) >= 0;
-  const directionMeta = getDirectionMeta(card.market_direction);
+function SignalCard({
+  card,
+  className = "",
+  style,
+  hoverTone = "cyan",
+}: {
+  card: HomepageCard;
+  className?: string;
+  style?: CSSProperties;
+  hoverTone?: "cyan" | "green";
+}) {
+  const hoverClasses = hoverTone === "green"
+    ? "hover:border-[#00DC5A]/20 hover:shadow-[0_12px_40px_rgba(0,220,90,0.06)]"
+    : "hover:border-[#00B4D8]/20 hover:shadow-[0_12px_40px_rgba(0,180,216,0.08)]";
+
   return (
     <Link
       href={`/c/${encodeURIComponent(card.slug)}`}
-      className="group relative overflow-hidden rounded-xl border border-white/[0.06] bg-[#0C0C10] p-3 transition-all hover:border-white/[0.12] hover:bg-[#0E0E14] hover:shadow-[0_8px_30px_rgba(0,0,0,0.3)]"
+      className={`group overflow-hidden rounded-2xl border border-white/[0.06] bg-[#0C0C10] transition-all ${hoverClasses} ${className}`}
+      style={style}
     >
-      <div className="flex gap-3.5">
-        {/* Card image — larger with premium shadow */}
-        <div className="relative shrink-0">
-          {card.image_url ? (
-            <img
-              src={card.image_url}
-              alt=""
-              className="h-[72px] w-[52px] rounded-lg object-cover shadow-[0_6px_20px_rgba(0,0,0,0.4)] transition-transform duration-200 group-hover:scale-[1.05]"
-            />
-          ) : (
-            <div className="h-[72px] w-[52px] rounded-lg bg-gradient-to-b from-[#1a1a2e] to-[#0a0a12] shadow-[0_6px_20px_rgba(0,0,0,0.4)]" />
-          )}
-          {/* Subtle glow under card on hover */}
-          <div className="pointer-events-none absolute -bottom-1 left-1/2 h-3 w-10 -translate-x-1/2 rounded-full bg-[#00B4D8]/0 blur-md transition-all group-hover:bg-[#00B4D8]/[0.1]" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-[13px] font-semibold text-[#E4E4E7] group-hover:text-white">{card.name}</p>
-          <p className="truncate text-[11px] text-[#555]">{card.set_name}</p>
-          <div className="mt-1.5 flex items-center gap-2">
-            <span className="text-[14px] font-bold tabular-nums text-white">{formatPrice(card.market_price)}</span>
-            <span className={`text-[13px] font-semibold tabular-nums ${isPositive ? "text-[#00DC5A]" : "text-[#FF3B30]"}`}>
-              {formatPct(card.change_pct)}
-            </span>
-          </div>
-          {(card.market_strength_score !== null || directionMeta) ? (
-            <div className="mt-2 flex items-center justify-between gap-2">
-              <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#666]">
-                Market Strength{" "}
-                <span className="text-[#D4D4D8]">
-                  {formatMarketStrength(card.market_strength_score)}
-                </span>
-              </span>
-              {directionMeta ? (
-                <span className={`text-[11px] font-semibold ${directionMeta.textClass}`}>
-                  {directionMeta.label}
-                </span>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-        {card.mover_tier === "hot" && (
-          <span className="shrink-0 self-start rounded-md bg-[#FF6B35]/10 px-1.5 py-0.5 text-[10px] font-bold text-[#FF6B35]">HOT</span>
+      <div className="relative overflow-hidden bg-gradient-to-b from-[#12121a] to-[#0C0C10] p-4 pb-3">
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/[0.02] to-transparent" />
+        {card.image_url ? (
+          <img
+            src={card.image_url}
+            alt={card.name}
+            className="relative mx-auto aspect-[63/88] w-full rounded-lg object-cover shadow-[0_12px_35px_rgba(0,0,0,0.5)] transition-transform duration-300 group-hover:scale-[1.04] group-hover:shadow-[0_16px_45px_rgba(0,0,0,0.6)]"
+          />
+        ) : (
+          <div className="mx-auto aspect-[63/88] w-full rounded-lg bg-gradient-to-br from-[#1a1a2e] to-[#0a0a12] shadow-[0_12px_35px_rgba(0,0,0,0.5)]" />
         )}
+      </div>
+      <div className="px-4 pb-4">
+        <p className="truncate text-[14px] font-semibold text-[#E4E4E7] group-hover:text-white">{card.name}</p>
+        <p className="mt-0.5 truncate text-[11px] text-[#555]">{card.set_name}</p>
+        <div className="mt-2.5 flex items-center justify-between border-t border-white/[0.04] pt-2.5">
+          <span className="text-[15px] font-bold tabular-nums text-white">{formatPrice(card.market_price)}</span>
+          <span className={`rounded-md px-1.5 py-0.5 text-[12px] font-bold tabular-nums ${(card.change_pct ?? 0) >= 0 ? "bg-[#00DC5A]/10 text-[#00DC5A]" : "bg-[#FF3B30]/10 text-[#FF3B30]"}`}>
+            {formatPct(card.change_pct)}
+          </span>
+        </div>
       </div>
     </Link>
   );
