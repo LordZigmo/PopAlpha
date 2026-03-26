@@ -175,6 +175,17 @@ type SelectedRawHistoryPrice = {
   condition: string;
 };
 
+export type ResolvedScrydexHistoryDay = {
+  dayKey: string;
+  selected: SelectedRawHistoryPrice;
+  source: "provider" | "carry_forward";
+};
+
+export type ResolvedScrydexHistoryDaySet = {
+  days: ResolvedScrydexHistoryDay[];
+  providerDaysMissingRaw: number;
+};
+
 export type ScrydexHistoryBackfillPlan = {
   ok: true;
   generatedAt: string;
@@ -227,6 +238,7 @@ export type ScrydexHistoryBackfillResult = {
   historyRowsUpserted: number;
   historyRowsSkippedExistingDay: number;
   historyRowsSkippedNoNearMint: number;
+  historyRowsForwardFilled: number;
   distinctSnapshotDaysWritten: number;
   sampleWrites: HistoryBackfillSample[];
   touchedVariantKeys: Array<{
@@ -324,6 +336,77 @@ export function historyDateToSnapshotTs(date: string): string {
     throw new Error(`Invalid history date: ${date}`);
   }
   return `${normalized}T12:00:00.000Z`;
+}
+
+function buildTrailingUtcDayKeys(windowDays: number, asOfInput: Date | string | number = new Date()): string[] {
+  const safeWindowDays = Math.max(1, Math.floor(windowDays));
+  const parsedAsOf = new Date(asOfInput);
+  const asOf = Number.isNaN(parsedAsOf.getTime()) ? new Date() : parsedAsOf;
+  const asOfDayMs = Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth(), asOf.getUTCDate());
+  const dayKeys: string[] = [];
+  for (let offset = safeWindowDays - 1; offset >= 0; offset -= 1) {
+    dayKeys.push(new Date(asOfDayMs - (offset * 24 * 60 * 60 * 1000)).toISOString().slice(0, 10));
+  }
+  return dayKeys;
+}
+
+export function resolveScrydexRawHistoryDays(params: {
+  historyDays: ScrydexPriceHistoryDay[] | null | undefined;
+  providerVariantToken: string;
+  windowDays: number;
+  asOf?: Date | string | number;
+}): ResolvedScrydexHistoryDaySet {
+  const actualDayKeys = new Set<string>();
+  const pricesByDayKey = new Map<string, ScrydexPriceHistoryEntry[]>();
+
+  for (const historyDay of params.historyDays ?? []) {
+    const dayKey = extractDayKey(historyDay?.date);
+    if (!dayKey) continue;
+    actualDayKeys.add(dayKey);
+    const bucket = pricesByDayKey.get(dayKey) ?? [];
+    if (Array.isArray(historyDay?.prices)) bucket.push(...historyDay.prices);
+    pricesByDayKey.set(dayKey, bucket);
+  }
+
+  const windowDayKeys = buildTrailingUtcDayKeys(params.windowDays, params.asOf);
+  const windowDayKeySet = new Set(windowDayKeys);
+  const orderedDayKeys = [...new Set([...actualDayKeys, ...windowDayKeys])].sort();
+  const resolvedDays: ResolvedScrydexHistoryDay[] = [];
+  let carryForward: SelectedRawHistoryPrice | null = null;
+  let providerDaysMissingRaw = 0;
+
+  for (const dayKey of orderedDayKeys) {
+    const directSelected = actualDayKeys.has(dayKey)
+      ? selectScrydexRawHistoryPrice(pricesByDayKey.get(dayKey) ?? [], params.providerVariantToken)
+      : null;
+
+    if (directSelected) {
+      carryForward = directSelected;
+      resolvedDays.push({
+        dayKey,
+        selected: directSelected,
+        source: "provider",
+      });
+      continue;
+    }
+
+    if (actualDayKeys.has(dayKey)) {
+      providerDaysMissingRaw += 1;
+    }
+
+    if (!windowDayKeySet.has(dayKey) || carryForward === null) continue;
+
+    resolvedDays.push({
+      dayKey,
+      selected: carryForward,
+      source: "carry_forward",
+    });
+  }
+
+  return {
+    days: resolvedDays,
+    providerDaysMissingRaw,
+  };
 }
 
 export function providerVariantIdToScrydexToken(providerVariantId: string): string {
@@ -1247,6 +1330,7 @@ export async function backfillScrydexPriceHistoryForSet(opts: {
   let historyRowsUpserted = 0;
   let historyRowsSkippedExistingDay = 0;
   let historyRowsSkippedNoNearMint = 0;
+  let historyRowsForwardFilled = 0;
   let firstError: string | null = null;
   const sampleWrites: HistoryBackfillSample[] = [];
   const distinctSnapshotDaysWritten = new Set<string>();
@@ -1289,34 +1373,35 @@ export async function backfillScrydexPriceHistoryForSet(opts: {
         throw error;
       }
 
-      for (const historyDay of historyDays) {
-        const dayKey = extractDayKey(historyDay.date);
-        if (!dayKey) continue;
-        const ts = historyDateToSnapshotTs(dayKey);
+      for (const variant of target.variants) {
+        const resolvedHistory = resolveScrydexRawHistoryDays({
+          historyDays,
+          providerVariantToken: variant.providerVariantToken,
+          windowDays: days,
+        });
+        historyRowsSkippedNoNearMint += resolvedHistory.providerDaysMissingRaw;
 
-        for (const variant of target.variants) {
-          const existingDayKey = `${variant.historyVariantRef}::${dayKey}`;
+        for (const resolvedDay of resolvedHistory.days) {
+          const existingDayKey = `${variant.historyVariantRef}::${resolvedDay.dayKey}`;
           if (existingSnapshotState.dayKeys.has(existingDayKey)) {
             historyRowsSkippedExistingDay += 1;
             continue;
           }
 
-          const selected = selectScrydexRawHistoryPrice(historyDay.prices ?? [], variant.providerVariantToken);
-          if (!selected) {
-            historyRowsSkippedNoNearMint += 1;
-            continue;
-          }
-
+          const ts = historyDateToSnapshotTs(resolvedDay.dayKey);
           const row: HistoryWriteRow = {
             canonical_slug: variant.canonicalSlug,
             variant_ref: variant.historyVariantRef,
             provider: PROVIDER,
             ts,
-            price: selected.price,
-            currency: selected.currency,
+            price: resolvedDay.selected.price,
+            currency: resolvedDay.selected.currency,
             source_window: "snapshot",
           };
           preparedRows.push(row);
+          if (resolvedDay.source === "carry_forward") {
+            historyRowsForwardFilled += 1;
+          }
           existingSnapshotState.dayKeys.add(existingDayKey);
           existingSnapshotState.variantRefs.add(variant.historyVariantRef);
           distinctSnapshotDaysWritten.add(existingDayKey);
@@ -1328,8 +1413,8 @@ export async function backfillScrydexPriceHistoryForSet(opts: {
               providerVariantId: variant.providerVariantId,
               canonicalSlug: variant.canonicalSlug,
               ts,
-              price: selected.price,
-              currency: selected.currency,
+              price: resolvedDay.selected.price,
+              currency: resolvedDay.selected.currency,
             });
           }
         }
@@ -1408,6 +1493,7 @@ export async function backfillScrydexPriceHistoryForSet(opts: {
     historyRowsUpserted,
     historyRowsSkippedExistingDay,
     historyRowsSkippedNoNearMint,
+    historyRowsForwardFilled,
     distinctSnapshotDaysWritten: distinctSnapshotDaysWritten.size,
     sampleWrites,
     touchedVariantKeys,

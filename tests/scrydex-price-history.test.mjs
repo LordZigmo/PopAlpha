@@ -7,6 +7,7 @@ import {
   isMissingScrydexCardHistoryErrorMessage,
   isRetryableHistoryWriteErrorMessage,
   providerVariantIdToScrydexToken,
+  resolveScrydexRawHistoryDays,
   retryHistoryWriteOperation,
   selectScrydexRawHistoryPrice,
   summarizeScrydexRecentHistoryCoverage,
@@ -79,6 +80,7 @@ async function runScrydexPriceHistoryTests() {
   assert.equal(recentPlan.selectedSets[0].plannedCardCount, 150);
 
   assert.equal(historyDateToSnapshotTs("2026-03-17"), "2026-03-17T12:00:00.000Z");
+  assert.equal(historyDateToSnapshotTs("2026/03/17"), "2026-03-17T12:00:00.000Z");
   assert.equal(providerVariantIdToScrydexToken("sv3pt5-7:reverseHolofoil"), "reverseholofoil");
   assert.equal(providerVariantIdToScrydexToken("sv3pt5-7:pokemonCenterStamp"), "pokemoncenterstamp");
 
@@ -145,6 +147,89 @@ async function runScrydexPriceHistoryTests() {
     },
   ], "normal");
   assert.equal(noNearMint, null);
+
+  const resolvedHistory = resolveScrydexRawHistoryDays({
+    historyDays: [
+      {
+        date: "2026/03/22",
+        prices: [
+          {
+            variant: "normal",
+            condition: "NM",
+            type: "raw",
+            market: 1.25,
+            currency: "USD",
+          },
+        ],
+      },
+      {
+        date: "2026/03/23",
+        prices: [
+          {
+            variant: "normal",
+            condition: "NM",
+            type: "graded",
+            market: 18,
+            currency: "USD",
+          },
+        ],
+      },
+      {
+        date: "2026/03/25",
+        prices: [
+          {
+            variant: "normal",
+            condition: "NM",
+            type: "raw",
+            market: 1.55,
+            currency: "USD",
+          },
+        ],
+      },
+    ],
+    providerVariantToken: "normal",
+    windowDays: 4,
+    asOf: "2026-03-25T18:00:00.000Z",
+  });
+  assert.equal(resolvedHistory.providerDaysMissingRaw, 1);
+  assert.deepEqual(resolvedHistory.days, [
+    {
+      dayKey: "2026-03-22",
+      selected: {
+        price: 1.25,
+        currency: "USD",
+        condition: "nm",
+      },
+      source: "provider",
+    },
+    {
+      dayKey: "2026-03-23",
+      selected: {
+        price: 1.25,
+        currency: "USD",
+        condition: "nm",
+      },
+      source: "carry_forward",
+    },
+    {
+      dayKey: "2026-03-24",
+      selected: {
+        price: 1.25,
+        currency: "USD",
+        condition: "nm",
+      },
+      source: "carry_forward",
+    },
+    {
+      dayKey: "2026-03-25",
+      selected: {
+        price: 1.55,
+        currency: "USD",
+        condition: "nm",
+      },
+      source: "provider",
+    },
+  ]);
 
   assert.equal(isRetryableHistoryWriteErrorMessage("TypeError: fetch failed"), true);
   assert.equal(isRetryableHistoryWriteErrorMessage("statement timeout"), true);

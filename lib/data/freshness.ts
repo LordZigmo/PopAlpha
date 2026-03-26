@@ -102,16 +102,27 @@ type CanonicalRawDailyFreshnessMonitorRow = {
 export async function getCanonicalRawRollingDailyFreshnessMonitors(windowDaysList: number[]): Promise<CanonicalRawFreshnessMonitor[]> {
   const supabase = dbPublic();
   const uniqueWindowDays = [...new Set(windowDaysList.map(normalizeWindowDays))];
-  const { data, error } = await supabase
-    .rpc("get_canonical_raw_daily_freshness_monitors", { p_window_days: uniqueWindowDays })
-    .returns<CanonicalRawDailyFreshnessMonitorRow[]>();
-
-  if (error) {
-    throw new Error(`freshness(daily-coverage): ${error.message}`);
-  }
-
   const monitorsByWindowDays = new Map<number, CanonicalRawFreshnessMonitor>();
-  const rows = Array.isArray(data) ? data : [];
+
+  const rows = await Promise.all(uniqueWindowDays.map(async (windowDays) => {
+    const { data, error } = await supabase
+      .rpc("get_canonical_raw_daily_freshness_monitors", { p_window_days: [windowDays] })
+      .returns<CanonicalRawDailyFreshnessMonitorRow[]>();
+
+    if (error) {
+      throw new Error(`freshness(daily-coverage:${windowDays}d): ${error.message}`);
+    }
+
+    const row = Array.isArray(data)
+      ? data.find((candidate) => normalizeWindowDays(parseMonitorNumber(candidate.window_days)) === windowDays) ?? null
+      : null;
+
+    if (!row) {
+      throw new Error(`freshness(daily-coverage missing:${windowDays}d): monitor was not computed`);
+    }
+
+    return row;
+  }));
 
   for (const row of rows) {
     const windowDays = normalizeWindowDays(parseMonitorNumber(row.window_days));

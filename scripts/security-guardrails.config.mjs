@@ -640,6 +640,14 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
     expectedSignals: ["service_role_client"],
     usesServiceRole: true,
   }),
+  "scripts/fill-scrydex-history-gaps.mjs": operationalScript({
+    classification: "service_role_repair",
+    executionMode: "manual_repair",
+    intendedCaller: "trusted operator forward-filling missing Scrydex snapshot days from existing privileged history data",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+  }),
   "scripts/import-all-pokemontcg-canonical.mjs": operationalScript({
     classification: "manual_admin_route_driver",
     executionMode: "manual_import",
