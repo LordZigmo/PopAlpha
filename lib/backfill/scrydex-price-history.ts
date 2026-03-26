@@ -43,7 +43,10 @@ const DEFAULT_DAILY_REQUEST_BUDGET_FALLBACK = process.env.SCRYDEX_DAILY_REQUEST_
   : 120;
 const DEFAULT_DAILY_REQUEST_BUDGET_HEADROOM = process.env.SCRYDEX_DAILY_REQUEST_BUDGET_HEADROOM
   ? Math.max(1, parseFloat(process.env.SCRYDEX_DAILY_REQUEST_BUDGET_HEADROOM))
-  : 1;
+  : 1.15;
+const DEFAULT_DAILY_REQUEST_BUDGET_MIN_SWEEP_PCT = process.env.SCRYDEX_DAILY_REQUEST_BUDGET_MIN_SWEEP_PCT
+  ? Math.min(1, Math.max(0, parseFloat(process.env.SCRYDEX_DAILY_REQUEST_BUDGET_MIN_SWEEP_PCT)))
+  : 0.95;
 const DEFAULT_DAILY_REQUEST_BUDGET_LOOKBACK_HOURS = process.env.SCRYDEX_DAILY_REQUEST_BUDGET_LOOKBACK_HOURS
   ? Math.max(1, parseInt(process.env.SCRYDEX_DAILY_REQUEST_BUDGET_LOOKBACK_HOURS, 10))
   : 24;
@@ -203,6 +206,8 @@ export type ScrydexDailyCapturePlanRow = ScrydexSetFootprint & {
 export type ScrydexDailyCapturePlanChunk = {
   chunkNumber: number;
   plannedRequests: number;
+  plannedExpectedCardCount: number;
+  plannedMatchedCardCount: number;
   providerSetIds: string[];
   selectedSets: ScrydexDailyCapturePlanRow[];
 };
@@ -780,12 +785,13 @@ async function loadRecentSuccessfulScrydexRequests(opts: {
   }, 0);
 }
 
-function resolveScrydexDailyRequestBudget(params: {
+export function resolveScrydexDailyRequestBudget(params: {
   totalAvailableRequests: number;
   recentSuccessfulRequests: number;
   maxRequests?: number;
   fallback?: number;
   headroom?: number;
+  minSweepPct?: number;
 }): number {
   const totalAvailableRequests = Math.max(0, Math.floor(params.totalAvailableRequests));
   if (totalAvailableRequests <= 0) return 0;
@@ -798,10 +804,14 @@ function resolveScrydexDailyRequestBudget(params: {
   const headroom = Number.isFinite(params.headroom)
     ? Math.max(1, Number(params.headroom))
     : DEFAULT_DAILY_REQUEST_BUDGET_HEADROOM;
+  const minSweepPct = Number.isFinite(params.minSweepPct)
+    ? Math.min(1, Math.max(0, Number(params.minSweepPct)))
+    : DEFAULT_DAILY_REQUEST_BUDGET_MIN_SWEEP_PCT;
   const learnedBudget = params.recentSuccessfulRequests > 0
     ? Math.max(1, Math.ceil(params.recentSuccessfulRequests * headroom))
     : fallback;
-  return Math.min(totalAvailableRequests, learnedBudget);
+  const sweepFloor = Math.max(fallback, Math.ceil(totalAvailableRequests * minSweepPct));
+  return Math.min(totalAvailableRequests, Math.max(learnedBudget, sweepFloor));
 }
 
 function buildScrydexDailyCapturePlanRows(params: {
@@ -868,19 +878,33 @@ function buildScrydexDailyCapturePlanRows(params: {
     });
 }
 
-function buildBalancedScrydexDailyCapturePlanChunks(params: {
+export function buildBalancedScrydexDailyCapturePlanChunks(params: {
   selectedSets: ScrydexDailyCapturePlanRow[];
   chunkCount: number;
 }): ScrydexDailyCapturePlanChunk[] {
   const chunkCount = Math.max(1, Math.floor(params.chunkCount));
+  const totalPlannedRequests = params.selectedSets.reduce((sum, row) => sum + row.dailyCaptureRequests, 0);
+  const totalExpectedCards = params.selectedSets.reduce((sum, row) => sum + row.expectedCardCount, 0);
+  const totalMatchedCards = params.selectedSets.reduce((sum, row) => sum + row.matchedCardCount, 0);
+  const targetRequestsPerChunk = Math.max(1, totalPlannedRequests / chunkCount);
+  const targetExpectedCardsPerChunk = Math.max(1, totalExpectedCards / chunkCount);
+  const targetMatchedCardsPerChunk = Math.max(1, totalMatchedCards / chunkCount);
   const chunks = Array.from({ length: chunkCount }, (_, index) => ({
     chunkNumber: index + 1,
     plannedRequests: 0,
+    plannedExpectedCardCount: 0,
+    plannedMatchedCardCount: 0,
     providerSetIds: [] as string[],
     selectedSets: [] as ScrydexDailyCapturePlanRow[],
   }));
 
   const assignmentOrder = [...params.selectedSets].sort((left, right) => {
+    if (right.expectedCardCount !== left.expectedCardCount) {
+      return right.expectedCardCount - left.expectedCardCount;
+    }
+    if (right.matchedCardCount !== left.matchedCardCount) {
+      return right.matchedCardCount - left.matchedCardCount;
+    }
     if (right.dailyCaptureRequests !== left.dailyCaptureRequests) {
       return right.dailyCaptureRequests - left.dailyCaptureRequests;
     }
@@ -892,6 +916,37 @@ function buildBalancedScrydexDailyCapturePlanChunks(params: {
 
   for (const row of assignmentOrder) {
     const targetChunk = chunks.reduce((best, candidate) => {
+      const candidateProjectedPeakLoad = Math.max(
+        (candidate.plannedExpectedCardCount + row.expectedCardCount) / targetExpectedCardsPerChunk,
+        (candidate.plannedMatchedCardCount + row.matchedCardCount) / targetMatchedCardsPerChunk,
+        (candidate.plannedRequests + row.dailyCaptureRequests) / targetRequestsPerChunk,
+      );
+      const bestProjectedPeakLoad = Math.max(
+        (best.plannedExpectedCardCount + row.expectedCardCount) / targetExpectedCardsPerChunk,
+        (best.plannedMatchedCardCount + row.matchedCardCount) / targetMatchedCardsPerChunk,
+        (best.plannedRequests + row.dailyCaptureRequests) / targetRequestsPerChunk,
+      );
+      if (candidateProjectedPeakLoad !== bestProjectedPeakLoad) {
+        return candidateProjectedPeakLoad < bestProjectedPeakLoad ? candidate : best;
+      }
+
+      const candidateProjectedWeightedLoad = (
+        ((candidate.plannedExpectedCardCount + row.expectedCardCount) / targetExpectedCardsPerChunk) * 4
+        + ((candidate.plannedMatchedCardCount + row.matchedCardCount) / targetMatchedCardsPerChunk) * 3
+        + ((candidate.plannedRequests + row.dailyCaptureRequests) / targetRequestsPerChunk) * 2
+      );
+      const bestProjectedWeightedLoad = (
+        ((best.plannedExpectedCardCount + row.expectedCardCount) / targetExpectedCardsPerChunk) * 4
+        + ((best.plannedMatchedCardCount + row.matchedCardCount) / targetMatchedCardsPerChunk) * 3
+        + ((best.plannedRequests + row.dailyCaptureRequests) / targetRequestsPerChunk) * 2
+      );
+      if (candidateProjectedWeightedLoad !== bestProjectedWeightedLoad) {
+        return candidateProjectedWeightedLoad < bestProjectedWeightedLoad ? candidate : best;
+      }
+
+      if (candidate.plannedExpectedCardCount !== best.plannedExpectedCardCount) {
+        return candidate.plannedExpectedCardCount < best.plannedExpectedCardCount ? candidate : best;
+      }
       if (candidate.plannedRequests !== best.plannedRequests) {
         return candidate.plannedRequests < best.plannedRequests ? candidate : best;
       }
@@ -902,6 +957,8 @@ function buildBalancedScrydexDailyCapturePlanChunks(params: {
     });
     targetChunk.selectedSets.push(row);
     targetChunk.plannedRequests += row.dailyCaptureRequests;
+    targetChunk.plannedExpectedCardCount += row.expectedCardCount;
+    targetChunk.plannedMatchedCardCount += row.matchedCardCount;
   }
 
   return chunks.map((chunk) => {
@@ -914,6 +971,8 @@ function buildBalancedScrydexDailyCapturePlanChunks(params: {
     return {
       chunkNumber: chunk.chunkNumber,
       plannedRequests: chunk.plannedRequests,
+      plannedExpectedCardCount: chunk.plannedExpectedCardCount,
+      plannedMatchedCardCount: chunk.plannedMatchedCardCount,
       providerSetIds: selectedSets.map((row) => row.providerSetId),
       selectedSets,
     };
@@ -926,6 +985,7 @@ export async function planScrydexDailyCapture(opts: {
   maxRequests?: number;
   lookbackHours?: number;
   requestBudgetHeadroom?: number;
+  requestBudgetMinSweepPct?: number;
 } = {}): Promise<ScrydexDailyCapturePlan> {
   const explicitSetIds = normalizeStringList(opts.providerSetIds ?? []);
   const chunkCount = Math.max(1, Math.floor(opts.chunkCount ?? 8));
@@ -946,6 +1006,7 @@ export async function planScrydexDailyCapture(opts: {
     recentSuccessfulRequests,
     maxRequests: opts.maxRequests,
     headroom: opts.requestBudgetHeadroom,
+    minSweepPct: opts.requestBudgetMinSweepPct,
   });
 
   let orderedRows: ScrydexDailyCapturePlanRow[];

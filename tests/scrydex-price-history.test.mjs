@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  buildBalancedScrydexDailyCapturePlanChunks,
   buildScrydexRecentHistoryCatchupPlan,
   calculateScrydexDailyCaptureRequests,
   calculateScrydexHistoryBackfillCredits,
@@ -7,6 +8,7 @@ import {
   isMissingScrydexCardHistoryErrorMessage,
   isRetryableHistoryWriteErrorMessage,
   providerVariantIdToScrydexToken,
+  resolveScrydexDailyRequestBudget,
   resolveScrydexRawHistoryDays,
   retryHistoryWriteOperation,
   selectScrydexRawHistoryPrice,
@@ -17,6 +19,93 @@ async function runScrydexPriceHistoryTests() {
   assert.equal(calculateScrydexDailyCaptureRequests(0), 1);
   assert.equal(calculateScrydexDailyCaptureRequests(245), 3);
   assert.equal(calculateScrydexHistoryBackfillCredits(5), 15);
+  assert.equal(resolveScrydexDailyRequestBudget({
+    totalAvailableRequests: 347,
+    recentSuccessfulRequests: 218,
+  }), 330);
+  assert.equal(resolveScrydexDailyRequestBudget({
+    totalAvailableRequests: 347,
+    recentSuccessfulRequests: 218,
+    maxRequests: 280,
+  }), 280);
+
+  const balancedChunks = buildBalancedScrydexDailyCapturePlanChunks({
+    chunkCount: 2,
+    selectedSets: [
+      {
+        providerSetId: "heavy-a",
+        setCode: "heavy-a",
+        setName: "Heavy A",
+        expectedCardCount: 300,
+        providerCardCount: 300,
+        matchedCardCount: 300,
+        dailyCaptureRequests: 1,
+        historyBackfillRequests: 300,
+        historyBackfillCredits: 900,
+        priorityReasons: ["matched"],
+        priorityWeight: 1000,
+      },
+      {
+        providerSetId: "heavy-b",
+        setCode: "heavy-b",
+        setName: "Heavy B",
+        expectedCardCount: 290,
+        providerCardCount: 290,
+        matchedCardCount: 290,
+        dailyCaptureRequests: 1,
+        historyBackfillRequests: 290,
+        historyBackfillCredits: 870,
+        priorityReasons: ["matched"],
+        priorityWeight: 990,
+      },
+      {
+        providerSetId: "small-c",
+        setCode: "small-c",
+        setName: "Small C",
+        expectedCardCount: 200,
+        providerCardCount: 200,
+        matchedCardCount: 200,
+        dailyCaptureRequests: 3,
+        historyBackfillRequests: 200,
+        historyBackfillCredits: 600,
+        priorityReasons: ["matched"],
+        priorityWeight: 980,
+      },
+      {
+        providerSetId: "small-d",
+        setCode: "small-d",
+        setName: "Small D",
+        expectedCardCount: 190,
+        providerCardCount: 190,
+        matchedCardCount: 190,
+        dailyCaptureRequests: 3,
+        historyBackfillRequests: 190,
+        historyBackfillCredits: 570,
+        priorityReasons: ["matched"],
+        priorityWeight: 970,
+      },
+    ],
+  });
+  assert.equal(balancedChunks.length, 2);
+  assert.deepEqual(
+    balancedChunks.map((chunk) => ({
+      plannedRequests: chunk.plannedRequests,
+      plannedExpectedCardCount: chunk.plannedExpectedCardCount,
+      providerSetIds: chunk.providerSetIds,
+    })),
+    [
+      {
+        plannedRequests: 4,
+        plannedExpectedCardCount: 490,
+        providerSetIds: ["heavy-a", "small-d"],
+      },
+      {
+        plannedRequests: 4,
+        plannedExpectedCardCount: 490,
+        providerSetIds: ["heavy-b", "small-c"],
+      },
+    ],
+  );
 
   assert.deepEqual(
     summarizeScrydexRecentHistoryCoverage({

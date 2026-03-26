@@ -52,6 +52,8 @@ export async function GET(
         cooldownUntil: providerCooldown.cooldownUntil,
         providerSetIds: [],
         plannedRequests: 0,
+        plannedExpectedCardCount: 0,
+        plannedMatchedCardCount: 0,
         queuedJobs: 0,
         runs: [],
       });
@@ -64,6 +66,8 @@ export async function GET(
     const chunkPlan = plan.chunks[chunkNumber - 1] ?? {
       chunkNumber,
       plannedRequests: 0,
+      plannedExpectedCardCount: 0,
+      plannedMatchedCardCount: 0,
       providerSetIds: [],
       selectedSets: [],
     };
@@ -125,6 +129,8 @@ export async function GET(
       recentSuccessfulRequests: plan.recentSuccessfulRequests,
       providerSetIds,
       plannedRequests: chunkPlan.plannedRequests || plannedRequests,
+      plannedExpectedCardCount: chunkPlan.plannedExpectedCardCount,
+      plannedMatchedCardCount: chunkPlan.plannedMatchedCardCount,
       selectedSets: plan.selectedSets.length,
       queuedJobs,
       runs,
