@@ -664,15 +664,34 @@ export default async function Home() {
   const livePriceCount = formatExactCount(trackedCardsWithLivePrice);
   const refreshedCount = formatExactCount(pricesRefreshedToday);
   const heroProofCopy = trackedCardsWithLivePrice !== null && pricesRefreshedToday !== null
-    ? `${livePriceCount} live card prices are on the board, with ${refreshedCount} refreshed in the last 24 hours.`
-    : "Live prices, fresh movers, and grounded market context update throughout the day.";
+    ? `${livePriceCount} canonical RAW cards currently resolve to a live market price, and ${refreshedCount} have refreshed inside the trailing 24-hour window.`
+    : "Coverage, freshness, and latest-update evidence is pulled directly from PopAlpha's live market rails.";
+  const heroProofInfrastructureCopy = "These figures come from the same live market infrastructure powering PopAlpha pricing, freshness, and card detail pages.";
   const heroBriefGrounding = trackedCardsWithLivePrice !== null && pricesRefreshedToday !== null
     ? `Grounded in ${livePriceCount} live prices and ${refreshedCount} refreshed cards from the last 24 hours.`
     : "Grounded in live market pricing and request-time refresh rails.";
   const heroProofStats = [
-    { value: livePriceCount, label: "Canonical RAW cards with live prices" },
-    { value: refreshedCount, label: "Cards refreshed in the last 24 hours" },
-    { value: asOf ? `Live ${asOf}` : "Live", label: "Latest market update" },
+    {
+      value: livePriceCount,
+      label: "Coverage online",
+      detail: "Canonical RAW cards with an active public market price right now.",
+      accentClass: "border-[#173642] bg-[linear-gradient(180deg,rgba(15,29,36,0.9),rgba(10,18,24,0.94))]",
+      dotClass: "bg-[#42D6E8]",
+    },
+    {
+      value: refreshedCount,
+      label: "Fresh in 24h",
+      detail: "Cards updated inside the trailing 24-hour freshness window.",
+      accentClass: "border-[#17382E] bg-[linear-gradient(180deg,rgba(14,27,22,0.9),rgba(9,18,15,0.94))]",
+      dotClass: "bg-[#5CE07D]",
+    },
+    {
+      value: asOf ? asOf : "Live now",
+      label: "Latest market tick",
+      detail: "Most recent timestamp currently flowing through PopAlpha's live price rails.",
+      accentClass: "border-[#25303B] bg-[linear-gradient(180deg,rgba(17,22,28,0.9),rgba(11,14,18,0.94))]",
+      dotClass: "bg-[#A5B4FC]",
+    },
   ] as const;
   const heroStats = [
     { value: livePriceCount, label: "Live card prices", href: "/search" },
@@ -733,12 +752,15 @@ export default async function Home() {
                     <p className="mt-2 text-[14px] leading-6 text-[#D6DEE6] sm:text-[15px]">
                       {heroProofCopy}
                     </p>
+                    <p className="mt-2 text-[11px] leading-5 text-[#7B8793] sm:text-[12px]">
+                      {heroProofInfrastructureCopy}
+                    </p>
                   </div>
                   <Link
                     href="/data"
                     className="inline-flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.03] px-4 py-2 text-[12px] font-semibold text-[#E7EDF2] transition-all hover:border-white/[0.15] hover:bg-white/[0.06] hover:text-white"
                   >
-                    View data monitor
+                    See live coverage
                   </Link>
                 </div>
 
@@ -746,13 +768,19 @@ export default async function Home() {
                   {heroProofStats.map((stat) => (
                     <div
                       key={stat.label}
-                      className="rounded-[18px] border border-white/[0.05] bg-white/[0.02] px-4 py-3"
+                      className={`rounded-[18px] border px-4 py-3 ${stat.accentClass}`}
                     >
-                      <p className="text-[18px] font-semibold tracking-tight text-white">
+                      <div className="flex items-center gap-2">
+                        <span className={`h-2 w-2 rounded-full ${stat.dotClass}`} />
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#8FA0AF]">
+                          {stat.label}
+                        </p>
+                      </div>
+                      <p className="mt-3 text-[22px] font-semibold tracking-tight text-white">
                         {stat.value}
                       </p>
-                      <p className="mt-1 text-[11px] leading-5 text-[#7B8793]">
-                        {stat.label}
+                      <p className="mt-2 text-[11px] leading-5 text-[#7B8793]">
+                        {stat.detail}
                       </p>
                     </div>
                   ))}

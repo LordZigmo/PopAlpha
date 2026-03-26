@@ -16,7 +16,13 @@ export default function DesktopSidebar() {
   const content = (
     <>
       <div className="mb-6 flex items-center justify-between gap-3">
-        <p className="text-[18px] font-semibold tracking-[-0.03em] text-white">PopAlpha</p>
+        <Link
+          href="/"
+          aria-label="Go to homepage"
+          className="text-[18px] font-semibold tracking-[-0.03em] text-white transition hover:text-[#D8D8D8]"
+        >
+          PopAlpha
+        </Link>
         {!user ? (
           <Link
             href="/sign-up"
