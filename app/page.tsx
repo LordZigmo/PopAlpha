@@ -693,6 +693,10 @@ export default async function Home() {
       dotClass: "bg-[#A5B4FC]",
     },
   ] as const;
+  const trendingCards = trending.slice(0, 5);
+  const dropCards = losers.slice(0, 5);
+  const strongMoversBadge = getChangeWindowBadge(strongMoverCards.length > 0 ? strongMoverCards : movers, "Live");
+  const pullbacksBadge = getChangeWindowBadge(dropCards, "Live");
   const communityVoteTotals = communityPulse.cards.reduce((totals, card) => ({
     bullish: totals.bullish + card.bullishVotes,
     total: totals.total + card.bullishVotes + card.bearishVotes,
@@ -741,11 +745,6 @@ export default async function Home() {
     { value: asOf ? `Live ${asOf}` : "Live", label: "Last market update", href: "/data" },
     { value: "Open", label: "Public data monitor", href: "/data" },
   ] as const;
-
-  const trendingCards = trending.slice(0, 5);
-  const dropCards = losers.slice(0, 5);
-  const strongMoversBadge = getChangeWindowBadge(strongMoverCards.length > 0 ? strongMoverCards : movers, "Live");
-  const pullbacksBadge = getChangeWindowBadge(dropCards, "Live");
 
   return (
     <div className="landing-shell min-h-screen bg-[#060608] text-[#F0F0F0]">
