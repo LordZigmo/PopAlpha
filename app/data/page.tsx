@@ -1,5 +1,7 @@
-import type { ReactNode } from "react";
+import Link from "next/link";
 import type { Metadata } from "next";
+import { ArrowRight, BarChart3, BookOpen, House, Layers3, Search } from "lucide-react";
+import CanonicalCardShell from "@/components/layout/CanonicalCardShell";
 import {
   getCanonicalRawFreshnessMonitor,
   getCanonicalRawRollingDailyFreshnessMonitors,
@@ -144,29 +146,47 @@ function UnavailablePanel({
   );
 }
 
-function SidebarBlock({
-  title,
-  subtitle,
-  children,
-}: {
-  title: string;
-  subtitle?: string;
-  children: ReactNode;
-}) {
+type RailActionLink = {
+  href: string;
+  label: string;
+  icon: typeof House;
+};
+
+type RailSectionLink = {
+  href: string;
+  label: string;
+};
+
+function RailAction({
+  href,
+  label,
+  icon: Icon,
+}: RailActionLink) {
   return (
-    <section className="rounded-[24px] border border-[#1E1E1E] bg-[#101010] p-5">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6B6B6B]">
-        {title}
-      </p>
-      {subtitle ? (
-        <p className="mt-2 text-[13px] leading-5 text-[#7A7A7A]">
-          {subtitle}
-        </p>
-      ) : null}
-      <div className="mt-4">
-        {children}
-      </div>
-    </section>
+    <Link
+      href={href}
+      className="flex items-center gap-3 rounded-[1.1rem] border border-transparent bg-transparent px-4 py-3 text-[#B0B0B0] transition hover:border-white/[0.05] hover:bg-white/[0.03] hover:text-white"
+    >
+      <span className="flex h-10 w-10 items-center justify-center rounded-[0.9rem] border border-[#1E1E1E] bg-[#0B0B0B] text-[#6B7280]">
+        <Icon size={18} strokeWidth={2.1} />
+      </span>
+      <span className="text-[15px] font-semibold">{label}</span>
+    </Link>
+  );
+}
+
+function SectionJump({
+  href,
+  label,
+}: RailSectionLink) {
+  return (
+    <a
+      href={href}
+      className="flex items-center justify-between rounded-[1rem] border border-[#1E1E1E] bg-[#0B0B0B] px-3 py-3 text-[13px] font-medium text-[#B0B0B0] transition hover:border-white/[0.06] hover:text-white"
+    >
+      <span>{label}</span>
+      <ArrowRight size={14} />
+    </a>
   );
 }
 
@@ -238,6 +258,18 @@ export default async function DataPage() {
     })),
   ];
   const latestTrendPoint = trend && trend.length > 0 ? trend[trend.length - 1] : null;
+  const quickActions: RailActionLink[] = [
+    { href: "/", label: "Home", icon: House },
+    { href: "/search", label: "Search", icon: Search },
+    { href: "/sets", label: "Sets", icon: BookOpen },
+    { href: "/portfolio", label: "Portfolio", icon: Layers3 },
+  ];
+  const pageLinks: RailSectionLink[] = [
+    { href: "#freshness-24h", label: "24h Freshness" },
+    { href: "#freshness-rolling", label: "7d / 30d / 90d" },
+    { href: "#pricing-transparency", label: "Pricing Transparency" },
+    { href: "#trend-history", label: "7-Day Trend" },
+  ];
 
   if (primaryMonitorResult.status === "rejected") {
     console.error("[data/page] failed to load price freshness (24h)", getLoadErrorMessage(primaryMonitorResult.reason));
@@ -258,11 +290,91 @@ export default async function DataPage() {
     critical: "text-[#F87171] border-[#7F1D1D] bg-[#2A0F12]",
   };
 
+  const contextRail = (
+    <div className="px-5 py-6">
+      <section className="rounded-[1.8rem] border border-white/[0.06] bg-zinc-900/40 p-5">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6B6B6B]">Monitor Context</p>
+        <div className="mt-4 flex items-center gap-4">
+          <div className="flex h-16 w-16 items-center justify-center rounded-[1rem] border border-white/[0.06] bg-white/[0.03] text-[#8DF0B4]">
+            <BarChart3 size={28} strokeWidth={2.1} />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[16px] font-semibold text-white">Canonical RAW Health</p>
+            <p className="mt-1 text-[12px] uppercase tracking-[0.12em] text-[#6B7280]">
+              Live pricing freshness and pipeline confidence
+            </p>
+          </div>
+        </div>
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          <div className="rounded-[1rem] border border-white/[0.06] bg-[#0B0B0B] px-3 py-3">
+            <p className="text-[11px] uppercase tracking-[0.12em] text-[#6B7280]">24h</p>
+            <p className="mt-2 text-[18px] font-semibold text-white">{primaryMonitor ? `${primaryMonitor.freshPct.toFixed(2)}%` : "n/a"}</p>
+          </div>
+          <div className="rounded-[1rem] border border-white/[0.06] bg-[#0B0B0B] px-3 py-3">
+            <p className="text-[11px] uppercase tracking-[0.12em] text-[#6B7280]">30d</p>
+            <p className="mt-2 text-[18px] font-semibold text-white">
+              {extendedMonitorByWindowDays.get(30) ? `${extendedMonitorByWindowDays.get(30)?.freshPct.toFixed(2)}%` : "n/a"}
+            </p>
+          </div>
+          <div className="rounded-[1rem] border border-white/[0.06] bg-[#0B0B0B] px-3 py-3">
+            <p className="text-[11px] uppercase tracking-[0.12em] text-[#6B7280]">Alerts</p>
+            <p className="mt-2 text-[18px] font-semibold text-white">
+              {transparency ? formatNumber(transparency.alerts.length) : "n/a"}
+            </p>
+          </div>
+          <div className="rounded-[1rem] border border-white/[0.06] bg-[#0B0B0B] px-3 py-3">
+            <p className="text-[11px] uppercase tracking-[0.12em] text-[#6B7280]">Trend</p>
+            <p className="mt-2 text-[18px] font-semibold text-white">
+              {latestTrendPoint?.freshnessPct != null ? `${latestTrendPoint.freshnessPct.toFixed(2)}%` : "n/a"}
+            </p>
+          </div>
+        </div>
+        {latestTrendPoint ? (
+          <p className="mt-4 text-[12px] leading-5 text-[#8A8A8A]">
+            Latest snapshot: {formatTimestamp(latestTrendPoint.capturedAt)}
+          </p>
+        ) : null}
+      </section>
+
+      <section className="mt-5 rounded-[1.8rem] border border-white/[0.06] bg-zinc-900/40 p-4">
+        <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6B6B6B]">Quick Actions</p>
+        <div className="mt-3 space-y-1.5">
+          {quickActions.map((link) => (
+            <RailAction key={`${link.label}-${link.href}`} {...link} />
+          ))}
+        </div>
+      </section>
+
+      <section className="mt-5 rounded-[1.8rem] border border-white/[0.06] bg-zinc-900/40 p-5">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6B6B6B]">Window Snapshot</p>
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          {windowSummaryCards.map((entry) => (
+            <CompactFreshnessTile
+              key={entry.label}
+              label={entry.label}
+              monitor={entry.monitor}
+              mode={entry.mode}
+            />
+          ))}
+        </div>
+      </section>
+
+      <section className="mt-5 rounded-[1.8rem] border border-white/[0.06] bg-zinc-900/40 p-4">
+        <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6B6B6B]">On Page</p>
+        <div className="mt-3 space-y-2">
+          {pageLinks.map((link) => (
+            <SectionJump key={link.href} {...link} />
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+
   return (
-    <main className="min-h-screen bg-[#0A0A0A] px-4 py-12 text-[#F0F0F0] sm:px-6">
-      <div className="mx-auto max-w-[1600px] xl:grid xl:grid-cols-[minmax(0,7fr)_minmax(20rem,3fr)] xl:gap-6">
-        <div className="min-w-0 space-y-6">
-          <section className="rounded-[28px] border border-[#1E1E1E] bg-[#101010] p-6 sm:p-8">
+    <CanonicalCardShell backHref="/" rightRail={contextRail}>
+      <div className="mx-auto max-w-5xl px-4 pb-[max(env(safe-area-inset-bottom),2.5rem)] pt-8 sm:px-6 sm:pb-[max(env(safe-area-inset-bottom),3.5rem)]">
+        <div className="space-y-6">
+          <section id="freshness-24h" className="rounded-[28px] border border-[#1E1E1E] bg-[#101010] p-6 sm:p-8">
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6B6B6B]">
               Public Data Monitor
             </p>
@@ -284,7 +396,7 @@ export default async function DataPage() {
             )}
           </section>
 
-          <section className="rounded-[28px] border border-[#1E1E1E] bg-[#101010] p-6 sm:p-8">
+          <section id="freshness-rolling" className="rounded-[28px] border border-[#1E1E1E] bg-[#101010] p-6 sm:p-8">
             <h2 className="text-[22px] font-semibold tracking-[-0.03em] sm:text-[28px]">Price Freshness (7d / 30d / 90d)</h2>
             <p className="mt-1 text-[13px] text-[#7A7A7A]">
               A card only counts as fresh when it has at least one recorded price on every trailing UTC day inside the window.
@@ -313,10 +425,36 @@ export default async function DataPage() {
             </div>
           </section>
 
-          <section className="rounded-[28px] border border-[#1E1E1E] bg-[#101010] p-6 sm:p-8">
+          <section id="pricing-transparency" className="rounded-[28px] border border-[#1E1E1E] bg-[#101010] p-6 sm:p-8">
             <h2 className="text-[22px] font-semibold tracking-[-0.03em] sm:text-[28px]">Pricing Transparency</h2>
             {transparency ? (
               <>
+                <div className="mt-4 rounded-xl border border-[#222] bg-[#0D0D0D] p-4">
+                  <p className="text-[12px] uppercase tracking-[0.12em] text-[#7A7A7A]">SLO Status</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {transparency.slo.map((row) => (
+                      <span
+                        key={row.key}
+                        className={`inline-flex items-center rounded-full border px-3 py-1 text-[12px] font-semibold ${statusTone[row.status]}`}
+                      >
+                        {row.label}: {row.value} (target {row.target})
+                      </span>
+                    ))}
+                  </div>
+                  <p className="mt-3 text-[12px] text-[#6B7280]">Threshold alerts auto-fire when an SLO leaves healthy range.</p>
+                </div>
+
+                <div className="mt-3 rounded-xl border border-[#222] bg-[#0D0D0D] p-4">
+                  <p className="text-[12px] uppercase tracking-[0.12em] text-[#7A7A7A]">Active Alerts</p>
+                  <div className="mt-2 space-y-1 text-[14px] text-[#FCA5A5]">
+                    {transparency.alerts.length === 0 ? (
+                      <p className="text-[#86EFAC]">No active alerts.</p>
+                    ) : (
+                      transparency.alerts.map((alert) => <p key={alert}>• {alert}</p>)
+                    )}
+                  </div>
+                </div>
+
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
                   <div className="rounded-xl border border-[#222] bg-[#0D0D0D] p-4">
                     <p className="text-[12px] uppercase tracking-[0.12em] text-[#7A7A7A]">Snapshot Coverage (24h)</p>
@@ -437,7 +575,7 @@ export default async function DataPage() {
           )}
           </section>
 
-          <section className="rounded-[28px] border border-[#1E1E1E] bg-[#101010] p-6 sm:p-8">
+          <section id="trend-history" className="rounded-[28px] border border-[#1E1E1E] bg-[#101010] p-6 sm:p-8">
             <h2 className="text-[22px] font-semibold tracking-[-0.03em] sm:text-[28px]">7-Day Trend</h2>
             <p className="mt-1 text-[13px] text-[#7A7A7A]">
               Snapshot-based history of key health metrics. Captured hourly.
@@ -484,114 +622,7 @@ export default async function DataPage() {
             )}
           </section>
         </div>
-
-        <aside className="mt-6 xl:mt-0">
-          <div className="space-y-6 xl:sticky xl:top-24">
-            <SidebarBlock
-              title="Monitor Snapshot"
-              subtitle="The same quick-read context rail pattern as the canonical card page, adapted for live data health."
-            >
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                {windowSummaryCards.map((entry) => (
-                  <CompactFreshnessTile
-                    key={entry.label}
-                    label={entry.label}
-                    monitor={entry.monitor}
-                    mode={entry.mode}
-                  />
-                ))}
-              </div>
-              {latestTrendPoint ? (
-                <p className="mt-4 text-[12px] leading-5 text-[#6B7280]">
-                  Latest trend capture: {formatTimestamp(latestTrendPoint.capturedAt)}
-                </p>
-              ) : null}
-            </SidebarBlock>
-
-            <SidebarBlock
-              title="Reliability Signals"
-              subtitle="The highest-signal operational summary for the current monitor state."
-            >
-              {transparency ? (
-                <>
-                  <div className="flex flex-wrap gap-2">
-                    {transparency.slo.map((row) => (
-                      <span
-                        key={row.key}
-                        className={`inline-flex items-center rounded-full border px-3 py-1 text-[12px] font-semibold ${statusTone[row.status]}`}
-                      >
-                        {row.label}: {row.value}
-                      </span>
-                    ))}
-                  </div>
-
-                  <div className="mt-4 space-y-2 text-[13px] leading-6">
-                    <p className="text-[#9CA3AF]">
-                      Snapshot coverage:
-                      {" "}
-                      <span className="font-semibold text-[#E5E7EB]">
-                        {transparency.snapshotCoverage24h.cardsWithSnapshotCount != null
-                          ? `${formatNumber(transparency.snapshotCoverage24h.cardsWithSnapshotCount)} cards`
-                          : "n/a"}
-                      </span>
-                    </p>
-                    <p className="text-[#9CA3AF]">
-                      Dual-provider coverage:
-                      {" "}
-                      <span className="font-semibold text-[#E5E7EB]">
-                        {transparency.coverage.bothPct}%
-                      </span>
-                    </p>
-                    <p className="text-[#9CA3AF]">
-                      Queue / retry / failed:
-                      {" "}
-                      <span className="font-semibold text-[#E5E7EB]">
-                        {transparency.pipelineHealth.queueDepth ?? "n/a"} / {transparency.pipelineHealth.retryDepth ?? "n/a"} / {transparency.pipelineHealth.failedDepth ?? "n/a"}
-                      </span>
-                    </p>
-                  </div>
-                </>
-              ) : (
-                <UnavailablePanel
-                  compact
-                  description="Pricing transparency is unavailable right now, so the reliability snapshot cannot be rendered."
-                />
-              )}
-            </SidebarBlock>
-
-            <SidebarBlock
-              title="Alert Feed"
-              subtitle="What is actively out of policy or worth immediate attention."
-            >
-              {transparency ? (
-                <div className="space-y-2 text-[13px] leading-6 text-[#FCA5A5]">
-                  {transparency.alerts.length === 0 ? (
-                    <p className="text-[#86EFAC]">No active alerts.</p>
-                  ) : (
-                    transparency.alerts.map((alert) => <p key={alert}>• {alert}</p>)
-                  )}
-                </div>
-              ) : (
-                <UnavailablePanel
-                  compact
-                  description="Alerts are unavailable because the transparency snapshot did not load."
-                />
-              )}
-            </SidebarBlock>
-
-            <SidebarBlock
-              title="Methodology"
-              subtitle="How to read the monitor at a glance."
-            >
-              <div className="space-y-3 text-[13px] leading-6 text-[#9CA3AF]">
-                <p>Freshness uses canonical RAW cards only.</p>
-                <p>7d / 30d / 90d require at least one recorded price on every trailing UTC day inside each window.</p>
-                <p>RAW pricing is Scrydex-first, with JustTCG used only when Scrydex is missing or stale.</p>
-              </div>
-            </SidebarBlock>
-          </div>
-        </aside>
       </div>
-    </main>
+    </CanonicalCardShell>
   );
 }

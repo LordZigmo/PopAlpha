@@ -25,8 +25,8 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
 
-  // Card detail pages compose their own shell so page state can drive the contextual rail.
-  if (pathname.startsWith("/c/")) {
+  // Card detail pages and the public data monitor compose their own shell.
+  if (pathname.startsWith("/c/") || pathname === "/data") {
     return <>{children}</>;
   }
 
