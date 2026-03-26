@@ -107,9 +107,9 @@ const TRENDING_SET_PILLS = [
 
 const HERO_HEADLINE = "Market intelligence";
 const HERO_HEADLINE_ACCENT = "for Pokémon collectors";
-const HERO_SUBHEADLINE = "See live Pokemon card prices, today's movers, and grounded market context built from the feed.";
+const HERO_SUBHEADLINE = "See where strength is concentrating, which sets are holding conviction, and what the live feed is confirming right now.";
 const HERO_PRIMARY_CTA = "Start free";
-const HERO_SECONDARY_CTA = "Explore live market";
+const HERO_SECONDARY_CTA = "Read live brief";
 const HOMEPAGE_SCOUT_NARRATIVE =
   "The market still looks selective today. A few chase cards are leading, but the move has not spread across the whole board. The next thing to watch is whether strength moves into deeper cards and sealed.";
 
@@ -693,6 +693,48 @@ export default async function Home() {
       dotClass: "bg-[#A5B4FC]",
     },
   ] as const;
+  const communityVoteTotals = communityPulse.cards.reduce((totals, card) => ({
+    bullish: totals.bullish + card.bullishVotes,
+    total: totals.total + card.bullishVotes + card.bearishVotes,
+  }), { bullish: 0, total: 0 });
+  const communityBullishPct = communityVoteTotals.total > 0
+    ? Math.round((communityVoteTotals.bullish / communityVoteTotals.total) * 100)
+    : null;
+  const discoveryCards = [
+    {
+      eyebrow: "Daily brief",
+      value: "Live market read",
+      detail: heroBrief.lead,
+      href: "#market-intelligence",
+      linkLabel: "Read the brief",
+      accentClass: "border-[#173642] bg-[linear-gradient(180deg,rgba(16,29,37,0.92),rgba(10,17,23,0.96))]",
+      linkClass: "text-[#7DD3FC]",
+    },
+    {
+      eyebrow: "Conviction movers",
+      value: strongMoverCards.length > 0 ? `${strongMoverCards.length} names in focus` : "Signal still forming",
+      detail: strongMoverCards.length > 0
+        ? `${strongMoversBadge} movers are already clearing the confidence threshold.`
+        : "The board is still waiting for a deeper group of high-confidence breakouts.",
+      href: "#featured-movers",
+      linkLabel: "See movers",
+      accentClass: "border-[#17382E] bg-[linear-gradient(180deg,rgba(15,28,22,0.92),rgba(10,18,15,0.96))]",
+      linkClass: "text-[#5CE07D]",
+    },
+    {
+      eyebrow: "Momentum pocket",
+      value: heroLeadingSet.name ?? (communityBullishPct != null ? `${communityBullishPct}% bullish` : "Conviction watch"),
+      detail: heroLeadingSet.name
+        ? `${heroLeadingSet.count} hero cards are clustering in one live pocket of the market.`
+        : communityBullishPct != null
+          ? `Community Pulse is running ${communityBullishPct}% bullish on the live board.`
+          : "Follow the next place where price action and collector conviction start aligning.",
+      href: heroLeadingSet.name ? "#momentum-rail" : "#market-intelligence",
+      linkLabel: heroLeadingSet.name ? "Track momentum" : "See conviction",
+      accentClass: "border-[#25303B] bg-[linear-gradient(180deg,rgba(18,22,29,0.92),rgba(11,14,19,0.96))]",
+      linkClass: "text-[#A5B4FC]",
+    },
+  ] as const;
   const heroStats = [
     { value: livePriceCount, label: "Live card prices", href: "/search" },
     { value: refreshedCount, label: "Refreshed 24h", href: "/data" },
@@ -787,16 +829,60 @@ export default async function Home() {
                 </div>
               </div>
 
-              {/* Search Bar */}
-              <div className="mt-9 max-w-[560px]">
-                <div className="overflow-hidden rounded-[28px] bg-[linear-gradient(180deg,rgba(18,22,29,0.92),rgba(10,12,16,0.96))] p-1.5 shadow-[0_24px_70px_rgba(0,0,0,0.38)] ring-1 ring-white/[0.06] backdrop-blur-xl">
+              <div className="mt-8 grid gap-3 sm:grid-cols-3">
+                {discoveryCards.map((card) => (
+                  <Link
+                    key={card.eyebrow}
+                    href={card.href}
+                    className={`group rounded-[22px] border p-4 transition-all hover:border-white/[0.12] hover:bg-white/[0.03] ${card.accentClass}`}
+                  >
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#7F8D98]">
+                      {card.eyebrow}
+                    </p>
+                    <p className="mt-3 text-[16px] font-semibold leading-6 tracking-tight text-white">
+                      {card.value}
+                    </p>
+                    <p className="mt-2 text-[12px] leading-6 text-[#94A0AB]">
+                      {card.detail}
+                    </p>
+                    <span className={`mt-4 inline-flex items-center gap-2 text-[11px] font-semibold transition-colors group-hover:text-white ${card.linkClass}`}>
+                      {card.linkLabel}
+                      <span aria-hidden="true">→</span>
+                    </span>
+                  </Link>
+                ))}
+              </div>
+
+              {/* Direct Lookup */}
+              <div className="mt-8 max-w-[560px]">
+                <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#7C8792]">
+                      Direct lookup
+                    </p>
+                    <p className="mt-1 text-[13px] text-[#8E98A3]">
+                      Know the exact card? Jump straight into its live detail page.
+                    </p>
+                  </div>
+                  <Link
+                    href="/search"
+                    className="text-[12px] font-semibold text-[#7DD3FC] transition-colors hover:text-white"
+                  >
+                    Open full search
+                  </Link>
+                </div>
+                <div className="overflow-hidden rounded-[28px] bg-[linear-gradient(180deg,rgba(18,22,29,0.88),rgba(10,12,16,0.94))] p-1.5 shadow-[0_18px_50px_rgba(0,0,0,0.34)] ring-1 ring-white/[0.05] backdrop-blur-xl">
                   <Suspense
                     fallback={<div className="h-[60px] rounded-full bg-white/[0.03]" />}
                   >
                     <HomepageSearch />
                   </Suspense>
                 </div>
-                <div className="mt-4 flex flex-wrap items-center gap-2">
+                <div className="mt-4">
+                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#68727C]">
+                    Start with a live pocket
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
                   {focusPills.map((name) => (
                     <Link
                       key={name}
@@ -806,6 +892,7 @@ export default async function Home() {
                       {name}
                     </Link>
                   ))}
+                  </div>
                 </div>
               </div>
 
@@ -822,7 +909,7 @@ export default async function Home() {
                   </svg>
                 </Link>
                 <Link
-                  href="/search"
+                  href="#market-intelligence"
                   className="inline-flex items-center gap-2 rounded-full border border-white/[0.1] bg-white/[0.02] px-6 py-3.5 text-[14px] font-medium text-[#D0D4DB] transition-all hover:border-white/[0.2] hover:bg-white/[0.04] hover:text-white"
                 >
                   {HERO_SECONDARY_CTA}
@@ -1022,7 +1109,7 @@ export default async function Home() {
       </section>
 
       {/* ── Featured Movers ─────────────────────────────────────────────── */}
-      <section className="relative py-16 sm:py-24">
+      <section id="featured-movers" className="relative py-16 sm:py-24">
         <div className="mx-auto max-w-[1400px] px-5 sm:px-8">
           <div className="flex items-end justify-between">
             <div>
@@ -1154,7 +1241,7 @@ export default async function Home() {
       </section>
 
       {/* ── Trending Rail ───────────────────────────────────────────────── */}
-      <section className="border-t border-white/[0.04] py-16 sm:py-20">
+      <section id="momentum-rail" className="border-t border-white/[0.04] py-16 sm:py-20">
         <div className="mx-auto max-w-[1400px] px-5 sm:px-8">
           <div className="flex items-end justify-between">
             <div>
@@ -1259,7 +1346,7 @@ export default async function Home() {
       </section>
 
       {/* ── Market Intelligence ─────────────────────────────────────────── */}
-      <section className="border-t border-white/[0.04] bg-[#08080C] py-16 sm:py-24">
+      <section id="market-intelligence" className="border-t border-white/[0.04] bg-[#08080C] py-16 sm:py-24">
         <div className="mx-auto max-w-[1400px] px-5 sm:px-8">
           <div className="grid gap-8 lg:grid-cols-2">
             {/* Scout Brief */}
