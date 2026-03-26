@@ -264,7 +264,17 @@ function chunkValues<T>(values: T[], size: number): T[][] {
 }
 
 function extractDayKey(value: string | null | undefined): string {
-  return String(value ?? "").trim().slice(0, 10);
+  const normalized = normalizeText(value);
+  if (!normalized) return "";
+
+  const prefixedDate = normalized.slice(0, 10).replace(/\//g, "-");
+  if (/^\d{4}-\d{2}-\d{2}$/.test(prefixedDate)) {
+    return prefixedDate;
+  }
+
+  const match = normalized.match(/^(\d{4})[/-](\d{2})[/-](\d{2})/);
+  if (!match) return prefixedDate;
+  return `${match[1]}-${match[2]}-${match[3]}`;
 }
 
 export function calculateScrydexDailyCaptureRequests(cardCount: number): number {
@@ -309,7 +319,7 @@ export function isMissingScrydexCardHistoryErrorMessage(message: string): boolea
 }
 
 export function historyDateToSnapshotTs(date: string): string {
-  const normalized = normalizeText(date);
+  const normalized = extractDayKey(date);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
     throw new Error(`Invalid history date: ${date}`);
   }
