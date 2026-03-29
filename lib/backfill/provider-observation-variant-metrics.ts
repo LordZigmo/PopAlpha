@@ -231,33 +231,13 @@ function extractProviderAnalytics(params: {
   historyPoints30d: NormalizedHistoryPoint[];
   observedPrice: number | null;
 }): ProviderAnalytics {
-  if (params.provider !== "JUSTTCG") {
-    return {
-      provider_trend_slope_7d: deriveTrendSlope7d(params.historyPoints30d),
-      provider_cov_price_30d: deriveCovPrice30d(params.historyPoints30d),
-      provider_price_relative_to_30d_range: derivePriceRelativeTo30dRange(params.historyPoints30d, params.observedPrice),
-      provider_price_changes_count_30d: derivePriceChangesCount30d(params.historyPoints30d),
-    };
-  }
-
-  const providerAnalytics = (
-    params.metadata
-    && typeof params.metadata.providerAnalytics === "object"
-    && params.metadata.providerAnalytics !== null
-  ) ? params.metadata.providerAnalytics as Record<string, unknown> : {};
-
-  const fallback = {
+  void params.provider;
+  void params.metadata;
+  return {
     provider_trend_slope_7d: deriveTrendSlope7d(params.historyPoints30d),
     provider_cov_price_30d: deriveCovPrice30d(params.historyPoints30d),
     provider_price_relative_to_30d_range: derivePriceRelativeTo30dRange(params.historyPoints30d, params.observedPrice),
     provider_price_changes_count_30d: derivePriceChangesCount30d(params.historyPoints30d),
-  };
-
-  return {
-    provider_trend_slope_7d: toFiniteNumber(providerAnalytics.provider_trend_slope_7d) ?? fallback.provider_trend_slope_7d,
-    provider_cov_price_30d: toFiniteNumber(providerAnalytics.provider_cov_price_30d) ?? fallback.provider_cov_price_30d,
-    provider_price_relative_to_30d_range: toFiniteNumber(providerAnalytics.provider_price_relative_to_30d_range) ?? fallback.provider_price_relative_to_30d_range,
-    provider_price_changes_count_30d: toFiniteNumber(providerAnalytics.provider_price_changes_count_30d) ?? fallback.provider_price_changes_count_30d,
   };
 }
 
