@@ -7,7 +7,6 @@ export const BACKEND_PIPELINE_PROVIDERS = [
 export type BackendPipelineProvider = typeof BACKEND_PIPELINE_PROVIDERS[number];
 
 export const ANALYTICS_PIPELINE_PROVIDERS = [
-  "JUSTTCG",
   "SCRYDEX",
 ] as const;
 
@@ -26,7 +25,7 @@ export const PROVIDER_PIPELINE_CAPABILITIES: Record<BackendPipelineProvider, Pro
   JUSTTCG: {
     provider: "JUSTTCG",
     source: "justtcg",
-    supportsAnalytics: true,
+    supportsAnalytics: false,
     supportsRetry: true,
     ingestionEnabled: false,
     ingestionDisabledReason: "justtcg_ingestion_retired",

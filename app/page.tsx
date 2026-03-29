@@ -1,4 +1,4 @@
-import { Suspense, type CSSProperties } from "react";
+import { Suspense } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { currentUser } from "@clerk/nextjs/server";
@@ -6,6 +6,7 @@ import { generateText } from "ai";
 import { getHomepageData, type HomepageCard } from "@/lib/data/homepage";
 import { getCommunityPulseSnapshot } from "@/lib/data/community-pulse";
 import { getPopAlphaModel } from "@/lib/ai/models";
+import HomepageSignalBoard from "@/components/homepage-signal-board";
 import HomepageSearch from "@/components/homepage-search";
 import SiteHeader from "@/components/site-header";
 import TypewriterText from "@/components/typewriter-text";
@@ -25,47 +26,15 @@ function timeAgo(iso: string | null): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
-function formatPrice(n: number | null): string {
-  if (n == null || n <= 0) return "--";
-  return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
 function formatPct(n: number | null): string {
   if (n == null) return "--";
   const sign = n >= 0 ? "+" : "";
   return `${sign}${n.toFixed(1)}%`;
 }
 
-function formatMarketStrength(score: number | null): string {
-  if (score == null || !Number.isFinite(score)) return "--";
-  return `${Math.round(score)}`;
-}
-
 function formatExactCount(value: number | null): string {
   if (value == null || !Number.isFinite(value)) return "--";
   return new Intl.NumberFormat("en-US").format(value);
-}
-
-function getDirectionMeta(direction: HomepageCard["market_direction"]) {
-  if (direction === "bullish") {
-    return {
-      label: "Bullish",
-      textClass: "text-[#00DC5A]",
-    };
-  }
-  if (direction === "bearish") {
-    return {
-      label: "Bearish",
-      textClass: "text-[#FF6B6B]",
-    };
-  }
-  if (direction === "flat") {
-    return {
-      label: "Flat",
-      textClass: "text-[#D1D5DB]",
-    };
-  }
-  return null;
 }
 
 function getChangeWindowBadge(cards: HomepageCard[], fallback = "Live"): string {
@@ -81,6 +50,11 @@ const EMPTY_DATA: {
   emerging_movers: HomepageCard[];
   losers: HomepageCard[];
   trending: HomepageCard[];
+  signal_board: {
+    top_movers: { "24H": HomepageCard[]; "7D": HomepageCard[] };
+    biggest_drops: { "24H": HomepageCard[]; "7D": HomepageCard[] };
+    momentum: { "24H": HomepageCard[]; "7D": HomepageCard[] };
+  };
   as_of: string | null;
   prices_refreshed_today: number | null;
   tracked_cards_with_live_price: number | null;
@@ -90,6 +64,11 @@ const EMPTY_DATA: {
   emerging_movers: [],
   losers: [],
   trending: [],
+  signal_board: {
+    top_movers: { "24H": [], "7D": [] },
+    biggest_drops: { "24H": [], "7D": [] },
+    momentum: { "24H": [], "7D": [] },
+  },
   as_of: null,
   prices_refreshed_today: null,
   tracked_cards_with_live_price: null,
@@ -602,6 +581,7 @@ export default async function Home() {
     emerging_movers: emergingMovers,
     losers,
     trending,
+    signal_board: signalBoard,
     as_of,
     prices_refreshed_today: pricesRefreshedToday,
     tracked_cards_with_live_price: trackedCardsWithLivePrice,
@@ -630,30 +610,18 @@ export default async function Home() {
   const heroMarketCards = (liveMarketCards.length > 0 ? liveMarketCards : trending)
     .filter((c, i, arr) => arr.findIndex((x) => x.slug === c.slug) === i);
 
-  // Featured card prefers a real mover with a scored market-strength read.
-  const positiveHeroCards = [...heroMarketCards]
-    .filter((card) => (card.change_pct ?? 0) > 0)
-    .sort((left, right) => (right.change_pct ?? 0) - (left.change_pct ?? 0));
-  const topGainer = positiveHeroCards.find((card) => card.market_strength_score !== null)
-    ?? positiveHeroCards[0]
-    ?? heroMarketCards.find((card) => card.market_strength_score !== null)
-    ?? heroMarketCards[0]
-    ?? null;
-  const featuredCard = topGainer;
-
-  // Hero panel cards only show the rest of the live market set.
-  const heroCards = heroMarketCards
-    .filter((c) => c.slug !== featuredCard?.slug)
+  const heroCards = [...heroMarketCards]
     .sort((a, b) => Math.abs(b.change_pct ?? 0) - Math.abs(a.change_pct ?? 0))
     .slice(0, 5);
-  const strongMoverCards = (highConfidenceMovers.length > 0 ? highConfidenceMovers : movers)
-    .filter((card) => card.slug !== featuredCard?.slug)
-    .slice(0, 4);
-  const heroPulseCards = (featuredCard ? [featuredCard, ...heroCards] : heroCards)
+  const highConfidenceCount = highConfidenceMovers.length;
+  const strongMoverRailCards = [...highConfidenceMovers, ...movers]
     .filter((card, index, cards) => cards.findIndex((entry) => entry.slug === card.slug) === index)
-    .slice(0, 4);
+    .slice(0, 5);
+  const topMoverCardsByWindow = signalBoard.top_movers;
+  const biggestDropsByWindow = signalBoard.biggest_drops;
+  const momentumCardsByWindow = signalBoard.momentum;
+  const heroPulseCards = heroCards.slice(0, 4);
   const heroLeadingSet = getLeadingSet(heroMarketCards);
-  const heroPulseSlides = heroPulseCards.slice(0, 4);
   const heroBrief = buildHeroBrief(
     aceSummary,
     heroPulseCards,
@@ -663,10 +631,6 @@ export default async function Home() {
   const focusPills = buildFocusPills([...heroPulseCards, ...trending, ...movers], TRENDING_SET_PILLS, 2);
   const livePriceCount = formatExactCount(trackedCardsWithLivePrice);
   const refreshedCount = formatExactCount(pricesRefreshedToday);
-  const heroProofCopy = trackedCardsWithLivePrice !== null && pricesRefreshedToday !== null
-    ? `${livePriceCount} canonical RAW cards currently resolve to a live market price, and ${refreshedCount} have refreshed inside the trailing 24-hour window.`
-    : "Coverage, freshness, and latest-update evidence is pulled directly from PopAlpha's live market rails.";
-  const heroProofInfrastructureCopy = "These figures come from the same live market infrastructure powering PopAlpha pricing, freshness, and card detail pages.";
   const heroBriefGrounding = trackedCardsWithLivePrice !== null && pricesRefreshedToday !== null
     ? `Grounded in ${livePriceCount} live prices and ${refreshedCount} refreshed cards from the last 24 hours.`
     : "Grounded in live market pricing and request-time refresh rails.";
@@ -693,10 +657,10 @@ export default async function Home() {
       dotClass: "bg-[#A5B4FC]",
     },
   ] as const;
-  const trendingCards = trending.slice(0, 5);
-  const dropCards = losers.slice(0, 5);
-  const strongMoversBadge = getChangeWindowBadge(strongMoverCards.length > 0 ? strongMoverCards : movers, "Live");
-  const pullbacksBadge = getChangeWindowBadge(dropCards, "Live");
+  const strongMoversBadge = getChangeWindowBadge([
+    ...topMoverCardsByWindow["24H"],
+    ...topMoverCardsByWindow["7D"],
+  ], "Live");
   const communityVoteTotals = communityPulse.cards.reduce((totals, card) => ({
     bullish: totals.bullish + card.bullishVotes,
     total: totals.total + card.bullishVotes + card.bearishVotes,
@@ -715,13 +679,17 @@ export default async function Home() {
       linkClass: "text-[#7DD3FC]",
     },
     {
-      eyebrow: "Conviction movers",
-      value: strongMoverCards.length > 0 ? `${strongMoverCards.length} names in focus` : "Signal still forming",
-      detail: strongMoverCards.length > 0
-        ? `${strongMoversBadge} movers are already clearing the confidence threshold.`
-        : "The board is still waiting for a deeper group of high-confidence breakouts.",
-      href: "#featured-movers",
-      linkLabel: "See movers",
+      eyebrow: "Top movers",
+      value: strongMoverRailCards.length > 0 ? `${strongMoverRailCards.length} names in focus` : "Signal still forming",
+      detail: highConfidenceCount > 0
+        ? highConfidenceCount >= strongMoverRailCards.length
+          ? `${strongMoversBadge} movers are already clearing the confidence threshold.`
+          : `${highConfidenceCount} high-confidence movers are leading a broader live mover board.`
+        : strongMoverRailCards.length > 0
+          ? "Live movers are active even while the high-confidence group is still forming."
+          : "The board is still waiting for a deeper group of high-confidence breakouts.",
+      href: "#top-movers",
+      linkLabel: "See top movers",
       accentClass: "border-[#17382E] bg-[linear-gradient(180deg,rgba(15,28,22,0.92),rgba(10,18,15,0.96))]",
       linkClass: "text-[#5CE07D]",
     },
@@ -751,6 +719,11 @@ export default async function Home() {
       <SiteHeader
         showSignIn={!user}
         primaryCta={user ? { label: "Profile", href: "/profile" } : { label: "Start free", href: "/sign-up" }}
+        centerSlot={(
+          <Suspense fallback={<div className="h-9 w-full rounded-full bg-white/[0.04]" />}>
+            <HomepageSearch size="nav" autoFocus={false} className="w-full" />
+          </Suspense>
+        )}
         logoPriority
       />
 
@@ -763,7 +736,7 @@ export default async function Home() {
 
         <div className="relative mx-auto max-w-[1400px] px-5 pb-14 pt-12 sm:px-8 sm:pt-20 lg:pb-20">
           <div className="grid items-start gap-12 lg:grid-cols-[minmax(0,1.2fr)_500px] lg:gap-10 xl:grid-cols-[minmax(0,1.12fr)_560px]">
-            {/* Left: Headline + Search */}
+            {/* Left: Headline + Proof */}
             <div className="relative z-30 isolate max-w-[780px] lg:pr-12 xl:pr-16">
               <div className="inline-flex items-center gap-2 rounded-full bg-white/[0.03] px-3 py-1.5 text-[12px] text-[#9EB2C2]">
                 <span className="relative flex h-2 w-2">
@@ -785,18 +758,10 @@ export default async function Home() {
               </p>
 
               <div className="mt-7 max-w-[660px] rounded-[24px] border border-[#16303A] bg-[linear-gradient(180deg,rgba(8,16,22,0.94),rgba(7,12,18,0.98))] p-4 shadow-[0_20px_55px_rgba(0,0,0,0.28)] ring-1 ring-white/[0.04] sm:p-5">
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div className="max-w-[430px]">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#7DD3FC]">
-                      Public Proof
-                    </p>
-                    <p className="mt-2 text-[14px] leading-6 text-[#D6DEE6] sm:text-[15px]">
-                      {heroProofCopy}
-                    </p>
-                    <p className="mt-2 text-[11px] leading-5 text-[#7B8793] sm:text-[12px]">
-                      {heroProofInfrastructureCopy}
-                    </p>
-                  </div>
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#7DD3FC]">
+                    Public Proof
+                  </p>
                   <Link
                     href="/data"
                     className="inline-flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.03] px-4 py-2 text-[12px] font-semibold text-[#E7EDF2] transition-all hover:border-white/[0.15] hover:bg-white/[0.06] hover:text-white"
@@ -853,7 +818,7 @@ export default async function Home() {
               </div>
 
               {/* Direct Lookup */}
-              <div className="mt-8 max-w-[560px]">
+              <div className="mt-8 max-w-[560px] lg:hidden">
                 <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
                   <div>
                     <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#7C8792]">
@@ -934,8 +899,7 @@ export default async function Home() {
                         className="h-12 w-12 shrink-0"
                       />
                       <div>
-                        <span className="text-[12px] font-medium text-[#98E7F3]">Grounded Market Brief</span>
-                        <p className="mt-1 text-[11px] text-[#7B8793]">Built from live price rails, not static homepage copy.</p>
+                        <span className="text-[12px] font-medium text-[#98E7F3]">PopAlpha AI Summary</span>
                       </div>
                     </div>
                     <span className="text-[11px] text-[#8D97A2]">
@@ -967,123 +931,6 @@ export default async function Home() {
                   </div>
                 </div>
               </div>
-
-              <div className="relative z-10 mt-5 overflow-hidden rounded-[28px] bg-[linear-gradient(180deg,rgba(10,14,18,0.94),rgba(7,10,14,0.98))] px-4 pb-5 pt-4 shadow-[0_24px_70px_rgba(0,0,0,0.34)] ring-1 ring-white/[0.05] backdrop-blur-xl sm:px-5 sm:pb-6 lg:ml-14 lg:mt-[-64px] lg:w-[84%] lg:pt-24">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <span className="text-[13px] font-medium text-[#D7DDE4]">Market Pulse</span>
-                    <p className="mt-1 text-[11px] text-[#6E7782]">
-                      {heroPulseSlides.length > 0 ? `${heroPulseSlides.length} movers in focus` : "Live market"}
-                    </p>
-                  </div>
-                  <span className="inline-flex items-center gap-2 text-[11px] text-[#7DE29B]">
-                    <span className="h-2 w-2 rounded-full bg-[#00DC5A]" />
-                    Live
-                  </span>
-                </div>
-
-                {heroPulseSlides.length > 0 ? (
-                  <>
-                    <div
-                      className="landing-scroll-rail mt-4 flex gap-3 overflow-x-auto pb-2"
-                      style={{ scrollSnapType: "x mandatory" }}
-                    >
-                      {heroPulseSlides.map((card, index) => {
-                        const directionMeta = getDirectionMeta(card.market_direction);
-
-                        return (
-                          <Link
-                            key={card.slug}
-                            href={`/c/${encodeURIComponent(card.slug)}`}
-                            className="group w-[84%] min-w-[240px] shrink-0 rounded-[24px] border border-white/[0.05] bg-[linear-gradient(180deg,rgba(16,21,27,0.96),rgba(9,12,17,0.98))] p-4 transition-all hover:border-white/[0.1] hover:bg-[linear-gradient(180deg,rgba(19,25,32,0.98),rgba(10,14,20,0.99))] sm:w-[72%]"
-                            style={{ scrollSnapAlign: "start" }}
-                          >
-                            <div className="relative overflow-hidden rounded-[20px] bg-[linear-gradient(180deg,rgba(20,27,34,0.94),rgba(11,15,21,0.98))] p-4 ring-1 ring-white/[0.05]">
-                              <div className="flex items-center justify-between gap-3">
-                                <span className="rounded-full bg-white/[0.04] px-2.5 py-1 text-[10px] font-semibold tracking-[0.16em] text-[#6F7A86]">
-                                  {String(index + 1).padStart(2, "0")}
-                                </span>
-                                {card.market_strength_score != null ? (
-                                  <span className="text-[11px] font-medium text-[#7FC8D3]">
-                                    {formatMarketStrength(card.market_strength_score)}
-                                  </span>
-                                ) : null}
-                              </div>
-
-                              <div className="mt-3 flex min-h-[176px] items-center justify-center">
-                                {card.image_url ? (
-                                  // eslint-disable-next-line @next/next/no-img-element
-                                  <img
-                                    src={card.image_url}
-                                    alt={card.name}
-                                    className="h-[164px] w-auto rounded-[14px] object-contain shadow-[0_18px_40px_rgba(0,0,0,0.38)] transition-transform duration-200 group-hover:scale-[1.02]"
-                                  />
-                                ) : (
-                                  <div className="flex h-[164px] w-[116px] items-center justify-center rounded-[14px] bg-[linear-gradient(180deg,rgba(26,33,42,0.92),rgba(12,16,22,0.98))] text-[10px] font-medium uppercase tracking-[0.18em] text-[#72808E]">
-                                    Card
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-
-                            <div className="mt-4">
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                  <p className="truncate text-[15px] font-semibold text-[#EEF2F6] group-hover:text-white">{card.name}</p>
-                                  <p className="mt-1 truncate text-[11px] text-[#6C7681]">{card.set_name ?? "Live market"}</p>
-                                </div>
-                                {directionMeta ? (
-                                  <span className={`rounded-full bg-white/[0.03] px-2.5 py-1 text-[10px] font-medium ${directionMeta.textClass}`}>
-                                    {directionMeta.label}
-                                  </span>
-                                ) : null}
-                              </div>
-
-                              <div className="mt-4 flex items-end justify-between gap-4">
-                                <div>
-                                  <p className="text-[10px] font-medium uppercase tracking-[0.16em] text-[#56606B]">Market price</p>
-                                  <p className="mt-1 text-[20px] font-semibold tabular-nums text-white">{formatPrice(card.market_price)}</p>
-                                </div>
-                                <div className="text-right">
-                                  <p className="text-[10px] font-medium uppercase tracking-[0.16em] text-[#56606B]">Move</p>
-                                  <p className={`mt-1 text-[18px] font-semibold tabular-nums ${(card.change_pct ?? 0) >= 0 ? "text-[#5CE07D]" : "text-[#FF7E78]"}`}>
-                                    {formatPct(card.change_pct)}
-                                  </p>
-                                </div>
-                              </div>
-
-                              <div className="mt-4 flex items-center gap-3">
-                                <div className="h-[4px] flex-1 overflow-hidden rounded-full bg-white/[0.08]">
-                                  <div
-                                    className="h-full rounded-full bg-[#42D6E8]"
-                                    style={{ width: `${Math.max(10, Math.min(100, card.market_strength_score ?? 0))}%` }}
-                                  />
-                                </div>
-                                <span className="text-[11px] text-[#7B8590]">
-                                  {card.change_window ?? "Live"}
-                                </span>
-                              </div>
-                            </div>
-                          </Link>
-                        );
-                      })}
-                    </div>
-
-                    <div className="mt-3 flex items-center gap-2">
-                      {heroPulseSlides.map((card, index) => (
-                        <span
-                          key={card.slug}
-                          className={`h-[3px] rounded-full ${index === 0 ? "w-8 bg-[#42D6E8]" : "w-4 bg-white/[0.14]"}`}
-                        />
-                      ))}
-                    </div>
-                  </>
-                ) : (
-                  <div className="mt-4 flex min-h-28 items-center justify-center rounded-2xl px-4 text-center text-[13px] text-[#707A86]">
-                    Live movers will appear here as fresh price action clears the confidence threshold.
-                  </div>
-                )}
-              </div>
             </div>
           </div>
         </div>
@@ -1107,195 +954,11 @@ export default async function Home() {
         </div>
       </section>
 
-      {/* ── Featured Movers ─────────────────────────────────────────────── */}
-      <section id="featured-movers" className="relative py-16 sm:py-24">
-        <div className="mx-auto max-w-[1400px] px-5 sm:px-8">
-          <div className="flex items-end justify-between">
-            <div>
-              <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#00B4D8]">Live Market</span>
-              <h2 className="mt-2 text-[clamp(1.5rem,3vw,2.25rem)] font-bold tracking-tight text-white">
-                What&apos;s moving with conviction
-              </h2>
-            </div>
-            <div className="hidden items-center gap-2 sm:flex">
-              {["24H", "7D"].map((period) => (
-                <span
-                  key={period}
-                  className={`cursor-default rounded-lg px-3 py-1.5 text-[12px] font-semibold ${period === "24H" ? "bg-white/[0.08] text-white" : "text-[#555] hover:text-[#888]"}`}
-                >
-                  {period}
-                </span>
-              ))}
-            </div>
-          </div>
-
-          {/* Featured card spotlight + grid */}
-          <div className="mt-8 grid gap-6 lg:grid-cols-[380px_1fr] xl:grid-cols-[420px_1fr]">
-            {/* Spotlight Card */}
-            {featuredCard && (
-              <Link
-                href={`/c/${encodeURIComponent(featuredCard.slug)}`}
-                className="group relative overflow-hidden rounded-2xl border border-white/[0.06] bg-gradient-to-b from-[#101018] to-[#0A0A0E] p-5 transition-all hover:border-[#00B4D8]/25 hover:shadow-[0_0_60px_rgba(0,180,216,0.1)] sm:p-6"
-              >
-                {/* Multi-layer ambient glow behind card */}
-                <div className="pointer-events-none absolute left-1/2 top-8 h-[320px] w-[260px] -translate-x-1/2 rounded-full bg-[#00B4D8]/[0.06] blur-[80px] transition-opacity group-hover:opacity-100 opacity-70" />
-                <div className="pointer-events-none absolute left-1/2 top-20 h-[200px] w-[180px] -translate-x-1/2 rounded-full bg-[#7C3AED]/[0.04] blur-[60px]" />
-
-                {/* Top badge row */}
-                <div className="relative mb-4 flex items-center justify-between">
-                  <span className="rounded-md bg-[#00DC5A]/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[#00DC5A]">
-                    Top Gainer
-                  </span>
-                  {featuredCard.mover_tier === "hot" && (
-                    <span className="rounded-md bg-[#FF6B35]/10 px-2.5 py-1 text-[10px] font-bold text-[#FF6B35]">HOT</span>
-                  )}
-                </div>
-
-                <div className="relative flex flex-col items-center">
-                  {/* Card image with premium framing */}
-                  <div className="relative">
-                    {featuredCard.image_url ? (
-                      <img
-                        src={featuredCard.image_url}
-                        alt={featuredCard.name}
-                        className="relative z-10 h-[300px] w-auto rounded-xl object-contain shadow-[0_24px_60px_rgba(0,0,0,0.6)] transition-transform duration-300 group-hover:scale-[1.03] group-hover:shadow-[0_28px_70px_rgba(0,0,0,0.7)] sm:h-[360px]"
-                      />
-                    ) : (
-                      <div className="relative z-10 h-[300px] w-[214px] rounded-xl bg-gradient-to-br from-[#1a1a2e] to-[#0a0a12] shadow-[0_24px_60px_rgba(0,0,0,0.6)] sm:h-[360px] sm:w-[257px]" />
-                    )}
-                    {/* Subtle reflection/glow under card */}
-                    <div className="pointer-events-none absolute -bottom-4 left-1/2 h-8 w-3/4 -translate-x-1/2 rounded-full bg-[#00B4D8]/[0.08] blur-xl" />
-                  </div>
-
-                  <div className="mt-6 w-full">
-                    <h3 className="text-[20px] font-bold text-white sm:text-[22px]">{featuredCard.name}</h3>
-                    <p className="mt-0.5 text-[13px] text-[#666]">{featuredCard.set_name}</p>
-
-                    <div className="mt-4 grid grid-cols-3 gap-3 rounded-xl border border-white/[0.04] bg-white/[0.02] p-3">
-                      <div>
-                        <span className="text-[10px] font-medium uppercase tracking-widest text-[#555]">Price</span>
-                        <p className="mt-0.5 text-[20px] font-bold tabular-nums leading-tight text-white">{formatPrice(featuredCard.market_price)}</p>
-                      </div>
-                      <div className="text-center">
-                        <span className="text-[10px] font-medium uppercase tracking-widest text-[#555]">Direction</span>
-                        <p className={`mt-0.5 text-[18px] font-bold leading-tight ${getDirectionMeta(featuredCard.market_direction)?.textClass ?? "text-[#D1D5DB]"}`}>
-                          {getDirectionMeta(featuredCard.market_direction)?.label ?? "--"}
-                        </p>
-                        <p className={`mt-0.5 text-[13px] font-semibold tabular-nums ${(featuredCard.change_pct ?? 0) >= 0 ? "text-[#00DC5A]" : "text-[#FF6B6B]"}`}>
-                          {formatPct(featuredCard.change_pct)}
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <span className="text-[10px] font-medium uppercase tracking-widest text-[#555]">Market Strength</span>
-                        <p className="mt-0.5 text-[20px] font-bold tabular-nums leading-tight text-[#00B4D8]">
-                          {formatMarketStrength(featuredCard.market_strength_score)}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </Link>
-            )}
-
-            {/* Movers Grid */}
-            <div className="space-y-4">
-              {/* High Confidence Movers */}
-              <div>
-                <div className="mb-3 flex items-center gap-2">
-                  <span className="text-[13px] font-semibold text-white">Strong Movers</span>
-                  <span className="rounded-md bg-[#00DC5A]/10 px-2 py-0.5 text-[10px] font-bold text-[#00DC5A]">{strongMoversBadge}</span>
-                </div>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  {strongMoverCards.map((card) => (
-                    <SignalCard key={card.slug} card={card} />
-                  ))}
-                  {strongMoverCards.length === 0 && (
-                    <div className="col-span-2 flex h-24 items-center justify-center rounded-xl border border-white/[0.04] text-[13px] text-[#444]">
-                      No high-confidence movers yet
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Biggest Drops */}
-              <div>
-                <div className="mb-3 flex items-center gap-2">
-                  <span className="text-[13px] font-semibold text-white">Largest Pullbacks</span>
-                  <span className="rounded-md bg-[#FF3B30]/10 px-2 py-0.5 text-[10px] font-bold text-[#FF3B30]">{pullbacksBadge}</span>
-                </div>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  {dropCards.slice(0, 4).map((card) => (
-                    <SignalCard key={card.slug} card={card} />
-                  ))}
-                  {dropCards.length === 0 && (
-                    <div className="col-span-2 flex h-24 items-center justify-center rounded-xl border border-white/[0.04] text-[13px] text-[#444]">
-                      No drops data yet
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ── Trending Rail ───────────────────────────────────────────────── */}
-      <section id="momentum-rail" className="border-t border-white/[0.04] py-16 sm:py-20">
-        <div className="mx-auto max-w-[1400px] px-5 sm:px-8">
-          <div className="flex items-end justify-between">
-            <div>
-              <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#7C3AED]">Momentum</span>
-              <h2 className="mt-2 text-[clamp(1.5rem,3vw,2rem)] font-bold tracking-tight text-white">Sustained momentum</h2>
-            </div>
-            <Link href="/search" className="text-[13px] font-medium text-[#00B4D8] transition-colors hover:text-white">
-              View all →
-            </Link>
-          </div>
-
-          <div
-            className="landing-scroll-rail mt-6 flex gap-4 overflow-x-auto pb-4"
-            style={{ scrollSnapType: "x mandatory" }}
-          >
-            {trendingCards.map((card) => (
-              <SignalCard
-                key={card.slug}
-                card={card}
-                className="w-[220px] shrink-0 sm:w-[240px]"
-                style={{ scrollSnapAlign: "start" }}
-              />
-            ))}
-            {trendingCards.length === 0 && (
-              <div className="flex h-40 w-full items-center justify-center text-[13px] text-[#444]">
-                No trending cards yet
-              </div>
-            )}
-          </div>
-
-          {/* Emerging Movers sub-section */}
-          {emergingMovers.length > 0 && (
-            <div className="mt-10">
-              <div className="mb-4 flex items-center gap-2">
-                <span className="text-[13px] font-semibold text-white">Emerging Movers</span>
-                <span className="rounded-md bg-[#00DC5A]/10 px-2 py-0.5 text-[10px] font-bold text-[#00DC5A]">NEW</span>
-              </div>
-              <div
-                className="landing-scroll-rail flex gap-4 overflow-x-auto pb-4"
-                style={{ scrollSnapType: "x mandatory" }}
-              >
-                {emergingMovers.slice(0, 5).map((card) => (
-                  <SignalCard
-                    key={card.slug}
-                    card={card}
-                    className="w-[220px] shrink-0 sm:w-[240px]"
-                    hoverTone="green"
-                    style={{ scrollSnapAlign: "start" }}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      </section>
+      <HomepageSignalBoard
+        topMoversByWindow={topMoverCardsByWindow}
+        biggestDropsByWindow={biggestDropsByWindow}
+        momentumByWindow={momentumCardsByWindow}
+      />
 
       {/* ── Market Intelligence ─────────────────────────────────────────── */}
       <section id="market-intelligence" className="border-t border-white/[0.04] bg-[#08080C] py-16 sm:py-24">
@@ -1629,50 +1292,3 @@ export default async function Home() {
 }
 
 /* ─── Sub-components ───────────────────────────────────────────────────────── */
-
-function SignalCard({
-  card,
-  className = "",
-  style,
-  hoverTone = "cyan",
-}: {
-  card: HomepageCard;
-  className?: string;
-  style?: CSSProperties;
-  hoverTone?: "cyan" | "green";
-}) {
-  const hoverClasses = hoverTone === "green"
-    ? "hover:border-[#00DC5A]/20 hover:shadow-[0_12px_40px_rgba(0,220,90,0.06)]"
-    : "hover:border-[#00B4D8]/20 hover:shadow-[0_12px_40px_rgba(0,180,216,0.08)]";
-
-  return (
-    <Link
-      href={`/c/${encodeURIComponent(card.slug)}`}
-      className={`group overflow-hidden rounded-2xl border border-white/[0.06] bg-[#0C0C10] transition-all ${hoverClasses} ${className}`}
-      style={style}
-    >
-      <div className="relative overflow-hidden bg-gradient-to-b from-[#12121a] to-[#0C0C10] p-4 pb-3">
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/[0.02] to-transparent" />
-        {card.image_url ? (
-          <img
-            src={card.image_url}
-            alt={card.name}
-            className="relative mx-auto aspect-[63/88] w-full rounded-lg object-cover shadow-[0_12px_35px_rgba(0,0,0,0.5)] transition-transform duration-300 group-hover:scale-[1.04] group-hover:shadow-[0_16px_45px_rgba(0,0,0,0.6)]"
-          />
-        ) : (
-          <div className="mx-auto aspect-[63/88] w-full rounded-lg bg-gradient-to-br from-[#1a1a2e] to-[#0a0a12] shadow-[0_12px_35px_rgba(0,0,0,0.5)]" />
-        )}
-      </div>
-      <div className="px-4 pb-4">
-        <p className="truncate text-[14px] font-semibold text-[#E4E4E7] group-hover:text-white">{card.name}</p>
-        <p className="mt-0.5 truncate text-[11px] text-[#555]">{card.set_name}</p>
-        <div className="mt-2.5 flex items-center justify-between border-t border-white/[0.04] pt-2.5">
-          <span className="text-[15px] font-bold tabular-nums text-white">{formatPrice(card.market_price)}</span>
-          <span className={`rounded-md px-1.5 py-0.5 text-[12px] font-bold tabular-nums ${(card.change_pct ?? 0) >= 0 ? "bg-[#00DC5A]/10 text-[#00DC5A]" : "bg-[#FF3B30]/10 text-[#FF3B30]"}`}>
-            {formatPct(card.change_pct)}
-          </span>
-        </div>
-      </div>
-    </Link>
-  );
-}

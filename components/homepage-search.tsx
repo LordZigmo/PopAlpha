@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import CardSearch from "@/components/card-search";
+import type { ComponentProps } from "react";
 
 const SEARCH_EXAMPLES = [
   "Search cards, sets, slabs, or sealed",
@@ -35,7 +36,17 @@ const SEARCH_EXAMPLES = [
  * Animated typewriter search for the homepage.
  * Compact variant — not full-screen hero.
  */
-export default function HomepageSearch() {
+type HomepageSearchProps = {
+  size?: ComponentProps<typeof CardSearch>["size"];
+  autoFocus?: boolean;
+  className?: string;
+};
+
+export default function HomepageSearch({
+  size = "hero",
+  autoFocus = true,
+  className,
+}: HomepageSearchProps) {
   const [placeholder, setPlaceholder] = useState("");
 
   useEffect(() => {
@@ -77,9 +88,10 @@ export default function HomepageSearch() {
 
   return (
     <CardSearch
-      size="hero"
+      className={className}
+      size={size}
       placeholder={placeholder || "Search cards, sets, slabs, or sealed"}
-      autoFocus
+      autoFocus={autoFocus}
       enableGlobalShortcut
       submitMode="active-or-search"
     />

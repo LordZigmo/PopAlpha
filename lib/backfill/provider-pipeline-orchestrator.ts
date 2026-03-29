@@ -224,7 +224,6 @@ const PROVIDER_PIPELINE_HANDLERS: Record<BackendPipelineProvider, ProviderPipeli
     matchErrorMessage: "justtcg match failed",
     timeseriesErrorMessage: "justtcg timeseries failed",
     variantMetricsErrorMessage: "justtcg variant metrics failed",
-    analyticsProvider: "JUSTTCG",
     runIngest: (opts) => runJustTcgRawIngest({
       providerSetId: opts.providerSetId ?? undefined,
       setLimit: opts.setLimit,

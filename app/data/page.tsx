@@ -258,6 +258,14 @@ export default async function DataPage() {
     })),
   ];
   const latestTrendPoint = trend && trend.length > 0 ? trend[trend.length - 1] : null;
+  const transparencyTotalRaw = transparency
+    ? transparency.coverage.both + transparency.coverage.justtcgOnly + transparency.coverage.scrydexOnly + transparency.coverage.none
+    : 0;
+  const transparencyLiveCoverage = transparency?.coverage.market ?? 0;
+  const transparencyLiveCoveragePct = transparency?.coverage.marketPct ?? 0;
+  const transparencyUncoveredCount = transparency
+    ? Math.max(0, transparencyTotalRaw - transparencyLiveCoverage)
+    : 0;
   const quickActions: RailActionLink[] = [
     { href: "/", label: "Home", icon: House },
     { href: "/search", label: "Search", icon: Search },
@@ -382,7 +390,7 @@ export default async function DataPage() {
               Price Freshness (24h)
             </h1>
             <p className="mt-3 max-w-2xl text-[14px] leading-6 text-[#8B8B8B]">
-              Live public health view for canonical RAW pricing, provider freshness, coverage quality, and pipeline reliability.
+              Live public health view for canonical RAW pricing, live market freshness, coverage quality, and pipeline reliability.
             </p>
 
             {primaryMonitor ? (
@@ -473,17 +481,20 @@ export default async function DataPage() {
                 </div>
 
                 <div className="rounded-xl border border-[#222] bg-[#0D0D0D] p-4">
-                  <p className="text-[12px] uppercase tracking-[0.12em] text-[#7A7A7A]">Provider Freshness (24h)</p>
-                  <p className="mt-2 text-[14px] text-[#9CA3AF]">JustTCG: <span className="font-semibold text-[#E5E7EB]">{transparency.freshnessByProvider24h.justtcgPct ?? 0}%</span></p>
-                  <p className="mt-1 text-[14px] text-[#9CA3AF]">Scrydex: <span className="font-semibold text-[#E5E7EB]">{transparency.freshnessByProvider24h.scrydexPct ?? 0}%</span></p>
+                  <p className="text-[12px] uppercase tracking-[0.12em] text-[#7A7A7A]">Live Market Freshness (24h)</p>
+                  <p className="mt-2 text-[14px] text-[#9CA3AF]">Scrydex-backed snapshots: <span className="font-semibold text-[#E5E7EB]">{transparency.freshnessByProvider24h.scrydexPct ?? 0}%</span></p>
+                  <p className="mt-1 text-[12px] text-[#6B7280]">Distinct canonical RAW cards with SCRYDEX or Pokemon TCG API snapshots in the last 24 hours.</p>
                 </div>
 
                 <div className="rounded-xl border border-[#222] bg-[#0D0D0D] p-4">
-                  <p className="text-[12px] uppercase tracking-[0.12em] text-[#7A7A7A]">Coverage</p>
-                  <p className="mt-2 text-[14px] text-[#9CA3AF]">Both providers: <span className="font-semibold text-[#E5E7EB]">{formatNumber(transparency.coverage.both)} ({transparency.coverage.bothPct}%)</span></p>
-                  <p className="mt-1 text-[14px] text-[#9CA3AF]">JustTCG only: <span className="font-semibold text-[#E5E7EB]">{formatNumber(transparency.coverage.justtcgOnly)}</span></p>
-                  <p className="mt-1 text-[14px] text-[#9CA3AF]">Scrydex only: <span className="font-semibold text-[#E5E7EB]">{formatNumber(transparency.coverage.scrydexOnly)}</span></p>
-                  <p className="mt-1 text-[14px] text-[#9CA3AF]">No price: <span className="font-semibold text-[#E5E7EB]">{formatNumber(transparency.coverage.none)}</span></p>
+                  <p className="text-[12px] uppercase tracking-[0.12em] text-[#7A7A7A]">Live Market Coverage</p>
+                  <p className="mt-2 text-[14px] text-[#9CA3AF]">Cards with a live market price: <span className="font-semibold text-[#E5E7EB]">{formatNumber(transparencyLiveCoverage)} ({transparencyLiveCoveragePct}%)</span></p>
+                  <p className="mt-1 text-[14px] text-[#9CA3AF]">Cards without a live market price: <span className="font-semibold text-[#E5E7EB]">{formatNumber(transparencyUncoveredCount)}</span></p>
+                  {transparency.coverage.justtcgOnly > 0 ? (
+                    <p className="mt-1 text-[12px] text-[#6B7280]">
+                      Legacy JustTCG-only rows are excluded from live coverage after the provider retirement.
+                    </p>
+                  ) : null}
                 </div>
 
                 <div className="rounded-xl border border-[#222] bg-[#0D0D0D] p-4">
@@ -518,8 +529,7 @@ export default async function DataPage() {
 
                 <div className="rounded-xl border border-[#222] bg-[#0D0D0D] p-4">
                   <p className="text-[12px] uppercase tracking-[0.12em] text-[#7A7A7A]">Ingestion Volume (24h)</p>
-                  <p className="mt-2 text-[14px] text-[#9CA3AF]">JustTCG observations: <span className="font-semibold text-[#E5E7EB]">{transparency.ingestionVolume24h.justtcgObservations ?? "n/a"}</span></p>
-                  <p className="mt-1 text-[14px] text-[#9CA3AF]">Scrydex observations: <span className="font-semibold text-[#E5E7EB]">{transparency.ingestionVolume24h.scrydexObservations ?? "n/a"}</span></p>
+                  <p className="mt-2 text-[14px] text-[#9CA3AF]">Scrydex-backed observations: <span className="font-semibold text-[#E5E7EB]">{transparency.ingestionVolume24h.scrydexObservations ?? "n/a"}</span></p>
                 </div>
 
                 <div className="rounded-xl border border-[#222] bg-[#0D0D0D] p-4">
@@ -565,7 +575,7 @@ export default async function DataPage() {
               </div>
 
               <p className="mt-5 text-[12px] text-[#6B7280]">
-                Methodology: RAW market pricing is Scrydex-first, with JustTCG used only when Scrydex is missing or stale; confidence still accounts for freshness, sample size, parity, and outlier filtering.
+                Methodology: RAW market pricing is now live-market-first through the active Scrydex-backed pipeline. Retired JustTCG-only rows are excluded from live coverage, while confidence still reflects freshness, sample size, and outlier filtering.
               </p>
             </>
           ) : (
@@ -587,7 +597,6 @@ export default async function DataPage() {
                     <tr>
                       <th className="px-2 py-2 font-medium">Captured</th>
                       <th className="px-2 py-2 font-medium">Freshness %</th>
-                      <th className="px-2 py-2 font-medium">Coverage %</th>
                       <th className="px-2 py-2 font-medium">P90 Spread %</th>
                       <th className="px-2 py-2 font-medium">Queued</th>
                       <th className="px-2 py-2 font-medium">Retry</th>
@@ -597,14 +606,13 @@ export default async function DataPage() {
                   <tbody className="text-[#D1D5DB]">
                     {trend.length === 0 ? (
                       <tr>
-                        <td className="px-2 py-3 text-[#9CA3AF]" colSpan={7}>No trend history yet. First snapshots will appear after cron runs.</td>
+                        <td className="px-2 py-3 text-[#9CA3AF]" colSpan={6}>No trend history yet. First snapshots will appear after cron runs.</td>
                       </tr>
                     ) : (
                       trend.slice(-24).map((row) => (
                         <tr key={row.capturedAt} className="border-t border-[#1F2937]">
                           <td className="px-2 py-2">{formatTimestamp(row.capturedAt)}</td>
                           <td className="px-2 py-2">{row.freshnessPct ?? "n/a"}</td>
-                          <td className="px-2 py-2">{row.coverageBothPct ?? "n/a"}</td>
                           <td className="px-2 py-2">{row.p90SpreadPct ?? "n/a"}</td>
                           <td className="px-2 py-2">{row.queueDepth ?? "n/a"}</td>
                           <td className="px-2 py-2">{row.retryDepth ?? "n/a"}</td>

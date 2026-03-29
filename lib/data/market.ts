@@ -95,9 +95,9 @@ function compareIsoDesc(left: string | null | undefined, right: string | null | 
 }
 
 function providerRank(provider: string | null | undefined): number {
-  if (provider === "JUSTTCG") return 0;
-  if (provider === "SCRYDEX") return 1;
-  if (provider === "POKEMON_TCG_API") return 2;
+  if (provider === "SCRYDEX") return 0;
+  if (provider === "POKEMON_TCG_API") return 1;
+  if (provider === "JUSTTCG") return 2;
   return 3;
 }
 

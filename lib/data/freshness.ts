@@ -161,6 +161,8 @@ export type PricingTransparencySnapshot = {
     scrydexPct: number | null;
   };
   coverage: {
+    market: number;
+    marketPct: number;
     both: number;
     justtcgOnly: number;
     scrydexOnly: number;
@@ -280,6 +282,85 @@ function computeLiquidityWeight(activeListings7d: number): number {
   return 1.25;
 }
 
+function deriveLegacyTotalRawFromCoverage(coverage: PricingTransparencySnapshot["coverage"]): number {
+  return Math.max(0, coverage.both + coverage.justtcgOnly + coverage.scrydexOnly + coverage.none);
+}
+
+async function loadLiveMarketCoverageCounts(
+  supabase: ReturnType<typeof dbPublic>,
+): Promise<{ totalRaw: number | null; marketCoverage: number | null }> {
+  const [totalResult, marketResult] = await Promise.all([
+    supabase
+      .from("public_card_metrics")
+      .select("canonical_slug", { count: "exact", head: true })
+      .eq("grade", "RAW")
+      .is("printing_id", null),
+    supabase
+      .from("public_card_metrics")
+      .select("canonical_slug", { count: "exact", head: true })
+      .eq("grade", "RAW")
+      .is("printing_id", null)
+      .not("market_price", "is", null),
+  ]);
+
+  return {
+    totalRaw: totalResult.error ? null : (totalResult.count ?? null),
+    marketCoverage: marketResult.error ? null : (marketResult.count ?? null),
+  };
+}
+
+function normalizePricingTransparencySnapshot(
+  snapshot: PricingTransparencySnapshot,
+  overrides: {
+    totalRaw?: number | null;
+    marketCoverage?: number | null;
+  } = {},
+): PricingTransparencySnapshot {
+  const totalRaw = typeof overrides.totalRaw === "number" && Number.isFinite(overrides.totalRaw)
+    ? overrides.totalRaw
+    : deriveLegacyTotalRawFromCoverage(snapshot.coverage);
+  const marketCoverage = typeof overrides.marketCoverage === "number" && Number.isFinite(overrides.marketCoverage)
+    ? overrides.marketCoverage
+    : (typeof snapshot.coverage.market === "number" && Number.isFinite(snapshot.coverage.market)
+      ? snapshot.coverage.market
+      : snapshot.coverage.both + snapshot.coverage.scrydexOnly);
+  const marketPct = totalRaw > 0
+    ? Number(((marketCoverage / totalRaw) * 100).toFixed(2))
+    : (typeof snapshot.coverage.marketPct === "number" && Number.isFinite(snapshot.coverage.marketPct)
+      ? snapshot.coverage.marketPct
+      : 0);
+
+  return {
+    ...snapshot,
+    coverage: {
+      ...snapshot.coverage,
+      market: marketCoverage,
+      marketPct,
+    },
+    slo: snapshot.slo.map((row) => (
+      row.key === "coverage_both"
+        ? {
+          ...row,
+          label: "Live Market Coverage",
+          value: `${marketPct.toFixed(2)}%`,
+          target: ">= 60%",
+        }
+        : row
+    )),
+    alerts: snapshot.alerts
+      .filter((alert) => !alert.startsWith("Blendable parity coverage is low"))
+      .map((alert) => {
+        if (alert.startsWith("Hard alert: zero JustTCG/Scrydex snapshot observations in 24h.")) {
+          return "Hard alert: zero live market snapshot observations in 24h.";
+        }
+        if (alert.startsWith("Dual-provider coverage below SLO")) {
+          return `Live market coverage below SLO (${marketCoverage}/${totalRaw}).`;
+        }
+        return alert;
+      }),
+  };
+}
+
 export async function getPricingTransparencySnapshot(): Promise<PricingTransparencySnapshot> {
   const supabase = dbPublic();
   const { data, error } = await supabase
@@ -297,7 +378,11 @@ export async function getPricingTransparencySnapshot(): Promise<PricingTranspare
     throw new Error("pricing_transparency_snapshots has no captured payload yet.");
   }
 
-  return data.payload;
+  const liveCoverage = await loadLiveMarketCoverageCounts(supabase);
+  return normalizePricingTransparencySnapshot(data.payload, {
+    totalRaw: liveCoverage.totalRaw,
+    marketCoverage: liveCoverage.marketCoverage,
+  });
 }
 
 export async function computePricingTransparencySnapshot(): Promise<PricingTransparencySnapshot> {
@@ -314,6 +399,7 @@ export async function computePricingTransparencySnapshot(): Promise<PricingTrans
     jOnlyRes,
     sOnlyRes,
     noneRes,
+    marketCoverageRes,
     under6hRes,
     under24hRes,
     under72hRes,
@@ -335,6 +421,7 @@ export async function computePricingTransparencySnapshot(): Promise<PricingTrans
     supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null).not("justtcg_price", "is", null).is("scrydex_price", null),
     supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null).is("justtcg_price", null).not("scrydex_price", "is", null),
     supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null).is("justtcg_price", null).is("scrydex_price", null),
+    supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null).not("market_price", "is", null),
     supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null).gte("market_price_as_of", iso6h),
     supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null).gte("market_price_as_of", iso24h),
     supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null).gte("market_price_as_of", iso72h),
@@ -367,6 +454,7 @@ export async function computePricingTransparencySnapshot(): Promise<PricingTrans
   const justtcgOnly = jOnlyRes.count ?? 0;
   const scrydexOnly = sOnlyRes.count ?? 0;
   const none = noneRes.count ?? 0;
+  const marketCoverageCount = marketCoverageRes.count ?? 0;
   const under6h = under6hRes.count ?? 0;
   const under24h = under24hRes.count ?? 0;
   const under72h = under72hRes.count ?? 0;
@@ -633,7 +721,8 @@ export async function computePricingTransparencySnapshot(): Promise<PricingTrans
 
   const p90Spread = percentile(spreads, 90);
   const freshnessSlo = statusHighGood(under24h > 0 && totalRaw > 0 ? (under24h / totalRaw) * 100 : 0, 90, 80);
-  const coverageSlo = statusHighGood(totalRaw > 0 ? (both / totalRaw) * 100 : 0, 60, 45);
+  const marketCoveragePct = totalRaw > 0 ? (marketCoverageCount / totalRaw) * 100 : 0;
+  const coverageSlo = statusHighGood(marketCoveragePct, 60, 45);
   const blendablePct = (blendableMatch !== null && totalRaw > 0) ? (blendableMatch / totalRaw) * 100 : null;
   const agreementSlo = statusLowGood(p90Spread, 45, 70);
   const changeCoverageSlo = statusHighGood(changeCoveragePct, 99.9, 99);
@@ -642,12 +731,11 @@ export async function computePricingTransparencySnapshot(): Promise<PricingTrans
   const alerts: string[] = [];
   const providerObservationCount24h = (just24hObsRes.count ?? 0) + (scrydex24hObsRes.count ?? 0);
   const freshRawCards24h = under24h;
-  if (providerObservationCount24h === 0) alerts.push("Hard alert: zero JustTCG/Scrydex snapshot observations in 24h.");
+  if (providerObservationCount24h === 0) alerts.push("Hard alert: zero live market snapshot observations in 24h.");
   if (freshRawCards24h === 0) alerts.push("Hard alert: zero fresh RAW cards in 24h.");
   if (freshnessSlo !== "healthy") alerts.push(`Freshness below SLO (${under24h}/${totalRaw} fresh in 24h).`);
-  if (coverageSlo !== "healthy") alerts.push(`Dual-provider coverage below SLO (${both}/${totalRaw}).`);
+  if (coverageSlo !== "healthy") alerts.push(`Live market coverage below SLO (${marketCoverageCount}/${totalRaw}).`);
   if (changeCoverageSlo !== "healthy") alerts.push(`Price-change coverage dropped (${changeCoverageCount}/${totalRaw} cards have change_pct).`);
-  if (blendablePct !== null && blendablePct < 50) alerts.push(`Blendable parity coverage is low (${blendablePct.toFixed(2)}%).`);
   if (agreementSlo === "critical") alerts.push(`Provider spread is elevated (p90 ${p90Spread ?? 0}%).`);
   if (divergenceGt80PctCount > 50) alerts.push(`Provider divergence spike: ${divergenceGt80PctCount} cards >80% spread.`);
   if (setJumpGt40PctCount > 0) alerts.push(`Set-level jump alert: ${setJumpGt40PctCount} sets have >=40% 24h movers.`);
@@ -660,11 +748,13 @@ export async function computePricingTransparencySnapshot(): Promise<PricingTrans
   if (sentinelSlo !== "healthy") alerts.push(`Sentinel price flags detected (${sentinelRes.count ?? 0}).`);
   if (retrySlo !== "healthy") alerts.push(`Pipeline retry queue depth elevated (${retryDepth ?? 0}).`);
 
-  return {
+  return normalizePricingTransparencySnapshot({
     asOf,
     snapshotCoverage24h,
     freshnessByProvider24h: providerFreshness,
     coverage: {
+      market: marketCoverageCount,
+      marketPct: totalRaw > 0 ? Number(((marketCoverageCount / totalRaw) * 100).toFixed(2)) : 0,
       both,
       justtcgOnly,
       scrydexOnly,
@@ -735,9 +825,9 @@ export async function computePricingTransparencySnapshot(): Promise<PricingTrans
       },
       {
         key: "coverage_both",
-        label: "Dual-Provider Coverage",
+        label: "Live Market Coverage",
         status: coverageSlo,
-        value: `${(totalRaw > 0 ? (both / totalRaw) * 100 : 0).toFixed(2)}%`,
+        value: `${marketCoveragePct.toFixed(2)}%`,
         target: ">= 60%",
       },
       {
@@ -770,7 +860,10 @@ export async function computePricingTransparencySnapshot(): Promise<PricingTrans
       },
     ],
     alerts,
-  };
+  }, {
+    totalRaw,
+    marketCoverage: marketCoverageCount,
+  });
 }
 
 export async function getPricingTransparencyTrend(days = 7): Promise<PricingTransparencyTrendPoint[]> {

@@ -14,12 +14,18 @@
  *   - public_variant_metrics still supplies the 7d sustained trending section
  */
 
-import { getCanonicalMarketPulseMap, type CanonicalMarketPulse } from "@/lib/data/market";
+import {
+  getCanonicalMarketPulseMap,
+  resolveCanonicalMarketPulse,
+  type CanonicalMarketPulse,
+} from "@/lib/data/market";
 import type { MarketDirection } from "@/lib/data/market-strength";
 import { dbPublic } from "@/lib/db";
 import { isPhysicalPokemonSet } from "@/lib/sets/physical";
 
 // ── Types ────────────────────────────────────────────────────────────────────
+
+export type HomepageSignalWindow = "24H" | "7D";
 
 export type HomepageCard = {
   slug: string;
@@ -28,7 +34,7 @@ export type HomepageCard = {
   year: number | null;
   market_price: number | null;
   change_pct: number | null;
-  change_window: "24H" | "7D" | null;
+  change_window: HomepageSignalWindow | null;
   confidence_score: number | null;
   low_confidence: boolean | null;
   market_strength_score: number | null;
@@ -38,12 +44,21 @@ export type HomepageCard = {
   sparkline_7d: number[];
 };
 
+export type HomepageWindowedCards = Record<HomepageSignalWindow, HomepageCard[]>;
+
+export type HomepageSignalBoardData = {
+  top_movers: HomepageWindowedCards;
+  biggest_drops: HomepageWindowedCards;
+  momentum: HomepageWindowedCards;
+};
+
 export type HomepageData = {
   movers: HomepageCard[];
   high_confidence_movers: HomepageCard[];
   emerging_movers: HomepageCard[];
   losers: HomepageCard[];
   trending: HomepageCard[];
+  signal_board: HomepageSignalBoardData;
   as_of: string | null;
   prices_refreshed_today: number | null;
   tracked_cards_with_live_price: number | null;
@@ -73,6 +88,7 @@ type CardRow = {
   canonical_name: string;
   set_name: string | null;
   year: number | null;
+  primary_image_url?: string | null;
 };
 
 type ImageRow = {
@@ -108,6 +124,7 @@ export type HomepageDataOptions = {
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const SECTION_LIMIT = 5;
+const SIGNAL_WINDOWS: HomepageSignalWindow[] = ["24H", "7D"];
 /** Minimum 7d median to filter noise / $0 cards */
 const MIN_PRICE = 0.5;
 /** Homepage mover rails should only show cards above this market price. */
@@ -121,6 +138,7 @@ const MIN_CHANGES_TRENDING = 3;
 /** Over-fetch factor for candidate lists (we filter in JS) */
 const CANDIDATE_FETCH_LIMIT = 80;
 const LIVE_CANDIDATE_FETCH_LIMIT = CANDIDATE_FETCH_LIMIT * 3;
+const BATCH_LOOKUP_SLUG_LIMIT = 40;
 const SENTINEL_PRICES = new Set([23456.78]);
 const MIN_MOVER_CHANGE_PCT = 2.5;
 const MIN_CONFIDENCE_SCORE = 45;
@@ -130,6 +148,18 @@ const MOVER_LOOKBACK_DAYS = 30;
 const MIN_MOVER_COVERAGE_RATIO = 0.9;
 const MIN_MOVER_SNAPSHOT_COUNT_30D = Math.ceil(MOVER_LOOKBACK_DAYS * MIN_MOVER_COVERAGE_RATIO);
 
+function createEmptyWindowedCards(): HomepageWindowedCards {
+  return { "24H": [], "7D": [] };
+}
+
+function createEmptySignalBoard(): HomepageSignalBoardData {
+  return {
+    top_movers: createEmptyWindowedCards(),
+    biggest_drops: createEmptyWindowedCards(),
+    momentum: createEmptyWindowedCards(),
+  };
+}
+
 // ── Loader ──────────────────────────────────────────────────────────────────
 
 const EMPTY: HomepageData = {
@@ -138,6 +168,7 @@ const EMPTY: HomepageData = {
   emerging_movers: [],
   losers: [],
   trending: [],
+  signal_board: createEmptySignalBoard(),
   as_of: null,
   prices_refreshed_today: null,
   tracked_cards_with_live_price: null,
@@ -188,6 +219,19 @@ function buildChangeCoverage(section: string, cards: HomepageCard[]) {
   return { section, total, present, missing, missingPct };
 }
 
+function dedupeHomepageCards(cards: HomepageCard[]): HomepageCard[] {
+  const seen = new Set<string>();
+  return cards.filter((card) => {
+    if (seen.has(card.slug)) return false;
+    seen.add(card.slug);
+    return true;
+  });
+}
+
+function combineHomepageCards(groups: HomepageCard[][], limit = SECTION_LIMIT): HomepageCard[] {
+  return dedupeHomepageCards(groups.flat()).slice(0, limit);
+}
+
 function hoursSince(iso: string | null | undefined, nowMs = Date.now()): number | null {
   if (!iso) return null;
   const ts = new Date(iso).getTime();
@@ -210,6 +254,19 @@ function computeLiquidityWeight(activeListings7d: number | null | undefined): nu
   return 1.25;
 }
 
+function buildFallbackPulseFromCandidate(row: ChangeCandidateRow): CanonicalMarketPulse {
+  return resolveCanonicalMarketPulse({
+    market_price: row.market_price,
+    market_price_as_of: row.market_price_as_of,
+    active_listings_7d: row.active_listings_7d,
+    snapshot_count_30d: row.snapshot_count_30d,
+    market_confidence_score: row.market_confidence_score,
+    market_low_confidence: row.market_low_confidence,
+    change_pct_24h: row.change_pct_24h,
+    change_pct_7d: row.change_pct_7d,
+  });
+}
+
 function dedupVariants(rows: VariantRow[], limit: number): VariantRow[] {
   const seen = new Set<string>();
   const out: VariantRow[] = [];
@@ -222,37 +279,39 @@ function dedupVariants(rows: VariantRow[], limit: number): VariantRow[] {
   return out;
 }
 
+function chunkValues<T>(values: T[], size: number): T[][] {
+  const chunkSize = Math.max(1, Math.floor(size));
+  const out: T[][] = [];
+  for (let index = 0; index < values.length; index += chunkSize) {
+    out.push(values.slice(index, index + chunkSize));
+  }
+  return out;
+}
+
 type DirectionalChange = {
   value: number;
-  window: "24H" | "7D";
+  window: HomepageSignalWindow;
 };
+
+function selectDirectionalChangeForWindow(
+  row: ChangeCandidateRow,
+  direction: "positive" | "negative",
+  window: HomepageSignalWindow,
+): DirectionalChange | null {
+  const rawChange = window === "24H" ? row.change_pct_24h : row.change_pct_7d;
+  const change = toFiniteChange(rawChange);
+  if (change === null) return null;
+  if (direction === "positive" && change <= 0) return null;
+  if (direction === "negative" && change >= 0) return null;
+  return { value: Number(change.toFixed(2)), window };
+}
 
 function selectDirectionalChange(
   row: ChangeCandidateRow,
   direction: "positive" | "negative",
 ): DirectionalChange | null {
-  const change24h = toFiniteChange(row.change_pct_24h);
-  if (change24h !== null) {
-    if (direction === "positive" && change24h > 0) {
-      return { value: Number(change24h.toFixed(2)), window: "24H" };
-    }
-    if (direction === "negative" && change24h < 0) {
-      return { value: Number(change24h.toFixed(2)), window: "24H" };
-    }
-    return null;
-  }
-
-  const change7d = toFiniteChange(row.change_pct_7d);
-  if (change7d !== null) {
-    if (direction === "positive" && change7d > 0) {
-      return { value: Number(change7d.toFixed(2)), window: "7D" };
-    }
-    if (direction === "negative" && change7d < 0) {
-      return { value: Number(change7d.toFixed(2)), window: "7D" };
-    }
-  }
-
-  return null;
+  return selectDirectionalChangeForWindow(row, direction, "24H")
+    ?? selectDirectionalChangeForWindow(row, direction, "7D");
 }
 
 function compareDirectionalCandidates(
@@ -358,7 +417,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
         client
           .from("public_variant_metrics")
           .select("canonical_slug, provider_trend_slope_7d, provider_price_changes_count_30d, updated_at")
-          .eq("provider", "JUSTTCG")
+          .in("provider", ["SCRYDEX", "POKEMON_TCG_API"])
           .eq("grade", "RAW")
           .gt("provider_trend_slope_7d", 0)
           .gte("provider_price_changes_count_30d", MIN_CHANGES_TRENDING)
@@ -415,42 +474,73 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
     if (!overrides) {
       const client = db;
       if (!client) return EMPTY;
+      const slugBatches = chunkValues(slugArray, BATCH_LOOKUP_SLUG_LIMIT);
 
       // ── Batch 2: card metadata + prices (with change pcts) + images ────
-      const [cardsResult, loadedMarketPulseMap, imagesResult, sparklineResult] = await Promise.all([
-        client
+      const [cardResults, marketPulseResults, imageResults, sparklineResults] = await Promise.all([
+        Promise.all(slugBatches.map((batch) => client
           .from("canonical_cards")
-          .select("slug, canonical_name, set_name, year")
-          .in("slug", slugArray),
+          .select("slug, canonical_name, set_name, year, primary_image_url")
+          .in("slug", batch))),
 
-        getCanonicalMarketPulseMap(client, slugArray),
+        Promise.all(slugBatches.map((batch) => getCanonicalMarketPulseMap(client, batch))),
 
-        client
+        Promise.all(slugBatches.map((batch) => client
           .from("card_printings")
           .select("canonical_slug, image_url")
-          .in("canonical_slug", slugArray)
+          .in("canonical_slug", batch)
           .eq("language", "EN")
           .not("image_url", "is", null)
-          .limit(slugArray.length * 3),
+          .limit(batch.length * 3))),
 
-        client
+        Promise.all(slugBatches.map((batch) => client
           .from("public_price_history")
           .select("canonical_slug, ts, price")
-          .in("canonical_slug", slugArray)
-          .eq("provider", "JUSTTCG")
+          .in("canonical_slug", batch)
+          .in("provider", ["SCRYDEX", "POKEMON_TCG_API"])
           .eq("source_window", "7d")
           .order("ts", { ascending: false })
-          .limit(Math.max(slugArray.length * 24, 120)),
+          .limit(Math.max(batch.length * 24, 120)))),
       ]);
 
-      if (cardsResult.error) logger.error("[homepage] cards", cardsResult.error.message);
-      if (imagesResult.error) logger.error("[homepage] images", imagesResult.error.message);
-      if (sparklineResult.error) logger.error("[homepage] sparkline", sparklineResult.error.message);
+      cardsRows = [];
+      for (const result of cardResults) {
+        if (result.error) {
+          logger.error("[homepage] cards", result.error.message);
+          continue;
+        }
+        cardsRows.push(...((result.data ?? []) as CardRow[]));
+      }
 
-      cardsRows = (cardsResult.data ?? []) as CardRow[];
-      marketPulseMap = loadedMarketPulseMap;
-      imageRows = (imagesResult.data ?? []) as ImageRow[];
-      sparklineRows = (sparklineResult.data ?? []) as SparklineRow[];
+      marketPulseMap = new Map();
+      for (const pulseBatch of marketPulseResults) {
+        for (const [slug, pulse] of pulseBatch.entries()) {
+          if (!marketPulseMap.has(slug)) marketPulseMap.set(slug, pulse);
+        }
+      }
+
+      imageRows = [];
+      for (const result of imageResults) {
+        if (result.error) {
+          logger.error("[homepage] images", result.error.message);
+          continue;
+        }
+        imageRows.push(...((result.data ?? []) as ImageRow[]));
+      }
+
+      sparklineRows = [];
+      for (const result of sparklineResults) {
+        if (result.error) {
+          logger.error("[homepage] sparkline", result.error.message);
+          continue;
+        }
+        sparklineRows.push(...((result.data ?? []) as SparklineRow[]));
+      }
+    }
+
+    for (const row of [...positiveChangeRows, ...negativeChangeRows]) {
+      if (marketPulseMap.has(row.canonical_slug)) continue;
+      marketPulseMap.set(row.canonical_slug, buildFallbackPulseFromCandidate(row));
     }
 
     // ── Build lookup maps ─────────────────────────────────────────────────
@@ -465,6 +555,11 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
     }
 
     const imageMap = new Map<string, string>();
+    for (const row of cardsRows) {
+      if (!imageMap.has(row.slug) && row.primary_image_url) {
+        imageMap.set(row.slug, row.primary_image_url);
+      }
+    }
     for (const row of imageRows) {
       if (!imageMap.has(row.canonical_slug) && row.image_url) {
         imageMap.set(row.canonical_slug, row.image_url);
@@ -490,7 +585,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
         fallbackPrice?: number | null;
         mover_tier?: HomepageCard["mover_tier"];
         changePct?: number | null;
-        changeWindow?: "24H" | "7D" | null;
+        changeWindow?: HomepageSignalWindow | null;
         preferOverrideChange?: boolean;
         allowSparklineFallback?: boolean;
       } = {},
@@ -506,7 +601,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
         ? marketPulse.changePct
         : null;
       let selectedChangePct: number | null = null;
-      let selectedChangeWindow: "24H" | "7D" | null = null;
+      let selectedChangeWindow: HomepageSignalWindow | null = null;
 
       if (overrides.preferOverrideChange && overrideChangePct !== null) {
         selectedChangePct = overrideChangePct;
@@ -545,39 +640,68 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
       };
     }
 
-    // ── Movers: recent live cards with 24h-first, 7d fallback change data ─
-    const highConfidenceMoversOut: HomepageCard[] = [];
-    const emergingMoversOut: HomepageCard[] = [];
-    const allMoversOut: HomepageCard[] = [];
-    const seenMoverSlugs = new Set<string>();
-    const pushMoverIfEligible = (r: ChangeCandidateRow): boolean => {
-      if (excludedSlugSet.has(r.canonical_slug)) return false;
-      if (seenMoverSlugs.has(r.canonical_slug)) return false;
-      const marketPulse = marketPulseMap.get(r.canonical_slug);
+    type PositiveMoverCollector = {
+      seenSlugs: Set<string>;
+      highConfidence: HomepageCard[];
+      emerging: HomepageCard[];
+      all: HomepageCard[];
+    };
+
+    type CardCollector = {
+      seenSlugs: Set<string>;
+      cards: HomepageCard[];
+    };
+
+    const createPositiveMoverCollector = (): PositiveMoverCollector => ({
+      seenSlugs: new Set<string>(),
+      highConfidence: [],
+      emerging: [],
+      all: [],
+    });
+
+    const createCardCollector = (): CardCollector => ({
+      seenSlugs: new Set<string>(),
+      cards: [],
+    });
+
+    const pushPositiveMoverIfEligible = (
+      row: ChangeCandidateRow,
+      collector: PositiveMoverCollector,
+      preferredWindow: HomepageSignalWindow | null = null,
+    ): boolean => {
+      if (excludedSlugSet.has(row.canonical_slug)) return false;
+      if (collector.seenSlugs.has(row.canonical_slug)) return false;
+      const marketPulse = marketPulseMap.get(row.canonical_slug);
       if (!marketPulse) return false;
-      const marketPrice = marketPulse.marketPrice ?? r.market_price ?? null;
+      const marketPrice = marketPulse.marketPrice ?? row.market_price ?? null;
       if (marketPrice == null) return false;
       if (SENTINEL_PRICES.has(Number(marketPrice.toFixed(2)))) return false;
       if (marketPrice < MIN_MOVER_PRICE) return false;
-      const snapshotCount30d = marketPulse.snapshotCount30d ?? r.snapshot_count_30d ?? 0;
+      const snapshotCount30d = marketPulse.snapshotCount30d ?? row.snapshot_count_30d ?? 0;
       if (snapshotCount30d < MIN_MOVER_SNAPSHOT_COUNT_30D) return false;
-      const directionalChange = selectDirectionalChange(r, "positive");
+      const directionalChange = preferredWindow
+        ? selectDirectionalChangeForWindow(row, "positive", preferredWindow)
+        : selectDirectionalChange(row, "positive");
       const changePct = directionalChange?.value
-        ?? (marketPulse.changePct24h ?? marketPulse.changePct7d ?? null);
+        ?? (preferredWindow ? null : (marketPulse.changePct24h ?? marketPulse.changePct7d ?? null));
       const changeWindow = directionalChange?.window
-        ?? (marketPulse.changePct24h !== null ? "24H" : marketPulse.changePct7d !== null ? "7D" : null);
-      if (changePct == null || changePct < MIN_MOVER_CHANGE_PCT) return false;
-      const confidenceScore = marketPulse.confidenceScore ?? r.market_confidence_score ?? 0;
-      const stalenessHours = hoursSince(marketPulse.marketPriceAsOf ?? r.market_price_as_of ?? null, nowMs);
+        ?? (preferredWindow
+          ? null
+          : (marketPulse.changePct24h !== null ? "24H" : marketPulse.changePct7d !== null ? "7D" : null));
+      if (changePct == null || changePct < MIN_MOVER_CHANGE_PCT || changeWindow === null) return false;
+      const confidenceScore = marketPulse.confidenceScore ?? row.market_confidence_score ?? 0;
+      const stalenessHours = hoursSince(marketPulse.marketPriceAsOf ?? row.market_price_as_of ?? null, nowMs);
       const isStale = stalenessHours === null || stalenessHours > RECENT_MARKET_MAX_AGE_HOURS;
-      const lowConfidence = marketPulse.lowConfidence === true || r.market_low_confidence === true || confidenceScore < MIN_CONFIDENCE_SCORE;
-      if (isStale || lowConfidence || changeWindow === null) return false;
-      const activeListings7d = marketPulse.activeListings7d ?? r.active_listings_7d ?? 0;
+      const lowConfidence = marketPulse.lowConfidence === true
+        || row.market_low_confidence === true
+        || confidenceScore < MIN_CONFIDENCE_SCORE;
+      if (isStale || lowConfidence) return false;
+      const activeListings7d = marketPulse.activeListings7d ?? row.active_listings_7d ?? 0;
       const liquidityWeight = computeLiquidityWeight(activeListings7d);
       const compositeScore = Math.abs(changePct) * (confidenceScore / 100) * liquidityWeight;
       if (!(compositeScore > 0)) return false;
-      const moverCard = toCard(r.canonical_slug, {
-        fallbackPrice: r.market_price,
+      const moverCard = toCard(row.canonical_slug, {
+        fallbackPrice: row.market_price,
         mover_tier: activeListings7d >= HIGH_CONF_LIQUIDITY_MIN ? "hot" : "warming",
         changePct,
         changeWindow,
@@ -585,79 +709,147 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
         allowSparklineFallback: false,
       });
       if (activeListings7d >= HIGH_CONF_LIQUIDITY_MIN) {
-        highConfidenceMoversOut.push(moverCard);
+        collector.highConfidence.push(moverCard);
       } else if (activeListings7d <= EMERGING_LIQUIDITY_MAX) {
-        emergingMoversOut.push(moverCard);
+        collector.emerging.push(moverCard);
       } else {
-        highConfidenceMoversOut.push(moverCard);
+        collector.highConfidence.push(moverCard);
       }
-      allMoversOut.push(moverCard);
-      seenMoverSlugs.add(r.canonical_slug);
+      collector.all.push(moverCard);
+      collector.seenSlugs.add(row.canonical_slug);
       return true;
     };
 
-    positiveChangeRows.sort((left, right) => compareDirectionalCandidates(left, right, "positive"));
-    for (const r of positiveChangeRows) {
-      pushMoverIfEligible(r);
-      if (highConfidenceMoversOut.length >= SECTION_LIMIT && emergingMoversOut.length >= SECTION_LIMIT) break;
-    }
-    highConfidenceMoversOut.sort(compareChangeDescending);
-    highConfidenceMoversOut.splice(SECTION_LIMIT);
-    emergingMoversOut.sort(compareChangeDescending);
-    emergingMoversOut.splice(SECTION_LIMIT);
-    allMoversOut.sort(compareChangeDescending);
-    const moversOut = allMoversOut.slice(0, SECTION_LIMIT);
-
-    // ── Biggest drops: recent live cards with 24h-first, 7d fallback data ─
-    const losersOut: HomepageCard[] = [];
-    negativeChangeRows.sort((left, right) => compareDirectionalCandidates(left, right, "negative"));
-    for (const r of negativeChangeRows) {
-      if (excludedSlugSet.has(r.canonical_slug)) continue;
-      const marketPulse = marketPulseMap.get(r.canonical_slug);
-      if (!marketPulse) continue;
-      const price = marketPulse.marketPrice ?? r.market_price ?? null;
-      if (price == null || price < MIN_MOVER_PRICE) continue;
-      const snapshotCount30d = marketPulse.snapshotCount30d ?? r.snapshot_count_30d ?? 0;
-      if (snapshotCount30d < MIN_MOVER_SNAPSHOT_COUNT_30D) continue;
-      const stalenessHours = hoursSince(marketPulse.marketPriceAsOf ?? r.market_price_as_of ?? null, nowMs);
-      if (stalenessHours === null || stalenessHours > RECENT_MARKET_MAX_AGE_HOURS) continue;
-      const confidenceScore = marketPulse.confidenceScore ?? r.market_confidence_score ?? 0;
-      if (marketPulse.lowConfidence === true || r.market_low_confidence === true || confidenceScore < MIN_CONFIDENCE_SCORE) continue;
-      const directionalChange = selectDirectionalChange(r, "negative");
+    const pushNegativeMoverIfEligible = (
+      row: ChangeCandidateRow,
+      collector: CardCollector,
+      preferredWindow: HomepageSignalWindow | null = null,
+    ): boolean => {
+      if (excludedSlugSet.has(row.canonical_slug)) return false;
+      if (collector.seenSlugs.has(row.canonical_slug)) return false;
+      const marketPulse = marketPulseMap.get(row.canonical_slug);
+      if (!marketPulse) return false;
+      const price = marketPulse.marketPrice ?? row.market_price ?? null;
+      if (price == null || price < MIN_MOVER_PRICE) return false;
+      const snapshotCount30d = marketPulse.snapshotCount30d ?? row.snapshot_count_30d ?? 0;
+      if (snapshotCount30d < MIN_MOVER_SNAPSHOT_COUNT_30D) return false;
+      const stalenessHours = hoursSince(marketPulse.marketPriceAsOf ?? row.market_price_as_of ?? null, nowMs);
+      if (stalenessHours === null || stalenessHours > RECENT_MARKET_MAX_AGE_HOURS) return false;
+      const confidenceScore = marketPulse.confidenceScore ?? row.market_confidence_score ?? 0;
+      if (marketPulse.lowConfidence === true || row.market_low_confidence === true || confidenceScore < MIN_CONFIDENCE_SCORE) {
+        return false;
+      }
+      const directionalChange = preferredWindow
+        ? selectDirectionalChangeForWindow(row, "negative", preferredWindow)
+        : selectDirectionalChange(row, "negative");
       const changePct = directionalChange?.value
-        ?? (marketPulse.changePct24h ?? marketPulse.changePct7d ?? null);
+        ?? (preferredWindow ? null : (marketPulse.changePct24h ?? marketPulse.changePct7d ?? null));
       const changeWindow = directionalChange?.window
-        ?? (marketPulse.changePct24h !== null ? "24H" : marketPulse.changePct7d !== null ? "7D" : null);
-      if (changePct == null || changePct >= 0 || changeWindow === null) continue;
-      losersOut.push(toCard(r.canonical_slug, {
-        fallbackPrice: r.market_price,
+        ?? (preferredWindow
+          ? null
+          : (marketPulse.changePct24h !== null ? "24H" : marketPulse.changePct7d !== null ? "7D" : null));
+      if (changePct == null || changePct >= 0 || changeWindow === null) return false;
+      collector.cards.push(toCard(row.canonical_slug, {
+        fallbackPrice: row.market_price,
         changePct,
         changeWindow,
         preferOverrideChange: true,
         allowSparklineFallback: false,
       }));
+      collector.seenSlugs.add(row.canonical_slug);
+      return true;
+    };
+
+    const mixedPositiveMovers = createPositiveMoverCollector();
+    const positiveMoversByWindow: Record<HomepageSignalWindow, PositiveMoverCollector> = {
+      "24H": createPositiveMoverCollector(),
+      "7D": createPositiveMoverCollector(),
+    };
+
+    positiveChangeRows.sort((left, right) => compareDirectionalCandidates(left, right, "positive"));
+    for (const row of positiveChangeRows) {
+      pushPositiveMoverIfEligible(row, mixedPositiveMovers);
+      for (const window of SIGNAL_WINDOWS) {
+        pushPositiveMoverIfEligible(row, positiveMoversByWindow[window], window);
+      }
     }
-    losersOut.sort(compareChangeAscending);
-    losersOut.splice(SECTION_LIMIT);
+
+    for (const collector of [mixedPositiveMovers, ...SIGNAL_WINDOWS.map((window) => positiveMoversByWindow[window])]) {
+      collector.highConfidence.sort(compareChangeDescending);
+      collector.emerging.sort(compareChangeDescending);
+      collector.all.sort(compareChangeDescending);
+    }
+
+    const highConfidenceMoversOut = mixedPositiveMovers.highConfidence.slice(0, SECTION_LIMIT);
+    const emergingMoversOut = mixedPositiveMovers.emerging.slice(0, SECTION_LIMIT);
+    const moversOut = mixedPositiveMovers.all.slice(0, SECTION_LIMIT);
+
+    const mixedNegativeMovers = createCardCollector();
+    const negativeMoversByWindow: Record<HomepageSignalWindow, CardCollector> = {
+      "24H": createCardCollector(),
+      "7D": createCardCollector(),
+    };
+
+    negativeChangeRows.sort((left, right) => compareDirectionalCandidates(left, right, "negative"));
+    for (const row of negativeChangeRows) {
+      pushNegativeMoverIfEligible(row, mixedNegativeMovers);
+      for (const window of SIGNAL_WINDOWS) {
+        pushNegativeMoverIfEligible(row, negativeMoversByWindow[window], window);
+      }
+    }
+
+    for (const collector of [mixedNegativeMovers, ...SIGNAL_WINDOWS.map((window) => negativeMoversByWindow[window])]) {
+      collector.cards.sort(compareChangeAscending);
+    }
+
+    const losersOut = mixedNegativeMovers.cards.slice(0, SECTION_LIMIT);
 
     // ── Trending: filter to cards with real prices above MIN_PRICE ────────
-    const trendingOut: HomepageCard[] = [];
-    for (const r of trendingVariants) {
-      if (excludedSlugSet.has(r.canonical_slug)) continue;
-      const price = marketPulseMap.get(r.canonical_slug)?.marketPrice ?? null;
+    const trendingCandidatesOut: HomepageCard[] = [];
+    for (const row of trendingVariants) {
+      if (excludedSlugSet.has(row.canonical_slug)) continue;
+      const price = marketPulseMap.get(row.canonical_slug)?.marketPrice ?? null;
       if (price == null || price < MIN_PRICE) continue;
-      const trendPct = Number.isFinite(r.provider_trend_slope_7d ?? NaN)
-        ? Number((r.provider_trend_slope_7d as number).toFixed(2))
+      const trendPct = Number.isFinite(row.provider_trend_slope_7d ?? NaN)
+        ? Number((row.provider_trend_slope_7d as number).toFixed(2))
         : null;
-      trendingOut.push(toCard(r.canonical_slug, {
+      trendingCandidatesOut.push(toCard(row.canonical_slug, {
         changePct: trendPct,
         changeWindow: trendPct !== null ? "7D" : null,
         preferOverrideChange: true,
         allowSparklineFallback: false,
       }));
     }
-    trendingOut.sort(compareChangeDescending);
-    trendingOut.splice(SECTION_LIMIT);
+    trendingCandidatesOut.sort(compareChangeDescending);
+    const trendingOut = trendingCandidatesOut.slice(0, SECTION_LIMIT);
+    const signalBoard = {
+      top_movers: {
+        "24H": combineHomepageCards([
+          positiveMoversByWindow["24H"].highConfidence,
+          positiveMoversByWindow["24H"].all,
+        ]),
+        "7D": combineHomepageCards([
+          positiveMoversByWindow["7D"].highConfidence,
+          positiveMoversByWindow["7D"].all,
+          trendingCandidatesOut,
+        ]),
+      },
+      biggest_drops: {
+        "24H": negativeMoversByWindow["24H"].cards.slice(0, SECTION_LIMIT),
+        "7D": negativeMoversByWindow["7D"].cards.slice(0, SECTION_LIMIT),
+      },
+      momentum: {
+        "24H": combineHomepageCards([
+          positiveMoversByWindow["24H"].emerging,
+          positiveMoversByWindow["24H"].highConfidence,
+          positiveMoversByWindow["24H"].all,
+        ]),
+        "7D": combineHomepageCards([
+          trendingCandidatesOut,
+          positiveMoversByWindow["7D"].all,
+        ]),
+      },
+    } satisfies HomepageSignalBoardData;
 
     // ── Derive as_of ──────────────────────────────────────────────────────
     const marketTimestamps = [...marketPulseMap.values()]
@@ -686,6 +878,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
       emerging_movers: emergingMoversOut,
       losers: losersOut,
       trending: trendingOut,
+      signal_board: signalBoard,
       as_of,
       prices_refreshed_today: pricesRefreshedToday,
       tracked_cards_with_live_price: trackedCardsWithLivePrice,

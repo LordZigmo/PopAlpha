@@ -24,6 +24,7 @@ type SiteHeaderProps = {
   showSignIn?: boolean;
   primaryCta?: SiteHeaderLink | null;
   leadingSlot?: ReactNode;
+  centerSlot?: ReactNode;
   className?: string;
   innerClassName?: string;
   logoPriority?: boolean;
@@ -34,16 +35,18 @@ export default function SiteHeader({
   showSignIn = true,
   primaryCta = { label: "Start free", href: "/sign-up" },
   leadingSlot,
+  centerSlot,
   className = "",
   innerClassName = "mx-auto flex h-16 max-w-[1400px] items-center justify-between px-5 sm:px-8",
   logoPriority = false,
 }: SiteHeaderProps) {
   const { user } = useSafeUser();
+  const navClassName = centerSlot ? "hidden items-center gap-1 xl:flex" : "hidden items-center gap-1 md:flex";
 
   return (
     <nav className={`fixed inset-x-0 top-0 z-50 border-b border-white/[0.06] bg-[#060608]/80 backdrop-blur-2xl ${className}`}>
       <div className={innerClassName}>
-        <div className="flex items-center gap-8">
+        <div className="flex min-w-0 items-center gap-6">
           <div className="flex items-center gap-4">
             {leadingSlot}
             <Link href="/" className="flex items-center gap-3">
@@ -59,7 +62,7 @@ export default function SiteHeader({
             </Link>
           </div>
 
-          <div className="hidden items-center gap-1 md:flex">
+          <div className={navClassName}>
             {navItems.map((item) => (
               <Link
                 key={item.label}
@@ -71,6 +74,12 @@ export default function SiteHeader({
             ))}
           </div>
         </div>
+
+        {centerSlot ? (
+          <div className="hidden min-w-0 flex-1 lg:flex lg:max-w-[460px] xl:max-w-[520px]">
+            {centerSlot}
+          </div>
+        ) : null}
 
         <div className="flex items-center gap-3">
           {user ? (
