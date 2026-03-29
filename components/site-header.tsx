@@ -16,7 +16,6 @@ const DEFAULT_NAV_ITEMS: readonly SiteHeaderLink[] = [
   { label: "Market", href: "/" },
   { label: "Sets", href: "/sets" },
   { label: "Portfolio", href: "/portfolio" },
-  { label: "Briefs", href: "/about" },
 ] as const;
 
 type SiteHeaderProps = {

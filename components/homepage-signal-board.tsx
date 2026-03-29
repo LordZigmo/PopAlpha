@@ -49,7 +49,7 @@ export default function HomepageSignalBoard({
         cards={topMoversByWindow[selectedWindow]}
         emptyMessage={`No ${selectedWindow} movers yet`}
         headerSlot={(
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
             <WindowTabs selectedWindow={selectedWindow} onChange={setSelectedWindow} />
             <Link href="/search" className="text-[13px] font-medium text-[#00B4D8] transition-colors hover:text-white">
               View all →
@@ -87,14 +87,14 @@ function WindowTabs({
   onChange: (window: SignalWindow) => void;
 }) {
   return (
-    <div className="inline-flex items-center rounded-full border border-white/[0.08] bg-white/[0.03] p-1">
+    <div className="inline-flex items-center rounded-full border border-white/[0.08] bg-white/[0.03] p-0.5">
       {SIGNAL_WINDOWS.map((window) => (
         <button
           key={window}
           type="button"
           onClick={() => onChange(window)}
           aria-pressed={selectedWindow === window}
-          className={`rounded-full px-3 py-1.5 text-[11px] font-semibold tracking-[0.16em] transition-all ${
+          className={`rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-[0.16em] transition-all ${
             selectedWindow === window
               ? "bg-white text-[#05070A] shadow-[0_10px_30px_rgba(255,255,255,0.16)]"
               : "text-[#87929D] hover:text-white"
@@ -115,6 +115,7 @@ function SignalRailSection({
   cards,
   emptyMessage,
   headerSlot,
+  spacingClassName,
 }: {
   id: string;
   eyebrow: string;
@@ -123,14 +124,15 @@ function SignalRailSection({
   cards: HomepageCard[];
   emptyMessage: string;
   headerSlot?: ReactNode;
+  spacingClassName?: string;
 }) {
   return (
-    <section id={id} className="border-t border-white/[0.04] py-16 sm:py-20">
+    <section id={id} className={`border-t border-white/[0.04] ${spacingClassName ?? "py-5 sm:py-6"}`}>
       <div className="mx-auto max-w-[1400px] px-5 sm:px-8">
-        <div className="flex items-end justify-between gap-4">
+        <div className="flex items-end justify-between gap-3">
           <div>
             <span className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${eyebrowClassName}`}>{eyebrow}</span>
-            <div className="mt-2 flex flex-wrap items-center gap-3">
+            <div className="mt-1 flex flex-wrap items-center gap-2.5">
               <h2 className="text-[clamp(1.5rem,3vw,2rem)] font-bold tracking-tight text-white">{title}</h2>
             </div>
           </div>
@@ -142,7 +144,7 @@ function SignalRailSection({
         </div>
 
         <div
-          className="landing-scroll-rail mt-6 flex gap-4 overflow-x-auto pb-4"
+          className="landing-scroll-rail mt-3 flex gap-3 overflow-x-auto pb-2"
           style={{ scrollSnapType: "x mandatory" }}
         >
           {cards.map((card) => (
@@ -166,10 +168,10 @@ function SignalCard({ card }: { card: HomepageCard }) {
   return (
     <Link
       href={`/c/${encodeURIComponent(card.slug)}`}
-      className="group w-[220px] shrink-0 overflow-hidden rounded-2xl border border-white/[0.06] bg-[#0C0C10] transition-all hover:border-[#00B4D8]/20 hover:shadow-[0_12px_40px_rgba(0,180,216,0.08)] sm:w-[240px]"
+      className="group w-[208px] shrink-0 overflow-hidden rounded-[18px] border border-white/[0.06] bg-[#0C0C10] transition-all hover:border-[#00B4D8]/20 hover:shadow-[0_12px_40px_rgba(0,180,216,0.08)] sm:w-[224px]"
       style={{ scrollSnapAlign: "start" }}
     >
-      <div className="relative overflow-hidden bg-gradient-to-b from-[#12121a] to-[#0C0C10] p-4 pb-3">
+      <div className="relative overflow-hidden bg-gradient-to-b from-[#12121a] to-[#0C0C10] p-3 pb-2.5">
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/[0.02] to-transparent" />
         {card.image_url ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -182,10 +184,10 @@ function SignalCard({ card }: { card: HomepageCard }) {
           <div className="mx-auto aspect-[63/88] w-full rounded-lg bg-gradient-to-br from-[#1a1a2e] to-[#0a0a12] shadow-[0_12px_35px_rgba(0,0,0,0.5)]" />
         )}
       </div>
-      <div className="px-4 pb-4">
+      <div className="px-3 pb-3">
         <p className="truncate text-[14px] font-semibold text-[#E4E4E7] group-hover:text-white">{card.name}</p>
         <p className="mt-0.5 truncate text-[11px] text-[#555]">{card.set_name}</p>
-        <div className="mt-2.5 flex items-center justify-between border-t border-white/[0.04] pt-2.5">
+        <div className="mt-2 flex items-center justify-between border-t border-white/[0.04] pt-2">
           <span className="text-[15px] font-bold tabular-nums text-white">{formatPrice(card.market_price)}</span>
           <span className={`rounded-md px-1.5 py-0.5 text-[12px] font-bold tabular-nums ${(card.change_pct ?? 0) >= 0 ? "bg-[#00DC5A]/10 text-[#00DC5A]" : "bg-[#FF3B30]/10 text-[#FF3B30]"}`}>
             {formatPct(card.change_pct)}
