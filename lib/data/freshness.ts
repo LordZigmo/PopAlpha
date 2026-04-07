@@ -146,7 +146,7 @@ export async function getCanonicalRawRollingDailyFreshnessMonitors(windowDaysLis
   });
 }
 
-type PairRow = { justtcg_price: number; scrydex_price: number };
+type PairRow = { scrydex_price: number };
 type SlugRow = { canonical_slug: string; market_price_as_of: string | null };
 type SetRow = { slug: string; set_name: string | null };
 
@@ -157,17 +157,13 @@ export type PricingTransparencySnapshot = {
     cardsWithSnapshotPct: number | null;
   };
   freshnessByProvider24h: {
-    justtcgPct: number | null;
     scrydexPct: number | null;
   };
   coverage: {
     market: number;
     marketPct: number;
-    both: number;
-    justtcgOnly: number;
     scrydexOnly: number;
     none: number;
-    bothPct: number;
     blendableMatch: number | null;
     blendableMatchPct: number | null;
     parityMismatch: number | null;
@@ -203,7 +199,6 @@ export type PricingTransparencySnapshot = {
     missingChangePct: number;
   };
   ingestionVolume24h: {
-    justtcgObservations: number | null;
     scrydexObservations: number | null;
   };
   setFreshness24h: {
@@ -283,7 +278,7 @@ function computeLiquidityWeight(activeListings7d: number): number {
 }
 
 function deriveLegacyTotalRawFromCoverage(coverage: PricingTransparencySnapshot["coverage"]): number {
-  return Math.max(0, coverage.both + coverage.justtcgOnly + coverage.scrydexOnly + coverage.none);
+  return Math.max(0, coverage.scrydexOnly + coverage.none);
 }
 
 async function loadLiveMarketCoverageCounts(
@@ -323,7 +318,7 @@ function normalizePricingTransparencySnapshot(
     ? overrides.marketCoverage
     : (typeof snapshot.coverage.market === "number" && Number.isFinite(snapshot.coverage.market)
       ? snapshot.coverage.market
-      : snapshot.coverage.both + snapshot.coverage.scrydexOnly);
+      : snapshot.coverage.scrydexOnly);
   const marketPct = totalRaw > 0
     ? Number(((marketCoverage / totalRaw) * 100).toFixed(2))
     : (typeof snapshot.coverage.marketPct === "number" && Number.isFinite(snapshot.coverage.marketPct)
@@ -417,17 +412,17 @@ export async function computePricingTransparencySnapshot(): Promise<PricingTrans
     moversHealthRowsRes,
   ] = await Promise.all([
     supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null),
-    supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null).not("justtcg_price", "is", null).not("scrydex_price", "is", null),
-    supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null).not("justtcg_price", "is", null).is("scrydex_price", null),
-    supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null).is("justtcg_price", null).not("scrydex_price", "is", null),
-    supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null).is("justtcg_price", null).is("scrydex_price", null),
+    { count: 0, error: null } as { count: number; error: null },
+    { count: 0, error: null } as { count: number; error: null },
+    supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null).not("scrydex_price", "is", null),
+    supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null).is("scrydex_price", null),
     supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null).not("market_price", "is", null),
     supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null).gte("market_price_as_of", iso6h),
     supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null).gte("market_price_as_of", iso24h),
     supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null).gte("market_price_as_of", iso72h),
     supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null).not("market_price_as_of", "is", null),
-    supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null).or("scrydex_price.eq.23456.78,justtcg_price.eq.23456.78"),
-    supabase.from("public_price_history").select("ts", { count: "exact", head: true }).eq("provider", "JUSTTCG").eq("source_window", "snapshot").gte("ts", iso24h),
+    supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null).eq("scrydex_price", 23456.78),
+    { count: 0, error: null } as { count: number; error: null },
     supabase.from("public_price_history").select("ts", { count: "exact", head: true }).in("provider", ["SCRYDEX", "POKEMON_TCG_API"]).eq("source_window", "snapshot").gte("ts", iso24h),
     supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null).or("change_pct_24h.not.is.null,change_pct_7d.not.is.null"),
     supabase.from("public_card_metrics").select("canonical_slug", { count: "exact", head: true }).eq("grade", "RAW").is("printing_id", null).eq("change_pct_24h", 0),
@@ -450,8 +445,6 @@ export async function computePricingTransparencySnapshot(): Promise<PricingTrans
   ]);
 
   const totalRaw = totalRawRes.count ?? 0;
-  const both = bothRes.count ?? 0;
-  const justtcgOnly = jOnlyRes.count ?? 0;
   const scrydexOnly = sOnlyRes.count ?? 0;
   const none = noneRes.count ?? 0;
   const marketCoverageCount = marketCoverageRes.count ?? 0;
@@ -489,7 +482,7 @@ export async function computePricingTransparencySnapshot(): Promise<PricingTrans
     cardsWithSnapshotCount: null as number | null,
     cardsWithSnapshotPct: null as number | null,
   };
-  let providerFreshness = { justtcgPct: null as number | null, scrydexPct: null as number | null };
+  let providerFreshness = { scrydexPct: null as number | null };
   const providerRowsRes = await supabase
     .from("public_price_history")
     .select("provider, canonical_slug")
@@ -498,13 +491,11 @@ export async function computePricingTransparencySnapshot(): Promise<PricingTrans
     .limit(25000);
   if (!providerRowsRes.error) {
     const anyFresh = new Set<string>();
-    const justtcgFresh = new Set<string>();
     const scrydexFresh = new Set<string>();
     for (const row of (providerRowsRes.data ?? []) as Array<{ provider: string; canonical_slug: string }>) {
       const slug = row.canonical_slug;
       if (!slug) continue;
       anyFresh.add(slug);
-      if (row.provider === "JUSTTCG") justtcgFresh.add(slug);
       if (row.provider === "SCRYDEX" || row.provider === "POKEMON_TCG_API") scrydexFresh.add(slug);
     }
     if (totalRaw > 0) {
@@ -513,36 +504,16 @@ export async function computePricingTransparencySnapshot(): Promise<PricingTrans
         cardsWithSnapshotPct: Number(((anyFresh.size / totalRaw) * 100).toFixed(2)),
       };
       providerFreshness = {
-        justtcgPct: Number(((justtcgFresh.size / totalRaw) * 100).toFixed(2)),
         scrydexPct: Number(((scrydexFresh.size / totalRaw) * 100).toFixed(2)),
       };
     }
   }
 
-  // Agreement + outlier stats.
-  const agreementRes = await supabase
-    .from("public_card_metrics")
-    .select("justtcg_price, scrydex_price")
-    .eq("grade", "RAW")
-    .is("printing_id", null)
-    .not("justtcg_price", "is", null)
-    .not("scrydex_price", "is", null)
-    .limit(10000);
-  const pairs = (agreementRes.data ?? []) as PairRow[];
+  // Agreement + outlier stats — single-provider mode (no dual-provider comparison).
+  const pairs: PairRow[] = [];
   const spreads: number[] = [];
-  let ratioGte3p5Count = 0;
-  let divergenceGt80PctCount = 0;
-  for (const row of pairs) {
-    const a = row.justtcg_price;
-    const b = row.scrydex_price;
-    if (!(a > 0 && b > 0)) continue;
-    const mean = (a + b) / 2;
-    spreads.push((Math.abs(a - b) / mean) * 100);
-    if ((Math.abs(a - b) / mean) * 100 >= 80) divergenceGt80PctCount += 1;
-    const high = Math.max(a, b);
-    const low = Math.min(a, b);
-    if (low > 0 && high / low >= 3.5) ratioGte3p5Count += 1;
-  }
+  const ratioGte3p5Count = 0;
+  const divergenceGt80PctCount = 0;
   spreads.sort((a, b) => a - b);
 
   const jumpRows = (recentRawRowsRes.data ?? []) as Array<{ canonical_slug: string; change_pct_24h: number | null }>;
@@ -575,14 +546,14 @@ export async function computePricingTransparencySnapshot(): Promise<PricingTrans
     .select("canonical_slug", { count: "exact", head: true })
     .eq("grade", "RAW")
     .is("printing_id", null)
-    .or("justtcg_price.not.is.null,scrydex_price.not.is.null");
+    .not("scrydex_price", "is", null);
   const pricedWithTsRes = await supabase
     .from("public_card_metrics")
     .select("canonical_slug", { count: "exact", head: true })
     .eq("grade", "RAW")
     .is("printing_id", null)
     .not("market_price_as_of", "is", null)
-    .or("justtcg_price.not.is.null,scrydex_price.not.is.null");
+    .not("scrydex_price", "is", null);
   if (!pricedRes.error && !pricedWithTsRes.error) {
     pricedButMissingTsCount = Math.max(0, (pricedRes.count ?? 0) - (pricedWithTsRes.count ?? 0));
   }
@@ -686,7 +657,7 @@ export async function computePricingTransparencySnapshot(): Promise<PricingTrans
     const asOfMs = row.market_price_as_of ? new Date(row.market_price_as_of).getTime() : NaN;
     if (!Number.isFinite(asOfMs) || (Date.now() - asOfMs) > (24 * 60 * 60 * 1000)) continue;
     const sampleCounts7d = row.market_provenance?.sampleCounts7d;
-    const sampleSize7d = (toFinite(sampleCounts7d?.justtcg) ?? 0) + (toFinite(sampleCounts7d?.scrydex) ?? 0);
+    const sampleSize7d = toFinite(sampleCounts7d?.scrydex) ?? 0;
     if (sampleSize7d < 8) continue;
     const activeListings7d = Math.max(0, toFinite(row.active_listings_7d) ?? 0);
     const liquidityWeight = computeLiquidityWeight(activeListings7d);
@@ -755,11 +726,8 @@ export async function computePricingTransparencySnapshot(): Promise<PricingTrans
     coverage: {
       market: marketCoverageCount,
       marketPct: totalRaw > 0 ? Number(((marketCoverageCount / totalRaw) * 100).toFixed(2)) : 0,
-      both,
-      justtcgOnly,
       scrydexOnly,
       none,
-      bothPct: totalRaw > 0 ? Number(((both / totalRaw) * 100).toFixed(2)) : 0,
       blendableMatch,
       blendableMatchPct: blendablePct !== null ? Number(blendablePct.toFixed(2)) : null,
       parityMismatch,
@@ -795,7 +763,6 @@ export async function computePricingTransparencySnapshot(): Promise<PricingTrans
       missingChangePct,
     },
     ingestionVolume24h: {
-      justtcgObservations: just24hObsRes.error ? null : (just24hObsRes.count ?? 0),
       scrydexObservations: scrydex24hObsRes.error ? null : (scrydex24hObsRes.count ?? 0),
     },
     setFreshness24h: {

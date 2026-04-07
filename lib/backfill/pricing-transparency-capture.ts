@@ -26,7 +26,7 @@ export async function capturePricingTransparencySnapshot(): Promise<{ ok: boolea
     .from("pricing_transparency_snapshots")
     .insert({
       freshness_pct: freshnessValue ? Number.parseFloat(freshnessValue.value) : null,
-      coverage_both_pct: snapshot.coverage.bothPct,
+      coverage_both_pct: snapshot.coverage.marketPct,
       p90_spread_pct: snapshot.priceAgreement.p90SpreadPct,
       queue_depth: snapshot.pipelineHealth.queueDepth,
       retry_depth: snapshot.pipelineHealth.retryDepth,

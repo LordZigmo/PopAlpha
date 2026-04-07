@@ -30,8 +30,8 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
 
-  // Search keeps the shared dashboard shell but skips the generic top header.
-  if (pathname === "/search") {
+  // Search, about, legal pages use the shared shell but skip the generic top header.
+  if (pathname === "/search" || pathname === "/about" || pathname === "/privacy" || pathname === "/terms") {
     return (
       <AppShell>
         {children}

@@ -259,7 +259,7 @@ export default async function DataPage() {
   ];
   const latestTrendPoint = trend && trend.length > 0 ? trend[trend.length - 1] : null;
   const transparencyTotalRaw = transparency
-    ? transparency.coverage.both + transparency.coverage.justtcgOnly + transparency.coverage.scrydexOnly + transparency.coverage.none
+    ? transparency.coverage.scrydexOnly + transparency.coverage.none
     : 0;
   const transparencyLiveCoverage = transparency?.coverage.market ?? 0;
   const transparencyLiveCoveragePct = transparency?.coverage.marketPct ?? 0;
@@ -490,11 +490,6 @@ export default async function DataPage() {
                   <p className="text-[12px] uppercase tracking-[0.12em] text-[#7A7A7A]">Live Market Coverage</p>
                   <p className="mt-2 text-[14px] text-[#9CA3AF]">Cards with a live market price: <span className="font-semibold text-[#E5E7EB]">{formatNumber(transparencyLiveCoverage)} ({transparencyLiveCoveragePct}%)</span></p>
                   <p className="mt-1 text-[14px] text-[#9CA3AF]">Cards without a live market price: <span className="font-semibold text-[#E5E7EB]">{formatNumber(transparencyUncoveredCount)}</span></p>
-                  {transparency.coverage.justtcgOnly > 0 ? (
-                    <p className="mt-1 text-[12px] text-[#6B7280]">
-                      Legacy JustTCG-only rows are excluded from live coverage after the provider retirement.
-                    </p>
-                  ) : null}
                 </div>
 
                 <div className="rounded-xl border border-[#222] bg-[#0D0D0D] p-4">
@@ -575,7 +570,7 @@ export default async function DataPage() {
               </div>
 
               <p className="mt-5 text-[12px] text-[#6B7280]">
-                Methodology: RAW market pricing is now live-market-first through the active Scrydex-backed pipeline. Retired JustTCG-only rows are excluded from live coverage, while confidence still reflects freshness, sample size, and outlier filtering.
+                Methodology: RAW market pricing is powered by the active Scrydex-backed pipeline. Confidence reflects freshness, sample size, and outlier filtering.
               </p>
             </>
           ) : (

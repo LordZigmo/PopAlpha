@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { useSafeUser } from "@/lib/auth/use-safe-user";
-import { Home, PieChart, Plus, Users } from "lucide-react";
+import { Activity, Home, PieChart, Plus, Users } from "lucide-react";
+import { useUnreadNotificationCount } from "@/lib/activity/use-unread-count";
 
 const DESKTOP_LEFT_RAIL_WIDTH = "md:w-[min(30vw,22rem)]";
 
@@ -56,11 +57,13 @@ function NavItem({
   label,
   active,
   icon: Icon,
+  badge,
 }: {
   href: string;
   label: string;
   active: boolean;
   icon: typeof Home;
+  badge?: number;
 }) {
   return (
     <Link
@@ -74,13 +77,18 @@ function NavItem({
     >
       <span
         className={[
-          "flex h-10 w-10 items-center justify-center rounded-[0.9rem] border",
+          "relative flex h-10 w-10 items-center justify-center rounded-[0.9rem] border",
           active
             ? "border-white/[0.08] bg-white/[0.06] text-white"
             : "border-[#1E1E1E] bg-[#0B0B0B] text-[#6B7280]",
         ].join(" ")}
       >
         <Icon size={18} strokeWidth={2.1} />
+        {badge != null && badge > 0 && (
+          <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#FF3B30] px-1 text-[10px] font-bold text-white">
+            {badge > 9 ? "9+" : badge}
+          </span>
+        )}
       </span>
       <span className="text-[15px] font-semibold">{label}</span>
     </Link>
@@ -94,6 +102,7 @@ export default function DesktopLeftRail() {
   const tier = resolveTier(
     user?.publicMetadata.subscriptionTier ?? user?.publicMetadata.tier ?? user?.publicMetadata.plan,
   );
+  const { unreadCount } = useUnreadNotificationCount();
 
   const [summary, setSummary] = useState<SummaryResponse["setCompletion"]>(null);
   const [collectionValue, setCollectionValue] = useState(0);
