@@ -8,7 +8,7 @@ import {
 } from "@/lib/backfill/provider-pipeline-job-queue";
 
 export const runtime = "nodejs";
-export const maxDuration = 300;
+export const maxDuration = 600;
 
 function parseOptionalInt(value: string | null): number | undefined {
   if (!value) return undefined;

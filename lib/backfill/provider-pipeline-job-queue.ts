@@ -35,7 +35,7 @@ type PipelineJobRow = {
 
 const DEFAULT_JOB_TIMEOUT_MS = process.env.PIPELINE_JOB_TIMEOUT_MS
   ? Math.max(5000, parseInt(process.env.PIPELINE_JOB_TIMEOUT_MS, 10))
-  : 240000;
+  : 480000;
 const DEFAULT_STALE_RECLAIM_SECONDS = process.env.PIPELINE_JOB_STALE_RECLAIM_SECONDS
   ? Math.max(60, parseInt(process.env.PIPELINE_JOB_STALE_RECLAIM_SECONDS, 10))
   : Math.max(360, Math.ceil(DEFAULT_JOB_TIMEOUT_MS / 1000) + 120);
