@@ -277,8 +277,10 @@ function computeLiquidityWeight(activeListings7d: number): number {
   return 1.25;
 }
 
-function deriveLegacyTotalRawFromCoverage(coverage: PricingTransparencySnapshot["coverage"]): number {
-  return Math.max(0, coverage.scrydexOnly + coverage.none);
+function deriveLegacyTotalRawFromCoverage(coverage: PricingTransparencySnapshot["coverage"] & Record<string, unknown>): number {
+  const both = typeof coverage.both === "number" && Number.isFinite(coverage.both) ? coverage.both : 0;
+  const justtcgOnly = typeof coverage.justtcgOnly === "number" && Number.isFinite(coverage.justtcgOnly) ? coverage.justtcgOnly : 0;
+  return Math.max(0, both + justtcgOnly + (coverage.scrydexOnly ?? 0) + (coverage.none ?? 0));
 }
 
 async function loadLiveMarketCoverageCounts(
