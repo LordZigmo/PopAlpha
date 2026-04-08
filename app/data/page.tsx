@@ -235,15 +235,17 @@ function CompactFreshnessTile({
 }
 
 export default async function DataPage() {
-  const [primaryMonitorResult, extendedMonitorResult, transparencyResult, trendResult] = await Promise.allSettled([
+  const [primaryMonitorResult, transparencyResult, trendResult] = await Promise.allSettled([
     getCanonicalRawFreshnessMonitor(PRIMARY_FRESHNESS_WINDOW_HOURS),
-    getCanonicalRawRollingDailyFreshnessMonitors([...EXTENDED_FRESHNESS_WINDOW_DAYS]),
     getPricingTransparencySnapshot(),
     getPricingTransparencyTrend(7),
   ]);
+  // Rolling daily freshness monitors (7d/30d/90d) are deferred — the query scans
+  // 12M+ rows in price_history_points and takes minutes. Compute these in a
+  // background cron and serve from a snapshot table instead.
 
   const primaryMonitor = primaryMonitorResult.status === "fulfilled" ? primaryMonitorResult.value : null;
-  const extendedMonitors = extendedMonitorResult.status === "fulfilled" ? extendedMonitorResult.value : [];
+  const extendedMonitors: Awaited<ReturnType<typeof getCanonicalRawRollingDailyFreshnessMonitors>> = [];
   const transparency = transparencyResult.status === "fulfilled" ? transparencyResult.value : null;
   const trend = trendResult.status === "fulfilled" ? trendResult.value : null;
   const extendedMonitorByWindowDays = new Map(
@@ -281,9 +283,6 @@ export default async function DataPage() {
 
   if (primaryMonitorResult.status === "rejected") {
     console.error("[data/page] failed to load price freshness (24h)", getLoadErrorMessage(primaryMonitorResult.reason));
-  }
-  if (extendedMonitorResult.status === "rejected") {
-    console.error("[data/page] failed to load rolling daily price freshness", getLoadErrorMessage(extendedMonitorResult.reason));
   }
   if (transparencyResult.status === "rejected") {
     console.error("[data/page] failed to load pricing transparency snapshot", getLoadErrorMessage(transparencyResult.reason));
