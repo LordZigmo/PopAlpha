@@ -59,26 +59,22 @@ export async function GET(
       });
     }
 
+    // Each chunk enqueues ALL sets that need coverage. The job queue dedup
+    // skips sets with active QUEUED/RUNNING/RETRY jobs, so only failed or
+    // unqueued sets get new jobs. This makes every 3-hour chunk a catch-up
+    // pass instead of a static partition.
     const plan = await planScrydexDailyCapture({
-      chunkCount: SCRYDEX_DAILY_CHUNK_COUNT,
+      chunkCount: 1,
       maxRequests,
     });
-    const chunkPlan = plan.chunks[chunkNumber - 1] ?? {
-      chunkNumber,
-      plannedRequests: 0,
-      plannedExpectedCardCount: 0,
-      plannedMatchedCardCount: 0,
-      providerSetIds: [],
-      selectedSets: [],
-    };
-    const providerSetIds = chunkPlan.providerSetIds;
+    const providerSetIds = plan.selectedSets.map((s) => s.providerSetId);
 
     const runs = [];
     let ok = true;
     let plannedRequests = 0;
     let queuedJobs = 0;
 
-    for (const selectedSet of chunkPlan.selectedSets) {
+    for (const selectedSet of plan.selectedSets) {
       const providerSetId = selectedSet.providerSetId;
       const dailyCaptureRequests = Math.max(1, selectedSet.dailyCaptureRequests);
       plannedRequests += dailyCaptureRequests;
@@ -128,9 +124,7 @@ export async function GET(
       maxRequests: plan.maxRequests,
       recentSuccessfulRequests: plan.recentSuccessfulRequests,
       providerSetIds,
-      plannedRequests: chunkPlan.plannedRequests || plannedRequests,
-      plannedExpectedCardCount: chunkPlan.plannedExpectedCardCount,
-      plannedMatchedCardCount: chunkPlan.plannedMatchedCardCount,
+      plannedRequests,
       selectedSets: plan.selectedSets.length,
       queuedJobs,
       runs,
