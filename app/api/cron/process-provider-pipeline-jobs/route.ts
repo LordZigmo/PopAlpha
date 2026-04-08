@@ -28,7 +28,7 @@ export async function GET(req: Request) {
     parseOptionalInt(url.searchParams.get("jobTimeoutMs"))
       ?? (process.env.PIPELINE_JOB_TIMEOUT_MS
         ? parseInt(process.env.PIPELINE_JOB_TIMEOUT_MS, 10)
-        : 240000),
+        : 480000),
   );
   const staleAfterSeconds = Math.max(
     60,
