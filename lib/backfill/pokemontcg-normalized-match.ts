@@ -56,7 +56,6 @@ type MatchMode = "incremental" | "backlog";
 
 type ScanRow = {
   id: string;
-  observed_at: string;
 };
 
 type ExistingMatchRow = {
@@ -468,48 +467,30 @@ async function loadCandidateObservations(params: {
   }
 
   async function scanLoop(providerSetId: string | null, recentOnly: boolean, maxScanRows: number): Promise<void> {
-    let cursorAt: string | null = null;
-    let totalScanned = 0;
-
-    while (selected.length < params.observationLimit && totalScanned < maxScanRows) {
+    for (let from = 0; selected.length < params.observationLimit && from < maxScanRows; from += SCAN_PAGE_SIZE) {
       if (hasDeadlinePassed(params.deadlineMs ?? null)) {
         timedOut = true;
         break;
       }
       let scanQuery = supabase
         .from("provider_normalized_observations")
-        .select("id, observed_at")
+        .select("id")
         .eq("provider", PROVIDER)
         .order("observed_at", { ascending })
         .order("id", { ascending })
-        .limit(SCAN_PAGE_SIZE);
+        .range(from, from + SCAN_PAGE_SIZE - 1);
 
       if (providerSetId) scanQuery = scanQuery.eq("provider_set_id", providerSetId);
       if (params.providerSetId) scanQuery = scanQuery.eq("provider_set_id", params.providerSetId);
       if (recentOnly) scanQuery = scanQuery.gte("observed_at", recentCutoffIso);
 
-      if (cursorAt !== null) {
-        scanQuery = ascending
-          ? scanQuery.gte("observed_at", cursorAt)
-          : scanQuery.lte("observed_at", cursorAt);
-      }
-
       const { data, error } = await scanQuery;
       if (error) throw new Error(`provider_normalized_observations(scan): ${error.message}`);
       const scanRows = (data ?? []) as ScanRow[];
       if (scanRows.length === 0) break;
-      totalScanned += scanRows.length;
       scanned += scanRows.length;
-
-      const lastRow = scanRows[scanRows.length - 1];
-      const prevCursor: string | null = cursorAt;
-      cursorAt = lastRow.observed_at;
-
       await addSelectedIdsFromScan(scanRows);
       if (timedOut || selected.length >= params.observationLimit) break;
-
-      // If cursor didn't advance, we've exhausted rows at this timestamp
-      if (prevCursor === cursorAt) break;
     }
   }
 
@@ -529,119 +510,102 @@ async function loadCandidateObservations(params: {
     return { rows: selected, scanned, skippedAlreadyMatched, timedOut };
   }
 
-  {
-    let cursorAt: string | null = null;
+  for (let from = 0; selected.length < params.observationLimit; from += SCAN_PAGE_SIZE) {
+    if (hasDeadlinePassed(params.deadlineMs ?? null)) {
+      timedOut = true;
+      break;
+    }
 
-    while (selected.length < params.observationLimit) {
+    let scanQuery = supabase
+      .from("provider_normalized_observations")
+      .select("id")
+      .eq("provider", PROVIDER)
+      .order("observed_at", { ascending })
+      .order("id", { ascending })
+      .range(from, from + SCAN_PAGE_SIZE - 1);
+
+    if (params.providerSetId) {
+      scanQuery = scanQuery.eq("provider_set_id", params.providerSetId);
+    }
+
+    const { data, error } = await scanQuery;
+    if (error) throw new Error(`provider_normalized_observations(scan): ${error.message}`);
+
+    const scanRows = (data ?? []) as ScanRow[];
+    if (scanRows.length === 0) break;
+    scanned += scanRows.length;
+
+    const existingById = new Map<string, ExistingMatchRow>();
+    if (!force) {
+      const { data: existingRows, error: existingError } = await supabase
+        .from("provider_observation_matches")
+        .select("provider_normalized_observation_id, match_status, updated_at")
+        .in("provider_normalized_observation_id", scanRows.map((row) => row.id));
+
+      if (existingError) {
+        throw new Error(`provider_observation_matches(scan existing): ${existingError.message}`);
+      }
+
+      for (const row of (existingRows ?? []) as ExistingMatchRow[]) {
+        existingById.set(String(row.provider_normalized_observation_id), row);
+      }
+    }
+
+    const selectedIds: string[] = [];
+    for (const row of scanRows) {
       if (hasDeadlinePassed(params.deadlineMs ?? null)) {
         timedOut = true;
         break;
       }
-
-      let scanQuery = supabase
-        .from("provider_normalized_observations")
-        .select("id, observed_at")
-        .eq("provider", PROVIDER)
-        .order("observed_at", { ascending })
-        .order("id", { ascending })
-        .limit(SCAN_PAGE_SIZE);
-
-      if (params.providerSetId) {
-        scanQuery = scanQuery.eq("provider_set_id", params.providerSetId);
+      if (selectedObservationIds.has(row.id)) {
+        continue;
       }
-
-      if (cursorAt !== null) {
-        scanQuery = ascending
-          ? scanQuery.gte("observed_at", cursorAt)
-          : scanQuery.lte("observed_at", cursorAt);
-      }
-
-      const { data, error } = await scanQuery;
-      if (error) throw new Error(`provider_normalized_observations(scan): ${error.message}`);
-
-      const scanRows = (data ?? []) as ScanRow[];
-      if (scanRows.length === 0) break;
-      scanned += scanRows.length;
-
-      const lastRow = scanRows[scanRows.length - 1];
-      const prevCursor: string | null = cursorAt;
-      cursorAt = lastRow.observed_at;
-
-      const existingById = new Map<string, ExistingMatchRow>();
       if (!force) {
-        const { data: existingRows, error: existingError } = await supabase
-          .from("provider_observation_matches")
-          .select("provider_normalized_observation_id, match_status, updated_at")
-          .in("provider_normalized_observation_id", scanRows.map((row) => row.id));
-
-        if (existingError) {
-          throw new Error(`provider_observation_matches(scan existing): ${existingError.message}`);
-        }
-
-        for (const row of (existingRows ?? []) as ExistingMatchRow[]) {
-          existingById.set(String(row.provider_normalized_observation_id), row);
-        }
-      }
-
-      const selectedIds: string[] = [];
-      for (const row of scanRows) {
-        if (hasDeadlinePassed(params.deadlineMs ?? null)) {
-          timedOut = true;
-          break;
-        }
-        if (selectedObservationIds.has(row.id)) {
+        const existing = existingById.get(row.id);
+        if (existing?.match_status === "MATCHED") {
+          skippedAlreadyMatched += 1;
           continue;
         }
-        if (!force) {
-          const existing = existingById.get(row.id);
-          if (existing?.match_status === "MATCHED") {
+        if (existing?.match_status === "UNMATCHED") {
+          const updatedAtMs = parseDateMs(existing.updated_at);
+          if (updatedAtMs !== null && (nowMs - updatedAtMs) < unmatchedRetryMs) {
             skippedAlreadyMatched += 1;
             continue;
           }
-          if (existing?.match_status === "UNMATCHED") {
-            const updatedAtMs = parseDateMs(existing.updated_at);
-            if (updatedAtMs !== null && (nowMs - updatedAtMs) < unmatchedRetryMs) {
-              skippedAlreadyMatched += 1;
-              continue;
-            }
-          }
         }
-        selectedIds.push(row.id);
-        selectedObservationIds.add(row.id);
-        if (selected.length + selectedIds.length >= params.observationLimit) break;
       }
-
-      if (selectedIds.length === 0) continue;
-
-      const { data: fullRows, error: fullError } = await supabase
-        .from("provider_normalized_observations")
-        .select("id, provider, provider_set_id, provider_card_id, provider_variant_id, asset_type, normalized_card_number, normalized_finish, normalized_edition, normalized_stamp, normalized_language, observed_at")
-        .in("id", selectedIds);
-
-      if (fullError) {
-        throw new Error(`provider_normalized_observations(load selected): ${fullError.message}`);
-      }
-
-      const byId = new Map<string, NormalizedObservationRow>();
-      for (const row of (fullRows ?? []) as NormalizedObservationRow[]) {
-        byId.set(row.id, row);
-      }
-
-      for (const id of selectedIds) {
-        if (hasDeadlinePassed(params.deadlineMs ?? null)) {
-          timedOut = true;
-          break;
-        }
-        const row = byId.get(id);
-        if (!row) continue;
-        selected.push(row);
-        if (selected.length >= params.observationLimit) break;
-      }
-      if (timedOut) break;
-
-      // If cursor didn't advance, we've exhausted rows at this timestamp
-      if (prevCursor === cursorAt) break;
+      selectedIds.push(row.id);
+      selectedObservationIds.add(row.id);
+      if (selected.length + selectedIds.length >= params.observationLimit) break;
     }
+
+    if (selectedIds.length === 0) continue;
+
+    const { data: fullRows, error: fullError } = await supabase
+      .from("provider_normalized_observations")
+      .select("id, provider, provider_set_id, provider_card_id, provider_variant_id, asset_type, normalized_card_number, normalized_finish, normalized_edition, normalized_stamp, normalized_language, observed_at")
+      .in("id", selectedIds);
+
+    if (fullError) {
+      throw new Error(`provider_normalized_observations(load selected): ${fullError.message}`);
+    }
+
+    const byId = new Map<string, NormalizedObservationRow>();
+    for (const row of (fullRows ?? []) as NormalizedObservationRow[]) {
+      byId.set(row.id, row);
+    }
+
+    for (const id of selectedIds) {
+      if (hasDeadlinePassed(params.deadlineMs ?? null)) {
+        timedOut = true;
+        break;
+      }
+      const row = byId.get(id);
+      if (!row) continue;
+      selected.push(row);
+      if (selected.length >= params.observationLimit) break;
+    }
+    if (timedOut) break;
   }
 
   return { rows: selected, scanned, skippedAlreadyMatched, timedOut };
