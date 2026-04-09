@@ -21,7 +21,7 @@ export async function GET(req: Request) {
   if (!auth.ok) return auth.response;
 
   const url = new URL(req.url);
-  const limit = Math.max(1, Math.min(parseOptionalInt(url.searchParams.get("limit")) ?? 6, 6));
+  const limit = Math.max(1, Math.min(parseOptionalInt(url.searchParams.get("limit")) ?? 2, 6));
   const workerId = url.searchParams.get("workerId")?.trim() || "vercel-cron";
   const jobTimeoutMs = Math.max(
     5000,
