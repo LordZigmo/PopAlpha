@@ -469,7 +469,6 @@ async function loadCandidateObservations(params: {
 
   async function scanLoop(providerSetId: string | null, recentOnly: boolean, maxScanRows: number): Promise<void> {
     let cursorAt: string | null = null;
-    let cursorId: string | null = null;
     let totalScanned = 0;
 
     while (selected.length < params.observationLimit && totalScanned < maxScanRows) {
@@ -489,12 +488,10 @@ async function loadCandidateObservations(params: {
       if (params.providerSetId) scanQuery = scanQuery.eq("provider_set_id", params.providerSetId);
       if (recentOnly) scanQuery = scanQuery.gte("observed_at", recentCutoffIso);
 
-      if (cursorAt !== null && cursorId !== null) {
-        if (ascending) {
-          scanQuery = scanQuery.or(`observed_at.gt.${cursorAt},and(observed_at.eq.${cursorAt},id.gt.${cursorId})`);
-        } else {
-          scanQuery = scanQuery.or(`observed_at.lt.${cursorAt},and(observed_at.eq.${cursorAt},id.lt.${cursorId})`);
-        }
+      if (cursorAt !== null) {
+        scanQuery = ascending
+          ? scanQuery.gte("observed_at", cursorAt)
+          : scanQuery.lte("observed_at", cursorAt);
       }
 
       const { data, error } = await scanQuery;
@@ -505,11 +502,14 @@ async function loadCandidateObservations(params: {
       scanned += scanRows.length;
 
       const lastRow = scanRows[scanRows.length - 1];
+      const prevCursor: string | null = cursorAt;
       cursorAt = lastRow.observed_at;
-      cursorId = lastRow.id;
 
       await addSelectedIdsFromScan(scanRows);
       if (timedOut || selected.length >= params.observationLimit) break;
+
+      // If cursor didn't advance, we've exhausted rows at this timestamp
+      if (prevCursor === cursorAt) break;
     }
   }
 
@@ -531,7 +531,6 @@ async function loadCandidateObservations(params: {
 
   {
     let cursorAt: string | null = null;
-    let cursorId: string | null = null;
 
     while (selected.length < params.observationLimit) {
       if (hasDeadlinePassed(params.deadlineMs ?? null)) {
@@ -551,12 +550,10 @@ async function loadCandidateObservations(params: {
         scanQuery = scanQuery.eq("provider_set_id", params.providerSetId);
       }
 
-      if (cursorAt !== null && cursorId !== null) {
-        if (ascending) {
-          scanQuery = scanQuery.or(`observed_at.gt.${cursorAt},and(observed_at.eq.${cursorAt},id.gt.${cursorId})`);
-        } else {
-          scanQuery = scanQuery.or(`observed_at.lt.${cursorAt},and(observed_at.eq.${cursorAt},id.lt.${cursorId})`);
-        }
+      if (cursorAt !== null) {
+        scanQuery = ascending
+          ? scanQuery.gte("observed_at", cursorAt)
+          : scanQuery.lte("observed_at", cursorAt);
       }
 
       const { data, error } = await scanQuery;
@@ -567,8 +564,8 @@ async function loadCandidateObservations(params: {
       scanned += scanRows.length;
 
       const lastRow = scanRows[scanRows.length - 1];
+      const prevCursor: string | null = cursorAt;
       cursorAt = lastRow.observed_at;
-      cursorId = lastRow.id;
 
       const existingById = new Map<string, ExistingMatchRow>();
       if (!force) {
@@ -641,6 +638,9 @@ async function loadCandidateObservations(params: {
         if (selected.length >= params.observationLimit) break;
       }
       if (timedOut) break;
+
+      // If cursor didn't advance, we've exhausted rows at this timestamp
+      if (prevCursor === cursorAt) break;
     }
   }
 
