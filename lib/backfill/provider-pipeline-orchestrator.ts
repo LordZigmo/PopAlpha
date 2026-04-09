@@ -45,7 +45,7 @@ type TouchedVariantKey = {
 
 const MAX_STAGE_DRAIN_PASSES = process.env.PROVIDER_PIPELINE_STAGE_MAX_PASSES
   ? Math.max(1, parseInt(process.env.PROVIDER_PIPELINE_STAGE_MAX_PASSES, 10))
-  : 50;
+  : 8;
 const PIPELINE_DRAIN_RESERVE_MS = process.env.PROVIDER_PIPELINE_DRAIN_RESERVE_MS
   ? Math.max(0, parseInt(process.env.PROVIDER_PIPELINE_DRAIN_RESERVE_MS, 10))
   : 15000;
