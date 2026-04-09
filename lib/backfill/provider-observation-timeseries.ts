@@ -345,19 +345,12 @@ async function loadCandidateRows(params: {
   let skippedAlreadyWritten = 0;
 
   for (let from = 0; selected.length < params.observationLimit; from += SCAN_PAGE_SIZE) {
-    let scanQuery = supabase
-      .from("provider_observation_matches")
-      .select("provider_normalized_observation_id")
-      .eq("provider", params.provider)
-      .eq("match_status", "MATCHED")
-      .order("updated_at", { ascending: false })
-      .range(from, from + SCAN_PAGE_SIZE - 1);
-
-    if (params.providerSetId) {
-      scanQuery = scanQuery.eq("provider_set_id", params.providerSetId);
-    }
-
-    const { data, error } = await scanQuery;
+    const { data, error } = await supabase.rpc("scan_matched_observations", {
+      p_provider: params.provider,
+      p_provider_set_id: params.providerSetId ?? null,
+      p_limit: SCAN_PAGE_SIZE,
+      p_offset: from,
+    });
     if (error) throw new Error(`provider_observation_matches(scan): ${error.message}`);
 
     const scanRows = (data ?? []) as MatchScanRow[];

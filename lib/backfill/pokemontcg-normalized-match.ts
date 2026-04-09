@@ -472,19 +472,15 @@ async function loadCandidateObservations(params: {
         timedOut = true;
         break;
       }
-      let scanQuery = supabase
-        .from("provider_normalized_observations")
-        .select("id")
-        .eq("provider", PROVIDER)
-        .order("observed_at", { ascending })
-        .order("id", { ascending })
-        .range(from, from + SCAN_PAGE_SIZE - 1);
-
-      if (providerSetId) scanQuery = scanQuery.eq("provider_set_id", providerSetId);
-      if (params.providerSetId) scanQuery = scanQuery.eq("provider_set_id", params.providerSetId);
-      if (recentOnly) scanQuery = scanQuery.gte("observed_at", recentCutoffIso);
-
-      const { data, error } = await scanQuery;
+      const effectiveSetId = providerSetId ?? params.providerSetId ?? null;
+      const { data, error } = await supabase.rpc("scan_normalized_observations", {
+        p_provider: PROVIDER,
+        p_provider_set_id: effectiveSetId,
+        p_min_observed_at: recentOnly ? recentCutoffIso : null,
+        p_ascending: ascending,
+        p_limit: SCAN_PAGE_SIZE,
+        p_offset: from,
+      });
       if (error) throw new Error(`provider_normalized_observations(scan): ${error.message}`);
       const scanRows = (data ?? []) as ScanRow[];
       if (scanRows.length === 0) break;
@@ -516,19 +512,13 @@ async function loadCandidateObservations(params: {
       break;
     }
 
-    let scanQuery = supabase
-      .from("provider_normalized_observations")
-      .select("id")
-      .eq("provider", PROVIDER)
-      .order("observed_at", { ascending })
-      .order("id", { ascending })
-      .range(from, from + SCAN_PAGE_SIZE - 1);
-
-    if (params.providerSetId) {
-      scanQuery = scanQuery.eq("provider_set_id", params.providerSetId);
-    }
-
-    const { data, error } = await scanQuery;
+    const { data, error } = await supabase.rpc("scan_normalized_observations", {
+      p_provider: PROVIDER,
+      p_provider_set_id: params.providerSetId ?? null,
+      p_ascending: ascending,
+      p_limit: SCAN_PAGE_SIZE,
+      p_offset: from,
+    });
     if (error) throw new Error(`provider_normalized_observations(scan): ${error.message}`);
 
     const scanRows = (data ?? []) as ScanRow[];
