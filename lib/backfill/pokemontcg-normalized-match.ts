@@ -666,12 +666,11 @@ async function loadCardPrintings(setCodes: string[]): Promise<Map<string, Printi
   const rows: PrintingRow[] = [];
 
   for (let from = 0; ; from += pageSize) {
-    const { data, error } = await supabase
-      .from("card_printings")
-      .select("id, canonical_slug, set_code, card_number, language, finish, edition, stamp")
-      .in("set_code", setCodes)
-      .order("id", { ascending: true })
-      .range(from, from + pageSize - 1);
+    const { data, error } = await supabase.rpc("scan_card_printings_by_set", {
+      p_set_codes: setCodes,
+      p_limit: pageSize,
+      p_offset: from,
+    });
 
     if (error) {
       throw new Error(`card_printings: ${error.message}`);

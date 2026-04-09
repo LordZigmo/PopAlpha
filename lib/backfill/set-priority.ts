@@ -193,14 +193,12 @@ export async function loadRecentSetConsistencyPriority(params: {
   for (let i = 0; i < targetSetCodes.length; i += 100) {
     const setCodeChunk = targetSetCodes.slice(i, i + 100);
     for (let from = 0; ; from += pageSize) {
-      const { data, error } = await supabase
-        .from("card_printings")
-        .select("set_code, set_name, year, canonical_slug")
-        .eq("language", "EN")
-        .gte("year", yearFrom)
-        .in("set_code", setCodeChunk)
-        .order("id", { ascending: true })
-        .range(from, from + pageSize - 1);
+      const { data, error } = await supabase.rpc("scan_card_printings_for_priority", {
+        p_set_codes: setCodeChunk,
+        p_year_from: yearFrom,
+        p_limit: pageSize,
+        p_offset: from,
+      });
       if (error) throw new Error(`set-priority(recent card_printings): ${error.message}`);
 
       const rows = (data ?? []) as Array<{
@@ -337,15 +335,12 @@ export async function loadRecentSetConsistencyPriority(params: {
   for (let i = 0; i < recentSetIds.length; i += 200) {
     const setIdChunk = recentSetIds.slice(i, i + 200);
     for (let from = 0; ; from += pageSize) {
-      const { data, error } = await supabase
-        .from("variant_price_latest")
-        .select("set_id, canonical_slug, latest_observed_at")
-        .eq("provider", params.provider)
-        .eq("grade", "RAW")
-        .in("set_id", setIdChunk)
-        .order("set_id", { ascending: true })
-        .order("canonical_slug", { ascending: true })
-        .range(from, from + pageSize - 1);
+      const { data, error } = await supabase.rpc("scan_variant_price_latest_for_priority", {
+        p_provider: params.provider,
+        p_set_ids: setIdChunk,
+        p_limit: pageSize,
+        p_offset: from,
+      });
       if (error) throw new Error(`set-priority(recent variant_price_latest): ${error.message}`);
 
       const rows = (data ?? []) as Array<{
