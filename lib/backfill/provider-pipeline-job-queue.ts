@@ -20,7 +20,7 @@ export type PipelineProvider = PipelineBatchProvider;
 export type PipelineJobKind = PipelineBatchKind;
 export type PipelineJobParams = PipelineBatchParams;
 
-type PipelineJobRow = {
+export type PipelineJobRow = {
   id: number;
   provider: PipelineProvider;
   job_kind: PipelineJobKind;

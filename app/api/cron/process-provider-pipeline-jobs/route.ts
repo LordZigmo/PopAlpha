@@ -5,6 +5,7 @@ import {
   completePipelineJob,
   executeClaimedPipelineJob,
   retryDelayForAttempt,
+  type PipelineJobRow,
 } from "@/lib/backfill/provider-pipeline-job-queue";
 
 export const runtime = "nodejs";
@@ -16,12 +17,63 @@ function parseOptionalInt(value: string | null): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+type JobRun = {
+  jobId: number;
+  provider: string;
+  kind: string;
+  ok: boolean;
+  error: string | null;
+  completionError?: string | null;
+};
+
+async function executeAndComplete(
+  claimed: PipelineJobRow,
+  jobTimeoutMs: number,
+): Promise<JobRun> {
+  let executed = {
+    ok: false,
+    result: null as unknown,
+    error: "PIPELINE_JOB_UNSETTLED" as string | null,
+  };
+  try {
+    executed = await executeClaimedPipelineJob(claimed, { timeoutMs: jobTimeoutMs });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    executed = { ok: false, result: null, error: message };
+  }
+
+  let completionError: string | null = null;
+  try {
+    const retryDelaySeconds = executed.ok ? 0 : retryDelayForAttempt(claimed.attempts);
+    await completePipelineJob({
+      jobId: claimed.id,
+      ok: executed.ok,
+      result: executed.result,
+      error: executed.error,
+      retryDelaySeconds,
+    });
+  } catch (error) {
+    completionError = error instanceof Error ? error.message : String(error);
+  }
+
+  return {
+    jobId: claimed.id,
+    provider: claimed.provider,
+    kind: claimed.job_kind,
+    ok: executed.ok && !completionError,
+    error: completionError
+      ? [executed.error, `completion: ${completionError}`].filter(Boolean).join(" | ")
+      : executed.error,
+    completionError,
+  };
+}
+
 export async function GET(req: Request) {
   const auth = await requireCron(req);
   if (!auth.ok) return auth.response;
 
   const url = new URL(req.url);
-  const limit = Math.max(1, Math.min(parseOptionalInt(url.searchParams.get("limit")) ?? 2, 6));
+  const limit = Math.max(1, Math.min(parseOptionalInt(url.searchParams.get("limit")) ?? 4, 6));
   const workerId = url.searchParams.get("workerId")?.trim() || "vercel-cron";
   const jobTimeoutMs = Math.max(
     5000,
@@ -38,69 +90,52 @@ export async function GET(req: Request) {
         : Math.max(360, Math.ceil(jobTimeoutMs / 1000) + 120)),
   );
 
-  const runs: Array<{
-    jobId: number;
-    provider: string;
-    kind: string;
-    ok: boolean;
-    error: string | null;
-    completionError?: string | null;
-  }> = [];
-
+  // Claim jobs sequentially to avoid lock contention on claim_pipeline_job,
+  // then execute them concurrently for parallelism.
+  const claimedJobs: PipelineJobRow[] = [];
   for (let i = 0; i < limit; i += 1) {
     const claimed = await claimNextPipelineJob(workerId, staleAfterSeconds);
     if (!claimed) break;
+    claimedJobs.push(claimed);
+  }
 
-    let executed = {
-      ok: false,
-      result: null as unknown,
-      error: "PIPELINE_JOB_UNSETTLED" as string | null,
-    };
-    try {
-      executed = await executeClaimedPipelineJob(claimed, { timeoutMs: jobTimeoutMs });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      executed = { ok: false, result: null, error: message };
+  const runs: JobRun[] = [];
+  if (claimedJobs.length > 0) {
+    const settled = await Promise.allSettled(
+      claimedJobs.map((claimed) => executeAndComplete(claimed, jobTimeoutMs)),
+    );
+    for (let i = 0; i < settled.length; i += 1) {
+      const result = settled[i];
+      const claimed = claimedJobs[i];
+      if (result.status === "fulfilled") {
+        runs.push(result.value);
+      } else {
+        const reason = result.reason instanceof Error
+          ? result.reason.message
+          : String(result.reason);
+        runs.push({
+          jobId: claimed.id,
+          provider: claimed.provider,
+          kind: claimed.job_kind,
+          ok: false,
+          error: `unhandled: ${reason}`,
+          completionError: null,
+        });
+      }
     }
-
-    let completionError: string | null = null;
-    try {
-      const retryDelaySeconds = executed.ok ? 0 : retryDelayForAttempt(claimed.attempts);
-      await completePipelineJob({
-        jobId: claimed.id,
-        ok: executed.ok,
-        result: executed.result,
-        error: executed.error,
-        retryDelaySeconds,
-      });
-    } catch (error) {
-      completionError = error instanceof Error ? error.message : String(error);
-    }
-
-    runs.push({
-      jobId: claimed.id,
-      provider: claimed.provider,
-      kind: claimed.job_kind,
-      ok: executed.ok && !completionError,
-      error: completionError
-        ? [executed.error, `completion: ${completionError}`].filter(Boolean).join(" | ")
-        : executed.error,
-      completionError,
-    });
-
-    if (completionError) break;
   }
 
   return NextResponse.json({
     ok: true,
     workerId,
     requestedLimit: limit,
+    claimed: claimedJobs.length,
     staleAfterSeconds,
     jobTimeoutMs,
     processed: runs.length,
     succeeded: runs.filter((row) => row.ok).length,
     failed: runs.filter((row) => !row.ok).length,
     runs,
-    refreshMode: "inline-targeted-rollups",
+    refreshMode: "deferred-rollups-parallel",
   });
 }

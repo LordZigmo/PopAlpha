@@ -53,6 +53,10 @@
       "schedule": "*/3 * * * *"
     },
     {
+      "path": "/api/cron/batch-refresh-pipeline-rollups",
+      "schedule": "10 * * * *"
+    },
+    {
       "path": "/api/cron/capture-pricing-transparency",
       "schedule": "15 * * * *"
     },

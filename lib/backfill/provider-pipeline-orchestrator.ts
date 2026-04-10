@@ -9,7 +9,7 @@ import { runPokeTraceRawNormalize } from "@/lib/backfill/poketrace-raw-normalize
 import { runPokeTraceNormalizedMatch } from "@/lib/backfill/poketrace-normalized-match";
 import { runProviderObservationTimeseries } from "@/lib/backfill/provider-observation-timeseries";
 import { runProviderObservationVariantMetrics } from "@/lib/backfill/provider-observation-variant-metrics";
-import { refreshPipelineRollupsForVariantKeys } from "@/lib/backfill/provider-pipeline-rollups";
+import { queuePendingRollups } from "@/lib/backfill/provider-pipeline-rollup-queue";
 import {
   buildProviderIngestionDisabledPayload,
   providerIngestionEnabled,
@@ -398,11 +398,34 @@ async function runProviderPipeline(provider: BackendPipelineProvider, opts: Pipe
         timeseriesTouchedKeys,
         variantMetricsTouchedKeys,
       );
-      const rollups = await refreshPipelineRollupsForVariantKeys({
-        keys: rollupKeys,
-      });
-      steps.push({ name: "targeted_rollups", ok: rollups.ok, result: rollups });
-      if (!rollups.ok) firstError = rollups.firstError ?? `${provider.toLowerCase()} targeted rollups failed`;
+      if (rollupKeys.length > 0) {
+        try {
+          const queued = await queuePendingRollups(rollupKeys);
+          steps.push({
+            name: "targeted_rollups",
+            ok: true,
+            result: {
+              mode: "deferred",
+              queued: queued.queued,
+              deferredTo: "hourly_batch",
+            },
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          firstError = message;
+          steps.push({
+            name: "targeted_rollups",
+            ok: false,
+            result: { mode: "deferred", error: message },
+          });
+        }
+      } else {
+        steps.push({
+          name: "targeted_rollups",
+          ok: true,
+          result: { mode: "deferred", queued: 0 },
+        });
+      }
     }
   }
 
