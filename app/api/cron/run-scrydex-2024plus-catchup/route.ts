@@ -17,7 +17,7 @@ const DEFAULT_CATCHUP_DAYS = process.env.SCRYDEX_2024PLUS_CATCHUP_DAYS
 // Keep each catch-up run under the cron runtime ceiling while burning down the backlog faster.
 const DEFAULT_CATCHUP_MAX_CREDITS = process.env.SCRYDEX_2024PLUS_CATCHUP_MAX_CREDITS
   ? Math.max(3, parseInt(process.env.SCRYDEX_2024PLUS_CATCHUP_MAX_CREDITS, 10))
-  : 600;
+  : 300;
 
 function parseOptionalInt(value: string | null): number | undefined {
   if (!value) return undefined;

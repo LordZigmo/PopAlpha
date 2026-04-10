@@ -35,7 +35,7 @@ export async function GET(
     const { chunk } = await context.params;
     const chunkNumber = parseChunkParam(chunk);
     const url = new URL(req.url);
-    const matchObservations = parseOptionalInt(url.searchParams.get("observations")) ?? 500;
+    const matchObservations = parseOptionalInt(url.searchParams.get("observations")) ?? 100;
     const timeseriesObservations = parseOptionalInt(url.searchParams.get("timeseriesObservations")) ?? matchObservations;
     const metricsObservations = parseOptionalInt(url.searchParams.get("metricsObservations")) ?? timeseriesObservations;
     const maxRequests = parseOptionalInt(url.searchParams.get("maxRequests"));

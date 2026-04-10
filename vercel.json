@@ -34,47 +34,23 @@
     },
     {
       "path": "/api/cron/run-scrydex-daily/2",
-      "schedule": "20 3 * * *"
+      "schedule": "20 6 * * *"
     },
     {
       "path": "/api/cron/run-scrydex-daily/3",
-      "schedule": "35 6 * * *"
+      "schedule": "35 12 * * *"
     },
     {
       "path": "/api/cron/run-scrydex-daily/4",
-      "schedule": "50 9 * * *"
-    },
-    {
-      "path": "/api/cron/run-scrydex-daily/5",
-      "schedule": "5 12 * * *"
-    },
-    {
-      "path": "/api/cron/run-scrydex-daily/6",
-      "schedule": "20 15 * * *"
-    },
-    {
-      "path": "/api/cron/run-scrydex-daily/7",
-      "schedule": "35 18 * * *"
-    },
-    {
-      "path": "/api/cron/run-scrydex-daily/8",
-      "schedule": "50 21 * * *"
+      "schedule": "50 18 * * *"
     },
     {
       "path": "/api/cron/run-scrydex-2024plus-catchup",
-      "schedule": "20 */4 * * *"
-    },
-    {
-      "path": "/api/cron/run-justtcg-pipeline",
-      "schedule": "10 */2 * * *"
-    },
-    {
-      "path": "/api/cron/run-justtcg-retry",
-      "schedule": "40 */8 * * *"
+      "schedule": "20 */12 * * *"
     },
     {
       "path": "/api/cron/process-provider-pipeline-jobs",
-      "schedule": "*/2 * * * *"
+      "schedule": "*/3 * * * *"
     },
     {
       "path": "/api/cron/capture-pricing-transparency",
