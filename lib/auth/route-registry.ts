@@ -32,6 +32,7 @@ export const PUBLIC_ROUTES = [
   "poketrace/mobile-samples",
   "handles/availability",
   "health",
+  "homepage",
   "waitlist",
 ];
 
