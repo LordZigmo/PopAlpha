@@ -18,10 +18,10 @@ import {
 } from "@/lib/backfill/provider-pipeline-rollup-queue";
 
 export const runtime = "nodejs";
-export const maxDuration = 300;
+export const maxDuration = 600;
 
-const DEFAULT_BATCH_SIZE = 2000;
-const DEADLINE_RESERVE_MS = 30_000;
+const DEFAULT_BATCH_SIZE = 200;
+const DEADLINE_RESERVE_MS = 45_000;
 
 function parseOptionalInt(value: string | null): number | undefined {
   if (!value) return undefined;
@@ -46,7 +46,7 @@ export async function GET(req: Request) {
   );
   const maxBatches = Math.max(
     1,
-    Math.min(parseOptionalInt(url.searchParams.get("maxBatches")) ?? 10, 20),
+    Math.min(parseOptionalInt(url.searchParams.get("maxBatches")) ?? 30, 100),
   );
 
   const batches: Array<{
