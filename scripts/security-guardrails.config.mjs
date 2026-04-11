@@ -401,6 +401,7 @@ export const INTERNAL_ROUTE_TRUST_CONTRACTS = {
   "cron/normalize-poketrace-raw": cronSecretRoute("cron/internal automation"),
   "cron/process-ebay-deletion-receipts": cronSecretRoute("cron/internal automation"),
   "cron/process-provider-pipeline-jobs": cronSecretRoute("cron/internal automation"),
+  "cron/refresh-ai-brief": cronSecretRoute("cron/internal automation"),
   "cron/refresh-card-embeddings": cronSecretRoute("cron/internal automation"),
   "cron/refresh-card-metrics": cronSecretRoute("cron/internal automation"),
   "cron/batch-refresh-pipeline-rollups": cronSecretRoute("cron/internal automation"),
