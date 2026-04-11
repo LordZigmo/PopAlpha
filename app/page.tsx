@@ -11,7 +11,7 @@ import HomepageSearch from "@/components/homepage-search";
 import SiteHeader from "@/components/site-header";
 import TypewriterText from "@/components/typewriter-text";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
 
 /* ─── Helpers ──────────────────────────────────────────────────────────────── */
 
@@ -73,7 +73,7 @@ const EMPTY_DATA: {
   prices_refreshed_today: null,
   tracked_cards_with_live_price: null,
 };
-const DATA_TIMEOUT_MS = 8_000;
+const DATA_TIMEOUT_MS = 30_000;
 const AI_TIMEOUT_MS = 4_000;
 
 const TRENDING_SET_PILLS = [
