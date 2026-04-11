@@ -1,12 +1,16 @@
 import { dbAdmin } from "@/lib/db/admin";
 import { ensureProviderRawPayloadLineageId } from "@/lib/backfill/provider-raw-payload-lineage";
 import { retrySupabaseWriteOperation } from "@/lib/backfill/supabase-write-retry";
-import { buildLegacyVariantRef, normalizeCondition } from "@/lib/providers/justtcg";
+import { buildLegacyVariantRef } from "@/lib/providers/justtcg";
 import {
   parseScrydexVariantSemantics,
   type ScrydexNormalizedEdition,
   type ScrydexNormalizedFinish,
 } from "@/lib/backfill/scrydex-variant-semantics";
+import {
+  getNumberField,
+  selectPreferredScrydexPriceEntry,
+} from "@/lib/backfill/scrydex-raw-price-select";
 import type { ScrydexCard, ScrydexVariant } from "@/lib/scrydex/client";
 
 const PROVIDER = "SCRYDEX";
@@ -135,15 +139,6 @@ type TrendAnchorPoint = {
   sourceWindow: "30d" | "180d";
 };
 
-type ScrydexCurrency = "USD" | "EUR" | "JPY";
-
-type SelectedScrydexPriceEntry = {
-  price: number;
-  currency: ScrydexCurrency;
-  row: Record<string, unknown>;
-  providerCondition: string | null;
-  normalizedCondition: string;
-};
 
 const SCRYDEX_TREND_WINDOWS: Array<{
   key: string;
@@ -182,159 +177,6 @@ function normalizeCardNumber(raw: string | null | undefined): string {
   return trimmed;
 }
 
-function getNumberField(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
-  if (typeof value === "string") {
-    const parsed = Number.parseFloat(value);
-    if (Number.isFinite(parsed) && parsed > 0) return parsed;
-  }
-  return null;
-}
-
-function normalizeScrydexCurrency(raw: unknown): ScrydexCurrency {
-  const value = String(raw ?? "").trim().toUpperCase();
-  if (value === "EUR") return "EUR";
-  if (value === "JPY") return "JPY";
-  return "USD";
-}
-
-function parseScrydexPriceObject(record: Record<string, unknown>): { price: number | null; currency: ScrydexCurrency } {
-  const directCurrency = normalizeScrydexCurrency(record.currency);
-  const directCandidates = [
-    record.marketPrice,
-    record.market,
-    record.lowest_near_mint,
-    record.low,
-    record.mid,
-    record.average,
-    record.avg,
-    record.price,
-    record.value,
-  ];
-  for (const candidate of directCandidates) {
-    const value = getNumberField(candidate);
-    if (value !== null) {
-      return {
-        price: value,
-        currency: directCurrency,
-      };
-    }
-  }
-
-  const usdValue = getNumberField(record.usd) ?? getNumberField(record.USD);
-  if (usdValue !== null) return { price: usdValue, currency: "USD" };
-
-  const eurValue = getNumberField(record.eur) ?? getNumberField(record.EUR);
-  if (eurValue !== null) return { price: eurValue, currency: "EUR" };
-
-  const jpyValue = getNumberField(record.jpy) ?? getNumberField(record.JPY);
-  if (jpyValue !== null) return { price: jpyValue, currency: "JPY" };
-
-  return { price: null, currency: "USD" };
-}
-
-function extractPriceCurrency(prices: unknown): { price: number | null; currency: ScrydexCurrency } {
-  if (Array.isArray(prices)) {
-    const rows = prices.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object");
-    if (rows.length === 0) return { price: null, currency: "USD" };
-
-    // Prefer raw NM market prices first, then any positive market/low value.
-    const rank = (row: Record<string, unknown>): number => {
-      const condition = String(row.condition ?? "").trim().toUpperCase();
-      const type = String(row.type ?? "").trim().toLowerCase();
-      const market = getNumberField(row.market);
-      const low = getNumberField(row.low);
-      let score = 0;
-      if (type === "raw") score += 100;
-      if (condition === "NM" || condition === "NEAR MINT") score += 50;
-      if (market !== null) score += 20;
-      if (low !== null) score += 10;
-      return score;
-    };
-
-    const sorted = [...rows].sort((a, b) => rank(b) - rank(a));
-    for (const row of sorted) {
-      const parsed = parseScrydexPriceObject(row);
-      if (parsed.price !== null) return parsed;
-    }
-    return { price: null, currency: "USD" };
-  }
-
-  if (!prices || typeof prices !== "object") return { price: null, currency: "USD" };
-  const record = prices as Record<string, unknown>;
-  const parsedDirect = parseScrydexPriceObject(record);
-  if (parsedDirect.price !== null) return parsedDirect;
-
-  for (const value of Object.values(record)) {
-    if (!value || typeof value !== "object") continue;
-    const nested = extractPriceCurrency(value);
-    if (nested.price !== null) return nested;
-  }
-
-  return { price: null, currency: "USD" };
-}
-
-function rankScrydexPriceEntry(row: Record<string, unknown>): number {
-  const condition = String(row.condition ?? "").trim().toUpperCase();
-  const type = String(row.type ?? "").trim().toLowerCase();
-  const market = getNumberField(row.market);
-  const low = getNumberField(row.low);
-  let score = 0;
-  if (type === "raw") score += 100;
-  if (condition === "NM" || condition === "NEAR MINT") score += 50;
-  if (market !== null) score += 20;
-  if (low !== null) score += 10;
-  return score;
-}
-
-function normalizeScrydexCondition(condition: unknown): {
-  providerCondition: string | null;
-  normalizedCondition: string;
-} {
-  const providerCondition = typeof condition === "string" && condition.trim()
-    ? condition.trim()
-    : null;
-  return {
-    providerCondition,
-    normalizedCondition: providerCondition ? normalizeCondition(providerCondition) : "nm",
-  };
-}
-
-function selectPreferredScrydexPriceEntry(prices: unknown): SelectedScrydexPriceEntry | null {
-  if (Array.isArray(prices)) {
-    const rows = prices
-      .filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object")
-      .sort((left, right) => rankScrydexPriceEntry(right) - rankScrydexPriceEntry(left));
-    for (const row of rows) {
-      const parsed = parseScrydexPriceObject(row);
-      if (parsed.price !== null) {
-        const condition = normalizeScrydexCondition(row.condition);
-        return {
-          price: parsed.price,
-          currency: parsed.currency,
-          row,
-          providerCondition: condition.providerCondition,
-          normalizedCondition: condition.normalizedCondition,
-        };
-      }
-    }
-    return null;
-  }
-
-  if (!prices || typeof prices !== "object") return null;
-  const row = prices as Record<string, unknown>;
-  const parsed = parseScrydexPriceObject(row);
-  if (parsed.price === null) return null;
-  const condition = normalizeScrydexCondition(row.condition);
-  return {
-    price: parsed.price,
-    currency: parsed.currency,
-    row,
-    providerCondition: condition.providerCondition,
-    normalizedCondition: condition.normalizedCondition,
-  };
-}
-
 function extractTrendAnchorPoints(prices: unknown): TrendAnchorPoint[] {
   const selected = selectPreferredScrydexPriceEntry(prices);
   if (!selected) return [];
@@ -366,46 +208,26 @@ function extractTrendAnchorPoints(prices: unknown): TrendAnchorPoint[] {
 }
 
 function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
-  const fallbackSelection = selectPreferredScrydexPriceEntry((card as { prices?: unknown }).prices);
-  const fallbackPrice = fallbackSelection
-    ? { price: fallbackSelection.price, currency: fallbackSelection.currency }
-    : extractPriceCurrency((card as { prices?: unknown }).prices);
-  const fallbackTrendAnchorPoints = extractTrendAnchorPoints((card as { prices?: unknown }).prices);
+  // Price is selected ONLY from per-variant Scrydex `prices` arrays. We no longer
+  // substitute the card-level `prices` as a fallback — on commons where Scrydex
+  // has no raw NM data, that fallback was pulling graded (PSA 10) prices into
+  // `observed_price` and tagging them as Near Mint. If a variant has no
+  // qualifying raw NM/Mint entry we skip the observation for that variant this
+  // cycle; carry-forward via existing snapshots handles the stale window.
   const variants = card.variants ?? [];
+  const results: VariantObservation[] = [];
+
   if (variants.length === 0) {
-    const fallbackSemantics = parseScrydexVariantSemantics("unknown");
-    return [{
+    // Cards without an explicit `variants` array: try the card-level `prices`
+    // but STILL only accept raw NM/Mint entries.
+    const pricingSelection = selectPreferredScrydexPriceEntry((card as { prices?: unknown }).prices);
+    if (!pricingSelection) return results;
+    const semantics = parseScrydexVariantSemantics("unknown");
+    results.push({
       variantName: "unknown",
       variantId: "unknown",
-      observedPrice: fallbackPrice.price,
-      currency: fallbackPrice.currency,
-      providerFinish: fallbackSemantics.providerFinish,
-      normalizedFinish: fallbackSemantics.normalizedFinish,
-      normalizedEdition: fallbackSemantics.normalizedEdition,
-      normalizedStamp: fallbackSemantics.normalizedStamp,
-      stampLabel: fallbackSemantics.stampLabel,
-      hasSpecialVariantToken: fallbackSemantics.hasSpecialVariantToken,
-      specialVariantToken: fallbackSemantics.specialVariantToken,
-      providerCondition: fallbackSelection?.providerCondition ?? null,
-      normalizedCondition: fallbackSelection?.normalizedCondition ?? "nm",
-      trendAnchorPoints: fallbackTrendAnchorPoints,
-    }];
-  }
-
-  const results: VariantObservation[] = [];
-  for (const variant of variants) {
-    const variantName = String((variant as ScrydexVariant).name ?? "unknown").trim() || "unknown";
-    const variantId = variantName.replace(/\s+/g, "_").toLowerCase();
-    const pricingSelection = selectPreferredScrydexPriceEntry((variant as ScrydexVariant).prices);
-    const pricing = pricingSelection
-      ? { price: pricingSelection.price, currency: pricingSelection.currency }
-      : extractPriceCurrency((variant as ScrydexVariant).prices);
-    const semantics = parseScrydexVariantSemantics(variantName);
-    results.push({
-      variantName,
-      variantId,
-      observedPrice: pricing.price ?? fallbackPrice.price,
-      currency: pricing.price !== null ? pricing.currency : fallbackPrice.currency,
+      observedPrice: pricingSelection.price,
+      currency: pricingSelection.currency,
       providerFinish: semantics.providerFinish,
       normalizedFinish: semantics.normalizedFinish,
       normalizedEdition: semantics.normalizedEdition,
@@ -413,11 +235,35 @@ function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
       stampLabel: semantics.stampLabel,
       hasSpecialVariantToken: semantics.hasSpecialVariantToken,
       specialVariantToken: semantics.specialVariantToken,
-      providerCondition: pricingSelection?.providerCondition ?? fallbackSelection?.providerCondition ?? null,
-      normalizedCondition: pricingSelection?.normalizedCondition ?? fallbackSelection?.normalizedCondition ?? "nm",
-      trendAnchorPoints: pricing.price !== null
-        ? extractTrendAnchorPoints((variant as ScrydexVariant).prices)
-        : fallbackTrendAnchorPoints,
+      providerCondition: pricingSelection.providerCondition,
+      normalizedCondition: pricingSelection.normalizedCondition,
+      trendAnchorPoints: extractTrendAnchorPoints((card as { prices?: unknown }).prices),
+    });
+    return results;
+  }
+
+  for (const variant of variants) {
+    const variantName = String((variant as ScrydexVariant).name ?? "unknown").trim() || "unknown";
+    const variantId = variantName.replace(/\s+/g, "_").toLowerCase();
+    const pricingSelection = selectPreferredScrydexPriceEntry((variant as ScrydexVariant).prices);
+    if (!pricingSelection) continue;
+
+    const semantics = parseScrydexVariantSemantics(variantName);
+    results.push({
+      variantName,
+      variantId,
+      observedPrice: pricingSelection.price,
+      currency: pricingSelection.currency,
+      providerFinish: semantics.providerFinish,
+      normalizedFinish: semantics.normalizedFinish,
+      normalizedEdition: semantics.normalizedEdition,
+      normalizedStamp: semantics.normalizedStamp,
+      stampLabel: semantics.stampLabel,
+      hasSpecialVariantToken: semantics.hasSpecialVariantToken,
+      specialVariantToken: semantics.specialVariantToken,
+      providerCondition: pricingSelection.providerCondition,
+      normalizedCondition: pricingSelection.normalizedCondition,
+      trendAnchorPoints: extractTrendAnchorPoints((variant as ScrydexVariant).prices),
     });
   }
 
