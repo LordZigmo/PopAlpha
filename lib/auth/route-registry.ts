@@ -33,6 +33,7 @@ export const PUBLIC_ROUTES = [
   "handles/availability",
   "health",
   "homepage",
+  "homepage/ai-brief",
   "waitlist",
 ];
 
@@ -69,6 +70,7 @@ export const CRON_ROUTES = [
   "cron/snapshot-price-history",
   "cron/refresh-derived-signals",
   "cron/refresh-set-summaries",
+  "cron/refresh-ai-brief",
 ];
 
 export const ADMIN_ROUTES = [

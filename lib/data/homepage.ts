@@ -42,6 +42,10 @@ export type HomepageCard = {
   mover_tier: "hot" | "warming" | "cooling" | "cold" | null;
   image_url: string | null;
   sparkline_7d: number[];
+  // Phase 2: density metrics surfaced on homepage cards
+  sales_count_30d: number | null;
+  active_listings_7d: number | null;
+  updated_at: string | null;
 };
 
 export type HomepageWindowedCards = Record<HomepageSignalWindow, HomepageCard[]>;
@@ -50,6 +54,10 @@ export type HomepageSignalBoardData = {
   top_movers: HomepageWindowedCards;
   biggest_drops: HomepageWindowedCards;
   momentum: HomepageWindowedCards;
+  // Phase 2: dedicated conviction signals (non-windowed — these are cached,
+  // not time-sliced like top_movers/biggest_drops).
+  unusual_volume: HomepageCard[];
+  breakouts: HomepageCard[];
 };
 
 export type HomepageData = {
@@ -157,6 +165,8 @@ function createEmptySignalBoard(): HomepageSignalBoardData {
     top_movers: createEmptyWindowedCards(),
     biggest_drops: createEmptyWindowedCards(),
     momentum: createEmptyWindowedCards(),
+    unusual_volume: [],
+    breakouts: [],
   };
 }
 
@@ -616,6 +626,15 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
         selectedChangePct = fallbackChangePct;
         selectedChangeWindow = "7D";
       }
+      const salesCount30d = typeof marketPulse?.snapshotCount30d === "number" && Number.isFinite(marketPulse.snapshotCount30d)
+        ? marketPulse.snapshotCount30d
+        : null;
+      const activeListings7d = typeof marketPulse?.activeListings7d === "number" && Number.isFinite(marketPulse.activeListings7d)
+        ? marketPulse.activeListings7d
+        : null;
+      const updatedAt = typeof marketPulse?.marketPriceAsOf === "string" && marketPulse.marketPriceAsOf.length > 0
+        ? marketPulse.marketPriceAsOf
+        : null;
       return {
         slug,
         name: card?.canonical_name ?? slug,
@@ -637,6 +656,9 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
         image_url: imageMap.get(slug) ?? null,
         mover_tier: overrides.mover_tier ?? null,
         sparkline_7d: sparkline,
+        sales_count_30d: salesCount30d,
+        active_listings_7d: activeListings7d,
+        updated_at: updatedAt,
       };
     }
 
@@ -822,6 +844,50 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
     }
     trendingCandidatesOut.sort(compareChangeDescending);
     const trendingOut = trendingCandidatesOut.slice(0, SECTION_LIMIT);
+    // ── Derived conviction sections (Phase 2) ────────────────────────────
+    //
+    // Build from the already-assembled positive + negative mover pools so
+    // we cost zero extra queries. Both sections are non-windowed — they
+    // answer "which cards are worth attention RIGHT NOW" rather than
+    // "what moved over X hours".
+    //
+    // Breakouts: positive movers with hot liquidity tier AND a bullish
+    // canonical market direction. This is the intersection of "price is
+    // moving" and "the book agrees". Strict filter — may be empty.
+    //
+    // Unusual volume: cards (any direction) whose active_listings_7d is
+    // notably above the pool median. These are conviction signals
+    // regardless of whether the price moved yet.
+    const breakoutPool = dedupeHomepageCards([
+      ...mixedPositiveMovers.highConfidence,
+      ...mixedPositiveMovers.all,
+    ]).filter((c) => c.mover_tier === "hot" && c.market_direction === "bullish");
+    breakoutPool.sort((a, b) => {
+      const strengthDelta = (b.market_strength_score ?? 0) - (a.market_strength_score ?? 0);
+      if (strengthDelta !== 0) return strengthDelta;
+      return compareChangeDescending(a, b);
+    });
+    const breakoutsOut = breakoutPool.slice(0, SECTION_LIMIT);
+
+    const unusualPool = dedupeHomepageCards([
+      ...mixedPositiveMovers.all,
+      ...mixedNegativeMovers.cards,
+    ]).filter((c) => (c.active_listings_7d ?? 0) > 0);
+    const listingCounts = unusualPool
+      .map((c) => c.active_listings_7d ?? 0)
+      .filter((v) => v > 0)
+      .sort((a, b) => a - b);
+    const listingMedian = listingCounts.length > 0
+      ? listingCounts[Math.floor(listingCounts.length / 2)]
+      : 0;
+    // Threshold: roughly double the median, with a floor to avoid trivia.
+    const unusualThreshold = Math.max(listingMedian * 2, HIGH_CONF_LIQUIDITY_MIN);
+    const unusualFiltered = unusualPool.filter(
+      (c) => (c.active_listings_7d ?? 0) >= unusualThreshold,
+    );
+    unusualFiltered.sort((a, b) => (b.active_listings_7d ?? 0) - (a.active_listings_7d ?? 0));
+    const unusualVolumeOut = unusualFiltered.slice(0, SECTION_LIMIT);
+
     const signalBoard = {
       top_movers: {
         "24H": combineHomepageCards([
@@ -849,6 +915,8 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
           positiveMoversByWindow["7D"].all,
         ]),
       },
+      unusual_volume: unusualVolumeOut,
+      breakouts: breakoutsOut,
     } satisfies HomepageSignalBoardData;
 
     // ── Derive as_of ──────────────────────────────────────────────────────

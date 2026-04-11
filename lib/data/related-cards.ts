@@ -39,6 +39,9 @@ function toHomepageCard(
     mover_tier: null,
     image_url: row.primary_image_url ?? null,
     sparkline_7d: [],
+    sales_count_30d: null,
+    active_listings_7d: null,
+    updated_at: null,
   };
 }
 

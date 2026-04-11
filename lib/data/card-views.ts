@@ -153,6 +153,9 @@ export async function getTopViewedCards(days = 7, limit = 5): Promise<HomepageCa
         mover_tier: null,
         image_url: card.primary_image_url ?? null,
         sparkline_7d: [],
+        sales_count_30d: null,
+        active_listings_7d: null,
+        updated_at: null,
       };
       return result;
     })

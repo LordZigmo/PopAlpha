@@ -54,6 +54,8 @@ const EMPTY_DATA: {
     top_movers: { "24H": HomepageCard[]; "7D": HomepageCard[] };
     biggest_drops: { "24H": HomepageCard[]; "7D": HomepageCard[] };
     momentum: { "24H": HomepageCard[]; "7D": HomepageCard[] };
+    unusual_volume: HomepageCard[];
+    breakouts: HomepageCard[];
   };
   as_of: string | null;
   prices_refreshed_today: number | null;
@@ -68,6 +70,8 @@ const EMPTY_DATA: {
     top_movers: { "24H": [], "7D": [] },
     biggest_drops: { "24H": [], "7D": [] },
     momentum: { "24H": [], "7D": [] },
+    unusual_volume: [],
+    breakouts: [],
   },
   as_of: null,
   prices_refreshed_today: null,
