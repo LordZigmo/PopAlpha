@@ -1,0 +1,473 @@
+import Foundation
+
+// MARK: - Card Service — Fetches live data from Supabase
+
+actor CardService {
+    static let shared = CardService()
+
+    private let decoder: JSONDecoder = {
+        let d = JSONDecoder()
+        d.keyDecodingStrategy = .convertFromSnakeCase
+        return d
+    }()
+
+    // MARK: - Trending Cards (Homepage)
+
+    /// Fetch top cards with market price, change%, image, and sparkline
+    func fetchTrendingCards() async throws -> [MarketCard] {
+        // 1. Fetch metrics rows (cards with prices, sorted by absolute change)
+        let metricsData = try await Supabase.query(
+            table: "public_card_metrics",
+            select: "canonical_slug,market_price,market_price_as_of,change_pct_24h,change_pct_7d,market_confidence_score,market_low_confidence,active_listings_7d,snapshot_count_30d",
+            filters: [
+                ("grade", "eq", "RAW"),
+                ("printing_id", "is", "null"),
+                ("market_price", "not.is", "null"),
+                ("market_price", "gt", "1"),
+            ],
+            order: "market_price.desc",
+            limit: 20
+        )
+        let metrics = try decoder.decode([MetricsRow].self, from: metricsData)
+        let slugs = metrics.map(\.canonicalSlug)
+        print("[CardService] Fetched \(metrics.count) metrics rows")
+
+        guard !slugs.isEmpty else {
+            print("[CardService] No metrics rows matched filters — returning empty")
+            return []
+        }
+
+        // 2. Fetch card metadata
+        let slugFilter = "(\(slugs.joined(separator: ",")))"
+        let cardsData = try await Supabase.query(
+            table: "canonical_cards",
+            select: "slug,canonical_name,set_name,year,card_number",
+            filters: [("slug", "in", slugFilter)]
+        )
+        let cards = try decoder.decode([CardRow].self, from: cardsData)
+        print("[CardService] Fetched \(cards.count) card metadata rows")
+        // Use first occurrence if duplicates exist (uniqueKeysWithValues crashes on dupes)
+        let cardMap = Dictionary(cards.map { ($0.slug, $0) }, uniquingKeysWith: { first, _ in first })
+
+        // 3. Fetch card images
+        let imagesData = try await Supabase.query(
+            table: "card_printings",
+            select: "canonical_slug,image_url",
+            filters: [
+                ("canonical_slug", "in", slugFilter),
+                ("language", "eq", "EN"),
+                ("image_url", "not.is", "null"),
+            ],
+            limit: 20
+        )
+        let images = try decoder.decode([ImageRow].self, from: imagesData)
+        print("[CardService] Fetched \(images.count) image rows")
+        var imageMap: [String: String] = [:]
+        for img in images where imageMap[img.canonicalSlug] == nil {
+            imageMap[img.canonicalSlug] = img.imageUrl
+        }
+
+        // 4. Fetch 7d sparkline data
+        let cutoff7d = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-7 * 86400))
+        let sparkData = try await Supabase.query(
+            table: "public_price_history",
+            select: "canonical_slug,ts,price",
+            filters: [
+                ("canonical_slug", "in", slugFilter),
+                ("source_window", "eq", "snapshot"),
+                ("ts", "gte", cutoff7d),
+            ],
+            order: "ts.desc",
+            limit: 200
+        )
+        let sparkRows = try decoder.decode([SparklineRow].self, from: sparkData)
+        var sparkMap: [String: [Double]] = [:]
+        for row in sparkRows {
+            var arr = sparkMap[row.canonicalSlug] ?? []
+            if arr.count < 7 { arr.append(row.price) }
+            sparkMap[row.canonicalSlug] = arr
+        }
+        // Reverse to oldest→newest
+        for (k, v) in sparkMap { sparkMap[k] = v.reversed() }
+
+        // 5. Assemble MarketCard array — always show cards that have a price
+        let result = metrics.compactMap { m -> MarketCard? in
+            let card = cardMap[m.canonicalSlug]
+            let sparkline = sparkMap[m.canonicalSlug] ?? []
+            let changePct = m.changePct24h ?? derivePctFromSparkline(sparkline)
+            let price = m.marketPrice ?? 0
+
+            return MarketCard(
+                id: m.canonicalSlug,
+                name: card?.canonicalName ?? m.canonicalSlug,
+                setName: card?.setName ?? "Unknown",
+                cardNumber: card?.cardNumber.map { "#\($0)" } ?? "",
+                price: price,
+                changePct: changePct ?? 0,
+                changeWindow: m.changePct24h != nil ? "24H" : "7D",
+                rarity: classifyRarity(price: price, listings: m.activeListings7d),
+                sparkline: sparkline.isEmpty ? [price] : sparkline,
+                imageGradient: [GradientStop(r: 0.1, g: 0.05, b: 0.15), GradientStop(r: 0.2, g: 0.1, b: 0.3)],
+                imageURL: imageMap[m.canonicalSlug].flatMap(URL.init(string:)),
+                confidenceScore: m.marketConfidenceScore
+            )
+        }
+        print("[CardService] Assembled \(result.count) MarketCards")
+        return result
+    }
+
+    // MARK: - Price History for Chart
+
+    /// Fetch raw-cohort price history for a given timeframe.
+    /// Reads from `public_price_history_canonical`, a server-side view that
+    /// restricts each slug to a single raw cohort (variant_ref ending in
+    /// '::RAW'). This prevents the chart from drawing multiple provider/
+    /// finish cohorts as one interleaved zig-zag line — see
+    /// supabase/migrations/20260411130000_public_price_history_canonical.sql.
+    func fetchPriceHistory(slug: String, timeframe: ChartTimeframe) async throws -> [PricePoint] {
+        let cutoff = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-timeframe.seconds))
+
+        let data = try await Supabase.query(
+            table: "public_price_history_canonical",
+            select: "ts,price",
+            filters: [
+                ("canonical_slug", "eq", slug),
+                ("source_window", "eq", "snapshot"),
+                ("ts", "gte", cutoff),
+            ],
+            order: "ts.asc",
+            limit: timeframe.maxPoints
+        )
+
+        return try decoder.decode([PricePoint].self, from: data)
+    }
+
+    // MARK: - Prices Refreshed (24h count, matches homepage)
+
+    func fetchPricesRefreshedToday() async throws -> Int {
+        let cutoff = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-24 * 3600))
+        return try await Supabase.count(
+            table: "public_card_metrics",
+            filters: [
+                ("grade", "eq", "RAW"),
+                ("printing_id", "is", "null"),
+                ("market_price_as_of", "gte", cutoff),
+            ]
+        )
+    }
+
+    // MARK: - Market Cap (sum of all card market prices)
+
+    func fetchMarketCap() async throws -> Double {
+        let data = try await Supabase.query(
+            table: "public_card_metrics",
+            select: "market_price",
+            filters: [
+                ("grade", "eq", "RAW"),
+                ("printing_id", "is", "null"),
+                ("market_price", "not.is", "null"),
+                ("market_price", "gt", "0"),
+            ],
+            limit: 10000
+        )
+
+        struct Row: Decodable { let marketPrice: Double? }
+        let rows = try decoder.decode([Row].self, from: data)
+        return rows.compactMap(\.marketPrice).reduce(0, +)
+    }
+
+    // MARK: - Average 24h Change (across all priced cards)
+
+    func fetchAvgChange24h() async throws -> Double? {
+        // Fetch change_pct_24h for all canonical RAW cards with a price
+        let data = try await Supabase.query(
+            table: "public_card_metrics",
+            select: "change_pct_24h",
+            filters: [
+                ("grade", "eq", "RAW"),
+                ("printing_id", "is", "null"),
+                ("market_price", "not.is", "null"),
+                ("market_price", "gt", "1"),
+                ("change_pct_24h", "not.is", "null"),
+            ],
+            limit: 5000
+        )
+
+        struct Row: Decodable { let changePct24h: Double? }
+        let rows = try decoder.decode([Row].self, from: data)
+        let values = rows.compactMap(\.changePct24h)
+        guard !values.isEmpty else { return nil }
+        return values.reduce(0, +) / Double(values.count)
+    }
+
+    // MARK: - Card Detail (from metrics)
+
+    func fetchCardMetrics(slug: String) async throws -> CardMetricsResult? {
+        let data = try await Supabase.query(
+            table: "public_card_metrics",
+            select: "canonical_slug,market_price,market_price_as_of,change_pct_24h,change_pct_7d,market_confidence_score,market_low_confidence,median_7d,median_30d,low_30d,high_30d,active_listings_7d,snapshot_count_30d",
+            filters: [
+                ("canonical_slug", "eq", slug),
+                ("grade", "eq", "RAW"),
+                ("printing_id", "is", "null"),
+            ],
+            limit: 1
+        )
+        let rows = try decoder.decode([CardMetricsResult].self, from: data)
+        return rows.first
+    }
+
+    // MARK: - Card Profile (AI Brief)
+
+    func fetchCardProfile(slug: String) async throws -> CardProfileResult? {
+        let data = try await Supabase.query(
+            table: "card_profiles",
+            select: "summary_short,summary_long",
+            filters: [("canonical_slug", "eq", slug)],
+            limit: 1
+        )
+        let rows = try decoder.decode([CardProfileResult].self, from: data)
+        return rows.first
+    }
+
+    // MARK: - Homepage Signal Board
+
+    /// Fetch the same signal board data the web homepage renders.
+    /// Hits /api/homepage which wraps getHomepageData() on the server.
+    func fetchHomepageSignalBoard() async throws -> HomepageDataDTO {
+        try await APIClient.get(path: "/api/homepage")
+    }
+
+    /// Fetch the cached LLM-generated market brief served by
+    /// /api/homepage/ai-brief. Returns nil when the cache is empty
+    /// (e.g. first deploy, before the cron has populated it).
+    func fetchAIBrief() async throws -> HomepageAIBriefDTO? {
+        let response: HomepageAIBriefResponseDTO = try await APIClient.get(path: "/api/homepage/ai-brief")
+        return response.brief
+    }
+
+    // MARK: - Helpers
+
+    private func derivePctFromSparkline(_ points: [Double]) -> Double? {
+        guard points.count >= 2, let first = points.first, first > 0 else { return nil }
+        return ((points.last! - first) / first) * 100
+    }
+
+    private func classifyRarity(price: Double, listings: Int?) -> CardRarity {
+        if price >= 200 { return .secretRare }
+        if price >= 50 { return .ultraRare }
+        if price >= 15 { return .rare }
+        return .uncommon
+    }
+
+    /// Shared rarity classifier used by MarketCard converters.
+    static func classifyRarityForPrice(_ price: Double) -> CardRarity {
+        if price >= 200 { return .secretRare }
+        if price >= 50 { return .ultraRare }
+        if price >= 15 { return .rare }
+        return .uncommon
+    }
+}
+
+// MARK: - Chart Timeframe
+
+enum ChartTimeframe: String, CaseIterable {
+    case day = "1D"
+    case week = "7D"
+    case month = "1M"
+    case threeMonth = "3M"
+    case year = "1Y"
+
+    var seconds: TimeInterval {
+        switch self {
+        case .day: return 86400
+        case .week: return 7 * 86400
+        case .month: return 30 * 86400
+        case .threeMonth: return 90 * 86400
+        case .year: return 365 * 86400
+        }
+    }
+
+    var maxPoints: Int {
+        switch self {
+        case .day: return 50
+        case .week: return 100
+        case .month: return 200
+        case .threeMonth: return 400
+        case .year: return 800
+        }
+    }
+}
+
+// MARK: - API Response Models
+
+struct MetricsRow: Decodable {
+    let canonicalSlug: String
+    let marketPrice: Double?
+    let marketPriceAsOf: String?
+    let changePct24h: Double?
+    let changePct7d: Double?
+    let marketConfidenceScore: Int?
+    let marketLowConfidence: Bool?
+    let activeListings7d: Int?
+    let snapshotCount30d: Int?
+}
+
+struct CardRow: Decodable {
+    let slug: String
+    let canonicalName: String
+    let setName: String?
+    let year: Int?
+    let cardNumber: String?
+}
+
+struct ImageRow: Decodable {
+    let canonicalSlug: String
+    let imageUrl: String?
+}
+
+struct SparklineRow: Decodable {
+    let canonicalSlug: String
+    let ts: String
+    let price: Double
+}
+
+struct PricePoint: Decodable {
+    let ts: String
+    let price: Double
+}
+
+struct CardProfileResult: Decodable {
+    let summaryShort: String
+    let summaryLong: String?
+}
+
+struct CardMetricsResult: Decodable {
+    let canonicalSlug: String
+    let marketPrice: Double?
+    let marketPriceAsOf: String?
+    let changePct24h: Double?
+    let changePct7d: Double?
+    let marketConfidenceScore: Int?
+    let marketLowConfidence: Bool?
+    let median7d: Double?
+    let median30d: Double?
+    let low30d: Double?
+    let high30d: Double?
+    let activeListings7d: Int?
+    let snapshotCount30d: Int?
+}
+
+// MARK: - Homepage DTOs (mirror lib/data/homepage.ts HomepageData)
+
+struct HomepageCardDTO: Decodable, Hashable {
+    let slug: String
+    let name: String
+    let setName: String?
+    let year: Int?
+    let marketPrice: Double?
+    let changePct: Double?
+    let changeWindow: String?            // "24H" | "7D"
+    let confidenceScore: Int?
+    let lowConfidence: Bool?
+    let marketStrengthScore: Int?
+    let marketDirection: String?         // "bullish" | "bearish" | "flat"
+    let moverTier: String?               // "hot" | "warming" | "cooling" | "cold"
+    let imageUrl: String?
+    let sparkline7D: [Double]
+    // Phase 2 density metrics — optional so older cached responses still decode
+    let salesCount30D: Int?
+    let activeListings7D: Int?
+    let updatedAt: String?
+}
+
+struct HomepageWindowedCardsDTO: Decodable, Hashable {
+    let h24: [HomepageCardDTO]
+    let d7: [HomepageCardDTO]
+
+    enum CodingKeys: String, CodingKey {
+        case h24 = "24H"
+        case d7 = "7D"
+    }
+
+    func forWindow(_ window: SignalWindow) -> [HomepageCardDTO] {
+        switch window {
+        case .h24: return h24
+        case .d7: return d7
+        }
+    }
+}
+
+struct HomepageSignalBoardDTO: Decodable, Hashable {
+    let topMovers: HomepageWindowedCardsDTO
+    let biggestDrops: HomepageWindowedCardsDTO
+    let momentum: HomepageWindowedCardsDTO
+    // Phase 2 conviction signals — non-windowed; optional during rollout
+    let unusualVolume: [HomepageCardDTO]?
+    let breakouts: [HomepageCardDTO]?
+}
+
+struct HomepageDataDTO: Decodable, Hashable {
+    let movers: [HomepageCardDTO]
+    let highConfidenceMovers: [HomepageCardDTO]
+    let emergingMovers: [HomepageCardDTO]
+    let losers: [HomepageCardDTO]
+    let trending: [HomepageCardDTO]
+    let signalBoard: HomepageSignalBoardDTO
+    let asOf: String?
+    let pricesRefreshedToday: Int?
+    let trackedCardsWithLivePrice: Int?
+}
+
+enum SignalWindow: String, CaseIterable, Hashable {
+    case h24 = "24H"
+    case d7 = "7D"
+
+    var label: String { rawValue }
+}
+
+// MARK: - Homepage AI Brief DTOs (/api/homepage/ai-brief)
+
+struct HomepageAIBriefDTO: Decodable, Hashable {
+    let version: String
+    let summary: String
+    let takeaway: String
+    let focusSet: String?
+    let modelLabel: String?
+    let source: String?          // "llm" | "fallback"
+    let dataAsOf: String?
+    let generatedAt: String?
+}
+
+struct HomepageAIBriefResponseDTO: Decodable {
+    let ok: Bool
+    let brief: HomepageAIBriefDTO?
+}
+
+// MARK: - DTO → MarketCard converter
+// Lets us reuse CardDetailView (which takes a MarketCard) without a parallel UI.
+
+extension HomepageCardDTO {
+    func toMarketCard() -> MarketCard {
+        let price = marketPrice ?? 0
+        let window = changeWindow ?? "24H"
+        let sparkline = sparkline7D.isEmpty ? [price] : sparkline7D
+        return MarketCard(
+            id: slug,
+            name: name,
+            setName: setName ?? "Unknown",
+            cardNumber: "",
+            price: price,
+            changePct: changePct ?? 0,
+            changeWindow: window,
+            rarity: CardService.classifyRarityForPrice(price),
+            sparkline: sparkline,
+            imageGradient: [
+                GradientStop(r: 0.1, g: 0.05, b: 0.15),
+                GradientStop(r: 0.2, g: 0.1, b: 0.3)
+            ],
+            imageURL: imageUrl.flatMap(URL.init(string:)),
+            confidenceScore: confidenceScore
+        )
+    }
+}
