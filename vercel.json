@@ -54,7 +54,7 @@
     },
     {
       "path": "/api/cron/batch-refresh-pipeline-rollups",
-      "schedule": "10 * * * *"
+      "schedule": "10,40 * * * *"
     },
     {
       "path": "/api/cron/capture-pricing-transparency",
