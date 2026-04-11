@@ -18,10 +18,10 @@ import {
 } from "@/lib/backfill/provider-pipeline-rollup-queue";
 
 export const runtime = "nodejs";
-export const maxDuration = 300;
+export const maxDuration = 600;
 
 const DEFAULT_BATCH_SIZE = 50;
-const DEADLINE_RESERVE_MS = 60_000;
+const DEADLINE_RESERVE_MS = 90_000;
 
 function parseOptionalInt(value: string | null): number | undefined {
   if (!value) return undefined;
