@@ -20,8 +20,8 @@ import {
 export const runtime = "nodejs";
 export const maxDuration = 600;
 
-const DEFAULT_BATCH_SIZE = 200;
-const DEADLINE_RESERVE_MS = 45_000;
+const DEFAULT_BATCH_SIZE = 50;
+const DEADLINE_RESERVE_MS = 90_000;
 
 function parseOptionalInt(value: string | null): number | undefined {
   if (!value) return undefined;
