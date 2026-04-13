@@ -86,11 +86,11 @@ type CanonicalCardPageBaseData = {
 };
 
 const DEFAULT_BACK_HREF = "/search";
-const GRADED_SOURCES = ["PSA", "TAG", "BGS", "CGC"] as const;
-const GRADE_BUCKETS = ["LE_7", "G8", "G9", "G10"] as const;
+import { GRADED_PROVIDERS, GRADE_BUCKETS, type GradeBucket } from "@/lib/cards/detail-types";
+
+const GRADED_SOURCES = GRADED_PROVIDERS;
 
 type ViewMode = "RAW" | "GRADED";
-type GradeBucket = (typeof GRADE_BUCKETS)[number];
 
 type GradedAvailabilityRow = {
   provider: GradedSource;
@@ -351,7 +351,9 @@ function gradeBucketLabel(grade: GradeBucket): string {
   if (grade === "LE_7") return "7 or Less";
   if (grade === "G8") return "8";
   if (grade === "G9") return "9";
+  if (grade === "G9_5") return "9.5";
   if (grade === "G10") return "10";
+  if (grade === "G10_PERFECT") return "10 Perfect";
   return grade;
 }
 

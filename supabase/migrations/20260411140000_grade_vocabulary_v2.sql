@@ -1,0 +1,33 @@
+-- Grade vocabulary v2: extend allowed grade bucket values.
+--
+-- All grade columns (price_snapshots.grade, variant_metrics.grade,
+-- card_metrics.grade) are `text not null default 'RAW'` with no CHECK
+-- constraints — they accept arbitrary strings already. This migration
+-- is a documentation marker only; no schema changes are required.
+--
+-- Previous vocabulary:
+--   RAW, LE_7, G8, G9, G10
+--
+-- Extended vocabulary (this PR):
+--   RAW, LE_7, G8, G9, G9_5, G10, G10_PERFECT
+--
+-- New buckets:
+--   G9_5        — half-grades (CGC 9.5, BGS 9.5)
+--   G10_PERFECT — premium tier 10s (BGS Black Label, CGC Perfect 10,
+--                 PSA Gem Mint when marked is_perfect by Scrydex)
+--
+-- LE_7 remains a catch-all for grades 1–7 across all providers.
+-- Fine-grained PSA 1–7 splits deferred until real Scrydex payload
+-- sampling shows sufficient data density per sub-grade.
+--
+-- Corresponding code changes:
+--   lib/cards/detail-types.ts       — GRADE_BUCKETS tuple extended
+--   lib/identity/variant-ref.mjs    — INTERNAL_GRADE_TO_BUCKET map +
+--                                     parseVariantRef regex extended
+--   lib/identity/variant-ref.d.ts   — VariantRefBucket type extended
+--   lib/providers/pokemon-tcg-api.ts — GRADE_KEY_MAP extended
+--   lib/ebay-query.ts               — GradeSelection type extended
+--   app/api/ingest/psa/route.ts     — gradeBucketFromPsaGrade extended
+--   app/c/[slug]/page.tsx           — imports from detail-types.ts
+
+select 1; -- no-op; migration is a documentation marker

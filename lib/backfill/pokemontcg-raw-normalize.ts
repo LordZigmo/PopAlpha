@@ -10,6 +10,7 @@ import {
 import {
   getNumberField,
   selectPreferredScrydexPriceEntry,
+  selectScrydexGradedEntries,
 } from "@/lib/backfill/scrydex-raw-price-select";
 import type { ScrydexCard, ScrydexVariant } from "@/lib/scrydex/client";
 
@@ -130,6 +131,13 @@ type VariantObservation = {
   providerCondition: string | null;
   normalizedCondition: string;
   trendAnchorPoints: TrendAnchorPoint[];
+  // Graded-specific fields (absent or "RAW" for raw observations)
+  grade: string;
+  gradedProvider: string | null;
+  gradedBucket: string | null;
+  isPerfect: boolean;
+  lowPrice: number | null;
+  highPrice: number | null;
 };
 
 type TrendAnchorPoint = {
@@ -214,57 +222,128 @@ function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
   // `observed_price` and tagging them as Near Mint. If a variant has no
   // qualifying raw NM/Mint entry we skip the observation for that variant this
   // cycle; carry-forward via existing snapshots handles the stale window.
+  //
+  // Additionally, we now extract graded entries (PSA/CGC/BGS/TAG) and emit one
+  // observation per (variant × provider × gradeBucket). These use a distinct
+  // provider_variant_id suffix (::GRADED::<PROVIDER>::<BUCKET>) to avoid
+  // collisions on the provider_normalized_observations unique index.
   const variants = card.variants ?? [];
   const results: VariantObservation[] = [];
 
+  const RAW_DEFAULTS = {
+    grade: "RAW" as const,
+    gradedProvider: null,
+    gradedBucket: null,
+    isPerfect: false,
+    lowPrice: null,
+    highPrice: null,
+  };
+
   if (variants.length === 0) {
-    // Cards without an explicit `variants` array: try the card-level `prices`
-    // but STILL only accept raw NM/Mint entries.
-    const pricingSelection = selectPreferredScrydexPriceEntry((card as { prices?: unknown }).prices);
-    if (!pricingSelection) return results;
-    const semantics = parseScrydexVariantSemantics("unknown");
-    results.push({
-      variantName: "unknown",
-      variantId: "unknown",
-      observedPrice: pricingSelection.price,
-      currency: pricingSelection.currency,
-      providerFinish: semantics.providerFinish,
-      normalizedFinish: semantics.normalizedFinish,
-      normalizedEdition: semantics.normalizedEdition,
-      normalizedStamp: semantics.normalizedStamp,
-      stampLabel: semantics.stampLabel,
-      hasSpecialVariantToken: semantics.hasSpecialVariantToken,
-      specialVariantToken: semantics.specialVariantToken,
-      providerCondition: pricingSelection.providerCondition,
-      normalizedCondition: pricingSelection.normalizedCondition,
-      trendAnchorPoints: extractTrendAnchorPoints((card as { prices?: unknown }).prices),
-    });
+    const prices = (card as { prices?: unknown }).prices;
+    const pricingSelection = selectPreferredScrydexPriceEntry(prices);
+    if (pricingSelection) {
+      const semantics = parseScrydexVariantSemantics("unknown");
+      results.push({
+        variantName: "unknown",
+        variantId: "unknown",
+        observedPrice: pricingSelection.price,
+        currency: pricingSelection.currency,
+        providerFinish: semantics.providerFinish,
+        normalizedFinish: semantics.normalizedFinish,
+        normalizedEdition: semantics.normalizedEdition,
+        normalizedStamp: semantics.normalizedStamp,
+        stampLabel: semantics.stampLabel,
+        hasSpecialVariantToken: semantics.hasSpecialVariantToken,
+        specialVariantToken: semantics.specialVariantToken,
+        providerCondition: pricingSelection.providerCondition,
+        normalizedCondition: pricingSelection.normalizedCondition,
+        trendAnchorPoints: extractTrendAnchorPoints(prices),
+        ...RAW_DEFAULTS,
+      });
+    }
+    // Also extract graded entries from card-level prices
+    for (const graded of selectScrydexGradedEntries(prices)) {
+      const semantics = parseScrydexVariantSemantics("unknown");
+      results.push({
+        variantName: "unknown",
+        variantId: "unknown",
+        observedPrice: graded.price,
+        currency: graded.currency,
+        providerFinish: semantics.providerFinish,
+        normalizedFinish: semantics.normalizedFinish,
+        normalizedEdition: semantics.normalizedEdition,
+        normalizedStamp: semantics.normalizedStamp,
+        stampLabel: semantics.stampLabel,
+        hasSpecialVariantToken: semantics.hasSpecialVariantToken,
+        specialVariantToken: semantics.specialVariantToken,
+        providerCondition: null,
+        normalizedCondition: "graded",
+        trendAnchorPoints: [],
+        grade: graded.gradeBucket,
+        gradedProvider: graded.provider,
+        gradedBucket: graded.gradeBucket,
+        isPerfect: graded.isPerfect,
+        lowPrice: graded.low,
+        highPrice: graded.high,
+      });
+    }
     return results;
   }
 
   for (const variant of variants) {
     const variantName = String((variant as ScrydexVariant).name ?? "unknown").trim() || "unknown";
     const variantId = variantName.replace(/\s+/g, "_").toLowerCase();
-    const pricingSelection = selectPreferredScrydexPriceEntry((variant as ScrydexVariant).prices);
-    if (!pricingSelection) continue;
+    const variantPrices = (variant as ScrydexVariant).prices;
+    const pricingSelection = selectPreferredScrydexPriceEntry(variantPrices);
 
-    const semantics = parseScrydexVariantSemantics(variantName);
-    results.push({
-      variantName,
-      variantId,
-      observedPrice: pricingSelection.price,
-      currency: pricingSelection.currency,
-      providerFinish: semantics.providerFinish,
-      normalizedFinish: semantics.normalizedFinish,
-      normalizedEdition: semantics.normalizedEdition,
-      normalizedStamp: semantics.normalizedStamp,
-      stampLabel: semantics.stampLabel,
-      hasSpecialVariantToken: semantics.hasSpecialVariantToken,
-      specialVariantToken: semantics.specialVariantToken,
-      providerCondition: pricingSelection.providerCondition,
-      normalizedCondition: pricingSelection.normalizedCondition,
-      trendAnchorPoints: extractTrendAnchorPoints((variant as ScrydexVariant).prices),
-    });
+    if (pricingSelection) {
+      const semantics = parseScrydexVariantSemantics(variantName);
+      results.push({
+        variantName,
+        variantId,
+        observedPrice: pricingSelection.price,
+        currency: pricingSelection.currency,
+        providerFinish: semantics.providerFinish,
+        normalizedFinish: semantics.normalizedFinish,
+        normalizedEdition: semantics.normalizedEdition,
+        normalizedStamp: semantics.normalizedStamp,
+        stampLabel: semantics.stampLabel,
+        hasSpecialVariantToken: semantics.hasSpecialVariantToken,
+        specialVariantToken: semantics.specialVariantToken,
+        providerCondition: pricingSelection.providerCondition,
+        normalizedCondition: pricingSelection.normalizedCondition,
+        trendAnchorPoints: extractTrendAnchorPoints(variantPrices),
+        ...RAW_DEFAULTS,
+      });
+    }
+
+    // Extract graded entries for this variant
+    for (const graded of selectScrydexGradedEntries(variantPrices)) {
+      const semantics = parseScrydexVariantSemantics(variantName);
+      results.push({
+        variantName,
+        variantId,
+        observedPrice: graded.price,
+        currency: graded.currency,
+        providerFinish: semantics.providerFinish,
+        normalizedFinish: semantics.normalizedFinish,
+        normalizedEdition: semantics.normalizedEdition,
+        normalizedStamp: semantics.normalizedStamp,
+        stampLabel: semantics.stampLabel,
+        hasSpecialVariantToken: semantics.hasSpecialVariantToken,
+        specialVariantToken: semantics.specialVariantToken,
+        providerCondition: null,
+        normalizedCondition: "graded",
+        trendAnchorPoints: [],
+        grade: graded.gradeBucket,
+        gradedProvider: graded.provider,
+        gradedBucket: graded.gradeBucket,
+        isPerfect: graded.isPerfect,
+        lowPrice: graded.low,
+        highPrice: graded.high,
+      });
+    }
   }
 
   return results;
@@ -282,7 +361,10 @@ function buildObservationRow(params: {
   const providerCardId = String(card.id ?? "").trim();
   if (!providerCardId) return null;
 
-  const providerVariantId = `${providerCardId}:${variant.variantId}`;
+  const isGraded = variant.grade !== "RAW" && variant.gradedProvider && variant.gradedBucket;
+  const providerVariantId = isGraded
+    ? `${providerCardId}:${variant.variantId}::GRADED::${variant.gradedProvider}::${variant.gradedBucket}`
+    : `${providerCardId}:${variant.variantId}`;
   const cardNumberRaw = String(card.number ?? card.printed_number ?? "").trim() || null;
   const normalizedCardNumber = normalizeCardNumber(cardNumberRaw);
   const observedAtMs = Date.parse(rawPayload.fetched_at);
@@ -329,9 +411,9 @@ function buildObservationRow(params: {
       variant.variantName,
       variant.normalizedEdition,
       variant.stampLabel,
-      variant.providerCondition ?? "Near Mint",
+      variant.providerCondition ?? (isGraded ? "graded" : "Near Mint"),
       "English",
-      "RAW",
+      isGraded ? `${variant.gradedProvider}_${variant.gradedBucket}` : "RAW",
     ),
     observed_price: variant.observedPrice,
     currency: variant.currency,
@@ -353,6 +435,14 @@ function buildObservationRow(params: {
       normalizedCondition: variant.normalizedCondition,
       providerVariantPricingCurrency: variant.currency,
       providerTrendAnchorPoints,
+      // Graded metadata — downstream timeseries + variant-metrics readers
+      // use these to set price_snapshots.grade and variant_metrics.grade.
+      grade: variant.grade,
+      gradedCompany: variant.gradedProvider,
+      gradedBucket: variant.gradedBucket,
+      isPerfect: variant.isPerfect,
+      lowPrice: variant.lowPrice,
+      highPrice: variant.highPrice,
     },
     updated_at: normalizedAt,
   };

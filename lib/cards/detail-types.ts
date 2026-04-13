@@ -1,5 +1,5 @@
 export const GRADED_PROVIDERS = ["PSA", "TAG", "BGS", "CGC"] as const;
-export const GRADE_BUCKETS = ["LE_7", "G8", "G9", "G10"] as const;
+export const GRADE_BUCKETS = ["LE_7", "G8", "G9", "G9_5", "G10", "G10_PERFECT"] as const;
 
 export type GradedProvider = (typeof GRADED_PROVIDERS)[number];
 export type GradeBucket = (typeof GRADE_BUCKETS)[number];

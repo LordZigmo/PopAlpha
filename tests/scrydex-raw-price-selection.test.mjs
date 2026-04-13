@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { selectPreferredScrydexPriceEntry } from "../lib/backfill/scrydex-raw-price-select.ts";
+import { selectPreferredScrydexPriceEntry, selectScrydexGradedEntries } from "../lib/backfill/scrydex-raw-price-select.ts";
 
 // Regression fixtures for the Legends Awakened Dratini contamination: Scrydex
 // was returning mixed raw + graded rows in a single `prices` array, and the
@@ -114,4 +114,100 @@ function runScrydexRawPriceSelectionTests() {
 
 runScrydexRawPriceSelectionTests();
 
+// ── Graded extraction tests ───────────────────────────────────────────────────
+
+function runScrydexGradedExtractionTests() {
+  // 1. Happy path — multiple graded tiers extracted, raw excluded.
+  const mixed = [
+    { type: "raw", condition: "Near Mint", market: 3.06 },
+    { type: "graded", company: "PSA", grade: "10", market: 157.0, low: 140, high: 175 },
+    { type: "graded", company: "PSA", grade: "9", market: 20.5, low: 18, high: 24 },
+    { type: "graded", company: "CGC", grade: "9.5", market: 45.0 },
+    { type: "graded", company: "BGS", grade: "10", is_perfect: true, market: 500.0 },
+  ];
+  const results = selectScrydexGradedEntries(mixed);
+  assert.equal(results.length, 4, "should extract 4 graded entries, not the raw one");
+
+  const psa10 = results.find((r) => r.provider === "PSA" && r.gradeBucket === "G10");
+  assert.ok(psa10, "PSA G10 must be present");
+  assert.equal(psa10.price, 157.0);
+  assert.equal(psa10.low, 140);
+  assert.equal(psa10.high, 175);
+
+  const psa9 = results.find((r) => r.provider === "PSA" && r.gradeBucket === "G9");
+  assert.ok(psa9);
+  assert.equal(psa9.price, 20.5);
+
+  const cgc95 = results.find((r) => r.provider === "CGC" && r.gradeBucket === "G9_5");
+  assert.ok(cgc95, "CGC G9_5 must be present for grade '9.5'");
+  assert.equal(cgc95.price, 45.0);
+
+  const bgsPerfect = results.find((r) => r.provider === "BGS" && r.gradeBucket === "G10_PERFECT");
+  assert.ok(bgsPerfect, "BGS G10_PERFECT must be present when is_perfect=true");
+  assert.equal(bgsPerfect.price, 500.0);
+  assert.equal(bgsPerfect.isPerfect, true);
+
+  // 2. Signed and error rows are rejected.
+  const flagged = [
+    { type: "graded", company: "PSA", grade: "10", is_signed: true, market: 300 },
+    { type: "graded", company: "PSA", grade: "9", is_error: true, market: 200 },
+    { type: "graded", company: "PSA", grade: "8", market: 15 },
+  ];
+  const flaggedResults = selectScrydexGradedEntries(flagged);
+  assert.equal(flaggedResults.length, 1, "signed and error must be rejected");
+  assert.equal(flaggedResults[0].gradeBucket, "G8");
+
+  // 3. Unknown company is rejected.
+  const unknownCompany = [
+    { type: "graded", company: "SGC", grade: "10", market: 100 },
+  ];
+  assert.equal(selectScrydexGradedEntries(unknownCompany).length, 0);
+
+  // 4. Unknown grade string is rejected (never fabricate).
+  const unknownGrade = [
+    { type: "graded", company: "PSA", grade: "AUTHENTIC", market: 50 },
+  ];
+  assert.equal(selectScrydexGradedEntries(unknownGrade).length, 0);
+
+  // 5. Missing grade or company is rejected.
+  const missingFields = [
+    { type: "graded", grade: "10", market: 100 },      // no company
+    { type: "graded", company: "PSA", market: 100 },    // no grade
+  ];
+  assert.equal(selectScrydexGradedEntries(missingFields).length, 0);
+
+  // 6. Dedup: two PSA 10 entries → keep the one with better scoring.
+  const dupes = [
+    { type: "graded", company: "PSA", grade: "10", low: 140, market: 157 },
+    { type: "graded", company: "PSA", grade: "10", market: 160 },
+  ];
+  const dedupResults = selectScrydexGradedEntries(dupes);
+  assert.equal(dedupResults.length, 1, "dedup: one entry per (provider, bucket)");
+  assert.equal(dedupResults[0].price, 157, "dedup: entry with market+low wins");
+
+  // 7. Empty / null inputs.
+  assert.deepEqual(selectScrydexGradedEntries(null), []);
+  assert.deepEqual(selectScrydexGradedEntries(undefined), []);
+  assert.deepEqual(selectScrydexGradedEntries([]), []);
+
+  // 8. Raw-only array returns empty (no graded).
+  const rawOnly = [
+    { type: "raw", condition: "Near Mint", market: 3.06 },
+  ];
+  assert.equal(selectScrydexGradedEntries(rawOnly).length, 0);
+
+  // 9. is_perfect overrides grade value to G10_PERFECT.
+  const perfectOverride = [
+    { type: "graded", company: "CGC", grade: "10", is_perfect: true, market: 800 },
+    { type: "graded", company: "CGC", grade: "10", market: 200 },
+  ];
+  const perfectResults = selectScrydexGradedEntries(perfectOverride);
+  assert.equal(perfectResults.length, 2, "perfect and non-perfect are different buckets");
+  assert.ok(perfectResults.some((r) => r.gradeBucket === "G10_PERFECT" && r.price === 800));
+  assert.ok(perfectResults.some((r) => r.gradeBucket === "G10" && r.price === 200));
+}
+
+runScrydexGradedExtractionTests();
+
 console.log("scrydex raw price selection tests passed");
+console.log("scrydex graded extraction tests passed");

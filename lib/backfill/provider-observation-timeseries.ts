@@ -71,8 +71,11 @@ type CandidateRow = {
 type PriceSnapshotWriteRow = {
   canonical_slug: string;
   printing_id: string | null;
-  grade: "RAW";
+  grade: string;
   price_value: number;
+  low_value: number | null;
+  high_value: number | null;
+  sample_count: number | null;
   currency: string;
   provider: SupportedProvider;
   provider_ref: string;
@@ -179,8 +182,12 @@ function buildHistoryVariantRef(row: CandidateRow, provider: SupportedProvider):
   });
 }
 
-function shouldWriteRawForCondition(_provider: SupportedProvider, condition: string | null | undefined): boolean {
-  const normalized = String(condition ?? "").trim().toLowerCase();
+function shouldWriteObservation(_provider: SupportedProvider, observation: { normalized_condition?: string | null; metadata?: Record<string, unknown> | null }): boolean {
+  const grade = String(observation.metadata?.grade ?? "RAW").trim();
+  // Graded observations always write — their grade is the primary qualifier.
+  if (grade && grade !== "RAW") return true;
+  // Raw observations require Near Mint or Mint condition.
+  const normalized = String(observation.normalized_condition ?? "").trim().toLowerCase();
   return normalized === "nm" || normalized === "mint";
 }
 
@@ -701,11 +708,12 @@ export async function runProviderObservationTimeseries(opts: {
         observationsSkippedNoCanonical += 1;
         continue;
       }
-      if (!shouldWriteRawForCondition(opts.provider, row.observation.normalized_condition)) {
+      if (!shouldWriteObservation(opts.provider, row.observation)) {
         observationsSkippedCondition += 1;
         continue;
       }
 
+      const observationGrade = String(row.observation.metadata?.grade ?? "RAW").trim();
       const providerRef = buildProviderRef(opts.provider, row.observation.provider_variant_id);
       const historyVariantRef = buildProviderHistoryVariantRef({
         printingId: row.mapping.printing_id,
@@ -716,11 +724,18 @@ export async function runProviderObservationTimeseries(opts: {
       const sourceCurrency = normalizeCurrency(row.observation.currency);
       const observedPriceUsd = convertToUsd(observedPrice, sourceCurrency);
 
+      const metaLow = row.observation.metadata?.lowPrice;
+      const metaHigh = row.observation.metadata?.highPrice;
       snapshotRows.push({
         canonical_slug: row.mapping.canonical_slug,
         printing_id: row.mapping.printing_id,
-        grade: "RAW",
+        grade: observationGrade,
         price_value: observedPriceUsd,
+        low_value: typeof metaLow === "number" && Number.isFinite(metaLow) && metaLow > 0
+          ? convertToUsd(metaLow, sourceCurrency) : null,
+        high_value: typeof metaHigh === "number" && Number.isFinite(metaHigh) && metaHigh > 0
+          ? convertToUsd(metaHigh, sourceCurrency) : null,
+        sample_count: null,
         currency: "USD",
         provider: opts.provider,
         provider_ref: providerRef,

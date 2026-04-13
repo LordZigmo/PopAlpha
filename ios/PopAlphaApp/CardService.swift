@@ -142,6 +142,43 @@ actor CardService {
         return try decoder.decode([PricePoint].self, from: data)
     }
 
+    /// Fetch graded price history matching a variant_ref suffix pattern.
+    /// Used when the user selects a graded pill (e.g. PSA G10).
+    /// The suffix is like "::PSA::10" and we match with ilike.
+    func fetchGradedPriceHistory(slug: String, variantRef: String, timeframe: ChartTimeframe) async throws -> [PricePoint] {
+        let cutoff = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-timeframe.seconds))
+
+        let data = try await Supabase.query(
+            table: "public_price_history",
+            select: "ts,price",
+            filters: [
+                ("canonical_slug", "eq", slug),
+                ("variant_ref", "ilike", "%\(variantRef)"),
+                ("source_window", "eq", "snapshot"),
+                ("ts", "gte", cutoff),
+            ],
+            order: "ts.asc",
+            limit: timeframe.maxPoints
+        )
+
+        return try decoder.decode([PricePoint].self, from: data)
+    }
+
+    /// Fetch graded variant metrics from public_variant_metrics for a card.
+    func fetchGradedVariantMetrics(slug: String) async throws -> [GradedVariantMetricRow] {
+        let data = try await Supabase.query(
+            table: "public_variant_metrics",
+            select: "printing_id,provider,grade,provider_as_of_ts,history_points_30d",
+            filters: [
+                ("canonical_slug", "eq", slug),
+            ],
+            order: "provider.asc,grade.asc",
+            limit: 200
+        )
+
+        return try decoder.decode([GradedVariantMetricRow].self, from: data)
+    }
+
     // MARK: - Prices Refreshed (24h count, matches homepage)
 
     func fetchPricesRefreshedToday() async throws -> Int {
@@ -356,6 +393,14 @@ struct CardMetricsResult: Decodable {
     let high30d: Double?
     let activeListings7d: Int?
     let snapshotCount30d: Int?
+}
+
+struct GradedVariantMetricRow: Decodable {
+    let printingId: String?
+    let provider: String
+    let grade: String
+    let providerAsOfTs: String?
+    let historyPoints30d: Int?
 }
 
 // MARK: - Homepage DTOs (mirror lib/data/homepage.ts HomepageData)

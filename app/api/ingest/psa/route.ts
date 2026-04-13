@@ -49,12 +49,20 @@ function normalizeText(value: string | null | undefined): string {
     .trim();
 }
 
-function gradeBucketFromPsaGrade(raw: string | null | undefined): "LE_7" | "G8" | "G9" | "G10" | null {
-  const match = String(raw ?? "").match(/(\d+(?:\.\d+)?)/);
+function gradeBucketFromPsaGrade(raw: string | null | undefined): "LE_7" | "G8" | "G9" | "G9_5" | "G10" | "G10_PERFECT" | null {
+  const rawStr = String(raw ?? "").trim();
+  const match = rawStr.match(/(\d+(?:\.\d+)?)/);
   if (!match) return null;
   const grade = Number.parseFloat(match[1]);
   if (!Number.isFinite(grade)) return null;
-  if (grade >= 10) return "G10";
+  if (grade >= 10) {
+    const lower = rawStr.toLowerCase();
+    if (lower.includes("pristine") || lower.includes("perfect") || lower.includes("black label")) {
+      return "G10_PERFECT";
+    }
+    return "G10";
+  }
+  if (grade >= 9.5) return "G9_5";
   if (grade >= 9) return "G9";
   if (grade >= 8) return "G8";
   return "LE_7";

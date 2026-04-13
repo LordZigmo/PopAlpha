@@ -1,5 +1,5 @@
 export type GradedVariantProvider = "PSA" | "CGC" | "BGS" | "TAG";
-export type VariantRefBucket = "RAW" | "7_OR_LESS" | "8" | "9" | "10";
+export type VariantRefBucket = "RAW" | "7_OR_LESS" | "8" | "9" | "9_5" | "10" | "10_PERFECT";
 
 export type ParsedVariantRef =
   | {

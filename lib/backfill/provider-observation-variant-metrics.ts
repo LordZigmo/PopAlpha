@@ -68,7 +68,7 @@ type VariantMetricsWriteRow = {
   printing_id: string;
   variant_ref: string;
   provider: SupportedProvider;
-  grade: "RAW";
+  grade: string;
   provider_trend_slope_7d: number | null;
   provider_cov_price_30d: number | null;
   provider_price_relative_to_30d_range: number | null;
@@ -140,8 +140,10 @@ function toFiniteNumber(value: unknown): number | null {
   return null;
 }
 
-function shouldWriteRawForCondition(_provider: SupportedProvider, condition: string | null | undefined): boolean {
-  const normalized = String(condition ?? "").trim().toLowerCase();
+function shouldWriteObservation(_provider: SupportedProvider, observation: { normalized_condition?: string | null; metadata?: Record<string, unknown> | null }): boolean {
+  const grade = String(observation.metadata?.grade ?? "RAW").trim();
+  if (grade && grade !== "RAW") return true;
+  const normalized = String(observation.normalized_condition ?? "").trim().toLowerCase();
   return normalized === "nm" || normalized === "mint";
 }
 
@@ -491,7 +493,7 @@ export async function runProviderObservationVariantMetrics(opts: {
         observationsSkippedNoPrice += 1;
         continue;
       }
-      if (!shouldWriteRawForCondition(opts.provider, row.observation.normalized_condition)) {
+      if (!shouldWriteObservation(opts.provider, row.observation)) {
         observationsSkippedCondition += 1;
         continue;
       }
@@ -542,7 +544,7 @@ export async function runProviderObservationVariantMetrics(opts: {
         printing_id: printingId,
         variant_ref: variantRef,
         provider: opts.provider,
-        grade: "RAW",
+        grade: String(row.observation.metadata?.grade ?? "RAW").trim(),
         provider_trend_slope_7d: analytics.provider_trend_slope_7d,
         provider_cov_price_30d: analytics.provider_cov_price_30d,
         provider_price_relative_to_30d_range: analytics.provider_price_relative_to_30d_range,

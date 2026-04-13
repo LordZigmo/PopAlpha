@@ -27,6 +27,24 @@ export function runVariantRefTests() {
     `${printingId}::BGS::10`,
   );
 
+  // New buckets: G9_5 and G10_PERFECT
+  assert.equal(
+    buildGradedVariantRef(printingId, "CGC", "G9_5"),
+    `${printingId}::CGC::9_5`,
+  );
+  assert.equal(
+    buildGradedVariantRef(printingId, "BGS", "G10_PERFECT"),
+    `${printingId}::BGS::10_PERFECT`,
+  );
+  assert.equal(
+    buildVariantRef({ printingId, provider: "PSA", grade: "G9_5" }),
+    `${printingId}::PSA::9_5`,
+  );
+  assert.equal(
+    buildVariantRef({ printingId, provider: "CGC", grade: "10_PERFECT" }),
+    `${printingId}::CGC::10_PERFECT`,
+  );
+
   assert.deepEqual(parseVariantRef(`${printingId}::RAW`), {
     printingId,
     mode: "RAW",
@@ -39,6 +57,21 @@ export function runVariantRefTests() {
     mode: "GRADED",
     provider: "CGC",
     gradeBucket: "8",
+  });
+
+  // New bucket round-trip: parse G9_5 and G10_PERFECT
+  assert.deepEqual(parseVariantRef(`${printingId}::CGC::9_5`), {
+    printingId,
+    mode: "GRADED",
+    provider: "CGC",
+    gradeBucket: "9_5",
+  });
+
+  assert.deepEqual(parseVariantRef(`${printingId}::BGS::10_PERFECT`), {
+    printingId,
+    mode: "GRADED",
+    provider: "BGS",
+    gradeBucket: "10_PERFECT",
   });
 
   assert.equal(

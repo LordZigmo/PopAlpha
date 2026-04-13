@@ -1,5 +1,36 @@
 import SwiftUI
 
+// MARK: - Price Mode
+
+enum PriceMode: Equatable, Hashable {
+    case nearMint
+    case graded(provider: String, bucket: String)
+
+    var isGraded: Bool {
+        if case .graded = self { return true }
+        return false
+    }
+
+    var label: String {
+        switch self {
+        case .nearMint: return "Near Mint"
+        case .graded(let provider, let bucket):
+            let bucketLabel: String = {
+                switch bucket {
+                case "LE_7": return "≤7"
+                case "G8": return "8"
+                case "G9": return "9"
+                case "G9_5": return "9.5"
+                case "G10": return "10"
+                case "G10_PERFECT": return "10 Perfect"
+                default: return bucket
+                }
+            }()
+            return "\(provider) \(bucketLabel)"
+        }
+    }
+}
+
 struct CardDetailView: View {
     let card: MarketCard
     @Environment(\.dismiss) private var dismiss
@@ -11,6 +42,10 @@ struct CardDetailView: View {
     @State private var cardMetrics: CardMetricsResult?
     @State private var friendActivity: ActivityService.CardActivityResponse?
     @State private var showAddHolding = false
+    @State private var selectedPriceMode: PriceMode = .nearMint
+    @State private var availableGradedOptions: [PriceMode] = []
+    @State private var gradedMetricsLoaded = false
+    @State private var gradedHeroPrice: Double?
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
@@ -20,7 +55,7 @@ struct CardDetailView: View {
             }
         }
         .background(PA.Colors.background)
-        .task(id: selectedTimeframe) {
+        .task(id: "\(selectedTimeframe.rawValue)|\(selectedPriceMode)") {
             await loadChart()
         }
         .task {
@@ -28,6 +63,28 @@ struct CardDetailView: View {
             cardMetrics = try? await CardService.shared.fetchCardMetrics(slug: card.id)
             if AuthService.shared.isAuthenticated {
                 friendActivity = try? await ActivityService.shared.fetchCardActivity(slug: card.id)
+            }
+            // Load available graded options lazily
+            if let rows = try? await CardService.shared.fetchGradedVariantMetrics(slug: card.id) {
+                let validProviders: Set<String> = ["PSA", "CGC", "BGS", "TAG"]
+                let validBuckets: Set<String> = ["LE_7", "G8", "G9", "G9_5", "G10", "G10_PERFECT"]
+                let options = rows
+                    .filter { validProviders.contains($0.provider) && validBuckets.contains($0.grade) }
+                    .filter { ($0.historyPoints30d ?? 0) >= 3 || $0.providerAsOfTs != nil }
+                    .map { PriceMode.graded(provider: $0.provider, bucket: $0.grade) }
+                let seen = NSMutableOrderedSet()
+                var unique: [PriceMode] = []
+                for opt in options {
+                    let key = "\(opt)" as NSString
+                    if !seen.contains(key) {
+                        seen.add(key)
+                        unique.append(opt)
+                    }
+                }
+                await MainActor.run {
+                    availableGradedOptions = unique
+                    gradedMetricsLoaded = true
+                }
             }
         }
         .sheet(isPresented: $showAddHolding) {
@@ -150,6 +207,9 @@ struct CardDetailView: View {
             // Title + Price section
             pricingSection
 
+            // Grade mode pill selector
+            gradePillSection
+
             // Chart section
             chartSection
 
@@ -203,21 +263,23 @@ struct CardDetailView: View {
             }
 
             HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Text(card.formattedPrice)
+                Text(currentHeroPrice)
                     .font(PA.Typography.heroPrice)
                     .foregroundStyle(PA.Colors.text)
 
-                HStack(spacing: 4) {
-                    Image(systemName: card.isPositive ? "arrow.up.right" : "arrow.down.right")
-                        .font(.system(size: 12, weight: .bold))
-                    Text(card.changeText)
-                        .font(.system(size: 15, weight: .semibold))
-                }
-                .foregroundStyle(card.isPositive ? PA.Colors.positive : PA.Colors.negative)
+                if !selectedPriceMode.isGraded {
+                    HStack(spacing: 4) {
+                        Image(systemName: card.isPositive ? "arrow.up.right" : "arrow.down.right")
+                            .font(.system(size: 12, weight: .bold))
+                        Text(card.changeText)
+                            .font(.system(size: 15, weight: .semibold))
+                    }
+                    .foregroundStyle(card.isPositive ? PA.Colors.positive : PA.Colors.negative)
 
-                Text(card.changeWindow)
-                    .font(PA.Typography.caption)
-                    .foregroundStyle(PA.Colors.muted)
+                    Text(card.changeWindow)
+                        .font(PA.Typography.caption)
+                        .foregroundStyle(PA.Colors.muted)
+                }
             }
         }
     }
@@ -300,14 +362,35 @@ struct CardDetailView: View {
     private func loadChart() async {
         chartLoading = true
         do {
-            let points = try await CardService.shared.fetchPriceHistory(
-                slug: card.id,
-                timeframe: selectedTimeframe
-            )
+            let points: [PricePoint]
+            switch selectedPriceMode {
+            case .nearMint:
+                points = try await CardService.shared.fetchPriceHistory(
+                    slug: card.id,
+                    timeframe: selectedTimeframe
+                )
+            case .graded(let provider, let bucket):
+                // Build variant_ref matching the server's buildGradedVariantRef format.
+                // We don't have the printingId on the client, so match using a
+                // pattern query on variant_ref containing the provider+bucket suffix.
+                // For now, use the un-scoped price_history which the server-side graded
+                // entries are written to with variant_ref like
+                // "{printingId}::{PROVIDER}::{BUCKET}" via buildProviderHistoryVariantRef.
+                // We filter by provider_variant_id pattern in the Supabase query.
+                let variantSuffix = "::\(provider)::\(gradeBucketToVariantRefBucket(bucket))"
+                points = try await CardService.shared.fetchGradedPriceHistory(
+                    slug: card.id,
+                    variantRef: variantSuffix,
+                    timeframe: selectedTimeframe
+                )
+            }
             await MainActor.run {
                 chartPrices = points.map(\.price)
                 chartTimestamps = points.map(\.ts)
                 chartLoading = false
+                if selectedPriceMode.isGraded, let latest = points.last {
+                    gradedHeroPrice = latest.price
+                }
             }
         } catch {
             await MainActor.run {
@@ -459,6 +542,96 @@ struct CardDetailView: View {
                     }
                 }
             }
+        }
+    }
+
+    // MARK: - Grade Pill Selector
+
+    private var gradePillSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                gradePill(title: "Near Mint", selected: selectedPriceMode == .nearMint) {
+                    PAHaptics.selection()
+                    selectedPriceMode = .nearMint
+                    gradedHeroPrice = nil
+                }
+                gradePill(title: "Graded", selected: selectedPriceMode.isGraded) {
+                    PAHaptics.selection()
+                    // Default to first available graded option, or PSA G10 fallback
+                    if let first = availableGradedOptions.first {
+                        selectedPriceMode = first
+                    } else {
+                        selectedPriceMode = .graded(provider: "PSA", bucket: "G10")
+                    }
+                }
+            }
+
+            if selectedPriceMode.isGraded && !availableGradedOptions.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(availableGradedOptions, id: \.self) { option in
+                            Button {
+                                PAHaptics.selection()
+                                selectedPriceMode = option
+                            } label: {
+                                Text(option.label)
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(selectedPriceMode == option ? PA.Colors.background : PA.Colors.text)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 7)
+                                    .background(selectedPriceMode == option ? PA.Colors.accent : PA.Colors.surfaceSoft)
+                                    .clipShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+
+            if selectedPriceMode.isGraded && availableGradedOptions.isEmpty && gradedMetricsLoaded {
+                Text("No graded data available for this card")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(PA.Colors.muted)
+            }
+        }
+        .padding(.horizontal, 0)
+    }
+
+    private func gradePill(title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(selected ? PA.Colors.background : PA.Colors.text)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .background(selected ? PA.Colors.accent : PA.Colors.surfaceSoft)
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Grade-Aware Hero Price
+
+    private var currentHeroPrice: String {
+        switch selectedPriceMode {
+        case .nearMint:
+            return card.formattedPrice
+        case .graded:
+            guard let price = gradedHeroPrice, price > 0 else { return "—" }
+            if price >= 1000 { return String(format: "$%.0f", price) }
+            return String(format: "$%.2f", price)
+        }
+    }
+
+    private func gradeBucketToVariantRefBucket(_ bucket: String) -> String {
+        switch bucket {
+        case "LE_7": return "7_OR_LESS"
+        case "G8": return "8"
+        case "G9": return "9"
+        case "G9_5": return "9_5"
+        case "G10": return "10"
+        case "G10_PERFECT": return "10_PERFECT"
+        default: return bucket
         }
     }
 

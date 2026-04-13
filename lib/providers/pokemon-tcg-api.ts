@@ -102,7 +102,7 @@ type CardsEnvelope = {
 // ── Grade mapping ────────────────────────────────────────────────────────────
 
 type GradedProvider = "PSA" | "BGS" | "CGC";
-type GradeBucket = "G8" | "G9" | "G10";
+type GradeBucket = "G8" | "G9" | "G9_5" | "G10" | "G10_PERFECT";
 
 export type ExtractedGradedPrice = {
   provider: GradedProvider;
@@ -114,11 +114,14 @@ const GRADE_KEY_MAP: Record<string, { provider: GradedProvider; grade: GradeBuck
   psa10:         { provider: "PSA", grade: "G10" },
   psa9:          { provider: "PSA", grade: "G9" },
   psa8:          { provider: "PSA", grade: "G8" },
-  bgs10pristine: { provider: "BGS", grade: "G10" },
+  bgs10pristine: { provider: "BGS", grade: "G10_PERFECT" },
   bgs10:         { provider: "BGS", grade: "G10" },
+  bgs95:         { provider: "BGS", grade: "G9_5" },
   bgs9:          { provider: "BGS", grade: "G9" },
   bgs8:          { provider: "BGS", grade: "G8" },
+  cgc10perfect:  { provider: "CGC", grade: "G10_PERFECT" },
   cgc10:         { provider: "CGC", grade: "G10" },
+  cgc95:         { provider: "CGC", grade: "G9_5" },
   cgc9:          { provider: "CGC", grade: "G9" },
   cgc8:          { provider: "CGC", grade: "G8" },
 };
