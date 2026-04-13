@@ -70,3 +70,33 @@ ios/Sources/Features/Scanner/ai_env/*
 
 .vercel
 .env*.local
+
+# ── Xcode / iOS ──────────────────────────────────────────────────────────────
+# User-specific Xcode state (window positions, breakpoints, scheme prefs).
+# These change on every Xcode session and cause meaningless merge conflicts.
+**/xcuserdata/
+**/*.xcuserstate
+# Xcode workspace settings (auto-generated, per-user)
+*.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+# SPM build artifacts
+.build/
+ios/.swiftpm/
+# Xcode DerivedData and build output
+DerivedData/
+ios/**/DerivedData/
+ios/**/build/
+# Archives and distribution artifacts
+*.ipa
+*.dSYM.zip
+*.dSYM
+*.xcarchive
+# CocoaPods (if ever used)
+ios/Pods/
+# Fastlane artifacts
+ios/fastlane/report.xml
+ios/fastlane/Preview.html
+ios/fastlane/screenshots/**/*.png
+
+# ── Misc local artifacts ─────────────────────────────────────────────────────
+*.png
+!ios/PopAlphaApp/Assets.xcassets/**/*.png
