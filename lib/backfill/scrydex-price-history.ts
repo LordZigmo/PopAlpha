@@ -10,8 +10,9 @@ import {
   retrySupabaseWriteOperation,
 } from "@/lib/backfill/supabase-write-retry";
 import { normalizeScrydexVariantToken } from "@/lib/backfill/scrydex-variant-semantics";
-import { buildProviderHistoryVariantRef } from "@/lib/identity/variant-ref.mjs";
+import { buildProviderHistoryVariantRef, buildGradedVariantRef } from "@/lib/identity/variant-ref.mjs";
 import { normalizeCondition } from "@/lib/providers/justtcg";
+import { selectScrydexGradedEntries } from "@/lib/backfill/scrydex-raw-price-select";
 import {
   fetchCardPriceHistoryPage,
   getScrydexCredentials,
@@ -1477,6 +1478,41 @@ export async function backfillScrydexPriceHistoryForSet(opts: {
               price: resolvedDay.selected.price,
               currency: resolvedDay.selected.currency,
             });
+          }
+        }
+
+        // ── Graded history extraction ─────────────────────────────────────
+        // For each history day, extract all graded entries and write them
+        // with grade-encoded variant_refs so the iOS graded chart has
+        // historical data on day 1 — no additional Scrydex API calls needed.
+        if (variant.printingId) {
+          for (const historyDay of historyDays) {
+            const dayKey = extractDayKey(historyDay?.date);
+            if (!dayKey) continue;
+            const gradedEntries = selectScrydexGradedEntries(historyDay.prices);
+            for (const graded of gradedEntries) {
+              const gradedVariantRef = buildGradedVariantRef(
+                variant.printingId,
+                graded.provider,
+                graded.gradeBucket,
+              );
+              const gradedDayKey = `${gradedVariantRef}::${dayKey}`;
+              if (existingSnapshotState.dayKeys.has(gradedDayKey)) continue;
+
+              const ts = historyDateToSnapshotTs(dayKey);
+              preparedRows.push({
+                canonical_slug: variant.canonicalSlug,
+                variant_ref: gradedVariantRef,
+                provider: PROVIDER,
+                ts,
+                price: graded.price,
+                currency: graded.currency,
+                source_window: "snapshot",
+              });
+              existingSnapshotState.dayKeys.add(gradedDayKey);
+              existingSnapshotState.variantRefs.add(gradedVariantRef);
+              distinctSnapshotDaysWritten.add(gradedDayKey);
+            }
           }
         }
       }
