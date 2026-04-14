@@ -686,21 +686,24 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
       cards: [],
     });
 
+    const positiveRejects = { excluded: 0, noMarketPulse: 0, priceTooLow: 0, snapshotTooLow: 0, changeTooSmall: 0, staleOrLowConf: 0, noComposite: 0 };
+    const negativeRejects = { excluded: 0, noMarketPulse: 0, priceTooLow: 0, snapshotTooLow: 0, staleOrLowConf: 0, noChange: 0 };
+
     const pushPositiveMoverIfEligible = (
       row: ChangeCandidateRow,
       collector: PositiveMoverCollector,
       preferredWindow: HomepageSignalWindow | null = null,
     ): boolean => {
-      if (excludedSlugSet.has(row.canonical_slug)) return false;
+      if (excludedSlugSet.has(row.canonical_slug)) { if (preferredWindow === null) positiveRejects.excluded++; return false; }
       if (collector.seenSlugs.has(row.canonical_slug)) return false;
       const marketPulse = marketPulseMap.get(row.canonical_slug);
-      if (!marketPulse) return false;
+      if (!marketPulse) { if (preferredWindow === null) positiveRejects.noMarketPulse++; return false; }
       const marketPrice = marketPulse.marketPrice ?? row.market_price ?? null;
-      if (marketPrice == null) return false;
-      if (SENTINEL_PRICES.has(Number(marketPrice.toFixed(2)))) return false;
-      if (marketPrice < MIN_MOVER_PRICE) return false;
+      if (marketPrice == null) { if (preferredWindow === null) positiveRejects.priceTooLow++; return false; }
+      if (SENTINEL_PRICES.has(Number(marketPrice.toFixed(2)))) { if (preferredWindow === null) positiveRejects.priceTooLow++; return false; }
+      if (marketPrice < MIN_MOVER_PRICE) { if (preferredWindow === null) positiveRejects.priceTooLow++; return false; }
       const snapshotCount30d = marketPulse.snapshotCount30d ?? row.snapshot_count_30d ?? 0;
-      if (snapshotCount30d < MIN_MOVER_SNAPSHOT_COUNT_30D) return false;
+      if (snapshotCount30d < MIN_MOVER_SNAPSHOT_COUNT_30D) { if (preferredWindow === null) positiveRejects.snapshotTooLow++; return false; }
       const directionalChange = preferredWindow
         ? selectDirectionalChangeForWindow(row, "positive", preferredWindow)
         : selectDirectionalChange(row, "positive");
@@ -710,18 +713,18 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
         ?? (preferredWindow
           ? null
           : (marketPulse.changePct24h !== null ? "24H" : marketPulse.changePct7d !== null ? "7D" : null));
-      if (changePct == null || changePct < MIN_MOVER_CHANGE_PCT || changeWindow === null) return false;
+      if (changePct == null || changePct < MIN_MOVER_CHANGE_PCT || changeWindow === null) { if (preferredWindow === null) positiveRejects.changeTooSmall++; return false; }
       const confidenceScore = marketPulse.confidenceScore ?? row.market_confidence_score ?? 0;
       const stalenessHours = hoursSince(marketPulse.marketPriceAsOf ?? row.market_price_as_of ?? null, nowMs);
       const isStale = stalenessHours === null || stalenessHours > RECENT_MARKET_MAX_AGE_HOURS;
       const lowConfidence = marketPulse.lowConfidence === true
         || row.market_low_confidence === true
         || confidenceScore < MIN_CONFIDENCE_SCORE;
-      if (isStale || lowConfidence) return false;
+      if (isStale || lowConfidence) { if (preferredWindow === null) positiveRejects.staleOrLowConf++; return false; }
       const activeListings7d = marketPulse.activeListings7d ?? row.active_listings_7d ?? 0;
       const liquidityWeight = computeLiquidityWeight(activeListings7d);
       const compositeScore = Math.abs(changePct) * (confidenceScore / 100) * liquidityWeight;
-      if (!(compositeScore > 0)) return false;
+      if (!(compositeScore > 0)) { if (preferredWindow === null) positiveRejects.noComposite++; return false; }
       const moverCard = toCard(row.canonical_slug, {
         fallbackPrice: row.market_price,
         mover_tier: activeListings7d >= HIGH_CONF_LIQUIDITY_MIN ? "hot" : "warming",
@@ -747,18 +750,19 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
       collector: CardCollector,
       preferredWindow: HomepageSignalWindow | null = null,
     ): boolean => {
-      if (excludedSlugSet.has(row.canonical_slug)) return false;
+      if (excludedSlugSet.has(row.canonical_slug)) { if (preferredWindow === null) negativeRejects.excluded++; return false; }
       if (collector.seenSlugs.has(row.canonical_slug)) return false;
       const marketPulse = marketPulseMap.get(row.canonical_slug);
-      if (!marketPulse) return false;
+      if (!marketPulse) { if (preferredWindow === null) negativeRejects.noMarketPulse++; return false; }
       const price = marketPulse.marketPrice ?? row.market_price ?? null;
-      if (price == null || price < MIN_MOVER_PRICE) return false;
+      if (price == null || price < MIN_MOVER_PRICE) { if (preferredWindow === null) negativeRejects.priceTooLow++; return false; }
       const snapshotCount30d = marketPulse.snapshotCount30d ?? row.snapshot_count_30d ?? 0;
-      if (snapshotCount30d < MIN_MOVER_SNAPSHOT_COUNT_30D) return false;
+      if (snapshotCount30d < MIN_MOVER_SNAPSHOT_COUNT_30D) { if (preferredWindow === null) negativeRejects.snapshotTooLow++; return false; }
       const stalenessHours = hoursSince(marketPulse.marketPriceAsOf ?? row.market_price_as_of ?? null, nowMs);
-      if (stalenessHours === null || stalenessHours > RECENT_MARKET_MAX_AGE_HOURS) return false;
+      if (stalenessHours === null || stalenessHours > RECENT_MARKET_MAX_AGE_HOURS) { if (preferredWindow === null) negativeRejects.staleOrLowConf++; return false; }
       const confidenceScore = marketPulse.confidenceScore ?? row.market_confidence_score ?? 0;
       if (marketPulse.lowConfidence === true || row.market_low_confidence === true || confidenceScore < MIN_CONFIDENCE_SCORE) {
+        if (preferredWindow === null) negativeRejects.staleOrLowConf++;
         return false;
       }
       const directionalChange = preferredWindow
@@ -770,7 +774,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
         ?? (preferredWindow
           ? null
           : (marketPulse.changePct24h !== null ? "24H" : marketPulse.changePct7d !== null ? "7D" : null));
-      if (changePct == null || changePct >= 0 || changeWindow === null) return false;
+      if (changePct == null || changePct >= 0 || changeWindow === null) { if (preferredWindow === null) negativeRejects.noChange++; return false; }
       collector.cards.push(toCard(row.canonical_slug, {
         fallbackPrice: row.market_price,
         changePct,
@@ -825,6 +829,13 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
     }
 
     const losersOut = mixedNegativeMovers.cards.slice(0, SECTION_LIMIT);
+
+    logger.info("[homepage.telemetry.filter_pipeline]", JSON.stringify({
+      batch1: { positiveChangeRows: positiveChangeRows.length, negativeChangeRows: negativeChangeRows.length, trendingVariants: trendingVariants.length, allSlugs: allSlugs.size },
+      jsFiltered: { movers: mixedPositiveMovers.all.length, highConfidence: mixedPositiveMovers.highConfidence.length, emerging: mixedPositiveMovers.emerging.length, losers: mixedNegativeMovers.cards.length },
+      positiveRejects,
+      negativeRejects,
+    }));
 
     // ── Trending: filter to cards with real prices above MIN_PRICE ────────
     const trendingCandidatesOut: HomepageCard[] = [];

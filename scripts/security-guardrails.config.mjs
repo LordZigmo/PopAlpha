@@ -420,6 +420,7 @@ export const INTERNAL_ROUTE_TRUST_CONTRACTS = {
   "cron/sync-canonical": cronSecretRoute("cron/internal automation"),
   "cron/sync-tcg-prices": cronSecretRoute("cron/internal automation"),
   "cron/write-provider-timeseries": cronSecretRoute("cron/internal automation"),
+  "cron/prune-old-data": cronSecretRoute("cron/internal automation"),
 };
 
 export const DEBUG_ROUTE_TRUST_CONTRACTS = {
@@ -440,6 +441,7 @@ export const DEBUG_ROUTE_TRUST_CONTRACTS = {
   "debug/tracked-assets": debugCronRoute("internal diagnostic requests and operator troubleshooting"),
   "debug/tracked-assets/seed": debugCronRoute("internal seeding and repair tooling"),
   "debug/tracked-refresh-diagnostics": debugCronRoute("internal diagnostic requests and operator troubleshooting"),
+  "debug/pipeline-health": debugCronRoute("internal diagnostic requests and operator troubleshooting"),
 };
 
 export const PUBLIC_WRITE_ROUTE_CONTRACTS = {

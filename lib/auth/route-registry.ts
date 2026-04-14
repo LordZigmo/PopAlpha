@@ -72,6 +72,7 @@ export const CRON_ROUTES = [
   "cron/refresh-derived-signals",
   "cron/refresh-set-summaries",
   "cron/refresh-ai-brief",
+  "cron/prune-old-data",
 ];
 
 export const ADMIN_ROUTES = [
@@ -102,6 +103,7 @@ export const DEBUG_ROUTES = [
   "debug/tracked-assets",
   "debug/tracked-assets/seed",
   "debug/tracked-refresh-diagnostics",
+  "debug/pipeline-health",
 ];
 
 export const INGEST_ROUTES = [

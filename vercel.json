@@ -70,7 +70,7 @@
     },
     {
       "path": "/api/cron/prune-old-data",
-      "schedule": "*/15 * * * *"
+      "schedule": "40 3 * * *"
     }
   ]
 }
