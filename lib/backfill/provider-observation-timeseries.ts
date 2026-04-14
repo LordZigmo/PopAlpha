@@ -557,23 +557,24 @@ async function cleanupStaleProviderVariantWrites(params: {
     const providerVariantIdChunk = providerVariantIdChunks[chunkIndex];
     const resolvedVariantRefs = new Set<string>();
     const resolvedProviderVariantIds = new Set<string>();
-    for (const providerVariantId of providerVariantIdChunk) {
-      const { data: historyVariantRefRows, error: historyVariantRefLookupError } = await supabase
-        .from("price_history_points")
-        .select("variant_ref")
-        .eq("provider", params.provider)
-        .like("variant_ref", `%::${providerVariantId}::RAW`);
-      if (historyVariantRefLookupError) {
-        throw new Error(`price_history_points(load stale variant refs): ${historyVariantRefLookupError.message}`);
-      }
+    const lookupOrFilter = providerVariantIdChunk
+      .map((providerVariantId) => buildStaleVariantRefLikeFilter(providerVariantId))
+      .join(",");
+    const { data: historyVariantRefRows, error: historyVariantRefLookupError } = await supabase
+      .from("price_history_points")
+      .select("variant_ref")
+      .eq("provider", params.provider)
+      .or(lookupOrFilter);
+    if (historyVariantRefLookupError) {
+      throw new Error(`price_history_points(load stale variant refs): ${historyVariantRefLookupError.message}`);
+    }
 
-      for (const row of (historyVariantRefRows ?? []) as CleanupHistoryVariantRefRow[]) {
-        const variantRef = String(row.variant_ref ?? "").trim();
-        const resolvedProviderVariantId = extractProviderVariantIdFromVariantRef(variantRef);
-        if (!variantRef || !resolvedProviderVariantId) continue;
-        resolvedVariantRefs.add(variantRef);
-        resolvedProviderVariantIds.add(resolvedProviderVariantId);
-      }
+    for (const row of (historyVariantRefRows ?? []) as CleanupHistoryVariantRefRow[]) {
+      const variantRef = String(row.variant_ref ?? "").trim();
+      const resolvedProviderVariantId = extractProviderVariantIdFromVariantRef(variantRef);
+      if (!variantRef || !resolvedProviderVariantId) continue;
+      resolvedVariantRefs.add(variantRef);
+      resolvedProviderVariantIds.add(resolvedProviderVariantId);
     }
 
     const resolvedVariantRefChunks = chunkValues([...resolvedVariantRefs], STALE_DELETE_PROVIDER_REF_CHUNK_SIZE);

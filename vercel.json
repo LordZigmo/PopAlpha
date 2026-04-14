@@ -14,7 +14,7 @@
     },
     {
       "path": "/api/cron/snapshot-price-history",
-      "schedule": "30 */6 * * *"
+      "schedule": "50 */6 * * *"
     },
     {
       "path": "/api/cron/refresh-derived-signals",
@@ -58,7 +58,7 @@
     },
     {
       "path": "/api/cron/capture-pricing-transparency",
-      "schedule": "15 * * * *"
+      "schedule": "45 * * * *"
     },
     {
       "path": "/api/cron/capture-matching-quality",
@@ -67,6 +67,10 @@
     {
       "path": "/api/cron/refresh-ai-brief",
       "schedule": "23 * * * *"
+    },
+    {
+      "path": "/api/cron/prune-old-data",
+      "schedule": "40 3 * * *"
     }
   ]
 }
