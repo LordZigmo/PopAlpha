@@ -392,40 +392,44 @@ async function runProviderPipeline(provider: BackendPipelineProvider, opts: Pipe
     });
     if (variantMetrics.firstError) firstError = variantMetrics.firstError;
     variantMetricsTouchedKeys = variantMetrics.touchedVariantKeys;
+  }
 
-    if (!firstError) {
-      const rollupKeys = mergeTouchedVariantKeys(
-        timeseriesTouchedKeys,
-        variantMetricsTouchedKeys,
-      );
-      if (rollupKeys.length > 0) {
-        try {
-          const queued = await queuePendingRollups(rollupKeys);
-          steps.push({
-            name: "targeted_rollups",
-            ok: true,
-            result: {
-              mode: "deferred",
-              queued: queued.queued,
-              deferredTo: "hourly_batch",
-            },
-          });
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          firstError = message;
-          steps.push({
-            name: "targeted_rollups",
-            ok: false,
-            result: { mode: "deferred", error: message },
-          });
-        }
-      } else {
+  // Always queue rollups from timeseries touched keys, even if variant_metrics
+  // failed. A variant_metrics constraint violation should not block the rollup
+  // of pricing data that timeseries already wrote to price_snapshots.
+  if (providerSupportsAnalytics(provider)) {
+    const rollupKeys = mergeTouchedVariantKeys(
+      timeseriesTouchedKeys,
+      variantMetricsTouchedKeys,
+    );
+    if (rollupKeys.length > 0) {
+      try {
+        const queued = await queuePendingRollups(rollupKeys);
         steps.push({
           name: "targeted_rollups",
           ok: true,
-          result: { mode: "deferred", queued: 0 },
+          result: {
+            mode: "deferred",
+            queued: queued.queued,
+            deferredTo: "hourly_batch",
+            variantMetricsError: firstError ?? null,
+          },
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (!firstError) firstError = message;
+        steps.push({
+          name: "targeted_rollups",
+          ok: false,
+          result: { mode: "deferred", error: message },
         });
       }
+    } else {
+      steps.push({
+        name: "targeted_rollups",
+        ok: true,
+        result: { mode: "deferred", queued: 0 },
+      });
     }
   }
 
