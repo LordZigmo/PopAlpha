@@ -14,6 +14,7 @@ struct MarketplaceView: View {
     @State private var pricesRefreshed24h: Int?
     @State private var avgChange24h: Double?
     @State private var marketCap: Double?
+    @State private var meData: HomepageMeDTO?
     @State private var showSearch = false
     @State private var selectedWindow: SignalWindow = .h24
 
@@ -33,16 +34,20 @@ struct MarketplaceView: View {
                     )
                     .padding(.horizontal, PA.Layout.sectionPadding)
 
+                    // Your world — between pulse strip and signal board
+                    YourWorldSection(data: meData)
+                        .padding(.horizontal, PA.Layout.sectionPadding)
+
                     SignalBoardView(selectedWindow: $selectedWindow)
                 }
                 .padding(.bottom, 32)
             }
             .background(PA.Colors.background)
             .refreshable {
-                await loadStats()
+                await loadAll()
             }
             .task {
-                await loadStats()
+                await loadAll()
             }
             .fullScreenCover(isPresented: $showSearch) {
                 NavigationStack {
@@ -54,7 +59,18 @@ struct MarketplaceView: View {
         }
     }
 
-    // MARK: - Stats loader
+    // MARK: - Data loaders
+
+    private func loadAll() async {
+        async let statsTask: Void = loadStats()
+        async let meTask: HomepageMeDTO? = {
+            do { return try await CardService.shared.fetchHomepageMe() }
+            catch { return nil }
+        }()
+        _ = await statsTask
+        let me = await meTask
+        await MainActor.run { meData = me }
+    }
 
     private func loadStats() async {
         let count = try? await CardService.shared.fetchPricesRefreshedToday()
@@ -226,6 +242,179 @@ private struct GlobalTimeframeControl: View {
         .padding(2)
         .background(Capsule().fill(Color.white.opacity(0.03)))
         .overlay(Capsule().stroke(Color.white.opacity(0.08), lineWidth: 1))
+    }
+}
+
+// MARK: - Your World (personalized section)
+
+private struct YourWorldSection: View {
+    let data: HomepageMeDTO?
+    private var auth: AuthService { AuthService.shared }
+
+    var body: some View {
+        if !auth.isAuthenticated {
+            signedOutCard
+        } else if let data, (!data.watchlistMovers.isEmpty || data.portfolio != nil) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("YOUR WORLD")
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(2.0)
+                    .foregroundStyle(PA.Colors.accent)
+
+                HStack(spacing: 12) {
+                    if !data.watchlistMovers.isEmpty {
+                        watchlistCard(data.watchlistMovers)
+                    }
+                    if let portfolio = data.portfolio {
+                        portfolioCard(portfolio)
+                    }
+                }
+            }
+        }
+        // If authenticated but data is nil/empty, show nothing — the
+        // AI Brief and movers fill the space without a distracting
+        // empty personalization card.
+    }
+
+    // MARK: - Signed-out CTA
+
+    private var signedOutCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("YOUR WORLD")
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(2.0)
+                .foregroundStyle(PA.Colors.accent)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Track what you care about")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(PA.Colors.text)
+                Text("Sign in to see your watchlist movers and portfolio P&L on the homepage.")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(PA.Colors.textSecondary)
+                    .lineLimit(2)
+
+                Button {
+                    AuthService.shared.signIn()
+                } label: {
+                    Text("Sign in")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(PA.Colors.background)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 8)
+                        .background(PA.Colors.accent)
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 2)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .glassSurface(radius: PA.Layout.cardRadius)
+        }
+    }
+
+    // MARK: - Watchlist card
+
+    private func watchlistCard(_ movers: [WatchlistMoverDTO]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "heart.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(PA.Colors.accent)
+                Text("Watchlist")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(PA.Colors.text)
+            }
+
+            ForEach(movers.prefix(3), id: \.slug) { mover in
+                HStack(spacing: 6) {
+                    Text(mover.name)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(PA.Colors.text)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    if let pct = mover.changePct {
+                        Text(formatChangePct(pct))
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .foregroundStyle(pct >= 0 ? PA.Colors.positive : PA.Colors.negative)
+                    }
+                }
+            }
+
+            if movers.count > 3 {
+                Text("\(movers.count - 3) more")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(PA.Colors.muted)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minHeight: 120)
+        .glassSurface(radius: PA.Layout.cardRadius)
+    }
+
+    // MARK: - Portfolio card
+
+    private func portfolioCard(_ p: PortfolioSummaryDTO) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "rectangle.stack")
+                    .font(.system(size: 10))
+                    .foregroundStyle(PA.Colors.accent)
+                Text("Portfolio")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(PA.Colors.text)
+            }
+
+            Text(formatDollar(p.totalMarketValue))
+                .font(.system(size: 20, weight: .bold, design: .rounded))
+                .foregroundStyle(PA.Colors.text)
+
+            HStack(spacing: 6) {
+                Text(formatPnl(p.dailyPnlAmount))
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(p.dailyPnlAmount >= 0 ? PA.Colors.positive : PA.Colors.negative)
+                if let pct = p.dailyPnlPct {
+                    Text("(\(formatChangePct(pct)))")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundStyle(pct >= 0 ? PA.Colors.positive : PA.Colors.negative)
+                }
+            }
+
+            Text("\(p.holdingCount) cards")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(PA.Colors.muted)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minHeight: 120)
+        .glassSurface(radius: PA.Layout.cardRadius)
+    }
+
+    // MARK: - Formatters
+
+    private func formatChangePct(_ n: Double) -> String {
+        let sign = n >= 0 ? "+" : ""
+        return "\(sign)\(String(format: "%.1f", n))%"
+    }
+
+    private func formatDollar(_ n: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.currencyCode = "USD"
+        formatter.maximumFractionDigits = 0
+        return formatter.string(from: NSNumber(value: n)) ?? String(format: "$%.0f", n)
+    }
+
+    private func formatPnl(_ n: Double) -> String {
+        let sign = n >= 0 ? "+" : ""
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.currencyCode = "USD"
+        formatter.maximumFractionDigits = 2
+        let abs = formatter.string(from: NSNumber(value: abs(n))) ?? String(format: "$%.2f", abs(n))
+        return n < 0 ? "-\(abs)" : "\(sign)\(abs)"
     }
 }
 

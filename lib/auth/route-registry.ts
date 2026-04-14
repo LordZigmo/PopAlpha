@@ -123,6 +123,7 @@ export const USER_ROUTES = [
   "pro/signals",
   "holdings",
   "holdings/summary",
+  "homepage/me",
   "me",
   "me/export",
   "me/push",

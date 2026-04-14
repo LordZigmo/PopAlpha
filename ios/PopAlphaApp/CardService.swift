@@ -283,6 +283,19 @@ actor CardService {
         return response.brief
     }
 
+    /// Fetch the authenticated user's personalized homepage data:
+    /// watchlist movers + portfolio summary. Returns nil if the user
+    /// is not signed in or the request fails.
+    func fetchHomepageMe() async throws -> HomepageMeDTO? {
+        guard AuthService.shared.isAuthenticated else { return nil }
+        let response: HomepageMeResponseDTO = try await APIClient.get(path: "/api/homepage/me")
+        guard response.ok else { return nil }
+        return HomepageMeDTO(
+            watchlistMovers: response.watchlistMovers ?? [],
+            portfolio: response.portfolio
+        )
+    }
+
     // MARK: - Helpers
 
     private func derivePctFromSparkline(_ points: [Double]) -> Double? {
@@ -487,6 +500,39 @@ struct HomepageAIBriefDTO: Decodable, Hashable {
 struct HomepageAIBriefResponseDTO: Decodable {
     let ok: Bool
     let brief: HomepageAIBriefDTO?
+}
+
+// MARK: - Homepage /me DTOs (personalization)
+
+struct WatchlistMoverDTO: Decodable, Hashable {
+    let slug: String
+    let name: String
+    let setName: String?
+    let year: Int?
+    let marketPrice: Double?
+    let changePct: Double?
+    let changeWindow: String?
+    let imageUrl: String?
+    let marketDirection: String?
+}
+
+struct PortfolioSummaryDTO: Decodable, Hashable {
+    let totalMarketValue: Double
+    let totalCostBasis: Double
+    let dailyPnlAmount: Double
+    let dailyPnlPct: Double?
+    let holdingCount: Int
+}
+
+struct HomepageMeDTO {
+    let watchlistMovers: [WatchlistMoverDTO]
+    let portfolio: PortfolioSummaryDTO?
+}
+
+struct HomepageMeResponseDTO: Decodable {
+    let ok: Bool
+    let watchlistMovers: [WatchlistMoverDTO]?
+    let portfolio: PortfolioSummaryDTO?
 }
 
 // MARK: - DTO → MarketCard converter
