@@ -1,4 +1,6 @@
--- Indexes for the homepage movers/drops and trending queries.
+-- Indexes for homepage queries and the refresh_card_metrics RPC.
+--
+-- ── Homepage queries (card_metrics + variant_metrics) ────────────────────────
 --
 -- The homepage queries public_card_metrics (a view on card_metrics) with:
 --   WHERE grade = 'RAW' AND printing_id IS NULL
@@ -16,8 +18,18 @@
 --   ORDER BY provider_trend_slope_7d DESC
 --   LIMIT 80
 --
--- Without covering indexes these queries scan full tables and hit
--- Supabase's anon-role statement timeout (~8s).
+-- ── refresh_card_metrics RPC (price_snapshots) ──────────────────────────────
+--
+-- The RPC scans price_snapshots twice:
+--   1. all_prices_raw:            WHERE provider IN (...) AND observed_at >= now() - 30 days
+--   2. provider_latest_by_ref_raw: WHERE provider IN (...) AND grade = 'RAW' AND observed_at >= now() - 72h
+--
+-- ── Timeseries writer (price_history_points) ────────────────────────────────
+--
+-- Checks "already written" state:
+--   WHERE provider = ... AND source_window = 'snapshot' AND variant_ref IN (...)
+
+-- ── card_metrics: homepage movers/drops/freshness ───────────────────────────
 
 -- Positive movers: cards with any upward price change in 24h or 7d
 CREATE INDEX IF NOT EXISTS idx_card_metrics_homepage_positive
@@ -44,10 +56,28 @@ CREATE INDEX IF NOT EXISTS idx_card_metrics_homepage_freshness
     AND printing_id IS NULL
     AND market_price IS NOT NULL;
 
--- Trending: positive slope with activity from variant_metrics
+-- ── variant_metrics: homepage trending ──────────────────────────────────────
+
 CREATE INDEX IF NOT EXISTS idx_variant_metrics_homepage_trending
   ON public.variant_metrics (provider_trend_slope_7d DESC)
   WHERE grade = 'RAW'
     AND provider IN ('SCRYDEX', 'POKEMON_TCG_API')
     AND provider_trend_slope_7d > 0
     AND provider_price_changes_count_30d >= 3;
+
+-- ── price_snapshots: refresh_card_metrics RPC ───────────────────────────────
+
+-- 30-day scan (all_prices_raw CTE): provider + observed_at range
+CREATE INDEX IF NOT EXISTS idx_price_snapshots_provider_observed
+  ON public.price_snapshots (provider, observed_at DESC);
+
+-- 72-hour live price scan (provider_latest_by_ref_raw CTE): provider + grade + observed_at range
+CREATE INDEX IF NOT EXISTS idx_price_snapshots_provider_grade_observed
+  ON public.price_snapshots (provider, grade, observed_at DESC)
+  WHERE grade = 'RAW';
+
+-- ── price_history_points: timeseries "already written" check ────────────────
+
+CREATE INDEX IF NOT EXISTS idx_price_history_points_provider_window_variant
+  ON public.price_history_points (provider, source_window, variant_ref)
+  WHERE source_window = 'snapshot';
