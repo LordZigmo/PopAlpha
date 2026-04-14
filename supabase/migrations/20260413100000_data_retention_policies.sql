@@ -66,6 +66,30 @@ begin
   get diagnostics _deleted = row_count;
   _result := _result || jsonb_build_object('card_page_views', _deleted);
 
+  -- 6. price_snapshots — 45-day retention
+  --    refresh_card_metrics reads a 30-day window; 15-day buffer for safety.
+  --    Daily aggregates in price_history preserve long-term data.
+  delete from public.price_snapshots
+  where  id in (
+    select id from public.price_snapshots
+    where  observed_at < now() - interval '45 days'
+    limit  _chunk_limit
+  );
+  get diagnostics _deleted = row_count;
+  _result := _result || jsonb_build_object('price_snapshots', _deleted);
+
+  -- 7. price_history_points — 90-day retention
+  --    Charts use a 30-day window; price changes use 8 days.
+  --    Daily aggregates in price_history cover long-term needs.
+  delete from public.price_history_points
+  where  id in (
+    select id from public.price_history_points
+    where  ts < now() - interval '90 days'
+    limit  _chunk_limit
+  );
+  get diagnostics _deleted = row_count;
+  _result := _result || jsonb_build_object('price_history_points', _deleted);
+
   return _result;
 end;
 $$;

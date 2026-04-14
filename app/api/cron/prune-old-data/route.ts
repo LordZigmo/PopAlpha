@@ -3,9 +3,14 @@
  *
  * Nightly cleanup of append-only tables that grow without bounds.
  * Calls the prune_old_data() SQL function which deletes rows beyond
- * their retention windows in 1 000-row chunks to keep transactions short.
+ * their retention windows in 5 000-row chunks to keep transactions short.
  *
- * Schedule (vercel.json): 40 3 * * * — 3:40 AM daily, off-peak.
+ * Schedule (vercel.json): 40 3 * * * — daily at 3:40 AM, off-peak.
+ *
+ * Tables pruned:
+ *   provider_raw_payloads (14d), provider_ingests (30d),
+ *   provider_normalized_observations (14d), listing_observations (14d),
+ *   card_page_views (90d), price_snapshots (45d), price_history_points (90d).
  */
 
 import { NextResponse } from "next/server";

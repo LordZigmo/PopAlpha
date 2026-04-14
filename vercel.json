@@ -10,7 +10,7 @@
     },
     {
       "path": "/api/cron/refresh-card-metrics",
-      "schedule": "15 */6 * * *"
+      "schedule": "15 */12 * * *"
     },
     {
       "path": "/api/cron/snapshot-price-history",

@@ -9,7 +9,7 @@ import { runPokeTraceRawNormalize } from "@/lib/backfill/poketrace-raw-normalize
 import { runPokeTraceNormalizedMatch } from "@/lib/backfill/poketrace-normalized-match";
 import { runProviderObservationTimeseries } from "@/lib/backfill/provider-observation-timeseries";
 import { runProviderObservationVariantMetrics } from "@/lib/backfill/provider-observation-variant-metrics";
-import { queuePendingRollups } from "@/lib/backfill/provider-pipeline-rollup-queue";
+import { queuePendingRollups, getPendingRollupsCount } from "@/lib/backfill/provider-pipeline-rollup-queue";
 import {
   buildProviderIngestionDisabledPayload,
   providerIngestionEnabled,
@@ -404,6 +404,20 @@ async function runProviderPipeline(provider: BackendPipelineProvider, opts: Pipe
     );
     if (rollupKeys.length > 0) {
       try {
+        const pendingCount = await getPendingRollupsCount();
+        if (pendingCount > 5000) {
+          steps.push({
+            name: "targeted_rollups",
+            ok: true,
+            result: {
+              mode: "skipped",
+              reason: "queue_cap_exceeded",
+              pendingCount,
+              cap: 5000,
+              variantMetricsError: firstError ?? null,
+            },
+          });
+        } else {
         const queued = await queuePendingRollups(rollupKeys);
         steps.push({
           name: "targeted_rollups",
@@ -415,6 +429,7 @@ async function runProviderPipeline(provider: BackendPipelineProvider, opts: Pipe
             variantMetricsError: firstError ?? null,
           },
         });
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         if (!firstError) firstError = message;
