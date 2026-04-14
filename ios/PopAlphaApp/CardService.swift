@@ -296,6 +296,17 @@ actor CardService {
         )
     }
 
+    /// Fetch the homepage community rail: trending cards, most saved
+    /// this week, and (if authenticated) friends' recent additions.
+    func fetchHomepageCommunity() async throws -> HomepageCommunityDTO {
+        let response: HomepageCommunityResponseDTO = try await APIClient.get(path: "/api/homepage/community")
+        return HomepageCommunityDTO(
+            trending: response.trending ?? [],
+            mostSaved: response.mostSaved ?? [],
+            friendsAdded: response.friendsAdded ?? []
+        )
+    }
+
     // MARK: - Helpers
 
     private func derivePctFromSparkline(_ points: [Double]) -> Double? {
@@ -533,6 +544,39 @@ struct HomepageMeResponseDTO: Decodable {
     let ok: Bool
     let watchlistMovers: [WatchlistMoverDTO]?
     let portfolio: PortfolioSummaryDTO?
+}
+
+// MARK: - Homepage Community DTOs (/api/homepage/community)
+
+struct CommunityCardDTO: Decodable, Hashable {
+    let slug: String
+    let name: String
+    let setName: String?
+    let year: Int?
+    let imageUrl: String?
+    let metricValue: Int
+    let metricLabel: String
+}
+
+struct FriendEventDTO: Decodable, Hashable {
+    let handle: String
+    let action: String           // "added" | "saved"
+    let cardName: String?
+    let canonicalSlug: String?
+    let createdAt: String
+}
+
+struct HomepageCommunityDTO {
+    let trending: [CommunityCardDTO]
+    let mostSaved: [CommunityCardDTO]
+    let friendsAdded: [FriendEventDTO]
+}
+
+struct HomepageCommunityResponseDTO: Decodable {
+    let ok: Bool
+    let trending: [CommunityCardDTO]?
+    let mostSaved: [CommunityCardDTO]?
+    let friendsAdded: [FriendEventDTO]?
 }
 
 // MARK: - DTO → MarketCard converter

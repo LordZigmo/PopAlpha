@@ -23,6 +23,7 @@ struct SignalBoardView: View {
 
     @State private var data: HomepageDataDTO?
     @State private var aiBrief: HomepageAIBriefDTO?
+    @State private var community: HomepageCommunityDTO?
     @State private var isLoading = true
     @State private var loadError: String?
     @State private var selectedCard: MarketCard?
@@ -100,6 +101,11 @@ struct SignalBoardView: View {
                 emptyMessage: "No \(selectedWindow.label) pullbacks",
                 onSelect: handleSelect
             )
+
+            // Community rail
+            if let community, !(community.trending.isEmpty && community.mostSaved.isEmpty && community.friendsAdded.isEmpty) {
+                CommunitySection(data: community)
+            }
 
             // Footer
             if let asOf = data.asOf {
@@ -185,29 +191,31 @@ struct SignalBoardView: View {
         isLoading = true
         loadError = nil
         async let signalTask = CardService.shared.fetchHomepageSignalBoard()
-        // The AI brief is best-effort: a cache miss or network error should
-        // not block the signal board from rendering.
         async let briefTask: HomepageAIBriefDTO? = {
-            do {
-                return try await CardService.shared.fetchAIBrief()
-            } catch {
-                print("[SignalBoardView] ai-brief load error: \(error)")
-                return nil
-            }
+            do { return try await CardService.shared.fetchAIBrief() }
+            catch { print("[SignalBoardView] ai-brief load error: \(error)"); return nil }
+        }()
+        async let communityTask: HomepageCommunityDTO? = {
+            do { return try await CardService.shared.fetchHomepageCommunity() }
+            catch { print("[SignalBoardView] community load error: \(error)"); return nil }
         }()
         do {
             let fetched = try await signalTask
             let brief = await briefTask
+            let comm = await communityTask
             await MainActor.run {
                 self.data = fetched
                 self.aiBrief = brief
+                self.community = comm
                 self.isLoading = false
             }
         } catch {
             print("[SignalBoardView] load error: \(error)")
             let brief = await briefTask
+            let comm = await communityTask
             await MainActor.run {
                 self.aiBrief = brief
+                self.community = comm
                 self.loadError = error.localizedDescription
                 self.isLoading = false
             }
@@ -769,6 +777,189 @@ private func formatRelativeUpdate(_ iso: String?) -> String? {
     let days = Int(delta / 86_400)
     if days > 30 { return nil }
     return "\(days)d ago"
+}
+
+// MARK: - Community Section
+
+private struct CommunitySection: View {
+    let data: HomepageCommunityDTO
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            // Section header
+            Text("COMMUNITY")
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(2.0)
+                .foregroundStyle(PA.Colors.accent)
+                .padding(.horizontal, PA.Layout.sectionPadding)
+
+            // Trending — horizontal scroll of compact tiles
+            if !data.trending.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Trending among collectors")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(PA.Colors.text)
+                        .padding(.horizontal, PA.Layout.sectionPadding)
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(data.trending, id: \.slug) { card in
+                                CommunityTrendingTile(card: card)
+                            }
+                        }
+                        .padding(.horizontal, PA.Layout.sectionPadding)
+                    }
+                }
+            }
+
+            // Most saved — compact list
+            if !data.mostSaved.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Most saved this week")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(PA.Colors.text)
+
+                    ForEach(data.mostSaved.prefix(5), id: \.slug) { card in
+                        CommunityListRow(card: card)
+                    }
+                }
+                .padding(.horizontal, PA.Layout.sectionPadding)
+            }
+
+            // Friends added — microfeed
+            if !data.friendsAdded.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Friends")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(PA.Colors.text)
+
+                    ForEach(Array(data.friendsAdded.prefix(5).enumerated()), id: \.offset) { _, event in
+                        FriendEventRow(event: event)
+                    }
+                }
+                .padding(.horizontal, PA.Layout.sectionPadding)
+            }
+        }
+    }
+}
+
+private struct CommunityTrendingTile: View {
+    let card: CommunityCardDTO
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            // Image
+            ZStack {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(PA.Colors.surfaceSoft)
+                if let url = card.imageUrl.flatMap(URL.init(string:)) {
+                    AsyncImage(url: url) { phase in
+                        if case let .success(image) = phase {
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        }
+                    }
+                    .padding(4)
+                }
+            }
+            .frame(width: 100, height: 140)
+
+            Text(card.name)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(PA.Colors.text)
+                .lineLimit(1)
+
+            Text(card.metricLabel)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(PA.Colors.accent)
+        }
+        .frame(width: 100)
+    }
+}
+
+private struct CommunityListRow: View {
+    let card: CommunityCardDTO
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(PA.Colors.surfaceSoft)
+                if let url = card.imageUrl.flatMap(URL.init(string:)) {
+                    AsyncImage(url: url) { phase in
+                        if case let .success(image) = phase {
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                        }
+                    }
+                    .padding(2)
+                }
+            }
+            .frame(width: 28, height: 40)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(card.name)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(PA.Colors.text)
+                    .lineLimit(1)
+                if let set = card.setName {
+                    Text(set)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(PA.Colors.muted)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer(minLength: 4)
+
+            Text(card.metricLabel)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(PA.Colors.accent)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+private struct FriendEventRow: View {
+    let event: FriendEventDTO
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(PA.Colors.surfaceSoft)
+                .frame(width: 24, height: 24)
+                .overlay(
+                    Text(String(event.handle.prefix(1)).uppercased())
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(PA.Colors.accent)
+                )
+
+            Text(eventText)
+                .font(.system(size: 12))
+                .foregroundStyle(PA.Colors.textSecondary)
+                .lineLimit(1)
+
+            Spacer(minLength: 4)
+
+            Text(relativeTime)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(PA.Colors.muted)
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var eventText: String {
+        let card = event.cardName ?? "a card"
+        return "**\(event.handle)** \(event.action) \(card)"
+    }
+
+    private var relativeTime: String {
+        formatRelativeUpdate(event.createdAt) ?? ""
+    }
 }
 
 // MARK: - Preview
