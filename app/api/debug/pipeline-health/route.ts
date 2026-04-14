@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/auth/require";
 import { dbAdmin } from "@/lib/db/admin";
+import { getHomepageData } from "@/lib/data/homepage";
 
 export const runtime = "nodejs";
 
@@ -118,6 +119,32 @@ export async function GET(req: Request) {
     issues.push("Zero card_metrics rows have market_price_as_of within 72h — homepage movers query returns nothing");
   }
 
+  // Diagnose homepage directly
+  let homepageDiag: Record<string, unknown> = {};
+  try {
+    const errors: string[] = [];
+    const infos: string[] = [];
+    const homepageData = await getHomepageData({
+      logger: {
+        error: (...args: unknown[]) => errors.push(args.map(String).join(" ")),
+        info: (...args: unknown[]) => infos.push(args.map(String).join(" ")),
+      },
+    });
+    homepageDiag = {
+      ok: true,
+      movers: homepageData.movers.length,
+      losers: homepageData.losers.length,
+      trending: homepageData.trending.length,
+      pricesRefreshedToday: homepageData.prices_refreshed_today,
+      trackedCardsWithLivePrice: homepageData.tracked_cards_with_live_price,
+      asOf: homepageData.as_of,
+      errors,
+      infos,
+    };
+  } catch (err) {
+    homepageDiag = { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+
   return NextResponse.json({
     checkedAt: now.toISOString(),
     healthy: issues.length === 0,
@@ -138,5 +165,6 @@ export async function GET(req: Request) {
       freshMetrics72h: freshMetricsCountResult.count ?? 0,
     },
     pendingRollups: pendingRollupsResult.count ?? 0,
+    homepage: homepageDiag,
   });
 }
