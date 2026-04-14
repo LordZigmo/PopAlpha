@@ -12,7 +12,7 @@ security definer
 set statement_timeout = '120s'
 as $$
 declare
-  _chunk_limit  int := 1000;
+  _chunk_limit  int := 5000;
   _deleted      int;
   _result       jsonb := '{}'::jsonb;
 begin
