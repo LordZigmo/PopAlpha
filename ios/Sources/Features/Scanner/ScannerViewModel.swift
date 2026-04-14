@@ -24,6 +24,16 @@ public final class ScannerViewModel: ObservableObject, PopAlphaVisionEngineDeleg
     @Published public private(set) var isScanning = true
     @Published public var useMockData: Bool
 
+    /// Vision-normalized bounding box of the current live candidate (origin bottom-left, 0–1 range),
+    /// or nil when the engine has no active candidate. Updated every frame the candidate is visible.
+    @Published public private(set) var candidateBoundingBox: CGRect?
+
+    /// Installed by `ScannerCameraViewController` after its preview layer lays out.
+    /// Converts a Vision-normalized bounding box to view-space coordinates via
+    /// `AVCaptureVideoPreviewLayer.layerRectConverted(fromMetadataOutputRect:)`,
+    /// handling rotation + aspectFill crop. Nil on simulator (no camera).
+    public var normalizedRectConverter: ((CGRect) -> CGRect?)?
+
     public let visionEngine: PopAlphaVisionEngine
     public var recognizedCardID: String? { recognizedCard?.id }
     public var simulatorTaskID: String { "\(useMockData)-\(isScanning)-\(recognizedCard?.id ?? "nil")" }
@@ -56,6 +66,7 @@ public final class ScannerViewModel: ObservableObject, PopAlphaVisionEngineDeleg
         identificationTask = nil
         recognizedCard = nil
         debugIndexLabel = nil
+        candidateBoundingBox = nil
         isScanning = true
         visionEngine.reset()
     }
@@ -71,6 +82,12 @@ public final class ScannerViewModel: ObservableObject, PopAlphaVisionEngineDeleg
     public nonisolated func didDetectStableCard(image: UIImage) {
         Task { @MainActor [weak self] in
             self?.startIdentification(with: image)
+        }
+    }
+
+    public nonisolated func didUpdateCandidateBoundingBox(_ normalizedBoundingBox: CGRect?) {
+        Task { @MainActor [weak self] in
+            self?.candidateBoundingBox = normalizedBoundingBox
         }
     }
 

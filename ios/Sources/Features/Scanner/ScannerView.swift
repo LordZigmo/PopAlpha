@@ -22,7 +22,7 @@ public struct ScannerView: View {
                 if viewModel.useMockData {
                     ScannerSimulatorPreview()
                 } else {
-                    ScannerCameraPreview(engine: viewModel.visionEngine)
+                    ScannerCameraPreview(viewModel: viewModel, engine: viewModel.visionEngine)
                 }
             }
             .ignoresSafeArea()
@@ -98,10 +98,11 @@ private struct ScannerSimulatorPreview: View {
 
 @available(iOS 17.0, *)
 private struct ScannerCameraPreview: UIViewControllerRepresentable {
+    let viewModel: ScannerViewModel
     let engine: PopAlphaVisionEngine
 
     func makeUIViewController(context: Context) -> ScannerCameraViewController {
-        ScannerCameraViewController(engine: engine)
+        ScannerCameraViewController(viewModel: viewModel, engine: engine)
     }
 
     func updateUIViewController(_ uiViewController: ScannerCameraViewController, context: Context) {
@@ -116,12 +117,15 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
     private let videoOutput = AVCaptureVideoDataOutput()
     private let sessionQueue = DispatchQueue(label: "com.popalpha.scanner.camera-session", qos: .userInitiated)
     private let sampleBufferQueue = DispatchQueue(label: "com.popalpha.scanner.sample-buffer", qos: .userInitiated)
+    private weak var viewModel: ScannerViewModel?
     private let engine: PopAlphaVisionEngine
 
     private var isSessionConfigured = false
+    private var hasInstalledConverter = false
     private let cameraPosition: AVCaptureDevice.Position = .back
 
-    init(engine: PopAlphaVisionEngine) {
+    init(viewModel: ScannerViewModel, engine: PopAlphaVisionEngine) {
+        self.viewModel = viewModel
         self.engine = engine
         super.init(nibName: nil, bundle: nil)
     }
@@ -157,6 +161,38 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         updatePreviewOrientation()
+        installNormalizedRectConverterIfNeeded()
+    }
+
+    private func installNormalizedRectConverterIfNeeded() {
+        guard !hasInstalledConverter, let viewModel else { return }
+        hasInstalledConverter = true
+        let layer = previewView.previewLayer
+        let converter: (CGRect) -> CGRect? = { [weak layer] visionBLPortrait in
+            guard let layer else { return nil }
+            // Vision returns coordinates in portrait-oriented BL space because we
+            // pass `.right` as the CGImagePropertyOrientation to VNImageRequestHandler
+            // (the raw sensor is landscape, Vision rotates the coordinate system).
+            //
+            // `layerRectConverted(fromMetadataOutputRect:)` on the other hand expects
+            // its input in the DEVICE'S NATIVE VIDEO ORIENTATION — which for the back
+            // camera is landscape-right, top-left origin. So we need to undo Vision's
+            // rotation (90° CCW in coordinate space) and flip the y-axis.
+            //
+            // Transform: portrait BL (vx, vy) → landscape TL (1 - vy, 1 - vx).
+            // Applied to a rect, this swaps width and height and repositions the origin:
+            let landscapeRect = CGRect(
+                x: 1 - visionBLPortrait.origin.y - visionBLPortrait.height,
+                y: 1 - visionBLPortrait.origin.x - visionBLPortrait.width,
+                width: visionBLPortrait.height,
+                height: visionBLPortrait.width
+            )
+            return layer.layerRectConverted(fromMetadataOutputRect: landscapeRect)
+        }
+        // Assign on the main actor since ScannerViewModel is @MainActor.
+        Task { @MainActor [weak viewModel] in
+            viewModel?.normalizedRectConverter = converter
+        }
     }
 
     func updatePreviewOrientation() {

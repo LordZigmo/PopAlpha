@@ -8,6 +8,16 @@ import Vision
 
 public protocol PopAlphaVisionEngineDelegate: AnyObject {
     func didDetectStableCard(image: UIImage)
+
+    /// Fires every frame that the engine has a live candidate rectangle, and
+    /// with `nil` when the candidate expires. Bounding box is in Vision's
+    /// normalized coordinate space (origin bottom-left, 0–1 range).
+    /// Default implementation is a no-op so existing conformers don't break.
+    func didUpdateCandidateBoundingBox(_ normalizedBoundingBox: CGRect?)
+}
+
+public extension PopAlphaVisionEngineDelegate {
+    func didUpdateCandidateBoundingBox(_ normalizedBoundingBox: CGRect?) {}
 }
 
 public final class PopAlphaVisionEngine {
@@ -29,12 +39,25 @@ public final class PopAlphaVisionEngine {
     private lazy var rectangleRequest: VNDetectRectanglesRequest = makeRectangleRequest()
     private var candidate: StableCandidate?
 
+    /// Number of seconds a candidate must exist before its bounding box is published
+    /// to the tracking overlay. Filters out first-frame noise from the rectangle
+    /// detector, which tends to be the least accurate frame.
+    private let publishWarmupDuration: TimeInterval = 0.15
+
+    /// EMA smoothing factor applied to published bounding boxes. Lower = smoother,
+    /// higher = more responsive. 0.35 damps jitter while still following hand motion.
+    private let boundingBoxSmoothing: CGFloat = 0.35
+
+    /// Last published (smoothed) bounding box, used as the EMA "previous" value.
+    /// Cleared when the candidate expires or resets.
+    private var smoothedPublishedBox: CGRect?
+
     public init(
         delegate: PopAlphaVisionEngineDelegate? = nil,
         callbackQueue: DispatchQueue = .main,
         minimumStableDuration: TimeInterval = 0.5,
-        aspectRatioTolerance: CGFloat = 0.08,
-        minimumCardSize: CGFloat = 0.18,
+        aspectRatioTolerance: CGFloat = 0.10,
+        minimumCardSize: CGFloat = 0.11,
         allowedMissDuration: TimeInterval = 0.15
     ) {
         self.delegate = delegate
@@ -75,8 +98,32 @@ public final class PopAlphaVisionEngine {
     public func reset() {
         analysisQueue.async {
             self.candidate = nil
+            self.smoothedPublishedBox = nil
             self.rectangleRequest.regionOfInterest = Self.fullFrameROI
+            self.notifyCandidateUpdated(nil)
         }
+    }
+
+    private func notifyCandidateUpdated(_ boundingBox: CGRect?) {
+        callbackQueue.async { [weak self] in
+            guard let self else { return }
+            self.delegate?.didUpdateCandidateBoundingBox(boundingBox)
+        }
+    }
+
+    /// Blend a raw bounding box with the previously published one to dampen
+    /// frame-to-frame jitter from the rectangle detector. Called only after
+    /// the candidate has passed the warmup threshold.
+    private func emaSmoothed(_ raw: CGRect) -> CGRect {
+        guard let previous = smoothedPublishedBox else { return raw }
+        let a = boundingBoxSmoothing
+        let blended = CGRect(
+            x: previous.origin.x * (1 - a) + raw.origin.x * a,
+            y: previous.origin.y * (1 - a) + raw.origin.y * a,
+            width: previous.width * (1 - a) + raw.width * a,
+            height: previous.height * (1 - a) + raw.height * a
+        )
+        return blended
     }
 
     private func analyze(
@@ -115,7 +162,7 @@ public final class PopAlphaVisionEngine {
         let request = VNDetectRectanglesRequest()
         request.revision = VNDetectRectanglesRequestRevision1
         request.preferBackgroundProcessing = false
-        request.minimumConfidence = 0.75
+        request.minimumConfidence = 0.85
         request.minimumSize = Float(minimumCardSize)
         request.minimumAspectRatio = Float(max(0.0, expectedCardAspectRatio - aspectRatioTolerance))
         request.maximumAspectRatio = Float(min(1.0, expectedCardAspectRatio + aspectRatioTolerance))
@@ -190,12 +237,25 @@ public final class PopAlphaVisionEngine {
             existingCandidate.lastSeenAt = timestamp
             candidate = existingCandidate
         } else {
+            // New candidate — reset the smoothed box so we don't blend across
+            // unrelated detections from different parts of the frame.
             candidate = StableCandidate(
                 observation: observation,
                 firstSeenAt: timestamp,
                 lastSeenAt: timestamp,
                 hasTriggered: false
             )
+            smoothedPublishedBox = nil
+        }
+
+        // Publish only AFTER a short warmup window. The first 150 ms of any new
+        // candidate is where the rectangle detector is least certain — showing
+        // the overlay immediately leads to flicker and tiny/thin spurious boxes.
+        if let candidate,
+           timestamp - candidate.firstSeenAt >= publishWarmupDuration {
+            let smoothed = emaSmoothed(observation.boundingBox)
+            smoothedPublishedBox = smoothed
+            notifyCandidateUpdated(smoothed)
         }
 
         guard var stableCandidate = candidate else {
@@ -236,7 +296,9 @@ public final class PopAlphaVisionEngine {
         }
 
         self.candidate = nil
+        self.smoothedPublishedBox = nil
         rectangleRequest.regionOfInterest = Self.fullFrameROI
+        notifyCandidateUpdated(nil)
     }
 
     private func regionOfInterestForCurrentCandidate() -> CGRect {
