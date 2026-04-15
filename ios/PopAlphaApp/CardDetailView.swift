@@ -182,7 +182,7 @@ struct CardDetailView: View {
         ZStack(alignment: .bottom) {
             PA.Colors.background
 
-            // Freefloating card art — no frame, just the card
+            // Freefloating card art — premium floating effect
             if let url = card.imageURL {
                 AsyncImage(url: url) { phase in
                     switch phase {
@@ -191,7 +191,17 @@ struct CardDetailView: View {
                             .resizable()
                             .aspectRatio(contentMode: .fit)
                             .frame(maxHeight: 420)
-                            .shadow(color: .black.opacity(0.6), radius: 32, x: 0, y: 16)
+                            // Layered shadows for depth: close contact shadow + diffuse glow
+                            .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 2)
+                            .shadow(color: .black.opacity(0.4), radius: 20, x: 0, y: 12)
+                            .shadow(color: .black.opacity(0.25), radius: 48, x: 0, y: 24)
+                            // Subtle colored glow from the accent
+                            .shadow(color: PA.Colors.accent.opacity(0.08), radius: 60, x: 0, y: 0)
+                            .rotation3DEffect(
+                                .degrees(1.5),
+                                axis: (x: 1, y: 0, z: 0),
+                                perspective: 0.8
+                            )
                     case .failure:
                         heroPlaceholder
                     case .empty:
@@ -202,18 +212,19 @@ struct CardDetailView: View {
                     }
                 }
                 .padding(.horizontal, 40)
-                .padding(.top, 8)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
             } else {
                 heroPlaceholder
                     .padding(.horizontal, 40)
-                    .padding(.top, 8)
+                    .padding(.top, 12)
             }
 
             // Bottom fade into content
             PA.Gradients.heroOverlay
-                .frame(height: 100)
+                .frame(height: 120)
         }
-        .frame(minHeight: 380)
+        .frame(minHeight: 400)
     }
 
     private var heroPlaceholder: some View {
