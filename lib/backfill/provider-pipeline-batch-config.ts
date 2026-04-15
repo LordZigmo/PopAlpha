@@ -58,9 +58,9 @@ const QUEUED_BATCH_PRESETS: Record<PipelineBatchProvider, ProviderPresetMap> = {
       setLimit: 1,
       maxRequests: 10,
       payloadLimit: 10,
-      matchObservations: 200,
-      timeseriesObservations: 200,
-      metricsObservations: 200,
+      matchObservations: 100,
+      timeseriesObservations: 100,
+      metricsObservations: 100,
     },
     RETRY: {
       setLimit: 1,
