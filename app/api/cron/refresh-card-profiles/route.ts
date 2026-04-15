@@ -60,7 +60,16 @@ type CardRow = {
   liquidity_score: number | null;
 };
 
-function toProfileInput(row: CardRow): CardProfileInput {
+type ConditionPriceRow = {
+  canonical_slug: string;
+  condition: string;
+  price: number;
+};
+
+function toProfileInput(
+  row: CardRow,
+  conditionPrices: Array<{ condition: string; price: number }> | null,
+): CardProfileInput {
   return {
     canonicalSlug: row.canonical_slug,
     canonicalName: row.canonical_name,
@@ -75,7 +84,28 @@ function toProfileInput(row: CardRow): CardProfileInput {
     activeListings7d: row.active_listings_7d,
     volatility30d: row.volatility_30d,
     liquidityScore: row.liquidity_score,
+    conditionPrices,
   };
+}
+
+async function fetchConditionPricesForSlugs(
+  supabase: ReturnType<typeof dbAdmin>,
+  slugs: string[],
+): Promise<Map<string, Array<{ condition: string; price: number }>>> {
+  if (slugs.length === 0) return new Map();
+  const { data, error } = await supabase
+    .from("card_condition_prices")
+    .select("canonical_slug,condition,price")
+    .in("canonical_slug", slugs)
+    .order("condition");
+  if (error) return new Map();
+  const result = new Map<string, Array<{ condition: string; price: number }>>();
+  for (const row of (data ?? []) as ConditionPriceRow[]) {
+    const existing = result.get(row.canonical_slug) ?? [];
+    existing.push({ condition: row.condition, price: Number(row.price) });
+    result.set(row.canonical_slug, existing);
+  }
+  return result;
 }
 
 async function fetchBackfillCards(
@@ -211,7 +241,9 @@ export async function GET(req: Request) {
 
       for (let i = 0; i < cards.length; i += batchSize) {
         if (Date.now() >= deadline) break;
-        const chunk = cards.slice(i, i + batchSize).map(toProfileInput);
+        const chunkCards = cards.slice(i, i + batchSize);
+        const conditionMap = await fetchConditionPricesForSlugs(supabase, chunkCards.map((c) => c.canonical_slug));
+        const chunk = chunkCards.map((c) => toProfileInput(c, conditionMap.get(c.canonical_slug) ?? null));
         const stats = await processChunk(supabase, chunk, concurrency);
         totalLlm += stats.llm;
         totalFallbacks += stats.fallbacks;
@@ -236,14 +268,16 @@ export async function GET(req: Request) {
 
       // Filter to cards whose hash actually changed
       const needsRefresh = cards.filter((row) => {
-        const input = toProfileInput(row);
+        const input = toProfileInput(row, null);
         const currentHash = buildMetricsHash(input);
         return row.existing_hash !== currentHash;
       });
 
       for (let i = 0; i < needsRefresh.length; i += batchSize) {
         if (Date.now() >= deadline) break;
-        const chunk = needsRefresh.slice(i, i + batchSize).map(toProfileInput);
+        const chunkCards = needsRefresh.slice(i, i + batchSize);
+        const conditionMap = await fetchConditionPricesForSlugs(supabase, chunkCards.map((c) => c.canonical_slug));
+        const chunk = chunkCards.map((c) => toProfileInput(c, conditionMap.get(c.canonical_slug) ?? null));
         const stats = await processChunk(supabase, chunk, concurrency);
         totalLlm += stats.llm;
         totalFallbacks += stats.fallbacks;

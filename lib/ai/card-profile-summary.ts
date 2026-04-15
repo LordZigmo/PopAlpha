@@ -28,6 +28,7 @@ export type CardProfileInput = {
   activeListings7d: number | null;
   volatility30d: number | null;
   liquidityScore: number | null;
+  conditionPrices: Array<{ condition: string; price: number }> | null;
 };
 
 export type CardProfileResult = {
@@ -130,7 +131,7 @@ const SYSTEM_PROMPT = [
   "- Output ONLY a single JSON object matching this exact shape:",
   '  {"summary_short":"...","summary_long":"..."}',
   "- summary_short: exactly 2 sentences, 15–30 words. State the card's current price direction and whether it looks strong or weak.",
-  "- summary_long: exactly 3–4 sentences, 30–60 words. Add context about supply, positioning within its price range, and whether the card looks fairly priced.",
+  "- summary_long: exactly 3–4 sentences, 30–60 words. Add context about supply, positioning within its price range, and whether the card looks fairly priced. If condition pricing is provided, mention the spread between Near Mint and lower conditions when the gap is meaningful.",
   "- Do not output anything outside the JSON object. No prose, no code fences, no markdown.",
 ].join("\n");
 
@@ -152,6 +153,19 @@ function buildUserPrompt(input: CardProfileInput): string {
   if (input.activeListings7d != null) lines.push(`Active listings (7d): ${input.activeListings7d}`);
   if (input.volatility30d != null) lines.push(`Volatility (30d): ${input.volatility30d.toFixed(1)}`);
   if (input.liquidityScore != null) lines.push(`Liquidity score: ${input.liquidityScore.toFixed(0)}/100`);
+
+  if (input.conditionPrices && input.conditionPrices.length > 0) {
+    lines.push("");
+    lines.push("Condition pricing:");
+    const conditionLabels: Record<string, string> = {
+      nm: "Near Mint", lp: "Lightly Played", mp: "Moderately Played",
+      hp: "Heavily Played", dmg: "Damaged",
+    };
+    for (const cp of input.conditionPrices) {
+      const label = conditionLabels[cp.condition] ?? cp.condition.toUpperCase();
+      lines.push(`  ${label}: $${cp.price.toFixed(2)}`);
+    }
+  }
 
   return lines.join("\n");
 }
