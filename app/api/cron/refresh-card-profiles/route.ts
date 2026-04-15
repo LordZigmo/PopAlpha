@@ -35,7 +35,7 @@ const DEADLINE_RESERVE_MS = 30_000;
 const DEFAULT_MAX_CARDS = 500;
 const DEFAULT_CONCURRENCY = 5;
 const DEFAULT_BATCH_SIZE = 50;
-const STALE_DAYS = 14;
+const STALE_DAYS = 1;
 
 function parseOptionalInt(value: string | null, min: number, max: number, fallback: number): number {
   if (!value) return fallback;

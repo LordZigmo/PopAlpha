@@ -73,7 +73,7 @@
       "schedule": "10 */3 * * *"
     },
     {
-      "path": "/api/cron/refresh-card-profiles?mode=refresh&maxCards=500",
+      "path": "/api/cron/refresh-card-profiles?mode=refresh&maxCards=2000",
       "schedule": "45 10 * * *"
     },
     {
