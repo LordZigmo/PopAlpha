@@ -46,6 +46,8 @@ struct CardDetailView: View {
     @State private var availableGradedOptions: [PriceMode] = []
     @State private var gradedMetricsLoaded = false
     @State private var gradedHeroPrice: Double?
+    @State private var selectedGradingAgency: String = "PSA"
+    @State private var selectedGradeBucket: String = "G10"
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
@@ -84,6 +86,11 @@ struct CardDetailView: View {
                 await MainActor.run {
                     availableGradedOptions = unique
                     gradedMetricsLoaded = true
+                    // Pre-select the first available agency and its highest grade
+                    if let first = unique.first, case .graded(let p, let b) = first {
+                        selectedGradingAgency = p
+                        selectedGradeBucket = b
+                    }
                 }
             }
         }
@@ -547,8 +554,41 @@ struct CardDetailView: View {
 
     // MARK: - Grade Pill Selector
 
+    private var availableAgencies: [String] {
+        let agencies = availableGradedOptions.compactMap { mode -> String? in
+            if case .graded(let provider, _) = mode { return provider }
+            return nil
+        }
+        var seen = Set<String>()
+        return agencies.filter { seen.insert($0).inserted }
+    }
+
+    private func bucketsForAgency(_ agency: String) -> [String] {
+        let order: [String] = ["LE_7", "G8", "G9", "G9_5", "G10", "G10_PERFECT"]
+        let buckets = availableGradedOptions.compactMap { mode -> String? in
+            if case .graded(let provider, let bucket) = mode, provider == agency { return bucket }
+            return nil
+        }
+        var seen = Set<String>()
+        let unique = buckets.filter { seen.insert($0).inserted }
+        return unique.sorted { (order.firstIndex(of: $0) ?? 99) < (order.firstIndex(of: $1) ?? 99) }
+    }
+
+    private func gradeDisplayLabel(_ bucket: String) -> String {
+        switch bucket {
+        case "LE_7": return "7 or less"
+        case "G8": return "8"
+        case "G9": return "9"
+        case "G9_5": return "9.5"
+        case "G10": return "10"
+        case "G10_PERFECT": return "10 Perfect"
+        default: return bucket
+        }
+    }
+
     private var gradePillSection: some View {
         VStack(alignment: .leading, spacing: 10) {
+            // Row 1: Near Mint / Graded toggle
             HStack(spacing: 8) {
                 gradePill(title: "Near Mint", selected: selectedPriceMode == .nearMint) {
                     PAHaptics.selection()
@@ -557,34 +597,69 @@ struct CardDetailView: View {
                 }
                 gradePill(title: "Graded", selected: selectedPriceMode.isGraded) {
                     PAHaptics.selection()
-                    // Default to first available graded option, or PSA G10 fallback
-                    if let first = availableGradedOptions.first {
-                        selectedPriceMode = first
-                    } else {
-                        selectedPriceMode = .graded(provider: "PSA", bucket: "G10")
-                    }
+                    applyGradedSelection()
                 }
             }
 
             if selectedPriceMode.isGraded && !availableGradedOptions.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(availableGradedOptions, id: \.self) { option in
-                            Button {
-                                PAHaptics.selection()
-                                selectedPriceMode = option
-                            } label: {
-                                Text(option.label)
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundStyle(selectedPriceMode == option ? PA.Colors.background : PA.Colors.text)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 7)
-                                    .background(selectedPriceMode == option ? PA.Colors.accent : PA.Colors.surfaceSoft)
-                                    .clipShape(Capsule())
+                // Row 2: Grading agency pills
+                HStack(spacing: 6) {
+                    ForEach(availableAgencies, id: \.self) { agency in
+                        Button {
+                            PAHaptics.selection()
+                            selectedGradingAgency = agency
+                            // Pick highest available grade for this agency
+                            let buckets = bucketsForAgency(agency)
+                            selectedGradeBucket = buckets.last ?? "G10"
+                            applyGradedSelection()
+                        } label: {
+                            Text(agency)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(selectedGradingAgency == agency ? PA.Colors.background : PA.Colors.text)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 7)
+                                .background(selectedGradingAgency == agency ? PA.Colors.accent : PA.Colors.surfaceSoft)
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
+                // Row 3: Grade picker wheel
+                let buckets = bucketsForAgency(selectedGradingAgency)
+                if buckets.count > 1 {
+                    HStack(spacing: 0) {
+                        Text("Grade")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(PA.Colors.muted)
+                            .padding(.leading, 4)
+
+                        Picker("Grade", selection: $selectedGradeBucket) {
+                            ForEach(buckets, id: \.self) { bucket in
+                                Text(gradeDisplayLabel(bucket))
+                                    .tag(bucket)
                             }
-                            .buttonStyle(.plain)
+                        }
+                        .pickerStyle(.wheel)
+                        .frame(height: 100)
+                        .clipped()
+                        .onChange(of: selectedGradeBucket) {
+                            PAHaptics.selection()
+                            applyGradedSelection()
                         }
                     }
+                    .padding(8)
+                    .glassSurface()
+                } else if let only = buckets.first {
+                    HStack(spacing: 6) {
+                        Text("Grade")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(PA.Colors.muted)
+                        Text(gradeDisplayLabel(only))
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(PA.Colors.text)
+                    }
+                    .padding(.leading, 4)
                 }
             }
 
@@ -595,6 +670,27 @@ struct CardDetailView: View {
             }
         }
         .padding(.horizontal, 0)
+    }
+
+    private func applyGradedSelection() {
+        let target = PriceMode.graded(provider: selectedGradingAgency, bucket: selectedGradeBucket)
+        if availableGradedOptions.contains(target) {
+            selectedPriceMode = target
+        } else if let first = availableGradedOptions.first(where: {
+            if case .graded(let p, _) = $0 { return p == selectedGradingAgency }
+            return false
+        }) {
+            selectedPriceMode = first
+            if case .graded(_, let bucket) = first { selectedGradeBucket = bucket }
+        } else if let first = availableGradedOptions.first {
+            selectedPriceMode = first
+            if case .graded(let p, let b) = first {
+                selectedGradingAgency = p
+                selectedGradeBucket = b
+            }
+        } else {
+            selectedPriceMode = .graded(provider: selectedGradingAgency, bucket: selectedGradeBucket)
+        }
     }
 
     private func gradePill(title: String, selected: Bool, action: @escaping () -> Void) -> some View {
