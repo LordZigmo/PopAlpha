@@ -40,33 +40,33 @@ export function buildPopAlphaScoutSummary({
   const fairValueText = fairValue !== null ? formatUsd(fairValue) : null;
   const changeText = formatSignedPct(changePct);
 
-  let openingLine = `Okay, so ${cardName} is trading around ${priceText}, which is kind of wild if you have been watching this one.`;
+  let openingLine = `${cardName} is trading around ${priceText}.`;
   if (changeText && changeLabel) {
     openingLine = changePct! > 0
-      ? `Okay, so ${cardName} is trading around ${priceText}, and it is up ${changeText} over the last ${changeLabel}, which is making it feel pretty lively.`
+      ? `${cardName} is trading around ${priceText}, up ${changeText} over the last ${changeLabel}.`
       : changePct! < 0
-        ? `Okay, so ${cardName} is trading around ${priceText}, after a ${changeText} move over the last ${changeLabel}, so the market cooled off a bit.`
-        : `Okay, so ${cardName} is trading around ${priceText}, and it has been basically flat over the last ${changeLabel}.`;
+        ? `${cardName} is trading around ${priceText}, pulling back ${changeText} over the last ${changeLabel}.`
+        : `${cardName} is trading around ${priceText}, holding flat over the last ${changeLabel}.`;
   }
 
-  let valueLine = "I am still waiting on enough fair-value data to really map this one out.";
+  let valueLine = "";
   if (marketPrice !== null && fairValue !== null && fairValue > 0) {
     const edgePct = ((marketPrice - fairValue) / fairValue) * 100;
     if (edgePct <= -1) {
-      valueLine = `By my notes, that is below our fair value mark near ${fairValueText}, so this might actually be a pretty nice pickup for the binder.`;
+      valueLine = ` That sits below fair value near ${fairValueText}, which could make it a solid entry point.`;
     } else if (edgePct >= 1) {
-      valueLine = `By my notes, that is above our fair value mark near ${fairValueText}, so people are definitely paying extra for it right now.`;
+      valueLine = ` That is above fair value near ${fairValueText}, so buyers are paying a premium right now.`;
     } else {
-      valueLine = `By my notes, that is almost exactly on top of our fair value mark near ${fairValueText}, which is honestly weirdly tidy.`;
+      valueLine = ` That lines up closely with fair value near ${fairValueText}.`;
     }
   }
 
-  let supplyLine = "Supply is still kind of fuzzy from here.";
+  let supplyLine = "";
   if (activeListings7d !== null) {
     if (activeListings7d <= 4) {
-      supplyLine = `There were only ${activeListings7d} live listings over the last 7 days, so supply looks pretty tight for a chase like this.`;
+      supplyLine = ` Supply is limited with only ${activeListings7d} listings in the last 7 days.`;
     } else {
-      supplyLine = `There were ${activeListings7d} live listings over the last 7 days, so there is enough on the board that you do not have to panic-buy it.`;
+      supplyLine = ` There were ${activeListings7d} listings over the last 7 days, so supply is steady.`;
     }
   }
 

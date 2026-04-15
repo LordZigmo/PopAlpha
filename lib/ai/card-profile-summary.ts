@@ -91,8 +91,8 @@ export function buildFallbackProfile(input: CardProfileInput): CardProfileResult
     summaryShort = changePct7d! > 0
       ? `${canonicalName} is trading around ${priceText}, up ${changeText} over the last 7 days.`
       : changePct7d! < 0
-        ? `${canonicalName} is trading around ${priceText}, down ${changeText} over the last 7 days.`
-        : `${canonicalName} is trading around ${priceText} and has been flat over the last 7 days.`;
+        ? `${canonicalName} is trading around ${priceText}, pulling back ${changeText} over the last 7 days.`
+        : `${canonicalName} is holding steady around ${priceText}.`;
   } else {
     summaryShort = `${canonicalName} is trading around ${priceText}.`;
   }
@@ -100,12 +100,12 @@ export function buildFallbackProfile(input: CardProfileInput): CardProfileResult
   let supplyNote = "";
   if (activeListings7d != null) {
     supplyNote = activeListings7d <= 4
-      ? ` Supply looks tight with only ${activeListings7d} listings in the last 7 days.`
-      : ` There were ${activeListings7d} listings over the last 7 days.`;
+      ? ` Supply is limited with only ${activeListings7d} listings in the last 7 days.`
+      : ` There have been ${activeListings7d} listings over the last 7 days.`;
   }
 
-  const setNote = setName ? ` from ${setName}` : "";
-  const summaryLong = `${summaryShort}${supplyNote} This is ${canonicalName}${setNote}.`;
+  const setContext = setName ? `, part of the ${setName} set` : "";
+  const summaryLong = `${summaryShort}${supplyNote}${setContext}.`;
 
   return {
     summaryShort,
