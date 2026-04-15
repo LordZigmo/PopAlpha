@@ -12,10 +12,11 @@ import {
   selectPreferredScrydexPriceEntry,
   selectScrydexGradedEntries,
 } from "@/lib/backfill/scrydex-raw-price-select";
-import {
-  selectAllScrydexConditionPrices,
-  type ConditionPriceEntry,
-} from "@/lib/backfill/scrydex-condition-price-extract";
+// TODO: re-enable after debugging pipeline failures
+// import {
+//   selectAllScrydexConditionPrices,
+//   type ConditionPriceEntry,
+// } from "@/lib/backfill/scrydex-condition-price-extract";
 import type { ScrydexCard, ScrydexVariant } from "@/lib/scrydex/client";
 
 const PROVIDER = "SCRYDEX";
@@ -142,8 +143,6 @@ type VariantObservation = {
   isPerfect: boolean;
   lowPrice: number | null;
   highPrice: number | null;
-  // Condition-based pricing (all raw conditions from Scrydex)
-  conditionPrices: Map<string, ConditionPriceEntry> | null;
 };
 
 type TrendAnchorPoint = {
@@ -243,7 +242,6 @@ function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
     isPerfect: false,
     lowPrice: null,
     highPrice: null,
-    conditionPrices: null as Map<string, ConditionPriceEntry> | null,
   };
 
   if (variants.length === 0) {
@@ -251,7 +249,6 @@ function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
     const pricingSelection = selectPreferredScrydexPriceEntry(prices);
     if (pricingSelection) {
       const semantics = parseScrydexVariantSemantics("unknown");
-      const conditionPrices = selectAllScrydexConditionPrices(prices);
       results.push({
         variantName: "unknown",
         variantId: "unknown",
@@ -268,7 +265,6 @@ function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
         normalizedCondition: pricingSelection.normalizedCondition,
         trendAnchorPoints: extractTrendAnchorPoints(prices),
         ...RAW_DEFAULTS,
-        conditionPrices: conditionPrices.size > 0 ? conditionPrices : null,
       });
     }
     // Also extract graded entries from card-level prices
@@ -295,7 +291,6 @@ function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
         isPerfect: graded.isPerfect,
         lowPrice: graded.low,
         highPrice: graded.high,
-        conditionPrices: null,
       });
     }
     return results;
@@ -309,7 +304,6 @@ function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
 
     if (pricingSelection) {
       const semantics = parseScrydexVariantSemantics(variantName);
-      const conditionPrices = selectAllScrydexConditionPrices(variantPrices);
       results.push({
         variantName,
         variantId,
@@ -326,7 +320,6 @@ function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
         normalizedCondition: pricingSelection.normalizedCondition,
         trendAnchorPoints: extractTrendAnchorPoints(variantPrices),
         ...RAW_DEFAULTS,
-        conditionPrices: conditionPrices.size > 0 ? conditionPrices : null,
       });
     }
 
@@ -354,7 +347,6 @@ function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
         isPerfect: graded.isPerfect,
         lowPrice: graded.low,
         highPrice: graded.high,
-        conditionPrices: null,
       });
     }
   }
@@ -456,10 +448,6 @@ function buildObservationRow(params: {
       isPerfect: variant.isPerfect,
       lowPrice: variant.lowPrice,
       highPrice: variant.highPrice,
-      // Condition-based pricing (all raw conditions from Scrydex)
-      conditionPrices: variant.conditionPrices
-        ? Object.fromEntries(variant.conditionPrices)
-        : null,
     },
     updated_at: normalizedAt,
   };
