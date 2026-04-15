@@ -191,16 +191,17 @@ struct CardDetailView: View {
                             .resizable()
                             .aspectRatio(contentMode: .fit)
                             .frame(maxHeight: 420)
-                            // Layered shadows for depth: close contact shadow + diffuse glow
-                            .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 2)
-                            .shadow(color: .black.opacity(0.4), radius: 20, x: 0, y: 12)
-                            .shadow(color: .black.opacity(0.25), radius: 48, x: 0, y: 24)
-                            // Subtle colored glow from the accent
-                            .shadow(color: PA.Colors.accent.opacity(0.08), radius: 60, x: 0, y: 0)
+                            // Ambient glow — visible on dark backgrounds
+                            .shadow(color: .white.opacity(0.06), radius: 40, x: 0, y: 0)
+                            .shadow(color: PA.Colors.accent.opacity(0.15), radius: 50, x: 0, y: 8)
+                            // Hard drop shadow for depth separation
+                            .shadow(color: .black.opacity(0.8), radius: 24, x: 0, y: 20)
+                            .shadow(color: .black.opacity(0.5), radius: 8, x: 0, y: 4)
+                            // Slight 3D perspective tilt
                             .rotation3DEffect(
-                                .degrees(1.5),
+                                .degrees(2),
                                 axis: (x: 1, y: 0, z: 0),
-                                perspective: 0.8
+                                perspective: 0.6
                             )
                     case .failure:
                         heroPlaceholder
