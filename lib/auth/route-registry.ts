@@ -72,6 +72,7 @@ export const CRON_ROUTES = [
   "cron/refresh-derived-signals",
   "cron/refresh-set-summaries",
   "cron/refresh-ai-brief",
+  "cron/refresh-card-profiles",
   "cron/prune-old-data",
 ];
 

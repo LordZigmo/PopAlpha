@@ -4,7 +4,7 @@ import { dbPublic } from "@/lib/db";
 export const runtime = "nodejs";
 
 type CardProfileRow = {
-  card_slug: string;
+  canonical_slug: string;
   summary_short: string;
   summary_long: string | null;
   created_at: string;
@@ -29,8 +29,8 @@ export async function GET(req: Request) {
     const supabase = dbPublic();
     const { data, error } = await supabase
       .from("card_profiles")
-      .select("card_slug, summary_short, summary_long, created_at")
-      .eq("card_slug", slug)
+      .select("canonical_slug, summary_short, summary_long, created_at")
+      .eq("canonical_slug", slug)
       .maybeSingle<CardProfileRow>();
 
     if (error) {
