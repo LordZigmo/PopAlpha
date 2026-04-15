@@ -17,6 +17,7 @@ struct MarketplaceView: View {
     @State private var meData: HomepageMeDTO?
     @State private var showSearch = false
     @State private var selectedWindow: SignalWindow = .h24
+    @State private var searchSelectedCard: MarketCard?
 
     var body: some View {
         NavigationStack {
@@ -51,10 +52,25 @@ struct MarketplaceView: View {
             }
             .fullScreenCover(isPresented: $showSearch) {
                 NavigationStack {
-                    SearchView { _ in
+                    SearchView(onSelectCard: { result in
                         showSearch = false
-                    }
+                        Task {
+                            try? await Task.sleep(for: .milliseconds(300))
+                            await MainActor.run {
+                                searchSelectedCard = MarketCard.stub(
+                                    slug: result.canonicalSlug,
+                                    name: result.canonicalName,
+                                    setName: result.setName ?? "",
+                                    cardNumber: result.cardNumber ?? "",
+                                    imageURL: result.imageURL
+                                )
+                            }
+                        }
+                    })
                 }
+            }
+            .navigationDestination(item: $searchSelectedCard) { card in
+                CardDetailView(card: card)
             }
         }
     }

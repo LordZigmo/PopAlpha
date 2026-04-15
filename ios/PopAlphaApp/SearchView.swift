@@ -4,6 +4,7 @@ import SwiftUI
 
 struct SearchView: View {
     var onSelectSlug: ((String) -> Void)?
+    var onSelectCard: ((SearchCardResult) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
 
@@ -115,6 +116,7 @@ struct SearchView: View {
 
                 ForEach(results) { card in
                     Button {
+                        onSelectCard?(card)
                         onSelectSlug?(card.canonicalSlug)
                         dismiss()
                     } label: {

@@ -37,6 +37,24 @@ struct MarketCard: Identifiable, Hashable {
         if score >= 55 { return .watch }
         return .low
     }
+    /// Lightweight stub for navigation from search results.
+    /// The detail view loads full metrics on appear.
+    static func stub(slug: String, name: String = "", setName: String = "", cardNumber: String = "", imageURL: URL? = nil) -> MarketCard {
+        MarketCard(
+            id: slug,
+            name: name,
+            setName: setName,
+            cardNumber: cardNumber,
+            price: 0,
+            changePct: 0,
+            changeWindow: "24H",
+            rarity: .common,
+            sparkline: [],
+            imageGradient: [],
+            imageURL: imageURL,
+            confidenceScore: nil
+        )
+    }
 }
 
 enum ConfidenceLevel {
