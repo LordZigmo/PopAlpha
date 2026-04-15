@@ -403,6 +403,7 @@ export const INTERNAL_ROUTE_TRUST_CONTRACTS = {
   "cron/process-provider-pipeline-jobs": cronSecretRoute("cron/internal automation"),
   "cron/refresh-ai-brief": cronSecretRoute("cron/internal automation"),
   "cron/refresh-card-profiles": cronSecretRoute("cron/internal automation"),
+  "cron/downsample-price-history": cronSecretRoute("cron/internal automation"),
   "cron/refresh-card-embeddings": cronSecretRoute("cron/internal automation"),
   "cron/refresh-card-metrics": cronSecretRoute("cron/internal automation"),
   "cron/batch-refresh-pipeline-rollups": cronSecretRoute("cron/internal automation"),

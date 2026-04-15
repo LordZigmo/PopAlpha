@@ -536,6 +536,7 @@ async function cleanupStaleProviderVariantWrites(params: {
     );
   }
 
+  const ninetyDaysAgo = new Date(Date.now() - 90 * 86400000).toISOString();
   const exactHistoryVariantRefChunks = chunkValues([...exactHistoryVariantRefs], STALE_DELETE_PROVIDER_REF_CHUNK_SIZE);
   for (let chunkIndex = 0; chunkIndex < exactHistoryVariantRefChunks.length; chunkIndex += 1) {
     const historyVariantRefChunk = exactHistoryVariantRefChunks[chunkIndex];
@@ -546,6 +547,7 @@ async function cleanupStaleProviderVariantWrites(params: {
           .from("price_history_points")
           .delete()
           .eq("provider", params.provider)
+          .gte("ts", ninetyDaysAgo)
           .in("variant_ref", historyVariantRefChunk);
         if (error) throw new Error(error.message);
       },
@@ -567,6 +569,7 @@ async function cleanupStaleProviderVariantWrites(params: {
       .from("price_history_points")
       .select("variant_ref")
       .eq("provider", params.provider)
+      .gte("ts", ninetyDaysAgo)
       .or(lookupOrFilter);
     if (historyVariantRefLookupError) {
       throw new Error(`price_history_points(load stale variant refs): ${historyVariantRefLookupError.message}`);
@@ -590,6 +593,7 @@ async function cleanupStaleProviderVariantWrites(params: {
             .from("price_history_points")
             .delete()
             .eq("provider", params.provider)
+            .gte("ts", ninetyDaysAgo)
             .in("variant_ref", resolvedVariantRefChunk);
           if (error) throw new Error(error.message);
         },
@@ -610,6 +614,7 @@ async function cleanupStaleProviderVariantWrites(params: {
           .from("price_history_points")
           .delete()
           .eq("provider", params.provider)
+          .gte("ts", ninetyDaysAgo)
           .or(fallbackOrFilter);
         if (error) throw new Error(error.message);
       },
