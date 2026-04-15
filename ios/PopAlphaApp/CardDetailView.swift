@@ -191,16 +191,6 @@ struct CardDetailView: View {
                             .resizable()
                             .aspectRatio(contentMode: .fit)
                             .frame(maxHeight: 420)
-                            .background(
-                                // Visible accent glow behind the card
-                                Ellipse()
-                                    .fill(PA.Colors.accent.opacity(0.35))
-                                    .blur(radius: 80)
-                                    .scaleEffect(x: 1.2, y: 0.6)
-                                    .offset(y: 30)
-                            )
-                            .shadow(color: .black, radius: 40, x: 0, y: 30)
-                            .shadow(color: .black.opacity(0.7), radius: 10, x: 0, y: 6)
                     case .failure:
                         heroPlaceholder
                     case .empty:
@@ -210,6 +200,15 @@ struct CardDetailView: View {
                         heroPlaceholder
                     }
                 }
+                .background(
+                    Ellipse()
+                        .fill(PA.Colors.accent.opacity(0.35))
+                        .blur(radius: 80)
+                        .scaleEffect(x: 1.3, y: 0.7)
+                        .offset(y: 40)
+                )
+                .shadow(color: .black, radius: 40, x: 0, y: 30)
+                .shadow(color: .black.opacity(0.7), radius: 10, x: 0, y: 6)
                 .padding(.horizontal, 40)
                 .padding(.top, 12)
                 .padding(.bottom, 8)
