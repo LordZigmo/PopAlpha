@@ -191,18 +191,29 @@ struct CardDetailView: View {
                             .resizable()
                             .aspectRatio(contentMode: .fit)
                             .frame(maxHeight: 420)
-                            // Ambient glow — visible on dark backgrounds
-                            .shadow(color: .white.opacity(0.06), radius: 40, x: 0, y: 0)
-                            .shadow(color: PA.Colors.accent.opacity(0.15), radius: 50, x: 0, y: 8)
-                            // Hard drop shadow for depth separation
-                            .shadow(color: .black.opacity(0.8), radius: 24, x: 0, y: 20)
-                            .shadow(color: .black.opacity(0.5), radius: 8, x: 0, y: 4)
-                            // Slight 3D perspective tilt
-                            .rotation3DEffect(
-                                .degrees(2),
-                                axis: (x: 1, y: 0, z: 0),
-                                perspective: 0.6
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .stroke(
+                                        LinearGradient(
+                                            colors: [
+                                                .white.opacity(0.15),
+                                                .white.opacity(0.03),
+                                                .clear,
+                                            ],
+                                            startPoint: .top,
+                                            endPoint: .bottom
+                                        ),
+                                        lineWidth: 1
+                                    )
                             )
+                            .background(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(PA.Colors.accent.opacity(0.12))
+                                    .blur(radius: 60)
+                                    .offset(y: 12)
+                            )
+                            .shadow(color: .black, radius: 30, x: 0, y: 24)
+                            .shadow(color: .black.opacity(0.6), radius: 8, x: 0, y: 4)
                     case .failure:
                         heroPlaceholder
                     case .empty:
