@@ -204,6 +204,7 @@ actor CardService {
             filters: [
                 ("canonical_slug", "eq", slug),
                 ("variant_ref", "like", "\(printingId)::%::RAW"),
+                ("variant_ref", "not.like", "%::GRADED::%"),
                 ("source_window", "eq", "snapshot"),
                 ("ts", "gte", cutoff),
             ],
