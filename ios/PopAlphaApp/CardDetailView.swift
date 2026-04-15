@@ -50,6 +50,7 @@ struct CardDetailView: View {
     @State private var selectedGradeBucket: String = "G10"
     @State private var availablePrintings: [CardPrintingOption] = []
     @State private var selectedPrintingId: String?
+    @State private var printingHeroPrice: Double?
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
@@ -427,6 +428,11 @@ struct CardDetailView: View {
                 chartLoading = false
                 if selectedPriceMode.isGraded, let latest = points.last {
                     gradedHeroPrice = latest.price
+                    printingHeroPrice = nil
+                } else if let latest = points.last {
+                    printingHeroPrice = latest.price
+                } else {
+                    printingHeroPrice = nil
                 }
             }
         } catch {
@@ -653,6 +659,7 @@ struct CardDetailView: View {
                     PAHaptics.selection()
                     selectedPriceMode = .nearMint
                     gradedHeroPrice = nil
+                    printingHeroPrice = nil
                 }
                 gradePill(title: "Graded", selected: selectedPriceMode.isGraded) {
                     PAHaptics.selection()
@@ -770,6 +777,11 @@ struct CardDetailView: View {
     private var currentHeroPrice: String {
         switch selectedPriceMode {
         case .nearMint:
+            // When a non-default printing is selected, show its latest price
+            if let price = printingHeroPrice, price > 0 {
+                if price >= 1000 { return String(format: "$%.0f", price) }
+                return String(format: "$%.2f", price)
+            }
             return card.formattedPrice
         case .graded:
             guard let price = gradedHeroPrice, price > 0 else { return "—" }
