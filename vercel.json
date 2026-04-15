@@ -69,8 +69,8 @@
       "schedule": "23 * * * *"
     },
     {
-      "path": "/api/cron/refresh-card-profiles?mode=backfill&maxCards=1000",
-      "schedule": "10 */3 * * *"
+      "path": "/api/cron/refresh-card-profiles?mode=backfill&maxCards=2000&concurrency=8",
+      "schedule": "10 * * * *"
     },
     {
       "path": "/api/cron/refresh-card-profiles?mode=refresh&maxCards=2000",
