@@ -48,6 +48,8 @@ struct CardDetailView: View {
     @State private var gradedHeroPrice: Double?
     @State private var selectedGradingAgency: String = "PSA"
     @State private var selectedGradeBucket: String = "G10"
+    @State private var availablePrintings: [CardPrintingOption] = []
+    @State private var selectedPrintingId: String?
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
@@ -57,7 +59,7 @@ struct CardDetailView: View {
             }
         }
         .background(PA.Colors.background)
-        .task(id: "\(selectedTimeframe.rawValue)|\(selectedPriceMode)") {
+        .task(id: "\(selectedTimeframe.rawValue)|\(selectedPriceMode)|\(selectedPrintingId ?? "")") {
             await loadChart()
         }
         .task {
@@ -65,6 +67,17 @@ struct CardDetailView: View {
             cardMetrics = try? await CardService.shared.fetchCardMetrics(slug: card.id)
             if AuthService.shared.isAuthenticated {
                 friendActivity = try? await ActivityService.shared.fetchCardActivity(slug: card.id)
+            }
+            // Load available finish variants
+            if let printings = try? await CardService.shared.fetchPrintings(slug: card.id) {
+                let finishOrder = ["NON_HOLO", "HOLO", "REVERSE_HOLO", "ALT_HOLO", "UNKNOWN"]
+                let sorted = printings.sorted {
+                    (finishOrder.firstIndex(of: $0.finish) ?? 99) < (finishOrder.firstIndex(of: $1.finish) ?? 99)
+                }
+                await MainActor.run {
+                    availablePrintings = sorted
+                    if selectedPrintingId == nil { selectedPrintingId = sorted.first?.id }
+                }
             }
             // Load available graded options lazily
             if let rows = try? await CardService.shared.fetchGradedVariantMetrics(slug: card.id) {
@@ -213,6 +226,11 @@ struct CardDetailView: View {
         VStack(alignment: .leading, spacing: 24) {
             // Title + Price section
             pricingSection
+
+            // Finish variant pill selector
+            if availablePrintings.count > 1 {
+                finishPillSection
+            }
 
             // Grade mode pill selector
             gradePillSection
@@ -372,24 +390,36 @@ struct CardDetailView: View {
             let points: [PricePoint]
             switch selectedPriceMode {
             case .nearMint:
-                points = try await CardService.shared.fetchPriceHistory(
-                    slug: card.id,
-                    timeframe: selectedTimeframe
-                )
+                if let printingId = selectedPrintingId {
+                    points = try await CardService.shared.fetchPrintingPriceHistory(
+                        slug: card.id,
+                        printingId: printingId,
+                        timeframe: selectedTimeframe
+                    )
+                } else {
+                    points = try await CardService.shared.fetchPriceHistory(
+                        slug: card.id,
+                        timeframe: selectedTimeframe
+                    )
+                }
             case .graded(let provider, let bucket):
-                // Build variant_ref matching the server's buildGradedVariantRef format.
-                // We don't have the printingId on the client, so match using a
-                // pattern query on variant_ref containing the provider+bucket suffix.
-                // For now, use the un-scoped price_history which the server-side graded
-                // entries are written to with variant_ref like
-                // "{printingId}::{PROVIDER}::{BUCKET}" via buildProviderHistoryVariantRef.
-                // We filter by provider_variant_id pattern in the Supabase query.
-                let variantSuffix = "::\(provider)::\(gradeBucketToVariantRefBucket(bucket))"
-                points = try await CardService.shared.fetchGradedPriceHistory(
-                    slug: card.id,
-                    variantRef: variantSuffix,
-                    timeframe: selectedTimeframe
-                )
+                let resolvedBucket = gradeBucketToVariantRefBucket(bucket)
+                if let printingId = selectedPrintingId {
+                    points = try await CardService.shared.fetchPrintingGradedPriceHistory(
+                        slug: card.id,
+                        printingId: printingId,
+                        provider: provider,
+                        bucket: resolvedBucket,
+                        timeframe: selectedTimeframe
+                    )
+                } else {
+                    let variantSuffix = "::\(provider)::\(resolvedBucket)"
+                    points = try await CardService.shared.fetchGradedPriceHistory(
+                        slug: card.id,
+                        variantRef: variantSuffix,
+                        timeframe: selectedTimeframe
+                    )
+                }
             }
             await MainActor.run {
                 chartPrices = points.map(\.price)
@@ -547,6 +577,35 @@ struct CardDetailView: View {
                     ForEach(activity.recent.prefix(3)) { item in
                         ActivityEventCell(item: item)
                     }
+                }
+            }
+        }
+    }
+
+    // MARK: - Finish Variant Selector
+
+    private var finishPillSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Finish")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(PA.Colors.muted)
+                .textCase(.uppercase)
+
+            HStack(spacing: 6) {
+                ForEach(availablePrintings) { printing in
+                    Button {
+                        PAHaptics.selection()
+                        selectedPrintingId = printing.id
+                    } label: {
+                        Text(printing.finishLabel)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(selectedPrintingId == printing.id ? PA.Colors.background : PA.Colors.text)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .background(selectedPrintingId == printing.id ? PA.Colors.accent : PA.Colors.surfaceSoft)
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }

@@ -179,6 +179,59 @@ actor CardService {
         return try decoder.decode([GradedVariantMetricRow].self, from: data)
     }
 
+    // MARK: - Card Printings (finish variants)
+
+    func fetchPrintings(slug: String) async throws -> [CardPrintingOption] {
+        let data = try await Supabase.query(
+            table: "card_printings",
+            select: "id,finish,language,edition",
+            filters: [
+                ("canonical_slug", "eq", slug),
+                ("language", "eq", "EN"),
+            ],
+            order: "finish.asc",
+            limit: 20
+        )
+        return try decoder.decode([CardPrintingOption].self, from: data)
+    }
+
+    /// Fetch RAW price history for a specific printing ID.
+    func fetchPrintingPriceHistory(slug: String, printingId: String, timeframe: ChartTimeframe) async throws -> [PricePoint] {
+        let cutoff = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-timeframe.seconds))
+        let data = try await Supabase.query(
+            table: "public_price_history",
+            select: "ts,price",
+            filters: [
+                ("canonical_slug", "eq", slug),
+                ("variant_ref", "like", "\(printingId)::%::RAW"),
+                ("source_window", "eq", "snapshot"),
+                ("ts", "gte", cutoff),
+            ],
+            order: "ts.asc",
+            limit: timeframe.maxPoints
+        )
+        return try decoder.decode([PricePoint].self, from: data)
+    }
+
+    /// Fetch graded price history for a specific printing + provider + grade.
+    func fetchPrintingGradedPriceHistory(slug: String, printingId: String, provider: String, bucket: String, timeframe: ChartTimeframe) async throws -> [PricePoint] {
+        let cutoff = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-timeframe.seconds))
+        let variantRef = "\(printingId)::\(provider)::\(bucket)"
+        let data = try await Supabase.query(
+            table: "public_price_history",
+            select: "ts,price",
+            filters: [
+                ("canonical_slug", "eq", slug),
+                ("variant_ref", "eq", variantRef),
+                ("source_window", "eq", "snapshot"),
+                ("ts", "gte", cutoff),
+            ],
+            order: "ts.asc",
+            limit: timeframe.maxPoints
+        )
+        return try decoder.decode([PricePoint].self, from: data)
+    }
+
     // MARK: - Prices Refreshed (24h count, matches homepage)
 
     func fetchPricesRefreshedToday() async throws -> Int {
@@ -425,6 +478,23 @@ struct GradedVariantMetricRow: Decodable {
     let grade: String
     let providerAsOfTs: String?
     let historyPoints30d: Int?
+}
+
+struct CardPrintingOption: Decodable, Identifiable, Hashable {
+    let id: String
+    let finish: String
+    let language: String?
+    let edition: String?
+
+    var finishLabel: String {
+        switch finish {
+        case "NON_HOLO": return "Regular"
+        case "HOLO": return "Holo"
+        case "REVERSE_HOLO": return "Reverse Holo"
+        case "ALT_HOLO": return "Alt Art"
+        default: return "Standard"
+        }
+    }
 }
 
 // MARK: - Homepage DTOs (mirror lib/data/homepage.ts HomepageData)
