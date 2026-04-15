@@ -195,6 +195,27 @@ actor CardService {
         return try decoder.decode([CardPrintingOption].self, from: data)
     }
 
+    /// Fetch condition-based prices (NM, LP, MP, HP, DMG) for a card.
+    func fetchConditionPrices(slug: String, printingId: String? = nil) async throws -> [ConditionPriceRow] {
+        var filters: [(String, String, String)] = [
+            ("canonical_slug", "eq", slug),
+        ]
+        if let printingId {
+            filters.append(("printing_id", "eq", printingId))
+        } else {
+            filters.append(("printing_id", "is", "null"))
+        }
+        let data = try await Supabase.query(
+            table: "public_card_condition_prices",
+            select: "id,condition,price,low_price,high_price,observed_at",
+            filters: filters,
+            order: "condition.asc",
+            limit: 10
+        )
+        return try decoder.decode([ConditionPriceRow].self, from: data)
+            .sorted { $0.sortIndex < $1.sortIndex }
+    }
+
     /// Fetch RAW price history for a specific printing ID.
     func fetchPrintingPriceHistory(slug: String, printingId: String, timeframe: ChartTimeframe) async throws -> [PricePoint] {
         let cutoff = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-timeframe.seconds))
@@ -479,6 +500,32 @@ struct GradedVariantMetricRow: Decodable {
     let grade: String
     let providerAsOfTs: String?
     let historyPoints30d: Int?
+}
+
+struct ConditionPriceRow: Decodable, Identifiable {
+    let id: String
+    let condition: String
+    let price: Double
+    let lowPrice: Double?
+    let highPrice: Double?
+    let observedAt: String
+
+    var conditionLabel: String {
+        switch condition {
+        case "nm": return "Near Mint"
+        case "lp": return "Lightly Played"
+        case "mp": return "Moderately Played"
+        case "hp": return "Heavily Played"
+        case "dmg": return "Damaged"
+        default: return condition.uppercased()
+        }
+    }
+
+    static let displayOrder = ["nm", "lp", "mp", "hp", "dmg"]
+
+    var sortIndex: Int {
+        Self.displayOrder.firstIndex(of: condition) ?? 99
+    }
 }
 
 struct CardPrintingOption: Decodable, Identifiable, Hashable {

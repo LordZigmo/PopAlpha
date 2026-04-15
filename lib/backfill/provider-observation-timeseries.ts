@@ -12,6 +12,8 @@ import type { AnalyticsPipelineProvider } from "@/lib/backfill/provider-registry
 import { type VariantSignalRefreshKey } from "@/lib/backfill/provider-derived-signals";
 import { buildProviderHistoryVariantRef } from "@/lib/identity/variant-ref.mjs";
 import { convertToUsd } from "@/lib/pricing/fx";
+import { writeConditionPrices } from "@/lib/backfill/condition-price-writer";
+import type { ConditionPriceEntry } from "@/lib/backfill/scrydex-condition-price-extract";
 
 const JOB = "provider_observation_timeseries";
 const DEFAULT_OBSERVATIONS_PER_RUN = process.env.PROVIDER_OBSERVATION_TIMESERIES_OBSERVATIONS_PER_RUN
@@ -836,6 +838,34 @@ export async function runProviderObservationTimeseries(opts: {
         },
       );
       historyPointsUpserted = data.length;
+    }
+
+    // Write condition-based prices (nm, lp, mp, hp, dmg) to card_condition_prices.
+    // This is purely additive — the existing NM pipeline above is unaffected.
+    for (const row of candidateResult.rows) {
+      const rawConditionPrices = row.observation.metadata?.conditionPrices;
+      if (!rawConditionPrices || typeof rawConditionPrices !== "object") continue;
+      if (!row.mapping.canonical_slug) continue;
+
+      const conditionMap = new Map<string, ConditionPriceEntry>();
+      for (const [key, value] of Object.entries(rawConditionPrices)) {
+        if (value && typeof value === "object" && typeof (value as ConditionPriceEntry).price === "number") {
+          conditionMap.set(key, value as ConditionPriceEntry);
+        }
+      }
+      if (conditionMap.size === 0) continue;
+
+      try {
+        await writeConditionPrices({
+          canonicalSlug: row.mapping.canonical_slug,
+          printingId: row.mapping.printing_id,
+          conditionPrices: conditionMap,
+          provider: opts.provider,
+          observedAt: row.observation.observed_at,
+        });
+      } catch {
+        // Non-fatal — condition price write failure should not break the pipeline
+      }
     }
   } catch (error) {
     firstError = error instanceof Error ? error.message : String(error);

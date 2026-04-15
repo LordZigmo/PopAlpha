@@ -51,6 +51,7 @@ struct CardDetailView: View {
     @State private var availablePrintings: [CardPrintingOption] = []
     @State private var selectedPrintingId: String?
     @State private var printingHeroPrice: Double?
+    @State private var conditionPrices: [ConditionPriceRow] = []
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
@@ -79,6 +80,13 @@ struct CardDetailView: View {
                     availablePrintings = sorted
                     if selectedPrintingId == nil { selectedPrintingId = sorted.first?.id }
                 }
+            }
+            // Load condition-based prices
+            if let prices = try? await CardService.shared.fetchConditionPrices(
+                slug: card.id,
+                printingId: selectedPrintingId
+            ) {
+                await MainActor.run { conditionPrices = prices }
             }
             // Load available graded options lazily
             if let rows = try? await CardService.shared.fetchGradedVariantMetrics(slug: card.id) {
@@ -110,6 +118,16 @@ struct CardDetailView: View {
         }
         .sheet(isPresented: $showAddHolding) {
             AddHoldingSheet(preselectedCard: card.asSearchResult)
+        }
+        .onChange(of: selectedPrintingId) {
+            Task {
+                if let prices = try? await CardService.shared.fetchConditionPrices(
+                    slug: card.id,
+                    printingId: selectedPrintingId
+                ) {
+                    await MainActor.run { conditionPrices = prices }
+                }
+            }
         }
         .navigationBarBackButtonHidden()
         .toolbar {
@@ -235,6 +253,11 @@ struct CardDetailView: View {
 
             // Grade mode pill selector
             gradePillSection
+
+            // Condition price breakdown (NM / LP / MP / HP)
+            if !conditionPrices.isEmpty && !selectedPriceMode.isGraded {
+                conditionPriceSection
+            }
 
             // Chart section
             chartSection
@@ -586,6 +609,50 @@ struct CardDetailView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Condition Price Breakdown
+
+    private var conditionPriceSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Condition Pricing")
+                .font(PA.Typography.sectionTitle)
+                .foregroundStyle(PA.Colors.text)
+
+            VStack(spacing: 0) {
+                ForEach(Array(conditionPrices.enumerated()), id: \.element.id) { index, row in
+                    HStack {
+                        Text(row.conditionLabel)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(row.condition == "nm" ? PA.Colors.text : PA.Colors.muted)
+                        Spacer()
+                        if let low = row.lowPrice, let high = row.highPrice, low != high {
+                            Text(formatConditionPrice(low) + " – " + formatConditionPrice(high))
+                                .font(.system(size: 12))
+                                .foregroundStyle(PA.Colors.muted)
+                                .padding(.trailing, 8)
+                        }
+                        Text(formatConditionPrice(row.price))
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .foregroundStyle(row.condition == "nm" ? PA.Colors.accent : PA.Colors.text)
+                    }
+                    .padding(.vertical, 10)
+                    .padding(.horizontal, 16)
+
+                    if index < conditionPrices.count - 1 {
+                        Divider()
+                            .background(PA.Colors.border)
+                            .padding(.horizontal, 16)
+                    }
+                }
+            }
+            .glassSurface()
+        }
+    }
+
+    private func formatConditionPrice(_ value: Double) -> String {
+        if value >= 1000 { return String(format: "$%.0f", value) }
+        return String(format: "$%.2f", value)
     }
 
     // MARK: - Finish Variant Selector
