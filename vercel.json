@@ -34,38 +34,22 @@
     },
     {
       "path": "/api/cron/run-scrydex-daily/2",
-      "schedule": "5 3 * * *"
+      "schedule": "20 6 * * *"
     },
     {
       "path": "/api/cron/run-scrydex-daily/3",
-      "schedule": "5 6 * * *"
+      "schedule": "35 12 * * *"
     },
     {
       "path": "/api/cron/run-scrydex-daily/4",
-      "schedule": "5 9 * * *"
-    },
-    {
-      "path": "/api/cron/run-scrydex-daily/5",
-      "schedule": "5 12 * * *"
-    },
-    {
-      "path": "/api/cron/run-scrydex-daily/6",
-      "schedule": "5 15 * * *"
-    },
-    {
-      "path": "/api/cron/run-scrydex-daily/7",
-      "schedule": "5 18 * * *"
-    },
-    {
-      "path": "/api/cron/run-scrydex-daily/8",
-      "schedule": "5 21 * * *"
+      "schedule": "50 18 * * *"
     },
     {
       "path": "/api/cron/run-scrydex-2024plus-catchup",
       "schedule": "20 */12 * * *"
     },
     {
-      "path": "/api/cron/process-provider-pipeline-jobs?limit=6",
+      "path": "/api/cron/process-provider-pipeline-jobs",
       "schedule": "*/3 * * * *"
     },
     {
@@ -85,8 +69,8 @@
       "schedule": "23 * * * *"
     },
     {
-      "path": "/api/cron/refresh-card-profiles?mode=backfill&maxCards=2000&concurrency=8",
-      "schedule": "10 * * * *"
+      "path": "/api/cron/refresh-card-profiles?mode=backfill&maxCards=500",
+      "schedule": "10 */6 * * *"
     },
     {
       "path": "/api/cron/refresh-card-profiles?mode=refresh&maxCards=2000",
