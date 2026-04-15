@@ -191,29 +191,16 @@ struct CardDetailView: View {
                             .resizable()
                             .aspectRatio(contentMode: .fit)
                             .frame(maxHeight: 420)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 16)
-                                    .stroke(
-                                        LinearGradient(
-                                            colors: [
-                                                .white.opacity(0.15),
-                                                .white.opacity(0.03),
-                                                .clear,
-                                            ],
-                                            startPoint: .top,
-                                            endPoint: .bottom
-                                        ),
-                                        lineWidth: 1
-                                    )
-                            )
                             .background(
-                                RoundedRectangle(cornerRadius: 16)
-                                    .fill(PA.Colors.accent.opacity(0.12))
-                                    .blur(radius: 60)
-                                    .offset(y: 12)
+                                // Visible accent glow behind the card
+                                Ellipse()
+                                    .fill(PA.Colors.accent.opacity(0.35))
+                                    .blur(radius: 80)
+                                    .scaleEffect(x: 1.2, y: 0.6)
+                                    .offset(y: 30)
                             )
-                            .shadow(color: .black, radius: 30, x: 0, y: 24)
-                            .shadow(color: .black.opacity(0.6), radius: 8, x: 0, y: 4)
+                            .shadow(color: .black, radius: 40, x: 0, y: 30)
+                            .shadow(color: .black.opacity(0.7), radius: 10, x: 0, y: 6)
                     case .failure:
                         heroPlaceholder
                     case .empty:
