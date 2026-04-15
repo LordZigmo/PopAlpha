@@ -2,7 +2,7 @@
 
 **Audience:** Future Claude (or any engineer) debugging, tuning, or extending the Scrydex ingestion pipeline.
 
-**Last updated:** 2026-04-11 after a multi-day incident that took the pipeline from completely broken back to 100% catalog freshness.
+**Last updated:** 2026-04-15 after CPU saturation incident caused by 13M-row `price_history_points` table (8.3 GB) consuming 113 hours of CPU daily.
 
 ---
 
@@ -14,7 +14,7 @@ Three hard constraints, ranked by priority:
 
 1. **Freshness** — `fresh_cards_24h / addressable_catalog` should stay ≥ 95%. `addressable_catalog` is `COUNT(*) FROM public_card_metrics WHERE grade='RAW' AND printing_id IS NULL AND market_price IS NOT NULL` (currently ~18,600). The total canonical count (~19,570) is **not** the right denominator — 1,000+ cards have no market price at all and can never be "fresh".
 2. **Scrydex credits** — the only upstream cost. Price history calls are 3 credits/card; daily request budget fallback is 120/day with 1.15× headroom. Every optimization must be credit-neutral or credit-negative. Never increase call volume to fix a perf issue.
-3. **Supabase compute + disk IO** — these get exhausted by runaway pipelines. Disk IO burst budget in particular is the first thing to burn, and once depleted you're throttled to baseline and everything starts cascading.
+3. **Supabase compute + disk IO** — these get exhausted by runaway pipelines. On medium compute, **CPU is the first constraint** (not disk IO). The `price_history_points` table is the #1 CPU consumer — its SELECT and DELETE queries must include `ts` bounds to avoid full-table scans. Disk IO burst budget is the second thing to burn.
 
 When in doubt: **correctness > freshness > credit thrift > DB load > latency**. Never sacrifice a higher-priority item for a lower one.
 
@@ -61,12 +61,17 @@ Vercel cron (every 6h)              Vercel cron (every 3m)           Vercel cron
 | `run-scrydex-daily/1..4` | Every 6h (00:05, 06:20, 12:35, 18:50 UTC) | Enqueue pipeline jobs, priority-sorted |
 | `run-scrydex-2024plus-catchup` | Every 12h (:20) | Catch-up for 2024+ sets, capped at 300 credits |
 | `process-provider-pipeline-jobs` | Every 3m | Claim + execute up to 4 jobs in parallel |
-| `batch-refresh-pipeline-rollups` | Twice hourly (:10, :40) | Drain `pending_rollups` through 5 refresh RPCs |
-| `refresh-card-metrics` | Every 6h (:15) | Backstop full sweep in case targeted refresh misses anything |
-| `snapshot-price-history` | Every 6h (:30) | Full pricing snapshot via `snapshot_price_history()` |
+| `batch-refresh-pipeline-rollups` | Twice hourly (:22, :52) | Drain `pending_rollups` through 5 refresh RPCs |
+| `refresh-card-metrics` | Every 12h (:15) | Backstop full sweep in case targeted refresh misses anything |
+| `snapshot-price-history` | Every 6h (:50) | Full pricing snapshot via `snapshot_price_history()` |
 | `refresh-set-summaries` | Daily 09:00 UTC | 4 heavy set-level refreshes |
 | `refresh-derived-signals` | Daily 08:00 UTC | Variant signal reconcile |
-| Various | Various | FX rates, embeddings, PSA, transparency audits |
+| `prune-old-data` | Daily 03:40 UTC | 90-day hard delete + 30-day downsample of price_history_points |
+| `downsample-price-history` | Daily 04:15 UTC | Backlog cleanup: downsample 7 days of old data per run (temporary) |
+| `refresh-card-profiles` | Every 6h (:10) + daily 10:45 UTC | AI summary backfill (500 cards/run) + daily refresh |
+| `refresh-ai-brief` | Hourly (:23) | Homepage market narrative (Gemini) |
+| `refresh-card-embeddings` | Daily 09:30 UTC | Semantic search embeddings |
+| Various | Various | FX rates, PSA, transparency audits |
 
 ### Batch configuration (source of truth: `lib/backfill/provider-pipeline-batch-config.ts`)
 
@@ -258,6 +263,70 @@ One visitor per 60-second window per edge region pays the cost; everyone else ge
 
 **Lesson:** `force-dynamic` on a homepage is asking for a thundering herd when the DB is slow. Prefer ISR with a short revalidate window for "live" pages that read aggregates.
 
+### 11. `price_history_points` table growth → CPU saturation (the table size incident)
+
+**Symptom:** CPU at 99% on Supabase medium compute. Pipeline jobs timing out at 480s. Freshness dropping from 36% to 32%. `pg_stat_statements` showed two query patterns on `price_history_points` consuming 113 hours of CPU per day (SELECT: 120s avg × 1,789 calls, DELETE: 120s avg × 1,585 calls).
+
+**Root cause:** The table grew to 13M rows / 8.3 GB (plus 6.2 GB of indexes). The stale variant DELETE queries in `provider-observation-timeseries.ts` (lines 539-617) scanned the entire table because they had no `ts` bound — only filtering by `provider` and `variant_ref`. Every pipeline job ran these queries, and at 120s each they consumed all available CPU.
+
+**Diagnostic queries:**
+```sql
+-- Top CPU consumers
+SELECT substring(query from 1 for 120) as q, calls,
+  round(total_exec_time::numeric / 1000) as total_sec,
+  round(mean_exec_time::numeric) as avg_ms
+FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 5;
+
+-- Table size
+SELECT pg_size_pretty(pg_total_relation_size('price_history_points')) as size,
+  count(*) as rows FROM price_history_points;
+
+-- Data age distribution
+SELECT CASE
+    WHEN ts >= now() - interval '7 days' THEN '0-7d'
+    WHEN ts >= now() - interval '30 days' THEN '8-30d'
+    WHEN ts >= now() - interval '90 days' THEN '31-90d'
+    ELSE '90+d'
+  END as bucket, count(*) FROM price_history_points GROUP BY 1 ORDER BY 1;
+```
+
+**Fix (three parts):**
+
+1. **Downsample old data** — `downsample_price_history_points_batch()` SQL function keeps 1 point per (card, variant, provider, source_window) per day for data older than 30 days. Called by `prune_old_data()` step 7b (daily) and `downsample-price-history` cron (backlog cleanup). Migration: `20260416000000_downsample_price_history.sql`.
+
+2. **Add `ts` bounds to stale variant DELETEs** — All DELETE and SELECT queries on `price_history_points` in `provider-observation-timeseries.ts` now include `.gte("ts", ninetyDaysAgo)`. This lets Postgres use composite indexes and skip 90%+ of the table.
+
+3. **Drop unused indexes** — `price_history_points_snapshot_day_slug_idx` (61 MB, 0 scans) and `price_history_points_dedup_idx` (16 MB, 0 scans) were dead weight.
+
+**Expected outcome:** 13M → ~3-4M rows, 8.3 GB → ~2.5-3 GB, CPU from 99% to ~40%.
+
+**Lesson:** `price_history_points` is the highest-churn table in the system. Any query on it without a `ts` bound is a full-table scan bomb. Always include `ts >= <cutoff>` in WHERE clauses. Monitor table size monthly — if it grows beyond 5M rows, investigate why downsampling isn't keeping up.
+
+### 12. `variant_metrics` check constraint rejecting G9_5/G10_PERFECT grades
+
+**Symptom:** 48 pipeline job failures with `variant_metrics(upsert): violates check constraint "variant_metrics_printing_key_variant_ref_chk"`.
+
+**Root cause:** The check constraint in `20260301200000_variant_ref_identity_standardization.sql` only allowed grades `LE_7, G8, G9, G10` but not `G9_5` or `G10_PERFECT`, which were added later in the grade vocabulary expansion (`20260411140000_grade_vocabulary_v2.sql`). The constraint was never updated to match.
+
+**Fix:** Migration `20260416000000_downsample_price_history.sql` step 4 updates the constraint to allow G9_5, G9_5, G10_PERFECT, 9_5, and 10_PERFECT.
+
+### 13. Increasing cron concurrency/batch sizes without monitoring CPU (don't do this)
+
+**Symptom:** After bumping from 4 → 8 daily chunks, 4 → 6 job concurrency, and 100 → 200 observations per batch, CPU went to 99% and jobs started zombieing. Freshness dropped from 36% to 32%.
+
+**Root cause:** More concurrent work = more concurrent DB queries = more CPU. On medium compute, the CPU was already near capacity. Doubling the load pushed it over the edge. Jobs took so long they exceeded the 480s timeout and got stuck in RUNNING status, blocking the queue.
+
+**Fix:** Reverted to 4 chunks, 4 concurrency, 100 observations. **Do not increase these without first reducing the table size** (via downsampling) to bring baseline CPU usage under 60%.
+
+**Lesson:** Before increasing pipeline throughput, always check CPU first:
+```sql
+-- What's running right now
+SELECT state, substring(query from 1 for 100),
+  round(extract(epoch from now() - query_start)) as sec
+FROM pg_stat_activity WHERE state != 'idle' AND pid != pg_backend_pid();
+```
+If you see queries running for 30+ seconds, the DB is already stressed. Increasing load will make it worse.
+
 ---
 
 ## Operational checklists
@@ -391,6 +460,17 @@ Homepage shows empty? ─┐
         │
         └─ NO (DB empty too) → data flow issue upstream, run Q4
 
+Supabase CPU at 90%+? ─┐
+                        ▼
+  1. Run pg_stat_statements — find the top CPU consumers
+  2. If price_history_points is the top consumer:
+     → Check table size (should be ≤ 5M rows)
+     → Run downsample-price-history cron manually
+     → Kill long-running queries: pg_terminate_backend(pid)
+  3. If pipeline stale DELETEs are slow:
+     → Verify ts bounds are present in provider-observation-timeseries.ts
+  4. Don't increase concurrency/batch sizes — reduce them
+
 Supabase dashboard says depleting disk IO? ─┐
                                               ▼
   Don't increase load — reduce it.
@@ -440,6 +520,9 @@ WHERE provider = 'SCRYDEX' AND provider_set_id = '__provider__';
 - **Don't bundle sets per job (`setLimit > 1`) without a specific reason.** It makes jobs heavier, slower, and more timeout-prone.
 - **Don't forget the five "rollup-dependent" stats**: `market_price_as_of`, `change_pct_24h/7d`, `market_confidence_score`, `canonical_raw_provider_parity`, set summaries. All are updated by `refresh_card_metrics_for_variants` + its four siblings, which are deferred through `pending_rollups`. They lag up to ~30 minutes. Any UI that depends on sub-minute freshness of these stats needs a different architecture.
 - **Don't try to fix disk IO exhaustion by running more crons.** That's backwards. Reduce load, let the budget refill.
+- **Don't query `price_history_points` without a `ts` bound.** This table is 8+ GB. Any WHERE clause without `ts >= <cutoff>` does a full-table scan and takes 120+ seconds. Always include `ts >= now() - interval 'N days'`.
+- **Don't increase cron concurrency or batch sizes without checking CPU first.** Run `pg_stat_activity` to see if queries are already slow. If avg query time > 30s, the DB is saturated — more load will make it worse, not better.
+- **Don't let `price_history_points` grow beyond 5M rows.** The downsample system keeps it at ~3-4M by reducing old data to 1 point/card/day. If it grows past 5M, check that `prune_old_data()` step 7b and the downsample cron are running.
 - **Don't mark a real failure as KILLED.** The `KILLED:` prefix is a sentinel for "this was a manual intervention, exclude from failure-rate math". Preserve the convention.
 
 ---
@@ -457,4 +540,7 @@ When this system is healthy, all of these are true simultaneously:
 7. `metrics_newest` is within 2 hours of `NOW()`
 8. No single job exceeds 60s exec time (under `started_at → updated_at`)
 
-You are currently in this state. **The job of future Claude is to keep it in this state**, which mostly means: **don't regress any of the 10 fixes above**.
+9. `price_history_points` row count ≤ 5M (downsampling keeping it lean)
+10. CPU utilization ≤ 60% average (check Supabase dashboard)
+
+**The job of future Claude is to keep it in this state**, which mostly means: **don't regress any of the 13 fixes above** and **monitor `price_history_points` table size monthly**.
