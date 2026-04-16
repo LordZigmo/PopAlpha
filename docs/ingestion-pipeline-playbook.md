@@ -2,7 +2,7 @@
 
 **Audience:** Future Claude (or any engineer) debugging, tuning, or extending the Scrydex ingestion pipeline.
 
-**Last updated:** 2026-04-15 after CPU saturation incident caused by 13M-row `price_history_points` table (8.3 GB) consuming 113 hours of CPU daily.
+**Last updated:** 2026-04-16 after a compound day: LIKE-OR fallback burning 70% of DB CPU, two cascade failures it had been masking, and a silent structural bug in `refresh_card_metrics_for_variants` that had been aborting every call since 2026-04-07 and was the real cause of user-visible stale prices.
 
 ---
 
@@ -326,6 +326,120 @@ SELECT state, substring(query from 1 for 100),
 FROM pg_stat_activity WHERE state != 'idle' AND pid != pg_backend_pid();
 ```
 If you see queries running for 30+ seconds, the DB is already stressed. Increasing load will make it worse.
+
+### 14. LIKE-OR fallback + masked cascades + silent `DISTINCT ON` structural bug (2026-04-16)
+
+**Symptom (what the operator saw):** Supabase at 100% CPU and 100% Disk IO for most of the day. User reported "only ~7k cards have fresh market prices." Catalog coverage was actually fine (19,431 / 19,568 priced = 99.3%), but `fresh_24h` was stuck at 9,820 and `MAX(market_price_as_of)` for RAW+no-printing hadn't advanced past 20:57 UTC even after manually running a 143k-row `refresh_card_metrics` sweep. Scrydex was feeding us 22,320 fresh observations per hour, so the data was arriving — it just wasn't landing in `public_card_metrics`.
+
+This was one reported symptom, three independent problems. The LIKE-OR fallback was burning the CPU. Gating it exposed two cascade failures that had been hidden by the timeout budget it consumed. Separately, a migration from 2026-04-07 had been silently aborting the primary rollup RPC for nine days, and none of the other fixes mattered until that was patched.
+
+---
+
+#### 14a. LIKE-OR fallback on `price_history_points` (the CPU fire)
+
+**Root cause:** `cleanupStaleProviderVariantWrites` in [lib/backfill/provider-observation-timeseries.ts:571-621](../lib/backfill/provider-observation-timeseries.ts) has a two-path design. Happy path: resolve stale variants to exact `provider_ref` values and delete by those. Fallback path: if some variants don't resolve, build a WHERE clause of `variant_ref LIKE 'x::%' OR variant_ref LIKE 'y::%' OR ...` and issue one big DELETE. The fallback fires frequently because non-resolving variants are common (matches not yet in `provider_observation_matches`).
+
+The fallback query consumed 70% of `pg_stat_statements.total_exec_time` — mean 80–120 s × ~10k calls/day. Even though `'x::%'` has no leading wildcard on its own, OR-chaining many LIKE predicates makes the planner bail on index use and sequential-scan all 90 days of `price_history_points` (13M rows, 8.3 GB). This is the same class of full-table scan that incident #11 addressed, just wearing a different costume.
+
+**Diagnostic query:**
+```sql
+-- Top CPU offenders with LIKE patterns
+SELECT substring(query from 1 for 200) as q, calls,
+  round(total_exec_time::numeric / 1000) as total_sec,
+  round(mean_exec_time::numeric) as avg_ms
+FROM pg_stat_statements
+WHERE query ILIKE '%price_history_points%' AND query ILIKE '%like%'
+ORDER BY total_exec_time DESC LIMIT 5;
+```
+
+**Fix:** Commit `e415db8` — gated the LIKE-OR branch behind env flag `PROVIDER_OBSERVATION_CLEANUP_LIKE_FALLBACK_ENABLED` (default **off**). Losing this cleanup is safe: `prune_old_data()` runs daily with a 90-day retention cut and reaps the same rows the LIKE-OR was chasing. Daily prune is slower than immediate cleanup, but the cleanup was costing us more than it was saving.
+
+**Lesson:** OR-joined `LIKE` on a >1M-row table is a CPU trap, even when each pattern is anchored. If you find yourself writing `field LIKE 'a%' OR field LIKE 'b%' OR ...`, stop — either pre-resolve to exact matches and use `IN`, or use a GIN trigram index. The former is almost always the right call.
+
+---
+
+#### 14b. Cascade failures that had been masked by the LIKE-OR's timeout budget
+
+After gating 14a, three problems surfaced that had been silently failing inside the 480s budget the LIKE-OR was eating.
+
+**Cascade 1: PostgREST URL overflow on the happy-path lookup.** Line 510-514 of `provider-observation-timeseries.ts` did `.in("provider_ref", providerRefs)` with 200+ items unchunked. That overflows PostgREST's URL limit and returns HTTP 400 "Bad Request". Previously, the LIKE-OR was timing out before this code ran, so the 400 never surfaced. Fixed in commit `11de000` by chunking via the existing `chunkValues(..., STALE_DELETE_PROVIDER_REF_CHUNK_SIZE)` pattern already used elsewhere in the file.
+
+**Cascade 2: `variant_metrics_printing_key_variant_ref_chk` constraint violation.** Migration 20260416 tightened the constraint so `variant_ref` shape must match `grade` (RAW shape for RAW grade, graded shape for graded grades). `runProviderObservationVariantMetrics` in [lib/backfill/provider-observation-variant-metrics.ts](../lib/backfill/provider-observation-variant-metrics.ts) unconditionally built `variant_ref = buildRawVariantRef(printingId)` (always RAW shape), but `shouldWriteObservation` at line 143 let graded observations through. Result: graded rows with RAW-shaped `variant_ref` → constraint violation. Fixed in commit `33cc91b` by inverting the guard to skip non-RAW observations. The analytics providers (SCRYDEX/JUSTTCG/POKETRACE) have no path for graded writes through this function anyway — graded data flows through `app/api/ingest/psa` separately.
+
+**Cascade 2b: empty-string / case-sensitivity fallthrough.** First pass used `if (grade && grade !== "RAW")`. That's false when `grade === ""` (empty string is falsy), so empty-grade observations still got written with `grade=""` and violated the constraint. It would also incorrectly reject lowercase `"raw"`. Fixed in commit `e5a3386`: uppercase-normalize before comparing with strict `grade !== "RAW"`, and force literal `"RAW"` on the write side instead of trusting the observation's passed-through grade.
+
+**Lesson:** When you remove a timeout-hog, budget for surprise errors downstream. Any code that previously never got to run in 480s will start running — and its own bugs will surface. Gate changes like 14a behind a flag and watch the failure distribution for one full cron cycle before declaring victory.
+
+---
+
+#### 14c. The silent structural bug: `DISTINCT ON` literal string, broken since 2026-04-07 (the actual cause of user-visible stale prices)
+
+**Root cause:** Migration `20260407000000_remove_justtcg_from_scoped_refresh.sql` replaced `ps.provider` with the string literal `'SCRYDEX'` in BOTH the `DISTINCT ON` list and the `ORDER BY` list of the `provider_latest_by_ref_raw` CTE inside `refresh_card_metrics_for_variants()`. Postgres rejects non-integer constants in both clauses. Migration `20260409140000_fix_scrydex_literal_in_order_by.sql` (incident #1) patched the `ORDER BY` side but missed `DISTINCT ON`. So **every call to `refresh_card_metrics_for_variants()` has aborted with `non-integer constant in DISTINCT ON` since 2026-04-07** — nine days of silent breakage.
+
+**Why nobody noticed for nine days (this is the important part):**
+
+1. `pg_stat_statements` showed `claim_pending_rollups` called 1,547 times but `refresh_card_metrics_for_variants` with **0 calls**. That's the giveaway: Postgres aborts parse-time before execution counts are incremented. If a JS client is calling an RPC and pg_stat_statements shows 0 calls, the call is being rejected syntactically — not a schema cache miss, not a permissions issue (those *are* counted).
+2. The other targeted RPCs in the same drain (`refresh_price_changes_for_cards`, `refresh_card_market_confidence_for_cards`) both had call count 1,494 — matching each other but 53 below `claim_pending_rollups`. The drain was running; it was just silently failing the first RPC in the chain and moving on.
+3. [lib/backfill/provider-pipeline-rollups.ts:90-107](../lib/backfill/provider-pipeline-rollups.ts) only falls back to the full-sweep `refresh_card_metrics()` when the error message contains `"function does not exist"` or `"could not find the function"`. Our actual error (`non-integer constant in DISTINCT ON`) matched neither, so the fallback never fired. The error got stashed in `cardMetricsError` and the drain moved on.
+4. Consequence: `public_card_metrics.market_price_as_of` only advanced when the `refresh-card-metrics` cron (every 12h at :15) ran its full-sweep backstop. Between ticks, users saw 12+ hour stale prices — even though ingestion was healthy and `price_snapshots` were current.
+
+**Diagnostic query:**
+```sql
+-- If this returns rows with current timestamps and the RPC has 0 calls, the RPC is parse-aborting.
+SELECT
+  (SELECT MAX(observed_at) FROM price_snapshots WHERE provider='SCRYDEX') as snapshots_newest,
+  (SELECT MAX(market_price_as_of) FROM public_card_metrics
+    WHERE grade='RAW' AND printing_id IS NULL) as metrics_newest,
+  NOW() - (SELECT MAX(market_price_as_of) FROM public_card_metrics
+    WHERE grade='RAW' AND printing_id IS NULL) as lag;
+
+-- Cross-check: if the RPC is actually being called
+SELECT query, calls, round(mean_exec_time::numeric) as avg_ms
+FROM pg_stat_statements
+WHERE query ILIKE '%refresh_card_metrics_for_variants%';
+```
+If `snapshots_newest` is current but `metrics_newest` lags by hours, and the RPC shows 0 calls while `claim_pending_rollups` shows thousands — same bug shape.
+
+**Fix:** Commit `097b6e0` — migration `supabase/migrations/20260416230000_fix_scrydex_literal_in_distinct_on.sql` uses the same `replace(prosrc, ...)` string-substitution approach as the 04-09 fix, patching the `DISTINCT ON` clause (`ps.grade,\n  'SCRYDEX',\n  ps.provider_ref` → `ps.grade,\n  ps.provider,\n  ps.provider_ref`). Also shipped `sql/ops/fix-rollup-rpc-20260416.sql` as a self-contained Studio-pasteable snippet. Idempotent — no-ops if the pattern isn't present.
+
+**Lesson:** Three compounding rules come out of this one.
+
+- **`pg_stat_statements` "0 calls" for an RPC the JS client is definitely calling = Postgres is rejecting the call before execution counts.** Not schema cache, not permissions (both are tracked). Parse-time and syntactic failures are the most common cause. If you see this asymmetry, the function body is broken and Postgres is telling you.
+- **Silent fallback that only fires on specific error strings is a bug smell.** `provider-pipeline-rollups.ts` swallowed `non-integer constant in DISTINCT ON` for nine days because its fallback pattern match was too narrow. If you're going to have a fallback, either widen it to any RPC error or emit the error to a dedicated sink where future Claude will notice it. See "Preventative follow-ups" below.
+- **"Only 7k cards have fresh prices" is a freshness proxy, not a coverage metric.** The user was conflating `market_price IS NOT NULL` (19,431 — fine) with `market_price_as_of > now() - interval '24 hours'` (9,820 — the actual problem). Always distinguish the two in triage queries.
+
+---
+
+#### String-substitution migrations: acceptable but fragile
+
+The 04-09 migration (incident #1) and today's 04-16 `DISTINCT ON` migration both use `replace(prosrc, ...)` to patch one clause of a SQL function without rewriting the whole body. It's idempotent and no-ops cleanly when the pattern doesn't match. This is the right tool when you want to leave surrounding code untouched and when a full `CREATE OR REPLACE FUNCTION` would conflict with unrelated changes. But it's brittle: if someone reformats the function, the pattern stops matching and the migration silently does nothing. Always document the pattern match assumption inline in the migration and treat these as temporary patches — roll them into a full `CREATE OR REPLACE` the next time you need to touch the function for other reasons.
+
+---
+
+#### Preventative follow-ups (do these soon)
+
+- **Widen the rollup fallback in [lib/backfill/provider-pipeline-rollups.ts:90-107](../lib/backfill/provider-pipeline-rollups.ts) to catch any RPC error**, not just `"function does not exist"` / `"could not find the function"`. At minimum, log every caught error to a dedicated `rollup_errors` table or structured log stream so the next instance of 14c is visible in under an hour, not nine days.
+- **Bulk downsample `price_history_points` (Phase 3 from `/Users/popalpha/.claude/plans/delightful-swinging-music.md`).** The 14a gating reduces pressure on the table but doesn't shrink it. Baseline CPU is still higher than it should be.
+- **Requeue the 1,048 FAILED jobs via `sql/ops/unblock-pipeline-queue-20260416.sql`.** Staged for tomorrow, not yet run. Check `pipeline_jobs` FAILED count before executing — if it's drifted, re-scope the file.
+- **Consider dropping `cleanupStaleProviderVariantWrites` entirely.** `prune_old_data`'s 90-day retention already reaps what this function was trying to clean up immediately, and the function's internal complexity is what spawned 14a in the first place. The 14a env flag keeps it gated off today; flipping from "gated off" to "deleted" removes a whole class of future incidents.
+
+**Fix summary (all on main, all deployed 2026-04-16):**
+
+| Commit | Scope |
+|--------|-------|
+| `e415db8` | Gate LIKE-OR fallback in `provider-observation-timeseries.ts` behind env flag |
+| `11de000` | Chunk `.in("provider_ref", ...)` lookup to avoid PostgREST URL overflow |
+| `33cc91b` | `provider-observation-variant-metrics.ts` — skip non-RAW observations |
+| `e5a3386` | Uppercase-normalize grade, strict `!== "RAW"`, force literal `"RAW"` on write |
+| `097b6e0` | Migration `20260416230000_fix_scrydex_literal_in_distinct_on.sql` — patches `DISTINCT ON` clause |
+
+**Files touched:**
+- [lib/backfill/provider-observation-timeseries.ts](../lib/backfill/provider-observation-timeseries.ts)
+- [lib/backfill/provider-observation-variant-metrics.ts](../lib/backfill/provider-observation-variant-metrics.ts)
+- [supabase/migrations/20260416230000_fix_scrydex_literal_in_distinct_on.sql](../supabase/migrations/20260416230000_fix_scrydex_literal_in_distinct_on.sql)
+- [sql/ops/triage-pipeline-cpu-saturation.sql](../sql/ops/triage-pipeline-cpu-saturation.sql) — triage SQL
+- [sql/ops/fix-rollup-rpc-20260416.sql](../sql/ops/fix-rollup-rpc-20260416.sql) — Studio-pasteable fix
+- [sql/ops/unblock-pipeline-queue-20260416.sql](../sql/ops/unblock-pipeline-queue-20260416.sql) — staged, unused
 
 ---
 
