@@ -35,6 +35,9 @@ export const PUBLIC_ROUTES = [
   "homepage",
   "homepage/ai-brief",
   "homepage/community",
+  "personalization/events",
+  "personalization/explanation",
+  "personalization/profile",
   "waitlist",
 ];
 
