@@ -101,6 +101,12 @@ struct PortfolioView: View {
                     selectedWindow: $selectedWindow
                 )
 
+                // While the user hasn't reached the analysis threshold,
+                // show a premium progress card instead of mock sections.
+                if !hasFullAnalysis {
+                    InsightsUnlockProgress(cardsAdded: positions.count)
+                }
+
                 // Enriched sections (only when backend returned full analysis)
                 if hasFullAnalysis {
                     if let identity = overview?.toIdentity() {
@@ -123,14 +129,14 @@ struct PortfolioView: View {
                     }
                 }
 
-                // Positions list (always shown)
+                // Positions list (always shown when there are holdings)
                 if !positions.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack(spacing: 8) {
                             Image(systemName: "rectangle.stack")
                                 .font(.system(size: 14))
                                 .foregroundStyle(PA.Colors.accent)
-                            Text("All Positions")
+                            Text("Your Cards")
                                 .font(PA.Typography.sectionTitle)
                                 .foregroundStyle(PA.Colors.text)
                         }
@@ -138,7 +144,10 @@ struct PortfolioView: View {
 
                         LazyVStack(spacing: 10) {
                             ForEach(positions) { position in
-                                PortfolioPositionCell(position: position)
+                                PortfolioPositionCell(
+                                    position: position,
+                                    metadata: position.canonicalSlug.flatMap { overview?.cardMetadata?[$0] }
+                                )
                             }
                         }
                         .padding(.horizontal, PA.Layout.sectionPadding)

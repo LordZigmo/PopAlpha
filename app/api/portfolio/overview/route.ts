@@ -47,6 +47,20 @@ type ImageRow = {
   image_url: string | null;
 };
 
+type PriceHistoryRow = {
+  canonical_slug: string;
+  ts: string;
+  price: number;
+};
+
+type CardMetadata = {
+  name: string;
+  set_name: string | null;
+  image_url: string | null;
+  market_price: number | null;
+  change_pct: number | null;
+};
+
 export async function GET(req: Request) {
   const auth = await requireUser(req);
   if (!auth.ok) return auth.response;
@@ -71,8 +85,9 @@ export async function GET(req: Request) {
     // 2. Collect unique slugs
     const slugs = [...new Set(holdings.map((h) => h.canonical_slug).filter(Boolean))];
 
-    // 3. Parallel batch-fetch: market data + card metadata + images
-    const [pulseMap, cardsResult, imagesResult] = await Promise.all([
+    // 3. Parallel batch-fetch: market data + card metadata + images + price history
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 86400 * 1000).toISOString();
+    const [pulseMap, cardsResult, imagesResult, historyResult] = await Promise.all([
       getCanonicalMarketPulseMap(pub, slugs),
       pub.from("canonical_cards")
         .select("slug, canonical_name, set_name, year")
@@ -82,7 +97,14 @@ export async function GET(req: Request) {
         .in("canonical_slug", slugs)
         .eq("language", "EN")
         .not("image_url", "is", null)
-        .limit(slugs.length),
+        .limit(slugs.length * 3),
+      pub.from("public_price_history_canonical")
+        .select("canonical_slug, ts, price")
+        .in("canonical_slug", slugs)
+        .eq("source_window", "snapshot")
+        .gte("ts", thirtyDaysAgo)
+        .order("ts", { ascending: true })
+        .limit(2000),
     ]);
 
     // Build lookup maps
@@ -102,10 +124,37 @@ export async function GET(req: Request) {
     const changeMap = new Map<string, number>();
     for (const slug of slugs) {
       const pulse = pulseMap.get(slug);
-      if (pulse?.marketPrice != null) priceMap.set(slug, pulse.marketPrice);
+      // Fall back through providers when market_price is null
+      const price = pulse?.marketPrice
+        ?? pulse?.scrydexPrice
+        ?? pulse?.justtcgPrice
+        ?? pulse?.pokemontcgPrice
+        ?? null;
+      if (price != null) priceMap.set(slug, price);
       const chg = pulse?.changePct24h ?? pulse?.changePct7d ?? 0;
       changeMap.set(slug, chg);
     }
+
+    // Build per-slug card metadata for the iOS positions list
+    const cardMetadata: Record<string, CardMetadata> = {};
+    for (const slug of slugs) {
+      const c = cardMap.get(slug);
+      cardMetadata[slug] = {
+        name: c?.canonical_name ?? slug,
+        set_name: c?.set_name ?? null,
+        image_url: imageMap.get(slug) ?? null,
+        market_price: priceMap.get(slug) ?? null,
+        change_pct: changeMap.get(slug) ?? 0,
+      };
+    }
+
+    // Compute portfolio value sparkline from price history.
+    // For each day we have data, sum (price × qty) using last-known prices.
+    const sparkline = computeSparkline(
+      (historyResult.data ?? []) as PriceHistoryRow[],
+      holdings,
+      priceMap,
+    );
 
     // 4. Compute summary
     let totalValue = 0;
@@ -143,6 +192,8 @@ export async function GET(req: Request) {
         ok: true,
         minimal: true,
         summary,
+        sparkline,
+        card_metadata: cardMetadata,
         top_holdings: computeTopHoldings(holdings, cardMap, priceMap, changeMap, imageMap),
       });
     }
@@ -163,6 +214,8 @@ export async function GET(req: Request) {
       ok: true,
       minimal: false,
       summary,
+      sparkline,
+      card_metadata: cardMetadata,
       identity,
       composition,
       top_holdings: topHoldings,
@@ -174,4 +227,67 @@ export async function GET(req: Request) {
     console.error("[portfolio/overview] failed:", message);
     return NextResponse.json({ ok: false, error: "Internal error." }, { status: 500 });
   }
+}
+
+/**
+ * Build a 14-point portfolio value sparkline from raw price history.
+ * Uses last-known-price-forward fill so the curve is continuous even on
+ * days where some cards had no snapshots.
+ */
+function computeSparkline(
+  history: PriceHistoryRow[],
+  holdings: HoldingRow[],
+  currentPrices: Map<string, number>,
+): number[] {
+  if (history.length === 0) return [];
+
+  // Bucket prices by day, keeping the latest price per slug per day.
+  const dayBuckets = new Map<string, Map<string, number>>();
+  for (const row of history) {
+    const day = row.ts.slice(0, 10);
+    if (!dayBuckets.has(day)) dayBuckets.set(day, new Map());
+    dayBuckets.get(day)!.set(row.canonical_slug, row.price);
+  }
+
+  const sortedDays = [...dayBuckets.keys()].sort();
+  const lastKnown = new Map<string, number>();
+
+  // Seed with cost basis so brand-new cards still contribute before they
+  // appear in the price history.
+  for (const h of holdings) {
+    lastKnown.set(h.canonical_slug, h.price_paid_usd);
+  }
+
+  const series: number[] = [];
+  for (const day of sortedDays) {
+    for (const [slug, price] of dayBuckets.get(day)!) {
+      lastKnown.set(slug, price);
+    }
+    let val = 0;
+    for (const h of holdings) {
+      const p = lastKnown.get(h.canonical_slug) ?? h.price_paid_usd;
+      val += p * (h.qty || 1);
+    }
+    series.push(Math.round(val * 100) / 100);
+  }
+
+  // Append a final point using the latest current prices so the line ends
+  // at "today's value" rather than the last snapshot day.
+  let nowVal = 0;
+  for (const h of holdings) {
+    const p = currentPrices.get(h.canonical_slug) ?? lastKnown.get(h.canonical_slug) ?? h.price_paid_usd;
+    nowVal += p * (h.qty || 1);
+  }
+  series.push(Math.round(nowVal * 100) / 100);
+
+  // Down-sample to 14 points if we have many.
+  if (series.length > 14) {
+    const step = (series.length - 1) / 13;
+    const sampled: number[] = [];
+    for (let i = 0; i < 14; i++) {
+      sampled.push(series[Math.round(i * step)]!);
+    }
+    return sampled;
+  }
+  return series;
 }

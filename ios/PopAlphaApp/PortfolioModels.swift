@@ -145,11 +145,21 @@ struct PortfolioOverviewResponse: Decodable {
     let ok: Bool
     let minimal: Bool?
     let summary: APISummary?
+    let sparkline: [Double]?
+    let cardMetadata: [String: APICardMetadata]?
     let identity: APIIdentity?
     let composition: APIComposition?
     let topHoldings: [APITopHolding]?
     let attributes: [APIAttribute]?
     let insights: [String]?
+}
+
+struct APICardMetadata: Decodable {
+    let name: String
+    let setName: String?
+    let imageUrl: String?
+    let marketPrice: Double?
+    let changePct: Double?
 }
 
 struct APISummary: Decodable {
@@ -227,7 +237,7 @@ extension PortfolioOverviewResponse {
             rawCount: s.rawCount,
             gradedCount: s.gradedCount,
             sealedCount: 0,
-            sparkline: [],
+            sparkline: sparkline ?? [],
             aiSummary: ""
         )
     }

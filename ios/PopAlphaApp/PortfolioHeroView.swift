@@ -48,13 +48,12 @@ struct PortfolioHeroView: View {
                 timeWindowToggle
             }
 
-            // Sparkline (only when we have historical data)
+            // Premium portfolio value chart (only when we have historical data)
             if summary.sparkline.count >= 2 {
-                SparklineView(
+                PortfolioValueChart(
                     data: summary.sparkline,
                     isPositive: change.isPositive,
-                    lineWidth: 2,
-                    height: 64
+                    height: 110
                 )
                 .padding(.horizontal, 4)
             }
@@ -62,15 +61,17 @@ struct PortfolioHeroView: View {
             // Stats row
             statsRow
 
-            // AI summary
-            Text(summary.aiSummary)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(PA.Colors.textSecondary)
-                .italic()
-                .multilineTextAlignment(.center)
-                .lineSpacing(2)
-                .padding(.horizontal, 8)
-                .fixedSize(horizontal: false, vertical: true)
+            // AI summary (only when populated)
+            if !summary.aiSummary.isEmpty {
+                Text(summary.aiSummary)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(PA.Colors.textSecondary)
+                    .italic()
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(2)
+                    .padding(.horizontal, 8)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(.horizontal, PA.Layout.sectionPadding)
         .padding(.top, 8)
