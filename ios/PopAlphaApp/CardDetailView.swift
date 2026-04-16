@@ -59,7 +59,18 @@ struct CardDetailView: View {
                 heroSection
                 detailContent
             }
+            .background(alignment: .top) {
+                // Accent glow — centered on card, bleeds into content below
+                Ellipse()
+                    .fill(PA.Colors.accent)
+                    .opacity(0.25)
+                    .blur(radius: 120)
+                    .frame(width: 380, height: 500)
+                    .offset(y: 180)
+                    .allowsHitTesting(false)
+            }
         }
+        .coordinateSpace(name: "scroll")
         .background(PA.Colors.background)
         .task(id: "\(selectedTimeframe.rawValue)|\(selectedPriceMode)|\(selectedPrintingId ?? "")") {
             await loadChart()
@@ -70,6 +81,14 @@ struct CardDetailView: View {
             if AuthService.shared.isAuthenticated {
                 friendActivity = try? await ActivityService.shared.fetchCardActivity(slug: card.id)
             }
+            // Fire a card_view personalization event once per appearance.
+            await PersonalizationService.shared.track(
+                PersonalizedEvent(
+                    type: .cardView,
+                    canonicalSlug: card.id,
+                    variantRef: selectedPrintingId.map { "\($0)::RAW" }
+                )
+            )
             // Load available finish variants
             if let printings = try? await CardService.shared.fetchPrintings(slug: card.id) {
                 let finishOrder = ["NON_HOLO", "HOLO", "REVERSE_HOLO", "ALT_HOLO", "UNKNOWN"]
@@ -179,50 +198,51 @@ struct CardDetailView: View {
     // MARK: - Hero (matches web canonical-card-floating-hero)
 
     private var heroSection: some View {
-        ZStack(alignment: .bottom) {
-            PA.Colors.background
+        GeometryReader { geo in
+            let scrollY = geo.frame(in: .named("scroll")).minY
+            let progress = max(0, min(-scrollY / 350, 1))
 
-            // Freefloating card art — premium floating effect
-            if let url = card.imageURL {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(maxHeight: 420)
-                    case .failure:
-                        heroPlaceholder
-                    case .empty:
-                        heroPlaceholder
-                            .overlay(ProgressView().tint(PA.Colors.muted))
-                    @unknown default:
-                        heroPlaceholder
+            ZStack {
+                Color.clear // fill GeometryReader
+                // Freefloating card image
+                if let url = card.imageURL {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(maxHeight: 420)
+                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                        .stroke(.white.opacity(0.1), lineWidth: 0.5)
+                                )
+                        case .failure:
+                            heroPlaceholder
+                        case .empty:
+                            heroPlaceholder
+                                .overlay(ProgressView().tint(PA.Colors.muted))
+                        @unknown default:
+                            heroPlaceholder
+                        }
                     }
-                }
-                .background(
-                    Ellipse()
-                        .fill(PA.Colors.accent.opacity(0.35))
-                        .blur(radius: 80)
-                        .scaleEffect(x: 1.3, y: 0.7)
-                        .offset(y: 40)
-                )
-                .shadow(color: .black, radius: 40, x: 0, y: 30)
-                .shadow(color: .black.opacity(0.7), radius: 10, x: 0, y: 6)
-                .padding(.horizontal, 40)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
-            } else {
-                heroPlaceholder
+                    .shadow(color: .black.opacity(0.8), radius: 24, x: 0, y: 16)
+                    .scaleEffect(1.0 - CGFloat(progress) * 0.08)
+                    .opacity(1.0 - CGFloat(progress) * 0.6)
+                    .offset(y: CGFloat(-progress) * 40.0)
                     .padding(.horizontal, 40)
                     .padding(.top, 12)
-            }
+                    .padding(.bottom, 8)
+                } else {
+                    heroPlaceholder
+                        .padding(.horizontal, 40)
+                        .padding(.top, 12)
+                }
 
-            // Bottom fade into content
-            PA.Gradients.heroOverlay
-                .frame(height: 120)
+            }
         }
-        .frame(minHeight: 400)
+        .frame(height: 420)
     }
 
     private var heroPlaceholder: some View {
@@ -276,6 +296,13 @@ struct CardDetailView: View {
                 aiBriefSection
             }
 
+            // Personalized insight (sits adjacent to AI Brief; renders its own
+            // fallback copy when there is not yet enough signal).
+            PersonalizedInsightCardView(
+                canonicalSlug: card.id,
+                variantRef: selectedPrintingId.map { "\($0)::RAW" }
+            )
+
             // Details grid
             detailsGrid
 
@@ -287,8 +314,10 @@ struct CardDetailView: View {
                 friendActivitySection(activity)
             }
 
-            // Market info
+            // Market info — slight top padding establishes the next
+            // section break after the primary action row.
             marketInfoSection
+                .padding(.top, 6)
         }
         .padding(PA.Layout.sectionPadding)
     }
@@ -297,9 +326,18 @@ struct CardDetailView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(card.setName)
-                        .font(PA.Typography.cardSubtitle)
+                    NavigationLink {
+                        SetDetailView(setName: card.setName)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(card.setName)
+                                .font(PA.Typography.cardSubtitle)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 9, weight: .semibold))
+                        }
                         .foregroundStyle(PA.Colors.accent)
+                    }
+                    .buttonStyle(.plain)
 
                     Text(card.name)
                         .font(.system(size: 26, weight: .bold))
@@ -408,9 +446,15 @@ struct CardDetailView: View {
             .padding(.vertical, 4)
 
             if !chartPrices.isEmpty {
-                Text("\(chartPrices.count) data points")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(PA.Colors.muted)
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(PA.Colors.accent.opacity(0.7))
+                        .frame(width: 4, height: 4)
+                    Text("Calibrated on \(chartPrices.count) data point\(chartPrices.count == 1 ? "" : "s") · \(selectedTimeframe.rawValue)")
+                        .font(.system(size: 10, weight: .semibold))
+                        .tracking(0.4)
+                        .foregroundStyle(PA.Colors.muted)
+                }
             }
         }
         .padding(16)
@@ -477,16 +521,56 @@ struct CardDetailView: View {
     }
 
     // MARK: - Details Grid
+    // Every tile derives its value from live card / metrics data so the
+    // section feels intentional rather than placeholder. Missing data
+    // degrades to a muted em-dash rather than leaving the UI looking broken.
+
+    private struct MetaTile: Identifiable {
+        let id = UUID()
+        let title: String
+        let value: String
+        let tone: DetailTone
+    }
+
+    private var metaTiles: [MetaTile] {
+        var tiles: [MetaTile] = []
+
+        let setName = card.setName.trimmingCharacters(in: .whitespacesAndNewlines)
+        tiles.append(MetaTile(
+            title: "Set",
+            value: setName.isEmpty ? "—" : setName,
+            tone: setName.isEmpty ? .muted : .neutral
+        ))
+
+        let rawNumber = card.cardNumber.trimmingCharacters(in: .whitespaces)
+        let hasNumber = !rawNumber.isEmpty
+        let displayedNumber: String = {
+            guard hasNumber else { return "—" }
+            return rawNumber.hasPrefix("#") ? rawNumber : "#\(rawNumber)"
+        }()
+        tiles.append(MetaTile(
+            title: "Number",
+            value: displayedNumber,
+            tone: hasNumber ? .neutral : .muted
+        ))
+
+        let confidence = confidenceDescriptor
+        tiles.append(MetaTile(title: "Confidence", value: confidence.label, tone: confidence.tone))
+
+        let liquidity = liquidityDescriptor
+        tiles.append(MetaTile(title: "Liquidity", value: liquidity.label, tone: liquidity.tone))
+
+        return tiles
+    }
 
     private var detailsGrid: some View {
         LazyVGrid(
-            columns: [GridItem(.flexible()), GridItem(.flexible())],
-            spacing: 12
+            columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)],
+            spacing: 10
         ) {
-            detailTile(title: "Set", value: card.setName)
-            detailTile(title: "Number", value: card.cardNumber)
-            detailTile(title: "Confidence", value: "High", tone: .accent)
-            detailTile(title: "Liquidity", value: "Strong", tone: .positive)
+            ForEach(metaTiles) { tile in
+                detailTile(title: tile.title, value: tile.value, tone: tile.tone)
+            }
         }
     }
 
@@ -495,26 +579,55 @@ struct CardDetailView: View {
             Text(title)
                 .font(PA.Typography.caption)
                 .foregroundStyle(PA.Colors.muted)
+                .tracking(0.4)
+                .textCase(.uppercase)
             Text(value)
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(tone.color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
         .glassSurface()
     }
 
+    /// Derives a user-facing Confidence label from the numeric score
+    /// attached to the card. Falls back to a muted em-dash when the
+    /// signal isn't loaded yet.
+    private var confidenceDescriptor: (label: String, tone: DetailTone) {
+        guard let score = card.confidenceScore else { return ("—", .muted) }
+        if score >= 85 { return ("High", .accent) }
+        if score >= 70 { return ("Solid", .accent) }
+        if score >= 55 { return ("Watch", .neutral) }
+        return ("Low", .muted)
+    }
+
+    /// Derives Liquidity from active listings (7D) with a snapshot-count
+    /// fallback. This keeps the tile meaningful even when listings are
+    /// sparse but price history is rich.
+    private var liquidityDescriptor: (label: String, tone: DetailTone) {
+        guard let metrics = cardMetrics else { return ("—", .muted) }
+        let listings = metrics.activeListings7d ?? 0
+        let snapshots = metrics.snapshotCount30d ?? 0
+        if listings >= 15 || snapshots >= 12 { return ("Strong", .positive) }
+        if listings >= 5 || snapshots >= 5 { return ("Moderate", .accent) }
+        if listings >= 1 || snapshots >= 1 { return ("Thin", .neutral) }
+        return ("—", .muted)
+    }
+
     // MARK: - Action Buttons
+    // Primary: Add to Collection — dominant, accent-filled, expands to
+    // fill the remaining width so it clearly reads as the next logical
+    // user action. Secondary: Wishlist — compact ghost pill.
 
     private var actionButtons: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             WatchlistButton(
                 slug: card.id,
                 cardName: card.name,
                 setName: card.setName
             )
-
-            Spacer()
 
             Button {
                 PAHaptics.tap()
@@ -522,53 +635,135 @@ struct CardDetailView: View {
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "plus")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: 14, weight: .bold))
                     Text("Add to Collection")
                         .font(.system(size: 15, weight: .semibold))
                 }
                 .foregroundStyle(PA.Colors.background)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
                 .background(PA.Colors.accent)
                 .clipShape(Capsule())
+                .shadow(color: PA.Colors.accent.opacity(0.25), radius: 14, x: 0, y: 6)
             }
             .buttonStyle(.plain)
         }
     }
 
     // MARK: - AI Brief
+    // Branded interpretation of the chart above. Mirrors the personalization
+    // card's shaded-pill pattern but in PopAlpha blue — the title lives
+    // inside the card, the left rail is inset so it sits cleanly within
+    // the rounded corners rather than tracing them.
 
     @ViewBuilder
     private var aiBriefSection: some View {
         if let profile = cardProfile {
             VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 6) {
+                HStack(alignment: .center, spacing: 8) {
                     Image(systemName: "sparkles")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(PA.Colors.accent)
-                    Text("AI Brief")
-                        .font(PA.Typography.sectionTitle)
-                        .foregroundStyle(PA.Colors.text)
+                    Text("Where this card stands today")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(PA.Colors.accent)
+                        .kerning(-0.2)
+                    Spacer(minLength: 0)
                 }
 
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(profile.summaryShort)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(PA.Colors.text)
+                Text(summaryHeadline(from: profile))
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(PA.Colors.text)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let interpretation = summaryInterpretation(from: profile) {
+                    Text(interpretation)
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(PA.Colors.textSecondary)
                         .lineSpacing(3)
-
-                    if let long = profile.summaryLong {
-                        Text(long)
-                            .font(.system(size: 13))
-                            .foregroundStyle(PA.Colors.muted)
-                            .lineSpacing(3)
-                    }
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .padding(16)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .glassSurface()
+
+                if shouldShowThinDataNote {
+                    HStack(spacing: 6) {
+                        Image(systemName: "dot.radiowaves.left.and.right")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text("Read calibrated for thin market depth")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundStyle(PA.Colors.muted)
+                    .padding(.top, 2)
+                }
             }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(PA.Colors.accent.opacity(0.12))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(alignment: .leading) {
+                // Inset rounded rail — tucks inside the card's rounded
+                // corners instead of trying to trace them.
+                Capsule()
+                    .fill(PA.Colors.accent)
+                    .frame(width: 3)
+                    .padding(.vertical, 10)
+                    .padding(.leading, 2)
+            }
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(PA.Colors.accent.opacity(0.35), lineWidth: 1)
+            )
+            .shadow(color: PA.Colors.accent.opacity(0.22), radius: 14, x: 0, y: 0)
+            .shadow(color: .black.opacity(0.24), radius: 30, x: 0, y: 18)
         }
+    }
+
+    /// Canonical one-line read — defaults to `summary_short` and trims
+    /// any trailing whitespace / punctuation doubling that occasionally
+    /// leaks through from the backend.
+    private func summaryHeadline(from profile: CardProfileResult) -> String {
+        profile.summaryShort.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Returns a distinct supporting line from `summary_long`. If the long
+    /// form simply repeats the short form (a common backend pattern), we
+    /// return nil so the card doesn't render duplicated copy.
+    private func summaryInterpretation(from profile: CardProfileResult) -> String? {
+        guard let long = profile.summaryLong else { return nil }
+        let short = profile.summaryShort.trimmingCharacters(in: .whitespacesAndNewlines)
+        let full = long.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !full.isEmpty else { return nil }
+        if full.caseInsensitiveCompare(short) == .orderedSame { return nil }
+
+        // Strip the headline when `long` begins with `short` verbatim,
+        // then clean up the residue so we show only the fresh context.
+        let remainder: String
+        if full.lowercased().hasPrefix(short.lowercased()) {
+            remainder = String(full.dropFirst(short.count))
+        } else {
+            remainder = full
+        }
+
+        let stripSet = CharacterSet(charactersIn: " .,;\t\n")
+        var cleaned = remainder.trimmingCharacters(in: stripSet)
+        guard !cleaned.isEmpty else { return nil }
+
+        cleaned = cleaned
+            .replacingOccurrences(of: ".,", with: ",")
+            .replacingOccurrences(of: ",.", with: ".")
+            .replacingOccurrences(of: " ,", with: ",")
+            .replacingOccurrences(of: "  ", with: " ")
+
+        let first = cleaned.prefix(1).uppercased()
+        let body = first + cleaned.dropFirst()
+        return body.hasSuffix(".") ? body : body + "."
+    }
+
+    /// Only surface the calibration note when we're genuinely working
+    /// with thin data — keeps the screen from over-caveating healthy cards.
+    private var shouldShowThinDataNote: Bool {
+        let count = chartPrices.isEmpty ? card.sparkline.count : chartPrices.count
+        return count > 0 && count < 8
     }
 
     // MARK: - Market Info
@@ -899,7 +1094,7 @@ struct CardDetailView: View {
 // MARK: - Supporting Types
 
 enum DetailTone {
-    case neutral, accent, positive, negative
+    case neutral, accent, positive, negative, muted
 
     var color: Color {
         switch self {
@@ -907,6 +1102,7 @@ enum DetailTone {
         case .accent: return PA.Colors.accent
         case .positive: return PA.Colors.positive
         case .negative: return PA.Colors.negative
+        case .muted: return PA.Colors.muted
         }
     }
 }

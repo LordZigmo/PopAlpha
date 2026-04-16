@@ -49,7 +49,10 @@
 		CC00000100000000000000FB /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00000100000000000000B2 /* SettingsView.swift */; };
 		DD00000100000000000000F1 /* SignalBoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000A1 /* SignalBoardView.swift */; };
 		DD00000100000000000000F2 /* Haptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000A2 /* Haptics.swift */; };
+		DD00000100000000000000F3 /* PersonalizationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000A3 /* PersonalizationService.swift */; };
+		DD00000100000000000000F4 /* PersonalizedInsightCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000A4 /* PersonalizedInsightCardView.swift */; };
 		EE00000100000000000000F1 /* PopAlphaCore in Frameworks */ = {isa = PBXBuildFile; productRef = EE00000100000000000000A2 /* PopAlphaCore */; };
+		EE00000100000000000000F2 /* SetDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE00000100000000000000A3 /* SetDetailView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -97,6 +100,9 @@
 		CC00000100000000000000B2 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		DD00000100000000000000A1 /* SignalBoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalBoardView.swift; sourceTree = "<group>"; };
 		DD00000100000000000000A2 /* Haptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Haptics.swift; sourceTree = "<group>"; };
+		DD00000100000000000000A3 /* PersonalizationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalizationService.swift; sourceTree = "<group>"; };
+		DD00000100000000000000A4 /* PersonalizedInsightCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalizedInsightCardView.swift; sourceTree = "<group>"; };
+		EE00000100000000000000A3 /* SetDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetDetailView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -162,6 +168,9 @@
 				CC00000100000000000000B2 /* SettingsView.swift */,
 				DD00000100000000000000A1 /* SignalBoardView.swift */,
 				DD00000100000000000000A2 /* Haptics.swift */,
+				DD00000100000000000000A3 /* PersonalizationService.swift */,
+				DD00000100000000000000A4 /* PersonalizedInsightCardView.swift */,
+				EE00000100000000000000A3 /* SetDetailView.swift */,
 				AA00000100000000000000B1 /* Assets.xcassets */,
 				AA00000100000000000000B3 /* Info.plist */,
 				AA00000100000000000000E3 /* Preview Content */,
@@ -301,6 +310,9 @@
 				CC00000100000000000000FB /* SettingsView.swift in Sources */,
 				DD00000100000000000000F1 /* SignalBoardView.swift in Sources */,
 				DD00000100000000000000F2 /* Haptics.swift in Sources */,
+				DD00000100000000000000F3 /* PersonalizationService.swift in Sources */,
+				DD00000100000000000000F4 /* PersonalizedInsightCardView.swift in Sources */,
+				EE00000100000000000000F2 /* SetDetailView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

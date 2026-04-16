@@ -403,6 +403,92 @@ actor CardService {
         if price >= 15 { return .rare }
         return .uncommon
     }
+
+    // MARK: - Set Browser
+
+    /// Fetch all cards in a set with prices and images, sorted by price desc.
+    func fetchSetCards(setName: String) async throws -> [MarketCard] {
+        // 1. Cards in the set
+        let cardsData = try await Supabase.query(
+            table: "canonical_cards",
+            select: "slug,canonical_name,set_name,year,card_number",
+            filters: [("set_name", "eq", setName)],
+            order: "card_number.asc",
+            limit: 500
+        )
+        let cards = try decoder.decode([CardRow].self, from: cardsData)
+        guard !cards.isEmpty else { return [] }
+
+        let slugs = cards.map(\.slug)
+        let slugFilter = "(\(slugs.joined(separator: ",")))"
+
+        // 2. Metrics (prices) + images in parallel
+        async let metricsTask: Data = Supabase.query(
+            table: "public_card_metrics",
+            select: "canonical_slug,market_price,change_pct_24h,change_pct_7d,market_confidence_score",
+            filters: [
+                ("canonical_slug", "in", slugFilter),
+                ("grade", "eq", "RAW"),
+                ("printing_id", "is", "null"),
+            ],
+            limit: 500
+        )
+        async let imagesTask: Data = Supabase.query(
+            table: "card_printings",
+            select: "canonical_slug,image_url",
+            filters: [
+                ("canonical_slug", "in", slugFilter),
+                ("language", "eq", "EN"),
+                ("image_url", "not.is", "null"),
+            ],
+            limit: 500
+        )
+
+        let metricsData = try await metricsTask
+        let imagesData = try await imagesTask
+
+        let metrics = try decoder.decode([MetricsRow].self, from: metricsData)
+        let images = try decoder.decode([ImageRow].self, from: imagesData)
+
+        let metricsMap = Dictionary(
+            metrics.map { ($0.canonicalSlug, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        var imageMap: [String: String] = [:]
+        for img in images where imageMap[img.canonicalSlug] == nil {
+            imageMap[img.canonicalSlug] = img.imageUrl
+        }
+
+        // 3. Assemble and sort by price desc (priced first, then unpriced by number)
+        let result = cards.map { card -> MarketCard in
+            let m = metricsMap[card.slug]
+            let price = m?.marketPrice ?? 0
+            let changePct = m?.changePct24h ?? m?.changePct7d ?? 0
+
+            return MarketCard(
+                id: card.slug,
+                name: card.canonicalName,
+                setName: card.setName ?? setName,
+                cardNumber: card.cardNumber.map { "#\($0)" } ?? "",
+                price: price,
+                changePct: changePct,
+                changeWindow: m?.changePct24h != nil ? "24H" : "7D",
+                rarity: classifyRarity(price: price, listings: nil),
+                sparkline: price > 0 ? [price] : [],
+                imageGradient: [],
+                imageURL: imageMap[card.slug].flatMap(URL.init(string:)),
+                confidenceScore: m?.marketConfidenceScore
+            )
+        }
+        .sorted { a, b in
+            if a.price > 0 && b.price > 0 { return a.price > b.price }
+            if a.price > 0 { return true }
+            if b.price > 0 { return false }
+            return a.cardNumber.localizedStandardCompare(b.cardNumber) == .orderedAscending
+        }
+
+        return result
+    }
 }
 
 // MARK: - Chart Timeframe
