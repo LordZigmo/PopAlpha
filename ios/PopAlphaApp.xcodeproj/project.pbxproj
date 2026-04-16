@@ -55,7 +55,7 @@
 		EE00000100000000000000F2 /* SetDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE00000100000000000000A3 /* SetDetailView.swift */; };
 		FF00000100000000000000F1 /* ClerkKit in Frameworks */ = {isa = PBXBuildFile; productRef = FF00000100000000000000A2 /* ClerkKit */; };
 		1100000100000000000000F1 /* PortfolioModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000100000000000000A1 /* PortfolioModels.swift */; };
-		1100000100000000000000F2 /* CollectorIdentityEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000100000000000000A2 /* CollectorIdentityEngine.swift */; };
+
 		1100000100000000000000F3 /* PortfolioHeroView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000100000000000000A3 /* PortfolioHeroView.swift */; };
 		1100000100000000000000F4 /* CollectorIdentityCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000100000000000000A4 /* CollectorIdentityCard.swift */; };
 		1100000100000000000000F5 /* PortfolioCompositionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000100000000000000A5 /* PortfolioCompositionView.swift */; };
@@ -113,7 +113,7 @@
 		DD00000100000000000000A4 /* PersonalizedInsightCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalizedInsightCardView.swift; sourceTree = "<group>"; };
 		EE00000100000000000000A3 /* SetDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetDetailView.swift; sourceTree = "<group>"; };
 		1100000100000000000000A1 /* PortfolioModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioModels.swift; sourceTree = "<group>"; };
-		1100000100000000000000A2 /* CollectorIdentityEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollectorIdentityEngine.swift; sourceTree = "<group>"; };
+
 		1100000100000000000000A3 /* PortfolioHeroView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioHeroView.swift; sourceTree = "<group>"; };
 		1100000100000000000000A4 /* CollectorIdentityCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollectorIdentityCard.swift; sourceTree = "<group>"; };
 		1100000100000000000000A5 /* PortfolioCompositionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioCompositionView.swift; sourceTree = "<group>"; };
@@ -190,7 +190,7 @@
 				DD00000100000000000000A4 /* PersonalizedInsightCardView.swift */,
 				EE00000100000000000000A3 /* SetDetailView.swift */,
 				1100000100000000000000A1 /* PortfolioModels.swift */,
-				1100000100000000000000A2 /* CollectorIdentityEngine.swift */,
+
 				1100000100000000000000A3 /* PortfolioHeroView.swift */,
 				1100000100000000000000A4 /* CollectorIdentityCard.swift */,
 				1100000100000000000000A5 /* PortfolioCompositionView.swift */,
@@ -342,7 +342,7 @@
 				DD00000100000000000000F4 /* PersonalizedInsightCardView.swift in Sources */,
 				EE00000100000000000000F2 /* SetDetailView.swift in Sources */,
 				1100000100000000000000F1 /* PortfolioModels.swift in Sources */,
-				1100000100000000000000F2 /* CollectorIdentityEngine.swift in Sources */,
+
 				1100000100000000000000F3 /* PortfolioHeroView.swift in Sources */,
 				1100000100000000000000F4 /* CollectorIdentityCard.swift in Sources */,
 				1100000100000000000000F5 /* PortfolioCompositionView.swift in Sources */,

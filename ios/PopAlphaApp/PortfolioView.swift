@@ -9,49 +9,37 @@ struct PortfolioView: View {
     @State private var error: String?
     @State private var showAddSheet = false
     @State private var selectedWindow: TimeWindow = .day
-    @State private var portfolioDTO: PortfolioSummaryDTO?
+
+    // Enriched data from /api/portfolio/overview
+    @State private var overview: PortfolioOverviewResponse?
+    @State private var activities: [PortfolioActivity] = []
 
     private var auth: AuthService { AuthService.shared }
 
-    // Real portfolio summary built from live API data + holdings.
+    // Summary built from the overview API response, falling back to holdings data.
     private var summary: PortfolioSummary {
+        if let s = overview?.toSummary() { return s }
+
         let rawCount = positions.filter { $0.grade == "RAW" }.reduce(0) { $0 + $1.totalQty }
         let gradedCount = positions.filter { $0.grade != "RAW" }.reduce(0) { $0 + $1.totalQty }
         let costBasis = positions.reduce(0) { $0 + $1.costBasis }
-        let totalCards = rawCount + gradedCount
-
-        let totalValue = portfolioDTO?.totalMarketValue ?? costBasis
-        let dailyPnl = portfolioDTO.map {
-            PortfolioChange(amount: $0.dailyPnlAmount, percent: $0.dailyPnlPct ?? 0)
-        } ?? PortfolioChange(amount: 0, percent: 0)
-
-        let aiLine = totalCards > 10
-            ? "PopAlpha is analyzing your \(totalCards)-card collection. Collector insights coming soon."
-            : "Add more cards to unlock your collector profile and AI-powered insights."
 
         return PortfolioSummary(
-            totalValue: totalValue,
-            changes: [
-                .day: dailyPnl,
-                .week: PortfolioChange(amount: 0, percent: 0),
-                .month: PortfolioChange(amount: 0, percent: 0),
-            ],
-            cardCount: totalCards,
+            totalValue: costBasis,
+            changes: [.day: PortfolioChange(amount: 0, percent: 0)],
+            cardCount: rawCount + gradedCount,
             rawCount: rawCount,
             gradedCount: gradedCount,
             sealedCount: 0,
             sparkline: [],
-            aiSummary: aiLine
+            aiSummary: ""
         )
     }
 
-    // Future: replace with API-driven data from the backend.
-    private let identity = CollectorIdentityEngine.analyze(PortfolioMockData.attributesInput)
-    private let composition = PortfolioMockData.composition
-    private let attributes = PortfolioMockData.attributes
-    private let topHoldings = PortfolioMockData.topHoldings
-    private let insights = PortfolioMockData.insights
-    private let activities = PortfolioMockData.activities
+    /// True when the overview API returned full analysis (>= 3 holdings).
+    private var hasFullAnalysis: Bool {
+        overview?.minimal == false
+    }
 
     var body: some View {
         NavigationStack {
@@ -107,11 +95,55 @@ struct PortfolioView: View {
     private var portfolioContent: some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(spacing: 28) {
-                PortfolioHeroView(summary: summary, handle: auth.currentHandle ?? auth.currentFirstName, selectedWindow: $selectedWindow)
-                CollectorIdentityCard(profile: identity)
-                PortfolioCompositionView(composition: composition, attributes: attributes)
-                TopHoldingsView(holdings: topHoldings)
-                PortfolioInsightView(insights: insights, activities: activities)
+                PortfolioHeroView(
+                    summary: summary,
+                    handle: auth.currentHandle ?? auth.currentFirstName,
+                    selectedWindow: $selectedWindow
+                )
+
+                // Enriched sections (only when backend returned full analysis)
+                if hasFullAnalysis {
+                    if let identity = overview?.toIdentity() {
+                        CollectorIdentityCard(profile: identity)
+                    }
+
+                    if let composition = overview?.toComposition() {
+                        let attrs = overview?.toAttributes() ?? []
+                        PortfolioCompositionView(composition: composition, attributes: attrs)
+                    }
+
+                    let topHoldings = overview?.toTopHoldings() ?? []
+                    if !topHoldings.isEmpty {
+                        TopHoldingsView(holdings: topHoldings)
+                    }
+
+                    let insights = overview?.toInsights() ?? []
+                    if !insights.isEmpty || !activities.isEmpty {
+                        PortfolioInsightView(insights: insights, activities: activities)
+                    }
+                }
+
+                // Positions list (always shown)
+                if !positions.isEmpty {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "rectangle.stack")
+                                .font(.system(size: 14))
+                                .foregroundStyle(PA.Colors.accent)
+                            Text("All Positions")
+                                .font(PA.Typography.sectionTitle)
+                                .foregroundStyle(PA.Colors.text)
+                        }
+                        .padding(.horizontal, PA.Layout.sectionPadding)
+
+                        LazyVStack(spacing: 10) {
+                            ForEach(positions) { position in
+                                PortfolioPositionCell(position: position)
+                            }
+                        }
+                        .padding(.horizontal, PA.Layout.sectionPadding)
+                    }
+                }
             }
             .padding(.bottom, 40)
         }
@@ -168,11 +200,21 @@ struct PortfolioView: View {
         }
         isLoading = false
 
-        // Non-critical: fetch live market value in background.
-        // Runs after isLoading is cleared so it never blocks the UI.
-        if let meData = try? await CardService.shared.fetchHomepageMe() {
-            portfolioDTO = meData.portfolio
-        }
+        // Non-critical enrichment: overview + activity (don't block UI)
+        guard !holdings.isEmpty else { return }
+
+        async let overviewTask: PortfolioOverviewResponse? = {
+            try? await APIClient.get(path: "/api/portfolio/overview")
+        }()
+        async let activityTask: PortfolioActivityResponse? = {
+            try? await APIClient.get(path: "/api/portfolio/activity")
+        }()
+
+        let fetchedOverview = await overviewTask
+        let fetchedActivity = await activityTask
+
+        if let ov = fetchedOverview { overview = ov }
+        if let act = fetchedActivity { activities = act.toActivities() }
     }
 }
 
@@ -181,16 +223,6 @@ struct PortfolioView: View {
 #Preview("Portfolio") {
     PortfolioView()
         .preferredColorScheme(.dark)
-}
-
-#Preview("Identity Card") {
-    ZStack {
-        PA.Colors.background.ignoresSafeArea()
-        CollectorIdentityCard(
-            profile: CollectorIdentityEngine.analyze(PortfolioMockData.attributesInput)
-        )
-    }
-    .preferredColorScheme(.dark)
 }
 
 #Preview("Empty State") {

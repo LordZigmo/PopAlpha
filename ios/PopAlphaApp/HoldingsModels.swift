@@ -20,6 +20,50 @@ struct HoldingRow: Decodable, Identifiable, Hashable {
     var totalCost: Double {
         pricePaidUsd * Double(qty)
     }
+
+    // Supabase may serialize bigint as string and numeric as string.
+    // This custom decoder handles both representations.
+    private enum CodingKeys: String, CodingKey {
+        case id, canonicalSlug, printingId, grade, qty, pricePaidUsd, acquiredOn, venue, certNumber
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+
+        // id: may arrive as Int or String
+        if let intId = try? c.decode(Int.self, forKey: .id) {
+            id = intId
+        } else {
+            let strId = try c.decode(String.self, forKey: .id)
+            id = Int(strId) ?? strId.hashValue
+        }
+
+        canonicalSlug = try c.decodeIfPresent(String.self, forKey: .canonicalSlug)
+        printingId = try c.decodeIfPresent(String.self, forKey: .printingId)
+        grade = (try? c.decode(String.self, forKey: .grade)) ?? "RAW"
+
+        // qty: may arrive as Int or String
+        if let intQty = try? c.decode(Int.self, forKey: .qty) {
+            qty = intQty
+        } else if let strQty = try? c.decode(String.self, forKey: .qty), let parsed = Int(strQty) {
+            qty = parsed
+        } else {
+            qty = 1
+        }
+
+        // pricePaidUsd: may arrive as Double or String
+        if let dblPrice = try? c.decode(Double.self, forKey: .pricePaidUsd) {
+            pricePaidUsd = dblPrice
+        } else if let strPrice = try? c.decode(String.self, forKey: .pricePaidUsd), let parsed = Double(strPrice) {
+            pricePaidUsd = parsed
+        } else {
+            pricePaidUsd = 0
+        }
+
+        acquiredOn = try c.decodeIfPresent(String.self, forKey: .acquiredOn)
+        venue = try c.decodeIfPresent(String.self, forKey: .venue)
+        certNumber = try c.decodeIfPresent(String.self, forKey: .certNumber)
+    }
 }
 
 struct HoldingsResponse: Decodable {

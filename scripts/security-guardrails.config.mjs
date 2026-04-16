@@ -22,6 +22,8 @@ export const DBADMIN_ALLOWED_FILES = [
   "app/api/personalization/events/route.ts",
   "app/api/personalization/explanation/route.ts",
   "app/api/personalization/profile/route.ts",
+  "app/api/portfolio/overview/route.ts",
+  "app/api/portfolio/activity/route.ts",
   "app/api/pro/signals/route.ts",
   "lib/db/admin.ts",
 ];
@@ -32,6 +34,8 @@ export const DBADMIN_ALLOWED_ROUTE_KEYS = [
   "personalization/events",
   "personalization/explanation",
   "personalization/profile",
+  "portfolio/overview",
+  "portfolio/activity",
   "pro/signals",
 ];
 

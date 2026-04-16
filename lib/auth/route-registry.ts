@@ -131,6 +131,8 @@ export const USER_ROUTES = [
   "pro/signals",
   "holdings",
   "holdings/summary",
+  "portfolio/overview",
+  "portfolio/activity",
   "homepage/me",
   "me",
   "me/export",
