@@ -1,13 +1,23 @@
 import SwiftUI
 
 // MARK: - Portfolio Value Chart
-// A premium chart for the portfolio hero — gradient fill, smooth curves,
-// glow on the leading edge, and a subtle baseline.
+// Premium scrubbable chart for the portfolio hero.
+// - Smooth quadratic-curve line with gradient fill
+// - Glowing leading-edge dot (when not scrubbing)
+// - Vertical dashed cursor + glow dot at scrub position
+// - Reports the scrub index to the parent so the hero can update its
+//   value/change display in sync (stock-app feel).
 
 struct PortfolioValueChart: View {
     let data: [Double]
     let isPositive: Bool
     var height: CGFloat = 110
+
+    /// Called as the user scrubs. nil when the gesture ends.
+    var onScrub: ((Int?) -> Void)? = nil
+
+    @State private var scrubIndex: Int? = nil
+    @State private var scrubbing: Bool = false
 
     var body: some View {
         GeometryReader { geo in
@@ -29,7 +39,7 @@ struct PortfolioValueChart: View {
                 }
 
                 ZStack {
-                    // Gradient fill below the line
+                    // Fill below the line
                     smoothPath(points: points, closed: true, height: h)
                         .fill(
                             LinearGradient(
@@ -51,24 +61,86 @@ struct PortfolioValueChart: View {
                         )
                         .shadow(color: lineColor.opacity(0.45), radius: 6, x: 0, y: 2)
 
-                    // Leading edge dot with glow
-                    if let last = points.last {
-                        ZStack {
-                            Circle()
-                                .fill(lineColor.opacity(0.25))
-                                .frame(width: 18, height: 18)
-                            Circle()
-                                .fill(lineColor)
-                                .frame(width: 7, height: 7)
-                                .shadow(color: lineColor, radius: 4)
-                        }
-                        .position(last)
+                    // Default leading-edge dot (only when not scrubbing)
+                    if !scrubbing, let last = points.last {
+                        leadingDot
+                            .position(last)
+                    }
+
+                    // Scrubber overlay
+                    if scrubbing, let idx = scrubIndex, idx < points.count {
+                        scrubberOverlay(at: points[idx], in: geo.size)
                     }
                 }
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            let x = max(0, min(w, value.location.x))
+                            let idx = max(0, min(data.count - 1, Int(round((x - inset) / stepX))))
+                            withAnimation(.interactiveSpring(response: 0.12)) {
+                                scrubbing = true
+                                scrubIndex = idx
+                            }
+                            onScrub?(idx)
+                        }
+                        .onEnded { _ in
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                scrubbing = false
+                                scrubIndex = nil
+                            }
+                            onScrub?(nil)
+                        }
+                )
             }
         }
         .frame(height: height)
     }
+
+    // MARK: - Sub-views
+
+    private var leadingDot: some View {
+        ZStack {
+            Circle()
+                .fill(lineColor.opacity(0.25))
+                .frame(width: 18, height: 18)
+            Circle()
+                .fill(lineColor)
+                .frame(width: 7, height: 7)
+                .shadow(color: lineColor, radius: 4)
+        }
+    }
+
+    private func scrubberOverlay(at point: CGPoint, in size: CGSize) -> some View {
+        ZStack {
+            // Vertical dashed cursor line spans full height
+            Path { p in
+                p.move(to: CGPoint(x: point.x, y: 0))
+                p.addLine(to: CGPoint(x: point.x, y: size.height))
+            }
+            .stroke(
+                Color.white.opacity(0.25),
+                style: StrokeStyle(lineWidth: 1, dash: [4, 3])
+            )
+
+            // Glow ring + dot at the scrub point
+            Circle()
+                .fill(lineColor.opacity(0.25))
+                .frame(width: 22, height: 22)
+                .position(point)
+            Circle()
+                .fill(lineColor)
+                .frame(width: 9, height: 9)
+                .shadow(color: lineColor, radius: 5)
+                .position(point)
+            Circle()
+                .stroke(Color.white.opacity(0.35), lineWidth: 1.5)
+                .frame(width: 16, height: 16)
+                .position(point)
+        }
+    }
+
+    // MARK: - Style helpers
 
     private var lineColor: Color {
         isPositive ? PA.Colors.positive : PA.Colors.negative
@@ -117,24 +189,12 @@ struct PortfolioValueChart: View {
     }
 }
 
-#Preview("Positive") {
+#Preview("Scrubbable") {
     ZStack {
         PA.Colors.background.ignoresSafeArea()
         PortfolioValueChart(
             data: [50, 52, 51, 54, 55, 53, 57, 60, 58, 62, 64, 63, 67, 70],
             isPositive: true
-        )
-        .padding()
-    }
-    .preferredColorScheme(.dark)
-}
-
-#Preview("Negative") {
-    ZStack {
-        PA.Colors.background.ignoresSafeArea()
-        PortfolioValueChart(
-            data: [70, 68, 65, 62, 60, 58, 55, 53, 50, 48, 47, 45, 44, 42],
-            isPositive: false
         )
         .padding()
     }

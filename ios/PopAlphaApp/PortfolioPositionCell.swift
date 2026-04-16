@@ -5,6 +5,7 @@ import SwiftUI
 struct PortfolioPositionCell: View {
     let position: Position
     var metadata: APICardMetadata? = nil
+    var onTap: (() -> Void)? = nil
 
     @State private var isExpanded = false
 
@@ -28,9 +29,7 @@ struct PortfolioPositionCell: View {
     var body: some View {
         VStack(spacing: 0) {
             Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    isExpanded.toggle()
-                }
+                onTap?()
             } label: {
                 HStack(spacing: 12) {
                     cardThumbnail
@@ -54,26 +53,46 @@ struct PortfolioPositionCell: View {
 
                     valueColumn
 
-                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                    Image(systemName: "chevron.right")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(PA.Colors.muted)
                 }
                 .padding(PA.Layout.cardPadding)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
-            if isExpanded && position.lots.count > 1 {
-                Divider().background(PA.Colors.border).padding(.horizontal, 16)
+            // Multi-lot disclosure (tap to expand below the row)
+            if position.lots.count > 1 {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 9, weight: .semibold))
+                        Text(isExpanded ? "Hide lots" : "\(position.lots.count) lots")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundStyle(PA.Colors.muted)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity)
+                    .background(PA.Colors.surfaceSoft.opacity(0.4))
+                }
+                .buttonStyle(.plain)
 
-                VStack(spacing: 0) {
-                    ForEach(position.lots) { lot in
-                        lotRow(lot)
-                        if lot.id != position.lots.last?.id {
-                            Divider().background(PA.Colors.border).padding(.leading, 70)
+                if isExpanded {
+                    VStack(spacing: 0) {
+                        ForEach(position.lots) { lot in
+                            lotRow(lot)
+                            if lot.id != position.lots.last?.id {
+                                Divider().background(PA.Colors.border).padding(.leading, 70)
+                            }
                         }
                     }
+                    .padding(.bottom, 8)
                 }
-                .padding(.bottom, 8)
             }
         }
         .glassSurface()

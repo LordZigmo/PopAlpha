@@ -14,6 +14,9 @@ struct PortfolioView: View {
     @State private var overview: PortfolioOverviewResponse?
     @State private var activities: [PortfolioActivity] = []
 
+    // Card detail navigation
+    @State private var selectedCard: MarketCard?
+
     private var auth: AuthService { AuthService.shared }
 
     // Summary built from the overview API response, falling back to holdings data.
@@ -87,7 +90,23 @@ struct PortfolioView: View {
                     Task { await loadPortfolio() }
                 }
             }
+            .navigationDestination(item: $selectedCard) { card in
+                CardDetailView(card: card)
+            }
         }
+    }
+
+    /// Build a stub MarketCard to navigate to CardDetailView from a position.
+    private func cardFor(position: Position) -> MarketCard? {
+        guard let slug = position.canonicalSlug else { return nil }
+        let meta = overview?.cardMetadata?[slug]
+        return MarketCard.stub(
+            slug: slug,
+            name: meta?.name ?? slug,
+            setName: meta?.setName ?? "",
+            cardNumber: "",
+            imageURL: meta?.imageUrl.flatMap(URL.init(string:))
+        )
     }
 
     // MARK: - Content
@@ -146,7 +165,8 @@ struct PortfolioView: View {
                             ForEach(positions) { position in
                                 PortfolioPositionCell(
                                     position: position,
-                                    metadata: position.canonicalSlug.flatMap { overview?.cardMetadata?[$0] }
+                                    metadata: position.canonicalSlug.flatMap { overview?.cardMetadata?[$0] },
+                                    onTap: { selectedCard = cardFor(position: position) }
                                 )
                             }
                         }

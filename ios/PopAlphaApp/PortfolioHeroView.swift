@@ -1,18 +1,44 @@
 import SwiftUI
 
 // MARK: - Portfolio Hero View
-// Above-the-fold summary: total value, change toggle, sparkline, stats, AI summary.
+// Above-the-fold summary: total value, scrubbable chart, stats.
+// The displayed value + change reflects the chart (stock-app pattern):
+// - Default: value = today, change = vs first chart point
+// - Scrubbing: value = scrubbed point, change = vs first chart point
 
 struct PortfolioHeroView: View {
     let summary: PortfolioSummary
     let handle: String?
     @Binding var selectedWindow: TimeWindow
 
-    private var change: PortfolioChange { summary.change(for: selectedWindow) }
+    @State private var scrubIndex: Int? = nil
 
-    /// Show the time-window toggle only when we have data beyond 1D.
-    private var hasMultiWindow: Bool {
-        [TimeWindow.week, .month].contains { summary.change(for: $0).amount != 0 }
+    /// Index used for display: scrub position when scrubbing, else the last point.
+    private var displayIndex: Int {
+        scrubIndex ?? max(0, summary.sparkline.count - 1)
+    }
+
+    /// Value to show in the headline.
+    private var displayValue: Double {
+        guard !summary.sparkline.isEmpty else { return summary.totalValue }
+        return summary.sparkline[min(displayIndex, summary.sparkline.count - 1)]
+    }
+
+    /// Change from the first chart point to the displayed point.
+    /// Falls back to the API-provided summary change when there's no chart.
+    private var displayChange: PortfolioChange {
+        guard summary.sparkline.count >= 2,
+              let first = summary.sparkline.first, first > 0 else {
+            return summary.change(for: .day)
+        }
+        let current = summary.sparkline[min(displayIndex, summary.sparkline.count - 1)]
+        let amount = current - first
+        let percent = (amount / first) * 100
+        return PortfolioChange(amount: amount, percent: percent)
+    }
+
+    private var rangeLabel: String {
+        scrubIndex != nil ? "from start of period" : "Past 30D"
     }
 
     var body: some View {
@@ -26,34 +52,41 @@ struct PortfolioHeroView: View {
 
             // Value + change
             VStack(spacing: 6) {
-                Text(formatValue(summary.totalValue))
+                Text(formatValue(displayValue))
                     .font(PA.Typography.heroPrice)
                     .foregroundStyle(PA.Colors.text)
+                    .contentTransition(.numericText())
+                    .animation(.interactiveSpring(response: 0.15), value: displayValue)
 
-                if change.amount != 0 || change.percent != 0 {
+                let chg = displayChange
+                if chg.amount != 0 || chg.percent != 0 {
                     HStack(spacing: 6) {
-                        Text(formatDelta(change.amount))
+                        Text(formatDelta(chg.amount))
                             .font(.system(size: 15, weight: .semibold, design: .rounded))
 
-                        Text("(\(formatPercent(change.percent)))")
+                        Text("(\(formatPercent(chg.percent)))")
                             .font(.system(size: 13, weight: .medium))
-                            .opacity(0.8)
+                            .opacity(0.85)
+
+                        if !rangeLabel.isEmpty {
+                            Text("· \(rangeLabel)")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(PA.Colors.muted)
+                        }
                     }
-                    .foregroundStyle(change.isPositive ? PA.Colors.positive : PA.Colors.negative)
+                    .foregroundStyle(chg.isPositive ? PA.Colors.positive : PA.Colors.negative)
                 }
             }
 
-            // Time window toggle (only when multi-window data is available)
-            if hasMultiWindow {
-                timeWindowToggle
-            }
-
-            // Premium portfolio value chart (only when we have historical data)
+            // Premium scrubbable portfolio chart
             if summary.sparkline.count >= 2 {
                 PortfolioValueChart(
                     data: summary.sparkline,
-                    isPositive: change.isPositive,
-                    height: 110
+                    isPositive: displayChange.isPositive,
+                    height: 110,
+                    onScrub: { idx in
+                        scrubIndex = idx
+                    }
                 )
                 .padding(.horizontal, 4)
             }
@@ -75,32 +108,6 @@ struct PortfolioHeroView: View {
         }
         .padding(.horizontal, PA.Layout.sectionPadding)
         .padding(.top, 8)
-    }
-
-    // MARK: - Time Window Toggle
-
-    private var timeWindowToggle: some View {
-        HStack(spacing: 4) {
-            ForEach(TimeWindow.allCases) { window in
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        selectedWindow = window
-                    }
-                } label: {
-                    Text(window.rawValue)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(selectedWindow == window ? PA.Colors.background : PA.Colors.muted)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 6)
-                        .background(selectedWindow == window ? PA.Colors.accent : Color.clear)
-                        .clipShape(Capsule())
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(3)
-        .background(PA.Colors.surfaceSoft)
-        .clipShape(Capsule())
     }
 
     // MARK: - Stats Row
