@@ -1,8 +1,24 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require";
 import { createServerSupabaseUserClient } from "@/lib/db/user";
+import { dbUser } from "@/lib/db";
 
 export const runtime = "nodejs";
+
+// ── Supabase client that works for both web and native requests ──────────────
+// Web requests: Clerk middleware sets cookies → createServerSupabaseUserClient()
+// works via auth().getToken(). Native (iOS) requests: send a Bearer JWT directly
+// → fall back to dbUser(bearer) when getToken() fails.
+
+async function getSupabaseClient(req: Request) {
+  try {
+    return await createServerSupabaseUserClient();
+  } catch {
+    const bearer = req.headers.get("authorization")?.slice(7)?.trim();
+    if (!bearer) throw new Error("No token available");
+    return dbUser(bearer);
+  }
+}
 
 // ── GET /api/holdings — list authenticated user's holdings ──────────────────
 
@@ -10,7 +26,13 @@ export async function GET(req: Request) {
   const auth = await requireUser(req);
   if (!auth.ok) return auth.response;
 
-  const supabase = await createServerSupabaseUserClient();
+  let supabase;
+  try {
+    supabase = await getSupabaseClient(req);
+  } catch {
+    return NextResponse.json({ ok: false, error: "Auth token missing." }, { status: 401 });
+  }
+
   const { data, error } = await supabase
     .from("holdings")
     .select("id, canonical_slug, printing_id, grade, qty, price_paid_usd, acquired_on, venue, cert_number")
@@ -62,7 +84,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "price_paid_usd must be >= 0." }, { status: 400 });
   }
 
-  const supabase = await createServerSupabaseUserClient();
+  let supabase;
+  try {
+    supabase = await getSupabaseClient(req);
+  } catch {
+    return NextResponse.json({ ok: false, error: "Auth token missing." }, { status: 401 });
+  }
+
   const { error } = await supabase.from("holdings").insert({
     owner_clerk_id: auth.userId,
     canonical_slug,
