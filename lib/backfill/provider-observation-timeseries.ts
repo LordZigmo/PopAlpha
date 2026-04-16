@@ -24,6 +24,20 @@ const SCAN_PAGE_SIZE = 100;
 const STALE_DELETE_PROVIDER_REF_CHUNK_SIZE = 100;
 const STALE_DELETE_VARIANT_FILTER_CHUNK_SIZE = 20;
 
+// Stale-variant cleanup has two paths:
+//   1. Exact (via price_snapshots lookup) — uses indexed .in("variant_ref", ...)
+//   2. Fallback (variant_ref LIKE OR LIKE ...) — sequential-scans 90d of
+//      price_history_points and cannot use an index because LIKE with a
+//      leading wildcard is unindexable.
+//
+// In April 2026 the fallback accounted for ~70% of all DB CPU (pg_stat_statements
+// showed 80-120s mean latency × ~10k calls). The daily prune_old_data() job
+// hard-deletes anything older than 90 days anyway, so skipping the fallback
+// only loses ~45-90d of fine-grained cleanup — an acceptable trade to keep
+// the pipeline running. Flip to "true" to re-enable if CPU headroom returns.
+const STALE_CLEANUP_LIKE_FALLBACK_ENABLED =
+  process.env.PROVIDER_OBSERVATION_CLEANUP_LIKE_FALLBACK_ENABLED === "true";
+
 export type SupportedProvider = AnalyticsPipelineProvider;
 
 type MatchScanRow = {
@@ -557,6 +571,21 @@ async function cleanupStaleProviderVariantWrites(params: {
   const unresolvedProviderVariantIds = providerVariantIds.filter(
     (providerVariantId) => !providerVariantIdsWithExactRefs.has(providerVariantId),
   );
+
+  if (!STALE_CLEANUP_LIKE_FALLBACK_ENABLED) {
+    if (unresolvedProviderVariantIds.length > 0) {
+      console.log(
+        "[cleanupStaleProviderVariantWrites] skipping LIKE-OR fallback",
+        {
+          provider: params.provider,
+          unresolvedCount: unresolvedProviderVariantIds.length,
+          reason: "PROVIDER_OBSERVATION_CLEANUP_LIKE_FALLBACK_ENABLED != 'true' — prune_old_data 90d retention handles these",
+        },
+      );
+    }
+    return;
+  }
+
   const providerVariantIdChunks = chunkValues(unresolvedProviderVariantIds, STALE_DELETE_VARIANT_FILTER_CHUNK_SIZE);
   for (let chunkIndex = 0; chunkIndex < providerVariantIdChunks.length; chunkIndex += 1) {
     const providerVariantIdChunk = providerVariantIdChunks[chunkIndex];
