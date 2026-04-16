@@ -507,18 +507,30 @@ async function cleanupStaleProviderVariantWrites(params: {
   if (providerVariantIds.length === 0) return;
 
   const providerRefs = providerVariantIds.map((providerVariantId) => buildProviderRef(params.provider, providerVariantId));
-  const { data: cleanupSnapshotRows, error: cleanupSnapshotError } = await supabase
-    .from("price_snapshots")
-    .select("provider_ref, canonical_slug, printing_id")
-    .eq("provider", params.provider)
-    .in("provider_ref", providerRefs);
-  if (cleanupSnapshotError) {
-    throw new Error(`price_snapshots(load stale history refs): ${cleanupSnapshotError.message}`);
+
+  // Chunk the .in() lookup — a single IN with hundreds of items overflows
+  // PostgREST's URL length limit and returns "Bad Request" (HTTP 400).
+  // This surfaced after gating the LIKE-OR fallback: jobs now reach this
+  // step reliably and fail here instead of timing out in the scan.
+  const cleanupSnapshotRows: Array<CleanupSnapshotRow> = [];
+  const cleanupLookupChunks = chunkValues(providerRefs, STALE_DELETE_PROVIDER_REF_CHUNK_SIZE);
+  for (const chunk of cleanupLookupChunks) {
+    const { data, error } = await supabase
+      .from("price_snapshots")
+      .select("provider_ref, canonical_slug, printing_id")
+      .eq("provider", params.provider)
+      .in("provider_ref", chunk);
+    if (error) {
+      throw new Error(`price_snapshots(load stale history refs): ${error.message}`);
+    }
+    for (const row of (data ?? []) as CleanupSnapshotRow[]) {
+      cleanupSnapshotRows.push(row);
+    }
   }
 
   const exactHistoryVariantRefs = new Set<string>();
   const providerVariantIdsWithExactRefs = new Set<string>();
-  for (const row of (cleanupSnapshotRows ?? []) as CleanupSnapshotRow[]) {
+  for (const row of cleanupSnapshotRows) {
     const providerRef = String(row.provider_ref ?? "").trim();
     const canonicalSlug = String(row.canonical_slug ?? "").trim();
     const providerVariantId = providerRef
