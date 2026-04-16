@@ -220,24 +220,29 @@ struct ProfileTabView: View {
 
     private var profileContent: some View {
         VStack(spacing: 24) {
-            // Avatar
+            // Avatar — Google profile picture if available, monogram fallback
             ZStack {
                 Circle()
                     .stroke(PA.Colors.accent.opacity(0.3), lineWidth: 2)
                     .frame(width: 88, height: 88)
 
-                Circle()
-                    .fill(PA.Colors.surfaceSoft)
+                if let urlString = auth.currentImageURL, let url = URL(string: urlString) {
+                    AsyncImage(url: url) { image in
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    } placeholder: {
+                        monogramAvatar
+                    }
                     .frame(width: 80, height: 80)
-                    .overlay(
-                        Text(String(displayHandle.prefix(1)).uppercased())
-                            .font(.system(size: 28, weight: .bold))
-                            .foregroundStyle(PA.Colors.accent)
-                    )
+                    .clipShape(Circle())
+                } else {
+                    monogramAvatar
+                }
             }
 
             VStack(spacing: 4) {
-                Text(profile?.handle ?? displayHandle)
+                Text(displayName)
                     .font(.system(size: 22, weight: .bold))
                     .foregroundStyle(PA.Colors.text)
 
@@ -301,6 +306,25 @@ struct ProfileTabView: View {
 
     private var displayHandle: String {
         auth.currentHandle ?? "collector"
+    }
+
+    /// Google first name → handle → "collector"
+    private var displayName: String {
+        if let firstName = auth.currentFirstName, !firstName.isEmpty {
+            return firstName
+        }
+        return profile?.handle ?? displayHandle
+    }
+
+    private var monogramAvatar: some View {
+        Circle()
+            .fill(PA.Colors.surfaceSoft)
+            .frame(width: 80, height: 80)
+            .overlay(
+                Text(String(displayName.prefix(1)).uppercased())
+                    .font(.system(size: 28, weight: .bold))
+                    .foregroundStyle(PA.Colors.accent)
+            )
     }
 
     private func profileStat(value: String, label: String) -> some View {

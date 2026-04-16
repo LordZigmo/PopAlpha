@@ -16,6 +16,8 @@ final class AuthService {
     private(set) var authToken: String?
     private(set) var currentUserId: String?
     private(set) var currentHandle: String?
+    private(set) var currentFirstName: String?
+    private(set) var currentImageURL: String?
     private(set) var isSigningIn: Bool = false
     private(set) var signInError: String?
 
@@ -51,7 +53,11 @@ final class AuthService {
             }
 
             let userId = await Clerk.shared.user?.id ?? ""
+            let firstName = await Clerk.shared.user?.firstName
+            let imageUrl = await Clerk.shared.user?.imageUrl
             setSession(token: token, userId: userId, handle: nil)
+            currentFirstName = firstName
+            currentImageURL = imageUrl
             startTokenRefresh()
 
             // Fetch the user's handle from the API (lives in our DB, not Clerk).
@@ -73,6 +79,8 @@ final class AuthService {
         authToken = nil
         currentUserId = nil
         currentHandle = nil
+        currentFirstName = nil
+        currentImageURL = nil
         APIClient.setAuthToken(nil)
     }
 
@@ -85,9 +93,13 @@ final class AuthService {
         guard let token = try? await Clerk.shared.auth.getToken() else { return }
         let userId = await Clerk.shared.user?.id ?? ""
         guard !userId.isEmpty else { return }
+        let firstName = await Clerk.shared.user?.firstName
+        let imageUrl = await Clerk.shared.user?.imageUrl
 
         await MainActor.run {
             setSession(token: token, userId: userId, handle: nil)
+            currentFirstName = firstName
+            currentImageURL = imageUrl
             startTokenRefresh()
         }
 
@@ -148,11 +160,15 @@ final class AuthService {
     /// our database, not in Clerk user metadata.
     @MainActor
     private func loadHandle() async {
-        struct MeResponse: Decodable {
+        // /api/me returns { ok, user: { handle, ... } } — handle is nested.
+        struct MeUser: Decodable {
             let handle: String?
         }
+        struct MeResponse: Decodable {
+            let user: MeUser?
+        }
         if let me: MeResponse = try? await APIClient.get(path: "/api/me") {
-            currentHandle = me.handle
+            currentHandle = me.user?.handle
         }
     }
 }

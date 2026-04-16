@@ -8,13 +8,50 @@ struct PortfolioView: View {
     @State private var isLoading = true
     @State private var error: String?
     @State private var showAddSheet = false
+    @State private var selectedWindow: TimeWindow = .day
+    @State private var portfolioDTO: PortfolioSummaryDTO?
 
     private var auth: AuthService { AuthService.shared }
 
-    // MARK: - Summary metrics
-    private var totalCostBasis: Double { positions.reduce(0) { $0 + $1.costBasis } }
-    private var totalCards: Int { positions.reduce(0) { $0 + $1.totalQty } }
-    private var uniqueCards: Int { positions.count }
+    // Real portfolio summary built from live API data + holdings.
+    private var summary: PortfolioSummary {
+        let rawCount = positions.filter { $0.grade == "RAW" }.reduce(0) { $0 + $1.totalQty }
+        let gradedCount = positions.filter { $0.grade != "RAW" }.reduce(0) { $0 + $1.totalQty }
+        let costBasis = positions.reduce(0) { $0 + $1.costBasis }
+        let totalCards = rawCount + gradedCount
+
+        let totalValue = portfolioDTO?.totalMarketValue ?? costBasis
+        let dailyPnl = portfolioDTO.map {
+            PortfolioChange(amount: $0.dailyPnlAmount, percent: $0.dailyPnlPct ?? 0)
+        } ?? PortfolioChange(amount: 0, percent: 0)
+
+        let aiLine = totalCards > 10
+            ? "PopAlpha is analyzing your \(totalCards)-card collection. Collector insights coming soon."
+            : "Add more cards to unlock your collector profile and AI-powered insights."
+
+        return PortfolioSummary(
+            totalValue: totalValue,
+            changes: [
+                .day: dailyPnl,
+                .week: PortfolioChange(amount: 0, percent: 0),
+                .month: PortfolioChange(amount: 0, percent: 0),
+            ],
+            cardCount: totalCards,
+            rawCount: rawCount,
+            gradedCount: gradedCount,
+            sealedCount: 0,
+            sparkline: [],
+            aiSummary: aiLine
+        )
+    }
+
+    // Future: replace with API-driven data from the backend.
+    private let identity = CollectorIdentityEngine.analyze(PortfolioMockData.attributesInput)
+    private let composition = PortfolioMockData.composition
+    private let attributes = PortfolioMockData.attributes
+    private let topHoldings = PortfolioMockData.topHoldings
+    private let insights = PortfolioMockData.insights
+    private let activities = PortfolioMockData.activities
 
     var body: some View {
         NavigationStack {
@@ -26,7 +63,7 @@ struct PortfolioView: View {
                 } else if let error, holdings.isEmpty {
                     errorState(error)
                 } else if holdings.isEmpty {
-                    emptyState
+                    PortfolioEmptyStateView(onAddCard: { showAddSheet = true })
                 } else {
                     portfolioContent
                 }
@@ -51,7 +88,7 @@ struct PortfolioView: View {
                     }
                 }
             }
-            .task {
+            .task(id: auth.isAuthenticated) {
                 await loadPortfolio()
             }
             .refreshable {
@@ -69,90 +106,26 @@ struct PortfolioView: View {
 
     private var portfolioContent: some View {
         ScrollView(.vertical, showsIndicators: false) {
-            VStack(spacing: 20) {
-                summarySection
-                positionsList
+            VStack(spacing: 28) {
+                PortfolioHeroView(summary: summary, handle: auth.currentHandle ?? auth.currentFirstName, selectedWindow: $selectedWindow)
+                CollectorIdentityCard(profile: identity)
+                PortfolioCompositionView(composition: composition, attributes: attributes)
+                TopHoldingsView(holdings: topHoldings)
+                PortfolioInsightView(insights: insights, activities: activities)
             }
-            .padding(.bottom, 32)
+            .padding(.bottom, 40)
         }
     }
 
-    // MARK: - Summary
-
-    private var summarySection: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 12) {
-                summaryCard(title: "Cost Basis", value: "$\(String(format: "%.2f", totalCostBasis))", icon: "dollarsign.circle")
-                summaryCard(title: "Cards", value: "\(totalCards)", icon: "rectangle.stack")
-                summaryCard(title: "Positions", value: "\(uniqueCards)", icon: "chart.bar")
-            }
-            .padding(.horizontal, PA.Layout.sectionPadding)
-            .padding(.top, 12)
-        }
-    }
-
-    private func summaryCard(title: String, value: String, icon: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.system(size: 12))
-                    .foregroundStyle(PA.Colors.accent)
-                Text(title)
-                    .font(PA.Typography.caption)
-                    .foregroundStyle(PA.Colors.muted)
-            }
-            Text(value)
-                .font(.system(size: 20, weight: .bold, design: .rounded))
-                .foregroundStyle(PA.Colors.text)
-        }
-        .frame(width: 140, alignment: .leading)
-        .padding(16)
-        .glassSurface(radius: PA.Layout.panelRadius)
-    }
-
-    // MARK: - Positions List
-
-    private var positionsList: some View {
-        LazyVStack(spacing: 10) {
-            ForEach(positions) { position in
-                PortfolioPositionCell(position: position)
-            }
-        }
-        .padding(.horizontal, PA.Layout.sectionPadding)
-    }
-
-    // MARK: - States
-
-    private var signInPrompt: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "rectangle.stack")
-                .font(.system(size: 36))
-                .foregroundStyle(PA.Colors.accent)
-            Text("Sign in to track your collection")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(PA.Colors.text)
-            Text("Add cards to your portfolio and track their value over time.")
-                .font(PA.Typography.cardSubtitle)
-                .foregroundStyle(PA.Colors.muted)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 280)
-            Button { AuthService.shared.signIn() } label: {
-                Text("Sign In")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(PA.Colors.background)
-                    .padding(.horizontal, 32)
-                    .padding(.vertical, 12)
-                    .background(PA.Colors.accent)
-                    .clipShape(Capsule())
-            }
-        }
-    }
+    // MARK: - Loading & Error States
 
     private var loadingState: some View {
         VStack(spacing: 12) {
             Spacer()
             ProgressView().tint(PA.Colors.accent)
-            Text("Loading portfolio...").font(PA.Typography.caption).foregroundStyle(PA.Colors.muted)
+            Text("Loading portfolio...")
+                .font(PA.Typography.caption)
+                .foregroundStyle(PA.Colors.muted)
             Spacer()
         }
     }
@@ -161,50 +134,19 @@ struct PortfolioView: View {
         VStack(spacing: 12) {
             Spacer()
             Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 28)).foregroundStyle(PA.Colors.muted)
-            Text(message).font(PA.Typography.cardSubtitle).foregroundStyle(PA.Colors.muted)
+                .font(.system(size: 28))
+                .foregroundStyle(PA.Colors.muted)
+            Text(message)
+                .font(PA.Typography.cardSubtitle)
+                .foregroundStyle(PA.Colors.muted)
             Button("Retry") { Task { await loadPortfolio() } }
-                .font(.system(size: 14, weight: .semibold)).foregroundStyle(PA.Colors.accent)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(PA.Colors.accent)
             Spacer()
         }
     }
 
-    private var emptyState: some View {
-        VStack(spacing: 16) {
-            Spacer()
-            Image(systemName: "rectangle.stack")
-                .font(.system(size: 36)).foregroundStyle(PA.Colors.muted)
-            Text("No cards in your collection")
-                .font(.system(size: 18, weight: .semibold)).foregroundStyle(PA.Colors.text)
-            Text(auth.isAuthenticated
-                 ? "Tap + to add your first card."
-                 : "Sign in to start tracking your collection and its value over time.")
-                .font(PA.Typography.cardSubtitle).foregroundStyle(PA.Colors.muted)
-                .multilineTextAlignment(.center).frame(maxWidth: 280)
-
-            if auth.isAuthenticated {
-                Button { showAddSheet = true } label: {
-                    Text("Add a Card")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(PA.Colors.background)
-                        .padding(.horizontal, 24).padding(.vertical, 10)
-                        .background(PA.Colors.accent).clipShape(Capsule())
-                }
-            } else {
-                Button { AuthService.shared.signIn() } label: {
-                    Text("Sign In")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(PA.Colors.accent)
-                        .padding(.horizontal, 20).padding(.vertical, 8)
-                        .background(PA.Colors.accent.opacity(0.12)).clipShape(Capsule())
-                }
-                .buttonStyle(.plain)
-            }
-            Spacer()
-        }
-    }
-
-    // MARK: - Data
+    // MARK: - Data Loading
 
     private func loadPortfolio() async {
         guard auth.isAuthenticated else {
@@ -217,8 +159,44 @@ struct PortfolioView: View {
             holdings = try await HoldingsService.shared.fetchHoldings()
             positions = Position.group(holdings)
         } catch {
-            self.error = "Couldn't load portfolio"
+            print("[PortfolioView] Holdings fetch failed: \(error)")
+            if let apiErr = error as? APIError, case .httpError(403, _) = apiErr {
+                self.error = "Set up your profile to access your portfolio"
+            } else {
+                self.error = "Couldn't load portfolio: \(error.localizedDescription)"
+            }
         }
         isLoading = false
+
+        // Non-critical: fetch live market value in background.
+        // Runs after isLoading is cleared so it never blocks the UI.
+        if let meData = try? await CardService.shared.fetchHomepageMe() {
+            portfolioDTO = meData.portfolio
+        }
     }
+}
+
+// MARK: - Previews
+
+#Preview("Portfolio") {
+    PortfolioView()
+        .preferredColorScheme(.dark)
+}
+
+#Preview("Identity Card") {
+    ZStack {
+        PA.Colors.background.ignoresSafeArea()
+        CollectorIdentityCard(
+            profile: CollectorIdentityEngine.analyze(PortfolioMockData.attributesInput)
+        )
+    }
+    .preferredColorScheme(.dark)
+}
+
+#Preview("Empty State") {
+    ZStack {
+        PA.Colors.background.ignoresSafeArea()
+        PortfolioEmptyStateView()
+    }
+    .preferredColorScheme(.dark)
 }
