@@ -64,6 +64,7 @@
 		1100000100000000000000F8 /* PortfolioEmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000100000000000000A8 /* PortfolioEmptyStateView.swift */; };
 		1200000100000000000000F1 /* PortfolioValueChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1200000100000000000000A1 /* PortfolioValueChart.swift */; };
 		1200000100000000000000F2 /* InsightsUnlockProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1200000100000000000000A2 /* InsightsUnlockProgress.swift */; };
+		1200000100000000000000F3 /* PortfolioCardGridCell.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1200000100000000000000A3 /* PortfolioCardGridCell.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -124,6 +125,7 @@
 		1100000100000000000000A8 /* PortfolioEmptyStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioEmptyStateView.swift; sourceTree = "<group>"; };
 		1200000100000000000000A1 /* PortfolioValueChart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioValueChart.swift; sourceTree = "<group>"; };
 		1200000100000000000000A2 /* InsightsUnlockProgress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightsUnlockProgress.swift; sourceTree = "<group>"; };
+		1200000100000000000000A3 /* PortfolioCardGridCell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioCardGridCell.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -203,6 +205,7 @@
 				1100000100000000000000A8 /* PortfolioEmptyStateView.swift */,
 				1200000100000000000000A1 /* PortfolioValueChart.swift */,
 				1200000100000000000000A2 /* InsightsUnlockProgress.swift */,
+				1200000100000000000000A3 /* PortfolioCardGridCell.swift */,
 				AA00000100000000000000B1 /* Assets.xcassets */,
 				AA00000100000000000000B3 /* Info.plist */,
 				AA00000100000000000000E3 /* Preview Content */,
@@ -357,6 +360,7 @@
 				1100000100000000000000F8 /* PortfolioEmptyStateView.swift in Sources */,
 				1200000100000000000000F1 /* PortfolioValueChart.swift in Sources */,
 				1200000100000000000000F2 /* InsightsUnlockProgress.swift in Sources */,
+				1200000100000000000000F3 /* PortfolioCardGridCell.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -17,6 +17,11 @@ struct PortfolioView: View {
     // Card detail navigation
     @State private var selectedCard: MarketCard?
 
+    // Positions list view mode (table rows vs card grid)
+    @State private var positionsViewMode: PositionsViewMode = .list
+
+    private enum PositionsViewMode { case list, grid }
+
     private var auth: AuthService { AuthService.shared }
 
     // Summary built from the overview API response, falling back to holdings data.
@@ -97,6 +102,50 @@ struct PortfolioView: View {
         }
     }
 
+    // MARK: - Positions Header (title + view-mode toggle)
+
+    private var positionsHeader: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "rectangle.stack")
+                .font(.system(size: 14))
+                .foregroundStyle(PA.Colors.accent)
+            Text("Your Cards")
+                .font(PA.Typography.sectionTitle)
+                .foregroundStyle(PA.Colors.text)
+
+            Spacer()
+
+            viewModeToggle
+        }
+    }
+
+    private var viewModeToggle: some View {
+        HStack(spacing: 0) {
+            viewModeButton(.list, icon: "list.bullet")
+            viewModeButton(.grid, icon: "square.grid.2x2.fill")
+        }
+        .padding(2)
+        .background(PA.Colors.surfaceSoft)
+        .clipShape(Capsule())
+    }
+
+    private func viewModeButton(_ mode: PositionsViewMode, icon: String) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                positionsViewMode = mode
+            }
+            PAHaptics.selection()
+        } label: {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(positionsViewMode == mode ? PA.Colors.background : PA.Colors.textSecondary)
+                .frame(width: 28, height: 22)
+                .background(positionsViewMode == mode ? PA.Colors.accent : Color.clear)
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
     /// Build a stub MarketCard to navigate to CardDetailView from a position.
     private func cardFor(position: Position) -> MarketCard? {
         guard let slug = position.canonicalSlug else { return nil }
@@ -152,23 +201,34 @@ struct PortfolioView: View {
                 // Positions list (always shown when there are holdings)
                 if !positions.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "rectangle.stack")
-                                .font(.system(size: 14))
-                                .foregroundStyle(PA.Colors.accent)
-                            Text("Your Cards")
-                                .font(PA.Typography.sectionTitle)
-                                .foregroundStyle(PA.Colors.text)
-                        }
-                        .padding(.horizontal, PA.Layout.sectionPadding)
+                        positionsHeader
+                            .padding(.horizontal, PA.Layout.sectionPadding)
 
-                        LazyVStack(spacing: 10) {
-                            ForEach(positions) { position in
-                                PortfolioPositionCell(
-                                    position: position,
-                                    metadata: position.canonicalSlug.flatMap { overview?.cardMetadata?[$0] },
-                                    onTap: { selectedCard = cardFor(position: position) }
-                                )
+                        Group {
+                            switch positionsViewMode {
+                            case .list:
+                                LazyVStack(spacing: 10) {
+                                    ForEach(positions) { position in
+                                        PortfolioPositionCell(
+                                            position: position,
+                                            metadata: position.canonicalSlug.flatMap { overview?.cardMetadata?[$0] },
+                                            onTap: { selectedCard = cardFor(position: position) }
+                                        )
+                                    }
+                                }
+                            case .grid:
+                                LazyVGrid(
+                                    columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
+                                    spacing: 12
+                                ) {
+                                    ForEach(positions) { position in
+                                        PortfolioCardGridCell(
+                                            position: position,
+                                            metadata: position.canonicalSlug.flatMap { overview?.cardMetadata?[$0] },
+                                            onTap: { selectedCard = cardFor(position: position) }
+                                        )
+                                    }
+                                }
                             }
                         }
                         .padding(.horizontal, PA.Layout.sectionPadding)
