@@ -636,6 +636,14 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
     expectedSignals: ["service_role_client"],
     usesServiceRole: true,
   }),
+  "scripts/bulk-downsample-price-history.mjs": operationalScript({
+    classification: "service_role_backfill",
+    executionMode: "manual_backfill",
+    intendedCaller: "trusted operator running a one-shot bulk downsample of price_history_points to shrink the table after the 2026-04-16 incident",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+  }),
   "scripts/backfill-unpriced-sets.mjs": operationalScript({
     classification: "manual_hybrid_route_driver",
     executionMode: "manual_repair",
