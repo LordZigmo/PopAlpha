@@ -142,7 +142,11 @@ function toFiniteNumber(value: unknown): number | null {
 
 function shouldWriteObservation(_provider: SupportedProvider, observation: { normalized_condition?: string | null; metadata?: Record<string, unknown> | null }): boolean {
   const grade = String(observation.metadata?.grade ?? "RAW").trim();
-  if (grade && grade !== "RAW") return true;
+  // Graded observations don't belong in this pipeline: variant_ref is
+  // unconditionally built as a RAW ref (`${printingId}::RAW`), which the
+  // tightened 04-16 check constraint rejects when grade is non-RAW.
+  // Graded data for PSA/CGC/BGS/TAG is ingested via app/api/ingest/psa.
+  if (grade && grade !== "RAW") return false;
   const normalized = String(observation.normalized_condition ?? "").trim().toLowerCase();
   return normalized === "nm" || normalized === "mint";
 }
