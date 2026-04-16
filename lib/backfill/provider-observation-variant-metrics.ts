@@ -141,12 +141,16 @@ function toFiniteNumber(value: unknown): number | null {
 }
 
 function shouldWriteObservation(_provider: SupportedProvider, observation: { normalized_condition?: string | null; metadata?: Record<string, unknown> | null }): boolean {
-  const grade = String(observation.metadata?.grade ?? "RAW").trim();
-  // Graded observations don't belong in this pipeline: variant_ref is
-  // unconditionally built as a RAW ref (`${printingId}::RAW`), which the
-  // tightened 04-16 check constraint rejects when grade is non-RAW.
-  // Graded data for PSA/CGC/BGS/TAG is ingested via app/api/ingest/psa.
-  if (grade && grade !== "RAW") return false;
+  const grade = String(observation.metadata?.grade ?? "RAW").trim().toUpperCase();
+  // variant_ref is unconditionally built as a RAW ref (`${printingId}::RAW`),
+  // and the 04-16 check constraint requires grade = 'RAW' to match. Accept
+  // only RAW-equivalent observations here; graded data for PSA/CGC/BGS/TAG
+  // is handled by app/api/ingest/psa.
+  //
+  // Also catches empty-string grade — "" short-circuits a `grade && ...`
+  // guard, then gets written as an empty grade and violates the constraint
+  // (upper(coalesce('', 'RAW')) != 'RAW').
+  if (grade !== "RAW") return false;
   const normalized = String(observation.normalized_condition ?? "").trim().toLowerCase();
   return normalized === "nm" || normalized === "mint";
 }
@@ -548,7 +552,10 @@ export async function runProviderObservationVariantMetrics(opts: {
         printing_id: printingId,
         variant_ref: variantRef,
         provider: opts.provider,
-        grade: String(row.observation.metadata?.grade ?? "RAW").trim(),
+        // shouldWriteObservation() gates this loop to RAW-equivalent
+        // observations only, and variant_ref is a RAW ref — so the stored
+        // grade must be literal "RAW" to satisfy the check constraint.
+        grade: "RAW",
         provider_trend_slope_7d: analytics.provider_trend_slope_7d,
         provider_cov_price_30d: analytics.provider_cov_price_30d,
         provider_price_relative_to_30d_range: analytics.provider_price_relative_to_30d_range,
