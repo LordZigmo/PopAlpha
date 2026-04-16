@@ -53,6 +53,7 @@
 		DD00000100000000000000F4 /* PersonalizedInsightCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000A4 /* PersonalizedInsightCardView.swift */; };
 		EE00000100000000000000F1 /* PopAlphaCore in Frameworks */ = {isa = PBXBuildFile; productRef = EE00000100000000000000A2 /* PopAlphaCore */; };
 		EE00000100000000000000F2 /* SetDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE00000100000000000000A3 /* SetDetailView.swift */; };
+		FF00000100000000000000F1 /* ClerkKit in Frameworks */ = {isa = PBXBuildFile; productRef = FF00000100000000000000A2 /* ClerkKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -111,6 +112,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				EE00000100000000000000F1 /* PopAlphaCore in Frameworks */,
+				FF00000100000000000000F1 /* ClerkKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -212,6 +214,7 @@
 			name = PopAlphaApp;
 			packageProductDependencies = (
 				EE00000100000000000000A2 /* PopAlphaCore */,
+				FF00000100000000000000A2 /* ClerkKit */,
 			);
 			productName = PopAlphaApp;
 			productReference = AA00000100000000000000C1 /* PopAlphaApp.app */;
@@ -243,6 +246,7 @@
 			mainGroup = AA00000100000000000000E1;
 			packageReferences = (
 				EE00000100000000000000A1 /* XCLocalSwiftPackageReference "." */,
+				FF00000100000000000000A1 /* XCRemoteSwiftPackageReference "clerk-ios" */,
 			);
 			productRefGroup = AA00000100000000000000E4 /* Products */;
 			projectDirPath = "";
@@ -451,11 +455,12 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = PopAlphaApp/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = PopAlpha;
+				INFOPLIST_KEY_NSCameraUsageDescription = "PopAlpha uses the camera to scan and identify collectible cards.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_UIUserInterfaceStyle = Dark;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -485,11 +490,12 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = PopAlphaApp/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = PopAlpha;
+				INFOPLIST_KEY_NSCameraUsageDescription = "PopAlpha uses the camera to scan and identify collectible cards.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_UIUserInterfaceStyle = Dark;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -536,11 +542,27 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		FF00000100000000000000A1 /* XCRemoteSwiftPackageReference "clerk-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/clerk/clerk-ios";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		EE00000100000000000000A2 /* PopAlphaCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = EE00000100000000000000A1 /* XCLocalSwiftPackageReference "." */;
 			productName = PopAlphaCore;
+		};
+		FF00000100000000000000A2 /* ClerkKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FF00000100000000000000A1 /* XCRemoteSwiftPackageReference "clerk-ios" */;
+			productName = ClerkKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

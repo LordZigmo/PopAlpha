@@ -1,22 +1,27 @@
 import SwiftUI
+import ClerkKit
 
 @main
 struct PopAlphaApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
+        Clerk.configure(publishableKey: "pk_live_Y2xlcmsucG9wYWxwaGEuYWkk")
         configureGlobalAppearance()
     }
 
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environment(Clerk.shared)
                 .preferredColorScheme(.dark)
+                .task { await AuthService.shared.restoreSession() }
                 .onChange(of: scenePhase) { _, newPhase in
                     switch newPhase {
                     case .active:
                         if AuthService.shared.isAuthenticated {
                             NotificationService.shared.startPolling()
+                            Task { await AuthService.shared.refreshTokenIfNeeded() }
                         }
                     case .background:
                         NotificationService.shared.stopPolling()
