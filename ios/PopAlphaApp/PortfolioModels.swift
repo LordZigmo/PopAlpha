@@ -63,6 +63,7 @@ enum CollectorType: String, CaseIterable, Identifiable {
 
 struct PortfolioSummary {
     let totalValue: Double
+    let totalCostBasis: Double
     let changes: [TimeWindow: PortfolioChange]
     let cardCount: Int
     let rawCount: Int
@@ -232,6 +233,7 @@ extension PortfolioOverviewResponse {
         let pnl = PortfolioChange(amount: s.pnlAmount, percent: s.pnlPct ?? 0)
         return PortfolioSummary(
             totalValue: s.totalValue,
+            totalCostBasis: s.totalCostBasis,
             changes: [.day: pnl],
             cardCount: s.cardCount,
             rawCount: s.rawCount,

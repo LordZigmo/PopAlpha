@@ -2,9 +2,21 @@ import SwiftUI
 
 // MARK: - Portfolio Hero View
 // Above-the-fold summary: total value, scrubbable chart, stats.
-// The displayed value + change reflects the chart (stock-app pattern):
-// - Default: value = today, change = vs first chart point
-// - Scrubbing: value = scrubbed point, change = vs first chart point
+// - Balance / Returns toggle (Vanguard-style) swaps the chart series and headline
+// - The displayed value + change reflects the chart's active series:
+//     default: value = today, change = vs first chart point
+//     scrubbing: value = scrubbed point, change = vs first chart point
+
+private enum ChartMode: String, CaseIterable, Identifiable {
+    case balance, returns
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .balance: "Balance"
+        case .returns: "Returns"
+        }
+    }
+}
 
 struct PortfolioHeroView: View {
     let summary: PortfolioSummary
@@ -12,29 +24,63 @@ struct PortfolioHeroView: View {
     @Binding var selectedWindow: TimeWindow
 
     @State private var scrubIndex: Int? = nil
+    @State private var chartMode: ChartMode = .balance
 
-    /// Index used for display: scrub position when scrubbing, else the last point.
+    /// Active sparkline depending on mode.
+    private var activeSparkline: [Double] {
+        switch chartMode {
+        case .balance:
+            return summary.sparkline
+        case .returns:
+            return summary.sparkline.map { $0 - summary.totalCostBasis }
+        }
+    }
+
     private var displayIndex: Int {
-        scrubIndex ?? max(0, summary.sparkline.count - 1)
+        scrubIndex ?? max(0, activeSparkline.count - 1)
     }
 
-    /// Value to show in the headline.
+    /// Headline value (currency for balance, signed P&L for returns).
     private var displayValue: Double {
-        guard !summary.sparkline.isEmpty else { return summary.totalValue }
-        return summary.sparkline[min(displayIndex, summary.sparkline.count - 1)]
+        if !activeSparkline.isEmpty {
+            return activeSparkline[min(displayIndex, activeSparkline.count - 1)]
+        }
+        return chartMode == .balance
+            ? summary.totalValue
+            : (summary.totalValue - summary.totalCostBasis)
     }
 
-    /// Change from the first chart point to the displayed point.
-    /// Falls back to the API-provided summary change when there's no chart.
+    /// Period change: scrubbed-or-current point minus the first chart point.
     private var displayChange: PortfolioChange {
-        guard summary.sparkline.count >= 2,
-              let first = summary.sparkline.first, first > 0 else {
+        guard activeSparkline.count >= 2,
+              let first = activeSparkline.first else {
             return summary.change(for: .day)
         }
-        let current = summary.sparkline[min(displayIndex, summary.sparkline.count - 1)]
+        let current = activeSparkline[min(displayIndex, activeSparkline.count - 1)]
         let amount = current - first
-        let percent = (amount / first) * 100
+        // Percent base differs by mode: balance % is over starting balance,
+        // returns % uses the starting *balance* so the percentage is interpretable.
+        let base: Double
+        switch chartMode {
+        case .balance:
+            base = first > 0 ? first : 1
+        case .returns:
+            base = (summary.sparkline.first ?? 1) > 0 ? (summary.sparkline.first ?? 1) : 1
+        }
+        let percent = (amount / base) * 100
         return PortfolioChange(amount: amount, percent: percent)
+    }
+
+    /// Line color: in returns mode, sign of current value drives color
+    /// (positive returns = green even if dipping). In balance mode, period
+    /// direction drives it.
+    private var lineIsPositive: Bool {
+        switch chartMode {
+        case .balance:
+            return displayChange.isPositive
+        case .returns:
+            return displayValue >= 0
+        }
     }
 
     private var rangeLabel: String {
@@ -52,11 +98,11 @@ struct PortfolioHeroView: View {
 
             // Value + change
             VStack(spacing: 6) {
-                Text(formatValue(displayValue))
+                Text(formatHeadline(displayValue))
                     .font(PA.Typography.heroPrice)
                     .foregroundStyle(PA.Colors.text)
                     .contentTransition(.numericText())
-                    .animation(.interactiveSpring(response: 0.15), value: displayValue)
+                    .animation(.interactiveSpring(response: 0.18), value: displayValue)
 
                 let chg = displayChange
                 if chg.amount != 0 || chg.percent != 0 {
@@ -78,17 +124,22 @@ struct PortfolioHeroView: View {
                 }
             }
 
+            // Balance / Returns segmented control (chart controls)
+            modeToggle
+
             // Premium scrubbable portfolio chart
-            if summary.sparkline.count >= 2 {
+            if activeSparkline.count >= 2 {
                 PortfolioValueChart(
-                    data: summary.sparkline,
-                    isPositive: displayChange.isPositive,
+                    data: activeSparkline,
+                    isPositive: lineIsPositive,
                     height: 110,
                     onScrub: { idx in
                         scrubIndex = idx
                     }
                 )
                 .padding(.horizontal, 4)
+                .id(chartMode) // Force smooth re-render between modes
+                .transition(.opacity)
             }
 
             // Stats row
@@ -108,6 +159,34 @@ struct PortfolioHeroView: View {
         }
         .padding(.horizontal, PA.Layout.sectionPadding)
         .padding(.top, 8)
+    }
+
+    // MARK: - Mode Toggle
+
+    private var modeToggle: some View {
+        HStack(spacing: 4) {
+            ForEach(ChartMode.allCases) { mode in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.22)) {
+                        chartMode = mode
+                        scrubIndex = nil
+                    }
+                    PAHaptics.selection()
+                } label: {
+                    Text(mode.label)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(chartMode == mode ? PA.Colors.background : PA.Colors.textSecondary)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 7)
+                        .background(chartMode == mode ? PA.Colors.accent : Color.clear)
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(3)
+        .background(PA.Colors.surfaceSoft)
+        .clipShape(Capsule())
     }
 
     // MARK: - Stats Row
@@ -144,7 +223,18 @@ struct PortfolioHeroView: View {
 
     // MARK: - Formatting
 
-    private func formatValue(_ value: Double) -> String {
+    /// Headline format: balance shows currency; returns shows signed P&L.
+    private func formatHeadline(_ value: Double) -> String {
+        switch chartMode {
+        case .balance:
+            return formatCurrency(value)
+        case .returns:
+            let sign = value >= 0 ? "+" : "−"
+            return "\(sign)\(formatCurrency(abs(value)))"
+        }
+    }
+
+    private func formatCurrency(_ value: Double) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
         formatter.currencyCode = "USD"

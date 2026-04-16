@@ -29,6 +29,7 @@ struct PortfolioView: View {
 
         return PortfolioSummary(
             totalValue: costBasis,
+            totalCostBasis: costBasis,
             changes: [.day: PortfolioChange(amount: 0, percent: 0)],
             cardCount: rawCount + gradedCount,
             rawCount: rawCount,
