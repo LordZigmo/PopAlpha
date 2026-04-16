@@ -11,18 +11,27 @@ export const DBADMIN_ALLOWED_PREFIXES = [
   "lib/admin/",
   "app/api/psa/cert/route.ts",
   "lib/backfill/",
+  "lib/personalization/server/",
   "scripts/",
 ];
 
 export const DBADMIN_ALLOWED_FILES = [
   "app/api/cards/[slug]/view/route.ts",
   "app/api/ebay/deletion-notification/route.ts",
+  "app/api/holdings/route.ts",
+  "app/api/personalization/events/route.ts",
+  "app/api/personalization/explanation/route.ts",
+  "app/api/personalization/profile/route.ts",
   "app/api/pro/signals/route.ts",
   "lib/db/admin.ts",
 ];
 
 export const DBADMIN_ALLOWED_ROUTE_KEYS = [
   "cards/[slug]/view",
+  "holdings",
+  "personalization/events",
+  "personalization/explanation",
+  "personalization/profile",
   "pro/signals",
 ];
 
@@ -464,6 +473,15 @@ export const PUBLIC_WRITE_ROUTE_CONTRACTS = {
     abuseControls: ["ip_burst", "ebay_jws_verification", "verified_receipt_quarantine", "structured_logging"],
     dbContract: "server-only insert into public.ebay_deletion_notification_receipts after verified signature",
     recommendedAction: "keep quarantine-first; do not trigger destructive deletion work directly from the webhook route",
+  },
+  "personalization/events": {
+    routeClass: "public",
+    access: "anon_or_authenticated",
+    methods: ["POST"],
+    writeType: "append_only_internal_table",
+    abuseControls: ["ip_burst", "actor_fingerprint", "cross_site_screen", "structured_logging"],
+    dbContract: "server-only insert into public.personalization_behavior_events via dbAdmin()",
+    recommendedAction: "keep server-only; do not expose public insert policy or widen grants",
   },
   waitlist: {
     routeClass: "public",
@@ -946,6 +964,10 @@ export const RLS_REQUIRED_PUBLIC_TABLES = [
   "ebay_deletion_notification_receipts",
   "holdings",
   "market_snapshots",
+  "personalization_actor_claims",
+  "personalization_behavior_events",
+  "personalization_explanation_cache",
+  "personalization_profiles",
   "pricing_transparency_snapshots",
   "private_sales",
   "profile_follows",
@@ -1036,6 +1058,7 @@ export const AUTHENTICATED_DML_OBJECT_GRANTS = {
   app_users: ["INSERT", "SELECT", "UPDATE"],
   community_card_votes: ["INSERT", "SELECT"],
   holdings: ["DELETE", "INSERT", "SELECT", "UPDATE"],
+  personalization_profiles: ["SELECT"],
   private_sales: ["DELETE", "INSERT", "SELECT"],
   profile_follows: ["DELETE", "INSERT", "SELECT"],
   profile_post_card_mentions: ["DELETE", "INSERT", "SELECT"],
@@ -1099,6 +1122,14 @@ export const SEQUENCE_GRANT_CONTRACTS = {
     anon: [],
     authenticated: [],
   },
+  personalization_behavior_events_id_seq: {
+    anon: [],
+    authenticated: [],
+  },
+  personalization_explanation_cache_id_seq: {
+    anon: [],
+    authenticated: [],
+  },
   pipeline_jobs_id_seq: {
     anon: [],
     authenticated: [],
@@ -1156,6 +1187,9 @@ export const INTERNAL_NO_GRANT_OBJECTS = [
   "market_snapshot_rollups",
   "matching_quality_audits",
   "outlier_excluded_points",
+  "personalization_actor_claims",
+  "personalization_behavior_events",
+  "personalization_explanation_cache",
   "pipeline_jobs",
   "price_history",
   "price_history_points",

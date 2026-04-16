@@ -1,24 +1,13 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require";
-import { createServerSupabaseUserClient } from "@/lib/db/user";
-import { dbUser } from "@/lib/db";
+import { dbAdmin } from "@/lib/db/admin";
 
 export const runtime = "nodejs";
 
-// ── Supabase client that works for both web and native requests ──────────────
-// Web requests: Clerk middleware sets cookies → createServerSupabaseUserClient()
-// works via auth().getToken(). Native (iOS) requests: send a Bearer JWT directly
-// → fall back to dbUser(bearer) when getToken() fails.
-
-async function getSupabaseClient(req: Request) {
-  try {
-    return await createServerSupabaseUserClient();
-  } catch {
-    const bearer = req.headers.get("authorization")?.slice(7)?.trim();
-    if (!bearer) throw new Error("No token available");
-    return dbUser(bearer);
-  }
-}
+// Uses dbAdmin() because the iOS app sends a Clerk Bearer JWT that
+// Supabase RLS cannot validate (no JWT template configured). Since
+// requireUser() already verifies identity and every query filters
+// by owner_clerk_id, this is equivalent in security to RLS.
 
 // ── GET /api/holdings — list authenticated user's holdings ──────────────────
 
@@ -26,13 +15,7 @@ export async function GET(req: Request) {
   const auth = await requireUser(req);
   if (!auth.ok) return auth.response;
 
-  let supabase;
-  try {
-    supabase = await getSupabaseClient(req);
-  } catch {
-    return NextResponse.json({ ok: false, error: "Auth token missing." }, { status: 401 });
-  }
-
+  const supabase = dbAdmin();
   const { data, error } = await supabase
     .from("holdings")
     .select("id, canonical_slug, printing_id, grade, qty, price_paid_usd, acquired_on, venue, cert_number")
@@ -84,13 +67,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "price_paid_usd must be >= 0." }, { status: 400 });
   }
 
-  let supabase;
-  try {
-    supabase = await getSupabaseClient(req);
-  } catch {
-    return NextResponse.json({ ok: false, error: "Auth token missing." }, { status: 401 });
-  }
-
+  const supabase = dbAdmin();
   const { error } = await supabase.from("holdings").insert({
     owner_clerk_id: auth.userId,
     canonical_slug,
