@@ -26,15 +26,26 @@ type PipelineBatchPreset = {
 
 type ProviderPresetMap = Record<PipelineBatchKind | "MINIMAL", PipelineBatchPreset>;
 
+// 2026-04-17: raised PIPELINE observation caps from 100 → 250 after today's
+// infrastructure cleanup (price_history_points shrunk 11M → 4.3M rows, LIKE-OR
+// scans gated, DISTINCT ON rollup bug fixed, dup-key firehose silenced). The
+// lower caps were a defensive measure after Incident #13 when CPU hit 99% on
+// 13M-row scans — that pressure no longer exists. Coverage math: at 100 obs/
+// job × 4 daily chunks = 400 obs/set/day, large sets like Cosmic Eclipse
+// (~540 observations) were only 74% covered per day. 250 obs/job restores
+// full daily coverage for all sets.
+//
+// RETRY and MINIMAL stay lower — those are the de-escalation path when jobs
+// are failing, and still protect against CPU spikes on a struggling DB.
 const QUEUED_BATCH_PRESETS: Record<PipelineBatchProvider, ProviderPresetMap> = {
   SCRYDEX: {
     PIPELINE: {
       setLimit: 1,
-      maxRequests: 10,
-      payloadLimit: 10,
-      matchObservations: 100,
-      timeseriesObservations: 100,
-      metricsObservations: 100,
+      maxRequests: 15,
+      payloadLimit: 15,
+      matchObservations: 250,
+      timeseriesObservations: 250,
+      metricsObservations: 250,
     },
     RETRY: {
       setLimit: 1,

@@ -20,7 +20,14 @@ import {
 export const runtime = "nodejs";
 export const maxDuration = 600;
 
-const DEFAULT_BATCH_SIZE = 50;
+// 2026-04-17: raised drain default from 50 → 150 after the 2026-04-16
+// infrastructure cleanup. With the DISTINCT ON rollup bug fixed
+// (097b6e0) the refresh_card_metrics_for_variants RPC actually does work
+// per call instead of erroring early, and the shrunken price_history_points
+// table makes each call cheaper. 150 keys × 30 max batches = 4,500 per
+// tick × 2 ticks/hour = 9,000/hour — comfortably above the ~4k/hour we
+// need to keep up with post-cap-increase pipeline throughput.
+const DEFAULT_BATCH_SIZE = 150;
 const DEADLINE_RESERVE_MS = 90_000;
 
 function parseOptionalInt(value: string | null): number | undefined {

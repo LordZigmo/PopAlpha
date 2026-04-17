@@ -32,9 +32,16 @@ export type PipelineJobRow = {
 const DEFAULT_JOB_TIMEOUT_MS = process.env.PIPELINE_JOB_TIMEOUT_MS
   ? Math.max(5000, parseInt(process.env.PIPELINE_JOB_TIMEOUT_MS, 10))
   : 480000;
+// 2026-04-17: dropped stale-reclaim default from 600s → 300s. The threshold
+// checks `coalesce(locked_at, started_at, updated_at, created_at)`, and
+// locked_at is refreshed every HEARTBEAT_INTERVAL_MS (30s) while a job is
+// healthy. So 300s = 10 missed heartbeats — strong signal the Node function
+// died (not transient DB hiccup). This catches Vercel-missed-tick zombies
+// in 5 min instead of 10 min. Raise via PIPELINE_JOB_STALE_RECLAIM_SECONDS
+// if reclaiming live jobs becomes an issue.
 const DEFAULT_STALE_RECLAIM_SECONDS = process.env.PIPELINE_JOB_STALE_RECLAIM_SECONDS
   ? Math.max(60, parseInt(process.env.PIPELINE_JOB_STALE_RECLAIM_SECONDS, 10))
-  : Math.max(360, Math.ceil(DEFAULT_JOB_TIMEOUT_MS / 1000) + 120);
+  : 300;
 const HEARTBEAT_INTERVAL_MS = process.env.PIPELINE_JOB_HEARTBEAT_MS
   ? Math.max(5000, parseInt(process.env.PIPELINE_JOB_HEARTBEAT_MS, 10))
   : 30000;
