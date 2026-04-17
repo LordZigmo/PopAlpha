@@ -1,5 +1,6 @@
 import Combine
 import SwiftUI
+import NukeUI
 import PopAlphaCore
 
 // MARK: - Scan Mode
@@ -297,8 +298,8 @@ struct ScannerTabView: View {
     private func multiCardChip(_ card: MarketCard) -> some View {
         HStack(spacing: 8) {
             if let url = card.imageURL {
-                AsyncImage(url: url) { phase in
-                    if case .success(let img) = phase {
+                LazyImage(url: url) { state in
+                    if let img = state.image {
                         img.resizable().aspectRatio(63.0 / 88.0, contentMode: .fill)
                     } else {
                         chipPlaceholder

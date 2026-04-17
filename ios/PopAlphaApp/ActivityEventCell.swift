@@ -1,4 +1,5 @@
 import SwiftUI
+import NukeUI
 
 struct ActivityEventCell: View {
     let item: ActivityService.ActivityFeedItem
@@ -49,15 +50,14 @@ struct ActivityEventCell: View {
                             onCardTap?(slug)
                         }
                     } label: {
-                        AsyncImage(url: url) { phase in
-                            switch phase {
-                            case .success(let image):
+                        LazyImage(url: url) { state in
+                            if let image = state.image {
                                 image
                                     .resizable()
                                     .aspectRatio(63.0 / 88.0, contentMode: .fit)
                                     .frame(width: 60)
                                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                            default:
+                            } else {
                                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                                     .fill(PA.Colors.surfaceSoft)
                                     .frame(width: 60, height: 84)

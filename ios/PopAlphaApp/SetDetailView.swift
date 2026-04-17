@@ -1,4 +1,5 @@
 import SwiftUI
+import NukeUI
 
 // MARK: - Set Browser
 //
@@ -137,19 +138,16 @@ private struct SetCardCell: View {
             // Card image
             ZStack {
                 if let url = card.imageURL {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image):
+                    LazyImage(url: url) { state in
+                        if let image = state.image {
                             image
                                 .resizable()
                                 .aspectRatio(contentMode: .fill)
-                        case .failure:
+                        } else if state.error != nil {
                             placeholder
-                        case .empty:
+                        } else {
                             placeholder
                                 .overlay(ProgressView().tint(PA.Colors.muted))
-                        @unknown default:
-                            placeholder
                         }
                     }
                 } else {

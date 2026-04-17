@@ -1,4 +1,5 @@
 import SwiftUI
+import NukeUI
 
 // MARK: - User Profile View (for viewing other users)
 
@@ -51,15 +52,14 @@ struct UserProfileView: View {
             VStack(spacing: 20) {
                 // Banner
                 if let bannerUrl = profile.profileBannerUrl, let url = URL(string: bannerUrl) {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image):
+                    LazyImage(url: url) { state in
+                        if let image = state.image {
                             image
                                 .resizable()
                                 .aspectRatio(contentMode: .fill)
                                 .frame(height: 120)
                                 .clipped()
-                        default:
+                        } else {
                             bannerPlaceholder
                         }
                     }

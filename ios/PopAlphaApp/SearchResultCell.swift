@@ -1,4 +1,5 @@
 import SwiftUI
+import NukeUI
 
 // MARK: - Search Result Cell
 
@@ -9,15 +10,14 @@ struct SearchResultCell: View {
         HStack(spacing: 12) {
             // Card thumbnail
             if let url = card.imageURL {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
+                LazyImage(url: url) { state in
+                    if let image = state.image {
                         image
                             .resizable()
                             .aspectRatio(63.0 / 88.0, contentMode: .fill)
-                    case .failure:
+                    } else if state.error != nil {
                         thumbnailPlaceholder
-                    default:
+                    } else {
                         thumbnailPlaceholder
                             .overlay(
                                 ProgressView()
@@ -97,13 +97,12 @@ struct SearchSuggestionCell: View {
         HStack(spacing: 10) {
             // Small thumbnail
             if let url = card.imageURL {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
+                LazyImage(url: url) { state in
+                    if let image = state.image {
                         image
                             .resizable()
                             .aspectRatio(63.0 / 88.0, contentMode: .fill)
-                    default:
+                    } else {
                         smallPlaceholder
                     }
                 }

@@ -1,4 +1,5 @@
 import SwiftUI
+import NukeUI
 
 // MARK: - Portfolio Position Cell
 
@@ -103,13 +104,12 @@ struct PortfolioPositionCell: View {
     private var cardThumbnail: some View {
         Group {
             if let urlString = metadata?.imageUrl, let url = URL(string: urlString) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
+                LazyImage(url: url) { state in
+                    if let image = state.image {
                         image
                             .resizable()
                             .aspectRatio(contentMode: .fill)
-                    default:
+                    } else {
                         thumbnailPlaceholder
                     }
                 }

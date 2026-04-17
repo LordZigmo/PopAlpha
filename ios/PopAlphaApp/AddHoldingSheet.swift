@@ -1,4 +1,5 @@
 import SwiftUI
+import NukeUI
 
 // MARK: - Add Holding Sheet
 
@@ -151,8 +152,8 @@ struct AddHoldingSheet: View {
     private func selectedCardRow(_ card: SearchCardResult) -> some View {
         HStack(spacing: 12) {
             if let url = card.imageURL {
-                AsyncImage(url: url) { phase in
-                    if case .success(let img) = phase {
+                LazyImage(url: url) { state in
+                    if let img = state.image {
                         img.resizable().aspectRatio(63.0 / 88.0, contentMode: .fill)
                     } else {
                         RoundedRectangle(cornerRadius: 6).fill(PA.Colors.surfaceSoft)

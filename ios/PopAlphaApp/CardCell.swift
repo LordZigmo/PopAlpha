@@ -1,4 +1,5 @@
 import SwiftUI
+import NukeUI
 
 struct CardCell: View {
     let card: MarketCard
@@ -45,20 +46,17 @@ struct CardCell: View {
     @ViewBuilder
     private var cardImage: some View {
         if let url = card.imageURL {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let image):
+            LazyImage(url: url) { state in
+                if let image = state.image {
                     image
                         .resizable()
                         .aspectRatio(contentMode: .fill)
                         .scaleEffect(isHovered ? 1.03 : 1.0)
                         .animation(.easeOut(duration: 0.3), value: isHovered)
-                case .failure:
+                } else if state.error != nil {
                     cardPlaceholder
-                case .empty:
+                } else {
                     cardLoadingState
-                @unknown default:
-                    cardPlaceholder
                 }
             }
         } else {

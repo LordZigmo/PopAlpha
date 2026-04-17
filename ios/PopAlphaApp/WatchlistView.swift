@@ -1,4 +1,5 @@
 import SwiftUI
+import NukeUI
 
 // MARK: - Watchlist View
 
@@ -54,8 +55,8 @@ struct WatchlistView: View {
         HStack(spacing: 12) {
             // Thumbnail
             if let url = item.imageURL {
-                AsyncImage(url: url) { phase in
-                    if case .success(let img) = phase {
+                LazyImage(url: url) { state in
+                    if let img = state.image {
                         img.resizable().aspectRatio(63.0 / 88.0, contentMode: .fill)
                     } else {
                         thumbnailPlaceholder

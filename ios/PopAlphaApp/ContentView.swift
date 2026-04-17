@@ -1,4 +1,5 @@
 import SwiftUI
+import NukeUI
 
 struct ContentView: View {
     @State private var selectedTab: AppTab = .market
@@ -227,12 +228,14 @@ struct ProfileTabView: View {
                     .frame(width: 88, height: 88)
 
                 if let urlString = auth.currentImageURL, let url = URL(string: urlString) {
-                    AsyncImage(url: url) { image in
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                    } placeholder: {
-                        monogramAvatar
+                    LazyImage(url: url) { state in
+                        if let image = state.image {
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                        } else {
+                            monogramAvatar
+                        }
                     }
                     .frame(width: 80, height: 80)
                     .clipShape(Circle())

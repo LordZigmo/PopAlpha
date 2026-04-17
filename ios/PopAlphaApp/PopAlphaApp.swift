@@ -12,9 +12,10 @@ struct PopAlphaApp: App {
         configureGlobalAppearance()
     }
 
-    /// Replace the default `AsyncImage` URLSession-backed loader with a
-    /// Nuke pipeline tuned for card thumbnails: 200 MB in-memory LRU and
-    /// a persistent disk cache so rails don't re-download on every scroll.
+    /// Configure the shared Nuke `ImagePipeline` that backs every
+    /// `LazyImage` in the app: 200 MB in-memory LRU for the current
+    /// session and a persistent on-disk cache so rails don't
+    /// re-download on scroll or across app launches.
     private func configureImagePipeline() {
         ImagePipeline.shared = ImagePipeline {
             $0.dataCache = try? DataCache(name: "ai.popalpha.card-images")

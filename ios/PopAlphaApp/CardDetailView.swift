@@ -1,4 +1,5 @@
 import SwiftUI
+import NukeUI
 
 // MARK: - Price Mode
 
@@ -206,9 +207,8 @@ struct CardDetailView: View {
                 Color.clear // fill GeometryReader
                 // Freefloating card image
                 if let url = card.imageURL {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image):
+                    LazyImage(url: url) { state in
+                        if let image = state.image {
                             image
                                 .resizable()
                                 .aspectRatio(contentMode: .fit)
@@ -218,13 +218,11 @@ struct CardDetailView: View {
                                     RoundedRectangle(cornerRadius: 16, style: .continuous)
                                         .stroke(.white.opacity(0.1), lineWidth: 0.5)
                                 )
-                        case .failure:
+                        } else if state.error != nil {
                             heroPlaceholder
-                        case .empty:
+                        } else {
                             heroPlaceholder
                                 .overlay(ProgressView().tint(PA.Colors.muted))
-                        @unknown default:
-                            heroPlaceholder
                         }
                     }
                     .shadow(color: .black.opacity(0.8), radius: 24, x: 0, y: 16)
