@@ -16,7 +16,7 @@
 // rows tagged `grade='RAW'` and bleeding into the market_price surfaced to
 // the iOS scanner and homepage.
 
-import { normalizeCondition } from "@/lib/providers/justtcg";
+import { normalizeCondition } from "@/lib/pricing/normalize-condition";
 
 export type ScrydexCurrency = "USD" | "EUR" | "JPY";
 

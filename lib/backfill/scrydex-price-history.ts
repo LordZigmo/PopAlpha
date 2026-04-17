@@ -11,7 +11,7 @@ import {
 } from "@/lib/backfill/supabase-write-retry";
 import { normalizeScrydexVariantToken } from "@/lib/backfill/scrydex-variant-semantics";
 import { buildProviderHistoryVariantRef, buildGradedVariantRef } from "@/lib/identity/variant-ref.mjs";
-import { normalizeCondition } from "@/lib/providers/justtcg";
+import { normalizeCondition } from "@/lib/pricing/normalize-condition";
 import { selectScrydexGradedEntries } from "@/lib/backfill/scrydex-raw-price-select";
 import {
   fetchCardPriceHistoryPage,
