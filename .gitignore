@@ -6,6 +6,7 @@
 .next
 .env.local
 .env
+.mcp.json
 .DS_Store
 *.log
 /.pnp
