@@ -135,7 +135,7 @@ const payload = cards.map((card) => {
   });
 
   return {
-    card_slug: card.slug,
+    canonical_slug: card.slug,
     summary_short: summary.summaryShort,
     summary_long: summary.summaryLong,
   };
@@ -143,7 +143,7 @@ const payload = cards.map((card) => {
 
 const { error: upsertError } = await supabase
   .from("card_profiles")
-  .upsert(payload, { onConflict: "card_slug" });
+  .upsert(payload, { onConflict: "canonical_slug" });
 
 if (upsertError) {
   throw new Error(`Failed upserting card_profiles: ${upsertError.message}`);

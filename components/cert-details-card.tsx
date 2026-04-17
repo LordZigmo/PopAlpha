@@ -38,7 +38,7 @@ type CanonicalMatch = {
   score: number;
 };
 type CardProfile = {
-  card_slug: string;
+  canonical_slug: string;
   summary_short: string;
   summary_long: string | null;
   created_at: string;
