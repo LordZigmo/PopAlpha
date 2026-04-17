@@ -91,10 +91,13 @@ async function deleteBatch(supabase, retentionDays, batchSize) {
   const ids = (idsData ?? []).map((row) => row.id);
   if (ids.length === 0) return 0;
 
-  // Step 2: delete by id. Supabase's .in() caps at ~1000 for URL length.
-  // Chunk into 1000-id slices.
+  // Step 2: delete by id. PostgREST URL length limit is ~8KB by default;
+  // UUIDs are ~36 chars + URL-encoded delimiters ≈ 50 bytes each, so
+  // 100 UUIDs per .in() call leaves comfortable headroom. Bigger sizes
+  // return 400 Bad Request. (Same failure mode we fixed for
+  // price_snapshots in commit 11de000.)
   let deletedTotal = 0;
-  const idChunkSize = 1000;
+  const idChunkSize = 100;
   for (let i = 0; i < ids.length; i += idChunkSize) {
     const chunk = ids.slice(i, i + idChunkSize);
     const { error } = await supabase
