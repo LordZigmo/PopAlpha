@@ -644,6 +644,14 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
     expectedSignals: ["service_role_client"],
     usesServiceRole: true,
   }),
+  "scripts/bulk-prune-old-price-history.mjs": operationalScript({
+    classification: "service_role_backfill",
+    executionMode: "manual_backfill",
+    intendedCaller: "trusted operator hard-deleting price_history_points rows past 90-day retention to drain the backlog the 5000/day cron can't keep up with (2026-04-16 incident Phase 3)",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+  }),
   "scripts/backfill-unpriced-sets.mjs": operationalScript({
     classification: "manual_hybrid_route_driver",
     executionMode: "manual_repair",
