@@ -27,32 +27,6 @@ type PipelineBatchPreset = {
 type ProviderPresetMap = Record<PipelineBatchKind | "MINIMAL", PipelineBatchPreset>;
 
 const QUEUED_BATCH_PRESETS: Record<PipelineBatchProvider, ProviderPresetMap> = {
-  JUSTTCG: {
-    PIPELINE: {
-      setLimit: 1,
-      maxRequests: 12,
-      payloadLimit: 10,
-      matchObservations: 30,
-      timeseriesObservations: 30,
-      metricsObservations: 30,
-    },
-    RETRY: {
-      setLimit: 1,
-      maxRequests: 6,
-      payloadLimit: 8,
-      matchObservations: 20,
-      timeseriesObservations: 20,
-      metricsObservations: 20,
-    },
-    MINIMAL: {
-      setLimit: 1,
-      maxRequests: 4,
-      payloadLimit: 6,
-      matchObservations: 12,
-      timeseriesObservations: 12,
-      metricsObservations: 12,
-    },
-  },
   SCRYDEX: {
     PIPELINE: {
       setLimit: 1,
@@ -74,32 +48,6 @@ const QUEUED_BATCH_PRESETS: Record<PipelineBatchProvider, ProviderPresetMap> = {
       setLimit: 1,
       maxRequests: 3,
       payloadLimit: 4,
-      matchObservations: 40,
-      timeseriesObservations: 40,
-      metricsObservations: 40,
-    },
-  },
-  POKETRACE: {
-    PIPELINE: {
-      setLimit: 1,
-      maxRequests: 3,
-      payloadLimit: 6,
-      matchObservations: 120,
-      timeseriesObservations: 120,
-      metricsObservations: 120,
-    },
-    RETRY: {
-      setLimit: 1,
-      maxRequests: 2,
-      payloadLimit: 4,
-      matchObservations: 80,
-      timeseriesObservations: 80,
-      metricsObservations: 80,
-    },
-    MINIMAL: {
-      setLimit: 1,
-      maxRequests: 1,
-      payloadLimit: 2,
       matchObservations: 40,
       timeseriesObservations: 40,
       metricsObservations: 40,

@@ -1,7 +1,19 @@
+/**
+ * Single source of truth for backend pipeline providers.
+ *
+ * As of 2026-04-17 only SCRYDEX is active. JUSTTCG, POKETRACE, and
+ * POKEMON_TCG_API have been retired. Historical rows in pricing tables
+ * still carry those provider strings and are read by SQL rollups, but no
+ * code path writes them anymore.
+ *
+ * Note: the active Scrydex ingest/normalize/match lib lives in
+ * `lib/backfill/pokemontcg-*.ts` for historical reasons — the Scrydex
+ * pipeline was built on top of the original pokemontcg scaffolding and
+ * piggybacks on the same module.
+ */
+
 export const BACKEND_PIPELINE_PROVIDERS = [
-  "JUSTTCG",
   "SCRYDEX",
-  "POKETRACE",
 ] as const;
 
 export type BackendPipelineProvider = typeof BACKEND_PIPELINE_PROVIDERS[number];
@@ -22,26 +34,10 @@ export type ProviderPipelineCapabilities = {
 };
 
 export const PROVIDER_PIPELINE_CAPABILITIES: Record<BackendPipelineProvider, ProviderPipelineCapabilities> = {
-  JUSTTCG: {
-    provider: "JUSTTCG",
-    source: "justtcg",
-    supportsAnalytics: false,
-    supportsRetry: true,
-    ingestionEnabled: false,
-    ingestionDisabledReason: "justtcg_ingestion_retired",
-  },
   SCRYDEX: {
     provider: "SCRYDEX",
     source: "scrydex",
     supportsAnalytics: true,
-    supportsRetry: true,
-    ingestionEnabled: true,
-    ingestionDisabledReason: null,
-  },
-  POKETRACE: {
-    provider: "POKETRACE",
-    source: "poketrace",
-    supportsAnalytics: false,
     supportsRetry: true,
     ingestionEnabled: true,
     ingestionDisabledReason: null,

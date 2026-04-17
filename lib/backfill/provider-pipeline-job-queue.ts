@@ -4,11 +4,7 @@ import {
   providerIngestionEnabled,
 } from "@/lib/backfill/provider-registry";
 import { getProviderCooldownState } from "@/lib/backfill/provider-cooldown";
-import {
-  runJustTcgPipeline,
-  runPokeTracePipeline,
-  runScrydexPipeline,
-} from "@/lib/backfill/provider-pipeline-orchestrator";
+import { runScrydexPipeline } from "@/lib/backfill/provider-pipeline-orchestrator";
 import {
   applyQueuedBatchPreset,
   type PipelineBatchKind,
@@ -252,37 +248,7 @@ export async function executeClaimedPipelineJob(
 
   try {
     const workPromise = (async (): Promise<{ ok: boolean; result: unknown; error: string | null }> => {
-      if (job.provider === "JUSTTCG") {
-        const result = await runJustTcgPipeline({
-          providerSetId: params.providerSetId ?? undefined,
-          setLimit: params.setLimit,
-          pageLimitPerSet: params.pageLimitPerSet,
-          maxRequests: params.maxRequests,
-          payloadLimit: params.payloadLimit,
-          matchObservations: params.matchObservations,
-          timeseriesObservations: params.timeseriesObservations,
-          metricsObservations: params.metricsObservations,
-          force: params.force === true,
-          retryOnly: job.job_kind === "RETRY",
-          deadlineMs,
-        });
-        return { ok: result.ok, result, error: result.firstError ?? null };
-      }
-
-      const sharedParams: {
-        providerSetId?: string | null;
-        setLimit?: number;
-        pageLimitPerSet?: number;
-        maxRequests?: number;
-        payloadLimit?: number;
-        matchObservations?: number;
-        timeseriesObservations?: number;
-        metricsObservations?: number;
-        force?: boolean;
-        matchScanDirection?: "newest" | "oldest";
-        matchMode?: "incremental" | "backlog";
-        deadlineMs?: number | null;
-      } = {
+      const result = await runScrydexPipeline({
         providerSetId: params.providerSetId ?? undefined,
         setLimit: params.setLimit,
         pageLimitPerSet: params.pageLimitPerSet,
@@ -295,10 +261,7 @@ export async function executeClaimedPipelineJob(
         matchScanDirection: job.job_kind === "RETRY" ? "oldest" : "newest",
         matchMode: job.job_kind === "RETRY" ? "backlog" : "incremental",
         deadlineMs,
-      };
-      const result = job.provider === "POKETRACE"
-        ? await runPokeTracePipeline(sharedParams)
-        : await runScrydexPipeline(sharedParams);
+      });
       return { ok: result.ok, result, error: result.firstError ?? null };
     })();
     return await Promise.race([workPromise, timeoutPromise]);

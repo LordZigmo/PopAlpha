@@ -1,12 +1,66 @@
 import { dbAdmin } from "@/lib/db/admin";
 import { ensureProviderRawPayloadLineageId } from "@/lib/backfill/provider-raw-payload-lineage";
 import { retrySupabaseWriteOperation } from "@/lib/backfill/supabase-write-retry";
-import { buildLegacyVariantRef } from "@/lib/providers/justtcg";
+import { normalizeCondition } from "@/lib/pricing/normalize-condition";
 import {
   parseScrydexVariantSemantics,
   type ScrydexNormalizedEdition,
   type ScrydexNormalizedFinish,
 } from "@/lib/backfill/scrydex-variant-semantics";
+
+// Inlined from the retired lib/providers/justtcg.ts. buildLegacyVariantRef
+// is the legacy 6-segment variant_ref format used for rows that predate the
+// printing_id-based identity. Only this file calls it, so there's no value
+// in a shared helper module.
+const LANGUAGE_ABBREV: Record<string, string> = {
+  "english": "en",
+  "japanese": "jp",
+  "korean": "kr",
+  "french": "fr",
+  "german": "de",
+  "spanish": "es",
+  "italian": "it",
+  "portuguese": "pt",
+};
+
+const EDITION_NORM: Record<string, string> = {
+  "first_edition": "1st-edition",
+  "unlimited":     "unlimited",
+  "unknown":       "unknown",
+};
+
+function normalizeEdition(edition: string): string {
+  const key = edition.toLowerCase().replace(/[\s-]+/g, "_");
+  return EDITION_NORM[key] ?? "unknown";
+}
+
+function normalizeStamp(stamp: string | null): string {
+  if (!stamp) return "none";
+  return stamp
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "") || "none";
+}
+
+function buildLegacyVariantRef(
+  printing: string,
+  edition: string,
+  stamp: string | null,
+  condition: string,
+  language: string,
+  grade: string,
+): string {
+  const printingNorm  = printing.toLowerCase().replace(/\s+/g, "_");
+  const editionNorm   = normalizeEdition(edition);
+  const stampNorm     = normalizeStamp(stamp);
+  const conditionNorm = normalizeCondition(condition);
+  const langKey       = language.toLowerCase().trim();
+  const languageNorm  = LANGUAGE_ABBREV[langKey] ?? langKey.replace(/\s+/g, "_");
+  const gradeNorm     = grade.toLowerCase();
+  return `${printingNorm}:${editionNorm}:${stampNorm}:${conditionNorm}:${languageNorm}:${gradeNorm}`;
+}
 import {
   getNumberField,
   selectPreferredScrydexPriceEntry,
