@@ -358,15 +358,6 @@ function adminSecretRoute(intendedCaller) {
   };
 }
 
-function adminImportTokenRoute(intendedCaller) {
-  return {
-    registryKind: "admin",
-    trustModel: "admin_import_token",
-    uiBacked: false,
-    intendedCaller,
-  };
-}
-
 function cronSecretRoute(intendedCaller) {
   return {
     registryKind: "cron",
@@ -395,8 +386,6 @@ export const INTERNAL_ROUTE_TRUST_CONTRACTS = {
     "internal admin review UI",
     ["lib/ebay/deletion-review-routes.ts", "lib/ebay/deletion-review-admin-api.ts"],
   ),
-  "admin/import/pokemontcg-canonical": adminSecretRoute("manual admin/import tooling"),
-  "admin/import/pokemontcg": adminImportTokenRoute("automation/manual import tooling"),
   "admin/import/printings": adminSecretRoute("manual admin/import tooling"),
   "admin/import/scrydex-canonical": adminSecretRoute("manual admin/import tooling"),
   "admin/psa-seeds": adminSecretRoute("manual admin seeding tooling"),
@@ -405,13 +394,6 @@ export const INTERNAL_ROUTE_TRUST_CONTRACTS = {
   "cron/capture-pricing-transparency": cronSecretRoute("cron/internal automation"),
   "cron/check-fx-rates-health": cronSecretRoute("cron/internal automation"),
   "cron/ingest-fx-rates": cronSecretRoute("cron/internal automation"),
-  "cron/ingest-justtcg-raw": cronSecretRoute("cron/internal automation"),
-  "cron/ingest-pokemontcg-raw": cronSecretRoute("cron/internal automation"),
-  "cron/match-justtcg-normalized": cronSecretRoute("cron/internal automation"),
-  "cron/match-pokemontcg-normalized": cronSecretRoute("cron/internal automation"),
-  "cron/normalize-justtcg-raw": cronSecretRoute("cron/internal automation"),
-  "cron/normalize-pokemontcg-raw": cronSecretRoute("cron/internal automation"),
-  "cron/normalize-poketrace-raw": cronSecretRoute("cron/internal automation"),
   "cron/process-ebay-deletion-receipts": cronSecretRoute("cron/internal automation"),
   "cron/process-provider-pipeline-jobs": cronSecretRoute("cron/internal automation"),
   "cron/refresh-ai-brief": cronSecretRoute("cron/internal automation"),
@@ -422,10 +404,6 @@ export const INTERNAL_ROUTE_TRUST_CONTRACTS = {
   "cron/batch-refresh-pipeline-rollups": cronSecretRoute("cron/internal automation"),
   "cron/refresh-derived-signals": cronSecretRoute("cron/internal automation"),
   "cron/refresh-set-summaries": cronSecretRoute("cron/internal automation"),
-  "cron/run-justtcg-pipeline": cronSecretRoute("cron/internal automation"),
-  "cron/run-justtcg-retry": cronSecretRoute("cron/internal automation"),
-  "cron/run-pokemontcg-pipeline": cronSecretRoute("cron/internal automation"),
-  "cron/run-poketrace-pipeline": cronSecretRoute("cron/internal automation"),
   "cron/run-scrydex-daily/[chunk]": cronSecretRoute("cron/internal automation"),
   "cron/run-scrydex-2024plus-catchup": cronSecretRoute("cron/internal automation"),
   "cron/run-scrydex-2024plus-daily/[chunk]": cronSecretRoute("cron/internal automation"),
@@ -441,17 +419,6 @@ export const INTERNAL_ROUTE_TRUST_CONTRACTS = {
 
 export const DEBUG_ROUTE_TRUST_CONTRACTS = {
   "debug/asset-inspect": debugCronRoute("internal diagnostic requests and operator troubleshooting"),
-  "debug/justtcg-inspect": debugCronRoute("internal diagnostic requests and operator troubleshooting"),
-  "debug/justtcg-match-summary": debugCronRoute("internal diagnostic requests and operator troubleshooting"),
-  "debug/justtcg-normalized-signals": debugCronRoute("internal diagnostic requests and operator troubleshooting"),
-  "debug/justtcg-raw-signals": debugCronRoute("internal diagnostic requests and operator troubleshooting"),
-  "debug/justtcg-unmatched-diagnostics": debugCronRoute("internal diagnostic requests and operator troubleshooting"),
-  "debug/justtcg/backfill-first-edition-printings": debugCronRoute("internal repair and backfill tooling"),
-  "debug/justtcg/backfill-set": debugCronRoute("internal repair and backfill tooling"),
-  "debug/justtcg/backfill-tracked-mappings": debugCronRoute("internal repair and backfill tooling"),
-  "debug/justtcg/precheck-repair-sets": debugCronRoute("internal repair precheck tooling"),
-  "debug/justtcg/repair-pokeball-stamp": debugCronRoute("internal repair tooling"),
-  "debug/justtcg/repair-set-finishes": debugCronRoute("internal repair tooling"),
   "debug/market-summary": debugCronRoute("internal diagnostic requests and cache verification"),
   "debug/provider-price-readings": debugCronRoute("internal diagnostic requests and operator troubleshooting"),
   "debug/tracked-assets": debugCronRoute("internal diagnostic requests and operator troubleshooting"),
