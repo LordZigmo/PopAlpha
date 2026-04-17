@@ -3,7 +3,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useSafeUser } from "@/lib/auth/use-safe-user";
 import { useRouter } from "next/navigation";
-import { POKETRACE_CAMERA_HREF } from "@/lib/poketrace/ui-paths";
 import { buildHighlightSegments, extractHighlightTokens } from "@/lib/search/highlight.mjs";
 import { useCardSearch } from "@/lib/search/use-card-search";
 
@@ -17,7 +16,6 @@ type CardSearchProps = {
   submitMode?: "active-only" | "active-or-search";
   className?: string;
   borderless?: boolean;
-  cameraHref?: string | null;
 };
 
 function joinClasses(...values: Array<string | false | null | undefined>) {
@@ -100,7 +98,6 @@ export default function CardSearch({
   submitMode = "active-only",
   className,
   borderless = false,
-  cameraHref = POKETRACE_CAMERA_HREF,
 }: CardSearchProps) {
   const router = useRouter();
   const { user } = useSafeUser();
@@ -283,25 +280,6 @@ export default function CardSearch({
           aria-controls={listboxId}
           aria-activedescendant={activeResult ? `${listboxId}-${activeResult.canonical_slug}` : undefined}
         />
-        <button
-          type="button"
-          onClick={() => {
-            if (!cameraHref) return;
-            closeDropdown();
-            router.push(cameraHref);
-          }}
-          className={joinClasses(
-            "flex shrink-0 items-center justify-center rounded-full transition text-[var(--color-muted)] hover:text-[var(--color-text)]",
-            sizeClasses.iconBtn,
-            cameraHref ? "cursor-pointer" : "cursor-default opacity-60",
-          )}
-          aria-label="Camera search"
-        >
-          <svg className={sizeClasses.iconSvg} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
-            <circle cx="12" cy="13" r="4" />
-          </svg>
-        </button>
         {showSubmitButton ? (
           <button
             type="submit"

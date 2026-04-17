@@ -8,7 +8,6 @@ import CardMarketIntelClient from "@/components/card-market-intel-client";
 import CardModeToggle from "@/components/card-mode-toggle";
 import { Pill } from "@/components/ios-grouped-ui";
 import MarketPulse from "@/components/market-pulse";
-import PokeTraceBetaCard from "@/components/poketrace-beta-card";
 import PopAlphaScoutPreview from "@/components/popalpha-scout-preview";
 import type { RawCardMarketVariant } from "@/components/raw-card-variant-types";
 
@@ -263,10 +262,6 @@ export default function RawCardMarketSurface({
                         </p>
                       </div>
                     ) : null}
-                    <PokeTraceBetaCard
-                      slug={canonicalSlug}
-                      printingId={activeVariant?.printingId ?? null}
-                    />
                   </>
                 ) : (
                   <p className="text-[15px] text-[#6B6B6B]">Market data is still forming for this variant.</p>

@@ -7,9 +7,7 @@ import { dbPublic } from "@/lib/db";
 import { measureAsync } from "@/lib/perf";
 import SearchResultsSection from "@/components/search-results-section";
 import CardSearch from "@/components/card-search";
-import PokeTraceCameraBetaPanel from "@/components/poketrace-camera-beta-panel";
 import SiteHeader from "@/components/site-header";
-import { POKETRACE_CAMERA_HREF } from "@/lib/poketrace/ui-paths";
 import { parseSearchSort, sortSearchResults } from "@/lib/search/sort.mjs";
 import { getLatestSetSummarySnapshot, type SetSummarySnapshot } from "@/lib/sets/summary";
 import { isPhysicalPokemonSet } from "@/lib/sets/physical";
@@ -624,8 +622,6 @@ export default async function SearchPage({
 }) {
   const params = await searchParams;
   const q = (params.q ?? "").trim();
-  const intent = (params.intent ?? "").trim().toLowerCase();
-  const cameraIntent = intent === "camera";
   const qNormalized = normalizeQuery(q);
   const parsedNumber = extractCardNumber(qNormalized);
   const nameHint = extractNameHint(qNormalized);
@@ -643,55 +639,31 @@ export default async function SearchPage({
         <SiteHeader />
 
         <div className="mx-auto w-full max-w-4xl px-5 pt-28 pb-20 sm:px-8 sm:pt-32">
-          {cameraIntent ? (
-            <>
-              <PokeTraceCameraBetaPanel className="mt-0" />
-              <section className="mx-auto w-full max-w-2xl pt-8 text-center sm:pt-10">
-                <p className="text-[11px] font-semibold uppercase tracking-widest text-[#7DB6FF]">
-                  PokeTrace Search
-                </p>
-                <p className="mx-auto mt-3 max-w-xl text-[14px] text-[#888]">
-                  Search is still available if you want to jump straight to a card instead of using the camera beta.
-                </p>
-                <CardSearch
-                  className="mx-auto mt-6 w-full max-w-2xl"
-                  size="search"
-                  placeholder="Search"
-                  autoFocus={false}
-                  enableGlobalShortcut
-                  submitMode="active-or-search"
-                  cameraHref={POKETRACE_CAMERA_HREF}
-                />
-              </section>
-            </>
-          ) : (
-            <section className="mx-auto w-full max-w-2xl pt-10 text-center sm:pt-16">
-              <div className="flex items-center justify-center gap-5">
-                <Image
-                  src="/brand/popalpha-icon-transparent.svg"
-                  alt=""
-                  aria-hidden="true"
-                  width={120}
-                  height={120}
-                  className="hidden shrink-0 sm:block"
-                  priority
-                />
-                <h1 className="text-[clamp(2.5rem,8vw,4.5rem)] font-bold tracking-tight text-white">PopAlpha</h1>
-              </div>
-              <p className="mx-auto mt-4 max-w-md text-[14px] text-[#888]">
-                Live market intelligence for Pokémon collectors.
-              </p>
-              <CardSearch
-                className="mx-auto mt-8 w-full max-w-2xl"
-                size="search"
-                placeholder="Search"
-                autoFocus
-                enableGlobalShortcut
-                submitMode="active-or-search"
-                cameraHref={POKETRACE_CAMERA_HREF}
+          <section className="mx-auto w-full max-w-2xl pt-10 text-center sm:pt-16">
+            <div className="flex items-center justify-center gap-5">
+              <Image
+                src="/brand/popalpha-icon-transparent.svg"
+                alt=""
+                aria-hidden="true"
+                width={120}
+                height={120}
+                className="hidden shrink-0 sm:block"
+                priority
               />
-            </section>
-          )}
+              <h1 className="text-[clamp(2.5rem,8vw,4.5rem)] font-bold tracking-tight text-white">PopAlpha</h1>
+            </div>
+            <p className="mx-auto mt-4 max-w-md text-[14px] text-[#888]">
+              Live market intelligence for Pokémon collectors.
+            </p>
+            <CardSearch
+              className="mx-auto mt-8 w-full max-w-2xl"
+              size="search"
+              placeholder="Search"
+              autoFocus
+              enableGlobalShortcut
+              submitMode="active-or-search"
+            />
+          </section>
         </div>
       </div>
     );

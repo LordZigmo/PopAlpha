@@ -3,9 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSafeUser } from "@/lib/auth/use-safe-user";
-import { motion } from "framer-motion";
-import { Camera, Home, PieChart, UserCircle, Users } from "lucide-react";
-import { POKETRACE_CAMERA_HREF } from "@/lib/poketrace/ui-paths";
+import { Home, PieChart, UserCircle, Users } from "lucide-react";
 
 type NavTab = {
   href: string;
@@ -97,7 +95,7 @@ export default function MobileNav() {
       aria-label="Primary mobile navigation"
       className="fixed inset-x-4 bottom-3 z-50 flex md:hidden"
     >
-      <div className="relative grid w-full grid-cols-5 items-end rounded-[2rem] border border-[#1E1E1E] bg-[#0A0A0A]/88 px-2 pt-2 shadow-[0_24px_70px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+      <div className="relative grid w-full grid-cols-4 items-end rounded-[2rem] border border-[#1E1E1E] bg-[#0A0A0A]/88 px-2 pt-2 shadow-[0_24px_70px_rgba(0,0,0,0.45)] backdrop-blur-xl">
         <div className="flex items-end pb-[max(env(safe-area-inset-bottom),0.5rem)]">
           <TabLink
             href={TABS[0].href}
@@ -114,22 +112,6 @@ export default function MobileNav() {
             icon={TABS[1].icon}
             active={TABS[1].match(resolvedPath)}
           />
-        </div>
-
-        <div className="flex items-start justify-center">
-          <motion.div
-            whileTap={{ scale: 0.92, y: 2 }}
-            transition={{ type: "spring", stiffness: 520, damping: 26 }}
-            className="-mt-7"
-          >
-            <Link
-              href={POKETRACE_CAMERA_HREF}
-              aria-label="Open Poketrace camera"
-              className="flex h-16 w-16 items-center justify-center rounded-[1.6rem] border border-[#5BA2FF]/35 bg-gradient-to-br from-[#1D4ED8] to-[#312E81] shadow-[0_20px_45px_rgba(29,78,216,0.38)]"
-            >
-              <Camera className="text-white" size={26} strokeWidth={2.3} />
-            </Link>
-          </motion.div>
         </div>
 
         <div className="flex items-end pb-[max(env(safe-area-inset-bottom),0.5rem)]">
