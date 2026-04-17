@@ -7,6 +7,20 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		1100000100000000000000F1 /* PortfolioModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000100000000000000A1 /* PortfolioModels.swift */; };
+		1100000100000000000000F3 /* PortfolioHeroView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000100000000000000A3 /* PortfolioHeroView.swift */; };
+		1100000100000000000000F4 /* CollectorIdentityCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000100000000000000A4 /* CollectorIdentityCard.swift */; };
+		1100000100000000000000F5 /* PortfolioCompositionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000100000000000000A5 /* PortfolioCompositionView.swift */; };
+		1100000100000000000000F6 /* TopHoldingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000100000000000000A6 /* TopHoldingsView.swift */; };
+		1100000100000000000000F7 /* PortfolioInsightView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000100000000000000A7 /* PortfolioInsightView.swift */; };
+		1100000100000000000000F8 /* PortfolioEmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000100000000000000A8 /* PortfolioEmptyStateView.swift */; };
+		1200000100000000000000F1 /* PortfolioValueChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1200000100000000000000A1 /* PortfolioValueChart.swift */; };
+		1200000100000000000000F2 /* InsightsUnlockProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1200000100000000000000A2 /* InsightsUnlockProgress.swift */; };
+		1200000100000000000000F3 /* PortfolioCardGridCell.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1200000100000000000000A3 /* PortfolioCardGridCell.swift */; };
+		9DB745292F91E43300AD2083 /* Nuke in Frameworks */ = {isa = PBXBuildFile; productRef = 9DB745282F91E43300AD2083 /* Nuke */; };
+		9DB7452B2F91E43300AD2083 /* NukeExtensions in Frameworks */ = {isa = PBXBuildFile; productRef = 9DB7452A2F91E43300AD2083 /* NukeExtensions */; };
+		9DB7452D2F91E43300AD2083 /* NukeUI in Frameworks */ = {isa = PBXBuildFile; productRef = 9DB7452C2F91E43300AD2083 /* NukeUI */; };
+		9DB7452F2F91E43300AD2083 /* NukeVideo in Frameworks */ = {isa = PBXBuildFile; productRef = 9DB7452E2F91E43300AD2083 /* NukeVideo */; };
 		AA000001000000000000000A /* PopAlphaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000A1 /* PopAlphaApp.swift */; };
 		AA000001000000000000000B /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000A2 /* ContentView.swift */; };
 		AA000001000000000000000C /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000A3 /* Theme.swift */; };
@@ -54,20 +68,19 @@
 		EE00000100000000000000F1 /* PopAlphaCore in Frameworks */ = {isa = PBXBuildFile; productRef = EE00000100000000000000A2 /* PopAlphaCore */; };
 		EE00000100000000000000F2 /* SetDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE00000100000000000000A3 /* SetDetailView.swift */; };
 		FF00000100000000000000F1 /* ClerkKit in Frameworks */ = {isa = PBXBuildFile; productRef = FF00000100000000000000A2 /* ClerkKit */; };
-		1100000100000000000000F1 /* PortfolioModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000100000000000000A1 /* PortfolioModels.swift */; };
-
-		1100000100000000000000F3 /* PortfolioHeroView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000100000000000000A3 /* PortfolioHeroView.swift */; };
-		1100000100000000000000F4 /* CollectorIdentityCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000100000000000000A4 /* CollectorIdentityCard.swift */; };
-		1100000100000000000000F5 /* PortfolioCompositionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000100000000000000A5 /* PortfolioCompositionView.swift */; };
-		1100000100000000000000F6 /* TopHoldingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000100000000000000A6 /* TopHoldingsView.swift */; };
-		1100000100000000000000F7 /* PortfolioInsightView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000100000000000000A7 /* PortfolioInsightView.swift */; };
-		1100000100000000000000F8 /* PortfolioEmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000100000000000000A8 /* PortfolioEmptyStateView.swift */; };
-		1200000100000000000000F1 /* PortfolioValueChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1200000100000000000000A1 /* PortfolioValueChart.swift */; };
-		1200000100000000000000F2 /* InsightsUnlockProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1200000100000000000000A2 /* InsightsUnlockProgress.swift */; };
-		1200000100000000000000F3 /* PortfolioCardGridCell.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1200000100000000000000A3 /* PortfolioCardGridCell.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		1100000100000000000000A1 /* PortfolioModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioModels.swift; sourceTree = "<group>"; };
+		1100000100000000000000A3 /* PortfolioHeroView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioHeroView.swift; sourceTree = "<group>"; };
+		1100000100000000000000A4 /* CollectorIdentityCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollectorIdentityCard.swift; sourceTree = "<group>"; };
+		1100000100000000000000A5 /* PortfolioCompositionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioCompositionView.swift; sourceTree = "<group>"; };
+		1100000100000000000000A6 /* TopHoldingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopHoldingsView.swift; sourceTree = "<group>"; };
+		1100000100000000000000A7 /* PortfolioInsightView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioInsightView.swift; sourceTree = "<group>"; };
+		1100000100000000000000A8 /* PortfolioEmptyStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioEmptyStateView.swift; sourceTree = "<group>"; };
+		1200000100000000000000A1 /* PortfolioValueChart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioValueChart.swift; sourceTree = "<group>"; };
+		1200000100000000000000A2 /* InsightsUnlockProgress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightsUnlockProgress.swift; sourceTree = "<group>"; };
+		1200000100000000000000A3 /* PortfolioCardGridCell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioCardGridCell.swift; sourceTree = "<group>"; };
 		AA00000100000000000000A1 /* PopAlphaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopAlphaApp.swift; sourceTree = "<group>"; };
 		AA00000100000000000000A2 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		AA00000100000000000000A3 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
@@ -115,17 +128,6 @@
 		DD00000100000000000000A3 /* PersonalizationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalizationService.swift; sourceTree = "<group>"; };
 		DD00000100000000000000A4 /* PersonalizedInsightCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalizedInsightCardView.swift; sourceTree = "<group>"; };
 		EE00000100000000000000A3 /* SetDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetDetailView.swift; sourceTree = "<group>"; };
-		1100000100000000000000A1 /* PortfolioModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioModels.swift; sourceTree = "<group>"; };
-
-		1100000100000000000000A3 /* PortfolioHeroView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioHeroView.swift; sourceTree = "<group>"; };
-		1100000100000000000000A4 /* CollectorIdentityCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollectorIdentityCard.swift; sourceTree = "<group>"; };
-		1100000100000000000000A5 /* PortfolioCompositionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioCompositionView.swift; sourceTree = "<group>"; };
-		1100000100000000000000A6 /* TopHoldingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopHoldingsView.swift; sourceTree = "<group>"; };
-		1100000100000000000000A7 /* PortfolioInsightView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioInsightView.swift; sourceTree = "<group>"; };
-		1100000100000000000000A8 /* PortfolioEmptyStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioEmptyStateView.swift; sourceTree = "<group>"; };
-		1200000100000000000000A1 /* PortfolioValueChart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioValueChart.swift; sourceTree = "<group>"; };
-		1200000100000000000000A2 /* InsightsUnlockProgress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightsUnlockProgress.swift; sourceTree = "<group>"; };
-		1200000100000000000000A3 /* PortfolioCardGridCell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioCardGridCell.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -133,6 +135,10 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				9DB7452D2F91E43300AD2083 /* NukeUI in Frameworks */,
+				9DB7452F2F91E43300AD2083 /* NukeVideo in Frameworks */,
+				9DB745292F91E43300AD2083 /* Nuke in Frameworks */,
+				9DB7452B2F91E43300AD2083 /* NukeExtensions in Frameworks */,
 				EE00000100000000000000F1 /* PopAlphaCore in Frameworks */,
 				FF00000100000000000000F1 /* ClerkKit in Frameworks */,
 			);
@@ -196,7 +202,6 @@
 				DD00000100000000000000A4 /* PersonalizedInsightCardView.swift */,
 				EE00000100000000000000A3 /* SetDetailView.swift */,
 				1100000100000000000000A1 /* PortfolioModels.swift */,
-
 				1100000100000000000000A3 /* PortfolioHeroView.swift */,
 				1100000100000000000000A4 /* CollectorIdentityCard.swift */,
 				1100000100000000000000A5 /* PortfolioCompositionView.swift */,
@@ -248,6 +253,10 @@
 			packageProductDependencies = (
 				EE00000100000000000000A2 /* PopAlphaCore */,
 				FF00000100000000000000A2 /* ClerkKit */,
+				9DB745282F91E43300AD2083 /* Nuke */,
+				9DB7452A2F91E43300AD2083 /* NukeExtensions */,
+				9DB7452C2F91E43300AD2083 /* NukeUI */,
+				9DB7452E2F91E43300AD2083 /* NukeVideo */,
 			);
 			productName = PopAlphaApp;
 			productReference = AA00000100000000000000C1 /* PopAlphaApp.app */;
@@ -280,6 +289,7 @@
 			packageReferences = (
 				EE00000100000000000000A1 /* XCLocalSwiftPackageReference "." */,
 				FF00000100000000000000A1 /* XCRemoteSwiftPackageReference "clerk-ios" */,
+				9DB745272F91E43300AD2083 /* XCRemoteSwiftPackageReference "Nuke" */,
 			);
 			productRefGroup = AA00000100000000000000E4 /* Products */;
 			projectDirPath = "";
@@ -351,7 +361,6 @@
 				DD00000100000000000000F4 /* PersonalizedInsightCardView.swift in Sources */,
 				EE00000100000000000000F2 /* SetDetailView.swift in Sources */,
 				1100000100000000000000F1 /* PortfolioModels.swift in Sources */,
-
 				1100000100000000000000F3 /* PortfolioHeroView.swift in Sources */,
 				1100000100000000000000F4 /* CollectorIdentityCard.swift in Sources */,
 				1100000100000000000000F5 /* PortfolioCompositionView.swift in Sources */,
@@ -494,11 +503,12 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"PopAlphaApp/Preview Content\"";
-				DEVELOPMENT_TEAM = YJTW4R458V;
+				DEVELOPMENT_TEAM = SR5AZXDJC3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = PopAlphaApp/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = PopAlpha;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.shopping";
 				INFOPLIST_KEY_NSCameraUsageDescription = "PopAlpha uses the camera to scan and identify collectible cards.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -511,7 +521,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.popalpha.app;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.popalpha.ios;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -526,14 +536,16 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"PopAlphaApp/Preview Content\"";
-				DEVELOPMENT_TEAM = YJTW4R458V;
+				DEVELOPMENT_TEAM = SR5AZXDJC3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = PopAlphaApp/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = PopAlpha;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.shopping";
 				INFOPLIST_KEY_NSCameraUsageDescription = "PopAlpha uses the camera to scan and identify collectible cards.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -546,8 +558,9 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.popalpha.app;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.popalpha.ios;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -587,6 +600,14 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		9DB745272F91E43300AD2083 /* XCRemoteSwiftPackageReference "Nuke" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/kean/Nuke";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.0.0;
+			};
+		};
 		FF00000100000000000000A1 /* XCRemoteSwiftPackageReference "clerk-ios" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/clerk/clerk-ios";
@@ -598,6 +619,26 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		9DB745282F91E43300AD2083 /* Nuke */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 9DB745272F91E43300AD2083 /* XCRemoteSwiftPackageReference "Nuke" */;
+			productName = Nuke;
+		};
+		9DB7452A2F91E43300AD2083 /* NukeExtensions */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 9DB745272F91E43300AD2083 /* XCRemoteSwiftPackageReference "Nuke" */;
+			productName = NukeExtensions;
+		};
+		9DB7452C2F91E43300AD2083 /* NukeUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 9DB745272F91E43300AD2083 /* XCRemoteSwiftPackageReference "Nuke" */;
+			productName = NukeUI;
+		};
+		9DB7452E2F91E43300AD2083 /* NukeVideo */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 9DB745272F91E43300AD2083 /* XCRemoteSwiftPackageReference "Nuke" */;
+			productName = NukeVideo;
+		};
 		EE00000100000000000000A2 /* PopAlphaCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = EE00000100000000000000A1 /* XCLocalSwiftPackageReference "." */;

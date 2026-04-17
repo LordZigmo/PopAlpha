@@ -1,5 +1,6 @@
 import SwiftUI
 import ClerkKit
+import Nuke
 
 @main
 struct PopAlphaApp: App {
@@ -7,7 +8,19 @@ struct PopAlphaApp: App {
 
     init() {
         Clerk.configure(publishableKey: "pk_live_Y2xlcmsucG9wYWxwaGEuYWkk")
+        configureImagePipeline()
         configureGlobalAppearance()
+    }
+
+    /// Replace the default `AsyncImage` URLSession-backed loader with a
+    /// Nuke pipeline tuned for card thumbnails: 200 MB in-memory LRU and
+    /// a persistent disk cache so rails don't re-download on every scroll.
+    private func configureImagePipeline() {
+        ImagePipeline.shared = ImagePipeline {
+            $0.dataCache = try? DataCache(name: "ai.popalpha.card-images")
+            $0.imageCache = ImageCache(costLimit: 200 * 1024 * 1024)
+            $0.isProgressiveDecodingEnabled = false
+        }
     }
 
     var body: some Scene {

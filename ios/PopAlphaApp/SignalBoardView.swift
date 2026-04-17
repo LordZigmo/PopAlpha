@@ -1,4 +1,5 @@
 import SwiftUI
+import NukeUI
 
 // MARK: - Signal Board — homepage content surface
 //
@@ -516,8 +517,8 @@ private struct FeaturedMoverCard: View {
                     )
                 )
             if let url = card.displayThumbUrl.flatMap(URL.init(string:)) {
-                AsyncImage(url: url) { phase in
-                    if case let .success(image) = phase {
+                LazyImage(url: url) { state in
+                    if let image = state.image {
                         image
                             .resizable()
                             .aspectRatio(contentMode: .fit)
@@ -569,8 +570,8 @@ private struct CompactMoverRow: View {
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
                     .fill(PA.Colors.surfaceSoft)
                 if let url = card.displayThumbUrl.flatMap(URL.init(string:)) {
-                    AsyncImage(url: url) { phase in
-                        if case let .success(image) = phase {
+                    LazyImage(url: url) { state in
+                        if let image = state.image {
                             image
                                 .resizable()
                                 .aspectRatio(contentMode: .fit)
@@ -853,8 +854,8 @@ private struct CommunityTrendingTile: View {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(PA.Colors.surfaceSoft)
                 if let url = card.displayThumbUrl.flatMap(URL.init(string:)) {
-                    AsyncImage(url: url) { phase in
-                        if case let .success(image) = phase {
+                    LazyImage(url: url) { state in
+                        if let image = state.image {
                             image
                                 .resizable()
                                 .aspectRatio(contentMode: .fit)
@@ -888,8 +889,8 @@ private struct CommunityListRow: View {
                 RoundedRectangle(cornerRadius: 4, style: .continuous)
                     .fill(PA.Colors.surfaceSoft)
                 if let url = card.displayThumbUrl.flatMap(URL.init(string:)) {
-                    AsyncImage(url: url) { phase in
-                        if case let .success(image) = phase {
+                    LazyImage(url: url) { state in
+                        if let image = state.image {
                             image
                                 .resizable()
                                 .aspectRatio(contentMode: .fit)
