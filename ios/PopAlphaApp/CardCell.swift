@@ -216,14 +216,6 @@ struct CardCell: View {
 
 // MARK: - Previews
 
-#Preview("Card Cell - Single") {
-    CardCell(card: MockMarket.trendingCards[0])
-        .frame(width: 172)
-        .padding()
-        .background(PA.Colors.background)
-        .preferredColorScheme(.dark)
-}
-
 #Preview("Card Cell - No Image") {
     CardCell(card: MarketCard(
         id: "test",
@@ -241,19 +233,6 @@ struct CardCell: View {
     ))
     .frame(width: 172)
     .padding()
-    .background(PA.Colors.background)
-    .preferredColorScheme(.dark)
-}
-
-#Preview("Card Grid") {
-    ScrollView {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-            ForEach(MockMarket.trendingCards.prefix(6)) { card in
-                CardCell(card: card)
-            }
-        }
-        .padding()
-    }
     .background(PA.Colors.background)
     .preferredColorScheme(.dark)
 }

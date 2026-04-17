@@ -1,6 +1,7 @@
 import type { HomepageCard } from "@/lib/data/homepage";
 import { getCanonicalMarketPulseMap, type CanonicalMarketPulse } from "@/lib/data/market";
 import { dbPublic } from "@/lib/db";
+import { resolveCardImage } from "@/lib/images/resolve";
 
 type CanonicalCardLookupRow = {
   slug: string;
@@ -9,6 +10,8 @@ type CanonicalCardLookupRow = {
   year: number | null;
   subject: string | null;
   primary_image_url: string | null;
+  mirrored_primary_image_url: string | null;
+  mirrored_primary_thumb_url: string | null;
 };
 
 function fallbackSubjectFromName(name: string): string | null {
@@ -24,6 +27,7 @@ function toHomepageCard(
   row: CanonicalCardLookupRow,
   market: CanonicalMarketPulse | null | undefined,
 ): HomepageCard {
+  const resolved = resolveCardImage(row);
   return {
     slug: row.slug,
     name: row.canonical_name,
@@ -37,7 +41,8 @@ function toHomepageCard(
     market_strength_score: market?.marketStrengthScore ?? null,
     market_direction: market?.marketDirection ?? null,
     mover_tier: null,
-    image_url: row.primary_image_url ?? null,
+    image_url: resolved.full,
+    image_thumb_url: resolved.thumb,
     sparkline_7d: [],
     sales_count_30d: null,
     active_listings_7d: null,
@@ -75,7 +80,7 @@ export async function getRelatedCardCarousels(input: {
     setName
       ? db
           .from("canonical_cards")
-          .select("slug, canonical_name, set_name, year, subject, primary_image_url")
+          .select("slug, canonical_name, set_name, year, subject, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url")
           .eq("set_name", setName)
           .neq("slug", slug)
           .limit(Math.max(limit * 3, 12))
@@ -84,13 +89,13 @@ export async function getRelatedCardCarousels(input: {
       ? subject?.trim()
         ? db
             .from("canonical_cards")
-            .select("slug, canonical_name, set_name, year, subject, primary_image_url")
+            .select("slug, canonical_name, set_name, year, subject, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url")
             .eq("subject", effectiveSubject)
             .neq("slug", slug)
             .limit(Math.max(limit * 4, 16))
         : db
             .from("canonical_cards")
-            .select("slug, canonical_name, set_name, year, subject, primary_image_url")
+            .select("slug, canonical_name, set_name, year, subject, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url")
             .ilike("canonical_name", `${effectiveSubject}%`)
             .neq("slug", slug)
             .limit(Math.max(limit * 4, 16))

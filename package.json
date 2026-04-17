@@ -11,6 +11,7 @@
     "test:internal-admin": "node --experimental-strip-types --loader ./scripts/ts-root-loader.mjs tests/run-internal-admin-tests.mjs",
     "test:public-writes": "node --experimental-strip-types --loader ./scripts/ts-root-loader.mjs tests/run-public-write-tests.mjs",
     "test:search": "node tests/run-search-tests.mjs",
+    "test:personalization": "node --experimental-strip-types --loader ./scripts/ts-root-loader.mjs tests/run-personalization-tests.mjs",
     "guard:no-cards-axis": "node scripts/check-no-cards-axis.mjs",
     "check:route-coverage": "node scripts/check-route-coverage.mjs",
     "check:internal-admin": "node scripts/check-internal-admin-pages.mjs",
@@ -56,6 +57,7 @@
     "next": "16.1.6",
     "react": "19.2.3",
     "react-dom": "19.2.3",
+    "sharp": "^0.33.5",
     "web-push": "^3.6.7"
   },
   "devDependencies": {

@@ -1,6 +1,7 @@
 import { dbPublic } from "@/lib/db";
 import type { HomepageCard } from "@/lib/data/homepage";
 import { getCanonicalMarketPulseMap } from "@/lib/data/market";
+import { resolveCardImage } from "@/lib/images/resolve";
 import { isPhysicalPokemonSet } from "@/lib/sets/physical";
 
 export type CardViewPoint = {
@@ -80,6 +81,8 @@ type TopViewedCardRow = {
   set_name: string | null;
   year: number | null;
   primary_image_url: string | null;
+  mirrored_primary_image_url: string | null;
+  mirrored_primary_thumb_url: string | null;
 };
 
 export async function getTopViewedCards(days = 7, limit = 5): Promise<HomepageCard[]> {
@@ -118,7 +121,7 @@ export async function getTopViewedCards(days = 7, limit = 5): Promise<HomepageCa
   const [{ data: cards, error: cardsError }, marketMap] = await Promise.all([
     supabase
       .from("canonical_cards")
-      .select("slug, canonical_name, set_name, year, primary_image_url")
+      .select("slug, canonical_name, set_name, year, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url")
       .in("slug", rankedSlugs),
     getCanonicalMarketPulseMap(supabase, rankedSlugs),
   ]);
@@ -138,6 +141,7 @@ export async function getTopViewedCards(days = 7, limit = 5): Promise<HomepageCa
       if (!card) return null;
       if (!isPhysicalPokemonSet({ setName: card.set_name })) return null;
       const market = marketMap.get(slug);
+      const resolvedImage = resolveCardImage(card);
       const result: HomepageCard = {
         slug,
         name: card.canonical_name,
@@ -151,7 +155,8 @@ export async function getTopViewedCards(days = 7, limit = 5): Promise<HomepageCa
         market_strength_score: market?.marketStrengthScore ?? null,
         market_direction: market?.marketDirection ?? null,
         mover_tier: null,
-        image_url: card.primary_image_url ?? null,
+        image_url: resolvedImage.full,
+        image_thumb_url: resolvedImage.thumb,
         sparkline_7d: [],
         sales_count_30d: null,
         active_listings_7d: null,

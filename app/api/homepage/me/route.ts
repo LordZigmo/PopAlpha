@@ -8,6 +8,7 @@ import {
 import type { MarketDirection } from "@/lib/data/market-strength";
 import { dbPublic } from "@/lib/db";
 import { createServerSupabaseUserClient } from "@/lib/db/user";
+import { resolveCardImage } from "@/lib/images/resolve";
 
 /**
  * GET /api/homepage/me — personalized homepage data for the signed-in user.
@@ -34,6 +35,7 @@ type WatchlistMover = {
   change_pct: number | null;
   change_window: string | null;
   image_url: string | null;
+  image_thumb_url: string | null;
   market_direction: MarketDirection | null;
 };
 
@@ -106,7 +108,7 @@ export async function GET(req: Request) {
       slugArray.length > 0
         ? publicDb
             .from("card_printings")
-            .select("canonical_slug, image_url")
+            .select("canonical_slug, image_url, mirrored_image_url, mirrored_thumb_url")
             .in("canonical_slug", slugArray)
             .eq("language", "EN")
             .not("image_url", "is", null)
@@ -127,13 +129,17 @@ export async function GET(req: Request) {
       cardMap.set(c.slug, c);
     }
 
-    const imageMap = new Map<string, string>();
+    const imageMap = new Map<string, { full: string | null; thumb: string | null }>();
     for (const img of (imagesResult.data ?? []) as Array<{
       canonical_slug: string;
       image_url: string | null;
+      mirrored_image_url: string | null;
+      mirrored_thumb_url: string | null;
     }>) {
-      if (img.image_url && !imageMap.has(img.canonical_slug)) {
-        imageMap.set(img.canonical_slug, img.image_url);
+      if (imageMap.has(img.canonical_slug)) continue;
+      const resolved = resolveCardImage(img);
+      if (resolved.full || resolved.thumb) {
+        imageMap.set(img.canonical_slug, resolved);
       }
     }
 
@@ -158,7 +164,8 @@ export async function GET(req: Request) {
           market_price: pulse.marketPrice,
           change_pct: changePct,
           change_window: changeWindow,
-          image_url: imageMap.get(slug) ?? null,
+          image_url: imageMap.get(slug)?.full ?? null,
+          image_thumb_url: imageMap.get(slug)?.thumb ?? null,
           market_direction: pulse.marketDirection ?? null,
         };
       })

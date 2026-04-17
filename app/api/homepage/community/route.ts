@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { resolveAuthContext } from "@/lib/auth/context";
 import { dbPublic } from "@/lib/db";
 import { createServerSupabaseUserClient } from "@/lib/db/user";
+import { resolveCardImage } from "@/lib/images/resolve";
 
 /**
  * GET /api/homepage/community — community rail for the homepage.
@@ -28,6 +29,7 @@ type CommunityCard = {
   set_name: string | null;
   year: number | null;
   image_url: string | null;
+  image_thumb_url: string | null;
   metric_value: number;
   metric_label: string;
 };
@@ -172,7 +174,7 @@ export async function GET(req: Request) {
       slugArray.length > 0
         ? publicDb
             .from("card_printings")
-            .select("canonical_slug, image_url")
+            .select("canonical_slug, image_url, mirrored_image_url, mirrored_thumb_url")
             .in("canonical_slug", slugArray)
             .eq("language", "EN")
             .not("image_url", "is", null)
@@ -193,13 +195,17 @@ export async function GET(req: Request) {
       cardMap.set(c.slug, c);
     }
 
-    const imageMap = new Map<string, string>();
+    const imageMap = new Map<string, { full: string | null; thumb: string | null }>();
     for (const img of (imagesResult.data ?? []) as Array<{
       canonical_slug: string;
       image_url: string | null;
+      mirrored_image_url: string | null;
+      mirrored_thumb_url: string | null;
     }>) {
-      if (img.image_url && !imageMap.has(img.canonical_slug)) {
-        imageMap.set(img.canonical_slug, img.image_url);
+      if (imageMap.has(img.canonical_slug)) continue;
+      const resolved = resolveCardImage(img);
+      if (resolved.full || resolved.thumb) {
+        imageMap.set(img.canonical_slug, resolved);
       }
     }
 
@@ -211,7 +217,8 @@ export async function GET(req: Request) {
         name: card?.canonical_name ?? r.canonical_slug,
         set_name: card?.set_name ?? null,
         year: card?.year ?? null,
-        image_url: imageMap.get(r.canonical_slug) ?? null,
+        image_url: imageMap.get(r.canonical_slug)?.full ?? null,
+        image_thumb_url: imageMap.get(r.canonical_slug)?.thumb ?? null,
         metric_value: r.unique_actors,
         metric_label: `${r.unique_actors} collectors`,
       };
@@ -224,7 +231,8 @@ export async function GET(req: Request) {
         name: card?.canonical_name ?? r.canonical_slug,
         set_name: card?.set_name ?? null,
         year: card?.year ?? null,
-        image_url: imageMap.get(r.canonical_slug) ?? null,
+        image_url: imageMap.get(r.canonical_slug)?.full ?? null,
+        image_thumb_url: imageMap.get(r.canonical_slug)?.thumb ?? null,
         metric_value: r.save_count,
         metric_label: `${r.save_count} saves`,
       };

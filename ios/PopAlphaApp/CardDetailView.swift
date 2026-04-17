@@ -272,50 +272,55 @@ struct CardDetailView: View {
 
     private var detailContent: some View {
         VStack(alignment: .leading, spacing: 24) {
-            // Title + Price section
+            // 1. Title + Price section (recognition + current market state)
             pricingSection
 
-            // Finish variant pill selector
+            // 2. Finish variant pill selector — identity cue, stays near title
             if availablePrintings.count > 1 {
                 finishPillSection
             }
 
-            // Grade mode pill selector
-            gradePillSection
+            // 3. Primary action row — moved high so Add to Collection is
+            // reachable within one short scroll of the hero.
+            actionButtons
 
-            // Condition price breakdown (NM / LP / MP / HP)
-            if !conditionPrices.isEmpty && !selectedPriceMode.isGraded {
-                conditionPriceSection
-            }
-
-            // Chart section
-            chartSection
-
-            // AI Brief
+            // 4. PopAlpha insight — the wedge. First real payoff on the page;
+            // anchors the user around our interpretation before raw mechanics.
             if cardProfile != nil {
                 aiBriefSection
             }
 
-            // Personalized insight (sits adjacent to AI Brief; renders its own
-            // fallback copy when there is not yet enough signal).
+            // 5 + 6. Practical pricing cluster — grade toggle + condition
+            // breakdown grouped tighter so they read as one details block
+            // rather than two equal siblings.
+            VStack(alignment: .leading, spacing: 12) {
+                gradePillSection
+
+                if !conditionPrices.isEmpty && !selectedPriceMode.isGraded {
+                    conditionPriceSection
+                }
+            }
+
+            // 7. Chart section — supporting evidence after the read.
+            chartSection
+
+            // 8. Personalized insight ("How this fits your style") — secondary
+            // differentiated layer; renders its own fallback when signal is thin.
             PersonalizedInsightCardView(
                 canonicalSlug: card.id,
                 variantRef: selectedPrintingId.map { "\($0)::RAW" }
             )
 
-            // Details grid
+            // 9. Details grid — metadata break after the narrative sections.
             detailsGrid
+                .padding(.top, 8)
 
-            // Action buttons
-            actionButtons
-
-            // Friend activity (only when authenticated)
+            // 10. Friend activity (only when authenticated + signal exists)
             if let activity = friendActivity, activity.ownerCount > 0 || !activity.recent.isEmpty {
                 friendActivitySection(activity)
             }
 
-            // Market info — slight top padding establishes the next
-            // section break after the primary action row.
+            // 11. Market intelligence — deepest diagnostics last.
             marketInfoSection
                 .padding(.top, 6)
         }
@@ -1105,22 +1110,6 @@ enum DetailTone {
         case .muted: return PA.Colors.muted
         }
     }
-}
-
-// MARK: - Previews
-
-#Preview("Card Detail") {
-    NavigationStack {
-        CardDetailView(card: MockMarket.trendingCards[0])
-    }
-    .preferredColorScheme(.dark)
-}
-
-#Preview("High Value Card") {
-    NavigationStack {
-        CardDetailView(card: MockMarket.trendingCards[3])
-    }
-    .preferredColorScheme(.dark)
 }
 
 fileprivate extension MarketCard {

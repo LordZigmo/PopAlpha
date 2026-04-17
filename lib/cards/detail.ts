@@ -1,4 +1,5 @@
 import { dbPublic } from "@/lib/db";
+import { resolveCardImage } from "@/lib/images/resolve";
 import {
   buildProviderPriceDisplay,
   type ProviderPriceDisplay,
@@ -34,6 +35,8 @@ type CardPrintingRow = {
   edition: string;
   stamp: string | null;
   image_url: string | null;
+  mirrored_image_url: string | null;
+  mirrored_thumb_url: string | null;
 };
 
 type RawMetricRow = {
@@ -131,7 +134,9 @@ export function buildPrintingPill(row: CardPrintingRow): CardPrintingPill {
     finish: row.finish,
     edition: row.edition,
     stamp: row.stamp,
-    imageUrl: row.image_url,
+    // Prefer mirrored full image; fall back to the raw Scrydex URL when the
+    // mirror cron hasn't picked up this row yet.
+    imageUrl: resolveCardImage(row).full,
   };
 }
 
@@ -270,7 +275,7 @@ export async function buildCardDetailResponse(inputSlug: string): Promise<CardDe
       .maybeSingle<CanonicalCardRow>(),
     supabase
       .from("card_printings")
-      .select("id, canonical_slug, finish, finish_detail, edition, stamp, image_url")
+      .select("id, canonical_slug, finish, finish_detail, edition, stamp, image_url, mirrored_image_url, mirrored_thumb_url")
       .eq("canonical_slug", canonicalSlug)
       .order("edition", { ascending: false })
       .order("finish", { ascending: true })

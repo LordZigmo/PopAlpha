@@ -515,7 +515,7 @@ private struct FeaturedMoverCard: View {
                         endPoint: .bottomTrailing
                     )
                 )
-            if let url = card.imageUrl.flatMap(URL.init(string:)) {
+            if let url = card.displayThumbUrl.flatMap(URL.init(string:)) {
                 AsyncImage(url: url) { phase in
                     if case let .success(image) = phase {
                         image
@@ -568,7 +568,7 @@ private struct CompactMoverRow: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
                     .fill(PA.Colors.surfaceSoft)
-                if let url = card.imageUrl.flatMap(URL.init(string:)) {
+                if let url = card.displayThumbUrl.flatMap(URL.init(string:)) {
                     AsyncImage(url: url) { phase in
                         if case let .success(image) = phase {
                             image
@@ -852,7 +852,7 @@ private struct CommunityTrendingTile: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(PA.Colors.surfaceSoft)
-                if let url = card.imageUrl.flatMap(URL.init(string:)) {
+                if let url = card.displayThumbUrl.flatMap(URL.init(string:)) {
                     AsyncImage(url: url) { phase in
                         if case let .success(image) = phase {
                             image
@@ -887,7 +887,7 @@ private struct CommunityListRow: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 4, style: .continuous)
                     .fill(PA.Colors.surfaceSoft)
-                if let url = card.imageUrl.flatMap(URL.init(string:)) {
+                if let url = card.displayThumbUrl.flatMap(URL.init(string:)) {
                     AsyncImage(url: url) { phase in
                         if case let .success(image) = phase {
                             image

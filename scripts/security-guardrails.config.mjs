@@ -436,6 +436,7 @@ export const INTERNAL_ROUTE_TRUST_CONTRACTS = {
   "cron/sync-tcg-prices": cronSecretRoute("cron/internal automation"),
   "cron/write-provider-timeseries": cronSecretRoute("cron/internal automation"),
   "cron/prune-old-data": cronSecretRoute("cron/internal automation"),
+  "cron/mirror-card-images": cronSecretRoute("cron/internal automation"),
 };
 
 export const DEBUG_ROUTE_TRUST_CONTRACTS = {

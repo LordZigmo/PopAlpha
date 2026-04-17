@@ -21,6 +21,7 @@ import {
 } from "@/lib/data/market";
 import type { MarketDirection } from "@/lib/data/market-strength";
 import { dbPublic } from "@/lib/db";
+import { resolveCardImage } from "@/lib/images/resolve";
 import { isPhysicalPokemonSet } from "@/lib/sets/physical";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -41,6 +42,7 @@ export type HomepageCard = {
   market_direction: MarketDirection | null;
   mover_tier: "hot" | "warming" | "cooling" | "cold" | null;
   image_url: string | null;
+  image_thumb_url: string | null;
   sparkline_7d: number[];
   // Phase 2: density metrics surfaced on homepage cards
   sales_count_30d: number | null;
@@ -97,11 +99,15 @@ type CardRow = {
   set_name: string | null;
   year: number | null;
   primary_image_url?: string | null;
+  mirrored_primary_image_url?: string | null;
+  mirrored_primary_thumb_url?: string | null;
 };
 
 type ImageRow = {
   canonical_slug: string;
   image_url: string;
+  mirrored_image_url?: string | null;
+  mirrored_thumb_url?: string | null;
 };
 
 type SparklineRow = {
@@ -490,14 +496,14 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
       const [cardResults, marketPulseResults, imageResults, sparklineResults] = await Promise.all([
         Promise.all(slugBatches.map((batch) => client
           .from("canonical_cards")
-          .select("slug, canonical_name, set_name, year, primary_image_url")
+          .select("slug, canonical_name, set_name, year, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url")
           .in("slug", batch))),
 
         Promise.all(slugBatches.map((batch) => getCanonicalMarketPulseMap(client, batch))),
 
         Promise.all(slugBatches.map((batch) => client
           .from("card_printings")
-          .select("canonical_slug, image_url")
+          .select("canonical_slug, image_url, mirrored_image_url, mirrored_thumb_url")
           .in("canonical_slug", batch)
           .eq("language", "EN")
           .not("image_url", "is", null)
@@ -564,15 +570,20 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
       cardMap.set(c.slug, c);
     }
 
-    const imageMap = new Map<string, string>();
+    type ResolvedImage = { full: string | null; thumb: string | null };
+    const imageMap = new Map<string, ResolvedImage>();
     for (const row of cardsRows) {
-      if (!imageMap.has(row.slug) && row.primary_image_url) {
-        imageMap.set(row.slug, row.primary_image_url);
+      if (imageMap.has(row.slug)) continue;
+      const resolved = resolveCardImage(row);
+      if (resolved.full || resolved.thumb) {
+        imageMap.set(row.slug, resolved);
       }
     }
     for (const row of imageRows) {
-      if (!imageMap.has(row.canonical_slug) && row.image_url) {
-        imageMap.set(row.canonical_slug, row.image_url);
+      if (imageMap.has(row.canonical_slug)) continue;
+      const resolved = resolveCardImage(row);
+      if (resolved.full || resolved.thumb) {
+        imageMap.set(row.canonical_slug, resolved);
       }
     }
 
@@ -653,7 +664,8 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
           ? Math.round(marketPulse.marketStrengthScore)
           : null,
         market_direction: marketPulse?.marketDirection ?? null,
-        image_url: imageMap.get(slug) ?? null,
+        image_url: imageMap.get(slug)?.full ?? null,
+        image_thumb_url: imageMap.get(slug)?.thumb ?? null,
         mover_tier: overrides.mover_tier ?? null,
         sparkline_7d: sparkline,
         sales_count_30d: salesCount30d,

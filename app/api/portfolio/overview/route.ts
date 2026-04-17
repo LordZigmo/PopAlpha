@@ -12,6 +12,7 @@ import {
   computeTopHoldings,
   isGraded,
 } from "@/lib/data/portfolio";
+import { resolveCardImage } from "@/lib/images/resolve";
 
 export const runtime = "nodejs";
 
@@ -45,6 +46,8 @@ type CardRow = {
 type ImageRow = {
   canonical_slug: string;
   image_url: string | null;
+  mirrored_image_url: string | null;
+  mirrored_thumb_url: string | null;
 };
 
 type PriceHistoryRow = {
@@ -93,7 +96,7 @@ export async function GET(req: Request) {
         .select("slug, canonical_name, set_name, year")
         .in("slug", slugs),
       pub.from("card_printings")
-        .select("canonical_slug, image_url")
+        .select("canonical_slug, image_url, mirrored_image_url, mirrored_thumb_url")
         .in("canonical_slug", slugs)
         .eq("language", "EN")
         .not("image_url", "is", null)
@@ -115,9 +118,12 @@ export async function GET(req: Request) {
 
     const imageMap = new Map<string, string>();
     for (const img of (imagesResult.data ?? []) as ImageRow[]) {
-      if (img.image_url && !imageMap.has(img.canonical_slug)) {
-        imageMap.set(img.canonical_slug, img.image_url);
-      }
+      if (imageMap.has(img.canonical_slug)) continue;
+      // Portfolio list rows display small thumbnails, so prefer the
+      // mirrored thumb when available and fall back to the full URL.
+      const resolved = resolveCardImage(img);
+      const best = resolved.thumb ?? resolved.full;
+      if (best) imageMap.set(img.canonical_slug, best);
     }
 
     const priceMap = new Map<string, number>();

@@ -647,11 +647,21 @@ struct HomepageCardDTO: Decodable, Hashable {
     let marketDirection: String?         // "bullish" | "bearish" | "flat"
     let moverTier: String?               // "hot" | "warming" | "cooling" | "cold"
     let imageUrl: String?
+    /// ~256px wide WebP thumbnail served from our Supabase Storage mirror.
+    /// Falls back to `imageUrl` for cards the mirror cron hasn't processed yet.
+    /// Rail cells should prefer this; detail views continue using `imageUrl`.
+    let imageThumbUrl: String?
     let sparkline7D: [Double]
     // Phase 2 density metrics — optional so older cached responses still decode
     let salesCount30D: Int?
     let activeListings7D: Int?
     let updatedAt: String?
+
+    /// Best URL for small card cells — mirrored thumb when present,
+    /// otherwise the full image URL.
+    var displayThumbUrl: String? {
+        imageThumbUrl ?? imageUrl
+    }
 }
 
 struct HomepageWindowedCardsDTO: Decodable, Hashable {
@@ -758,8 +768,14 @@ struct CommunityCardDTO: Decodable, Hashable {
     let setName: String?
     let year: Int?
     let imageUrl: String?
+    let imageThumbUrl: String?
     let metricValue: Int
     let metricLabel: String
+
+    /// Mirror-preferred small URL for community tiles/rows.
+    var displayThumbUrl: String? {
+        imageThumbUrl ?? imageUrl
+    }
 }
 
 struct FriendEventDTO: Decodable, Hashable {

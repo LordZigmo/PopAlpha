@@ -14,6 +14,7 @@ import { clerkEnabled } from "@/lib/auth/clerk-enabled";
 import CanonicalCardFloatingHero from "@/components/canonical-card-floating-hero";
 import CanonicalCardContextRail from "@/components/canonical-card/CanonicalCardContextRail";
 import CardModeToggle from "@/components/card-mode-toggle";
+import CardPageViewTracker from "@/components/card-page-view-tracker";
 import CardViewTracker from "@/components/card-view-tracker";
 import CollapsibleSection from "@/components/collapsible-section";
 import EbayListings from "@/components/ebay-listings";
@@ -21,6 +22,7 @@ import { GroupedSection, Pill, SegmentedControl, StatStripItem } from "@/compone
 import CanonicalCardShell from "@/components/layout/CanonicalCardShell";
 import MarketPulse from "@/components/market-pulse";
 import MarketSummaryCard, { loadRawCardMarketVariants } from "@/components/market-summary-card";
+import PersonalizedCardInsight from "@/components/personalized-card-insight";
 import PopAlphaScoutPreview from "@/components/popalpha-scout-preview";
 import RawCardMarketSurface from "@/components/raw-card-market-surface";
 import type { RawCardMarketVariantInput } from "@/components/raw-card-variant-types";
@@ -406,6 +408,8 @@ function rawVariantSegmentLabel(
     edition: printing.edition,
     stamp: printing.stamp,
     image_url: printing.image_url,
+    mirrored_image_url: null,
+    mirrored_thumb_url: null,
   }).pillLabel;
 
   const finishText = printing.finish !== "UNKNOWN" ? finishLabel(printing.finish) : null;
@@ -771,6 +775,7 @@ export default async function CanonicalCardPage({
         market_direction: null,
         mover_tier: null,
         image_url: selectedPrinting?.image_url ?? null,
+        image_thumb_url: null,
         sparkline_7d: [],
         sales_count_30d: null,
         active_listings_7d: null,
@@ -984,8 +989,20 @@ export default async function CanonicalCardPage({
     { href: "#related-set", label: "From This Set" },
     { href: "#related-pokemon", label: "From This Pokémon" },
   ];
+  const personalizedInsightSlot = (
+    <PersonalizedCardInsight
+      canonicalSlug={slug}
+      variantRef={selectedPrinting?.id ? `${selectedPrinting.id}::RAW` : null}
+    />
+  );
+
   const commonTailSections = (
     <>
+      <CardPageViewTracker
+        canonicalSlug={slug}
+        variantRef={selectedPrinting?.id ? `${selectedPrinting.id}::RAW` : null}
+      />
+
       <div id="card-views" className="scroll-mt-20 pt-4 sm:pt-5">
         <CardViewTracker
           canonicalSlug={slug}
@@ -1070,6 +1087,7 @@ export default async function CanonicalCardPage({
           scoutSummaryText={cardProfile?.summary_long ?? cardProfile?.summary_short ?? null}
           scoutUpdatedAt={scoutUpdatedAt}
           currentCardPulse={rawPulseSnapshot}
+          belowScoutSlot={personalizedInsightSlot}
         >
           {commonTailSections}
         </RawCardMarketSurface>
@@ -1214,6 +1232,8 @@ export default async function CanonicalCardPage({
           summaryText={cardProfile?.summary_long ?? cardProfile?.summary_short ?? null}
           updatedAt={scoutUpdatedAt}
         />
+
+        {personalizedInsightSlot}
 
         <section className="mt-6 mb-6 grid gap-2 sm:grid-cols-3">
           <DerivedMetricTile
