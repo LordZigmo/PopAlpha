@@ -76,38 +76,17 @@ async function countOldRows(supabase, retentionDays) {
 }
 
 async function deleteBatch(supabase, retentionDays, batchSize) {
-  // Use an RPC to get reliable row_count return. We build the RPC as an
-  // anonymous DO block via .rpc isn't possible — instead, use the same
-  // pattern the cron uses: select IDs then delete by id.
+  // Server-side RPC does SELECT + DELETE in one transaction. Avoids
+  // PostgREST's default db_max_rows cap (~1000) that throttled the earlier
+  // JS-side implementation to ~1000 rows per "batch" regardless of the
+  // requested size. See supabase/migrations/20260417000000_bulk_prune_price_history_points.sql
   const cutoff = new Date(Date.now() - retentionDays * 86_400_000).toISOString();
-
-  // Step 1: claim batch of IDs
-  const { data: idsData, error: idsError } = await supabase
-    .from("price_history_points")
-    .select("id")
-    .lt("ts", cutoff)
-    .limit(batchSize);
-  if (idsError) throw new Error(`select old ids: ${idsError.message}`);
-  const ids = (idsData ?? []).map((row) => row.id);
-  if (ids.length === 0) return 0;
-
-  // Step 2: delete by id. PostgREST URL length limit is ~8KB by default;
-  // UUIDs are ~36 chars + URL-encoded delimiters ≈ 50 bytes each, so
-  // 100 UUIDs per .in() call leaves comfortable headroom. Bigger sizes
-  // return 400 Bad Request. (Same failure mode we fixed for
-  // price_snapshots in commit 11de000.)
-  let deletedTotal = 0;
-  const idChunkSize = 100;
-  for (let i = 0; i < ids.length; i += idChunkSize) {
-    const chunk = ids.slice(i, i + idChunkSize);
-    const { error } = await supabase
-      .from("price_history_points")
-      .delete()
-      .in("id", chunk);
-    if (error) throw new Error(`delete batch: ${error.message}`);
-    deletedTotal += chunk.length;
-  }
-  return deletedTotal;
+  const { data, error } = await supabase.rpc("bulk_prune_price_history_points", {
+    p_batch_size: batchSize,
+    p_older_than: cutoff,
+  });
+  if (error) throw new Error(`bulk_prune_price_history_points: ${error.message}`);
+  return Number.isFinite(data) ? Number(data) : 0;
 }
 
 async function main() {
