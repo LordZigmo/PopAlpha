@@ -202,6 +202,11 @@ function responseHash(body: unknown): string {
     .digest("hex");
 }
 
+function isDuplicateInsertError(message: string | null | undefined): boolean {
+  const text = String(message ?? "").toLowerCase();
+  return text.includes("duplicate") || text.includes("unique");
+}
+
 function delayMs(ms: number): Promise<void> {
   if (!Number.isFinite(ms) || ms <= 0) return Promise.resolve();
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -654,21 +659,10 @@ async function insertRawPayloadRow(params: {
     variant_ref: null,
   };
 
-  // Upsert with ignoreDuplicates turns the "catch-and-suppress duplicate"
-  // anti-pattern into INSERT ... ON CONFLICT DO NOTHING server-side. No
-  // transaction rollback, no Postgres error log spam. Partial unique index
-  // (request_hash, response_hash) WHERE both NOT NULL is always satisfied
-  // because we set both above.
-  const { data, error } = await supabase
-    .from("provider_raw_payloads")
-    .upsert(payload, {
-      onConflict: "request_hash,response_hash",
-      ignoreDuplicates: true,
-    })
-    .select("id");
-  if (error) throw new Error(`provider_raw_payloads: ${error.message}`);
-  const inserted = Array.isArray(data) && data.length > 0;
-  return { inserted, duplicate: !inserted };
+  const { error } = await supabase.from("provider_raw_payloads").insert(payload);
+  if (!error) return { inserted: true, duplicate: false };
+  if (isDuplicateInsertError(error.message)) return { inserted: false, duplicate: true };
+  throw new Error(`provider_raw_payloads: ${error.message}`);
 }
 
 export async function runPokemonTcgRawIngest(opts: {
