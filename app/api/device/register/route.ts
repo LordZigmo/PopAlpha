@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require";
-import { createServerSupabaseUserClient } from "@/lib/db/user";
+import { dbAdmin } from "@/lib/db/admin";
 
 // Native iOS device token registration for APNs push.
 // Called by PushService on iOS after the OS hands us a device token
-// (see ios/PopAlphaApp/PushService.swift). Upsert-keyed on
-// (clerk_user_id, device_token) so token rotation / reinstall is
-// handled transparently without creating duplicate rows.
+// (see ios/PopAlphaApp/PushService.swift).
+//
+// Uses dbAdmin() because the iOS app sends a Clerk Bearer JWT that
+// Supabase RLS cannot validate (no JWT template configured). Since
+// requireUser() already verifies identity and every query filters by
+// clerk_user_id = auth.userId, this is equivalent in security to RLS.
+// Same pattern as /api/holdings/route.ts.
 
 export const runtime = "nodejs";
 
@@ -21,13 +25,7 @@ function sanitizeTrim(input: unknown, maxLength: number): string | null {
 }
 
 export async function POST(req: Request) {
-  // Hard outer try/catch so NOTHING can escape as an unhandled
-  // exception (Vercel returns empty-body 500s in that case, which is
-  // useless for diagnosis). Stage tracking tells us exactly which step
-  // blew up; we surface it in the response body so iOS sees something
-  // actionable instead of a blank wall.
   let stage = "init";
-  let diag = "";
   try {
     stage = "auth";
     const auth = await requireUser(req);
@@ -67,36 +65,15 @@ export async function POST(req: Request) {
       );
     }
 
-    stage = "create-db-client";
-    // Diagnostic: log a fingerprint of the JWT we're handing to Supabase
-    // (header + first 16 chars of payload). Lets us compare the token
-    // shape vs what Clerk's iOS SDK actually sent in the Authorization
-    // header. Strip after diagnosis is complete.
-    const incomingBearer = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
-    const incomingFingerprint = incomingBearer
-      ? `${incomingBearer.split(".")[0]}.${incomingBearer.split(".")[1]?.slice(0, 16) ?? ""}…`
-      : "(none)";
-    const { getCurrentClerkSessionToken } = await import("@/lib/db/user");
-    const serverToken = await getCurrentClerkSessionToken();
-    const serverFingerprint = `${serverToken.split(".")[0]}.${serverToken.split(".")[1]?.slice(0, 16) ?? ""}…`;
-    const sameToken = incomingBearer === serverToken;
-    diag = `incoming=${incomingFingerprint} server=${serverFingerprint} sameToken=${sameToken}`;
-    console.error(`[device/register] jwt fingerprint — ${diag}`);
-
-    const db = await createServerSupabaseUserClient();
+    stage = "db-write";
+    const db = dbAdmin();
     const now = new Date().toISOString();
 
-    // Explicit delete-then-insert instead of upsert with onConflict.
-    // PostgREST's onConflict matcher has been finicky with the
-    // (clerk_user_id, device_token) composite unique index in this
-    // project — the constraint exists and works at the SQL level but
-    // PostgREST returns "no unique or exclusion constraint matching
-    // the ON CONFLICT specification". Explicit two-step is bulletproof,
-    // RLS-safe (both ops are scoped by clerk_user_id), and the only
-    // race is two registrations for the same device in the same
-    // millisecond — in which case the second wins, which is what
-    // we'd want anyway since the row content is identical.
-    stage = "db-delete";
+    // Delete-then-insert keyed by (clerk_user_id, device_token) so token
+    // rotation / reinstall is handled cleanly without leaving stale rows.
+    // Both ops manually filter by auth.userId; the admin client has no
+    // RLS but the userId came from requireUser()'s Clerk verification,
+    // so cross-user writes are impossible by construction.
     const { error: deleteError } = await db
       .from("apns_device_tokens")
       .delete()
@@ -104,7 +81,6 @@ export async function POST(req: Request) {
       .eq("device_token", deviceToken);
     if (deleteError) throw new Error(`delete: ${deleteError.message}`);
 
-    stage = "db-insert";
     const { error: insertError } = await db.from("apns_device_tokens").insert({
       clerk_user_id: auth.userId,
       device_token: deviceToken,
@@ -120,22 +96,15 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ ok: true });
   } catch (error) {
-    // Wrap-all catch — nothing should make it past this. Includes the
-    // failing stage so iOS / curl can see what actually went wrong.
     console.error(`[device/register] stage=${stage}`, error);
     const message = error instanceof Error ? error.message : String(error);
-    return NextResponse.json(
-      { ok: false, stage, error: message, diag },
-      { status: 500 },
-    );
+    return NextResponse.json({ ok: false, stage, error: message }, { status: 500 });
   }
 }
 
 /**
- * Unregister a device. Called on sign-out or when the user disables
- * notifications in iOS Settings — though today iOS side doesn't wire
- * this up (it just clears the local upload cache). Endpoint exists so
- * the hook is available when we need it.
+ * Unregister a device. Hook is exposed for future use (sign-out, user
+ * disabling notifications in iOS Settings, etc).
  */
 export async function DELETE(req: Request) {
   const auth = await requireUser(req);
@@ -157,7 +126,7 @@ export async function DELETE(req: Request) {
   }
 
   try {
-    const db = await createServerSupabaseUserClient();
+    const db = dbAdmin();
     const { error } = await db
       .from("apns_device_tokens")
       .delete()
@@ -167,6 +136,7 @@ export async function DELETE(req: Request) {
     if (error) throw new Error(error.message);
     return NextResponse.json({ ok: true });
   } catch (error) {
+    console.error("[device/register DELETE]", error);
     return NextResponse.json(
       { ok: false, error: error instanceof Error ? error.message : String(error) },
       { status: 500 },

@@ -17,6 +17,8 @@ export const DBADMIN_ALLOWED_PREFIXES = [
 
 export const DBADMIN_ALLOWED_FILES = [
   "app/api/cards/[slug]/view/route.ts",
+  "app/api/device/register/route.ts",
+  "app/api/device/test-push/route.ts",
   "app/api/ebay/deletion-notification/route.ts",
   "app/api/holdings/route.ts",
   "app/api/personalization/events/route.ts",
@@ -30,6 +32,8 @@ export const DBADMIN_ALLOWED_FILES = [
 
 export const DBADMIN_ALLOWED_ROUTE_KEYS = [
   "cards/[slug]/view",
+  "device/register",
+  "device/test-push",
   "holdings",
   "personalization/events",
   "personalization/explanation",
@@ -400,6 +404,7 @@ export const INTERNAL_ROUTE_TRUST_CONTRACTS = {
   "cron/refresh-card-profiles": cronSecretRoute("cron/internal automation"),
   "cron/downsample-price-history": cronSecretRoute("cron/internal automation"),
   "cron/refresh-card-embeddings": cronSecretRoute("cron/internal automation"),
+  "cron/refresh-card-image-embeddings": cronSecretRoute("cron/internal automation"),
   "cron/refresh-card-metrics": cronSecretRoute("cron/internal automation"),
   "cron/batch-refresh-pipeline-rollups": cronSecretRoute("cron/internal automation"),
   "cron/refresh-derived-signals": cronSecretRoute("cron/internal automation"),
