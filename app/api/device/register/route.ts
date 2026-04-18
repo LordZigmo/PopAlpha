@@ -27,6 +27,7 @@ export async function POST(req: Request) {
   // blew up; we surface it in the response body so iOS sees something
   // actionable instead of a blank wall.
   let stage = "init";
+  let diag = "";
   try {
     stage = "auth";
     const auth = await requireUser(req);
@@ -67,6 +68,21 @@ export async function POST(req: Request) {
     }
 
     stage = "create-db-client";
+    // Diagnostic: log a fingerprint of the JWT we're handing to Supabase
+    // (header + first 16 chars of payload). Lets us compare the token
+    // shape vs what Clerk's iOS SDK actually sent in the Authorization
+    // header. Strip after diagnosis is complete.
+    const incomingBearer = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
+    const incomingFingerprint = incomingBearer
+      ? `${incomingBearer.split(".")[0]}.${incomingBearer.split(".")[1]?.slice(0, 16) ?? ""}…`
+      : "(none)";
+    const { getCurrentClerkSessionToken } = await import("@/lib/db/user");
+    const serverToken = await getCurrentClerkSessionToken();
+    const serverFingerprint = `${serverToken.split(".")[0]}.${serverToken.split(".")[1]?.slice(0, 16) ?? ""}…`;
+    const sameToken = incomingBearer === serverToken;
+    diag = `incoming=${incomingFingerprint} server=${serverFingerprint} sameToken=${sameToken}`;
+    console.error(`[device/register] jwt fingerprint — ${diag}`);
+
     const db = await createServerSupabaseUserClient();
     const now = new Date().toISOString();
 
@@ -109,7 +125,7 @@ export async function POST(req: Request) {
     console.error(`[device/register] stage=${stage}`, error);
     const message = error instanceof Error ? error.message : String(error);
     return NextResponse.json(
-      { ok: false, stage, error: message },
+      { ok: false, stage, error: message, diag },
       { status: 500 },
     );
   }
