@@ -59,25 +59,42 @@ export async function POST(req: Request) {
   try {
     const db = await createServerSupabaseUserClient();
     const now = new Date().toISOString();
-    const { error } = await db.from("apns_device_tokens").upsert(
-      {
-        clerk_user_id: auth.userId,
-        device_token: deviceToken,
-        bundle_id: bundleId,
-        environment: environmentRaw,
-        device_model: deviceModel,
-        os_version: osVersion,
-        enabled: true,
-        updated_at: now,
-        last_registered_at: now,
-      },
-      { onConflict: "clerk_user_id,device_token" },
-    );
 
-    if (error) throw new Error(error.message);
+    // Explicit delete-then-insert instead of upsert with onConflict.
+    // PostgREST's onConflict matcher has been finicky with the
+    // (clerk_user_id, device_token) composite unique index in this
+    // project — the constraint exists and works at the SQL level but
+    // PostgREST returns "no unique or exclusion constraint matching
+    // the ON CONFLICT specification". Explicit two-step is bulletproof,
+    // RLS-safe (both ops are scoped by clerk_user_id), and the only
+    // race is two registrations for the same device in the same
+    // millisecond — in which case the second wins, which is what
+    // we'd want anyway since the row content is identical.
+    const { error: deleteError } = await db
+      .from("apns_device_tokens")
+      .delete()
+      .eq("clerk_user_id", auth.userId)
+      .eq("device_token", deviceToken);
+    if (deleteError) throw new Error(`delete: ${deleteError.message}`);
+
+    const { error: insertError } = await db.from("apns_device_tokens").insert({
+      clerk_user_id: auth.userId,
+      device_token: deviceToken,
+      bundle_id: bundleId,
+      environment: environmentRaw,
+      device_model: deviceModel,
+      os_version: osVersion,
+      enabled: true,
+      updated_at: now,
+      last_registered_at: now,
+    });
+    if (insertError) throw new Error(`insert: ${insertError.message}`);
 
     return NextResponse.json({ ok: true });
   } catch (error) {
+    // Log so Vercel function logs surface DB errors — without this,
+    // failures arrive at the iOS client as opaque 500s with empty body.
+    console.error("[device/register]", error);
     return NextResponse.json(
       { ok: false, error: error instanceof Error ? error.message : String(error) },
       { status: 500 },
