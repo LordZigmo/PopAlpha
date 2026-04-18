@@ -21,42 +21,52 @@ function sanitizeTrim(input: unknown, maxLength: number): string | null {
 }
 
 export async function POST(req: Request) {
-  const auth = await requireUser(req);
-  if (!auth.ok) return auth.response;
-
-  let body: Record<string, unknown>;
+  // Hard outer try/catch so NOTHING can escape as an unhandled
+  // exception (Vercel returns empty-body 500s in that case, which is
+  // useless for diagnosis). Stage tracking tells us exactly which step
+  // blew up; we surface it in the response body so iOS sees something
+  // actionable instead of a blank wall.
+  let stage = "init";
   try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ ok: false, error: "Invalid JSON." }, { status: 400 });
-  }
+    stage = "auth";
+    const auth = await requireUser(req);
+    if (!auth.ok) return auth.response;
 
-  const deviceToken = sanitizeTrim(body.device_token, 256);
-  const bundleId = sanitizeTrim(body.bundle_id, 128);
-  const environmentRaw = sanitizeTrim(body.environment, 32);
-  const deviceModel = sanitizeTrim(body.device_model, 128);
-  const osVersion = sanitizeTrim(body.os_version, 64);
+    stage = "parse-body";
+    let body: Record<string, unknown>;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json({ ok: false, error: "Invalid JSON." }, { status: 400 });
+    }
 
-  if (!deviceToken || !HEX_TOKEN_REGEX.test(deviceToken)) {
-    return NextResponse.json(
-      { ok: false, error: "Invalid device_token." },
-      { status: 400 },
-    );
-  }
-  if (!bundleId) {
-    return NextResponse.json(
-      { ok: false, error: "bundle_id is required." },
-      { status: 400 },
-    );
-  }
-  if (environmentRaw !== "development" && environmentRaw !== "production") {
-    return NextResponse.json(
-      { ok: false, error: 'environment must be "development" or "production".' },
-      { status: 400 },
-    );
-  }
+    stage = "validate";
+    const deviceToken = sanitizeTrim(body.device_token, 256);
+    const bundleId = sanitizeTrim(body.bundle_id, 128);
+    const environmentRaw = sanitizeTrim(body.environment, 32);
+    const deviceModel = sanitizeTrim(body.device_model, 128);
+    const osVersion = sanitizeTrim(body.os_version, 64);
 
-  try {
+    if (!deviceToken || !HEX_TOKEN_REGEX.test(deviceToken)) {
+      return NextResponse.json(
+        { ok: false, error: "Invalid device_token." },
+        { status: 400 },
+      );
+    }
+    if (!bundleId) {
+      return NextResponse.json(
+        { ok: false, error: "bundle_id is required." },
+        { status: 400 },
+      );
+    }
+    if (environmentRaw !== "development" && environmentRaw !== "production") {
+      return NextResponse.json(
+        { ok: false, error: 'environment must be "development" or "production".' },
+        { status: 400 },
+      );
+    }
+
+    stage = "create-db-client";
     const db = await createServerSupabaseUserClient();
     const now = new Date().toISOString();
 
@@ -70,6 +80,7 @@ export async function POST(req: Request) {
     // race is two registrations for the same device in the same
     // millisecond — in which case the second wins, which is what
     // we'd want anyway since the row content is identical.
+    stage = "db-delete";
     const { error: deleteError } = await db
       .from("apns_device_tokens")
       .delete()
@@ -77,6 +88,7 @@ export async function POST(req: Request) {
       .eq("device_token", deviceToken);
     if (deleteError) throw new Error(`delete: ${deleteError.message}`);
 
+    stage = "db-insert";
     const { error: insertError } = await db.from("apns_device_tokens").insert({
       clerk_user_id: auth.userId,
       device_token: deviceToken,
@@ -92,11 +104,12 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ ok: true });
   } catch (error) {
-    // Log so Vercel function logs surface DB errors — without this,
-    // failures arrive at the iOS client as opaque 500s with empty body.
-    console.error("[device/register]", error);
+    // Wrap-all catch — nothing should make it past this. Includes the
+    // failing stage so iOS / curl can see what actually went wrong.
+    console.error(`[device/register] stage=${stage}`, error);
+    const message = error instanceof Error ? error.message : String(error);
     return NextResponse.json(
-      { ok: false, error: error instanceof Error ? error.message : String(error) },
+      { ok: false, stage, error: message },
       { status: 500 },
     );
   }
