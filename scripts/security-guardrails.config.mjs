@@ -404,7 +404,6 @@ export const INTERNAL_ROUTE_TRUST_CONTRACTS = {
   "cron/refresh-card-profiles": cronSecretRoute("cron/internal automation"),
   "cron/downsample-price-history": cronSecretRoute("cron/internal automation"),
   "cron/refresh-card-embeddings": cronSecretRoute("cron/internal automation"),
-  "cron/refresh-card-image-embeddings": cronSecretRoute("cron/internal automation"),
   "cron/refresh-card-metrics": cronSecretRoute("cron/internal automation"),
   "cron/batch-refresh-pipeline-rollups": cronSecretRoute("cron/internal automation"),
   "cron/refresh-derived-signals": cronSecretRoute("cron/internal automation"),
