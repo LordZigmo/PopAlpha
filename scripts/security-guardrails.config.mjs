@@ -946,6 +946,7 @@ export const RLS_REQUIRED_PUBLIC_TABLES = [
   ...PHASE2_PUBLIC_WRITE_TABLES,
   ...PHASE2_DIRECT_PUBLIC_READ_TABLES,
   ...PHASE2_INTERNAL_BASE_VIEW_TABLES,
+  "apns_device_tokens",
   "community_card_votes",
   "ebay_deletion_manual_review_events",
   "ebay_deletion_manual_review_tasks",
@@ -1043,6 +1044,7 @@ export const RLS_ROLLOUT_BATCHES = [
 ];
 
 export const AUTHENTICATED_DML_OBJECT_GRANTS = {
+  apns_device_tokens: ["DELETE", "INSERT", "SELECT", "UPDATE"],
   app_users: ["INSERT", "SELECT", "UPDATE"],
   community_card_votes: ["INSERT", "SELECT"],
   holdings: ["DELETE", "INSERT", "SELECT", "UPDATE"],
@@ -1146,6 +1148,10 @@ export const SEQUENCE_GRANT_CONTRACTS = {
     anon: [],
     authenticated: ["USAGE"],
   },
+  apns_device_tokens_id_seq: {
+    anon: [],
+    authenticated: ["USAGE"],
+  },
   realized_sales_backtest_snapshots_id_seq: {
     anon: [],
     authenticated: [],
@@ -1236,6 +1242,7 @@ export const PUBLIC_VIEW_NAMES = [
 ];
 
 export const PHASE1_PRIVATE_TABLES = [
+  "apns_device_tokens",
   "app_users",
   "holdings",
   "private_sales",

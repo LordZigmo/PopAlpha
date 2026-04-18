@@ -113,6 +113,8 @@ export const USER_ROUTES = [
   "me/export",
   "me/push",
   "me/push/test",
+  "device/register",
+  "device/test-push",
   "onboarding/handle",
   "settings",
   "profile",
