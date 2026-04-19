@@ -919,6 +919,7 @@ export async function runPokemonTcgRawIngest(opts: {
     let setLastError: string | null = null;
     let setHadSuccess = false;
     let setHadRetryableFailure = false;
+    let duplicatePagesForSet = 0;
 
     while (requestsMade < maxRequests && pagesFetched < pageLimitPerSet) {
       let pageSucceeded = false;
@@ -939,7 +940,10 @@ export async function runPokemonTcgRawIngest(opts: {
             fetchedAt,
           });
           if (rawInsert.inserted) rawPayloadsInserted += 1;
-          if (rawInsert.duplicate) rawPayloadsDuplicate += 1;
+          if (rawInsert.duplicate) {
+            rawPayloadsDuplicate += 1;
+            duplicatePagesForSet += 1;
+          }
 
           pagesFetched += 1;
           lastStatus = 200;
@@ -1005,6 +1009,27 @@ export async function runPokemonTcgRawIngest(opts: {
     if (setHadSuccess) {
       failedSetQueue = failedSetQueue.filter((providerSetId) => providerSetId !== target.providerSetId);
       delete cooldownByProviderSet[target.providerSetId];
+    }
+
+    // If any page for this set was a response-hash dedup (identical data as
+    // last fetch), the normal ingest → normalize → match → timeseries flow
+    // short-circuits and nothing advances market_price_as_of. Call the
+    // touch_verified_snapshots RPC to advance observed_at on the latest
+    // snapshot per (slug, variant_ref, grade) AND queue variant keys to
+    // pending_rollups so the drain propagates the fresh timestamp to
+    // public_card_metrics. Non-fatal on error.
+    if (setHadSuccess && duplicatePagesForSet > 0) {
+      try {
+        await dbAdmin().rpc("touch_verified_snapshots", {
+          p_provider: PROVIDER,
+          p_provider_set_id: target.providerSetId,
+        });
+      } catch (touchError) {
+        const message = touchError instanceof Error ? touchError.message : String(touchError);
+        console.warn(
+          `[scrydex-raw-ingest] touch_verified_snapshots failed for ${target.providerSetId}: ${message}`,
+        );
+      }
     }
 
     if (sampleSetResults.length < 25) {
