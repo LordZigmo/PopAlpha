@@ -202,11 +202,6 @@ function responseHash(body: unknown): string {
     .digest("hex");
 }
 
-function isDuplicateInsertError(message: string | null | undefined): boolean {
-  const text = String(message ?? "").toLowerCase();
-  return text.includes("duplicate") || text.includes("unique");
-}
-
 function delayMs(ms: number): Promise<void> {
   if (!Number.isFinite(ms) || ms <= 0) return Promise.resolve();
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -636,33 +631,39 @@ async function insertRawPayloadRow(params: {
 }) {
   const { providerSetId, page, body, statusCode, fetchedAt } = params;
   const supabase = dbAdmin();
-  const payload = {
-    provider: PROVIDER,
-    endpoint: ENDPOINT,
-    params: {
-      expansionId: providerSetId,
-      page,
-      page_size: PAGE_LIMIT,
-      include: "prices",
-    },
-    response: body ?? {},
-    status_code: statusCode,
-    fetched_at: fetchedAt,
-    request_hash: requestHash(ENDPOINT, {
-      expansionId: providerSetId,
-      page,
-      page_size: PAGE_LIMIT,
-      include: "prices",
-    }),
-    response_hash: responseHash(body),
-    canonical_slug: null,
-    variant_ref: null,
+  const endpointParams = {
+    expansionId: providerSetId,
+    page,
+    page_size: PAGE_LIMIT,
+    include: "prices",
   };
 
-  const { error } = await supabase.from("provider_raw_payloads").insert(payload);
-  if (!error) return { inserted: true, duplicate: false };
-  if (isDuplicateInsertError(error.message)) return { inserted: false, duplicate: true };
-  throw new Error(`provider_raw_payloads: ${error.message}`);
+  // Use the insert_provider_raw_payload RPC rather than a direct .insert().
+  // The unique index on (request_hash, response_hash) is PARTIAL — WHERE
+  // both hashes are NOT NULL — which PostgREST's onConflict syntax can't
+  // express, so a direct .upsert() fails with "no unique constraint
+  // matching the ON CONFLICT specification" (incident commit 4b3b846).
+  // Inside a SQL function we can match the partial index predicate
+  // properly, so dedup is silent: no error raised, no log spam, no
+  // transaction rollback.
+  const { data, error } = await supabase.rpc("insert_provider_raw_payload", {
+    p_provider: PROVIDER,
+    p_endpoint: ENDPOINT,
+    p_params: endpointParams,
+    p_response: body ?? {},
+    p_status_code: statusCode,
+    p_fetched_at: fetchedAt,
+    p_request_hash: requestHash(ENDPOINT, endpointParams),
+    p_response_hash: responseHash(body),
+  });
+  if (error) {
+    throw new Error(`provider_raw_payloads: ${error.message}`);
+  }
+  const result = (data ?? {}) as { inserted?: boolean; duplicate?: boolean };
+  return {
+    inserted: result.inserted === true,
+    duplicate: result.duplicate === true,
+  };
 }
 
 export async function runPokemonTcgRawIngest(opts: {
