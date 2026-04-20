@@ -65,6 +65,14 @@
 		DD00000100000000000000F2 /* Haptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000A2 /* Haptics.swift */; };
 		DD00000100000000000000F3 /* PersonalizationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000A3 /* PersonalizationService.swift */; };
 		DD00000100000000000000F4 /* PersonalizedInsightCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000A4 /* PersonalizedInsightCardView.swift */; };
+		DD00000100000000000000F5 /* RationaleChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000A5 /* RationaleChip.swift */; };
+		DD00000100000000000000F6 /* PersonalPulseSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000A6 /* PersonalPulseSection.swift */; };
+		DD00000100000000000000F7 /* ForYouRail.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000A7 /* ForYouRail.swift */; };
+		DD00000100000000000000F8 /* MarketPulseSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000A8 /* MarketPulseSection.swift */; };
+		DD00000100000000000000F9 /* AIBriefDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000A9 /* AIBriefDetailView.swift */; };
+		DD00000100000000000000FB /* PushService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000AB /* PushService.swift */; };
+		DD00000100000000000000FC /* PushNotificationAppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000AC /* PushNotificationAppDelegate.swift */; };
+		DD00000100000000000000FD /* ScanService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000AD /* ScanService.swift */; };
 		EE00000100000000000000F1 /* PopAlphaCore in Frameworks */ = {isa = PBXBuildFile; productRef = EE00000100000000000000A2 /* PopAlphaCore */; };
 		EE00000100000000000000F2 /* SetDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE00000100000000000000A3 /* SetDetailView.swift */; };
 		FF00000100000000000000F1 /* ClerkKit in Frameworks */ = {isa = PBXBuildFile; productRef = FF00000100000000000000A2 /* ClerkKit */; };
@@ -127,6 +135,15 @@
 		DD00000100000000000000A2 /* Haptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Haptics.swift; sourceTree = "<group>"; };
 		DD00000100000000000000A3 /* PersonalizationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalizationService.swift; sourceTree = "<group>"; };
 		DD00000100000000000000A4 /* PersonalizedInsightCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalizedInsightCardView.swift; sourceTree = "<group>"; };
+		DD00000100000000000000A5 /* RationaleChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RationaleChip.swift; sourceTree = "<group>"; };
+		DD00000100000000000000A6 /* PersonalPulseSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalPulseSection.swift; sourceTree = "<group>"; };
+		DD00000100000000000000A7 /* ForYouRail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForYouRail.swift; sourceTree = "<group>"; };
+		DD00000100000000000000A8 /* MarketPulseSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketPulseSection.swift; sourceTree = "<group>"; };
+		DD00000100000000000000A9 /* AIBriefDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIBriefDetailView.swift; sourceTree = "<group>"; };
+		DD00000100000000000000AA /* PopAlphaApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PopAlphaApp.entitlements; sourceTree = "<group>"; };
+		DD00000100000000000000AB /* PushService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushService.swift; sourceTree = "<group>"; };
+		DD00000100000000000000AC /* PushNotificationAppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushNotificationAppDelegate.swift; sourceTree = "<group>"; };
+		DD00000100000000000000AD /* ScanService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanService.swift; sourceTree = "<group>"; };
 		EE00000100000000000000A3 /* SetDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetDetailView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -200,6 +217,15 @@
 				DD00000100000000000000A2 /* Haptics.swift */,
 				DD00000100000000000000A3 /* PersonalizationService.swift */,
 				DD00000100000000000000A4 /* PersonalizedInsightCardView.swift */,
+				DD00000100000000000000A5 /* RationaleChip.swift */,
+				DD00000100000000000000A6 /* PersonalPulseSection.swift */,
+				DD00000100000000000000A7 /* ForYouRail.swift */,
+				DD00000100000000000000A8 /* MarketPulseSection.swift */,
+				DD00000100000000000000A9 /* AIBriefDetailView.swift */,
+				DD00000100000000000000AA /* PopAlphaApp.entitlements */,
+				DD00000100000000000000AB /* PushService.swift */,
+				DD00000100000000000000AC /* PushNotificationAppDelegate.swift */,
+				DD00000100000000000000AD /* ScanService.swift */,
 				EE00000100000000000000A3 /* SetDetailView.swift */,
 				1100000100000000000000A1 /* PortfolioModels.swift */,
 				1100000100000000000000A3 /* PortfolioHeroView.swift */,
@@ -359,6 +385,14 @@
 				DD00000100000000000000F2 /* Haptics.swift in Sources */,
 				DD00000100000000000000F3 /* PersonalizationService.swift in Sources */,
 				DD00000100000000000000F4 /* PersonalizedInsightCardView.swift in Sources */,
+				DD00000100000000000000F5 /* RationaleChip.swift in Sources */,
+				DD00000100000000000000F6 /* PersonalPulseSection.swift in Sources */,
+				DD00000100000000000000F7 /* ForYouRail.swift in Sources */,
+				DD00000100000000000000F8 /* MarketPulseSection.swift in Sources */,
+				DD00000100000000000000F9 /* AIBriefDetailView.swift in Sources */,
+				DD00000100000000000000FB /* PushService.swift in Sources */,
+				DD00000100000000000000FC /* PushNotificationAppDelegate.swift in Sources */,
+				DD00000100000000000000FD /* ScanService.swift in Sources */,
 				EE00000100000000000000F2 /* SetDetailView.swift in Sources */,
 				1100000100000000000000F1 /* PortfolioModels.swift in Sources */,
 				1100000100000000000000F3 /* PortfolioHeroView.swift in Sources */,
@@ -500,6 +534,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = PopAlphaApp/PopAlphaApp.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"PopAlphaApp/Preview Content\"";
@@ -536,6 +571,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = PopAlphaApp/PopAlphaApp.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;

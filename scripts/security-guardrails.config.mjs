@@ -27,6 +27,7 @@ export const DBADMIN_ALLOWED_FILES = [
   "app/api/portfolio/overview/route.ts",
   "app/api/portfolio/activity/route.ts",
   "app/api/pro/signals/route.ts",
+  "app/api/scan/identify/route.ts",
   "lib/db/admin.ts",
 ];
 
@@ -41,6 +42,7 @@ export const DBADMIN_ALLOWED_ROUTE_KEYS = [
   "portfolio/overview",
   "portfolio/activity",
   "pro/signals",
+  "scan/identify",
 ];
 
 export const INTERNAL_ADMIN_PAGE_ROOTS = [
@@ -404,6 +406,7 @@ export const INTERNAL_ROUTE_TRUST_CONTRACTS = {
   "cron/refresh-card-profiles": cronSecretRoute("cron/internal automation"),
   "cron/downsample-price-history": cronSecretRoute("cron/internal automation"),
   "cron/refresh-card-embeddings": cronSecretRoute("cron/internal automation"),
+  "cron/refresh-card-image-embeddings": cronSecretRoute("cron/internal automation"),
   "cron/refresh-card-metrics": cronSecretRoute("cron/internal automation"),
   "cron/batch-refresh-pipeline-rollups": cronSecretRoute("cron/internal automation"),
   "cron/refresh-derived-signals": cronSecretRoute("cron/internal automation"),
@@ -458,6 +461,17 @@ export const PUBLIC_WRITE_ROUTE_CONTRACTS = {
     abuseControls: ["ip_burst", "actor_fingerprint", "cross_site_screen", "structured_logging"],
     dbContract: "server-only insert into public.personalization_behavior_events via dbAdmin()",
     recommendedAction: "keep server-only; do not expose public insert policy or widen grants",
+  },
+  "scan/identify": {
+    routeClass: "public",
+    access: "anon_or_authenticated",
+    methods: ["POST"],
+    writeType: "append_only_telemetry_plus_vector_lookup",
+    abuseControls: ["payload_size_limit_3mb", "structured_logging"],
+    dbContract:
+      "embeds uploaded JPEG via Replicate, runs readonly pgvector kNN against Neon card_image_embeddings, then inserts a single telemetry row into public.scan_identify_events via dbAdmin(). Image bytes themselves are never persisted — only a sha256 hash.",
+    recommendedAction:
+      "keep telemetry writes append-only; never expose scan_identify_events to anon/authenticated readers without a privacy review.",
   },
   waitlist: {
     routeClass: "public",

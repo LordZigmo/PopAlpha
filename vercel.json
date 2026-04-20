@@ -29,6 +29,10 @@
       "schedule": "30 9 * * *"
     },
     {
+      "path": "/api/cron/refresh-card-image-embeddings?maxCards=256",
+      "schedule": "*/3 * * * *"
+    },
+    {
       "path": "/api/cron/run-scrydex-daily/1",
       "schedule": "5 0 * * *"
     },

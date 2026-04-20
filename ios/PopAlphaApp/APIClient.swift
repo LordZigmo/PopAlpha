@@ -65,7 +65,31 @@ enum APIClient {
         return try await execute(request, decoder: decoder)
     }
 
-    /// Fire-and-forget POST (no response body needed)
+    /// POST with a raw byte body (e.g. JPEG from the camera scanner).
+    /// Content-Type is supplied by the caller. Response is decoded as JSON.
+    /// Used by the scanner identify path, which can't JSON-encode the
+    /// image without a 33% base64 overhead on every scan.
+    static func postRaw<T: Decodable>(
+        path: String,
+        body: Data,
+        contentType: String,
+        query: [(String, String)] = [],
+        decoder: JSONDecoder? = nil
+    ) async throws -> T {
+        let url = try buildURL(path: path, query: query)
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.httpBody = body
+        applyHeaders(&request)
+        // applyHeaders set application/json; override for binary payloads.
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        return try await execute(request, decoder: decoder)
+    }
+
+    /// Fire-and-forget POST (no response body needed for success path).
+    /// On error responses we still capture the response body so callers
+    /// can log it — without this, every server-side failure surfaces as
+    /// `body=""`, making remote debugging impossible.
     static func post(path: String, body: [String: Any]) async throws {
         let url = try buildURL(path: path)
         var request = URLRequest(url: url)
@@ -73,10 +97,19 @@ enum APIClient {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         applyHeaders(&request)
 
-        let (_, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            let http = response as? HTTPURLResponse
-            throw APIError.httpError(statusCode: http?.statusCode ?? 0, body: "")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError.httpError(statusCode: 0, body: "No HTTP response")
+        }
+        if http.statusCode == 401 {
+            throw APIError.unauthorized
+        }
+        guard (200...299).contains(http.statusCode) else {
+            let bodyText = String(data: data, encoding: .utf8) ?? ""
+            throw APIError.httpError(
+                statusCode: http.statusCode,
+                body: String(bodyText.prefix(500))
+            )
         }
     }
 
@@ -99,6 +132,15 @@ enum APIClient {
         if let token = _authToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
+        // Personalization actor identity — cookies are not sent from native
+        // clients, so we attach the locally-persisted key on every request.
+        // Server picks Clerk > cookie > header > fresh-mint, so this is safe
+        // to include even when signed in.
+        request.setValue(ActorStore.shared.actorKey, forHTTPHeaderField: "X-PA-Actor-Key")
+        // Platform tag — powers server-side telemetry segmentation (e.g.
+        // distinguishing iOS scanner traffic from web tests). Harmless
+        // if the endpoint doesn't care.
+        request.setValue("ios", forHTTPHeaderField: "X-PA-Client-Platform")
         request.cachePolicy = .reloadRevalidatingCacheData
     }
 

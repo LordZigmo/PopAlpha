@@ -34,6 +34,15 @@ public final class ScannerViewModel: ObservableObject, PopAlphaVisionEngineDeleg
     /// handling rotation + aspectFill crop. Nil on simulator (no camera).
     public var normalizedRectConverter: ((CGRect) -> CGRect?)?
 
+    /// Hook the app layer installs to replace the on-device CoreML
+    /// classifier with a network identifier (e.g. /api/scan/identify).
+    /// When non-nil, the stability-gated captured UIImage is handed to
+    /// this closure and the internal classifier path is skipped.
+    /// ScannerViewModel pauses scanning while the closure runs; the app
+    /// must call `resumeScanning()` when it's ready for the next scan
+    /// (low-confidence result, user retry, or post-navigation dismiss).
+    public var onStableCardCaptured: (@Sendable (UIImage) async -> Void)?
+
     public let visionEngine: PopAlphaVisionEngine
     public var recognizedCardID: String? { recognizedCard?.id }
     public var simulatorTaskID: String { "\(useMockData)-\(isScanning)-\(recognizedCard?.id ?? "nil")" }
@@ -81,7 +90,18 @@ public final class ScannerViewModel: ObservableObject, PopAlphaVisionEngineDeleg
 
     public nonisolated func didDetectStableCard(image: UIImage) {
         Task { @MainActor [weak self] in
-            self?.startIdentification(with: image)
+            guard let self else { return }
+            if let hook = self.onStableCardCaptured {
+                // App-level identifier installed — skip the CoreML path
+                // and hand the captured frame to the network identifier.
+                // Pause scanning for the duration so the Vision engine
+                // stops re-triggering while the network call is inflight.
+                self.isScanning = false
+                self.visionEngine.reset()
+                await hook(image)
+            } else {
+                self.startIdentification(with: image)
+            }
         }
     }
 
