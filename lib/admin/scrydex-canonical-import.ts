@@ -13,6 +13,9 @@ export type ScrydexCanonicalImportParams = {
   pageSize: number;
   expansionId: string | null;
   dryRun: boolean;
+  // When true, bypass ALLOW_PROVIDER_CANONICAL_IMPORT and write source='scrydex_provisional'.
+  // Caller must have already verified that expansionId is brand-new (no provider_set_map row).
+  provisional?: boolean;
 };
 
 export type RouteJsonResult = {
@@ -330,12 +333,14 @@ async function updateRun(
 }
 
 export async function runScrydexCanonicalImport(params: ScrydexCanonicalImportParams): Promise<RouteJsonResult> {
-  if (!providerCanonicalImportEnabled()) {
+  if (!params.provisional && !providerCanonicalImportEnabled()) {
     return jsonResult(409, {
       ok: false,
       error: "Provider-driven canonical import is disabled. Canonical identity must come from the canonical JSON source of truth.",
     });
   }
+
+  const sourceValue = params.provisional ? "scrydex_provisional" : "scrydex";
 
   let credentials: ReturnType<typeof getScrydexCredentials>;
   try {
@@ -369,6 +374,7 @@ export async function runScrydexCanonicalImport(params: ScrydexCanonicalImportPa
         pageSize: params.pageSize,
         expansionId: params.expansionId,
         dryRun: params.dryRun,
+        provisional: Boolean(params.provisional),
         env: envName,
       },
     })
@@ -425,7 +431,10 @@ export async function runScrydexCanonicalImport(params: ScrydexCanonicalImportPa
             0,
           );
       } else {
-        const canonicalRows = preparedCards.map((prepared) => prepared.canonical);
+        const canonicalRows = preparedCards.map((prepared) => ({
+          ...prepared.canonical,
+          source: sourceValue,
+        }));
         const { error: canonicalError } = await supabase
           .from("canonical_cards")
           .upsert(canonicalRows, { onConflict: "slug" });
@@ -465,7 +474,7 @@ export async function runScrydexCanonicalImport(params: ScrydexCanonicalImportPa
             stamp: null,
             rarity: printing.rarity,
             image_url: printing.imageUrl,
-            source: "scrydex",
+            source: sourceValue,
             source_id: printing.sourceId,
             updated_at: new Date().toISOString(),
           })),
@@ -524,6 +533,7 @@ export async function runScrydexCanonicalImport(params: ScrydexCanonicalImportPa
           pageSize: params.pageSize,
           expansionId: params.expansionId,
           dryRun: params.dryRun,
+          provisional: Boolean(params.provisional),
           env: envName,
           pageLastProcessed: page,
         },

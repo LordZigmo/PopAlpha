@@ -70,6 +70,7 @@ export const CRON_ROUTES = [
   "cron/prune-old-data",
   "cron/mirror-card-images",
   "cron/compute-daily-top-movers",
+  "cron/discover-new-sets",
 ];
 
 export const ADMIN_ROUTES = [
@@ -78,6 +79,7 @@ export const ADMIN_ROUTES = [
   "admin/import/scrydex-canonical",
   "admin/import/printings",
   "admin/psa-seeds",
+  "admin/discover-sets",
 ];
 
 export const DEBUG_ROUTES = [

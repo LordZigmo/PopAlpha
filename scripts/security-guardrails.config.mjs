@@ -393,6 +393,7 @@ export const INTERNAL_ROUTE_TRUST_CONTRACTS = {
     "internal admin review UI",
     ["lib/ebay/deletion-review-routes.ts", "lib/ebay/deletion-review-admin-api.ts"],
   ),
+  "admin/discover-sets": adminSecretRoute("manual admin on-demand set discovery trigger"),
   "admin/import/printings": adminSecretRoute("manual admin/import tooling"),
   "admin/import/scrydex-canonical": adminSecretRoute("manual admin/import tooling"),
   "admin/psa-seeds": adminSecretRoute("manual admin seeding tooling"),
@@ -425,6 +426,7 @@ export const INTERNAL_ROUTE_TRUST_CONTRACTS = {
   "cron/prune-old-data": cronSecretRoute("cron/internal automation"),
   "cron/mirror-card-images": cronSecretRoute("cron/internal automation"),
   "cron/compute-daily-top-movers": cronSecretRoute("cron/internal automation"),
+  "cron/discover-new-sets": cronSecretRoute("cron/internal automation"),
 };
 
 export const DEBUG_ROUTE_TRUST_CONTRACTS = {
