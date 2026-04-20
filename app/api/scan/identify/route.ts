@@ -51,20 +51,28 @@ const DEFAULT_LIMIT = 5;
 const MAX_LIMIT = 10;
 
 /**
- * Confidence tiers derived empirically from the reference-catalog
- * kNN behavior we validated at ~2,500 rows (see the Charizard probe):
+ * Confidence tiers calibrated from real-device scan telemetry.
  *
- *   cos_dist ≤ 0.02  → essentially the same card (high)
- *   cos_dist ≤ 0.08  → same character / very similar art (medium —
- *                     variant ambiguity, needs OCR secondary signal)
- *   cos_dist > 0.08  → probably wrong card (low)
+ * The first round of thresholds (≤0.02 high, ≤0.08 medium) was tuned
+ * from a kNN self-test where the query was a reference embedding —
+ * so any "correct" match was effectively cos_dist = 0. Real camera
+ * captures of the same card land around cos_dist 0.20-0.25 even when
+ * correctly identified, because the embedding picks up lighting /
+ * angle / JPEG-compression / sensor differences between the Scrydex
+ * product shot and the user's phone capture.
  *
- * iOS treats "high" as the zero-tap auto-navigate signal. "Medium"
- * surfaces matches for user confirmation. "Low" is ignored and the
- * scanner keeps hunting.
+ *   cos_dist ≤ 0.30 AND gap ≥ 0.005  → high (zero-tap navigate)
+ *   cos_dist ≤ 0.45                   → medium (variant ambiguity)
+ *   cos_dist >  0.45                   → low (keep scanning)
+ *
+ * The `min gap` requirement on HIGH defends against variant confusion
+ * (Charizard ex vs Charizard V with near-identical art) — those cases
+ * land with small cos_dist but a tiny rank-1-to-rank-2 margin and
+ * should NOT silently auto-navigate to one over the other.
  */
-const CONFIDENCE_HIGH_COS_DIST = 0.02;
-const CONFIDENCE_MEDIUM_COS_DIST = 0.08;
+const CONFIDENCE_HIGH_COS_DIST = 0.30;
+const CONFIDENCE_MEDIUM_COS_DIST = 0.45;
+const CONFIDENCE_HIGH_MIN_GAP = 0.005;
 
 type MatchRow = {
   canonical_slug: string;
@@ -88,9 +96,18 @@ function parseLimit(raw: string | null): number {
   return Math.min(parsed, MAX_LIMIT);
 }
 
-function classifyConfidence(topDistance: number | undefined): "high" | "medium" | "low" {
+function classifyConfidence(
+  topDistance: number | undefined,
+  gap: number | null,
+): "high" | "medium" | "low" {
   if (topDistance === undefined) return "low";
-  if (topDistance <= CONFIDENCE_HIGH_COS_DIST) return "high";
+  // High requires both absolute closeness AND a meaningful margin over
+  // rank-2. A tight cluster with ambiguous gap (e.g. Charizard ex vs
+  // Charizard V) should fall to medium so the user confirms.
+  if (topDistance <= CONFIDENCE_HIGH_COS_DIST) {
+    if (gap === null || gap >= CONFIDENCE_HIGH_MIN_GAP) return "high";
+    return "medium";
+  }
   if (topDistance <= CONFIDENCE_MEDIUM_COS_DIST) return "medium";
   return "low";
 }
@@ -318,7 +335,6 @@ export async function POST(req: Request) {
   }
 
   const topDistance = matches[0]?.cos_dist;
-  const confidence = classifyConfidence(topDistance);
   const topSimilarity = matches[0] ? 1 - matches[0].cos_dist : null;
   const rank2 = matches[1];
   const rank2Similarity = rank2 ? 1 - rank2.cos_dist : null;
@@ -326,6 +342,8 @@ export async function POST(req: Request) {
     topSimilarity !== null && rank2Similarity !== null
       ? topSimilarity - rank2Similarity
       : null;
+
+  const confidence = classifyConfidence(topDistance, topGap);
 
   await logScanEvent({
     imageHash,
