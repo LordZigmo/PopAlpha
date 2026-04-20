@@ -7,6 +7,14 @@ struct UserSettings: Decodable {
     let notifyPriceAlerts: Bool
     let notifyWeeklyDigest: Bool
     let notifyProductUpdates: Bool
+    /// Preferred hour of day (0–23) for bundled notification delivery,
+    /// interpreted in `notificationDeliveryTimezone`.
+    let notificationDeliveryHour: Int
+    /// Preferred minute (0–59) for bundled notification delivery.
+    let notificationDeliveryMinute: Int
+    /// IANA timezone name (e.g. "America/New_York"). Defaults to "UTC"
+    /// on the server for brand-new rows that haven't been saved yet.
+    let notificationDeliveryTimezone: String
     let profileVisibility: String   // "PUBLIC" or "PRIVATE"
     let activityVisibility: String  // "public", "followers", "private"
 }
