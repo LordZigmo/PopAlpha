@@ -175,9 +175,71 @@ export async function POST(req: Request) {
     throw err;
   }
 
+  // Stash the scan in Supabase Storage and pass a public URL to
+  // Replicate. The andreasjansson/clip-features model parses line-
+  // delimited inputs as URLs-or-text; it happily embeds a data-URL
+  // string as TEXT (not as the decoded image), which produced the
+  // ~0.19 similarity floor we hit on first device testing. Matching
+  // the catalog ingestion path — which always embeds via public URL —
+  // gets the two indexes into the same embedding space.
+  //
+  // Keyed by imageHash so identical scans are idempotent uploads.
+  // bucket lifecycle cleanup for scan-uploads/* is a follow-up.
+  const supabase = dbAdmin();
+  const scanKey = `scan-uploads/${imageHash}.jpg`;
+  const { error: uploadError } = await supabase.storage
+    .from("card-images")
+    .upload(scanKey, bytes, {
+      upsert: true,
+      contentType: "image/jpeg",
+      cacheControl: "no-cache",
+    });
+
+  if (uploadError) {
+    await logScanEvent({
+      imageHash,
+      imageBytesSize,
+      language,
+      confidence: "error",
+      modelVersion: embedder.modelVersion,
+      durationMs: Date.now() - startedAt,
+      error: `Storage upload failed: ${uploadError.message}`.slice(0, 500),
+      actorKey,
+      clientPlatform,
+    });
+    return NextResponse.json(
+      { ok: false, error: `Storage upload failed: ${uploadError.message}` },
+      { status: 502 },
+    );
+  }
+
+  const scanPublicUrl = supabase.storage
+    .from("card-images")
+    .getPublicUrl(scanKey).data.publicUrl;
+
   let queryEmbedding: number[];
   try {
-    queryEmbedding = await embedder.embedBytes(bytes, mimeType);
+    const results = await embedder.embedUrls([scanPublicUrl]);
+    const first = results[0];
+    if (!first || first.embedding === null) {
+      const message = first?.error ?? "embedder returned no result";
+      await logScanEvent({
+        imageHash,
+        imageBytesSize,
+        language,
+        confidence: "error",
+        modelVersion: embedder.modelVersion,
+        durationMs: Date.now() - startedAt,
+        error: `Embedder failure: ${message}`.slice(0, 500),
+        actorKey,
+        clientPlatform,
+      });
+      return NextResponse.json(
+        { ok: false, error: `Embedder failure: ${message}` },
+        { status: 502 },
+      );
+    }
+    queryEmbedding = first.embedding;
   } catch (err) {
     if (err instanceof ImageEmbedderRuntimeError) {
       await logScanEvent({

@@ -277,13 +277,66 @@ public final class PopAlphaVisionEngine {
             return
         }
 
+        // Crop the captured frame to the detected card rectangle before
+        // emitting. The reference embedding index was built from tight
+        // card-only product shots, so handing the embedder a full camera
+        // frame (card-on-desk with lots of background) produced cosine
+        // similarities near random (~0.19). Cropping to just the card —
+        // with a small padding for edge tolerance — brings the query
+        // image's visual statistics back in line with the index.
+        let cardImage = croppedToCard(image, normalizedBox: stableCandidate.observation.boundingBox) ?? image
+
         callbackQueue.async { [weak self] in
             guard let self else {
                 return
             }
 
-            self.delegate?.didDetectStableCard(image: image)
+            self.delegate?.didDetectStableCard(image: cardImage)
         }
+    }
+
+    /// Crops the captured image down to the Vision-detected card rectangle,
+    /// accounting for Vision's bottom-left-origin normalized coordinates
+    /// and the UIImage's baked-in orientation. Returns nil if the crop
+    /// math produces a degenerate rect — callers fall back to the full
+    /// frame in that case.
+    private func croppedToCard(_ image: UIImage, normalizedBox: CGRect) -> UIImage? {
+        let padding: CGFloat = 0.04
+        let paddedBox = normalizedBox
+            .insetBy(dx: -padding, dy: -padding)
+            .clampedToUnitRect()
+
+        // Render the oriented image into a flat up-oriented canvas so
+        // subsequent pixel math operates in the display coordinate
+        // system (top-left origin) without wrestling with
+        // UIImage.imageOrientation.
+        let orientedSize = image.size
+        guard orientedSize.width > 0, orientedSize.height > 0 else { return nil }
+
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        format.opaque = true
+
+        let renderer = UIGraphicsImageRenderer(size: orientedSize, format: format)
+        let orientedImage = renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: orientedSize))
+        }
+
+        guard let cg = orientedImage.cgImage else { return nil }
+
+        // Vision's normalized origin is bottom-left. Flip Y into the
+        // top-left origin system before scaling to pixel coordinates.
+        let pixelRect = CGRect(
+            x: paddedBox.minX * orientedSize.width,
+            y: (1 - paddedBox.minY - paddedBox.height) * orientedSize.height,
+            width: paddedBox.width * orientedSize.width,
+            height: paddedBox.height * orientedSize.height
+        ).integral
+
+        guard pixelRect.width > 0, pixelRect.height > 0 else { return nil }
+        guard let croppedCG = cg.cropping(to: pixelRect) else { return nil }
+
+        return UIImage(cgImage: croppedCG, scale: 1, orientation: .up)
     }
 
     private func expireCandidateIfNeeded(at timestamp: TimeInterval) {
