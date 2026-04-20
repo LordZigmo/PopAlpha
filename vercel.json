@@ -91,6 +91,10 @@
     {
       "path": "/api/cron/mirror-card-images?batch=200",
       "schedule": "*/3 * * * *"
+    },
+    {
+      "path": "/api/cron/compute-daily-top-movers",
+      "schedule": "35 */2 * * *"
     }
   ]
 }

@@ -68,6 +68,7 @@ export const CRON_ROUTES = [
   "cron/downsample-price-history",
   "cron/prune-old-data",
   "cron/mirror-card-images",
+  "cron/compute-daily-top-movers",
 ];
 
 export const ADMIN_ROUTES = [

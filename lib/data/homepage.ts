@@ -166,6 +166,122 @@ function createEmptyWindowedCards(): HomepageWindowedCards {
   return { "24H": [], "7D": [] };
 }
 
+// ── Daily-computed top movers override ──────────────────────────────────────
+//
+// The homepage's top_movers + biggest_drops rails prefer a daily-computed
+// list over the live on-read computation. The daily list is populated by
+// the compute_daily_top_movers RPC (migration 20260419230000) once per day
+// when catalog-wide fresh_24h coverage is high enough, with a set-diversity
+// constraint (max 2 per set) to avoid clustering.
+//
+// See app/api/cron/compute-daily-top-movers/route.ts for the producer.
+// Homepage falls back to yesterday's list if today's doesn't exist yet;
+// falls through to live on-read computation if neither exists.
+
+type DailyMoverJoinedCard = {
+  canonical_name: string | null;
+  year: number | null;
+  primary_image_url: string | null;
+  mirrored_primary_image_url: string | null;
+  mirrored_primary_thumb_url: string | null;
+};
+
+type DailyMoverRow = {
+  rank: number;
+  canonical_slug: string;
+  change_pct: number;
+  change_window: "24H" | "7D";
+  market_price: number;
+  market_price_as_of: string;
+  set_name: string | null;
+  active_listings_7d: number | null;
+  confidence_score: number | null;
+  // Supabase returns joined rows as arrays; the FK is 1:1 so we only use the first.
+  canonical_cards: DailyMoverJoinedCard[] | DailyMoverJoinedCard | null;
+};
+
+type DailyMoverBundle = {
+  gainers: HomepageCard[];
+  losers: HomepageCard[];
+  computed_at_date: string | null;
+};
+
+async function loadDailyTopMoversBundle(
+  client: NonNullable<ReturnType<typeof dbPublic>>,
+): Promise<DailyMoverBundle> {
+  // Take the most recent date that has any rows. Preferring today, fall
+  // back to yesterday or older if the cron hasn't run yet today.
+  const { data: latestDateRow, error: latestDateError } = await client
+    .from("daily_top_movers")
+    .select("computed_at_date")
+    .order("computed_at_date", { ascending: false })
+    .limit(1)
+    .maybeSingle<{ computed_at_date: string }>();
+
+  if (latestDateError || !latestDateRow?.computed_at_date) {
+    return { gainers: [], losers: [], computed_at_date: null };
+  }
+
+  const computedDate = latestDateRow.computed_at_date;
+  const { data, error } = await client
+    .from("daily_top_movers")
+    .select(
+      "rank, kind, canonical_slug, change_pct, change_window, market_price, market_price_as_of, set_name, active_listings_7d, confidence_score, canonical_cards(canonical_name, year, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url)",
+    )
+    .eq("computed_at_date", computedDate)
+    .order("kind", { ascending: true })
+    .order("rank", { ascending: true });
+
+  if (error || !data) {
+    return { gainers: [], losers: [], computed_at_date: computedDate };
+  }
+
+  const toCard = (row: DailyMoverRow & { kind: "gainer" | "loser" }): HomepageCard => {
+    const canonicalCard: DailyMoverJoinedCard | null = Array.isArray(row.canonical_cards)
+      ? (row.canonical_cards[0] ?? null)
+      : (row.canonical_cards ?? null);
+    const image = resolveCardImage({
+      primary_image_url: canonicalCard?.primary_image_url ?? null,
+      mirrored_primary_image_url: canonicalCard?.mirrored_primary_image_url ?? null,
+      mirrored_primary_thumb_url: canonicalCard?.mirrored_primary_thumb_url ?? null,
+    });
+    const highConfidence = (row.active_listings_7d ?? 0) >= HIGH_CONF_LIQUIDITY_MIN;
+    return {
+      slug: row.canonical_slug,
+      name: canonicalCard?.canonical_name ?? row.canonical_slug,
+      set_name: row.set_name,
+      year: canonicalCard?.year ?? null,
+      market_price: row.market_price,
+      change_pct: row.change_pct,
+      change_window: row.change_window,
+      confidence_score: row.confidence_score,
+      low_confidence: false,
+      market_strength_score: null,
+      market_direction: null,
+      mover_tier:
+        row.kind === "gainer"
+          ? (highConfidence ? "hot" : "warming")
+          : (highConfidence ? "cooling" : "cold"),
+      image_url: image.full,
+      image_thumb_url: image.thumb,
+      sparkline_7d: [],
+      sales_count_30d: null,
+      active_listings_7d: row.active_listings_7d,
+      updated_at: row.market_price_as_of,
+    };
+  };
+
+  const gainers: HomepageCard[] = [];
+  const losers: HomepageCard[] = [];
+  for (const raw of (data ?? []) as unknown as Array<DailyMoverRow & { kind: "gainer" | "loser" }>) {
+    const card = toCard(raw);
+    if (raw.kind === "gainer") gainers.push(card);
+    else losers.push(card);
+  }
+
+  return { gainers, losers, computed_at_date: computedDate };
+}
+
 function createEmptySignalBoard(): HomepageSignalBoardData {
   return {
     top_movers: createEmptyWindowedCards(),
@@ -911,21 +1027,65 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
     unusualFiltered.sort((a, b) => (b.active_listings_7d ?? 0) - (a.active_listings_7d ?? 0));
     const unusualVolumeOut = unusualFiltered.slice(0, SECTION_LIMIT);
 
+    // Prefer the daily-computed top movers (generated by
+    // compute_daily_top_movers RPC once per day when catalog coverage is
+    // complete). If unavailable, fall back to the live per-request
+    // computation below.
+    let dailyMovers: DailyMoverBundle = { gainers: [], losers: [], computed_at_date: null };
+    if (!overrides && db) {
+      try {
+        dailyMovers = await loadDailyTopMoversBundle(db);
+      } catch (err) {
+        logger.error(
+          "[homepage] daily_top_movers",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
+
+    const liveTopMovers24H = combineHomepageCards([
+      positiveMoversByWindow["24H"].highConfidence,
+      positiveMoversByWindow["24H"].all,
+    ]);
+    const liveTopMovers7D = combineHomepageCards([
+      positiveMoversByWindow["7D"].highConfidence,
+      positiveMoversByWindow["7D"].all,
+      trendingCandidatesOut,
+    ]);
+    const liveDrops24H = negativeMoversByWindow["24H"].cards.slice(0, SECTION_LIMIT);
+    const liveDrops7D = negativeMoversByWindow["7D"].cards.slice(0, SECTION_LIMIT);
+
+    // Split the daily list by change_window so the UI's 24H/7D pills still
+    // work. If one window is empty in the daily list, fall back to the other.
+    const dailyGainers24H = dailyMovers.gainers.filter((c) => c.change_window === "24H");
+    const dailyGainers7D = dailyMovers.gainers.filter((c) => c.change_window === "7D");
+    const dailyLosers24H = dailyMovers.losers.filter((c) => c.change_window === "24H");
+    const dailyLosers7D = dailyMovers.losers.filter((c) => c.change_window === "7D");
+
     const signalBoard = {
       top_movers: {
-        "24H": combineHomepageCards([
-          positiveMoversByWindow["24H"].highConfidence,
-          positiveMoversByWindow["24H"].all,
-        ]),
-        "7D": combineHomepageCards([
-          positiveMoversByWindow["7D"].highConfidence,
-          positiveMoversByWindow["7D"].all,
-          trendingCandidatesOut,
-        ]),
+        "24H": dailyGainers24H.length > 0
+          ? dailyGainers24H.slice(0, SECTION_LIMIT)
+          : (dailyMovers.gainers.length > 0
+            ? dailyMovers.gainers.slice(0, SECTION_LIMIT)
+            : liveTopMovers24H),
+        "7D": dailyGainers7D.length > 0
+          ? dailyGainers7D.slice(0, SECTION_LIMIT)
+          : (dailyMovers.gainers.length > 0
+            ? dailyMovers.gainers.slice(0, SECTION_LIMIT)
+            : liveTopMovers7D),
       },
       biggest_drops: {
-        "24H": negativeMoversByWindow["24H"].cards.slice(0, SECTION_LIMIT),
-        "7D": negativeMoversByWindow["7D"].cards.slice(0, SECTION_LIMIT),
+        "24H": dailyLosers24H.length > 0
+          ? dailyLosers24H.slice(0, SECTION_LIMIT)
+          : (dailyMovers.losers.length > 0
+            ? dailyMovers.losers.slice(0, SECTION_LIMIT)
+            : liveDrops24H),
+        "7D": dailyLosers7D.length > 0
+          ? dailyLosers7D.slice(0, SECTION_LIMIT)
+          : (dailyMovers.losers.length > 0
+            ? dailyMovers.losers.slice(0, SECTION_LIMIT)
+            : liveDrops7D),
       },
       momentum: {
         "24H": combineHomepageCards([

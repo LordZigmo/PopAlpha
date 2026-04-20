@@ -28,6 +28,7 @@ export const DBADMIN_ALLOWED_FILES = [
   "app/api/portfolio/activity/route.ts",
   "app/api/pro/signals/route.ts",
   "app/api/scan/identify/route.ts",
+  "lib/data/app-user.ts",
   "lib/db/admin.ts",
 ];
 
@@ -422,6 +423,7 @@ export const INTERNAL_ROUTE_TRUST_CONTRACTS = {
   "cron/write-provider-timeseries": cronSecretRoute("cron/internal automation"),
   "cron/prune-old-data": cronSecretRoute("cron/internal automation"),
   "cron/mirror-card-images": cronSecretRoute("cron/internal automation"),
+  "cron/compute-daily-top-movers": cronSecretRoute("cron/internal automation"),
 };
 
 export const DEBUG_ROUTE_TRUST_CONTRACTS = {
