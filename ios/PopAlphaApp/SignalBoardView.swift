@@ -3,24 +3,33 @@ import NukeUI
 
 // MARK: - Signal Board — homepage content surface
 //
-// Renders the full stack of market-intelligence sections below the
-// TodayPulseStrip in MarketplaceView:
+// Renders the market-intelligence sections that sit below the compact
+// PersonalPulseSection in MarketplaceView. Section order (post-Apr 2026
+// rebalance — see docs/plans/jazzy-rolling-rocket.md):
 //
-//   1. AIBriefCard      (Phase 1: static placeholder, Phase 2: /api/homepage/ai-brief)
-//   2. Top Movers       (MoverSection: 1 featured + compact rows)
-//   3. Breakouts        (from signalBoard.momentum — windowed)
-//   4. Unusual Volume   (proxy: highConfidenceMovers — non-windowed Phase 1)
-//   5. Pullbacks        (from signalBoard.biggestDrops)
+//   1. AIBriefCard       (/api/homepage/ai-brief + style-aware tertiary)
+//   2. ForYouRail        (personalized rail; falls back to global trending)
+//   3. MarketPulseSection (tabbed: Movers / Breakouts / Unusual / Pullbacks)
+//   4. CommunitySection  (reframed as "Collectors like you" when style known)
+//   5. Footer            (data provenance)
 //
-// The selected timeframe (24H / 7D) is owned by MarketplaceView and
-// passed in as a @Binding so the Today strip's GlobalTimeframeControl
-// drives every windowed section uniformly.
+// The KPI strip (Prices 24H · Avg 24H · Mkt Cap) is folded into the
+// MarketPulseSection header, and the 24H / 7D window toggle lives inside
+// the same module. Both are owned by MarketplaceView and passed down so
+// pull-to-refresh continues to refresh everything in one shot.
 //
-// Backed by /api/homepage (getHomepageData on the server). No new
-// endpoints in Phase 1 — we re-slice existing data only.
+// Backed by /api/homepage (getHomepageData on the server).
 
 struct SignalBoardView: View {
     @Binding var selectedWindow: SignalWindow
+
+    // Passed down from MarketplaceView so the market module can render
+    // the folded KPI strip and the "Watchlist spike" rationale chip.
+    let styleLabel: String?
+    let meData: HomepageMeDTO?
+    let pricesRefreshed24h: Int?
+    let avgChange24h: Double?
+    let marketCap: Double?
 
     @State private var data: HomepageDataDTO?
     @State private var aiBrief: HomepageAIBriefDTO?
@@ -57,58 +66,43 @@ struct SignalBoardView: View {
     @ViewBuilder
     private func content(for data: HomepageDataDTO) -> some View {
         VStack(spacing: 24) {
-            AIBriefCard(brief: aiBrief, fallbackAsOf: data.asOf)
-                .padding(.horizontal, PA.Layout.sectionPadding)
+            // 1. AI Brief — the editorial anchor
+            AIBriefCard(
+                brief: aiBrief,
+                fallbackAsOf: data.asOf,
+                styleLabel: styleLabel
+            )
+            .padding(.horizontal, PA.Layout.sectionPadding)
 
-            MoverSection(
-                eyebrow: "LIVE MARKET",
-                eyebrowColor: PA.Colors.accent,
-                title: "Top movers",
-                window: selectedWindow,
-                cards: data.signalBoard.topMovers.forWindow(selectedWindow),
-                emptyMessage: "No \(selectedWindow.label) movers yet",
+            // 2. For You — personalized rail with rationale chips;
+            //    falls back to global trending for guests / low-data.
+            ForYouRail(
+                signalBoard: data.signalBoard,
+                fallbackWindow: selectedWindow,
+                hasProfile: styleLabel != nil,
                 onSelect: handleSelect
             )
 
-            // Breakouts: prefer Phase 2 dedicated section, fall back to momentum rail
-            MoverSection(
-                eyebrow: "BREAKOUTS",
-                eyebrowColor: Color(red: 0.486, green: 0.227, blue: 0.929),
-                title: "Breakouts",
-                window: nil,
-                cards: data.signalBoard.breakouts
-                    ?? data.signalBoard.momentum.forWindow(selectedWindow),
-                emptyMessage: "No breakouts yet",
+            // 3. Market Pulse — tabbed wrapper over the four mover sections.
+            //    Folds the old TodayPulseStrip KPIs and 24H/7D toggle into
+            //    its header so this is the *single* market module.
+            MarketPulseSection(
+                selectedWindow: $selectedWindow,
+                signalBoard: data.signalBoard,
+                highConfidenceMovers: data.highConfidenceMovers,
+                watchlistSlugs: watchlistSlugs,
+                pricesRefreshed24h: pricesRefreshed24h,
+                avgChange24h: avgChange24h,
+                marketCap: marketCap,
                 onSelect: handleSelect
             )
 
-            // Unusual volume: prefer Phase 2 dedicated section, fall back to high-confidence movers
-            MoverSection(
-                eyebrow: "UNUSUAL",
-                eyebrowColor: PA.Colors.gold,
-                title: "Unusual volume",
-                window: nil,
-                cards: data.signalBoard.unusualVolume ?? data.highConfidenceMovers,
-                emptyMessage: "No unusual activity",
-                onSelect: handleSelect
-            )
-
-            MoverSection(
-                eyebrow: "PULLBACKS",
-                eyebrowColor: Color(red: 1.0, green: 0.42, blue: 0.42),
-                title: "Pullbacks",
-                window: selectedWindow,
-                cards: data.signalBoard.biggestDrops.forWindow(selectedWindow),
-                emptyMessage: "No \(selectedWindow.label) pullbacks",
-                onSelect: handleSelect
-            )
-
-            // Community rail
+            // 4. Collector Pulse — reframed eyebrow when we know the style.
             if let community, !(community.trending.isEmpty && community.mostSaved.isEmpty && community.friendsAdded.isEmpty) {
-                CommunitySection(data: community)
+                CommunitySection(data: community, styleLabel: styleLabel)
             }
 
-            // Footer
+            // 5. Footer
             if let asOf = data.asOf {
                 Text("Data as of \(formatAsOf(asOf)) · Scrydex & PokémonTCG")
                     .font(.system(size: 10, weight: .medium))
@@ -118,6 +112,13 @@ struct SignalBoardView: View {
             }
         }
         .padding(.vertical, 8)
+    }
+
+    /// Slugs of cards the signed-in user is watching — used by
+    /// MarketPulseSection to annotate rows with a "Watchlist spike"
+    /// rationale chip. Empty set for guests / missing data.
+    private var watchlistSlugs: Set<String> {
+        Set((meData?.watchlistMovers ?? []).map { $0.slug })
     }
 
     // MARK: - States
@@ -239,6 +240,10 @@ struct SignalBoardView: View {
 private struct AIBriefCard: View {
     let brief: HomepageAIBriefDTO?
     let fallbackAsOf: String?
+    /// Personalization profile's dominant style label, when known.
+    /// Drives the "Matters most for: …" tertiary line so the brief feels
+    /// aimed at the reader instead of the whole market.
+    let styleLabel: String?
 
     // Placeholder copy used only when the /api/homepage/ai-brief cache is
     // empty (e.g. fresh deploy, cron hasn't run yet). Real briefs come
@@ -249,6 +254,11 @@ private struct AIBriefCard: View {
     private var summary: String { brief?.summary ?? Self.placeholderSummary }
     private var takeaway: String { brief?.takeaway ?? Self.placeholderTakeaway }
     private var isLive: Bool { brief != nil && brief?.source != "fallback" }
+    private var mattersLine: String {
+        // Falls back to "Modern collectors" so guests still see a line
+        // rather than an awkward gap. Keep copy warm and declarative.
+        "Matters most for: \(styleLabel ?? "Modern collectors")"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -300,9 +310,12 @@ private struct AIBriefCard: View {
 
                 Spacer()
 
-                Button {
-                    // Phase 2: push full AI brief detail view
-                    PAHaptics.tap()
+                NavigationLink {
+                    AIBriefDetailView(
+                        brief: brief,
+                        fallbackAsOf: fallbackAsOf,
+                        styleLabel: styleLabel
+                    )
                 } label: {
                     HStack(spacing: 4) {
                         Text("Read more")
@@ -313,6 +326,20 @@ private struct AIBriefCard: View {
                     .foregroundStyle(PA.Colors.accent)
                 }
                 .buttonStyle(.plain)
+                .hapticTap()
+            }
+
+            // Tertiary "who this matters to" line — personalizes without
+            // new data. Always rendered (falls back to a generic persona)
+            // so the card has a consistent 3-line body rhythm.
+            HStack(spacing: 6) {
+                Image(systemName: "scope")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(PA.Colors.muted)
+                Text(mattersLine)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(PA.Colors.textSecondary)
+                    .lineLimit(1)
             }
         }
         .padding(16)
@@ -332,7 +359,7 @@ private struct AIBriefCard: View {
         .clipShape(RoundedRectangle(cornerRadius: PA.Layout.panelRadius, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: PA.Layout.panelRadius, style: .continuous)
-                .stroke(PA.Colors.borderLight, lineWidth: 1)
+                .stroke(PA.Colors.accent.opacity(0.35), lineWidth: 1)
         )
     }
 
@@ -353,8 +380,11 @@ private struct AIBriefCard: View {
 }
 
 // MARK: - Mover Section — eyebrow + title + 1 featured + compact rows
+//
+// Exposed as `internal` (drop the `private`) so MarketPulseSection can
+// reuse the exact same section template inside its tabbed wrapper.
 
-private struct MoverSection: View {
+struct MoverSection: View {
     let eyebrow: String
     let eyebrowColor: Color
     let title: String
@@ -362,6 +392,14 @@ private struct MoverSection: View {
     let cards: [HomepageCardDTO]
     let emptyMessage: String
     let onSelect: (HomepageCardDTO) -> Void
+    /// Slugs the current user is watching. Used to render a subtle
+    /// "Watchlist spike" rationale chip on the matching rows. Empty set
+    /// for guests — no chip is drawn in that case.
+    var watchlistSlugs: Set<String> = []
+    /// Section-level rationale override. When set, overrides the
+    /// per-row badge-derived rationale (e.g. the Unusual tab wants every
+    /// row to read "Unusual volume" regardless of each card's badge).
+    var sectionRationale: String? = nil
 
     private let maxCompactRows = 4
 
@@ -410,7 +448,11 @@ private struct MoverSection: View {
                         Button {
                             onSelect(featured)
                         } label: {
-                            FeaturedMoverCard(card: featured, window: window)
+                            FeaturedMoverCard(
+                                card: featured,
+                                window: window,
+                                rationale: rationale(for: featured)
+                            )
                         }
                         .buttonStyle(.plain)
                     }
@@ -420,7 +462,11 @@ private struct MoverSection: View {
                         Button {
                             onSelect(card)
                         } label: {
-                            CompactMoverRow(card: card, window: window)
+                            CompactMoverRow(
+                                card: card,
+                                window: window,
+                                rationale: rationale(for: card)
+                            )
                         }
                         .buttonStyle(.plain)
                     }
@@ -429,13 +475,25 @@ private struct MoverSection: View {
             }
         }
     }
+
+    /// Derive a one-line rationale for a row: "Watchlist spike" takes
+    /// priority (most personal), then any section-level override,
+    /// otherwise no chip (the badge already does the work).
+    private func rationale(for card: HomepageCardDTO) -> String? {
+        if watchlistSlugs.contains(card.slug) { return "Watchlist spike" }
+        if let sectionRationale { return sectionRationale }
+        return nil
+    }
 }
 
 // MARK: - Featured Mover Card (96pt)
+//
+// Exposed as `internal` for reuse by MarketPulseSection / ForYouRail.
 
-private struct FeaturedMoverCard: View {
+struct FeaturedMoverCard: View {
     let card: HomepageCardDTO
     let window: SignalWindow?
+    var rationale: String? = nil
 
     var body: some View {
         HStack(spacing: 12) {
@@ -489,6 +547,11 @@ private struct FeaturedMoverCard: View {
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(PA.Colors.textSecondary)
                         .lineLimit(1)
+                }
+
+                // Rationale chip — "why this card is on the page"
+                if let rationale {
+                    RationaleChip(label: rationale)
                 }
             }
         }
@@ -558,10 +621,13 @@ private struct FeaturedMoverCard: View {
 }
 
 // MARK: - Compact Mover Row (~52pt)
+//
+// Exposed as `internal` for reuse by MarketPulseSection / ForYouRail.
 
-private struct CompactMoverRow: View {
+struct CompactMoverRow: View {
     let card: HomepageCardDTO
     let window: SignalWindow?
+    var rationale: String? = nil
 
     var body: some View {
         HStack(spacing: 10) {
@@ -596,6 +662,10 @@ private struct CompactMoverRow: View {
                         .lineLimit(1)
                     if let badge = SignalBadgeKind.from(card) {
                         SignalBadgeView(kind: badge, compact: true)
+                    } else if let rationale {
+                        // No badge, so surface the rationale chip instead.
+                        // Keeps each row to ~52pt without stacking a 3rd line.
+                        RationaleChip(label: rationale, compact: true)
                     }
                 }
             }
@@ -658,7 +728,7 @@ private struct CompactMoverRow: View {
 
 // MARK: - Change Pill
 
-private struct ChangePill: View {
+struct ChangePill: View {
     let changePct: Double?
     let window: String
     var small: Bool = false
@@ -684,7 +754,7 @@ private struct ChangePill: View {
 
 // MARK: - Signal Badge
 
-private enum SignalBadgeKind {
+enum SignalBadgeKind {
     case hot
     case breakout
     case watch
@@ -725,7 +795,7 @@ private enum SignalBadgeKind {
     }
 }
 
-private struct SignalBadgeView: View {
+struct SignalBadgeView: View {
     let kind: SignalBadgeKind
     var compact: Bool = false
 
@@ -744,9 +814,9 @@ private struct SignalBadgeView: View {
     }
 }
 
-// MARK: - Shared formatters
+// MARK: - Shared formatters (internal — reused by MarketPulseSection / ForYouRail)
 
-private func formatPrice(_ n: Double?) -> String {
+func formatPrice(_ n: Double?) -> String {
     guard let n, n > 0 else { return "--" }
     let formatter = NumberFormatter()
     formatter.numberStyle = .currency
@@ -756,7 +826,7 @@ private func formatPrice(_ n: Double?) -> String {
     return formatter.string(from: NSNumber(value: n)) ?? String(format: "$%.2f", n)
 }
 
-private func formatPct(_ n: Double?) -> String {
+func formatPct(_ n: Double?) -> String {
     guard let n else { return "--" }
     let sign = n >= 0 ? "+" : ""
     return "\(sign)\(String(format: "%.1f", n))%"
@@ -765,7 +835,7 @@ private func formatPct(_ n: Double?) -> String {
 /// Returns a short freshness string like "5m ago", "2h ago", "3d ago"
 /// for an ISO8601 timestamp. Returns nil if the timestamp is missing
 /// or older than 30 days (not actionable as "fresh").
-private func formatRelativeUpdate(_ iso: String?) -> String? {
+func formatRelativeUpdate(_ iso: String?) -> String? {
     guard let iso else { return nil }
     let f = ISO8601DateFormatter()
     f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -784,11 +854,19 @@ private func formatRelativeUpdate(_ iso: String?) -> String? {
 
 private struct CommunitySection: View {
     let data: HomepageCommunityDTO
+    /// When we know the reader's style, reframe the eyebrow to
+    /// "COLLECTORS LIKE YOU" so this rail feels socially adjacent
+    /// rather than a generic community readout.
+    let styleLabel: String?
+
+    private var eyebrow: String {
+        styleLabel == nil ? "COMMUNITY" : "COLLECTORS LIKE YOU"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             // Section header
-            Text("COMMUNITY")
+            Text(eyebrow)
                 .font(.system(size: 10, weight: .semibold))
                 .tracking(2.0)
                 .foregroundStyle(PA.Colors.accent)
@@ -968,7 +1046,14 @@ private struct FriendEventRow: View {
 #Preview("Signal Board") {
     StatefulPreviewWrapper(SignalWindow.h24) { binding in
         ScrollView {
-            SignalBoardView(selectedWindow: binding)
+            SignalBoardView(
+                selectedWindow: binding,
+                styleLabel: nil,
+                meData: nil,
+                pricesRefreshed24h: nil,
+                avgChange24h: nil,
+                marketCap: nil
+            )
         }
         .background(PA.Colors.background)
         .preferredColorScheme(.dark)

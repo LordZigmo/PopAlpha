@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>com.apple.developer.applesignin</key>
+	<array>
+		<string>Default</string>
+	</array>
+	<!--
+		APNs environment. Set to "development" for Debug / TestFlight
+		(sandbox APNs at api.sandbox.push.apple.com), and flip to
+		"production" for App Store builds (api.push.apple.com).
+		Servers must match the environment — see lib/push/apns.ts,
+		APNS_ENVIRONMENT env var.
+	-->
+	<key>aps-environment</key>
+	<string>development</string>
+</dict>
+</plist>

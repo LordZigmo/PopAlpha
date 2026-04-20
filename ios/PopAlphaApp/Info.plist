@@ -5,15 +5,34 @@
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
+			<!--
+				The Clerk iOS SDK performs OAuth via ASWebAuthenticationSession,
+				which uses its own ephemeral scheme matcher (callbackURLScheme)
+				independent of this list. This entry is kept for debugging /
+				openURL routing only. The scheme MUST match the SDK's default
+				redirect URL format ({bundleIdentifier}://callback) because
+				that's what gets sent to the OAuth provider and Clerk.
+				Register the same value in the Clerk Dashboard → Native
+				Applications → Allowed redirect URLs as:
+					ai.popalpha.ios://callback
+			-->
 			<key>CFBundleURLName</key>
-			<string>com.popalpha.app.clerk-callback</string>
+			<string>ai.popalpha.ios.clerk-callback</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>clerk.popalpha.ai</string>
+				<string>ai.popalpha.ios</string>
 			</array>
 		</dict>
 	</array>
 	<key>UIBackgroundModes</key>
-	<array/>
+	<array>
+		<!--
+			Lets iOS deliver silent (content-available) pushes while the app
+			is backgrounded so PushService can refresh the in-app
+			notification badge and sync unread counts without the user
+			opening the app. Required together with aps-environment.
+		-->
+		<string>remote-notification</string>
+	</array>
 </dict>
 </plist>

@@ -5,6 +5,11 @@ import Nuke
 @main
 struct PopAlphaApp: App {
     @Environment(\.scenePhase) private var scenePhase
+    // Bridge UIKit's AppDelegate callbacks into this SwiftUI @main so
+    // APNs callbacks (didRegisterForRemoteNotificationsWithDeviceToken,
+    // silent pushes, tap delegates) fire through
+    // PushNotificationAppDelegate → PushService.
+    @UIApplicationDelegateAdaptor(PushNotificationAppDelegate.self) private var pushDelegate
 
     init() {
         Clerk.configure(publishableKey: "pk_live_Y2xlcmsucG9wYWxwaGEuYWkk")

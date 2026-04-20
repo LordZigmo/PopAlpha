@@ -25,47 +25,95 @@ final class AuthService {
 
     private init() {}
 
-    // MARK: - Sign In (Google OAuth via Clerk)
+    // MARK: - Sign In (providers)
+    //
+    // Two providers today:
+    //   • Google — browser OAuth via ASWebAuthenticationSession. Requires
+    //     the redirect URL `{bundleIdentifier}://callback` to be allow-
+    //     listed in the Clerk Dashboard → Native Applications.
+    //   • Apple  — native AuthenticationServices. No redirect URL
+    //     plumbing; requires the "Sign in with Apple" capability on the
+    //     app target and Apple enabled as a provider in Clerk Dashboard.
+    //
+    // Both share the same isSigningIn guard so a user can't trigger both
+    // in parallel, and both feed the same signInError surface so the
+    // global alert in ContentView works uniformly regardless of provider.
 
-    /// Triggers Google OAuth. Existing call sites fire-and-forget —
-    /// the method spawns its own Task so callers stay synchronous.
+    /// Triggers Google OAuth. Fire-and-forget — spawns its own Task so
+    /// SwiftUI button actions stay synchronous.
     func signIn() {
         guard !isSigningIn else { return }
         Task { @MainActor in
-            await performSignIn()
+            await performSignIn { try await Clerk.shared.auth.signInWithOAuth(provider: .google) }
         }
     }
 
+    /// Triggers native Apple Sign In. No webview, no redirect URI —
+    /// `AuthenticationServices` handles the credential exchange and
+    /// Clerk trades the Apple id_token for a session under the hood.
+    func signInWithApple() {
+        guard !isSigningIn else { return }
+        Task { @MainActor in
+            await performSignIn { try await Clerk.shared.auth.signInWithApple() }
+        }
+    }
+
+    /// Shared post-provider session plumbing: runs the provider-specific
+    /// Clerk call, then extracts the session token + user metadata and
+    /// wires everything into APIClient. Error handling is the same for
+    /// both providers — user-cancel becomes a no-op so the global alert
+    /// doesn't fire for a benign dismissal.
     @MainActor
-    private func performSignIn() async {
+    private func performSignIn(
+        _ providerCall: @escaping () async throws -> Void
+    ) async {
         isSigningIn = true
         signInError = nil
         defer { isSigningIn = false }
 
         do {
-            // Clerk presents ASWebAuthenticationSession for Google OAuth.
-            _ = try await Clerk.shared.auth.signInWithOAuth(provider: .google)
+            try await providerCall()
 
-            // Extract session token + user ID from the now-active session.
             guard let token = try await Clerk.shared.auth.getToken() else {
                 signInError = "Unable to retrieve session token."
                 return
             }
 
-            let userId = await Clerk.shared.user?.id ?? ""
-            let firstName = await Clerk.shared.user?.firstName
-            let imageUrl = await Clerk.shared.user?.imageUrl
+            let userId = Clerk.shared.user?.id ?? ""
+            let firstName = Clerk.shared.user?.firstName
+            let imageUrl = Clerk.shared.user?.imageUrl
             setSession(token: token, userId: userId, handle: nil)
             currentFirstName = firstName
             currentImageURL = imageUrl
             startTokenRefresh()
 
-            // Fetch the user's handle from the API (lives in our DB, not Clerk).
             await loadHandle()
+
+            // Ask for push permission *after* sign-in succeeds —
+            // better conversion than prompting on cold launch, and the
+            // register endpoint requires an authenticated session anyway.
+            await PushService.shared.requestAuthorizationIfNeeded()
         } catch {
-            signInError = error.localizedDescription
+            // User-cancel is a non-error path for both providers:
+            //   • ASWebAuthenticationSession (Google) throws its own
+            //     "canceledLogin" error (code 1)
+            //   • ASAuthorizationError (Apple) throws code 1001 "canceled"
+            let ns = error as NSError
+            let isUserCancel =
+                (ns.domain == "com.apple.AuthenticationServices.WebAuthenticationSession" && ns.code == 1)
+                || (ns.domain == "com.apple.AuthenticationServices.AuthorizationError" && ns.code == 1001)
+                || error.localizedDescription.lowercased().contains("cancel")
+            if !isUserCancel {
+                signInError = error.localizedDescription
+            }
             print("[AuthService] Sign-in failed: \(error)")
         }
+    }
+
+    /// Clear a stale sign-in error after the UI has shown it.
+    /// Called from the global alert's dismiss button in ContentView.
+    func clearSignInError() {
+        signInError = nil
     }
 
     // MARK: - Sign Out
@@ -82,6 +130,9 @@ final class AuthService {
         currentFirstName = nil
         currentImageURL = nil
         APIClient.setAuthToken(nil)
+        // Force PushService to re-upload on next sign-in so we never
+        // send pushes to a signed-out account's token accidentally.
+        PushService.shared.clearUploadedTokenCache()
     }
 
     // MARK: - Session Restoration (cold launch)
@@ -104,6 +155,11 @@ final class AuthService {
         }
 
         await loadHandle()
+
+        // Returning user with a cached Clerk session — re-trigger APNs
+        // registration so the server gets a fresh device token every
+        // cold launch. PushService dedupes if the token hasn't rotated.
+        await PushService.shared.requestAuthorizationIfNeeded()
     }
 
     // MARK: - Token Refresh

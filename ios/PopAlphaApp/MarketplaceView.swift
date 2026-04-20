@@ -2,19 +2,41 @@ import SwiftUI
 
 // MARK: - Marketplace (home screen)
 //
-// Top-level layout:
-//   1. TopBar           (compact 44pt — logo · search · alerts · avatar)
-//   2. TodayPulseStrip  (heading · KPIs · global timeframe)
-//   3. SignalBoardView  (AI Brief + mover sections, driven by selectedWindow)
+// Post-Apr 2026 rebalance (see docs/plans/jazzy-rolling-rocket.md).
 //
-// The timeframe (24H / 7D) is owned HERE and passed down to SignalBoardView
-// as a @Binding so the global control drives every mover section.
+// Section order — top to bottom:
+//
+//   1. TopBar                  (compact 44pt — logo · search · alerts · avatar)
+//   2. PersonalPulseSection    ("my PopAlpha" — watchlist · portfolio · style)
+//   3. SignalBoardView, which in turn renders:
+//        • AIBriefCard          (editorial anchor, style-aware tertiary)
+//        • ForYouRail           (personalized rail + rationale chips)
+//        • MarketPulseSection   (tabbed: Movers / Breakouts / Unusual / Pullbacks
+//                                + folded KPI strip + 24H / 7D toggle)
+//        • CommunitySection     (reframed as "COLLECTORS LIKE YOU" when styled)
+//        • Footer
+//
+// Key shifts from the old layout:
+//   • TodayPulseStrip was deleted from the top — its KPIs now live inside
+//     MarketPulseSection's header so the top of the screen is personal /
+//     editorial, not a broad market readout.
+//   • YourWorldSection was replaced by the slimmer PersonalPulseSection
+//     (compact chip row, not a full-bleed CTA panel).
+//   • Four stacked MoverSections collapsed into one MarketPulseSection
+//     with a segmented control — same content, ~¾ less scroll.
+//
+// Data ownership:
+//   • MarketplaceView owns personalization profile + /me + KPI stats, and
+//     passes them into SignalBoardView as props.
+//   • SignalBoardView owns the /api/homepage fetch, the AI brief, and
+//     the community data.
 
 struct MarketplaceView: View {
     @State private var pricesRefreshed24h: Int?
     @State private var avgChange24h: Double?
     @State private var marketCap: Double?
     @State private var meData: HomepageMeDTO?
+    @State private var styleLabel: String?
     @State private var showSearch = false
     @State private var selectedWindow: SignalWindow = .h24
     @State private var searchSelectedCard: MarketCard?
@@ -27,19 +49,22 @@ struct MarketplaceView: View {
                         .padding(.horizontal, PA.Layout.sectionPadding)
                         .padding(.top, 8)
 
-                    TodayPulseStrip(
-                        pricesRefreshed24h: pricesRefreshed24h,
-                        avgChange24h: avgChange24h,
-                        marketCap: marketCap,
-                        selectedWindow: $selectedWindow
-                    )
-                    .padding(.horizontal, PA.Layout.sectionPadding)
-
-                    // Your world — between pulse strip and signal board
-                    YourWorldSection(data: meData)
+                    // 2. PersonalPulseSection — the first thing a collector
+                    //    sees should be *theirs*, not the broad market.
+                    PersonalPulseSection(me: meData, styleLabel: styleLabel)
                         .padding(.horizontal, PA.Layout.sectionPadding)
 
-                    SignalBoardView(selectedWindow: $selectedWindow)
+                    // 3. SignalBoardView — AI Brief · For You · Market Pulse ·
+                    //    Community · Footer. Fetches /api/homepage itself;
+                    //    takes personalization context as props.
+                    SignalBoardView(
+                        selectedWindow: $selectedWindow,
+                        styleLabel: styleLabel,
+                        meData: meData,
+                        pricesRefreshed24h: pricesRefreshed24h,
+                        avgChange24h: avgChange24h,
+                        marketCap: marketCap
+                    )
                 }
                 .padding(.bottom, 32)
             }
@@ -83,9 +108,19 @@ struct MarketplaceView: View {
             do { return try await CardService.shared.fetchHomepageMe() }
             catch { return nil }
         }()
+        async let profileTask: PersonalizedProfileResponse? =
+            PersonalizationService.shared.fetchProfile()
+
         _ = await statsTask
         let me = await meTask
-        await MainActor.run { meData = me }
+        let profile = await profileTask
+        await MainActor.run {
+            meData = me
+            // Only surface a style label when the profile actually has
+            // one — the server returns nil/empty for low-event actors.
+            styleLabel = profile?.profile?.dominantStyleLabel
+                .flatMap { $0.isEmpty ? nil : $0 }
+        }
     }
 
     private func loadStats() async {
@@ -153,284 +188,6 @@ private struct TopBar: View {
                 )
         }
         .frame(height: 44)
-    }
-}
-
-// MARK: - Today Pulse Strip
-
-private struct TodayPulseStrip: View {
-    let pricesRefreshed24h: Int?
-    let avgChange24h: Double?
-    let marketCap: Double?
-    @Binding var selectedWindow: SignalWindow
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .bottom, spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Today's Market")
-                        .font(.system(size: 22, weight: .bold))
-                        .foregroundStyle(PA.Colors.text)
-                    Text("Live across Pokémon TCG")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(PA.Colors.muted)
-                }
-                Spacer()
-                GlobalTimeframeControl(selected: $selectedWindow)
-            }
-
-            // KPI rail
-            HStack(spacing: 18) {
-                if let count = pricesRefreshed24h {
-                    kpi(label: "Prices 24H", value: formatCount(count))
-                }
-                if let avg = avgChange24h {
-                    kpi(
-                        label: "Avg 24H",
-                        value: String(format: "%+.1f%%", avg),
-                        isPositive: avg >= 0
-                    )
-                }
-                if let cap = marketCap, cap > 0 {
-                    kpi(label: "Market cap", value: formatDollar(cap))
-                }
-                Spacer(minLength: 0)
-            }
-        }
-    }
-
-    private func kpi(label: String, value: String, isPositive: Bool? = nil) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(PA.Colors.muted)
-            Text(value)
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                .foregroundStyle(
-                    isPositive == true ? PA.Colors.positive :
-                    isPositive == false ? PA.Colors.negative :
-                    PA.Colors.text
-                )
-        }
-    }
-
-    private func formatDollar(_ n: Double) -> String {
-        if n >= 1_000_000 { return String(format: "$%.1fM", n / 1_000_000) }
-        if n >= 1_000 { return String(format: "$%.1fK", n / 1_000) }
-        return String(format: "$%.0f", n)
-    }
-
-    private func formatCount(_ n: Int) -> String {
-        if n >= 1000 { return String(format: "%.1fK", Double(n) / 1000) }
-        return "\(n)"
-    }
-}
-
-// MARK: - Global Timeframe Control (24H / 7D)
-
-private struct GlobalTimeframeControl: View {
-    @Binding var selected: SignalWindow
-
-    var body: some View {
-        HStack(spacing: 0) {
-            ForEach(SignalWindow.allCases, id: \.self) { window in
-                Button {
-                    withAnimation(.easeInOut(duration: 0.18)) {
-                        selected = window
-                        PAHaptics.selection()
-                    }
-                } label: {
-                    Text(window.label)
-                        .font(.system(size: 11, weight: .bold))
-                        .tracking(1.0)
-                        .foregroundStyle(selected == window ? PA.Colors.background : PA.Colors.textSecondary)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background {
-                            if selected == window {
-                                Capsule().fill(Color.white)
-                            }
-                        }
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(2)
-        .background(Capsule().fill(Color.white.opacity(0.03)))
-        .overlay(Capsule().stroke(Color.white.opacity(0.08), lineWidth: 1))
-    }
-}
-
-// MARK: - Your World (personalized section)
-
-private struct YourWorldSection: View {
-    let data: HomepageMeDTO?
-    private var auth: AuthService { AuthService.shared }
-
-    var body: some View {
-        if !auth.isAuthenticated {
-            signedOutCard
-        } else if let data, (!data.watchlistMovers.isEmpty || data.portfolio != nil) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("YOUR WORLD")
-                    .font(.system(size: 10, weight: .semibold))
-                    .tracking(2.0)
-                    .foregroundStyle(PA.Colors.accent)
-
-                HStack(spacing: 12) {
-                    if !data.watchlistMovers.isEmpty {
-                        watchlistCard(data.watchlistMovers)
-                    }
-                    if let portfolio = data.portfolio {
-                        portfolioCard(portfolio)
-                    }
-                }
-            }
-        }
-        // If authenticated but data is nil/empty, show nothing — the
-        // AI Brief and movers fill the space without a distracting
-        // empty personalization card.
-    }
-
-    // MARK: - Signed-out CTA
-
-    private var signedOutCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("YOUR WORLD")
-                .font(.system(size: 10, weight: .semibold))
-                .tracking(2.0)
-                .foregroundStyle(PA.Colors.accent)
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Track what you care about")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(PA.Colors.text)
-                Text("Sign in to see your watchlist movers and portfolio P&L on the homepage.")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(PA.Colors.textSecondary)
-                    .lineLimit(2)
-
-                Button {
-                    AuthService.shared.signIn()
-                } label: {
-                    Text("Sign in")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(PA.Colors.background)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 8)
-                        .background(PA.Colors.accent)
-                        .clipShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                .padding(.top, 2)
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .glassSurface(radius: PA.Layout.cardRadius)
-        }
-    }
-
-    // MARK: - Watchlist card
-
-    private func watchlistCard(_ movers: [WatchlistMoverDTO]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Image(systemName: "heart.fill")
-                    .font(.system(size: 10))
-                    .foregroundStyle(PA.Colors.accent)
-                Text("Watchlist")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(PA.Colors.text)
-            }
-
-            ForEach(movers.prefix(3), id: \.slug) { mover in
-                HStack(spacing: 6) {
-                    Text(mover.name)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(PA.Colors.text)
-                        .lineLimit(1)
-                    Spacer(minLength: 4)
-                    if let pct = mover.changePct {
-                        Text(formatChangePct(pct))
-                            .font(.system(size: 11, weight: .bold, design: .rounded))
-                            .foregroundStyle(pct >= 0 ? PA.Colors.positive : PA.Colors.negative)
-                    }
-                }
-            }
-
-            if movers.count > 3 {
-                Text("\(movers.count - 3) more")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(PA.Colors.muted)
-            }
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(minHeight: 120)
-        .glassSurface(radius: PA.Layout.cardRadius)
-    }
-
-    // MARK: - Portfolio card
-
-    private func portfolioCard(_ p: PortfolioSummaryDTO) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Image(systemName: "rectangle.stack")
-                    .font(.system(size: 10))
-                    .foregroundStyle(PA.Colors.accent)
-                Text("Portfolio")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(PA.Colors.text)
-            }
-
-            Text(formatDollar(p.totalMarketValue))
-                .font(.system(size: 20, weight: .bold, design: .rounded))
-                .foregroundStyle(PA.Colors.text)
-
-            HStack(spacing: 6) {
-                Text(formatPnl(p.dailyPnlAmount))
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                    .foregroundStyle(p.dailyPnlAmount >= 0 ? PA.Colors.positive : PA.Colors.negative)
-                if let pct = p.dailyPnlPct {
-                    Text("(\(formatChangePct(pct)))")
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(pct >= 0 ? PA.Colors.positive : PA.Colors.negative)
-                }
-            }
-
-            Text("\(p.holdingCount) cards")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(PA.Colors.muted)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(minHeight: 120)
-        .glassSurface(radius: PA.Layout.cardRadius)
-    }
-
-    // MARK: - Formatters
-
-    private func formatChangePct(_ n: Double) -> String {
-        let sign = n >= 0 ? "+" : ""
-        return "\(sign)\(String(format: "%.1f", n))%"
-    }
-
-    private func formatDollar(_ n: Double) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.currencyCode = "USD"
-        formatter.maximumFractionDigits = 0
-        return formatter.string(from: NSNumber(value: n)) ?? String(format: "$%.0f", n)
-    }
-
-    private func formatPnl(_ n: Double) -> String {
-        let sign = n >= 0 ? "+" : ""
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.currencyCode = "USD"
-        formatter.maximumFractionDigits = 2
-        let abs = formatter.string(from: NSNumber(value: abs(n))) ?? String(format: "$%.2f", abs(n))
-        return n < 0 ? "-\(abs)" : "\(sign)\(abs)"
     }
 }
 
