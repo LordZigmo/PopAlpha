@@ -34,9 +34,11 @@ export function getScrydexCredentials(): ScrydexCredentials {
 export type ScrydexExpansion = {
   id: string;
   name: string;
+  series?: string;
   release_date?: string;
   releaseDate?: string;
   language_code?: string;
+  is_online_only?: boolean;
 };
 
 export type ScrydexImage = {

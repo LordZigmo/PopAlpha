@@ -40,11 +40,22 @@ export type DiscoverNewSetsResult = {
   lastKnownTotalCount?: number | null;
   newSetIds?: string[];
   seededSetIds?: string[];
+  filteredSetIds?: Array<{ id: string; reason: string }>;
   failedSetIds?: Array<{ id: string; error: string }>;
   runId?: string;
   elapsedMs?: number;
   error?: string;
 };
+
+// Only physical, first-party releases are worth auto-seeding. Everything else
+// (TCG Pocket digital sets, Scrydex's "Other" catch-all bucket, etc.) should
+// be skipped at discovery so we don't waste credits importing cards that
+// aren't part of the collectible catalog.
+function filterReason(exp: ScrydexExpansion): string | null {
+  if (exp.is_online_only === true) return "online_only";
+  if (typeof exp.series === "string" && exp.series.trim().toLowerCase() === "other") return "series_other";
+  return null;
+}
 
 type LastDiscoverMeta = {
   expansionsTotalCount?: number;
@@ -167,12 +178,23 @@ export async function runDiscoverNewSets(
 
     const knownIds = new Set((mapped ?? []).map((row) => String(row.provider_set_id)));
     const newExpansions = expansions.filter((exp) => !knownIds.has(exp.id));
-    const newSetIds = newExpansions.map((exp) => exp.id);
+
+    const filteredSetIds: Array<{ id: string; reason: string }> = [];
+    const seedableExpansions: ScrydexExpansion[] = [];
+    for (const exp of newExpansions) {
+      const skipReason = filterReason(exp);
+      if (skipReason) {
+        filteredSetIds.push({ id: exp.id, reason: skipReason });
+      } else {
+        seedableExpansions.push(exp);
+      }
+    }
+    const newSetIds = seedableExpansions.map((exp) => exp.id);
 
     const seededSetIds: string[] = [];
     const failedSetIds: Array<{ id: string; error: string }> = [];
 
-    for (const exp of newExpansions) {
+    for (const exp of seedableExpansions) {
       const importResult = await runScrydexCanonicalImport({
         pageStart: 1,
         maxPages: MAX_PAGES_PER_SET,
@@ -227,6 +249,7 @@ export async function runDiscoverNewSets(
           expansionsTotalCount: totalCount,
           newSetIds,
           seededSetIds,
+          filteredSetIds,
           failedSetIds,
         },
       })
@@ -238,6 +261,7 @@ export async function runDiscoverNewSets(
       lastKnownTotalCount,
       newSetIds,
       seededSetIds,
+      filteredSetIds,
       failedSetIds,
       runId,
       elapsedMs: Date.now() - startedAt,
