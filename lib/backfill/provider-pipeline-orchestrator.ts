@@ -1,6 +1,6 @@
-import { runScrydexRawIngest } from "@/lib/backfill/pokemontcg-raw-ingest";
-import { runScrydexRawNormalize } from "@/lib/backfill/pokemontcg-raw-normalize";
-import { runScrydexNormalizedMatch } from "@/lib/backfill/pokemontcg-normalized-match";
+import { runScrydexRawIngest } from "@/lib/backfill/scrydex-raw-ingest";
+import { runScrydexRawNormalize } from "@/lib/backfill/scrydex-raw-normalize";
+import { runScrydexNormalizedMatch } from "@/lib/backfill/scrydex-normalized-match";
 import { runProviderObservationTimeseries } from "@/lib/backfill/provider-observation-timeseries";
 import { runProviderObservationVariantMetrics } from "@/lib/backfill/provider-observation-variant-metrics";
 import { queuePendingRollups, getPendingRollupsCount } from "@/lib/backfill/provider-pipeline-rollup-queue";

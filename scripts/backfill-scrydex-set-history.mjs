@@ -10,8 +10,8 @@ import {
   loadRetainedPayloads,
   loadSetHistoryCoverage,
 } from "./report-scrydex-set-history-coverage.mjs";
-import { runPokemonTcgRawNormalize } from "@/lib/backfill/pokemontcg-raw-normalize";
-import { runPokemonTcgNormalizedMatch } from "@/lib/backfill/pokemontcg-normalized-match";
+import { runScrydexRawNormalize } from "@/lib/backfill/scrydex-raw-normalize";
+import { runScrydexNormalizedMatch } from "@/lib/backfill/scrydex-normalized-match";
 import { runProviderObservationTimeseries } from "@/lib/backfill/provider-observation-timeseries";
 import { runProviderObservationVariantMetrics } from "@/lib/backfill/provider-observation-variant-metrics";
 import { refreshPipelineRollupsForVariantKeys } from "@/lib/backfill/provider-pipeline-rollups";
@@ -142,7 +142,7 @@ async function main() {
 
   const normalizePasses = [];
   for (const payload of payloadsToReplay) {
-    const result = await runPokemonTcgRawNormalize({
+    const result = await runScrydexRawNormalize({
       rawPayloadId: String(payload.id),
       force: normalizeForce,
     });
@@ -162,7 +162,7 @@ async function main() {
   const matchStage = await drainStage({
     name: "match",
     maxPasses: maxStagePasses,
-    run: () => runPokemonTcgNormalizedMatch({
+    run: () => runScrydexNormalizedMatch({
       providerSetId,
       observationLimit: matchObservations,
       force: drainForce,

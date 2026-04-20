@@ -52,11 +52,9 @@ next-env.d.ts
 .codex/
 
 # External datasets
-pokemon-tcg-data/
 pokemon_card_detector-1/
 
 # Local runtime state
-scripts/import-state.json
 scripts/justtcg-live-state.json
 
 # Generated artifacts

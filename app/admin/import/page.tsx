@@ -1,4 +1,3 @@
-import AdminImportRunner from "@/components/admin-import-runner";
 import { dbPublic } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -48,9 +47,7 @@ export default async function AdminImportPage() {
         <section className="glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
           <h1 className="text-app text-2xl font-semibold tracking-tight">Admin Import</h1>
           <p className="text-muted mt-2 text-sm">Scrydex Pokemon API (English)</p>
-          <div className="mt-3">
-            <AdminImportRunner />
-          </div>
+          <p className="text-muted mt-2 text-xs">Imports run via <code>POST /api/admin/import/scrydex-canonical</code> (see README). This page is a read-only view of recent runs.</p>
         </section>
 
         <section className="mt-4 glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">

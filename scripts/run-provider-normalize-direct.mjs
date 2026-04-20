@@ -32,7 +32,7 @@ function providerConfig() {
     {
       provider: "SCRYDEX",
       endpoint: "/en/expansions/{id}/cards",
-      importPath: "../lib/backfill/pokemontcg-raw-normalize.ts",
+      importPath: "../lib/backfill/scrydex-raw-normalize.ts",
       exportName: "runScrydexRawNormalize",
     },
     {

@@ -821,7 +821,7 @@ export function chooseSinglePrinting(params: {
   };
 }
 
-export async function runPokemonTcgNormalizedMatch(opts: {
+export async function runScrydexNormalizedMatch(opts: {
   observationLimit?: number;
   providerSetId?: string | null;
   observationId?: string | null;
@@ -1224,17 +1224,4 @@ export async function runPokemonTcgNormalizedMatch(opts: {
   }
 
   return result;
-}
-
-export async function runScrydexNormalizedMatch(opts: {
-  observationLimit?: number;
-  providerSetId?: string | null;
-  observationId?: string | null;
-  force?: boolean;
-  scanDirection?: ScanDirection;
-  maxRuntimeMs?: number;
-  mode?: MatchMode;
-  recentWindowHours?: number;
-} = {}): Promise<MatchResult> {
-  return runPokemonTcgNormalizedMatch(opts);
 }

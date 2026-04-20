@@ -4,7 +4,7 @@ import path from "node:path";
 const ROOT = process.cwd();
 const TARGET_DIRS = ["app", "lib", "components", "scripts"];
 const TEXT_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".mjs", ".cjs"]);
-const IGNORE_DIRS = new Set(["node_modules", ".next", "pokemon-tcg-data", "supabase"]);
+const IGNORE_DIRS = new Set(["node_modules", ".next", "supabase"]);
 const LEGACY_WRITE_TABLES = [
   "holdings",
   "market_latest",

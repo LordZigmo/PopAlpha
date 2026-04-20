@@ -5,11 +5,6 @@
  * POKEMON_TCG_API have been retired. Historical rows in pricing tables
  * still carry those provider strings and are read by SQL rollups, but no
  * code path writes them anymore.
- *
- * Note: the active Scrydex ingest/normalize/match lib lives in
- * `lib/backfill/pokemontcg-*.ts` for historical reasons — the Scrydex
- * pipeline was built on top of the original pokemontcg scaffolding and
- * piggybacks on the same module.
  */
 
 export const BACKEND_PIPELINE_PROVIDERS = [

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { planScrydexTargetSelection } from "../lib/backfill/pokemontcg-raw-ingest.ts";
+import { planScrydexTargetSelection } from "../lib/backfill/scrydex-raw-ingest.ts";
 
 function makeTarget(setCode) {
   return {

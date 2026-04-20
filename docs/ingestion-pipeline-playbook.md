@@ -623,6 +623,27 @@ WHERE provider = 'SCRYDEX' AND provider_set_id = '__provider__';
 
 ---
 
+## URL validation (write-path guard against dead image URLs)
+
+**Why it exists:** the retired pokemon-tcg-data ingest composed URLs like `https://images.pokemontcg.io/{set_code}/{number}_hires.png` without verifying them. For promo / McDonald's sets pokemontcg.io doesn't host the asset, so those URLs 404. A 2026-04 audit found 61 `card_printings` rows with dead URLs (48 McDonald's promos, 6 XY Black Star Promos). The mirror cron burned its 5-attempt budget on each; the UI fell back to a "No image" gradient that users read as the card back. The pokemon-tcg-data ingest has since been deleted, but the pattern is kept here so the next composed-URL provider gets guarded on day one.
+
+**Pattern (scripts/lib/validate-image-url.mjs):** shared HEAD-probe validator. 5s timeout, concurrency 10, per-run URL cache (dedupes repeats within a single ingest). No retries — one HEAD failure is enough evidence the URL is bad.
+
+**Where it runs:**
+- [scripts/import-scrydex-canonical-direct.mjs](../scripts/import-scrydex-canonical-direct.mjs) — currently the only ingest consumer. Scrydex returns concrete image URLs so 404s are rare, but the probe is cheap insurance.
+- [scripts/repair-broken-card-images.mjs](../scripts/repair-broken-card-images.mjs) — retroactive sweeper. Same validator, applied against existing DB rows. Dry-run by default; `--apply` to write. Only 404/410 trigger a NULL so transient 5xx / timeouts don't destroy good rows.
+
+**Behavior on a failed probe:**
+- `image_url` / `primary_image_url` written as `NULL` (not the broken string).
+- `image_mirror_last_error` set to `HEAD <url> → HTTP 404` so there's a paper trail in the same column the mirror cron writes to.
+- Row is then invisible to the mirror cron's partial index (`image_url IS NOT NULL` is part of the predicate).
+
+**Rule of thumb for new ingest scripts:** any new script that composes image URLs from a provider ID (as opposed to accepting a URL the provider itself has confirmed) MUST route the URL through `createImageUrlValidator` before writing. If the provider already hands you concrete URLs, keep the probe anyway — it's the cheapest insurance we have against upstream rot.
+
+**Budget cost:** at 10 concurrent HEAD with ~200ms median, each 1k URLs adds ~20 s of wall-clock; the 5s per-probe timeout bounds the worst case.
+
+---
+
 ## Things not to do (learned the hard way)
 
 - **Don't set `statement_timeout` inside scan RPCs.** The outer job timeout is the authoritative cap. Inner timeouts cause drain-loop retry cascades.

@@ -4,7 +4,7 @@ import {
   normalizeScrydexStampToken,
   parseScrydexVariantSemantics,
 } from "../lib/backfill/scrydex-variant-semantics.ts";
-import { chooseSinglePrinting } from "../lib/backfill/pokemontcg-normalized-match.ts";
+import { chooseSinglePrinting } from "../lib/backfill/scrydex-normalized-match.ts";
 
 function makeObservation(overrides = {}) {
   return {

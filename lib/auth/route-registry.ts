@@ -53,7 +53,6 @@ export const CRON_ROUTES = [
   "cron/process-provider-pipeline-jobs",
   "cron/process-ebay-deletion-receipts",
   "cron/sync-canonical",
-  "cron/sync-tcg-prices",
   "cron/refresh-card-metrics",
   "cron/batch-refresh-pipeline-rollups",
   "cron/refresh-card-embeddings",

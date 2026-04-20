@@ -13,7 +13,7 @@ import { readRouteRegistry, routeKeyFromFilePath } from "./lib/route-registry.mj
 
 const ROOT = process.cwd();
 const TEXT_EXTENSIONS = new Set([".ts", ".tsx"]);
-const IGNORE_DIRS = new Set(["node_modules", ".next", "pokemon-tcg-data", "supabase"]);
+const IGNORE_DIRS = new Set(["node_modules", ".next", "supabase"]);
 const TARGET_DIRS = ["app", "components", "lib", "scripts"];
 
 const routeRegistry = readRouteRegistry();

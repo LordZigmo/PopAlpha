@@ -3,6 +3,7 @@
 import dotenv from "dotenv";
 import { createClient } from "@supabase/supabase-js";
 import { buildCanonicalSearchDoc, normalizeSearchText } from "../lib/search/normalize.mjs";
+import { createImageUrlValidator, formatProbeError } from "./lib/validate-image-url.mjs";
 
 const SCRYDEX_BASE_URL = "https://api.scrydex.com/pokemon/v1";
 const DEFAULT_PAGE_SIZE = 100;
@@ -471,11 +472,12 @@ async function syncPrintingRows(supabase, rows) {
   return sourceIdToPrintingId;
 }
 
-async function importExpansionCards({ supabase, credentials, expansion, setYearMap, dryRun }) {
+async function importExpansionCards({ supabase, credentials, expansion, setYearMap, dryRun, imageValidator }) {
   let page = 1;
   let cardsFetched = 0;
   let cardsUpserted = 0;
   let printingRowsUpserted = 0;
+  let imageUrlsSkipped = 0;
 
   while (true) {
     const params = new URLSearchParams({
@@ -489,6 +491,38 @@ async function importExpansionCards({ supabase, credentials, expansion, setYearM
 
     const preparedCards = cards.map((card) => toPreparedCard(card, setYearMap));
     cardsFetched += cards.length;
+
+    const urlsToProbe = [];
+    for (const row of preparedCards) {
+      if (row.canonical.primary_image_url) urlsToProbe.push(row.canonical.primary_image_url);
+      for (const printing of row.printings) {
+        if (printing.imageUrl) urlsToProbe.push(printing.imageUrl);
+      }
+    }
+    if (urlsToProbe.length > 0) {
+      const probeResults = await imageValidator.validateAll(urlsToProbe);
+      for (const row of preparedCards) {
+        row.canonical.image_mirror_last_error = null;
+        if (row.canonical.primary_image_url) {
+          const probe = probeResults.get(row.canonical.primary_image_url);
+          if (probe && !probe.ok) {
+            row.canonical.image_mirror_last_error = formatProbeError(row.canonical.primary_image_url, probe);
+            row.canonical.primary_image_url = null;
+            imageUrlsSkipped += 1;
+          }
+        }
+        for (const printing of row.printings) {
+          printing.imageMirrorLastError = null;
+          if (!printing.imageUrl) continue;
+          const probe = probeResults.get(printing.imageUrl);
+          if (probe && !probe.ok) {
+            printing.imageMirrorLastError = formatProbeError(printing.imageUrl, probe);
+            printing.imageUrl = null;
+            imageUrlsSkipped += 1;
+          }
+        }
+      }
+    }
 
     if (!dryRun) {
       const canonicalRows = preparedCards.map((row) => row.canonical);
@@ -519,6 +553,7 @@ async function importExpansionCards({ supabase, credentials, expansion, setYearM
           stamp: null,
           rarity: printing.rarity,
           image_url: printing.imageUrl,
+          image_mirror_last_error: printing.imageMirrorLastError ?? null,
           source: "scrydex",
           source_id: printing.sourceId,
           updated_at: new Date().toISOString(),
@@ -563,6 +598,7 @@ async function importExpansionCards({ supabase, credentials, expansion, setYearM
     cardsFetched,
     cardsUpserted,
     printingRowsUpserted,
+    imageUrlsSkipped,
   };
 }
 
@@ -636,6 +672,8 @@ async function main() {
   let totalCardsFetched = 0;
   let totalCardsUpserted = 0;
   let totalPrintingsUpserted = 0;
+  let totalImageUrlsSkipped = 0;
+  const imageValidator = createImageUrlValidator();
 
   for (const [index, expansion] of targets.entries()) {
     console.log(`[import-scrydex-direct] ${index + 1}/${targets.length} ${expansion.id} ${expansion.name}`);
@@ -645,20 +683,25 @@ async function main() {
       expansion,
       setYearMap,
       dryRun: args.dryRun,
+      imageValidator,
     });
     totalCardsFetched += result.cardsFetched;
     totalCardsUpserted += result.cardsUpserted;
     totalPrintingsUpserted += result.printingRowsUpserted;
+    totalImageUrlsSkipped += result.imageUrlsSkipped;
     console.log(JSON.stringify(result));
     await sleep(250);
   }
 
+  const probeStats = imageValidator.stats();
   console.log(JSON.stringify({
     ok: true,
     expansionsProcessed: targets.length,
     totalCardsFetched,
     totalCardsUpserted,
     totalPrintingsUpserted,
+    totalImageUrlsSkipped,
+    imageUrlsProbed: probeStats.probed,
   }, null, 2));
 }
 

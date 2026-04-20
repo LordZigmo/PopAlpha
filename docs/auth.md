@@ -43,7 +43,7 @@ PopAlpha uses a 4-kind auth model defined in `lib/auth/context.ts`.
 | `INTERNAL_ADMIN_EMAILS` | Fallback/internal convenience allowlist for internal-admin operators | `/internal/admin` operators | `lib/auth/internal-admin-session-core.ts` | Optional; overlaps with Clerk user IDs but is intentionally secondary |
 | `INTERNAL_ADMIN_SESSION_SECRET` | Signs the short-lived internal-admin session cookie | `/internal/admin` page + API session verifier | `lib/auth/internal-admin-session-core.ts` | Recommended and should be dedicated; falls back to `ADMIN_SECRET` only if unset |
 | `ADMIN_SECRET` | Server-to-server auth for true admin/import routes that are not UI-backed | Manual admin tooling, trusted server calls, import scripts | `lib/auth/context.ts`, `requireAdmin()` routes | Still required; no longer the normal auth path for UI-backed admin flows |
-| `ADMIN_IMPORT_TOKEN` | Narrow bearer token for the PokemonTCG import automation surface | `app/api/admin/import/pokemontcg` callers only | `lib/auth/context.ts`, `app/api/admin/import/pokemontcg/route.ts` | Still required; distinct from `ADMIN_SECRET` because it is route-specific and lower-scope |
+| `ADMIN_IMPORT_TOKEN` | Narrow bearer token once used by the retired PokemonTCG import route; still accepted by `requireAdmin()` so it can be reused by a future narrow-scope import | — (no route currently consumes it) | `lib/auth/context.ts` | Optional. Remove the env value if you aren't reusing it; the auth code path is dormant until a route opts in again. |
 | `CRON_SECRET` | Cron/internal automation auth bearer | `app/api/cron/**` and debug/repair scripts that intentionally use cron auth | `lib/auth/context.ts`, `requireCron()` routes | Still required; distinct from `ADMIN_SECRET` even though `requireCron()` accepts admin too |
 | `ALLOW_DEBUG_IN_PROD` | Explicit production kill-switch override for `app/api/debug/**` | Internal operators only | `proxy.ts` | Still required; distinct route-surface enable flag, not an auth credential |
 | `ALLOW_PROVIDER_CANONICAL_IMPORT` | Enables the legacy provider-driven canonical importer and related cron path | Admin/cron importer routes only | `lib/admin/scrydex-canonical-import.ts`, `app/api/cron/sync-canonical/route.ts` | Still required while legacy importer exists; distinct feature gate, not an auth credential |
@@ -117,7 +117,7 @@ High-trust entrypoints outside `app/api/**` and `scripts/**` now have an explici
   - trust model: explicit route classification, secret-based admin/cron resolution where justified, and Clerk-backed internal-admin revalidation
 - Privileged package-script wrappers:
   - top-level security wrappers: `check:security`, `check:security:doctor`, `check:security:invariants`, `check:security:schema`, `check:security:schema:local`, `verify:rls`, `verify:rls:linked`
-  - operational wrappers: `ebay:deletion-setup`, `env:pull-safe`, `sets:backfill-summaries`, `import:pokemontcg-all`, `import:scrydex-all`, `import:scrydex-missing-printings`, `report:set-efficiency`, `justtcg:repair-sweep`, `justtcg:backfill-live`, `watch:unknown-finishes`, `ai:refresh-embeddings`
+  - operational wrappers: `ebay:deletion-setup`, `env:pull-safe`, `sets:backfill-summaries`, `import:scrydex-all`, `import:scrydex-missing-printings`, `report:set-efficiency`, `justtcg:repair-sweep`, `justtcg:backfill-live`, `watch:unknown-finishes`, `ai:refresh-embeddings`
   - trust model: thin wrappers around classified privileged scripts only; command drift is checked in CI
 - Secret-bearing GitHub workflows:
   - `.github/workflows/ci.yml`
@@ -187,7 +187,7 @@ When adding a new internal/admin/debug route:
 
 - Keep a route when it is a real network boundary: operator UI, cron invocation, manual admin tooling, or an external script target.
 - Do not reuse one internal route from another route just to share logic. Extract the shared server work into a module under `lib/` and let each route keep only its own auth, input parsing, and response shaping.
-- The Scrydex canonical importer now follows that pattern: `app/api/admin/import/scrydex-canonical/route.ts`, `app/api/admin/import/pokemontcg-canonical/route.ts`, `app/api/admin/import/pokemontcg/route.ts`, and `app/api/cron/sync-canonical/route.ts` all call `lib/admin/scrydex-canonical-import.ts` instead of treating another route as an internal API.
+- The Scrydex canonical importer follows that pattern: `app/api/admin/import/scrydex-canonical/route.ts` and `app/api/cron/sync-canonical/route.ts` both call `lib/admin/scrydex-canonical-import.ts` instead of treating another route as an internal API.
 
 ## Clerk Integration
 

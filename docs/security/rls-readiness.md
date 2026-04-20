@@ -459,7 +459,7 @@ The matrix below captures the verified pre-hardening baseline and the intended e
 - `npm run check:script-trust` fails if a security-sensitive script is unclassified, if its actual trust signals drift from the contract, or if the contract claims service-role usage that the script does not actually perform.
 - The contract currently covers four broad classes:
   - linked-schema/bootstrap scripts: `scripts/check-linked-db-prereqs.mjs`, `scripts/check-supabase-security.mjs`, `scripts/verify-phase1-rls.mjs`
-  - manual admin route drivers: `scripts/import-all-scrydex-canonical.mjs`, `scripts/import-all-pokemontcg-canonical.mjs`, `scripts/import-pokemontcg.ps1`
+  - manual admin route drivers: `scripts/import-all-scrydex-canonical.mjs`
   - manual cron/debug route drivers and hybrids: `scripts/backfill-unpriced-sets.mjs`, `scripts/run-live-normalizer-smoke.mjs`, `scripts/sweep-justtcg-finish-repair.mjs`, plus a few explicitly marked deprecated legacy JustTCG drivers
   - direct service-role maintenance/report/diagnostic scripts: backfills, reports, diagnostics, and repair helpers that create a Supabase service-role client directly
 - Legacy scripts that still target the retired `sync-justtcg-prices` flow are explicitly marked `deprecated` in the contract instead of being treated as current operational paths.
@@ -489,7 +489,7 @@ The matrix below captures the verified pre-hardening baseline and the intended e
 - Current perimeter covered by that contract:
   - internal admin UI: `app/internal/admin/page.tsx`, `app/internal/admin/sign-in/page.tsx`, `app/internal/admin/actions.ts`, `app/internal/admin/(protected)/layout.tsx`, `app/internal/admin/(protected)/ebay-deletion-tasks/page.tsx`, `app/internal/admin/(protected)/ebay-deletion-tasks/actions.ts`
   - auth/middleware glue: `proxy.ts`, `lib/auth/clerk-enabled.ts`, `lib/auth/context.ts`, `lib/auth/require.ts`, `lib/auth/internal-admin-session-core.ts`, `lib/auth/internal-admin-session.ts`, `lib/auth/route-registry.ts`
-  - privileged package scripts: `check:security`, `check:security:doctor`, `check:security:invariants`, `check:security:schema`, `check:security:schema:local`, `verify:rls`, `verify:rls:linked`, `ebay:deletion-setup`, `env:pull-safe`, `sets:backfill-summaries`, `import:pokemontcg-all`, `import:scrydex-all`, `import:scrydex-missing-printings`, `report:set-efficiency`, `justtcg:repair-sweep`, `justtcg:backfill-live`, `watch:unknown-finishes`, `ai:refresh-embeddings`
+  - privileged package scripts: `check:security`, `check:security:doctor`, `check:security:invariants`, `check:security:schema`, `check:security:schema:local`, `verify:rls`, `verify:rls:linked`, `ebay:deletion-setup`, `env:pull-safe`, `sets:backfill-summaries`, `import:scrydex-all`, `import:scrydex-missing-printings`, `report:set-efficiency`, `justtcg:repair-sweep`, `justtcg:backfill-live`, `watch:unknown-finishes`, `ai:refresh-embeddings`
   - workflows: `.github/workflows/ci.yml`, `.github/workflows/psa-ingest-cron.yml`, `.github/workflows/supabase-migrations.yml`
 - Add a new privileged entrypoint safely:
   1. Decide whether it is really an entrypoint or just a shared helper that should stay behind an existing entrypoint.
@@ -565,19 +565,13 @@ The matrix below captures the verified pre-hardening baseline and the intended e
     - UI-backed: yes
     - `dbAdmin()`: indirect via `lib/ebay/deletion-review.ts`
   - `admin_secret` routes:
-    - `admin/import/pokemontcg-canonical`, `admin/import/scrydex-canonical`, `admin/import/printings`, `admin/psa-seeds`
+    - `admin/import/scrydex-canonical`, `admin/import/printings`, `admin/psa-seeds`
     - intended caller: manual admin/import/server-to-server tooling
     - auth: `requireAdmin(req)`
     - UI-backed: no
     - `dbAdmin()`: direct
-  - `admin_import_token` route:
-    - `admin/import/pokemontcg`
-    - intended caller: import automation using `ADMIN_IMPORT_TOKEN`
-    - auth: import-token bearer
-    - UI-backed: no
-    - `dbAdmin()`: indirect through `lib/admin/scrydex-canonical-import.ts`
   - `cron_secret` routes:
-    - `cron/ingest-fx-rates`, `cron/check-fx-rates-health`, `cron/ingest-justtcg-raw`, `cron/ingest-pokemontcg-raw`, `cron/normalize-justtcg-raw`, `cron/normalize-poketrace-raw`, `cron/normalize-pokemontcg-raw`, `cron/match-justtcg-normalized`, `cron/match-pokemontcg-normalized`, `cron/write-provider-timeseries`, `cron/run-justtcg-pipeline`, `cron/run-justtcg-retry`, `cron/run-scrydex-pipeline`, `cron/backfill-scrydex-price-history`, `cron/run-scrydex-2024plus-daily/[chunk]`, `cron/run-scrydex-retry`, `cron/run-poketrace-pipeline`, `cron/run-pokemontcg-pipeline`, `cron/process-provider-pipeline-jobs`, `cron/process-ebay-deletion-receipts`, `cron/sync-canonical`, `cron/sync-tcg-prices`, `cron/refresh-card-metrics`, `cron/refresh-card-embeddings`, `cron/capture-pricing-transparency`, `cron/capture-matching-quality`, `cron/snapshot-price-history`, `cron/refresh-derived-signals`, `cron/refresh-set-summaries`
+    - `cron/ingest-fx-rates`, `cron/check-fx-rates-health`, `cron/ingest-justtcg-raw`, `cron/ingest-pokemontcg-raw`, `cron/normalize-justtcg-raw`, `cron/normalize-poketrace-raw`, `cron/normalize-pokemontcg-raw`, `cron/match-justtcg-normalized`, `cron/match-pokemontcg-normalized`, `cron/write-provider-timeseries`, `cron/run-justtcg-pipeline`, `cron/run-justtcg-retry`, `cron/run-scrydex-pipeline`, `cron/backfill-scrydex-price-history`, `cron/run-scrydex-2024plus-daily/[chunk]`, `cron/run-scrydex-retry`, `cron/run-poketrace-pipeline`, `cron/run-pokemontcg-pipeline`, `cron/process-provider-pipeline-jobs`, `cron/process-ebay-deletion-receipts`, `cron/sync-canonical`, `cron/refresh-card-metrics`, `cron/refresh-card-embeddings`, `cron/capture-pricing-transparency`, `cron/capture-matching-quality`, `cron/snapshot-price-history`, `cron/refresh-derived-signals`, `cron/refresh-set-summaries`
     - intended caller: cron/internal automation only
     - auth: `requireCron(req)` (admin also accepted by the shared cron guard)
     - UI-backed: no
@@ -692,7 +686,7 @@ The matrix below captures the verified pre-hardening baseline and the intended e
 - route-to-route bridge policy:
   - keep routes for real network boundaries only: operator UI, external/manual admin tooling, cron invocation, or script targets
   - shared server logic belongs in `lib/`, not in one route importing or fetching another route just for reuse
-  - `lib/admin/scrydex-canonical-import.ts` now holds the canonical import implementation used by `admin/import/scrydex-canonical`, `admin/import/pokemontcg-canonical`, `admin/import/pokemontcg`, and `cron/sync-canonical`
+  - `lib/admin/scrydex-canonical-import.ts` now holds the canonical import implementation used by `admin/import/scrydex-canonical` and `cron/sync-canonical`
   - remaining justified bridge patterns in admin/cron/debug: none
 - Public write route rules:
   - add every `public` or `ingest` write route to `PUBLIC_WRITE_ROUTE_CONTRACTS` in `scripts/security-guardrails.config.mjs`

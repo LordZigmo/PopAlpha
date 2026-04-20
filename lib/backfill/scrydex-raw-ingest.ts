@@ -666,7 +666,7 @@ async function insertRawPayloadRow(params: {
   };
 }
 
-export async function runPokemonTcgRawIngest(opts: {
+export async function runScrydexRawIngest(opts: {
   setLimit?: number;
   providerSetId?: string | null;
   pageLimitPerSet?: number;
@@ -1213,16 +1213,4 @@ export async function runPokemonTcgRawIngest(opts: {
   }
 
   return result;
-}
-
-export async function runScrydexRawIngest(opts: {
-  setLimit?: number;
-  providerSetId?: string | null;
-  pageLimitPerSet?: number;
-  maxRequests?: number;
-  retryAttempts?: number;
-  retryBackoffMs?: number;
-  force?: boolean;
-} = {}): Promise<RawIngestResult> {
-  return runPokemonTcgRawIngest(opts);
 }

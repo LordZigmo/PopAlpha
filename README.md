@@ -135,8 +135,7 @@ Extending to new providers:
 
 ## Scrydex canonical importer (chunked, production-safe)
 
-Primary route: `POST /api/admin/import/scrydex-canonical`  
-Compatibility route: `POST /api/admin/import/pokemontcg-canonical` (shim to Scrydex)
+Primary route: `POST /api/admin/import/scrydex-canonical`
 
 Query params:
 - `pageStart` (default `1`)
@@ -184,13 +183,6 @@ supabase db push
 Security reminder:
 - Never expose `SUPABASE_SERVICE_ROLE_KEY` to the browser, client bundles, or public scripts.
 - Keep service role keys server-only (`.env.local`, Vercel server env vars, CI secrets).
-
-Local dataset importer:
-- Set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in `.env.local`.
-- Run:
-```bash
-node scripts/import-pokemon-tcg-data-local.mjs
-```
 
 Search suggest endpoint (manual check):
 - `GET /api/search/suggest?q=pikachu`
