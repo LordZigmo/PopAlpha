@@ -30,7 +30,6 @@
     "ebay:deletion-setup": "node scripts/ebay-deletion-setup.mjs",
     "justtcg:backfill-live": "node scripts/backfill-justtcg-live.mjs",
     "sets:backfill-summaries": "node scripts/backfill-set-summaries.mjs",
-    "import:pokemontcg-all": "node scripts/import-all-pokemontcg-canonical.mjs",
     "import:scrydex-all": "node scripts/import-all-scrydex-canonical.mjs",
     "import:scrydex-missing-printings": "node scripts/import-scrydex-canonical-direct.mjs --only-missing",
     "report:set-efficiency": "node scripts/report-set-efficiency.mjs",

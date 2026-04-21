@@ -21,7 +21,7 @@ export default function AdminImportRunner() {
     setRunning(true);
     setSummary(null);
     try {
-      const response = await fetch("/api/admin/import/pokemontcg", {
+      const response = await fetch("/api/admin/import/scrydex-canonical", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),

@@ -262,13 +262,6 @@ export const PRIVILEGED_PACKAGE_SCRIPT_CONTRACTS = {
     requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
     expectedCommandFragments: ["scripts/backfill-set-summaries.mjs"],
   }),
-  "import:pokemontcg-all": packageScriptContract({
-    target: "scripts/import-all-pokemontcg-canonical.mjs",
-    intendedCaller: "trusted operator driving the PokemonTCG admin import route",
-    trustModel: "manual_admin_route_driver_wrapper",
-    requiredTrustInputs: ["ADMIN_SECRET"],
-    expectedCommandFragments: ["scripts/import-all-pokemontcg-canonical.mjs"],
-  }),
   "import:scrydex-all": packageScriptContract({
     target: "scripts/import-all-scrydex-canonical.mjs",
     intendedCaller: "trusted operator driving the Scrydex admin import route",
@@ -683,14 +676,6 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
     expectedSignals: ["service_role_client"],
     usesServiceRole: true,
   }),
-  "scripts/import-all-pokemontcg-canonical.mjs": operationalScript({
-    classification: "manual_admin_route_driver",
-    executionMode: "manual_import",
-    intendedCaller: "trusted operator driving the PokemonTCG canonical admin import route",
-    requiredTrustInputs: ["ADMIN_SECRET"],
-    expectedSignals: ["admin_secret_route_driver"],
-    usesServiceRole: false,
-  }),
   "scripts/import-all-scrydex-canonical.mjs": operationalScript({
     classification: "manual_admin_route_driver",
     executionMode: "manual_import",
@@ -716,14 +701,6 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
     requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
     expectedSignals: ["service_role_client"],
     usesServiceRole: true,
-  }),
-  "scripts/import-pokemontcg.ps1": operationalScript({
-    classification: "manual_admin_route_driver",
-    executionMode: "manual_import",
-    intendedCaller: "trusted operator on Windows driving the PokemonTCG canonical admin import route",
-    requiredTrustInputs: ["ADMIN_SECRET"],
-    expectedSignals: ["admin_secret_route_driver"],
-    usesServiceRole: false,
   }),
   "scripts/import-scrydex-canonical-direct.mjs": operationalScript({
     classification: "service_role_import",
