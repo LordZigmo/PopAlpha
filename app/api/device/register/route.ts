@@ -1,16 +1,16 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require";
-import { dbAdmin } from "@/lib/db/admin";
+import { createServerSupabaseUserClient } from "@/lib/db/user";
 
 // Native iOS device token registration for APNs push.
 // Called by PushService on iOS after the OS hands us a device token
 // (see ios/PopAlphaApp/PushService.swift).
 //
-// Uses dbAdmin() because the iOS app sends a Clerk Bearer JWT that
-// Supabase RLS cannot validate (no JWT template configured). Since
-// requireUser() already verifies identity and every query filters by
-// clerk_user_id = auth.userId, this is equivalent in security to RLS.
-// Same pattern as /api/holdings/route.ts.
+// Uses the user-scoped Supabase client. Clerk is registered as a
+// third-party auth provider on this Supabase project, so the iOS
+// Bearer JWT validates and the owner-only RLS policies on
+// apns_device_tokens (keyed on requesting_clerk_user_id()) enforce
+// isolation.
 
 export const runtime = "nodejs";
 
@@ -66,7 +66,7 @@ export async function POST(req: Request) {
     }
 
     stage = "db-write";
-    const db = dbAdmin();
+    const db = await createServerSupabaseUserClient();
     const now = new Date().toISOString();
 
     // Delete-then-insert keyed by (clerk_user_id, device_token) so token
@@ -126,7 +126,7 @@ export async function DELETE(req: Request) {
   }
 
   try {
-    const db = dbAdmin();
+    const db = await createServerSupabaseUserClient();
     const { error } = await db
       .from("apns_device_tokens")
       .delete()

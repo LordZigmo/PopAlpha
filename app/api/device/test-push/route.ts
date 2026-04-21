@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require";
-import { dbAdmin } from "@/lib/db/admin";
+import { createServerSupabaseUserClient } from "@/lib/db/user";
 import {
   APNS_TERMINAL_REASONS,
   isApnsConfigured,
@@ -63,11 +63,9 @@ export async function POST(req: Request) {
     : "Push notifications are working — you're all set.";
 
   try {
-    // Same dbAdmin() rationale as /api/device/register — Supabase RLS
-    // can't validate Clerk Bearer JWTs from iOS; the requireUser() check
-    // above plus the explicit eq("clerk_user_id", auth.userId) filter
-    // give equivalent isolation.
-    const db = dbAdmin();
+    // User-scoped client — RLS on apns_device_tokens enforces that
+    // the caller can only read/update their own device rows.
+    const db = await createServerSupabaseUserClient();
 
     const { data: rows, error } = await db
       .from("apns_device_tokens")

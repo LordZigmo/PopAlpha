@@ -1,15 +1,19 @@
 /**
  * App user provisioning for authenticated users.
  *
- * Uses dbAdmin() because the iOS app sends a Clerk Bearer JWT that
- * Supabase RLS cannot validate (no JWT template configured on this
- * project). Every caller of these helpers gates on requireUser() first
- * and every query here filters by clerk_user_id explicitly — same
- * isolation guarantees RLS would provide. Matches the pattern used
- * by /api/holdings/route.ts and /api/device/register/route.ts.
+ * Uses the signed-in Clerk session token through the user-bound
+ * Supabase client. Clerk is registered as a third-party auth provider
+ * on this Supabase project, so the Clerk JWT is validated by Supabase
+ * and RLS policies on app_users (owner-only SELECT / INSERT / UPDATE
+ * keyed on requesting_clerk_user_id()) enforce isolation.
+ *
+ * Exception: isHandleTaken() needs visibility across *all* users to
+ * detect collisions. It calls the SECURITY DEFINER `is_handle_available`
+ * RPC, which safely bypasses RLS for that one yes/no lookup without
+ * leaking any other row data.
  */
 
-import { dbAdmin } from "@/lib/db/admin";
+import { createServerSupabaseUserClient } from "@/lib/db/user";
 
 export type AppUser = {
   clerk_user_id: string;
@@ -39,7 +43,7 @@ const APP_USER_SELECT =
  * Returns the full row (creates if missing, returns existing otherwise).
  */
 export async function ensureAppUser(clerkUserId: string): Promise<AppUser> {
-  const db = dbAdmin();
+  const db = await createServerSupabaseUserClient();
   const { data, error } = await db
     .from("app_users")
     .upsert({ clerk_user_id: clerkUserId }, { onConflict: "clerk_user_id" })
@@ -54,7 +58,7 @@ export async function ensureAppUser(clerkUserId: string): Promise<AppUser> {
  * Fetch an app_users row or null if it doesn't exist.
  */
 export async function getAppUser(clerkUserId: string): Promise<AppUser | null> {
-  const db = dbAdmin();
+  const db = await createServerSupabaseUserClient();
   const { data, error } = await db
     .from("app_users")
     .select(APP_USER_SELECT)
@@ -67,16 +71,22 @@ export async function getAppUser(clerkUserId: string): Promise<AppUser | null> {
 
 /**
  * Check whether a normalized handle is already taken.
+ *
+ * Uses the SECURITY DEFINER `is_handle_available` RPC instead of a
+ * direct SELECT, because the owner-only RLS policy on app_users would
+ * otherwise hide rows owned by OTHER users and report every handle as
+ * free. The RPC runs as its owner, safely sees all rows for just the
+ * boolean check, and leaks no other column data.
  */
 export async function isHandleTaken(handleNorm: string): Promise<boolean> {
-  const db = dbAdmin();
-  const { count, error } = await db
-    .from("app_users")
-    .select("*", { count: "exact", head: true })
-    .eq("handle_norm", handleNorm);
+  const db = await createServerSupabaseUserClient();
+  const { data, error } = await db
+    .rpc("is_handle_available", { desired_handle_norm: handleNorm });
 
   if (error) throw new Error(`isHandleTaken failed: ${error.message}`);
-  return (count ?? 0) > 0;
+  // RPC returns TRUE when the handle is AVAILABLE — invert for our
+  // "is taken" semantics.
+  return data === false;
 }
 
 /**
@@ -91,7 +101,7 @@ export async function claimHandle(
   handle: string,
   handleNorm: string,
 ): Promise<AppUser | null> {
-  const db = dbAdmin();
+  const db = await createServerSupabaseUserClient();
   try {
     const { data, error } = await db
       .from("app_users")
@@ -136,7 +146,7 @@ export async function updateAppProfile(
     profileVisibility?: "PUBLIC" | "PRIVATE";
   },
 ): Promise<AppUser | null> {
-  const db = dbAdmin();
+  const db = await createServerSupabaseUserClient();
   const payload: Record<string, unknown> = {};
 
   if (typeof updates.handle === "string") payload.handle = updates.handle;
