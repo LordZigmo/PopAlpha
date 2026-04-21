@@ -6,10 +6,18 @@ import SwiftUI
 // holdings). Headline value + change track the chart in real time —
 // drag to scrub through any day in the past 30.
 
+/// Cost-basis completeness signal shown below the hero stats so the
+/// P&L number is honest. Nil means "don't render the badge".
+struct CostBasisGap: Equatable {
+    let positionsMissingCost: Int
+    let totalPositions: Int
+}
+
 struct PortfolioHeroView: View {
     let summary: PortfolioSummary
     let handle: String?
     @Binding var selectedWindow: TimeWindow
+    var costBasisGap: CostBasisGap? = nil
 
     @State private var scrubIndex: Int? = nil
 
@@ -93,6 +101,13 @@ struct PortfolioHeroView: View {
             // Stats row
             statsRow
 
+            // Honest P&L disclosure: when some positions are missing
+            // cost basis, surface a subtle badge so the change number
+            // above isn't misread as a full-portfolio P&L.
+            if let gap = costBasisGap, gap.positionsMissingCost > 0 {
+                costBasisBadge(gap)
+            }
+
             // AI summary (only when populated)
             if !summary.aiSummary.isEmpty {
                 Text(summary.aiSummary)
@@ -139,6 +154,28 @@ struct PortfolioHeroView: View {
                 .foregroundStyle(PA.Colors.muted)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - Cost-basis completeness badge
+
+    private func costBasisBadge(_ gap: CostBasisGap) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "info.circle")
+                .font(.system(size: 10, weight: .semibold))
+            Text("\(gap.positionsMissingCost) of \(gap.totalPositions) positions missing cost basis")
+                .font(PA.Typography.caption)
+            Text("· P&L is partial")
+                .font(PA.Typography.caption)
+                .foregroundStyle(PA.Colors.muted.opacity(0.8))
+        }
+        .foregroundStyle(PA.Colors.muted)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(PA.Colors.surfaceSoft.opacity(0.5))
+        .clipShape(Capsule())
+        .overlay(
+            Capsule().stroke(PA.Colors.borderLight, lineWidth: 0.5)
+        )
     }
 
     // MARK: - Formatting

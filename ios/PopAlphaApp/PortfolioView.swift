@@ -16,6 +16,10 @@ struct PortfolioView: View {
 
     // Card detail navigation
     @State private var selectedCard: MarketCard?
+    // Tapped lot row opens the edit sheet — lets users retroactively
+    // add cost basis, bump qty, fix grade, etc. Nil when closed;
+    // setting to a HoldingRow auto-presents the sheet.
+    @State private var editingLot: HoldingRow?
 
     // Positions list view mode (table rows vs card grid)
     @State private var positionsViewMode: PositionsViewMode = .list
@@ -48,6 +52,23 @@ struct PortfolioView: View {
     /// True when the overview API returned full analysis (>= 3 holdings).
     private var hasFullAnalysis: Bool {
         overview?.minimal == false
+    }
+
+    /// Count of positions (grouped holdings) that have at least one lot
+    /// with no recorded cost basis. Surfaces as a subtle "X of Y
+    /// missing cost basis" badge on the hero so the displayed P&L is
+    /// read in the right context. Nil-guard returns no badge when
+    /// there are no positions yet.
+    private var costBasisGap: CostBasisGap? {
+        guard !positions.isEmpty else { return nil }
+        let missing = positions.filter { pos in
+            pos.lots.contains { $0.pricePaidUsd == nil }
+        }.count
+        guard missing > 0 else { return nil }
+        return CostBasisGap(
+            positionsMissingCost: missing,
+            totalPositions: positions.count,
+        )
     }
 
     var body: some View {
@@ -95,6 +116,15 @@ struct PortfolioView: View {
                 AddHoldingSheet {
                     Task { await loadPortfolio() }
                 }
+            }
+            .sheet(item: $editingLot) { lot in
+                EditHoldingLotSheet(
+                    lot: lot,
+                    cardName: lot.canonicalSlug.flatMap { overview?.cardMetadata?[$0]?.name },
+                    onSaved: {
+                        Task { await loadPortfolio() }
+                    }
+                )
             }
             .navigationDestination(item: $selectedCard) { card in
                 CardDetailView(card: card)
@@ -167,7 +197,8 @@ struct PortfolioView: View {
                 PortfolioHeroView(
                     summary: summary,
                     handle: auth.currentHandle ?? auth.currentFirstName,
-                    selectedWindow: $selectedWindow
+                    selectedWindow: $selectedWindow,
+                    costBasisGap: costBasisGap
                 )
 
                 // While the user hasn't reached the analysis threshold,
@@ -212,7 +243,8 @@ struct PortfolioView: View {
                                         PortfolioPositionCell(
                                             position: position,
                                             metadata: position.canonicalSlug.flatMap { overview?.cardMetadata?[$0] },
-                                            onTap: { selectedCard = cardFor(position: position) }
+                                            onTap: { selectedCard = cardFor(position: position) },
+                                            onLotTap: { lot in editingLot = lot }
                                         )
                                     }
                                 }

@@ -92,3 +92,121 @@ export async function POST(req: Request) {
   }
   return NextResponse.json({ ok: true });
 }
+
+// ── PATCH /api/holdings — partial update of an existing lot ────────────────
+//
+// Accepts { id, ...changes }. Every field other than id is optional;
+// presence (including explicit null for price_paid_usd) means "set to
+// this value", absence means "leave untouched". Scoped by owner_clerk_id
+// so a user can't patch a row they don't own even if they guess an id.
+
+export async function PATCH(req: Request) {
+  const auth = await requireUser(req);
+  if (!auth.ok) return auth.response;
+
+  let body: Record<string, unknown>;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ ok: false, error: "Invalid JSON." }, { status: 400 });
+  }
+
+  const id = typeof body.id === "number" ? Math.floor(body.id) : NaN;
+  if (!Number.isFinite(id) || id <= 0) {
+    return NextResponse.json({ ok: false, error: "id must be a positive integer." }, { status: 400 });
+  }
+
+  // Build the update payload out of only the keys the caller actually
+  // sent. `"price_paid_usd" in body` distinguishes "field omitted"
+  // (leave alone) from "field set to null" (clear cost basis).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const update: Record<string, any> = {};
+
+  if ("grade" in body) {
+    if (typeof body.grade !== "string" || !body.grade.trim()) {
+      return NextResponse.json({ ok: false, error: "grade must be a non-empty string." }, { status: 400 });
+    }
+    update.grade = body.grade.trim();
+  }
+
+  if ("qty" in body) {
+    if (typeof body.qty !== "number" || !Number.isFinite(body.qty) || body.qty < 1) {
+      return NextResponse.json({ ok: false, error: "qty must be a positive integer." }, { status: 400 });
+    }
+    update.qty = Math.floor(body.qty);
+  }
+
+  if ("price_paid_usd" in body) {
+    if (body.price_paid_usd === null) {
+      update.price_paid_usd = null;
+    } else if (typeof body.price_paid_usd === "number" && body.price_paid_usd >= 0) {
+      update.price_paid_usd = body.price_paid_usd;
+    } else {
+      return NextResponse.json(
+        { ok: false, error: "price_paid_usd must be a non-negative number or null." },
+        { status: 400 },
+      );
+    }
+  }
+
+  if ("acquired_on" in body) {
+    if (body.acquired_on === null || body.acquired_on === "") {
+      update.acquired_on = null;
+    } else if (typeof body.acquired_on === "string") {
+      update.acquired_on = body.acquired_on;
+    } else {
+      return NextResponse.json(
+        { ok: false, error: "acquired_on must be a date string or null." },
+        { status: 400 },
+      );
+    }
+  }
+
+  if ("venue" in body) {
+    if (body.venue === null || body.venue === "") {
+      update.venue = null;
+    } else if (typeof body.venue === "string") {
+      update.venue = body.venue.trim() || null;
+    } else {
+      return NextResponse.json({ ok: false, error: "venue must be a string or null." }, { status: 400 });
+    }
+  }
+
+  if ("cert_number" in body) {
+    if (body.cert_number === null || body.cert_number === "") {
+      update.cert_number = null;
+    } else if (typeof body.cert_number === "string") {
+      update.cert_number = body.cert_number.trim() || null;
+    } else {
+      return NextResponse.json(
+        { ok: false, error: "cert_number must be a string or null." },
+        { status: 400 },
+      );
+    }
+  }
+
+  if (Object.keys(update).length === 0) {
+    return NextResponse.json(
+      { ok: false, error: "No updatable fields provided." },
+      { status: 400 },
+    );
+  }
+
+  const supabase = dbAdmin();
+  const { error, count } = await supabase
+    .from("holdings")
+    .update(update, { count: "exact" })
+    .eq("id", id)
+    .eq("owner_clerk_id", auth.userId);
+
+  if (error) {
+    console.error("[holdings PATCH]", error.message);
+    return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+  }
+  if ((count ?? 0) === 0) {
+    // Row didn't exist OR belonged to another user. 404 rather than 403
+    // so we don't leak existence of other users' rows.
+    return NextResponse.json({ ok: false, error: "Holding not found." }, { status: 404 });
+  }
+  return NextResponse.json({ ok: true });
+}

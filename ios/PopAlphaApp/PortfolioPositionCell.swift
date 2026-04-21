@@ -7,6 +7,10 @@ struct PortfolioPositionCell: View {
     let position: Position
     var metadata: APICardMetadata? = nil
     var onTap: (() -> Void)? = nil
+    /// Called when the user taps an individual lot row in the
+    /// disclosure. Parent opens EditHoldingLotSheet with that lot so
+    /// cost basis / qty / grade etc. can be retroactively corrected.
+    var onLotTap: ((HoldingRow) -> Void)? = nil
 
     @State private var isExpanded = false
 
@@ -187,48 +191,76 @@ struct PortfolioPositionCell: View {
     // MARK: - Lot Row
 
     private func lotRow(_ lot: HoldingRow) -> some View {
-        HStack(spacing: 10) {
-            Circle()
-                .fill(PA.Colors.surfaceSoft)
-                .frame(width: 6, height: 6)
+        // Whole row is a button so tapping an individual lot opens the
+        // edit sheet. If the caller didn't wire `onLotTap`, render a
+        // read-only row instead of a dead button.
+        Button {
+            PAHaptics.tap()
+            onLotTap?(lot)
+        } label: {
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(PA.Colors.surfaceSoft)
+                    .frame(width: 6, height: 6)
 
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text("×\(lot.qty)")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(PA.Colors.text)
-                    Text("@ \(lot.formattedCost)")
-                        .font(.system(size: 13))
-                        .foregroundStyle(PA.Colors.textSecondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text("×\(lot.qty)")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(PA.Colors.text)
+                        Text("@ \(lot.formattedCost)")
+                            .font(.system(size: 13))
+                            .foregroundStyle(PA.Colors.textSecondary)
+                        // Inline hint when this lot is missing cost —
+                        // nudges the user toward tapping to add it.
+                        if lot.pricePaidUsd == nil {
+                            Text("Add cost")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(PA.Colors.accent)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(PA.Colors.accent.opacity(0.12))
+                                .clipShape(Capsule())
+                        }
+                    }
+
+                    HStack(spacing: 8) {
+                        if let date = lot.acquiredOn {
+                            Text(date)
+                                .font(.system(size: 11))
+                                .foregroundStyle(PA.Colors.muted)
+                        }
+                        if let venue = lot.venue {
+                            Text(venue)
+                                .font(.system(size: 11))
+                                .foregroundStyle(PA.Colors.muted)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(PA.Colors.surfaceSoft)
+                                .clipShape(Capsule())
+                        }
+                        if let cert = lot.certNumber {
+                            Text("PSA #\(cert)")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(PA.Colors.accent.opacity(0.8))
+                        }
+                    }
                 }
 
-                HStack(spacing: 8) {
-                    if let date = lot.acquiredOn {
-                        Text(date)
-                            .font(.system(size: 11))
-                            .foregroundStyle(PA.Colors.muted)
-                    }
-                    if let venue = lot.venue {
-                        Text(venue)
-                            .font(.system(size: 11))
-                            .foregroundStyle(PA.Colors.muted)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(PA.Colors.surfaceSoft)
-                            .clipShape(Capsule())
-                    }
-                    if let cert = lot.certNumber {
-                        Text("PSA #\(cert)")
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(PA.Colors.accent.opacity(0.8))
-                    }
+                Spacer()
+
+                if onLotTap != nil {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(PA.Colors.muted)
                 }
             }
-
-            Spacer()
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .buttonStyle(.plain)
+        .disabled(onLotTap == nil)
     }
 
     // MARK: - Helpers

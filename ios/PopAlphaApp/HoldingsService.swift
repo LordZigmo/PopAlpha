@@ -60,25 +60,39 @@ actor HoldingsService {
 
     // MARK: - Update
 
-    /// Update an existing holding (partial update)
+    /// Full replace of the user-editable fields on a single holding.
+    /// The edit-sheet UX hands the user current values for every field;
+    /// submitting replays all of them to the server. Nil/empty on the
+    /// nullable fields means "clear on the server" (stores NULL).
+    ///
+    /// Use this when the caller has all current values in hand. For a
+    /// surgical single-field update, build the PATCH body directly.
     func updateHolding(
         id: Int,
-        grade: String? = nil,
-        qty: Int? = nil,
-        pricePaidUsd: Double? = nil,
-        acquiredOn: String? = nil,
-        venue: String? = nil,
-        certNumber: String? = nil
+        grade: String,
+        qty: Int,
+        pricePaidUsd: Double?,
+        acquiredOn: String?,
+        venue: String?,
+        certNumber: String?
     ) async throws {
         try AuthService.shared.requireAuth()
 
-        var body: [String: Any] = ["id": id]
-        if let grade { body["grade"] = grade }
-        if let qty { body["qty"] = qty }
-        if let pricePaidUsd { body["price_paid_usd"] = pricePaidUsd }
-        if let acquiredOn { body["acquired_on"] = acquiredOn }
-        if let venue { body["venue"] = venue }
-        if let certNumber { body["cert_number"] = certNumber }
+        // Always send all editable fields. NSNull() for Swift nil so
+        // the server distinguishes "explicit clear" from "omitted" —
+        // PATCH treats `"field" in body` as the update signal.
+        var body: [String: Any] = [
+            "id": id,
+            "grade": grade,
+            "qty": qty,
+            "price_paid_usd": pricePaidUsd as Any? ?? NSNull(),
+            "acquired_on": (acquiredOn?.isEmpty == false ? acquiredOn! : NSNull()) as Any,
+            "venue": (venue?.isEmpty == false ? venue! : NSNull()) as Any,
+            "cert_number": (certNumber?.isEmpty == false ? certNumber! : NSNull()) as Any,
+        ]
+        // `pricePaidUsd as Any? ?? NSNull()` evaluates a double-optional,
+        // so collapse it to a concrete value here for JSONSerialization.
+        if pricePaidUsd == nil { body["price_paid_usd"] = NSNull() }
 
         let _: SimpleOKResponse = try await APIClient.patch(
             path: "/api/holdings",
