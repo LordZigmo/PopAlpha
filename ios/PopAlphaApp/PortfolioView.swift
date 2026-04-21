@@ -8,6 +8,7 @@ struct PortfolioView: View {
     @State private var isLoading = true
     @State private var error: String?
     @State private var showAddSheet = false
+    @State private var showImportSheet = false
     @State private var selectedWindow: TimeWindow = .day
 
     // Enriched data from /api/portfolio/overview
@@ -93,8 +94,17 @@ struct PortfolioView: View {
             .toolbar {
                 if auth.isAuthenticated {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            showAddSheet = true
+                        Menu {
+                            Button {
+                                showAddSheet = true
+                            } label: {
+                                Label("Add Card", systemImage: "plus.circle")
+                            }
+                            Button {
+                                showImportSheet = true
+                            } label: {
+                                Label("Import CSV", systemImage: "square.and.arrow.down")
+                            }
                         } label: {
                             Image(systemName: "plus")
                                 .font(.system(size: 14, weight: .semibold))
@@ -114,6 +124,11 @@ struct PortfolioView: View {
             }
             .sheet(isPresented: $showAddSheet) {
                 AddHoldingSheet {
+                    Task { await loadPortfolio() }
+                }
+            }
+            .sheet(isPresented: $showImportSheet) {
+                BulkImportSheet {
                     Task { await loadPortfolio() }
                 }
             }

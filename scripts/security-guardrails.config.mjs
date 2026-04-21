@@ -19,6 +19,7 @@ export const DBADMIN_ALLOWED_FILES = [
   "app/api/cards/[slug]/view/route.ts",
   "app/api/ebay/deletion-notification/route.ts",
   "app/api/holdings/route.ts",
+  "app/api/holdings/bulk-import/route.ts",
   "app/api/personalization/events/route.ts",
   "app/api/personalization/explanation/route.ts",
   "app/api/personalization/profile/route.ts",
@@ -32,6 +33,7 @@ export const DBADMIN_ALLOWED_FILES = [
 export const DBADMIN_ALLOWED_ROUTE_KEYS = [
   "cards/[slug]/view",
   "holdings",
+  "holdings/bulk-import",
   "personalization/events",
   "personalization/explanation",
   "personalization/profile",

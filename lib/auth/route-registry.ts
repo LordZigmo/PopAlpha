@@ -111,6 +111,7 @@ export const USER_ROUTES = [
   "private-sales/[id]",
   "pro/signals",
   "holdings",
+  "holdings/bulk-import",
   "holdings/summary",
   "portfolio/overview",
   "portfolio/activity",
