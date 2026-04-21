@@ -27,12 +27,14 @@ actor HoldingsService {
 
     // MARK: - Add
 
-    /// Add a new lot to the portfolio
+    /// Add a new lot to the portfolio.
+    /// `pricePaidUsd` is optional — omit for holdings whose cost basis
+    /// the user doesn't remember. Server stores NULL in that case.
     func addHolding(
         canonicalSlug: String,
         grade: String,
         qty: Int,
-        pricePaidUsd: Double,
+        pricePaidUsd: Double? = nil,
         acquiredOn: String? = nil,
         venue: String? = nil,
         certNumber: String? = nil
@@ -43,8 +45,8 @@ actor HoldingsService {
             "canonical_slug": canonicalSlug,
             "grade": grade,
             "qty": qty,
-            "price_paid_usd": pricePaidUsd
         ]
+        if let pricePaidUsd { body["price_paid_usd"] = pricePaidUsd }
         if let acquiredOn { body["acquired_on"] = acquiredOn }
         if let venue { body["venue"] = venue }
         if let certNumber { body["cert_number"] = certNumber }

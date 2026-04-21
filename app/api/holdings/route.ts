@@ -47,7 +47,11 @@ export async function POST(req: Request) {
   const printing_id = typeof body.printing_id === "string" ? body.printing_id.trim() || null : null;
   const grade = typeof body.grade === "string" ? body.grade.trim() : "";
   const qty = typeof body.qty === "number" ? Math.floor(body.qty) : 0;
-  const price_paid_usd = typeof body.price_paid_usd === "number" ? body.price_paid_usd : -1;
+  // price_paid_usd is optional — users often don't remember what they
+  // paid for older cards. NULL means "unknown cost basis" rather than
+  // "paid $0", so we preserve that distinction all the way through.
+  const price_paid_usd =
+    typeof body.price_paid_usd === "number" ? body.price_paid_usd : null;
   const acquired_on = typeof body.acquired_on === "string" && body.acquired_on ? body.acquired_on : null;
   const venue = typeof body.venue === "string" && body.venue ? body.venue.trim() : null;
   const cert_number = typeof body.cert_number === "string" && body.cert_number.trim()
@@ -63,7 +67,9 @@ export async function POST(req: Request) {
   if (qty < 1) {
     return NextResponse.json({ ok: false, error: "qty must be at least 1." }, { status: 400 });
   }
-  if (price_paid_usd < 0) {
+  // Only validate when the user actually provided a price. Null is
+  // fine — "I don't remember".
+  if (price_paid_usd !== null && price_paid_usd < 0) {
     return NextResponse.json({ ok: false, error: "price_paid_usd must be >= 0." }, { status: 400 });
   }
 

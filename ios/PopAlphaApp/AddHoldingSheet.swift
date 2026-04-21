@@ -35,7 +35,19 @@ struct AddHoldingSheet: View {
     @FocusState private var searchFocused: Bool
 
     private var isValid: Bool {
-        selectedCard != nil && quantity >= 1 && (Double(pricePaid) ?? -1) >= 0
+        // Price paid is optional — users can add cards they owned for
+        // years without remembering the purchase price. Only validate
+        // format when they actually typed something.
+        let priceOk: Bool
+        let trimmed = pricePaid.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty {
+            priceOk = true
+        } else if let parsed = Double(trimmed), parsed >= 0 {
+            priceOk = true
+        } else {
+            priceOk = false
+        }
+        return selectedCard != nil && quantity >= 1 && priceOk
     }
 
     var body: some View {
@@ -281,9 +293,14 @@ struct AddHoldingSheet: View {
 
     private var priceSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Price Paid (per card)")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(PA.Colors.muted)
+            HStack(spacing: 6) {
+                Text("Price Paid (per card)")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(PA.Colors.muted)
+                Text("· optional")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(PA.Colors.muted.opacity(0.7))
+            }
 
             HStack(spacing: 8) {
                 Text("$")
@@ -298,6 +315,10 @@ struct AddHoldingSheet: View {
             .padding(12)
             .background(PA.Colors.surfaceSoft)
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            Text("Leave blank if you don't remember. You can add it later.")
+                .font(.system(size: 11))
+                .foregroundStyle(PA.Colors.muted)
         }
     }
 
@@ -375,7 +396,21 @@ struct AddHoldingSheet: View {
     }
 
     private func saveHolding() async {
-        guard let card = selectedCard, let price = Double(pricePaid), price >= 0 else { return }
+        guard let card = selectedCard else { return }
+
+        // Price paid is optional. Empty string → nil (server stores
+        // NULL). Bad input bails silently — isValid already prevents
+        // the submit button from enabling in that case.
+        let trimmedPrice = pricePaid.trimmingCharacters(in: .whitespaces)
+        let parsedPrice: Double?
+        if trimmedPrice.isEmpty {
+            parsedPrice = nil
+        } else if let p = Double(trimmedPrice), p >= 0 {
+            parsedPrice = p
+        } else {
+            return
+        }
+
         isSaving = true
         saveError = nil
 
@@ -387,7 +422,7 @@ struct AddHoldingSheet: View {
                 canonicalSlug: card.canonicalSlug,
                 grade: selectedGrade.rawValue,
                 qty: quantity,
-                pricePaidUsd: price,
+                pricePaidUsd: parsedPrice,
                 acquiredOn: dateStr,
                 venue: venue.isEmpty ? nil : venue,
                 certNumber: certToSend

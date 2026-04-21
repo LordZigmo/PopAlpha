@@ -8,17 +8,26 @@ struct HoldingRow: Decodable, Identifiable, Hashable {
     let printingId: String?
     let grade: String
     let qty: Int
-    let pricePaidUsd: Double
+    /// Optional — users can add a card without recording what they
+    /// paid. nil means "unknown cost basis" and is treated as zero
+    /// when summing for position-level totals (same convention as
+    /// the server-side `?? 0` coercion), while the per-lot display
+    /// shows "—" instead of "$0.00" to preserve the distinction.
+    let pricePaidUsd: Double?
     let acquiredOn: String?
     let venue: String?
     let certNumber: String?
 
     var formattedCost: String {
-        "$\(String(format: "%.2f", pricePaidUsd))"
+        guard let price = pricePaidUsd else { return "—" }
+        return "$\(String(format: "%.2f", price))"
     }
 
+    /// Used by Position aggregation; nil cost counts as 0 here so a
+    /// position mixing known and unknown lots still produces a
+    /// sensible partial total.
     var totalCost: Double {
-        pricePaidUsd * Double(qty)
+        (pricePaidUsd ?? 0) * Double(qty)
     }
 
     // Supabase may serialize bigint as string and numeric as string.
@@ -51,13 +60,16 @@ struct HoldingRow: Decodable, Identifiable, Hashable {
             qty = 1
         }
 
-        // pricePaidUsd: may arrive as Double or String
+        // pricePaidUsd: may arrive as Double, String, or null/missing.
+        // null/missing is preserved (see the property comment) — do NOT
+        // substitute 0, because "unknown cost" and "$0 cost" are
+        // different things to the user.
         if let dblPrice = try? c.decode(Double.self, forKey: .pricePaidUsd) {
             pricePaidUsd = dblPrice
         } else if let strPrice = try? c.decode(String.self, forKey: .pricePaidUsd), let parsed = Double(strPrice) {
             pricePaidUsd = parsed
         } else {
-            pricePaidUsd = 0
+            pricePaidUsd = nil
         }
 
         acquiredOn = try c.decodeIfPresent(String.self, forKey: .acquiredOn)
