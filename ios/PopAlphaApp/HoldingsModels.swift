@@ -2,6 +2,18 @@ import Foundation
 
 // MARK: - Holdings Models (matches /api/holdings response)
 
+/// How a lot was added to the portfolio. Server stores as a plain
+/// text column with a check constraint; iOS mirrors as an enum for
+/// type-safe dispatch (e.g. showing an "Imported" chip on CSV lots).
+enum HoldingSource: String, Decodable, Hashable {
+    case manual
+    case csvImport = "csv_import"
+    case scanner
+
+    /// Fallback for unknown future values so the decoder never throws.
+    static let unknownFallback: HoldingSource = .manual
+}
+
 struct HoldingRow: Decodable, Identifiable, Hashable {
     let id: Int
     let canonicalSlug: String?
@@ -17,6 +29,11 @@ struct HoldingRow: Decodable, Identifiable, Hashable {
     let acquiredOn: String?
     let venue: String?
     let certNumber: String?
+    /// Provenance: how this lot entered the portfolio. "manual" for
+    /// AddHoldingSheet, "csv_import" for bulk CSV import, "scanner"
+    /// reserved for future camera-capture flows. Defaults to "manual"
+    /// in the DB so all historical rows retain their semantics.
+    let source: HoldingSource
 
     var formattedCost: String {
         guard let price = pricePaidUsd else { return "—" }
@@ -33,7 +50,7 @@ struct HoldingRow: Decodable, Identifiable, Hashable {
     // Supabase may serialize bigint as string and numeric as string.
     // This custom decoder handles both representations.
     private enum CodingKeys: String, CodingKey {
-        case id, canonicalSlug, printingId, grade, qty, pricePaidUsd, acquiredOn, venue, certNumber
+        case id, canonicalSlug, printingId, grade, qty, pricePaidUsd, acquiredOn, venue, certNumber, source
     }
 
     init(from decoder: Decoder) throws {
@@ -75,6 +92,16 @@ struct HoldingRow: Decodable, Identifiable, Hashable {
         acquiredOn = try c.decodeIfPresent(String.self, forKey: .acquiredOn)
         venue = try c.decodeIfPresent(String.self, forKey: .venue)
         certNumber = try c.decodeIfPresent(String.self, forKey: .certNumber)
+
+        // Tolerate missing column (older API / cached response) or
+        // unrecognized enum values (future-forward) by falling back to
+        // manual. Matches the DB default so behavior stays predictable.
+        if let raw = try? c.decodeIfPresent(String.self, forKey: .source),
+           let parsed = HoldingSource(rawValue: raw) {
+            source = parsed
+        } else {
+            source = HoldingSource.unknownFallback
+        }
     }
 }
 

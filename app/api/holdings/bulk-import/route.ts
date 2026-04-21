@@ -42,6 +42,7 @@ type InsertPayload = {
   acquired_on: string | null;
   venue: string | null;
   cert_number: string | null;
+  source: "csv_import";
 };
 
 function toStringOrNull(value: unknown, maxLength: number): string | null {
@@ -129,6 +130,9 @@ export async function POST(req: Request) {
       acquired_on: toStringOrNull(row.acquired_on, 32),
       venue: toStringOrNull(row.venue, 128),
       cert_number: toStringOrNull(row.cert_number, 64),
+      // Every row inserted through this endpoint is flagged so the iOS
+      // client can surface a subtle "Imported" chip on those lots.
+      source: "csv_import",
     });
   });
 

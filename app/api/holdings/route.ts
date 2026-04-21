@@ -18,7 +18,7 @@ export async function GET(req: Request) {
   const supabase = dbAdmin();
   const { data, error } = await supabase
     .from("holdings")
-    .select("id, canonical_slug, printing_id, grade, qty, price_paid_usd, acquired_on, venue, cert_number")
+    .select("id, canonical_slug, printing_id, grade, qty, price_paid_usd, acquired_on, venue, cert_number, source")
     .eq("owner_clerk_id", auth.userId)
     .order("created_at", { ascending: false });
 

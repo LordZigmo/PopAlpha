@@ -475,6 +475,22 @@ struct BulkImportPreviewView: View {
     @State private var isImporting = false
     @State private var importError: String?
 
+    // Live progress during commit. Chunk-based: we split the ready
+    // payload into groups of IMPORT_CHUNK_SIZE and POST each group
+    // serially, updating the counter as each chunk acks.
+    @State private var importedSoFar: Int = 0
+    @State private var totalToImport: Int = 0
+
+    // Row the user tapped to re-match — when non-nil the match-picker
+    // sheet is presented. Binding-based update replaces the row's
+    // `resolved` / `resolutionState` in place.
+    @State private var editingRowIndex: Int?
+
+    /// Chunk size for the bulk POST. Small enough to feel responsive
+    /// even on slow connections (~1s per chunk at 100 rows), large
+    /// enough that a 500-row import is at most 5 round trips.
+    private static let importChunkSize = 100
+
     init(initialRows: [BulkImportRow], onImported: @escaping () -> Void) {
         self.initialRows = initialRows
         self.onImported = onImported
@@ -506,8 +522,8 @@ struct BulkImportPreviewView: View {
             ScrollView {
                 LazyVStack(spacing: 10) {
                     progressCard
-                    ForEach($rows) { $row in
-                        rowCard($row)
+                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, _ in
+                        rowCard(index: index, row: $rows[index])
                     }
 
                     if let importError {
@@ -534,6 +550,40 @@ struct BulkImportPreviewView: View {
         .task {
             await resolveAll()
         }
+        // Match-picker sheet: opened by tapping "Change match" on any
+        // row. Presents a mini search field + results list; picking a
+        // result patches the row's `resolved` in place.
+        .sheet(item: Binding(
+            get: { editingRowIndex.flatMap { idx in
+                rows.indices.contains(idx) ? IndexedID(id: rows[idx].id, index: idx) : nil
+            } },
+            set: { if $0 == nil { editingRowIndex = nil } },
+        )) { wrapper in
+            MatchPickerSheet(
+                initialQuery: matchPickerInitialQuery(for: wrapper.index),
+                current: rows[wrapper.index].resolved,
+            ) { picked in
+                if rows.indices.contains(wrapper.index) {
+                    rows[wrapper.index].resolved = picked
+                    rows[wrapper.index].resolutionState = .resolved
+                    rows[wrapper.index].isIncluded = true
+                }
+                editingRowIndex = nil
+            }
+        }
+    }
+
+    /// Identifiable wrapper for the sheet(item:) binding so SwiftUI
+    /// knows when to re-present across different rows.
+    private struct IndexedID: Identifiable, Hashable {
+        let id: UUID
+        let index: Int
+    }
+
+    private func matchPickerInitialQuery(for index: Int) -> String {
+        guard rows.indices.contains(index) else { return "" }
+        let r = rows[index]
+        return [r.name, r.set].filter { !$0.isEmpty }.joined(separator: " ")
     }
 
     // MARK: - Progress
@@ -585,11 +635,11 @@ struct BulkImportPreviewView: View {
     // MARK: - Per-row card
 
     @ViewBuilder
-    private func rowCard(_ row: Binding<BulkImportRow>) -> some View {
+    private func rowCard(index: Int, row: Binding<BulkImportRow>) -> some View {
         let r = row.wrappedValue
-        let tappable = r.resolutionState == .resolved
+        let hasMatch = r.resolved != nil
         HStack(alignment: .top, spacing: 10) {
-            // Include toggle
+            // Include toggle — disabled until resolution settles
             Button {
                 row.wrappedValue.isIncluded.toggle()
             } label: {
@@ -598,14 +648,14 @@ struct BulkImportPreviewView: View {
                     .foregroundStyle(r.isIncluded ? PA.Colors.accent : PA.Colors.muted)
             }
             .buttonStyle(.plain)
-            .disabled(!tappable)
+            .disabled(!hasMatch)
 
             // Thumbnail (resolved)
             thumbnail(for: r)
                 .frame(width: 36, height: 50)
 
             // Labels
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
                     Text(r.resolved?.canonicalName ?? r.name)
                         .font(.system(size: 13, weight: .semibold))
@@ -619,14 +669,38 @@ struct BulkImportPreviewView: View {
                     .font(.system(size: 11))
                     .foregroundStyle(PA.Colors.muted)
                     .lineLimit(1)
-                stateChip(for: r)
+
+                HStack(spacing: 6) {
+                    stateChip(for: r)
+                    // Change-match action. Always tappable (users
+                    // sometimes want to re-match even a confident
+                    // resolution, e.g. wrong set).
+                    if r.resolutionState != .pending && r.resolutionState != .resolving {
+                        Button {
+                            editingRowIndex = index
+                        } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: "pencil")
+                                    .font(.system(size: 9, weight: .semibold))
+                                Text(hasMatch ? "Change" : "Find match")
+                                    .font(.system(size: 10, weight: .semibold))
+                            }
+                            .foregroundStyle(PA.Colors.accent)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(PA.Colors.accent.opacity(0.12))
+                            .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
             }
 
             Spacer()
         }
         .padding(10)
         .background(
-            r.isIncluded && tappable
+            r.isIncluded && hasMatch
                 ? PA.Colors.surfaceSoft
                 : PA.Colors.surfaceSoft.opacity(0.4)
         )
@@ -697,36 +771,67 @@ struct BulkImportPreviewView: View {
     // MARK: - Commit bar
 
     private var commitBar: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("\(readyCount) ready to import")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(PA.Colors.text)
-                if failedCount > 0 {
-                    Text("\(failedCount) skipped")
-                        .font(.system(size: 11))
-                        .foregroundStyle(PA.Colors.muted)
-                }
-            }
-            Spacer()
-            Button {
-                Task { await commit() }
-            } label: {
-                HStack(spacing: 6) {
-                    if isImporting {
-                        ProgressView().tint(PA.Colors.background).controlSize(.small)
+        VStack(spacing: 8) {
+            // Progress bar — only during an active import. Fills left
+            // to right as chunks ack so the user sees real movement
+            // instead of a single indeterminate spinner.
+            if isImporting && totalToImport > 0 {
+                HStack(spacing: 8) {
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(PA.Colors.surfaceSoft)
+                                .frame(height: 6)
+                            Capsule()
+                                .fill(PA.Colors.accent)
+                                .frame(
+                                    width: geo.size.width * commitProgressFraction,
+                                    height: 6,
+                                )
+                                .animation(.easeInOut(duration: 0.2), value: importedSoFar)
+                        }
                     }
-                    Text(isImporting ? "Importing…" : "Import \(readyCount)")
+                    .frame(height: 6)
+                    Text("\(importedSoFar) / \(totalToImport)")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundStyle(PA.Colors.muted)
+                        .monospacedDigit()
                 }
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(PA.Colors.background)
-                .padding(.horizontal, 20)
-                .padding(.vertical, 12)
-                .background(readyCount > 0 ? PA.Colors.accent : PA.Colors.muted)
-                .clipShape(Capsule())
             }
-            .buttonStyle(.plain)
-            .disabled(readyCount == 0 || isImporting)
+
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(isImporting
+                         ? "Uploading…"
+                         : "\(readyCount) ready to import")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(PA.Colors.text)
+                    if !isImporting && failedCount > 0 {
+                        Text("\(failedCount) skipped")
+                            .font(.system(size: 11))
+                            .foregroundStyle(PA.Colors.muted)
+                    }
+                }
+                Spacer()
+                Button {
+                    Task { await commit() }
+                } label: {
+                    HStack(spacing: 6) {
+                        if isImporting {
+                            ProgressView().tint(PA.Colors.background).controlSize(.small)
+                        }
+                        Text(isImporting ? "Importing…" : "Import \(readyCount)")
+                    }
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(PA.Colors.background)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .background(readyCount > 0 ? PA.Colors.accent : PA.Colors.muted)
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(readyCount == 0 || isImporting)
+            }
         }
         .padding(14)
         .frame(maxWidth: .infinity)
@@ -815,13 +920,24 @@ struct BulkImportPreviewView: View {
         }
     }
 
+    // MARK: - Commit progress
+
+    private var commitProgressFraction: Double {
+        guard totalToImport > 0 else { return 0 }
+        return Double(importedSoFar) / Double(totalToImport)
+    }
+
     // MARK: - Commit
+    //
+    // Chunked POST so large imports show real progress (filling bar +
+    // "X / Y" counter) instead of a single long spinner. Each chunk
+    // is a separate /api/holdings/bulk-import request; we tally the
+    // server's `inserted` count so the progress reflects server truth,
+    // not just client optimism. Errors from any chunk surface inline
+    // without blocking later chunks (partial-success semantics).
 
     private func commit() async {
         importError = nil
-        isImporting = true
-        defer { isImporting = false }
-
         let payload = rows
             .filter { $0.isIncluded && $0.resolutionState == .resolved }
             .compactMap { r -> [String: Any]? in
@@ -838,19 +954,242 @@ struct BulkImportPreviewView: View {
 
         guard !payload.isEmpty else { return }
 
-        do {
-            let response: BulkImportResponse = try await APIClient.post(
-                path: "/api/holdings/bulk-import",
-                body: ["rows": payload]
-            )
-            if response.ok {
-                PAHaptics.tap()
-                onImported()
+        isImporting = true
+        importedSoFar = 0
+        totalToImport = payload.count
+        defer { isImporting = false }
+
+        let chunks = payload.chunked(into: Self.importChunkSize)
+        var anyChunkFailed = false
+        var accumulatedErrors: [String] = []
+
+        for chunk in chunks {
+            do {
+                let response: BulkImportResponse = try await APIClient.post(
+                    path: "/api/holdings/bulk-import",
+                    body: ["rows": chunk]
+                )
+                await MainActor.run {
+                    importedSoFar += response.inserted ?? 0
+                }
+                if let err = response.error, !err.isEmpty {
+                    accumulatedErrors.append(err)
+                    anyChunkFailed = true
+                }
+                if !response.ok && response.inserted == nil {
+                    anyChunkFailed = true
+                }
+            } catch {
+                accumulatedErrors.append(error.localizedDescription)
+                anyChunkFailed = true
+                // Keep going — a transient failure on one chunk
+                // shouldn't block the rest. Any accumulated errors
+                // surface at the end.
+            }
+        }
+
+        if anyChunkFailed {
+            importError = accumulatedErrors.first ?? "Some rows couldn't be imported."
+            // Don't auto-dismiss on failure — let the user see the
+            // error + the partial counter. They can dismiss manually.
+        } else {
+            PAHaptics.tap()
+            onImported()
+        }
+    }
+}
+
+// Split an array into equal-sized chunks. Used to batch bulk-import
+// POST requests so progress can update per chunk.
+private extension Array {
+    func chunked(into size: Int) -> [[Element]] {
+        guard size > 0 else { return [self] }
+        return stride(from: 0, to: count, by: size).map {
+            Array(self[$0..<Swift.min($0 + size, count)])
+        }
+    }
+}
+
+// MARK: - Match Picker Sheet
+//
+// Opened when a user taps "Change" / "Find match" on a preview row.
+// Mini search field + results list — very thin wrapper around
+// SearchService, same shape as SearchView but scoped to "pick exactly
+// one card and dismiss". Picking a card calls onPicked which patches
+// the host row's resolved state in place.
+
+private struct MatchPickerSheet: View {
+    let initialQuery: String
+    let current: SearchCardResult?
+    let onPicked: (SearchCardResult) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var query: String = ""
+    @State private var results: [SearchCardResult] = []
+    @State private var isSearching = false
+    @State private var searchError: String?
+
+    init(
+        initialQuery: String,
+        current: SearchCardResult?,
+        onPicked: @escaping (SearchCardResult) -> Void,
+    ) {
+        self.initialQuery = initialQuery
+        self.current = current
+        self.onPicked = onPicked
+        _query = State(initialValue: initialQuery)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                PA.Colors.background.ignoresSafeArea()
+
+                VStack(spacing: 12) {
+                    searchField
+                    if let searchError {
+                        Text(searchError)
+                            .font(.system(size: 12))
+                            .foregroundStyle(PA.Colors.negative)
+                            .padding(.horizontal, 20)
+                    }
+                    resultsList
+                }
+                .padding(.top, 12)
+            }
+            .navigationTitle("Pick a match")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(PA.Colors.surface, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { dismiss() }
+                        .foregroundStyle(PA.Colors.textSecondary)
+                }
+            }
+            .task {
+                await runSearch()
+            }
+        }
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(PA.Colors.muted)
+            TextField("Card name, set, or number", text: $query)
+                .font(.system(size: 15))
+                .foregroundStyle(PA.Colors.text)
+                .submitLabel(.search)
+                .onSubmit {
+                    Task { await runSearch() }
+                }
+            if isSearching {
+                ProgressView().controlSize(.mini).tint(PA.Colors.muted)
+            } else if !query.isEmpty {
+                Button {
+                    query = ""
+                    results = []
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(PA.Colors.muted)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(10)
+        .background(PA.Colors.surfaceSoft)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.horizontal, 20)
+    }
+
+    private var resultsList: some View {
+        ScrollView {
+            LazyVStack(spacing: 6) {
+                ForEach(results) { card in
+                    Button {
+                        PAHaptics.tap()
+                        onPicked(card)
+                    } label: {
+                        resultRow(card)
+                    }
+                    .buttonStyle(.plain)
+                }
+                if results.isEmpty && !isSearching {
+                    Text(query.isEmpty ? "Search for a card." : "No results.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(PA.Colors.muted)
+                        .padding(.top, 24)
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 24)
+        }
+    }
+
+    private func resultRow(_ card: SearchCardResult) -> some View {
+        HStack(spacing: 10) {
+            if let url = card.imageURL {
+                LazyImage(url: url) { state in
+                    if let image = state.image {
+                        image.resizable().aspectRatio(contentMode: .fit)
+                    } else {
+                        Color(PA.Colors.surfaceSoft)
+                    }
+                }
+                .frame(width: 36, height: 50)
+                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
             } else {
-                importError = response.error ?? "Import failed"
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(PA.Colors.surfaceSoft)
+                    .frame(width: 36, height: 50)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(card.canonicalName)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(PA.Colors.text)
+                    .lineLimit(1)
+                Text(
+                    [card.setName, card.cardNumber.map { "#\($0)" }]
+                        .compactMap { $0 }
+                        .joined(separator: " · ")
+                )
+                    .font(.system(size: 11))
+                    .foregroundStyle(PA.Colors.muted)
+                    .lineLimit(1)
+            }
+            Spacer()
+            if card.canonicalSlug == current?.canonicalSlug {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(PA.Colors.accent)
+            }
+        }
+        .padding(10)
+        .background(PA.Colors.surfaceSoft)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func runSearch() async {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            results = []
+            return
+        }
+        isSearching = true
+        searchError = nil
+        do {
+            let found = try await SearchService.shared.search(query: trimmed)
+            await MainActor.run {
+                results = found
+                isSearching = false
             }
         } catch {
-            importError = error.localizedDescription
+            await MainActor.run {
+                searchError = error.localizedDescription
+                isSearching = false
+            }
         }
     }
 }

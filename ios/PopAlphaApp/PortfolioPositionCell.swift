@@ -244,6 +244,22 @@ struct PortfolioPositionCell: View {
                                 .font(.system(size: 11, design: .monospaced))
                                 .foregroundStyle(PA.Colors.accent.opacity(0.8))
                         }
+                        // Subtle provenance chip for lots that entered
+                        // via CSV bulk import. Muted so it reads as
+                        // informational, not as a warning.
+                        if lot.source == .csvImport {
+                            HStack(spacing: 3) {
+                                Image(systemName: "square.and.arrow.down")
+                                    .font(.system(size: 8, weight: .semibold))
+                                Text("Imported")
+                                    .font(.system(size: 10, weight: .medium))
+                            }
+                            .foregroundStyle(PA.Colors.muted)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(PA.Colors.surfaceSoft)
+                            .clipShape(Capsule())
+                        }
                     }
                 }
 
