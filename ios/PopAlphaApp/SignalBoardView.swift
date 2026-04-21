@@ -245,6 +245,12 @@ private struct AIBriefCard: View {
     /// aimed at the reader instead of the whole market.
     let styleLabel: String?
 
+    /// In-place expansion state. Tapping "Read more" un-truncates the
+    /// summary and reveals the provenance footer (model, focus set, data
+    /// freshness) without pushing a new screen. Preserves home-screen
+    /// context and feels more modern than a detail-view push.
+    @State private var isExpanded = false
+
     // Placeholder copy used only when the /api/homepage/ai-brief cache is
     // empty (e.g. fresh deploy, cron hasn't run yet). Real briefs come
     // from Gemini via the hourly cron.
@@ -282,15 +288,16 @@ private struct AIBriefCard: View {
                 Spacer()
             }
 
-            // Body summary
+            // Body summary — line-limited when collapsed, full when expanded
             Text(summary)
                 .font(.system(size: 14))
                 .foregroundStyle(PA.Colors.text)
                 .lineSpacing(3)
-                .lineLimit(3)
+                .lineLimit(isExpanded ? nil : 3)
                 .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
 
-            // Takeaway chip + read more
+            // Takeaway chip + toggle (read more ↔ show less)
             HStack(spacing: 10) {
                 HStack(spacing: 6) {
                     Text("🔥")
@@ -310,23 +317,22 @@ private struct AIBriefCard: View {
 
                 Spacer()
 
-                NavigationLink {
-                    AIBriefDetailView(
-                        brief: brief,
-                        fallbackAsOf: fallbackAsOf,
-                        styleLabel: styleLabel
-                    )
+                Button {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        isExpanded.toggle()
+                    }
+                    PAHaptics.tap()
                 } label: {
                     HStack(spacing: 4) {
-                        Text("Read more")
+                        Text(isExpanded ? "Show less" : "Read more")
                             .font(.system(size: 12, weight: .semibold))
-                        Image(systemName: "arrow.right")
+                        Image(systemName: "chevron.down")
                             .font(.system(size: 10, weight: .bold))
+                            .rotationEffect(.degrees(isExpanded ? 180 : 0))
                     }
                     .foregroundStyle(PA.Colors.accent)
                 }
                 .buttonStyle(.plain)
-                .hapticTap()
             }
 
             // Tertiary "who this matters to" line — personalizes without
@@ -340,6 +346,17 @@ private struct AIBriefCard: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(PA.Colors.textSecondary)
                     .lineLimit(1)
+            }
+
+            // Expanded-only provenance footer. Shows up below the
+            // "matters most for" line with a thin divider so the card
+            // stays visually cohesive. Collapsed state hides this
+            // entirely — no reserved space, no layout jitter.
+            if isExpanded {
+                expandedFooter
+                    .transition(
+                        .opacity.combined(with: .move(edge: .top))
+                    )
             }
         }
         .padding(16)
@@ -361,6 +378,57 @@ private struct AIBriefCard: View {
             RoundedRectangle(cornerRadius: PA.Layout.panelRadius, style: .continuous)
                 .stroke(PA.Colors.accent.opacity(0.35), lineWidth: 1)
         )
+    }
+
+    // MARK: - Expanded footer
+
+    private var expandedFooter: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Divider().background(PA.Colors.border)
+                .padding(.vertical, 2)
+
+            Text("HOW THIS WAS BUILT")
+                .font(.system(size: 9, weight: .semibold))
+                .tracking(1.5)
+                .foregroundStyle(PA.Colors.muted)
+
+            metaRow(label: "Model", value: brief?.modelLabel ?? "PopAlpha mix")
+            if let focus = brief?.focusSet, !focus.isEmpty {
+                metaRow(label: "Focus set", value: focus)
+            }
+            metaRow(label: "Source", value: (brief?.source ?? "fallback").capitalized)
+            metaRow(label: "Data as of", value: formatRelative(brief?.dataAsOf ?? fallbackAsOf))
+            metaRow(label: "Generated", value: formatRelative(brief?.generatedAt ?? fallbackAsOf))
+        }
+    }
+
+    private func metaRow(label: String, value: String) -> some View {
+        HStack(spacing: 10) {
+            Text(label)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(PA.Colors.muted)
+                .frame(width: 78, alignment: .leading)
+            Text(value)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(PA.Colors.textSecondary)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func formatRelative(_ iso: String?) -> String {
+        guard let iso else { return "—" }
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let date = f.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
+        guard let date else { return iso }
+        let minutes = Int(-date.timeIntervalSinceNow / 60)
+        if minutes < 1 { return "just now" }
+        if minutes < 60 { return "\(minutes)m ago" }
+        let hours = minutes / 60
+        if hours < 24 { return "\(hours)h ago" }
+        return "\(hours / 24)d ago"
     }
 
     private var timestampLabel: String {

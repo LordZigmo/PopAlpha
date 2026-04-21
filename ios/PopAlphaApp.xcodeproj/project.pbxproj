@@ -69,7 +69,6 @@
 		DD00000100000000000000F6 /* PersonalPulseSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000A6 /* PersonalPulseSection.swift */; };
 		DD00000100000000000000F7 /* ForYouRail.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000A7 /* ForYouRail.swift */; };
 		DD00000100000000000000F8 /* MarketPulseSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000A8 /* MarketPulseSection.swift */; };
-		DD00000100000000000000F9 /* AIBriefDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000A9 /* AIBriefDetailView.swift */; };
 		DD00000100000000000000FB /* PushService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000AB /* PushService.swift */; };
 		DD00000100000000000000FC /* PushNotificationAppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000AC /* PushNotificationAppDelegate.swift */; };
 		DD00000100000000000000FD /* ScanService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000AD /* ScanService.swift */; };
@@ -139,7 +138,6 @@
 		DD00000100000000000000A6 /* PersonalPulseSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalPulseSection.swift; sourceTree = "<group>"; };
 		DD00000100000000000000A7 /* ForYouRail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForYouRail.swift; sourceTree = "<group>"; };
 		DD00000100000000000000A8 /* MarketPulseSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketPulseSection.swift; sourceTree = "<group>"; };
-		DD00000100000000000000A9 /* AIBriefDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIBriefDetailView.swift; sourceTree = "<group>"; };
 		DD00000100000000000000AA /* PopAlphaApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PopAlphaApp.entitlements; sourceTree = "<group>"; };
 		DD00000100000000000000AB /* PushService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushService.swift; sourceTree = "<group>"; };
 		DD00000100000000000000AC /* PushNotificationAppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushNotificationAppDelegate.swift; sourceTree = "<group>"; };
@@ -221,7 +219,6 @@
 				DD00000100000000000000A6 /* PersonalPulseSection.swift */,
 				DD00000100000000000000A7 /* ForYouRail.swift */,
 				DD00000100000000000000A8 /* MarketPulseSection.swift */,
-				DD00000100000000000000A9 /* AIBriefDetailView.swift */,
 				DD00000100000000000000AA /* PopAlphaApp.entitlements */,
 				DD00000100000000000000AB /* PushService.swift */,
 				DD00000100000000000000AC /* PushNotificationAppDelegate.swift */,
@@ -389,7 +386,6 @@
 				DD00000100000000000000F6 /* PersonalPulseSection.swift in Sources */,
 				DD00000100000000000000F7 /* ForYouRail.swift in Sources */,
 				DD00000100000000000000F8 /* MarketPulseSection.swift in Sources */,
-				DD00000100000000000000F9 /* AIBriefDetailView.swift in Sources */,
 				DD00000100000000000000FB /* PushService.swift in Sources */,
 				DD00000100000000000000FC /* PushNotificationAppDelegate.swift in Sources */,
 				DD00000100000000000000FD /* ScanService.swift in Sources */,
@@ -555,7 +551,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 0.9.0;
 				PRODUCT_BUNDLE_IDENTIFIER = ai.popalpha.ios;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -593,7 +589,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 0.9.0;
 				PRODUCT_BUNDLE_IDENTIFIER = ai.popalpha.ios;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
