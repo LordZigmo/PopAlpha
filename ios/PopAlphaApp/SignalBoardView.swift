@@ -50,7 +50,12 @@ struct SignalBoardView: View {
                 emptyState
             }
         }
-        .task {
+        // .task(id:) so the full signal-board / AI brief / community
+        // fetch only fires when auth state flips — not on every view
+        // re-appear after a pop. Scroll position in the parent
+        // MarketplaceView ScrollView is preserved on back-navigation.
+        // Manual refresh still goes through .refreshable below.
+        .task(id: AuthService.shared.isAuthenticated) {
             await load()
         }
         .refreshable {

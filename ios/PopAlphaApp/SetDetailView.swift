@@ -67,7 +67,14 @@ struct SetDetailView: View {
         .navigationDestination(item: $selectedCard) { card in
             CardDetailView(card: card)
         }
-        .task { await loadSetCards() }
+        // .task(id:) instead of plain .task so the load only fires when
+        // setName actually changes (i.e. navigating TO a new set) — NOT
+        // on every view re-appear. Without this, popping back from
+        // CardDetailView re-runs the task, flips `loading = true` for a
+        // frame, body re-renders the loading branch, the grid gets
+        // destroyed, and scroll resets to the top. The fix is app-wide:
+        // see WatchlistView, PortfolioView, NotificationView, etc.
+        .task(id: setName) { await loadSetCards() }
     }
 
     // MARK: - Header

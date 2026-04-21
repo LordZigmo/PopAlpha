@@ -34,7 +34,11 @@ struct ActivityFeedView: View {
                 }
             }
             .background(PA.Colors.background)
-            .task {
+            // .task(id:) prevents the feed from reloading (and
+            // resetting scroll) every time the user pops back from a
+            // pushed detail view. See SetDetailView.swift for the full
+            // rationale. Pull-to-refresh still covers manual refreshes.
+            .task(id: auth.isAuthenticated) {
                 await loadFeed()
             }
             .refreshable {

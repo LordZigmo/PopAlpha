@@ -72,7 +72,12 @@ struct MarketplaceView: View {
             .refreshable {
                 await loadAll()
             }
-            .task {
+            // .task(id:) prevents the home-tab data from reloading (and
+            // resetting scroll position) every time the user pops back
+            // from a card detail view. Fetches once per session and
+            // only re-fires when auth state flips. Pull-to-refresh
+            // covers explicit refresh requests.
+            .task(id: AuthService.shared.isAuthenticated) {
                 await loadAll()
             }
             .fullScreenCover(isPresented: $showSearch) {

@@ -28,7 +28,13 @@ struct WatchlistView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(PA.Colors.surface, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
-        .task {
+        // .task(id:) prevents the auto-reload-on-re-appear that was
+        // swapping the loading state in and out and resetting scroll
+        // to the top when users popped back from a card detail view.
+        // Load runs once per session and re-runs only when auth state
+        // flips (sign-in / sign-out). Pull-to-refresh still covers
+        // explicit refreshes.
+        .task(id: auth.isAuthenticated) {
             await loadWatchlist()
         }
         .refreshable {

@@ -41,7 +41,11 @@ struct NotificationView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(PA.Colors.surface, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
-        .task {
+        // .task(id:) so we only fetch when auth state flips, not on
+        // every view re-appear. Avoids resetting the scroll position of
+        // the activity feed below the delivery-time picker every time
+        // the user pops back to this screen. Manual refresh still works.
+        .task(id: auth.isAuthenticated) {
             await loadAll()
         }
         .refreshable {
