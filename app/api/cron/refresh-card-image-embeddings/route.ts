@@ -233,13 +233,21 @@ async function recordEmbedOutcomes(
     // and rare (only known-broken URLs hit this path).
     for (const { slug, error } of failureReasons) {
       const nextAttempts = (attemptsBySlug.get(slug) ?? 0) + 1;
+      // Guard against lost-race overwrite: a concurrent cron invocation
+      // may have claimed the same row, succeeded, and already stamped
+      // image_embedded_at before our failure write lands. In that case
+      // the vector is safely in Neon and we must NOT smear stale
+      // attempt/error metadata back over the successful row. The
+      // `.is("image_embedded_at", null)` predicate turns this update
+      // into a no-op once the row has been marked embedded.
       const { error: updateError } = await supabase
         .from("canonical_cards")
         .update({
           image_embed_attempts: nextAttempts,
           image_embed_last_error: error.slice(0, 500),
         })
-        .eq("slug", slug);
+        .eq("slug", slug)
+        .is("image_embedded_at", null);
 
       if (updateError) {
         console.warn(
