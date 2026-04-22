@@ -58,10 +58,15 @@ final class PushService {
 
         switch settings.authorizationStatus {
         case .notDetermined:
+            AnalyticsService.shared.capture(.pushPermissionPrompted)
             do {
                 let granted = try await center.requestAuthorization(options: [.alert, .sound, .badge])
                 await refreshAuthorizationStatus()
                 print("[PushService] permission granted=\(granted) — calling registerForRemoteNotifications()")
+                AnalyticsService.shared.capture(
+                    .pushPermissionResponse,
+                    properties: ["granted": granted]
+                )
                 if granted {
                     await MainActor.run { UIApplication.shared.registerForRemoteNotifications() }
                 }
@@ -157,12 +162,20 @@ final class PushService {
     // MARK: - Tap handling
 
     /// Called when the user taps a delivered push. For now we just
-    /// refresh the in-app notification feed; deep-link routing (e.g.
-    /// jump to a card detail) can read `userInfo["deepLink"]` and
-    /// dispatch through a shared coordinator in a follow-up.
+    /// record the tap in analytics; deep-link routing (e.g. jump to a
+    /// card detail) can read `userInfo["deepLink"]` and dispatch
+    /// through a shared coordinator in a follow-up.
     func handleNotificationTap(_ userInfo: [AnyHashable: Any]) {
-        // no-op placeholder — deep link routing is a follow-up PR
-        _ = userInfo
+        // The payload's "type" field (e.g. "price_move", "signal_alert",
+        // "ai_brief") lets us segment tap-through rates per push type.
+        // Unknown/untagged pushes fall into "unknown".
+        let type = (userInfo["type"] as? String)
+            ?? (userInfo["notification_type"] as? String)
+            ?? "unknown"
+        AnalyticsService.shared.capture(
+            .pushNotificationOpened,
+            properties: ["type": type]
+        )
     }
 
     /// Call on sign-out so we don't target a signed-out account. Clears
@@ -182,13 +195,16 @@ final class PushService {
     }
 
     /// Mirrors the aps-environment entitlement so the server can pick
-    /// the right APNs host (sandbox vs production). Debug → development,
-    /// release → production. Keep this in lockstep with PopAlphaApp.entitlements.
+    /// the right APNs host (sandbox vs production). Must match the
+    /// value in PopAlphaApp.entitlements exactly — if they disagree,
+    /// Apple returns BadDeviceToken and pushes silently fail.
+    ///
+    /// The entitlement is hardcoded to "production" (required by
+    /// TestFlight and App Store), so this is "production" for every
+    /// build configuration. If you temporarily flip the entitlement
+    /// back to "development" for local sandbox testing, also flip
+    /// this value — and don't ship the pair.
     private var apnsEnvironment: String {
-        #if DEBUG
-        return "development"
-        #else
-        return "production"
-        #endif
+        "production"
     }
 }

@@ -44,7 +44,10 @@ final class AuthService {
     func signIn() {
         guard !isSigningIn else { return }
         Task { @MainActor in
-            await performSignIn { try await Clerk.shared.auth.signInWithOAuth(provider: .google) }
+            await performSignIn(
+                provider: "google",
+                { try await Clerk.shared.auth.signInWithOAuth(provider: .google) }
+            )
         }
     }
 
@@ -54,7 +57,10 @@ final class AuthService {
     func signInWithApple() {
         guard !isSigningIn else { return }
         Task { @MainActor in
-            await performSignIn { try await Clerk.shared.auth.signInWithApple() }
+            await performSignIn(
+                provider: "apple",
+                { try await Clerk.shared.auth.signInWithApple() }
+            )
         }
     }
 
@@ -65,6 +71,7 @@ final class AuthService {
     /// doesn't fire for a benign dismissal.
     @MainActor
     private func performSignIn(
+        provider: String,
         _ providerCall: @escaping () async throws -> Void
     ) async {
         isSigningIn = true
@@ -81,11 +88,27 @@ final class AuthService {
 
             let userId = Clerk.shared.user?.id ?? ""
             let firstName = Clerk.shared.user?.firstName
+            let email = Clerk.shared.user?.primaryEmailAddress?.emailAddress
             let imageUrl = Clerk.shared.user?.imageUrl
             setSession(token: token, userId: userId, handle: nil)
             currentFirstName = firstName
             currentImageURL = imageUrl
             startTokenRefresh()
+
+            // Attribute subsequent PostHog events to this Clerk user so
+            // iOS activity lands on the same person as the user's web
+            // sessions, then capture the sign-in itself.
+            if !userId.isEmpty {
+                AnalyticsService.shared.identify(
+                    userId: userId,
+                    email: email,
+                    firstName: firstName
+                )
+                AnalyticsService.shared.capture(
+                    .userSignedIn,
+                    properties: ["provider": provider]
+                )
+            }
 
             await loadHandle()
 
@@ -133,6 +156,11 @@ final class AuthService {
         // Force PushService to re-upload on next sign-in so we never
         // send pushes to a signed-out account's token accidentally.
         PushService.shared.clearUploadedTokenCache()
+        // Capture the sign-out event *before* reset so it's still
+        // attributed to the user who signed out, then reset to a fresh
+        // anonymous distinct_id for subsequent events.
+        AnalyticsService.shared.capture(.userSignedOut)
+        AnalyticsService.shared.reset()
     }
 
     // MARK: - Session Restoration (cold launch)
@@ -145,6 +173,7 @@ final class AuthService {
         let userId = await Clerk.shared.user?.id ?? ""
         guard !userId.isEmpty else { return }
         let firstName = await Clerk.shared.user?.firstName
+        let email = await Clerk.shared.user?.primaryEmailAddress?.emailAddress
         let imageUrl = await Clerk.shared.user?.imageUrl
 
         await MainActor.run {
@@ -153,6 +182,15 @@ final class AuthService {
             currentImageURL = imageUrl
             startTokenRefresh()
         }
+
+        // Re-identify on cold launch so events from this session
+        // attribute to the correct user. No signed-in event is fired
+        // here — the user didn't just sign in, they returned.
+        AnalyticsService.shared.identify(
+            userId: userId,
+            email: email,
+            firstName: firstName
+        )
 
         await loadHandle()
 

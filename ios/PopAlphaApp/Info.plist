@@ -2,6 +2,17 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!--
+		Export compliance. The app uses only standard HTTPS/TLS and
+		platform-provided cryptography (URLSession, Sign in with Apple,
+		Clerk iOS SDK over HTTPS). No custom or non-exempt encryption,
+		so this qualifies for the mass-market exemption and no annual
+		self-classification report is required. Flip to true only if
+		the app starts shipping custom crypto — and then also answer
+		the App Store Connect export compliance questions.
+	-->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

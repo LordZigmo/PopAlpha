@@ -276,7 +276,6 @@ struct ProfileTabView: View {
 
             // Menu items
             VStack(spacing: 0) {
-                profileMenuItem(icon: "folder", title: "Portfolio")
                 NavigationLink {
                     WatchlistView()
                 } label: {
@@ -294,11 +293,9 @@ struct ProfileTabView: View {
                 NavigationLink {
                     SettingsView()
                 } label: {
-                    profileMenuRow(icon: "gearshape", title: "Settings")
+                    profileMenuRow(icon: "gearshape", title: "Settings", isLast: true)
                 }
                 .buttonStyle(.plain)
-
-                profileMenuItem(icon: "questionmark.circle", title: "Help", isLast: true)
             }
             .glassSurface(radius: PA.Layout.panelRadius)
 
@@ -388,10 +385,6 @@ struct ProfileTabView: View {
         }
     }
 
-    private func profileMenuItem(icon: String, title: String, isLast: Bool = false) -> some View {
-        profileMenuRow(icon: icon, title: title, isLast: isLast)
-    }
-
     private func profileMenuRow(icon: String, title: String, isLast: Bool = false) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
@@ -412,6 +405,13 @@ struct ProfileTabView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
+            // Force the entire row's bounding box to be hit-testable.
+            // Without this, SwiftUI only registers taps on rendered
+            // pixels — the Spacer() between title and chevron leaves
+            // a dead zone mid-row and taps silently miss the
+            // NavigationLink. This is a well-known SwiftUI gotcha for
+            // custom NavigationLink labels.
+            .contentShape(Rectangle())
 
             if !isLast {
                 Divider()

@@ -7,13 +7,16 @@
 		<string>Default</string>
 	</array>
 	<!--
-		APNs environment. Set to "development" for Debug / TestFlight
-		(sandbox APNs at api.sandbox.push.apple.com), and flip to
-		"production" for App Store builds (api.push.apple.com).
-		Servers must match the environment — see lib/push/apns.ts,
-		APNS_ENVIRONMENT env var.
+		APNs environment. "production" is required for both TestFlight
+		and App Store builds (api.push.apple.com). Xcode debug builds
+		installed directly to a device also work with "production" as
+		long as the server's APNS_ENVIRONMENT env var matches. If you
+		need to test against sandbox APNs (api.sandbox.push.apple.com)
+		during local development, temporarily flip this to "development"
+		and flip APNS_ENVIRONMENT on the server to match — see
+		lib/push/apns.ts.
 	-->
 	<key>aps-environment</key>
-	<string>development</string>
+	<string>production</string>
 </dict>
 </plist>

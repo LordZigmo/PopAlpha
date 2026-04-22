@@ -17,6 +17,8 @@
 		1200000100000000000000F1 /* PortfolioValueChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1200000100000000000000A1 /* PortfolioValueChart.swift */; };
 		1200000100000000000000F2 /* InsightsUnlockProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1200000100000000000000A2 /* InsightsUnlockProgress.swift */; };
 		1200000100000000000000F3 /* PortfolioCardGridCell.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1200000100000000000000A3 /* PortfolioCardGridCell.swift */; };
+		9D07CFCE2F982B7B004BF9A7 /* PostHog in Frameworks */ = {isa = PBXBuildFile; productRef = 9D07CFCD2F982B7B004BF9A7 /* PostHog */; };
+		9D07CFD22F982DCD004BF9A7 /* AnalyticsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D07CFD12F982DCD004BF9A7 /* AnalyticsService.swift */; };
 		9DB745292F91E43300AD2083 /* Nuke in Frameworks */ = {isa = PBXBuildFile; productRef = 9DB745282F91E43300AD2083 /* Nuke */; };
 		9DB7452B2F91E43300AD2083 /* NukeExtensions in Frameworks */ = {isa = PBXBuildFile; productRef = 9DB7452A2F91E43300AD2083 /* NukeExtensions */; };
 		9DB7452D2F91E43300AD2083 /* NukeUI in Frameworks */ = {isa = PBXBuildFile; productRef = 9DB7452C2F91E43300AD2083 /* NukeUI */; };
@@ -90,6 +92,7 @@
 		1200000100000000000000A1 /* PortfolioValueChart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioValueChart.swift; sourceTree = "<group>"; };
 		1200000100000000000000A2 /* InsightsUnlockProgress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightsUnlockProgress.swift; sourceTree = "<group>"; };
 		1200000100000000000000A3 /* PortfolioCardGridCell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioCardGridCell.swift; sourceTree = "<group>"; };
+		9D07CFD12F982DCD004BF9A7 /* AnalyticsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsService.swift; sourceTree = "<group>"; };
 		AA00000100000000000000A1 /* PopAlphaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopAlphaApp.swift; sourceTree = "<group>"; };
 		AA00000100000000000000A2 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		AA00000100000000000000A3 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
@@ -156,6 +159,7 @@
 			files = (
 				9DB7452D2F91E43300AD2083 /* NukeUI in Frameworks */,
 				9DB7452F2F91E43300AD2083 /* NukeVideo in Frameworks */,
+				9D07CFCE2F982B7B004BF9A7 /* PostHog in Frameworks */,
 				9DB745292F91E43300AD2083 /* Nuke in Frameworks */,
 				9DB7452B2F91E43300AD2083 /* NukeExtensions in Frameworks */,
 				EE00000100000000000000F1 /* PopAlphaCore in Frameworks */,
@@ -171,6 +175,7 @@
 			children = (
 				AA00000100000000000000E2 /* PopAlphaApp */,
 				AA00000100000000000000E4 /* Products */,
+				9D07CFD12F982DCD004BF9A7 /* AnalyticsService.swift */,
 			);
 			sourceTree = "<group>";
 		};
@@ -286,6 +291,7 @@
 				9DB7452A2F91E43300AD2083 /* NukeExtensions */,
 				9DB7452C2F91E43300AD2083 /* NukeUI */,
 				9DB7452E2F91E43300AD2083 /* NukeVideo */,
+				9D07CFCD2F982B7B004BF9A7 /* PostHog */,
 			);
 			productName = PopAlphaApp;
 			productReference = AA00000100000000000000C1 /* PopAlphaApp.app */;
@@ -319,6 +325,7 @@
 				EE00000100000000000000A1 /* XCLocalSwiftPackageReference "." */,
 				FF00000100000000000000A1 /* XCRemoteSwiftPackageReference "clerk-ios" */,
 				9DB745272F91E43300AD2083 /* XCRemoteSwiftPackageReference "Nuke" */,
+				9D07CFCC2F982B7B004BF9A7 /* XCRemoteSwiftPackageReference "posthog-ios" */,
 			);
 			productRefGroup = AA00000100000000000000E4 /* Products */;
 			projectDirPath = "";
@@ -393,6 +400,7 @@
 				DD00000100000000000000F7 /* ForYouRail.swift in Sources */,
 				DD00000100000000000000F8 /* MarketPulseSection.swift in Sources */,
 				DD00000100000000000000FB /* PushService.swift in Sources */,
+				9D07CFD22F982DCD004BF9A7 /* AnalyticsService.swift in Sources */,
 				DD00000100000000000000FC /* PushNotificationAppDelegate.swift in Sources */,
 				DD00000100000000000000FD /* ScanService.swift in Sources */,
 				DD00000100000000000000FE /* EditHoldingLotSheet.swift in Sources */,
@@ -640,6 +648,14 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		9D07CFCC2F982B7B004BF9A7 /* XCRemoteSwiftPackageReference "posthog-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/PostHog/posthog-ios";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 3.55.1;
+			};
+		};
 		9DB745272F91E43300AD2083 /* XCRemoteSwiftPackageReference "Nuke" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/kean/Nuke";
@@ -659,6 +675,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		9D07CFCD2F982B7B004BF9A7 /* PostHog */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 9D07CFCC2F982B7B004BF9A7 /* XCRemoteSwiftPackageReference "posthog-ios" */;
+			productName = PostHog;
+		};
 		9DB745282F91E43300AD2083 /* Nuke */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 9DB745272F91E43300AD2083 /* XCRemoteSwiftPackageReference "Nuke" */;
