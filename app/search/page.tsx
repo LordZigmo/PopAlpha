@@ -674,7 +674,7 @@ export default async function SearchPage({
   }
 
   const supabase = dbPublic();
-  let setFilter = requestedSetFilter;
+  const setFilter = requestedSetFilter;
 
   const { data: printingAliasRow } = await measureAsync("search.printing_alias", { q: qNormalized }, async () =>
     supabase
@@ -726,7 +726,7 @@ export default async function SearchPage({
     );
 
     if (exactSetRow?.set_name && isPhysicalPokemonSet({ setName: exactSetRow.set_name })) {
-      setFilter = exactSetRow.set_name;
+      redirect(`/sets/${encodeURIComponent(exactSetRow.set_name)}`);
     }
   }
 

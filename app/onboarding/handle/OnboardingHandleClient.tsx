@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useUser, RedirectToSignIn } from "@clerk/nextjs";
 import { useSearchParams } from "next/navigation";
 import { validateHandle, safeReturnTo } from "@/lib/handles";
+import posthog from "posthog-js";
 
 type AvailabilityState = "idle" | "checking" | "available" | "taken" | "error";
 
@@ -100,10 +101,20 @@ export default function OnboardingHandleClient() {
         return;
       }
 
+      // Identify user and track handle claim
+      posthog.identify(user.id, {
+        handle: json.handle,
+        email: user.primaryEmailAddress?.emailAddress,
+      });
+      posthog.capture("handle_claimed", {
+        handle: json.handle,
+      });
+
       // Success — redirect
       const returnTo = safeReturnTo(searchParams.get("return_to"));
       window.location.href = returnTo;
-    } catch {
+    } catch (err) {
+      posthog.captureException(err);
       setServerError("Network error. Please try again.");
       setSubmitting(false);
     }

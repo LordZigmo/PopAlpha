@@ -85,9 +85,15 @@ export default function PrivacyPage() {
               <p>
                 We collect basic analytics through Vercel Web Analytics and
                 Speed Insights, which record page views, performance metrics,
-                and broad device categories. We do not use cookies for tracking
-                or advertising. The only cookies on our site are strictly
-                necessary authentication cookies set by Clerk.
+                and broad device categories. We also use PostHog for product
+                analytics — tracking which features you use, funnel completion,
+                and aggregated engagement so we can improve the product. PostHog
+                is configured to capture exceptions for error monitoring and may
+                record session replays of anonymized interactions (no password,
+                email, or payment fields are captured). We do not use cookies
+                for tracking or advertising. The only cookies on our site are
+                strictly necessary authentication cookies set by Clerk and a
+                first-party PostHog session cookie.
               </p>
 
               <p className="font-medium text-[#D0D0D0]">
@@ -120,8 +126,9 @@ export default function PrivacyPage() {
                   Google Gemini. No personal data is included in those requests.
                 </li>
                 <li>
-                  Improve the product: we use Vercel Analytics to understand
-                  which pages are visited and how the site performs.
+                  Improve the product: we use Vercel Analytics and PostHog to
+                  understand which pages are visited, how features are used,
+                  where users drop off in funnels, and how the site performs.
                 </li>
                 <li>
                   Communicate with you: service emails, optional weekly

@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import PageShell from "@/components/layout/PageShell";
 import { dbPublic } from "@/lib/db";
 import FollowButton from "@/components/profile/follow-button";
 import PostBody, { type PostMention } from "@/components/profile/post-body";
@@ -105,8 +106,9 @@ export default async function PublicProfilePage({ params }: { params: Promise<{ 
   }));
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6 sm:py-8">
-      <section className="overflow-hidden rounded-[2rem] border border-[#1E1E1E] bg-[#101010]">
+    <PageShell>
+      <div className="mx-auto max-w-3xl px-5 py-6 sm:px-8 sm:py-8">
+        <section className="overflow-hidden rounded-[2rem] border border-[#1E1E1E] bg-[#101010]">
         <div
           className="h-40 bg-[radial-gradient(circle_at_top_left,rgba(29,78,216,0.24),transparent_34%),radial-gradient(circle_at_top_right,rgba(49,46,129,0.26),transparent_30%),linear-gradient(180deg,#0F172A_0%,#0A0A0A_72%)] bg-cover bg-center"
           style={profile.profile_banner_url ? { backgroundImage: `linear-gradient(180deg, rgba(10,10,10,0.18), rgba(10,10,10,0.68)), url("${profile.profile_banner_url}")` } : undefined}
@@ -166,6 +168,7 @@ export default async function PublicProfilePage({ params }: { params: Promise<{ 
           </div>
         </div>
       </section>
-    </div>
+      </div>
+    </PageShell>
   );
 }

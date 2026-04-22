@@ -17,6 +17,7 @@ import {
   retryAfterSeconds,
 } from "@/lib/public-write";
 import { createRateLimiter } from "@/lib/rate-limit";
+import { getPostHogClient } from "@/lib/posthog-server";
 
 export const runtime = "nodejs";
 
@@ -198,6 +199,20 @@ export async function POST(req: Request) {
       hasUserAgent: userAgent.length > 0,
       requestMs: Date.now() - requestStartedAtMs,
     });
+
+    if (result.outcome === "created") {
+      const distinctId = clerkUserId ?? normalizedEmail;
+      const posthog = getPostHogClient();
+      posthog.capture({
+        distinctId,
+        event: "waitlist_joined",
+        properties: {
+          tier,
+          source: WAITLIST_SIGNUP_SOURCE,
+          authenticated: auth.kind === "user",
+        },
+      });
+    }
 
     return NextResponse.json({ ok: true });
   } catch (error) {

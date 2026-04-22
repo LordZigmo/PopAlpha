@@ -317,6 +317,30 @@ body {
   animation: scoutHoloSweep 8s linear infinite;
 }
 
+.personalized-holo-shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(192, 132, 252, 0.02) 18%,
+    rgba(216, 180, 254, 0.16) 48%,
+    rgba(192, 132, 252, 0.03) 72%,
+    transparent 100%
+  );
+  animation: scoutHoloSweep 8s linear infinite;
+}
+
+.scout-blue-shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(0, 180, 216, 0.02) 18%,
+    rgba(125, 211, 232, 0.16) 48%,
+    rgba(0, 180, 216, 0.03) 72%,
+    transparent 100%
+  );
+  animation: scoutHoloSweep 8s linear infinite;
+}
+
 .raw-json-panel .raw-json-content { grid-template-rows: 0fr; }
 .raw-json-panel[open] .raw-json-content { grid-template-rows: 1fr; margin-top: 0.5rem; }
 

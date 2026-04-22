@@ -141,6 +141,37 @@ export async function getLatestSetSummarySnapshot(setName: string): Promise<SetS
   return data ? toSnapshot(data) : null;
 }
 
+export type SetSummaryHistoryPoint = {
+  asOfDate: string;
+  marketCap: number;
+};
+
+export async function getSetSummaryHistory(
+  setName: string,
+  days: number = 90,
+): Promise<SetSummaryHistoryPoint[]> {
+  if (!setName.trim()) return [];
+
+  const supabase = dbPublic();
+  const sinceDate = new Date();
+  sinceDate.setUTCDate(sinceDate.getUTCDate() - Math.max(1, days));
+  const sinceIso = sinceDate.toISOString().slice(0, 10);
+
+  const { data } = await supabase
+    .from("public_set_summaries")
+    .select("as_of_date, market_cap")
+    .eq("set_name", setName)
+    .gte("as_of_date", sinceIso)
+    .order("as_of_date", { ascending: true });
+
+  return ((data ?? []) as Array<{ as_of_date: string; market_cap: number | null }>)
+    .map((row) => ({
+      asOfDate: row.as_of_date,
+      marketCap: Number(row.market_cap ?? 0),
+    }))
+    .filter((row) => Number.isFinite(row.marketCap) && row.marketCap > 0);
+}
+
 export async function getSetFinishBreakdown(setName: string): Promise<SetFinishBreakdown[]> {
   if (!setName.trim()) return [];
 

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require";
 import { dbAdmin } from "@/lib/db/admin";
+import { getPostHogClient } from "@/lib/posthog-server";
 
 export const runtime = "nodejs";
 
@@ -208,5 +209,13 @@ export async function PATCH(req: Request) {
     // so we don't leak existence of other users' rows.
     return NextResponse.json({ ok: false, error: "Holding not found." }, { status: 404 });
   }
+
+  const posthog = getPostHogClient();
+  posthog.capture({
+    distinctId: auth.userId,
+    event: "holding_edited",
+    properties: { holding_id: id, fields_updated: Object.keys(update) },
+  });
+
   return NextResponse.json({ ok: true });
 }

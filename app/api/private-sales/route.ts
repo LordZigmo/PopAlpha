@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require";
 import { createServerSupabaseUserClient } from "@/lib/db/user";
+import { getPostHogClient } from "@/lib/posthog-server";
 
 export const runtime = "nodejs";
 
@@ -113,6 +114,18 @@ export async function POST(req: Request) {
     if (error) {
       return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
     }
+
+    const posthog = getPostHogClient();
+    posthog.capture({
+      distinctId: userId,
+      event: "private_sale_logged",
+      properties: {
+        cert,
+        price,
+        currency,
+        payment_method: paymentMethod,
+      },
+    });
 
     return NextResponse.json({ ok: true, sale: data }, { status: 201 });
   } catch (error) {

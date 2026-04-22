@@ -4,7 +4,9 @@ import SettingsMenu from "@/components/settings-menu";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useUser, useClerk, RedirectToSignIn } from "@clerk/nextjs";
 import { usePathname, useSearchParams } from "next/navigation";
+import PageShell from "@/components/layout/PageShell";
 import { supabase } from "@/lib/supabaseClient";
+import posthog from "posthog-js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -304,12 +306,14 @@ function PortfolioInner() {
 
   if (!isLoaded) {
     return (
-      <div className="app-shell flex min-h-[60vh] items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
-          <p className="text-sm text-white/50">Loading account...</p>
+      <PageShell>
+        <div className="flex min-h-[60vh] items-center justify-center">
+          <div className="flex flex-col items-center gap-3">
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
+            <p className="text-sm text-white/50">Loading account...</p>
+          </div>
         </div>
-      </div>
+      </PageShell>
     );
   }
 
@@ -325,12 +329,14 @@ function PortfolioInner() {
 
   if (onboardingRedirect) {
     return (
-      <div className="app-shell flex min-h-[60vh] items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
-          <p className="text-sm text-white/50">Setting up your account...</p>
+      <PageShell>
+        <div className="flex min-h-[60vh] items-center justify-center">
+          <div className="flex flex-col items-center gap-3">
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
+            <p className="text-sm text-white/50">Setting up your account...</p>
+          </div>
         </div>
-      </div>
+      </PageShell>
     );
   }
 
@@ -338,16 +344,18 @@ function PortfolioInner() {
 
   if (loading) {
     return (
-      <div className="app-shell px-4 py-6 sm:px-6 lg:px-10">
-        <div className="mx-auto max-w-[1200px] space-y-4">
-          <div className="h-8 w-48 animate-pulse rounded-xl bg-white/10" />
-          <div className="grid gap-4 lg:grid-cols-2">
-            <div className="h-64 animate-pulse rounded-3xl bg-white/5" />
-            <div className="h-64 animate-pulse rounded-3xl bg-white/5" />
+      <PageShell>
+        <div className="px-4 py-6 sm:px-6 lg:px-10">
+          <div className="mx-auto max-w-[1200px] space-y-4">
+            <div className="h-8 w-48 animate-pulse rounded-xl bg-white/10" />
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="h-64 animate-pulse rounded-3xl bg-white/5" />
+              <div className="h-64 animate-pulse rounded-3xl bg-white/5" />
+            </div>
+            <div className="h-48 animate-pulse rounded-3xl bg-white/5" />
           </div>
-          <div className="h-48 animate-pulse rounded-3xl bg-white/5" />
         </div>
-      </div>
+      </PageShell>
     );
   }
 
@@ -410,11 +418,20 @@ function PortfolioInner() {
         setAddSaving(false);
         return;
       }
-    } catch {
+    } catch (err) {
+      posthog.captureException(err);
       setAddErr("Network error. Check your connection and try again.");
       setAddSaving(false);
       return;
     }
+
+    posthog.capture("holding_added", {
+      canonical_slug: cardId,
+      grade,
+      qty: intQty,
+      price_paid_usd: pricePaid,
+      venue: venue || null,
+    });
 
     // Success — reset form, show feedback, re-fetch
     setQty(1);
@@ -435,8 +452,9 @@ function PortfolioInner() {
   const pnlClass = totalPnL >= 0 ? "text-emerald-600" : "text-rose-600";
 
   return (
-    <div className="app-shell px-4 py-6 sm:px-6 lg:px-10">
-      <div className="mx-auto max-w-[1200px] rounded-[2rem] border border-[#1E1E1E] bg-[#0A0A0A] p-3 sm:p-5 shadow-[0_35px_80px_rgba(0,0,0,0.55)]">
+    <PageShell>
+      <div className="px-4 py-6 sm:px-6 lg:px-10">
+        <div className="mx-auto max-w-[1200px] rounded-[2rem] border border-[#1E1E1E] bg-[#0A0A0A] p-3 sm:p-5 shadow-[0_35px_80px_rgba(0,0,0,0.55)]">
         <div className="relative overflow-hidden rounded-[1.8rem] border border-white/[0.08] bg-[radial-gradient(circle_at_top_left,rgba(37,99,235,0.18),transparent_34%),radial-gradient(circle_at_top_right,rgba(79,70,229,0.14),transparent_30%),linear-gradient(180deg,#111827_0%,#0A0A0A_78%)] p-5 sm:p-7">
           <div className="absolute -left-16 -top-16 h-64 w-64 rounded-full bg-sky-400/10 blur-3xl" />
           <div className="absolute -right-20 -bottom-20 h-72 w-72 rounded-full bg-indigo-300/10 blur-3xl" />
@@ -783,7 +801,8 @@ function PortfolioInner() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </PageShell>
   );
 }
 
@@ -793,9 +812,11 @@ export default function PortfolioClient() {
   return (
     <Suspense
       fallback={
-        <div className="app-shell flex min-h-[60vh] items-center justify-center">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
-        </div>
+        <PageShell>
+          <div className="flex min-h-[60vh] items-center justify-center">
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
+          </div>
+        </PageShell>
       }
     >
       <PortfolioInner />

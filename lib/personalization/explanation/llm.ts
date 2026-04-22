@@ -137,6 +137,11 @@ export async function buildLlmExplanation(
       system: SYSTEM_PROMPT,
       prompt: buildUserPrompt(card, features, profile),
       abortSignal: controller.signal,
+      experimental_telemetry: {
+        isEnabled: true,
+        functionId: "personalized-card-explanation",
+        metadata: { dominant_style: profile.dominant_style_label },
+      },
     });
     const parsed = parseLlmOutput(result.text ?? "");
     if (!parsed) {

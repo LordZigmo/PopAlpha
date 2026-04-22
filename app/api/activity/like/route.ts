@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require";
 import { createServerSupabaseUserClient } from "@/lib/db/user";
 import { emitNotification } from "@/lib/activity/emit";
+import { getPostHogClient } from "@/lib/posthog-server";
 
 export const runtime = "nodejs";
 
@@ -57,6 +58,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
     }
     liked = true;
+
+    const posthog = getPostHogClient();
+    posthog.capture({
+      distinctId: auth.userId,
+      event: "activity_liked",
+      properties: { event_id: eventId },
+    });
 
     // Notify event actor (async, don't block)
     const { data: event } = await db

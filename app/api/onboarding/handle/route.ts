@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/auth/require";
 import { validateHandle } from "@/lib/handles";
 import { ensureAppUser, claimHandle } from "@/lib/data/app-user";
 import { createRateLimiter } from "@/lib/rate-limit";
+import { getPostHogClient } from "@/lib/posthog-server";
 
 export const runtime = "nodejs";
 
@@ -55,6 +56,17 @@ export async function POST(req: Request) {
         { status: 409 },
       );
     }
+
+    const posthog = getPostHogClient();
+    posthog.identify({
+      distinctId: auth.userId,
+      properties: { handle: claimed.handle },
+    });
+    posthog.capture({
+      distinctId: auth.userId,
+      event: "handle_claimed",
+      properties: { handle: claimed.handle },
+    });
 
     return NextResponse.json({ ok: true, handle: claimed.handle });
   } catch (error) {

@@ -229,6 +229,11 @@ export async function generateCardProfile(
       system: SYSTEM_PROMPT,
       prompt: buildUserPrompt(input),
       abortSignal: abortController.signal,
+      experimental_telemetry: {
+        isEnabled: true,
+        functionId: "card-profile-summary",
+        metadata: { canonical_slug: input.canonicalSlug },
+      },
     });
 
     const parsed = parseLlmProfile(result.text ?? "");

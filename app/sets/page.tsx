@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import PageShell from "@/components/layout/PageShell";
 import { buildSetId } from "@/lib/sets/summary-core.mjs";
 import { dbPublic } from "@/lib/db";
 import { isPhysicalPokemonSet } from "@/lib/sets/physical";
@@ -150,8 +151,8 @@ export default async function SetsPage() {
   });
 
   return (
-    <main className="app-shell">
-      <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
+    <PageShell>
+      <div className="px-5 py-8 sm:px-8">
         <section className="glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
           <div className="flex items-center justify-between">
             <div>
@@ -160,9 +161,6 @@ export default async function SetsPage() {
                 {sets.length} sets · Browse cards sorted by market value
               </p>
             </div>
-            <Link href="/" className="text-muted text-sm transition-colors hover:text-app">
-              ← Home
-            </Link>
           </div>
         </section>
 
@@ -201,6 +199,6 @@ export default async function SetsPage() {
           ))}
         </div>
       </div>
-    </main>
+    </PageShell>
   );
 }

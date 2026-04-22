@@ -6,6 +6,8 @@ import { SignOutButton } from "@clerk/nextjs";
 import { useSafeUser } from "@/lib/auth/use-safe-user";
 import { Camera, Pencil } from "lucide-react";
 import PostBody, { type PostMention } from "@/components/profile/post-body";
+import PageShell from "@/components/layout/PageShell";
+import posthog from "posthog-js";
 
 type AppProfile = {
   handle: string | null;
@@ -223,33 +225,37 @@ export default function ProfilePage() {
 
   if (!isLoaded || loadingProfile) {
     return (
-      <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
-        <div className="overflow-hidden rounded-[2rem] border border-[#1E1E1E] bg-[#101010]">
-          <div className="h-40 animate-pulse bg-white/[0.04]" />
-          <div className="px-5 py-5">
-            <div className="-mt-16 h-24 w-24 animate-pulse rounded-full border-4 border-[#101010] bg-white/[0.06]" />
-            <div className="mt-4 h-6 w-40 animate-pulse rounded-full bg-white/[0.05]" />
-            <div className="mt-2 h-4 w-28 animate-pulse rounded-full bg-white/[0.04]" />
+      <PageShell>
+        <div className="mx-auto max-w-3xl px-5 py-10 sm:px-8">
+          <div className="overflow-hidden rounded-[2rem] border border-[#1E1E1E] bg-[#101010]">
+            <div className="h-40 animate-pulse bg-white/[0.04]" />
+            <div className="px-5 py-5">
+              <div className="-mt-16 h-24 w-24 animate-pulse rounded-full border-4 border-[#101010] bg-white/[0.06]" />
+              <div className="mt-4 h-6 w-40 animate-pulse rounded-full bg-white/[0.05]" />
+              <div className="mt-2 h-4 w-28 animate-pulse rounded-full bg-white/[0.04]" />
+            </div>
           </div>
         </div>
-      </div>
+      </PageShell>
     );
   }
 
   if (!user) {
     return (
-      <div className="mx-auto max-w-2xl px-4 py-10 sm:px-6">
-        <div className="rounded-[2rem] border border-[#1E1E1E] bg-[#101010] px-6 py-8 text-center">
-          <p className="text-[24px] font-semibold tracking-[-0.03em] text-white">Profile</p>
-          <p className="mt-3 text-[14px] leading-6 text-[#A3A3A3]">Sign in to see your PopAlpha profile.</p>
-          <Link
-            href="/sign-in"
-            className="mt-5 inline-flex rounded-2xl border border-[#1E1E1E] bg-white/[0.06] px-4 py-2 text-[14px] font-semibold text-white transition hover:bg-white/[0.1]"
-          >
-            Sign In
-          </Link>
+      <PageShell>
+        <div className="mx-auto max-w-2xl px-5 py-10 sm:px-8">
+          <div className="rounded-[2rem] border border-[#1E1E1E] bg-[#101010] px-6 py-8 text-center">
+            <p className="text-[24px] font-semibold tracking-[-0.03em] text-white">Profile</p>
+            <p className="mt-3 text-[14px] leading-6 text-[#A3A3A3]">Sign in to see your PopAlpha profile.</p>
+            <Link
+              href="/sign-in"
+              className="mt-5 inline-flex rounded-2xl border border-[#1E1E1E] bg-white/[0.06] px-4 py-2 text-[14px] font-semibold text-white transition hover:bg-white/[0.1]"
+            >
+              Sign In
+            </Link>
+          </div>
         </div>
-      </div>
+      </PageShell>
     );
   }
 
@@ -341,7 +347,11 @@ export default function ProfilePage() {
       setEditingName(false);
       setEditingHandle(false);
       setEditingBio(false);
+      posthog.capture("profile_updated", {
+        handle: payload.profile.handle,
+      });
     } catch (error) {
+      posthog.captureException(error);
       setProfileError(error instanceof Error ? error.message : "Could not save profile.");
     } finally {
       setSavingProfile(false);
@@ -367,7 +377,12 @@ export default function ProfilePage() {
       setPosts((current) => [payload.post as ProfilePost, ...current]);
       setStats((current) => ({ ...current, post_count: current.post_count + 1 }));
       setPostDraft("");
+      posthog.capture("post_created", {
+        post_id: (payload.post as ProfilePost).id,
+        body_length: body.length,
+      });
     } catch (error) {
+      posthog.captureException(error);
       setProfileError(error instanceof Error ? error.message : "Could not publish post.");
     } finally {
       setPosting(false);
@@ -413,6 +428,7 @@ export default function ProfilePage() {
       }
       setPosts((current) => current.filter((post) => post.id !== postId));
       setStats((current) => ({ ...current, post_count: Math.max(0, current.post_count - 1) }));
+      posthog.capture("post_deleted", { post_id: postId });
       if (editingPostId === postId) {
         setEditingPostId(null);
         setPostEditDraft("");
@@ -443,8 +459,9 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6 sm:py-8">
-      <section className="overflow-hidden rounded-[2rem] border border-[#1E1E1E] bg-[#101010]">
+    <PageShell>
+      <div className="mx-auto max-w-3xl px-5 py-6 sm:px-8 sm:py-8">
+        <section className="overflow-hidden rounded-[2rem] border border-[#1E1E1E] bg-[#101010]">
         <div
           className="group relative h-40 bg-[radial-gradient(circle_at_top_left,rgba(29,78,216,0.24),transparent_34%),radial-gradient(circle_at_top_right,rgba(49,46,129,0.26),transparent_30%),linear-gradient(180deg,#0F172A_0%,#0A0A0A_72%)] bg-cover bg-center"
           style={bannerUrl ? { backgroundImage: `linear-gradient(180deg, rgba(10,10,10,0.18), rgba(10,10,10,0.68)), url("${bannerUrl}")` } : undefined}
@@ -774,6 +791,7 @@ export default function ProfilePage() {
           </div>
         </div>
       </section>
-    </div>
+      </div>
+    </PageShell>
   );
 }

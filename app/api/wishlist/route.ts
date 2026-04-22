@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require";
 import { createServerSupabaseUserClient } from "@/lib/db/user";
+import { getPostHogClient } from "@/lib/posthog-server";
 
 export const runtime = "nodejs";
 
@@ -124,6 +125,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
   }
 
+  const posthog = getPostHogClient();
+  posthog.capture({
+    distinctId: auth.userId,
+    event: "card_wishlisted",
+    properties: { canonical_slug, has_note: note !== null },
+  });
+
   // Emit activity event (fire-and-forget)
   import("@/lib/activity/emit").then(async ({ emitActivityEvent }) => {
     let cardName = canonical_slug;
@@ -169,6 +177,13 @@ export async function DELETE(req: Request) {
     console.error("[wishlist DELETE]", error.message);
     return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
   }
+
+  const posthog = getPostHogClient();
+  posthog.capture({
+    distinctId: auth.userId,
+    event: "card_unwishlisted",
+    properties: { canonical_slug: slug },
+  });
 
   return NextResponse.json({ ok: true });
 }

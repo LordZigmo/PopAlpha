@@ -1,6 +1,7 @@
 "use server";
 
 import { generateText } from "ai";
+import { auth } from "@clerk/nextjs/server";
 import { getAnalysisPromptForTier } from "@/lib/ai/prompts";
 import { getPopAlphaModel, type PopAlphaTier } from "@/lib/ai/models";
 
@@ -82,6 +83,7 @@ function calculateViewGrowth(
 export async function generateCardAnalysis(
   input: CardAnalysisInput,
 ): Promise<CardAnalysisResult> {
+  const { userId } = await auth();
   const { tier, card } = input;
   const prompt = getAnalysisPromptForTier(tier);
   const gradingGap = calculateGradingGap(card.grade10Price, card.rawPrice);
@@ -131,6 +133,14 @@ export async function generateCardAnalysis(
       "",
       dynamicContext,
     ].join("\n"),
+    experimental_telemetry: {
+      isEnabled: true,
+      functionId: "card-analysis",
+      metadata: {
+        tier,
+        ...(userId ? { posthog_distinct_id: userId } : {}),
+      },
+    },
   });
 
   return {

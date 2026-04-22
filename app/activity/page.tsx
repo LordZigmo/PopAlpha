@@ -5,6 +5,7 @@ import { Activity, Users } from "lucide-react";
 import type { ActivityFeedItem } from "@/lib/activity/types";
 import ActivityEventRow from "@/components/activity/activity-event-row";
 import NotificationBell from "@/components/activity/notification-bell";
+import PageShell from "@/components/layout/PageShell";
 
 function SkeletonRow() {
   return (
@@ -79,15 +80,16 @@ export default function ActivityPage() {
   }, [cursor, hasMore, loadingMore, fetchFeed]);
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-6 sm:px-6 sm:py-8">
-      {/* Header */}
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-[28px] font-semibold tracking-[-0.04em] text-white">Activity</h1>
-          <p className="mt-1 text-[14px] text-[#8A8A8A]">See what collectors you follow are up to</p>
+    <PageShell>
+      <div className="mx-auto max-w-2xl px-5 py-6 sm:px-8 sm:py-8">
+        {/* Header */}
+        <div className="mb-6 flex items-center justify-between">
+          <div>
+            <h1 className="text-[28px] font-semibold tracking-[-0.04em] text-white">Activity</h1>
+            <p className="mt-1 text-[14px] text-[#8A8A8A]">See what collectors you follow are up to</p>
+          </div>
+          <NotificationBell />
         </div>
-        <NotificationBell />
-      </div>
 
       {/* Feed */}
       {loading ? (
@@ -133,11 +135,12 @@ export default function ActivityPage() {
             </div>
           )}
 
-          {!hasMore && items.length > 5 && (
-            <p className="py-6 text-center text-[13px] text-[#6B6B6B]">You're all caught up</p>
-          )}
-        </div>
-      )}
-    </div>
+            {!hasMore && items.length > 5 && (
+              <p className="py-6 text-center text-[13px] text-[#6B6B6B]">You're all caught up</p>
+            )}
+          </div>
+        )}
+      </div>
+    </PageShell>
   );
 }

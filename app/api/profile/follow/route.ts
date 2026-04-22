@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require";
 import { createServerSupabaseUserClient } from "@/lib/db/user";
 import { ensureAppUser } from "@/lib/data/app-user";
+import { getPostHogClient } from "@/lib/posthog-server";
 
 export const runtime = "nodejs";
 
@@ -48,6 +49,14 @@ export async function POST(req: Request) {
     );
 
     if (error) throw new Error(error.message);
+
+    const posthog = getPostHogClient();
+    posthog.capture({
+      distinctId: auth.userId,
+      event: "user_followed",
+      properties: { followee_handle: handle.trim() },
+    });
+
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json(
@@ -80,6 +89,14 @@ export async function DELETE(req: Request) {
       .eq("followee_id", followeeId);
 
     if (error) throw new Error(error.message);
+
+    const posthog = getPostHogClient();
+    posthog.capture({
+      distinctId: auth.userId,
+      event: "user_unfollowed",
+      properties: { followee_handle: handle.trim() },
+    });
+
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json(

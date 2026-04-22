@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require";
 import { dbAdmin } from "@/lib/db/admin";
+import { getPostHogClient } from "@/lib/posthog-server";
 
 // Bulk-import holdings from a CSV parsed client-side.
 //
@@ -163,9 +164,22 @@ export async function POST(req: Request) {
     );
   }
 
+  const insertedCount = count ?? toInsert.length;
+
+  const posthog = getPostHogClient();
+  posthog.capture({
+    distinctId: auth.userId,
+    event: "holdings_bulk_imported",
+    properties: {
+      rows_submitted: rawRows.length,
+      rows_inserted: insertedCount,
+      rows_errored: errors.length,
+    },
+  });
+
   return NextResponse.json({
     ok: true,
-    inserted: count ?? toInsert.length,
+    inserted: insertedCount,
     errors,
   });
 }

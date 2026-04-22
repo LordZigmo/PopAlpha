@@ -332,6 +332,11 @@ export async function generateHomepageBrief(
       system,
       prompt,
       abortSignal: abortController.signal,
+      experimental_telemetry: {
+        isEnabled: true,
+        functionId: "homepage-brief",
+        metadata: { tone: ctx.tone, dominant_set: ctx.dominantSet ?? undefined },
+      },
     });
     const parsed = parseLlmBrief(result.text ?? "");
     if (!parsed) {

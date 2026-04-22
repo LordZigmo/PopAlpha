@@ -723,6 +723,14 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
     expectedSignals: ["service_role_client"],
     usesServiceRole: true,
   }),
+  "scripts/repair-broken-card-images.mjs": operationalScript({
+    classification: "service_role_repair",
+    executionMode: "manual_repair",
+    intendedCaller: "trusted operator repairing card_printings rows whose stored image URL 404s on pokemontcg.io by swapping in Scrydex URLs and mirroring the images into our own Storage bucket",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY", "SCRYDEX_API_KEY"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+  }),
   "scripts/refresh-card-embeddings.mjs": operationalScript({
     classification: "service_role_backfill",
     executionMode: "manual_backfill",

@@ -3,6 +3,7 @@ import "./globals.css";
 import { ClerkProvider } from "@clerk/nextjs";
 import { ThemeProvider } from "./theme-provider";
 import AppChrome from "@/components/app-chrome";
+import PostHogProvider from "@/components/posthog-provider";
 import { getSiteUrl } from "@/lib/site-url";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
@@ -66,9 +67,11 @@ export default function RootLayout({
   const inner = (
     <html lang="en" suppressHydrationWarning data-style="terminal">
       <body className="antialiased">
-        <ThemeProvider>
-          <AppChrome>{children}</AppChrome>
-        </ThemeProvider>
+        <PostHogProvider>
+          <ThemeProvider>
+            <AppChrome>{children}</AppChrome>
+          </ThemeProvider>
+        </PostHogProvider>
         <Analytics />
         <SpeedInsights />
       </body>

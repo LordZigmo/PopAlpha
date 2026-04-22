@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require";
 import { createServerSupabaseUserClient } from "@/lib/db/user";
+import { getPostHogClient } from "@/lib/posthog-server";
 
 export const runtime = "nodejs";
 
@@ -59,6 +60,17 @@ export async function GET(req: Request) {
       posts: postsRes.data ?? [],
       exportedAt: new Date().toISOString(),
     };
+
+    const posthog = getPostHogClient();
+    posthog.capture({
+      distinctId: uid,
+      event: "data_exported",
+      properties: {
+        holdings_count: (holdingsRes.data ?? []).length,
+        wishlist_count: (wishlistRes.data ?? []).length,
+        posts_count: (postsRes.data ?? []).length,
+      },
+    });
 
     return NextResponse.json({ ok: true, data: exportData });
   } catch (error) {

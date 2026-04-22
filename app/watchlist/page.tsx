@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import PageShell from "@/components/layout/PageShell";
 import {
   listCards,
   listCerts,
@@ -11,6 +12,7 @@ import {
   type WatchCardEntry,
   type WatchCertEntry,
 } from "@/lib/watchlist";
+import posthog from "posthog-js";
 
 export default function WatchlistPage() {
   const [cards, setCards] = useState<WatchCardEntry[]>(() => listCards());
@@ -22,8 +24,8 @@ export default function WatchlistPage() {
   }
 
   return (
-    <main className="app-shell">
-      <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
+    <PageShell>
+      <div className="px-5 py-8 sm:px-8 sm:py-10">
         <section className="glass rounded-[var(--radius-panel)] border-app border p-[var(--space-panel)]">
           <h1 className="text-app text-2xl font-semibold tracking-tight">Watchlist</h1>
           <p className="text-muted mt-2 text-sm">Saved cards and certs for quick drill-in.</p>
@@ -47,6 +49,11 @@ export default function WatchlistPage() {
                     onClick={() => {
                       removeCard(card.slug);
                       refresh();
+                      posthog.capture("card_unwatched", {
+                        canonical_slug: card.slug,
+                        canonical_name: card.canonical_name,
+                        set_name: card.set_name,
+                      });
                     }}
                     className="btn-ghost rounded-[var(--radius-input)] border px-2 py-1 text-xs"
                   >
@@ -75,6 +82,11 @@ export default function WatchlistPage() {
                     onClick={() => {
                       removeCert(cert.cert);
                       refresh();
+                      posthog.capture("cert_unwatched", {
+                        cert: cert.cert,
+                        label: cert.label,
+                        grade: cert.grade,
+                      });
                     }}
                     className="btn-ghost rounded-[var(--radius-input)] border px-2 py-1 text-xs"
                   >
@@ -86,6 +98,6 @@ export default function WatchlistPage() {
           )}
         </section>
       </div>
-    </main>
+    </PageShell>
   );
 }

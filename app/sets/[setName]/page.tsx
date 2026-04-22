@@ -2,9 +2,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { cache } from "react";
+import PageShell from "@/components/layout/PageShell";
 import { getCanonicalMarketPulseMap } from "@/lib/data/market";
-import { getSetSummaryPageData } from "@/lib/sets/summary";
+import { getSetSummaryPageData, getSetSummaryHistory } from "@/lib/sets/summary";
 import ChangeBadge from "@/components/change-badge";
+import EnhancedChart from "@/components/enhanced-chart";
 import { dbPublic } from "@/lib/db";
 import { isPhysicalPokemonSet } from "@/lib/sets/physical";
 
@@ -215,13 +217,14 @@ export default async function SetBrowserPage({ params }: { params: Promise<{ set
 
   const slugs = cards.map((c) => c.slug);
 
-  // Fetch printings and prices in parallel
-  const [{ data: printingsRaw }, marketPulseBySlug] = await Promise.all([
+  // Fetch printings, prices, and master-set history in parallel
+  const [{ data: printingsRaw }, marketPulseBySlug, masterSetHistory] = await Promise.all([
     supabase
       .from("card_printings")
       .select("canonical_slug, image_url, language, finish, edition")
       .in("canonical_slug", slugs),
     getCanonicalMarketPulseMap(supabase, slugs),
+    getSetSummaryHistory(decodedSetName, 90),
   ]);
 
   const printings = (printingsRaw ?? []) as PrintingRow[];
@@ -263,16 +266,59 @@ export default async function SetBrowserPage({ params }: { params: Promise<{ set
   const trend = trendSummary(summary.snapshot?.change7dPct ?? null, summary.snapshot?.change30dPct ?? null);
   const primaryTrendChange = summary.snapshot?.change7dPct ?? summary.snapshot?.change30dPct ?? null;
 
+  const liveMasterSetTotal = pricedValues.reduce((acc, value) => acc + value, 0);
+  const masterSetCurrent =
+    liveMasterSetTotal > 0 ? liveMasterSetTotal : summary.snapshot?.marketCap ?? null;
+  const masterSetChangePct = summary.snapshot?.change7dPct ?? summary.snapshot?.change30dPct ?? null;
+  const masterSetChangeWindow =
+    summary.snapshot?.change7dPct != null ? "7D" : summary.snapshot?.change30dPct != null ? "30D" : null;
+  const masterSetChartPoints = masterSetHistory.map((point) => ({
+    ts: point.asOfDate,
+    price: point.marketCap,
+  }));
+
   return (
-    <main className="app-shell">
-      <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
+    <PageShell backHref="/sets">
+      <div className="px-5 py-8 sm:px-8">
         <div className="mb-5 flex items-baseline gap-3">
-          <Link href="/sets" className="text-muted text-sm transition-colors hover:text-app">
-            ← Sets
-          </Link>
           <h1 className="text-app text-xl font-semibold">{decodedSetName}</h1>
           <span className="text-muted text-xs">{cards.length} cards</span>
         </div>
+
+        {masterSetCurrent !== null && masterSetCurrent > 0 ? (
+          <section className="mb-6 rounded-[var(--radius-card)] border-app border bg-surface-soft/30 p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-muted text-[11px] uppercase tracking-[0.18em]">Near Mint Master Set</p>
+                <p className="mt-2 text-app text-3xl font-semibold tabular-nums">
+                  {formatUsd(masterSetCurrent, 0)}
+                </p>
+                <p className="mt-1 text-xs text-muted">
+                  Combined RAW / Near Mint value of all {cards.length} cards · updated daily
+                </p>
+              </div>
+              {masterSetChangePct !== null && Number.isFinite(masterSetChangePct) ? (
+                <div className="text-right">
+                  <p className="text-muted text-[11px] uppercase tracking-[0.18em]">
+                    {masterSetChangeWindow ?? "Trend"}
+                  </p>
+                  <p
+                    className="mt-2 text-xl font-semibold tabular-nums"
+                    style={{ color: changeTone(masterSetChangePct) }}
+                  >
+                    {formatChange(masterSetChangePct) ?? "—"}
+                  </p>
+                </div>
+              ) : null}
+            </div>
+            <div className="mt-4">
+              <EnhancedChart
+                points={masterSetChartPoints}
+                windowLabel={`${Math.max(1, masterSetChartPoints.length)}D`}
+              />
+            </div>
+          </section>
+        ) : null}
 
         {summary.snapshot ? (
           <section className="mb-6 space-y-3">
@@ -380,6 +426,6 @@ export default async function SetBrowserPage({ params }: { params: Promise<{ set
           </div>
         </section>
       </div>
-    </main>
+    </PageShell>
   );
 }
