@@ -310,6 +310,20 @@ export const PRIVILEGED_PACKAGE_SCRIPT_CONTRACTS = {
     requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
     expectedCommandFragments: ["scripts/refresh-card-embeddings.mjs"],
   }),
+  "eval:seed": packageScriptContract({
+    target: "scripts/seed-scan-eval-image.mjs",
+    intendedCaller: "trusted operator seeding a single image + ground-truth label into the scanner eval corpus",
+    trustModel: "service_role_storage_upsert_wrapper",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedCommandFragments: ["scripts/seed-scan-eval-image.mjs"],
+  }),
+  "eval:run": packageScriptContract({
+    target: "scripts/run-scanner-eval.mjs",
+    intendedCaller: "trusted operator running the scanner eval corpus against /api/scan/identify and persisting one scan_eval_runs row",
+    trustModel: "service_role_read_plus_public_endpoint_driver",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedCommandFragments: ["scripts/run-scanner-eval.mjs"],
+  }),
 };
 
 export const PRIVILEGED_WORKFLOW_CONTRACTS = {
@@ -570,6 +584,15 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
     expectedSignals: ["service_role_client"],
     usesServiceRole: true,
   }),
+  "scripts/backfill-phase2c-printing-columns.mjs": operationalScript({
+    classification: "service_role_backfill",
+    executionMode: "manual_backfill",
+    intendedCaller: "trusted operator driving public.phase2c_backfill_batch to fill printing_id / finish / provider_variant_token on price_history_points",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+    notes: "Idempotent + resumable: WHERE printing_id IS NULL guards re-runs.",
+  }),
   "scripts/backfill-justtcg-live.mjs": operationalScript({
     classification: "manual_cron_route_driver",
     executionMode: "manual_backfill",
@@ -715,6 +738,15 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
     expectedSignals: ["service_role_client"],
     usesServiceRole: true,
   }),
+  "scripts/phase3a-remap.mjs": operationalScript({
+    classification: "service_role_backfill",
+    executionMode: "manual_backfill",
+    intendedCaller: "trusted operator driving public.phase3a_remap_batch to completion against _phase3a_refs",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+    notes: "Idempotent + resumable via remapped_at IS NULL.",
+  }),
   "scripts/rebuild-scrydex-raw-timeseries.mjs": operationalScript({
     classification: "service_role_backfill",
     executionMode: "manual_backfill",
@@ -786,6 +818,24 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
     requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
     expectedSignals: ["service_role_client"],
     usesServiceRole: true,
+  }),
+  "scripts/run-scanner-eval.mjs": operationalScript({
+    classification: "service_role_diagnostic",
+    executionMode: "manual_diagnostic",
+    intendedCaller: "trusted operator running the scanner eval corpus against /api/scan/identify and persisting one scan_eval_runs row for regression tracking",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+    notes: "Reads scan_eval_images + their Storage objects, posts each image to the public identify route, writes scan_eval_runs. Calls the public endpoint — does not invoke privileged routes directly.",
+  }),
+  "scripts/seed-scan-eval-image.mjs": operationalScript({
+    classification: "service_role_diagnostic",
+    executionMode: "manual_diagnostic",
+    intendedCaller: "trusted operator seeding a single ground-truth image + canonical_slug into the scanner eval corpus",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+    notes: "Uploads one JPEG into card-images/scan-eval/<sha>.jpg and upserts one scan_eval_images row. Idempotent on re-run with the same bytes.",
   }),
   "scripts/seed-scout-summaries.mjs": operationalScript({
     classification: "service_role_backfill",
