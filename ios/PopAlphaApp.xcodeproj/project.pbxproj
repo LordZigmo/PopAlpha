@@ -41,7 +41,7 @@
 		AA00000100000000000000E6 /* ActivityFeedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000E9 /* ActivityFeedView.swift */; };
 		AA00000100000000000000E7 /* ActivityEventCell.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000EA /* ActivityEventCell.swift */; };
 		AA00000100000000000000EB /* WishlistService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000EC /* WishlistService.swift */; };
-		CC00000100000000000000A1 /* RecentSearchStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00000100000000000000A2 /* RecentSearchStore.swift */; };
+		CC00000100000000000000FC /* RecentSearchStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00000100000000000000B3 /* RecentSearchStore.swift */; };
 		BB00000100000000000000F1 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00000100000000000000A1 /* APIClient.swift */; };
 		BB00000100000000000000F2 /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00000100000000000000A2 /* AuthService.swift */; };
 		BB00000100000000000000F3 /* SearchModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00000100000000000000A3 /* SearchModels.swift */; };
@@ -114,7 +114,7 @@
 		AA00000100000000000000E9 /* ActivityFeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityFeedView.swift; sourceTree = "<group>"; };
 		AA00000100000000000000EA /* ActivityEventCell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityEventCell.swift; sourceTree = "<group>"; };
 		AA00000100000000000000EC /* WishlistService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WishlistService.swift; sourceTree = "<group>"; };
-		CC00000100000000000000A2 /* RecentSearchStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentSearchStore.swift; sourceTree = "<group>"; };
+		CC00000100000000000000B3 /* RecentSearchStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentSearchStore.swift; sourceTree = "<group>"; };
 		BB00000100000000000000A1 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		BB00000100000000000000A2 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
 		BB00000100000000000000A3 /* SearchModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchModels.swift; sourceTree = "<group>"; };
@@ -200,7 +200,7 @@
 				AA00000100000000000000E9 /* ActivityFeedView.swift */,
 				AA00000100000000000000EA /* ActivityEventCell.swift */,
 				AA00000100000000000000EC /* WishlistService.swift */,
-				CC00000100000000000000A2 /* RecentSearchStore.swift */,
+				CC00000100000000000000B3 /* RecentSearchStore.swift */,
 				BB00000100000000000000A1 /* APIClient.swift */,
 				BB00000100000000000000A2 /* AuthService.swift */,
 				BB00000100000000000000A3 /* SearchModels.swift */,
@@ -372,7 +372,7 @@
 				AA00000100000000000000E6 /* ActivityFeedView.swift in Sources */,
 				AA00000100000000000000E7 /* ActivityEventCell.swift in Sources */,
 				AA00000100000000000000EB /* WishlistService.swift in Sources */,
-				CC00000100000000000000A1 /* RecentSearchStore.swift in Sources */,
+				CC00000100000000000000FC /* RecentSearchStore.swift in Sources */,
 				BB00000100000000000000F1 /* APIClient.swift in Sources */,
 				BB00000100000000000000F2 /* AuthService.swift in Sources */,
 				BB00000100000000000000F3 /* SearchModels.swift in Sources */,
