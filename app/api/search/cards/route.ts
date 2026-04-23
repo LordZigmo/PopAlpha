@@ -6,8 +6,12 @@ import { isPhysicalPokemonSet } from "@/lib/sets/physical";
 
 export const runtime = "nodejs";
 
-const RESULT_LIMIT = 20;
-const FETCH_LIMIT = 80;
+// Character queries like "pikachu" (~244 rows) or "charizard" hit the
+// physical-set filter down to ~170 results — so a 20-row cap was
+// clipping 85% of legitimate matches. Trigram GIN indexes on
+// search_doc_norm / alias_norm make the larger fetch cheap.
+const RESULT_LIMIT = 100;
+const FETCH_LIMIT = 500;
 
 type CanonicalRow = {
   canonical_slug: string;

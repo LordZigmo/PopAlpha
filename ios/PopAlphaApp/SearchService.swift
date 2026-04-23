@@ -11,7 +11,7 @@ actor SearchService {
         return d
     }()
 
-    /// Autocomplete search — returns up to 20 ranked results
+    /// Autocomplete search — returns up to 100 ranked results
     /// Calls GET /api/search/cards?q=<query>
     func search(query: String) async throws -> [SearchCardResult] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
