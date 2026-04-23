@@ -6,12 +6,14 @@
 -- returns exactly one variant_ref per slug. Any slug that returns 0 or >1
 -- is a data-model gap worth investigating.
 --
--- Thresholds (as of 2026-04-23, post Phase 2):
---   Expected:  >= 94%  of multi-cohort slugs return 1 cohort
---   Residue:   ~4%     return >1 (pattern-variant HOLO collisions — Phase 3)
---   Residue:   ~1%     return 0  (stamped/edition rows, all UNKNOWN-token)
+-- Thresholds (as of 2026-04-23, post Phase 3a):
+--   Expected:  >= 99%  of multi-cohort slugs return 1 cohort
+--   Residue:             pure-edition tokens (firstedition/unlimited/jumbo,
+--                        artist autographs) still have printing_id NULL
+--                        and are excluded from the canonical view —
+--                        separate Phase 3b/c/d scope.
 --
--- Run on demand or wire into a CI check when Phase 3 lands.
+-- Run on demand or wire into a CI check when further phases land.
 
 with multi_cohort as (
   select canonical_slug
