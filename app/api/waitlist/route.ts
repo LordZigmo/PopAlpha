@@ -200,7 +200,7 @@ export async function POST(req: Request) {
       requestMs: Date.now() - requestStartedAtMs,
     });
 
-    if (result.outcome === "created") {
+    if (result.outcome === "inserted") {
       const distinctId = clerkUserId ?? normalizedEmail;
       const posthog = getPostHogClient();
       posthog.capture({

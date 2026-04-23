@@ -335,7 +335,10 @@ export async function generateHomepageBrief(
       experimental_telemetry: {
         isEnabled: true,
         functionId: "homepage-brief",
-        metadata: { tone: ctx.tone, dominant_set: ctx.dominantSet ?? undefined },
+        metadata: {
+          tone: ctx.tone,
+          ...(ctx.dominantSet ? { dominant_set: ctx.dominantSet } : {}),
+        },
       },
     });
     const parsed = parseLlmBrief(result.text ?? "");

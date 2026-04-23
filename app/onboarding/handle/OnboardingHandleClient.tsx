@@ -102,10 +102,12 @@ export default function OnboardingHandleClient() {
       }
 
       // Identify user and track handle claim
-      posthog.identify(user.id, {
-        handle: json.handle,
-        email: user.primaryEmailAddress?.emailAddress,
-      });
+      if (user) {
+        posthog.identify(user.id, {
+          handle: json.handle,
+          email: user.primaryEmailAddress?.emailAddress,
+        });
+      }
       posthog.capture("handle_claimed", {
         handle: json.handle,
       });
