@@ -231,6 +231,18 @@ const SPECIAL_VARIANT_SPECS: SpecialVariantSpec[] = [
     forcedFinish: null,
     specialVariantToken: "prereleasestamp",
   },
+  // Phase 3b: shadowless is modeled as a stamp overlay on an edition.
+  // The alias pattern is a substring match, so it fires for plain
+  // 'unlimitedshadowless' / 'firsteditionshadowless' AND compound
+  // 'unlimitedshadowlessholofoil' etc. Edition + finish are still
+  // derived from the surrounding token segments.
+  {
+    aliases: ["shadowless"],
+    normalizedStamp: "SHADOWLESS",
+    stampLabel: "shadowless",
+    forcedFinish: null,
+    specialVariantToken: "shadowless",
+  },
 ];
 
 export type ScrydexVariantSemantics = {
