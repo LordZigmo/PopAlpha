@@ -80,6 +80,20 @@ public final class ScannerViewModel: ObservableObject, PopAlphaVisionEngineDeleg
         visionEngine.reset()
     }
 
+    /// Pauses the Vision stability gate so the app layer can identify
+    /// a UIImage it sourced from somewhere other than the live camera
+    /// (e.g. a photo-library pick). Mirrors the isScanning=false branch
+    /// of `didDetectStableCard` without requiring a captured frame.
+    /// Call `resumeScanning()` when you're ready for the live camera
+    /// path to fire again.
+    public func pauseForExternalCapture() {
+        identificationTask?.cancel()
+        identificationTask = nil
+        isScanning = false
+        candidateBoundingBox = nil
+        visionEngine.reset()
+    }
+
     public func triggerMockDetection() {
         guard useMockData else {
             return

@@ -1,4 +1,5 @@
 import Combine
+import PhotosUI
 import SwiftUI
 import NukeUI
 import PopAlphaCore
@@ -17,6 +18,7 @@ struct ScannerTabView: View {
     @State private var scannedCards: [MarketCard] = []
     @State private var navigateToCard: MarketCard?
     @State private var scanLanguage: ScanLanguage = .en
+    @State private var selectedPhotoItem: PhotosPickerItem?
 
     // Package-backed recognition
     @StateObject private var scanner = ScannerHost()
@@ -121,16 +123,60 @@ struct ScannerTabView: View {
         VStack(spacing: 12) {
             Color.clear.frame(height: 54)
 
-            HStack {
+            HStack(spacing: 8) {
                 statusBadge
 
                 Spacer()
 
+                libraryPickerButton
                 languagePill
             }
             .padding(.horizontal, 20)
 
             modePill
+        }
+    }
+
+    // MARK: - Library picker (scan a saved photo instead of live camera)
+
+    private var libraryPickerButton: some View {
+        PhotosPicker(
+            selection: $selectedPhotoItem,
+            matching: .images,
+            photoLibrary: .shared()
+        ) {
+            Image(systemName: "photo.on.rectangle.angled")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.85))
+                .frame(width: 32, height: 32)
+                .background(.ultraThinMaterial.opacity(0.5))
+                .clipShape(Circle())
+        }
+        .disabled(scanner.isIdentifying)
+        .onChange(of: selectedPhotoItem) { _, newItem in
+            guard let newItem else { return }
+            Task {
+                await loadAndIdentifyLibraryPhoto(newItem)
+                // Reset the selection so picking the same photo twice
+                // in a row re-fires the onChange handler.
+                await MainActor.run { selectedPhotoItem = nil }
+            }
+        }
+    }
+
+    private func loadAndIdentifyLibraryPhoto(_ item: PhotosPickerItem) async {
+        do {
+            guard
+                let data = try await item.loadTransferable(type: Data.self),
+                let image = UIImage(data: data)
+            else {
+                return
+            }
+            await scanner.runIdentifyFromLibrary(image: image)
+        } catch {
+            // Swallow — ScannerHost.runIdentify surfaces network / identify
+            // errors via `identifyError`; picker-load failures are rare
+            // enough to ignore for v1.
         }
     }
 
@@ -555,6 +601,21 @@ final class ScannerHost: ObservableObject {
             self.identifyError = error.localizedDescription
             self.resumeScanning()
         }
+    }
+
+    /// Identifies a card from the user's photo library (or any already-
+    /// captured UIImage) by feeding it straight through the server
+    /// identify pipeline, skipping the Vision rectangle stability gate.
+    /// Used by the scanner UI's PhotosPicker button so users can scan
+    /// photos they already have — especially useful for building out
+    /// the eval corpus from saved captures.
+    func runIdentifyFromLibrary(image: UIImage) async {
+        // Pause live scanning so the camera's stability gate doesn't
+        // also fire an identify concurrently — we only want the library
+        // photo's result to drive navigation.
+        viewModel?.pauseForExternalCapture()
+        isScanning = viewModel?.isScanning ?? false
+        await runIdentify(image: image)
     }
 
     func resumeScanning() {
