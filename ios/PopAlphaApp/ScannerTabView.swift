@@ -19,6 +19,7 @@ struct ScannerTabView: View {
     @State private var navigateToCard: MarketCard?
     @State private var scanLanguage: ScanLanguage = .en
     @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var showEvalSeeding = false
 
     // Package-backed recognition
     @StateObject private var scanner = ScannerHost()
@@ -75,13 +76,16 @@ struct ScannerTabView: View {
             .ignoresSafeArea()
             .navigationBarHidden(true)
             .navigationDestination(item: $navigateToCard) { card in
-                CardDetailView(card: card)
+                CardDetailView(card: card, scanImageHash: scanner.lastImageHash)
                     .onDisappear {
                         // Resume auto-scanning when the user returns from the detail view (single mode).
                         if scanMode == .single {
                             resetToIdle()
                         }
                     }
+            }
+            .sheet(isPresented: $showEvalSeeding) {
+                EvalSeedingView(mode: .freshPhoto, isPresented: $showEvalSeeding)
             }
             .onChange(of: scanner.lastMatch) { _, newValue in
                 handleIdentifyResult(newValue)
@@ -128,12 +132,34 @@ struct ScannerTabView: View {
 
                 Spacer()
 
+                evalSeedingButton
                 libraryPickerButton
                 languagePill
             }
             .padding(.horizontal, 20)
 
             modePill
+        }
+    }
+
+    // MARK: - Eval seeding button (admin — opens EvalSeedingView)
+    //
+    // Server-side admin auth gates the actual write, so showing this
+    // to non-admins is harmless (their POST would 401). A non-admin
+    // tap is a very unlikely foot-shooting path — the button is small
+    // and labelled with a flask icon that reads as "experimental."
+
+    private var evalSeedingButton: some View {
+        Button {
+            PAHaptics.tap()
+            showEvalSeeding = true
+        } label: {
+            Image(systemName: "testtube.2")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.85))
+                .frame(width: 32, height: 32)
+                .background(.ultraThinMaterial.opacity(0.5))
+                .clipShape(Circle())
         }
     }
 
@@ -508,6 +534,10 @@ final class ScannerHost: ObservableObject {
     @Published private(set) var lastConfidence: String?
     @Published private(set) var isIdentifying: Bool = false
     @Published private(set) var identifyError: String?
+    /// sha256 hash of the most recently-uploaded scan JPEG. Threaded
+    /// through so CardDetailView can fire "this is the wrong card"
+    /// corrections against the exact image the identifier saw.
+    @Published private(set) var lastImageHash: String?
 
     /// Language hint passed to /api/scan/identify. Defaults to EN; the
     /// scanner UI exposes a pill toggle so the user can flip to JP.
@@ -587,6 +617,7 @@ final class ScannerHost: ObservableObject {
             )
             self.lastMatch = response.topMatch
             self.lastConfidence = response.confidence
+            self.lastImageHash = response.imageHash
             self.isIdentifying = false
 
             // Low-confidence → auto-resume so the user can try again
@@ -631,6 +662,7 @@ final class ScannerHost: ObservableObject {
         lastMatch = nil
         lastConfidence = nil
         identifyError = nil
+        lastImageHash = nil
     }
 }
 

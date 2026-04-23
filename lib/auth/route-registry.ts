@@ -80,6 +80,7 @@ export const ADMIN_ROUTES = [
   "admin/import/printings",
   "admin/psa-seeds",
   "admin/discover-sets",
+  "admin/scan-eval/promote",
 ];
 
 export const DEBUG_ROUTES = [

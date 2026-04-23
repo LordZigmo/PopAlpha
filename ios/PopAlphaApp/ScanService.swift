@@ -41,10 +41,35 @@ struct ScanIdentifyResponse: Decodable, Sendable {
     let matches: [ScanMatch]
     let languageFilter: String
     let modelVersion: String
+    /// sha256 of the uploaded JPEG bytes, computed server-side. Threaded
+    /// through so CardDetailView can hand this back to the promote
+    /// endpoint when the user reports a mis-identification — server then
+    /// copies scan-uploads/<hash>.jpg into scan-eval/<hash>.jpg.
+    let imageHash: String?
 
     var topMatch: ScanMatch? { matches.first }
     var isHighConfidence: Bool { confidence == "high" }
     var isMediumConfidence: Bool { confidence == "medium" }
+}
+
+// MARK: - Promote-to-eval response
+
+struct ScanEvalPromoteResponse: Decodable, Sendable {
+    let ok: Bool
+    let evalImageId: String?
+    let storagePath: String?
+    let imageHash: String?
+    let imageBytesSize: Int?
+    let canonicalSlug: String?
+    let wasUpload: Bool?
+    let error: String?
+}
+
+/// Which seeding path the user took. Feeds into scan_eval_images.captured_source
+/// so corrections show up distinctly from "I manually labeled a photo."
+enum EvalCaptureSource: String, Sendable {
+    case userPhoto = "user_photo"
+    case userCorrection = "user_correction"
 }
 
 // MARK: - Service
@@ -73,6 +98,65 @@ enum ScanService {
             body: jpegData,
             contentType: "image/jpeg",
             query: [("language", language.rawValue)]
+        )
+    }
+
+    /// Promotes a past scan (identified by its image_hash) into the eval
+    /// corpus with the user-provided correct canonical_slug. Use from
+    /// CardDetailView when the user reports a mis-identification —
+    /// server copies scan-uploads/<hash>.jpg into scan-eval/<hash>.jpg.
+    static func promoteEvalFromHash(
+        imageHash: String,
+        canonicalSlug: String,
+        source: EvalCaptureSource = .userCorrection,
+        language: ScanLanguage = .en,
+        notes: String? = nil
+    ) async throws -> ScanEvalPromoteResponse {
+        var body: [String: Any] = [
+            "canonical_slug": canonicalSlug,
+            "image_hash": imageHash,
+            "captured_source": source.rawValue,
+            "captured_language": language.rawValue,
+        ]
+        if let notes, !notes.isEmpty { body["notes"] = notes }
+
+        return try await APIClient.post(
+            path: "/api/admin/scan-eval/promote",
+            body: body
+        )
+    }
+
+    /// Promotes a freshly-picked photo into the eval corpus as ground
+    /// truth — no prior scan required. Base64-encodes the JPEG into a
+    /// JSON body so we don't need multipart plumbing on the client.
+    static func promoteEvalFromBytes(
+        image: UIImage,
+        canonicalSlug: String,
+        source: EvalCaptureSource = .userPhoto,
+        language: ScanLanguage = .en,
+        notes: String? = nil,
+        maxEdgePixels: CGFloat = 1024,
+        compressionQuality: CGFloat = 0.85
+    ) async throws -> ScanEvalPromoteResponse {
+        guard let jpegData = resizedJPEG(
+            from: image,
+            maxEdge: maxEdgePixels,
+            quality: compressionQuality
+        ) else {
+            throw ScanServiceError.imageEncodingFailed
+        }
+
+        var body: [String: Any] = [
+            "canonical_slug": canonicalSlug,
+            "image_base64": jpegData.base64EncodedString(),
+            "captured_source": source.rawValue,
+            "captured_language": language.rawValue,
+        ]
+        if let notes, !notes.isEmpty { body["notes"] = notes }
+
+        return try await APIClient.post(
+            path: "/api/admin/scan-eval/promote",
+            body: body
         )
     }
 

@@ -34,7 +34,21 @@ enum PriceMode: Equatable, Hashable {
 
 struct CardDetailView: View {
     let card: MarketCard
+    /// sha256 of the scan image that brought the user to this detail view,
+    /// if any. Set only when navigating from the scanner. When non-nil, a
+    /// "Not this card?" correction affordance appears in the hero section
+    /// so the user can hand the identifier a ground-truth label without
+    /// re-photographing the card. Defaults nil so existing call sites
+    /// (portfolio, signals, marketplace, set detail) don't need updates.
+    let scanImageHash: String?
+
+    init(card: MarketCard, scanImageHash: String? = nil) {
+        self.card = card
+        self.scanImageHash = scanImageHash
+    }
+
     @Environment(\.dismiss) private var dismiss
+    @State private var showCorrectionSheet = false
     @State private var selectedTimeframe: ChartTimeframe = .week
     @State private var chartPrices: [Double] = []
     @State private var chartTimestamps: [String] = []
@@ -58,6 +72,11 @@ struct CardDetailView: View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(spacing: 0) {
                 heroSection
+                if scanImageHash != nil {
+                    correctionPrompt
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 8)
+                }
                 detailContent
             }
             .background(alignment: .top) {
@@ -73,6 +92,14 @@ struct CardDetailView: View {
         }
         .coordinateSpace(name: "scroll")
         .background(PA.Colors.background)
+        .sheet(isPresented: $showCorrectionSheet) {
+            if let hash = scanImageHash {
+                EvalSeedingView(
+                    mode: .correction(imageHash: hash, predictedSlug: card.id),
+                    isPresented: $showCorrectionSheet
+                )
+            }
+        }
         .task(id: "\(selectedTimeframe.rawValue)|\(selectedPriceMode)|\(selectedPrintingId ?? "")") {
             await loadChart()
         }
@@ -197,6 +224,43 @@ struct CardDetailView: View {
     }
 
     // MARK: - Hero (matches web canonical-card-floating-hero)
+
+    /// Shown only when the user arrived at this detail view via a
+    /// scanner identify. Lets them flag "that's not the card I
+    /// scanned" and feed the correct slug back into the eval corpus,
+    /// where it becomes regression-test material + fine-tuning fodder.
+    private var correctionPrompt: some View {
+        Button {
+            PAHaptics.tap()
+            showCorrectionSheet = true
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "questionmark.circle.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(PA.Colors.accent)
+                Text("Not this card? Tell the scanner what it actually was.")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(PA.Colors.text)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(PA.Colors.muted)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(PA.Colors.accent.opacity(0.08))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(PA.Colors.accent.opacity(0.25), lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+    }
 
     private var heroSection: some View {
         GeometryReader { geo in

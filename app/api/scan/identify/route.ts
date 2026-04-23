@@ -376,6 +376,12 @@ export async function POST(req: Request) {
     })),
     language_filter: language,
     model_version: embedder.modelVersion,
+    // Returned so the iOS app can later correct a mis-identification
+    // (POST /api/admin/scan-eval/promote with this hash and the true
+    // canonical_slug). The hash isn't sensitive — just sha256 of the
+    // JPEG bytes the client already sent — and it lets us promote the
+    // scan into the eval corpus without re-uploading the image.
+    image_hash: imageHash,
   });
 }
 
