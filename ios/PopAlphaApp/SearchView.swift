@@ -14,6 +14,7 @@ struct SearchView: View {
     @State private var searchError: String?
     @State private var hasSearched = false
     @FocusState private var isTextFieldFocused: Bool
+    @ObservedObject private var recents = RecentSearchStore.shared
 
     // Card number detection
     private var isCardNumberQuery: Bool {
@@ -116,6 +117,7 @@ struct SearchView: View {
 
                 ForEach(results) { card in
                     Button {
+                        recents.record(card)
                         onSelectCard?(card)
                         onSelectSlug?(card.canonicalSlug)
                         dismiss()
@@ -219,6 +221,51 @@ struct SearchView: View {
     }
 
     private var idleState: some View {
+        Group {
+            if recents.recents.isEmpty {
+                emptyIdleState
+            } else {
+                recentsList
+            }
+        }
+    }
+
+    private var recentsList: some View {
+        ScrollView {
+            LazyVStack(spacing: 8) {
+                HStack {
+                    Text("Recent")
+                        .font(PA.Typography.sectionTitle)
+                        .foregroundStyle(PA.Colors.text)
+                    Spacer()
+                    Button("Clear") {
+                        recents.clear()
+                    }
+                    .font(PA.Typography.caption)
+                    .foregroundStyle(PA.Colors.muted)
+                }
+                .padding(.horizontal, 4)
+                .padding(.top, 4)
+
+                ForEach(recents.recents) { card in
+                    Button {
+                        recents.record(card)
+                        onSelectCard?(card)
+                        onSelectSlug?(card.canonicalSlug)
+                        dismiss()
+                    } label: {
+                        SearchResultCell(card: card)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 32)
+        }
+    }
+
+    private var emptyIdleState: some View {
         VStack(spacing: 16) {
             Spacer()
             Image(systemName: "magnifyingglass")

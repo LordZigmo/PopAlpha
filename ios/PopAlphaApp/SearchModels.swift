@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - Search Models (matches /api/search/cards response)
 
-struct SearchCardResult: Decodable, Identifiable, Hashable {
+struct SearchCardResult: Codable, Identifiable, Hashable {
     let canonicalSlug: String
     let canonicalName: String
     let setName: String?

@@ -497,8 +497,8 @@ actor CardService {
 
 // MARK: - Chart Timeframe
 
+// No 1D case: Scrydex snapshot cadence doesn't produce intraday points.
 enum ChartTimeframe: String, CaseIterable {
-    case day = "1D"
     case week = "7D"
     case month = "1M"
     case threeMonth = "3M"
@@ -506,7 +506,6 @@ enum ChartTimeframe: String, CaseIterable {
 
     var seconds: TimeInterval {
         switch self {
-        case .day: return 86400
         case .week: return 7 * 86400
         case .month: return 30 * 86400
         case .threeMonth: return 90 * 86400
@@ -516,7 +515,6 @@ enum ChartTimeframe: String, CaseIterable {
 
     var maxPoints: Int {
         switch self {
-        case .day: return 50
         case .week: return 100
         case .month: return 200
         case .threeMonth: return 400
