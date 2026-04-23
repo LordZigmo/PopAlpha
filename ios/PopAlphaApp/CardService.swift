@@ -217,15 +217,19 @@ actor CardService {
     }
 
     /// Fetch RAW price history for a specific printing ID.
+    /// Reads from public_price_history_by_printing (Phase 2d), which
+    /// filters by the backfilled printing_id column — no variant_ref
+    /// regex matching, so cohort interleave (e.g. ':normal' +
+    /// ':reverseholofoil' under one printing_id) is impossible.
+    /// See supabase/migrations/20260423010000_phase2d_canonical_view_v2.sql.
     func fetchPrintingPriceHistory(slug: String, printingId: String, timeframe: ChartTimeframe) async throws -> [PricePoint] {
         let cutoff = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-timeframe.seconds))
         let data = try await Supabase.query(
-            table: "public_price_history",
+            table: "public_price_history_by_printing",
             select: "ts,price",
             filters: [
                 ("canonical_slug", "eq", slug),
-                ("variant_ref", "like", "\(printingId)::%::RAW"),
-                ("variant_ref", "not.like", "%::GRADED::%"),
+                ("printing_id", "eq", printingId),
                 ("source_window", "eq", "snapshot"),
                 ("ts", "gte", cutoff),
             ],

@@ -470,7 +470,14 @@ struct CardDetailView: View {
             let points: [PricePoint]
             switch selectedPriceMode {
             case .nearMint:
-                if let printingId = selectedPrintingId {
+                // Only use printing-specific history when the user can
+                // actually choose a finish. For single-printing cards, the
+                // printing_id filter matches multiple provider_variant cohorts
+                // (e.g. ':normal' + ':reverseholofoil' under one printing) —
+                // the canonical view resolves that to a single dominant
+                // cohort via preferred_canonical_raw_variant_ref. See
+                // supabase/migrations/20260422200000_canonical_pin_provider_variant.sql.
+                if let printingId = selectedPrintingId, availablePrintings.count > 1 {
                     points = try await CardService.shared.fetchPrintingPriceHistory(
                         slug: card.id,
                         printingId: printingId,

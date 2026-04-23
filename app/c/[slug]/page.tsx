@@ -736,6 +736,8 @@ export default async function CanonicalCardPage({
         .eq("canonical_slug", slug)
         .eq("source_window", "snapshot")
         .in("provider", ["SCRYDEX", "POKEMON_TCG_API"])
+        .like("variant_ref", "%::RAW")
+        .not("variant_ref", "ilike", "%::GRADED::%")
         .order("ts", { ascending: false })
         .limit(300);
       if (rawVariantPrefix) {

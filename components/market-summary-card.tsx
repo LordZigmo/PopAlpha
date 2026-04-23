@@ -19,6 +19,7 @@ type SupportedProvider = "SCRYDEX";
 
 type PriceHistoryRow = {
   variant_ref: string | null;
+  printing_id: string | null;
   provider: string | null;
   currency: string | null;
   ts: string;
@@ -103,8 +104,8 @@ async function loadAllHistoryRows(params: {
 
   for (let from = 0; ; from += pageSize) {
     const { data, error } = await params.supabase
-      .from("public_price_history")
-      .select("variant_ref, provider, currency, ts, price")
+      .from("public_price_history_by_printing")
+      .select("variant_ref, printing_id, provider, currency, ts, price")
       .eq("canonical_slug", params.canonicalSlug)
       .in("provider", ["SCRYDEX", "POKEMON_TCG_API"])
       .gte("ts", since)
@@ -411,7 +412,10 @@ export async function loadRawCardMarketVariants(params: {
 
   const historyRowsByPrinting = new Map<string, PriceHistoryRow[]>();
   for (const row of allHistoryRows) {
-    const printingId = historyPrintingId(row.variant_ref);
+    // Use the backfilled printing_id column (Phase 2d). Fallback to the
+    // variant_ref prefix parse covers pre-backfill rows and is a no-op
+    // once Phase 2e enforces NOT NULL.
+    const printingId = row.printing_id ?? historyPrintingId(row.variant_ref);
     if (!printingId) continue;
     const current = historyRowsByPrinting.get(printingId) ?? [];
     current.push(row);
