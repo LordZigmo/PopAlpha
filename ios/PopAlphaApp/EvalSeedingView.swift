@@ -234,12 +234,19 @@ struct EvalSeedingView: View {
                 }
             }
 
-            if !searchResults.isEmpty {
+            // Hide the dropdown once a card is picked — the selected
+            // card section below is the committed state, and lingering
+            // results just crowd the UI. Also clear the query + results
+            // so tapping Save or changing notes doesn't re-trigger a
+            // search on the same text.
+            if !searchResults.isEmpty && selectedCard == nil {
                 LazyVStack(spacing: 6) {
                     ForEach(searchResults.prefix(8)) { card in
                         Button {
                             selectedCard = card
                             searchFocused = false
+                            searchQuery = ""
+                            searchResults = []
                         } label: {
                             SearchSuggestionCell(card: card)
                                 .glassSurface(radius: 10)

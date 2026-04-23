@@ -1,3 +1,12 @@
+// Next.js 16 middleware entrypoint (renamed from middleware.ts → proxy.ts).
+// This file is bundled separately from the app directory. Vercel's build
+// cache occasionally skips rebuilding the middleware bundle when only the
+// imported route-registry changes, which leaves stale PUBLIC/ADMIN/… sets
+// in production even after the new route files deploy. Symptom: new API
+// routes return 404 from this middleware's "unknown" branch instead of
+// reaching the route handler. If you see that, a whitespace/comment
+// bump in this file forces a full middleware rebuild.
+
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse, type NextRequest } from "next/server";
 import {
