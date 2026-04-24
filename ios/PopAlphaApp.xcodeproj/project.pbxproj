@@ -79,6 +79,7 @@
 		DD00000100000000000000FF /* BulkImportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000AF /* BulkImportSheet.swift */; };
 		DD000001000000000000E001 /* EvalSeedingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000E000 /* EvalSeedingView.swift */; };
 		DD000001000000000000E003 /* ScanPickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000E002 /* ScanPickerSheet.swift */; };
+		DD000001000000000000E005 /* OCRService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000E004 /* OCRService.swift */; };
 		EE00000100000000000000F1 /* PopAlphaCore in Frameworks */ = {isa = PBXBuildFile; productRef = EE00000100000000000000A2 /* PopAlphaCore */; };
 		EE00000100000000000000F2 /* SetDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE00000100000000000000A3 /* SetDetailView.swift */; };
 		FF00000100000000000000F1 /* ClerkKit in Frameworks */ = {isa = PBXBuildFile; productRef = FF00000100000000000000A2 /* ClerkKit */; };
@@ -155,6 +156,7 @@
 		DD00000100000000000000AF /* BulkImportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BulkImportSheet.swift; sourceTree = "<group>"; };
 		DD000001000000000000E000 /* EvalSeedingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EvalSeedingView.swift; sourceTree = "<group>"; };
 		DD000001000000000000E002 /* ScanPickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanPickerSheet.swift; sourceTree = "<group>"; };
+		DD000001000000000000E004 /* OCRService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OCRService.swift; sourceTree = "<group>"; };
 		EE00000100000000000000A3 /* SetDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetDetailView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -243,6 +245,7 @@
 				DD00000100000000000000AF /* BulkImportSheet.swift */,
 				DD000001000000000000E000 /* EvalSeedingView.swift */,
 				DD000001000000000000E002 /* ScanPickerSheet.swift */,
+				DD000001000000000000E004 /* OCRService.swift */,
 				EE00000100000000000000A3 /* SetDetailView.swift */,
 				1100000100000000000000A1 /* PortfolioModels.swift */,
 				1100000100000000000000A3 /* PortfolioHeroView.swift */,
@@ -417,6 +420,7 @@
 				DD00000100000000000000FF /* BulkImportSheet.swift in Sources */,
 				DD000001000000000000E001 /* EvalSeedingView.swift in Sources */,
 				DD000001000000000000E003 /* ScanPickerSheet.swift in Sources */,
+				DD000001000000000000E005 /* OCRService.swift in Sources */,
 				EE00000100000000000000F2 /* SetDetailView.swift in Sources */,
 				1100000100000000000000F1 /* PortfolioModels.swift in Sources */,
 				1100000100000000000000F3 /* PortfolioHeroView.swift in Sources */,

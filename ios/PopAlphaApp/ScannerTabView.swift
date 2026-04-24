@@ -656,21 +656,38 @@ final class ScannerHost: ObservableObject {
         self.isIdentifying = true
         self.identifyError = nil
 
+        // Run the server identify and on-device OCR concurrently —
+        // OCR finishes much faster (~100-300ms) than identify (~1-3s),
+        // so joining on both only costs identify's latency. OCR pulls
+        // the collector number from the card's bottom corner, which
+        // uniquely disambiguates variant prints that CLIP can't
+        // distinguish on art alone (e.g. Cramorant-AH vs Cramorant-JT).
+        async let identifyTask = ScanService.identify(
+            image: image,
+            language: self.scanLanguage
+        )
+        async let ocrTask = OCRService.extractCollectorNumber(from: image)
+
         do {
-            let response = try await ScanService.identify(
-                image: image,
-                language: self.scanLanguage
+            let response = try await identifyTask
+            let ocrNumber = await ocrTask
+
+            let reranked = ScanMatchReranker.rerank(
+                matches: response.matches,
+                originalConfidence: response.confidence,
+                ocrCardNumber: ocrNumber
             )
-            self.lastMatch = response.topMatch
-            self.lastMatches = response.matches
-            self.lastConfidence = response.confidence
+
+            self.lastMatch = reranked.matches.first
+            self.lastMatches = reranked.matches
+            self.lastConfidence = reranked.confidence
             self.lastImageHash = response.imageHash
             self.isIdentifying = false
 
             // Low-confidence → auto-resume so the user can try again
             // without tapping. High/medium results are handled by the
             // view which navigates (high) or displays matches (medium).
-            if response.confidence == "low" {
+            if reranked.confidence == "low" {
                 self.lastMatch = nil
                 self.resumeScanning()
             }
