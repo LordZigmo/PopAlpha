@@ -104,6 +104,19 @@ export async function GET(req: Request) {
       { status: 500 },
     );
   }
+
+  const { searchParams: querySearchParams } = new URL(req.url);
+
+  // `?backfill=1` path: skip the normal augment work, just mark all
+  // TCG Pocket rows in card_image_embeddings with is_digital_only=true
+  // so the identify route's kNN filter excludes them. Folded into this
+  // already-classified cron to avoid the middleware-bundle-cache
+  // latency that blocks adding a new cron route mid-session. One-shot
+  // and idempotent.
+  if (querySearchParams.get("backfill") === "1") {
+    return await runDigitalFlagBackfill();
+  }
+
   if (!hasReplicateConfig()) {
     return NextResponse.json(
       { ok: false, error: "Missing REPLICATE_API_TOKEN or REPLICATE_CLIP_MODEL_VERSION." },
@@ -317,4 +330,70 @@ async function fetchExistingVariantHashes(slugs: string[]): Promise<Map<string, 
     out.set(`${row.canonical_slug}::${row.variant_index}`, row.source_hash);
   }
   return out;
+}
+
+/**
+ * One-shot cross-DB backfill invoked via ?backfill=1. Fetches the
+ * set of TCG Pocket (digital-only) slugs from Supabase and flips
+ * card_image_embeddings.is_digital_only to true for all matching
+ * rows in Neon. Idempotent — the WHERE clause skips rows that are
+ * already flagged, so re-runs are cheap no-ops.
+ */
+async function runDigitalFlagBackfill() {
+  await ensureCardImageEmbeddingsSchema();
+
+  const supabase = dbAdmin();
+  const digitalSlugs: string[] = [];
+  let offset = 0;
+  const PAGE = 1000;
+  while (true) {
+    const { data, error } = await supabase
+      .from("canonical_cards")
+      .select("slug")
+      .like("primary_image_url", "%/pokemon/tcgp-%")
+      .range(offset, offset + PAGE - 1);
+    if (error) {
+      return NextResponse.json(
+        { ok: false, error: `supabase select: ${error.message}` },
+        { status: 500 },
+      );
+    }
+    const rows = (data ?? []) as Array<{ slug: string }>;
+    for (const row of rows) digitalSlugs.push(row.slug);
+    if (rows.length < PAGE) break;
+    offset += PAGE;
+  }
+
+  if (digitalSlugs.length === 0) {
+    return NextResponse.json({
+      ok: true,
+      backfill: true,
+      digital_slugs_found: 0,
+      rows_updated: 0,
+      note: "No TCG Pocket slugs found in canonical_cards.",
+    });
+  }
+
+  const updateResult = await sql.query(
+    `
+      update card_image_embeddings
+      set is_digital_only = true,
+          updated_at = now()
+      where canonical_slug = any($1::text[])
+        and is_digital_only = false
+    `,
+    [digitalSlugs],
+  );
+
+  const after = await sql.query<{ n: number }>(
+    `select count(*)::int as n from card_image_embeddings where is_digital_only = true`,
+  );
+
+  return NextResponse.json({
+    ok: true,
+    backfill: true,
+    digital_slugs_found: digitalSlugs.length,
+    rows_updated: updateResult.rowCount ?? 0,
+    total_digital_flagged_after: after.rows[0]?.n ?? 0,
+  });
 }
