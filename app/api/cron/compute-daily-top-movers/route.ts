@@ -11,9 +11,13 @@
  *      it returns without writing. Cron quietly logs "waiting" and will
  *      retry on the next tick (every 2 hours).
  *
- * Schedule: 35 * /2 * * * (every 2 hours at :35). That way, when the day's
- * fourth Scrydex chunk (18:50 UTC) finishes and fresh_24h crosses the
- * threshold, the next :35 tick computes and locks in today's list.
+ * Schedule: 0 14,17,21 * * * (14:00 UTC = 9am EST, with retries at
+ * 17:00 UTC and 21:00 UTC). The 9am EST primary attempt gives a stable
+ * morning refresh. If the catalog coverage gate (18k fresh_24h cards)
+ * isn't met yet because the morning Scrydex chunks haven't landed, the
+ * 17:00 UTC retry picks it up mid-afternoon, and the 21:00 UTC fallback
+ * is positioned after the day's final Scrydex chunk (18:50 UTC) so
+ * coverage is guaranteed to be met by then.
  *
  * Manual override: query-string ?force=1 skips the "already computed"
  * check and re-computes even if today's rows exist. Useful for debugging.

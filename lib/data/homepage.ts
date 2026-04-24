@@ -200,9 +200,13 @@ type DailyMoverRow = {
   canonical_cards: DailyMoverJoinedCard[] | DailyMoverJoinedCard | null;
 };
 
+type DailyMoverKind = "gainer" | "loser" | "momentum_24h" | "momentum_7d";
+
 type DailyMoverBundle = {
   gainers: HomepageCard[];
   losers: HomepageCard[];
+  momentum_24h: HomepageCard[];
+  momentum_7d: HomepageCard[];
   computed_at_date: string | null;
 };
 
@@ -219,7 +223,7 @@ async function loadDailyTopMoversBundle(
     .maybeSingle<{ computed_at_date: string }>();
 
   if (latestDateError || !latestDateRow?.computed_at_date) {
-    return { gainers: [], losers: [], computed_at_date: null };
+    return { gainers: [], losers: [], momentum_24h: [], momentum_7d: [], computed_at_date: null };
   }
 
   const computedDate = latestDateRow.computed_at_date;
@@ -233,10 +237,10 @@ async function loadDailyTopMoversBundle(
     .order("rank", { ascending: true });
 
   if (error || !data) {
-    return { gainers: [], losers: [], computed_at_date: computedDate };
+    return { gainers: [], losers: [], momentum_24h: [], momentum_7d: [], computed_at_date: computedDate };
   }
 
-  const toCard = (row: DailyMoverRow & { kind: "gainer" | "loser" }): HomepageCard => {
+  const toCard = (row: DailyMoverRow & { kind: DailyMoverKind }): HomepageCard => {
     const canonicalCard: DailyMoverJoinedCard | null = Array.isArray(row.canonical_cards)
       ? (row.canonical_cards[0] ?? null)
       : (row.canonical_cards ?? null);
@@ -259,9 +263,10 @@ async function loadDailyTopMoversBundle(
       market_strength_score: null,
       market_direction: null,
       mover_tier:
-        row.kind === "gainer"
-          ? (highConfidence ? "hot" : "warming")
-          : (highConfidence ? "cooling" : "cold"),
+        row.kind === "loser"
+          ? (highConfidence ? "cooling" : "cold")
+          // Gainers and momentum lean upward; warmth tracks liquidity.
+          : (highConfidence ? "hot" : "warming"),
       image_url: image.full,
       image_thumb_url: image.thumb,
       sparkline_7d: [],
@@ -273,13 +278,19 @@ async function loadDailyTopMoversBundle(
 
   const gainers: HomepageCard[] = [];
   const losers: HomepageCard[] = [];
-  for (const raw of (data ?? []) as unknown as Array<DailyMoverRow & { kind: "gainer" | "loser" }>) {
+  const momentum_24h: HomepageCard[] = [];
+  const momentum_7d: HomepageCard[] = [];
+  for (const raw of (data ?? []) as unknown as Array<DailyMoverRow & { kind: DailyMoverKind }>) {
     const card = toCard(raw);
-    if (raw.kind === "gainer") gainers.push(card);
-    else losers.push(card);
+    switch (raw.kind) {
+      case "gainer": gainers.push(card); break;
+      case "loser": losers.push(card); break;
+      case "momentum_24h": momentum_24h.push(card); break;
+      case "momentum_7d": momentum_7d.push(card); break;
+    }
   }
 
-  return { gainers, losers, computed_at_date: computedDate };
+  return { gainers, losers, momentum_24h, momentum_7d, computed_at_date: computedDate };
 }
 
 function createEmptySignalBoard(): HomepageSignalBoardData {
@@ -519,7 +530,11 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
 
       // ── Batch 1: movers + variant-level trend data + canonical counts ──
       const [positiveChangeResult, negativeChangeResult, trendingVariantResult, refreshedCountResult, trackedCountResult] = await Promise.all([
-        // 1. Top movers — prefer 24h, then fall back to 7d when 24h is unavailable
+        // 1. Top movers — prefer 24h, then fall back to 7d when 24h is unavailable.
+        // Order by the change itself (not `market_price_as_of`) so the fallback
+        // is stable between requests: "biggest mover wins" instead of
+        // "whichever card the refresh cron just touched wins". The freshness
+        // filter is already applied via `market_price_as_of >= recentMarketCutoffIso`.
         client
           .from("public_card_metrics")
           .select("canonical_slug, market_price, market_price_as_of, snapshot_count_30d, change_pct_24h, change_pct_7d, market_confidence_score, market_low_confidence, active_listings_7d")
@@ -528,11 +543,14 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
           .gte("market_price", MIN_MOVER_PRICE)
           .gte("market_price_as_of", recentMarketCutoffIso)
           .or("change_pct_24h.gt.0,change_pct_7d.gt.0")
-          .order("market_price_as_of", { ascending: false })
+          .order("change_pct_24h", { ascending: false, nullsFirst: false })
+          .order("change_pct_7d", { ascending: false, nullsFirst: false })
           .order("market_confidence_score", { ascending: false })
           .limit(LIVE_CANDIDATE_FETCH_LIMIT),
 
-        // 2. Biggest drops — prefer 24h, then fall back to 7d when 24h is unavailable
+        // 2. Biggest drops — prefer 24h, then fall back to 7d when 24h is unavailable.
+        // Order by change ascending (most negative first) for the same
+        // stability reason as top_movers.
         client
           .from("public_card_metrics")
           .select("canonical_slug, market_price, market_price_as_of, snapshot_count_30d, change_pct_24h, change_pct_7d, market_confidence_score, market_low_confidence, active_listings_7d")
@@ -541,7 +559,8 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
           .gte("market_price", MIN_MOVER_PRICE)
           .gte("market_price_as_of", recentMarketCutoffIso)
           .or("change_pct_24h.lt.0,change_pct_7d.lt.0")
-          .order("market_price_as_of", { ascending: false })
+          .order("change_pct_24h", { ascending: true, nullsFirst: false })
+          .order("change_pct_7d", { ascending: true, nullsFirst: false })
           .order("market_confidence_score", { ascending: false })
           .limit(LIVE_CANDIDATE_FETCH_LIMIT),
 
@@ -1031,7 +1050,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
     // compute_daily_top_movers RPC once per day when catalog coverage is
     // complete). If unavailable, fall back to the live per-request
     // computation below.
-    let dailyMovers: DailyMoverBundle = { gainers: [], losers: [], computed_at_date: null };
+    let dailyMovers: DailyMoverBundle = { gainers: [], losers: [], momentum_24h: [], momentum_7d: [], computed_at_date: null };
     if (!overrides && db) {
       try {
         dailyMovers = await loadDailyTopMoversBundle(db);
@@ -1088,15 +1107,23 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
             : liveDrops7D),
       },
       momentum: {
-        "24H": combineHomepageCards([
-          positiveMoversByWindow["24H"].emerging,
-          positiveMoversByWindow["24H"].highConfidence,
-          positiveMoversByWindow["24H"].all,
-        ]),
-        "7D": combineHomepageCards([
-          trendingCandidatesOut,
-          positiveMoversByWindow["7D"].all,
-        ]),
+        // Prefer the daily-computed momentum rails so the iOS For You
+        // rail (which prefers momentum over top_movers) doesn't flip
+        // every app open. Fall back to live compute if today's daily
+        // list is missing.
+        "24H": dailyMovers.momentum_24h.length > 0
+          ? dailyMovers.momentum_24h.slice(0, SECTION_LIMIT)
+          : combineHomepageCards([
+              positiveMoversByWindow["24H"].emerging,
+              positiveMoversByWindow["24H"].highConfidence,
+              positiveMoversByWindow["24H"].all,
+            ]),
+        "7D": dailyMovers.momentum_7d.length > 0
+          ? dailyMovers.momentum_7d.slice(0, SECTION_LIMIT)
+          : combineHomepageCards([
+              trendingCandidatesOut,
+              positiveMoversByWindow["7D"].all,
+            ]),
       },
       unusual_volume: unusualVolumeOut,
       breakouts: breakoutsOut,

@@ -102,7 +102,7 @@
     },
     {
       "path": "/api/cron/compute-daily-top-movers",
-      "schedule": "35 */2 * * *"
+      "schedule": "0 14,17,21 * * *"
     },
     {
       "path": "/api/cron/discover-new-sets",
