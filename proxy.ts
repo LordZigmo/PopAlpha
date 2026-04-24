@@ -6,6 +6,7 @@
 // routes return 404 from this middleware's "unknown" branch instead of
 // reaching the route handler. If you see that, a whitespace/comment
 // bump in this file forces a full middleware rebuild.
+// (bump 2: cron/backfill-card-image-digital-flag — 2026-04-24)
 
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse, type NextRequest } from "next/server";
