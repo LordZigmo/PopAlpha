@@ -20,6 +20,7 @@ struct ScannerTabView: View {
     @State private var scanLanguage: ScanLanguage = .en
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var showEvalSeeding = false
+    @State private var showPickerSheet = false
 
     // Package-backed recognition
     @StateObject private var scanner = ScannerHost()
@@ -86,6 +87,15 @@ struct ScannerTabView: View {
             }
             .sheet(isPresented: $showEvalSeeding) {
                 EvalSeedingView(mode: .freshPhoto, isPresented: $showEvalSeeding)
+            }
+            .sheet(isPresented: $showPickerSheet) {
+                ScanPickerSheet(
+                    matches: scanner.lastMatches,
+                    imageHash: scanner.lastImageHash,
+                    scanLanguage: scanLanguage,
+                    onPick: handlePickerSelection,
+                    onDismiss: handlePickerDismiss
+                )
             }
             .onChange(of: scanner.lastMatch) { _, newValue in
                 handleIdentifyResult(newValue)
@@ -482,32 +492,63 @@ struct ScannerTabView: View {
     private func handleIdentifyResult(_ match: ScanMatch?) {
         guard let match else { return }
 
-        // Only "high" confidence auto-navigates. Medium-confidence top
-        // matches within 0.08 cosine distance can still be wrong-variant
-        // (e.g. Charizard ex vs Charizard V with the same art) — we
-        // don't want a zero-tap flow that silently picks the wrong
-        // printing. For v1, medium/low re-arms the scanner so the user
-        // gets another frame to stabilize.
-        guard scanner.lastConfidence == "high" else {
-            scanner.clearLastMatch()
-            scanner.resumeScanning()
-            return
-        }
-
-        let marketCard = match.toMarketCard()
-
-        if scanMode == .single {
-            PAHaptics.tap()
-            navigateToCard = marketCard
-        } else {
-            // Multi mode: add to tray and keep scanning.
-            if !scannedCards.contains(where: { $0.id == marketCard.id }) {
-                scannedCards.append(marketCard)
+        switch scanner.lastConfidence {
+        case "high":
+            // Zero-tap auto-navigate on high confidence.
+            let marketCard = match.toMarketCard()
+            if scanMode == .single {
                 PAHaptics.tap()
+                navigateToCard = marketCard
+            } else {
+                if !scannedCards.contains(where: { $0.id == marketCard.id }) {
+                    scannedCards.append(marketCard)
+                    PAHaptics.tap()
+                }
+                scanner.clearLastMatch()
+                scanner.resumeScanning()
             }
+
+        case "medium":
+            // Present the top-3 picker so the user can tap the right
+            // card. 58% top-5 accuracy in the eval corpus means this
+            // almost always contains the correct answer — the user
+            // just needs to see it. Silent re-arm throws that away.
+            // Only shown in single-card mode; multi-card keeps the
+            // existing aggressive behavior since the tray flow assumes
+            // autonomous collection.
+            if scanMode == .single && !scanner.lastMatches.isEmpty {
+                PAHaptics.selection()
+                showPickerSheet = true
+            } else {
+                scanner.clearLastMatch()
+                scanner.resumeScanning()
+            }
+
+        default:
+            // Low confidence (or unknown tier) → silent re-arm.
             scanner.clearLastMatch()
             scanner.resumeScanning()
         }
+    }
+
+    /// User picked a card from the ScanPickerSheet. Navigate to it.
+    /// The promote-to-eval call is fired from inside the sheet so we
+    /// don't need to repeat it here.
+    private func handlePickerSelection(_ match: ScanMatch) {
+        let marketCard = match.toMarketCard()
+        // Defer navigation one tick so the sheet's dismiss animation
+        // starts before the nav push — avoids the "sheet still visible
+        // as the detail view slides in" UI glitch.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            navigateToCard = marketCard
+            scanner.clearLastMatch()
+        }
+    }
+
+    /// User dismissed the sheet without picking — re-arm the scanner.
+    private func handlePickerDismiss() {
+        scanner.clearLastMatch()
+        scanner.resumeScanning()
     }
 
     private func resetToIdle() {
@@ -538,6 +579,11 @@ final class ScannerHost: ObservableObject {
     /// through so CardDetailView can fire "this is the wrong card"
     /// corrections against the exact image the identifier saw.
     @Published private(set) var lastImageHash: String?
+    /// Full match list from the last identify call. Surfaced so the
+    /// picker sheet (shown on medium confidence) can display top-3
+    /// candidates for the user to tap-select instead of silently
+    /// re-arming. Populated alongside lastMatch; cleared in lockstep.
+    @Published private(set) var lastMatches: [ScanMatch] = []
 
     /// Language hint passed to /api/scan/identify. Defaults to EN; the
     /// scanner UI exposes a pill toggle so the user can flip to JP.
@@ -616,6 +662,7 @@ final class ScannerHost: ObservableObject {
                 language: self.scanLanguage
             )
             self.lastMatch = response.topMatch
+            self.lastMatches = response.matches
             self.lastConfidence = response.confidence
             self.lastImageHash = response.imageHash
             self.isIdentifying = false
@@ -660,6 +707,7 @@ final class ScannerHost: ObservableObject {
 
     func clearLastMatch() {
         lastMatch = nil
+        lastMatches = []
         lastConfidence = nil
         identifyError = nil
         lastImageHash = nil
