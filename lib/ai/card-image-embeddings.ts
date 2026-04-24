@@ -60,7 +60,7 @@ export async function ensureCardImageEmbeddingsSchema(): Promise<void> {
   await sql.query(`create extension if not exists vector;`);
   await sql.query(`
     create table if not exists card_image_embeddings (
-      canonical_slug text primary key,
+      canonical_slug text not null,
       canonical_name text not null,
       language text null,
       set_name text null,
@@ -70,8 +70,45 @@ export async function ensureCardImageEmbeddingsSchema(): Promise<void> {
       source_hash text not null,
       model_version text not null,
       embedding vector(${IMAGE_EMBEDDER_DIMENSIONS}) not null,
-      updated_at timestamptz not null default now()
+      variant_index integer not null default 0,
+      updated_at timestamptz not null default now(),
+      primary key (canonical_slug, variant_index)
     );
+  `);
+
+  // Schema migration: original table had `canonical_slug text primary
+  // key` (single-column). Stage C needs multiple embedding variants per
+  // canonical card (augmented reference shots to close the iPhone-
+  // capture distribution gap), so the PK is now composite. This block
+  // makes the upgrade idempotent — runs on pre-Stage-C tables, no-ops
+  // on already-migrated ones.
+  await sql.query(`
+    alter table card_image_embeddings
+      add column if not exists variant_index integer not null default 0;
+  `);
+
+  // If the PK is still the single-column version, swap it for the
+  // composite. We identify "old shape" by asking pg for the PK
+  // definition. This is safe to run multiple times — the check is
+  // exact-match on the constraint definition string.
+  await sql.query(`
+    do $$
+    declare
+      current_pk_def text;
+    begin
+      select pg_get_constraintdef(c.oid) into current_pk_def
+      from pg_constraint c
+      join pg_class t on t.oid = c.conrelid
+      where c.contype = 'p'
+        and t.relname = 'card_image_embeddings';
+
+      if current_pk_def is not null and current_pk_def = 'PRIMARY KEY (canonical_slug)' then
+        alter table card_image_embeddings drop constraint card_image_embeddings_pkey;
+        alter table card_image_embeddings
+          add constraint card_image_embeddings_pkey
+          primary key (canonical_slug, variant_index);
+      end if;
+    end $$;
   `);
 
   // Prefilter btree indexes. kNN queries from the identify route will

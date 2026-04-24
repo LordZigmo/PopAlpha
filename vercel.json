@@ -33,6 +33,10 @@
       "schedule": "*/3 * * * *"
     },
     {
+      "path": "/api/cron/augment-card-image-embeddings?maxCards=32",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/cron/keepwarm-image-embedder",
       "schedule": "*/4 * * * *"
     },

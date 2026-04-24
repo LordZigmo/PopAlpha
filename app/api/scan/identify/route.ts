@@ -298,21 +298,47 @@ export async function POST(req: Request) {
 
   let matches: MatchRow[];
   try {
+    // Per-slug dedup: Stage C stores multiple embedding variants per
+    // canonical card (one un-augmented + N synthetic "iPhone-like"
+    // variants). DISTINCT ON canonical_slug returns the single closest
+    // variant per card. We overfetch `limit * 4` with the inner CTE so
+    // dedup doesn't starve the final top-K — without the multiplier,
+    // if all top-N raw hits happen to be variants of the same card,
+    // we'd only return one slug instead of the user-requested top-K.
     const result = await sql.query<MatchRow>(
       `
-        select
-          canonical_slug,
-          canonical_name,
-          language,
-          set_name,
-          card_number,
-          variant,
-          source_image_url,
-          (embedding <=> $1::vector) as cos_dist
-        from card_image_embeddings
-        where model_version = $2
-          and language = $3
-        order by embedding <=> $1::vector
+        with nearest_variants as (
+          select
+            canonical_slug,
+            canonical_name,
+            language,
+            set_name,
+            card_number,
+            variant,
+            source_image_url,
+            (embedding <=> $1::vector) as cos_dist
+          from card_image_embeddings
+          where model_version = $2
+            and language = $3
+          order by embedding <=> $1::vector
+          limit $4 * 4
+        ),
+        dedup as (
+          select distinct on (canonical_slug)
+            canonical_slug,
+            canonical_name,
+            language,
+            set_name,
+            card_number,
+            variant,
+            source_image_url,
+            cos_dist
+          from nearest_variants
+          order by canonical_slug, cos_dist
+        )
+        select *
+        from dedup
+        order by cos_dist
         limit $4
       `,
       [vectorLiteral, embedder.modelVersion, language, limit],

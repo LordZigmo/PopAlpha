@@ -58,6 +58,7 @@ export const CRON_ROUTES = [
   "cron/batch-refresh-pipeline-rollups",
   "cron/refresh-card-embeddings",
   "cron/refresh-card-image-embeddings",
+  "cron/augment-card-image-embeddings",
   "cron/keepwarm-image-embedder",
   "cron/capture-pricing-transparency",
   "cron/capture-matching-quality",
