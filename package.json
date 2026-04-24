@@ -38,6 +38,7 @@
     "ai:refresh-embeddings": "node scripts/refresh-card-embeddings.mjs",
     "eval:seed": "node --env-file=.env.local scripts/seed-scan-eval-image.mjs",
     "eval:run": "node --env-file=.env.local scripts/run-scanner-eval.mjs",
+    "scan:backfill-digital": "node --env-file=.env.local scripts/backfill-card-image-digital-flag.mjs",
     "env:pull-safe": "pwsh -File scripts/safe-env-pull.ps1",
     "verify:rls": "node --env-file=.env.local scripts/verify-phase1-rls.mjs",
     "verify:rls:linked": "node scripts/verify-phase1-rls.mjs"

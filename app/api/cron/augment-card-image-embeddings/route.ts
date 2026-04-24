@@ -57,7 +57,14 @@ type CanonicalRow = {
   card_number: string | null;
   variant: string | null;
   mirrored_primary_image_url: string | null;
+  primary_image_url: string | null;
 };
+
+/** Detects TCG Pocket (digital-only) cards by their Scrydex URL prefix. */
+function isDigitalOnlyUrl(primaryImageUrl: string | null | undefined): boolean {
+  if (!primaryImageUrl) return false;
+  return primaryImageUrl.includes("/pokemon/tcgp-");
+}
 
 type ExistingVariantHash = {
   canonical_slug: string;
@@ -136,7 +143,7 @@ export async function GET(req: Request) {
     let query = supabase
       .from("canonical_cards")
       .select(
-        "slug, canonical_name, language, set_name, card_number, variant, mirrored_primary_image_url",
+        "slug, canonical_name, language, set_name, card_number, variant, mirrored_primary_image_url, primary_image_url",
       )
       .not("mirrored_primary_image_url", "is", null)
       .order("slug", { ascending: true })
@@ -222,13 +229,15 @@ export async function GET(req: Request) {
 
           // 5. Upsert into card_image_embeddings.
           const vectorLiteral = `[${first.embedding.join(",")}]`;
+          const isDigital = isDigitalOnlyUrl(row.primary_image_url);
           await sql.query(
             `
               insert into card_image_embeddings (
                 canonical_slug, canonical_name, language, set_name, card_number, variant,
-                source_image_url, source_hash, model_version, embedding, variant_index, updated_at
+                source_image_url, source_hash, model_version, embedding, variant_index,
+                is_digital_only, updated_at
               ) values (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::vector, $11, now()
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::vector, $11, $12, now()
               )
               on conflict (canonical_slug, variant_index) do update set
                 canonical_name = excluded.canonical_name,
@@ -240,6 +249,7 @@ export async function GET(req: Request) {
                 source_hash = excluded.source_hash,
                 model_version = excluded.model_version,
                 embedding = excluded.embedding,
+                is_digital_only = excluded.is_digital_only,
                 updated_at = excluded.updated_at
             `,
             [
@@ -254,6 +264,7 @@ export async function GET(req: Request) {
               embedder.modelVersion,
               vectorLiteral,
               variant.index,
+              isDigital,
             ],
           );
           generated += 1;

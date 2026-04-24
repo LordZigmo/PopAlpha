@@ -49,8 +49,15 @@ type CanonicalRow = {
   card_number: string | null;
   variant: string | null;
   mirrored_primary_image_url: string | null;
+  primary_image_url: string | null;
   image_embed_attempts: number | null;
 };
+
+/** Detects TCG Pocket (digital-only) cards by their Scrydex URL prefix. */
+function isDigitalOnlyUrl(primaryImageUrl: string | null | undefined): boolean {
+  if (!primaryImageUrl) return false;
+  return primaryImageUrl.includes("/pokemon/tcgp-");
+}
 
 function parseMaxCards(raw: string | null): number {
   const parsed = Number.parseInt(raw ?? "", 10);
@@ -109,7 +116,7 @@ export async function GET(req: Request) {
     let query = supabase
       .from("canonical_cards")
       .select(
-        "slug, canonical_name, language, set_name, card_number, variant, mirrored_primary_image_url, image_embed_attempts",
+        "slug, canonical_name, language, set_name, card_number, variant, mirrored_primary_image_url, primary_image_url, image_embed_attempts",
       )
       .not("mirrored_primary_image_url", "is", null)
       .lt("image_embed_attempts", MAX_EMBED_ATTEMPTS)
@@ -141,6 +148,7 @@ export async function GET(req: Request) {
         card_number: row.card_number,
         variant: row.variant,
         source_image_url: row.mirrored_primary_image_url,
+        is_digital_only: isDigitalOnlyUrl(row.primary_image_url),
       }));
 
     try {

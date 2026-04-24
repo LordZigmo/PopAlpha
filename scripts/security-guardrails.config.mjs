@@ -324,6 +324,13 @@ export const PRIVILEGED_PACKAGE_SCRIPT_CONTRACTS = {
     requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
     expectedCommandFragments: ["scripts/run-scanner-eval.mjs"],
   }),
+  "scan:backfill-digital": packageScriptContract({
+    target: "scripts/backfill-card-image-digital-flag.mjs",
+    intendedCaller: "trusted operator flagging TCG Pocket rows in card_image_embeddings so the identify kNN excludes them",
+    trustModel: "service_role_read_plus_neon_update_wrapper",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY", "POSTGRES_URL"],
+    expectedCommandFragments: ["scripts/backfill-card-image-digital-flag.mjs"],
+  }),
 };
 
 export const PRIVILEGED_WORKFLOW_CONTRACTS = {
@@ -585,6 +592,15 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
     requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
     expectedSignals: ["service_role_client"],
     usesServiceRole: true,
+  }),
+  "scripts/backfill-card-image-digital-flag.mjs": operationalScript({
+    classification: "service_role_backfill",
+    executionMode: "manual_backfill",
+    intendedCaller: "trusted operator flagging TCG Pocket rows in Neon's card_image_embeddings so the identify route's kNN excludes them",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+    notes: "Reads digital-only slugs from Supabase (tcgp-* primary_image_url prefix), bulk-updates Neon card_image_embeddings.is_digital_only. Idempotent.",
   }),
   "scripts/backfill-phase2c-printing-columns.mjs": operationalScript({
     classification: "service_role_backfill",

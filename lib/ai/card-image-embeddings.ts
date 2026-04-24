@@ -33,6 +33,16 @@ export type EmbeddableCardImage = {
   variant: string | null;
   /** The URL we feed the embedder — typically mirrored_primary_image_url. */
   source_image_url: string;
+  /**
+   * True when this canonical card exists only in the TCG Pocket mobile
+   * game (Scrydex URL pattern `/pokemon/tcgp-...`). Those cards
+   * contaminate physical-card scanner matches because their art
+   * clusters by composition (bird, dragon, water) in CLIP space
+   * against real TCG captures that will never correspond to them. The
+   * identify route filters these out of its kNN so users scanning
+   * physical cards never get a digital-only match.
+   */
+  is_digital_only: boolean;
 };
 
 type ExistingHashRow = {
@@ -71,6 +81,7 @@ export async function ensureCardImageEmbeddingsSchema(): Promise<void> {
       model_version text not null,
       embedding vector(${IMAGE_EMBEDDER_DIMENSIONS}) not null,
       variant_index integer not null default 0,
+      is_digital_only boolean not null default false,
       updated_at timestamptz not null default now(),
       primary key (canonical_slug, variant_index)
     );
@@ -109,6 +120,13 @@ export async function ensureCardImageEmbeddingsSchema(): Promise<void> {
           primary key (canonical_slug, variant_index);
       end if;
     end $$;
+  `);
+
+  // is_digital_only column for TCG Pocket filtering. Idempotent for
+  // tables that already have the column.
+  await sql.query(`
+    alter table card_image_embeddings
+      add column if not exists is_digital_only boolean not null default false;
   `);
 
   // Prefilter btree indexes. kNN queries from the identify route will
@@ -260,12 +278,13 @@ export async function refreshCardImageEmbeddingBatch(
             source_hash,
             model_version,
             embedding,
+            is_digital_only,
             updated_at
           )
           values (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::vector, now()
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::vector, $11, now()
           )
-          on conflict (canonical_slug) do update set
+          on conflict (canonical_slug, variant_index) do update set
             canonical_name = excluded.canonical_name,
             language = excluded.language,
             set_name = excluded.set_name,
@@ -275,6 +294,7 @@ export async function refreshCardImageEmbeddingBatch(
             source_hash = excluded.source_hash,
             model_version = excluded.model_version,
             embedding = excluded.embedding,
+            is_digital_only = excluded.is_digital_only,
             updated_at = excluded.updated_at
         `,
         [
@@ -288,6 +308,7 @@ export async function refreshCardImageEmbeddingBatch(
           sourceHash,
           embedder.modelVersion,
           vectorLiteral,
+          card.is_digital_only,
         ],
       );
       updated += 1;

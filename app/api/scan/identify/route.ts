@@ -305,6 +305,12 @@ export async function POST(req: Request) {
     // dedup doesn't starve the final top-K — without the multiplier,
     // if all top-N raw hits happen to be variants of the same card,
     // we'd only return one slug instead of the user-requested top-K.
+    //
+    // is_digital_only = false filter excludes TCG Pocket cards (2.4k+
+    // of 23k rows). Those are Pokemon's mobile-game-only cards; users
+    // scanning physical cards never want them, and they polluted early
+    // eval results (Cramorant→Pidgey, Lopunny→Lucario, etc.) by
+    // clustering compositionally in CLIP space with physical card art.
     const result = await sql.query<MatchRow>(
       `
         with nearest_variants as (
@@ -320,6 +326,7 @@ export async function POST(req: Request) {
           from card_image_embeddings
           where model_version = $2
             and language = $3
+            and is_digital_only = false
           order by embedding <=> $1::vector
           limit $4 * 4
         ),
