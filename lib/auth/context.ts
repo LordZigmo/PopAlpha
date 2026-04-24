@@ -1,4 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
+import { resolveInternalAdminAllowlist } from "@/lib/auth/internal-admin-session-core";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -43,8 +44,12 @@ async function verifyUserJwt(_req: Request): Promise<string | null> {
  * Priority:
  * 1. CRON_SECRET bearer → "cron"
  * 2. ADMIN_SECRET bearer / x-admin-secret header / ADMIN_IMPORT_TOKEN bearer → "admin"
- * 3. Clerk session → "user"
- * 4. Fallback → "public"
+ * 3. Clerk session whose userId is in INTERNAL_ADMIN_CLERK_USER_IDS → "admin"
+ *    (same allowlist the internal admin web UI uses — the iOS app shares
+ *    it so operators can hit admin API routes without bundling a shared
+ *    secret into the client binary)
+ * 4. Clerk session → "user"
+ * 5. Fallback → "public"
  */
 export async function resolveAuthContext(req: Request): Promise<AuthContext> {
   const authHeader = req.headers.get("authorization")?.trim() ?? "";
@@ -73,9 +78,13 @@ export async function resolveAuthContext(req: Request): Promise<AuthContext> {
     return { kind: "admin", reason: "bearer-admin-import-token" };
   }
 
-  // 3. Clerk user session
+  // 3. Clerk user session — with allowlist elevation to admin
   const userId = await verifyUserJwt(req);
   if (userId) {
+    const allowlist = resolveInternalAdminAllowlist();
+    if (allowlist.clerkUserIds.has(userId)) {
+      return { kind: "admin", reason: "clerk-allowlist" };
+    }
     return { kind: "user", userId };
   }
 
