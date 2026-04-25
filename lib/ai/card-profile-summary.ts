@@ -9,7 +9,10 @@ import { getPopAlphaModel } from "@/lib/ai/models";
 
 export const CARD_PROFILE_VERSION = "card-profile-v2";
 export const CARD_PROFILE_MODEL_TIER = "Ace" as const;
-export const CARD_PROFILE_MODEL_LABEL = "gemini-2.0-flash";
+// Keep in sync with getPopAlphaModel("Ace"). Stored alongside every
+// card_profiles row so historical data can be traced back to the
+// model that produced it.
+export const CARD_PROFILE_MODEL_LABEL = "gemini-2.5-flash";
 export const CARD_PROFILE_TIMEOUT_MS = 6_000;
 
 export const SIGNAL_LABELS = [

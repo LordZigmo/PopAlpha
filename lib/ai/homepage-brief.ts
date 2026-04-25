@@ -33,7 +33,9 @@ import type { HomepageCard, HomepageData } from "@/lib/data/homepage";
 
 export const HOMEPAGE_BRIEF_VERSION = "homepage-brief-v1";
 export const HOMEPAGE_BRIEF_MODEL_TIER = "Ace" as const;
-export const HOMEPAGE_BRIEF_MODEL_LABEL = "gemini-2.0-flash";
+// Keep in sync with getPopAlphaModel("Ace"). Stored on generated
+// brief rows so each entry carries its producing model.
+export const HOMEPAGE_BRIEF_MODEL_LABEL = "gemini-2.5-flash";
 export const HOMEPAGE_BRIEF_TIMEOUT_MS = 8_000;
 
 export type HomepageBriefSource = "llm" | "fallback";
