@@ -13,7 +13,13 @@ export const CARD_PROFILE_MODEL_TIER = "Ace" as const;
 // card_profiles row so historical data can be traced back to the
 // model that produced it.
 export const CARD_PROFILE_MODEL_LABEL = "gemini-2.5-flash";
-export const CARD_PROFILE_TIMEOUT_MS = 6_000;
+// Upper bound per card. Prior value (6s) was too tight for
+// gemini-2.5-flash in practice — first smoke test showed 2 of 3 cards
+// timing out at ~6s. 15s gives ~3× headroom over the measured single-
+// call latency while still bounding total cron wall time (500 cards ×
+// 15s / concurrency=5 = ~25 min worst case vs. 300s maxDuration on
+// Vercel, which is why we also have the deadline guard in the route).
+export const CARD_PROFILE_TIMEOUT_MS = 15_000;
 
 export const SIGNAL_LABELS = [
   "BREAKOUT",
