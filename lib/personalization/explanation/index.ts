@@ -13,15 +13,18 @@ import type {
 } from "../types";
 import type { ExplanationCardInput } from "./template";
 import { buildTemplateExplanation } from "./template";
+import type { MarketSignalContext } from "./llm";
 
 export { buildTemplateExplanation };
 export type { ExplanationCardInput };
+export type { MarketSignalContext } from "./llm";
 
 export async function buildPersonalizedExplanation(
   card: ExplanationCardInput,
   features: CardStyleFeatures,
   profile: StyleProfile | null,
   capability: PersonalizationCapability,
+  market: MarketSignalContext | null,
 ): Promise<PersonalizedExplanation> {
   // Template path — default. No network calls. Always safe.
   if (capability.mode === "template" || !profile) {
@@ -33,7 +36,7 @@ export async function buildPersonalizedExplanation(
   // the dynamic import guards against accidental inclusion.
   try {
     const { buildLlmExplanation } = await import("./llm");
-    return await buildLlmExplanation(card, features, profile);
+    return await buildLlmExplanation(card, features, profile, market);
   } catch (err) {
     console.error("[personalization:explanation] llm path failed, falling back", err);
     return buildTemplateExplanation(card, features, profile);

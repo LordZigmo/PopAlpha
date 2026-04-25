@@ -142,6 +142,9 @@ async function upsertProfile(
     .upsert(
       {
         canonical_slug: slug,
+        signal_label: result.signalLabel,
+        verdict: result.verdict,
+        chip: result.chip,
         summary_short: result.summaryShort,
         summary_long: result.summaryLong,
         source: result.source,

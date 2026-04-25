@@ -5,6 +5,9 @@ export const runtime = "nodejs";
 
 type CardProfileRow = {
   canonical_slug: string;
+  signal_label: string | null;
+  verdict: string | null;
+  chip: string | null;
   summary_short: string;
   summary_long: string | null;
   created_at: string;
@@ -29,7 +32,7 @@ export async function GET(req: Request) {
     const supabase = dbPublic();
     const { data, error } = await supabase
       .from("card_profiles")
-      .select("canonical_slug, summary_short, summary_long, created_at")
+      .select("canonical_slug, signal_label, verdict, chip, summary_short, summary_long, created_at")
       .eq("canonical_slug", slug)
       .maybeSingle<CardProfileRow>();
 

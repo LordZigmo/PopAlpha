@@ -7,10 +7,27 @@ import { getPopAlphaModel } from "@/lib/ai/models";
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
-export const CARD_PROFILE_VERSION = "card-profile-v1";
+export const CARD_PROFILE_VERSION = "card-profile-v2";
 export const CARD_PROFILE_MODEL_TIER = "Ace" as const;
 export const CARD_PROFILE_MODEL_LABEL = "gemini-2.0-flash";
 export const CARD_PROFILE_TIMEOUT_MS = 6_000;
+
+export const SIGNAL_LABELS = [
+  "BREAKOUT",
+  "COOLING",
+  "VALUE_ZONE",
+  "STEADY",
+  "OVERHEATED",
+] as const;
+export type SignalLabel = (typeof SIGNAL_LABELS)[number];
+
+export const VERDICTS = [
+  "UNDERVALUED",
+  "FAIR",
+  "OVERHEATED",
+  "INSUFFICIENT_DATA",
+] as const;
+export type Verdict = (typeof VERDICTS)[number];
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -32,6 +49,9 @@ export type CardProfileInput = {
 };
 
 export type CardProfileResult = {
+  signalLabel: SignalLabel;
+  verdict: Verdict;
+  chip: string;
   summaryShort: string;
   summaryLong: string;
   source: "llm" | "fallback";
@@ -63,6 +83,52 @@ export function buildMetricsHash(input: CardProfileInput): string {
   return crypto.createHash("sha256").update(payload).digest("hex").slice(0, 16);
 }
 
+// ── Deterministic signal/verdict (used by fallback and as a sanity guard) ───
+
+function pickSignal(input: CardProfileInput): SignalLabel {
+  const change = input.changePct7d;
+  const liquidity = input.liquidityScore;
+  const volatility = input.volatility30d;
+
+  if (typeof change === "number") {
+    if (change >= 12) return "BREAKOUT";
+    if (change <= -10) return "COOLING";
+  }
+  if (typeof volatility === "number" && volatility >= 35) return "OVERHEATED";
+
+  // Value zone: priced in the lower half of the 30-day range with reasonable
+  // liquidity — a soft "looks cheap, with depth" tag.
+  if (
+    typeof input.marketPrice === "number" &&
+    typeof input.low30d === "number" &&
+    typeof input.high30d === "number" &&
+    input.high30d > input.low30d
+  ) {
+    const positionInRange =
+      (input.marketPrice - input.low30d) / (input.high30d - input.low30d);
+    if (positionInRange <= 0.35 && (liquidity ?? 0) >= 30) {
+      return "VALUE_ZONE";
+    }
+  }
+
+  return "STEADY";
+}
+
+function pickVerdict(input: CardProfileInput, signal: SignalLabel): Verdict {
+  if (input.marketPrice == null) return "INSUFFICIENT_DATA";
+  if (signal === "BREAKOUT" || signal === "OVERHEATED") return "OVERHEATED";
+  if (signal === "VALUE_ZONE") return "UNDERVALUED";
+  return "FAIR";
+}
+
+const SIGNAL_TO_CHIP: Record<SignalLabel, string> = {
+  BREAKOUT: "🔥 Breakout",
+  COOLING: "📉 Cooling Off",
+  VALUE_ZONE: "💎 Value Zone",
+  STEADY: "🔁 Holding Pattern",
+  OVERHEATED: "⚠️ Running Hot",
+};
+
 // ── Deterministic fallback ──────────────────────────────────────────────────
 
 function formatUsd(value: number | null): string {
@@ -85,6 +151,8 @@ export function buildFallbackProfile(input: CardProfileInput): CardProfileResult
   const { canonicalName, setName, marketPrice, changePct7d, activeListings7d } = input;
   const priceText = formatUsd(marketPrice);
   const changeText = formatSignedPct(changePct7d);
+  const signal = pickSignal(input);
+  const verdict = pickVerdict(input, signal);
 
   let summaryShort: string;
   if (changeText) {
@@ -108,6 +176,9 @@ export function buildFallbackProfile(input: CardProfileInput): CardProfileResult
   const summaryLong = `${summaryShort}${supplyNote}${setContext}.`;
 
   return {
+    signalLabel: signal,
+    verdict,
+    chip: SIGNAL_TO_CHIP[signal],
     summaryShort,
     summaryLong,
     source: "fallback",
@@ -121,20 +192,44 @@ export function buildFallbackProfile(input: CardProfileInput): CardProfileResult
 // ── Prompt ───────────────────────────────────────────────────────────────────
 
 const SYSTEM_PROMPT = [
-  "You are PopAlpha's card analyst for Pokémon TCG collectors.",
-  "Write a concise market summary for a single card based on the data provided.",
-  "Rules:",
-  "- Write in plain English at an 8th-grade reading level.",
-  "- Sound professional but approachable — like a knowledgeable friend explaining the market.",
-  "- Never start with filler words like \"Okay\", \"So\", \"Well\", \"Alright\", or \"Currently\".",
-  "- Lead with the insight, not a setup. Get straight to what matters.",
+  "You are PopAlpha's market-signal analyst for Pokémon TCG collectors.",
+  "Your job is to read a single card's market data and write an actionable, signal-led brief.",
+  "",
+  "Tone:",
+  "- Plain English, 8th-grade reading level. Calm, sharp, useful.",
+  "- Lead with the signal. Get straight to what's happening — never start with 'Okay', 'So', 'Currently', or any setup phrase.",
+  "- Sound like a heads-up from a knowledgeable friend, not a market recap.",
   "- Avoid hype, slang, and finance jargon.",
-  "- Do not repeat raw numbers verbatim; interpret them.",
-  "- Do not mention being an AI.",
-  "- Output ONLY a single JSON object matching this exact shape:",
-  '  {"summary_short":"...","summary_long":"..."}',
-  "- summary_short: exactly 2 sentences, 15–30 words. State the card's current price direction and whether it looks strong or weak.",
-  "- summary_long: exactly 3–4 sentences, 30–60 words. Add context about supply, positioning within its price range, and whether the card looks fairly priced. If condition pricing is provided, mention the spread between Near Mint and lower conditions when the gap is meaningful.",
+  "- Never give buy / sell / hold advice. Reframe action as 'on watch', 'fading', 'cooling off', 'in a value zone', 'running hot'.",
+  "- Do not mention being an AI. Do not invent metrics that aren't in the data.",
+  "",
+  "Signal labels (pick exactly one):",
+  "- BREAKOUT  — strong upward move, price climbing meaningfully on the 7-day.",
+  "- COOLING   — pulling back from recent highs.",
+  "- VALUE_ZONE — sitting in the lower half of its 30-day range with real depth.",
+  "- STEADY    — holding pattern, no decisive move.",
+  "- OVERHEATED — volatile and stretched, bigger swings than the catalog norm.",
+  "",
+  "Verdicts (pick exactly one):",
+  "- UNDERVALUED — price looks soft relative to the recent range.",
+  "- FAIR        — price looks consistent with the recent range.",
+  "- OVERHEATED  — price looks stretched relative to the recent range.",
+  "- INSUFFICIENT_DATA — not enough signal to call.",
+  "",
+  "Output ONLY a single JSON object matching this exact shape:",
+  '  {"signal_label":"...","verdict":"...","chip":"...","summary_short":"...","summary_long":"..."}',
+  "",
+  "Field rules:",
+  "- signal_label: one of BREAKOUT, COOLING, VALUE_ZONE, STEADY, OVERHEATED.",
+  "- verdict: one of UNDERVALUED, FAIR, OVERHEATED, INSUFFICIENT_DATA.",
+  "- chip: 2–4 word phrase the user sees as a badge. Lead with a single emoji that matches the signal.",
+  "    BREAKOUT → 🔥, COOLING → 📉, VALUE_ZONE → 💎, STEADY → 🔁, OVERHEATED → ⚠️.",
+  "    Examples: \"🔥 Breakout Alert\", \"📉 Cooling Off\", \"💎 Value Zone\", \"🔁 Holding Pattern\", \"⚠️ Running Hot\".",
+  "- summary_short: 1–2 sentences, 18–32 words. State the signal and what it means right now.",
+  "    Lead with the move, not the price level. The user already sees the price.",
+  "- summary_long: 3–4 sentences, 35–65 words. Add context: where the card sits in its recent range,",
+  "    whether supply is thin or deep, and whether the move looks confirmed or fragile.",
+  "    If condition spreads are meaningful, mention them in plain words.",
   "- Do not output anything outside the JSON object. No prose, no code fences, no markdown.",
 ].join("\n");
 
@@ -170,12 +265,25 @@ function buildUserPrompt(input: CardProfileInput): string {
     }
   }
 
+  // Anchor the LLM with a deterministic suggested signal so it doesn't
+  // freelance into BREAKOUT on a flat card. Phrased as a hint, not a
+  // command — the model can override when the broader picture warrants it.
+  const suggested = pickSignal(input);
+  lines.push("");
+  lines.push(`Suggested signal from raw metrics: ${suggested}`);
+
   return lines.join("\n");
 }
 
 // ── JSON parsing ────────────────────────────────────────────────────────────
 
-type ParsedProfile = { summary_short: string; summary_long: string };
+type ParsedProfile = {
+  signal_label: SignalLabel;
+  verdict: Verdict;
+  chip: string;
+  summary_short: string;
+  summary_long: string;
+};
 
 function extractJsonObject(raw: string): string | null {
   if (!raw) return null;
@@ -195,6 +303,14 @@ function extractJsonObject(raw: string): string | null {
   return null;
 }
 
+function isSignalLabel(v: unknown): v is SignalLabel {
+  return typeof v === "string" && (SIGNAL_LABELS as readonly string[]).includes(v);
+}
+
+function isVerdict(v: unknown): v is Verdict {
+  return typeof v === "string" && (VERDICTS as readonly string[]).includes(v);
+}
+
 function parseLlmProfile(raw: string): ParsedProfile | null {
   const json = extractJsonObject(raw);
   if (!json) return null;
@@ -208,10 +324,23 @@ function parseLlmProfile(raw: string): ParsedProfile | null {
   const obj = parsed as Record<string, unknown>;
   const summaryShort = typeof obj.summary_short === "string" ? obj.summary_short.trim() : "";
   const summaryLong = typeof obj.summary_long === "string" ? obj.summary_long.trim() : "";
-  if (!summaryShort || !summaryLong) return null;
+  const chip = typeof obj.chip === "string" ? obj.chip.trim() : "";
+  const signalLabel = obj.signal_label;
+  const verdict = obj.verdict;
+
+  if (!summaryShort || !summaryLong || !chip) return null;
+  if (!isSignalLabel(signalLabel) || !isVerdict(verdict)) return null;
   if (summaryShort.length > 500 || summaryLong.length > 1000) return null;
   if (summaryShort.length < 15) return null;
-  return { summary_short: summaryShort, summary_long: summaryLong };
+  if (chip.length > 60) return null;
+
+  return {
+    signal_label: signalLabel,
+    verdict,
+    chip,
+    summary_short: summaryShort,
+    summary_long: summaryLong,
+  };
 }
 
 // ── Main entry ──────────────────────────────────────────────────────────────
@@ -243,6 +372,9 @@ export async function generateCardProfile(
 
     const usage = result.totalUsage ?? { inputTokens: undefined, outputTokens: undefined };
     return {
+      signalLabel: parsed.signal_label,
+      verdict: parsed.verdict,
+      chip: parsed.chip,
       summaryShort: parsed.summary_short,
       summaryLong: parsed.summary_long,
       source: "llm",

@@ -338,7 +338,7 @@ actor CardService {
     func fetchCardProfile(slug: String) async throws -> CardProfileResult? {
         let data = try await Supabase.query(
             table: "card_profiles",
-            select: "summary_short,summary_long",
+            select: "signal_label,verdict,chip,summary_short,summary_long",
             filters: [("canonical_slug", "eq", slug)],
             limit: 1
         )
@@ -562,6 +562,9 @@ struct PricePoint: Decodable {
 }
 
 struct CardProfileResult: Decodable {
+    let signalLabel: String?   // "BREAKOUT" | "COOLING" | "VALUE_ZONE" | "STEADY" | "OVERHEATED"
+    let verdict: String?       // "UNDERVALUED" | "FAIR" | "OVERHEATED" | "INSUFFICIENT_DATA"
+    let chip: String?          // e.g. "🔥 Breakout Alert"
     let summaryShort: String
     let summaryLong: String?
 }

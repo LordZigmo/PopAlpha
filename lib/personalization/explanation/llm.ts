@@ -16,24 +16,56 @@ const LLM_TIMEOUT_MS = 6_000;
 const LLM_MODEL_TIER = "Ace" as const;
 const SOURCE_VERSION = `llm-gemini2-flash-v${PROFILE_VERSION}`;
 
+/**
+ * Market signal context, sourced from the per-card market summary
+ * (`card_profiles`). When a row is missing this is null and the prompt
+ * falls back to plain feature reasoning.
+ */
+export type MarketSignalContext = {
+  signalLabel: string | null;     // BREAKOUT | COOLING | VALUE_ZONE | STEADY | OVERHEATED
+  verdict: string | null;         // UNDERVALUED | FAIR | OVERHEATED | INSUFFICIENT_DATA
+  chip: string | null;            // e.g. "🔥 Breakout Alert"
+  summaryShort: string | null;    // 1–2 sentence market read
+  marketPrice: number | null;
+  changePct7d: number | null;
+  activeListings7d: number | null;
+};
+
 const SYSTEM_PROMPT = [
   "You are PopAlpha's personalized card analyst for Pokémon TCG collectors.",
-  "You are given (1) a collector's inferred style profile and (2) structured features of a single card.",
-  "Explain how well the card fits the collector's style in an observational, grounded tone.",
-  "Rules:",
-  "- Speak to the user in second person ('your activity suggests…', 'you tend to favor…').",
-  "- Be observational, not prescriptive. Never give buy, sell, hold, or investment advice.",
-  "- Do not claim fake certainty. If signal is thin, say so.",
-  "- When the card does NOT match, say that plainly but respectfully.",
+  "You are given (1) a collector's inferred style profile, (2) structured features of a single card,",
+  "and (3) the card's current market signal.",
+  "",
+  "Your job: write a tight read that reasons across BOTH the market move AND how the card fits the user's style.",
+  "The combined read is the value. A breakout that doesn't fit is a heads-up to skip; a slow burner that does fit is a quiet hold; a breakout that fits is a 'don't miss this' nudge.",
+  "",
+  "Tone:",
+  "- Speak to the user in second person ('you tend to favor…', 'this isn't getting the price action you usually look for').",
+  "- Plain English, 8th-grade reading level. Calm, useful, observational.",
+  "- Be honest when the card doesn't fit. Say so plainly but respectfully.",
+  "- Never give buy / sell / hold advice. Reframe action as 'on watch', 'fading', 'in a value zone', 'running hot'.",
+  "- Do not claim fake certainty. If style signal is thin (low confidence, few events), say so.",
   "- Do not mention being an AI.",
-  "- Plain English, 8th-grade reading level, no hype or finance jargon.",
-  "- Output ONLY a single JSON object matching this exact shape:",
+  "- Avoid hype, slang, and finance jargon.",
+  "",
+  "How to weave market + style:",
+  "- If the market signal is BREAKOUT and the card matches style → 'this is moving, and it's the kind of card you usually engage with'.",
+  "- If BREAKOUT but style doesn't match → 'this is moving, but it's not the type of price action you usually look for'.",
+  "- If VALUE_ZONE and style matches → 'sitting in your kind of pocket — quiet but in range'.",
+  "- If COOLING/OVERHEATED and style matches → flag the move as a heads-up, not an entry.",
+  "- If STEADY → describe the card as patient; speak to whether the user has the patience profile for it.",
+  "- If no market signal is present, focus on the style fit and acknowledge market context is thin.",
+  "",
+  "Output ONLY a single JSON object matching this exact shape:",
   '  {"headline":"...","summary":"...","why_it_matches":"...","reasons":["...","..."],"caveats":["..."]}',
-  "- headline: 6–10 words.",
-  "- summary: 1–2 sentences, 20–40 words.",
-  "- why_it_matches: 1 short sentence.",
-  "- reasons: 2–4 short bullet phrases, 10–20 words each.",
-  "- caveats: 0–2 short phrases (can be empty array).",
+  "",
+  "Field rules:",
+  "- headline: 6–10 words. Pull together the market move and the style fit in one phrase.",
+  "    Examples: \"Breakout that fits your fast-flip lean\", \"Slow burner — not your usual price action\", \"Quiet, but in your value zone\".",
+  "- summary: 1–2 sentences, 25–45 words. Combine the move + the fit. Lead with the most useful framing.",
+  "- why_it_matches: 1 short sentence that names the specific style trait this lines up with (or doesn't).",
+  "- reasons: 2–4 short bullet phrases, 10–20 words each. Each reason should reference EITHER the market state OR a style dimension — ideally a mix.",
+  "- caveats: 0–2 short phrases. Use one when style signal is thin or when the move is fragile.",
   "- No prose, no code fences, no markdown outside the JSON object.",
 ].join("\n");
 
@@ -41,6 +73,7 @@ function buildUserPrompt(
   card: ExplanationCardInput,
   features: CardStyleFeatures,
   profile: StyleProfile,
+  market: MarketSignalContext | null,
 ): string {
   const lines: string[] = [];
   lines.push("## Collector style profile");
@@ -65,6 +98,25 @@ function buildUserPrompt(
   lines.push(`Art-forward rarity: ${features.is_art_centric ? "yes" : "no"}`);
   lines.push(`Liquidity band: ${features.liquidity_band}`);
   lines.push(`Volatility band: ${features.volatility_band}`);
+
+  lines.push("");
+  lines.push("## Market signal");
+  if (market) {
+    if (market.signalLabel) lines.push(`Signal: ${market.signalLabel}`);
+    if (market.verdict) lines.push(`Verdict: ${market.verdict}`);
+    if (market.chip) lines.push(`Chip phrase: ${market.chip}`);
+    if (market.summaryShort) lines.push(`Recent read: ${market.summaryShort}`);
+    if (market.marketPrice != null) lines.push(`Price: $${market.marketPrice.toFixed(2)}`);
+    if (market.changePct7d != null) {
+      lines.push(`7-day change: ${market.changePct7d > 0 ? "+" : ""}${market.changePct7d.toFixed(1)}%`);
+    }
+    if (market.activeListings7d != null) {
+      lines.push(`Active listings (7d): ${market.activeListings7d}`);
+    }
+  } else {
+    lines.push("No fresh market signal available — reason from style + features only.");
+  }
+
   return lines.join("\n");
 }
 
@@ -123,11 +175,17 @@ function parseLlmOutput(raw: string): ParsedLlmExplanation | null {
 /**
  * Generate a personalized explanation via Gemini.
  * Returns the template fallback on any error or timeout.
+ *
+ * The prompt reasons across both the user's style profile and the per-card
+ * market signal (when available) so the read tells the user not just whether
+ * the card fits their pattern, but whether the current move is the kind of
+ * price action they usually engage with.
  */
 export async function buildLlmExplanation(
   card: ExplanationCardInput,
   features: CardStyleFeatures,
   profile: StyleProfile,
+  market: MarketSignalContext | null,
 ): Promise<PersonalizedExplanation> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
@@ -135,12 +193,15 @@ export async function buildLlmExplanation(
     const result = await generateText({
       model: getPopAlphaModel(LLM_MODEL_TIER),
       system: SYSTEM_PROMPT,
-      prompt: buildUserPrompt(card, features, profile),
+      prompt: buildUserPrompt(card, features, profile, market),
       abortSignal: controller.signal,
       experimental_telemetry: {
         isEnabled: true,
         functionId: "personalized-card-explanation",
-        metadata: { dominant_style: profile.dominant_style_label },
+        metadata: {
+          dominant_style: profile.dominant_style_label,
+          ...(market?.signalLabel ? { signal_label: market.signalLabel } : {}),
+        },
       },
     });
     const parsed = parseLlmOutput(result.text ?? "");

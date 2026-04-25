@@ -743,6 +743,19 @@ struct CardDetailView: View {
                         .foregroundStyle(PA.Colors.accent)
                         .kerning(-0.2)
                     Spacer(minLength: 0)
+                    if let chip = profile.chip?.trimmingCharacters(in: .whitespacesAndNewlines), !chip.isEmpty {
+                        Text(chip)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(PA.Colors.text)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(PA.Colors.accent.opacity(0.28))
+                            .clipShape(Capsule())
+                            .overlay(
+                                Capsule()
+                                    .stroke(PA.Colors.accent.opacity(0.45), lineWidth: 1)
+                            )
+                    }
                 }
 
                 Text(summaryHeadline(from: profile))
