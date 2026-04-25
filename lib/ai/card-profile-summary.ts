@@ -59,6 +59,16 @@ export type CardProfileResult = {
   inputTokens: number | null;
   outputTokens: number | null;
   metricsHash: string;
+  // When source === "fallback", carries the reason the LLM path failed
+  // so the caller (cron route) can report it instead of silently
+  // writing 100% fallbacks and returning ok:true. See
+  // docs/project_silent_rpc_fallbacks.md — same lesson.
+  //   - "llm-threw:<error>" — generateText threw synchronously (auth,
+  //     model-not-found, rate-limit, abort, etc.)
+  //   - "parse-miss"         — LLM returned text but parseLlmProfile
+  //     rejected the shape
+  //   - undefined            — source === "llm", no failure
+  failureReason?: string;
 };
 
 // ── Metrics hash ────────────────────────────────────────────────────────────
@@ -367,7 +377,14 @@ export async function generateCardProfile(
 
     const parsed = parseLlmProfile(result.text ?? "");
     if (!parsed) {
-      return buildFallbackProfile(input);
+      // Text came back but didn't match the JSON contract. Keep the
+      // fallback but surface the reason so we don't confuse "LLM broken"
+      // with "prompt returning junk".
+      const sample = String(result.text ?? "").slice(0, 120).replace(/\s+/g, " ");
+      console.warn(
+        `[card-profile] parse miss slug=${input.canonicalSlug} sample="${sample}"`,
+      );
+      return { ...buildFallbackProfile(input), failureReason: "parse-miss" };
     }
 
     const usage = result.totalUsage ?? { inputTokens: undefined, outputTokens: undefined };
@@ -383,8 +400,23 @@ export async function generateCardProfile(
       outputTokens: typeof usage.outputTokens === "number" ? usage.outputTokens : null,
       metricsHash,
     };
-  } catch {
-    return buildFallbackProfile(input);
+  } catch (err) {
+    // Surface the actual error before falling back. Previously this
+    // catch was silent, which hid auth / model-name / rate-limit bugs
+    // for arbitrarily long — a 100% fallback rate looked identical to
+    // a healthy run in the cron response. The runtime behavior is
+    // still degrade-gracefully (one bad card doesn't take out the
+    // batch), but the reason now leaves fingerprints in both logs and
+    // the return value.
+    const errName = err instanceof Error ? err.name : "UnknownError";
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.error(
+      `[card-profile] generateText threw slug=${input.canonicalSlug} ${errName}: ${errMsg}`,
+    );
+    return {
+      ...buildFallbackProfile(input),
+      failureReason: `llm-threw:${errName}:${errMsg.slice(0, 160)}`,
+    };
   } finally {
     clearTimeout(timeoutId);
   }

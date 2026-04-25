@@ -163,12 +163,26 @@ async function processChunk(
   supabase: ReturnType<typeof dbAdmin>,
   inputs: CardProfileInput[],
   concurrency: number,
-): Promise<{ llm: number; fallbacks: number; errors: number; inputTokens: number; outputTokens: number }> {
+): Promise<{
+  llm: number;
+  fallbacks: number;
+  errors: number;
+  inputTokens: number;
+  outputTokens: number;
+  // First non-null failureReason seen in this chunk. Surfaces the
+  // underlying LLM error (auth, model-not-found, rate-limit, parse-miss,
+  // …) through the cron response instead of silently converting every
+  // failure into a fallback and returning ok:true.
+  firstFailureReason: string | null;
+  failureReasonCounts: Record<string, number>;
+}> {
   let llm = 0;
   let fallbacks = 0;
   let errors = 0;
   let inputTokens = 0;
   let outputTokens = 0;
+  let firstFailureReason: string | null = null;
+  const failureReasonCounts: Record<string, number> = {};
 
   // Process in sliding windows of `concurrency`
   for (let i = 0; i < inputs.length; i += concurrency) {
@@ -181,12 +195,16 @@ async function processChunk(
       const input = window[j];
       const settled = results[j];
 
-      let profile: ReturnType<typeof buildFallbackProfile>;
-      if (settled.status === "fulfilled") {
-        profile = settled.value;
-      } else {
-        profile = buildFallbackProfile(input);
-      }
+      // generateCardProfile never throws (it catches internally and
+      // returns a fallback-with-reason), so the "rejected" branch only
+      // fires for truly unexpected crashes — keep it as a last resort.
+      const profile =
+        settled.status === "fulfilled"
+          ? settled.value
+          : {
+              ...buildFallbackProfile(input),
+              failureReason: `rejected:${settled.reason instanceof Error ? settled.reason.message : String(settled.reason)}`,
+            };
 
       try {
         await upsertProfile(supabase, input.canonicalSlug, profile);
@@ -196,6 +214,14 @@ async function processChunk(
           outputTokens += profile.outputTokens ?? 0;
         } else {
           fallbacks++;
+          if (profile.failureReason) {
+            if (!firstFailureReason) firstFailureReason = profile.failureReason;
+            // Bucket by the class prefix (llm-threw:<Name>, parse-miss,
+            // rejected:…) so the summary stays compact — full messages
+            // go to Vercel logs.
+            const bucket = profile.failureReason.split(":").slice(0, 2).join(":");
+            failureReasonCounts[bucket] = (failureReasonCounts[bucket] ?? 0) + 1;
+          }
         }
       } catch {
         errors++;
@@ -203,7 +229,15 @@ async function processChunk(
     }
   }
 
-  return { llm, fallbacks, errors, inputTokens, outputTokens };
+  return {
+    llm,
+    fallbacks,
+    errors,
+    inputTokens,
+    outputTokens,
+    firstFailureReason,
+    failureReasonCounts,
+  };
 }
 
 export async function GET(req: Request) {
@@ -227,6 +261,12 @@ export async function GET(req: Request) {
   let totalOutputTokens = 0;
   let totalProcessed = 0;
   let firstError: string | null = null;
+  // LLM-path fingerprints: `llmFailureSample` is the first human-readable
+  // failure string (e.g. "llm-threw:AI_APICallError:…"), and
+  // `llmFailureBuckets` counts failures by class so a glance at the
+  // response tells you "all 498 were AI_APICallError" vs. a mixed bag.
+  let llmFailureSample: string | null = null;
+  const llmFailureBuckets: Record<string, number> = {};
 
   try {
     if (mode === "backfill") {
@@ -254,6 +294,12 @@ export async function GET(req: Request) {
         totalInputTokens += stats.inputTokens;
         totalOutputTokens += stats.outputTokens;
         totalProcessed += chunk.length;
+        if (!llmFailureSample && stats.firstFailureReason) {
+          llmFailureSample = stats.firstFailureReason;
+        }
+        for (const [bucket, count] of Object.entries(stats.failureReasonCounts)) {
+          llmFailureBuckets[bucket] = (llmFailureBuckets[bucket] ?? 0) + count;
+        }
       }
     } else {
       // refresh mode
@@ -288,13 +334,25 @@ export async function GET(req: Request) {
         totalInputTokens += stats.inputTokens;
         totalOutputTokens += stats.outputTokens;
         totalProcessed += chunk.length;
+        if (!llmFailureSample && stats.firstFailureReason) {
+          llmFailureSample = stats.firstFailureReason;
+        }
+        for (const [bucket, count] of Object.entries(stats.failureReasonCounts)) {
+          llmFailureBuckets[bucket] = (llmFailureBuckets[bucket] ?? 0) + count;
+        }
       }
     }
   } catch (err) {
     firstError = err instanceof Error ? err.message : String(err);
   }
 
-  const ok = firstError === null;
+  // ok is now a tighter predicate: infrastructure didn't throw AND at
+  // least some cards actually hit the LLM. 100% fallback with zero
+  // tokens — the prior silent-success shape — now returns ok:false so
+  // the caller (or a future scheduled cron) can alert instead of
+  // shrugging.
+  const llmPathDegraded = totalProcessed > 0 && totalLlm === 0;
+  const ok = firstError === null && !llmPathDegraded;
   return NextResponse.json(
     {
       ok,
@@ -309,6 +367,11 @@ export async function GET(req: Request) {
       totalInputTokens,
       totalOutputTokens,
       firstError,
+      // Populated only when the LLM path had failures. On a healthy
+      // run these will be null / empty.
+      llmFailureSample,
+      llmFailureBuckets: Object.keys(llmFailureBuckets).length ? llmFailureBuckets : null,
+      llmPathDegraded,
     },
     { status: ok ? 200 : 500 },
   );
