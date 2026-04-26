@@ -81,23 +81,50 @@ export type CardProfileResult = {
 };
 
 // ── Metrics hash ────────────────────────────────────────────────────────────
+//
+// The hash is the refresh trigger for the card-profile cron — when it
+// changes, the card's LLM summary gets regenerated. So sensitivity
+// here directly controls how often we pay for an LLM call per card,
+// and by extension steady-state cost.
+//
+// Coarsened 2026-04-26 to bound steady-state cost. Prior version
+// rounded prices to the cent and changePct to 0.1% — sensitive enough
+// that pure noise (cent-level price ticks, percent-point reporting
+// precision, day-edge poll-window flicker on activeListings) was
+// triggering LLM refreshes for cards whose narrative was unchanged.
+//
+// What's in the hash now:
+//   marketPrice / median7d / low30d / high30d  → rounded to whole dollars
+//   changePct7d                                 → rounded to whole percent
+//
+// What was DROPPED:
+//   activeListings7d — turned out to be saturated at 100 for 99.84%
+//   of cards (it's not really "active listings", it's a count of
+//   provider snapshots in 7 days, capped via a *20-then-clamp formula).
+//   Counts can flicker ±1 from rolling-window edge timing, which was
+//   causing pure-noise refreshes. Still passed to the LLM in the
+//   prompt for reasoning context — just not used as a refresh trigger.
+//
+// Combined with changePct rounded to integers, this still catches:
+//   - $0.50 → $1.00      (100% move; changePct flips 0 → 100)
+//   - $20  → $21         (5% move;  changePct flips 0 → 5)
+//   - $200 → $210        (same 5% logic at any price level)
+// While suppressing:
+//   - $4.97 → $4.98      (penny tick, narrative unchanged)
+//   - 4.4% → 4.5%        (sub-percent move, within reporting precision)
+//   - listings 14 → 15   (poll-edge flicker, no real activity change)
 
-function round2(v: number | null): string {
-  return v != null && Number.isFinite(v) ? v.toFixed(2) : "";
-}
-
-function round1(v: number | null): string {
-  return v != null && Number.isFinite(v) ? v.toFixed(1) : "";
+function round0(v: number | null): string {
+  return v != null && Number.isFinite(v) ? Math.round(v).toString() : "";
 }
 
 export function buildMetricsHash(input: CardProfileInput): string {
   const payload = [
-    round2(input.marketPrice),
-    round2(input.median7d),
-    round1(input.changePct7d),
-    round2(input.low30d),
-    round2(input.high30d),
-    String(input.activeListings7d ?? ""),
+    round0(input.marketPrice),
+    round0(input.median7d),
+    round0(input.changePct7d),
+    round0(input.low30d),
+    round0(input.high30d),
   ].join("|");
   return crypto.createHash("sha256").update(payload).digest("hex").slice(0, 16);
 }
