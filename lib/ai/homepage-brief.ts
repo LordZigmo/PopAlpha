@@ -36,7 +36,11 @@ export const HOMEPAGE_BRIEF_MODEL_TIER = "Ace" as const;
 // Keep in sync with getPopAlphaModel("Ace"). Stored on generated
 // brief rows so each entry carries its producing model.
 export const HOMEPAGE_BRIEF_MODEL_LABEL = "gemini-2.5-flash";
-export const HOMEPAGE_BRIEF_TIMEOUT_MS = 8_000;
+// Bumped from 8_000 to 15_000 in the same wave as card-profile-summary
+// (commit 564ce8c) and personalization/llm. Gemini 2.5-flash p95 sits in
+// the 5-10s range; 8s aborted enough briefs to be worth fixing
+// proactively rather than waiting for the symptoms to surface.
+export const HOMEPAGE_BRIEF_TIMEOUT_MS = 15_000;
 
 export type HomepageBriefSource = "llm" | "fallback";
 
@@ -51,6 +55,12 @@ export type HomepageBrief = {
   outputTokens: number | null;
   durationMs: number | null;
   dataAsOf: string | null;
+  // Set only when source === "fallback" AND the LLM was actually
+  // attempted — i.e. this is a degraded run, not the legitimate "no
+  // mover data, skip the LLM" short-circuit. The cron route uses this
+  // to flip ok:false on degradation while staying ok:true on the
+  // intentional skip path. See docs/external-api-failure-modes.md.
+  failureReason?: string;
 };
 
 // ── Data context ─────────────────────────────────────────────────────────────
@@ -348,7 +358,10 @@ export async function generateHomepageBrief(
       logger.warn("[homepage-brief] LLM output failed parse, using fallback", {
         rawPreview: (result.text ?? "").slice(0, 200),
       });
-      return buildFallbackHomepageBrief(ctx, data.as_of);
+      return {
+        ...buildFallbackHomepageBrief(ctx, data.as_of),
+        failureReason: "parse-miss",
+      };
     }
 
     const usage = result.totalUsage ?? {
@@ -376,9 +389,22 @@ export async function generateHomepageBrief(
     });
     return brief;
   } catch (err) {
-    const reason = err instanceof Error ? err.name || err.message : "unknown";
-    logger.warn("[homepage-brief] LLM call failed, using fallback", { reason });
-    return buildFallbackHomepageBrief(ctx, data.as_of);
+    // Logging here was already in place; the change is to ALSO
+    // propagate the reason through the returned HomepageBrief so the
+    // cron consumer can flag a degraded run instead of silently
+    // writing fallback content into ai_brief_cache and returning
+    // ok:true. Without this, Vercel logs were the only place a real
+    // outage surfaced — same anti-pattern as the card-profile cron
+    // before commit e3f2549.
+    const errName = err instanceof Error ? err.name : "UnknownError";
+    const errMsg = err instanceof Error ? err.message : String(err);
+    logger.warn("[homepage-brief] LLM call failed, using fallback", {
+      reason: `${errName}: ${errMsg}`,
+    });
+    return {
+      ...buildFallbackHomepageBrief(ctx, data.as_of),
+      failureReason: `llm-threw:${errName}:${errMsg.slice(0, 160)}`,
+    };
   } finally {
     clearTimeout(timeoutId);
   }

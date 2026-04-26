@@ -12,9 +12,19 @@ import type {
 } from "../types";
 import { buildTemplateExplanation, type ExplanationCardInput } from "./template";
 
-const LLM_TIMEOUT_MS = 6_000;
+// Bumped from 6_000 to 15_000 alongside the gemini-2.0-flash → 2.5-flash
+// migration (commits ed9219a + 564ce8c). Same lesson as card-profile:
+// 2.5-flash p95 sits in the 5-10s range and a 6s budget silently aborts
+// a meaningful tail of calls. 15s gives headroom while staying inside
+// any reasonable end-user wait expectation; the response is cached, so
+// only the first request per (actor, card, metricsHash) tuple pays this.
+const LLM_TIMEOUT_MS = 15_000;
 const LLM_MODEL_TIER = "Ace" as const;
-const SOURCE_VERSION = `llm-gemini2-flash-v${PROFILE_VERSION}`;
+// Model-agnostic label so this constant doesn't drift the next time
+// getPopAlphaModel("Ace") moves to a new generation. The actual model
+// name is owned by lib/ai/models.ts; the label here is just for cache-
+// row provenance.
+const SOURCE_VERSION = `llm-v${PROFILE_VERSION}`;
 
 /**
  * Market signal context, sourced from the per-card market summary
@@ -206,7 +216,18 @@ export async function buildLlmExplanation(
     });
     const parsed = parseLlmOutput(result.text ?? "");
     if (!parsed) {
-      return buildTemplateExplanation(card, features, profile);
+      // LLM responded but the output didn't match the JSON contract.
+      // Distinct from a thrown error — it means the model is reachable
+      // and the API key works, the prompt or output is the issue.
+      const sample = String(result.text ?? "").slice(0, 120).replace(/\s+/g, " ");
+      console.warn(
+        `[personalization:llm] parse miss slug=${card.canonical_slug} sample="${sample}"`,
+      );
+      return {
+        ...buildTemplateExplanation(card, features, profile),
+        source: "fallback",
+        failureReason: "parse-miss",
+      };
     }
     return {
       headline: parsed.headline,
@@ -220,8 +241,23 @@ export async function buildLlmExplanation(
       source: "llm",
       source_version: SOURCE_VERSION,
     };
-  } catch {
-    return buildTemplateExplanation(card, features, profile);
+  } catch (err) {
+    // Surface the actual error before falling back. Previously this
+    // catch was bare (`catch { return template }`), which made every
+    // upstream failure — auth, model deprecation, rate limit, abort —
+    // indistinguishable from a user being on the template tier by
+    // design. See docs/external-api-failure-modes.md for the
+    // generalized rule.
+    const errName = err instanceof Error ? err.name : "UnknownError";
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.error(
+      `[personalization:llm] generateText threw slug=${card.canonical_slug} ${errName}: ${errMsg}`,
+    );
+    return {
+      ...buildTemplateExplanation(card, features, profile),
+      source: "fallback",
+      failureReason: `llm-threw:${errName}:${errMsg.slice(0, 160)}`,
+    };
   } finally {
     clearTimeout(timeoutId);
   }

@@ -75,20 +75,36 @@ export async function GET(req: Request) {
       console.warn("[cron/refresh-ai-brief] prune failed:", pruneError.message);
     }
 
-    return NextResponse.json({
-      ok: true,
-      durationMs: Date.now() - startMs,
-      brief: {
-        source: brief.source,
-        summary: brief.summary,
-        takeaway: brief.takeaway,
-        focusSet: brief.focusSet,
-        modelLabel: brief.modelLabel,
-        inputTokens: brief.inputTokens,
-        outputTokens: brief.outputTokens,
-        generationMs: brief.durationMs,
+    // Degradation predicate: source !== "llm" AND we attempted the LLM
+    // (failureReason is set). The two-step distinguishes the legitimate
+    // short-circuit path (no mover data → fallback with no failureReason
+    // → ok:true, healthy run) from a real degradation (LLM threw or
+    // returned junk → fallback with failureReason → ok:false so this
+    // can't silently look like a successful cron). See
+    // docs/external-api-failure-modes.md for the rule.
+    const llmPathDegraded =
+      brief.source !== "llm" && typeof brief.failureReason === "string";
+
+    return NextResponse.json(
+      {
+        ok: !llmPathDegraded,
+        durationMs: Date.now() - startMs,
+        llmPathDegraded,
+        // Populated only on a degraded run.
+        llmFailureReason: brief.failureReason ?? null,
+        brief: {
+          source: brief.source,
+          summary: brief.summary,
+          takeaway: brief.takeaway,
+          focusSet: brief.focusSet,
+          modelLabel: brief.modelLabel,
+          inputTokens: brief.inputTokens,
+          outputTokens: brief.outputTokens,
+          generationMs: brief.durationMs,
+        },
       },
-    });
+      { status: llmPathDegraded ? 500 : 200 },
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[cron/refresh-ai-brief] failed:", message);

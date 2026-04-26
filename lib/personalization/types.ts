@@ -121,6 +121,18 @@ export type PersonalizedExplanation = {
   confidence: number;
   fits: "aligned" | "neutral" | "contrast";
   generated_at: string;
+  // "template" — user is on the template tier by capability, expected outcome.
+  // "llm" — LLM call succeeded, generated content.
+  // "fallback" — LLM was attempted but failed; the content here is template-
+  //   quality but tagged distinctly so telemetry can tell "expected template"
+  //   apart from "LLM degraded into template-quality content." See
+  //   docs/external-api-failure-modes.md.
   source: "template" | "llm" | "fallback";
   source_version: string;
+  // Set only when source === "fallback" — class-level fingerprint of the
+  // upstream failure (e.g. "llm-threw:AI_APICallError:…", "parse-miss",
+  // "abort"). Visible to the API consumer but its real value is in
+  // operational logs and any downstream telemetry that aggregates by
+  // failure class.
+  failureReason?: string;
 };
