@@ -163,12 +163,26 @@ async function processChunk(
   supabase: ReturnType<typeof dbAdmin>,
   inputs: CardProfileInput[],
   concurrency: number,
+  // Absolute wall-clock cutoff (Date.now() ms). Once we cross it,
+  // bail out of the inner concurrency loop instead of starting
+  // another batch. Without this, a chunk that begins under-deadline
+  // could still run past Vercel's maxDuration if the Gemini p95 is
+  // long — Incident: 2026-04-26 504 FUNCTION_INVOCATION_TIMEOUT,
+  // which is exactly what motivated moving the check inside.
+  deadline: number,
 ): Promise<{
   llm: number;
   fallbacks: number;
   errors: number;
   inputTokens: number;
   outputTokens: number;
+  // Number of cards in `inputs` that we actually touched before
+  // bailing on the deadline. The caller uses this to update its
+  // running totals correctly when a chunk exits early.
+  processed: number;
+  // True when the inner loop broke out because Date.now() crossed
+  // `deadline`. Lets the caller stop scheduling further work.
+  hitDeadline: boolean;
   // First non-null failureReason seen in this chunk. Surfaces the
   // underlying LLM error (auth, model-not-found, rate-limit, parse-miss,
   // …) through the cron response instead of silently converting every
@@ -181,11 +195,20 @@ async function processChunk(
   let errors = 0;
   let inputTokens = 0;
   let outputTokens = 0;
+  let processed = 0;
+  let hitDeadline = false;
   let firstFailureReason: string | null = null;
   const failureReasonCounts: Record<string, number> = {};
 
-  // Process in sliding windows of `concurrency`
+  // Process in sliding windows of `concurrency`. The deadline is
+  // checked at the start of each window so we can exit between
+  // batches — granularity is `concurrency` cards × p95-latency ≈
+  // ~5-12s instead of `batchSize` cards × p95-latency ≈ ~30-100s.
   for (let i = 0; i < inputs.length; i += concurrency) {
+    if (Date.now() >= deadline) {
+      hitDeadline = true;
+      break;
+    }
     const window = inputs.slice(i, i + concurrency);
     const results = await Promise.allSettled(
       window.map((input) => generateCardProfile(input)),
@@ -208,6 +231,7 @@ async function processChunk(
 
       try {
         await upsertProfile(supabase, input.canonicalSlug, profile);
+        processed++;
         if (profile.source === "llm") {
           llm++;
           inputTokens += profile.inputTokens ?? 0;
@@ -235,6 +259,8 @@ async function processChunk(
     errors,
     inputTokens,
     outputTokens,
+    processed,
+    hitDeadline,
     firstFailureReason,
     failureReasonCounts,
   };
@@ -261,6 +287,11 @@ export async function GET(req: Request) {
   let totalOutputTokens = 0;
   let totalProcessed = 0;
   let firstError: string | null = null;
+  // True if any chunk exited mid-flight on the deadline check, OR
+  // the outer loop broke before draining `cards`. Tells the operator
+  // (or a wrapping drain loop) that there's more work to do — just
+  // rerun the same URL.
+  let truncatedAtDeadline = false;
   // LLM-path fingerprints: `llmFailureSample` is the first human-readable
   // failure string (e.g. "llm-threw:AI_APICallError:…"), and
   // `llmFailureBuckets` counts failures by class so a glance at the
@@ -283,23 +314,38 @@ export async function GET(req: Request) {
       }
 
       for (let i = 0; i < cards.length; i += batchSize) {
+        // Outer deadline check: don't START a new chunk past deadline.
+        // The inner check inside processChunk handles "we crossed the
+        // deadline mid-chunk" — together they bound wall-clock time.
         if (Date.now() >= deadline) break;
         const chunkCards = cards.slice(i, i + batchSize);
         const conditionMap = await fetchConditionPricesForSlugs(supabase, chunkCards.map((c) => c.canonical_slug));
         const chunk = chunkCards.map((c) => toProfileInput(c, conditionMap.get(c.canonical_slug) ?? null));
-        const stats = await processChunk(supabase, chunk, concurrency);
+        const stats = await processChunk(supabase, chunk, concurrency, deadline);
         totalLlm += stats.llm;
         totalFallbacks += stats.fallbacks;
         totalErrors += stats.errors;
         totalInputTokens += stats.inputTokens;
         totalOutputTokens += stats.outputTokens;
-        totalProcessed += chunk.length;
+        // Was: chunk.length — over-counted when the inner loop broke
+        // early. Now reflects the cards actually upserted.
+        totalProcessed += stats.processed;
         if (!llmFailureSample && stats.firstFailureReason) {
           llmFailureSample = stats.firstFailureReason;
         }
         for (const [bucket, count] of Object.entries(stats.failureReasonCounts)) {
           llmFailureBuckets[bucket] = (llmFailureBuckets[bucket] ?? 0) + count;
         }
+        // Inner loop broke on deadline → don't schedule another chunk.
+        if (stats.hitDeadline) {
+          truncatedAtDeadline = true;
+          break;
+        }
+      }
+      // If we exited the outer loop because Date.now() >= deadline
+      // BEFORE finishing all chunks, that's also a truncation.
+      if (!truncatedAtDeadline && Date.now() >= deadline) {
+        truncatedAtDeadline = true;
       }
     } else {
       // refresh mode
@@ -323,23 +369,37 @@ export async function GET(req: Request) {
       });
 
       for (let i = 0; i < needsRefresh.length; i += batchSize) {
+        // See backfill-mode comment above — outer + inner deadline
+        // checks together bound wall-clock time.
         if (Date.now() >= deadline) break;
         const chunkCards = needsRefresh.slice(i, i + batchSize);
         const conditionMap = await fetchConditionPricesForSlugs(supabase, chunkCards.map((c) => c.canonical_slug));
         const chunk = chunkCards.map((c) => toProfileInput(c, conditionMap.get(c.canonical_slug) ?? null));
-        const stats = await processChunk(supabase, chunk, concurrency);
+        const stats = await processChunk(supabase, chunk, concurrency, deadline);
         totalLlm += stats.llm;
         totalFallbacks += stats.fallbacks;
         totalErrors += stats.errors;
         totalInputTokens += stats.inputTokens;
         totalOutputTokens += stats.outputTokens;
-        totalProcessed += chunk.length;
+        // Was: chunk.length — over-counted when the inner loop broke
+        // early. Now reflects the cards actually upserted.
+        totalProcessed += stats.processed;
         if (!llmFailureSample && stats.firstFailureReason) {
           llmFailureSample = stats.firstFailureReason;
         }
         for (const [bucket, count] of Object.entries(stats.failureReasonCounts)) {
           llmFailureBuckets[bucket] = (llmFailureBuckets[bucket] ?? 0) + count;
         }
+        // Inner loop broke on deadline → don't schedule another chunk.
+        if (stats.hitDeadline) {
+          truncatedAtDeadline = true;
+          break;
+        }
+      }
+      // If we exited the outer loop because Date.now() >= deadline
+      // BEFORE finishing all chunks, that's also a truncation.
+      if (!truncatedAtDeadline && Date.now() >= deadline) {
+        truncatedAtDeadline = true;
       }
     }
   } catch (err) {
@@ -372,6 +432,10 @@ export async function GET(req: Request) {
       llmFailureSample,
       llmFailureBuckets: Object.keys(llmFailureBuckets).length ? llmFailureBuckets : null,
       llmPathDegraded,
+      // True when this invocation exited early on the deadline guard
+      // (either between chunks or mid-chunk via the inner check).
+      // Operator should rerun the same URL to drain remaining work.
+      truncatedAtDeadline,
     },
     { status: ok ? 200 : 500 },
   );
