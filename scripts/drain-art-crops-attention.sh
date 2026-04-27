@@ -38,21 +38,31 @@ for i in $(seq 1 $MAX_PASSES); do
     URL="$BASE_URL?priority=attention_only&maxCards=200"
   fi
 
-  HTTP_CODE_FILE=$(mktemp)
-  RESPONSE=$(curl -s -w "%{http_code}" -o /tmp/drain_body_$$.json \
+  # --retry 3 + --retry-delay 10: curl auto-retries on transient
+  # network / DNS / connection errors AND HTTP 408 / 429 / 5xx.
+  # Catches the HTTP 000 connection-dropped case that the explicit
+  # post-curl retry block below missed. --max-time 290 caps the
+  # outer wait per attempt so a stuck connection can't block the
+  # script forever.
+  RESPONSE=$(curl -s --retry 3 --retry-delay 10 --max-time 290 \
+    -w "%{http_code}" -o /tmp/drain_body_$$.json \
     -H "Authorization: Bearer $CRON_SECRET" "$URL")
   HTTP_CODE="$RESPONSE"
   BODY=$(cat /tmp/drain_body_$$.json 2>/dev/null || echo "{}")
-  rm -f /tmp/drain_body_$$.json "$HTTP_CODE_FILE"
+  rm -f /tmp/drain_body_$$.json
 
   if [ "$HTTP_CODE" != "200" ]; then
     echo "pass $i  HTTP $HTTP_CODE  body: $(echo "$BODY" | head -c 200)"
     if [ "$HTTP_CODE" = "401" ]; then
       echo "  -> auth failed. Check CRON_SECRET matches Vercel."
+      exit 1
     fi
-    if [ "$HTTP_CODE" = "504" ]; then
-      echo "  -> function timeout. Retrying after 10s sleep..."
-      sleep 10
+    # 504 / 502 / 000: curl already retried 3x. Give it one more
+    # script-level breather then continue — drain is idempotent so
+    # a single missed pass is fine.
+    if [ "$HTTP_CODE" = "504" ] || [ "$HTTP_CODE" = "502" ] || [ "$HTTP_CODE" = "000" ]; then
+      echo "  -> transient, sleeping 30s before next pass..."
+      sleep 30
       continue
     fi
     exit 1
