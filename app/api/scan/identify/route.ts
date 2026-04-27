@@ -42,6 +42,10 @@ import {
   ImageEmbedderConfigError,
   ImageEmbedderRuntimeError,
 } from "@/lib/ai/image-embedder";
+import {
+  applyCropTransform,
+  ImageCropError,
+} from "@/lib/ai/image-crops";
 import { getPostHogClient } from "@/lib/posthog-server";
 
 export const runtime = "nodejs";
@@ -74,6 +78,65 @@ const MAX_LIMIT = 10;
 const CONFIDENCE_HIGH_COS_DIST = 0.30;
 const CONFIDENCE_MEDIUM_COS_DIST = 0.45;
 const CONFIDENCE_HIGH_MIN_GAP = 0.005;
+
+/**
+ * Per-crop-type kNN. Run once per crop_type (full and art) at query
+ * time; results are merged max-by-slug in the route handler.
+ *
+ *   $1 — query embedding vector literal
+ *   $2 — model_version (must match what the index was built with)
+ *   $3 — language filter (EN | JP)
+ *   $4 — top-K limit
+ *   $5 — crop_type ('full' | 'art')
+ *
+ * Per-slug dedup via DISTINCT ON: a given canonical_slug can have
+ * multiple variant rows in the index (Stage C augmentations under
+ * crop_type='full'). DISTINCT ON returns the closest variant per slug.
+ * The 4× overfetch in the inner CTE keeps dedup from starving the
+ * final top-K when many top-N raw hits cluster on a few slugs.
+ *
+ * is_digital_only = false excludes TCG Pocket cards (Pokemon's mobile-
+ * game-only catalog). Those polluted early eval results before the
+ * filter landed (Cramorant→Pidgey, Lopunny→Lucario) by clustering
+ * compositionally with physical-card art in CLIP space.
+ */
+const KNN_QUERY = `
+  with nearest_variants as (
+    select
+      canonical_slug,
+      canonical_name,
+      language,
+      set_name,
+      card_number,
+      variant,
+      source_image_url,
+      (embedding <=> $1::vector) as cos_dist
+    from card_image_embeddings
+    where model_version = $2
+      and language = $3
+      and is_digital_only = false
+      and crop_type = $5
+    order by embedding <=> $1::vector
+    limit $4 * 4
+  ),
+  dedup as (
+    select distinct on (canonical_slug)
+      canonical_slug,
+      canonical_name,
+      language,
+      set_name,
+      card_number,
+      variant,
+      source_image_url,
+      cos_dist
+    from nearest_variants
+    order by canonical_slug, cos_dist
+  )
+  select *
+  from dedup
+  order by cos_dist
+  limit $4
+`;
 
 type MatchRow = {
   canonical_slug: string;
@@ -269,27 +332,82 @@ export async function POST(req: Request) {
     throw err;
   }
 
-  // Stash the scan in Supabase Storage and pass a public URL to
-  // Replicate. The andreasjansson/clip-features model parses line-
-  // delimited inputs as URLs-or-text; it happily embeds a data-URL
-  // string as TEXT (not as the decoded image), which produced the
-  // ~0.19 similarity floor we hit on first device testing. Matching
-  // the catalog ingestion path — which always embeds via public URL —
-  // gets the two indexes into the same embedding space.
+  // ── Multi-crop ensemble ────────────────────────────────────────────
   //
-  // Keyed by imageHash so identical scans are idempotent uploads.
-  // bucket lifecycle cleanup for scan-uploads/* is a follow-up.
+  // Two parallel pipelines per scan:
+  //   • full   — original captured bytes (existing path)
+  //   • art    — server-side art-only crop (top 62% of card height,
+  //              excluding the footer/collector-number region)
+  //
+  // Each pipeline embeds via Replicate, kNNs against pgvector with a
+  // crop_type filter, and the two result sets are merged max-by-slug
+  // (per slug, keep the closer of the two cos_dists). The art branch
+  // recovers cards whose footer is occluded by a finger — the
+  // dominant real-world failure mode flagged in
+  // docs/scanner-augmentation-playbook.md and exercised by the
+  // 2026-04-26 user-reported "Cramorant with finger covering corner"
+  // miss.
+  //
+  // Graceful degradation: any failure on the art branch (crop fails,
+  // upload fails, embed returns null, kNN errors) is logged and
+  // skipped — the route still returns full-only matches. The art
+  // branch is "additive when present, no-op when absent." Only the
+  // full branch is load-bearing for correctness.
+
   const supabase = dbAdmin();
-  const scanKey = `scan-uploads/${imageHash}.jpg`;
-  const { error: uploadError } = await supabase.storage
+  const scanFullKey = `scan-uploads/${imageHash}.jpg`;
+  const scanArtKey = `scan-uploads/${imageHash}-art.jpg`;
+
+  // 1. Generate the art crop server-side. Determinism is critical:
+  //    the embed-card-art-crops cron uses the same applyCropTransform,
+  //    so reference embeddings and query embeddings end up in the same
+  //    CLIP feature manifold.
+  let artBytes: Buffer | null = null;
+  try {
+    artBytes = await applyCropTransform("art", bytes);
+  } catch (err) {
+    if (err instanceof ImageCropError) {
+      // Tiny / malformed images degrade to single-crop. Logged so we
+      // can spot patterns in real-world rejections.
+      console.warn(
+        `[identify] art-crop skipped hash=${imageHash}: ${err.message}`,
+      );
+    } else {
+      // Any other crop error is surfaced but still degrades gracefully.
+      console.warn(
+        `[identify] art-crop error hash=${imageHash}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  // 2. Upload both crops to Storage in parallel. Idempotent uploads
+  //    keyed by hash — re-scanning the same image is a no-op.
+  const fullUploadPromise = supabase.storage
     .from("card-images")
-    .upload(scanKey, bytes, {
+    .upload(scanFullKey, bytes, {
       upsert: true,
       contentType: "image/jpeg",
       cacheControl: "no-cache",
     });
+  const artUploadPromise = artBytes
+    ? supabase.storage
+        .from("card-images")
+        .upload(scanArtKey, artBytes, {
+          upsert: true,
+          contentType: "image/jpeg",
+          cacheControl: "no-cache",
+        })
+    : Promise.resolve({ error: null });
 
-  if (uploadError) {
+  const [fullUpload, artUpload] = await Promise.all([
+    fullUploadPromise,
+    artUploadPromise,
+  ]);
+
+  // Full upload failure is fatal — without it Replicate has nothing
+  // to fetch and we can't return matches. Match the previous status
+  // codes / failure_reason so existing PostHog alerts keep firing.
+  if (fullUpload.error) {
     await logScanEvent({
       imageHash,
       imageBytesSize,
@@ -297,28 +415,49 @@ export async function POST(req: Request) {
       confidence: "error",
       modelVersion: embedder.modelVersion,
       durationMs: Date.now() - startedAt,
-      error: `Storage upload failed: ${uploadError.message}`.slice(0, 500),
+      error: `Storage upload failed: ${fullUpload.error.message}`.slice(0, 500),
       actorKey,
       clientPlatform,
       httpStatus: 502,
       failureReason: "storage_upload_failed",
     });
     return NextResponse.json(
-      { ok: false, error: `Storage upload failed: ${uploadError.message}` },
+      { ok: false, error: `Storage upload failed: ${fullUpload.error.message}` },
       { status: 502 },
     );
   }
 
-  const scanPublicUrl = supabase.storage
-    .from("card-images")
-    .getPublicUrl(scanKey).data.publicUrl;
+  // Art upload failure → degrade to single-crop. Log so we know.
+  const artUploadFailed = artBytes !== null && artUpload.error !== null;
+  if (artUploadFailed) {
+    console.warn(
+      `[identify] art upload failed hash=${imageHash}: ${artUpload.error?.message ?? "?"}`,
+    );
+  }
 
-  let queryEmbedding: number[];
+  const fullPublicUrl = supabase.storage
+    .from("card-images")
+    .getPublicUrl(scanFullKey).data.publicUrl;
+  const artPublicUrl =
+    artBytes && !artUploadFailed
+      ? supabase.storage.from("card-images").getPublicUrl(scanArtKey).data.publicUrl
+      : null;
+
+  // 3. Embed both URLs in a single batch call to Replicate.
+  //    embedUrls supports arrays (REPLICATE_CLIP_DEFAULT_BATCH_SIZE=8;
+  //    we're sending 1-2). Batching amortizes cold-start over both
+  //    crops — meaningfully cheaper than two sequential calls when
+  //    Replicate is cold.
+  const urlsToEmbed: string[] = [fullPublicUrl];
+  if (artPublicUrl) urlsToEmbed.push(artPublicUrl);
+
+  let fullEmbedding: number[];
+  let artEmbedding: number[] | null = null;
   try {
-    const results = await embedder.embedUrls([scanPublicUrl]);
-    const first = results[0];
-    if (!first || first.embedding === null) {
-      const message = first?.error ?? "embedder returned no result";
+    const results = await embedder.embedUrls(urlsToEmbed);
+    const fullResult = results[0];
+    if (!fullResult || fullResult.embedding === null) {
+      const message = fullResult?.error ?? "embedder returned no result";
       await logScanEvent({
         imageHash,
         imageBytesSize,
@@ -337,7 +476,19 @@ export async function POST(req: Request) {
         { status: 502 },
       );
     }
-    queryEmbedding = first.embedding;
+    fullEmbedding = fullResult.embedding;
+
+    // Art branch failure is non-fatal.
+    if (artPublicUrl) {
+      const artResult = results[1];
+      if (artResult && artResult.embedding) {
+        artEmbedding = artResult.embedding;
+      } else {
+        console.warn(
+          `[identify] art embed returned null hash=${imageHash}: ${artResult?.error ?? "no result"}`,
+        );
+      }
+    }
   } catch (err) {
     if (err instanceof ImageEmbedderRuntimeError) {
       await logScanEvent({
@@ -361,8 +512,8 @@ export async function POST(req: Request) {
     throw err;
   }
 
-  if (queryEmbedding.length !== embedder.dimensions) {
-    const message = `Embedder returned unexpected dimensions: ${queryEmbedding.length} vs ${embedder.dimensions}`;
+  if (fullEmbedding.length !== embedder.dimensions) {
+    const message = `Embedder returned unexpected dimensions: ${fullEmbedding.length} vs ${embedder.dimensions}`;
     await logScanEvent({
       imageHash,
       imageBytesSize,
@@ -379,63 +530,46 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: message }, { status: 502 });
   }
 
-  const vectorLiteral = `[${queryEmbedding.join(",")}]`;
-
-  let matches: MatchRow[];
-  try {
-    // Per-slug dedup: Stage C stores multiple embedding variants per
-    // canonical card (one un-augmented + N synthetic "iPhone-like"
-    // variants). DISTINCT ON canonical_slug returns the single closest
-    // variant per card. We overfetch `limit * 4` with the inner CTE so
-    // dedup doesn't starve the final top-K — without the multiplier,
-    // if all top-N raw hits happen to be variants of the same card,
-    // we'd only return one slug instead of the user-requested top-K.
-    //
-    // is_digital_only = false filter excludes TCG Pocket cards (2.4k+
-    // of 23k rows). Those are Pokemon's mobile-game-only cards; users
-    // scanning physical cards never want them, and they polluted early
-    // eval results (Cramorant→Pidgey, Lopunny→Lucario, etc.) by
-    // clustering compositionally in CLIP space with physical card art.
-    const result = await sql.query<MatchRow>(
-      `
-        with nearest_variants as (
-          select
-            canonical_slug,
-            canonical_name,
-            language,
-            set_name,
-            card_number,
-            variant,
-            source_image_url,
-            (embedding <=> $1::vector) as cos_dist
-          from card_image_embeddings
-          where model_version = $2
-            and language = $3
-            and is_digital_only = false
-          order by embedding <=> $1::vector
-          limit $4 * 4
-        ),
-        dedup as (
-          select distinct on (canonical_slug)
-            canonical_slug,
-            canonical_name,
-            language,
-            set_name,
-            card_number,
-            variant,
-            source_image_url,
-            cos_dist
-          from nearest_variants
-          order by canonical_slug, cos_dist
-        )
-        select *
-        from dedup
-        order by cos_dist
-        limit $4
-      `,
-      [vectorLiteral, embedder.modelVersion, language, limit],
+  // Defensive: if the art embedding came back with a wrong dimension
+  // (shouldn't happen with the same model, but cheap to check), drop
+  // it and degrade. Don't fail the whole scan over an art-branch
+  // anomaly.
+  if (artEmbedding && artEmbedding.length !== embedder.dimensions) {
+    console.warn(
+      `[identify] art embedding dim mismatch hash=${imageHash}: ${artEmbedding.length} vs ${embedder.dimensions}`,
     );
-    matches = result.rows;
+    artEmbedding = null;
+  }
+
+  const fullVectorLiteral = `[${fullEmbedding.join(",")}]`;
+  const artVectorLiteral = artEmbedding ? `[${artEmbedding.join(",")}]` : null;
+
+  // 4. Two parallel pgvector kNN queries. Each filters by crop_type so
+  //    the full-card query embeds against full-card references and the
+  //    art-crop query embeds against art-crop references — apples-to-
+  //    apples within each branch. Same dedup-by-slug + 4× overfetch as
+  //    the prior single-crop path; existing reasoning about Pokemon
+  //    augmentation variants and TCG Pocket exclusion is unchanged.
+  let fullMatches: MatchRow[] = [];
+  let artMatches: MatchRow[] = [];
+  try {
+    const queries: Array<Promise<{ rows: MatchRow[] }>> = [
+      sql.query<MatchRow>(
+        KNN_QUERY,
+        [fullVectorLiteral, embedder.modelVersion, language, limit, "full"],
+      ),
+    ];
+    if (artVectorLiteral) {
+      queries.push(
+        sql.query<MatchRow>(
+          KNN_QUERY,
+          [artVectorLiteral, embedder.modelVersion, language, limit, "art"],
+        ),
+      );
+    }
+    const results = await Promise.all(queries);
+    fullMatches = results[0].rows;
+    if (results.length > 1) artMatches = results[1].rows;
   } catch (err) {
     const message = err instanceof Error ? err.message : "pgvector query failed";
     await logScanEvent({
@@ -452,6 +586,46 @@ export async function POST(req: Request) {
       failureReason: "pgvector_query_failed",
     });
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
+  }
+
+  // 5. Merge max-by-slug across the two branches.
+  //    Per canonical_slug, keep whichever branch returned the closer
+  //    cos_dist (i.e. higher similarity). Tag each merged row with
+  //    which branch won, so telemetry can later answer "was the art
+  //    crop pulling its weight?"
+  type MatchWithCrop = MatchRow & { winning_crop: "full" | "art" };
+  const slugToBest = new Map<string, MatchWithCrop>();
+  for (const row of fullMatches) {
+    slugToBest.set(row.canonical_slug, { ...row, winning_crop: "full" });
+  }
+  for (const row of artMatches) {
+    const existing = slugToBest.get(row.canonical_slug);
+    if (!existing || row.cos_dist < existing.cos_dist) {
+      slugToBest.set(row.canonical_slug, { ...row, winning_crop: "art" });
+    }
+  }
+  const matches: MatchWithCrop[] = [...slugToBest.values()]
+    .sort((a, b) => a.cos_dist - b.cos_dist)
+    .slice(0, limit);
+
+  // Per-branch top similarities BEFORE merge — preserved for
+  // telemetry so we can see whether the two branches agreed or one
+  // dragged the other.
+  const fullTopSimilarity = fullMatches[0] ? 1 - fullMatches[0].cos_dist : null;
+  const artTopSimilarity = artMatches[0] ? 1 - artMatches[0].cos_dist : null;
+
+  // Winning crop on the merged top-1. "tie" when both branches
+  // returned the same top slug (informative — means the art branch
+  // didn't add new signal, but didn't subtract either).
+  let winningCrop: "full" | "art" | "tie" | null = null;
+  if (matches[0]) {
+    const fullTop = fullMatches[0]?.canonical_slug;
+    const artTop = artMatches[0]?.canonical_slug;
+    if (fullTop && artTop && fullTop === artTop) {
+      winningCrop = "tie";
+    } else {
+      winningCrop = matches[0].winning_crop;
+    }
   }
 
   const topDistance = matches[0]?.cos_dist;
@@ -482,6 +656,9 @@ export async function POST(req: Request) {
     clientPlatform,
     httpStatus: 200,
     failureReason: null,
+    fullTopSimilarity,
+    artTopSimilarity,
+    winningCrop,
   });
 
   return NextResponse.json({
@@ -540,6 +717,15 @@ type ScanEventInput = {
   clientPlatform?: string | null;
   httpStatus: number;
   failureReason: FailureReason | null;
+  // Multi-crop telemetry — populated only on the success path. The
+  // per-branch top similarities are recorded BEFORE merge so we can
+  // see whether the two branches agreed (close numbers, often a
+  // "tie") or disagreed (one branch found something the other
+  // missed). winningCrop tells us which branch produced the merged
+  // top-1 — "tie" when both branches' top-1 was the same slug.
+  fullTopSimilarity?: number | null;
+  artTopSimilarity?: number | null;
+  winningCrop?: "full" | "art" | "tie" | null;
 };
 
 async function logScanEvent(event: ScanEventInput): Promise<void> {
@@ -561,6 +747,9 @@ async function logScanEvent(event: ScanEventInput): Promise<void> {
         error: event.error ?? null,
         actor_key: event.actorKey ?? null,
         client_platform: event.clientPlatform ?? null,
+        full_top_similarity: event.fullTopSimilarity ?? null,
+        art_top_similarity: event.artTopSimilarity ?? null,
+        winning_crop: event.winningCrop ?? null,
       });
 
     if (error) {
