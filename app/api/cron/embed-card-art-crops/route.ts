@@ -122,17 +122,28 @@ async function fetchAttentionSlugs(
   since.setUTCDate(since.getUTCDate() - 14);
   const sinceDate = since.toISOString().slice(0, 10);
 
+  // .limit(100000) on both: Supabase JS .select() defaults to a
+  // 1000-row cap, which silently clips both inputs to the
+  // intersection. public_card_page_view_daily has ~one row per
+  // (slug, day) so 14 days of views easily exceeds 1000 rows on a
+  // few-thousand-card-page-view-daily catalog. Without the explicit
+  // limit, the attention set looks ~10× smaller than reality (73
+  // vs the 1,168 we measured in supabase MCP — see commit 6170eba
+  // postmortem). 100k is a safe over-provision; in practice neither
+  // query returns more than ~10-50k rows.
   const [viewedRes, pricedRes] = await Promise.all([
     supabase
       .from("public_card_page_view_daily")
       .select("canonical_slug")
-      .gte("view_date", sinceDate),
+      .gte("view_date", sinceDate)
+      .limit(100000),
     supabase
       .from("card_metrics")
       .select("canonical_slug")
       .is("printing_id", null)
       .eq("grade", "RAW")
-      .gte("market_price", 5),
+      .gte("market_price", 5)
+      .limit(100000),
   ]);
 
   if (viewedRes.error) {
