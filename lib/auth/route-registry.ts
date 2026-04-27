@@ -38,7 +38,7 @@ export const PUBLIC_ROUTES = [
   "personalization/explanation",
   "personalization/profile",
   "waitlist",
-  "_diag/auth",
+  "diag/auth",
 ];
 
 export const CRON_ROUTES = [
