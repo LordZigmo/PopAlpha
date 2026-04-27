@@ -118,56 +118,29 @@ function artCropStorageKey(slug: string): string {
 async function fetchAttentionSlugs(
   supabase: ReturnType<typeof dbAdmin>,
 ): Promise<string[]> {
-  const since = new Date();
-  since.setUTCDate(since.getUTCDate() - 14);
-  const sinceDate = since.toISOString().slice(0, 10);
-
-  // .limit(100000) on both: Supabase JS .select() defaults to a
-  // 1000-row cap, which silently clips both inputs to the
-  // intersection. public_card_page_view_daily has ~one row per
-  // (slug, day) so 14 days of views easily exceeds 1000 rows on a
-  // few-thousand-card-page-view-daily catalog. Without the explicit
-  // limit, the attention set looks ~10× smaller than reality (73
-  // vs the 1,168 we measured in supabase MCP — see commit 6170eba
-  // postmortem). 100k is a safe over-provision; in practice neither
-  // query returns more than ~10-50k rows.
-  const [viewedRes, pricedRes] = await Promise.all([
-    supabase
-      .from("public_card_page_view_daily")
-      .select("canonical_slug")
-      .gte("view_date", sinceDate)
-      .limit(100000),
-    supabase
-      .from("card_metrics")
-      .select("canonical_slug")
-      .is("printing_id", null)
-      .eq("grade", "RAW")
-      .gte("market_price", 5)
-      .limit(100000),
-  ]);
-
-  if (viewedRes.error) {
-    throw new Error(`fetchAttentionSlugs viewed: ${viewedRes.error.message}`);
-  }
-  if (pricedRes.error) {
-    throw new Error(`fetchAttentionSlugs priced: ${pricedRes.error.message}`);
-  }
-
-  const viewedSet = new Set<string>(
-    (viewedRes.data ?? []).map((r) => (r as { canonical_slug: string }).canonical_slug),
+  // The intersection runs server-side via the
+  // get_attention_slugs_for_art_crop RPC — see migration
+  // 20260427010000_attention_slugs_for_art_crop. The earlier
+  // approach (two .select() queries + JS-side intersection) was
+  // silently clipped by Supabase PostgREST's db-max-rows=1000 cap
+  // on each input, producing a 73-slug intersection against an
+  // actual ~1,162-slug correct answer. The RPC returns a single
+  // text[] so the row cap doesn't apply.
+  const { data, error } = await supabase.rpc(
+    "get_attention_slugs_for_art_crop",
+    { p_days_back: 14, p_min_price: 5 },
   );
-  const pricedSet = new Set<string>(
-    (pricedRes.data ?? []).map((r) => (r as { canonical_slug: string }).canonical_slug),
-  );
-  // Intersection. JS doesn't have a built-in for this on Set yet
-  // (Set.prototype.intersection is Stage 4 but not everywhere) so
-  // do it explicitly.
-  const intersection: string[] = [];
-  for (const slug of viewedSet) {
-    if (pricedSet.has(slug)) intersection.push(slug);
+  if (error) {
+    throw new Error(`fetchAttentionSlugs rpc: ${error.message}`);
   }
-  intersection.sort();
-  return intersection;
+  // RPC returns text[]; the supabase-js client deserializes that
+  // into the JS string[].
+  if (!Array.isArray(data)) {
+    throw new Error(
+      `fetchAttentionSlugs: expected array from RPC, got ${typeof data}`,
+    );
+  }
+  return data as string[];
 }
 
 async function fetchExistingArtCropHashes(slugs: string[]): Promise<Map<string, string>> {
