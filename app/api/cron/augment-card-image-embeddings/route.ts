@@ -243,16 +243,21 @@ export async function GET(req: Request) {
           // 5. Upsert into card_image_embeddings.
           const vectorLiteral = `[${first.embedding.join(",")}]`;
           const isDigital = isDigitalOnlyUrl(row.primary_image_url);
+          // Augmented variants are full-card crops by construction
+          // (color/rotation transforms, no region cropping). The
+          // composite PK includes crop_type='full' explicitly so this
+          // upsert touches the same row each run regardless of any
+          // future art-crop rows under the same (slug, variant_index).
           await sql.query(
             `
               insert into card_image_embeddings (
                 canonical_slug, canonical_name, language, set_name, card_number, variant,
                 source_image_url, source_hash, model_version, embedding, variant_index,
-                is_digital_only, updated_at
+                is_digital_only, crop_type, updated_at
               ) values (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::vector, $11, $12, now()
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::vector, $11, $12, 'full', now()
               )
-              on conflict (canonical_slug, variant_index) do update set
+              on conflict (canonical_slug, variant_index, crop_type) do update set
                 canonical_name = excluded.canonical_name,
                 language = excluded.language,
                 set_name = excluded.set_name,
@@ -317,12 +322,17 @@ export async function GET(req: Request) {
 async function fetchExistingVariantHashes(slugs: string[]): Promise<Map<string, string>> {
   const out = new Map<string, string>();
   if (slugs.length === 0) return out;
+  // Filter to crop_type='full' so we never confuse an augmented full-
+  // card variant with an art-crop variant of the same slug. The
+  // augment cron only ever produces crop_type='full' rows; the art-
+  // crop cron lives at a separate route with its own hash query.
   const result = await sql.query<ExistingVariantHash>(
     `
       select canonical_slug, variant_index, source_hash
       from card_image_embeddings
       where canonical_slug = any($1::text[])
         and variant_index > 0
+        and crop_type = 'full'
     `,
     [slugs],
   );

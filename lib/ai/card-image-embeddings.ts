@@ -82,8 +82,9 @@ export async function ensureCardImageEmbeddingsSchema(): Promise<void> {
       embedding vector(${IMAGE_EMBEDDER_DIMENSIONS}) not null,
       variant_index integer not null default 0,
       is_digital_only boolean not null default false,
+      crop_type text not null default 'full',
       updated_at timestamptz not null default now(),
-      primary key (canonical_slug, variant_index)
+      primary key (canonical_slug, variant_index, crop_type)
     );
   `);
 
@@ -127,6 +128,50 @@ export async function ensureCardImageEmbeddingsSchema(): Promise<void> {
   await sql.query(`
     alter table card_image_embeddings
       add column if not exists is_digital_only boolean not null default false;
+  `);
+
+  // crop_type column for multi-crop ensemble (2026-04-26). Existing
+  // rows are full-card embeddings; the new art-crop reference rows are
+  // tagged crop_type='art'. The identify route filters by crop_type
+  // when running its kNN so an art-cropped query embeds against
+  // art-cropped references (apples-to-apples) instead of being mixed
+  // with full-card embeddings (apples-to-oranges, lower similarity).
+  await sql.query(`
+    alter table card_image_embeddings
+      add column if not exists crop_type text not null default 'full';
+  `);
+
+  // Swap the PK to (canonical_slug, variant_index, crop_type) so a
+  // single slug can hold both crop_type='full' AND crop_type='art'
+  // rows under the same variant_index 0. Idempotent on already-
+  // migrated tables.
+  await sql.query(`
+    do $$
+    declare
+      current_pk_def text;
+    begin
+      select pg_get_constraintdef(c.oid) into current_pk_def
+      from pg_constraint c
+      join pg_class t on t.oid = c.conrelid
+      where c.contype = 'p'
+        and t.relname = 'card_image_embeddings';
+
+      if current_pk_def is not null
+         and current_pk_def = 'PRIMARY KEY (canonical_slug, variant_index)' then
+        alter table card_image_embeddings drop constraint card_image_embeddings_pkey;
+        alter table card_image_embeddings
+          add constraint card_image_embeddings_pkey
+          primary key (canonical_slug, variant_index, crop_type);
+      end if;
+    end $$;
+  `);
+
+  // crop_type prefilter index. The identify route now runs two kNN
+  // queries per scan (one per crop_type), so the planner needs this
+  // to avoid scanning rows of the wrong crop type.
+  await sql.query(`
+    create index if not exists card_image_embeddings_crop_type_idx
+      on card_image_embeddings (crop_type);
   `);
 
   // Prefilter btree indexes. kNN queries from the identify route will
@@ -265,6 +310,12 @@ export async function refreshCardImageEmbeddingBatch(
     const sourceHash = buildImageEmbeddingHash(card, embedder.modelVersion);
 
     try {
+      // refreshCardImageEmbeddingBatch is the primary-mirror, full-card
+      // path — variant_index defaults to 0, crop_type defaults to
+      // 'full'. The on-conflict clause matches the new composite PK
+      // (canonical_slug, variant_index, crop_type) so re-runs of the
+      // primary cron continue to overwrite their own row without
+      // touching art-crop or augmented variants of the same slug.
       await sql.query(
         `
           insert into card_image_embeddings (
@@ -279,12 +330,13 @@ export async function refreshCardImageEmbeddingBatch(
             model_version,
             embedding,
             is_digital_only,
+            crop_type,
             updated_at
           )
           values (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::vector, $11, now()
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::vector, $11, 'full', now()
           )
-          on conflict (canonical_slug, variant_index) do update set
+          on conflict (canonical_slug, variant_index, crop_type) do update set
             canonical_name = excluded.canonical_name,
             language = excluded.language,
             set_name = excluded.set_name,

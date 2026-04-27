@@ -59,6 +59,7 @@ export const CRON_ROUTES = [
   "cron/refresh-card-embeddings",
   "cron/refresh-card-image-embeddings",
   "cron/augment-card-image-embeddings",
+  "cron/embed-card-art-crops",
   "cron/keepwarm-image-embedder",
   "cron/capture-pricing-transparency",
   "cron/capture-matching-quality",
