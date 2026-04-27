@@ -7,6 +7,7 @@
 // reaching the route handler. If you see that, a whitespace/comment
 // bump in this file forces a full middleware rebuild.
 // (bump 2: cron/backfill-card-image-digital-flag — 2026-04-24)
+// (bump 3: _diag/auth temp diagnostic — 2026-04-27)
 
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse, type NextRequest } from "next/server";
