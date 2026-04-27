@@ -42,6 +42,7 @@ import {
   ImageEmbedderConfigError,
   ImageEmbedderRuntimeError,
 } from "@/lib/ai/image-embedder";
+import { getPostHogClient } from "@/lib/posthog-server";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -85,6 +86,22 @@ type MatchRow = {
   cos_dist: number;
 };
 
+// Closed enum so adding a new failure mode requires updating this
+// type, which forces a corresponding PostHog dashboard / alert update.
+type FailureReason =
+  | "config_missing"
+  | "replicate_unavailable"
+  | "bad_content_type"
+  | "body_empty"
+  | "body_too_large"
+  | "body_read_failed"
+  | "embedder_config"
+  | "storage_upload_failed"
+  | "embedder_returned_null"
+  | "embedder_runtime_error"
+  | "embedding_dimension_mismatch"
+  | "pgvector_query_failed";
+
 function parseLanguage(raw: string | null): "EN" | "JP" {
   const normalized = raw?.trim().toUpperCase();
   return normalized === "JP" ? "JP" : "EN";
@@ -117,7 +134,24 @@ export async function POST(req: Request) {
   const actorKey = req.headers.get("x-pa-actor-key");
   const clientPlatform = req.headers.get("x-pa-client-platform");
 
+  // Parsed up-front so all failure paths — including pre-body
+  // validation — can include language_filter in their PostHog event.
+  // parseLanguage defaults to "EN", so this is safe even if the iOS
+  // client forgets the query param.
+  const { searchParams } = new URL(req.url);
+  const language = parseLanguage(searchParams.get("language"));
+  const limit = parseLimit(searchParams.get("limit"));
+
   if (!hasVercelPostgresConfig()) {
+    emitScanFailureEvent({
+      actorKey,
+      clientPlatform,
+      language,
+      failureReason: "config_missing",
+      httpStatus: 503,
+      durationMs: Date.now() - startedAt,
+      imageBytesSize: null,
+    });
     return NextResponse.json(
       { ok: false, error: "Image embeddings database is not configured." },
       { status: 503 },
@@ -125,6 +159,15 @@ export async function POST(req: Request) {
   }
 
   if (!hasReplicateConfig()) {
+    emitScanFailureEvent({
+      actorKey,
+      clientPlatform,
+      language,
+      failureReason: "replicate_unavailable",
+      httpStatus: 503,
+      durationMs: Date.now() - startedAt,
+      imageBytesSize: null,
+    });
     return NextResponse.json(
       { ok: false, error: "Embedder is not configured." },
       { status: 503 },
@@ -133,6 +176,15 @@ export async function POST(req: Request) {
 
   const contentType = req.headers.get("content-type")?.toLowerCase() ?? "";
   if (!contentType.startsWith("image/") && contentType !== "application/octet-stream") {
+    emitScanFailureEvent({
+      actorKey,
+      clientPlatform,
+      language,
+      failureReason: "bad_content_type",
+      httpStatus: 415,
+      durationMs: Date.now() - startedAt,
+      imageBytesSize: null,
+    });
     return NextResponse.json(
       { ok: false, error: "Request must carry an image/* or application/octet-stream body." },
       { status: 415 },
@@ -145,12 +197,30 @@ export async function POST(req: Request) {
   try {
     const arrayBuffer = await req.arrayBuffer();
     if (arrayBuffer.byteLength === 0) {
+      emitScanFailureEvent({
+        actorKey,
+        clientPlatform,
+        language,
+        failureReason: "body_empty",
+        httpStatus: 400,
+        durationMs: Date.now() - startedAt,
+        imageBytesSize: 0,
+      });
       return NextResponse.json(
         { ok: false, error: "Empty request body." },
         { status: 400 },
       );
     }
     if (arrayBuffer.byteLength > MAX_IMAGE_BYTES) {
+      emitScanFailureEvent({
+        actorKey,
+        clientPlatform,
+        language,
+        failureReason: "body_too_large",
+        httpStatus: 413,
+        durationMs: Date.now() - startedAt,
+        imageBytesSize: arrayBuffer.byteLength,
+      });
       return NextResponse.json(
         { ok: false, error: `Image exceeds ${MAX_IMAGE_BYTES} byte limit.` },
         { status: 413 },
@@ -158,6 +228,15 @@ export async function POST(req: Request) {
     }
     bytes = Buffer.from(arrayBuffer);
   } catch {
+    emitScanFailureEvent({
+      actorKey,
+      clientPlatform,
+      language,
+      failureReason: "body_read_failed",
+      httpStatus: 400,
+      durationMs: Date.now() - startedAt,
+      imageBytesSize: null,
+    });
     return NextResponse.json(
       { ok: false, error: "Failed to read request body." },
       { status: 400 },
@@ -166,10 +245,6 @@ export async function POST(req: Request) {
 
   const imageHash = crypto.createHash("sha256").update(bytes).digest("hex");
   const imageBytesSize = bytes.length;
-
-  const { searchParams } = new URL(req.url);
-  const language = parseLanguage(searchParams.get("language"));
-  const limit = parseLimit(searchParams.get("limit"));
 
   let embedder;
   try {
@@ -186,6 +261,8 @@ export async function POST(req: Request) {
         error: err.message,
         actorKey,
         clientPlatform,
+        httpStatus: 503,
+        failureReason: "embedder_config",
       });
       return NextResponse.json({ ok: false, error: err.message }, { status: 503 });
     }
@@ -223,6 +300,8 @@ export async function POST(req: Request) {
       error: `Storage upload failed: ${uploadError.message}`.slice(0, 500),
       actorKey,
       clientPlatform,
+      httpStatus: 502,
+      failureReason: "storage_upload_failed",
     });
     return NextResponse.json(
       { ok: false, error: `Storage upload failed: ${uploadError.message}` },
@@ -250,6 +329,8 @@ export async function POST(req: Request) {
         error: `Embedder failure: ${message}`.slice(0, 500),
         actorKey,
         clientPlatform,
+        httpStatus: 502,
+        failureReason: "embedder_returned_null",
       });
       return NextResponse.json(
         { ok: false, error: `Embedder failure: ${message}` },
@@ -269,6 +350,8 @@ export async function POST(req: Request) {
         error: `Embedder failure: ${err.message}`.slice(0, 500),
         actorKey,
         clientPlatform,
+        httpStatus: 502,
+        failureReason: "embedder_runtime_error",
       });
       return NextResponse.json(
         { ok: false, error: `Embedder failure: ${err.message}` },
@@ -290,6 +373,8 @@ export async function POST(req: Request) {
       error: message,
       actorKey,
       clientPlatform,
+      httpStatus: 502,
+      failureReason: "embedding_dimension_mismatch",
     });
     return NextResponse.json({ ok: false, error: message }, { status: 502 });
   }
@@ -363,6 +448,8 @@ export async function POST(req: Request) {
       error: message.slice(0, 500),
       actorKey,
       clientPlatform,
+      httpStatus: 500,
+      failureReason: "pgvector_query_failed",
     });
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
@@ -383,6 +470,7 @@ export async function POST(req: Request) {
     imageBytesSize,
     language,
     confidence,
+    matchCount: matches.length,
     topMatchSlug: matches[0]?.canonical_slug ?? null,
     topSimilarity,
     topGapToRank2: topGap,
@@ -392,6 +480,8 @@ export async function POST(req: Request) {
     durationMs: Date.now() - startedAt,
     actorKey,
     clientPlatform,
+    httpStatus: 200,
+    failureReason: null,
   });
 
   return NextResponse.json({
@@ -423,12 +513,21 @@ export async function POST(req: Request) {
 // Best-effort append-only logger. Never throws out of this function —
 // a telemetry failure must not fail the scan. Logs to console so ops
 // can correlate; the scan identify response is unaffected.
+//
+// Telemetry fans out two ways:
+//   1. scan_identify_events table (DB) — the fine-tuning corpus and
+//      operator backfill source. Constrained schema (imageHash NOT
+//      NULL etc.) so only post-body paths can write here.
+//   2. PostHog — product analytics surface. Every path emits exactly
+//      one event (card_scan_succeeded | card_scan_failed). Pre-body
+//      validation failures emit via emitScanFailureEvent (PH only).
 
 type ScanEventInput = {
   imageHash: string;
   imageBytesSize: number;
   language: "EN" | "JP";
   confidence: "high" | "medium" | "low" | "error";
+  matchCount?: number;
   topMatchSlug?: string | null;
   topSimilarity?: number | null;
   topGapToRank2?: number | null;
@@ -439,6 +538,8 @@ type ScanEventInput = {
   error?: string | null;
   actorKey?: string | null;
   clientPlatform?: string | null;
+  httpStatus: number;
+  failureReason: FailureReason | null;
 };
 
 async function logScanEvent(event: ScanEventInput): Promise<void> {
@@ -468,6 +569,124 @@ async function logScanEvent(event: ScanEventInput): Promise<void> {
   } catch (err) {
     console.warn(
       `[scan/identify] telemetry unexpected error: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+
+  emitScanPostHog({
+    actorKey: event.actorKey ?? null,
+    clientPlatform: event.clientPlatform ?? null,
+    language: event.language,
+    failureReason: event.failureReason,
+    httpStatus: event.httpStatus,
+    durationMs: event.durationMs,
+    imageBytesSize: event.imageBytesSize,
+    confidence: event.failureReason ? null : event.confidence,
+    matchCount: event.matchCount ?? null,
+    topMatchSlug: event.topMatchSlug ?? null,
+    topSimilarity: event.topSimilarity ?? null,
+    modelVersion: event.modelVersion,
+  });
+}
+
+// PostHog-only emit for pre-body validation failures (paths where
+// imageHash / modelVersion don't exist yet, so the scan_identify_events
+// row would violate NOT NULL constraints).
+function emitScanFailureEvent(args: {
+  actorKey: string | null;
+  clientPlatform: string | null;
+  language: "EN" | "JP";
+  failureReason: FailureReason;
+  httpStatus: number;
+  durationMs: number;
+  imageBytesSize: number | null;
+}): void {
+  emitScanPostHog({
+    actorKey: args.actorKey,
+    clientPlatform: args.clientPlatform,
+    language: args.language,
+    failureReason: args.failureReason,
+    httpStatus: args.httpStatus,
+    durationMs: args.durationMs,
+    imageBytesSize: args.imageBytesSize,
+    confidence: null,
+    matchCount: null,
+    topMatchSlug: null,
+    topSimilarity: null,
+    modelVersion: null,
+  });
+}
+
+// Single chokepoint for PostHog scan events. Adding a new property
+// here makes it land on every event type. Wrapped so a PostHog
+// outage never affects scan results — but logs the failure rather
+// than swallowing it (per docs/external-api-failure-modes.md).
+function emitScanPostHog(input: {
+  actorKey: string | null;
+  clientPlatform: string | null;
+  language: "EN" | "JP";
+  failureReason: FailureReason | null;
+  httpStatus: number;
+  durationMs: number;
+  imageBytesSize: number | null;
+  confidence: "high" | "medium" | "low" | "error" | null;
+  matchCount: number | null;
+  topMatchSlug: string | null;
+  topSimilarity: number | null;
+  modelVersion: string | null;
+}): void {
+  // No actor key = probe / curl traffic without iOS ActorStore.
+  // Drop rather than create anonymous distinctIds that would pollute
+  // the PostHog person table.
+  if (!input.actorKey) return;
+
+  const actorType = input.actorKey.startsWith("user:")
+    ? "user"
+    : input.actorKey.startsWith("guest:")
+      ? "guest"
+      : "unknown";
+
+  const baseProps: Record<string, unknown> = {
+    language_filter: input.language,
+    image_size_bytes: input.imageBytesSize,
+    duration_ms: input.durationMs,
+    http_status: input.httpStatus,
+    client_platform: input.clientPlatform,
+    actor_type: actorType,
+  };
+
+  let eventName: "card_scan_succeeded" | "card_scan_failed";
+  let properties: Record<string, unknown>;
+
+  if (input.failureReason) {
+    eventName = "card_scan_failed";
+    properties = {
+      ...baseProps,
+      failure_reason: input.failureReason,
+    };
+  } else {
+    eventName = "card_scan_succeeded";
+    properties = {
+      ...baseProps,
+      confidence: input.confidence,
+      match_count: input.matchCount,
+      top_match_slug: input.topMatchSlug,
+      top_match_cos_dist:
+        input.topSimilarity !== null ? 1 - input.topSimilarity : null,
+      model_version: input.modelVersion,
+    };
+  }
+
+  try {
+    getPostHogClient().capture({
+      distinctId: input.actorKey,
+      event: eventName,
+      properties,
+    });
+  } catch (err) {
+    console.warn(
+      `[scan/identify] posthog capture failed: ${
         err instanceof Error ? err.message : String(err)
       }`,
     );
