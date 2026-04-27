@@ -97,6 +97,68 @@ function artCropStorageKey(slug: string): string {
   return `${ART_CROP_PREFIX}/${safeSlug}.jpg`;
 }
 
+/**
+ * Fetch the "user attention" slug set for a focused recovery run.
+ *
+ * Same intersection we use for the card-profile selective recovery:
+ * cards that have BEEN VIEWED in the last 14 days AND are PRICED at
+ * $5+. The two filters together describe "cards a user has actually
+ * looked at recently AND that are valuable enough that an AI summary
+ * (or a high-quality multi-crop ensemble) is worth the cost."
+ *
+ * This is NOT the union — the union pulls in cheap cards that get
+ * casual-discovery views, which dilutes the budget without helping.
+ * The intersection lands at ~1,168 slugs against the current
+ * catalog (2026-04-27).
+ *
+ * Returns an alphabetically-sorted array so the existing cursor-
+ * advancement pattern works unchanged. The cron's cursor becomes an
+ * index into this sorted set instead of into the full catalog.
+ */
+async function fetchAttentionSlugs(
+  supabase: ReturnType<typeof dbAdmin>,
+): Promise<string[]> {
+  const since = new Date();
+  since.setUTCDate(since.getUTCDate() - 14);
+  const sinceDate = since.toISOString().slice(0, 10);
+
+  const [viewedRes, pricedRes] = await Promise.all([
+    supabase
+      .from("public_card_page_view_daily")
+      .select("canonical_slug")
+      .gte("view_date", sinceDate),
+    supabase
+      .from("card_metrics")
+      .select("canonical_slug")
+      .is("printing_id", null)
+      .eq("grade", "RAW")
+      .gte("market_price", 5),
+  ]);
+
+  if (viewedRes.error) {
+    throw new Error(`fetchAttentionSlugs viewed: ${viewedRes.error.message}`);
+  }
+  if (pricedRes.error) {
+    throw new Error(`fetchAttentionSlugs priced: ${pricedRes.error.message}`);
+  }
+
+  const viewedSet = new Set<string>(
+    (viewedRes.data ?? []).map((r) => (r as { canonical_slug: string }).canonical_slug),
+  );
+  const pricedSet = new Set<string>(
+    (pricedRes.data ?? []).map((r) => (r as { canonical_slug: string }).canonical_slug),
+  );
+  // Intersection. JS doesn't have a built-in for this on Set yet
+  // (Set.prototype.intersection is Stage 4 but not everywhere) so
+  // do it explicitly.
+  const intersection: string[] = [];
+  for (const slug of viewedSet) {
+    if (pricedSet.has(slug)) intersection.push(slug);
+  }
+  intersection.sort();
+  return intersection;
+}
+
 async function fetchExistingArtCropHashes(slugs: string[]): Promise<Map<string, string>> {
   const out = new Map<string, string>();
   if (slugs.length === 0) return out;
@@ -149,6 +211,14 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const maxCards = parseMaxCards(searchParams.get("maxCards"));
   const cursor = searchParams.get("cursor") ?? "";
+  // priority=attention_only: only embed art crops for the user-
+  // attention subset (viewed in 14d AND priced ≥ $5). Bounds the
+  // recovery spend at ~$1.75 instead of ~$5-10 for the full catalog,
+  // and aligns the multi-crop coverage with the slugs the LLM-
+  // summary recovery already prioritized. See
+  // fetchAttentionSlugs above for the exact filter.
+  const priority = searchParams.get("priority");
+  const attentionOnly = priority === "attention_only";
 
   await ensureCardImageEmbeddingsSchema();
 
@@ -162,6 +232,37 @@ export async function GET(req: Request) {
   let truncatedAtDeadline = false;
   let firstFailure: string | null = null;
 
+  // Attention mode: precompute the candidate slug set up front.
+  // The cursor (if any) advances through this sorted list rather
+  // than the full canonical_cards table, so each invocation walks
+  // only "slugs we care about" instead of skipping past tens of
+  // thousands of long-tail cards to find the next one to process.
+  let attentionSlugs: string[] | null = null;
+  let attentionStartIndex = 0;
+  if (attentionOnly) {
+    try {
+      attentionSlugs = await fetchAttentionSlugs(supabase);
+    } catch (err) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        },
+        { status: 500 },
+      );
+    }
+    if (lastSlug) {
+      // Resume past the cursor — find the first attention slug
+      // strictly greater than lastSlug.
+      while (
+        attentionStartIndex < attentionSlugs.length &&
+        attentionSlugs[attentionStartIndex] <= lastSlug
+      ) {
+        attentionStartIndex += 1;
+      }
+    }
+  }
+
   while (processed < maxCards) {
     if (Date.now() >= deadline) {
       truncatedAtDeadline = true;
@@ -170,26 +271,67 @@ export async function GET(req: Request) {
     const remaining = maxCards - processed;
     const pageSize = Math.min(FETCH_BATCH_SIZE, remaining);
 
-    let query = supabase
-      .from("canonical_cards")
-      .select(
-        "slug, canonical_name, language, set_name, card_number, variant, mirrored_primary_image_url, primary_image_url",
-      )
-      .not("mirrored_primary_image_url", "is", null)
-      .order("slug", { ascending: true })
-      .limit(pageSize);
-
-    if (lastSlug) query = query.gt("slug", lastSlug);
-
-    const { data, error } = await query;
-    if (error) {
-      return NextResponse.json(
-        { ok: false, error: `canonical_cards select: ${error.message}` },
-        { status: 500 },
+    let rows: CanonicalRow[];
+    if (attentionSlugs) {
+      // Attention mode: page through the precomputed slug list.
+      // Exhausted? Done.
+      if (attentionStartIndex >= attentionSlugs.length) break;
+      const pageSlugs = attentionSlugs.slice(
+        attentionStartIndex,
+        attentionStartIndex + pageSize,
       );
+      attentionStartIndex += pageSlugs.length;
+
+      const { data, error } = await supabase
+        .from("canonical_cards")
+        .select(
+          "slug, canonical_name, language, set_name, card_number, variant, mirrored_primary_image_url, primary_image_url",
+        )
+        .in("slug", pageSlugs)
+        .not("mirrored_primary_image_url", "is", null)
+        .order("slug", { ascending: true });
+      if (error) {
+        return NextResponse.json(
+          { ok: false, error: `canonical_cards select: ${error.message}` },
+          { status: 500 },
+        );
+      }
+      rows = (data ?? []) as CanonicalRow[];
+      // It's possible some pageSlugs have null mirrored URLs and
+      // get filtered out — that's fine, just skip them. Empty page
+      // shouldn't end the drain because more attention slugs may
+      // still be ahead.
+      if (rows.length === 0) {
+        // Advance cursor to the last slug we ASKED for so we don't
+        // re-page these on retry.
+        if (pageSlugs.length > 0) {
+          lastSlug = pageSlugs[pageSlugs.length - 1];
+        }
+        continue;
+      }
+    } else {
+      // Default mode: alphabetical pagination over canonical_cards.
+      let query = supabase
+        .from("canonical_cards")
+        .select(
+          "slug, canonical_name, language, set_name, card_number, variant, mirrored_primary_image_url, primary_image_url",
+        )
+        .not("mirrored_primary_image_url", "is", null)
+        .order("slug", { ascending: true })
+        .limit(pageSize);
+
+      if (lastSlug) query = query.gt("slug", lastSlug);
+
+      const { data, error } = await query;
+      if (error) {
+        return NextResponse.json(
+          { ok: false, error: `canonical_cards select: ${error.message}` },
+          { status: 500 },
+        );
+      }
+      rows = (data ?? []) as CanonicalRow[];
+      if (rows.length === 0) break;
     }
-    const rows = (data ?? []) as CanonicalRow[];
-    if (rows.length === 0) break;
 
     const slugs = rows.map((r) => r.slug);
     const existingHashes = await fetchExistingArtCropHashes(slugs);
@@ -339,7 +481,11 @@ export async function GET(req: Request) {
     }
 
     if (truncatedAtDeadline) break;
-    if (rows.length < pageSize) break;
+    // "Catalog exhausted" signal:
+    //   - attention mode: handled at top of loop via attentionStartIndex
+    //   - default mode: a short page from canonical_cards means we
+    //     reached the end of the alphabetical walk
+    if (!attentionSlugs && rows.length < pageSize) break;
   }
 
   return NextResponse.json({
@@ -358,5 +504,10 @@ export async function GET(req: Request) {
     recipe_version: ART_CROP_RECIPE_VERSION,
     model_version: embedder.modelVersion,
     crop_type: "art",
+    // Echoed back so the operator's drain loop can confirm it ran
+    // in the mode it intended.
+    priority: priority ?? null,
+    attention_total: attentionSlugs?.length ?? null,
+    attention_position: attentionSlugs ? attentionStartIndex : null,
   });
 }
