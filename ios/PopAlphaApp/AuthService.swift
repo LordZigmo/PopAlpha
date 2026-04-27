@@ -169,12 +169,59 @@ final class AuthService {
     /// If Clerk has a cached session, restore auth state without
     /// re-presenting the OAuth flow.
     func restoreSession() async {
-        guard let token = try? await Clerk.shared.auth.getToken() else { return }
-        let userId = await Clerk.shared.user?.id ?? ""
-        guard !userId.isEmpty else { return }
-        let firstName = await Clerk.shared.user?.firstName
-        let email = await Clerk.shared.user?.primaryEmailAddress?.emailAddress
-        let imageUrl = await Clerk.shared.user?.imageUrl
+        // Clerk.configure() returns synchronously but the SDK loads
+        // client + environment in the background. getToken() is
+        // unreliable until isLoaded == true.
+        await waitForClerkLoaded()
+
+        let user = await Clerk.shared.user
+        let session = await Clerk.shared.session
+        let clientSessions = await Clerk.shared.client?.sessions ?? []
+        print("[AuthService] restore: user=\(user?.id ?? "nil") session=\(session?.id ?? "nil") clientSessions=\(clientSessions.count)")
+
+        // Healthy path: user + active session + token mint succeeds.
+        if let user,
+           !user.id.isEmpty,
+           let session,
+           let token = try? await session.getToken(),
+           !token.isEmpty {
+            await applyHealthyRestore(user: user, token: token)
+            return
+        }
+
+        // Unhealthy path. Either user is nil but the client still has an
+        // orphan credential (Clerk responds "session_exists" to signIn),
+        // user is non-nil but session is dead, or token mint fails.
+        // Either way, every signIn attempt will 400 and every API call
+        // will 401 until we explicitly tear down what's on the client.
+        if user != nil || !clientSessions.isEmpty {
+            print("[AuthService] restore: limbo — clearing client (sessions=\(clientSessions.count))")
+            do {
+                try await Clerk.shared.auth.signOut()
+                print("[AuthService] signOut(all) ok")
+            } catch {
+                print("[AuthService] signOut(all) failed: \(error)")
+            }
+            for s in clientSessions {
+                do {
+                    try await Clerk.shared.auth.signOut(sessionId: s.id)
+                    print("[AuthService] signOut(sessionId: \(s.id)) ok")
+                } catch {
+                    print("[AuthService] signOut(sessionId: \(s.id)) failed: \(error)")
+                }
+            }
+        }
+        return
+    }
+
+    /// Apply a successful cold-launch restore to local state and kick
+    /// off the side-effects (handle fetch, push registration, analytics).
+    /// Pulled out of `restoreSession` so the healthy path stays linear.
+    private func applyHealthyRestore(user: User, token: String) async {
+        let userId = user.id
+        let firstName = user.firstName
+        let email = user.primaryEmailAddress?.emailAddress
+        let imageUrl = user.imageUrl
 
         await MainActor.run {
             setSession(token: token, userId: userId, handle: nil)
@@ -217,6 +264,11 @@ final class AuthService {
     private func startTokenRefresh() {
         stopTokenRefresh()
         tokenRefreshTask = Task { [weak self] in
+            // Refresh immediately so the first authed request after
+            // cold launch / sign-in goes out with a fresh JWT, then
+            // settle into the 50s steady-state cadence. Without this,
+            // the first portfolio fetch races a stale cached token.
+            await self?.refreshTokenIfNeeded()
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(50))
                 guard !Task.isCancelled else { break }
@@ -245,6 +297,62 @@ final class AuthService {
     func requireAuth() throws {
         guard isAuthenticated else {
             throw APIError.unauthorized
+        }
+    }
+
+    // MARK: - Clerk Readiness
+
+    /// Spin until Clerk's background load (environment + client) finishes
+    /// or we hit the timeout. Past the timeout, callers fall back to the
+    /// signed-out path — better than wedging the app on a Clerk outage.
+    private func waitForClerkLoaded(timeout: Duration = .seconds(8)) async {
+        let deadline = ContinuousClock.now.advanced(by: timeout)
+        while ContinuousClock.now < deadline {
+            if await Clerk.shared.isLoaded { return }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+    }
+
+    // MARK: - Server-Driven Auth Reconciliation
+
+    /// Called from APIClient when the server returns 401 despite us
+    /// believing we're authenticated. Most 401s are just expired tokens
+    /// — try a fresh getToken() first. If Clerk has nothing usable, we
+    /// have to also tear down Clerk's client-side session(s); otherwise
+    /// the next signIn attempt 400s with `session_exists` because Clerk
+    /// thinks the user is still signed in even though our server doesn't.
+    @MainActor
+    func handleServerAuthRejection() async {
+        if let token = try? await Clerk.shared.auth.getToken(),
+           !token.isEmpty,
+           token != authToken {
+            print("[AuthService] 401 → minted fresh token, retrying")
+            authToken = token
+            APIClient.setAuthToken(token)
+            return
+        }
+        print("[AuthService] 401 → no usable token from Clerk, tearing down")
+        isAuthenticated = false
+        authToken = nil
+        APIClient.setAuthToken(nil)
+
+        // Same cleanup as the cold-launch limbo path. Without this, the
+        // user is stuck: local state says signed-out, Clerk says they're
+        // still signed in, signIn rejects with session_exists.
+        let sessions = Clerk.shared.client?.sessions ?? []
+        do {
+            try await Clerk.shared.auth.signOut()
+            print("[AuthService] 401 cleanup: signOut(all) ok")
+        } catch {
+            print("[AuthService] 401 cleanup: signOut(all) failed: \(error)")
+        }
+        for s in sessions {
+            do {
+                try await Clerk.shared.auth.signOut(sessionId: s.id)
+                print("[AuthService] 401 cleanup: signOut(\(s.id)) ok")
+            } catch {
+                print("[AuthService] 401 cleanup: signOut(\(s.id)) failed: \(error)")
+            }
         }
     }
 

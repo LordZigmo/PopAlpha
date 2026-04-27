@@ -102,6 +102,13 @@ enum APIClient {
             throw APIError.httpError(statusCode: 0, body: "No HTTP response")
         }
         if http.statusCode == 401 {
+            // Server rejected our token. Either it expired between mint
+            // and arrival, or Clerk handed us a stale cached one. Tell
+            // AuthService to refresh / clear local state so the UI
+            // doesn't stay wedged in a phantom signed-in state.
+            let bodyText = String(data: data, encoding: .utf8) ?? ""
+            print("[APIClient] 401 \(request.url?.path ?? "?"): \(bodyText.prefix(300))")
+            Task { await AuthService.shared.handleServerAuthRejection() }
             throw APIError.unauthorized
         }
         guard (200...299).contains(http.statusCode) else {
@@ -158,6 +165,14 @@ enum APIClient {
         }
 
         if http.statusCode == 401 {
+            // See note in `post(path:body:)` — keep local auth state
+            // honest when the server says our token is no good. Log the
+            // body so we can tell *why* the server rejected the token
+            // (expired, bad signature, missing claim, etc.) — without
+            // this, every 401 looks identical.
+            let bodyText = String(data: data, encoding: .utf8) ?? ""
+            print("[APIClient] 401 \(request.url?.path ?? "?"): \(bodyText.prefix(300))")
+            Task { await AuthService.shared.handleServerAuthRejection() }
             throw APIError.unauthorized
         }
 
