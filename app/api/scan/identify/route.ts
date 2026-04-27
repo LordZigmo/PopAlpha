@@ -588,21 +588,64 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 
-  // 5. Merge max-by-slug across the two branches.
+  // 5. Merge across the two branches with a re-rank-only constraint.
+  //
   //    Per canonical_slug, keep whichever branch returned the closer
-  //    cos_dist (i.e. higher similarity). Tag each merged row with
-  //    which branch won, so telemetry can later answer "was the art
-  //    crop pulling its weight?"
+  //    cos_dist (higher similarity). BUT: art can only update slugs
+  //    that already appear in full's top-K — art-only candidates are
+  //    dropped.
+  //
+  //    Why: with selective art-crop reference coverage (~1,164 of
+  //    ~19,000 slugs in the index right now), the art kNN for a
+  //    query whose true answer ISN'T in the covered subset will
+  //    return the best-fitting WRONG attention card with high
+  //    similarity. In a vanilla max-by-slug merge, that wrong card
+  //    can outrank the correct full-card match. We measured this
+  //    empirically on 2026-04-27: vanilla multi-crop regressed the
+  //    eval from 4/12 to 2/12 top-1, and made several wrong matches
+  //    MORE confident than the prior single-crop run.
+  //
+  //    Re-rank-only constraint: art can boost slugs full found,
+  //    cannot introduce new ones. For attention-set cards (the
+  //    coverage we have), full's kNN finds the right slug in top-K
+  //    most of the time and art picks among those — useful when
+  //    art's signal disambiguates within full's candidate set
+  //    (e.g. variant ambiguity). For non-attention cards, art's
+  //    noise is filtered out and the route degrades to full-only.
+  //
+  //    Future: if we drain the full ~19,000-slug catalog with art
+  //    crops, flip MULTI_CROP_ART_REQUIRES_FULL_MATCH to false and
+  //    the merge becomes additive (art can recover slugs full
+  //    missed entirely). Until then, re-rank-only is the safer
+  //    default.
+  const MULTI_CROP_ART_REQUIRES_FULL_MATCH = true;
+
   type MatchWithCrop = MatchRow & { winning_crop: "full" | "art" };
   const slugToBest = new Map<string, MatchWithCrop>();
   for (const row of fullMatches) {
     slugToBest.set(row.canonical_slug, { ...row, winning_crop: "full" });
   }
+  let artOnlyDropped = 0;
   for (const row of artMatches) {
     const existing = slugToBest.get(row.canonical_slug);
-    if (!existing || row.cos_dist < existing.cos_dist) {
+    if (!existing) {
+      if (MULTI_CROP_ART_REQUIRES_FULL_MATCH) {
+        artOnlyDropped += 1;
+        continue;
+      }
+      slugToBest.set(row.canonical_slug, { ...row, winning_crop: "art" });
+      continue;
+    }
+    if (row.cos_dist < existing.cos_dist) {
       slugToBest.set(row.canonical_slug, { ...row, winning_crop: "art" });
     }
+  }
+  // Logged at debug level rather than persisted — useful when staring
+  // at Vercel logs after a regression, but not worth a column.
+  if (artOnlyDropped > 0) {
+    console.log(
+      `[identify] art-only candidates dropped (re-rank-only mode): ${artOnlyDropped} hash=${imageHash}`,
+    );
   }
   const matches: MatchWithCrop[] = [...slugToBest.values()]
     .sort((a, b) => a.cos_dist - b.cos_dist)
