@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth, clerkClient } from "@clerk/nextjs/server";
+import { resolveAuthContext } from "@/lib/auth/context";
+import { requireUser } from "@/lib/auth/require";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -57,6 +59,32 @@ export async function GET(req: Request) {
     }
   } catch (err) {
     result.authenticate_request_error = err instanceof Error ? err.message : String(err);
+  }
+
+  // Run the SAME helper /api/me uses, so we can see whether the
+  // mismatch is in resolveAuthContext / requireUser even when raw
+  // auth() succeeded above.
+  try {
+    const ctx = await resolveAuthContext(req);
+    result.resolve_auth_kind = ctx.kind;
+    if (ctx.kind === "user") {
+      result.resolve_auth_user_id = ctx.userId;
+    } else if (ctx.kind === "admin" || ctx.kind === "cron") {
+      result.resolve_auth_reason = ctx.reason;
+    }
+  } catch (err) {
+    result.resolve_auth_error = err instanceof Error ? err.message : String(err);
+  }
+  try {
+    const ru = await requireUser(req);
+    result.require_user_ok = ru.ok;
+    if (!ru.ok) {
+      result.require_user_status = ru.response.status;
+    } else {
+      result.require_user_id = ru.userId;
+    }
+  } catch (err) {
+    result.require_user_error = err instanceof Error ? err.message : String(err);
   }
 
   // Decode the JWT payload (no signature check) so we can inspect its
