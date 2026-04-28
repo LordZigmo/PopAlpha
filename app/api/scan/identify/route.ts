@@ -56,7 +56,8 @@ const DEFAULT_LIMIT = 5;
 const MAX_LIMIT = 10;
 
 /**
- * Confidence tiers calibrated from real-device scan telemetry.
+ * Confidence tiers calibrated from baseline-eval data (run id
+ * 8adb3eaa-a805-4d0b-81d7-cd9185ce1fcb, 157 user-photos, 2026-04-28).
  *
  * The first round of thresholds (≤0.02 high, ≤0.08 medium) was tuned
  * from a kNN self-test where the query was a reference embedding —
@@ -66,18 +67,34 @@ const MAX_LIMIT = 10;
  * angle / JPEG-compression / sensor differences between the Scrydex
  * product shot and the user's phone capture.
  *
- *   cos_dist ≤ 0.30 AND gap ≥ 0.005  → high (zero-tap navigate)
- *   cos_dist ≤ 0.45                   → medium (variant ambiguity)
- *   cos_dist >  0.45                   → low (keep scanning)
+ * The 2nd round (≤0.30 high / ≤0.45 medium / 0.005 gap) was over-
+ * generous: 23% of "high" calls were wrong (26/113), and the medium
+ * tier had 5% precision — essentially noise being shown as a guess.
  *
- * The `min gap` requirement on HIGH defends against variant confusion
- * (Charizard ex vs Charizard V with near-identical art) — those cases
- * land with small cos_dist but a tiny rank-1-to-rank-2 margin and
- * should NOT silently auto-navigate to one over the other.
+ * Per baseline-eval distribution, GAP is the dominant signal:
+ *
+ *   cos_dist ≤ 0.25 AND gap ≥ 0.04  → 59/59 = 100% precision  → high
+ *   cos_dist ≤ 0.30                  → 22/52 = 42% precision  → medium
+ *                                                              (still useful — top-5 lets user pick)
+ *   cos_dist >  0.30                 → 8/43  = 19% precision  → low
+ *                                                              (suppress; keep scanning)
+ *
+ * HIGH = "auto-navigate, zero-tap." Tightening cos_dist to 0.25 plus
+ * raising the gap floor to 0.04 collapses the high-conf-wrong rate
+ * from 23% to ~0% on the baseline eval. We trade fewer auto-navs for
+ * a precision bar that won't burn user trust.
+ *
+ * MEDIUM = "show top-5, user picks." The 0.30 cap keeps medium honest:
+ * everything below is still close enough to the right card that the
+ * top-5 list contains the answer often enough to be worth showing.
+ *
+ * LOW = "don't show; keep scanning." Below 0.30, surfacing the guess
+ * was actively misleading (19% precision) — better to ask for another
+ * frame.
  */
-const CONFIDENCE_HIGH_COS_DIST = 0.30;
-const CONFIDENCE_MEDIUM_COS_DIST = 0.45;
-const CONFIDENCE_HIGH_MIN_GAP = 0.005;
+const CONFIDENCE_HIGH_COS_DIST = 0.25;
+const CONFIDENCE_MEDIUM_COS_DIST = 0.30;
+const CONFIDENCE_HIGH_MIN_GAP = 0.04;
 
 /**
  * Per-crop-type kNN. Run once per crop_type (full and art) at query
@@ -647,9 +664,58 @@ export async function POST(req: Request) {
       `[identify] art-only candidates dropped (re-rank-only mode): ${artOnlyDropped} hash=${imageHash}`,
     );
   }
-  const matches: MatchWithCrop[] = [...slugToBest.values()]
-    .sort((a, b) => a.cos_dist - b.cos_dist)
-    .slice(0, limit);
+  const allMergedMatches: MatchWithCrop[] = [...slugToBest.values()]
+    .sort((a, b) => a.cos_dist - b.cos_dist);
+
+  // ── Orphan filter ─────────────────────────────────────────────────
+  //
+  // The card_image_embeddings index (Neon) and canonical_cards (Supabase)
+  // can drift: an embedding row may persist after its canonical_cards
+  // parent is deleted (slug rename, dedup, retracted printing). When
+  // that happens the kNN happily returns the orphan slug as a top-N
+  // result, but the iOS app can't navigate to a /cards/<slug> that
+  // doesn't exist. Worse, the orphan crowds out legitimate candidates.
+  //
+  // 2026-04-28 baseline eval: 6 of 65 wrong predictions returned slugs
+  // missing from canonical_cards (~9% of misses). All 6 looked plausible
+  // to CLIP but weren't navigable.
+  //
+  // We resolve the merged top-K candidate set against canonical_cards
+  // and keep only the present ones. The pre-merge over-fetch (4× in the
+  // kNN CTE) gives us headroom — the K-after-filter is usually still ≥
+  // the requested limit even after dropping orphans. When it isn't, we
+  // return what we have rather than silently padding with low-quality
+  // matches we know are wrong.
+  let orphansDropped = 0;
+  let matches: MatchWithCrop[];
+  if (allMergedMatches.length === 0) {
+    matches = [];
+  } else {
+    const candidateSlugs = allMergedMatches.map((m) => m.canonical_slug);
+    const { data: presentRows, error: presenceErr } = await supabase
+      .from("canonical_cards")
+      .select("slug")
+      .in("slug", candidateSlugs);
+
+    if (presenceErr) {
+      // Don't fail the scan over the orphan filter — log and degrade
+      // to "trust the kNN output" (existing pre-filter behavior).
+      console.warn(
+        `[identify] canonical-cards presence check failed hash=${imageHash}: ${presenceErr.message}`,
+      );
+      matches = allMergedMatches.slice(0, limit);
+    } else {
+      const presentSet = new Set((presentRows ?? []).map((r) => r.slug));
+      const filtered = allMergedMatches.filter((m) => presentSet.has(m.canonical_slug));
+      orphansDropped = allMergedMatches.length - filtered.length;
+      if (orphansDropped > 0) {
+        console.log(
+          `[identify] orphan slugs dropped (not in canonical_cards): ${orphansDropped} hash=${imageHash}`,
+        );
+      }
+      matches = filtered.slice(0, limit);
+    }
+  }
 
   // Per-branch top similarities BEFORE merge — preserved for
   // telemetry so we can see whether the two branches agreed or one
