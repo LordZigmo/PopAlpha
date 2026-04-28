@@ -45,6 +45,7 @@ import {
 import {
   applyCropTransform,
   ImageCropError,
+  resizeForUpload,
 } from "@/lib/ai/image-crops";
 import { getPostHogClient } from "@/lib/posthog-server";
 
@@ -375,13 +376,36 @@ export async function POST(req: Request) {
   const scanFullKey = `scan-uploads/${imageHash}.jpg`;
   const scanArtKey = `scan-uploads/${imageHash}-art.jpg`;
 
-  // 1. Generate the art crop server-side. Determinism is critical:
-  //    the embed-card-art-crops cron uses the same applyCropTransform,
-  //    so reference embeddings and query embeddings end up in the same
-  //    CLIP feature manifold.
+  // 0. Resize the captured photo to a Replicate-fetchable size. iPhone
+  //    full-res JPEGs (1-2 MB) caused Replicate's CLIP fetch to fail
+  //    with `ended in status=failed: You have to specify either text
+  //    or images. Both cannot be none.` — the model's URL fetch came
+  //    back empty/truncated for large public-bucket URLs. Capping at
+  //    800px long-edge / JPEG q=88 fixes this with no measurable
+  //    accuracy loss (CLIP downsamples to 224×224 internally anyway).
+  //    Both the full-upload and the art-crop branches consume this
+  //    resized version so they see the same input.
+  let uploadBytes: Buffer;
+  try {
+    uploadBytes = await resizeForUpload(bytes);
+  } catch (err) {
+    console.warn(
+      `[identify] resize-for-upload failed hash=${imageHash}, falling back to original bytes: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    uploadBytes = bytes;
+  }
+
+  // 1. Generate the art crop server-side from the resized input.
+  //    Determinism is critical: the embed-card-art-crops cron uses
+  //    the same applyCropTransform, so reference embeddings and query
+  //    embeddings end up in the same CLIP feature manifold. (Cron-side
+  //    inputs are already small Scrydex catalog images, so the resize
+  //    step above is a no-op for them.)
   let artBytes: Buffer | null = null;
   try {
-    artBytes = await applyCropTransform("art", bytes);
+    artBytes = await applyCropTransform("art", uploadBytes);
   } catch (err) {
     if (err instanceof ImageCropError) {
       // Tiny / malformed images degrade to single-crop. Logged so we
@@ -401,7 +425,7 @@ export async function POST(req: Request) {
   //    keyed by hash — re-scanning the same image is a no-op.
   const fullUploadPromise = supabase.storage
     .from("card-images")
-    .upload(scanFullKey, bytes, {
+    .upload(scanFullKey, uploadBytes, {
       upsert: true,
       contentType: "image/jpeg",
       cacheControl: "no-cache",

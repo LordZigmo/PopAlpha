@@ -148,6 +148,59 @@ export async function applyCropTransform(
 }
 
 /**
+ * Resize a captured user photo down to a sensible upload size before
+ * storing it for Replicate to fetch.
+ *
+ * Why this exists: 2026-04-28 we discovered that ~50% of scan_eval
+ * photos uploaded by the operator were 750KB-1.8MB (full-res iPhone
+ * JPEGs). Replicate's CLIP model fetched our public URL but failed
+ * with `ended in status=failed: You have to specify either text or
+ * images. Both cannot be none.` — the model received empty/truncated
+ * bytes back from its fetch, treated `image=None`, and erroneed out.
+ * 142 of 264 evaluated images failed this way; the smaller (~185KB)
+ * batch from prior days had zero failures.
+ *
+ * CLIP downsamples to 224×224 internally regardless of input size, so
+ * sending a 1.8MB image is purely wasted upload bandwidth + a fetch
+ * Replicate can't always service. 800px long-edge at JPEG q=88 is
+ * indistinguishable for CLIP's purposes and reliably fetchable.
+ *
+ * Scoped to the inference route — the embedding cron handles catalog
+ * images (~200-400KB Scrydex product shots) where this resize would
+ * be a no-op AND a forced re-encoding of every existing embedding's
+ * source bytes (cascading source_hash invalidation). The route is the
+ * only place where large iPhone-original bytes show up.
+ */
+const UPLOAD_MAX_EDGE_PX = 800;
+
+export async function resizeForUpload(input: Buffer): Promise<Buffer> {
+  const meta = await sharp(input).metadata();
+  const width = meta.width ?? 0;
+  const height = meta.height ?? 0;
+
+  // No metadata or already small — pass through. Avoids needless
+  // re-encoding of already-tiny captures (rare, but the cheap check
+  // costs us nothing).
+  if (
+    width === 0 ||
+    height === 0 ||
+    (width <= UPLOAD_MAX_EDGE_PX && height <= UPLOAD_MAX_EDGE_PX)
+  ) {
+    return input;
+  }
+
+  return sharp(input)
+    .resize({
+      width: UPLOAD_MAX_EDGE_PX,
+      height: UPLOAD_MAX_EDGE_PX,
+      fit: "inside",
+      withoutEnlargement: true,
+    })
+    .jpeg({ quality: 88, mozjpeg: true })
+    .toBuffer();
+}
+
+/**
  * Thrown when an image can't be cropped (no metadata, too small, etc.).
  * Caller should record-and-skip — do not let one bad image take out
  * the batch.
