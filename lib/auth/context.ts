@@ -5,7 +5,7 @@ import { resolveInternalAdminAllowlist } from "@/lib/auth/internal-admin-session
 
 export type AuthContext =
   | { kind: "public" }
-  | { kind: "user"; userId: string }
+  | { kind: "user"; userId: string; isAdmin?: boolean }
   | { kind: "admin"; reason: string }
   | { kind: "cron"; reason: string };
 
@@ -44,12 +44,13 @@ async function verifyUserJwt(_req: Request): Promise<string | null> {
  * Priority:
  * 1. CRON_SECRET bearer → "cron"
  * 2. ADMIN_SECRET bearer / x-admin-secret header / ADMIN_IMPORT_TOKEN bearer → "admin"
- * 3. Clerk session whose userId is in INTERNAL_ADMIN_CLERK_USER_IDS → "admin"
- *    (same allowlist the internal admin web UI uses — the iOS app shares
- *    it so operators can hit admin API routes without bundling a shared
- *    secret into the client binary)
- * 4. Clerk session → "user"
- * 5. Fallback → "public"
+ * 3. Clerk session → "user" (with isAdmin: true if userId is in
+ *    INTERNAL_ADMIN_CLERK_USER_IDS — same allowlist the internal admin
+ *    web UI uses, shared by the iOS app so operators can hit admin API
+ *    routes without bundling a shared secret into the client binary).
+ *    Admin elevation is a flag on user context, not a replacement, so
+ *    user-level routes (/api/me, /api/holdings) keep working for admins.
+ * 4. Fallback → "public"
  */
 export async function resolveAuthContext(req: Request): Promise<AuthContext> {
   const authHeader = req.headers.get("authorization")?.trim() ?? "";
@@ -78,14 +79,19 @@ export async function resolveAuthContext(req: Request): Promise<AuthContext> {
     return { kind: "admin", reason: "bearer-admin-import-token" };
   }
 
-  // 3. Clerk user session — with allowlist elevation to admin
+  // 3. Clerk user session — preserve the userId so user-level routes
+  // (/api/me, /api/holdings, /api/portfolio/*) keep working for the
+  // operator. Admin elevation is carried as a *flag* on the user
+  // context instead of replacing kind, so admin is a superset of user
+  // rather than a sibling. Without this, requireUser() (which only
+  // accepts kind === "user") returns 401 for every allowlisted user.
   const userId = await verifyUserJwt(req);
   if (userId) {
     const allowlist = resolveInternalAdminAllowlist();
-    if (allowlist.clerkUserIds.has(userId)) {
-      return { kind: "admin", reason: "clerk-allowlist" };
-    }
-    return { kind: "user", userId };
+    const isAdmin = allowlist.clerkUserIds.has(userId);
+    return isAdmin
+      ? { kind: "user", userId, isAdmin: true }
+      : { kind: "user", userId };
   }
 
   // 4. Fallback

@@ -31,14 +31,23 @@ export async function requireCron(
 }
 
 /**
- * Require admin-level access. Accepts kind "admin" only.
+ * Require admin-level access. Accepts shared-secret admin contexts AND
+ * Clerk-allowlist users (kind === "user" with isAdmin: true) — that's
+ * the trust boundary commit 8439a33 introduced for the iOS app.
  */
 export async function requireAdmin(
   req: Request,
-): Promise<AuthSuccess<Extract<AuthContext, { kind: "admin" }>> | AuthFailure> {
+): Promise<
+  | AuthSuccess<Extract<AuthContext, { kind: "admin" }>>
+  | (AuthSuccess<Extract<AuthContext, { kind: "user" }>> & { userId: string })
+  | AuthFailure
+> {
   const ctx = await resolveAuthContext(req);
   if (ctx.kind === "admin") {
     return { ok: true, ctx };
+  }
+  if (ctx.kind === "user" && ctx.isAdmin) {
+    return { ok: true, ctx, userId: ctx.userId };
   }
   return { ok: false, response: denied(pathFromReq(req), "admin", ctx.kind) };
 }
