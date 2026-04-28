@@ -251,6 +251,33 @@ export function evaluateInternalAdminAccess(input: {
   return { kind: "authorized", operator: input.operator };
 }
 
+/**
+ * Allowlist of post-sign-in landing paths. Each entry is either a
+ * literal path or a path prefix terminated with "/". The original
+ * sole entry was "/internal/admin" — any new internal-admin-gated
+ * page that lives outside `/internal/admin/*` (e.g. ones that need
+ * client-side rendering, which the strict admin guard forbids) must
+ * be added here so its returnTo doesn't get clobbered to the
+ * default.
+ */
+const INTERNAL_ADMIN_RETURN_PATH_ALLOWLIST: readonly string[] = [
+  "/internal/admin/",
+  "/internal/eval-prelabel",
+];
+
+function isAllowedReturnPath(pathname: string): boolean {
+  for (const entry of INTERNAL_ADMIN_RETURN_PATH_ALLOWLIST) {
+    if (entry.endsWith("/")) {
+      if (pathname.startsWith(entry) || pathname === entry.slice(0, -1)) {
+        return true;
+      }
+    } else if (pathname === entry || pathname.startsWith(`${entry}/`)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function sanitizeInternalAdminReturnTo(value: string | null | undefined): string {
   const raw = typeof value === "string" ? value.trim() : "";
   if (!raw || raw.startsWith("//") || raw.includes("://")) {
@@ -259,7 +286,7 @@ export function sanitizeInternalAdminReturnTo(value: string | null | undefined):
 
   try {
     const parsed = new URL(raw, "https://internal.popalpha.local");
-    if (!parsed.pathname.startsWith("/internal/admin")) {
+    if (!isAllowedReturnPath(parsed.pathname)) {
       return INTERNAL_ADMIN_DEFAULT_RETURN_TO;
     }
     if (parsed.pathname === "/internal/admin/sign-in") {
