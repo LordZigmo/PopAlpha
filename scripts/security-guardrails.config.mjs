@@ -325,6 +325,13 @@ export const PRIVILEGED_PACKAGE_SCRIPT_CONTRACTS = {
     requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
     expectedCommandFragments: ["scripts/run-scanner-eval.mjs"],
   }),
+  "dataset:export": packageScriptContract({
+    target: "scripts/export-finetune-dataset.mjs",
+    intendedCaller: "trusted operator exporting a Stage D fine-tune training dataset (JSONL + anchor JPEGs) from scan_eval_images, canonical_cards, and the most recent scan_eval_runs detailed_results",
+    trustModel: "service_role_read_only_export",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedCommandFragments: ["scripts/export-finetune-dataset.mjs"],
+  }),
   "scan:backfill-digital": packageScriptContract({
     target: "scripts/backfill-card-image-digital-flag.mjs",
     intendedCaller: "trusted operator flagging TCG Pocket rows in card_image_embeddings so the identify kNN excludes them",
@@ -857,6 +864,15 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
     expectedSignals: ["service_role_client"],
     usesServiceRole: true,
     notes: "Reads scan_eval_images + their Storage objects, posts each image to the public identify route, writes scan_eval_runs. Calls the public endpoint — does not invoke privileged routes directly.",
+  }),
+  "scripts/export-finetune-dataset.mjs": operationalScript({
+    classification: "service_role_diagnostic",
+    executionMode: "manual_diagnostic",
+    intendedCaller: "trusted operator exporting a Stage D fine-tune training dataset (anchor user-photos + positive catalog-art URLs + hard-negative slugs) from scan_eval_images, canonical_cards, and scan_eval_runs.detailed_results",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+    notes: "Read-only against Supabase + Storage. Writes JSONL + downloaded anchor JPEGs to a local out-dir; never mutates DB or Storage. Accompanies docs/scanner-finetune-runbook.md.",
   }),
   "scripts/seed-scan-eval-image.mjs": operationalScript({
     classification: "service_role_diagnostic",
