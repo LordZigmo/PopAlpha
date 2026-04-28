@@ -39,6 +39,7 @@
     "eval:seed": "node --env-file=.env.local scripts/seed-scan-eval-image.mjs",
     "eval:run": "node --env-file=.env.local scripts/run-scanner-eval.mjs",
     "dataset:export": "node --env-file=.env.local scripts/export-finetune-dataset.mjs",
+    "scan-eval:convert-heic": "node --env-file=.env.local scripts/convert-scan-eval-heic.mjs",
     "scan:backfill-digital": "node --env-file=.env.local scripts/backfill-card-image-digital-flag.mjs",
     "env:pull-safe": "pwsh -File scripts/safe-env-pull.ps1",
     "verify:rls": "node --env-file=.env.local scripts/verify-phase1-rls.mjs",

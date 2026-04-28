@@ -332,6 +332,13 @@ export const PRIVILEGED_PACKAGE_SCRIPT_CONTRACTS = {
     requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
     expectedCommandFragments: ["scripts/export-finetune-dataset.mjs"],
   }),
+  "scan-eval:convert-heic": packageScriptContract({
+    target: "scripts/convert-scan-eval-heic.mjs",
+    intendedCaller: "trusted operator one-shot back-converting HEIC objects in scan_eval/<hash>.jpg to JPEG so they're decodable by Replicate's CLIP backend (paired with the resizeForUpload + promote-route HEIC handling in 0d81bc1)",
+    trustModel: "service_role_storage_overwrite_wrapper",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedCommandFragments: ["scripts/convert-scan-eval-heic.mjs"],
+  }),
   "scan:backfill-digital": packageScriptContract({
     target: "scripts/backfill-card-image-digital-flag.mjs",
     intendedCaller: "trusted operator flagging TCG Pocket rows in card_image_embeddings so the identify kNN excludes them",
@@ -873,6 +880,15 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
     expectedSignals: ["service_role_client"],
     usesServiceRole: true,
     notes: "Read-only against Supabase + Storage. Writes JSONL + downloaded anchor JPEGs to a local out-dir; never mutates DB or Storage. Accompanies docs/scanner-finetune-runbook.md.",
+  }),
+  "scripts/convert-scan-eval-heic.mjs": operationalScript({
+    classification: "service_role_backfill",
+    executionMode: "manual_backfill",
+    intendedCaller: "trusted operator one-shot converting HEIC scan_eval Storage objects to JPEG (paired with the resizeForUpload + promote-route HEIC handling in 0d81bc1)",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+    notes: "Walks scan_eval_images, sniffs each Storage object's magic bytes, runs heic-convert + sharp resize on HEIC ones, overwrites the same storage_path. Idempotent — already-JPEG objects skipped. Disposable one-shot, deletable after a successful re-eval verifies.",
   }),
   "scripts/seed-scan-eval-image.mjs": operationalScript({
     classification: "service_role_diagnostic",
