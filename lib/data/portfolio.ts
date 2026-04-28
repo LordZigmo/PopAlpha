@@ -313,6 +313,85 @@ export function computeInsights(attrs: PortfolioAttributes, identity: CollectorI
   return insights.slice(0, 4);
 }
 
+// ── Collector Radar Profile ─────────────────────────────────────────────────
+
+export type RadarProfile = {
+  vintage: number;
+  graded: number;
+  premium: number;
+  setFinisher: number;
+  japanese: number;
+  grailHunter: number;
+};
+
+type PrintingMeta = {
+  finish: string | null;
+  rarity: string | null;
+  language: string | null;
+};
+
+const PREMIUM_RARITY_KEYWORDS = [
+  "art rare", "illustration rare", "special illustration", "alt art",
+  "full art", "rainbow", "hyper rare",
+];
+
+function isPremiumRarity(rarity: string | null | undefined): boolean {
+  if (!rarity) return false;
+  const lower = rarity.toLowerCase();
+  return PREMIUM_RARITY_KEYWORDS.some((k) => lower.includes(k));
+}
+
+export function computeRadarProfile(
+  holdings: (HoldingInput & { printing_id?: string | null })[],
+  cardMap: Map<string, { year: number | null; set_name: string | null }>,
+  printingMetaMap: Map<string, PrintingMeta>,
+  priceMap: Map<string, number>,
+): RadarProfile {
+  if (holdings.length === 0) {
+    return { vintage: 0, graded: 0, premium: 0, setFinisher: 0, japanese: 0, grailHunter: 0 };
+  }
+
+  let totalQty = 0;
+  let vintageQty = 0;
+  let gradedQty = 0;
+  let premiumQty = 0;
+  let jpQty = 0;
+  let grailQty = 0;
+  const sets = new Set<string>();
+
+  for (const h of holdings) {
+    const qty = h.qty || 1;
+    totalQty += qty;
+
+    const meta = cardMap.get(h.canonical_slug);
+    if (meta?.year != null && meta.year <= 2002) vintageQty += qty;
+    if (meta?.set_name) sets.add(meta.set_name);
+
+    if (isGraded(h.grade)) gradedQty += qty;
+
+    const printMeta = h.printing_id ? printingMetaMap.get(h.printing_id) : null;
+    if (printMeta?.language === "JP") jpQty += qty;
+    if (printMeta?.finish === "ALT_HOLO" || isPremiumRarity(printMeta?.rarity)) premiumQty += qty;
+
+    const price = priceMap.get(h.canonical_slug) ?? 0;
+    if (price >= 500) grailQty += qty;
+  }
+
+  // Depth-over-breadth: avg cards per set, 10 = full score
+  const setFinisher = Math.min(totalQty / Math.max(sets.size, 1) / 10, 1);
+  // Scale grail density: 25% of collection at $500+ = full score
+  const grailHunter = Math.min((totalQty > 0 ? grailQty / totalQty : 0) * 4, 1);
+
+  return {
+    vintage: totalQty > 0 ? vintageQty / totalQty : 0,
+    graded: totalQty > 0 ? gradedQty / totalQty : 0,
+    premium: totalQty > 0 ? premiumQty / totalQty : 0,
+    setFinisher,
+    japanese: totalQty > 0 ? jpQty / totalQty : 0,
+    grailHunter,
+  };
+}
+
 // ── Top Holdings ────────────────────────────────────────────────────────────
 
 export type TopHoldingResult = {

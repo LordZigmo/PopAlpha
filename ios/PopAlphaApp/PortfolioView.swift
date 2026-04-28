@@ -225,7 +225,7 @@ struct PortfolioView: View {
                 // Enriched sections (only when backend returned full analysis)
                 if hasFullAnalysis {
                     if let identity = overview?.toIdentity() {
-                        CollectorIdentityCard(profile: identity)
+                        CollectorIdentityCard(profile: identity, radarProfile: overview?.radarProfile)
                     }
 
                     if let composition = overview?.toComposition() {

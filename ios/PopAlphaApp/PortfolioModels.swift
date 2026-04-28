@@ -141,6 +141,15 @@ struct PortfolioActivity: Identifiable {
 
 // MARK: - API Response Decodable Types
 
+struct APIRadarProfile: Decodable {
+    let vintage: Double
+    let graded: Double
+    let premium: Double
+    let setFinisher: Double
+    let japanese: Double
+    let grailHunter: Double
+}
+
 /// Top-level response from GET /api/portfolio/overview
 struct PortfolioOverviewResponse: Decodable {
     let ok: Bool
@@ -153,6 +162,7 @@ struct PortfolioOverviewResponse: Decodable {
     let topHoldings: [APITopHolding]?
     let attributes: [APIAttribute]?
     let insights: [String]?
+    let radarProfile: APIRadarProfile?
 }
 
 struct APICardMetadata: Decodable {

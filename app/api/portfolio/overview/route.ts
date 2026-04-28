@@ -10,6 +10,7 @@ import {
   computeDisplayAttributes,
   computeInsights,
   computeTopHoldings,
+  computeRadarProfile,
   isGraded,
 } from "@/lib/data/portfolio";
 import { resolveCardImage } from "@/lib/images/resolve";
@@ -34,6 +35,14 @@ type HoldingRow = {
   qty: number;
   grade: string;
   price_paid_usd: number;
+  printing_id: string | null;
+};
+
+type PrintingMetaRow = {
+  id: string;
+  finish: string | null;
+  rarity: string | null;
+  language: string | null;
 };
 
 type CardRow = {
@@ -75,7 +84,7 @@ export async function GET(req: Request) {
     // 1. Fetch holdings
     const { data: holdingsData, error: holdingsErr } = await admin
       .from("holdings")
-      .select("canonical_slug, qty, grade, price_paid_usd")
+      .select("canonical_slug, qty, grade, price_paid_usd, printing_id")
       .eq("owner_clerk_id", auth.userId);
 
     if (holdingsErr) throw new Error(holdingsErr.message);
@@ -88,9 +97,10 @@ export async function GET(req: Request) {
     // 2. Collect unique slugs
     const slugs = [...new Set(holdings.map((h) => h.canonical_slug).filter(Boolean))];
 
-    // 3. Parallel batch-fetch: market data + card metadata + images + price history
+    // 3. Parallel batch-fetch: market data + card metadata + images + price history + printing meta
     const thirtyDaysAgo = new Date(Date.now() - 30 * 86400 * 1000).toISOString();
-    const [pulseMap, cardsResult, imagesResult, historyResult] = await Promise.all([
+    const printingIds = [...new Set(holdings.map((h) => h.printing_id).filter(Boolean))] as string[];
+    const [pulseMap, cardsResult, imagesResult, historyResult, printingMetaResult] = await Promise.all([
       getCanonicalMarketPulseMap(pub, slugs),
       pub.from("canonical_cards")
         .select("slug, canonical_name, set_name, year")
@@ -108,6 +118,11 @@ export async function GET(req: Request) {
         .gte("ts", thirtyDaysAgo)
         .order("ts", { ascending: true })
         .limit(2000),
+      printingIds.length > 0
+        ? pub.from("card_printings")
+            .select("id, finish, rarity, language")
+            .in("id", printingIds)
+        : Promise.resolve({ data: [] as PrintingMetaRow[], error: null }),
     ]);
 
     // Build lookup maps
@@ -124,6 +139,11 @@ export async function GET(req: Request) {
       const resolved = resolveCardImage(img);
       const best = resolved.thumb ?? resolved.full;
       if (best) imageMap.set(img.canonical_slug, best);
+    }
+
+    const printingMetaMap = new Map<string, { finish: string | null; rarity: string | null; language: string | null }>();
+    for (const p of (printingMetaResult.data ?? []) as PrintingMetaRow[]) {
+      printingMetaMap.set(p.id, { finish: p.finish, rarity: p.rarity, language: p.language });
     }
 
     const priceMap = new Map<string, number>();
@@ -215,6 +235,7 @@ export async function GET(req: Request) {
     const displayAttrs = computeDisplayAttributes(attrs, cardCount);
     const insights = computeInsights(attrs, identity);
     const topHoldings = computeTopHoldings(holdings, cardMap, priceMap, changeMap, imageMap);
+    const radarProfile = computeRadarProfile(holdings, cardMetaMap, printingMetaMap, priceMap);
 
     return NextResponse.json({
       ok: true,
@@ -227,6 +248,7 @@ export async function GET(req: Request) {
       top_holdings: topHoldings,
       attributes: displayAttrs,
       insights,
+      radar_profile: radarProfile,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
