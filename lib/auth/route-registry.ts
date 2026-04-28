@@ -84,6 +84,7 @@ export const ADMIN_ROUTES = [
   "admin/discover-sets",
   "admin/scan-eval/promote",
   "admin/scan-eval/pre-label",
+  "admin/cleanup/dedupe-canonical-slugs-neon",
 ];
 
 export const DEBUG_ROUTES = [

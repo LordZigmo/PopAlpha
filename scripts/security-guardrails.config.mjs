@@ -405,6 +405,7 @@ export const INTERNAL_ROUTE_TRUST_CONTRACTS = {
     "internal admin review UI",
     ["lib/ebay/deletion-review-routes.ts", "lib/ebay/deletion-review-admin-api.ts"],
   ),
+  "admin/cleanup/dedupe-canonical-slugs-neon": adminSecretRoute("one-shot Neon-side dedup of canonical_slug accent-twin pairs (companion to Supabase MCP cleanup)"),
   "admin/discover-sets": adminSecretRoute("manual admin on-demand set discovery trigger"),
   "admin/import/printings": adminSecretRoute("manual admin/import tooling"),
   "admin/import/scrydex-canonical": adminSecretRoute("manual admin/import tooling"),
