@@ -63,6 +63,13 @@ export type InternalAdminApiAccessResult =
 // sign-in would redirect to returnTo, and round it went.
 const INTERNAL_ADMIN_COOKIE_PATH = "/internal";
 
+// Legacy cookie path from before the broaden. Kept around so
+// issueInternalAdminSession can explicitly invalidate any stale
+// cookie still living at the old path on operators who signed in
+// before the deploy. Without this, those operators stay stuck in
+// the redirect loop until they manually clear cookies.
+const INTERNAL_ADMIN_COOKIE_LEGACY_PATH = "/internal/admin";
+
 function buildCookieOptions(expiresAtMs: number) {
   return {
     httpOnly: true,
@@ -70,6 +77,17 @@ function buildCookieOptions(expiresAtMs: number) {
     secure: process.env.NODE_ENV === "production",
     path: INTERNAL_ADMIN_COOKIE_PATH,
     expires: new Date(expiresAtMs),
+  };
+}
+
+function buildLegacyCookieClearOptions() {
+  return {
+    httpOnly: true,
+    sameSite: "strict" as const,
+    secure: process.env.NODE_ENV === "production",
+    path: INTERNAL_ADMIN_COOKIE_LEGACY_PATH,
+    expires: new Date(0),
+    maxAge: 0,
   };
 }
 
@@ -238,6 +256,13 @@ export async function issueInternalAdminSession(
   });
 
   const cookieStore = await cookies();
+  // Defensive: explicitly invalidate any cookie still living at the
+  // legacy path. Browsers only delete cookies when the new Set-Cookie
+  // matches the existing path EXACTLY — setting at /internal does
+  // NOT delete the same-name cookie at /internal/admin. If the
+  // operator signed in pre-deploy, they need this kill-line to
+  // unstick the redirect loop.
+  cookieStore.set(INTERNAL_ADMIN_COOKIE_NAME, "", buildLegacyCookieClearOptions());
   cookieStore.set(INTERNAL_ADMIN_COOKIE_NAME, token, buildCookieOptions(now + INTERNAL_ADMIN_SESSION_TTL_MS));
 
   const verified = verifyInternalAdminSessionToken(token, { secret, now });
