@@ -35,6 +35,21 @@
 			</array>
 		</dict>
 	</array>
+	<!--
+		Custom launch screen: dark navy background asset with the PopAlpha
+		logo centered. Replaces the auto-generated empty launch screen
+		(INFOPLIST_KEY_UILaunchScreen_Generation has been turned off in the
+		Xcode build settings so this dict is the source of truth).
+	-->
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string>LaunchBackground</string>
+		<key>UIImageName</key>
+		<string>LaunchLogo</string>
+		<key>UIImageRespectsSafeAreaInsets</key>
+		<false/>
+	</dict>
 	<key>UIBackgroundModes</key>
 	<array>
 		<!--
@@ -45,5 +60,18 @@
 		-->
 		<string>remote-notification</string>
 	</array>
+	<!--
+		Photo library access is requested ONLY when the operator running
+		the eval seeding flow ticks "Delete from library after upload."
+		That flow calls PHAssetChangeRequest.deleteAssets() so the just-
+		uploaded photo disappears from the user's library, letting them
+		keep tapping the top photo for the next card without re-uploading
+		duplicates. iOS shows its own confirmation prompt per delete.
+		Bulk picker access for upload doesn't need this — PhotosPicker
+		runs out-of-process. This string is the prompt iOS shows the
+		first time the app calls into PHPhotoLibrary.
+	-->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>PopAlpha needs photo library access to remove eval-corpus photos from your library after upload, so you can continue picking the next card without uploading duplicates.</string>
 </dict>
 </plist>

@@ -1,4 +1,5 @@
 import PhotosUI
+import Photos
 import SwiftUI
 import NukeUI
 
@@ -42,6 +43,14 @@ struct EvalSeedingView: View {
 
     @State private var pickerItem: PhotosPickerItem?
     @State private var pickedImage: UIImage?
+    // PHAsset identifier of the photo the user picked from their
+    // library. We capture it on photo-pick (NOT on save) because
+    // PhotosPickerItem.itemIdentifier is the PHAsset.localIdentifier
+    // when the picker is configured with photoLibrary: .shared(),
+    // which it is. Used after successful upload to optionally delete
+    // the photo from the user's library so they can keep tapping the
+    // top photo to seed the next card without uploading duplicates.
+    @State private var pickedAssetIdentifier: String?
     @State private var searchQuery: String = ""
     @State private var searchResults: [SearchCardResult] = []
     @State private var selectedCard: SearchCardResult?
@@ -49,6 +58,13 @@ struct EvalSeedingView: View {
     @State private var isSaving = false
     @State private var saveResult: SaveOutcome?
     @State private var notes: String = ""
+    // Drives the post-save "Delete from your photos?" alert. We don't
+    // delete silently — iOS forces its own confirmation on top of
+    // ours anyway, but a soft pre-prompt makes the workflow read
+    // better ("just saved as journey-together-23-combusken — clear
+    // the original from your library?") and gives the operator one
+    // chance to skip without seeing the system dialog at all.
+    @State private var pendingLibraryDeleteAssetId: String?
     @FocusState private var searchFocused: Bool
 
     private enum SaveOutcome: Equatable {
@@ -87,6 +103,37 @@ struct EvalSeedingView: View {
         }
         .task(id: searchQuery) {
             await runSearchIfNeeded()
+        }
+        // Two-step delete confirmation. Our alert is the soft prompt
+        // ("you just uploaded — also clear the original from your
+        // library?"), and PHAssetChangeRequest then triggers iOS's
+        // native confirmation. The double-prompt feels right for
+        // this destructive action — accidentally tapping Delete in
+        // a fast labeling rhythm shouldn't silently lose the user's
+        // original photo.
+        .alert(
+            "Delete photo from library?",
+            isPresented: Binding(
+                get: { pendingLibraryDeleteAssetId != nil },
+                set: { newValue in
+                    if !newValue { pendingLibraryDeleteAssetId = nil }
+                },
+            ),
+        ) {
+            Button("Delete", role: .destructive) {
+                if let assetId = pendingLibraryDeleteAssetId {
+                    pendingLibraryDeleteAssetId = nil
+                    deletePickedAssetFromLibrary(assetId)
+                }
+            }
+            Button("Skip") {
+                pendingLibraryDeleteAssetId = nil
+                resetPickerForNextCard()
+            }
+        } message: {
+            Text(
+                "Saved to the eval corpus. Removing the photo from your library lets you keep tapping the top photo to seed the next card without uploading duplicates."
+            )
         }
     }
 
@@ -149,6 +196,12 @@ struct EvalSeedingView: View {
             }
             .onChange(of: pickerItem) { _, newItem in
                 guard let newItem else { return }
+                // PhotosPickerItem.itemIdentifier resolves to the
+                // PHAsset.localIdentifier when the picker is bound to
+                // photoLibrary: .shared(). Caching it here (synchronous,
+                // doesn't require photo-library permission yet) so we
+                // can offer "Delete from library" after upload.
+                pickedAssetIdentifier = newItem.itemIdentifier
                 Task {
                     if
                         let data = try? await newItem.loadTransferable(type: Data.self),
@@ -430,6 +483,16 @@ struct EvalSeedingView: View {
                 if response.ok {
                     saveResult = .success(response.canonicalSlug ?? card.canonicalSlug)
                     PAHaptics.success()
+                    // If the user picked from their library AND we
+                    // captured an asset identifier, surface the
+                    // delete-from-library prompt. Skipped automatically
+                    // for the .correction path (no photo picker) and
+                    // for picker selections that didn't yield an
+                    // identifier (rare — usually means the asset was
+                    // a transient screenshot or shared-album item).
+                    if mode.requiresPhotoPick, let assetId = pickedAssetIdentifier {
+                        pendingLibraryDeleteAssetId = assetId
+                    }
                 } else {
                     saveResult = .failure(response.error ?? "Save failed")
                 }
@@ -439,5 +502,76 @@ struct EvalSeedingView: View {
                 saveResult = .failure(error.localizedDescription)
             }
         }
+    }
+
+    /// Removes the just-uploaded source photo from the user's photo
+    /// library. iOS shows its own native confirmation dialog when
+    /// PHAssetChangeRequest.deleteAssets is invoked, so the user
+    /// gets a final yes/no even if they accidentally tap our
+    /// "Delete" button. On success, also resets the picker state
+    /// so the next card's photo can be picked fresh.
+    private func deletePickedAssetFromLibrary(_ assetIdentifier: String) {
+        // Authorization status is also auto-prompted by performChanges
+        // on first call, but checking ahead of time lets us bail out
+        // cleanly with a visible failure message if the user has
+        // explicitly denied photo library access.
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        if status == .denied || status == .restricted {
+            saveResult = .failure(
+                "Photo library access denied — enable in Settings → Privacy → Photos to remove uploaded photos automatically."
+            )
+            return
+        }
+
+        let assets = PHAsset.fetchAssets(
+            withLocalIdentifiers: [assetIdentifier],
+            options: nil,
+        )
+        guard assets.count > 0 else {
+            // Asset went missing between pick and delete (user could
+            // have manually deleted, or it was a transient resource).
+            // Just clear local state without complaining loudly.
+            resetPickerForNextCard()
+            return
+        }
+
+        PHPhotoLibrary.shared().performChanges({
+            PHAssetChangeRequest.deleteAssets(assets)
+        }) { success, error in
+            DispatchQueue.main.async {
+                if success {
+                    PAHaptics.tap()
+                    resetPickerForNextCard()
+                } else if let error {
+                    // User probably tapped "Don't Allow" on the system
+                    // confirmation. Don't treat as a hard failure —
+                    // they got what they asked for; just leave state
+                    // as-is so they can pick a different photo or try
+                    // delete again.
+                    let nsError = error as NSError
+                    if nsError.code != PHPhotosError.userCancelled.rawValue {
+                        saveResult = .failure(
+                            "Couldn't delete photo: \(error.localizedDescription)"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    /// Clears the picker / selected-card / search state so the operator
+    /// can immediately tap "Photo" again and the system will surface
+    /// the new top-of-library picture (now that the previous one is
+    /// gone). Notes and saveResult banner are intentionally preserved
+    /// so the operator can confirm what just happened before the next
+    /// upload.
+    private func resetPickerForNextCard() {
+        pickerItem = nil
+        pickedImage = nil
+        pickedAssetIdentifier = nil
+        selectedCard = nil
+        searchQuery = ""
+        searchResults = []
+        pendingLibraryDeleteAssetId = nil
     }
 }
