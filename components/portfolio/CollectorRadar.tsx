@@ -79,15 +79,15 @@ export function CollectorRadar({ profile }: { profile: RadarProfile }) {
       {/* Filled data polygon */}
       <polygon
         points={dataPoints.map(([x, y]) => `${x},${y}`).join(" ")}
-        fill="rgba(229,83,75,0.30)"
-        stroke="#E5534B"
+        fill="rgba(0,180,216,0.25)"
+        stroke="#00B4D8"
         strokeWidth={1.5}
         strokeLinejoin="round"
       />
 
       {/* Data-point dots */}
       {dataPoints.map(([x, y], i) => (
-        <circle key={i} cx={x} cy={y} r={3} fill="#E5534B" />
+        <circle key={i} cx={x} cy={y} r={3} fill="#00B4D8" />
       ))}
 
       {/* Axis labels */}

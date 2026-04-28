@@ -16,7 +16,7 @@ struct CollectorRadarView: View {
         ("Premium",  \.premium),
     ]
 
-    private let accentColor = Color(red: 0.898, green: 0.325, blue: 0.294) // #E5534B
+    private let accentColor = PA.Colors.accent // #00B4D8
     private let gridColor   = Color.white.opacity(0.08)
     private let rings       = 4
 
