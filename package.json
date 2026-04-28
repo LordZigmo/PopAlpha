@@ -58,6 +58,7 @@
     "ai": "^6.0.108",
     "dotenv": "^17.3.1",
     "framer-motion": "^12.34.5",
+    "heic-convert": "^2.1.0",
     "html-to-image": "^1.11.13",
     "lucide-react": "^0.576.0",
     "next": "16.1.6",
@@ -71,6 +72,7 @@
   "devDependencies": {
     "@tailwindcss/cli": "^4.2.1",
     "@tailwindcss/postcss": "^4.2.1",
+    "@types/heic-convert": "^2.1.0",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

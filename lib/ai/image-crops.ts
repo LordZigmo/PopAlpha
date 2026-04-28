@@ -52,6 +52,7 @@
  */
 
 import sharp from "sharp";
+import heicConvert from "heic-convert";
 
 /**
  * The set of crop types persisted in card_image_embeddings.crop_type.
@@ -151,45 +152,102 @@ export async function applyCropTransform(
  * Resize a captured user photo down to a sensible upload size before
  * storing it for Replicate to fetch.
  *
- * Why this exists: 2026-04-28 we discovered that ~50% of scan_eval
- * photos uploaded by the operator were 750KB-1.8MB (full-res iPhone
- * JPEGs). Replicate's CLIP model fetched our public URL but failed
- * with `ended in status=failed: You have to specify either text or
- * images. Both cannot be none.` — the model received empty/truncated
- * bytes back from its fetch, treated `image=None`, and erroneed out.
- * 142 of 264 evaluated images failed this way; the smaller (~185KB)
- * batch from prior days had zero failures.
+ * Why this exists: 2026-04-28 we discovered TWO failure modes on the
+ * scan-eval corpus:
  *
- * CLIP downsamples to 224×224 internally regardless of input size, so
- * sending a 1.8MB image is purely wasted upload bandwidth + a fetch
- * Replicate can't always service. 800px long-edge at JPEG q=88 is
- * indistinguishable for CLIP's purposes and reliably fetchable.
+ *   1. Large JPEGs (1-2MB iPhone originals) — Replicate's URL fetch
+ *      returns truncated/empty bytes for the public Storage URL of
+ *      anything ≳800KB, the CLIP model treats image=None, and the
+ *      prediction fails with `ended in status=failed: You have to
+ *      specify either text or images. Both cannot be none.`
  *
- * Scoped to the inference route — the embedding cron handles catalog
- * images (~200-400KB Scrydex product shots) where this resize would
- * be a no-op AND a forced re-encoding of every existing embedding's
- * source bytes (cascading source_hash invalidation). The route is the
- * only place where large iPhone-original bytes show up.
+ *   2. HEIF/HEIC inputs — newer iPhones save photos as HEIC by
+ *      default, and AirDrop preserves the format. Sharp on Vercel's
+ *      runtime ships a libvips build *without* libheif, so any
+ *      attempt to decode HEIC throws "No decoding plugin installed
+ *      for this compression format". Replicate's CLIP backend also
+ *      can't decode HEIC, so passing the bytes through unchanged
+ *      hits the same "no images specified" wall.
+ *
+ * Both failures masquerade as the same model-side error message,
+ * which made diagnosis painful — at the time of the fix, 120 of 277
+ * eval images were HEIC and the cliff at index 157 in the eval was
+ * exactly the JPEG/HEIC boundary in the corpus.
+ *
+ * Resolution: this helper is the single chokepoint for "make these
+ * bytes Replicate-fetchable":
+ *
+ *   • If the input is HEIC, decode it via the pure-JS heic-convert
+ *     package (libheif WebAssembly fallback — works anywhere Node
+ *     runs, no native dep needed).
+ *   • Then resize with sharp to ≤800px long edge at JPEG q=88. CLIP
+ *     downsamples to 224×224 internally regardless of input size, so
+ *     800px is indistinguishable for embedding purposes but reliably
+ *     fetchable.
+ *   • Pass-through if the bytes are already a small JPEG.
+ *
+ * Scoped to the inference route + scan-eval ingest — the embedding
+ * cron handles catalog images (~200-400KB Scrydex product shots)
+ * which are always small JPEGs. Calling this from the cron would be
+ * a no-op AND would force a cascading source_hash invalidation of
+ * every existing embedding for no benefit.
  */
 const UPLOAD_MAX_EDGE_PX = 800;
 
+function isHeicMagic(buf: Buffer): boolean {
+  // ISO-BMFF box: 4-byte size, then 'ftyp', then a brand. HEIC variants:
+  //   'heic', 'heix' — single image
+  //   'mif1', 'msf1' — image sequence containers
+  //   'hevc'         — HEVC video (rare in photo apps but defensive)
+  if (buf.length < 12) return false;
+  if (buf.slice(4, 8).toString("ascii") !== "ftyp") return false;
+  const brand = buf.slice(8, 12).toString("ascii");
+  return brand === "heic" || brand === "heix" || brand === "mif1" || brand === "msf1" || brand === "hevc";
+}
+
+async function decodeHeicToJpegBytes(input: Buffer): Promise<Buffer> {
+  // heic-convert's @types declares `buffer` as ArrayBufferLike, but the
+  // implementation handles Node Buffers fine (Buffer extends Uint8Array).
+  // Cast to bypass the structural mismatch — at runtime it's a no-op.
+  // Output is an ArrayBuffer; wrap in Buffer.from. Quality is 0..1
+  // (not 0..100) — 0.92 is visually indistinguishable from HEIF source
+  // for CLIP's purposes; CLIP downsamples to 224×224 either way.
+  const out = await heicConvert({
+    buffer: input as unknown as ArrayBufferLike,
+    format: "JPEG",
+    quality: 0.92,
+  });
+  return Buffer.from(out);
+}
+
 export async function resizeForUpload(input: Buffer): Promise<Buffer> {
-  const meta = await sharp(input).metadata();
+  // Step 1: HEIC → JPEG decode if needed. heic-convert is slower than
+  // sharp (~1-2s per image) but it's the only path that works without
+  // native libheif on Vercel. Run it BEFORE sharp because sharp can't
+  // read HEIC at all on the deployed runtime.
+  let bytes = input;
+  if (isHeicMagic(input)) {
+    bytes = await decodeHeicToJpegBytes(input);
+  }
+
+  // Step 2: Sharp metadata + resize. After the optional HEIC decode,
+  // bytes is guaranteed to be a JPEG (or PNG/WebP if we ever extend),
+  // and sharp can read it.
+  const meta = await sharp(bytes).metadata();
   const width = meta.width ?? 0;
   const height = meta.height ?? 0;
 
   // No metadata or already small — pass through. Avoids needless
-  // re-encoding of already-tiny captures (rare, but the cheap check
-  // costs us nothing).
+  // re-encoding of already-tiny captures.
   if (
     width === 0 ||
     height === 0 ||
     (width <= UPLOAD_MAX_EDGE_PX && height <= UPLOAD_MAX_EDGE_PX)
   ) {
-    return input;
+    return bytes;
   }
 
-  return sharp(input)
+  return sharp(bytes)
     .resize({
       width: UPLOAD_MAX_EDGE_PX,
       height: UPLOAD_MAX_EDGE_PX,

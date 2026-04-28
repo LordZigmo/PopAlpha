@@ -36,6 +36,7 @@ import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/require";
 import { dbAdmin } from "@/lib/db/admin";
+import { resizeForUpload } from "@/lib/ai/image-crops";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -219,13 +220,32 @@ export async function POST(req: Request) {
   let wasUpload: boolean;
 
   if (parsed.imageBytes) {
-    // Fresh photo — compute hash + upload to scan-eval/<hash>.jpg.
-    imageHash = crypto.createHash("sha256").update(parsed.imageBytes).digest("hex");
-    bytesSize = parsed.imageBytes.length;
+    // Fresh photo — convert (HEIC→JPEG if needed) + resize before
+    // upload, then compute hash from THE PROCESSED bytes so the
+    // storage object's content matches its key. This is the chokepoint
+    // that prevents HEIC bytes from ever landing in scan-eval/. 120 of
+    // 277 corpus images snuck in as HEIC before this guard existed and
+    // had to be back-converted via a one-shot — the fix lives here so
+    // a future labeling sprint with a different operator's iPhone can't
+    // poison the corpus the same way.
+    let processedBytes: Buffer;
+    try {
+      processedBytes = await resizeForUpload(parsed.imageBytes);
+    } catch (err) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: `image processing failed: ${err instanceof Error ? err.message : String(err)}`,
+        },
+        { status: 400 },
+      );
+    }
+    imageHash = crypto.createHash("sha256").update(processedBytes).digest("hex");
+    bytesSize = processedBytes.length;
     const evalKey = `${SCAN_EVAL_PREFIX}/${imageHash}.jpg`;
     const { error: uploadErr } = await supabase.storage
       .from(IMAGE_BUCKET)
-      .upload(evalKey, parsed.imageBytes, {
+      .upload(evalKey, processedBytes, {
         upsert: true,
         contentType: "image/jpeg",
         cacheControl: "31536000, immutable",
