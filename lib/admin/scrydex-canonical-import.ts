@@ -5,7 +5,7 @@ import {
   getScrydexCredentials,
   type ScrydexCard,
 } from "@/lib/scrydex/client";
-import { buildCanonicalSearchDoc, normalizeSearchText } from "@/lib/search/normalize.mjs";
+import { buildCanonicalSearchDoc, normalizeSearchText, stripDiacritics } from "@/lib/search/normalize.mjs";
 
 export type ScrydexCanonicalImportParams = {
   pageStart: number;
@@ -165,8 +165,13 @@ function parseYearFromReleaseDate(value: string | undefined): number | null {
   return match ? Number.parseInt(match[1], 10) : null;
 }
 
+// MUST stripDiacritics BEFORE the [^a-z0-9]+ replace, otherwise accented
+// chars like é become separators and "Pokémon GO" → "pok-mon-go" instead
+// of the intended "pokemon-go". Bug history: this exact mistake produced
+// 216 duplicate canonical_cards rows in 2026-04. See
+// supabase/migrations/20260428_dedupe_accent_bug_canonical_slugs.sql.
 function slugify(input: string): string {
-  return input
+  return stripDiacritics(input)
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")

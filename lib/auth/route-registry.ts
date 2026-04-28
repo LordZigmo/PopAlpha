@@ -73,7 +73,6 @@ export const CRON_ROUTES = [
   "cron/mirror-card-images",
   "cron/compute-daily-top-movers",
   "cron/discover-new-sets",
-  "admin/cleanup/dedupe-canonical-slugs-neon",
 ];
 
 export const ADMIN_ROUTES = [

@@ -1,5 +1,10 @@
+import { stripDiacritics } from "@/lib/search/normalize.mjs";
+
+// MUST stripDiacritics BEFORE the [^a-z0-9]+ replace, otherwise accented
+// chars like é become separators ("Pokémon" → "pok_mon" instead of "pokemon").
+// See lib/admin/scrydex-canonical-import.ts for full bug history.
 function normalizePart(value: string): string {
-  return value
+  return stripDiacritics(value)
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "");
