@@ -27,6 +27,7 @@ export const DBADMIN_ALLOWED_FILES = [
   "app/api/portfolio/activity/route.ts",
   "app/api/pro/signals/route.ts",
   "app/api/scan/identify/route.ts",
+  "lib/data/canonical-card-match.ts",
   "lib/db/admin.ts",
 ];
 
@@ -409,6 +410,7 @@ export const INTERNAL_ROUTE_TRUST_CONTRACTS = {
   "admin/import/scrydex-canonical": adminSecretRoute("manual admin/import tooling"),
   "admin/psa-seeds": adminSecretRoute("manual admin seeding tooling"),
   "admin/scan-eval/promote": adminSecretRoute("operator-driven scanner eval corpus seeding + mis-identification correction"),
+  "admin/scan-eval/pre-label": adminSecretRoute("VLM pre-labeling of operator-captured card images for the scanner eval corpus"),
   "cron/backfill-scrydex-price-history": cronSecretRoute("cron/internal automation"),
   "cron/capture-matching-quality": cronSecretRoute("cron/internal automation"),
   "cron/capture-pricing-transparency": cronSecretRoute("cron/internal automation"),

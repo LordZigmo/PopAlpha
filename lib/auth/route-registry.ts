@@ -83,6 +83,7 @@ export const ADMIN_ROUTES = [
   "admin/psa-seeds",
   "admin/discover-sets",
   "admin/scan-eval/promote",
+  "admin/scan-eval/pre-label",
 ];
 
 export const DEBUG_ROUTES = [
