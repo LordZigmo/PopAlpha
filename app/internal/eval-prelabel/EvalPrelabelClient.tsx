@@ -1,27 +1,16 @@
 "use client";
 
 /**
- * Bulk pre-labeling UI.
+ * Bulk pre-labeling UI — simplified.
  *
- * Workflow:
- *   1. Drag/drop or pick a batch of card photos.
- *   2. Each one is uploaded to /api/admin/scan-eval/pre-label.
- *      Gemini reads the card; the server returns ranked
- *      canonical_slug candidates.
- *   3. The UI renders a queue: image on the left, top candidate
- *      + alternates on the right, notes chips, accept/skip buttons.
- *   4. Accept saves via /api/admin/scan-eval/promote with
- *      image_base64 + chosen slug + notes.
- *   5. The card disappears from the queue when done.
- *
- * Designed for keyboard-driven review: ENTER to accept top
- * candidate, S to skip, 1-5 to pick alternate. Heavy use is
- * tap-tap-tap.
+ * Drop photos → pre-label via Gemini → confirm/edit → save to
+ * scan_eval_images. Inline styles only (no Tailwind dependency)
+ * so layout is robust regardless of global CSS state.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-// ── Types matching the server response shapes ─────────────────────
+// ── Types matching server response shapes ─────────────────────────
 
 type VlmGuess = {
   is_pokemon_tcg: boolean;
@@ -64,17 +53,15 @@ type SearchCandidate = {
 };
 
 type QueueItem = {
-  id: string; // local-only — UUID-like, generated client-side
+  id: string;
   file: File;
-  previewUrl: string; // object URL for the <img>
-  base64: string; // cached for save
+  previewUrl: string;
+  base64: string;
   status: "uploading" | "ready" | "saving" | "saved" | "skipped" | "error";
   preLabel?: PreLabelResponse;
-  selectedSlug?: string; // current pick — defaults to top candidate
-  notes: string; // condition tag (clean / hand-held / corner-finger / etc.)
+  selectedSlug?: string;
+  notes: string;
   errorMessage?: string;
-  // Manual search override — when set, replaces preLabel.candidates
-  // for this item. Used when none of Gemini's suggestions are right.
   manualOverride?: SearchCandidate;
 };
 
@@ -89,8 +76,6 @@ const CONDITION_TAGS = [
   "glare",
 ] as const;
 
-// Concurrency cap for parallel pre-label uploads. Vercel's edge
-// network handles this fine; the bottleneck is Gemini's rate limits.
 const MAX_CONCURRENT_PRELABEL = 4;
 
 function generateLocalId(): string {
@@ -106,7 +91,6 @@ async function fileToBase64(file: File): Promise<string> {
         reject(new Error("FileReader returned non-string"));
         return;
       }
-      // Strip the "data:image/jpeg;base64," prefix.
       const commaIdx = result.indexOf(",");
       resolve(commaIdx >= 0 ? result.slice(commaIdx + 1) : result);
     };
@@ -114,6 +98,63 @@ async function fileToBase64(file: File): Promise<string> {
     reader.readAsDataURL(file);
   });
 }
+
+// ── Inline style helpers (no Tailwind dependency) ───────────────────
+
+const colors = {
+  bg: "#0a0a0a",
+  surface: "#141414",
+  surfaceAlt: "#1c1c1c",
+  border: "#2a2a2a",
+  borderAccent: "#3b82f6",
+  text: "#fff",
+  textMuted: "#aaa",
+  textDim: "#666",
+  green: "#10b981",
+  greenBg: "rgba(16,185,129,0.15)",
+  red: "#ef4444",
+  redBg: "rgba(239,68,68,0.15)",
+  yellow: "#fbbf24",
+};
+
+const dropZoneStyle = (active: boolean): React.CSSProperties => ({
+  border: `3px dashed ${active ? colors.borderAccent : colors.border}`,
+  background: active ? "rgba(59,130,246,0.08)" : colors.surface,
+  borderRadius: 16,
+  padding: "60px 24px",
+  textAlign: "center",
+  cursor: "pointer",
+  transition: "all 0.15s ease",
+});
+
+const buttonStyle = (variant: "primary" | "secondary" | "danger"): React.CSSProperties => ({
+  border: "1px solid",
+  borderColor:
+    variant === "primary"
+      ? colors.green
+      : variant === "danger"
+        ? colors.red
+        : colors.border,
+  background:
+    variant === "primary"
+      ? colors.greenBg
+      : variant === "danger"
+        ? colors.redBg
+        : colors.surface,
+  color:
+    variant === "primary"
+      ? colors.green
+      : variant === "danger"
+        ? colors.red
+        : colors.text,
+  padding: "8px 14px",
+  borderRadius: 8,
+  fontSize: 13,
+  fontWeight: 600,
+  cursor: "pointer",
+});
+
+// ── Main component ─────────────────────────────────────────────────
 
 export default function EvalPrelabelClient() {
   const [queue, setQueue] = useState<QueueItem[]>([]);
@@ -125,8 +166,6 @@ export default function EvalPrelabelClient() {
   const updateItem = useCallback((id: string, patch: Partial<QueueItem>) => {
     setQueue((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)));
   }, []);
-
-  // ── Pre-label pipeline ─────────────────────────────────────────────
 
   const runPreLabel = useCallback(
     async (item: QueueItem) => {
@@ -160,7 +199,6 @@ export default function EvalPrelabelClient() {
     [updateItem],
   );
 
-  // Add files to queue + kick off pre-label on a bounded concurrency.
   const addFiles = useCallback(
     async (files: FileList | File[]) => {
       const fileArr = Array.from(files).filter((f) => f.type.startsWith("image/"));
@@ -176,16 +214,13 @@ export default function EvalPrelabelClient() {
           notes: "clean",
         })),
       );
-
       setQueue((prev) => [...prev, ...newItems]);
 
-      // Worker-pool pattern: take items off a shared list with bounded concurrency.
       let cursor = 0;
       const worker = async () => {
         while (cursor < newItems.length) {
           const idx = cursor++;
-          const item = newItems[idx]!;
-          await runPreLabel(item);
+          await runPreLabel(newItems[idx]!);
         }
       };
       const workers = Array.from(
@@ -197,13 +232,10 @@ export default function EvalPrelabelClient() {
     [runPreLabel],
   );
 
-  // ── Save (accept) — writes to scan_eval_images via promote ────────
-
   const saveItem = useCallback(
     async (item: QueueItem) => {
       if (!item.selectedSlug) return;
       updateItem(item.id, { status: "saving", errorMessage: undefined });
-
       try {
         const resp = await fetch("/api/admin/scan-eval/promote", {
           method: "POST",
@@ -215,10 +247,7 @@ export default function EvalPrelabelClient() {
             notes: item.notes,
           }),
         });
-        const json = (await resp.json()) as {
-          ok: boolean;
-          error?: string;
-        };
+        const json = (await resp.json()) as { ok: boolean; error?: string };
         if (!resp.ok || !json.ok) {
           updateItem(item.id, {
             status: "error",
@@ -238,140 +267,105 @@ export default function EvalPrelabelClient() {
   );
 
   const skipItem = useCallback(
-    (id: string) => {
-      updateItem(id, { status: "skipped" });
-    },
+    (id: string) => updateItem(id, { status: "skipped" }),
     [updateItem],
   );
 
-  // Cleanup object URLs on unmount.
   useEffect(() => {
     return () => {
-      for (const item of queueRef.current) {
-        URL.revokeObjectURL(item.previewUrl);
-      }
+      for (const item of queueRef.current) URL.revokeObjectURL(item.previewUrl);
     };
   }, []);
-
-  // ── Drag/drop wiring ───────────────────────────────────────────────
 
   const onDrop = useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
       e.preventDefault();
       setIsDragOver(false);
-      if (e.dataTransfer?.files) {
-        void addFiles(e.dataTransfer.files);
-      }
+      if (e.dataTransfer?.files) void addFiles(e.dataTransfer.files);
     },
     [addFiles],
   );
-
   const onDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsDragOver(true);
   }, []);
-
   const onDragLeave = useCallback(() => setIsDragOver(false), []);
 
-  // ── Render ─────────────────────────────────────────────────────────
-
   const pending = queue.filter((q) => q.status === "uploading" || q.status === "ready");
-  const finished = queue.filter((q) => q.status === "saved" || q.status === "skipped");
-  const failed = queue.filter((q) => q.status === "error");
+  const savedCount = queue.filter((q) => q.status === "saved").length;
+  const skippedCount = queue.filter((q) => q.status === "skipped").length;
+  const erroredCount = queue.filter((q) => q.status === "error").length;
+  const visibleQueue = queue.filter((q) => q.status !== "saved" && q.status !== "skipped");
 
   return (
-    <div className="flex flex-col gap-6">
-      {/* Drop zone */}
+    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+      {/* Big obvious drop zone */}
       <div
+        onClick={() => inputRef.current?.click()}
         onDrop={onDrop}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
-        className={`rounded-2xl border-2 border-dashed px-8 py-12 text-center transition ${
-          isDragOver
-            ? "border-blue-400 bg-blue-500/10"
-            : "border-[#2A2A2A] bg-white/[0.02]"
-        }`}
+        style={dropZoneStyle(isDragOver)}
       >
-        <p className="text-[15px] font-semibold text-white">
-          Drop card photos here, or
-        </p>
-        <button
-          type="button"
-          onClick={() => inputRef.current?.click()}
-          className="mt-3 inline-flex items-center rounded-2xl border border-[#1E1E1E] bg-white/[0.06] px-4 py-2 text-[13px] font-semibold text-white transition hover:bg-white/[0.12]"
-        >
-          Pick files…
-        </button>
+        <div style={{ fontSize: 22, fontWeight: 600, marginBottom: 8 }}>
+          {isDragOver ? "Drop to upload" : "Drop photos here"}
+        </div>
+        <div style={{ fontSize: 13, color: colors.textMuted, marginBottom: 16 }}>
+          or click anywhere in this box to pick files
+        </div>
+        <div style={{ fontSize: 12, color: colors.textDim }}>
+          JPEGs / PNGs up to 8 MB each. Drop a folder of photos at once — we
+          pre-label 4 at a time in parallel.
+        </div>
         <input
           ref={inputRef}
           type="file"
           accept="image/*"
           multiple
-          className="hidden"
+          style={{ display: "none" }}
           onChange={(e) => {
-            if (e.target.files) {
-              void addFiles(e.target.files);
-            }
+            if (e.target.files) void addFiles(e.target.files);
             e.target.value = "";
           }}
         />
-        <p className="mt-3 text-[12px] text-[#6B6B6B]">
-          Up to 8 MB per image. Drop a folder of photos at once — Gemini
-          pre-labels in parallel (4 at a time).
-        </p>
       </div>
 
       {/* Queue summary */}
       {queue.length > 0 && (
-        <div className="flex flex-wrap gap-3 text-[12px] text-[#A3A3A3]">
-          <span>
-            <span className="font-semibold text-white">{pending.length}</span> pending
-          </span>
-          <span>·</span>
-          <span>
-            <span className="font-semibold text-emerald-400">{finished.filter((q) => q.status === "saved").length}</span> saved
-          </span>
-          <span>·</span>
-          <span>
-            <span className="font-semibold text-zinc-500">{finished.filter((q) => q.status === "skipped").length}</span> skipped
-          </span>
-          {failed.length > 0 && (
+        <div style={{ fontSize: 13, color: colors.textMuted }}>
+          <span style={{ color: colors.text, fontWeight: 600 }}>{pending.length}</span> pending ·{" "}
+          <span style={{ color: colors.green, fontWeight: 600 }}>{savedCount}</span> saved ·{" "}
+          <span style={{ color: colors.textDim, fontWeight: 600 }}>{skippedCount}</span> skipped
+          {erroredCount > 0 && (
             <>
-              <span>·</span>
-              <span>
-                <span className="font-semibold text-red-400">{failed.length}</span> errored
-              </span>
+              {" · "}
+              <span style={{ color: colors.red, fontWeight: 600 }}>{erroredCount}</span> errored
             </>
           )}
         </div>
       )}
 
       {/* Item cards */}
-      <div className="flex flex-col gap-4">
-        {queue
-          .filter((q) => q.status !== "saved" && q.status !== "skipped")
-          .map((item) => (
-            <ItemCard
-              key={item.id}
-              item={item}
-              onSelectSlug={(slug) => updateItem(item.id, { selectedSlug: slug })}
-              onSetNotes={(notes) => updateItem(item.id, { notes })}
-              onSetManualOverride={(c) =>
-                updateItem(item.id, {
-                  manualOverride: c,
-                  selectedSlug: c?.slug,
-                })
-              }
-              onSave={() => saveItem(item)}
-              onSkip={() => skipItem(item.id)}
-            />
-          ))}
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        {visibleQueue.map((item) => (
+          <ItemCard
+            key={item.id}
+            item={item}
+            onSelectSlug={(slug) => updateItem(item.id, { selectedSlug: slug })}
+            onSetNotes={(notes) => updateItem(item.id, { notes })}
+            onSetManualOverride={(c) =>
+              updateItem(item.id, { manualOverride: c, selectedSlug: c?.slug })
+            }
+            onSave={() => saveItem(item)}
+            onSkip={() => skipItem(item.id)}
+          />
+        ))}
       </div>
     </div>
   );
 }
 
-// ── Single-item card ─────────────────────────────────────────────────
+// ── Single-item review card ────────────────────────────────────────
 
 function ItemCard({
   item,
@@ -406,154 +400,184 @@ function ItemCard({
     : candidates;
 
   return (
-    <div className="grid grid-cols-1 gap-4 rounded-2xl border border-[#1E1E1E] bg-white/[0.02] p-4 sm:grid-cols-[240px_1fr]">
-      {/* Captured image */}
-      <div className="flex items-start justify-center">
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "200px 1fr",
+        gap: 16,
+        padding: 16,
+        background: colors.surface,
+        border: `1px solid ${colors.border}`,
+        borderRadius: 12,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "center" }}>
         <img
           src={item.previewUrl}
           alt="captured card"
-          className="max-h-[300px] w-auto rounded-xl object-contain"
+          style={{ maxHeight: 280, width: "auto", borderRadius: 8, objectFit: "contain" }}
         />
       </div>
 
-      {/* Right side — guess + controls */}
-      <div className="flex flex-col gap-3">
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {item.status === "uploading" && (
-          <p className="text-[13px] text-[#A3A3A3]">Pre-labeling with Gemini…</p>
+          <div style={{ fontSize: 13, color: colors.textMuted }}>Pre-labeling with Gemini…</div>
         )}
 
         {item.status === "error" && (
-          <p className="text-[13px] text-red-400">
+          <div style={{ fontSize: 13, color: colors.red }}>
             {item.errorMessage ?? "pre-label failed"}
-          </p>
+          </div>
         )}
 
         {(item.status === "ready" || item.status === "saving") && item.preLabel && (
           <>
-            {/* VLM guess summary */}
-            <div className="rounded-xl border border-[#1E1E1E] bg-black/40 p-3 text-[12px] text-[#A3A3A3]">
-              <p className="font-mono">
-                <span className="text-[#6B6B6B]">vlm:</span>{" "}
-                <span className="text-white">{item.preLabel.vlm_guess.card_name ?? "—"}</span>
-                {item.preLabel.vlm_guess.collector_number && (
-                  <>
-                    {" · "}
-                    <span className="text-white">
-                      #{item.preLabel.vlm_guess.collector_number}
-                    </span>
-                  </>
-                )}
-                {item.preLabel.vlm_guess.set_name && (
-                  <>
-                    {" · "}
-                    <span className="text-white">
-                      {item.preLabel.vlm_guess.set_name}
-                    </span>
-                  </>
-                )}
-                {" · "}
-                <span
-                  className={
+            <div
+              style={{
+                fontSize: 12,
+                fontFamily: "ui-monospace,monospace",
+                color: colors.textMuted,
+                background: colors.surfaceAlt,
+                border: `1px solid ${colors.border}`,
+                borderRadius: 8,
+                padding: 8,
+              }}
+            >
+              <span style={{ color: colors.textDim }}>vlm:</span>{" "}
+              <span style={{ color: colors.text }}>
+                {item.preLabel.vlm_guess.card_name ?? "—"}
+              </span>
+              {item.preLabel.vlm_guess.collector_number && (
+                <>
+                  {" · "}
+                  <span style={{ color: colors.text }}>
+                    #{item.preLabel.vlm_guess.collector_number}
+                  </span>
+                </>
+              )}
+              {item.preLabel.vlm_guess.set_name && (
+                <>
+                  {" · "}
+                  <span style={{ color: colors.text }}>{item.preLabel.vlm_guess.set_name}</span>
+                </>
+              )}
+              {" · "}
+              <span
+                style={{
+                  color:
                     item.preLabel.vlm_guess.confidence === "high"
-                      ? "text-emerald-400"
+                      ? colors.green
                       : item.preLabel.vlm_guess.confidence === "medium"
-                        ? "text-yellow-400"
-                        : "text-red-400"
-                  }
-                >
-                  {item.preLabel.vlm_guess.confidence}
-                </span>
-              </p>
-              <p className="mt-1 text-[11px] text-[#6B6B6B]">
-                match: {item.preLabel.match_quality}
-              </p>
+                        ? colors.yellow
+                        : colors.red,
+                }}
+              >
+                {item.preLabel.vlm_guess.confidence}
+              </span>
+              <span style={{ color: colors.textDim }}> · match: {item.preLabel.match_quality}</span>
             </div>
 
-            {/* Candidate list */}
-            <div className="flex flex-col gap-2">
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {renderedCandidates.length === 0 ? (
-                <p className="text-[13px] text-[#A3A3A3]">
-                  No candidates matched — search manually below.
-                </p>
+                <div style={{ fontSize: 13, color: colors.textMuted }}>
+                  No matches — search manually below.
+                </div>
               ) : (
                 renderedCandidates.map((c) => (
                   <button
                     key={c.slug}
                     type="button"
                     onClick={() => onSelectSlug(c.slug)}
-                    className={`flex items-center gap-3 rounded-xl border p-2 text-left transition ${
-                      item.selectedSlug === c.slug
-                        ? "border-blue-400 bg-blue-500/10"
-                        : "border-[#1E1E1E] bg-white/[0.02] hover:bg-white/[0.06]"
-                    }`}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                      padding: 8,
+                      background:
+                        item.selectedSlug === c.slug ? "rgba(59,130,246,0.12)" : colors.surfaceAlt,
+                      border: `1px solid ${
+                        item.selectedSlug === c.slug ? colors.borderAccent : colors.border
+                      }`,
+                      borderRadius: 8,
+                      cursor: "pointer",
+                      textAlign: "left",
+                      color: colors.text,
+                    }}
                   >
                     {c.mirrored_primary_image_url && (
-                      // eslint-disable-next-line @next/next/no-img-element
                       <img
                         src={c.mirrored_primary_image_url}
                         alt={c.canonical_name}
-                        className="h-16 w-12 rounded-md object-cover"
+                        style={{ height: 60, width: 44, borderRadius: 4, objectFit: "cover" }}
                       />
                     )}
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-[13px] font-semibold text-white">
-                        {c.canonical_name}
-                      </p>
-                      <p className="truncate text-[11px] text-[#A3A3A3]">
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{c.canonical_name}</div>
+                      <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>
                         {c.set_name ?? "?"} · #{c.card_number ?? "?"}
-                      </p>
-                      <p className="mt-1 font-mono text-[10px] text-[#6B6B6B]">
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 10,
+                          fontFamily: "ui-monospace,monospace",
+                          color: colors.textDim,
+                          marginTop: 4,
+                        }}
+                      >
                         {c.slug}
-                      </p>
+                      </div>
                     </div>
-                    <span className="text-[11px] text-[#6B6B6B]">
-                      {c.match_reason}
-                    </span>
+                    <div style={{ fontSize: 10, color: colors.textDim }}>{c.match_reason}</div>
                   </button>
                 ))
               )}
             </div>
 
-            {/* Manual search */}
             <ManualSearch
               onPick={(c) => onSetManualOverride(c)}
               onClear={() => onSetManualOverride(undefined)}
               hasOverride={hasOverride}
             />
 
-            {/* Notes / condition tag */}
-            <div className="flex flex-wrap gap-1.5">
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
               {CONDITION_TAGS.map((tag) => (
                 <button
                   key={tag}
                   type="button"
                   onClick={() => onSetNotes(tag)}
-                  className={`rounded-lg border px-2 py-1 text-[11px] font-semibold transition ${
-                    item.notes === tag
-                      ? "border-blue-400 bg-blue-500/20 text-blue-100"
-                      : "border-[#1E1E1E] bg-white/[0.02] text-[#A3A3A3] hover:bg-white/[0.06]"
-                  }`}
+                  style={{
+                    padding: "4px 10px",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    background:
+                      item.notes === tag ? "rgba(59,130,246,0.2)" : colors.surfaceAlt,
+                    border: `1px solid ${
+                      item.notes === tag ? colors.borderAccent : colors.border
+                    }`,
+                    borderRadius: 6,
+                    color: item.notes === tag ? "#a8c5ff" : colors.textMuted,
+                    cursor: "pointer",
+                  }}
                 >
                   {tag}
                 </button>
               ))}
             </div>
 
-            {/* Actions */}
-            <div className="flex items-center gap-2">
+            <div style={{ display: "flex", gap: 8 }}>
               <button
                 type="button"
                 onClick={onSave}
                 disabled={!item.selectedSlug || item.status === "saving"}
-                className="flex-1 rounded-xl border border-emerald-400/40 bg-emerald-500/20 px-4 py-2 text-[13px] font-semibold text-emerald-100 transition hover:bg-emerald-500/30 disabled:opacity-40"
+                style={{
+                  ...buttonStyle("primary"),
+                  flex: 1,
+                  opacity: !item.selectedSlug || item.status === "saving" ? 0.4 : 1,
+                }}
               >
                 {item.status === "saving" ? "Saving…" : "Accept & save"}
               </button>
-              <button
-                type="button"
-                onClick={onSkip}
-                className="rounded-xl border border-[#3A2020] bg-[#201010] px-4 py-2 text-[13px] font-semibold text-[#FFD3D3] transition hover:bg-[#2A1515]"
-              >
+              <button type="button" onClick={onSkip} style={buttonStyle("danger")}>
                 Skip
               </button>
             </div>
@@ -564,7 +588,7 @@ function ItemCard({
   );
 }
 
-// ── Manual slug search (fallback when Gemini's guesses are all wrong)
+// ── Manual slug search ─────────────────────────────────────────────
 
 function ManualSearch({
   onPick,
@@ -630,14 +654,30 @@ function ManualSearch({
   }, [query]);
 
   return (
-    <div className="rounded-xl border border-[#1E1E1E] bg-black/30 p-2">
-      <div className="flex items-center gap-2">
+    <div
+      style={{
+        background: colors.surfaceAlt,
+        border: `1px solid ${colors.border}`,
+        borderRadius: 8,
+        padding: 6,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <input
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search manually if none of the candidates are right…"
-          className="w-full rounded-md bg-white/[0.04] px-3 py-1.5 text-[13px] text-white placeholder-[#6B6B6B] focus:outline-none"
+          style={{
+            flex: 1,
+            background: "rgba(255,255,255,0.04)",
+            border: "none",
+            borderRadius: 4,
+            padding: "6px 10px",
+            fontSize: 13,
+            color: colors.text,
+            outline: "none",
+          }}
         />
         {hasOverride && (
           <button
@@ -646,17 +686,25 @@ function ManualSearch({
               onClear();
               setQuery("");
             }}
-            className="text-[11px] text-[#A3A3A3] hover:text-white"
+            style={{
+              fontSize: 11,
+              color: colors.textMuted,
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+            }}
           >
             Clear
           </button>
         )}
       </div>
       {searching && (
-        <p className="mt-1 px-1 text-[11px] text-[#6B6B6B]">Searching…</p>
+        <div style={{ marginTop: 4, fontSize: 11, color: colors.textDim, padding: "0 4px" }}>
+          Searching…
+        </div>
       )}
       {results.length > 0 && (
-        <div className="mt-2 flex flex-col gap-1">
+        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
           {results.map((r) => (
             <button
               key={r.slug}
@@ -666,21 +714,31 @@ function ManualSearch({
                 setQuery("");
                 setResults([]);
               }}
-              className="flex items-center gap-2 rounded-md bg-white/[0.02] px-2 py-1 text-left hover:bg-white/[0.06]"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                background: "rgba(255,255,255,0.03)",
+                border: "none",
+                padding: "4px 8px",
+                borderRadius: 4,
+                cursor: "pointer",
+                textAlign: "left",
+                color: colors.text,
+              }}
             >
               {r.mirrored_primary_image_url && (
-                // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={r.mirrored_primary_image_url}
                   alt={r.canonical_name}
-                  className="h-10 w-7 rounded object-cover"
+                  style={{ height: 38, width: 28, borderRadius: 3, objectFit: "cover" }}
                 />
               )}
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-[12px] text-white">{r.canonical_name}</p>
-                <p className="truncate text-[10px] text-[#6B6B6B]">
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 12 }}>{r.canonical_name}</div>
+                <div style={{ fontSize: 10, color: colors.textDim }}>
                   {r.set_name ?? "?"} · #{r.card_number ?? "?"}
-                </p>
+                </div>
               </div>
             </button>
           ))}
