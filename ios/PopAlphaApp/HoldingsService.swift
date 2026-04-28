@@ -58,6 +58,23 @@ actor HoldingsService {
         )
     }
 
+    // MARK: - Delete
+
+    /// Remove one or more holding lots by ID. Typically all lots in a
+    /// position are passed together so the entire card disappears from
+    /// the portfolio in one request.
+    func deleteHoldings(ids: [Int]) async throws {
+        guard !ids.isEmpty else { return }
+        try AuthService.shared.requireAuth()
+
+        let idsParam = ids.map(String.init).joined(separator: ",")
+        let _: SimpleOKResponse = try await APIClient.delete(
+            path: "/api/holdings",
+            query: [("ids", idsParam)],
+            decoder: decoder
+        )
+    }
+
     // MARK: - Update
 
     /// Full replace of the user-editable fields on a single holding.

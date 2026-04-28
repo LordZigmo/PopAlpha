@@ -18,6 +18,7 @@
 		1200000100000000000000F2 /* InsightsUnlockProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1200000100000000000000A2 /* InsightsUnlockProgress.swift */; };
 		1200000100000000000000F3 /* PortfolioCardGridCell.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1200000100000000000000A3 /* PortfolioCardGridCell.swift */; };
 		1300000100000000000000F1 /* CollectorRadarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1300000100000000000000A1 /* CollectorRadarView.swift */; };
+		1400000100000000000000F1 /* SwipeRevealRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1400000100000000000000A1 /* SwipeRevealRow.swift */; };
 		9D07CFCE2F982B7B004BF9A7 /* PostHog in Frameworks */ = {isa = PBXBuildFile; productRef = 9D07CFCD2F982B7B004BF9A7 /* PostHog */; };
 		9D07CFD22F982DCD004BF9A7 /* AnalyticsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D07CFD12F982DCD004BF9A7 /* AnalyticsService.swift */; };
 		9DB745292F91E43300AD2083 /* Nuke in Frameworks */ = {isa = PBXBuildFile; productRef = 9DB745282F91E43300AD2083 /* Nuke */; };
@@ -98,6 +99,7 @@
 		1200000100000000000000A2 /* InsightsUnlockProgress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightsUnlockProgress.swift; sourceTree = "<group>"; };
 		1200000100000000000000A3 /* PortfolioCardGridCell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioCardGridCell.swift; sourceTree = "<group>"; };
 		1300000100000000000000A1 /* CollectorRadarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollectorRadarView.swift; sourceTree = "<group>"; };
+		1400000100000000000000A1 /* SwipeRevealRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipeRevealRow.swift; sourceTree = "<group>"; };
 		9D07CFD12F982DCD004BF9A7 /* AnalyticsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsService.swift; sourceTree = "<group>"; };
 		AA00000100000000000000A1 /* PopAlphaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopAlphaApp.swift; sourceTree = "<group>"; };
 		AA00000100000000000000A2 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -260,6 +262,7 @@
 				1200000100000000000000A2 /* InsightsUnlockProgress.swift */,
 				1200000100000000000000A3 /* PortfolioCardGridCell.swift */,
 				1300000100000000000000A1 /* CollectorRadarView.swift */,
+				1400000100000000000000A1 /* SwipeRevealRow.swift */,
 				AA00000100000000000000B1 /* Assets.xcassets */,
 				AA00000100000000000000B3 /* Info.plist */,
 				AA00000100000000000000E3 /* Preview Content */,
@@ -436,6 +439,7 @@
 				1200000100000000000000F2 /* InsightsUnlockProgress.swift in Sources */,
 				1200000100000000000000F3 /* PortfolioCardGridCell.swift in Sources */,
 				1300000100000000000000F1 /* CollectorRadarView.swift in Sources */,
+				1400000100000000000000F1 /* SwipeRevealRow.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

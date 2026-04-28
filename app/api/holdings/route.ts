@@ -219,3 +219,46 @@ export async function PATCH(req: Request) {
 
   return NextResponse.json({ ok: true });
 }
+
+// ── DELETE /api/holdings?ids=1,2,3 — remove lots from the portfolio ─────────
+//
+// Accepts a comma-separated list of holding row IDs via the `ids` query
+// param. All IDs are scoped to the authenticated user so callers cannot
+// delete rows they don't own even if they guess an id.
+
+export async function DELETE(req: Request) {
+  const auth = await requireUser(req);
+  if (!auth.ok) return auth.response;
+
+  const url = new URL(req.url);
+  const rawIds = url.searchParams.get("ids") ?? "";
+  const ids = rawIds
+    .split(",")
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isFinite(n) && n > 0);
+
+  if (ids.length === 0) {
+    return NextResponse.json({ ok: false, error: "ids query param required." }, { status: 400 });
+  }
+
+  const supabase = dbAdmin();
+  const { error, count } = await supabase
+    .from("holdings")
+    .delete({ count: "exact" })
+    .in("id", ids)
+    .eq("owner_clerk_id", auth.userId);
+
+  if (error) {
+    console.error("[holdings DELETE]", error.message);
+    return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+  }
+
+  const posthog = getPostHogClient();
+  posthog.capture({
+    distinctId: auth.userId,
+    event: "holding_deleted",
+    properties: { holding_ids: ids, count: count ?? ids.length },
+  });
+
+  return NextResponse.json({ ok: true, deleted: count ?? ids.length });
+}

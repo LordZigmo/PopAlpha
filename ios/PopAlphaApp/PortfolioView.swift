@@ -261,6 +261,10 @@ struct PortfolioView: View {
                                             onTap: { selectedCard = cardFor(position: position) },
                                             onLotTap: { lot in editingLot = lot }
                                         )
+                                        .swipeRevealActions(
+                                            onEdit: { editingLot = position.lots.first },
+                                            onDelete: { Task { await deleteLots(position.lots.map(\.id)) } }
+                                        )
                                     }
                                 }
                             case .grid:
@@ -352,6 +356,26 @@ struct PortfolioView: View {
 
         if let ov = fetchedOverview { overview = ov }
         if let act = fetchedActivity { activities = act.toActivities() }
+    }
+
+    // MARK: - Delete
+
+    /// Remove all lots for the given holding IDs, then optimistically
+    /// drop them from local state before the reload confirms it.
+    private func deleteLots(_ ids: [Int]) async {
+        let idSet = Set(ids)
+        // Optimistic update — remove from UI immediately
+        holdings.removeAll { idSet.contains($0.id) }
+        positions = Position.group(holdings)
+        PAHaptics.tap()
+
+        do {
+            try await HoldingsService.shared.deleteHoldings(ids: ids)
+        } catch {
+            print("[PortfolioView] Delete failed: \(error)")
+        }
+        // Reload to sync with server (also triggers overview refresh)
+        await loadPortfolio()
     }
 }
 
