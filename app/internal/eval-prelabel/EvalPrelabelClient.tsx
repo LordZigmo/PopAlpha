@@ -562,123 +562,149 @@ function ItemCard({
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {/* Status banner — uploading / error message / VLM summary */}
         {item.status === "uploading" && (
           <div style={{ fontSize: 13, color: colors.textMuted }}>Pre-labeling with Gemini…</div>
         )}
 
         {item.status === "error" && (
-          <div style={{ fontSize: 13, color: colors.red }}>
-            {item.errorMessage ?? "pre-label failed"}
+          <div
+            style={{
+              fontSize: 12,
+              color: colors.red,
+              background: "rgba(239,68,68,0.08)",
+              border: `1px solid rgba(239,68,68,0.30)`,
+              borderRadius: 8,
+              padding: 8,
+            }}
+          >
+            <div style={{ fontWeight: 600, marginBottom: 2 }}>VLM pre-label failed</div>
+            <div style={{ fontFamily: "ui-monospace,monospace", color: "#ffb4b4" }}>
+              {item.errorMessage ?? "unknown error"}
+            </div>
+            <div style={{ marginTop: 4, color: "#ffd0d0" }}>
+              Use the search box below to label this card manually.
+            </div>
           </div>
         )}
 
         {(item.status === "ready" || item.status === "saving") &&
           item.preLabel &&
           item.preLabel.vlm_guess && (
-            <>
-              <div
+            <div
+              style={{
+                fontSize: 12,
+                fontFamily: "ui-monospace,monospace",
+                color: colors.textMuted,
+                background: colors.surfaceAlt,
+                border: `1px solid ${colors.border}`,
+                borderRadius: 8,
+                padding: 8,
+              }}
+            >
+              <span style={{ color: colors.textDim }}>vlm:</span>{" "}
+              <span style={{ color: colors.text }}>
+                {item.preLabel.vlm_guess.card_name ?? "—"}
+              </span>
+              {item.preLabel.vlm_guess.collector_number && (
+                <>
+                  {" · "}
+                  <span style={{ color: colors.text }}>
+                    #{item.preLabel.vlm_guess.collector_number}
+                  </span>
+                </>
+              )}
+              {item.preLabel.vlm_guess.set_name && (
+                <>
+                  {" · "}
+                  <span style={{ color: colors.text }}>{item.preLabel.vlm_guess.set_name}</span>
+                </>
+              )}
+              {" · "}
+              <span
                 style={{
-                  fontSize: 12,
-                  fontFamily: "ui-monospace,monospace",
-                  color: colors.textMuted,
-                  background: colors.surfaceAlt,
-                  border: `1px solid ${colors.border}`,
-                  borderRadius: 8,
-                  padding: 8,
+                  color:
+                    item.preLabel.vlm_guess.confidence === "high"
+                      ? colors.green
+                      : item.preLabel.vlm_guess.confidence === "medium"
+                        ? colors.yellow
+                        : colors.red,
                 }}
               >
-                <span style={{ color: colors.textDim }}>vlm:</span>{" "}
-                <span style={{ color: colors.text }}>
-                  {item.preLabel.vlm_guess.card_name ?? "—"}
-                </span>
-                {item.preLabel.vlm_guess.collector_number && (
-                  <>
-                    {" · "}
-                    <span style={{ color: colors.text }}>
-                      #{item.preLabel.vlm_guess.collector_number}
-                    </span>
-                  </>
-                )}
-                {item.preLabel.vlm_guess.set_name && (
-                  <>
-                    {" · "}
-                    <span style={{ color: colors.text }}>{item.preLabel.vlm_guess.set_name}</span>
-                  </>
-                )}
-                {" · "}
-                <span
+                {item.preLabel.vlm_guess.confidence}
+              </span>
+              <span style={{ color: colors.textDim }}>
+                {" "}· match: {item.preLabel.match_quality}
+              </span>
+            </div>
+          )}
+
+        {/* Candidate list — only shown when VLM returned at least one
+            potential match. Skipped on error / no-candidate paths,
+            since the operator's only option there is manual search. */}
+        {(item.status === "ready" || item.status === "saving") &&
+          renderedCandidates.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {renderedCandidates.map((c) => (
+                <button
+                  key={c.slug}
+                  type="button"
+                  onClick={() => onSelectSlug(c.slug)}
                   style={{
-                    color:
-                      item.preLabel.vlm_guess.confidence === "high"
-                        ? colors.green
-                        : item.preLabel.vlm_guess.confidence === "medium"
-                          ? colors.yellow
-                          : colors.red,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    padding: 8,
+                    background:
+                      item.selectedSlug === c.slug ? "rgba(59,130,246,0.12)" : colors.surfaceAlt,
+                    border: `1px solid ${
+                      item.selectedSlug === c.slug ? colors.borderAccent : colors.border
+                    }`,
+                    borderRadius: 8,
+                    cursor: "pointer",
+                    textAlign: "left",
+                    color: colors.text,
                   }}
                 >
-                  {item.preLabel.vlm_guess.confidence}
-                </span>
-                <span style={{ color: colors.textDim }}>
-                  {" "}· match: {item.preLabel.match_quality}
-                </span>
-              </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {renderedCandidates.length === 0 ? (
-                <div style={{ fontSize: 13, color: colors.textMuted }}>
-                  No matches — search manually below.
-                </div>
-              ) : (
-                renderedCandidates.map((c) => (
-                  <button
-                    key={c.slug}
-                    type="button"
-                    onClick={() => onSelectSlug(c.slug)}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 12,
-                      padding: 8,
-                      background:
-                        item.selectedSlug === c.slug ? "rgba(59,130,246,0.12)" : colors.surfaceAlt,
-                      border: `1px solid ${
-                        item.selectedSlug === c.slug ? colors.borderAccent : colors.border
-                      }`,
-                      borderRadius: 8,
-                      cursor: "pointer",
-                      textAlign: "left",
-                      color: colors.text,
-                    }}
-                  >
-                    {c.mirrored_primary_image_url && (
-                      <img
-                        src={c.mirrored_primary_image_url}
-                        alt={c.canonical_name}
-                        style={{ height: 60, width: 44, borderRadius: 4, objectFit: "cover" }}
-                      />
-                    )}
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600 }}>{c.canonical_name}</div>
-                      <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>
-                        {c.set_name ?? "?"} · #{c.card_number ?? "?"}
-                      </div>
-                      <div
-                        style={{
-                          fontSize: 10,
-                          fontFamily: "ui-monospace,monospace",
-                          color: colors.textDim,
-                          marginTop: 4,
-                        }}
-                      >
-                        {c.slug}
-                      </div>
+                  {c.mirrored_primary_image_url && (
+                    <img
+                      src={c.mirrored_primary_image_url}
+                      alt={c.canonical_name}
+                      style={{ height: 60, width: 44, borderRadius: 4, objectFit: "cover" }}
+                    />
+                  )}
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{c.canonical_name}</div>
+                    <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>
+                      {c.set_name ?? "?"} · #{c.card_number ?? "?"}
                     </div>
-                    <div style={{ fontSize: 10, color: colors.textDim }}>{c.match_reason}</div>
-                  </button>
-                ))
-              )}
+                    <div
+                      style={{
+                        fontSize: 10,
+                        fontFamily: "ui-monospace,monospace",
+                        color: colors.textDim,
+                        marginTop: 4,
+                      }}
+                    >
+                      {c.slug}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 10, color: colors.textDim }}>{c.match_reason}</div>
+                </button>
+              ))}
             </div>
+          )}
 
+        {/* Editor — manual search + condition chips + accept/skip
+            buttons. Renders for any state where the operator can act
+            on the photo: ready (VLM succeeded), saving (in flight),
+            error (VLM failed but operator can still label manually).
+            This was the missing piece — previously the whole editor
+            was gated on item.preLabel.vlm_guess, so VLM failures left
+            the operator with nothing but an error message and a Skip
+            button. Now the editor is always available. */}
+        {(item.status === "ready" || item.status === "saving" || item.status === "error") && (
+          <>
             <ManualSearch
               onPick={(c) => onSetManualOverride(c)}
               onClear={() => onSetManualOverride(undefined)}
