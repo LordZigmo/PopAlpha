@@ -34,13 +34,23 @@ type Candidate = {
   match_reason: string;
 };
 
+type AlreadySavedInfo = {
+  eval_image_id: string;
+  canonical_slug: string;
+  captured_source: string;
+  captured_language: string;
+  notes: string | null;
+  created_at: string;
+};
+
 type PreLabelResponse = {
   ok: boolean;
   image_hash: string;
   image_bytes_size: number;
-  vlm_guess: VlmGuess;
+  vlm_guess: VlmGuess | null;
   candidates: Candidate[];
   match_quality: "exact" | "fuzzy" | "name-only" | "unmatched";
+  already_saved: AlreadySavedInfo | null;
   error?: string;
 };
 
@@ -57,7 +67,14 @@ type QueueItem = {
   file: File;
   previewUrl: string;
   base64: string;
-  status: "uploading" | "ready" | "saving" | "saved" | "skipped" | "error";
+  status:
+    | "uploading"
+    | "ready"
+    | "saving"
+    | "saved"
+    | "skipped"
+    | "error"
+    | "already-saved"; // server detected this image hash is already in scan_eval_images
   preLabel?: PreLabelResponse;
   selectedSlug?: string;
   notes: string;
@@ -184,6 +201,19 @@ export default function EvalPrelabelClient() {
           });
           return;
         }
+        // Already-saved short-circuit — server detected this image
+        // hash already exists in scan_eval_images. Surface in a
+        // distinct "already-saved" state so the operator can see at
+        // a glance which photos in a re-upload batch are duplicates
+        // vs which are genuinely new and need attention.
+        if (json.already_saved) {
+          updateItem(item.id, {
+            status: "already-saved",
+            preLabel: json,
+            selectedSlug: json.already_saved.canonical_slug,
+          });
+          return;
+        }
         updateItem(item.id, {
           status: "ready",
           preLabel: json,
@@ -294,7 +324,11 @@ export default function EvalPrelabelClient() {
   const pending = queue.filter((q) => q.status === "uploading" || q.status === "ready");
   const savedCount = queue.filter((q) => q.status === "saved").length;
   const skippedCount = queue.filter((q) => q.status === "skipped").length;
+  const alreadySavedCount = queue.filter((q) => q.status === "already-saved").length;
   const erroredCount = queue.filter((q) => q.status === "error").length;
+  // already-saved cards stay visible (so operator can see which ones
+  // were dedup'd) but render as compact dismiss-able banners rather
+  // than full review cards.
   const visibleQueue = queue.filter((q) => q.status !== "saved" && q.status !== "skipped");
 
   return (
@@ -336,6 +370,13 @@ export default function EvalPrelabelClient() {
           <span style={{ color: colors.text, fontWeight: 600 }}>{pending.length}</span> pending ·{" "}
           <span style={{ color: colors.green, fontWeight: 600 }}>{savedCount}</span> saved ·{" "}
           <span style={{ color: colors.textDim, fontWeight: 600 }}>{skippedCount}</span> skipped
+          {alreadySavedCount > 0 && (
+            <>
+              {" · "}
+              <span style={{ color: colors.yellow, fontWeight: 600 }}>{alreadySavedCount}</span>{" "}
+              already saved
+            </>
+          )}
           {erroredCount > 0 && (
             <>
               {" · "}
@@ -347,20 +388,121 @@ export default function EvalPrelabelClient() {
 
       {/* Item cards */}
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        {visibleQueue.map((item) => (
-          <ItemCard
-            key={item.id}
-            item={item}
-            onSelectSlug={(slug) => updateItem(item.id, { selectedSlug: slug })}
-            onSetNotes={(notes) => updateItem(item.id, { notes })}
-            onSetManualOverride={(c) =>
-              updateItem(item.id, { manualOverride: c, selectedSlug: c?.slug })
-            }
-            onSave={() => saveItem(item)}
-            onSkip={() => skipItem(item.id)}
-          />
-        ))}
+        {visibleQueue.map((item) =>
+          item.status === "already-saved" ? (
+            <AlreadySavedBanner
+              key={item.id}
+              item={item}
+              onDismiss={() => skipItem(item.id)}
+            />
+          ) : (
+            <ItemCard
+              key={item.id}
+              item={item}
+              onSelectSlug={(slug) => updateItem(item.id, { selectedSlug: slug })}
+              onSetNotes={(notes) => updateItem(item.id, { notes })}
+              onSetManualOverride={(c) =>
+                updateItem(item.id, { manualOverride: c, selectedSlug: c?.slug })
+              }
+              onSave={() => saveItem(item)}
+              onSkip={() => skipItem(item.id)}
+            />
+          ),
+        )}
       </div>
+
+      {/* Bulk-dismiss action when there are several already-saved items */}
+      {alreadySavedCount >= 3 && (
+        <button
+          type="button"
+          onClick={() => {
+            for (const item of queue) {
+              if (item.status === "already-saved") skipItem(item.id);
+            }
+          }}
+          style={{
+            ...buttonStyle("secondary"),
+            alignSelf: "flex-start",
+          }}
+        >
+          Dismiss all {alreadySavedCount} already-saved items
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ── Compact "already saved" banner ─────────────────────────────────
+
+function AlreadySavedBanner({
+  item,
+  onDismiss,
+}: {
+  item: QueueItem;
+  onDismiss: () => void;
+}) {
+  const slug = item.preLabel?.already_saved?.canonical_slug ?? item.selectedSlug ?? "?";
+  const notes = item.preLabel?.already_saved?.notes;
+  const createdAt = item.preLabel?.already_saved?.created_at;
+  const friendlyDate = createdAt
+    ? new Date(createdAt).toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+      })
+    : null;
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        padding: 10,
+        background: "rgba(251,191,36,0.06)",
+        border: `1px solid rgba(251,191,36,0.30)`,
+        borderRadius: 10,
+      }}
+    >
+      <img
+        src={item.previewUrl}
+        alt="already saved"
+        style={{ height: 56, width: "auto", borderRadius: 4, objectFit: "contain" }}
+      />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, color: colors.yellow, fontWeight: 600, marginBottom: 2 }}>
+          ✓ Already saved
+        </div>
+        <div
+          style={{
+            fontSize: 12,
+            fontFamily: "ui-monospace,monospace",
+            color: colors.text,
+            wordBreak: "break-all",
+          }}
+        >
+          {slug}
+        </div>
+        {(notes || friendlyDate) && (
+          <div style={{ fontSize: 11, color: colors.textDim, marginTop: 2 }}>
+            {[notes, friendlyDate].filter(Boolean).join(" · ")}
+          </div>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={onDismiss}
+        style={{
+          fontSize: 11,
+          color: colors.textMuted,
+          background: "transparent",
+          border: `1px solid ${colors.border}`,
+          borderRadius: 6,
+          padding: "4px 10px",
+          cursor: "pointer",
+        }}
+      >
+        Dismiss
+      </button>
     </div>
   );
 }
@@ -430,52 +572,56 @@ function ItemCard({
           </div>
         )}
 
-        {(item.status === "ready" || item.status === "saving") && item.preLabel && (
-          <>
-            <div
-              style={{
-                fontSize: 12,
-                fontFamily: "ui-monospace,monospace",
-                color: colors.textMuted,
-                background: colors.surfaceAlt,
-                border: `1px solid ${colors.border}`,
-                borderRadius: 8,
-                padding: 8,
-              }}
-            >
-              <span style={{ color: colors.textDim }}>vlm:</span>{" "}
-              <span style={{ color: colors.text }}>
-                {item.preLabel.vlm_guess.card_name ?? "—"}
-              </span>
-              {item.preLabel.vlm_guess.collector_number && (
-                <>
-                  {" · "}
-                  <span style={{ color: colors.text }}>
-                    #{item.preLabel.vlm_guess.collector_number}
-                  </span>
-                </>
-              )}
-              {item.preLabel.vlm_guess.set_name && (
-                <>
-                  {" · "}
-                  <span style={{ color: colors.text }}>{item.preLabel.vlm_guess.set_name}</span>
-                </>
-              )}
-              {" · "}
-              <span
+        {(item.status === "ready" || item.status === "saving") &&
+          item.preLabel &&
+          item.preLabel.vlm_guess && (
+            <>
+              <div
                 style={{
-                  color:
-                    item.preLabel.vlm_guess.confidence === "high"
-                      ? colors.green
-                      : item.preLabel.vlm_guess.confidence === "medium"
-                        ? colors.yellow
-                        : colors.red,
+                  fontSize: 12,
+                  fontFamily: "ui-monospace,monospace",
+                  color: colors.textMuted,
+                  background: colors.surfaceAlt,
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 8,
+                  padding: 8,
                 }}
               >
-                {item.preLabel.vlm_guess.confidence}
-              </span>
-              <span style={{ color: colors.textDim }}> · match: {item.preLabel.match_quality}</span>
-            </div>
+                <span style={{ color: colors.textDim }}>vlm:</span>{" "}
+                <span style={{ color: colors.text }}>
+                  {item.preLabel.vlm_guess.card_name ?? "—"}
+                </span>
+                {item.preLabel.vlm_guess.collector_number && (
+                  <>
+                    {" · "}
+                    <span style={{ color: colors.text }}>
+                      #{item.preLabel.vlm_guess.collector_number}
+                    </span>
+                  </>
+                )}
+                {item.preLabel.vlm_guess.set_name && (
+                  <>
+                    {" · "}
+                    <span style={{ color: colors.text }}>{item.preLabel.vlm_guess.set_name}</span>
+                  </>
+                )}
+                {" · "}
+                <span
+                  style={{
+                    color:
+                      item.preLabel.vlm_guess.confidence === "high"
+                        ? colors.green
+                        : item.preLabel.vlm_guess.confidence === "medium"
+                          ? colors.yellow
+                          : colors.red,
+                  }}
+                >
+                  {item.preLabel.vlm_guess.confidence}
+                </span>
+                <span style={{ color: colors.textDim }}>
+                  {" "}· match: {item.preLabel.match_quality}
+                </span>
+              </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {renderedCandidates.length === 0 ? (

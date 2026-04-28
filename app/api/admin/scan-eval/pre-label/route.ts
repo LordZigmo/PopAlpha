@@ -33,6 +33,7 @@
 import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/require";
+import { dbAdmin } from "@/lib/db/admin";
 import {
   prelabelCardImage,
   VlmPrelabelError,
@@ -91,6 +92,38 @@ export async function POST(req: Request) {
 
   const imageHash = crypto.createHash("sha256").update(imageBytes).digest("hex");
 
+  // Dedup check — has this image already been promoted? If so, skip
+  // the VLM call entirely (saves money + latency) and tell the
+  // operator "already saved as X" so they can move on without
+  // re-confirming. Critical for re-upload workflows where a batch
+  // includes some already-labeled images alongside fresh ones.
+  const supabase = dbAdmin();
+  const existing = await supabase
+    .from("scan_eval_images")
+    .select("id, canonical_slug, captured_source, captured_language, notes, created_at")
+    .eq("image_hash", imageHash)
+    .maybeSingle();
+
+  if (existing.data) {
+    return NextResponse.json({
+      ok: true,
+      image_hash: imageHash,
+      image_bytes_size: imageBytes.length,
+      already_saved: {
+        eval_image_id: existing.data.id,
+        canonical_slug: existing.data.canonical_slug,
+        captured_source: existing.data.captured_source,
+        captured_language: existing.data.captured_language,
+        notes: existing.data.notes,
+        created_at: existing.data.created_at,
+      },
+      vlm_guess: null,
+      candidates: [],
+      match_quality: "unmatched" as const,
+      vlm_version: VLM_PRELABEL_VERSION,
+    });
+  }
+
   // VLM extraction — surface any failure cleanly. Per the
   // external-api-failure-modes playbook, no blanket-catch swallowing.
   try {
@@ -101,6 +134,7 @@ export async function POST(req: Request) {
       ok: true,
       image_hash: imageHash,
       image_bytes_size: imageBytes.length,
+      already_saved: null,
       vlm_guess: guess,
       candidates: matchResult.candidates,
       match_quality: matchResult.match_quality,
