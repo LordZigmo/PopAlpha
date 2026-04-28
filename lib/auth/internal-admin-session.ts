@@ -51,12 +51,24 @@ export type InternalAdminApiAccessResult =
       code: InternalAdminApiFailureCode;
     };
 
+// Cookie path scoped to /internal so it covers both
+// /internal/admin/* (eBay deletion review) AND sibling internal-
+// admin-gated pages like /internal/eval-prelabel without needing
+// to broaden to / (which would expose the cookie to public routes).
+//
+// Originally /internal/admin only — when /internal/eval-prelabel
+// was added 2026-04-28 the path mismatch caused an infinite redirect
+// loop: browser would not send the cookie to the new page, page
+// would redirect back to sign-in, sign-in WOULD see the cookie,
+// sign-in would redirect to returnTo, and round it went.
+const INTERNAL_ADMIN_COOKIE_PATH = "/internal";
+
 function buildCookieOptions(expiresAtMs: number) {
   return {
     httpOnly: true,
     sameSite: "strict" as const,
     secure: process.env.NODE_ENV === "production",
-    path: "/internal/admin",
+    path: INTERNAL_ADMIN_COOKIE_PATH,
     expires: new Date(expiresAtMs),
   };
 }
@@ -251,7 +263,7 @@ export async function clearInternalAdminSession(): Promise<void> {
     httpOnly: true,
     sameSite: "strict",
     secure: process.env.NODE_ENV === "production",
-    path: "/internal/admin",
+    path: INTERNAL_ADMIN_COOKIE_PATH,
     expires: new Date(0),
     maxAge: 0,
   });
