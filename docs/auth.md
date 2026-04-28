@@ -11,6 +11,30 @@ PopAlpha uses a 4-kind auth model defined in `lib/auth/context.ts`.
 | `admin` | Admin tooling | `ADMIN_SECRET` (Bearer or x-admin-secret header) or `ADMIN_IMPORT_TOKEN` | `requireAdmin()` |
 | `cron` | Vercel cron / admin | `CRON_SECRET` (Bearer) | `requireCron()` (also accepts admin) |
 
+## Elevation Is Additive, Never A Kind Swap
+
+When a user gains *more* access on top of an existing role, model it as a flag (or a permission set) on their existing kind — never by swapping `kind` to a more-privileged value. `requireUser()`, `requireAdmin()`, and `requireCron()` are mutually exclusive on `kind`, so the moment you change the discriminator, every guard that matched the original kind starts denying the elevated user. The failure surfaces as a generic 401 on unrelated user-tier routes; nothing points back at the elevation logic.
+
+Concrete rule for `AuthContext`:
+
+- `kind: "user"` carries identity (`userId`). It is the only kind that does. Anything that has a userId belongs in `user`, with optional flags (`isAdmin?: boolean`, future scopes, etc.) layered on top.
+- `kind: "admin"` and `kind: "cron"` come from shared secrets (`ADMIN_SECRET`, `ADMIN_IMPORT_TOKEN`, `CRON_SECRET`) and are intentionally identity-less — there's no userId to thread through, so they stay as their own kinds.
+- `requireAdmin()` accepts both `kind: "admin"` and `kind: "user"` with `isAdmin: true`. Admin is a strict superset of user, not a replacement.
+
+Do / don't:
+
+```ts
+// DON'T — swapping kind drops userId and breaks every requireUser() route
+if (allowlist.has(userId)) return { kind: "admin", reason: "clerk-allowlist" };
+return { kind: "user", userId };
+
+// DO — keep the user kind, layer admin on as a flag
+const isAdmin = allowlist.has(userId);
+return { kind: "user", userId, isAdmin };
+```
+
+This was the bug in commit `8439a33` (iOS operator admin elevation via `INTERNAL_ADMIN_CLERK_USER_IDS`): allowlisted Clerk users were returned as `{ kind: "admin" }`, so `requireUser()` rejected them on `/api/me`, `/api/holdings`, `/api/portfolio/**`, `/api/personalization/**`. Symptom in the iOS app was "Sign in required" + empty homepage holdings — nothing about admin. Regular users were unaffected, which is why it hid for several days. Fixed in `577f2dd` by keeping `kind: "user"` and adding `isAdmin?: boolean`. If you find yourself reaching for a new admin-shaped kind for any future role/scope/RBAC work, reach for an additive flag on the existing user context instead.
+
 ## Adding a New Route
 
 1. **Pick a classification**: public, user, admin, cron, ingest, or debug
