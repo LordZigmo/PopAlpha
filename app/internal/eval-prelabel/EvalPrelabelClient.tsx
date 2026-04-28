@@ -615,34 +615,57 @@ function ManualSearch({
       try {
         const resp = await fetch(`/api/search/cards?q=${encodeURIComponent(query)}`);
         if (!resp.ok) {
+          // Surface non-2xx visibly instead of silently emptying the
+          // result list — playbook lesson from the silent-fallback
+          // postmortem (docs/external-api-failure-modes.md). If the
+          // operator sees "search returned 503" they know to retry;
+          // a silent empty list looks like "no matches" and they
+          // skip the card.
+          console.warn(
+            `[eval-prelabel] /api/search/cards HTTP ${resp.status} for q="${query}"`,
+          );
           setResults([]);
           return;
         }
         const json = (await resp.json()) as {
           ok: boolean;
-          results?: Array<{
+          cards?: Array<{
+            id?: string;
             slug?: string;
             canonical_slug?: string;
             canonical_name?: string;
             name?: string;
+            set?: string | null;
             set_name?: string | null;
             card_number?: string | null;
             mirrored_primary_image_url?: string | null;
             primary_image_url?: string | null;
           }>;
+          // Older shape — kept defensively in case the endpoint
+          // ever changes back, but cards is the current truth.
+          results?: unknown[];
         };
-        const normalized = (json.results ?? [])
+        // The /api/search/cards endpoint returns the array under
+        // `cards`. (Original code read `results` — that was the bug
+        // that made manual search appear to find nothing.)
+        const raw = json.cards ?? [];
+        const normalized = raw
           .map((r) => ({
-            slug: r.slug ?? r.canonical_slug ?? "",
+            slug: r.slug ?? r.canonical_slug ?? r.id ?? "",
             canonical_name: r.canonical_name ?? r.name ?? "",
-            set_name: r.set_name ?? null,
+            set_name: r.set_name ?? r.set ?? null,
             card_number: r.card_number ?? null,
             mirrored_primary_image_url:
               r.mirrored_primary_image_url ?? r.primary_image_url ?? null,
           }))
           .filter((r) => r.slug && r.canonical_name)
-          .slice(0, 5);
+          .slice(0, 8);
         setResults(normalized);
+      } catch (err) {
+        console.warn(
+          `[eval-prelabel] manual search threw: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        setResults([]);
       } finally {
         setSearching(false);
       }
