@@ -13,8 +13,10 @@
  * .env.local has empty POSTGRES_URL on the operator's machine. Vercel
  * runtime has the real connection string baked in via project env.
  *
- * Trust: admin — Authorization: Bearer ADMIN_SECRET (or admin Clerk
- * user). Aligns with other admin/* manual one-shot routes.
+ * Trust: cron — Authorization: Bearer CRON_SECRET. requireCron also
+ * accepts ADMIN_SECRET, so either works. Classified as a cron-trust
+ * route in the registry even though the path lives under admin/cleanup
+ * (the path describes intent, the trust contract describes auth).
  *
  * Idempotent: re-running is a no-op once losers are cleaned.
  *
@@ -24,7 +26,7 @@
 
 import { NextResponse } from "next/server";
 import { sql } from "@vercel/postgres";
-import { requireAdmin } from "@/lib/auth/require";
+import { requireCron } from "@/lib/auth/require";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -251,7 +253,7 @@ const PLAN: Array<[string, string]> = [
 ];
 
 export async function GET(req: Request) {
-  const auth = await requireAdmin(req);
+  const auth = await requireCron(req);
   if (!auth.ok) return auth.response;
 
   const startedAt = Date.now();
