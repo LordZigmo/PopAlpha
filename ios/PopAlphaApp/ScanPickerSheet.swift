@@ -20,6 +20,13 @@ struct ScanPickerSheet: View {
     let matches: [ScanMatch]
     let imageHash: String?
     let scanLanguage: ScanLanguage
+    /// What on-device OCR pulled from the captured frame. Used by the
+    /// debug overlay (DEBUG-only) so during sprint real-device testing
+    /// the operator can see whether Vision actually extracted the
+    /// printed collector number / set name. Default-nil keeps the
+    /// initializer source-compatible with existing callers.
+    var ocrCardNumber: String? = nil
+    var ocrSetHint: String? = nil
     let onPick: (ScanMatch) -> Void
     let onDismiss: () -> Void
 
@@ -36,6 +43,9 @@ struct ScanPickerSheet: View {
                 header
                 matchList
                 Spacer(minLength: 12)
+                #if DEBUG
+                ocrDebugStrip
+                #endif
                 noneOfTheseButton
             }
             .padding(.horizontal, 20)
@@ -60,6 +70,36 @@ struct ScanPickerSheet: View {
         .presentationDragIndicator(.visible)
         .interactiveDismissDisabled(promoting)
     }
+
+    #if DEBUG
+    @ViewBuilder
+    private var ocrDebugStrip: some View {
+        let numberDisplay = ocrCardNumber?.isEmpty == false ? ocrCardNumber! : "—"
+        let hintDisplay = ocrSetHint?.isEmpty == false ? ocrSetHint! : "—"
+        VStack(alignment: .leading, spacing: 4) {
+            Text("OCR debug (DEBUG builds only)")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(PA.Colors.muted)
+            HStack(spacing: 12) {
+                Text("card_number: \(numberDisplay)")
+                    .font(.system(size: 11, design: .monospaced))
+                Text("set_hint: \(hintDisplay)")
+                    .font(.system(size: 11, design: .monospaced))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .foregroundStyle(PA.Colors.foreground.opacity(0.7))
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(PA.Colors.muted.opacity(0.08))
+        )
+        .padding(.bottom, 12)
+    }
+    #endif
 
     // MARK: - Sections
 

@@ -93,6 +93,8 @@ struct ScannerTabView: View {
                     matches: scanner.lastMatches,
                     imageHash: scanner.lastImageHash,
                     scanLanguage: scanLanguage,
+                    ocrCardNumber: scanner.lastOCR.cardNumber,
+                    ocrSetHint: scanner.lastOCR.setHint,
                     onPick: handlePickerSelection,
                     onDismiss: handlePickerDismiss
                 )
@@ -585,6 +587,14 @@ final class ScannerHost: ObservableObject {
     /// re-arming. Populated alongside lastMatch; cleared in lockstep.
     @Published private(set) var lastMatches: [ScanMatch] = []
 
+    /// What on-device OCR pulled from the last captured frame
+    /// (collector number and/or set-name hint). Surfaced so the
+    /// debug overlay in ScanPickerSheet can show what Vision
+    /// extracted vs. what the system identified — answers "did
+    /// OCR fail or did the route ignore my hints?" during sprint
+    /// real-device testing. Compile-stripped in release builds.
+    @Published private(set) var lastOCR: (cardNumber: String?, setHint: String?) = (nil, nil)
+
     /// Language hint passed to /api/scan/identify. Defaults to EN; the
     /// scanner UI exposes a pill toggle so the user can flip to JP.
     var scanLanguage: ScanLanguage = .en
@@ -682,6 +692,13 @@ final class ScannerHost: ObservableObject {
         // any drift between canonical_cards.card_number and what the
         // server returned in match.cardNumber.
         let ocr = await OCRService.extractCardIdentifiers(from: image)
+        self.lastOCR = ocr
+        #if DEBUG
+        print(
+            "[scan ocr] cardNumber=\(ocr.cardNumber ?? "nil") "
+            + "setHint=\(ocr.setHint ?? "nil")"
+        )
+        #endif
 
         do {
             let response = try await ScanService.identify(
@@ -747,6 +764,7 @@ final class ScannerHost: ObservableObject {
         lastConfidence = nil
         identifyError = nil
         lastImageHash = nil
+        lastOCR = (nil, nil)
     }
 }
 
