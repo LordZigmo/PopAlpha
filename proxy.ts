@@ -33,6 +33,12 @@ const ADMIN_SET = new Set(ADMIN_ROUTES);
 const DEBUG_SET = new Set(DEBUG_ROUTES);
 const INGEST_SET = new Set(INGEST_ROUTES);
 const USER_SET = new Set(USER_ROUTES);
+// Force middleware bundle to take a fresh hash on the post-79e6e8a
+// deploy — registry-only changes were skipping middleware rebuild and
+// admin/cleanup/delete-thumb-overlay-augs returned 404 from the
+// "unknown" branch despite being registered.
+const _ROUTE_REGISTRY_BUNDLE_REV = "2026-04-29-thumb-overlay-cleanup";
+void _ROUTE_REGISTRY_BUNDLE_REV;
 const ALL_ROUTE_KEYS = [
   ...PUBLIC_ROUTES,
   ...CRON_ROUTES,
