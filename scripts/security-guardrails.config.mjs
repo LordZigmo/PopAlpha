@@ -50,7 +50,8 @@ export const INTERNAL_ADMIN_PAGE_ROOTS = [
 
 export const INTERNAL_ADMIN_ALLOWED_PAGE_FETCH_PREFIXES = [
   "/api/admin/ebay-deletion-tasks",
-  "/api/admin/variant-tokens",
+  // "/api/admin/variant-tokens" — reverted 2026-04-29 alongside the
+  // registry entry (route file untracked in git, breaking Vercel build).
 ];
 
 function privilegedEntrypoint({
@@ -136,20 +137,11 @@ export const INTERNAL_ADMIN_UI_ENTRYPOINT_CONTRACTS = {
     requiredTrustInputs: ["internal_admin_cookie", "audited_admin_review_patch"],
     expectedSignals: ["require_internal_admin_session", "internal_admin_review_patch"],
   }),
-  "app/internal/admin/(protected)/variant-tokens/page.tsx": privilegedEntrypoint({
-    type: "internal_admin_variant_token_page",
-    intendedCaller: "allowlisted Clerk operator reviewing the Scrydex variant token registry",
-    trustModel: "internal_admin_session",
-    requiredTrustInputs: ["internal_admin_cookie", "server_only_admin_variant_token_api"],
-    expectedSignals: ["require_internal_admin_session", "internal_admin_variant_token_api"],
-  }),
-  "app/internal/admin/(protected)/variant-tokens/actions.ts": privilegedEntrypoint({
-    type: "internal_admin_variant_token_actions",
-    intendedCaller: "server actions mutating variant_token_registry display labels and statuses",
-    trustModel: "internal_admin_session",
-    requiredTrustInputs: ["internal_admin_cookie", "audited_admin_variant_token_patch"],
-    expectedSignals: ["require_internal_admin_session", "internal_admin_variant_token_patch"],
-  }),
+  // 2026-04-29: variant-tokens entries reverted alongside the registry/
+  // route entry (their target files are untracked in git, breaking the
+  // Vercel build). Re-add when committing the matching feature files.
+  // "app/internal/admin/(protected)/variant-tokens/page.tsx": privilegedEntrypoint({...}),
+  // "app/internal/admin/(protected)/variant-tokens/actions.ts": privilegedEntrypoint({...}),
 };
 
 export const AUTH_GLUE_ENTRYPOINT_CONTRACTS = {
@@ -448,10 +440,9 @@ export const INTERNAL_ROUTE_TRUST_CONTRACTS = {
   "admin/psa-seeds": adminSecretRoute("manual admin seeding tooling"),
   "admin/scan-eval/promote": adminSecretRoute("operator-driven scanner eval corpus seeding + mis-identification correction"),
   "admin/scan-eval/pre-label": adminSecretRoute("VLM pre-labeling of operator-captured card images for the scanner eval corpus"),
-  "admin/variant-tokens": internalAdminSessionRoute(
-    "internal admin variant token registry UI",
-    ["app/api/admin/variant-tokens/route.ts"],
-  ),
+  // "admin/variant-tokens": internalAdminSessionRoute(...) — reverted
+  // 2026-04-29 alongside the route-registry entry (target files
+  // untracked in git, breaking the Vercel build).
   "cron/backfill-scrydex-price-history": cronSecretRoute("cron/internal automation"),
   "cron/capture-matching-quality": cronSecretRoute("cron/internal automation"),
   "cron/capture-pricing-transparency": cronSecretRoute("cron/internal automation"),
@@ -1422,7 +1413,7 @@ export const PUBLIC_SCHEMA_EVENT_TRIGGER = "popalpha_auto_enable_public_table_rl
 export const FIXED_ROUTE_CLASSIFICATIONS = {
   "admin/ebay-deletion-tasks": "admin",
   "admin/ebay-deletion-tasks/[id]": "admin",
-  "admin/variant-tokens": "admin",
+  // "admin/variant-tokens": "admin" — reverted 2026-04-29.
   "cron/process-ebay-deletion-receipts": "cron",
   "ebay/deletion-notification": "ingest",
 };
