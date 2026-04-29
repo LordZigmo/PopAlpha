@@ -57,7 +57,7 @@ struct CollectorRadarView: View {
                 i == 0 ? fill.move(to: pt) : fill.addLine(to: pt)
             }
             fill.closeSubpath()
-            ctx.fill(fill, with: .color(accentColor.opacity(0.28)))
+            ctx.fill(fill, with: .color(accentColor.opacity(0.25)))
 
             // Data polygon — stroke
             ctx.stroke(fill, with: .color(accentColor), style: StrokeStyle(lineWidth: 1.5, lineJoin: .round))

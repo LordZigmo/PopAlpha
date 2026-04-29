@@ -1,25 +1,33 @@
 import SwiftUI
 
 // MARK: - Swipe Reveal Row
-// Wraps any card-style row and reveals trailing action buttons when the
-// user swipes left.
+// Wraps any card-style row with trailing swipe-to-reveal edit/delete buttons.
 //
-// Gesture strategy: `.simultaneousGesture` on the outer ZStack so the
-// drag runs alongside button taps (not blocked by them) and we explicitly
-// guard for horizontal-dominant drags to avoid stealing vertical scroll.
+// Gesture strategy:
+//   • highPriorityGesture on the outer ZStack: once the DragGesture
+//     activates (≥10pt of movement) it preempts inner Buttons, so a swipe
+//     never accidentally fires the row's tap action. Pure taps stay below
+//     the 10pt threshold and reach the buttons normally.
+//   • On the first 10pt of movement, decide whether the drag is horizontal
+//     or vertical. Vertical → ignore entirely (let ScrollView scroll).
+//     Horizontal → lock scroll via the isScrollLocked binding and track.
+//   • offset is always relative to startOffset captured at gesture begin,
+//     so the card can be swiped from any position (already-open etc.).
 
 private let kActionWidth: CGFloat = 72
-private let kTotalWidth: CGFloat  = kActionWidth * 2  // edit + delete
+private let kTotalWidth:  CGFloat = kActionWidth * 2
 
 struct SwipeRevealModifier: ViewModifier {
-    let onEdit: () -> Void
+    @Binding var isScrollLocked: Bool
+    let onEdit:   () -> Void
     let onDelete: () -> Void
 
-    @State private var offset: CGFloat = 0
+    @State private var offset:           CGFloat = 0
+    @State private var startOffset:      CGFloat = 0
+    @State private var dragAxis:         DragAxis = .undecided
     @State private var showDeleteConfirm = false
-    // Track whether this drag started as horizontal so we don't flip
-    // direction mid-gesture when the finger drifts vertically.
-    @State private var isHorizontalDrag = false
+
+    private enum DragAxis { case undecided, horizontal, vertical }
 
     func body(content: Content) -> some View {
         ZStack(alignment: .trailing) {
@@ -30,10 +38,10 @@ struct SwipeRevealModifier: ViewModifier {
                 .offset(x: offset)
         }
         .clipped()
-        .simultaneousGesture(swipeDrag)
+        .highPriorityGesture(swipeDrag)
         .alert("Remove card?", isPresented: $showDeleteConfirm) {
             Button("Remove", role: .destructive) { onDelete() }
-            Button("Cancel", role: .cancel) {}
+            Button("Cancel",  role: .cancel)      {}
         } message: {
             Text("This will remove all lots of this card from your portfolio.")
         }
@@ -43,10 +51,8 @@ struct SwipeRevealModifier: ViewModifier {
 
     private var actionStrip: some View {
         HStack(spacing: 1) {
-            // Edit (…)
             Button {
-                close()
-                onEdit()
+                close(); onEdit()
             } label: {
                 VStack(spacing: 5) {
                     Image(systemName: "ellipsis")
@@ -61,10 +67,8 @@ struct SwipeRevealModifier: ViewModifier {
             }
             .buttonStyle(.plain)
 
-            // Delete (trash)
             Button {
-                close()
-                showDeleteConfirm = true
+                close(); showDeleteConfirm = true
             } label: {
                 VStack(spacing: 5) {
                     Image(systemName: "trash.fill")
@@ -85,39 +89,41 @@ struct SwipeRevealModifier: ViewModifier {
     // MARK: - Drag Gesture
 
     private var swipeDrag: some Gesture {
-        DragGesture(minimumDistance: 15, coordinateSpace: .local)
+        DragGesture(minimumDistance: 10, coordinateSpace: .local)
             .onChanged { value in
                 let dx = value.translation.width
                 let dy = value.translation.height
 
-                // On the first meaningful movement decide if this is a
-                // horizontal drag. If vertical, let the ScrollView handle it.
-                if !isHorizontalDrag && (abs(dx) > 8 || abs(dy) > 8) {
-                    isHorizontalDrag = abs(dx) > abs(dy)
+                // Axis decision: wait for 10 pt of movement before committing
+                if dragAxis == .undecided {
+                    guard abs(dx) > 10 || abs(dy) > 10 else { return }
+                    dragAxis = abs(dx) > abs(dy) ? .horizontal : .vertical
+                    startOffset = offset
+                    if dragAxis == .horizontal { isScrollLocked = true }
                 }
-                guard isHorizontalDrag else { return }
 
-                if dx < 0 {
-                    // Swiping left — reveal actions with light rubber-banding
-                    let raw = offset + dx - (value.predictedEndTranslation.width - value.translation.width) * 0
-                    if -dx <= kTotalWidth {
-                        offset = dx
-                    } else {
-                        let overscroll = -dx - kTotalWidth
-                        offset = -(kTotalWidth + overscroll * 0.15)
-                    }
-                } else if offset < 0 {
-                    // Swiping right — close
-                    offset = min(offset + dx, 0)
+                guard dragAxis == .horizontal else { return }
+
+                // Direct 1:1 tracking from where the card started this gesture
+                let candidate = startOffset + dx
+                // Clamp: can't go right past 0, slight resistance past full reveal
+                if candidate >= 0 {
+                    offset = 0
+                } else if candidate < -kTotalWidth {
+                    let overscroll = -(candidate + kTotalWidth)
+                    offset = -(kTotalWidth + overscroll * 0.2)
+                } else {
+                    offset = candidate
                 }
             }
             .onEnded { value in
-                guard isHorizontalDrag else {
-                    isHorizontalDrag = false
-                    return
+                defer {
+                    dragAxis = .undecided
+                    isScrollLocked = false
                 }
-                isHorizontalDrag = false
-                withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                guard dragAxis == .horizontal else { return }
+
+                withAnimation(.interpolatingSpring(stiffness: 300, damping: 30)) {
                     offset = -offset > kTotalWidth * 0.45 ? -kTotalWidth : 0
                 }
             }
@@ -126,15 +132,20 @@ struct SwipeRevealModifier: ViewModifier {
     // MARK: - Helpers
 
     private func close() {
-        withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) { offset = 0 }
+        withAnimation(.interpolatingSpring(stiffness: 300, damping: 30)) { offset = 0 }
     }
 }
 
 extension View {
     func swipeRevealActions(
-        onEdit: @escaping () -> Void,
-        onDelete: @escaping () -> Void
+        isScrollLocked: Binding<Bool>,
+        onEdit:         @escaping () -> Void,
+        onDelete:       @escaping () -> Void
     ) -> some View {
-        modifier(SwipeRevealModifier(onEdit: onEdit, onDelete: onDelete))
+        modifier(SwipeRevealModifier(
+            isScrollLocked: isScrollLocked,
+            onEdit:   onEdit,
+            onDelete: onDelete
+        ))
     }
 }

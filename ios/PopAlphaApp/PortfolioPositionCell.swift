@@ -6,6 +6,11 @@ import NukeUI
 struct PortfolioPositionCell: View {
     let position: Position
     var metadata: APICardMetadata? = nil
+    /// Optional accolade — "Largest holding", "Best performer", etc.
+    /// Computed at the parent level by ranking all positions, then
+    /// surfaced inline next to the grade so users see *why* a card
+    /// stands out without a separate analytics section.
+    var descriptor: String? = nil
     var onTap: (() -> Void)? = nil
     /// Called when the user taps an individual lot row in the
     /// disclosure. Parent opens EditHoldingLotSheet with that lot so
@@ -50,8 +55,13 @@ struct PortfolioPositionCell: View {
                             .foregroundStyle(PA.Colors.muted)
                             .lineLimit(1)
 
-                        gradeBadge
-                            .padding(.top, 2)
+                        HStack(spacing: 6) {
+                            gradeBadge
+                            if let descriptor {
+                                descriptorChip(descriptor)
+                            }
+                        }
+                        .padding(.top, 2)
                     }
 
                     Spacer()
@@ -144,6 +154,32 @@ struct PortfolioPositionCell: View {
                     .font(.system(size: 14))
                     .foregroundStyle(PA.Colors.muted)
             )
+    }
+
+    // MARK: - Descriptor Chip
+    // Small accent-tinted pill that surfaces a position's accolade
+    // ("Largest holding", "Best performer", etc.) inline with the grade,
+    // replacing the standalone Top Holdings analytics section.
+
+    private func descriptorChip(_ text: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: descriptorIcon(text))
+                .font(.system(size: 8, weight: .bold))
+            Text(text)
+                .font(.system(size: 10, weight: .semibold))
+        }
+        .foregroundStyle(PA.Colors.accent)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(PA.Colors.accent.opacity(0.12))
+        .clipShape(Capsule())
+    }
+
+    private func descriptorIcon(_ text: String) -> String {
+        let lower = text.lowercased()
+        if lower.contains("largest") { return "crown.fill" }
+        if lower.contains("performer") { return "chart.line.uptrend.xyaxis" }
+        return "sparkles"
     }
 
     // MARK: - Grade Badge

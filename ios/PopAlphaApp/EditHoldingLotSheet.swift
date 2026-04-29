@@ -17,9 +17,11 @@ struct EditHoldingLotSheet: View {
     /// their SetMetadata, lots don't. Passed in so the sheet shows
     /// "Editing: Charizard" and not just an id.
     let cardName: String?
-    /// Tight feedback loop: fire after a successful save so the
-    /// caller can refetch + close the sheet.
-    var onSaved: (() -> Void)?
+    /// Async callback fired after a successful save. Awaited before
+    /// the sheet dismisses so the caller's state update completes
+    /// before the transition, guaranteeing updated data is visible
+    /// the moment the portfolio is back on screen.
+    var onSaved: (() async -> Void)?
 
     @Environment(\.dismiss) private var dismiss
 
@@ -35,7 +37,7 @@ struct EditHoldingLotSheet: View {
     @State private var isSaving = false
     @State private var saveError: String?
 
-    init(lot: HoldingRow, cardName: String?, onSaved: (() -> Void)? = nil) {
+    init(lot: HoldingRow, cardName: String?, onSaved: (() async -> Void)? = nil) {
         self.lot = lot
         self.cardName = cardName
         self.onSaved = onSaved
@@ -376,8 +378,9 @@ struct EditHoldingLotSheet: View {
                 venue: venue.trimmingCharacters(in: .whitespaces),
                 certNumber: certToSend
             )
+            isSaving = false
             PAHaptics.tap()
-            onSaved?()
+            await onSaved?()
             dismiss()
         } catch {
             saveError = error.localizedDescription

@@ -24,6 +24,9 @@ struct PortfolioView: View {
 
     // Positions list view mode (table rows vs card grid)
     @State private var positionsViewMode: PositionsViewMode = .list
+    // Set to true while a card swipe is in progress so the ScrollView
+    // can't scroll vertically at the same time.
+    @State private var isSwipingCard = false
 
     private enum PositionsViewMode { case list, grid }
 
@@ -53,6 +56,45 @@ struct PortfolioView: View {
     /// True when the overview API returned full analysis (>= 3 holdings).
     private var hasFullAnalysis: Bool {
         overview?.minimal == false
+    }
+
+    /// Per-position accolades — "Largest holding" goes to the position
+    /// with the highest market value; "Best performer" goes to the
+    /// position with the highest positive 24h change among the rest.
+    /// Computed locally from the overview metadata, so we don't need
+    /// the deprecated TopHoldings analytics section anymore.
+    private var positionDescriptors: [String: String] {
+        guard !positions.isEmpty else { return [:] }
+
+        // Score each position by (marketValue, changePct) using overview
+        // metadata. Positions without metadata fall back to cost basis
+        // for value and 0 for change.
+        struct Scored { let id: String; let value: Double; let changePct: Double }
+        let scored: [Scored] = positions.map { p in
+            let meta = p.canonicalSlug.flatMap { overview?.cardMetadata?[$0] }
+            let price = meta?.marketPrice ?? p.avgCost
+            return Scored(
+                id: p.id,
+                value: price * Double(p.totalQty),
+                changePct: meta?.changePct ?? 0
+            )
+        }
+
+        var out: [String: String] = [:]
+
+        // Largest by market value
+        if let largest = scored.max(by: { $0.value < $1.value }) {
+            out[largest.id] = "Largest holding"
+
+            // Best performer among the remaining positions, only if its
+            // change is meaningfully positive (≥ 1%) so we don't
+            // mislabel a flat or losing card.
+            let rest = scored.filter { $0.id != largest.id }
+            if let best = rest.max(by: { $0.changePct < $1.changePct }), best.changePct >= 1.0 {
+                out[best.id] = "Best performer"
+            }
+        }
+        return out
     }
 
     /// Count of positions (grouped holdings) that have at least one lot
@@ -137,7 +179,7 @@ struct PortfolioView: View {
                     lot: lot,
                     cardName: lot.canonicalSlug.flatMap { overview?.cardMetadata?[$0]?.name },
                     onSaved: {
-                        Task { await loadPortfolio() }
+                        await refreshHoldings()
                     }
                 )
             }
@@ -233,11 +275,6 @@ struct PortfolioView: View {
                         PortfolioCompositionView(composition: composition, attributes: attrs)
                     }
 
-                    let topHoldings = overview?.toTopHoldings() ?? []
-                    if !topHoldings.isEmpty {
-                        TopHoldingsView(holdings: topHoldings)
-                    }
-
                     let insights = overview?.toInsights() ?? []
                     if !insights.isEmpty || !activities.isEmpty {
                         PortfolioInsightView(insights: insights, activities: activities)
@@ -253,15 +290,18 @@ struct PortfolioView: View {
                         Group {
                             switch positionsViewMode {
                             case .list:
+                                let descriptors = positionDescriptors
                                 LazyVStack(spacing: 10) {
                                     ForEach(positions) { position in
                                         PortfolioPositionCell(
                                             position: position,
                                             metadata: position.canonicalSlug.flatMap { overview?.cardMetadata?[$0] },
+                                            descriptor: descriptors[position.id],
                                             onTap: { selectedCard = cardFor(position: position) },
                                             onLotTap: { lot in editingLot = lot }
                                         )
                                         .swipeRevealActions(
+                                            isScrollLocked: $isSwipingCard,
                                             onEdit: { editingLot = position.lots.first },
                                             onDelete: { Task { await deleteLots(position.lots.map(\.id)) } }
                                         )
@@ -288,6 +328,7 @@ struct PortfolioView: View {
             }
             .padding(.bottom, 40)
         }
+        .scrollDisabled(isSwipingCard)
     }
 
     // MARK: - Loading & Error States
@@ -356,6 +397,23 @@ struct PortfolioView: View {
 
         if let ov = fetchedOverview { overview = ov }
         if let act = fetchedActivity { activities = act.toActivities() }
+    }
+
+    // MARK: - Targeted Holdings Refresh
+
+    /// Lightweight refresh that re-fetches only the holdings list and
+    /// recomputes positions — without touching overview/activity state.
+    /// Used after a single-lot edit so the card row updates in place
+    /// without rebuilding the enrichment sections above it (which would
+    /// reset the scroll position).
+    private func refreshHoldings() async {
+        do {
+            let fresh = try await HoldingsService.shared.fetchHoldings()
+            holdings = fresh
+            positions = Position.group(holdings)
+        } catch {
+            print("[PortfolioView] Holdings refresh failed: \(error)")
+        }
     }
 
     // MARK: - Delete
