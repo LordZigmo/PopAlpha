@@ -6,14 +6,12 @@ import SwiftUI
 
 struct CollectorIdentityCard: View {
     let profile: CollectorIdentityProfile
-    var radarProfile: APIRadarProfile? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             headerRow
             explanationText
             if !profile.traits.isEmpty { traitsSection }
-            if let radar = radarProfile { radarSection(radar) }
         }
         .padding(20)
         .background(cardBackground)
@@ -92,19 +90,6 @@ struct CollectorIdentityCard: View {
         .padding(.vertical, 5)
         .background(PA.Colors.surfaceSoft)
         .clipShape(Capsule())
-    }
-
-    // MARK: - Radar
-
-    private func radarSection(_ radar: APIRadarProfile) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Divider().background(PA.Colors.border)
-            Text("Collector Style Radar")
-                .font(PA.Typography.caption)
-                .foregroundStyle(PA.Colors.muted)
-            CollectorRadarView(profile: radar)
-                .frame(height: 220)
-        }
     }
 
     // MARK: - Confidence Meter

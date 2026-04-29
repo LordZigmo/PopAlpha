@@ -251,12 +251,11 @@ struct PortfolioView: View {
     private var portfolioContent: some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(spacing: 28) {
-                // 1. Your Collection (composition + attributes) sits at
-                // the very top so users immediately see what their
-                // portfolio is *made of* before drilling into totals.
-                if hasFullAnalysis, let composition = overview?.toComposition() {
-                    let attrs = overview?.toAttributes() ?? []
-                    PortfolioCompositionView(composition: composition, attributes: attrs)
+                // 1. Your Collector Type — the emotional opener. Lives
+                // above the totals so users see *who they are as a
+                // collector* before dollar figures.
+                if hasFullAnalysis, let identity = overview?.toIdentity() {
+                    CollectorIdentityCard(profile: identity)
                 }
 
                 // 2. Hero — totals, P&L, sparkline.
@@ -273,11 +272,11 @@ struct PortfolioView: View {
                     InsightsUnlockProgress(cardsAdded: positions.count)
                 }
 
-                // 4. Identity + AI insights (Evolution moved out — it
-                // now lives at the bottom of the page).
+                // 4. Radar (separated from the type card) + AI insights.
+                // Evolution lives at the bottom of the page.
                 if hasFullAnalysis {
-                    if let identity = overview?.toIdentity() {
-                        CollectorIdentityCard(profile: identity, radarProfile: overview?.radarProfile)
+                    if let radar = overview?.radarProfile {
+                        CollectorRadarCard(profile: radar)
                     }
 
                     let insights = overview?.toInsights() ?? []
