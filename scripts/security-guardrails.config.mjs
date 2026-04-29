@@ -50,6 +50,7 @@ export const INTERNAL_ADMIN_PAGE_ROOTS = [
 
 export const INTERNAL_ADMIN_ALLOWED_PAGE_FETCH_PREFIXES = [
   "/api/admin/ebay-deletion-tasks",
+  "/api/admin/variant-tokens",
 ];
 
 function privilegedEntrypoint({
@@ -134,6 +135,20 @@ export const INTERNAL_ADMIN_UI_ENTRYPOINT_CONTRACTS = {
     trustModel: "internal_admin_session",
     requiredTrustInputs: ["internal_admin_cookie", "audited_admin_review_patch"],
     expectedSignals: ["require_internal_admin_session", "internal_admin_review_patch"],
+  }),
+  "app/internal/admin/(protected)/variant-tokens/page.tsx": privilegedEntrypoint({
+    type: "internal_admin_variant_token_page",
+    intendedCaller: "allowlisted Clerk operator reviewing the Scrydex variant token registry",
+    trustModel: "internal_admin_session",
+    requiredTrustInputs: ["internal_admin_cookie", "server_only_admin_variant_token_api"],
+    expectedSignals: ["require_internal_admin_session", "internal_admin_variant_token_api"],
+  }),
+  "app/internal/admin/(protected)/variant-tokens/actions.ts": privilegedEntrypoint({
+    type: "internal_admin_variant_token_actions",
+    intendedCaller: "server actions mutating variant_token_registry display labels and statuses",
+    trustModel: "internal_admin_session",
+    requiredTrustInputs: ["internal_admin_cookie", "audited_admin_variant_token_patch"],
+    expectedSignals: ["require_internal_admin_session", "internal_admin_variant_token_patch"],
   }),
 };
 
@@ -339,6 +354,13 @@ export const PRIVILEGED_PACKAGE_SCRIPT_CONTRACTS = {
     requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
     expectedCommandFragments: ["scripts/convert-scan-eval-heic.mjs"],
   }),
+  "scan-eval:delete-thumb-overlay-storage": packageScriptContract({
+    target: "scripts/delete-thumb-overlay-storage.mjs",
+    intendedCaller: "trusted operator one-shot deleting orphaned augmented/<slug>/v3-*.jpg and v4-*.jpg Storage objects after the recipe-v2 thumb-overlay retirement (paired with /api/admin/cleanup/delete-thumb-overlay-augs for the matching Neon rows)",
+    trustModel: "service_role_storage_delete_wrapper",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedCommandFragments: ["scripts/delete-thumb-overlay-storage.mjs"],
+  }),
   "scan:backfill-digital": packageScriptContract({
     target: "scripts/backfill-card-image-digital-flag.mjs",
     intendedCaller: "trusted operator flagging TCG Pocket rows in card_image_embeddings so the identify kNN excludes them",
@@ -419,12 +441,17 @@ export const INTERNAL_ROUTE_TRUST_CONTRACTS = {
     "internal admin review UI",
     ["lib/ebay/deletion-review-routes.ts", "lib/ebay/deletion-review-admin-api.ts"],
   ),
+  "admin/cleanup/delete-thumb-overlay-augs": cronSecretRoute("one-shot Neon-side delete of recipe-v2 synthetic-thumb-overlay augmentation rows (variant_index 3 and 4) from card_image_embeddings; manually invoked via curl with CRON_SECRET, paired with scripts/delete-thumb-overlay-storage.mjs for the Storage objects"),
   "admin/discover-sets": adminSecretRoute("manual admin on-demand set discovery trigger"),
   "admin/import/printings": adminSecretRoute("manual admin/import tooling"),
   "admin/import/scrydex-canonical": adminSecretRoute("manual admin/import tooling"),
   "admin/psa-seeds": adminSecretRoute("manual admin seeding tooling"),
   "admin/scan-eval/promote": adminSecretRoute("operator-driven scanner eval corpus seeding + mis-identification correction"),
   "admin/scan-eval/pre-label": adminSecretRoute("VLM pre-labeling of operator-captured card images for the scanner eval corpus"),
+  "admin/variant-tokens": internalAdminSessionRoute(
+    "internal admin variant token registry UI",
+    ["app/api/admin/variant-tokens/route.ts"],
+  ),
   "cron/backfill-scrydex-price-history": cronSecretRoute("cron/internal automation"),
   "cron/capture-matching-quality": cronSecretRoute("cron/internal automation"),
   "cron/capture-pricing-transparency": cronSecretRoute("cron/internal automation"),
@@ -889,6 +916,15 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
     expectedSignals: ["service_role_client"],
     usesServiceRole: true,
     notes: "Walks scan_eval_images, sniffs each Storage object's magic bytes, runs heic-convert + sharp resize on HEIC ones, overwrites the same storage_path. Idempotent — already-JPEG objects skipped. Disposable one-shot, deletable after a successful re-eval verifies.",
+  }),
+  "scripts/delete-thumb-overlay-storage.mjs": operationalScript({
+    classification: "service_role_backfill",
+    executionMode: "manual_backfill",
+    intendedCaller: "trusted operator one-shot deleting retired recipe-v2 thumb-overlay augmentation Storage objects (augmented/<slug>/v3-*.jpg and v4-*.jpg) after the kNN+row cleanup in 7c53dd6 et al",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+    notes: "Walks augmented/<safeSlug>/, lists each slug dir, removes any object whose name starts with v3- or v4-. Idempotent — already-deleted objects produce zero work on replay. Disposable one-shot, deletable after the post-cleanup runtime-filter removal verifies clean.",
   }),
   "scripts/seed-scan-eval-image.mjs": operationalScript({
     classification: "service_role_diagnostic",
@@ -1386,6 +1422,7 @@ export const PUBLIC_SCHEMA_EVENT_TRIGGER = "popalpha_auto_enable_public_table_rl
 export const FIXED_ROUTE_CLASSIFICATIONS = {
   "admin/ebay-deletion-tasks": "admin",
   "admin/ebay-deletion-tasks/[id]": "admin",
+  "admin/variant-tokens": "admin",
   "cron/process-ebay-deletion-receipts": "cron",
   "ebay/deletion-notification": "ingest",
 };

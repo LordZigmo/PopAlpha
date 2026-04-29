@@ -73,6 +73,7 @@ export const CRON_ROUTES = [
   "cron/mirror-card-images",
   "cron/compute-daily-top-movers",
   "cron/discover-new-sets",
+  "admin/cleanup/delete-thumb-overlay-augs",
 ];
 
 export const ADMIN_ROUTES = [
@@ -84,6 +85,7 @@ export const ADMIN_ROUTES = [
   "admin/discover-sets",
   "admin/scan-eval/promote",
   "admin/scan-eval/pre-label",
+  "admin/variant-tokens",
 ];
 
 export const DEBUG_ROUTES = [

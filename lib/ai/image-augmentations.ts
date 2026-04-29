@@ -15,11 +15,23 @@
  *
  * Recipe v1 (variants 1-2): brightness/WB/rotate/JPEG. Addresses
  * flat-on-table / on-surface captures. Validated 2026-04-24:
- * 0→3/6 top-1 on flat eval subset.
+ * 0→3/6 top-1 on flat eval subset. Active.
  *
- * Recipe v2 (variants 3-4): recipe v1 base + synthetic thumb overlay
- * at corner. Addresses corner-held captures — the failure mode the
- * eval harness cleanly separated from distribution mismatch.
+ * Recipe v2 (variants 3-4): RETIRED 2026-04-29. The synthetic thumb-
+ * overlay augmentations were intended to address corner-held captures
+ * but instead became skin-tone magnets — any user photo with a real
+ * thumb in similar position landed on the v4 (top-left) variant of
+ * whichever card had the strongest residual holographic-foil signal
+ * underneath. astral-radiance-102-hisuian-samurott-vstar emerged as
+ * the dominant lighthouse, falsely predicted for ~10 unrelated
+ * holo-foil VSTAR/V/ex cards in the 277-image eval. Filtering v3/v4
+ * out of kNN gave +4% top-1 immediately. The cron no longer generates
+ * them; existing rows in card_image_embeddings + their storage
+ * objects are deleted by app/api/admin/cleanup/delete-thumb-overlay-augs
+ * and scripts/delete-thumb-overlay-storage.mjs. The thumb-overlay
+ * SVG-blob composite function is gone — bringing it back means
+ * confronting the same lighthouse mechanism, so don't, write a
+ * proper finetune instead.
  *
  * Each variant's recipeId is included in source_hash. Adding new
  * variants does NOT invalidate existing ones — new recipeIds just
@@ -89,72 +101,6 @@ async function pipelineFromVariant(
 }
 
 /**
- * Composites a skin-tone blob at a card corner to simulate a thumb
- * or finger wrapping around the edge while the user holds the card.
- * The blob is an SVG radial gradient (oval, slightly rotated) with
- * soft fall-off at the outer edge so it blends over whatever card
- * content is underneath. Not photorealistic — we're nudging CLIP to
- * associate "card with skin-tone patch at corner" with the underlying
- * card's identity, not fooling a human observer.
- *
- * Sized to cover ~10% of the visible card area, positioned ~30%
- * off-edge so the visible portion looks like a finger wrapping in
- * from outside the frame rather than a blob pasted in the middle.
- */
-async function thumbOverlay(
-  baseBuffer: Buffer,
-  corner: "bottom-right" | "top-left",
-): Promise<Buffer> {
-  const meta = await sharp(baseBuffer).metadata();
-  const width = meta.width ?? TARGET_LONG_EDGE;
-  const height = meta.height ?? TARGET_LONG_EDGE;
-
-  // Blob dimensions — taller than wide to roughly match thumb
-  // proportions. Bigger than naive intuition because much of it is
-  // positioned off the edge.
-  const ellipseW = Math.round(width * 0.35);
-  const ellipseH = Math.round(height * 0.48);
-
-  let cx: number;
-  let cy: number;
-  let rotation: number;
-  if (corner === "bottom-right") {
-    cx = width - Math.round(ellipseW * 0.35);
-    cy = height - Math.round(ellipseH * 0.32);
-    rotation = 28;
-  } else {
-    cx = Math.round(ellipseW * 0.35);
-    cy = Math.round(ellipseH * 0.32);
-    rotation = -28;
-  }
-
-  const svg = `
-    <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <radialGradient id="thumbGrad" cx="50%" cy="45%">
-          <stop offset="0%" stop-color="rgb(230, 190, 165)" stop-opacity="0.98"/>
-          <stop offset="45%" stop-color="rgb(215, 175, 150)" stop-opacity="0.94"/>
-          <stop offset="80%" stop-color="rgb(195, 155, 130)" stop-opacity="0.72"/>
-          <stop offset="100%" stop-color="rgb(170, 130, 105)" stop-opacity="0"/>
-        </radialGradient>
-        <filter id="softEdge" x="-20%" y="-20%" width="140%" height="140%">
-          <feGaussianBlur stdDeviation="2"/>
-        </filter>
-      </defs>
-      <g transform="translate(${cx} ${cy}) rotate(${rotation})">
-        <ellipse cx="0" cy="0" rx="${ellipseW / 2}" ry="${ellipseH / 2}"
-                 fill="url(#thumbGrad)" filter="url(#softEdge)"/>
-      </g>
-    </svg>
-  `;
-
-  return sharp(baseBuffer)
-    .composite([{ input: Buffer.from(svg), blend: "over" }])
-    .jpeg({ quality: 78, mozjpeg: true })
-    .toBuffer();
-}
-
-/**
  * Augmentation variants. Each approximates a different slice of
  * iPhone-capture distribution:
  *
@@ -162,15 +108,16 @@ async function thumbOverlay(
  *     1 phone-warm: warmer WB, +3° tilt, JPEG q=80
  *     2 phone-cool: cooler WB, -5° tilt, JPEG q=72, soft blur
  *
- *   Recipe v2 (indices 3-4) — corner-held conditions:
- *     3 thumb-bottom-right: warm WB, slight tilt, thumb blob at
- *       bottom-right corner (~10% visible card coverage)
- *     4 thumb-top-left: cool WB, slight tilt, thumb blob at top-left
+ * Recipe v2 (variants 3-4) was retired 2026-04-29 — see file header.
+ * If you're tempted to add new corner-occlusion variants, don't:
+ * synthetic skin-tone overlays act as universal magnets in CLIP
+ * embedding space and create lighthouse cards. Real progress on
+ * occlusion comes from fine-tuning, not augmentation.
  *
- * More variants can land later (perspective skew, glare overlay,
- * motion blur, sleeve texture) behind the same interface. Adding a
- * new entry here does NOT invalidate existing variants — only the
- * new recipeId gets fresh generation.
+ * More variants can land later (perspective skew, glare overlay
+ * without skin tones, motion blur, sleeve texture) behind the same
+ * interface. Adding a new entry here does NOT invalidate existing
+ * variants — only the new recipeId gets fresh generation.
  */
 export const AUGMENTATION_VARIANTS: AugmentationVariant[] = [
   {
@@ -197,34 +144,6 @@ export const AUGMENTATION_VARIANTS: AugmentationVariant[] = [
         jpegQuality: 72,
         blurSigma: 0.4,
       }),
-  },
-  {
-    index: 3,
-    recipeId: "v2-thumb-bottom-right",
-    description: "warm WB, +2° rotate, thumb overlay at bottom-right corner",
-    transform: async (input) => {
-      const warmed = await pipelineFromVariant(input, {
-        brightness: 1.05,
-        saturation: 1.02,
-        rotateDeg: 2,
-        jpegQuality: 85,
-      });
-      return thumbOverlay(warmed, "bottom-right");
-    },
-  },
-  {
-    index: 4,
-    recipeId: "v2-thumb-top-left",
-    description: "cool WB, -2° rotate, thumb overlay at top-left corner",
-    transform: async (input) => {
-      const cooled = await pipelineFromVariant(input, {
-        brightness: 0.95,
-        saturation: 0.98,
-        rotateDeg: -2,
-        jpegQuality: 80,
-      });
-      return thumbOverlay(cooled, "top-left");
-    },
   },
 ];
 

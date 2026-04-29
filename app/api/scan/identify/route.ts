@@ -727,13 +727,24 @@ export async function POST(req: Request) {
   // matches we know are wrong.
   let orphansDropped = 0;
   let matches: MatchWithCrop[];
+  // Map of slug → canonical_cards.mirrored_primary_image_url. Populated
+  // by the orphan-filter Supabase round-trip below and used when we
+  // build the response so the iOS app sees the CLEAN catalog image, not
+  // whichever augmentation variant happened to win the kNN. Before
+  // 2026-04-29 we returned card_image_embeddings.source_image_url
+  // directly — that meant a v4-thumb-overlay match showed the operator
+  // a synthetic-thumb-glared preview, hiding which card the system
+  // actually identified. Empty map ⇒ degrade to source_image_url
+  // (the previous behavior) per the same fail-graceful contract as the
+  // orphan filter.
+  const canonicalImageBySlug = new Map<string, string | null>();
   if (allMergedMatches.length === 0) {
     matches = [];
   } else {
     const candidateSlugs = allMergedMatches.map((m) => m.canonical_slug);
     const { data: presentRows, error: presenceErr } = await supabase
       .from("canonical_cards")
-      .select("slug")
+      .select("slug, mirrored_primary_image_url")
       .in("slug", candidateSlugs);
 
     if (presenceErr) {
@@ -745,6 +756,9 @@ export async function POST(req: Request) {
       matches = allMergedMatches.slice(0, limit);
     } else {
       const presentSet = new Set((presentRows ?? []).map((r) => r.slug));
+      for (const row of presentRows ?? []) {
+        canonicalImageBySlug.set(row.slug, row.mirrored_primary_image_url ?? null);
+      }
       const filtered = allMergedMatches.filter((m) => presentSet.has(m.canonical_slug));
       orphansDropped = allMergedMatches.length - filtered.length;
       if (orphansDropped > 0) {
@@ -819,7 +833,19 @@ export async function POST(req: Request) {
       set_name: row.set_name,
       card_number: row.card_number,
       variant: row.variant,
-      mirrored_primary_image_url: row.source_image_url,
+      // Prefer the canonical (clean) catalog image over the kNN row's
+      // own source_image_url. The kNN row may have won via an
+      // augmentation variant whose URL points at e.g.
+      // augmented/<slug>/v1-augv1-phone-warm.jpg — showing that to the
+      // operator is misleading because the iOS card detail view of the
+      // same slug shows the clean canonical image, so the scanner
+      // preview and the navigated detail-view would visibly disagree.
+      // The canonicalImageBySlug map was populated by the orphan-filter
+      // Supabase round-trip above, so this is free. Falls back to
+      // source_image_url for any slug where the orphan-filter lookup
+      // failed (rare; fail-graceful path).
+      mirrored_primary_image_url:
+        canonicalImageBySlug.get(row.canonical_slug) ?? row.source_image_url,
       similarity: Number.isFinite(row.cos_dist) ? 1 - row.cos_dist : 0,
     })),
     language_filter: language,

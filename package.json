@@ -40,6 +40,7 @@
     "eval:run": "node --env-file=.env.local scripts/run-scanner-eval.mjs",
     "dataset:export": "node --env-file=.env.local scripts/export-finetune-dataset.mjs",
     "scan-eval:convert-heic": "node --env-file=.env.local scripts/convert-scan-eval-heic.mjs",
+    "scan-eval:delete-thumb-overlay-storage": "node --env-file=.env.local scripts/delete-thumb-overlay-storage.mjs",
     "scan:backfill-digital": "node --env-file=.env.local scripts/backfill-card-image-digital-flag.mjs",
     "env:pull-safe": "pwsh -File scripts/safe-env-pull.ps1",
     "verify:rls": "node --env-file=.env.local scripts/verify-phase1-rls.mjs",
