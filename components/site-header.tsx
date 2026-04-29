@@ -13,7 +13,7 @@ export type SiteHeaderLink = {
 
 const DEFAULT_NAV_ITEMS: readonly SiteHeaderLink[] = [
   { label: "Explore", href: "/search" },
-  { label: "Market", href: "/" },
+  { label: "Market", href: "/market" },
   { label: "Sets", href: "/sets" },
   { label: "Portfolio", href: "/portfolio" },
 ] as const;

@@ -47,10 +47,20 @@
   --stat-font: "SFMono-Regular", ui-monospace, Menlo, Monaco, monospace;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
 html,
 body {
   max-width: 100vw;
   overflow-x: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
 }
 
 body {

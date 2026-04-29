@@ -10,31 +10,32 @@ import { SpeedInsights } from "@vercel/speed-insights/next";
 import { clerkEnabled, assertClerkConfigured } from "@/lib/auth/clerk-enabled";
 
 const siteUrl = getSiteUrl();
-const description = "Premium collectibles intelligence for Pokemon card collectors.";
+const description = "PopAlpha is the iPhone app for Pok\u00e9mon collectors. Snap any card to identify it instantly, follow market intelligence on movers and breakouts, track your portfolio, and get push alerts on live signals. Join the waitlist.";
+const title = "PopAlpha \u2014 Pok\u00e9mon Card Intelligence on iPhone";
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   applicationName: "PopAlpha",
-  title: "PopAlpha",
+  title,
   description,
   manifest: "/manifest.webmanifest",
   icons: {
     icon: [
-      { url: "/icon?v=3", sizes: "512x512", type: "image/png" },
-      { url: "/brand/popalpha-icon.svg?v=3", type: "image/svg+xml" },
+      { url: "/icon?v=4", sizes: "512x512", type: "image/png" },
+      { url: "/brand/popalpha-icon.svg?v=4", type: "image/svg+xml" },
     ],
     apple: [
-      { url: "/apple-icon?v=3", sizes: "180x180", type: "image/png" },
+      { url: "/apple-icon?v=4", sizes: "180x180", type: "image/png" },
     ],
     shortcut: [
-      { url: "/icon?v=3", sizes: "512x512", type: "image/png" },
+      { url: "/icon?v=4", sizes: "512x512", type: "image/png" },
     ],
   },
   alternates: {
     canonical: "/",
   },
   openGraph: {
-    title: "PopAlpha",
+    title,
     description,
     url: siteUrl,
     siteName: "PopAlpha",
@@ -50,7 +51,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "PopAlpha",
+    title,
     description,
     images: ["/twitter-image"],
   },

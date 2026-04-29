@@ -1,1298 +1,351 @@
-import { Suspense } from "react";
-import Image from "next/image";
 import Link from "next/link";
-import { currentUser } from "@clerk/nextjs/server";
-import { generateText } from "ai";
-import { getHomepageData, type HomepageCard } from "@/lib/data/homepage";
-import { getCommunityPulseSnapshot } from "@/lib/data/community-pulse";
-import { getPopAlphaModel } from "@/lib/ai/models";
-import HomepageSignalBoard from "@/components/homepage-signal-board";
-import HomepageSearch from "@/components/homepage-search";
+import { redirect } from "next/navigation";
+import { auth } from "@clerk/nextjs/server";
 import SiteHeader from "@/components/site-header";
-import TypewriterText from "@/components/typewriter-text";
-
-export const revalidate = 60;
-
-/* ─── Helpers ──────────────────────────────────────────────────────────────── */
-
-function timeAgo(iso: string | null): string {
-  if (!iso) return "";
-  const ms = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(ms / 60_000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
-
-function formatPct(n: number | null): string {
-  if (n == null) return "--";
-  const sign = n >= 0 ? "+" : "";
-  return `${sign}${n.toFixed(1)}%`;
-}
-
-function formatExactCount(value: number | null): string {
-  if (value == null || !Number.isFinite(value)) return "--";
-  return new Intl.NumberFormat("en-US").format(value);
-}
-
-function getChangeWindowBadge(cards: HomepageCard[], fallback = "Live"): string {
-  const windows = [...new Set(cards.map((card) => card.change_window).filter((value): value is "24H" | "7D" => value === "24H" || value === "7D"))];
-  if (windows.length === 0) return fallback;
-  if (windows.length === 1) return windows[0];
-  return "24H + 7D";
-}
-
-const EMPTY_DATA: {
-  movers: HomepageCard[];
-  high_confidence_movers: HomepageCard[];
-  emerging_movers: HomepageCard[];
-  losers: HomepageCard[];
-  trending: HomepageCard[];
-  signal_board: {
-    top_movers: { "24H": HomepageCard[]; "7D": HomepageCard[] };
-    biggest_drops: { "24H": HomepageCard[]; "7D": HomepageCard[] };
-    momentum: { "24H": HomepageCard[]; "7D": HomepageCard[] };
-    unusual_volume: HomepageCard[];
-    breakouts: HomepageCard[];
-  };
-  as_of: string | null;
-  prices_refreshed_today: number | null;
-  tracked_cards_with_live_price: number | null;
-} = {
-  movers: [],
-  high_confidence_movers: [],
-  emerging_movers: [],
-  losers: [],
-  trending: [],
-  signal_board: {
-    top_movers: { "24H": [], "7D": [] },
-    biggest_drops: { "24H": [], "7D": [] },
-    momentum: { "24H": [], "7D": [] },
-    unusual_volume: [],
-    breakouts: [],
-  },
-  as_of: null,
-  prices_refreshed_today: null,
-  tracked_cards_with_live_price: null,
-};
-const DATA_TIMEOUT_MS = 30_000;
-const AI_TIMEOUT_MS = 4_000;
-
-const TRENDING_SET_PILLS = [
-  "Prismatic Evolutions",
-  "151",
-  "Evolving Skies",
-  "Crown Zenith",
-  "Paldean Fates",
-] as const;
-
-const HERO_HEADLINE = "Market intelligence";
-const HERO_HEADLINE_ACCENT = "for Pokémon collectors";
-const HERO_SUBHEADLINE = "See where strength is concentrating, which sets are holding conviction, and what the live feed is confirming right now.";
-const HERO_PRIMARY_CTA = "Start free";
-const HERO_SECONDARY_CTA = "Read live brief";
-const HOMEPAGE_SCOUT_NARRATIVE =
-  "The market still looks selective today. A few chase cards are leading, but the move has not spread across the whole board. The next thing to watch is whether strength moves into deeper cards and sealed.";
-
-type PopAlphaTier = "Trainer" | "Ace" | "Elite";
-type HomepageSummaryCommunityCard = {
-  name: string;
-  setName: string | null;
-  bullishVotes: number;
-  bearishVotes: number;
-  changePct: number | null;
-};
-type HomepageSummaryConfig = {
-  version: string;
-  modelTier: PopAlphaTier;
-  modelLabel: string;
-  timeoutMs: number;
-  logKey: string;
-  sourceLimits: {
-    topMovers: number;
-    trending: number;
-    losers: number;
-    communityPulse: number;
-  };
-  pricingUsdPerMillionTokens: {
-    input: number;
-    output: number;
-  };
-  system: {
-    role: string;
-    style: readonly string[];
-    structure: readonly string[];
-    guardrails: readonly string[];
-  };
-  prompt: {
-    task: string;
-    focus: readonly string[];
-  };
-};
-
-const HOMEPAGE_SUMMARY_CONFIG = {
-  version: "homepage-summary-v2",
-  modelTier: "Ace",
-  modelLabel: "gemini-2.0-flash",
-  timeoutMs: AI_TIMEOUT_MS,
-  logKey: "[homepage.ai-summary]",
-  sourceLimits: {
-    topMovers: 2,
-    trending: 2,
-    losers: 1,
-    communityPulse: 3,
-  },
-  pricingUsdPerMillionTokens: {
-    input: 0.1,
-    output: 0.4,
-  },
-  system: {
-    role: "You are PopAlpha Ace Summary, a premium market note for the homepage.",
-    style: [
-      "Write in plain English at about an 8th-grade reading level.",
-      "Use short sentences and common words.",
-      "Sound calm, sharp, and useful.",
-      "Focus on why the market matters for collectors, not just what moved.",
-      "Avoid hype, slang, and heavy finance jargon.",
-    ],
-    structure: [
-      "Use the supplied market, set, pullback, and community vote signals.",
-      "Write exactly 2 short paragraphs.",
-      "Use no more than 2 sentences per paragraph.",
-      "Paragraph 1 should explain where strength is concentrating or whether the market is broadening.",
-      "Paragraph 2 should explain whether collector conviction confirms the move and what deserves attention next.",
-    ],
-    guardrails: [
-      "Talk about the market in general terms.",
-      "Refer to sets, clusters, breadth, and conviction rather than individual cards.",
-      "Do not mention specific cards by name.",
-      "Do not mention being an AI, and do not invent metrics.",
-    ],
-  },
-  prompt: {
-    task: "Write a short market-wide read for collectors using only the supplied homepage and community pulse data.",
-    focus: [
-      "Explain the clearest source of strength or weakness.",
-      "Say whether the move looks concentrated or broad.",
-      "Say whether community conviction is confirming the move.",
-      "Keep the read value-driven, concise, and useful.",
-    ],
-  },
-} as const satisfies HomepageSummaryConfig;
-
-function getTierLabel(value: unknown): PopAlphaTier {
-  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
-  if (normalized === "elite") return "Elite";
-  if (normalized === "ace") return "Ace";
-  return "Trainer";
-}
-
-function buildMarketNarrative(
-  tier: PopAlphaTier,
-  movers: HomepageCard[],
-  losers: HomepageCard[],
-  trending: HomepageCard[],
-): string {
-  const allCards = [...movers, ...trending, ...losers];
-  const setCounts = new Map<string, number>();
-  for (const card of allCards) {
-    const setName = card.set_name?.trim();
-    if (!setName) continue;
-    setCounts.set(setName, (setCounts.get(setName) ?? 0) + 1);
-  }
-  const rankedSets = [...setCounts.entries()].sort((a, b) => b[1] - a[1]);
-  const leader = rankedSets[0]?.[0];
-  const runnerUp = rankedSets[1]?.[0];
-
-  if (!leader) {
-    return "The market is still mixed. No set is clearly in control yet.";
-  }
-  if ((rankedSets[0]?.[1] ?? 0) >= 3) {
-    return `${leader} is leading today. The strongest moves keep showing up in the same set.`;
-  }
-  if (runnerUp) {
-    return `The action is split between ${leader} and ${runnerUp}. No single set is taking over yet.`;
-  }
-  return `${leader} looks strongest right now, but the rest of the market still feels selective.`;
-}
-
-function rankSetCounts(setNames: Array<string | null | undefined>): Array<{ name: string; count: number }> {
-  const counts = new Map<string, number>();
-
-  for (const value of setNames) {
-    const setName = value?.trim();
-    if (!setName) continue;
-    counts.set(setName, (counts.get(setName) ?? 0) + 1);
-  }
-
-  return [...counts.entries()]
-    .sort((left, right) => {
-      if (right[1] !== left[1]) return right[1] - left[1];
-      return left[0].localeCompare(right[0]);
-    })
-    .map(([name, count]) => ({ name, count }));
-}
-
-function buildAceNarrativeFallback(
-  movers: HomepageCard[],
-  trending: HomepageCard[],
-  losers: HomepageCard[],
-  communityCards: HomepageSummaryCommunityCard[],
-): string {
-  const rankedSets = rankSetCounts([
-    ...movers.map((card) => card.set_name),
-    ...trending.map((card) => card.set_name),
-    ...losers.map((card) => card.set_name),
-  ]);
-  const leaderSet = rankedSets[0] ?? null;
-  const runnerUpSet = rankedSets[1] ?? null;
-  const communitySets = rankSetCounts(communityCards.map((card) => card.setName));
-  const communityVotes = communityCards.reduce((totals, card) => ({
-    bullish: totals.bullish + card.bullishVotes,
-    total: totals.total + card.bullishVotes + card.bearishVotes,
-  }), { bullish: 0, total: 0 });
-  const communityPct = communityVotes.total > 0
-    ? Math.round((communityVotes.bullish / communityVotes.total) * 100)
-    : null;
-
-  if (leaderSet && leaderSet.count >= 3) {
-    return `${leaderSet.name} is setting the tone, and strength still looks concentrated rather than broad. The rest of the market is participating more selectively.\n\n${communityPct != null ? `Community Pulse is ${communityPct}% bullish${communitySets[0] ? `, with the clearest support around ${communitySets[0].name}.` : "."}` : "Community Pulse will show whether broader conviction starts to build."} Watch for leadership to spread into more sets.`;
-  }
-  if (leaderSet && runnerUpSet) {
-    return `Leadership is split between ${leaderSet.name} and ${runnerUpSet.name}, so the market still looks selective. No single pocket has fully taken control yet.\n\n${communityPct != null ? `Community Pulse is ${communityPct}% bullish, which suggests collectors are leaning constructive but still waiting for confirmation.` : "Community Pulse will show whether collectors start to agree on one pocket of strength."} Watch for one area to separate from the rest of the board.`;
-  }
-  if (leaderSet) {
-    return `${leaderSet.name} looks strongest right now, but breadth is still limited. The rest of the board has not moved in a decisive way yet.\n\n${communityPct != null ? `Community Pulse is ${communityPct}% bullish${communitySets[0] ? `, with the clearest support around ${communitySets[0].name}.` : "."}` : "Community Pulse will show whether conviction starts to align with price strength."} Watch for follow-through beyond the current leader.`;
-  }
-  return "The board is still taking shape. The strongest action is still narrow, so the next clear leader has not fully broken out yet.\n\nCommunity Pulse still matters because it can show where real conviction starts first. Watch for attention, price strength, and repeat support to start aligning in the same pocket of the market.";
-}
-
-function normalizeAceSummary(text: string): string {
-  const trimmed = text.trim();
-  if (!trimmed) return trimmed;
-  const explicitParagraphs = trimmed.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
-  if (explicitParagraphs.length >= 2) return `${explicitParagraphs[0]}\n\n${explicitParagraphs[1]}`;
-  const sentences = trimmed.match(/[^.!?]+[.!?]+(?:\s|$)|[^.!?]+$/g)?.map((p) => p.trim()).filter(Boolean) ?? [trimmed];
-  if (sentences.length <= 1) return `${trimmed}\n\nThe board is worth watching, but the next edge depends on where conviction builds.`;
-  const mid = Math.ceil(sentences.length / 2);
-  return `${sentences.slice(0, mid).join(" ").trim()}\n\n${sentences.slice(mid).join(" ").trim() || "The board is worth watching, but the next edge depends on where conviction builds."}`;
-}
-
-function splitAcePreview(text: string): { lead: string; remainder: string } {
-  const flattened = text.replace(/\s*\n\s*/g, " ").replace(/\s+/g, " ").trim();
-  if (!flattened) return { lead: "", remainder: "" };
-  const firstSentence = flattened.match(/[^.!?]+[.!?]+(?:\s|$)|[^.!?]+$/)?.[0]?.trim() ?? flattened;
-  const remainder = flattened.slice(firstSentence.length).trim();
-  return { lead: firstSentence, remainder };
-}
-
-function buildHomepageSummaryContext(
-  config: HomepageSummaryConfig,
-  movers: HomepageCard[],
-  trending: HomepageCard[],
-  losers: HomepageCard[],
-  communityCards: HomepageSummaryCommunityCard[],
-): string {
-  const moverSample = movers.slice(0, config.sourceLimits.topMovers);
-  const trendingSample = trending.slice(0, config.sourceLimits.trending);
-  const loserSample = losers.slice(0, config.sourceLimits.losers);
-  const communitySample = communityCards.slice(0, config.sourceLimits.communityPulse);
-  const marketSample = [...moverSample, ...trendingSample, ...loserSample];
-  const rankedSets = rankSetCounts(marketSample.map((card) => card.set_name));
-  const moverSets = rankSetCounts(moverSample.map((card) => card.set_name));
-  const communitySets = rankSetCounts(communitySample.map((card) => card.setName));
-  const positiveSignals = marketSample.filter((card) => (card.change_pct ?? 0) > 0).length;
-  const negativeSignals = marketSample.filter((card) => (card.change_pct ?? 0) < 0).length;
-  const averageMoverChange = averageValues(moverSample.map((card) => card.change_pct));
-  const averageTrendChange = averageValues(trendingSample.map((card) => card.change_pct));
-  const pullbackChange = loserSample[0]?.change_pct ?? null;
-  const communityVotes = communitySample.reduce((totals, card) => ({
-    bullish: totals.bullish + card.bullishVotes,
-    total: totals.total + card.bullishVotes + card.bearishVotes,
-  }), { bullish: 0, total: 0 });
-  const communityBullishPct = communityVotes.total > 0
-    ? Math.round((communityVotes.bullish / communityVotes.total) * 100)
-    : null;
-
-  return [
-    `Market breadth: ${positiveSignals} positive reads, ${negativeSignals} negative reads, ${rankedSets.length} active sets in focus.`,
-    moverSets[0]
-      ? `Strength concentration: ${moverSets[0].name} leads the strongest live movers${moverSets[1] ? `, with ${moverSets[1].name} also showing follow-through.` : "."}`
-      : "Strength concentration: No single set is clearly leading yet.",
-    `Pricing signal: strongest movers average ${averageMoverChange != null ? `${averageMoverChange.toFixed(1)}%` : "unknown"}, trending cards average ${averageTrendChange != null ? `${averageTrendChange.toFixed(1)}%` : "unknown"}, and the sharpest pullback is ${pullbackChange != null ? `${pullbackChange.toFixed(1)}%` : "unknown"}.`,
-    communityBullishPct != null
-      ? `Community pulse: ${communityBullishPct}% bullish across ${communityVotes.total} votes${communitySets[0] ? `, with the clearest support around ${communitySets[0].name}.` : "."}`
-      : "Community pulse: No clear vote consensus yet.",
-  ].join("\n");
-}
-
-function buildHomepageSummaryPrompt(config: HomepageSummaryConfig, topContext: string): { system: string; prompt: string } {
-  return {
-    system: [
-      config.system.role,
-      ...config.system.style,
-      ...config.system.structure,
-      ...config.system.guardrails,
-    ].join(" "),
-    prompt: [
-      config.prompt.task,
-      ...config.prompt.focus,
-      "",
-      topContext,
-    ].join("\n"),
-  };
-}
-
-function estimateHomepageSummaryCostUsd(
-  config: HomepageSummaryConfig,
-  usage: {
-    inputTokens: number | undefined;
-    outputTokens: number | undefined;
-  },
-): number | null {
-  const inputTokens = usage.inputTokens;
-  const outputTokens = usage.outputTokens;
-
-  if (inputTokens == null && outputTokens == null) return null;
-
-  const inputCost = ((inputTokens ?? 0) / 1_000_000) * config.pricingUsdPerMillionTokens.input;
-  const outputCost = ((outputTokens ?? 0) / 1_000_000) * config.pricingUsdPerMillionTokens.output;
-  return Number((inputCost + outputCost).toFixed(6));
-}
-
-function logHomepageSummaryUsage(
-  config: HomepageSummaryConfig,
-  usage: {
-    inputTokens: number | undefined;
-    outputTokens: number | undefined;
-    totalTokens: number | undefined;
-  },
-  meta: {
-    durationMs: number;
-    finishReason: string;
-  },
-): void {
-  console.info(config.logKey, JSON.stringify({
-    event: "usage",
-    version: config.version,
-    modelTier: config.modelTier,
-    modelLabel: config.modelLabel,
-    durationMs: meta.durationMs,
-    finishReason: meta.finishReason,
-    inputTokens: usage.inputTokens,
-    outputTokens: usage.outputTokens,
-    totalTokens: usage.totalTokens,
-    estimatedCostUsd: estimateHomepageSummaryCostUsd(config, usage),
-  }));
-}
-
-function getHomepageSummaryFailureReason(error: unknown): string {
-  if (error instanceof Error) {
-    if (error.name === "AbortError") return "timeout";
-    return error.message || error.name;
-  }
-  return "unknown";
-}
-
-function logHomepageSummaryFallback(
-  config: HomepageSummaryConfig,
-  durationMs: number,
-  reason: string,
-): void {
-  console.info(config.logKey, JSON.stringify({
-    event: "fallback",
-    version: config.version,
-    modelTier: config.modelTier,
-    modelLabel: config.modelLabel,
-    durationMs,
-    reason,
-  }));
-}
-
-function averageValues(values: Array<number | null | undefined>): number | null {
-  const finite = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
-  if (finite.length === 0) return null;
-  return Math.round(finite.reduce((sum, value) => sum + value, 0) / finite.length);
-}
-
-function getLeadingSet(cards: HomepageCard[]): { name: string | null; count: number } {
-  const counts = new Map<string, number>();
-  for (const card of cards) {
-    const setName = card.set_name?.trim();
-    if (!setName) continue;
-    counts.set(setName, (counts.get(setName) ?? 0) + 1);
-  }
-
-  const leader = [...counts.entries()].sort((left, right) => {
-    if (right[1] !== left[1]) return right[1] - left[1];
-    return left[0].localeCompare(right[0]);
-  })[0];
-
-  return {
-    name: leader?.[0] ?? null,
-    count: leader?.[1] ?? 0,
-  };
-}
-
-function buildFocusPills(cards: HomepageCard[], fallback: readonly string[], limit = 4): string[] {
-  const seen = new Set<string>();
-  const names = [
-    ...cards.map((card) => card.set_name?.trim() ?? "").filter(Boolean),
-    ...fallback,
-  ];
-  const pills: string[] = [];
-
-  for (const name of names) {
-    const key = name.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    pills.push(name);
-    if (pills.length >= limit) break;
-  }
-
-  return pills;
-}
-
-function splitIntoSentences(text: string): string[] {
-  return text
-    .replace(/\s*\n+\s*/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .match(/[^.!?]+[.!?]+(?:\s|$)|[^.!?]+$/g)
-    ?.map((sentence) => sentence.trim())
-    .filter(Boolean)
-    ?? [];
-}
-
-function buildHeroBriefFallback(
-  pulseCards: HomepageCard[],
-  leaderSet: { name: string | null; count: number },
-  fallback: string,
-): { lead: string; secondary: string | null } {
-  const positiveCount = pulseCards.filter((card) => (card.change_pct ?? 0) > 0).length;
-
-  if (leaderSet.name && leaderSet.count >= 3) {
-    return {
-      lead: `Momentum is clustering in ${leaderSet.name}.`,
-      secondary: `${leaderSet.count} cards are moving together.`,
-    };
-  }
-
-  if (leaderSet.name && leaderSet.count >= 2) {
-    return {
-      lead: `Momentum is forming in ${leaderSet.name}.`,
-      secondary: `${leaderSet.count} cards are moving together.`,
-    };
-  }
-
-  if (positiveCount >= 3) {
-    return {
-      lead: "Today's strength is broad, not isolated.",
-      secondary: `${positiveCount} names are participating.`,
-    };
-  }
-
-  if (leaderSet.name) {
-    return {
-      lead: `${leaderSet.name} looks strongest right now.`,
-      secondary: "Breadth is still selective.",
-    };
-  }
-
-  return {
-    lead: fallback,
-    secondary: null,
-  };
-}
-
-function buildHeroBrief(
-  summary: string,
-  pulseCards: HomepageCard[],
-  leaderSet: { name: string | null; count: number },
-  fallback: string,
-): { lead: string; secondary: string | null } {
-  const summarySentences = splitIntoSentences(summary);
-  const fallbackBrief = buildHeroBriefFallback(pulseCards, leaderSet, fallback);
-
-  if (summarySentences.length === 0) {
-    return fallbackBrief;
-  }
-
-  return {
-    lead: summarySentences[0] ?? fallbackBrief.lead,
-    secondary: summarySentences.slice(1, 3).join(" ").trim() || fallbackBrief.secondary,
-  };
-}
-
-async function generateAceSummary(
-  movers: HomepageCard[],
-  trending: HomepageCard[],
-  losers: HomepageCard[],
-  communityCards: HomepageSummaryCommunityCard[],
-): Promise<string> {
-  const fallback = buildAceNarrativeFallback(movers, trending, losers, communityCards);
-  const topContext = buildHomepageSummaryContext(HOMEPAGE_SUMMARY_CONFIG, movers, trending, losers, communityCards);
-  const { system, prompt } = buildHomepageSummaryPrompt(HOMEPAGE_SUMMARY_CONFIG, topContext);
-  const abortController = new AbortController();
-  const timeoutId = setTimeout(() => abortController.abort(), HOMEPAGE_SUMMARY_CONFIG.timeoutMs);
-  const startedAt = performance.now();
-
-  try {
-    const result = await generateText({
-      model: getPopAlphaModel(HOMEPAGE_SUMMARY_CONFIG.modelTier),
-      abortSignal: abortController.signal,
-      system,
-      prompt,
-    });
-    clearTimeout(timeoutId);
-    logHomepageSummaryUsage(HOMEPAGE_SUMMARY_CONFIG, result.totalUsage, {
-      durationMs: Math.round(performance.now() - startedAt),
-      finishReason: result.finishReason,
-    });
-    return normalizeAceSummary(result.text) || fallback;
-  } catch (error) {
-    clearTimeout(timeoutId);
-    logHomepageSummaryFallback(
-      HOMEPAGE_SUMMARY_CONFIG,
-      Math.round(performance.now() - startedAt),
-      getHomepageSummaryFailureReason(error),
-    );
-    return fallback;
-  }
-}
-
-/* ─── Page ─────────────────────────────────────────────────────────────────── */
+import WaitlistForm from "@/components/landing/waitlist-form";
+import IphoneMockup from "@/components/landing/iphone-mockup";
+import { clerkEnabled } from "@/lib/auth/clerk-enabled";
 
 export default async function Home() {
-  const user = await currentUser().catch(() => null);
-  const userTier: PopAlphaTier = getTierLabel(user?.publicMetadata?.popalpha_tier);
-
-  let data: Awaited<ReturnType<typeof getHomepageData>>;
-  try {
-    data = await Promise.race([
-      getHomepageData(),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), DATA_TIMEOUT_MS)),
-    ]);
-  } catch {
-    data = { ...EMPTY_DATA };
+  if (clerkEnabled) {
+    let userId: string | null = null;
+    try {
+      const session = await auth();
+      userId = session.userId ?? null;
+    } catch {
+      userId = null;
+    }
+    if (userId) redirect("/portfolio");
   }
-
-  const {
-    movers,
-    high_confidence_movers: highConfidenceMovers,
-    emerging_movers: emergingMovers,
-    losers,
-    trending,
-    signal_board: signalBoard,
-    as_of,
-    prices_refreshed_today: pricesRefreshedToday,
-    tracked_cards_with_live_price: trackedCardsWithLivePrice,
-  } = data;
-  const asOf = timeAgo(as_of);
-
-  let communityPulse: Awaited<ReturnType<typeof getCommunityPulseSnapshot>>;
-  try {
-    communityPulse = await getCommunityPulseSnapshot([...movers, ...trending, ...losers], user?.id ?? null);
-  } catch {
-    communityPulse = { cards: [], votesRemaining: 0, weeklyLimit: 0, weekEndsAt: 0 };
-  }
-
-  const marketNarrative = buildMarketNarrative(userTier, movers, losers, trending);
-  const aceSummary = await generateAceSummary(
-    movers, trending, losers,
-    communityPulse.cards.map((c) => ({
-      name: c.name, setName: c.setName, bullishVotes: c.bullishVotes, bearishVotes: c.bearishVotes, changePct: c.changePct,
-    })),
-  );
-  const acePreview = splitAcePreview(aceSummary);
-
-  // Hero showcase stays on live market movers and falls back to trending only if those rails are empty.
-  const liveMarketCards = [...highConfidenceMovers, ...emergingMovers, ...movers, ...losers]
-    .filter((c, i, arr) => arr.findIndex((x) => x.slug === c.slug) === i);
-  const heroMarketCards = (liveMarketCards.length > 0 ? liveMarketCards : trending)
-    .filter((c, i, arr) => arr.findIndex((x) => x.slug === c.slug) === i);
-
-  const heroCards = [...heroMarketCards]
-    .sort((a, b) => Math.abs(b.change_pct ?? 0) - Math.abs(a.change_pct ?? 0))
-    .slice(0, 5);
-  const highConfidenceCount = highConfidenceMovers.length;
-  const strongMoverRailCards = [...highConfidenceMovers, ...movers]
-    .filter((card, index, cards) => cards.findIndex((entry) => entry.slug === card.slug) === index)
-    .slice(0, 5);
-  const topMoverCardsByWindow = signalBoard.top_movers;
-  const biggestDropsByWindow = signalBoard.biggest_drops;
-  const momentumCardsByWindow = signalBoard.momentum;
-  const heroPulseCards = heroCards.slice(0, 4);
-  const heroLeadingSet = getLeadingSet(heroMarketCards);
-  const heroBrief = buildHeroBrief(
-    aceSummary,
-    heroPulseCards,
-    heroLeadingSet,
-    marketNarrative || "The market is still taking shape.",
-  );
-  const focusPills = buildFocusPills([...heroPulseCards, ...trending, ...movers], TRENDING_SET_PILLS, 2);
-  const livePriceCount = formatExactCount(trackedCardsWithLivePrice);
-  const refreshedCount = formatExactCount(pricesRefreshedToday);
-  const heroBriefGrounding = trackedCardsWithLivePrice !== null && pricesRefreshedToday !== null
-    ? `Grounded in ${livePriceCount} live prices and ${refreshedCount} refreshed cards from the last 24 hours.`
-    : "Grounded in live market pricing and request-time refresh rails.";
-  const heroProofStats = [
-    {
-      value: livePriceCount,
-      label: "Coverage online",
-      detail: "Canonical RAW cards with an active public market price right now.",
-      accentClass: "border-[#173642] bg-[linear-gradient(180deg,rgba(15,29,36,0.9),rgba(10,18,24,0.94))]",
-      dotClass: "bg-[#42D6E8]",
-    },
-    {
-      value: refreshedCount,
-      label: "Fresh in 24h",
-      detail: "Cards updated inside the trailing 24-hour freshness window.",
-      accentClass: "border-[#17382E] bg-[linear-gradient(180deg,rgba(14,27,22,0.9),rgba(9,18,15,0.94))]",
-      dotClass: "bg-[#5CE07D]",
-    },
-    {
-      value: asOf ? asOf : "Live now",
-      label: "Latest market tick",
-      detail: "Most recent timestamp currently flowing through PopAlpha's live price rails.",
-      accentClass: "border-[#25303B] bg-[linear-gradient(180deg,rgba(17,22,28,0.9),rgba(11,14,18,0.94))]",
-      dotClass: "bg-[#A5B4FC]",
-    },
-  ] as const;
-  const strongMoversBadge = getChangeWindowBadge([
-    ...topMoverCardsByWindow["24H"],
-    ...topMoverCardsByWindow["7D"],
-  ], "Live");
-  const communityVoteTotals = communityPulse.cards.reduce((totals, card) => ({
-    bullish: totals.bullish + card.bullishVotes,
-    total: totals.total + card.bullishVotes + card.bearishVotes,
-  }), { bullish: 0, total: 0 });
-  const communityBullishPct = communityVoteTotals.total > 0
-    ? Math.round((communityVoteTotals.bullish / communityVoteTotals.total) * 100)
-    : null;
-  const discoveryCards = [
-    {
-      eyebrow: "Daily brief",
-      value: "Live market read",
-      detail: heroBrief.lead,
-      href: "#market-intelligence",
-      linkLabel: "Read the brief",
-      accentClass: "border-[#173642] bg-[linear-gradient(180deg,rgba(16,29,37,0.92),rgba(10,17,23,0.96))]",
-      linkClass: "text-[#7DD3FC]",
-    },
-    {
-      eyebrow: "Top movers",
-      value: strongMoverRailCards.length > 0 ? `${strongMoverRailCards.length} names in focus` : "Signal still forming",
-      detail: highConfidenceCount > 0
-        ? highConfidenceCount >= strongMoverRailCards.length
-          ? `${strongMoversBadge} movers are already clearing the confidence threshold.`
-          : `${highConfidenceCount} high-confidence movers are leading a broader live mover board.`
-        : strongMoverRailCards.length > 0
-          ? "Live movers are active even while the high-confidence group is still forming."
-          : "The board is still waiting for a deeper group of high-confidence breakouts.",
-      href: "#top-movers",
-      linkLabel: "See top movers",
-      accentClass: "border-[#17382E] bg-[linear-gradient(180deg,rgba(15,28,22,0.92),rgba(10,18,15,0.96))]",
-      linkClass: "text-[#5CE07D]",
-    },
-    {
-      eyebrow: "Momentum pocket",
-      value: heroLeadingSet.name ?? (communityBullishPct != null ? `${communityBullishPct}% bullish` : "Conviction watch"),
-      detail: heroLeadingSet.name
-        ? `${heroLeadingSet.count} hero cards are clustering in one live pocket of the market.`
-        : communityBullishPct != null
-          ? `Community Pulse is running ${communityBullishPct}% bullish on the live board.`
-          : "Follow the next place where price action and collector conviction start aligning.",
-      href: heroLeadingSet.name ? "#momentum-rail" : "#market-intelligence",
-      linkLabel: heroLeadingSet.name ? "Track momentum" : "See conviction",
-      accentClass: "border-[#25303B] bg-[linear-gradient(180deg,rgba(18,22,29,0.92),rgba(11,14,19,0.96))]",
-      linkClass: "text-[#A5B4FC]",
-    },
-  ] as const;
-  const heroStats = [
-    { value: livePriceCount, label: "Live card prices", href: "/search" },
-    { value: refreshedCount, label: "Refreshed 24h", href: "/data" },
-    { value: asOf ? `Live ${asOf}` : "Live", label: "Last market update", href: "/data" },
-    { value: "Open", label: "Public data monitor", href: "/data" },
-  ] as const;
 
   return (
     <div className="landing-shell min-h-screen bg-[#060608] text-[#F0F0F0]">
       <SiteHeader
-        showSignIn={!user}
-        primaryCta={user ? { label: "Profile", href: "/profile" } : { label: "Start free", href: "/sign-up" }}
-        centerSlot={(
-          <Suspense fallback={<div className="h-9 w-full rounded-full bg-white/[0.04]" />}>
-            <HomepageSearch size="nav" autoFocus={false} className="w-full" />
-          </Suspense>
-        )}
+        navItems={[]}
+        primaryCta={{ label: "Join Waitlist", href: "#waitlist" }}
+        showSignIn={false}
         logoPriority
       />
 
-      {/* ── Hero ────────────────────────────────────────────────────────── */}
-      <section className="relative overflow-hidden pt-16">
-        <div className="pointer-events-none absolute inset-0">
-          <div className="absolute -top-24 left-[12%] h-[420px] w-[420px] rounded-full bg-[#00B4D8]/[0.06] blur-[130px]" />
-          <div className="absolute right-[10%] top-10 h-[320px] w-[320px] rounded-full bg-[#14B8A6]/[0.05] blur-[120px]" />
-        </div>
-
-        <div className="relative mx-auto max-w-[1400px] px-5 pb-14 pt-12 sm:px-8 sm:pt-20 lg:pb-20">
-          <div className="grid items-start gap-12 lg:grid-cols-[minmax(0,1.2fr)_500px] lg:gap-10 xl:grid-cols-[minmax(0,1.12fr)_560px]">
-            {/* Left: Headline + Proof */}
-            <div className="relative z-30 isolate max-w-[780px] lg:pr-12 xl:pr-16">
-              <div className="inline-flex items-center gap-2 rounded-full bg-white/[0.03] px-3 py-1.5 text-[12px] text-[#9EB2C2]">
-                <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#00DC5A] opacity-75" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-[#00DC5A]" />
-                </span>
-                <span>{asOf ? `Live ${asOf}` : "Live now"}</span>
-              </div>
-
-              <h1 className="relative z-40 mt-7 text-[clamp(3.45rem,5.95vw,5rem)] font-semibold leading-[0.86] tracking-[-0.058em] text-white">
-                <span className="block sm:whitespace-nowrap">{HERO_HEADLINE}</span>
-                <span className="mt-1 inline-block pr-[0.08em] bg-gradient-to-r from-[#9BE7F6] via-[#36D6E7] to-[#00C7B7] bg-clip-text text-transparent sm:whitespace-nowrap">
-                  {HERO_HEADLINE_ACCENT}
-                </span>
-              </h1>
-
-              <p className="mt-5 max-w-lg text-[17px] leading-8 text-[#98A2AE] sm:text-[18px]">
-                {HERO_SUBHEADLINE}
-              </p>
-
-              <div className="mt-7 max-w-[660px] rounded-[24px] border border-[#16303A] bg-[linear-gradient(180deg,rgba(8,16,22,0.94),rgba(7,12,18,0.98))] p-4 shadow-[0_20px_55px_rgba(0,0,0,0.28)] ring-1 ring-white/[0.04] sm:p-5">
-                <div className="flex flex-wrap items-center justify-between gap-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#7DD3FC]">
-                    Public Proof
-                  </p>
-                  <Link
-                    href="/data"
-                    className="inline-flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.03] px-4 py-2 text-[12px] font-semibold text-[#E7EDF2] transition-all hover:border-white/[0.15] hover:bg-white/[0.06] hover:text-white"
-                  >
-                    See live coverage
-                  </Link>
-                </div>
-
-                <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                  {heroProofStats.map((stat) => (
-                    <div
-                      key={stat.label}
-                      className={`rounded-[18px] border px-4 py-3 ${stat.accentClass}`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className={`h-2 w-2 rounded-full ${stat.dotClass}`} />
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#8FA0AF]">
-                          {stat.label}
-                        </p>
-                      </div>
-                      <p className="mt-3 text-[22px] font-semibold tracking-tight text-white">
-                        {stat.value}
-                      </p>
-                      <p className="mt-2 text-[11px] leading-5 text-[#7B8793]">
-                        {stat.detail}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="mt-8 grid gap-3 sm:grid-cols-3">
-                {discoveryCards.map((card) => (
-                  <Link
-                    key={card.eyebrow}
-                    href={card.href}
-                    className={`group rounded-[22px] border p-4 transition-all hover:border-white/[0.12] hover:bg-white/[0.03] ${card.accentClass}`}
-                  >
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#7F8D98]">
-                      {card.eyebrow}
-                    </p>
-                    <p className="mt-3 text-[16px] font-semibold leading-6 tracking-tight text-white">
-                      {card.value}
-                    </p>
-                    <p className="mt-2 text-[12px] leading-6 text-[#94A0AB]">
-                      {card.detail}
-                    </p>
-                    <span className={`mt-4 inline-flex items-center gap-2 text-[11px] font-semibold transition-colors group-hover:text-white ${card.linkClass}`}>
-                      {card.linkLabel}
-                      <span aria-hidden="true">→</span>
-                    </span>
-                  </Link>
-                ))}
-              </div>
-
-              {/* Direct Lookup */}
-              <div className="mt-8 max-w-[560px] lg:hidden">
-                <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
-                  <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#7C8792]">
-                      Direct lookup
-                    </p>
-                    <p className="mt-1 text-[13px] text-[#8E98A3]">
-                      Know the exact card? Jump straight into its live detail page.
-                    </p>
-                  </div>
-                  <Link
-                    href="/search"
-                    className="text-[12px] font-semibold text-[#7DD3FC] transition-colors hover:text-white"
-                  >
-                    Open full search
-                  </Link>
-                </div>
-                <div className="overflow-hidden rounded-[28px] bg-[linear-gradient(180deg,rgba(18,22,29,0.88),rgba(10,12,16,0.94))] p-1.5 shadow-[0_18px_50px_rgba(0,0,0,0.34)] ring-1 ring-white/[0.05] backdrop-blur-xl">
-                  <Suspense
-                    fallback={<div className="h-[60px] rounded-full bg-white/[0.03]" />}
-                  >
-                    <HomepageSearch />
-                  </Suspense>
-                </div>
-                <div className="mt-4">
-                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#68727C]">
-                    Start with a live pocket
-                  </p>
-                  <div className="flex flex-wrap items-center gap-2">
-                  {focusPills.map((name) => (
-                    <Link
-                      key={name}
-                      href={`/search?q=${encodeURIComponent(name)}`}
-                      className="rounded-full bg-white/[0.04] px-3 py-1.5 text-[12px] font-medium text-[#A0A9B4] transition-all hover:bg-white/[0.07] hover:text-white"
-                    >
-                      {name}
-                    </Link>
-                  ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* CTA Row */}
-              <div className="mt-8 flex flex-wrap items-center gap-4">
-                <Link
-                  href="/sign-up"
-                  className="group inline-flex items-center gap-2 rounded-full px-6 py-3.5 text-[14px] font-semibold text-[#060608] transition-all hover:shadow-[0_0_30px_rgba(255,255,255,0.12)]"
-                  style={{ backgroundColor: "#ffffff" }}
-                >
-                  {HERO_PRIMARY_CTA}
-                  <svg className="h-4 w-4 transition-transform group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
-                  </svg>
-                </Link>
-                <Link
-                  href="#market-intelligence"
-                  className="inline-flex items-center gap-2 rounded-full border border-white/[0.1] bg-white/[0.02] px-6 py-3.5 text-[14px] font-medium text-[#D0D4DB] transition-all hover:border-white/[0.2] hover:bg-white/[0.04] hover:text-white"
-                >
-                  {HERO_SECONDARY_CTA}
-                </Link>
-              </div>
-            </div>
-
-            {/* Right: Product Composition */}
-            <div className="relative z-0 w-full max-w-[600px] lg:justify-self-end lg:pt-10">
-              <div className="pointer-events-none absolute left-4 top-2 h-[280px] w-[280px] rounded-full bg-[#2FD0E3]/[0.15] blur-[120px]" />
-              <div className="pointer-events-none absolute bottom-6 right-8 h-[220px] w-[220px] rounded-full bg-[#0F766E]/[0.1] blur-[110px]" />
-
-              <div className="relative z-20 max-w-[540px] overflow-hidden rounded-[34px] bg-[linear-gradient(145deg,rgba(20,32,42,0.98),rgba(8,13,18,0.98)_72%)] px-6 py-6 shadow-[0_34px_90px_rgba(0,0,0,0.48)] ring-1 ring-white/[0.08] backdrop-blur-2xl sm:px-7 sm:py-7">
-                <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-[linear-gradient(180deg,rgba(84,216,232,0.12),transparent)]" />
-                <div className="relative">
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex items-center gap-3">
-                      <Image
-                        src="/brand/popalpha-icon-transparent.svg"
-                        alt="PopAlpha logo"
-                        width={48}
-                        height={48}
-                        className="h-12 w-12 shrink-0"
-                      />
-                      <div>
-                        <span className="text-[12px] font-medium text-[#98E7F3]">PopAlpha AI Summary</span>
-                      </div>
-                    </div>
-                    <span className="text-[11px] text-[#8D97A2]">
-                      {asOf ? `Updated ${asOf}` : "Live"}
-                    </span>
-                  </div>
-
-                  <div className="mt-6 rounded-xl border border-white/[0.04] bg-white/[0.02] p-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-[10px] font-semibold uppercase tracking-widest text-[#5F6A76]">Today&apos;s Read</span>
-                      <Link
-                        href="/data"
-                        className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#7DD3FC] transition-colors hover:text-white"
-                      >
-                        Proof
-                      </Link>
-                    </div>
-                    <p className="mt-2 text-[15px] font-medium leading-relaxed text-[#D4DCE4]">
-                      {heroBrief.lead}
-                    </p>
-                    {heroBrief.secondary ? (
-                      <p className="mt-3 text-[14px] leading-relaxed text-[#94A0AB]">
-                        {heroBrief.secondary}
-                      </p>
-                    ) : null}
-                    <p className="mt-4 text-[12px] leading-relaxed text-[#7B8793]">
-                      {heroBriefGrounding}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ── Trust Strip ─────────────────────────────────────────────────── */}
-      <section className="border-y border-white/[0.04] bg-[#07090D]">
-        <div className="mx-auto max-w-[1400px] px-5 sm:px-8">
-          <div className="grid gap-y-6 py-6 sm:grid-cols-2 lg:grid-cols-4 lg:gap-y-0">
-            {heroStats.map((stat, index) => (
-              <Link
-                key={stat.label}
-                href={stat.href}
-                className={`${index > 0 ? "lg:border-l lg:border-white/[0.05] lg:pl-6" : ""} ${index < heroStats.length - 1 ? "lg:pr-6" : ""}`}
-              >
-                <span className="text-[16px] font-semibold tracking-tight text-white transition-colors hover:text-[#9BE7F6] sm:text-[18px]">{stat.value}</span>
-                <p className="mt-1 text-[12px] text-[#6D7783]">{stat.label}</p>
-              </Link>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <HomepageSignalBoard
-        topMoversByWindow={topMoverCardsByWindow}
-        biggestDropsByWindow={biggestDropsByWindow}
-        momentumByWindow={momentumCardsByWindow}
-      />
-
-      {/* ── Market Intelligence ─────────────────────────────────────────── */}
-      <section id="market-intelligence" className="border-t border-white/[0.04] bg-[#08080C] py-16 sm:py-24">
-        <div className="mx-auto max-w-[1400px] px-5 sm:px-8">
-          <div className="grid gap-8 lg:grid-cols-2">
-            {/* Scout Brief */}
-            <div className="relative overflow-hidden rounded-2xl border border-[#00B4D8]/10 bg-gradient-to-br from-[#0C1015] to-[#0A0A0E] p-6 sm:p-8">
-              <div className="pointer-events-none absolute -right-20 -top-20 h-40 w-40 rounded-full bg-[#00B4D8]/[0.04] blur-[60px]" />
-
-              <div className="relative">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#00B4D8]/10 text-[16px]">
-                      🔮
-                    </div>
-                    <div>
-                      <span className="text-[15px] font-bold text-white">PopAlpha Scout</span>
-                      <p className="text-[11px] font-medium text-[#00B4D8]">Live market brief</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="relative flex h-2 w-2">
-                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#FF3B30] opacity-60" />
-                      <span className="relative inline-flex h-2 w-2 rounded-full bg-[#FF3B30]" />
-                    </span>
-                    <span className="text-[11px] font-semibold text-[#FF6B6B]">LIVE</span>
-                  </div>
-                </div>
-
-                <div className="mt-5 rounded-xl border border-white/[0.04] bg-white/[0.02] p-4">
-                  <span className="text-[10px] font-semibold uppercase tracking-widest text-[#555]">Today&apos;s Read</span>
-                  <p className="mt-1.5 text-[15px] font-medium leading-relaxed text-[#D4D4D8]">
-                    {heroCards[0] ? `${heroCards[0].name} is setting the pace today at ${formatPct(heroCards[0].change_pct)}.` : "The market is still taking shape."}
-                  </p>
-                </div>
-
-                <div className="mt-4">
-                  <TypewriterText
-                    text={HOMEPAGE_SCOUT_NARRATIVE}
-                    className="text-[14px] leading-relaxed text-[#888]"
-                  />
-                </div>
-
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {["Narrow breadth", "Conviction building", "Chase-led market"].map((tag) => (
-                    <span key={tag} className="rounded-full border border-white/[0.06] px-2.5 py-1 text-[11px] font-medium text-[#666]">
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Ace Intelligence Preview */}
-            <div className="relative overflow-hidden rounded-2xl border border-[#7C3AED]/10 bg-gradient-to-br from-[#0E0C15] to-[#0A0A0E] p-6 sm:p-8">
-              <div className="pointer-events-none absolute -right-20 -top-20 h-40 w-40 rounded-full bg-[#7C3AED]/[0.04] blur-[60px]" />
-
-              <div className="relative">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#7C3AED]/10 text-[16px]">
-                      ⚡
-                    </div>
-                    <div>
-                      <span className="text-[15px] font-bold text-white">PopAlpha Ace</span>
-                      <p className="text-[11px] font-medium text-[#7C3AED]">Deeper market read</p>
-                    </div>
-                  </div>
-                  <span className="rounded-md bg-[#FFD700]/10 px-2 py-0.5 text-[10px] font-bold text-[#FFD700]">PRO</span>
-                </div>
-
-                <div className="mt-5">
-                  <p className="text-[14px] leading-relaxed text-[#999]">
-                    {acePreview.lead}
-                  </p>
-                  {acePreview.remainder && (
-                    <div className="relative mt-3 overflow-hidden rounded-xl">
-                      <p className="text-[14px] leading-relaxed text-[#999] blur-[4px] select-none">
-                        {acePreview.remainder}
-                      </p>
-                      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-[#0E0C15] to-transparent" />
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <span className="rounded-full bg-gradient-to-r from-[#7C3AED] to-[#6366F1] px-4 py-2 text-[12px] font-bold text-white shadow-[0_8px_20px_rgba(124,58,237,0.3)]">
-                          Unlock Ace
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="mt-4 rounded-xl border border-white/[0.04] bg-white/[0.02] p-3">
-                  <p className="text-[12px] text-[#666]">
-                    Ace goes deeper on breadth, set rotation, conviction flow, crowd divergence, and risk. Updated live.
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ── Collector Edge Section ───────────────────────────────────────── */}
-      <section className="border-t border-white/[0.04] py-16 sm:py-24">
-        <div className="mx-auto max-w-[1400px] px-5 sm:px-8">
-          <div className="text-center">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#00B4D8]">The Collector&apos;s Edge</span>
-            <h2 className="mt-3 text-[clamp(1.5rem,3vw,2.5rem)] font-bold tracking-tight text-white">
-              Beyond price: context, conviction, and market strength
-            </h2>
-            <p className="mx-auto mt-4 max-w-xl text-[15px] leading-relaxed text-[#666]">
-              PopAlpha combines live pricing, confidence scoring, momentum tracking, and AI market briefs in one collector-native workflow.
-            </p>
-          </div>
-
-          <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {[
-              {
-                icon: "🔍",
-                title: "Instant market context",
-                desc: "Search or scan any card to see price, market strength, and recent market context in seconds.",
-                accent: "#00B4D8",
-              },
-              {
-                icon: "🤖",
-                title: "AI market briefs",
-                desc: "Daily reads on what is moving, why it matters, and where conviction is building.",
-                accent: "#7C3AED",
-              },
-              {
-                icon: "📊",
-                title: "Confidence scoring",
-                desc: "Every move is scored so you can separate real traction from noisy prints.",
-                accent: "#00DC5A",
-              },
-              {
-                icon: "💼",
-                title: "Portfolio intelligence",
-                desc: "Track value, monitor strength shifts, and follow raw, sealed, and graded exposure.",
-                accent: "#FFD700",
-              },
-            ].map((feature) => (
-              <div
-                key={feature.title}
-                className="group rounded-2xl border border-white/[0.06] bg-[#0C0C10] p-6 transition-all hover:border-white/[0.1] hover:shadow-[0_0_30px_rgba(0,0,0,0.3)]"
-              >
-                <div
-                  className="flex h-10 w-10 items-center justify-center rounded-xl text-[18px]"
-                  style={{ background: `${feature.accent}10` }}
-                >
-                  {feature.icon}
-                </div>
-                <h3 className="mt-4 text-[15px] font-bold text-white">{feature.title}</h3>
-                <p className="mt-2 text-[13px] leading-relaxed text-[#666]">{feature.desc}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ── Workflow Section ─────────────────────────────────────────────── */}
-      <section className="border-t border-white/[0.04] bg-[#08080C] py-16 sm:py-24">
-        <div className="mx-auto max-w-[1400px] px-5 sm:px-8">
-          <div className="text-center">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#00DC5A]">How It Works</span>
-            <h2 className="mt-3 text-[clamp(1.5rem,3vw,2.25rem)] font-bold tracking-tight text-white">
-              From discovery to decision in seconds
-            </h2>
-          </div>
-
-          <div className="mx-auto mt-12 grid max-w-4xl gap-6 sm:grid-cols-3">
-            {[
-              {
-                step: "01",
-                title: "Search or scan",
-                desc: "Type a card name, paste a URL, or scan with your camera. Live results in seconds.",
-                accent: "#00B4D8",
-              },
-              {
-                step: "02",
-                title: "Read the market",
-                desc: "See price action, confidence score, market strength, and AI context in one view.",
-                accent: "#7C3AED",
-              },
-              {
-                step: "03",
-                title: "Track and act",
-                desc: "Save key names to your watchlist or portfolio and act when strength builds or fades.",
-                accent: "#00DC5A",
-              },
-            ].map((item, i) => (
-              <div key={item.step} className="relative">
-                {i < 2 && (
-                  <div className="pointer-events-none absolute right-0 top-8 hidden h-px w-6 bg-gradient-to-r from-white/10 to-transparent sm:block" style={{ right: "-12px" }} />
-                )}
-                <div className="rounded-2xl border border-white/[0.06] bg-[#0C0C10] p-6">
-                  <span
-                    className="text-[32px] font-bold tabular-nums"
-                    style={{ color: item.accent, opacity: 0.3 }}
-                  >
-                    {item.step}
-                  </span>
-                  <h3 className="mt-3 text-[16px] font-bold text-white">{item.title}</h3>
-                  <p className="mt-2 text-[13px] leading-relaxed text-[#666]">{item.desc}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ── Why PopAlpha ─────────────────────────────────────────────────── */}
-      <section className="border-t border-white/[0.04] py-16 sm:py-24">
-        <div className="mx-auto max-w-[1400px] px-5 sm:px-8">
-          <div className="text-center">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#FFD700]">Why Market Strength Beats Raw Price</span>
-            <h2 className="mt-3 text-[clamp(1.5rem,3vw,2.25rem)] font-bold tracking-tight text-white">
-              Price tells you what happened. Market strength shows how real the move is.
-            </h2>
-          </div>
-
-          <div className="mx-auto mt-12 grid max-w-4xl gap-4 sm:grid-cols-3">
-            {[
-              {
-                label: "Price Trackers",
-                items: ["Last-sale pricing", "Historical charts", "Basic search"],
-                accent: "#555",
-                muted: true,
-              },
-              {
-                label: "Marketplaces",
-                items: ["Listings and recent sales", "Seller and transaction detail", "Built to transact, not interpret"],
-                accent: "#555",
-                muted: true,
-              },
-              {
-                label: "PopAlpha",
-                items: [
-                  "Price + confidence + market strength",
-                  "AI market briefs",
-                  "Momentum and conviction tracking",
-                  "Portfolio and watchlist tools",
-                  "Raw, sealed, and graded coverage",
-                ],
-                accent: "#00B4D8",
-                muted: false,
-              },
-            ].map((col) => (
-              <div
-                key={col.label}
-                className={`rounded-2xl border p-6 ${col.muted ? "border-white/[0.04] bg-[#0A0A0E]" : "border-[#00B4D8]/20 bg-[#00B4D8]/[0.03] shadow-[0_0_30px_rgba(0,180,216,0.06)]"}`}
-              >
-                <span
-                  className={`text-[12px] font-bold uppercase tracking-widest ${col.muted ? "text-[#555]" : "text-[#00B4D8]"}`}
-                >
-                  {col.label}
-                </span>
-                <ul className="mt-4 space-y-2.5">
-                  {col.items.map((item) => (
-                    <li key={item} className="flex items-start gap-2">
-                      <span className={`mt-1 text-[12px] ${col.muted ? "text-[#444]" : "text-[#00B4D8]"}`}>
-                        {col.muted ? "–" : "✓"}
-                      </span>
-                      <span className={`text-[13px] ${col.muted ? "text-[#555]" : "text-[#ccc]"}`}>{item}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ── Final CTA ───────────────────────────────────────────────────── */}
-      <section className="relative overflow-hidden border-t border-white/[0.04] py-20 sm:py-32">
-        {/* Ambient glow */}
-        <div className="pointer-events-none absolute inset-0">
-          <div className="absolute left-1/2 top-1/2 h-[500px] w-[500px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#00B4D8]/[0.04] blur-[120px]" />
-          <div className="absolute left-1/3 top-1/3 h-[300px] w-[300px] rounded-full bg-[#7C3AED]/[0.03] blur-[80px]" />
-        </div>
-
-        <div className="relative mx-auto max-w-2xl px-5 text-center sm:px-8">
-          <h2 className="text-[clamp(1.75rem,4vw,3rem)] font-bold leading-[1.1] tracking-tight text-white">
-            Start tracking with context
-            <br />
-            <span className="bg-gradient-to-r from-[#00B4D8] to-[#00DC5A] bg-clip-text text-transparent">and conviction</span>
-          </h2>
-          <p className="mx-auto mt-5 max-w-md text-[15px] leading-relaxed text-[#666]">
-            Search free, scan any card, and explore the live market. Upgrade for AI briefs, market strength, and portfolio tools.
-          </p>
-          <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
-            <Link
-              href="/sign-up"
-              className="group inline-flex items-center gap-2 rounded-full px-8 py-3.5 text-[15px] font-semibold text-[#060608] transition-all hover:shadow-[0_0_40px_rgba(255,255,255,0.15)]"
-              style={{ backgroundColor: "#ffffff" }}
-            >
-              {HERO_PRIMARY_CTA}
-              <svg className="h-4 w-4 transition-transform group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
-              </svg>
-            </Link>
-            <Link
-              href="/search"
-              className="inline-flex items-center gap-2 rounded-full border border-white/[0.1] px-8 py-3.5 text-[15px] font-medium text-[#ccc] transition-all hover:border-white/[0.2] hover:text-white"
-            >
-              {HERO_SECONDARY_CTA}
-            </Link>
-          </div>
-        </div>
-      </section>
-
-      {/* ── Footer ──────────────────────────────────────────────────────── */}
-      <footer className="border-t border-white/[0.04] bg-[#060608] py-10">
-        <div className="mx-auto flex max-w-[1400px] flex-col items-center justify-between gap-4 px-5 sm:flex-row sm:px-8">
-          <span className="text-[13px] font-medium text-[#444]">PopAlpha</span>
-          <div className="flex items-center gap-5">
-            {["About", "Sets", "Portfolio"].map((item) => (
-              <Link
-                key={item}
-                href={`/${item.toLowerCase()}`}
-                className="text-[12px] font-medium text-[#555] transition-colors hover:text-white"
-              >
-                {item}
-              </Link>
-            ))}
-          </div>
-          <span className="text-[11px] text-[#333]">Collector intelligence, not financial advice.</span>
-        </div>
-      </footer>
+      <Hero />
+      <AIMarquee />
+      <FeatureGrid />
+      <HowItWorks />
+      <FinalCta />
+      <LandingFooter />
     </div>
   );
 }
 
-/* ─── Sub-components ───────────────────────────────────────────────────────── */
+/* ── Hero ──────────────────────────────────────────────────────────────────── */
+
+function Hero() {
+  return (
+    <section className="relative overflow-hidden pt-16">
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute -top-32 left-[8%] h-[520px] w-[520px] rounded-full bg-[#00B4D8]/[0.10] blur-[140px]" />
+        <div className="absolute right-[6%] top-20 h-[420px] w-[420px] rounded-full bg-[#7C3AED]/[0.08] blur-[160px]" />
+      </div>
+
+      <div className="relative mx-auto max-w-[1400px] px-5 pb-20 pt-16 sm:px-8 sm:pt-24 lg:pb-28 lg:pt-28">
+        <div className="grid items-center gap-14 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,360px)] lg:gap-16 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,420px)]">
+          <div className="relative z-10 max-w-[720px]">
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-[12px] font-medium text-[#9EB2C2]">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#00B4D8] opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-[#00B4D8]" />
+              </span>
+              <span>Coming soon to iPhone</span>
+            </div>
+
+            <h1 className="mt-7 text-[clamp(3rem,5.5vw,4.75rem)] font-semibold leading-[0.95] tracking-[-0.045em] text-white">
+              Pokémon card intelligence,
+              <span className="mt-1 block bg-gradient-to-r from-[#9BE7F6] via-[#36D6E7] to-[#00C7B7] bg-clip-text text-transparent">
+                tuned to you.
+              </span>
+            </h1>
+
+            <p className="mt-6 max-w-[580px] text-[18px] leading-[1.55] text-[#B5BEC9]">
+              PopAlpha is your AI scout for the Pokémon market. It learns the cards you care about,
+              identifies any new card in a second, and tells you the moment to buy — all from your
+              iPhone.
+            </p>
+
+            <div id="waitlist" className="mt-9 scroll-mt-24">
+              <WaitlistForm variant="hero" />
+            </div>
+
+            <div className="mt-10 flex flex-wrap items-center gap-x-6 gap-y-3 text-[12px] text-[#7B8794]">
+              <HeroProof label="Personalized for you" />
+              <HeroProof label="Buy-zone alerts" />
+              <HeroProof label="Real-time scanner" />
+              <HeroProof label="Daily AI brief" />
+            </div>
+          </div>
+
+          <div className="relative hidden lg:flex lg:items-center lg:justify-center">
+            <IphoneMockup size="hero" />
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function HeroProof({ label }: { label: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      <svg className="h-4 w-4 text-[#00DC5A]" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-7.5 7.5a1 1 0 01-1.414 0l-3.5-3.5a1 1 0 011.414-1.414L8.5 12.086l6.793-6.793a1 1 0 011.414 0z" clipRule="evenodd" />
+      </svg>
+      <span>{label}</span>
+    </div>
+  );
+}
+
+/* ── AI Marquee ────────────────────────────────────────────────────────────── */
+
+function AIMarquee() {
+  return (
+    <section className="relative overflow-hidden border-y border-white/[0.05] bg-[linear-gradient(180deg,#06070B_0%,#0A0D14_50%,#06070B_100%)]">
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute left-1/2 top-0 h-[420px] w-[820px] -translate-x-1/2 rounded-full bg-[#00B4D8]/[0.10] blur-[150px]" />
+        <div className="absolute right-[12%] bottom-0 h-[320px] w-[420px] rounded-full bg-[#7C3AED]/[0.10] blur-[150px]" />
+      </div>
+
+      <div className="relative mx-auto max-w-[1200px] px-5 py-24 text-center sm:px-8 lg:py-36">
+        <p className="text-[13px] font-semibold uppercase tracking-[0.2em] text-[#7DD3FC]">Built around you</p>
+        <h2 className="mx-auto mt-5 max-w-[1200px] text-[clamp(3.5rem,8vw,7rem)] font-semibold leading-[0.92] tracking-[-0.05em] text-white">
+          An AI that knows your collection —
+          <span className="block bg-gradient-to-r from-[#9BE7F6] via-[#36D6E7] to-[#00C7B7] bg-clip-text text-transparent">
+            and tells you when to act.
+          </span>
+        </h2>
+        <p className="mx-auto mt-8 max-w-[760px] text-[clamp(17px,1.5vw,21px)] leading-[1.55] text-[#B5BEC9]">
+          PopAlpha tracks what you own, what you watch, and how you move — then pinpoints the
+          cards worth buying and the exact moments they&rsquo;re undervalued.
+        </p>
+
+        <ul className="mx-auto mt-16 grid max-w-[1000px] gap-8 text-left md:grid-cols-3 md:gap-6">
+          <MarqueeBullet
+            title="A signal feed that filters the noise"
+            detail="Movers, breakouts, and unusual activity — ranked by relevance to your collection, not the market."
+          />
+          <MarqueeBullet
+            title="Your daily edge"
+            detail="A personalized AI brief on what&rsquo;s moving in your niche — backed by live pricing, not hype."
+          />
+          <MarqueeBullet
+            title="Buy when it actually matters"
+            detail="Get alerted the moment a card drops into a historically strong buy zone — before everyone else catches on."
+          />
+        </ul>
+      </div>
+    </section>
+  );
+}
+
+function MarqueeBullet({ title, detail }: { title: string; detail: string }) {
+  return (
+    <li className="flex gap-4">
+      <div className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[#00B4D8]/30 bg-[#00B4D8]/10">
+        <span className="h-2 w-2 rounded-full bg-[#00B4D8]" />
+      </div>
+      <div>
+        <p className="text-[15px] font-semibold tracking-tight text-white">{title}</p>
+        <p className="mt-1 text-[14px] leading-[1.55] text-[#9FA4AE]">{detail}</p>
+      </div>
+    </li>
+  );
+}
+
+/* ── Feature Grid ──────────────────────────────────────────────────────────── */
+
+function FeatureGrid() {
+  const features = [
+    {
+      eyebrow: "Real-time scanner",
+      title: "Snap any card. Get the price.",
+      detail:
+        "Apple Vision\u2013powered camera ID \u2014 set, number, and variant in under a second. EN and JP prints, both native. The fastest way to price a card.",
+      Icon: ScannerIcon,
+    },
+    {
+      eyebrow: "Buy-zone intelligence",
+      title: "Buy at the right moment.",
+      detail:
+        "PopAlpha tracks where prices have historically lived for the cards you watch. When one dips into its buy zone, a push fires the moment it happens.",
+      Icon: TrendIcon,
+    },
+    {
+      eyebrow: "Portfolio that thinks",
+      title: "The more you track, the smarter it gets.",
+      detail:
+        "Graded and raw, lot-level cost basis, live valuation. Every card you scan or watchlist teaches the AI more about what you actually care about.",
+      Icon: PortfolioIcon,
+    },
+  ];
+
+  return (
+    <section className="mx-auto max-w-[1400px] px-5 py-20 sm:px-8 lg:py-28">
+      <div className="max-w-[680px]">
+        <p className="text-[12px] font-semibold uppercase tracking-[0.18em] text-[#7DD3FC]">Built for iPhone</p>
+        <h2 className="mt-3 text-[clamp(2rem,3.4vw,3rem)] font-semibold leading-[1.05] tracking-[-0.035em] text-white">
+          Quick prices. Smart timing. A portfolio that learns.
+        </h2>
+      </div>
+
+      <div className="mt-12 grid gap-5 md:grid-cols-3">
+        {features.map((feature) => (
+          <div
+            key={feature.eyebrow}
+            className="group relative overflow-hidden rounded-[1.6rem] border border-white/[0.06] bg-[linear-gradient(180deg,rgba(20,28,38,0.6),rgba(9,12,18,0.85))] p-6 transition hover:border-white/[0.12]"
+          >
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-[#00B4D8]/25 bg-[#00B4D8]/[0.08] text-[#7DD3FC]">
+              <feature.Icon />
+            </div>
+            <p className="mt-5 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#7DD3FC]">{feature.eyebrow}</p>
+            <h3 className="mt-2 text-[22px] font-semibold tracking-[-0.025em] text-white">{feature.title}</h3>
+            <p className="mt-3 text-[14px] leading-[1.6] text-[#9FA4AE]">{feature.detail}</p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/* ── How It Works ──────────────────────────────────────────────────────────── */
+
+function HowItWorks() {
+  const steps = [
+    {
+      step: "01",
+      title: "Add the cards you care about",
+      detail:
+        "Snap to identify, then drop into your portfolio or watchlist with a tap. Every card you save becomes signal.",
+    },
+    {
+      step: "02",
+      title: "PopAlpha learns you",
+      detail:
+        "The AI studies what you own, watch, and search — building a picture of which sets, eras, and prints actually matter to you.",
+    },
+    {
+      step: "03",
+      title: "Get the right alert at the right moment",
+      detail:
+        "When a card you care about hits its buy zone, breaks out, or moves unusually, your iPhone pings you in real time.",
+    },
+  ];
+
+  return (
+    <section className="relative overflow-hidden border-t border-white/[0.05] bg-[#06070B]">
+      <div className="mx-auto max-w-[1400px] px-5 py-20 sm:px-8 lg:py-28">
+        <div className="max-w-[680px]">
+          <p className="text-[12px] font-semibold uppercase tracking-[0.18em] text-[#7DD3FC]">How it works</p>
+          <h2 className="mt-3 text-[clamp(2rem,3.4vw,3rem)] font-semibold leading-[1.05] tracking-[-0.035em] text-white">
+            Save what matters. Let the AI do the watching.
+          </h2>
+        </div>
+
+        <ol className="mt-12 grid gap-5 md:grid-cols-3">
+          {steps.map((step, index) => (
+            <li
+              key={step.step}
+              className="relative rounded-[1.6rem] border border-white/[0.06] bg-[linear-gradient(180deg,rgba(15,21,30,0.7),rgba(8,11,17,0.9))] p-6"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#7DD3FC]">Step</span>
+                <span className="text-[40px] font-semibold leading-none tracking-[-0.04em] text-white/[0.12]">
+                  {step.step}
+                </span>
+              </div>
+              <h3 className="mt-3 text-[20px] font-semibold tracking-[-0.02em] text-white">{step.title}</h3>
+              <p className="mt-2 text-[14px] leading-[1.6] text-[#9FA4AE]">{step.detail}</p>
+              {index < steps.length - 1 ? (
+                <div className="pointer-events-none absolute -right-3 top-1/2 hidden h-px w-6 -translate-y-1/2 bg-gradient-to-r from-white/[0.12] to-transparent md:block" />
+              ) : null}
+            </li>
+          ))}
+        </ol>
+      </div>
+    </section>
+  );
+}
+
+/* ── Final CTA ─────────────────────────────────────────────────────────────── */
+
+function FinalCta() {
+  return (
+    <section className="relative overflow-hidden border-t border-white/[0.05] bg-[linear-gradient(180deg,#070A12_0%,#06070B_100%)]">
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute left-1/2 top-1/2 h-[400px] w-[820px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#00B4D8]/[0.08] blur-[160px]" />
+      </div>
+
+      <div className="relative mx-auto max-w-[1100px] px-5 py-24 text-center sm:px-8 lg:py-32">
+        <p className="text-[12px] font-semibold uppercase tracking-[0.18em] text-[#7DD3FC]">Pre-launch</p>
+        <h2 className="mt-3 text-[clamp(2.25rem,3.8vw,3.5rem)] font-semibold leading-[1.05] tracking-[-0.035em] text-white">
+          The smartest way to collect Pokémon —
+          <span className="block bg-gradient-to-r from-[#9BE7F6] via-[#36D6E7] to-[#00C7B7] bg-clip-text text-transparent">
+            built for iPhone first.
+          </span>
+        </h2>
+        <p className="mx-auto mt-5 max-w-[620px] text-[17px] leading-[1.55] text-[#B5BEC9]">
+          We&rsquo;re opening up early access in waves. Drop your email and we&rsquo;ll be in touch
+          when your spot is ready.
+        </p>
+
+        <div className="mt-10">
+          <WaitlistForm variant="final" />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ── Footer ────────────────────────────────────────────────────────────────── */
+
+function LandingFooter() {
+  return (
+    <footer className="border-t border-white/[0.06] bg-[#060608] py-10">
+      <div className="mx-auto flex max-w-[1400px] flex-col items-center justify-between gap-4 px-5 text-[13px] text-[#7B8794] sm:flex-row sm:px-8">
+        <p>&copy; {new Date().getFullYear()} PopAlpha. All rights reserved.</p>
+        <div className="flex items-center gap-5">
+          <Link href="/about" className="transition hover:text-white">About</Link>
+          <Link href="/data" className="transition hover:text-white">Data</Link>
+          <Link href="/sign-in" className="transition hover:text-white">Sign in</Link>
+        </div>
+      </div>
+    </footer>
+  );
+}
+
+/* ── Inline Icons ──────────────────────────────────────────────────────────── */
+
+function ScannerIcon() {
+  return (
+    <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="6" width="18" height="13" rx="2.5" />
+      <circle cx="12" cy="12.5" r="3.6" />
+      <path d="M9 6l1.4-2h3.2L15 6" />
+    </svg>
+  );
+}
+
+function TrendIcon() {
+  return (
+    <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 17l5-6 4 4 8-9" />
+      <path d="M14 6h6v6" />
+    </svg>
+  );
+}
+
+function PortfolioIcon() {
+  return (
+    <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="6" width="18" height="14" rx="2" />
+      <path d="M3 10h18M9 6V4h6v2" />
+    </svg>
+  );
+}
