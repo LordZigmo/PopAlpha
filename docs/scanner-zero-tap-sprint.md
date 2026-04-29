@@ -9,7 +9,30 @@ and you'll know exactly where we are.
 
 ## Where we are right now
 
-### Latest production state (commit `1c44dc6`)
+### Latest production state (commit `4fa0264`)
+
+**Day 2 has shipped.** End-to-end OCR + layered retrieval now in
+production:
+- iOS captures card → `OCRService.extractCardIdentifiers` extracts BOTH
+  `card_number` AND `set_hint`
+- iOS sends `?card_number=...&set_hint=...` to `/api/scan/identify`
+- Server runs THREE retrieval paths in priority order:
+  - Path A (strict): both filters present → SELECT canonical_cards
+    directly. 1 row → HIGH (`ocr_direct_unique`); 2–3 → MEDIUM
+    intersect with kNN (`ocr_direct_narrow`).
+  - Path B (middle): `card_number` only → SELECT canonical_cards by
+    number, intersect with kNN candidates. 1 → HIGH
+    (`ocr_intersect_unique`); 2–3 → MEDIUM (`ocr_intersect_narrow`).
+  - Path C (fallback): vision_only — Day 1 pipeline with trust-killer
+    HIGH→MEDIUM downgrade.
+- `winning_path` is logged to `scan_identify_events` AND surfaced in
+  the JSON response, then rendered in the iOS DEBUG overlay so the
+  operator can see which signal won on each scan.
+
+Day 2 commits: `a532e12` (route + iOS + migration), `4fa0264` (eval
+script per-path scoreboard + `--no-set-hint`).
+
+#### Day 1 state (commit `1c44dc6`)
 
 End-to-end on-device OCR is wired with both filters AND a debug overlay:
 - iOS captures card → `OCRService.extractCardIdentifiers` (Apple Vision,
@@ -188,13 +211,16 @@ Path A even when set OCR fails.
 
 Implementation tasks:
 
-| # | Task | Hours |
+| # | Task | Status |
 |---|---|---|
-| 2.1 | Path A direct-lookup branch + result mapping (Path A-1 → HIGH, A-2/3 → MEDIUM via mini-kNN) | 3 |
-| 2.2 | Path B intersection branch — pull all slugs with matching card_number (could be ~50 globally, fine for in-memory intersect with kNN top-K) | 2 |
-| 2.3 | `winning_path` field added to scan_identify_events + response so iOS + telemetry know which path fired | 1 |
-| 2.4 | Tighten OCR confidence — Path A unique → HIGH always, Path B unique-after-intersect → HIGH only if CLIP also liked it (gap signal), Path B 2-3 → MEDIUM | 1 |
-| 2.5 | Re-eval with `--perfect-ocr` (which exercises Path A) and without (which exercises Path B + C) | 1 |
+| 2.0 | `winning_path TEXT` migration on scan_identify_events | ✅ applied 2026-04-29 |
+| 2.1 | Path A direct-lookup branch + canonicalRowToMatch helper | ✅ `a532e12` |
+| 2.2 | Path B intersection branch over kNN candidate pool | ✅ `a532e12` |
+| 2.3 | `winning_path` in `scan_identify_events` + response payload | ✅ `a532e12` |
+| 2.4 | Confidence: Path A/B unique → HIGH; narrow → MEDIUM; vision_only → Day 1 trust-killer logic | ✅ `a532e12` |
+| 2.4b | iOS reads `winning_path`; ScanPickerSheet shows it in DEBUG overlay | ✅ `a532e12` |
+| 2.4c | eval harness: per-path scoreboard + `--no-set-hint` Path-B-isolation flag | ✅ `4fa0264` |
+| 2.5 | Re-eval after Vercel deploy: baseline + `--perfect-ocr` (Path A) + `--perfect-ocr --no-set-hint` (Path B) | ⏳ in progress |
 
 **End of Day 2 target:**
 - Top-1: 75-85% (strict Path A on perfect OCR; partial Path B real-world)
