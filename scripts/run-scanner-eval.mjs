@@ -67,9 +67,15 @@ async function fetchImageBytes(supabase, storagePath) {
   return Buffer.from(arrayBuffer);
 }
 
-async function identify({ endpoint, bytes, language }) {
+async function identify({ endpoint, bytes, language, cardNumber }) {
   const url = new URL("/api/scan/identify", endpoint);
   url.searchParams.set("language", language);
+  // Optional card_number filter — when set, the route narrows kNN
+  // candidates to canonical_cards where card_number matches. The eval
+  // harness passes the ground-truth card_number to measure the
+  // "perfect OCR" ceiling: an upper bound for any future on-device
+  // text-recognition path (iOS Vision etc.).
+  if (cardNumber) url.searchParams.set("card_number", cardNumber);
 
   const startedAt = Date.now();
   const response = await fetch(url, {
@@ -121,6 +127,11 @@ async function main() {
       : null;
   const throttleMs = Number.parseInt(args["throttle-ms"] ?? "300", 10);
   const notes = typeof args.notes === "string" ? args.notes : null;
+  // Pass each anchor's GROUND-TRUTH card_number to the route as the
+  // ?card_number= filter. Simulates a perfect OCR result and measures
+  // the upper bound of any future on-device text-recognition path.
+  // Without this flag the eval behaves identically to before.
+  const perfectOcr = Boolean(args["perfect-ocr"]);
 
   const supabase = createClient(
     requireEnv("SUPABASE_URL"),
@@ -145,10 +156,32 @@ async function main() {
     process.exit(1);
   }
 
+  // Pull ground-truth card_number for each anchor's expected slug when
+  // --perfect-ocr is set. Cheap one-shot batch query.
+  const cardNumberBySlug = new Map();
+  if (perfectOcr) {
+    const slugs = [...new Set(images.map((img) => img.canonical_slug))];
+    const { data: ccRows, error: ccErr } = await supabase
+      .from("canonical_cards")
+      .select("slug, card_number")
+      .in("slug", slugs);
+    if (ccErr) {
+      console.error(`Failed to load canonical card_numbers: ${ccErr.message}`);
+      process.exit(2);
+    }
+    for (const row of ccRows ?? []) {
+      cardNumberBySlug.set(row.slug, row.card_number ?? null);
+    }
+    console.log(
+      `[eval] perfect-ocr: pulled card_number for ${cardNumberBySlug.size} of ${slugs.length} unique slugs`,
+    );
+  }
+
   console.log(
     `\nScanner eval — ${images.length} images → ${endpoint}` +
       (languageFilter ? ` (language=${languageFilter})` : "") +
       (sourceFilter ? ` (sources=${sourceFilter.join(",")})` : "") +
+      (perfectOcr ? " (perfect-ocr)" : "") +
       "\n",
   );
 
@@ -177,6 +210,7 @@ async function main() {
         endpoint,
         bytes,
         language: image.captured_language,
+        cardNumber: perfectOcr ? cardNumberBySlug.get(image.canonical_slug) ?? null : null,
       });
 
       if (!result.ok || !result.body?.ok) {

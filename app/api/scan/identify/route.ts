@@ -199,6 +199,49 @@ function parseLimit(raw: string | null): number {
   return Math.min(parsed, MAX_LIMIT);
 }
 
+/**
+ * Normalize a printed collector number into the shape canonical_cards
+ * stores. Accepts any of:
+ *   "70"          → "70"
+ *   "70/197"      → "70"
+ *   " #70/197 "   → "70"
+ *   "TG04"        → "TG04"      (alphanumeric — keep as-is)
+ *   "SWSH062"     → "SWSH062"
+ *   "044/030"     → "044"
+ * Returns null for empty/whitespace input.
+ *
+ * For pure-digit values we strip leading zeros to match the eval-set
+ * canonical_cards.card_number convention (e.g. "070" → "70"); for
+ * alphanumeric codes we preserve them verbatim because their leading
+ * letters carry the set/series prefix.
+ */
+function parseCardNumberFilter(raw: string | null): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  const slashMatch = trimmed.match(/^#?\s*([A-Za-z0-9]+)\s*\/\s*[A-Za-z0-9]+/);
+  if (slashMatch) {
+    const head = slashMatch[1];
+    return /^\d+$/.test(head) ? head.replace(/^0+(?=\d)/, "") : head;
+  }
+  const numberMatch = trimmed.match(/^#?\s*([A-Za-z0-9]+)/);
+  if (numberMatch) {
+    const head = numberMatch[1];
+    return /^\d+$/.test(head) ? head.replace(/^0+(?=\d)/, "") : head;
+  }
+  return trimmed;
+}
+
+function normalizeCardNumberForCompare(raw: string | null | undefined): string | null {
+  // Same rules as parseCardNumberFilter but applied to canonical_cards
+  // values too, so "70" filter matches "070" stored values and vice
+  // versa. Defense against database/print drift.
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  return /^\d+$/.test(trimmed) ? trimmed.replace(/^0+(?=\d)/, "") : trimmed;
+}
+
 function classifyConfidence(
   topDistance: number | undefined,
   gap: number | null,
@@ -227,6 +270,12 @@ export async function POST(req: Request) {
   const { searchParams } = new URL(req.url);
   const language = parseLanguage(searchParams.get("language"));
   const limit = parseLimit(searchParams.get("limit"));
+  // Optional collector-number filter. Eventually populated by the iOS
+  // app's on-device Vision text-recognition before upload. For now,
+  // only the eval harness sends it (with the ground-truth value, to
+  // measure the perfect-OCR ceiling). When unset, the route behaves
+  // identically to before.
+  const cardNumberFilter = parseCardNumberFilter(searchParams.get("card_number"));
 
   if (!hasVercelPostgresConfig()) {
     emitScanFailureEvent({
@@ -716,6 +765,8 @@ export async function POST(req: Request) {
   // return what we have rather than silently padding with low-quality
   // matches we know are wrong.
   let orphansDropped = 0;
+  let cardNumberDropped = 0;
+  let cardNumberFilterApplied = false;
   let matches: MatchWithCrop[];
   // Map of slug → canonical_cards.mirrored_primary_image_url. Populated
   // by the orphan-filter Supabase round-trip below and used when we
@@ -728,13 +779,16 @@ export async function POST(req: Request) {
   // (the previous behavior) per the same fail-graceful contract as the
   // orphan filter.
   const canonicalImageBySlug = new Map<string, string | null>();
+  // Map of slug → canonical_cards.card_number, used for the optional
+  // post-kNN filter when the iOS app sends an OCR'd card_number.
+  const canonicalCardNumberBySlug = new Map<string, string | null>();
   if (allMergedMatches.length === 0) {
     matches = [];
   } else {
     const candidateSlugs = allMergedMatches.map((m) => m.canonical_slug);
     const { data: presentRows, error: presenceErr } = await supabase
       .from("canonical_cards")
-      .select("slug, mirrored_primary_image_url")
+      .select("slug, mirrored_primary_image_url, card_number")
       .in("slug", candidateSlugs);
 
     if (presenceErr) {
@@ -748,15 +802,53 @@ export async function POST(req: Request) {
       const presentSet = new Set((presentRows ?? []).map((r) => r.slug));
       for (const row of presentRows ?? []) {
         canonicalImageBySlug.set(row.slug, row.mirrored_primary_image_url ?? null);
+        canonicalCardNumberBySlug.set(row.slug, row.card_number ?? null);
       }
-      const filtered = allMergedMatches.filter((m) => presentSet.has(m.canonical_slug));
-      orphansDropped = allMergedMatches.length - filtered.length;
+      const orphanFiltered = allMergedMatches.filter((m) => presentSet.has(m.canonical_slug));
+      orphansDropped = allMergedMatches.length - orphanFiltered.length;
       if (orphansDropped > 0) {
         console.log(
           `[identify] orphan slugs dropped (not in canonical_cards): ${orphansDropped} hash=${imageHash}`,
         );
       }
-      matches = filtered.slice(0, limit);
+
+      // ── Optional card_number filter ─────────────────────────────────
+      // When the request supplies a card_number (currently: eval harness
+      // simulating perfect OCR; future: iOS Vision pre-extraction), we
+      // narrow the candidate set to only canonical_cards rows whose
+      // card_number matches. This is structurally how V vs VMAX vs ex
+      // confusion gets resolved: CLIP can't read the printed number,
+      // but if the client extracted "44" from the photo, we filter
+      // among Pikachu candidates to {Pikachu VMAX (#44)} instead of
+      // returning {Pikachu V (#43)}.
+      //
+      // Fail-graceful: if the filter drops everything (OCR was wrong /
+      // canonical_cards is missing the number / format mismatch), fall
+      // back to the orphan-filtered candidates. Better to return a
+      // CLIP-best guess than nothing.
+      let postFilter = orphanFiltered;
+      if (cardNumberFilter) {
+        cardNumberFilterApplied = true;
+        const target = normalizeCardNumberForCompare(cardNumberFilter);
+        const numFiltered = orphanFiltered.filter((m) => {
+          const stored = canonicalCardNumberBySlug.get(m.canonical_slug);
+          return normalizeCardNumberForCompare(stored) === target;
+        });
+        cardNumberDropped = orphanFiltered.length - numFiltered.length;
+        if (numFiltered.length === 0) {
+          console.log(
+            `[identify] card_number filter '${cardNumberFilter}' dropped all candidates — degrading to orphan-filtered set hash=${imageHash}`,
+          );
+        } else {
+          postFilter = numFiltered;
+          if (cardNumberDropped > 0) {
+            console.log(
+              `[identify] card_number filter '${cardNumberFilter}' kept ${numFiltered.length}/${orphanFiltered.length} hash=${imageHash}`,
+            );
+          }
+        }
+      }
+      matches = postFilter.slice(0, limit);
     }
   }
 
