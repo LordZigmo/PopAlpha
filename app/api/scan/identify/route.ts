@@ -117,6 +117,20 @@ const CONFIDENCE_HIGH_MIN_GAP = 0.04;
  * game-only catalog). Those polluted early eval results before the
  * filter landed (Cramorant→Pidgey, Lopunny→Lucario) by clustering
  * compositionally with physical-card art in CLIP space.
+ *
+ * variant_index NOT IN (3, 4) excludes the recipe-v2 synthetic thumb-
+ * overlay augmentations. The playbook (docs/scanner-augmentation-
+ * playbook.md §1) introduced them to address corner-held captures,
+ * but `lib/ai/image-crops.ts` notes they "didn't move the eval needle"
+ * and we kept them in the index anyway. 2026-04-29 the operator caught
+ * a real-world false positive: scanning a card with a real thumb at
+ * top-left landed on the v4 thumb-overlay variant of
+ * astral-radiance-102-hisuian-samurott-vstar (the dominant lighthouse
+ * card in eval, attributed to "CLIP holographic-foil-portrait bias"
+ * but actually caused by the synthetic thumb itself acting as a
+ * skin-tone magnet). Filtering at query time is a one-line revert
+ * while we plan the physical Neon row + storage cleanup. After the
+ * cleanup ships, this filter can be removed.
  */
 const KNN_QUERY = `
   with nearest_variants as (
@@ -134,6 +148,7 @@ const KNN_QUERY = `
       and language = $3
       and is_digital_only = false
       and crop_type = $5
+      and variant_index not in (3, 4)
     order by embedding <=> $1::vector
     limit $4 * 4
   ),
