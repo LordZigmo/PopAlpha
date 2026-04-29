@@ -13,6 +13,13 @@
 //   --throttle-ms <n>    Gap between requests (default 300) so we don't
 //                        hammer Replicate while we're rate-limited.
 //   --notes "<text>"     Free-form annotation on the run row.
+//   --perfect-ocr        Send GROUND-TRUTH card_number AND set_hint to the
+//                        route. Simulates a flawless OCR layer; exercises
+//                        Day 2 Path A (ocr_direct_unique / narrow).
+//   --no-set-hint        When combined with --perfect-ocr, only sends
+//                        card_number. Exercises Day 2 Path B
+//                        (ocr_intersect_unique / narrow). Without
+//                        --perfect-ocr this flag is a no-op.
 //
 // Output: human-readable summary to stdout + exit code 0 on success.
 // Fails with exit 1 if the corpus is empty or the endpoint rejected
@@ -131,6 +138,10 @@ async function main() {
   // the upper bound of any future on-device text-recognition path.
   // Without this flag the eval behaves identically to before.
   const perfectOcr = Boolean(args["perfect-ocr"]);
+  // When combined with --perfect-ocr, suppress the ground-truth
+  // set_hint and only send card_number. This isolates Day 2 Path B
+  // (ocr_intersect_unique / narrow) from Path A.
+  const noSetHint = Boolean(args["no-set-hint"]);
 
   const supabase = createClient(
     requireEnv("SUPABASE_URL"),
@@ -179,11 +190,16 @@ async function main() {
     );
   }
 
+  const ocrModeLabel = perfectOcr
+    ? noSetHint
+      ? " (perfect-ocr, number-only — Path B)"
+      : " (perfect-ocr, both — Path A)"
+    : "";
   console.log(
     `\nScanner eval — ${images.length} images → ${endpoint}` +
       (languageFilter ? ` (language=${languageFilter})` : "") +
       (sourceFilter ? ` (sources=${sourceFilter.join(",")})` : "") +
-      (perfectOcr ? " (perfect-ocr)" : "") +
+      ocrModeLabel +
       "\n",
   );
 
@@ -194,6 +210,11 @@ async function main() {
   const detailed = [];
   const perSet = {};
   const perSource = {};
+  // Day 2: track which retrieval path resolved each scan and the
+  // top-1 hit rate within each path. Helps answer "did Path A do
+  // what we hoped (~X% unique HIGH at top-1=100%)" and "is Path B
+  // earning its keep over vision_only".
+  const perPath = {};
   let nTop1 = 0;
   let nTop5 = 0;
   let nHigh = 0;
@@ -213,7 +234,7 @@ async function main() {
         bytes,
         language: image.captured_language,
         cardNumber: perfectOcr ? cardNumberBySlug.get(image.canonical_slug) ?? null : null,
-        setHint: perfectOcr ? setNameBySlug.get(image.canonical_slug) ?? null : null,
+        setHint: perfectOcr && !noSetHint ? setNameBySlug.get(image.canonical_slug) ?? null : null,
       });
 
       if (!result.ok || !result.body?.ok) {
@@ -257,8 +278,10 @@ async function main() {
       else if (confidence === "low") nLow += 1;
 
       const setName = image.canonical_slug.split("-").slice(0, -2).join("-") || "unknown";
+      const winningPath = body.winning_path ?? "unknown";
       accumulate(perSet, setName, { top1: isTop1, top5: isTop5 });
       accumulate(perSource, image.captured_source, { top1: isTop1, top5: isTop5 });
+      accumulate(perPath, winningPath, { top1: isTop1, top5: isTop5 });
 
       detailed.push({
         image_id: image.id,
@@ -268,6 +291,7 @@ async function main() {
         similarity,
         gap_to_rank_2: gap,
         confidence,
+        winning_path: winningPath,
         duration_ms: result.duration,
         error: null,
         source: image.captured_source,
@@ -321,6 +345,21 @@ async function main() {
     console.log("    Top sets by count:");
     for (const [set, counts] of setRows) {
       console.log(`      ${set.padEnd(28).slice(0, 28)}  ${counts.top1}/${counts.n} top-1 (${fmtPct(counts.top1, counts.n)})`);
+    }
+    console.log("");
+  }
+
+  // Day 2: per-path scoreboard. Tells you at-a-glance how often each
+  // retrieval path fired and how accurate it was. The Day 2 thesis
+  // is "OCR-first paths should pull top-1 above the kNN-only ceiling
+  // (57.4%)"; this row is the proof.
+  const pathRows = Object.entries(perPath).sort(([, a], [, b]) => b.n - a.n);
+  if (pathRows.length) {
+    console.log("    Per-path scoreboard:");
+    for (const [path, counts] of pathRows) {
+      console.log(
+        `      ${path.padEnd(24).slice(0, 24)}  ${counts.top1}/${counts.n} top-1 (${fmtPct(counts.top1, counts.n)})`,
+      );
     }
     console.log("");
   }
