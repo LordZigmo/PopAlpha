@@ -2,11 +2,14 @@ import SwiftUI
 
 // MARK: - Swipe Reveal Row
 // Wraps any card-style row and reveals trailing action buttons when the
-// user swipes left. Snap logic: reveal when > 50% exposed, close otherwise.
-// Confirmation alert fires before the destructive delete action executes.
+// user swipes left.
+//
+// Gesture strategy: `.simultaneousGesture` on the outer ZStack so the
+// drag runs alongside button taps (not blocked by them) and we explicitly
+// guard for horizontal-dominant drags to avoid stealing vertical scroll.
 
 private let kActionWidth: CGFloat = 72
-private let kTotalWidth: CGFloat = kActionWidth * 2   // two actions
+private let kTotalWidth: CGFloat  = kActionWidth * 2  // edit + delete
 
 struct SwipeRevealModifier: ViewModifier {
     let onEdit: () -> Void
@@ -14,20 +17,20 @@ struct SwipeRevealModifier: ViewModifier {
 
     @State private var offset: CGFloat = 0
     @State private var showDeleteConfirm = false
+    // Track whether this drag started as horizontal so we don't flip
+    // direction mid-gesture when the finger drifts vertically.
+    @State private var isHorizontalDrag = false
 
     func body(content: Content) -> some View {
         ZStack(alignment: .trailing) {
-            // Action strip — revealed as content slides left
             actionStrip
                 .frame(width: kTotalWidth)
 
-            // Card content that slides left
             content
                 .offset(x: offset)
-                .gesture(swipeDrag)
         }
-        // Clip so the action strip never bleeds outside the card area
         .clipped()
+        .simultaneousGesture(swipeDrag)
         .alert("Remove card?", isPresented: $showDeleteConfirm) {
             Button("Remove", role: .destructive) { onDelete() }
             Button("Cancel", role: .cancel) {}
@@ -56,6 +59,7 @@ struct SwipeRevealModifier: ViewModifier {
                 .frame(maxHeight: .infinity)
                 .background(Color(red: 0.25, green: 0.25, blue: 0.30))
             }
+            .buttonStyle(.plain)
 
             // Delete (trash)
             Button {
@@ -73,6 +77,7 @@ struct SwipeRevealModifier: ViewModifier {
                 .frame(maxHeight: .infinity)
                 .background(Color.red)
             }
+            .buttonStyle(.plain)
         }
         .clipShape(RoundedRectangle(cornerRadius: PA.Layout.panelRadius, style: .continuous))
     }
@@ -80,26 +85,40 @@ struct SwipeRevealModifier: ViewModifier {
     // MARK: - Drag Gesture
 
     private var swipeDrag: some Gesture {
-        DragGesture(minimumDistance: 12)
+        DragGesture(minimumDistance: 15, coordinateSpace: .local)
             .onChanged { value in
                 let dx = value.translation.width
-                // Allow only leftward swipes; add slight resistance past full reveal
+                let dy = value.translation.height
+
+                // On the first meaningful movement decide if this is a
+                // horizontal drag. If vertical, let the ScrollView handle it.
+                if !isHorizontalDrag && (abs(dx) > 8 || abs(dy) > 8) {
+                    isHorizontalDrag = abs(dx) > abs(dy)
+                }
+                guard isHorizontalDrag else { return }
+
                 if dx < 0 {
+                    // Swiping left — reveal actions with light rubber-banding
+                    let raw = offset + dx - (value.predictedEndTranslation.width - value.translation.width) * 0
                     if -dx <= kTotalWidth {
                         offset = dx
                     } else {
-                        // Rubber-band past the full reveal
-                        let overscroll = (-dx - kTotalWidth)
-                        offset = -(kTotalWidth + overscroll * 0.2)
+                        let overscroll = -dx - kTotalWidth
+                        offset = -(kTotalWidth + overscroll * 0.15)
                     }
                 } else if offset < 0 {
-                    // Allow swiping back right
+                    // Swiping right — close
                     offset = min(offset + dx, 0)
                 }
             }
-            .onEnded { _ in
+            .onEnded { value in
+                guard isHorizontalDrag else {
+                    isHorizontalDrag = false
+                    return
+                }
+                isHorizontalDrag = false
                 withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
-                    offset = -offset > kTotalWidth * 0.5 ? -kTotalWidth : 0
+                    offset = -offset > kTotalWidth * 0.45 ? -kTotalWidth : 0
                 }
             }
     }
@@ -112,7 +131,6 @@ struct SwipeRevealModifier: ViewModifier {
 }
 
 extension View {
-    /// Adds a left-swipe trailing action strip with an edit and a delete button.
     func swipeRevealActions(
         onEdit: @escaping () -> Void,
         onDelete: @escaping () -> Void
