@@ -61,7 +61,6 @@ const EMPTY_DATA: {
     momentum: { "24H": HomepageCard[]; "7D": HomepageCard[] };
     unusual_volume: HomepageCard[];
     breakouts: HomepageCard[];
-    budget_movers: HomepageCard[];
   };
   as_of: string | null;
   prices_refreshed_today: number | null;
@@ -78,7 +77,6 @@ const EMPTY_DATA: {
     momentum: { "24H": [], "7D": [] },
     unusual_volume: [],
     breakouts: [],
-    budget_movers: [],
   },
   as_of: null,
   prices_refreshed_today: null,
@@ -631,7 +629,6 @@ export default async function Home() {
   const topMoverCardsByWindow = signalBoard.top_movers;
   const biggestDropsByWindow = signalBoard.biggest_drops;
   const momentumCardsByWindow = signalBoard.momentum;
-  const budgetMoverCards = signalBoard.budget_movers;
   const heroPulseCards = heroCards.slice(0, 4);
   const heroLeadingSet = getLeadingSet(heroMarketCards);
   const heroBrief = buildHeroBrief(
@@ -970,7 +967,6 @@ export default async function Home() {
         topMoversByWindow={topMoverCardsByWindow}
         biggestDropsByWindow={biggestDropsByWindow}
         momentumByWindow={momentumCardsByWindow}
-        budgetMovers={budgetMoverCards}
       />
 
       {/* ── Market Intelligence ─────────────────────────────────────────── */}
