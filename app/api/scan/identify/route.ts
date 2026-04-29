@@ -245,12 +245,31 @@ function normalizeCardNumberForCompare(raw: string | null | undefined): string |
 function classifyConfidence(
   topDistance: number | undefined,
   gap: number | null,
+  context: {
+    cardNumberFilterApplied: boolean;
+    ocrChangedTop1: boolean;
+  },
 ): "high" | "medium" | "low" {
   if (topDistance === undefined) return "low";
   // High requires both absolute closeness AND a meaningful margin over
   // rank-2. A tight cluster with ambiguous gap (e.g. Charizard ex vs
   // Charizard V) should fall to medium so the user confirms.
   if (topDistance <= CONFIDENCE_HIGH_COS_DIST) {
+    // Default rule: gap-null is treated as "uncontested rank-1" → high.
+    // EXCEPTION (2026-04-29 trust-killer fix): when the OCR card_number
+    // filter narrowed candidates to exactly 1, gap is null because we
+    // *removed* the rank-2 — not because no rank-2 was naturally close.
+    // If that surviving candidate ALSO replaced what CLIP originally
+    // had as top-1, the route is essentially trusting OCR over CLIP.
+    // OCR is independently fallible (real-device test 2026-04-29 hit
+    // Umbreon V #94 → "Suicune & Entei LEGEND #94" at HIGH confidence
+    // because OCR read the right number on the wrong card cluster).
+    // Downgrade to medium so the user confirms instead of getting
+    // auto-navigated. When CLIP's top-1 also satisfied the OCR filter
+    // (the common case), both signals agree and HIGH still applies.
+    if (context.cardNumberFilterApplied && context.ocrChangedTop1 && gap === null) {
+      return "medium";
+    }
     if (gap === null || gap >= CONFIDENCE_HIGH_MIN_GAP) return "high";
     return "medium";
   }
@@ -767,6 +786,14 @@ export async function POST(req: Request) {
   let orphansDropped = 0;
   let cardNumberDropped = 0;
   let cardNumberFilterApplied = false;
+  // CLIP's choice of top-1 BEFORE the card_number filter ran. Used by
+  // confidence classification to detect "OCR overrode CLIP" — when
+  // they agree, HIGH stays earned; when they disagree, the route is
+  // trusting OCR alone, which is independently fallible (real-device
+  // 2026-04-29 hit Umbreon V #94 → "Suicune & Entei LEGEND #94"
+  // because OCR read 94 on the wrong card cluster). See
+  // classifyConfidence for the downgrade rule.
+  let clipOriginalTopSlug: string | null = null;
   let matches: MatchWithCrop[];
   // Map of slug → canonical_cards.mirrored_primary_image_url. Populated
   // by the orphan-filter Supabase round-trip below and used when we
@@ -811,6 +838,9 @@ export async function POST(req: Request) {
           `[identify] orphan slugs dropped (not in canonical_cards): ${orphansDropped} hash=${imageHash}`,
         );
       }
+      // Capture CLIP's top-1 choice BEFORE the OCR filter runs so the
+      // confidence classifier can detect "OCR overrode CLIP" cases.
+      clipOriginalTopSlug = orphanFiltered[0]?.canonical_slug ?? null;
 
       // ── Optional card_number filter ─────────────────────────────────
       // When the request supplies a card_number (currently: eval harness
@@ -881,7 +911,21 @@ export async function POST(req: Request) {
       ? topSimilarity - rank2Similarity
       : null;
 
-  const confidence = classifyConfidence(topDistance, topGap);
+  // Detect "OCR overrode CLIP": filter narrowed candidates AND the
+  // surviving top-1 was NOT what CLIP originally ranked first. When
+  // this happens AND gap is null (filter narrowed to exactly 1
+  // candidate), classifyConfidence downgrades HIGH→MEDIUM so the user
+  // confirms instead of getting auto-navigated to a card OCR alone
+  // chose.
+  const ocrChangedTop1 =
+    cardNumberFilterApplied &&
+    clipOriginalTopSlug !== null &&
+    matches[0] != null &&
+    matches[0].canonical_slug !== clipOriginalTopSlug;
+  const confidence = classifyConfidence(topDistance, topGap, {
+    cardNumberFilterApplied,
+    ocrChangedTop1,
+  });
 
   await logScanEvent({
     imageHash,
