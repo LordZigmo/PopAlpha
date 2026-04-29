@@ -46,6 +46,13 @@ struct ScanIdentifyResponse: Decodable, Sendable {
     /// endpoint when the user reports a mis-identification — server then
     /// copies scan-uploads/<hash>.jpg into scan-eval/<hash>.jpg.
     let imageHash: String?
+    /// Day 2 retrieval path (`vision_only`, `ocr_direct_unique`,
+    /// `ocr_direct_narrow`, `ocr_intersect_unique`,
+    /// `ocr_intersect_narrow`). Surfaced in the DEBUG overlay so the
+    /// operator can see which signal resolved each scan. Nullable
+    /// because pre-Day-2 server builds didn't send it; current
+    /// production always emits a value.
+    let winningPath: String?
 
     var topMatch: ScanMatch? { matches.first }
     var isHighConfidence: Bool { confidence == "high" }

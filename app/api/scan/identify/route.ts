@@ -172,6 +172,87 @@ type MatchRow = {
   cos_dist: number;
 };
 
+/**
+ * MatchRow tagged with which crop branch (full / art) produced it.
+ * Used by the merge step + by the Day 2 direct-lookup path which
+ * needs to materialize a match without going through the kNN.
+ */
+type MatchWithCrop = MatchRow & { winning_crop: "full" | "art" };
+
+/**
+ * Day 2 two-stage retrieval path. Logged to scan_identify_events and
+ * surfaced in the response so iOS / production dashboards can see
+ * which signal resolved each scan.
+ *
+ *   vision_only            — Path C fallback. CLIP kNN top-K with the
+ *                             optional card_number / set_hint
+ *                             post-filters from Day 1 (b76faed +
+ *                             8f11595).
+ *   ocr_direct_unique      — Path A unique. iOS sent BOTH card_number
+ *                             AND set_hint; SELECT canonical_cards
+ *                             with both filters returned exactly 1
+ *                             row → HIGH confidence regardless of
+ *                             CLIP signal.
+ *   ocr_direct_narrow      — Path A narrow. Same direct query
+ *                             returned 2-3 rows; intersected with
+ *                             kNN ordering and returned the highest-
+ *                             similarity survivor at MEDIUM.
+ *   ocr_intersect_unique   — Path B unique. iOS sent card_number
+ *                             only (set_hint absent or noisy).
+ *                             SELECT canonical_cards by card_number
+ *                             returned N rows; intersected with kNN
+ *                             top-K and exactly one slug survived →
+ *                             HIGH (dual-signal: OCR + CLIP agree).
+ *   ocr_intersect_narrow   — Path B narrow. 2-3 survivors in the
+ *                             intersection → MEDIUM.
+ */
+type WinningPath =
+  | "vision_only"
+  | "ocr_direct_unique"
+  | "ocr_direct_narrow"
+  | "ocr_intersect_unique"
+  | "ocr_intersect_narrow";
+
+/**
+ * Row shape returned by the OCR-direct canonical_cards query. Carries
+ * the metadata needed to build a ScanMatch response without a kNN
+ * round-trip.
+ */
+type CanonicalRow = {
+  slug: string;
+  canonical_name: string;
+  language: string | null;
+  set_name: string | null;
+  card_number: string | null;
+  variant: string | null;
+  mirrored_primary_image_url: string | null;
+};
+
+/**
+ * Adapt a CanonicalRow into the MatchWithCrop shape the response
+ * builder expects. cos_dist is unknown when the slug came from a
+ * direct lookup that didn't appear in kNN top-K — we synthesize a
+ * sentinel value so similarity reports as `1 - 0 = 1.0`. Iterations
+ * could compute a real similarity by querying card_image_embeddings
+ * for this slug and dotting against the query embedding, but for
+ * the first version a sentinel is honest enough — the caller
+ * already knows path === "ocr_direct_unique" means the answer
+ * came from OCR + DB, not CLIP.
+ */
+function canonicalRowToMatch(row: CanonicalRow, cosDist: number): MatchWithCrop {
+  return {
+    canonical_slug: row.slug,
+    canonical_name: row.canonical_name,
+    language: row.language,
+    set_name: row.set_name,
+    card_number: row.card_number,
+    variant: row.variant,
+    source_image_url: row.mirrored_primary_image_url,
+    cos_dist: cosDist,
+    winning_crop: "full",
+  };
+}
+
 // Closed enum so adding a new failure mode requires updating this
 // type, which forces a corresponding PostHog dashboard / alert update.
 type FailureReason =
@@ -782,7 +863,6 @@ export async function POST(req: Request) {
   //    default.
   const MULTI_CROP_ART_REQUIRES_FULL_MATCH = true;
 
-  type MatchWithCrop = MatchRow & { winning_crop: "full" | "art" };
   const slugToBest = new Map<string, MatchWithCrop>();
   for (const row of fullMatches) {
     slugToBest.set(row.canonical_slug, { ...row, winning_crop: "full" });
@@ -967,6 +1047,115 @@ export async function POST(req: Request) {
     }
   }
 
+  // ── Day 2: layered two-stage OCR-first retrieval ────────────────────
+  //
+  // The post-kNN filter pipeline above (Day 1) hit a hard ceiling at
+  // 57.4% top-1 on the 277-image eval — filters can only narrow what
+  // kNN already returned, and CLIP's top-K simply doesn't contain the
+  // right card for ~42% of failure cases. Day 2 attacks this by
+  // bypassing kNN ENTIRELY when OCR has enough signal:
+  //
+  //   Path A (strict)   — card_number + set_hint both present:
+  //                        SELECT canonical_cards WHERE card_number=N
+  //                        AND set_name ILIKE %hint%. 1 row → HIGH.
+  //                        2-3 rows → intersect with kNN ordering,
+  //                        return MEDIUM. >3 → fall through.
+  //
+  //   Path B (middle)   — card_number only (set OCR failed):
+  //                        SELECT canonical_cards WHERE
+  //                        card_number=N (could be 100+ slugs across
+  //                        sets globally). Intersect with the kNN
+  //                        candidate pool. Unique survivor → HIGH
+  //                        (CLIP + OCR agree). 2-3 → MEDIUM.
+  //                        0 → fall through to Path C.
+  //
+  //   Path C (fallback) — current pipeline output (`matches`).
+  //                        Already built above.
+  //
+  // We always run both kNN AND the OCR-direct lookup; choosing
+  // between paths is purely a decision over their results. Future
+  // optimization could short-circuit the embed/kNN when Path A
+  // unique fires (saves ~3s of Replicate latency), but for the first
+  // ship we prefer the simpler path-selection logic.
+  let winningPath: WinningPath = "vision_only";
+
+  if (cardNumberFilter) {
+    const normalizedNumber = normalizeCardNumberForCompare(cardNumberFilter);
+    let directQuery = supabase
+      .from("canonical_cards")
+      .select("slug, canonical_name, language, set_name, card_number, variant, mirrored_primary_image_url")
+      .eq("language", language)
+      .limit(50); // bounded to keep memory + intersect cost predictable
+
+    if (normalizedNumber) {
+      directQuery = directQuery.eq("card_number", normalizedNumber);
+    }
+
+    const directResult = await directQuery;
+
+    if (directResult.error) {
+      console.warn(
+        `[identify] OCR-direct lookup failed hash=${imageHash}: ${directResult.error.message}`,
+      );
+    } else {
+      const directRows: CanonicalRow[] = (directResult.data ?? []) as CanonicalRow[];
+
+      // Apply set_hint filter if iOS provided one.
+      const setMatching = setHintFilter
+        ? directRows.filter((r) => setHintMatches(setHintFilter, r.set_name))
+        : directRows;
+
+      if (setHintFilter && setMatching.length > 0 && setMatching.length <= 3) {
+        // Path A: strict (card_number AND set_hint).
+        if (setMatching.length === 1) {
+          // Path A unique → HIGH-confidence direct answer. Synthesize
+          // a match from the canonical row; cos_dist=0 yields
+          // similarity=1.0, which is honest because we did NOT use
+          // CLIP's similarity for this decision — the iOS app reads
+          // the response and treats it identically to a kNN HIGH.
+          matches = [canonicalRowToMatch(setMatching[0], 0)];
+          winningPath = "ocr_direct_unique";
+        } else {
+          // Path A narrow: 2-3 rows. Use kNN's existing ordering to
+          // rank within the surviving set. allMergedMatches has the
+          // full kNN output (with cos_dist sortable); pull whichever
+          // of the survivors appear there. Survivors not in kNN keep
+          // sentinel cos_dist=0.5 (mid-tier) so they sort below CLIP-
+          // confirmed matches but above unknown.
+          const ranked = setMatching.map((r) => {
+            const knn = allMergedMatches.find((m) => m.canonical_slug === r.slug);
+            return knn ?? canonicalRowToMatch(r, 0.5);
+          });
+          ranked.sort((a, b) => a.cos_dist - b.cos_dist);
+          matches = ranked.slice(0, limit);
+          winningPath = "ocr_direct_narrow";
+        }
+      } else if (!setHintFilter && directRows.length > 0) {
+        // Path B: card_number only. Intersect direct-query slugs
+        // with the kNN candidate pool. The kNN's allMergedMatches
+        // is up to ~20 unique slugs (4× over-fetch + slug dedup).
+        const directSlugSet = new Set(directRows.map((r) => r.slug));
+        const intersect = allMergedMatches.filter((m) =>
+          directSlugSet.has(m.canonical_slug),
+        );
+
+        if (intersect.length === 1) {
+          // Path B unique → HIGH (dual-signal: OCR + CLIP agree).
+          matches = [intersect[0]];
+          winningPath = "ocr_intersect_unique";
+        } else if (intersect.length >= 2 && intersect.length <= 3) {
+          // Path B narrow: kNN already ranked these; just slice.
+          matches = intersect.slice(0, limit);
+          winningPath = "ocr_intersect_narrow";
+        }
+        // 0 → fall through to vision_only
+        // >3 → too noisy for Path B, also fall through
+      }
+      // Path A returned >3 rows OR Path A returned 0 with set_hint
+      // present → fall through to vision_only too.
+    }
+  }
+
   // Per-branch top similarities BEFORE merge — preserved for
   // telemetry so we can see whether the two branches agreed or one
   // dragged the other.
@@ -996,23 +1185,45 @@ export async function POST(req: Request) {
       ? topSimilarity - rank2Similarity
       : null;
 
-  // Detect "OCR overrode CLIP": EITHER OCR filter narrowed candidates
-  // AND the surviving top-1 was NOT what CLIP originally ranked first.
-  // When this happens AND gap is null (filter narrowed to exactly 1
-  // candidate), classifyConfidence downgrades HIGH→MEDIUM so the user
-  // confirms instead of getting auto-navigated to a card OCR alone
-  // chose. Both card_number and set_hint filters can trigger this —
-  // either signal alone can be wrong.
-  const ocrFilterApplied = cardNumberFilterApplied || setHintFilterApplied;
-  const ocrChangedTop1 =
-    ocrFilterApplied &&
-    clipOriginalTopSlug !== null &&
-    matches[0] != null &&
-    matches[0].canonical_slug !== clipOriginalTopSlug;
-  const confidence = classifyConfidence(topDistance, topGap, {
-    cardNumberFilterApplied: ocrFilterApplied,
-    ocrChangedTop1,
-  });
+  // Confidence tier — the rules differ between Day 2 paths and the
+  // legacy vision_only pipeline:
+  //
+  //   ocr_direct_unique    HIGH (OCR pulled both card_number AND set;
+  //                        canonical_cards row was unique. Both signals
+  //                        agreed independently of CLIP. No
+  //                        trust-killer concern because the route did
+  //                        NOT have to override CLIP — it bypassed
+  //                        CLIP entirely.)
+  //   ocr_direct_narrow    MEDIUM (2-3 rows survived; user confirms.)
+  //   ocr_intersect_unique HIGH (CLIP top-K and OCR card_number
+  //                        intersected to one slug — dual-signal
+  //                        agreement.)
+  //   ocr_intersect_narrow MEDIUM.
+  //   vision_only          — Day 1 logic: if OCR filter changed CLIP's
+  //                        original top-1 AND gap is null, downgrade
+  //                        HIGH→MEDIUM (the trust-killer fix); else
+  //                        fall through to the cos_dist+gap rules.
+  let confidence: "high" | "medium" | "low";
+  if (winningPath === "ocr_direct_unique" || winningPath === "ocr_intersect_unique") {
+    confidence = "high";
+  } else if (winningPath === "ocr_direct_narrow" || winningPath === "ocr_intersect_narrow") {
+    confidence = "medium";
+  } else {
+    // Detect "OCR overrode CLIP": EITHER OCR filter narrowed
+    // candidates AND the surviving top-1 was NOT what CLIP originally
+    // ranked first. When this happens AND gap is null, downgrade
+    // HIGH→MEDIUM (Day 1 trust-killer fix in 5f2df4f).
+    const ocrFilterApplied = cardNumberFilterApplied || setHintFilterApplied;
+    const ocrChangedTop1 =
+      ocrFilterApplied &&
+      clipOriginalTopSlug !== null &&
+      matches[0] != null &&
+      matches[0].canonical_slug !== clipOriginalTopSlug;
+    confidence = classifyConfidence(topDistance, topGap, {
+      cardNumberFilterApplied: ocrFilterApplied,
+      ocrChangedTop1,
+    });
+  }
 
   await logScanEvent({
     imageHash,
@@ -1034,6 +1245,7 @@ export async function POST(req: Request) {
     fullTopSimilarity,
     artTopSimilarity,
     winningCrop,
+    winningPath,
   });
 
   return NextResponse.json({
@@ -1069,6 +1281,10 @@ export async function POST(req: Request) {
     // JPEG bytes the client already sent — and it lets us promote the
     // scan into the eval corpus without re-uploading the image.
     image_hash: imageHash,
+    // Day 2 retrieval path. Lets the iOS debug overlay show which
+    // path fired for each scan; iOS production behavior is
+    // unchanged (HIGH/MEDIUM/LOW from `confidence` already drives UX).
+    winning_path: winningPath,
   });
 }
 
@@ -1113,6 +1329,12 @@ type ScanEventInput = {
   fullTopSimilarity?: number | null;
   artTopSimilarity?: number | null;
   winningCrop?: "full" | "art" | "tie" | null;
+  // Day 2 retrieval path. See WinningPath enum at the top of this
+  // file. Lets dashboards measure how often each path fires in
+  // production — critical for catching e.g. "Path B never wins
+  // because OCR card_number is too noisy" or "Path A unique fires
+  // 60% of the time".
+  winningPath?: WinningPath | null;
 };
 
 async function logScanEvent(event: ScanEventInput): Promise<void> {
@@ -1137,6 +1359,7 @@ async function logScanEvent(event: ScanEventInput): Promise<void> {
         full_top_similarity: event.fullTopSimilarity ?? null,
         art_top_similarity: event.artTopSimilarity ?? null,
         winning_crop: event.winningCrop ?? null,
+        winning_path: event.winningPath ?? null,
       });
 
     if (error) {

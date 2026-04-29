@@ -95,6 +95,7 @@ struct ScannerTabView: View {
                     scanLanguage: scanLanguage,
                     ocrCardNumber: scanner.lastOCR.cardNumber,
                     ocrSetHint: scanner.lastOCR.setHint,
+                    winningPath: scanner.lastWinningPath,
                     onPick: handlePickerSelection,
                     onDismiss: handlePickerDismiss
                 )
@@ -595,6 +596,13 @@ final class ScannerHost: ObservableObject {
     /// real-device testing. Compile-stripped in release builds.
     @Published private(set) var lastOCR: (cardNumber: String?, setHint: String?) = (nil, nil)
 
+    /// Which Day 2 retrieval path resolved the most recent scan
+    /// (`ocr_direct_unique`, `ocr_intersect_unique`, etc.). Surfaced
+    /// in the DEBUG overlay so the operator can see which signal
+    /// won — direct DB lookup vs CLIP+OCR intersection vs CLIP-only
+    /// fallback.
+    @Published private(set) var lastWinningPath: String?
+
     /// Language hint passed to /api/scan/identify. Defaults to EN; the
     /// scanner UI exposes a pill toggle so the user can flip to JP.
     var scanLanguage: ScanLanguage = .en
@@ -718,7 +726,15 @@ final class ScannerHost: ObservableObject {
             self.lastMatches = reranked.matches
             self.lastConfidence = reranked.confidence
             self.lastImageHash = response.imageHash
+            self.lastWinningPath = response.winningPath
             self.isIdentifying = false
+
+            #if DEBUG
+            print(
+                "[scan path] winning_path=\(response.winningPath ?? "nil") "
+                + "confidence=\(reranked.confidence)"
+            )
+            #endif
 
             // Low-confidence → auto-resume so the user can try again
             // without tapping. High/medium results are handled by the
@@ -765,6 +781,7 @@ final class ScannerHost: ObservableObject {
         identifyError = nil
         lastImageHash = nil
         lastOCR = (nil, nil)
+        lastWinningPath = nil
     }
 }
 

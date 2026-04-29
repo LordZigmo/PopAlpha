@@ -27,6 +27,14 @@ struct ScanPickerSheet: View {
     /// initializer source-compatible with existing callers.
     var ocrCardNumber: String? = nil
     var ocrSetHint: String? = nil
+    /// Day 2 retrieval path that resolved this scan
+    /// (`vision_only`, `ocr_direct_unique`, `ocr_direct_narrow`,
+    /// `ocr_intersect_unique`, `ocr_intersect_narrow`). Surfaced in the
+    /// DEBUG overlay so during sprint real-device testing the operator
+    /// can see which signal won — direct DB lookup vs. CLIP+OCR
+    /// intersection vs. CLIP-only fallback. Default-nil keeps the
+    /// initializer source-compatible with existing callers.
+    var winningPath: String? = nil
     let onPick: (ScanMatch) -> Void
     let onDismiss: () -> Void
 
@@ -76,6 +84,7 @@ struct ScanPickerSheet: View {
     private var ocrDebugStrip: some View {
         let numberDisplay = ocrCardNumber?.isEmpty == false ? ocrCardNumber! : "—"
         let hintDisplay = ocrSetHint?.isEmpty == false ? ocrSetHint! : "—"
+        let pathDisplay = winningPath?.isEmpty == false ? winningPath! : "—"
         VStack(alignment: .leading, spacing: 4) {
             Text("OCR debug (DEBUG builds only)")
                 .font(.system(size: 10, weight: .semibold))
@@ -89,6 +98,11 @@ struct ScanPickerSheet: View {
                     .truncationMode(.tail)
             }
             .foregroundStyle(PA.Colors.foreground.opacity(0.7))
+            Text("path: \(pathDisplay)")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(PA.Colors.foreground.opacity(0.7))
+                .lineLimit(1)
+                .truncationMode(.tail)
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 10)
