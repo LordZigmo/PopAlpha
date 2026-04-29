@@ -242,6 +242,48 @@ function normalizeCardNumberForCompare(raw: string | null | undefined): string |
   return /^\d+$/.test(trimmed) ? trimmed.replace(/^0+(?=\d)/, "") : trimmed;
 }
 
+/**
+ * Normalize a free-text set hint from on-device OCR for fuzzy
+ * matching against canonical_cards.set_name. Lowercases, collapses
+ * whitespace, strips punctuation. Returns null for short/noisy input
+ * so we don't filter on a 2-character OCR misread.
+ */
+function parseSetHintFilter(raw: string | null): string | null {
+  if (!raw) return null;
+  const trimmed = raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{Letter}\p{Number}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (trimmed.length < 3) return null; // 2-char OCR misreads are pure noise
+  return trimmed;
+}
+
+function normalizeSetNameForCompare(raw: string | null | undefined): string {
+  if (!raw) return "";
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{Letter}\p{Number}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * True if the operator-supplied OCR set hint plausibly refers to
+ * `set_name` from canonical_cards. Case- and punctuation-insensitive
+ * containment check in either direction so "phantasmal flames" hint
+ * matches "Phantasmal Flames" stored AND "Pokemon GO" hint matches
+ * the longer printed-on-card "Pokemon GO Booster" if that ever drifts.
+ */
+function setHintMatches(hint: string, storedSetName: string | null | undefined): boolean {
+  if (!hint) return true; // no hint → no filter
+  const stored = normalizeSetNameForCompare(storedSetName);
+  if (stored.length === 0) return false;
+  return stored.includes(hint) || hint.includes(stored);
+}
+
 function classifyConfidence(
   topDistance: number | undefined,
   gap: number | null,
@@ -289,12 +331,18 @@ export async function POST(req: Request) {
   const { searchParams } = new URL(req.url);
   const language = parseLanguage(searchParams.get("language"));
   const limit = parseLimit(searchParams.get("limit"));
-  // Optional collector-number filter. Eventually populated by the iOS
-  // app's on-device Vision text-recognition before upload. For now,
-  // only the eval harness sends it (with the ground-truth value, to
-  // measure the perfect-OCR ceiling). When unset, the route behaves
-  // identically to before.
+  // Optional collector-number filter. Populated by the iOS app's
+  // on-device Vision text-recognition before upload. When unset the
+  // route behaves identically to pre-OCR.
   const cardNumberFilter = parseCardNumberFilter(searchParams.get("card_number"));
+  // Optional set-name hint, also from on-device Vision OCR. Pairs with
+  // card_number to disambiguate cases where two cards share the same
+  // collector number across different sets — e.g. Umbreon V #94 (Evolving
+  // Skies) vs Suicune & Entei LEGEND #94 (HS Unleashed). A correct OCR
+  // read of "Evolving Skies" picks Umbreon. Free-text contains-match
+  // (in either direction) against canonical_cards.set_name, so e.g.
+  // "PE" abbreviation isn't useful but "Prismatic Evolutions" is.
+  const setHintFilter = parseSetHintFilter(searchParams.get("set_hint"));
 
   if (!hasVercelPostgresConfig()) {
     emitScanFailureEvent({
@@ -786,6 +834,8 @@ export async function POST(req: Request) {
   let orphansDropped = 0;
   let cardNumberDropped = 0;
   let cardNumberFilterApplied = false;
+  let setHintFilterApplied = false;
+  let setHintDropped = 0;
   // CLIP's choice of top-1 BEFORE the card_number filter ran. Used by
   // confidence classification to detect "OCR overrode CLIP" — when
   // they agree, HIGH stays earned; when they disagree, the route is
@@ -806,16 +856,19 @@ export async function POST(req: Request) {
   // (the previous behavior) per the same fail-graceful contract as the
   // orphan filter.
   const canonicalImageBySlug = new Map<string, string | null>();
-  // Map of slug → canonical_cards.card_number, used for the optional
-  // post-kNN filter when the iOS app sends an OCR'd card_number.
+  // Maps populated by the orphan-filter Supabase round-trip below and
+  // consumed by the optional card_number / set_hint filters. Always
+  // populated (cheap; the SELECT has them) so adding new filters
+  // doesn't require another round-trip.
   const canonicalCardNumberBySlug = new Map<string, string | null>();
+  const canonicalSetNameBySlug = new Map<string, string | null>();
   if (allMergedMatches.length === 0) {
     matches = [];
   } else {
     const candidateSlugs = allMergedMatches.map((m) => m.canonical_slug);
     const { data: presentRows, error: presenceErr } = await supabase
       .from("canonical_cards")
-      .select("slug, mirrored_primary_image_url, card_number")
+      .select("slug, mirrored_primary_image_url, card_number, set_name")
       .in("slug", candidateSlugs);
 
     if (presenceErr) {
@@ -830,6 +883,7 @@ export async function POST(req: Request) {
       for (const row of presentRows ?? []) {
         canonicalImageBySlug.set(row.slug, row.mirrored_primary_image_url ?? null);
         canonicalCardNumberBySlug.set(row.slug, row.card_number ?? null);
+        canonicalSetNameBySlug.set(row.slug, row.set_name ?? null);
       }
       const orphanFiltered = allMergedMatches.filter((m) => presentSet.has(m.canonical_slug));
       orphansDropped = allMergedMatches.length - orphanFiltered.length;
@@ -878,6 +932,37 @@ export async function POST(req: Request) {
           }
         }
       }
+
+      // ── Optional set_hint filter ────────────────────────────────────
+      // Layered AFTER card_number so when both are present we get a
+      // strict (number, set) intersect — the killer case for shared
+      // collector numbers across sets (Umbreon V #94 Evolving Skies vs
+      // Suicune & Entei LEGEND #94 HS Unleashed; Nidoking #11 Base vs
+      // Base Set 2). Set hints are noisy (OCR may pull anything from
+      // the card art), so the filter is fail-graceful: if it drops
+      // every candidate, we keep whatever the card_number filter (or
+      // upstream orphan filter) produced.
+      if (setHintFilter) {
+        setHintFilterApplied = true;
+        const beforeSetFilter = postFilter;
+        const setFiltered = postFilter.filter((m) => {
+          const stored = canonicalSetNameBySlug.get(m.canonical_slug);
+          return setHintMatches(setHintFilter, stored);
+        });
+        setHintDropped = beforeSetFilter.length - setFiltered.length;
+        if (setFiltered.length === 0) {
+          console.log(
+            `[identify] set_hint filter '${setHintFilter}' dropped all candidates — degrading hash=${imageHash}`,
+          );
+        } else {
+          postFilter = setFiltered;
+          if (setHintDropped > 0) {
+            console.log(
+              `[identify] set_hint filter '${setHintFilter}' kept ${setFiltered.length}/${beforeSetFilter.length} hash=${imageHash}`,
+            );
+          }
+        }
+      }
       matches = postFilter.slice(0, limit);
     }
   }
@@ -911,19 +996,21 @@ export async function POST(req: Request) {
       ? topSimilarity - rank2Similarity
       : null;
 
-  // Detect "OCR overrode CLIP": filter narrowed candidates AND the
-  // surviving top-1 was NOT what CLIP originally ranked first. When
-  // this happens AND gap is null (filter narrowed to exactly 1
+  // Detect "OCR overrode CLIP": EITHER OCR filter narrowed candidates
+  // AND the surviving top-1 was NOT what CLIP originally ranked first.
+  // When this happens AND gap is null (filter narrowed to exactly 1
   // candidate), classifyConfidence downgrades HIGH→MEDIUM so the user
   // confirms instead of getting auto-navigated to a card OCR alone
-  // chose.
+  // chose. Both card_number and set_hint filters can trigger this —
+  // either signal alone can be wrong.
+  const ocrFilterApplied = cardNumberFilterApplied || setHintFilterApplied;
   const ocrChangedTop1 =
-    cardNumberFilterApplied &&
+    ocrFilterApplied &&
     clipOriginalTopSlug !== null &&
     matches[0] != null &&
     matches[0].canonical_slug !== clipOriginalTopSlug;
   const confidence = classifyConfidence(topDistance, topGap, {
-    cardNumberFilterApplied,
+    cardNumberFilterApplied: ocrFilterApplied,
     ocrChangedTop1,
   });
 

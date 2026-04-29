@@ -1,18 +1,24 @@
 import UIKit
 @preconcurrency import Vision
 
-/// On-device OCR focused specifically on pulling the collector number
-/// (the `X/Y` pair in a Pokemon card's bottom corner). Used as a
-/// disambiguator layered on top of the CLIP identify response:
-/// when CLIP narrows to the right character but wrong print
-/// (e.g. Hop's Cramorant Ascended Heroes vs Journey Together — same
-/// art, same character, different card_number), the corner number
-/// uniquely resolves it. Free — Apple ships `VNRecognizeTextRequest`.
+/// On-device OCR for the scanner. Pulls both the collector number
+/// (X/Y in the bottom corner) and a set-name hint from any other
+/// printed text in the captured frame. Both signals are forwarded to
+/// `/api/scan/identify` as filters layered on top of CLIP's kNN.
+/// Free — Apple ships `VNRecognizeTextRequest`.
 ///
-/// Intentionally narrow: we only care about the integer before the
-/// "/" (the "card number within set"). We don't try to read card
-/// names or set symbols here — those are noisier to extract
-/// reliably and CLIP already handles semantic identity.
+/// Why both: card_number alone disambiguates same-art-different-print
+/// pairs (V vs VMAX vs ex of the same character). But card_number can
+/// COLLIDE across sets — Umbreon V #94 (Evolving Skies) and
+/// Suicune & Entei LEGEND #94 (HS Unleashed) are entirely different
+/// cards that share the printed number. The set-name hint resolves
+/// those: "Evolving Skies" → Umbreon V wins. Real-device 2026-04-29
+/// hit this collision and got auto-navigated to the wrong card before
+/// the trust-killer fix in 5f2df4f.
+///
+/// `extractCardIdentifiers` is the new entry point that returns both
+/// fields in one Vision pass. `extractCollectorNumber` stays for
+/// callers that only need the number (used by the legacy reranker).
 enum OCRService {
     /// Regex picks up "177/217" or "177 / 217" with optional surrounding
     /// whitespace. First capture = card number, second = set size.
@@ -25,59 +31,93 @@ enum OCRService {
         )
     }()
 
-    /// Runs `VNRecognizeTextRequest` against the captured image and
-    /// returns the first collector number it finds, if any. Normalized
-    /// (leading zeros stripped) so downstream string-equality against
-    /// `card_number` from the scan match works directly.
-    ///
-    /// Returns nil if:
-    ///   - OCR finds no text
-    ///   - No text matches the collector-number regex
-    ///   - The image is invalid or Vision errors
+    /// Combined extractor: runs ONE Vision pass and returns both the
+    /// collector number (digits before the "/" in "70/197" style
+    /// printings) AND a free-text set-name hint (the longest
+    /// recognized line that looks like text not numbers — usually
+    /// the printed set name like "Phantasmal Flames" or
+    /// "Pokémon GO"). Both fields are independently nullable;
+    /// callers can use whichever the OCR successfully extracted.
     ///
     /// Non-throwing by design. OCR is a boost, not a gate — any
     /// failure should fall through to vanilla CLIP ranking, not
     /// block the scan.
-    static func extractCollectorNumber(from image: UIImage) async -> String? {
-        guard let cgImage = image.cgImage else { return nil }
+    static func extractCardIdentifiers(
+        from image: UIImage
+    ) async -> (cardNumber: String?, setHint: String?) {
+        guard let cgImage = image.cgImage else { return (nil, nil) }
 
-        return await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
+        return await withCheckedContinuation { (continuation: CheckedContinuation<(String?, String?), Never>) in
             let request = VNRecognizeTextRequest { request, _ in
                 guard
                     let results = request.results as? [VNRecognizedTextObservation]
                 else {
-                    continuation.resume(returning: nil)
+                    continuation.resume(returning: (nil, nil))
                     return
                 }
 
-                for observation in results {
-                    guard let top = observation.topCandidates(1).first else { continue }
-                    if let number = firstCollectorNumber(in: top.string) {
-                        continuation.resume(returning: number)
-                        return
-                    }
+                let lines: [String] = results.compactMap { obs in
+                    obs.topCandidates(1).first?.string
                 }
-                continuation.resume(returning: nil)
+
+                let cardNumber = lines.lazy
+                    .compactMap { firstCollectorNumber(in: $0) }
+                    .first
+
+                let setHint = pickSetHint(from: lines)
+
+                continuation.resume(returning: (cardNumber, setHint))
             }
 
             request.recognitionLevel = .accurate
             request.recognitionLanguages = ["en-US"]
-            request.usesLanguageCorrection = false  // numbers shouldn't be autocorrected
+            request.usesLanguageCorrection = false
 
-            // Orientation hint: the scan pipeline already crops + rotates
-            // the card to roughly-upright before getting here (via
-            // PopAlphaVisionEngine.croppedToCard), so we ask Vision to
-            // treat the pixels as-is. If that assumption ever breaks,
-            // Vision will still succeed because its text detector is
-            // rotation-robust — it might just take a few ms longer.
             let handler = VNImageRequestHandler(cgImage: cgImage, orientation: .up, options: [:])
 
             do {
                 try handler.perform([request])
             } catch {
-                continuation.resume(returning: nil)
+                continuation.resume(returning: (nil, nil))
             }
         }
+    }
+
+    /// Legacy single-field extractor. Kept for the existing
+    /// `ScanMatchReranker` call site which only needs the number.
+    /// New code should call `extractCardIdentifiers` to also get the
+    /// set hint in one Vision pass.
+    static func extractCollectorNumber(from image: UIImage) async -> String? {
+        await extractCardIdentifiers(from: image).cardNumber
+    }
+
+    /// Pick the most set-name-looking line from a Vision OCR pass.
+    /// Heuristic: take the longest line that's mostly letters (≥3
+    /// letter characters, ≤30 chars total, contains a space OR is
+    /// at least 5 letters long). Filters out lines that are just
+    /// numbers, very short codes, or pure flavor text.
+    static func pickSetHint(from lines: [String]) -> String? {
+        let candidates: [(String, Int)] = lines.compactMap { raw in
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.count >= 3, trimmed.count <= 40 else { return nil }
+
+            let letters = trimmed.unicodeScalars.filter { CharacterSet.letters.contains($0) }.count
+            let digits = trimmed.unicodeScalars.filter { CharacterSet.decimalDigits.contains($0) }.count
+            // Reject if mostly digits (collector numbers, prices, energy
+            // costs) or if it's a tiny code.
+            guard letters >= 3, letters > digits else { return nil }
+            // Reject if the line looks like a fraction/rule text.
+            if trimmed.contains("/") && digits > 2 { return nil }
+
+            // Score: longer = more likely a real set name (vs a
+            // 3-letter HP value or "EX"). Multi-word lines also
+            // preferred — set names are usually 2+ words.
+            let wordCount = trimmed.split(separator: " ").count
+            let score = letters * 2 + (wordCount > 1 ? 5 : 0)
+            return (trimmed, score)
+        }
+
+        return candidates.max(by: { $0.1 < $1.1 })?.0
     }
 
     /// Scans a single OCR'd line for the first "X/Y" pattern, returns

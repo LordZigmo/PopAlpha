@@ -656,40 +656,45 @@ final class ScannerHost: ObservableObject {
         self.isIdentifying = true
         self.identifyError = nil
 
-        // Run on-device OCR FIRST (~100-300ms), then forward the result
-        // to the server's identify endpoint. The server uses
-        // ?card_number= to filter the kNN's INTERNAL ~20-candidate pool
-        // before slicing — strictly higher recall than the older
-        // pattern of letting the server return a top-5 and reranking
-        // client-side, because the server filter sees candidates that
-        // never made the top-5 cut. Trade ~200ms of added latency for
-        // a structural lift in the post-Step-A eval (+9.4pp top-1,
-        // 94.8% high-confidence precision).
+        // Run on-device OCR FIRST (~100-300ms) to extract BOTH a
+        // collector number AND a set-name hint, then forward both to
+        // the server's identify endpoint. The server uses
+        // ?card_number= and ?set_hint= to filter the kNN's INTERNAL
+        // ~20-candidate pool — strictly higher recall than letting
+        // the server return a top-5 and reranking client-side because
+        // the server filters see candidates that never made top-5.
         //
-        // OCR is fail-graceful: if it returns nil (no number readable,
-        // or Vision errored), the request goes out without a hint and
-        // the route behaves like before. Likewise the server-side
-        // filter falls back to unfiltered candidates if the filter
-        // would drop everything (wrong OCR / stale card_number data).
+        // Why both fields: card_number alone resolves V/VMAX/VSTAR/ex
+        // confusion within a printing, but it COLLIDES across sets
+        // (Umbreon V #94 Evolving Skies vs Suicune & Entei LEGEND #94
+        // HS Unleashed). Set hint resolves those collisions.
         //
-        // We still apply ScanMatchReranker locally as defense in depth:
-        // when both the server filter AND a non-trivial top-K survive,
-        // client-side promotion + confidence upgrade catches any drift
-        // between canonical_cards.card_number and what the server
-        // returned in `match.cardNumber`.
-        let ocrNumber = await OCRService.extractCollectorNumber(from: image)
+        // OCR is fail-graceful per-field: if either field is nil
+        // (Vision errored, the corner was occluded, the set name was
+        // ambiguous text), the request just omits that filter and the
+        // route behaves like it does without that hint. The server
+        // also falls back gracefully if its filter would drop every
+        // candidate.
+        //
+        // ScanMatchReranker still runs locally as defense in depth:
+        // when the server returns multiple candidates surviving its
+        // filters, client-side promotion + confidence upgrade catches
+        // any drift between canonical_cards.card_number and what the
+        // server returned in match.cardNumber.
+        let ocr = await OCRService.extractCardIdentifiers(from: image)
 
         do {
             let response = try await ScanService.identify(
                 image: image,
                 language: self.scanLanguage,
-                cardNumber: ocrNumber
+                cardNumber: ocr.cardNumber,
+                setHint: ocr.setHint
             )
 
             let reranked = ScanMatchReranker.rerank(
                 matches: response.matches,
                 originalConfidence: response.confidence,
-                ocrCardNumber: ocrNumber
+                ocrCardNumber: ocr.cardNumber
             )
 
             self.lastMatch = reranked.matches.first

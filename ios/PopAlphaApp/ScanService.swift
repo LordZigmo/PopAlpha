@@ -95,6 +95,7 @@ enum ScanService {
         image: UIImage,
         language: ScanLanguage,
         cardNumber: String? = nil,
+        setHint: String? = nil,
         maxEdgePixels: CGFloat = 768,
         compressionQuality: CGFloat = 0.8
     ) async throws -> ScanIdentifyResponse {
@@ -109,6 +110,9 @@ enum ScanService {
         var query: [(String, String)] = [("language", language.rawValue)]
         if let cardNumber, !cardNumber.isEmpty {
             query.append(("card_number", cardNumber))
+        }
+        if let setHint, !setHint.isEmpty {
+            query.append(("set_hint", setHint))
         }
 
         return try await APIClient.postRaw(
