@@ -9,167 +9,198 @@ and you'll know exactly where we are.
 
 ## Where we are right now
 
-### Latest production state (commit `c0c02dd`)
+### Latest production state (commit `1c44dc6`)
 
-End-to-end on-device OCR is wired:
-- iOS captures card → `OCRService.extractCollectorNumber` (Apple Vision,
-  ~100-300ms on-device) → extracts `\b(\d{1,3})/(\d{1,3})\b` from the
-  captured frame
-- iOS sends `?card_number=N` query param to `/api/scan/identify`
-- Server runs CLIP kNN as before, then post-filters candidates by
-  `canonical_cards.card_number` matching the OCR result
-- `ScanMatchReranker` still runs client-side as defense-in-depth
+End-to-end on-device OCR is wired with both filters AND a debug overlay:
+- iOS captures card → `OCRService.extractCardIdentifiers` (Apple Vision,
+  ~100-300ms on-device) → extracts BOTH `card_number` (e.g. `70` from
+  `70/197`) AND `set_hint` (longest non-numeric line via `pickSetHint`)
+- iOS sends `?card_number=N&set_hint=...` to `/api/scan/identify`
+- Server runs CLIP kNN, then layers two post-filters:
+  - `card_number` match against `canonical_cards.card_number` (with
+    leading-zero normalization)
+  - `set_hint` fuzzy contain-match against `canonical_cards.set_name`
+- `classifyConfidence` was hardened against the trust-killer "OCR
+  filter narrowed to 1 wrong card → HIGH confidence" bug: when a filter
+  changed CLIP's original top-1 AND gap is null, downgrade HIGH→MEDIUM
+- Debug overlay (#if DEBUG) in `ScanPickerSheet` shows what Vision
+  actually extracted on each medium-confidence scan — strips out of
+  release builds
 
-Server route filter ships in `b76faed`; iOS integration in `c0c02dd`.
+Commits: `b76faed` (server card_number filter), `c0c02dd` (iOS
+card_number wiring), `5f2df4f` (HIGH-conf trust-killer fix),
+`8f11595` (set_hint pipeline + iOS combined extractor),
+`1c44dc6` (debug overlay).
 
 ### Eval numbers (run ids in scan_eval_runs)
 
-| Stage | Run id | Top-1 | HIGH count | HIGH precision |
+| Stage | Run id | Top-1 | HIGH | HIGH precision |
 |---|---|---|---|---|
 | Pre-Track-A (HEIC bug) | `de2df2bb` | 31.8% | 61 | 98.4%* |
 | Post-Step-A baseline | `2713ec8e` | 48.0% | 84 | 91.7% |
-| **Perfect-OCR ceiling** (ground-truth card_number) | `84cc8fe9` | **57.4%** | **134** | **94.8%** |
-| **Real-device** (10 scans, 2026-04-29 21:00-21:20 UTC) | n/a | **~40%** (4/10) | — | — |
+| Perfect-OCR (card_number only) | `84cc8fe9` | **57.4%** | **134** | **94.8%** |
+| Perfect-OCR + set_hint | (fail-to-persist) | **57.4%** | **123** | TBD |
+| Real-device (10 scans, 2026-04-29 21:00 UTC, pre-trust-killer-fix) | n/a | ~40% (4/10) | — | — |
 
-The perfect-OCR ceiling is the upper bound for the iOS-Vision path
-because real-world OCR misses the number on some cards. Real-device
-test fell well below that ceiling — which surfaced three problems
-that block the rest of the sprint.
+**Day 1.6 result is decisive: filtering AFTER kNN has hit its
+ceiling at 57.4%.** Set_hint added zero top-1 because the 277-image
+eval doesn't have many cross-set collisions. The HIGH count drop
+(134→123) is the trust-killer fix demoting OCR-narrowed-to-1 cases
+that changed CLIP's top-1 — exactly what we wanted, fewer false-HIGHs.
+
+The 42.6% remaining wrongs are **kNN-recall failures**: CLIP doesn't
+return the right card in its top-K, and post-filtering can't fix what
+kNN never returned. **Day 2 must bypass kNN** for the OCR-rich cases
+to unlock the next leg of accuracy.
 
 ---
 
-## The three problems blocking the sprint
+## Problems surfaced and their fix status
 
-### Problem 1 — HIGH-confidence-but-WRONG bug ⚠️ URGENT
+### Problem 1 — HIGH-confidence-but-WRONG bug ✅ FIXED in `5f2df4f`
 
-**The trust killer.** Real-device test scan #11 (Umbreon V #94 → returned
+**The trust killer.** Real-device test scan (Umbreon V #94 → returned
 HS Unleashed Suicune & Entei LEGEND #94 at HIGH confidence, 0.812 sim,
 gap=null).
 
-Mechanism: the OCR `card_number` filter narrowed to ONE survivor (Suicune
-& Entei #94, the only `card_number=94` card in the kNN's top-K). With
+Mechanism: OCR `card_number` filter narrowed to ONE survivor (Suicune
+& Entei, the only `card_number=94` card in the kNN's top-K). With
 exactly one candidate, `gap_to_rank_2 = null`. The route's confidence
-logic is:
+logic was:
 
 ```ts
-// app/api/scan/identify/route.ts:202-216
-if (topDistance <= CONFIDENCE_HIGH_COS_DIST) {
-  if (gap === null || gap >= CONFIDENCE_HIGH_MIN_GAP) return "high";
-  return "medium";
-}
+if (gap === null || gap >= CONFIDENCE_HIGH_MIN_GAP) return "high";
 ```
 
-The `gap === null` short-circuit was correct for pre-OCR: kNN failing
-to return rank-2 meant strong confidence. After OCR filtering, **null
-gap means "the filter dropped everything else"** — *not* uncontested
-strength.
+The `gap === null` short-circuit was correct for pre-OCR but became a
+trust-killer after OCR filtering: null gap meant "we removed rank-2,"
+not "rank-2 is far behind."
 
-**Fix:** when `cardNumberFilterApplied = true`, treat null gap as a
-downgrade. Require explicit CLIP+OCR agreement (the OCR-filtered top-1
-also being the original CLIP top-1) before returning HIGH. Estimated
-**~30 minutes** including re-deploy.
+Fix shipped in `5f2df4f`: track `clipOriginalTopSlug` (kNN's top-1
+BEFORE the filter), pass `ocrChangedTop1 = (any-ocr-filter-applied
+&& matches[0] !== clipOriginalTopSlug)` to `classifyConfidence`, and
+when both `ocrChangedTop1` and gap=null hold, downgrade HIGH→MEDIUM.
+The common case (CLIP and OCR agree) still earns HIGH.
 
-Files to touch:
-- `app/api/scan/identify/route.ts` — `classifyConfidence()` plus thread
-  the `cardNumberFilterApplied` flag in. The flag already exists
-  (added in `b76faed`); just needs to be passed to the classifier.
+### Problem 2 — Real-world OCR fails more than ceiling assumed (PARTIALLY FIXED)
 
-### Problem 2 — Real-world OCR fails more than the ceiling assumed
-
-The 57.4% ceiling assumed perfect OCR. Reality:
-- **Black Kyurem ex #218** → predicted card had `card_number=86`. OCR
-  returned wrong number or none → fell back to vision-only → wrong.
-- **Centiskorch #030** → predicted Blaziken #42. Leading-zero "030"
-  likely tripped the regex which expects `\d{1,3}` followed by `/`.
-  Vision read "30/197" or just "30" — but if it read "030" the
-  normalization should have stripped the zero. Need to verify.
+The 57.4% ceiling assumed perfect OCR. Real device:
+- **Black Kyurem ex #218** → wrong card returned. OCR may have
+  failed or the route fell back to CLIP-only.
+- **Centiskorch #030** → Blaziken #42. Leading-zero handling needs
+  verification.
 - **Charizard V Black Star Promo SWSH062** → no slash-fraction on
-  promo cards (just "SWSH062" near the set logo). Current regex
-  doesn't match this pattern.
-- **Lugia ex Prismatic** (corner-finger) → number is in the bottom
-  corner; the operator's finger occludes it. Vision can't read what's
-  not visible.
+  promo cards. Need alphanumeric set-code support.
+- **Lugia ex Prismatic** (corner-finger) → number occluded by finger.
 
-The current regex is `\b(\d{1,3})\s*/\s*(\d{1,3})\b` — only matches
-"23/159" style. We need:
-1. Also match standalone numbers near the bottom of the card
-2. Also match alphanumeric set codes like "SWSH062", "JTG", "PRE",
-   "SVI" — these are equally discriminating
-3. When the corner is occluded, look at OTHER printed text — set
-   name from the bottom strip, card name from the top — as fallback
-   filters
+Day 1.2-1.4 work shipped in `8f11595`:
+- iOS `OCRService.extractCardIdentifiers` returns BOTH `cardNumber`
+  AND `setHint` from one Vision pass
+- Server route accepts `?set_hint=` and applies fuzzy
+  case/punctuation-insensitive contain-match against
+  `canonical_cards.set_name`
+- Both filters layered (card_number first, set_hint second), each
+  fail-graceful — empty result falls back to prior step
 
-Estimated **~3-4 hours** Day 1 work, plus iteration based on debug
-view (Problem 3).
+What this commit DIDN'T fix:
+- Alphanumeric set codes like "SWSH062" still aren't matched by the
+  collector-number regex
+- Standalone numbers (without `/`) aren't extracted
+- These will be addressed in Day 2 work
 
-### Problem 3 — Vision rectangle detector misses some cards
+### Problem 3 — Vision rectangle detector misses some cards (UNRESOLVED)
 
-Real-device scans #8 (Flareon ex 14) and #12 (Umbreon ex 60) didn't
-even fire `/api/scan/identify` — the iOS auto-capture stability gate
-never triggered. No `scan_identify_events` rows for them.
+Real-device scans (Flareon ex 14, Umbreon ex 60) didn't fire
+`/api/scan/identify` at all — the iOS auto-capture stability gate
+never triggered. Upstream of OCR / kNN. Day 3 real-device validation
+will hopefully surface what makes Vision skip those frames; deferred
+until then.
 
-This is upstream of OCR / kNN — it's the iOS Vision rectangle detector
-in the live preview. Possible causes (need debug view to confirm):
-- Low contrast against the operator's hand/desk
-- Glare obscuring the card border
-- Tight framing
-- Aspect ratio outside the detector's expected range
+### Problem 4 — `image_hash` drift from HEIC conversion (NEW, BLOCKING TELEMETRY)
 
-Hard to fix without seeing debug logs or video of the failed captures.
-The OCR debug view (Problem 2 fix) should also surface "rectangle
-not detected" feedback so we can correlate.
+When Step A converted the 120 HEIC objects in `scan_eval/<hash>.jpg`
+to JPEG, we kept `scan_eval_images.image_hash` as the original HEIC
+bytes hash but the storage object now contains JPEG bytes. The route
+hashes incoming bytes — so `scan_identify_events.image_hash` is the
+JPEG hash, which doesn't join to `scan_eval_images.image_hash`
+anymore.
+
+Symptom: post-eval HIGH-precision queries that join through
+`image_hash` produce wrong numbers. The Day 1.6 result shown
+72.4% HIGH precision is wrong — actual is closer to 95% but I
+can't compute it cleanly until this is patched.
+
+Fix (Day 1.6.5, ~5 min): re-hash every `scan_eval/<hash>.jpg`
+storage object's CURRENT bytes, update `scan_eval_images.image_hash`
+to the new value. Idempotent.
 
 ---
 
 ## The plan, day-by-day
 
-### Day 1 — 2026-04-29 (today)
+### Day 1 — 2026-04-29 ✅ DONE
 
-**Goal:** ship the HIGH-confidence bug fix and an OCR debug view; gather
-real-device data on what Vision is actually reading.
+**Shipped:**
 
-**My work (~5-7 hours):**
-
-| # | Task | Hours | File(s) |
+| # | Task | Commit | Notes |
 |---|---|---|---|
-| 1.1 | Fix HIGH-conf null-gap bug — when `cardNumberFilterApplied=true` and gap=null, downgrade to MEDIUM unless OCR-filtered top-1 was already the original kNN top-1 | 0.5 | `app/api/scan/identify/route.ts` `classifyConfidence` |
-| 1.2 | Expand `OCRService.extractCollectorNumber` to also match: standalone `\d{1,3}` near bottom of frame, set codes like `SWSH062`, `JTG-\d+` | 2 | `ios/PopAlphaApp/OCRService.swift` |
-| 1.3 | Server: accept `?set_code=` query param (not yet `?set_name=`); add to filter alongside `card_number` | 1 | `app/api/scan/identify/route.ts` |
-| 1.4 | iOS: extract set_code via Vision, pass to server alongside card_number | 1 | `ios/PopAlphaApp/OCRService.swift`, `ScanService.swift` |
-| 1.5 | OCR debug view in iOS scanner — when scan returns medium/low, show overlay listing the Vision-recognized text the OCR pass extracted (card_number / set_code / raw lines) | 1.5 | `ios/PopAlphaApp/ScannerTabView.swift` |
-| 1.6 | Re-deploy, re-eval (perfect-OCR + simulated baseline) | 0.5 | n/a |
+| 1.1 | HIGH-conf null-gap bug fix | `5f2df4f` | Trust killer addressed |
+| 1.2-1.4 | Combined OCR extractor + set_hint pipeline (server + iOS + eval harness) | `8f11595` | Both filters live |
+| 1.5 | OCR debug overlay in `ScanPickerSheet` | `1c44dc6` | DEBUG-only; surfaces Vision extraction on medium-confidence picker |
+| 1.6 | Perfect-OCR + set_hint re-eval | (failed to persist) | Top-1 stayed at 57.4% — set_hint added zero lift on this corpus; HIGH dropped 134→123 (trust-killer working) |
 
-**Your work (~1 hour, after I deploy):**
-- Re-scan the 6 live failures + 3 eval failures from today's test
-- Tell me what Vision OCR shows in the debug overlay for each
-- This data drives Day 2's two-stage architecture choices
+**End of Day 1 actual:**
+- HIGH-confidence-wrong rate addressed structurally (the Umbreon-V→Suicune-Entei
+  pattern can no longer return HIGH)
+- Real-world top-1 not yet remeasured (Day 3 work, post-Day-2)
+- Day 1.6 revealed: filtering after kNN has a hard ceiling at 57.4% on
+  this eval. Day 2 must bypass kNN to break through.
 
-**End of Day 1 target:**
-- HIGH-confidence-wrong rate < 2%
-- Real-world top-1 climbs from 40% → 50-55%
-- Clear data on which OCR patterns fail
+### Day 1.6.5 — `image_hash` drift patch (~10 min, doing now)
 
-### Day 2 — Wednesday
+The HEIC→JPEG conversion in Step A left `scan_eval_images.image_hash`
+pointing at the original HEIC bytes hash. The route hashes incoming
+JPEG bytes, so `scan_identify_events.image_hash` no longer joins to
+`scan_eval_images.image_hash` for the ~120 converted entries.
 
-**Goal:** ship two-stage OCR-first retrieval. When OCR confidently
-extracts both card_number AND set_code/set_name, skip CLIP entirely
-and do a direct `canonical_cards` lookup.
+Fix: a one-shot script that re-hashes every `scan_eval/<hash>.jpg`
+storage object's CURRENT bytes and updates the `scan_eval_images` row
+to match. Idempotent. Unblocks HIGH-precision telemetry queries.
 
-**My work (~6-8 hours):**
+### Day 2 — Wednesday: two-stage OCR-first retrieval (LAYERED)
+
+**Goal:** bypass CLIP+kNN for cards where OCR has enough signal to
+resolve directly via `canonical_cards`. Three paths inside the route
+based on what OCR extracted, in priority order:
+
+| Path | Condition | Logic | Confidence |
+|---|---|---|---|
+| **A — strict** | `card_number` AND `set_hint` both present | `SELECT * FROM canonical_cards WHERE card_number = ? AND set_name ILIKE '%hint%' LIMIT 5`. If exactly 1 → return HIGH. If 2-3 → run kNN over THOSE slugs to disambiguate, return MEDIUM. If 0 → fall through. | HIGH if unique, MEDIUM if ≤3 |
+| **B — partial (THE MIDDLE LAYER)** | `card_number` only (set OCR failed or ambiguous) | `SELECT * FROM canonical_cards WHERE card_number = ?`. Combine with kNN: keep only intersection (slugs that are BOTH in canonical_cards@card_number AND in kNN top-K). If 1 → HIGH; if 2-3 → MEDIUM; if 0 → fall through. | HIGH/MEDIUM |
+| **C — fallback** | OCR failed entirely (no number, no usable hint) | Current CLIP+kNN pipeline. | Current logic |
+
+Path B (the middle layer) is the user's specific request — it
+catches more cases than strict-only because Vision often pulls the
+collector number reliably but flubs the set name (small text, glare).
+By using card_number alone as a server-side allow-list AND
+intersecting with kNN's visual signal, we get most of the lift of
+Path A even when set OCR fails.
+
+Implementation tasks:
 
 | # | Task | Hours |
 |---|---|---|
-| 2.1 | Server-side OCR-first branch in identify route: `WHERE set_code = ? AND card_number = ?` direct lookup. If 1-2 rows match, return as HIGH confidence with `winning_path = "ocr_direct"`. If 0 or 3+, fall through to current CLIP+filter pipeline. | 3-4 |
-| 2.2 | Add `winning_path` column to `scan_identify_events` (migration) so production telemetry shows OCR-direct vs CLIP fallback share | 0.5 |
-| 2.3 | Tighten OCR confidence logic — only take the OCR-direct path when both card_number AND set_code are extracted (not just one) | 1 |
-| 2.4 | Re-eval with `--perfect-ocr` flag (which now passes set_code too) and without (real Vision behavior on eval images) | 1 |
-| 2.5 | Iterate based on Day 1 debug-view data — fix the specific OCR failure modes the operator hit | 1-2 |
+| 2.1 | Path A direct-lookup branch + result mapping (Path A-1 → HIGH, A-2/3 → MEDIUM via mini-kNN) | 3 |
+| 2.2 | Path B intersection branch — pull all slugs with matching card_number (could be ~50 globally, fine for in-memory intersect with kNN top-K) | 2 |
+| 2.3 | `winning_path` field added to scan_identify_events + response so iOS + telemetry know which path fired | 1 |
+| 2.4 | Tighten OCR confidence — Path A unique → HIGH always, Path B unique-after-intersect → HIGH only if CLIP also liked it (gap signal), Path B 2-3 → MEDIUM | 1 |
+| 2.5 | Re-eval with `--perfect-ocr` (which exercises Path A) and without (which exercises Path B + C) | 1 |
 
 **End of Day 2 target:**
-- Top-1: 75-85%
-- HIGH count: 200+ of 277 (vs 134 ceiling, 84 baseline)
-- HIGH precision: 95%+ (≤7 wrongs at most)
-- This is the inflection point. If we don't hit ~75% by EOD Wed, escalate.
+- Top-1: 75-85% (strict Path A on perfect OCR; partial Path B real-world)
+- HIGH count: 200+ of 277
+- HIGH precision: 95%+ (kept by the dual-signal requirement on Path B)
+- Inflection point — if we don't hit ~75% EOD Wed, escalate.
 
 ### Day 3 — Thursday
 
@@ -219,17 +250,16 @@ tests pass, ready to TestFlight Friday.
 
 ---
 
-## Open questions awaiting your decision (last asked: end of Day 0)
+## Resolved decisions (don't re-litigate)
 
-1. **Ship the HIGH-confidence-bug fix INDEPENDENTLY before continuing?**
-   - Pro: it's a 30-min change, fixes a trust-killer in production NOW
-   - Con: next round of scans you do should test the fix; small extra context-switch
-   - **My recommendation: yes, ship now**
+1. ✅ **HIGH-confidence-bug fix shipped independently** (`5f2df4f`).
+2. ✅ **OCR debug view = DEBUG-only flag (`#if DEBUG`).** Strip-clean
+   step on sprint exit is just deleting the `#if DEBUG` block in
+   `ScanPickerSheet`.
+3. ✅ **Day 2 will use the LAYERED two-stage architecture** (Path A
+   strict + Path B middle-layer + Path C fallback) per user direction.
 
-2. **OCR debug view scope:**
-   - Option A — temporary, dev-only flag (`UserDefaults.standard.bool("ocrDebug")`)
-   - Option B — long-term "show me what we read" affordance for end users
-   - **My recommendation: A. Production users don't need to see Vision's raw extraction; we just need it for sprint debugging. Strip after sprint.**
+## Open: nothing currently blocking
 
 ---
 
@@ -237,13 +267,14 @@ tests pass, ready to TestFlight Friday.
 
 | File | Purpose | Current state |
 |---|---|---|
-| `app/api/scan/identify/route.ts` | Server scanner endpoint with CLIP + kNN + OCR filter | `b76faed` |
+| `app/api/scan/identify/route.ts` | Server scanner endpoint with CLIP + kNN + OCR filter (card_number + set_hint) | `8f11595` + `5f2df4f` |
 | `lib/ai/image-crops.ts` | resizeForUpload (HEIC→JPEG) + art crop generation | post-Step-A |
 | `lib/ai/image-augmentations.ts` | Catalog augmentations (recipe v1 ONLY; v2 thumb-overlay retired) | post-Step-A |
-| `ios/PopAlphaApp/OCRService.swift` | On-device Vision OCR for card_number | `c0c02dd` |
-| `ios/PopAlphaApp/ScanService.swift` | iOS API client for /api/scan/identify | `c0c02dd` |
-| `ios/PopAlphaApp/ScannerTabView.swift` | Scanner UI + capture orchestration | `c0c02dd` |
-| `scripts/run-scanner-eval.mjs` | Eval harness, supports `--perfect-ocr` | `b76faed` |
+| `ios/PopAlphaApp/OCRService.swift` | `extractCardIdentifiers` returns card_number + set_hint in one Vision pass | `8f11595` |
+| `ios/PopAlphaApp/ScanService.swift` | Sends both filters to identify route | `8f11595` |
+| `ios/PopAlphaApp/ScannerTabView.swift` | Scanner UI; runIdentify uses combined extractor; debug overlay | `1c44dc6` |
+| `ios/PopAlphaApp/ScanPickerSheet.swift` | Medium-conf picker + DEBUG-only OCR debug strip | `1c44dc6` |
+| `scripts/run-scanner-eval.mjs` | Eval harness, `--perfect-ocr` passes both card_number + set_name | `8f11595` |
 | `docs/scanner-augmentation-playbook.md` | Old Stage A-C notes (augmentation history) | stable |
 | `docs/scanner-finetune-runbook.md` | Stage D fine-tune (data-bound conclusion) | stable |
 | `docs/scanner-zero-tap-sprint.md` | **THIS DOC** — active sprint plan | live |
