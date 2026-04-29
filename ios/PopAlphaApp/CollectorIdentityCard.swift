@@ -7,11 +7,16 @@ import SwiftUI
 struct CollectorIdentityCard: View {
     let profile: CollectorIdentityProfile
 
+    /// Traits live inside a dropdown row at the bottom of the card so
+    /// the type + explanation read clean by default. Tap the row to
+    /// reveal the secondary archetypes a user also shows traits of.
+    @State private var traitsExpanded = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             headerRow
             explanationText
-            if !profile.traits.isEmpty { traitsSection }
+            if !profile.traits.isEmpty { traitsDropdown }
         }
         .padding(20)
         .background(cardBackground)
@@ -60,20 +65,55 @@ struct CollectorIdentityCard: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    // MARK: - Traits
+    // MARK: - Traits Dropdown
+    // Collapsible row attached to the bottom of the card. The trigger
+    // header is always visible; the trait pills slide in/out on tap.
 
-    private var traitsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+    private var traitsDropdown: some View {
+        VStack(alignment: .leading, spacing: 12) {
             Divider().background(PA.Colors.border)
 
-            Text("Also shows traits of")
-                .font(PA.Typography.caption)
-                .foregroundStyle(PA.Colors.muted)
-
-            HStack(spacing: 8) {
-                ForEach(profile.traits) { trait in
-                    traitPill(trait)
+            Button {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    traitsExpanded.toggle()
                 }
+                PAHaptics.selection()
+            } label: {
+                HStack(spacing: 6) {
+                    Text("Also shows traits of")
+                        .font(PA.Typography.caption)
+                        .foregroundStyle(PA.Colors.muted)
+
+                    Text("\(profile.traits.count)")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundStyle(PA.Colors.accent)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(PA.Colors.accent.opacity(0.12))
+                        .clipShape(Capsule())
+
+                    Spacer()
+
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(PA.Colors.muted)
+                        .rotationEffect(.degrees(traitsExpanded ? 180 : 0))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if traitsExpanded {
+                HStack(spacing: 8) {
+                    ForEach(profile.traits) { trait in
+                        traitPill(trait)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .transition(.asymmetric(
+                    insertion: .opacity.combined(with: .move(edge: .top)),
+                    removal: .opacity
+                ))
             }
         }
     }
