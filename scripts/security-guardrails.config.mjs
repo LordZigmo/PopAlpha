@@ -339,6 +339,13 @@ export const PRIVILEGED_PACKAGE_SCRIPT_CONTRACTS = {
     requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
     expectedCommandFragments: ["scripts/export-finetune-dataset.mjs"],
   }),
+  "dataset:catalog-pool": packageScriptContract({
+    target: "scripts/dump-catalog-pool.mjs",
+    intendedCaller: "trusted operator dumping a smart subset of canonical_cards (slug + URL + metadata) as the candidate pool for hard-negative mining in the Stage D fine-tune",
+    trustModel: "service_role_read_only_export",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedCommandFragments: ["scripts/dump-catalog-pool.mjs"],
+  }),
   "scan-eval:convert-heic": packageScriptContract({
     target: "scripts/convert-scan-eval-heic.mjs",
     intendedCaller: "trusted operator one-shot back-converting HEIC objects in scan_eval/<hash>.jpg to JPEG so they're decodable by Replicate's CLIP backend (paired with the resizeForUpload + promote-route HEIC handling in 0d81bc1)",
@@ -352,6 +359,13 @@ export const PRIVILEGED_PACKAGE_SCRIPT_CONTRACTS = {
     trustModel: "service_role_storage_delete_wrapper",
     requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
     expectedCommandFragments: ["scripts/delete-thumb-overlay-storage.mjs"],
+  }),
+  "scan-eval:rehash": packageScriptContract({
+    target: "scripts/rehash-scan-eval-images.mjs",
+    intendedCaller: "trusted operator one-shot recomputing scan_eval_images.image_hash from the CURRENT bytes of each scan_eval/<hash>.jpg storage object (corrects drift introduced by the Step A HEIC-to-JPEG conversion which left scan_eval_images.image_hash pointing at the original HEIC bytes hash while storage objects now hold JPEG bytes)",
+    trustModel: "service_role_table_update_wrapper",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedCommandFragments: ["scripts/rehash-scan-eval-images.mjs"],
   }),
   "scan:backfill-digital": packageScriptContract({
     target: "scripts/backfill-card-image-digital-flag.mjs",
@@ -899,6 +913,15 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
     usesServiceRole: true,
     notes: "Read-only against Supabase + Storage. Writes JSONL + downloaded anchor JPEGs to a local out-dir; never mutates DB or Storage. Accompanies docs/scanner-finetune-runbook.md.",
   }),
+  "scripts/dump-catalog-pool.mjs": operationalScript({
+    classification: "service_role_diagnostic",
+    executionMode: "manual_diagnostic",
+    intendedCaller: "trusted operator dumping a smart subset of canonical_cards as the candidate pool for hard-negative mining during Stage D fine-tune training",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+    notes: "Read-only canonical_cards + scan_eval_runs queries. Writes one JSON file with slug + URL + metadata for each pool member; train.py consumes it. Composition: train/val slugs + variant siblings + set-mates + eval-run lighthouses + random-sample. No DB or Storage writes.",
+  }),
   "scripts/convert-scan-eval-heic.mjs": operationalScript({
     classification: "service_role_backfill",
     executionMode: "manual_backfill",
@@ -916,6 +939,15 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
     expectedSignals: ["service_role_client"],
     usesServiceRole: true,
     notes: "Walks augmented/<safeSlug>/, lists each slug dir, removes any object whose name starts with v3- or v4-. Idempotent — already-deleted objects produce zero work on replay. Disposable one-shot, deletable after the post-cleanup runtime-filter removal verifies clean.",
+  }),
+  "scripts/rehash-scan-eval-images.mjs": operationalScript({
+    classification: "service_role_backfill",
+    executionMode: "manual_backfill",
+    intendedCaller: "trusted operator one-shot patching scan_eval_images.image_hash drift introduced by the Step A HEIC-to-JPEG storage conversion",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+    notes: "Downloads each scan_eval/<hash>.jpg storage object, SHA-256s the current bytes, updates the matching scan_eval_images row's image_hash + image_bytes_size if drifted. Idempotent — no-op when hashes already match. Unblocks scan_identify_events JOIN scan_eval_images telemetry queries. Disposable one-shot.",
   }),
   "scripts/seed-scan-eval-image.mjs": operationalScript({
     classification: "service_role_diagnostic",
