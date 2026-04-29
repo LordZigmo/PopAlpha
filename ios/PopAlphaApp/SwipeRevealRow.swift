@@ -52,7 +52,8 @@ struct SwipeRevealModifier: ViewModifier {
                         .font(.system(size: 10, weight: .medium))
                 }
                 .foregroundStyle(.white)
-                .frame(width: kActionWidth - 1, maxHeight: .infinity)
+                .frame(width: kActionWidth - 1)
+                .frame(maxHeight: .infinity)
                 .background(Color(red: 0.25, green: 0.25, blue: 0.30))
             }
 
@@ -68,7 +69,8 @@ struct SwipeRevealModifier: ViewModifier {
                         .font(.system(size: 10, weight: .medium))
                 }
                 .foregroundStyle(.white)
-                .frame(width: kActionWidth, maxHeight: .infinity)
+                .frame(width: kActionWidth)
+                .frame(maxHeight: .infinity)
                 .background(Color.red)
             }
         }
