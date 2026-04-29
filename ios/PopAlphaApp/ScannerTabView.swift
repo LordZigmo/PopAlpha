@@ -656,21 +656,35 @@ final class ScannerHost: ObservableObject {
         self.isIdentifying = true
         self.identifyError = nil
 
-        // Run the server identify and on-device OCR concurrently —
-        // OCR finishes much faster (~100-300ms) than identify (~1-3s),
-        // so joining on both only costs identify's latency. OCR pulls
-        // the collector number from the card's bottom corner, which
-        // uniquely disambiguates variant prints that CLIP can't
-        // distinguish on art alone (e.g. Cramorant-AH vs Cramorant-JT).
-        async let identifyTask = ScanService.identify(
-            image: image,
-            language: self.scanLanguage
-        )
-        async let ocrTask = OCRService.extractCollectorNumber(from: image)
+        // Run on-device OCR FIRST (~100-300ms), then forward the result
+        // to the server's identify endpoint. The server uses
+        // ?card_number= to filter the kNN's INTERNAL ~20-candidate pool
+        // before slicing — strictly higher recall than the older
+        // pattern of letting the server return a top-5 and reranking
+        // client-side, because the server filter sees candidates that
+        // never made the top-5 cut. Trade ~200ms of added latency for
+        // a structural lift in the post-Step-A eval (+9.4pp top-1,
+        // 94.8% high-confidence precision).
+        //
+        // OCR is fail-graceful: if it returns nil (no number readable,
+        // or Vision errored), the request goes out without a hint and
+        // the route behaves like before. Likewise the server-side
+        // filter falls back to unfiltered candidates if the filter
+        // would drop everything (wrong OCR / stale card_number data).
+        //
+        // We still apply ScanMatchReranker locally as defense in depth:
+        // when both the server filter AND a non-trivial top-K survive,
+        // client-side promotion + confidence upgrade catches any drift
+        // between canonical_cards.card_number and what the server
+        // returned in `match.cardNumber`.
+        let ocrNumber = await OCRService.extractCollectorNumber(from: image)
 
         do {
-            let response = try await identifyTask
-            let ocrNumber = await ocrTask
+            let response = try await ScanService.identify(
+                image: image,
+                language: self.scanLanguage,
+                cardNumber: ocrNumber
+            )
 
             let reranked = ScanMatchReranker.rerank(
                 matches: response.matches,

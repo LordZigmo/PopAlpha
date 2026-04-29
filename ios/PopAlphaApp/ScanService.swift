@@ -79,9 +79,22 @@ enum ScanService {
     /// embedding index. The image is resized to ~768px long-edge and
     /// JPEG-compressed (q=0.8) before upload — target body size is
     /// ~60–100 KB, which uploads in ~200ms over LTE.
+    ///
+    /// `cardNumber` is the on-device OCR result (from
+    /// `OCRService.extractCollectorNumber`). When supplied, the server
+    /// narrows kNN candidates to canonical_cards rows whose
+    /// `card_number` matches — structurally resolves variant
+    /// confusion (V vs VMAX vs ex), reprint ambiguity (Base vs Base
+    /// Set 2), and lighthouse pull (Samurott VSTAR magneting other
+    /// holographic-foil cards) that CLIP alone can't separate.
+    /// Server falls back gracefully if the filter drops all candidates
+    /// (OCR was wrong / canonical_cards.card_number is stale), so
+    /// passing this value can never make a scan worse than not
+    /// passing it.
     static func identify(
         image: UIImage,
         language: ScanLanguage,
+        cardNumber: String? = nil,
         maxEdgePixels: CGFloat = 768,
         compressionQuality: CGFloat = 0.8
     ) async throws -> ScanIdentifyResponse {
@@ -93,11 +106,16 @@ enum ScanService {
             throw ScanServiceError.imageEncodingFailed
         }
 
+        var query: [(String, String)] = [("language", language.rawValue)]
+        if let cardNumber, !cardNumber.isEmpty {
+            query.append(("card_number", cardNumber))
+        }
+
         return try await APIClient.postRaw(
             path: "/api/scan/identify",
             body: jpegData,
             contentType: "image/jpeg",
-            query: [("language", language.rawValue)]
+            query: query
         )
     }
 
