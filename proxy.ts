@@ -10,6 +10,7 @@
 // (bump 3: _diag/auth temp diagnostic — 2026-04-27)
 // (bump 4: rename _diag → diag — 2026-04-27)
 // (bump 5: remove diag/auth after admin-elevation fix — 2026-04-27)
+// (bump 6: admin/cleanup/delete-thumb-overlay-augs — 2026-04-29)
 
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse, type NextRequest } from "next/server";
