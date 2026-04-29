@@ -251,6 +251,15 @@ struct PortfolioView: View {
     private var portfolioContent: some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(spacing: 28) {
+                // 1. Your Collection (composition + attributes) sits at
+                // the very top so users immediately see what their
+                // portfolio is *made of* before drilling into totals.
+                if hasFullAnalysis, let composition = overview?.toComposition() {
+                    let attrs = overview?.toAttributes() ?? []
+                    PortfolioCompositionView(composition: composition, attributes: attrs)
+                }
+
+                // 2. Hero — totals, P&L, sparkline.
                 PortfolioHeroView(
                     summary: summary,
                     handle: auth.currentHandle ?? auth.currentFirstName,
@@ -258,30 +267,31 @@ struct PortfolioView: View {
                     costBasisGap: costBasisGap
                 )
 
-                // While the user hasn't reached the analysis threshold,
-                // show a premium progress card instead of mock sections.
+                // 3. Below-threshold users see the unlock progress
+                // teaser instead of the analytics sections.
                 if !hasFullAnalysis {
                     InsightsUnlockProgress(cardsAdded: positions.count)
                 }
 
-                // Enriched sections (only when backend returned full analysis)
+                // 4. Identity + AI insights (Evolution moved out — it
+                // now lives at the bottom of the page).
                 if hasFullAnalysis {
                     if let identity = overview?.toIdentity() {
                         CollectorIdentityCard(profile: identity, radarProfile: overview?.radarProfile)
                     }
 
-                    if let composition = overview?.toComposition() {
-                        let attrs = overview?.toAttributes() ?? []
-                        PortfolioCompositionView(composition: composition, attributes: attrs)
-                    }
-
                     let insights = overview?.toInsights() ?? []
-                    if !insights.isEmpty || !activities.isEmpty {
-                        PortfolioInsightView(insights: insights, activities: activities)
+                    if !insights.isEmpty {
+                        PortfolioInsightView(
+                            insights: insights,
+                            activities: [],
+                            showActivity: false
+                        )
                     }
                 }
 
-                // Positions list (always shown when there are holdings)
+                // 5. Positions list ("Your Cards"), always shown when
+                // there are holdings.
                 if !positions.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
                         positionsHeader
@@ -324,6 +334,17 @@ struct PortfolioView: View {
                         }
                         .padding(.horizontal, PA.Layout.sectionPadding)
                     }
+                }
+
+                // 6. Evolution timeline — anchored at the bottom of the
+                // page so it acts as a "what's been happening" log,
+                // not as primary analytics.
+                if hasFullAnalysis, !activities.isEmpty {
+                    PortfolioInsightView(
+                        insights: [],
+                        activities: activities,
+                        showInsights: false
+                    )
                 }
             }
             .padding(.bottom, 40)

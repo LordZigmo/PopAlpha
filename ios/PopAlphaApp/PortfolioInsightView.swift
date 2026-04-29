@@ -6,11 +6,22 @@ import SwiftUI
 struct PortfolioInsightView: View {
     let insights: [PortfolioInsight]
     let activities: [PortfolioActivity]
+    /// Render the AI insights block. Default true; pass false to render
+    /// only the Evolution timeline (used when Evolution is positioned
+    /// independently at the bottom of the page).
+    var showInsights: Bool = true
+    /// Render the Evolution timeline. Default true; pass false to render
+    /// only the AI insights (used when Evolution moves to the bottom).
+    var showActivity: Bool = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            insightsSection
-            activitySection
+            if showInsights && !insights.isEmpty {
+                insightsSection
+            }
+            if showActivity && !activities.isEmpty {
+                activitySection
+            }
         }
         .padding(.horizontal, PA.Layout.sectionPadding)
     }
