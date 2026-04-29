@@ -239,32 +239,45 @@ function buildHardNegatives({
   return out;
 }
 
-function stratifiedSplit(rows, valFrac, seed) {
-  // Group by anchor slug, shuffle within group, take ceil(n*valFrac)
-  // for val. Keeps slugs disjoint across train/val so val accuracy
-  // measures generalization, not memorization.
+function slugDisjointSplit(rows, valFrac, seed) {
+  // Slug-disjoint train/val split. Each canonical_slug is assigned
+  // *whole* to either train or val — a slug's photos never appear in
+  // both sides. This is what makes val accuracy measure generalization
+  // (can the model recognize a card it has never trained on?) instead
+  // of memorization (does the model know that *this specific catalog
+  // image* lives at a specific point in embedding space, after seeing
+  // it as the positive for many train anchors?).
+  //
+  // Earlier 2026-04-29 revision deliberately renamed from
+  // `stratifiedSplit` because the comment lied: it claimed disjoint
+  // but actually put a slug's 3 photos at 1 val + 2 train, leaking
+  // the catalog image into both sides. Smoke fine-tune hit val_top1
+  // 1.000 by epoch 12 because of this leakage; nothing in the model
+  // had to generalize. Slug-disjoint puts the same model in front of
+  // a real "unseen card" task.
+  //
+  // Cost: ~20% of slugs become unavailable for training. With 92
+  // distinct slugs that's ~18 val-only slugs and ~74 train slugs.
+  // Train shrinks but val finally measures the right thing.
   const rng = makeRng(seed);
-  const bySlug = new Map();
-  for (const row of rows) {
-    if (!bySlug.has(row.positive.slug)) bySlug.set(row.positive.slug, []);
-    bySlug.get(row.positive.slug).push(row);
+  const slugs = [...new Set(rows.map((r) => r.positive.slug))];
+  // Shuffle slugs deterministically (xorshift32 PRNG seeded by --seed)
+  for (let i = slugs.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(rng() * (i + 1));
+    [slugs[i], slugs[j]] = [slugs[j], slugs[i]];
   }
+  const valCount = Math.max(1, Math.round(slugs.length * valFrac));
+  const valSlugs = new Set(slugs.slice(0, valCount));
   const train = [];
   const val = [];
-  for (const list of bySlug.values()) {
-    const shuffled = [...list].sort(() => rng() - 0.5);
-    const valCount = Math.min(shuffled.length, Math.max(1, Math.round(shuffled.length * valFrac)));
-    // Keep at least 1 in train per slug if there's >= 2 photos; if
-    // there's only 1 photo of a slug, send it to train (val would
-    // make it untrainable).
-    if (shuffled.length === 1) {
-      train.push(shuffled[0]);
-      continue;
+  for (const row of rows) {
+    if (valSlugs.has(row.positive.slug)) {
+      val.push(row);
+    } else {
+      train.push(row);
     }
-    val.push(...shuffled.slice(0, valCount));
-    train.push(...shuffled.slice(valCount));
   }
-  return { train, val };
+  return { train, val, valSlugs };
 }
 
 async function main() {
@@ -358,13 +371,17 @@ async function main() {
   }
   console.log(`[export] rows built: ${rows.length} (skipped ${skippedNoCanonical} with no canonical_card)`);
 
-  const { train, val } = stratifiedSplit(rows, valFrac, seed);
-  console.log(`[export] split: train=${train.length} · val=${val.length}`);
+  const { train, val, valSlugs } = slugDisjointSplit(rows, valFrac, seed);
+  console.log(`[export] split: train=${train.length} (${new Set(train.map(r=>r.positive.slug)).size} slugs) · val=${val.length} (${valSlugs.size} slugs) · slug-disjoint`);
 
   // Stats — useful in the manifest and for catching obvious gaps.
   const stats = {
     anchors_total: rows.length,
     distinct_slugs: new Set(rows.map((r) => r.positive.slug)).size,
+    train_anchors: train.length,
+    train_slugs: new Set(train.map(r=>r.positive.slug)).size,
+    val_anchors: val.length,
+    val_slugs: valSlugs.size,
     avg_hard_negatives: rows.length === 0
       ? 0
       : rows.reduce((s, r) => s + r.hard_negatives.length, 0) / rows.length,

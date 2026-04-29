@@ -65,6 +65,9 @@ rf-detr-base.pth
 ios/Sources/Features/Scanner/training_runs/
 ios/Sources/Features/Scanner/ai_env/*
 !ios/Sources/Features/Scanner/ai_env/download_data.py
+training/.venv/
+training/__pycache__/
+data/finetune-*/
 
 # Supabase local temp
 .supabase/
