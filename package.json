@@ -39,7 +39,6 @@
     "eval:seed": "node --env-file=.env.local scripts/seed-scan-eval-image.mjs",
     "eval:run": "node --env-file=.env.local scripts/run-scanner-eval.mjs",
     "dataset:export": "node --env-file=.env.local scripts/export-finetune-dataset.mjs",
-    "dataset:catalog-pool": "node --env-file=.env.local scripts/dump-catalog-pool.mjs",
     "scan-eval:convert-heic": "node --env-file=.env.local scripts/convert-scan-eval-heic.mjs",
     "scan-eval:delete-thumb-overlay-storage": "node --env-file=.env.local scripts/delete-thumb-overlay-storage.mjs",
     "scan-eval:rehash": "node --env-file=.env.local scripts/rehash-scan-eval-images.mjs",

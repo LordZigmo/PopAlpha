@@ -339,13 +339,6 @@ export const PRIVILEGED_PACKAGE_SCRIPT_CONTRACTS = {
     requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
     expectedCommandFragments: ["scripts/export-finetune-dataset.mjs"],
   }),
-  "dataset:catalog-pool": packageScriptContract({
-    target: "scripts/dump-catalog-pool.mjs",
-    intendedCaller: "trusted operator dumping a smart subset of canonical_cards (slug + URL + metadata) as the candidate pool for hard-negative mining in the Stage D fine-tune",
-    trustModel: "service_role_read_only_export",
-    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
-    expectedCommandFragments: ["scripts/dump-catalog-pool.mjs"],
-  }),
   "scan-eval:convert-heic": packageScriptContract({
     target: "scripts/convert-scan-eval-heic.mjs",
     intendedCaller: "trusted operator one-shot back-converting HEIC objects in scan_eval/<hash>.jpg to JPEG so they're decodable by Replicate's CLIP backend (paired with the resizeForUpload + promote-route HEIC handling in 0d81bc1)",
@@ -912,15 +905,6 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
     expectedSignals: ["service_role_client"],
     usesServiceRole: true,
     notes: "Read-only against Supabase + Storage. Writes JSONL + downloaded anchor JPEGs to a local out-dir; never mutates DB or Storage. Accompanies docs/scanner-finetune-runbook.md.",
-  }),
-  "scripts/dump-catalog-pool.mjs": operationalScript({
-    classification: "service_role_diagnostic",
-    executionMode: "manual_diagnostic",
-    intendedCaller: "trusted operator dumping a smart subset of canonical_cards as the candidate pool for hard-negative mining during Stage D fine-tune training",
-    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
-    expectedSignals: ["service_role_client"],
-    usesServiceRole: true,
-    notes: "Read-only canonical_cards + scan_eval_runs queries. Writes one JSON file with slug + URL + metadata for each pool member; train.py consumes it. Composition: train/val slugs + variant siblings + set-mates + eval-run lighthouses + random-sample. No DB or Storage writes.",
   }),
   "scripts/convert-scan-eval-heic.mjs": operationalScript({
     classification: "service_role_backfill",
