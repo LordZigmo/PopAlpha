@@ -391,6 +391,16 @@ function classifyConfidence(
   context: {
     cardNumberFilterApplied: boolean;
     ocrChangedTop1: boolean;
+    /// True when the OCR card_number filter was provided BUT none of
+    /// CLIP's top-K candidates matched that number. The route then
+    /// degrades back to CLIP's top-1, but the OCR signal is strong
+    /// disagreement — see real-device session 3 (2026-04-30) Kabuto
+    /// scan: OCR=140 → CLIP top-K had Baltoy #32 + others without
+    /// any #140, route returned Baltoy at HIGH. Downgrades to
+    /// MEDIUM so the picker surfaces the disagreement and the user
+    /// can correct via search. The picker-search flow lands the
+    /// correction in scan_eval_images automatically.
+    cardNumberFilterDroppedAll: boolean;
   },
 ): "high" | "medium" | "low" {
   if (topDistance === undefined) return "low";
@@ -398,6 +408,15 @@ function classifyConfidence(
   // rank-2. A tight cluster with ambiguous gap (e.g. Charizard ex vs
   // Charizard V) should fall to medium so the user confirms.
   if (topDistance <= CONFIDENCE_HIGH_COS_DIST) {
+    // OCR/CLIP disagreement (2026-04-30): OCR provided a
+    // card_number that no candidate in CLIP's top-K matched. We
+    // can't know which signal was wrong, but auto-navigating to
+    // CLIP's pick when OCR strongly disagrees has been a real
+    // trust-killer in the wild. Downgrade to MEDIUM so the picker
+    // sheet's correction flow can capture the right answer.
+    if (context.cardNumberFilterApplied && context.cardNumberFilterDroppedAll) {
+      return "medium";
+    }
     // Default rule: gap-null is treated as "uncontested rank-1" → high.
     // EXCEPTION (2026-04-29 trust-killer fix): when the OCR card_number
     // filter narrowed candidates to exactly 1, gap is null because we
@@ -935,6 +954,17 @@ export async function POST(req: Request) {
   let cardNumberDropped = 0;
   let cardNumberFilterApplied = false;
   let setHintFilterApplied = false;
+  // True when the OCR card_number filter was applied AND it returned
+  // ZERO survivors against the kNN top-K (i.e. none of CLIP's top
+  // candidates had a matching card_number). This is OCR/CLIP
+  // DISAGREEMENT — either OCR misread the number or CLIP missed
+  // the right card entirely. Pre-2026-04-30 the route silently
+  // degraded back to CLIP's top-1 and returned HIGH (real-device
+  // session 3 caught one: Kabuto OCR=140 → returned Baltoy #32 at
+  // HIGH because the gap looked clean). Now used to downgrade
+  // HIGH→MEDIUM in classifyConfidence so the picker surfaces the
+  // disagreement instead of auto-navigating to the wrong card.
+  let cardNumberFilterDroppedAll = false;
   let setHintDropped = 0;
   // CLIP's choice of top-1 BEFORE the card_number filter ran. Used by
   // confidence classification to detect "OCR overrode CLIP" — when
@@ -1020,6 +1050,7 @@ export async function POST(req: Request) {
         });
         cardNumberDropped = orphanFiltered.length - numFiltered.length;
         if (numFiltered.length === 0) {
+          cardNumberFilterDroppedAll = true;
           console.log(
             `[identify] card_number filter '${cardNumberFilter}' dropped all candidates — degrading to orphan-filtered set hash=${imageHash}`,
           );
@@ -1252,6 +1283,7 @@ export async function POST(req: Request) {
     confidence = classifyConfidence(topDistance, topGap, {
       cardNumberFilterApplied: ocrFilterApplied,
       ocrChangedTop1,
+      cardNumberFilterDroppedAll,
     });
   }
 
