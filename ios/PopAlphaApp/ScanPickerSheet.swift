@@ -97,10 +97,10 @@ struct ScanPickerSheet: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
-            .foregroundStyle(PA.Colors.foreground.opacity(0.7))
+            .foregroundStyle(PA.Colors.text.opacity(0.7))
             Text("path: \(pathDisplay)")
                 .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(PA.Colors.foreground.opacity(0.7))
+                .foregroundStyle(PA.Colors.text.opacity(0.7))
                 .lineLimit(1)
                 .truncationMode(.tail)
         }
