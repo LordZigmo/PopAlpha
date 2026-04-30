@@ -353,16 +353,36 @@ function normalizeSetNameForCompare(raw: string | null | undefined): string {
 
 /**
  * True if the operator-supplied OCR set hint plausibly refers to
- * `set_name` from canonical_cards. Case- and punctuation-insensitive
- * containment check in either direction so "phantasmal flames" hint
- * matches "Phantasmal Flames" stored AND "Pokemon GO" hint matches
- * the longer printed-on-card "Pokemon GO Booster" if that ever drifts.
+ * `set_name` from canonical_cards. UNIDIRECTIONAL containment check:
+ * the canonical set name must contain the hint, NOT the other way
+ * around.
+ *
+ * Why one-directional (2026-04-30 fix):
+ * The bidirectional version caused a HIGH-confidence-WRONG bug.
+ * On a real-device scan of "151 #140 Kabuto," iOS pickSetHint
+ * returned the flavor text "evolves from antique dome fossil"
+ * (the longest letter-heavy line on the card). The old check
+ * `hint.includes(stored)` was true for the canonical set name
+ * "Fossil" (which is a substring of the flavor text), so Path A
+ * unique fired with `card_number=1 + set_name=Fossil` matching
+ * exactly 1 canonical row → Aerodactyl Fossil #1. Returned at
+ * sim=1.0 HIGH and auto-navigated the user to the wrong card.
+ *
+ * The OCR'd hint is allowed to be a partial read of the canonical
+ * set name ("evolving" → "evolving skies"). It is NOT allowed to
+ * be a long flavor-text string that happens to contain the
+ * canonical name.
  */
 function setHintMatches(hint: string, storedSetName: string | null | undefined): boolean {
   if (!hint) return true; // no hint → no filter
   const stored = normalizeSetNameForCompare(storedSetName);
   if (stored.length === 0) return false;
-  return stored.includes(hint) || hint.includes(stored);
+  // Only allow stored set name to contain the hint, not the reverse.
+  // Belt-and-braces: if the hint is dramatically longer than the
+  // canonical set name (>1.5×), it's almost certainly flavor text
+  // that incidentally contains the set name.
+  if (hint.length > stored.length * 1.5 + 4) return false;
+  return stored.includes(hint);
 }
 
 function classifyConfidence(
@@ -1105,8 +1125,14 @@ export async function POST(req: Request) {
         ? directRows.filter((r) => setHintMatches(setHintFilter, r.set_name))
         : directRows;
 
+      // ── Path A: strict (card_number AND useful set_hint) ───────────
+      // Only fires when set_hint is present AND it actually narrowed
+      // the canonical_cards rows to ≥1 and ≤3 candidates. If
+      // set_hint was garbage (filtered to 0 rows) or too loose
+      // (filtered to >3), we DROP DOWN to Path B below — we don't
+      // give up. Pre-2026-04-30 this dropped to vision_only and the
+      // middle-layer never fired in production.
       if (setHintFilter && setMatching.length > 0 && setMatching.length <= 3) {
-        // Path A: strict (card_number AND set_hint).
         if (setMatching.length === 1) {
           // Path A unique → HIGH-confidence direct answer. Synthesize
           // a match from the canonical row; cos_dist=0 yields
@@ -1130,10 +1156,16 @@ export async function POST(req: Request) {
           matches = ranked.slice(0, limit);
           winningPath = "ocr_direct_narrow";
         }
-      } else if (!setHintFilter && directRows.length > 0) {
-        // Path B: card_number only. Intersect direct-query slugs
-        // with the kNN candidate pool. The kNN's allMergedMatches
-        // is up to ~20 unique slugs (4× over-fetch + slug dedup).
+      }
+
+      // ── Path B: middle layer (card_number-only intersection) ───────
+      // Activates when Path A didn't fire — either set_hint was
+      // absent, OR set_hint filtered to 0 rows (garbage hint), OR
+      // set_hint filtered to >3 rows (too loose). The middle layer
+      // intersects ALL canonical_cards rows with that card_number
+      // (across every set) against the kNN candidate pool. Survivors
+      // are the slugs both OCR and CLIP independently endorsed.
+      if (winningPath === "vision_only" && directRows.length > 0) {
         const directSlugSet = new Set(directRows.map((r) => r.slug));
         const intersect = allMergedMatches.filter((m) =>
           directSlugSet.has(m.canonical_slug),
@@ -1148,11 +1180,9 @@ export async function POST(req: Request) {
           matches = intersect.slice(0, limit);
           winningPath = "ocr_intersect_narrow";
         }
-        // 0 → fall through to vision_only
-        // >3 → too noisy for Path B, also fall through
+        // intersect.length === 0 → fall through to vision_only
+        // intersect.length > 3 → too noisy; also fall through
       }
-      // Path A returned >3 rows OR Path A returned 0 with set_hint
-      // present → fall through to vision_only too.
     }
   }
 
@@ -1246,6 +1276,8 @@ export async function POST(req: Request) {
     artTopSimilarity,
     winningCrop,
     winningPath,
+    ocrCardNumber: cardNumberFilter ?? null,
+    ocrSetHint: setHintFilter ?? null,
   });
 
   return NextResponse.json({
@@ -1335,6 +1367,12 @@ type ScanEventInput = {
   // because OCR card_number is too noisy" or "Path A unique fires
   // 60% of the time".
   winningPath?: WinningPath | null;
+  // Day 3.5: the raw OCR fields the iOS app sent in the URL query.
+  // Required to diagnose Path A/B activation in production —
+  // without this, we have to OCR-probe the saved JPEG locally to
+  // guess what iOS extracted, which is a brutal feedback loop.
+  ocrCardNumber?: string | null;
+  ocrSetHint?: string | null;
 };
 
 async function logScanEvent(event: ScanEventInput): Promise<void> {
@@ -1360,6 +1398,8 @@ async function logScanEvent(event: ScanEventInput): Promise<void> {
         art_top_similarity: event.artTopSimilarity ?? null,
         winning_crop: event.winningCrop ?? null,
         winning_path: event.winningPath ?? null,
+        ocr_card_number: event.ocrCardNumber ?? null,
+        ocr_set_hint: event.ocrSetHint ?? null,
       });
 
     if (error) {

@@ -92,10 +92,34 @@ enum OCRService {
     }
 
     /// Pick the most set-name-looking line from a Vision OCR pass.
-    /// Heuristic: take the longest line that's mostly letters (≥3
-    /// letter characters, ≤30 chars total, contains a space OR is
-    /// at least 5 letters long). Filters out lines that are just
-    /// numbers, very short codes, or pure flavor text.
+    ///
+    /// Iteration history:
+    ///   v1 (Day 1): "longest plausible letter-heavy line." Caused
+    ///   real-device session 2 (2026-04-30) to return flavor text
+    ///   like "evolves from antique dome fossil" or artist credits
+    ///   like "Illus. Anesoki Dynamic" as the set hint, breaking
+    ///   server-side Path A and triggering one HIGH-confidence-WRONG
+    ///   false-positive when "fossil" matched the canonical "Fossil"
+    ///   set name.
+    ///
+    ///   v2 (Day 3.5): rejects lines that look like flavor text or
+    ///   metadata. The cleanest signal that a line ISN'T a set name
+    ///   on a Pokémon card is one of:
+    ///     - Starts with a metadata token: "Illus.", "©", "(C)",
+    ///       "NO.", "HP", "Stage", "Basic", "Evolves" — these prefix
+    ///       species classification, copyright lines, attack costs,
+    ///       and evolution lines. None are set names.
+    ///     - Ends with a period (sentence-cased flavor text — set
+    ///       names don't end with periods).
+    ///     - Contains a stop word that strongly signals prose ("is",
+    ///       "the", "a", "from", "of", "this", "its", "by").
+    ///
+    /// Modern Pokémon cards rarely print the SET NAME on the front
+    /// at all (just a small set CODE like "AR" or "PRE"). So this
+    /// function returning nil is the COMMON case. That's fine —
+    /// nil set_hint lets server-side Path B activate (the middle
+    /// layer), which is strictly better than Path A firing on a
+    /// false hint.
     static func pickSetHint(from lines: [String]) -> String? {
         let candidates: [(String, Int)] = lines.compactMap { raw in
             let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -108,6 +132,33 @@ enum OCRService {
             guard letters >= 3, letters > digits else { return nil }
             // Reject if the line looks like a fraction/rule text.
             if trimmed.contains("/") && digits > 2 { return nil }
+
+            // Reject metadata prefixes — these are species lines,
+            // copyright, attack labels, evolution lines, never set
+            // names. Case-insensitive prefix match.
+            let lowered = trimmed.lowercased()
+            let metadataPrefixes = [
+                "illus.", "illus ", "©", "(c)", "c20", "©20",
+                "no.", "no ", "hp", "stage", "basic ", "basic\t",
+                "evolves ", "weakness", "resistance", "retreat",
+                "ability", "pokémon power",
+            ]
+            if metadataPrefixes.contains(where: { lowered.hasPrefix($0) }) {
+                return nil
+            }
+            // Reject sentence-cased flavor text — ends with period.
+            if trimmed.hasSuffix(".") { return nil }
+            // Reject prose stop words. Set names don't contain
+            // articles or prepositions ("the", "a", "of", "from").
+            let proseStopWords: Set<String> = [
+                "is", "the", "a", "from", "of", "this", "its", "by",
+                "to", "with", "and", "but", "or", "for", "as",
+                "have", "has", "had", "be", "been",
+            ]
+            let words = lowered.split(separator: " ").map(String.init)
+            if words.contains(where: { proseStopWords.contains($0) }) {
+                return nil
+            }
 
             // Score: longer = more likely a real set name (vs a
             // 3-letter HP value or "EX"). Multi-word lines also
