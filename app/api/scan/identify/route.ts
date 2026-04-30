@@ -1265,8 +1265,26 @@ export async function POST(req: Request) {
   //                        HIGH→MEDIUM (the trust-killer fix); else
   //                        fall through to the cos_dist+gap rules.
   let confidence: "high" | "medium" | "low";
-  if (winningPath === "ocr_direct_unique" || winningPath === "ocr_intersect_unique") {
+  if (winningPath === "ocr_direct_unique") {
+    // Path A unique: card_number AND set_hint both passed strict
+    // validation against canonical_cards. No CLIP override risk
+    // because we did NOT use CLIP at all to pick — the route
+    // bypassed kNN entirely. HIGH is justified.
     confidence = "high";
+  } else if (winningPath === "ocr_intersect_unique") {
+    // Path B unique: card_number filter narrowed kNN top-K to one
+    // survivor. Trust-killer guard (2026-04-30): if the survivor
+    // was NOT CLIP's original top-1, OCR forcibly overrode CLIP.
+    // This is the same risk the Day 1 fix (5f2df4f) addressed for
+    // vision_only — Suicune & Entei LEGEND #94 false-positives on
+    // Umbreon V scans because both share card_number=94.
+    // Demote to MEDIUM so the picker sheet's correction-search
+    // surfaces the disagreement instead of auto-navigating.
+    const pathBChangedTop1 =
+      clipOriginalTopSlug !== null &&
+      matches[0] != null &&
+      matches[0].canonical_slug !== clipOriginalTopSlug;
+    confidence = pathBChangedTop1 ? "medium" : "high";
   } else if (winningPath === "ocr_direct_narrow" || winningPath === "ocr_intersect_narrow") {
     confidence = "medium";
   } else {
