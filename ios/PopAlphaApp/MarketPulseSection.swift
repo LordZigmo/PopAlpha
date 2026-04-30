@@ -45,6 +45,7 @@ struct MarketPulseSection: View {
         case breakouts
         case unusual
         case pullbacks
+        case budget
 
         var id: String { rawValue }
 
@@ -54,6 +55,7 @@ struct MarketPulseSection: View {
             case .breakouts: return "Breakouts"
             case .unusual: return "Unusual"
             case .pullbacks: return "Pullbacks"
+            case .budget: return "Budget"
             }
         }
 
@@ -63,6 +65,7 @@ struct MarketPulseSection: View {
             case .breakouts: return "BREAKOUTS"
             case .unusual: return "UNUSUAL"
             case .pullbacks: return "PULLBACKS"
+            case .budget: return "UNDER $20"
             }
         }
 
@@ -72,6 +75,7 @@ struct MarketPulseSection: View {
             case .breakouts: return "Breakouts"
             case .unusual: return "Unusual volume"
             case .pullbacks: return "Pullbacks"
+            case .budget: return "Budget movers"
             }
         }
 
@@ -81,6 +85,7 @@ struct MarketPulseSection: View {
             case .breakouts: return Color(red: 0.486, green: 0.227, blue: 0.929)
             case .unusual: return PA.Colors.gold
             case .pullbacks: return Color(red: 1.0, green: 0.42, blue: 0.42)
+            case .budget: return Color(red: 0.961, green: 0.620, blue: 0.043) // amber-500
             }
         }
 
@@ -93,16 +98,18 @@ struct MarketPulseSection: View {
             case .breakouts: return "Thin supply move"
             case .unusual: return "Unusual volume"
             case .pullbacks: return nil
+            case .budget: return nil
             }
         }
 
         /// Whether this category respects the global 24H / 7D window.
-        /// Breakouts and Unusual are derived from non-windowed signals
-        /// server-side today, so the toggle is ignored there.
+        /// Breakouts, Unusual, and Budget come from non-windowed
+        /// daily-computed lists server-side, so the toggle is ignored
+        /// there.
         var isWindowed: Bool {
             switch self {
             case .movers, .pullbacks: return true
-            case .breakouts, .unusual: return false
+            case .breakouts, .unusual, .budget: return false
             }
         }
     }
@@ -264,6 +271,10 @@ struct MarketPulseSection: View {
             return signalBoard.unusualVolume ?? highConfidenceMovers
         case .pullbacks:
             return signalBoard.biggestDrops.forWindow(selectedWindow)
+        case .budget:
+            // Pre-rollout server builds may not include budgetMovers yet;
+            // fall back to an empty list (renders the empty state).
+            return signalBoard.budgetMovers ?? []
         }
     }
 
@@ -273,6 +284,7 @@ struct MarketPulseSection: View {
         case .breakouts: return "No breakouts yet"
         case .unusual: return "No unusual activity"
         case .pullbacks: return "No \(selectedWindow.label) pullbacks"
+        case .budget: return "No budget movers yet"
         }
     }
 

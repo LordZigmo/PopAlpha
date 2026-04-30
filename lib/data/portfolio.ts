@@ -191,16 +191,16 @@ function scoreType(type: CollectorType, a: PortfolioAttributes): number {
 }
 
 const EXPLANATIONS: Record<CollectorType, string> = {
-  grail_hunter: "Your portfolio centers on high-value chase cards. You prefer conviction over diversification, targeting the cards other collectors dream about.",
-  set_finisher: "You approach collecting with completionist discipline. Your portfolio shows methodical progress toward filling out the sets you care about.",
-  nostalgia_curator: "You favor iconic legacy cards with emotional and historical weight over broad diversification. Your portfolio suggests deliberate taste rather than pure speculation.",
-  modern_momentum: "You stay close to the current meta, building positions in new releases and emerging chase cards before the wider market catches on.",
-  trophy_collector: "Your collection reads like a highlight reel. You invest in statement pieces — the cards that define collections and turn heads.",
-  market_opportunist: "You collect with a trader's eye, spotting undervalued opportunities across eras and categories. Your portfolio is built on market awareness.",
-  completionist: "You cast a wide net, building broad coverage across sets and eras. Your collection values breadth and the joy of discovery.",
-  graded_purist: "Condition is everything to you. Your portfolio skews heavily toward professionally graded cards, with a clear preference for top grades.",
-  binder_builder: "You collect for the tangible experience. Your portfolio is raw-heavy, focused on building a physical collection you can hold and enjoy.",
-  sealed_strategist: "You treat sealed product as a long-term asset. Your allocation toward unopened product suggests patience and a belief in future demand.",
+  grail_hunter: "You go after the big cards. Your portfolio is built around the ones every collector wants, not lots of small pieces.",
+  set_finisher: "You build set by set. Your portfolio shows you are working through sets you care about, one card at a time.",
+  nostalgia_curator: "You collect what means something to you. Your portfolio leans toward iconic, classic cards over pure speculation.",
+  modern_momentum: "You stay close to what is new. Your portfolio is full of recent sets and chase cards that are getting attention right now.",
+  trophy_collector: "Your collection is a highlight reel. You go for the cards that define a collection and stand out at a glance.",
+  market_opportunist: "You collect with a trader's eye. Your portfolio shows you spot good buying ranges across different eras and styles.",
+  completionist: "You collect wide. Your portfolio covers a lot of sets and eras, built around the joy of finding cards you don't have yet.",
+  graded_purist: "Condition matters most to you. Your portfolio leans heavily on graded cards, especially the top grades.",
+  binder_builder: "You collect for the feel of it. Your portfolio is mostly raw cards built to hold, flip through, and enjoy.",
+  sealed_strategist: "You play the long game. Your portfolio leans into sealed product, betting that today's boxes are tomorrow's grails.",
 };
 
 export function computeIdentity(attrs: PortfolioAttributes): CollectorIdentity {
@@ -293,17 +293,17 @@ export function computeInsights(attrs: PortfolioAttributes, identity: CollectorI
   const insights: string[] = [];
 
   if (attrs.vintagePercent > 0.5 && attrs.grailDensity > 0.2)
-    insights.push("Your portfolio is more curator-driven than investor-driven.");
+    insights.push("Your portfolio looks more like a curator's than a trader's.");
   if (attrs.topHoldingConcentration > 0.6)
-    insights.push("Your gains are driven by a small number of high-conviction cards.");
+    insights.push("A few big cards drive most of your value.");
   if (attrs.nostalgiaScore > 0.5 && attrs.modernPercent < 0.3)
-    insights.push("You prefer iconic scarcity over set breadth.");
+    insights.push("You go for classic, hard-to-find cards over wide set coverage.");
   if (attrs.gradedPercent > 0.5)
-    insights.push("You lean into condition as a value driver.");
+    insights.push("Condition matters to you — you lean toward graded cards.");
   if (attrs.setBreadth > 0.6 && attrs.topHoldingConcentration < 0.4)
-    insights.push("You collect broadly — your portfolio is well-diversified across sets.");
+    insights.push("You collect wide — your portfolio covers a lot of different sets.");
   if (attrs.modernPercent > 0.6)
-    insights.push("You're positioned in the current meta — modern releases dominate your portfolio.");
+    insights.push("You stay close to what is new — modern sets fill most of your portfolio.");
 
   // Always include at least one insight based on the identity
   if (insights.length === 0) {

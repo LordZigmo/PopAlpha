@@ -60,6 +60,9 @@ export type HomepageSignalBoardData = {
   // not time-sliced like top_movers/biggest_drops).
   unusual_volume: HomepageCard[];
   breakouts: HomepageCard[];
+  // Budget tier ($1 .. premium_min_price): gainers from cards below the
+  // premium price floor used by top_movers. Single rail, no window split.
+  budget_movers: HomepageCard[];
 };
 
 export type HomepageData = {
@@ -200,13 +203,14 @@ type DailyMoverRow = {
   canonical_cards: DailyMoverJoinedCard[] | DailyMoverJoinedCard | null;
 };
 
-type DailyMoverKind = "gainer" | "loser" | "momentum_24h" | "momentum_7d";
+type DailyMoverKind = "gainer" | "loser" | "momentum_24h" | "momentum_7d" | "budget_gainer";
 
 type DailyMoverBundle = {
   gainers: HomepageCard[];
   losers: HomepageCard[];
   momentum_24h: HomepageCard[];
   momentum_7d: HomepageCard[];
+  budget_gainers: HomepageCard[];
   computed_at_date: string | null;
 };
 
@@ -223,7 +227,7 @@ async function loadDailyTopMoversBundle(
     .maybeSingle<{ computed_at_date: string }>();
 
   if (latestDateError || !latestDateRow?.computed_at_date) {
-    return { gainers: [], losers: [], momentum_24h: [], momentum_7d: [], computed_at_date: null };
+    return { gainers: [], losers: [], momentum_24h: [], momentum_7d: [], budget_gainers: [], computed_at_date: null };
   }
 
   const computedDate = latestDateRow.computed_at_date;
@@ -237,7 +241,7 @@ async function loadDailyTopMoversBundle(
     .order("rank", { ascending: true });
 
   if (error || !data) {
-    return { gainers: [], losers: [], momentum_24h: [], momentum_7d: [], computed_at_date: computedDate };
+    return { gainers: [], losers: [], momentum_24h: [], momentum_7d: [], budget_gainers: [], computed_at_date: computedDate };
   }
 
   const toCard = (row: DailyMoverRow & { kind: DailyMoverKind }): HomepageCard => {
@@ -280,6 +284,7 @@ async function loadDailyTopMoversBundle(
   const losers: HomepageCard[] = [];
   const momentum_24h: HomepageCard[] = [];
   const momentum_7d: HomepageCard[] = [];
+  const budget_gainers: HomepageCard[] = [];
   for (const raw of (data ?? []) as unknown as Array<DailyMoverRow & { kind: DailyMoverKind }>) {
     const card = toCard(raw);
     switch (raw.kind) {
@@ -287,10 +292,11 @@ async function loadDailyTopMoversBundle(
       case "loser": losers.push(card); break;
       case "momentum_24h": momentum_24h.push(card); break;
       case "momentum_7d": momentum_7d.push(card); break;
+      case "budget_gainer": budget_gainers.push(card); break;
     }
   }
 
-  return { gainers, losers, momentum_24h, momentum_7d, computed_at_date: computedDate };
+  return { gainers, losers, momentum_24h, momentum_7d, budget_gainers, computed_at_date: computedDate };
 }
 
 function createEmptySignalBoard(): HomepageSignalBoardData {
@@ -300,6 +306,7 @@ function createEmptySignalBoard(): HomepageSignalBoardData {
     momentum: createEmptyWindowedCards(),
     unusual_volume: [],
     breakouts: [],
+    budget_movers: [],
   };
 }
 
@@ -1050,7 +1057,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
     // compute_daily_top_movers RPC once per day when catalog coverage is
     // complete). If unavailable, fall back to the live per-request
     // computation below.
-    let dailyMovers: DailyMoverBundle = { gainers: [], losers: [], momentum_24h: [], momentum_7d: [], computed_at_date: null };
+    let dailyMovers: DailyMoverBundle = { gainers: [], losers: [], momentum_24h: [], momentum_7d: [], budget_gainers: [], computed_at_date: null };
     if (!overrides && db) {
       try {
         dailyMovers = await loadDailyTopMoversBundle(db);
@@ -1127,6 +1134,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
       },
       unusual_volume: unusualVolumeOut,
       breakouts: breakoutsOut,
+      budget_movers: dailyMovers.budget_gainers.slice(0, SECTION_LIMIT),
     } satisfies HomepageSignalBoardData;
 
     // ── Derive as_of ──────────────────────────────────────────────────────

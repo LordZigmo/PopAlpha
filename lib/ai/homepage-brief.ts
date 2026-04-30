@@ -190,18 +190,44 @@ function stringifyContextForPrompt(ctx: BriefContext): string {
 // ── Prompts ──────────────────────────────────────────────────────────────────
 
 const SYSTEM_PROMPT = [
-  "You are PopAlpha's homepage market analyst for Pokémon TCG collectors.",
-  "Your job is to write a tight, calm, useful market read for today's homepage card.",
-  "Rules:",
-  "- Write in plain English at an 8th-grade reading level.",
-  "- Sound calm, sharp, and useful. Avoid hype, slang, and finance jargon.",
-  "- Talk about the market in general terms. Refer to sets, clusters, breadth, and conviction rather than naming individual cards.",
-  "- Do not mention being an AI. Do not invent metrics or sets that are not in the data.",
-  "- Output ONLY a single JSON object matching this exact shape:",
+  "You are PopAlpha's market guide for Pokémon TCG collectors.",
+  "Write a short, easy-to-read brief about what the market is doing today.",
+  "",
+  "Style:",
+  "- 8th-grade reading level. Short sentences. Plain English.",
+  "- Premium but not academic. Calm, clear, and useful.",
+  "- Written for Pokémon collectors, not Wall Street analysts.",
+  "- No hype, no slang, no finance jargon.",
+  "- Do not mention being an AI. Do not invent sets or numbers that are not in the data.",
+  "",
+  "BANNED phrases — never use any of these:",
+  "  broad activity, selective strength, distinct clusters, accumulation zone,",
+  "  pricing dislocation, asymmetric upside, market regime, breadth, conviction,",
+  "  rotation, concentrating, dominant pocket, board-wide.",
+  "",
+  "Use simpler words instead:",
+  "  - 'broad activity' → 'a lot of cards are moving'",
+  "  - 'selective strength' → 'the strongest gains are in a few areas'",
+  "  - 'accumulation zone' → 'good buying range'",
+  "  - 'pricing dislocation' → 'price gap'",
+  "  - 'asymmetric upside' → 'could have room to move'",
+  "  - 'market regime' → 'how the market is acting'",
+  "  - 'breadth' → 'how many cards are moving'",
+  "",
+  "Each summary follows this 3-step pattern:",
+  "  1. What is happening? (one short sentence)",
+  "  2. Why it matters. (one short sentence)",
+  "  3. What to watch next. (one short sentence)",
+  "",
+  "Output ONLY a single JSON object matching this exact shape:",
   '  {"summary":"...","takeaway":"...","focusSet":"..." | null}',
-  "- summary: exactly 2 sentences, 20–40 words total. Explain where strength or weakness is concentrating and whether the move looks broad or selective.",
-  "- takeaway: one punchy phrase, 4–8 words, no trailing period. Treat it like a headline chip. Examples: \"Sealed modern leading breadth\", \"Rotation into classic holos\", \"Selective bid, no broad lift\".",
-  "- focusSet: the single most important set name from the data, or null if no set dominates.",
+  "",
+  "Field rules:",
+  "- summary: 3 short sentences (one per pattern step), 30–55 words total.",
+  "- takeaway: one short headline, 4–8 words, no trailing period.",
+  "    Examples: \"Some vintage cards are heating up\", \"Mixed market, no clear leader\",",
+  "    \"Modern sets quietly leading\", \"A few cards doing the work\".",
+  "- focusSet: the single most important set name from the data, or null if no set stands out.",
   "- Do not output anything outside the JSON object. No prose, no code fences, no markdown.",
 ].join("\n");
 
@@ -229,22 +255,22 @@ export function buildFallbackHomepageBrief(
   let takeaway: string;
 
   if (leader && leaderCount >= 3) {
-    summary = `${leader} is leading the board today, with most of the strongest movers clustered in the same set. Breadth is still selective, so the rest of the market is participating more cautiously.`;
+    summary = `${leader} is leading today. Most of the biggest movers come from the same set, so the gains are not spread across the whole market. Watch whether other sets join in or ${leader} keeps doing the work.`;
     takeaway = avg != null && avg > 0
-      ? `${leader} +${avg}% avg 24H`
-      : `${leader} leading breadth`;
+      ? `${leader} +${avg}% on average`
+      : `${leader} is leading today`;
   } else if (leader && ctx.moverSets.length >= 3) {
-    summary = `Strength is split across ${leader} and a handful of other sets, so no single pocket has broken away. The board looks active but mixed, without a clear consensus leader.`;
-    takeaway = "Mixed strength, no clear leader";
+    summary = `${leader} is moving, but a few other sets are moving too. No single set is in charge today. Watch which set holds its gains by the end of the day.`;
+    takeaway = "Mixed market, no clear leader";
   } else if (leader) {
-    summary = `${leader} looks strongest right now, but breadth is limited and the move is still narrow. The rest of the board has not confirmed a broader rotation yet.`;
-    takeaway = `${leader} leads, breadth thin`;
+    summary = `${leader} looks strongest right now, but only a few cards are doing the work. The rest of the market is still quiet. Watch for more sets to join before calling this a real run.`;
+    takeaway = `${leader} leads, but quietly`;
   } else if ((ctx.topPullbackAvgPct ?? 0) < 0) {
-    summary = "The market is in a quiet pullback with no single set in control. Strong bids are rare and breadth is thin across the board.";
-    takeaway = "Quiet pullback, thin breadth";
+    summary = "The market is cooling off today. Most cards are flat or slipping, and very few are bid up. Watch for the first set that finds a floor and bounces.";
+    takeaway = "Cool day, few bids";
   } else {
-    summary = "The board is still taking shape today. No set has separated from the rest, so the next clear leader has not fully broken out yet.";
-    takeaway = "Board waiting for a leader";
+    summary = "The market is quiet today. No set has pulled ahead yet, so it is hard to say where the next move comes from. Watch for the first card or set that breaks out.";
+    takeaway = "Market is quiet today";
   }
 
   return {

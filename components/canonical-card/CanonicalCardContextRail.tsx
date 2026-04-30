@@ -32,6 +32,17 @@ function formatCount(value: number | null | undefined): string {
   }).format(value);
 }
 
+// The DB column `active_listings_7d` is rolled up across printing variants
+// and dominated by data-provider price-history rows; the absolute number
+// is not meaningful to a collector. Surface a qualitative bucket instead.
+// Bucket thresholds match lib/ai/card-profile-summary.ts priceTrackingBucket.
+function formatPriceTracking(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  if (value <= 4) return "Thin";
+  if (value < 30) return "Steady";
+  return "Dense";
+}
+
 function RelatedCardLink({
   card,
 }: {
@@ -203,8 +214,8 @@ export default function CanonicalCardContextRail({
             <p className="mt-2 text-[18px] font-semibold text-white">{formatCount(totalViews)}</p>
           </div>
           <div className="rounded-[1rem] border border-white/[0.06] bg-[#0B0B0B] px-3 py-3">
-            <p className="text-[11px] uppercase tracking-[0.12em] text-[#6B7280]">Listings</p>
-            <p className="mt-2 text-[18px] font-semibold text-white">{formatCount(activeListings7d)}</p>
+            <p className="text-[11px] uppercase tracking-[0.12em] text-[#6B7280]">Price Tracking</p>
+            <p className="mt-2 text-[18px] font-semibold text-white">{formatPriceTracking(activeListings7d)}</p>
           </div>
           <div className="rounded-[1rem] border border-white/[0.06] bg-[#0B0B0B] px-3 py-3">
             <p className="text-[11px] uppercase tracking-[0.12em] text-[#6B7280]">Bullish</p>

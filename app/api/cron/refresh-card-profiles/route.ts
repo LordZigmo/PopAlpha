@@ -7,9 +7,12 @@
  *   backfill  – Fills profiles for cards that have none yet.
  *               Run every 3 hours until the full catalog is covered,
  *               then remove the cron entry.
- *   refresh   – Re-generates profiles whose underlying market data has
- *               changed (detected via metrics_hash) or that are older
- *               than 14 days. Runs daily.
+ *   refresh   – Tiered re-generation, prioritised by the RPC:
+ *               1. High-priority (abs(change_pct_7d) >= 5% or liquidity >= 50):
+ *                  refreshed every p_stale_days regardless of hash change.
+ *               2. Low-priority: refreshed only when the price hash changes.
+ *               3. Fallback upgrades: always processed, high-priority first.
+ *               Runs daily.
  *
  * Each invocation processes up to `maxCards` cards, using `concurrency`
  * parallel Gemini calls. A deadline guard ensures the function exits
@@ -23,7 +26,6 @@ import { requireCron } from "@/lib/auth/require";
 import { dbAdmin } from "@/lib/db/admin";
 import {
   generateCardProfile,
-  buildMetricsHash,
   buildFallbackProfile,
   type CardProfileInput,
 } from "@/lib/ai/card-profile-summary";
@@ -58,6 +60,8 @@ type CardRow = {
   active_listings_7d: number | null;
   volatility_30d: number | null;
   liquidity_score: number | null;
+  existing_source?: string | null;
+  is_high_priority?: boolean | null;
 };
 
 type ConditionPriceRow = {
@@ -81,7 +85,11 @@ function toProfileInput(
     changePct7d: row.change_pct_7d,
     low30d: row.low_30d,
     high30d: row.high_30d,
-    activeListings7d: row.active_listings_7d,
+    // DB column is named active_listings_7d for historical reasons but the
+    // value is actually a count of fresh price observations (capped at 100),
+    // not marketplace listings. Map to the accurate field name on the LLM
+    // input so prompts don't mislead the model into writing "X listings".
+    priceObservations7d: row.active_listings_7d,
     volatility30d: row.volatility_30d,
     liquidityScore: row.liquidity_score,
     conditionPrices,
@@ -361,18 +369,15 @@ export async function GET(req: Request) {
         });
       }
 
-      // Filter to cards whose hash actually changed
-      const needsRefresh = cards.filter((row) => {
-        const input = toProfileInput(row, null);
-        const currentHash = buildMetricsHash(input);
-        return row.existing_hash !== currentHash;
-      });
-
-      for (let i = 0; i < needsRefresh.length; i += batchSize) {
+      // No client-side filter needed — the RPC already encodes all three
+      // tiers: high-priority cards (daily), low-priority cards (hash-change
+      // only), and fallback upgrades. ORDER BY in the RPC puts the most
+      // important work first within the p_limit budget.
+      for (let i = 0; i < cards.length; i += batchSize) {
         // See backfill-mode comment above — outer + inner deadline
         // checks together bound wall-clock time.
         if (Date.now() >= deadline) break;
-        const chunkCards = needsRefresh.slice(i, i + batchSize);
+        const chunkCards = cards.slice(i, i + batchSize);
         const conditionMap = await fetchConditionPricesForSlugs(supabase, chunkCards.map((c) => c.canonical_slug));
         const chunk = chunkCards.map((c) => toProfileInput(c, conditionMap.get(c.canonical_slug) ?? null));
         const stats = await processChunk(supabase, chunk, concurrency, deadline);

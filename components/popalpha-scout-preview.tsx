@@ -37,7 +37,10 @@ export default function PopAlphaScoutPreview(props: PopAlphaScoutPreviewProps) {
       fairValue: props.fairValue,
       changePct: props.changePct,
       changeLabel: props.changeLabel,
-      activeListings7d: props.activeListings7d,
+      // The prop is named `activeListings7d` for legacy consistency with
+      // the DB column, but the value is fresh price observations, not
+      // listings. Map to the accurate name on the LLM/fallback input.
+      priceObservations7d: props.activeListings7d,
     }).summaryLong;
   const updatedAgo = formatUpdatedAgo(props.updatedAt);
 

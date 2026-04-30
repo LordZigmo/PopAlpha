@@ -117,10 +117,10 @@ export async function generateCardAnalysis(
 
   const tierInstructions =
     tier === "Elite"
-      ? "For Elite, explicitly analyze Velocity of Hype from the view data, and end with exactly one Investment Grade: Strong Buy, Accumulate, or Trim. If view growth exceeds 50%, prefix the response with 'WHALE ALERT:'."
+      ? "For Elite, look at how fast attention is growing using view counts and community votes. End with exactly one short call: 'Worth Buying', 'Worth Watching', or 'Worth Trimming'. If view growth is more than 50%, start the response with 'WHALE ALERT:' and explain in one line why attention is spiking. Plain words, short sentences, no Wall Street jargon."
       : tier === "Ace"
-        ? "For Ace, explicitly discuss Supply Squeeze, whether the card is Mooning or cooling, and whether the Grading Gap makes it a Steal."
-        : "For Trainer, keep it to 2-4 sentences, very punchy, and easy for a casual collector to understand.";
+        ? "For Ace, look at supply (how many copies are listed), whether the card is heating up or cooling off, and whether graded copies trade for much more than raw (and what that means in plain words). Short sentences. No jargon unless you explain it in the same line."
+        : "For Trainer, keep it to 2-4 short sentences, very easy to read, and helpful for a casual collector.";
 
   const { text } = await generateText({
     model: getPopAlphaModel(tier),

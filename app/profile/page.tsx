@@ -178,7 +178,7 @@ export default function ProfilePage() {
     [user?.firstName, user?.lastName, user?.username],
   );
   const handle = appProfile?.handle || user?.username || "popalpha_user";
-  const bio = appProfile?.profile_bio || "Tracking the market one card at a time. Building conviction, watching momentum, and treating the collection like a real book.";
+  const bio = appProfile?.profile_bio || "Tracking the market one card at a time. Watching what's moving, learning what to watch next, and treating the collection like the real thing.";
   const bannerUrl = appProfile?.profile_banner_url || "";
   const joined = formatJoined(appProfile?.created_at);
 

@@ -51,7 +51,19 @@ export type CardProfileInput = {
   changePct7d: number | null;
   low30d: number | null;
   high30d: number | null;
-  activeListings7d: number | null;
+  // Rolled-up price-observation count over 7 days (DB column:
+  // active_listings_7d). Defined as
+  //   greatest(history_7d_count, snapshot_active_7d_count)
+  // summed across printing variants — see migration
+  // 20260304120000_refresh_card_metrics_use_history_counts.sql.
+  // Dominated by data-provider price-history rows for popular cards
+  // and uncapped (an earlier comment claiming a "*20-then-clamp" cap
+  // was wrong — that cap is on liquidity_score). The absolute number
+  // is not meaningful to a collector, so prompts and fallbacks
+  // translate it to a qualitative bucket via priceTrackingBucket()
+  // and never surface the raw count. NOT marketplace listings or
+  // copies for sale.
+  priceObservations7d: number | null;
   volatility30d: number | null;
   liquidityScore: number | null;
   conditionPrices: Array<{ condition: string; price: number }> | null;
@@ -98,12 +110,22 @@ export type CardProfileResult = {
 //   changePct7d                                 → rounded to whole percent
 //
 // What was DROPPED:
-//   activeListings7d — turned out to be saturated at 100 for 99.84%
-//   of cards (it's not really "active listings", it's a count of
-//   provider snapshots in 7 days, capped via a *20-then-clamp formula).
-//   Counts can flicker ±1 from rolling-window edge timing, which was
-//   causing pure-noise refreshes. Still passed to the LLM in the
-//   prompt for reasoning context — just not used as a refresh trigger.
+//   priceObservations7d (DB column: active_listings_7d) — flickers from
+//   rolling-window edge timing (a card's count can move ±1 just because
+//   yesterday's poll fell outside the window today). Was triggering
+//   pure-noise refreshes. Still passed to the LLM in the prompt for
+//   qualitative reasoning context (thin/steady/dense bucket) — just
+//   not used as a refresh trigger.
+//
+// Note on what priceObservations7d actually is: it's
+//   greatest(history_7d_count, snapshot_active_7d_count)
+// rolled up across all printing variants of the card (see migration
+// 20260304120000_refresh_card_metrics_use_history_counts.sql lines
+// 138-167). It is NOT capped — earlier comments in this file claimed a
+// "*20-then-clamp" cap to 100, but that cap is on liquidity_score, not
+// on this field. The number can run into the hundreds for popular
+// cards with many variants, which is why we now translate it to a
+// qualitative bucket (thin/steady/dense) before surfacing to users.
 //
 // Combined with changePct rounded to integers, this still catches:
 //   - $0.50 → $1.00      (100% move; changePct flips 0 → 100)
@@ -112,7 +134,7 @@ export type CardProfileResult = {
 // While suppressing:
 //   - $4.97 → $4.98      (penny tick, narrative unchanged)
 //   - 4.4% → 4.5%        (sub-percent move, within reporting precision)
-//   - listings 14 → 15   (poll-edge flicker, no real activity change)
+//   - reads 14 → 15      (poll-edge flicker, no real activity change)
 
 function round0(v: number | null): string {
   return v != null && Number.isFinite(v) ? Math.round(v).toString() : "";
@@ -170,8 +192,8 @@ function pickVerdict(input: CardProfileInput, signal: SignalLabel): Verdict {
 const SIGNAL_TO_CHIP: Record<SignalLabel, string> = {
   BREAKOUT: "🔥 Breakout",
   COOLING: "📉 Cooling Off",
-  VALUE_ZONE: "💎 Value Zone",
-  STEADY: "🔁 Holding Pattern",
+  VALUE_ZONE: "💎 Good Buying Range",
+  STEADY: "🔁 Holding Steady",
   OVERHEATED: "⚠️ Running Hot",
 };
 
@@ -186,6 +208,20 @@ function formatUsd(value: number | null): string {
   }).format(value);
 }
 
+// Translates the raw `priceObservations7d` count into a qualitative bucket.
+// The raw number is technically meaningless to a reader (it's summed across
+// printing variants over 7 days, with provider feeds dominating the count
+// for popular cards). The bucket conveys the only thing that actually
+// matters: how reliable today's price level is.
+type PriceTrackingBucket = "thin" | "steady" | "dense";
+
+export function priceTrackingBucket(count: number | null): PriceTrackingBucket | null {
+  if (count == null || !Number.isFinite(count)) return null;
+  if (count <= 4) return "thin";
+  if (count < 30) return "steady";
+  return "dense";
+}
+
 function formatSignedPct(value: number | null): string | null {
   if (value == null || !Number.isFinite(value)) return null;
   const abs = Math.abs(value);
@@ -194,32 +230,64 @@ function formatSignedPct(value: number | null): string | null {
 }
 
 export function buildFallbackProfile(input: CardProfileInput): CardProfileResult {
-  const { canonicalName, setName, marketPrice, changePct7d, activeListings7d } = input;
+  const { canonicalName, setName, marketPrice, changePct7d, priceObservations7d } = input;
   const priceText = formatUsd(marketPrice);
   const changeText = formatSignedPct(changePct7d);
   const signal = pickSignal(input);
   const verdict = pickVerdict(input, signal);
 
-  let summaryShort: string;
-  if (changeText) {
-    summaryShort = changePct7d! > 0
-      ? `${canonicalName} is trading around ${priceText}, up ${changeText} over the last 7 days.`
-      : changePct7d! < 0
-        ? `${canonicalName} is trading around ${priceText}, pulling back ${changeText} over the last 7 days.`
-        : `${canonicalName} is holding steady around ${priceText}.`;
+  // Sentence 1 — what is happening (the move)
+  let happeningLine: string;
+  if (changeText && changePct7d != null && changePct7d > 0) {
+    happeningLine = `${canonicalName} is up ${changeText} over the last 7 days, trading around ${priceText}.`;
+  } else if (changeText && changePct7d != null && changePct7d < 0) {
+    happeningLine = `${canonicalName} is down ${changeText} over the last 7 days, trading around ${priceText}.`;
   } else {
-    summaryShort = `${canonicalName} is trading around ${priceText}.`;
+    happeningLine = `${canonicalName} is holding steady around ${priceText}.`;
   }
 
-  let supplyNote = "";
-  if (activeListings7d != null) {
-    supplyNote = activeListings7d <= 4
-      ? ` Supply is limited with only ${activeListings7d} listings in the last 7 days.`
-      : ` There have been ${activeListings7d} listings over the last 7 days.`;
+  // Sentence 2 — why it matters (signal-aware)
+  let mattersLine: string;
+  switch (signal) {
+    case "BREAKOUT":
+      mattersLine = "That is a strong move higher in a short window.";
+      break;
+    case "COOLING":
+      mattersLine = "That is a clear pullback from recent highs.";
+      break;
+    case "VALUE_ZONE":
+      mattersLine = "That puts it in a good buying range vs. the last 30 days.";
+      break;
+    case "OVERHEATED":
+      mattersLine = "Price swings have been bigger than usual lately.";
+      break;
+    default:
+      mattersLine = "There is no clear move in either direction right now.";
   }
 
-  const setContext = setName ? `, part of the ${setName} set` : "";
-  const summaryLong = `${summaryShort}${supplyNote}${setContext}.`;
+  // Sentence 3 — what to watch next. The raw priceObservations7d count is
+  // a rolled-up data-provider artifact (often in the dozens for popular
+  // cards) and means nothing to a collector, so we translate to a
+  // qualitative bucket and never surface the number itself.
+  const bucket = priceTrackingBucket(priceObservations7d);
+  let watchLine: string;
+  switch (bucket) {
+    case "thin":
+      watchLine = "Price tracking on this card is thin, so the next sale will tell you a lot.";
+      break;
+    case "steady":
+      watchLine = "Price tracking is steady — watch whether the move holds across the next few sales.";
+      break;
+    case "dense":
+      watchLine = "Price tracking is dense, so a clean move shows up fast — watch whether it holds across the next few sales.";
+      break;
+    default:
+      watchLine = "Watch whether the move holds across the next few sales.";
+  }
+
+  const summaryShort = `${happeningLine} ${mattersLine}`;
+  const setContext = setName ? ` This card is from the ${setName} set.` : "";
+  const summaryLong = `${happeningLine} ${mattersLine} ${watchLine}${setContext}`;
 
   return {
     signalLabel: signal,
@@ -238,29 +306,55 @@ export function buildFallbackProfile(input: CardProfileInput): CardProfileResult
 // ── Prompt ───────────────────────────────────────────────────────────────────
 
 const SYSTEM_PROMPT = [
-  "You are PopAlpha's market-signal analyst for Pokémon TCG collectors.",
-  "Your job is to read a single card's market data and write an actionable, signal-led brief.",
+  "You are PopAlpha's market guide for Pokémon TCG collectors.",
+  "Read one card's market data and write a clear, useful brief about it.",
   "",
-  "Tone:",
-  "- Plain English, 8th-grade reading level. Calm, sharp, useful.",
-  "- Lead with the signal. Get straight to what's happening — never start with 'Okay', 'So', 'Currently', or any setup phrase.",
-  "- Sound like a heads-up from a knowledgeable friend, not a market recap.",
-  "- Avoid hype, slang, and finance jargon.",
-  "- Never give buy / sell / hold advice. Reframe action as 'on watch', 'fading', 'cooling off', 'in a value zone', 'running hot'.",
-  "- Do not mention being an AI. Do not invent metrics that aren't in the data.",
+  "Style:",
+  "- 8th-grade reading level. Short sentences. Plain English.",
+  "- Premium but not academic. Sound like a smart friend, not a Wall Street analyst.",
+  "- No hype, no slang, no finance jargon.",
+  "- Lead with the move. Do not start with 'Okay', 'So', 'Currently', or any setup phrase.",
+  "- Never give buy / sell / hold advice. Use plain phrases like 'worth watching', 'cooling off', 'in a good buying range', 'running hot'.",
+  "- Do not mention being an AI. Do not invent numbers that are not in the data.",
+  "",
+  "BANNED phrases — never use any of these:",
+  "  broad activity, selective strength, distinct clusters, accumulation zone,",
+  "  pricing dislocation, asymmetric upside, market regime, conviction, breadth,",
+  "  stretched, dislocated, regime, asymmetric, decisive, fragile run.",
+  "",
+  "Field meanings (read carefully so you don't mislabel data):",
+  "- 'Price tracking (7d)' is one of: thin, steady, dense.",
+  "    thin   = sparse data; the next sale will tell us a lot.",
+  "    steady = enough data to read the price reliably.",
+  "    dense  = price is very well-tracked; a clean move shows up fast.",
+  "- 'Price observations raw count (7d)' is internal only. NEVER cite this number to the reader (e.g., do not write '78 price reads', '12 listings', etc.). It is summed across printing variants and dominated by data-provider rows, so the absolute count is meaningless to a collector.",
+  "- This metric is NOT a count of marketplace listings, copies for sale, supply, or sale events. Never say 'X listings', 'supply is thin', or 'only X copies for sale'.",
+  "- Use the bucket to talk about how reliable the price is, not about supply.",
+  "",
+  "Use simpler words instead:",
+  "  - 'accumulation zone' → 'good buying range'",
+  "  - 'pricing dislocation' → 'price gap'",
+  "  - 'asymmetric upside' → 'could have room to move'",
+  "  - 'breadth is thin' → 'not many cards are moving with it'",
+  "  - 'stretched' → 'priced high vs. recent range'",
+  "",
+  "Every summary follows this 3-step pattern:",
+  "  1. What is happening? (lead with the move)",
+  "  2. Why it matters. (what the price level or supply tells the collector)",
+  "  3. What to watch next. (the next signal to keep an eye on)",
   "",
   "Signal labels (pick exactly one):",
-  "- BREAKOUT  — strong upward move, price climbing meaningfully on the 7-day.",
-  "- COOLING   — pulling back from recent highs.",
-  "- VALUE_ZONE — sitting in the lower half of its 30-day range with real depth.",
-  "- STEADY    — holding pattern, no decisive move.",
-  "- OVERHEATED — volatile and stretched, bigger swings than the catalog norm.",
+  "- BREAKOUT   — strong move higher over the last 7 days.",
+  "- COOLING    — pulling back from recent highs.",
+  "- VALUE_ZONE — sitting in a good buying range vs. the last 30 days, with real supply.",
+  "- STEADY     — holding flat. No clear move.",
+  "- OVERHEATED — bigger price swings than usual. Priced high vs. recent range.",
   "",
   "Verdicts (pick exactly one):",
-  "- UNDERVALUED — price looks soft relative to the recent range.",
-  "- FAIR        — price looks consistent with the recent range.",
-  "- OVERHEATED  — price looks stretched relative to the recent range.",
-  "- INSUFFICIENT_DATA — not enough signal to call.",
+  "- UNDERVALUED        — price looks soft vs. the recent range.",
+  "- FAIR               — price lines up with the recent range.",
+  "- OVERHEATED         — price looks high vs. the recent range.",
+  "- INSUFFICIENT_DATA  — not enough signal to call.",
   "",
   "Output ONLY a single JSON object matching this exact shape:",
   '  {"signal_label":"...","verdict":"...","chip":"...","summary_short":"...","summary_long":"..."}',
@@ -268,14 +362,14 @@ const SYSTEM_PROMPT = [
   "Field rules:",
   "- signal_label: one of BREAKOUT, COOLING, VALUE_ZONE, STEADY, OVERHEATED.",
   "- verdict: one of UNDERVALUED, FAIR, OVERHEATED, INSUFFICIENT_DATA.",
-  "- chip: 2–4 word phrase the user sees as a badge. Lead with a single emoji that matches the signal.",
+  "- chip: 2–4 word badge. Start with one emoji that matches the signal.",
   "    BREAKOUT → 🔥, COOLING → 📉, VALUE_ZONE → 💎, STEADY → 🔁, OVERHEATED → ⚠️.",
-  "    Examples: \"🔥 Breakout Alert\", \"📉 Cooling Off\", \"💎 Value Zone\", \"🔁 Holding Pattern\", \"⚠️ Running Hot\".",
-  "- summary_short: 1–2 sentences, 18–32 words. State the signal and what it means right now.",
-  "    Lead with the move, not the price level. The user already sees the price.",
-  "- summary_long: 3–4 sentences, 35–65 words. Add context: where the card sits in its recent range,",
-  "    whether supply is thin or deep, and whether the move looks confirmed or fragile.",
-  "    If condition spreads are meaningful, mention them in plain words.",
+  "    Examples: \"🔥 Breakout\", \"📉 Cooling Off\", \"💎 Good Buying Range\", \"🔁 Holding Steady\", \"⚠️ Running Hot\".",
+  "- summary_short: 2 short sentences, 18–32 words. Sentence 1 = what is happening.",
+  "    Sentence 2 = why it matters or what to watch next. Lead with the move, not the price.",
+  "- summary_long: 3 short sentences, 30–55 words. Use the 3-step pattern:",
+  "    What is happening → Why it matters → What to watch next.",
+  "    If condition prices show a clear gap (e.g. NM is much higher than LP), say so plainly.",
   "- Do not output anything outside the JSON object. No prose, no code fences, no markdown.",
 ].join("\n");
 
@@ -294,7 +388,23 @@ function buildUserPrompt(input: CardProfileInput): string {
   if (input.low30d != null && input.high30d != null) {
     lines.push(`30-day range: $${input.low30d.toFixed(2)} – $${input.high30d.toFixed(2)}`);
   }
-  if (input.activeListings7d != null) lines.push(`Active listings (7d): ${input.activeListings7d}`);
+  if (input.priceObservations7d != null) {
+    // The raw count is rolled up across printing variants over 7 days
+    // and is dominated by provider price-history rows — it is NOT
+    // marketplace listings, copies for sale, or sale events. Surface
+    // the qualitative bucket (thin/steady/dense) for the model to use,
+    // and pass the raw count only as an internal reasoning aid with an
+    // explicit "do not cite" instruction.
+    const bucket = priceTrackingBucket(input.priceObservations7d);
+    if (bucket) {
+      lines.push(`Price tracking (7d): ${bucket}`);
+    }
+    lines.push(
+      `Price observations raw count (7d): ${input.priceObservations7d} ` +
+      `(internal only — do NOT cite this number to the reader; it is rolled ` +
+      `up across all printing variants and is not marketplace listings or sales)`,
+    );
+  }
   if (input.volatility30d != null) lines.push(`Volatility (30d): ${input.volatility30d.toFixed(1)}`);
   if (input.liquidityScore != null) lines.push(`Liquidity score: ${input.liquidityScore.toFixed(0)}/100`);
 

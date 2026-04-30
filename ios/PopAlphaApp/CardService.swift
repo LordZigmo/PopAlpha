@@ -184,7 +184,7 @@ actor CardService {
     func fetchPrintings(slug: String) async throws -> [CardPrintingOption] {
         let data = try await Supabase.query(
             table: "card_printings",
-            select: "id,finish,language,edition",
+            select: "id,finish,language,edition,stamp",
             filters: [
                 ("canonical_slug", "eq", slug),
                 ("language", "eq", "EN"),
@@ -624,14 +624,30 @@ struct CardPrintingOption: Decodable, Identifiable, Hashable {
     let finish: String
     let language: String?
     let edition: String?
+    let stamp: String?
 
     var finishLabel: String {
+        if let stamp {
+            return Self.stampLabel(stamp)
+        }
         switch finish {
         case "NON_HOLO": return "Regular"
         case "HOLO": return "Holo"
         case "REVERSE_HOLO": return "Reverse Holo"
         case "ALT_HOLO": return "Alt Art"
         default: return "Standard"
+        }
+    }
+
+    private static func stampLabel(_ stamp: String) -> String {
+        switch stamp.uppercased() {
+        case "POKE_BALL_PATTERN":   return "Poke Ball"
+        case "MASTER_BALL_PATTERN": return "Master Ball"
+        case "SHADOWLESS":          return "Shadowless"
+        default:
+            return stamp.split(separator: "_")
+                        .map { $0.prefix(1).uppercased() + $0.dropFirst().lowercased() }
+                        .joined(separator: " ")
         }
     }
 }
@@ -693,6 +709,11 @@ struct HomepageSignalBoardDTO: Decodable, Hashable {
     // Phase 2 conviction signals — non-windowed; optional during rollout
     let unusualVolume: [HomepageCardDTO]?
     let breakouts: [HomepageCardDTO]?
+    // Budget tier ($1 .. premium_min_price) gainers. Server filters
+    // top_movers / biggest_drops / momentum to a premium price floor
+    // (default $20); this rail surfaces gainers below that floor.
+    // Optional during rollout — older server builds may not include it.
+    let budgetMovers: [HomepageCardDTO]?
 }
 
 struct HomepageDataDTO: Decodable, Hashable {

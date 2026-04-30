@@ -4,7 +4,13 @@ export type PopAlphaScoutSummaryInput = {
   fairValue: number | null;
   changePct: number | null;
   changeLabel: "24h" | "7d" | null;
-  activeListings7d: number | null;
+  // Rolled-up price-observation count over 7 days (DB column:
+  // active_listings_7d). The raw number is summed across printing
+  // variants and dominated by data-provider rows, so the absolute
+  // count is meaningless to a collector. The fallback below translates
+  // it to a qualitative bucket (thin/steady/dense) and never surfaces
+  // the raw number. NOT marketplace listings or copies for sale.
+  priceObservations7d: number | null;
 };
 
 export type PopAlphaScoutSummary = {
@@ -34,44 +40,54 @@ export function buildPopAlphaScoutSummary({
   fairValue,
   changePct,
   changeLabel,
-  activeListings7d,
+  priceObservations7d,
 }: PopAlphaScoutSummaryInput): PopAlphaScoutSummary {
   const priceText = formatUsd(marketPrice);
   const fairValueText = fairValue !== null ? formatUsd(fairValue) : null;
   const changeText = formatSignedPct(changePct);
 
-  let openingLine = `${cardName} is trading around ${priceText}.`;
+  // Sentence 1 — what is happening
+  let happeningLine = `${cardName} is trading around ${priceText}.`;
   if (changeText && changeLabel) {
-    openingLine = changePct! > 0
-      ? `${cardName} is trading around ${priceText}, up ${changeText} over the last ${changeLabel}.`
-      : changePct! < 0
-        ? `${cardName} is trading around ${priceText}, pulling back ${changeText} over the last ${changeLabel}.`
-        : `${cardName} is trading around ${priceText}, holding flat over the last ${changeLabel}.`;
-  }
-
-  let valueLine = "";
-  if (marketPrice !== null && fairValue !== null && fairValue > 0) {
-    const edgePct = ((marketPrice - fairValue) / fairValue) * 100;
-    if (edgePct <= -1) {
-      valueLine = ` That sits below fair value near ${fairValueText}, which could make it a solid entry point.`;
-    } else if (edgePct >= 1) {
-      valueLine = ` That is above fair value near ${fairValueText}, so buyers are paying a premium right now.`;
+    if (changePct != null && changePct > 0) {
+      happeningLine = `${cardName} is up ${changeText} over the last ${changeLabel}, trading around ${priceText}.`;
+    } else if (changePct != null && changePct < 0) {
+      happeningLine = `${cardName} is down ${changeText} over the last ${changeLabel}, trading around ${priceText}.`;
     } else {
-      valueLine = ` That lines up closely with fair value near ${fairValueText}.`;
+      happeningLine = `${cardName} is holding flat over the last ${changeLabel}, trading around ${priceText}.`;
     }
   }
 
-  let supplyLine = "";
-  if (activeListings7d !== null) {
-    if (activeListings7d <= 4) {
-      supplyLine = ` Supply is limited with only ${activeListings7d} listings in the last 7 days.`;
+  // Sentence 2 — why it matters (vs. fair value)
+  let mattersLine = "";
+  if (marketPrice !== null && fairValue !== null && fairValue > 0) {
+    const edgePct = ((marketPrice - fairValue) / fairValue) * 100;
+    if (edgePct <= -1) {
+      mattersLine = ` That is below fair value near ${fairValueText}, so it could be a good buying range.`;
+    } else if (edgePct >= 1) {
+      mattersLine = ` That is above fair value near ${fairValueText}, so buyers are paying a small premium right now.`;
     } else {
-      supplyLine = ` There were ${activeListings7d} listings over the last 7 days, so supply is steady.`;
+      mattersLine = ` That lines up with fair value near ${fairValueText}.`;
+    }
+  }
+
+  // Sentence 3 — what to watch next. The raw priceObservations7d count is
+  // rolled up across printing variants and dominated by data-provider rows,
+  // so it's meaningless to a collector. Translate to a qualitative bucket
+  // (thin/steady/dense) and never show the raw number.
+  let watchLine = "";
+  if (priceObservations7d !== null) {
+    if (priceObservations7d <= 4) {
+      watchLine = " Price tracking on this card is thin, so the next sale will tell you a lot.";
+    } else if (priceObservations7d < 30) {
+      watchLine = " Price tracking is steady — watch whether the price holds across the next few sales.";
+    } else {
+      watchLine = " Price tracking is dense, so a clean move shows up fast — watch whether it holds across the next few sales.";
     }
   }
 
   return {
-    summaryShort: openingLine,
-    summaryLong: `${openingLine} ${valueLine} ${supplyLine}`,
+    summaryShort: happeningLine,
+    summaryLong: `${happeningLine}${mattersLine}${watchLine}`,
   };
 }

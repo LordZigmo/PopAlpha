@@ -1,0 +1,24 @@
+-- 20260428035000_daily_top_movers_anon_select_grant.sql
+--
+-- Grants SELECT on public.daily_top_movers to anon and authenticated.
+--
+-- Background: the table was created on 2026-04-19 with RLS enabled and a
+-- public-read policy ('using (true)'), but the table-level privilege was
+-- never granted. RLS policies do not grant privileges on their own — both
+-- a permissive policy AND a SELECT grant are required for anon-key reads
+-- to return rows.
+--
+-- Symptom (silent): the homepage code at lib/data/homepage.ts reads
+-- daily_top_movers via the public/anon client. Without this grant, every
+-- read returned an empty result without raising an error, so the homepage
+-- silently fell back to live computation for every mover rail (top movers,
+-- biggest drops, momentum, and the new budget rail). Discovered while
+-- wiring the budget tier; explained the empty 'Budget movers' section in
+-- the first end-to-end test.
+--
+-- This migration brings the schema into sync with the production state
+-- (the grant was already applied to prod via the Supabase MCP on
+-- 2026-04-29) so any clean rebuild — CI, fresh branch DB, teammate
+-- pulling from main — produces the same authorisation surface.
+
+GRANT SELECT ON public.daily_top_movers TO anon, authenticated;

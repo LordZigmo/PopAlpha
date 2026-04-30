@@ -13,6 +13,7 @@ type HomepageSignalBoardProps = {
   topMoversByWindow: HomepageWindowedCards;
   biggestDropsByWindow: HomepageWindowedCards;
   momentumByWindow: HomepageWindowedCards;
+  budgetMovers: HomepageCard[];
 };
 
 const SIGNAL_WINDOWS: SignalWindow[] = ["24H", "7D"];
@@ -32,6 +33,7 @@ export default function HomepageSignalBoard({
   topMoversByWindow,
   biggestDropsByWindow,
   momentumByWindow,
+  budgetMovers,
 }: HomepageSignalBoardProps) {
   const [selectedWindow, setSelectedWindow] = useState<SignalWindow>("24H");
   const momentumTitle = selectedWindow === "24H" ? "Live momentum" : "Sustained momentum";
@@ -74,6 +76,15 @@ export default function HomepageSignalBoard({
         title={momentumTitle}
         cards={momentumByWindow[selectedWindow]}
         emptyMessage={momentumEmptyMessage}
+      />
+
+      <SignalRailSection
+        id="budget-movers"
+        eyebrow="Under $20"
+        eyebrowClassName="text-[#F59E0B]"
+        title="Budget movers"
+        cards={budgetMovers}
+        emptyMessage="No budget movers yet"
       />
     </>
   );

@@ -259,7 +259,7 @@ private struct AIBriefCard: View {
     // Placeholder copy used only when the /api/homepage/ai-brief cache is
     // empty (e.g. fresh deploy, cron hasn't run yet). Real briefs come
     // from Gemini via the hourly cron.
-    private static let placeholderSummary = "Your AI market brief will appear here once today's data is in. It summarizes where strength is concentrating and which sets are leading the board."
+    private static let placeholderSummary = "Your AI market brief shows up here once today's data is ready. It tells you which cards and sets are moving, why it matters, and what to watch next."
     private static let placeholderTakeaway = "Updating shortly"
 
     private var summary: String { brief?.summary ?? Self.placeholderSummary }

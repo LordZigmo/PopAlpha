@@ -107,7 +107,9 @@ async function readMarketSignal(
       summaryShort: profileRow?.summary_short ?? null,
       marketPrice: metricsRow?.market_price ?? null,
       changePct7d: metricsRow?.change_pct_7d ?? null,
-      activeListings7d: metricsRow?.active_listings_7d ?? null,
+      // DB column is named active_listings_7d for historical reasons;
+      // the value is fresh price observations, not marketplace listings.
+      priceObservations7d: metricsRow?.active_listings_7d ?? null,
     };
 
     return { context, signalHash: profileRow?.metrics_hash ?? null };
@@ -174,7 +176,9 @@ async function ensureMarketSignal(
       changePct7d: metrics.change_pct_7d,
       low30d: metrics.low_30d,
       high30d: metrics.high_30d,
-      activeListings7d: metrics.active_listings_7d,
+      // active_listings_7d is the DB column name but the value is a count
+      // of fresh price observations, not marketplace listings.
+      priceObservations7d: metrics.active_listings_7d,
       volatility30d: metrics.volatility_30d,
       liquidityScore: metrics.liquidity_score,
       conditionPrices: conditionPrices.length > 0 ? conditionPrices : null,
@@ -220,7 +224,7 @@ async function ensureMarketSignal(
       summaryShort: result.summaryShort,
       marketPrice: profileInput.marketPrice,
       changePct7d: profileInput.changePct7d,
-      activeListings7d: profileInput.activeListings7d,
+      priceObservations7d: profileInput.priceObservations7d,
     };
     const signalHash = buildCardProfileMetricsHash(profileInput);
     return { context, signalHash };
