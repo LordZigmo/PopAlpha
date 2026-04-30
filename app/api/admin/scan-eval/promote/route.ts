@@ -37,6 +37,7 @@ import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/require";
 import { dbAdmin } from "@/lib/db/admin";
 import { resizeForUpload } from "@/lib/ai/image-crops";
+import { embedAndStoreUserCorrection } from "@/lib/ai/user-correction-embedding";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -329,6 +330,53 @@ export async function POST(req: Request) {
     );
   }
 
+  // ── v1.1 auto-learning ──────────────────────────────────────────────
+  // Fire embedAndStoreUserCorrection so the user's actual scan image
+  // becomes a kNN anchor for `canonicalSlug`. The next scan of a
+  // visually-similar card will find this anchor and resolve correctly
+  // without a model retrain. We await it because the iOS app already
+  // fires the promote call as Task.detached — the user has navigated
+  // away by the time we return — but Vercel may terminate the function
+  // after `return`, so awaiting is the only way to guarantee the
+  // anchor lands. Latency cost: ~3s Replicate + ~100ms DB; the iOS
+  // client never blocks on it. Failure is non-fatal: the eval-images
+  // row already landed (the durable source of truth), so we just log
+  // the error for diagnostics and return ok=true.
+  //
+  // Why captured_source = 'user_correction' specifically: the user
+  // explicitly told us the scanner was wrong and which card it
+  // actually was. captured_source = 'user_photo' (admin EvalSeedingView
+  // path) is a hand-labeled photo from a known-correct context — same
+  // training value but doesn't necessarily represent in-the-wild scan
+  // conditions. We auto-embed BOTH so the kNN gets the long-tail
+  // anchors regardless of capture source, but only when image bytes
+  // are available in memory.
+  let embedResult: { skipped?: boolean; variantIndex?: number; error?: string } = {};
+  if (parsed.capturedSource === "user_correction" || parsed.capturedSource === "user_photo") {
+    try {
+      // Re-download from the canonical scan-eval path so the embed
+      // operates on EXACTLY the bytes the eval row references (no
+      // double-processing risk if iOS sent slightly different bytes
+      // than what we resized to). One extra Storage GET costs ~100ms,
+      // worth the simplicity.
+      const bytes = await downloadEvalBytes(supabase, storagePath);
+      const result = await embedAndStoreUserCorrection({
+        imageBytes: bytes,
+        imageHash,
+        canonicalSlug: parsed.canonicalSlug,
+      });
+      embedResult = { skipped: result.skipped, variantIndex: result.variantIndex };
+      console.log(
+        `[scan-eval/promote] kNN anchor ${result.skipped ? "exists" : "added"} slug=${parsed.canonicalSlug} hash=${imageHash.slice(0, 12)} variant=${result.variantIndex} model=${result.modelVersion}`,
+      );
+    } catch (err) {
+      embedResult = { error: err instanceof Error ? err.message : String(err) };
+      console.warn(
+        `[scan-eval/promote] kNN anchor failed (non-fatal) slug=${parsed.canonicalSlug} hash=${imageHash.slice(0, 12)}: ${embedResult.error}`,
+      );
+    }
+  }
+
   return NextResponse.json({
     ok: true,
     eval_image_id: upsert.data?.id,
@@ -337,5 +385,23 @@ export async function POST(req: Request) {
     image_bytes_size: bytesSize,
     was_upload: wasUpload,
     canonical_slug: parsed.canonicalSlug,
+    knn_anchor: embedResult,
   });
+}
+
+/**
+ * Re-download the bytes we just wrote to scan-eval. Handles the
+ * known-hash promote path where the route doesn't keep the bytes in
+ * memory after copying scan-uploads → scan-eval. Pulls from the
+ * scan-eval prefix because that's the durable canonical location.
+ */
+async function downloadEvalBytes(
+  supabase: ReturnType<typeof dbAdmin>,
+  storagePath: string,
+): Promise<Buffer> {
+  const dl = await supabase.storage.from(IMAGE_BUCKET).download(storagePath);
+  if (dl.error || !dl.data) {
+    throw new Error(`download from ${storagePath} failed: ${dl.error?.message ?? "no data"}`);
+  }
+  return Buffer.from(await dl.data.arrayBuffer());
 }

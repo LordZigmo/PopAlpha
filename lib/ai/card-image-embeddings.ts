@@ -16,6 +16,19 @@
 
 import crypto from "node:crypto";
 import { sql } from "@vercel/postgres";
+
+/**
+ * variant_index offset reserved for user-correction kNN anchors
+ * (v1.1 auto-learning). Catalog rows live at 0 + small ints (Stage C
+ * augmentations might use 1, 2, 3, …); user corrections start at
+ * 10000 so the two populations can never collide on the
+ * (canonical_slug, variant_index, crop_type) primary key.
+ *
+ * One slug can hold up to ~9999 catalog/aug variants AND ~9999
+ * user-correction anchors before we'd need to revisit. In practice
+ * we expect <10 of each.
+ */
+export const IMAGE_EMBED_USER_CORRECTION_VARIANT_OFFSET = 10000;
 import { hasVercelPostgresConfig } from "@/lib/ai/card-embeddings";
 import {
   IMAGE_EMBEDDER_DIMENSIONS,
@@ -139,6 +152,27 @@ export async function ensureCardImageEmbeddingsSchema(): Promise<void> {
   await sql.query(`
     alter table card_image_embeddings
       add column if not exists crop_type text not null default 'full';
+  `);
+
+  // source column for v1.1 auto-learning (2026-04-30). Existing rows
+  // are 'catalog' (mirrored official catalog art); new value
+  // 'user_correction' tags embeddings produced from a user's actual
+  // scan image when they corrected a mis-identification. The kNN
+  // doesn't filter by source — both kinds participate as anchors —
+  // but the column lets us:
+  //   - Distinguish the populations in metrics / debugging
+  //   - Selectively re-embed only catalog rows when bumping
+  //     model_version (user_correction rows can be re-embedded too,
+  //     but on a different cadence)
+  //   - Optionally exclude user_correction rows in eval runs to
+  //     measure pure catalog accuracy vs. with-corrections accuracy.
+  await sql.query(`
+    alter table card_image_embeddings
+      add column if not exists source text not null default 'catalog';
+  `);
+  await sql.query(`
+    create index if not exists card_image_embeddings_source_idx
+      on card_image_embeddings (source);
   `);
 
   // Swap the PK to (canonical_slug, variant_index, crop_type) so a
