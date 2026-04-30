@@ -354,6 +354,21 @@ export async function POST(req: Request) {
   let embedResult: { skipped?: boolean; variantIndex?: number; error?: string } = {};
   if (parsed.capturedSource === "user_correction" || parsed.capturedSource === "user_photo") {
     try {
+      // Pre-fetch canonical metadata here (route is admin-gated, has
+      // dbAdmin) and pass into the helper. Keeps lib/ai/ free of the
+      // dbAdmin import that the check:dbadmin guard restricts to
+      // app/api/admin/, app/api/cron/, and explicit allowlist files.
+      const canonicalRow = await supabase
+        .from("canonical_cards")
+        .select("canonical_name, language, set_name, card_number, variant")
+        .eq("slug", parsed.canonicalSlug)
+        .maybeSingle();
+      if (canonicalRow.error) {
+        throw new Error(`canonical_cards lookup: ${canonicalRow.error.message}`);
+      }
+      if (!canonicalRow.data) {
+        throw new Error(`no canonical_cards row for slug=${parsed.canonicalSlug}`);
+      }
       // Re-download from the canonical scan-eval path so the embed
       // operates on EXACTLY the bytes the eval row references (no
       // double-processing risk if iOS sent slightly different bytes
@@ -364,6 +379,13 @@ export async function POST(req: Request) {
         imageBytes: bytes,
         imageHash,
         canonicalSlug: parsed.canonicalSlug,
+        canonical: {
+          canonicalName: canonicalRow.data.canonical_name,
+          language: canonicalRow.data.language,
+          setName: canonicalRow.data.set_name,
+          cardNumber: canonicalRow.data.card_number,
+          variant: canonicalRow.data.variant,
+        },
       });
       embedResult = { skipped: result.skipped, variantIndex: result.variantIndex };
       console.log(

@@ -20,8 +20,13 @@
  * user_correction rows under the new model_version (or discard them
  * — see docs/scanner-finetune-runbook.md).
  *
- * Trust model: only fired from the admin-gated /api/admin/scan-eval/promote
- * route. Untrusted users cannot directly write to card_image_embeddings.
+ * Trust model: the helper does NOT import the admin DB client. The
+ * caller (admin-gated /api/admin/scan-eval/promote route) already
+ * authorizes the user and can pre-fetch the canonical metadata it
+ * needs to pass in. Keeping the privileged client out of lib/ai keeps
+ * the `check:dbadmin` build guard happy — that surface is only
+ * sanctioned on app/api/admin, app/api/cron, scripts/, and explicit
+ * allowlist entries.
  *
  * Cost: ~$0.001/correction (one Replicate CLIP call) + ~50 KB row.
  * Negligible at the volumes we expect (target: hundreds/day).
@@ -33,7 +38,20 @@ import {
   IMAGE_EMBED_USER_CORRECTION_VARIANT_OFFSET,
 } from "./card-image-embeddings";
 import { getReplicateClipEmbedder } from "./image-embedder";
-import { dbAdmin } from "@/lib/db/admin";
+
+/**
+ * Caller-supplied canonical metadata for the slug being anchored.
+ * The promote route already authorizes the request and queries
+ * canonical_cards; passing the result in keeps this helper free of
+ * privileged DB access.
+ */
+export type UserCorrectionCanonical = {
+  canonicalName: string;
+  language: string | null;
+  setName: string | null;
+  cardNumber: string | null;
+  variant: string | null;
+};
 
 /**
  * Embed `imageBytes` with the current model and persist as a kNN
@@ -41,13 +59,17 @@ import { dbAdmin } from "@/lib/db/admin";
  * (canonicalSlug, source_hash, model_version) is a no-op.
  *
  * Throws on hard failures (embed RPC error, DB error). The caller
- * (promote route) wraps this in a fire-and-forget so failures here
- * never block the user-visible promote response.
+ * (promote route) wraps this in a try/catch so failures here never
+ * block the user-visible promote response.
  */
 export async function embedAndStoreUserCorrection(args: {
   imageBytes: Buffer;
   imageHash: string;
   canonicalSlug: string;
+  /** Pre-fetched canonical_cards metadata for the slug. The route
+   *  has admin auth and queries this; the helper stays uncoupled from
+   *  any specific DB client. */
+  canonical: UserCorrectionCanonical;
   /** "image/jpeg" — bytes are always JPEG by the time the promote
    *  route resizes via resizeForUpload. */
   mimeType?: string;
@@ -58,27 +80,7 @@ export async function embedAndStoreUserCorrection(args: {
 
   const embedder = getReplicateClipEmbedder();
 
-  // 1. Pull canonical metadata for this slug. We need canonical_name +
-  //    set_name + card_number for the row insert (kNN response shape
-  //    expects these populated). If the slug doesn't exist in
-  //    canonical_cards, abort — we don't want orphaned anchors.
-  const slugRow = await dbAdmin()
-    .from("canonical_cards")
-    .select("canonical_name, language, set_name, card_number, variant, mirrored_primary_image_url")
-    .eq("slug", args.canonicalSlug)
-    .maybeSingle();
-  if (slugRow.error) {
-    throw new Error(
-      `[user-correction-embed] canonical_cards lookup failed for ${args.canonicalSlug}: ${slugRow.error.message}`,
-    );
-  }
-  if (!slugRow.data) {
-    throw new Error(
-      `[user-correction-embed] no canonical_cards row for slug=${args.canonicalSlug} — refusing to insert orphan anchor`,
-    );
-  }
-
-  // 2. Idempotency check: if we've already embedded this exact image
+  // 1. Idempotency check: if we've already embedded this exact image
   //    for this slug under the current model_version, no-op. Saves a
   //    Replicate call and avoids variant_index churn on re-promotes.
   const existing = await sql.query<{ variant_index: number }>(
@@ -99,12 +101,12 @@ export async function embedAndStoreUserCorrection(args: {
     };
   }
 
-  // 3. Embed. fail-fast on transport errors (the user-visible promote
+  // 2. Embed. fail-fast on transport errors (the user-visible promote
   //    has already succeeded; we just don't get the v1.1 cache benefit
   //    on this one correction).
   const embedding = await embedder.embedBytes(args.imageBytes, mimeType);
 
-  // 4. Pick the next variant_index for user-correction rows on this
+  // 3. Pick the next variant_index for user-correction rows on this
   //    slug. Catalog rows live at 0 + small ints (Stage C aug). User
   //    corrections start at IMAGE_EMBED_USER_CORRECTION_VARIANT_OFFSET
   //    so the two populations never collide on PK.
@@ -117,7 +119,7 @@ export async function embedAndStoreUserCorrection(args: {
   );
   const variantIndex = maxResult.rows[0]?.next_index ?? IMAGE_EMBED_USER_CORRECTION_VARIANT_OFFSET;
 
-  // 5. Insert. ON CONFLICT DO NOTHING handles the (rare) race where
+  // 4. Insert. ON CONFLICT DO NOTHING handles the (rare) race where
   //    two concurrent corrections of the same image+slug landed at the
   //    same time (idempotency check missed it because both saw "no
   //    existing row"). One wins, the other is a harmless duplicate
@@ -143,11 +145,11 @@ export async function embedAndStoreUserCorrection(args: {
      on conflict (canonical_slug, variant_index, crop_type) do nothing`,
     [
       args.canonicalSlug,
-      slugRow.data.canonical_name,
-      slugRow.data.language,
-      slugRow.data.set_name,
-      slugRow.data.card_number,
-      slugRow.data.variant,
+      args.canonical.canonicalName,
+      args.canonical.language,
+      args.canonical.setName,
+      args.canonical.cardNumber,
+      args.canonical.variant,
       sourceImageUrl,
       args.imageHash,
       embedder.modelVersion,
