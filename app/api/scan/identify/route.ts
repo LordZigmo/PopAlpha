@@ -671,8 +671,28 @@ export async function POST(req: Request) {
     }
   }
 
-  // 2. Upload both crops to Storage in parallel. Idempotent uploads
-  //    keyed by hash — re-scanning the same image is a no-op.
+  // 2. PARALLEL: kick off Storage upload AND embed in parallel.
+  //    Pre-2026-05-01 this section was sequential (upload → get
+  //    public URL → embed-via-URL → Modal fetched the URL) which
+  //    cost 400-700ms of pure transport latency on the hot path.
+  //
+  //    New flow:
+  //      - Storage upload still runs (non-fatal failure → log + drop
+  //        the v1.1 anchor for this scan, but don't block the
+  //        response). Promise.all means we still wait for it before
+  //        returning so the v1.1 promote flow has scan-uploads/<hash>.jpg
+  //        ready.
+  //      - Embed runs IN PARALLEL via embedder.embedUrls() with
+  //        data: URIs of the in-memory bytes. Modal's predict.py
+  //        already handles both http(s):// and data: schemes (see
+  //        cog/siglip-features/modal_app.py); Replicate's
+  //        andreasjansson/clip-features only handles http(s)://
+  //        — so we branch on the active embedder's class for safety.
+  //
+  //    Net win: ~400-700ms saved on warm scans because Storage
+  //    upload no longer blocks embed AND Modal no longer needs a
+  //    second round-trip to fetch the public URL.
+
   const fullUploadPromise = supabase.storage
     .from("card-images")
     .upload(scanFullKey, uploadBytes, {
@@ -690,14 +710,72 @@ export async function POST(req: Request) {
         })
     : Promise.resolve({ error: null });
 
-  const [fullUpload, artUpload] = await Promise.all([
-    fullUploadPromise,
-    artUploadPromise,
-  ]);
+  // Build the embed inputs. Modal accepts data URIs natively;
+  // Replicate's clip-features only accepts http(s) URLs, so we have
+  // to await the upload first when running on CLIP. The `variant`
+  // const was already declared earlier in this function for the
+  // embedder-readiness check — reuse it instead of redeclaring.
+  const supportsDataUri = variant === "modal-siglip";
 
-  // Full upload failure is fatal — without it Replicate has nothing
-  // to fetch and we can't return matches. Match the previous status
-  // codes / failure_reason so existing PostHog alerts keep firing.
+  let urlsToEmbedPromise: Promise<string[]>;
+  if (supportsDataUri) {
+    // Inline as base64 data URIs — no Storage round-trip required.
+    const fullDataUri = `data:image/jpeg;base64,${uploadBytes.toString("base64")}`;
+    const artDataUri = artBytes
+      ? `data:image/jpeg;base64,${artBytes.toString("base64")}`
+      : null;
+    const inlineUrls = [fullDataUri];
+    if (artDataUri) inlineUrls.push(artDataUri);
+    urlsToEmbedPromise = Promise.resolve(inlineUrls);
+  } else {
+    // Replicate path: must wait for Storage upload to get public URLs.
+    urlsToEmbedPromise = (async () => {
+      const [fullUp, artUp] = await Promise.all([
+        fullUploadPromise,
+        artUploadPromise,
+      ]);
+      if (fullUp.error) {
+        throw new Error(`Storage upload failed: ${fullUp.error.message}`);
+      }
+      const fullUrl = supabase.storage
+        .from("card-images")
+        .getPublicUrl(scanFullKey).data.publicUrl;
+      const artUrl =
+        artBytes && !artUp.error
+          ? supabase.storage.from("card-images").getPublicUrl(scanArtKey).data.publicUrl
+          : null;
+      return artUrl ? [fullUrl, artUrl] : [fullUrl];
+    })();
+  }
+
+  // Run upload + embed in parallel. The embed kicks off as soon as
+  // urlsToEmbedPromise resolves; for Modal that's instant (data URIs
+  // computed in-memory), so embed starts before upload finishes. For
+  // Replicate, urlsToEmbedPromise awaits upload first.
+  //
+  // Use Promise.allSettled so the three branches don't take each
+  // other down on individual failures — we want to handle each case
+  // with its existing error path (storage_upload_failed,
+  // embedder_runtime_error) and matching status codes.
+  const embedPromise = (async () => {
+    const urls = await urlsToEmbedPromise;
+    return embedder.embedUrls(urls);
+  })();
+
+  const [fullUploadSettled, artUploadSettled, embedSettled] =
+    await Promise.allSettled([fullUploadPromise, artUploadPromise, embedPromise]);
+
+  const fullUpload = fullUploadSettled.status === "fulfilled"
+    ? fullUploadSettled.value
+    : { error: { message: String(fullUploadSettled.reason) } };
+  const artUpload = artUploadSettled.status === "fulfilled"
+    ? artUploadSettled.value
+    : { error: { message: String(artUploadSettled.reason) } };
+
+  // Full upload failure is fatal — without it the v1.1 anchor flow
+  // can't pull the JPEG when the user later corrects this scan.
+  // Match the previous status codes / failure_reason so existing
+  // PostHog alerts keep firing.
   if (fullUpload.error) {
     await logScanEvent({
       imageHash,
@@ -726,26 +804,16 @@ export async function POST(req: Request) {
     );
   }
 
-  const fullPublicUrl = supabase.storage
-    .from("card-images")
-    .getPublicUrl(scanFullKey).data.publicUrl;
-  const artPublicUrl =
-    artBytes && !artUploadFailed
-      ? supabase.storage.from("card-images").getPublicUrl(scanArtKey).data.publicUrl
-      : null;
-
-  // 3. Embed both URLs in a single batch call to Replicate.
-  //    embedUrls supports arrays (REPLICATE_CLIP_DEFAULT_BATCH_SIZE=8;
-  //    we're sending 1-2). Batching amortizes cold-start over both
-  //    crops — meaningfully cheaper than two sequential calls when
-  //    Replicate is cold.
-  const urlsToEmbed: string[] = [fullPublicUrl];
-  if (artPublicUrl) urlsToEmbed.push(artPublicUrl);
-
   let fullEmbedding: number[];
   let artEmbedding: number[] | null = null;
   try {
-    const results = await embedder.embedUrls(urlsToEmbed);
+    if (embedSettled.status === "rejected") {
+      // Re-throw so the existing catch block below converts the
+      // ImageEmbedderRuntimeError / ImageEmbedderConfigError to
+      // the matching 502 + failure_reason.
+      throw embedSettled.reason;
+    }
+    const results = embedSettled.value;
     const fullResult = results[0];
     if (!fullResult || fullResult.embedding === null) {
       const message = fullResult?.error ?? "embedder returned no result";
@@ -769,8 +837,11 @@ export async function POST(req: Request) {
     }
     fullEmbedding = fullResult.embedding;
 
-    // Art branch failure is non-fatal.
-    if (artPublicUrl) {
+    // Art branch failure is non-fatal. We sent an art image iff
+    // results.length > 1 — that's the proxy for "did the embedder
+    // process an art crop" since artPublicUrl was inlined into the
+    // 2026-05-01 latency optimization.
+    if (results.length > 1) {
       const artResult = results[1];
       if (artResult && artResult.embedding) {
         artEmbedding = artResult.embedding;

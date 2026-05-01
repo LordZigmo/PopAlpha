@@ -95,11 +95,15 @@ secret = modal.Secret.from_name("siglip2-features-token", required_keys=["MODAL_
     gpu="T4",
     image=image,
     secrets=[secret],
-    # Keep one container warm 5min after last request. The "warm
-    # window" trades ~$0.13/hr × idle minutes against the cold-start
-    # latency hit on the next request. 5min is the sweet spot for
-    # human-paced scanning sessions.
-    scaledown_window=300,
+    # Keep one container warm 15min after last request. The "warm
+    # window" trades GPU idle cost (~$0.13/hr) against the cold-start
+    # latency hit on the next request. Real-device session pattern:
+    # users scan 10-30 cards in a single sitting, often with 2-5min
+    # gaps between cards while they reach for the next one. A 5min
+    # scaledown produced occasional mid-session cold starts (one
+    # 24.9s scan in session 5 was the cold-start tax). 15min covers
+    # the typical scanning session without significant idle cost.
+    scaledown_window=900,
     # enable_memory_snapshot lets Modal serialize the loaded model
     # state to disk, then restore it on cold start in ~1-3s vs
     # ~10-30s for fresh model load. Critical for sub-second UX.
