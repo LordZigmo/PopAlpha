@@ -29,20 +29,34 @@ After cleanup, `supabase/migrations/<remote_ts>_<remote_name>.sql` exists for ev
 
 ## Pending work surfaced by the cleanup
 
-While verifying drift was clean, `supabase db push --dry-run --include-all` revealed 11 local-only migrations that had NEVER been applied to prod. Categorized:
+While verifying drift was clean, `supabase db push --dry-run --include-all` revealed 11 local-only migrations that had NEVER been applied to prod. The work was deliberately split into a PR-1-applies-only-the-fires / PR-2-applies-the-rest sequence so the two prod-biting bugs ship without the larger cleanup blast radius.
 
-**Applied as part of this PR (TestFlight / price coverage critical):**
+### Applied by **this PR** (PR 1) — surgical fixes for prod-biting bugs
+
 - `20260416230000_fix_scrydex_literal_in_distinct_on` — fixes the `refresh_card_metrics_for_variants` RPC that has been silently failing since 2026-04-07. The price refresh has been running on the 12h cron backstop only — likely root cause of cards missing `market_price`.
-- `20260416234500_card_image_mirror` — mirrored image columns + cron infrastructure.
-- `20260417000000_bulk_prune_price_history_points` — batched DELETE RPC for the >90d backlog.
-- `20260420150000_index_provider_observation_matches_canonical_slug` — missing FK index that caused `canonical_cards` deletes to time out.
-- `20260424000000_phase3_price_snapshots_printing_backfill` — backfills `price_snapshots.printing_id` so card_metrics surfaces price for Phase 2/3-mapped printings.
 - `20260424010000_grant_preferred_canonical_raw_printing` — anon EXECUTE grant on the function the canonical view's WHERE clause calls. Without this, **every iOS chart silently 42501s for unauthenticated users**.
 
-**Held in `supabase/migrations/_pending/` for separate review:**
+### Held in `supabase/migrations/_pending/` for **PR 2** (cleanup follow-up)
+
+Move from `_pending/` back into `migrations/` and push. CI will apply on merge.
+
+- `20260416234500_card_image_mirror` — mirrored image columns + cron infrastructure.
+- `20260417000000_bulk_prune_price_history_points` — batched DELETE RPC for the >90d backlog.
+- `20260420150000_index_provider_observation_matches_canonical_slug` — missing FK index that caused `canonical_cards` deletes to time out (`CREATE INDEX CONCURRENTLY`).
+- `20260424000000_phase3_price_snapshots_printing_backfill` — backfills `price_snapshots.printing_id` so card_metrics surfaces price for Phase 2/3-mapped printings.
+- `20260430230000_ai_brief_three_step_fields` — three new columns + view rebuild for the homepage AI Brief expand-to-read flow.
+- `20260430230100_personalization_event_type_ai_brief` — CHECK constraint expansion for the `ai_brief_read_more_tapped` event.
+
+### Held in `supabase/migrations/_pending/` for **separate review** (Phase 2b/3 cluster)
+
+Read each carefully before promoting. They depend on Phase 2a (already applied) and produce real schema/data changes (insert missing card_printings rows, remap printing_ids).
+
 - `20260423000000_phase2b_missing_finish_printings`
 - `20260423040000_phase3a_stamp_classifier_and_remap`
 - `20260423050000_phase3b_edition_classifier_and_remap`
+
+### Held in `supabase/migrations/_pending/` for the **scanner agent** to promote in their PR
+
 - `20260427000000_scan_events_multicrop_telemetry`
 - `20260427010000_attention_slugs_for_art_crop`
 - `20260427020000_attention_slugs_include_labeled`
