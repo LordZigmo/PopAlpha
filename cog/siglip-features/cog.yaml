@@ -1,0 +1,53 @@
+# Cog model: SigLIP 2 image feature extractor for the PopAlpha card scanner.
+#
+# Mirrors the API contract of `andreasjansson/clip-features` so the
+# existing `ReplicateClipEmbedder` in lib/ai/image-embedder.ts can be
+# pointed at this model with no code change beyond the version hash:
+#   - Input: `inputs` = newline-separated image URLs or data URIs
+#   - Output: [{ input, embedding }, ...] aligned to input order
+#   - Embeddings are L2-normalized so cosine similarity == dot product
+#
+# Why SigLIP 2 (vs SigLIP 1):
+#   - Same size/dim (vector(768) — drop-in match for our pgvector schema)
+#   - Better benchmarks across image-text retrieval
+#   - Multilingual training data (handles JP set names if/when we
+#     embed text alongside images later)
+#
+# Why pre-bake the HF weights into the image (build.run):
+#   - Without it, first call after a cold start downloads ~400MB
+#     (~30s extra latency on cold starts)
+#   - Pre-baked: image is bigger but cold start drops to ~3-5s
+#
+# GPU: T4 — cheapest Replicate option that's plenty fast for this model
+# (~50ms per image inference). Switch to A40/L4 only if scan volume
+# demands sub-50ms.
+
+build:
+  gpu: true
+  cuda: "12.1"
+  python_version: "3.11"
+  python_packages:
+    # transformers 4.49.0+ is required for SigLIP 2 (Feb 2025 release).
+    # 4.45.x will load the model but the tokenizer class mismatches
+    # (GemmaTokenizer vs SiglipTokenizer) — surfaces as a build error.
+    - "torch==2.3.1"
+    - "transformers==4.49.0"
+    - "Pillow==10.4.0"
+    # SigLIP 2 ships a SentencePiece-based Gemma tokenizer that pulls
+    # protobuf for its model file. We don't USE the tokenizer (image
+    # encoder only) but AutoProcessor.from_pretrained tries to load
+    # it. Pin both to keep the image build deterministic.
+    - "sentencepiece==0.2.0"
+    - "protobuf==4.25.5"
+  run:
+    # Pre-download the SigLIP 2 weights into the image cache so
+    # cold-start inference is fast. The HF cache lives at
+    # ~/.cache/huggingface/ inside the container.
+    #
+    # Using AutoImageProcessor (image-only) instead of AutoProcessor
+    # so the tokenizer is never loaded — the predictor only takes
+    # images as input. Side benefit: layer is smaller without the
+    # ~5MB tokenizer files.
+    - python -c "from transformers import AutoImageProcessor, AutoModel; AutoImageProcessor.from_pretrained('google/siglip2-base-patch16-384'); AutoModel.from_pretrained('google/siglip2-base-patch16-384')"
+
+predict: "predict.py:Predictor"

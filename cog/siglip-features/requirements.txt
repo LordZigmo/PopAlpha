@@ -1,0 +1,16 @@
+# Dependencies for the local catalog re-embed script.
+# Install in a fresh venv:
+#   python3 -m venv venv
+#   source venv/bin/activate
+#   pip install -r requirements.txt
+#
+# These are PINNED to versions known to work with SigLIP 2 + Apple MPS
+# as of 2026-04-30. Bump cautiously — torch+transformers compat is real.
+
+torch==2.3.1
+transformers==4.49.0
+Pillow==10.4.0
+sentencepiece==0.2.0
+protobuf==4.25.5
+supabase==2.7.4
+requests==2.32.3

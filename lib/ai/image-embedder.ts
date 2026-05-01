@@ -57,12 +57,35 @@ export class ImageEmbedderRuntimeError extends Error {
 }
 
 /**
- * Tag shipped into card_image_embeddings.model_version. Bumped whenever
- * the underlying model or the pre-processing contract changes.
+ * Tags shipped into card_image_embeddings.model_version, one per
+ * supported embedding model. The kNN_QUERY in /api/scan/identify
+ * filters by this tag, which is how CLIP and SigLIP rows coexist in
+ * the same table — only the rows matching the active embedder's
+ * modelVersion participate in retrieval.
+ *
+ * IMAGE_EMBEDDER_MODEL_VERSION below resolves to whichever tag the
+ * active variant uses, so callers that import the constant
+ * automatically follow the cutover.
  */
-export const IMAGE_EMBEDDER_MODEL_VERSION = "replicate-clip-vit-l-14-v1";
+export const IMAGE_EMBEDDER_MODEL_VERSION_CLIP = "replicate-clip-vit-l-14-v1";
+export const IMAGE_EMBEDDER_MODEL_VERSION_SIGLIP = "siglip2-base-patch16-384-v1";
 
-/** CLIP ViT-L/14 output dimensionality. Pinned — column is vector(768). */
+/**
+ * Active model_version tag — driven by the IMAGE_EMBEDDER_VARIANT env
+ * var so the cutover and rollback are both env-only:
+ *   IMAGE_EMBEDDER_VARIANT=modal-siglip → SigLIP active
+ *   anything else (or unset)            → CLIP active (default)
+ */
+function resolveActiveModelVersion(): string {
+  const variant = process.env.IMAGE_EMBEDDER_VARIANT?.trim();
+  if (variant === "modal-siglip") return IMAGE_EMBEDDER_MODEL_VERSION_SIGLIP;
+  return IMAGE_EMBEDDER_MODEL_VERSION_CLIP;
+}
+
+export const IMAGE_EMBEDDER_MODEL_VERSION = resolveActiveModelVersion();
+
+/** Output dimensionality. Both CLIP-L/14 and SigLIP-2-Base-384 land at
+ * 768, so the pgvector column stays `vector(768)` across the cutover. */
 export const IMAGE_EMBEDDER_DIMENSIONS = 768;
 
 /**
@@ -310,4 +333,181 @@ export class ReplicateClipEmbedder implements ImageEmbedder {
       `Replicate prediction ${current.id} did not complete within ${this.pollTimeoutMs}ms (last status=${current.status})`,
     );
   }
+}
+
+// ─── Modal-hosted SigLIP-2 embedder ─────────────────────────────────
+//
+// Self-hosted on Modal serverless GPUs (memory-snapshot enabled) for
+// sub-second cold starts. Replaces the broken-on-cold-start Replicate
+// path for SigLIP. See cog/siglip-features/modal_app.py for the
+// service implementation, MODAL.md for deploy instructions.
+//
+// Wire format mirrors andreasjansson/clip-features:
+//   POST <endpoint>
+//   Content-Type: application/json
+//   { "auth": "<token>", "inputs": "url1\nurl2\n..." }
+//   →
+//   { "results": [{"input": "url1", "embedding": [...]}], ...,
+//     "model_version": "siglip2-base-patch16-384-v1", "took_ms": ... }
+//
+// Auth is a token-in-body rather than a Bearer header so the Modal
+// FastAPI integration stays simple. The wire is HTTPS, the endpoint
+// is server-to-server (Vercel route ↔ Modal), and the token is
+// rotated by re-running `modal secret create siglip2-features-token`.
+
+type ModalSiglipResult = {
+  input: string;
+  embedding: number[] | null;
+  error?: string;
+};
+
+type ModalSiglipResponse = {
+  results: ModalSiglipResult[];
+  model_version: string;
+  took_ms?: number;
+};
+
+export class ModalSiglipEmbedder implements ImageEmbedder {
+  public readonly modelVersion = IMAGE_EMBEDDER_MODEL_VERSION_SIGLIP;
+  public readonly dimensions = IMAGE_EMBEDDER_DIMENSIONS;
+
+  private readonly endpointUrl: string;
+  private readonly token: string;
+  private readonly maxBatchSize: number;
+  private readonly timeoutMs: number;
+
+  constructor(opts: {
+    endpointUrl: string;
+    token: string;
+    maxBatchSize?: number;
+    timeoutMs?: number;
+  }) {
+    this.endpointUrl = opts.endpointUrl;
+    this.token = opts.token;
+    // Modal's snapshot-restored containers comfortably batch the same
+    // ~16 images CLIP did, with similar T4 memory budget.
+    this.maxBatchSize = opts.maxBatchSize ?? 16;
+    // Cold start max ~10s on Modal; warm inference is sub-100ms.
+    // 30s gives headroom for the worst-case cold start + slow URL
+    // download inside the container.
+    this.timeoutMs = opts.timeoutMs ?? 30_000;
+  }
+
+  async embedUrls(urls: string[]): Promise<ImageEmbedResult[]> {
+    if (urls.length === 0) return [];
+    const out: ImageEmbedResult[] = urls.map(() => ({
+      embedding: null,
+      error: "unprocessed",
+    }));
+
+    for (let offset = 0; offset < urls.length; offset += this.maxBatchSize) {
+      const chunk = urls.slice(offset, offset + this.maxBatchSize);
+      try {
+        const results = await this.invokeEndpoint(chunk);
+        for (let i = 0; i < chunk.length; i += 1) {
+          const r = results[i];
+          if (r?.embedding) {
+            out[offset + i] = { embedding: r.embedding, error: null };
+          } else {
+            out[offset + i] = { embedding: null, error: r?.error ?? "no embedding returned" };
+          }
+        }
+      } catch (err) {
+        const msg = err instanceof ImageEmbedderRuntimeError ? err.message : String(err);
+        for (let i = 0; i < chunk.length; i += 1) {
+          out[offset + i] = { embedding: null, error: msg.slice(0, 300) };
+        }
+      }
+    }
+
+    return out;
+  }
+
+  async embedBytes(bytes: Buffer, mimeType: string): Promise<number[]> {
+    // Inline as a data URI — Modal endpoint handles both http(s) and
+    // data: schemes. Same pattern the Cog model + Replicate model use.
+    const dataUri = `data:${mimeType};base64,${bytes.toString("base64")}`;
+    const results = await this.invokeEndpoint([dataUri]);
+    const item = results[0];
+    if (!item?.embedding) {
+      throw new ImageEmbedderRuntimeError(
+        `Modal SigLIP embed failed: ${item?.error ?? "no embedding in response"}`,
+      );
+    }
+    return item.embedding;
+  }
+
+  private async invokeEndpoint(sources: string[]): Promise<ModalSiglipResult[]> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const response = await fetch(this.endpointUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ auth: this.token, inputs: sources.join("\n") }),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        const errBody = await response.text().catch(() => "");
+        throw new ImageEmbedderRuntimeError(
+          `Modal endpoint ${response.status}: ${errBody.slice(0, 400)}`,
+        );
+      }
+
+      const parsed = (await response.json()) as ModalSiglipResponse;
+      if (!parsed?.results) {
+        throw new ImageEmbedderRuntimeError(
+          `Modal endpoint returned malformed body: ${JSON.stringify(parsed).slice(0, 400)}`,
+        );
+      }
+      return parsed.results;
+    } catch (err) {
+      if (err instanceof ImageEmbedderRuntimeError) throw err;
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new ImageEmbedderRuntimeError(`Modal endpoint fetch failed: ${msg}`, err);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+}
+
+export function hasModalSiglipConfig(): boolean {
+  return Boolean(
+    process.env.MODAL_SIGLIP_ENDPOINT_URL?.trim() &&
+    process.env.MODAL_SIGLIP_TOKEN?.trim(),
+  );
+}
+
+export function getModalSiglipEmbedder(): ModalSiglipEmbedder {
+  const endpointUrl = process.env.MODAL_SIGLIP_ENDPOINT_URL?.trim();
+  const token = process.env.MODAL_SIGLIP_TOKEN?.trim();
+  if (!endpointUrl) {
+    throw new ImageEmbedderConfigError("Missing MODAL_SIGLIP_ENDPOINT_URL.");
+  }
+  if (!token) {
+    throw new ImageEmbedderConfigError(
+      "Missing MODAL_SIGLIP_TOKEN. Must match MODAL_INFERENCE_TOKEN secret on the Modal app.",
+    );
+  }
+  return new ModalSiglipEmbedder({ endpointUrl, token });
+}
+
+// ─── Factory ────────────────────────────────────────────────────────
+//
+// Single entry point for the route. Picks CLIP or SigLIP based on the
+// IMAGE_EMBEDDER_VARIANT env var. Default = "clip" (existing
+// production path) so the cutover is opt-in via Vercel env config.
+//
+//   IMAGE_EMBEDDER_VARIANT=clip          → ReplicateClipEmbedder (default)
+//   IMAGE_EMBEDDER_VARIANT=modal-siglip  → ModalSiglipEmbedder
+//
+// Rollback is symmetric: drop the env var or set it back to "clip".
+
+export function getImageEmbedder(): ImageEmbedder {
+  const variant = process.env.IMAGE_EMBEDDER_VARIANT?.trim();
+  if (variant === "modal-siglip") {
+    return getModalSiglipEmbedder();
+  }
+  return getReplicateClipEmbedder();
 }

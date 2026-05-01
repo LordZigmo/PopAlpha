@@ -175,6 +175,36 @@ export async function ensureCardImageEmbeddingsSchema(): Promise<void> {
       on card_image_embeddings (source);
   `);
 
+  // Include model_version in the PK so two model generations (CLIP
+  // and SigLIP, or any future swap) can coexist for the same
+  // (slug, variant_index, crop_type) tuple. The KNN_QUERY in
+  // /api/scan/identify already filters by model_version, so both
+  // populations live side-by-side and the route picks the active one
+  // via the IMAGE_EMBEDDER_MODEL_VERSION constant. Migration was
+  // applied first via supabase/migrations/20260430030000 — this
+  // mirror keeps the lazy-migration path on parity for fresh
+  // environments.
+  await sql.query(`
+    do $$
+    declare
+      current_pk_def text;
+    begin
+      select pg_get_constraintdef(c.oid) into current_pk_def
+      from pg_constraint c
+      join pg_class t on t.oid = c.conrelid
+      where c.contype = 'p'
+        and t.relname = 'card_image_embeddings';
+
+      if current_pk_def is not null
+         and current_pk_def = 'PRIMARY KEY (canonical_slug, variant_index, crop_type)' then
+        alter table card_image_embeddings drop constraint card_image_embeddings_pkey;
+        alter table card_image_embeddings
+          add constraint card_image_embeddings_pkey
+          primary key (canonical_slug, variant_index, crop_type, model_version);
+      end if;
+    end $$;
+  `);
+
   // Swap the PK to (canonical_slug, variant_index, crop_type) so a
   // single slug can hold both crop_type='full' AND crop_type='art'
   // rows under the same variant_index 0. Idempotent on already-

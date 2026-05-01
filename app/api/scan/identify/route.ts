@@ -37,8 +37,9 @@ import { sql } from "@vercel/postgres";
 import { hasVercelPostgresConfig } from "@/lib/ai/card-embeddings";
 import { dbAdmin } from "@/lib/db/admin";
 import {
-  getReplicateClipEmbedder,
+  getImageEmbedder,
   hasReplicateConfig,
+  hasModalSiglipConfig,
   ImageEmbedderConfigError,
   ImageEmbedderRuntimeError,
 } from "@/lib/ai/image-embedder";
@@ -480,7 +481,15 @@ export async function POST(req: Request) {
     );
   }
 
-  if (!hasReplicateConfig()) {
+  // Variant-aware config check. Whichever embedder the IMAGE_EMBEDDER_VARIANT
+  // env var selected, verify its config is present BEFORE we try to
+  // construct the embedder. This produces a clean 503 instead of a
+  // 500 when env vars are missing.
+  const variant = process.env.IMAGE_EMBEDDER_VARIANT?.trim();
+  const embedderReady = variant === "modal-siglip"
+    ? hasModalSiglipConfig()
+    : hasReplicateConfig();
+  if (!embedderReady) {
     emitScanFailureEvent({
       actorKey,
       clientPlatform,
@@ -570,7 +579,7 @@ export async function POST(req: Request) {
 
   let embedder;
   try {
-    embedder = getReplicateClipEmbedder();
+    embedder = getImageEmbedder();
   } catch (err) {
     if (err instanceof ImageEmbedderConfigError) {
       await logScanEvent({

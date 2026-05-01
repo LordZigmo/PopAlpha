@@ -1,0 +1,13 @@
+# Cog-generated artifacts
+.cog/
+__pycache__/
+*.pyc
+
+# Local virtualenvs (if anyone runs the model outside Docker)
+venv/
+.venv/
+env/
+
+# Editor / OS noise
+.DS_Store
+*.swp
