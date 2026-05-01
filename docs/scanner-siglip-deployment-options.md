@@ -1,21 +1,31 @@
 # Scanner: SigLIP production-inference deployment options
 
-When the local SigLIP eval validates better accuracy than CLIP, we'll
-need a production inference endpoint. Today's `lib/ai/image-embedder.ts`
-calls Replicate's `andreasjansson/clip-features`. To use SigLIP we
-need *something* that takes an image and returns the 768-dim SigLIP-2
-embedding via HTTP.
+**Resolved 2026-05-01 — Modal is the chosen + deployed path.** Below
+documents the options we considered and why we picked Modal, plus
+operational details (rollback, monitoring, troubleshooting) for the
+deployed Modal app.
 
-This doc compares the realistic options. Update as we learn more.
-
-## Status snapshot (2026-04-30)
+## Status snapshot (2026-05-01)
 
 - ✅ Local SigLIP-2 inference working on Mac MPS (re-embed script)
 - ✅ Cog model `lordzigmo/siglip2-features` pushed to Replicate
-- ❌ Replicate inference queue stuck — predictions never get past
-  `starting` status, no GPU allocation. Cause TBD; could be a
-  Replicate-side issue or model deployment config we haven't found.
-- ⏸️ Production inference deferred until eval shows SigLIP wins
+  (kept as portable container reference; Replicate inference queue
+  stuck on community-tier scale-to-zero, unusable for live UX)
+- ✅ **Modal app `siglip2-features` deployed** at
+  `https://zachdavis710--predict.modal.run` (workspace
+  `zachdavis710`). Sub-second warm cold starts via
+  `enable_memory_snapshot=True`. Token-in-body auth via
+  `MODAL_INFERENCE_TOKEN` secret.
+- ✅ **Production cutover landed** in commit `6366483`. The
+  `IMAGE_EMBEDDER_VARIANT=modal-siglip` env var on Vercel routes
+  `/api/scan/identify` through Modal. Verified end-to-end with one
+  Kabuto scan (sim=0.9755, 8.7s cold-start latency).
+- ✅ All 23,105 EN catalog rows + 28 user_correction anchors mirrored
+  under `model_version='siglip2-base-patch16-384-v1'` in
+  `card_image_embeddings`. CLIP rows still present for rollback.
+- ⏸️ Real-device validation under SigLIP — pending. The pre-cutover
+  trajectory hit 92% on a focused subset; SigLIP should hold or
+  improve on this.
 
 ## Option A: Re-try Replicate after fixing the deploy issue
 

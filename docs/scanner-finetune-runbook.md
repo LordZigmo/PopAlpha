@@ -315,20 +315,38 @@ fine-tune leaderboard.
 
 ---
 
-## What's done as of 2026-04-28
+## What's done as of 2026-05-01
 
 - ✅ Dataset spec defined (this doc)
 - ✅ `scripts/export-finetune-dataset.mjs` — JSONL emitter + anchor
   download + train/val split
 - ✅ `npm run dataset:export` wired up
 - ✅ Trust-contract entries in `scripts/security-guardrails.config.mjs`
+- ✅ **Eval corpus expanded**: 277 anchors at sprint start →
+  **305 anchors** (277 user_photo + 28 user_correction from real-device
+  sessions in `docs/scanner-zero-tap-sprint.md`'s Day 3). Real-device
+  corrections feed both the eval set AND the v1.1 auto-learning kNN
+  cache simultaneously.
+- ✅ **Mid-sprint backbone swap to SigLIP-2** (2026-05-01): without
+  fine-tuning. The +19pp gain over CLIP on the 277-image eval suggests
+  Stage D fine-tuning's marginal value over SigLIP base may be smaller
+  than the pre-sprint estimate. Re-baseline before committing to fine-
+  tune compute.
 
 ## What's TODO
 
-- [ ] Pick training infra (recommend Modal)
-- [ ] Write `training/train.py` against the dataset format
+- [ ] **Re-evaluate Stage D priority** post-SigLIP cutover. Run an
+      eval comparing SigLIP-base vs an imagined SigLIP+LoRA finetune.
+      The 500-anchor target was set for CLIP-fine-tuning; SigLIP may
+      need fewer anchors OR may not benefit enough to justify the
+      training compute.
+- [ ] Pick training infra (Modal recommended — we already have a Modal
+      account from the SigLIP inference deployment)
+- [ ] Write `training/train.py` against the dataset format. SigLIP
+      needs different loss + tokenizer setup than CLIP.
 - [ ] First fine-tune run + eval
 - [ ] If green, integrate into the inference path (steps in "Inference
-      deployment" above)
+      deployment" above; cutover will be the same env-var-flip pattern
+      as SigLIP-base)
 - [ ] Document fine-tune results back into this runbook (replacing
       the "What's done" / "What's TODO" sections with a results log)

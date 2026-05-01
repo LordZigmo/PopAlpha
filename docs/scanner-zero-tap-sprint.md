@@ -1,17 +1,109 @@
 # Scanner zero-tap sprint plan
 
-**Active sprint. Started 2026-04-29.** Target: **85-92% top-1 with 95%+ HIGH-confidence
-precision** by end of week, shipped to TestFlight. This doc is the
-single source of truth — if context compacts, read this top-to-bottom
-and you'll know exactly where we are.
+**Sprint started 2026-04-29 → SigLIP-2 cutover landed 2026-05-01.**
+Target was 85-92% top-1 with 95%+ HIGH-confidence precision shipped
+to TestFlight. We exceeded the eval target. TestFlight build still
+pending. This doc is the single source of truth — if context compacts,
+read top-to-bottom and you'll know exactly where we are.
 
 ---
 
-## Where we are right now
+## TL;DR for fresh context (read this first)
 
-### Latest production state (commit `4fa0264`)
+The scanner pipeline today (commit `6366483`):
 
-**Day 2 has shipped.** End-to-end OCR + layered retrieval now in
+1. **iOS** captures card → `OCRService.extractCardIdentifiers` extracts
+   `card_number` (regex on the printed `X/Y` collector number) and
+   `set_hint` (heuristic on the longest letter-heavy line). Both
+   fail-graceful per-field.
+2. **iOS uploads** the resized JPEG to `/api/scan/identify?card_number=…&set_hint=…`.
+3. **Vercel route** picks the active embedder via the
+   `IMAGE_EMBEDDER_VARIANT` env var (currently `modal-siglip`):
+   - `modal-siglip` → `ModalSiglipEmbedder` calls
+     `https://zachdavis710--predict.modal.run` (token-in-body auth).
+   - `clip` (or unset) → `ReplicateClipEmbedder` (rollback path).
+4. The embedder returns a 768-dim vector; pgvector kNN runs against
+   `card_image_embeddings` filtered by the active model_version
+   (`siglip2-base-patch16-384-v1`).
+5. **Three-path routing** decides confidence:
+   - Path A (`ocr_direct_unique`/`_narrow`): both filters present →
+     direct `canonical_cards` lookup, bypasses kNN. Unique →
+     HIGH; 2-3 → MEDIUM.
+   - Path B (`ocr_intersect_unique`/`_narrow`): card_number only or
+     Path A returned 0 rows → intersect direct-lookup with kNN
+     top-K. Unique → HIGH (with trust-killer demote if CLIP top-1
+     would have differed); 2-3 → MEDIUM.
+   - Path C (`vision_only`): everything else, including OCR-extracted-but-
+     CLIP-disagrees. Day 1 trust-killer + 2026-04-30 OCR-disagreement
+     demote both apply.
+6. **Confidence tiers drive UX**:
+   - HIGH → auto-navigate to `CardDetailView` (with "Not this card?"
+     correction prompt threaded via `scanImageHash`).
+   - MEDIUM → `ScanPickerSheet` shows top-3 + "None of these →
+     **search for the card**" (Day 3 search-correction ship).
+   - LOW → silent re-arm.
+7. **v1.1 auto-learning kNN anchors**: every user correction (from
+   either UI path) embeds the user's actual scan image with the
+   active model and inserts it into `card_image_embeddings` with
+   `source='user_correction'` and `variant_index >= 10000`. The next
+   visually-similar scan finds the anchor as a kNN candidate. No
+   model retraining needed for the cache to compound.
+
+**Real-device hit rate trajectory** (pre-SigLIP):
+
+| Session | Top-1 raw | Top-1 with corrections |
+|---|---|---|
+| Day 3 #1 (basement) | 17% (1/6) | 17% |
+| Day 3 #2 (focused 14 cards) | 50% (7/14) | 86% |
+| Day 3 #3 (post-Day 3.5 fixes) | 62% | 85% |
+| Day 3 #4 (focused subset) | **92%** (12/13) | 100% |
+| Daylight stress test (27 diverse) | 70% | 81% |
+
+Eval data justifying the SigLIP cutover (run on the same 277-image
+corpus + 28 user_correction anchors, locally re-embedded under
+SigLIP-2 by `cog/siglip-features/reembed_catalog.py`):
+
+| Metric | CLIP | **SigLIP-2** | Delta |
+|---|---|---|---|
+| Top-1 pure-kNN on user_photo corpus | 48.7% | **67.9%** | **+19.2pp** |
+| Top-5 (full eval) | n/a | **91.5%** | (picker UX) |
+| user_correction recall | n/a | 100% (29/29) | sanity ✓ |
+
+The +19pp captures the foil-bias / lighthouse-Samurott / V-VMAX-
+confusion class of CLIP failures — exactly what SigLIP's sigmoid loss
+is documented to fix.
+
+## Production state at sprint close
+
+**Active embedder:** Modal-hosted `google/siglip2-base-patch16-384`
+via `cog/siglip-features/modal_app.py` (deployed at
+`https://zachdavis710--predict.modal.run`). Sub-second cold starts
+via `enable_memory_snapshot=True`, ~$5-10/mo at our volume.
+
+**Coexisting CLIP rows:** `card_image_embeddings` PK now includes
+`model_version` (migration 20260430030000) so the legacy CLIP rows
+(~26k) still live in the table but unused. Rollback to CLIP is a
+single env-var flip + redeploy (~3 min). See
+`docs/scanner-siglip-deployment-options.md` for the procedure.
+
+**Open tracking items** (post-sprint):
+- TestFlight build + submit (was the original sprint goal — pre-flight
+  cleanup pass needed).
+- Real-device session under SigLIP to measure the empirical
+  improvement vs the pre-cutover sessions in the trajectory table
+  above.
+- Phase 2 self-host on gaming PC (deferred indefinitely — Modal
+  is fine until cost or latency forces the move).
+- Phase 3 on-device CoreML SigLIP for offline scanning (post-launch
+  v2.0 feature; SigLIP-Base-384 was chosen specifically to enable this).
+
+---
+
+## ARCHIVE: day-by-day plan (how we got here)
+
+### Latest production state (pre-SigLIP, commit `4fa0264`)
+
+**Day 2 had shipped.** End-to-end OCR + layered retrieval was in
 production:
 - iOS captures card → `OCRService.extractCardIdentifiers` extracts BOTH
   `card_number` AND `set_hint`
