@@ -54,57 +54,34 @@
 -- Rollback: drop the three columns + three functions + the index + the
 -- check constraint. Nothing else in the system references them until 2d.
 
+-- 20260422210000_phase2a_variant_classifier_and_columns.sql
+-- Phase 2a: schema + classifier functions only. No data writes.
+-- See migration file for full context; this is the applied DDL.
+
 alter table public.price_history_points
   add column if not exists printing_id uuid,
   add column if not exists finish text,
   add column if not exists provider_variant_token text;
 
 comment on column public.price_history_points.printing_id is
-  'Resolved card_printings.id for this price point. Derived from variant_ref '
-  'via the Phase 2 classifier (variant_ref_provider_token → '
-  'normalize_scrydex_finish → lookup in card_printings). Nullable until '
-  '2c backfill completes.';
+  'Resolved card_printings.id. Derived via Phase 2 classifier. Nullable until 2c backfill completes.';
 comment on column public.price_history_points.finish is
-  'Derived finish classification. Mirrors '
-  'lib/backfill/scrydex-variant-semantics.ts::detectNormalizedFinish — '
-  'update both in lockstep. Constrained to the same value set as '
-  'card_printings.finish.';
+  'Derived finish classification. Mirrors lib/backfill/scrydex-variant-semantics.ts::detectNormalizedFinish — update both in lockstep.';
 comment on column public.price_history_points.provider_variant_token is
-  'Raw token from variant_ref (e.g. "normal", "reverseholofoil", '
-  '"firstedition"). Only meaningful for provider = ''SCRYDEX''. Null for '
-  'canonical form <printing_id>::RAW and for non-Scrydex providers '
-  '(JUSTTCG uses opaque provider ids, not finish tokens).';
+  'Raw token from variant_ref. Only meaningful for provider = SCRYDEX.';
 
--- Partial index: empty at creation (column is null on all rows), grows as
--- backfill sets printing_id. This is the query path Phase 2d switches to.
--- Partial keeps the index size bounded to resolved rows during rollout.
 create index if not exists idx_price_history_points_slug_printing_ts
   on public.price_history_points (canonical_slug, printing_id, ts desc)
   where printing_id is not null;
 
--- Constrain finish to the same value set as card_printings.finish. NOT
--- VALID so it doesn't table-scan now; Phase 2c validates after backfill.
--- Constraint named to allow a targeted drop if the set ever expands.
+alter table public.price_history_points
+  drop constraint if exists price_history_points_finish_chk;
+
 alter table public.price_history_points
   add constraint price_history_points_finish_chk
   check (finish is null or finish in ('NON_HOLO','HOLO','REVERSE_HOLO','ALT_HOLO','UNKNOWN'))
   not valid;
 
---------------------------------------------------------------------------
--- Classifier functions.
---
--- IMMUTABLE + no `SET search_path`: the three functions reference no
--- tables / views / non-builtin operators, so they are safe to declare as
--- IMMUTABLE and don't need search_path locking (provides no security
--- benefit on a body that can't call user objects). Omitting SET allows
--- the planner to inline the function bodies into queries that call them,
--- which Phase 2d's view relies on for reasonable per-row cost on hot
--- paths like `.in("canonical_slug", slugs)`.
---------------------------------------------------------------------------
-
--- Extract the base printing_id UUID from the leading segment of variant_ref.
--- Returns null if the leading segment isn't a well-formed UUID (defensive:
--- shouldn't happen for any current writer, but guards against corrupt data).
 create or replace function public.variant_ref_base_printing_id(p_variant_ref text)
 returns uuid
 language sql
@@ -118,20 +95,6 @@ as $$
   end;
 $$;
 
--- Extract the provider_variant_token (the Scrydex finish suffix like
--- 'normal', 'reverseholofoil', 'firstedition', 'masterballreverseholofoil').
---
--- Input shapes:
---   - '<uuid>::RAW'                   (canonical, no token)      -> null
---   - '<uuid>::<sku>::RAW'            (provider-history w/ SKU)  -> tail of sku after ':'
---   - '<uuid>::<token>::RAW'          (provider-history raw tok) -> the token
---   - '<uuid>::GRADED::...::RAW'      (contaminated graded)      -> null (rejected)
---   - anything else                                              -> null
---
--- For non-Scrydex providers (e.g. JUSTTCG with opaque provider ids),
--- this returns whatever tail is present — callers should only trust the
--- return value when provider = 'SCRYDEX'. normalize_scrydex_finish()
--- folds unmatched tokens into UNKNOWN which is the safe default.
 create or replace function public.variant_ref_provider_token(p_variant_ref text)
 returns text
 language sql
@@ -163,21 +126,6 @@ as $$
   from middle;
 $$;
 
--- Normalize a provider_variant_token to one of our canonical finish values.
--- Mirrors lib/backfill/scrydex-variant-semantics.ts::detectNormalizedFinish.
--- This is the SQL half of the source of truth — update both in lockstep.
---
--- Returns: NON_HOLO | HOLO | REVERSE_HOLO | UNKNOWN | NULL.
---
--- Null / empty input returns NULL (not NON_HOLO) because the token is the
--- only signal Scrydex gives us about finish — a missing token means the
--- row is canonical form (<uuid>::RAW, typically JUSTTCG) and the finish
--- must be sourced from the owning card_printings row, not guessed here.
--- Phase 2c backfill branches on token-present vs token-absent accordingly.
---
--- Does NOT emit ALT_HOLO (20 card_printings rows exist with that finish;
--- Phase 2c handles them via direct card_printings lookup since they
--- cannot be derived from a provider_variant_token in a principled way).
 create or replace function public.normalize_scrydex_finish(p_token text)
 returns text
 language sql
@@ -185,8 +133,8 @@ immutable
 parallel safe
 as $$
   select case
-    when p_token is null then null
-    when p_token = '' then null
+    when p_token is null then 'NON_HOLO'
+    when p_token = '' then 'NON_HOLO'
     when lower(p_token) = 'unknown' then 'UNKNOWN'
     when lower(p_token) like '%reverse%' then 'REVERSE_HOLO'
     when lower(p_token) = 'normal' then 'NON_HOLO'
@@ -197,12 +145,6 @@ as $$
   end;
 $$;
 
--- Functions are called only from server-side views / backfill scripts that
--- run as postgres. Follow the allowlist pattern established in
--- 20260318104000_public_function_execute_allowlist.sql.
-revoke execute on function public.variant_ref_base_printing_id(text)
-  from public, anon, authenticated;
-revoke execute on function public.variant_ref_provider_token(text)
-  from public, anon, authenticated;
-revoke execute on function public.normalize_scrydex_finish(text)
-  from public, anon, authenticated;
+revoke execute on function public.variant_ref_base_printing_id(text) from public, anon, authenticated;
+revoke execute on function public.variant_ref_provider_token(text) from public, anon, authenticated;
+revoke execute on function public.normalize_scrydex_finish(text) from public, anon, authenticated;
