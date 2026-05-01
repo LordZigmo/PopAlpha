@@ -17,10 +17,12 @@ struct EditHoldingLotSheet: View {
     /// their SetMetadata, lots don't. Passed in so the sheet shows
     /// "Editing: Charizard" and not just an id.
     let cardName: String?
-    /// Async callback fired after a successful save. Awaited before
-    /// the sheet dismisses so the caller's state update completes
-    /// before the transition, guaranteeing updated data is visible
-    /// the moment the portfolio is back on screen.
+    /// Async callback fired after a successful save. The parent owns
+    /// dismissal — the closure is expected to refresh data AND close
+    /// the sheet (e.g. by setting its binding to nil). We deliberately
+    /// don't call @Environment(\.dismiss) here on success because in
+    /// some iOS versions it doesn't propagate reliably from inside a
+    /// NavigationStack inside a sheet.
     var onSaved: (() async -> Void)?
 
     @Environment(\.dismiss) private var dismiss
@@ -380,9 +382,12 @@ struct EditHoldingLotSheet: View {
             )
             isSaving = false
             PAHaptics.tap()
+            // Parent owns dismissal — its onSaved closure is expected
+            // to refresh state AND clear its sheet binding. We don't
+            // call dismiss() here on success.
             await onSaved?()
-            dismiss()
         } catch {
+            print("[EditHoldingLotSheet] save failed for id=\(lot.id): \(error)")
             saveError = error.localizedDescription
             isSaving = false
         }

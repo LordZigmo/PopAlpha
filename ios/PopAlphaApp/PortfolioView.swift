@@ -179,7 +179,12 @@ struct PortfolioView: View {
                     lot: lot,
                     cardName: lot.canonicalSlug.flatMap { overview?.cardMetadata?[$0]?.name },
                     onSaved: {
+                        // Parent-owned dismissal: refresh data first,
+                        // then explicitly clear the binding so the
+                        // sheet always closes — independent of any
+                        // NavigationStack-vs-sheet dismiss quirks.
                         await refreshHoldings()
+                        editingLot = nil
                     }
                 )
             }
