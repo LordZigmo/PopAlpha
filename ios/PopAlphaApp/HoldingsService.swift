@@ -95,26 +95,31 @@ actor HoldingsService {
     ) async throws {
         try AuthService.shared.requireAuth()
 
-        // Always send all editable fields. NSNull() for Swift nil so
-        // the server distinguishes "explicit clear" from "omitted" —
+        // Always send all editable fields. NSNull() for nil so the
+        // server distinguishes "explicit clear" from "omitted" —
         // PATCH treats `"field" in body` as the update signal.
+        //
+        // Built field-by-field rather than in a literal because the
+        // `optionalDouble as Any? ?? NSNull()` idiom can wrap into a
+        // double-optional that JSONSerialization rejects with an
+        // "invalid type in JSON write" exception.
         var body: [String: Any] = [
             "id": id,
             "grade": grade,
             "qty": qty,
-            "price_paid_usd": pricePaidUsd as Any? ?? NSNull(),
-            "acquired_on": (acquiredOn?.isEmpty == false ? acquiredOn! : NSNull()) as Any,
-            "venue": (venue?.isEmpty == false ? venue! : NSNull()) as Any,
-            "cert_number": (certNumber?.isEmpty == false ? certNumber! : NSNull()) as Any,
         ]
-        // `pricePaidUsd as Any? ?? NSNull()` evaluates a double-optional,
-        // so collapse it to a concrete value here for JSONSerialization.
-        if pricePaidUsd == nil { body["price_paid_usd"] = NSNull() }
+        body["price_paid_usd"] = pricePaidUsd.map { $0 as Any } ?? NSNull()
+        body["acquired_on"]    = (acquiredOn.flatMap  { $0.isEmpty ? nil : ($0 as Any) }) ?? NSNull()
+        body["venue"]          = (venue.flatMap       { $0.isEmpty ? nil : ($0 as Any) }) ?? NSNull()
+        body["cert_number"]    = (certNumber.flatMap  { $0.isEmpty ? nil : ($0 as Any) }) ?? NSNull()
 
-        let _: SimpleOKResponse = try await APIClient.patch(
+        print("[HoldingsService] PATCH /api/holdings body=\(body)")
+
+        let response: SimpleOKResponse = try await APIClient.patch(
             path: "/api/holdings",
             body: body,
             decoder: decoder
         )
+        print("[HoldingsService] PATCH /api/holdings ok=\(response.ok)")
     }
 }

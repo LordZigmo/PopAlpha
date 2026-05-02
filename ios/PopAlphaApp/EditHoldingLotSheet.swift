@@ -101,7 +101,10 @@ struct EditHoldingLotSheet: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        Task { await save() }
+                        // Explicit MainActor so state mutations in save()
+                        // can't end up on a background thread (which would
+                        // not trigger SwiftUI re-renders).
+                        Task { @MainActor in await save() }
                     } label: {
                         if isSaving {
                             ProgressView().tint(PA.Colors.accent)
@@ -113,7 +116,22 @@ struct EditHoldingLotSheet: View {
                     .foregroundStyle(isValid && !isSaving ? PA.Colors.accent : PA.Colors.muted)
                 }
             }
+            .alert("Couldn't save changes", isPresented: errorAlertBinding) {
+                Button("OK", role: .cancel) { saveError = nil }
+            } message: {
+                Text(saveError ?? "")
+            }
         }
+    }
+
+    /// Bridges the optional saveError into an isPresented binding so
+    /// errors surface as a modal alert no matter where the user has
+    /// scrolled in the form.
+    private var errorAlertBinding: Binding<Bool> {
+        Binding(
+            get: { saveError != nil },
+            set: { if !$0 { saveError = nil } }
+        )
     }
 
     // MARK: - Header
@@ -339,7 +357,10 @@ struct EditHoldingLotSheet: View {
 
     // MARK: - Save
 
+    @MainActor
     private func save() async {
+        print("[EditHoldingLotSheet] save() invoked for lot id=\(lot.id), grade=\(selectedGrade.rawValue), qty=\(quantity)")
+
         let trimmedPrice = pricePaid.trimmingCharacters(in: .whitespaces)
         let parsedPrice: Double?
         if trimmedPrice.isEmpty {
@@ -347,6 +368,11 @@ struct EditHoldingLotSheet: View {
         } else if let p = Double(trimmedPrice), p >= 0 {
             parsedPrice = p
         } else {
+            // Don't silently return — the user tapped Save with
+            // something they presumably want to commit. Surface the
+            // problem so they can correct it.
+            print("[EditHoldingLotSheet] price parse failed: '\(trimmedPrice)'")
+            saveError = "Price '\(trimmedPrice)' isn't a valid number. Clear the field or enter a number like 12.34."
             return
         }
 
@@ -371,6 +397,7 @@ struct EditHoldingLotSheet: View {
         saveError = nil
 
         do {
+            print("[EditHoldingLotSheet] calling PATCH /api/holdings for id=\(lot.id)")
             try await HoldingsService.shared.updateHolding(
                 id: lot.id,
                 grade: selectedGrade.rawValue,
@@ -380,14 +407,16 @@ struct EditHoldingLotSheet: View {
                 venue: venue.trimmingCharacters(in: .whitespaces),
                 certNumber: certToSend
             )
+            print("[EditHoldingLotSheet] PATCH succeeded for id=\(lot.id)")
             isSaving = false
             PAHaptics.tap()
             // Parent owns dismissal — its onSaved closure is expected
-            // to refresh state AND clear its sheet binding. We don't
-            // call dismiss() here on success.
+            // to refresh state AND clear its sheet binding.
+            print("[EditHoldingLotSheet] invoking onSaved (refresh + close sheet)")
             await onSaved?()
+            print("[EditHoldingLotSheet] onSaved returned — save() complete")
         } catch {
-            print("[EditHoldingLotSheet] save failed for id=\(lot.id): \(error)")
+            print("[EditHoldingLotSheet] save FAILED for id=\(lot.id): \(error)")
             saveError = error.localizedDescription
             isSaving = false
         }
