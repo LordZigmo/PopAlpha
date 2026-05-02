@@ -102,7 +102,32 @@ struct MarketplaceView: View {
             .navigationDestination(item: $searchSelectedCard) { card in
                 CardDetailView(card: card)
             }
+            // Universal Links — DeepLinkRouter parses popalpha.ai URLs in
+            // ContentView.onContinueUserActivity and stashes a pending
+            // destination. We reuse the search → searchSelectedCard →
+            // navigationDestination pipeline (both flows produce a stub
+            // MarketCard from a slug; CardDetailView hydrates the rest
+            // via .task on appear). onAppear handles the cold-launch
+            // case where the router was set before MarketplaceView
+            // mounted; onChange handles the warm-app-already-running
+            // case.
+            .onAppear { consumePendingDeepLink() }
+            .onChange(of: DeepLinkRouter.shared.pendingDestination) { _, _ in
+                consumePendingDeepLink()
+            }
         }
+    }
+
+    /// If the DeepLinkRouter is holding a pending `.card(slug:)`
+    /// destination, hydrate a stub MarketCard and trigger
+    /// navigation, then consume the router state so a re-render
+    /// doesn't push the same destination twice.
+    private func consumePendingDeepLink() {
+        guard case let .card(slug) = DeepLinkRouter.shared.pendingDestination else {
+            return
+        }
+        searchSelectedCard = MarketCard.stub(slug: slug)
+        DeepLinkRouter.shared.consume()
     }
 
     // MARK: - Data loaders
