@@ -742,6 +742,12 @@ struct HomepageAIBriefDTO: Decodable, Hashable {
     let version: String
     let summary: String
     let takeaway: String
+    /// Labeled 3-step content. Optional for backward compat with
+    /// briefs cached before the 3-step migration. The card falls
+    /// back to the single `summary` blob if these are nil.
+    let whatsHappening: String?
+    let whyItMatters: String?
+    let whatToWatch: String?
     let focusSet: String?
     let modelLabel: String?
     let source: String?          // "llm" | "fallback"

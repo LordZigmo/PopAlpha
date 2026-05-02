@@ -40,6 +40,7 @@ export type EventType =
   | "variant_switch"
   | "market_signal_expand"
   | "ai_analysis_expand"
+  | "ai_brief_read_more_tapped"
   | "price_history_expand"
   | "compare_open"
   | "portfolio_open";

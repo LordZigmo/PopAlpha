@@ -172,6 +172,7 @@ export async function GET(req: Request) {
             .from("canonical_cards")
             .select("slug, canonical_name, set_name, year")
             .in("slug", slugArray)
+            .eq("is_digital", false)
         : Promise.resolve({ data: [], error: null }),
       slugArray.length > 0
         ? publicDb

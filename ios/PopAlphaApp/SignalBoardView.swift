@@ -266,6 +266,18 @@ private struct AIBriefCard: View {
     private var summary: String { brief?.summary ?? Self.placeholderSummary }
     private var takeaway: String { brief?.takeaway ?? Self.placeholderTakeaway }
     private var isLive: Bool { brief != nil && brief?.source != "fallback" }
+
+    /// Returns the 3-step trio iff all three labeled fields are present
+    /// on the current brief. Older v1 briefs don't have them yet, so we
+    /// fall back to the single `summary` blob in those cases.
+    private var threeStep: (whats: String, why: String, watch: String)? {
+        guard
+            let h = brief?.whatsHappening, !h.isEmpty,
+            let w = brief?.whyItMatters,   !w.isEmpty,
+            let n = brief?.whatToWatch,    !n.isEmpty
+        else { return nil }
+        return (h, w, n)
+    }
     private var mattersLine: String {
         // Falls back to "Modern collectors" so guests still see a line
         // rather than an awkward gap. Keep copy warm and declarative.
@@ -296,14 +308,21 @@ private struct AIBriefCard: View {
                 Spacer()
             }
 
-            // Body summary — line-limited when collapsed, full when expanded
-            Text(summary)
-                .font(.system(size: 14))
-                .foregroundStyle(PA.Colors.text)
-                .lineSpacing(3)
-                .lineLimit(isExpanded ? nil : 3)
-                .multilineTextAlignment(.leading)
-                .fixedSize(horizontal: false, vertical: true)
+            // Body summary. Collapsed → preview the full single-blob
+            // summary, line-limited. Expanded → if the brief has labeled
+            // 3-step content, render it as three captioned sections; if
+            // not (older v1 cached briefs), fall back to the full summary.
+            if isExpanded, let trio = threeStep {
+                threeStepSummary(trio.whats, trio.why, trio.watch)
+            } else {
+                Text(summary)
+                    .font(.system(size: 14))
+                    .foregroundStyle(PA.Colors.text)
+                    .lineSpacing(3)
+                    .lineLimit(isExpanded ? nil : 3)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             // Takeaway chip + toggle (read more ↔ show less)
             HStack(spacing: 10) {
@@ -326,10 +345,19 @@ private struct AIBriefCard: View {
                 Spacer()
 
                 Button {
+                    let willExpand = !isExpanded
                     withAnimation(.easeInOut(duration: 0.25)) {
                         isExpanded.toggle()
                     }
                     PAHaptics.tap()
+                    // Fire the personalization event only on expansion —
+                    // collapsing back doesn't carry intent. Best-effort:
+                    // PersonalizationService.track is debounced + batched.
+                    if willExpand {
+                        PersonalizationService.shared.track(
+                            PersonalizedEvent(type: .aiBriefReadMoreTapped)
+                        )
+                    }
                 } label: {
                     HStack(spacing: 4) {
                         Text(isExpanded ? "Show less" : "Read more")
@@ -389,6 +417,44 @@ private struct AIBriefCard: View {
             RoundedRectangle(cornerRadius: PA.Layout.panelRadius, style: .continuous)
                 .stroke(PA.Colors.accent.opacity(0.35), lineWidth: 1)
         )
+    }
+
+    // MARK: - Three-step summary (expanded body)
+    // Renders the labeled "What's happening / Why it matters / What to
+    // watch" trio as three captioned sections. Used when the brief has
+    // the 3-step fields populated and the card is expanded.
+
+    private func threeStepSummary(_ whats: String, _ why: String, _ watch: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            threeStepRow(label: "What's happening", text: whats, icon: "dot.circle.fill")
+            threeStepRow(label: "Why it matters",   text: why,   icon: "scope")
+            threeStepRow(label: "What to watch",    text: watch, icon: "binoculars.fill")
+        }
+    }
+
+    private func threeStepRow(label: String, text: String, icon: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(PA.Colors.accent)
+                    .accessibilityHidden(true)
+                Text(label.uppercased())
+                    .font(.system(size: 10, weight: .bold))
+                    .tracking(1.2)
+                    .foregroundStyle(PA.Colors.accent)
+            }
+            Text(text)
+                .font(.system(size: 14))
+                .foregroundStyle(PA.Colors.text)
+                .lineSpacing(3)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        // Voiceover reads the label and body as a single sentence so
+        // screen-reader users don't hear the caption read separately.
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(label). \(text)")
     }
 
     // MARK: - Expanded footer

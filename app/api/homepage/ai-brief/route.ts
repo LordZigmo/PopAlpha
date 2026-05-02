@@ -27,6 +27,9 @@ type AiBriefRow = {
   version: string;
   summary: string;
   takeaway: string;
+  whats_happening: string | null;
+  why_it_matters: string | null;
+  what_to_watch: string | null;
   focus_set: string | null;
   model_label: string;
   source: string;
@@ -39,7 +42,9 @@ export async function GET() {
     const supabase = dbPublic();
     const { data, error } = await supabase
       .from("public_ai_brief_latest")
-      .select("version, summary, takeaway, focus_set, model_label, source, data_as_of, generated_at")
+      .select(
+        "version, summary, takeaway, whats_happening, why_it_matters, what_to_watch, focus_set, model_label, source, data_as_of, generated_at",
+      )
       .maybeSingle<AiBriefRow>();
 
     if (error) {
@@ -68,6 +73,9 @@ export async function GET() {
           version: data.version,
           summary: data.summary,
           takeaway: data.takeaway,
+          whats_happening: data.whats_happening,
+          why_it_matters: data.why_it_matters,
+          what_to_watch: data.what_to_watch,
           focus_set: data.focus_set,
           model_label: data.model_label,
           source: data.source,

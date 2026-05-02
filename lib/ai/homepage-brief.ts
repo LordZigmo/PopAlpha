@@ -48,6 +48,14 @@ export type HomepageBrief = {
   version: string;
   summary: string;
   takeaway: string;
+  /// Labeled 3-step variant of the same content as `summary`. The
+  /// homepage AI Brief card on iOS renders these as three captioned
+  /// sections when expanded ("What's happening / Why it matters /
+  /// What to watch"). All three are nullable for backward compat with
+  /// older v1 cached briefs and the legitimate fallback path.
+  whatsHappening: string | null;
+  whyItMatters: string | null;
+  whatToWatch: string | null;
   focusSet: string | null;
   modelLabel: string;
   source: HomepageBriefSource;
@@ -220,10 +228,12 @@ const SYSTEM_PROMPT = [
   "  3. What to watch next. (one short sentence)",
   "",
   "Output ONLY a single JSON object matching this exact shape:",
-  '  {"summary":"...","takeaway":"...","focusSet":"..." | null}',
+  '  {"whatsHappening":"...","whyItMatters":"...","whatToWatch":"...","takeaway":"...","focusSet":"..." | null}',
   "",
   "Field rules:",
-  "- summary: 3 short sentences (one per pattern step), 30–55 words total.",
+  "- whatsHappening: one short sentence (10–18 words) answering pattern step 1.",
+  "- whyItMatters:   one short sentence (10–18 words) answering pattern step 2.",
+  "- whatToWatch:    one short sentence (10–18 words) answering pattern step 3.",
   "- takeaway: one short headline, 4–8 words, no trailing period.",
   "    Examples: \"Some vintage cards are heating up\", \"Mixed market, no clear leader\",",
   "    \"Modern sets quietly leading\", \"A few cards doing the work\".",
@@ -251,32 +261,51 @@ export function buildFallbackHomepageBrief(
   const leaderCount = ctx.moverSets[0]?.count ?? 0;
   const avg = ctx.topMoverAvgPct;
 
-  let summary: string;
+  let whatsHappening: string;
+  let whyItMatters:   string;
+  let whatToWatch:    string;
   let takeaway: string;
 
   if (leader && leaderCount >= 3) {
-    summary = `${leader} is leading today. Most of the biggest movers come from the same set, so the gains are not spread across the whole market. Watch whether other sets join in or ${leader} keeps doing the work.`;
+    whatsHappening = `${leader} is leading today.`;
+    whyItMatters   = "Most of the biggest movers come from the same set, so the gains are not spread across the whole market.";
+    whatToWatch    = `Watch whether other sets join in or ${leader} keeps doing the work.`;
     takeaway = avg != null && avg > 0
       ? `${leader} +${avg}% on average`
       : `${leader} is leading today`;
   } else if (leader && ctx.moverSets.length >= 3) {
-    summary = `${leader} is moving, but a few other sets are moving too. No single set is in charge today. Watch which set holds its gains by the end of the day.`;
+    whatsHappening = `${leader} is moving, but a few other sets are moving too.`;
+    whyItMatters   = "No single set is in charge today.";
+    whatToWatch    = "Watch which set holds its gains by the end of the day.";
     takeaway = "Mixed market, no clear leader";
   } else if (leader) {
-    summary = `${leader} looks strongest right now, but only a few cards are doing the work. The rest of the market is still quiet. Watch for more sets to join before calling this a real run.`;
+    whatsHappening = `${leader} looks strongest right now, but only a few cards are doing the work.`;
+    whyItMatters   = "The rest of the market is still quiet.";
+    whatToWatch    = "Watch for more sets to join before calling this a real run.";
     takeaway = `${leader} leads, but quietly`;
   } else if ((ctx.topPullbackAvgPct ?? 0) < 0) {
-    summary = "The market is cooling off today. Most cards are flat or slipping, and very few are bid up. Watch for the first set that finds a floor and bounces.";
+    whatsHappening = "The market is cooling off today.";
+    whyItMatters   = "Most cards are flat or slipping, and very few are bid up.";
+    whatToWatch    = "Watch for the first set that finds a floor and bounces.";
     takeaway = "Cool day, few bids";
   } else {
-    summary = "The market is quiet today. No set has pulled ahead yet, so it is hard to say where the next move comes from. Watch for the first card or set that breaks out.";
+    whatsHappening = "The market is quiet today.";
+    whyItMatters   = "No set has pulled ahead yet, so it is hard to say where the next move comes from.";
+    whatToWatch    = "Watch for the first card or set that breaks out.";
     takeaway = "Market is quiet today";
   }
+
+  // Concatenated `summary` is the legacy single-blob form, kept around
+  // for older clients reading the v1 shape.
+  const summary = [whatsHappening, whyItMatters, whatToWatch].join(" ");
 
   return {
     version: HOMEPAGE_BRIEF_VERSION,
     summary,
     takeaway,
+    whatsHappening,
+    whyItMatters,
+    whatToWatch,
     focusSet: leader,
     modelLabel: HOMEPAGE_BRIEF_MODEL_LABEL,
     source: "fallback",
@@ -293,6 +322,9 @@ type ParsedLlmBrief = {
   summary: string;
   takeaway: string;
   focusSet: string | null;
+  whatsHappening: string | null;
+  whyItMatters: string | null;
+  whatToWatch: string | null;
 };
 
 /**
@@ -329,14 +361,45 @@ function parseLlmBrief(raw: string): ParsedLlmBrief | null {
   }
   if (!parsed || typeof parsed !== "object") return null;
   const obj = parsed as Record<string, unknown>;
-  const summary = typeof obj.summary === "string" ? obj.summary.trim() : "";
   const takeaway = typeof obj.takeaway === "string" ? obj.takeaway.trim() : "";
-  if (!summary || !takeaway) return null;
-  if (summary.length > 400 || takeaway.length > 80) return null;
+  if (!takeaway || takeaway.length > 80) return null;
+
+  // 3-step fields are the primary path. We also accept a legacy
+  // single-`summary` blob for backward compat with older prompts that
+  // might still be in flight; the cron will catch up on the next tick.
+  const cleanSection = (key: string): string => {
+    const v = obj[key];
+    return typeof v === "string" ? v.trim() : "";
+  };
+  const whatsHappening = cleanSection("whatsHappening");
+  const whyItMatters   = cleanSection("whyItMatters");
+  const whatToWatch    = cleanSection("whatToWatch");
+
+  let summary = typeof obj.summary === "string" ? obj.summary.trim() : "";
+  if (!summary && (whatsHappening || whyItMatters || whatToWatch)) {
+    // Synthesize the legacy `summary` field from the 3 steps so older
+    // clients that read only `summary` still see complete content.
+    summary = [whatsHappening, whyItMatters, whatToWatch]
+      .filter(Boolean)
+      .join(" ");
+  }
+  if (!summary || summary.length > 600) return null;
+  for (const part of [whatsHappening, whyItMatters, whatToWatch]) {
+    if (part.length > 220) return null;
+  }
+
   const focusSet = typeof obj.focusSet === "string" && obj.focusSet.trim().length > 0
     ? obj.focusSet.trim()
     : null;
-  return { summary, takeaway, focusSet };
+
+  return {
+    summary,
+    takeaway,
+    focusSet,
+    whatsHappening: whatsHappening || null,
+    whyItMatters:   whyItMatters   || null,
+    whatToWatch:    whatToWatch    || null,
+  };
 }
 
 // ── Main entry point ─────────────────────────────────────────────────────────
@@ -398,6 +461,9 @@ export async function generateHomepageBrief(
       version: HOMEPAGE_BRIEF_VERSION,
       summary: parsed.summary,
       takeaway: parsed.takeaway,
+      whatsHappening: parsed.whatsHappening,
+      whyItMatters:   parsed.whyItMatters,
+      whatToWatch:    parsed.whatToWatch,
       // If the LLM returned a focus set, prefer it; else fall back to our derived dominant set.
       focusSet: parsed.focusSet ?? ctx.dominantSet,
       modelLabel: HOMEPAGE_BRIEF_MODEL_LABEL,

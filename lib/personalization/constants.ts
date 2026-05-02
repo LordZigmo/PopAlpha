@@ -9,6 +9,7 @@ export const EVENT_TYPES: readonly EventType[] = [
   "variant_switch",
   "market_signal_expand",
   "ai_analysis_expand",
+  "ai_brief_read_more_tapped",
   "price_history_expand",
   "compare_open",
   "portfolio_open",
@@ -55,6 +56,11 @@ export const EVENT_WEIGHTS: Record<EventType, number> = {
   variant_switch: 1.8,
   market_signal_expand: 2,
   ai_analysis_expand: 2,
+  // Lighter than ai_analysis_expand because the brief is market-wide,
+  // not card-specific — it tells us the user is engaged with macro
+  // commentary, but doesn't pin a style dimension the way expanding
+  // a per-card AI takeaway does.
+  ai_brief_read_more_tapped: 1.2,
   price_history_expand: 2,
   compare_open: 2.5,
   portfolio_open: 1.2,

@@ -129,6 +129,7 @@ struct PersonalizedEvent {
         case variantSwitch = "variant_switch"
         case marketSignalExpand = "market_signal_expand"
         case aiAnalysisExpand = "ai_analysis_expand"
+        case aiBriefReadMoreTapped = "ai_brief_read_more_tapped"
         case priceHistoryExpand = "price_history_expand"
         case compareOpen = "compare_open"
         case portfolioOpen = "portfolio_open"
