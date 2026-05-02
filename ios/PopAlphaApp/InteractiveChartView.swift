@@ -34,6 +34,25 @@ struct InteractiveChartView: View {
         return ("\(sign)\(String(format: "%.2f", pct))%", pct >= 0)
     }
 
+    /// VoiceOver summary so the scrubber-based chart is at least
+    /// describable to screen readers (the drag gesture itself is not
+    /// reachable via VoiceOver). Reads e.g. "Price chart, $10.50 to
+    /// $12.30, up 17 percent over 10 data points."
+    private var accessibilitySummary: String {
+        guard let first = data.first, let last = data.last,
+              data.count >= 2 else {
+            return "no data"
+        }
+        let pctChange: Double = first != 0
+            ? ((last - first) / abs(first)) * 100
+            : 0
+        let direction = isPositive ? "up" : "down"
+        return String(
+            format: "$%.2f to $%.2f, %@ %.0f percent over %d data points",
+            first, last, direction, abs(pctChange), data.count
+        )
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             // Scrub price overlay
@@ -95,6 +114,9 @@ struct InteractiveChartView: View {
             }
             .frame(height: height)
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Price chart")
+        .accessibilityValue(accessibilitySummary)
     }
 
     // MARK: - Price Overlay (shown while scrubbing)

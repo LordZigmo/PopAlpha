@@ -280,10 +280,12 @@ private struct AIBriefCard: View {
                     Image(systemName: "sparkles")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(PA.Colors.accent)
+                        .accessibilityHidden(true)
                     Text("AI BRIEF")
                         .font(.system(size: 10, weight: .semibold))
                         .tracking(2.0)
                         .foregroundStyle(PA.Colors.accent)
+                        .accessibilityAddTraits(.isHeader)
                 }
                 Circle()
                     .fill(isLive ? PA.Colors.positive : PA.Colors.muted)
@@ -335,10 +337,12 @@ private struct AIBriefCard: View {
                         Image(systemName: "chevron.down")
                             .font(.system(size: 10, weight: .bold))
                             .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                            .accessibilityHidden(true)
                     }
                     .foregroundStyle(PA.Colors.accent)
                 }
                 .buttonStyle(.plain)
+                .accessibilityHint(isExpanded ? "Collapses the AI brief" : "Expands the full AI brief")
             }
 
             // Tertiary "who this matters to" line — personalizes without
@@ -348,6 +352,7 @@ private struct AIBriefCard: View {
                 Image(systemName: "scope")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(PA.Colors.muted)
+                    .accessibilityHidden(true)
                 Text(mattersLine)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(PA.Colors.textSecondary)
@@ -953,6 +958,7 @@ private struct CommunitySection: View {
                         .font(.system(size: 16, weight: .bold))
                         .foregroundStyle(PA.Colors.text)
                         .padding(.horizontal, PA.Layout.sectionPadding)
+                        .accessibilityAddTraits(.isHeader)
 
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 10) {
@@ -971,6 +977,7 @@ private struct CommunitySection: View {
                     Text("Most saved this week")
                         .font(.system(size: 16, weight: .bold))
                         .foregroundStyle(PA.Colors.text)
+                        .accessibilityAddTraits(.isHeader)
 
                     ForEach(data.mostSaved.prefix(5), id: \.slug) { card in
                         CommunityListRow(card: card)
@@ -985,6 +992,7 @@ private struct CommunitySection: View {
                     Text("Friends")
                         .font(.system(size: 16, weight: .bold))
                         .foregroundStyle(PA.Colors.text)
+                        .accessibilityAddTraits(.isHeader)
 
                     ForEach(Array(data.friendsAdded.prefix(5).enumerated()), id: \.offset) { _, event in
                         FriendEventRow(event: event)

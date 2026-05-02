@@ -31,6 +31,30 @@ struct PortfolioPositionCell: View {
         return "\(qtyLabel) · Avg \(position.formattedAvgCost)"
     }
 
+    /// VoiceOver summary of the entire position row. Without this the
+    /// row reads as 6+ separate elements (image, name, set, qty, grade,
+    /// descriptor, value, change, chevron). Saves screen-reader users
+    /// many swipes on holdings-heavy portfolios.
+    private var accessibilitySummary: String {
+        var parts: [String] = ["\(displayName), \(position.totalQty) \(position.totalQty == 1 ? "copy" : "copies"), grade \(position.grade)"]
+        if let set = metadata?.setName, !set.isEmpty {
+            parts.append("from \(set)")
+        }
+        if let mv = marketValue {
+            parts.append("worth \(formatDollar(mv))")
+            if let chg = metadata?.changePct, chg != 0 {
+                let direction = chg >= 0 ? "up" : "down"
+                parts.append("\(direction) \(formatPct(abs(chg))) at market")
+            }
+        } else {
+            parts.append("cost basis \(position.formattedCostBasis)")
+        }
+        if let descriptor {
+            parts.append(descriptor)
+        }
+        return parts.joined(separator: ", ")
+    }
+
     private var marketValue: Double? {
         guard let price = metadata?.marketPrice else { return nil }
         return price * Double(position.totalQty)
@@ -71,11 +95,16 @@ struct PortfolioPositionCell: View {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(PA.Colors.muted)
+                        // Decorative — Button trait already says "button".
+                        .accessibilityHidden(true)
                 }
                 .padding(PA.Layout.cardPadding)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(accessibilitySummary)
+            .accessibilityAddTraits(.isButton)
 
             // Multi-lot disclosure (tap to expand below the row)
             if position.lots.count > 1 {
@@ -165,6 +194,8 @@ struct PortfolioPositionCell: View {
         HStack(spacing: 4) {
             Image(systemName: descriptorIcon(text))
                 .font(.system(size: 8, weight: .bold))
+                // Decorative — text label conveys the same meaning.
+                .accessibilityHidden(true)
             Text(text)
                 .font(.system(size: 10, weight: .semibold))
         }

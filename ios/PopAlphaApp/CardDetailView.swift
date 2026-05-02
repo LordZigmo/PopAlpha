@@ -197,6 +197,7 @@ struct CardDetailView: View {
                         .background(.ultraThinMaterial.opacity(0.5))
                         .clipShape(Circle())
                 }
+                .accessibilityLabel("Back")
             }
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 8) {
@@ -208,6 +209,7 @@ struct CardDetailView: View {
                             .background(.ultraThinMaterial.opacity(0.5))
                             .clipShape(Circle())
                     }
+                    .accessibilityLabel("Notifications")
 
                     Button {
                         PAHaptics.tap()
@@ -441,10 +443,14 @@ struct CardDetailView: View {
                     HStack(spacing: 4) {
                         Image(systemName: card.isPositive ? "arrow.up.right" : "arrow.down.right")
                             .font(.system(size: 12, weight: .bold))
+                            // Decorative — adjacent percent text conveys direction.
+                            .accessibilityHidden(true)
                         Text(card.changeText)
                             .font(.system(size: 15, weight: .semibold))
                     }
                     .foregroundStyle(card.isPositive ? PA.Colors.positive : PA.Colors.negative)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("\(card.isPositive ? "Up" : "Down") \(card.changeText)")
 
                     Text(card.changeWindow)
                         .font(PA.Typography.caption)
