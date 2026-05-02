@@ -172,11 +172,14 @@ private struct TopBar: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image("PopAlphaLogo")
+            // Transparent character (no dark tile background) so the
+            // mark blends into the homepage chrome instead of looking
+            // like a separate floating icon. Slightly larger frame to
+            // compensate for the lack of a tile to anchor it visually.
+            Image("PopAlphaLogoTransparent")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
-                .frame(width: 26, height: 26)
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .frame(width: 30, height: 30)
 
             Text("PopAlpha")
                 .font(.system(size: 17, weight: .semibold, design: .rounded))
