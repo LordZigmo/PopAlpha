@@ -99,9 +99,21 @@ struct CardDetailView: View {
         .coordinateSpace(name: "scroll")
         .background(PA.Colors.background)
         .overlay(alignment: .bottomTrailing) {
-            addHoldingFAB
-                .padding(.trailing, 20)
-                .padding(.bottom, 20)
+            // Stacked floating actions, both stay in place during scroll.
+            // Wishlist sits above the primary "+" FAB at a smaller size +
+            // frosted background so the visual hierarchy reads as
+            // primary (Add to Portfolio) → secondary (Wishlist).
+            VStack(spacing: 12) {
+                WatchlistButton(
+                    slug: card.id,
+                    cardName: card.name,
+                    setName: card.setName,
+                    compact: true
+                )
+                addHoldingFAB
+            }
+            .padding(.trailing, 20)
+            .padding(.bottom, 20)
         }
         .sheet(isPresented: $showCorrectionSheet) {
             if let hash = scanImageHash {
