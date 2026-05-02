@@ -1,4 +1,5 @@
 import SwiftUI
+import OSLog
 
 // MARK: - Edit Holding Lot Sheet
 //
@@ -359,7 +360,7 @@ struct EditHoldingLotSheet: View {
 
     @MainActor
     private func save() async {
-        print("[EditHoldingLotSheet] save() invoked for lot id=\(lot.id), grade=\(selectedGrade.rawValue), qty=\(quantity)")
+        Logger.ui.debug("save() invoked for lot id=\(lot.id), grade=\(selectedGrade.rawValue), qty=\(quantity)")
 
         let trimmedPrice = pricePaid.trimmingCharacters(in: .whitespaces)
         let parsedPrice: Double?
@@ -371,7 +372,7 @@ struct EditHoldingLotSheet: View {
             // Don't silently return — the user tapped Save with
             // something they presumably want to commit. Surface the
             // problem so they can correct it.
-            print("[EditHoldingLotSheet] price parse failed: '\(trimmedPrice)'")
+            Logger.ui.debug("price parse failed: '\(trimmedPrice)'")
             saveError = "Price '\(trimmedPrice)' isn't a valid number. Clear the field or enter a number like 12.34."
             return
         }
@@ -397,7 +398,7 @@ struct EditHoldingLotSheet: View {
         saveError = nil
 
         do {
-            print("[EditHoldingLotSheet] calling PATCH /api/holdings for id=\(lot.id)")
+            Logger.ui.debug("calling PATCH /api/holdings for id=\(lot.id)")
             try await HoldingsService.shared.updateHolding(
                 id: lot.id,
                 grade: selectedGrade.rawValue,
@@ -407,16 +408,16 @@ struct EditHoldingLotSheet: View {
                 venue: venue.trimmingCharacters(in: .whitespaces),
                 certNumber: certToSend
             )
-            print("[EditHoldingLotSheet] PATCH succeeded for id=\(lot.id)")
+            Logger.ui.debug("PATCH succeeded for id=\(lot.id)")
             isSaving = false
             PAHaptics.tap()
             // Parent owns dismissal — its onSaved closure is expected
             // to refresh state AND clear its sheet binding.
-            print("[EditHoldingLotSheet] invoking onSaved (refresh + close sheet)")
+            Logger.ui.debug("invoking onSaved (refresh + close sheet)")
             await onSaved?()
-            print("[EditHoldingLotSheet] onSaved returned — save() complete")
+            Logger.ui.debug("onSaved returned — save() complete")
         } catch {
-            print("[EditHoldingLotSheet] save FAILED for id=\(lot.id): \(error)")
+            Logger.ui.debug("save FAILED for id=\(lot.id): \(error)")
             saveError = error.localizedDescription
             isSaving = false
         }

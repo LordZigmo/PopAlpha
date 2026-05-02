@@ -1,4 +1,5 @@
 import SwiftUI
+import OSLog
 
 // MARK: - Portfolio View
 
@@ -398,7 +399,7 @@ struct PortfolioView: View {
             holdings = try await HoldingsService.shared.fetchHoldings()
             positions = Position.group(holdings)
         } catch {
-            print("[PortfolioView] Holdings fetch failed: \(error)")
+            Logger.ui.debug("Holdings fetch failed: \(error)")
             if let apiErr = error as? APIError, case .httpError(403, _) = apiErr {
                 self.error = "Set up your profile to access your portfolio"
             } else {
@@ -437,7 +438,7 @@ struct PortfolioView: View {
             holdings = fresh
             positions = Position.group(holdings)
         } catch {
-            print("[PortfolioView] Holdings refresh failed: \(error)")
+            Logger.ui.debug("Holdings refresh failed: \(error)")
         }
     }
 
@@ -445,7 +446,7 @@ struct PortfolioView: View {
 
     /// Remove all lots for the given holding IDs, then optimistically
     /// drop them from local state before the reload confirms it.
-    private func deleteLots(_ ids: [Int]) async {
+    private func deleteLots(_ ids: [String]) async {
         let idSet = Set(ids)
         // Optimistic update — remove from UI immediately
         holdings.removeAll { idSet.contains($0.id) }
@@ -455,7 +456,7 @@ struct PortfolioView: View {
         do {
             try await HoldingsService.shared.deleteHoldings(ids: ids)
         } catch {
-            print("[PortfolioView] Delete failed: \(error)")
+            Logger.ui.debug("Delete failed: \(error)")
         }
         // Reload to sync with server (also triggers overview refresh)
         await loadPortfolio()

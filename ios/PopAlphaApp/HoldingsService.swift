@@ -63,11 +63,11 @@ actor HoldingsService {
     /// Remove one or more holding lots by ID. Typically all lots in a
     /// position are passed together so the entire card disappears from
     /// the portfolio in one request.
-    func deleteHoldings(ids: [Int]) async throws {
+    func deleteHoldings(ids: [String]) async throws {
         guard !ids.isEmpty else { return }
         try AuthService.shared.requireAuth()
 
-        let idsParam = ids.map(String.init).joined(separator: ",")
+        let idsParam = ids.joined(separator: ",")
         let _: SimpleOKResponse = try await APIClient.delete(
             path: "/api/holdings",
             query: [("ids", idsParam)],
@@ -85,7 +85,7 @@ actor HoldingsService {
     /// Use this when the caller has all current values in hand. For a
     /// surgical single-field update, build the PATCH body directly.
     func updateHolding(
-        id: Int,
+        id: String,
         grade: String,
         qty: Int,
         pricePaidUsd: Double?,
@@ -113,13 +113,10 @@ actor HoldingsService {
         body["venue"]          = (venue.flatMap       { $0.isEmpty ? nil : ($0 as Any) }) ?? NSNull()
         body["cert_number"]    = (certNumber.flatMap  { $0.isEmpty ? nil : ($0 as Any) }) ?? NSNull()
 
-        print("[HoldingsService] PATCH /api/holdings body=\(body)")
-
-        let response: SimpleOKResponse = try await APIClient.patch(
+        let _: SimpleOKResponse = try await APIClient.patch(
             path: "/api/holdings",
             body: body,
             decoder: decoder
         )
-        print("[HoldingsService] PATCH /api/holdings ok=\(response.ok)")
     }
 }

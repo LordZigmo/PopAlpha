@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 // MARK: - PopAlpha API Client (calls Next.js routes at popalpha.ai)
 
@@ -107,7 +108,7 @@ enum APIClient {
             // AuthService to refresh / clear local state so the UI
             // doesn't stay wedged in a phantom signed-in state.
             let bodyText = String(data: data, encoding: .utf8) ?? ""
-            print("[APIClient] 401 \(request.url?.path ?? "?"): \(bodyText.prefix(300))")
+            Logger.api.debug("401 \(request.url?.path ?? "?"): \(bodyText.prefix(300))")
             Task { await AuthService.shared.handleServerAuthRejection() }
             throw APIError.unauthorized
         }
@@ -171,7 +172,7 @@ enum APIClient {
             // (expired, bad signature, missing claim, etc.) — without
             // this, every 401 looks identical.
             let bodyText = String(data: data, encoding: .utf8) ?? ""
-            print("[APIClient] 401 \(request.url?.path ?? "?"): \(bodyText.prefix(300))")
+            Logger.api.debug("401 \(request.url?.path ?? "?"): \(bodyText.prefix(300))")
             Task { await AuthService.shared.handleServerAuthRejection() }
             throw APIError.unauthorized
         }

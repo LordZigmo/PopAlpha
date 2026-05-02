@@ -48,6 +48,7 @@
 //      full-card embeddings for v1.
 
 import Foundation
+import OSLog
 
 // MARK: - Public types
 
@@ -253,7 +254,7 @@ public final class OfflineIdentifier {
         #if DEBUG
         if dbg {
             let directDistinct = Set(directRows.map { $0.canonicalSlug }).count
-            print("[identify.dbg] hint=\(normalizedHint ?? "nil") num=\(normalizedNumber ?? "nil") lang=\(request.language) directRows=\(directRows.count) directDistinct=\(directDistinct) clipTop=\(clipOriginalTopSlug ?? "nil")")
+            Logger.scan.debug("hint=\(normalizedHint ?? "nil") num=\(normalizedNumber ?? "nil") lang=\(request.language) directRows=\(directRows.count) directDistinct=\(directDistinct) clipTop=\(clipOriginalTopSlug ?? "nil")")
         }
         #endif
 
@@ -267,7 +268,7 @@ public final class OfflineIdentifier {
             let uniqueSlugs = Self.distinctSlugs(setMatching)
             #if DEBUG
             if dbg {
-                print("[identify.dbg.A] setMatching=\(setMatching.count) uniqueSlugs=\(uniqueSlugs.count) sample=\(uniqueSlugs.prefix(3))")
+                Logger.scan.debug("setMatching=\(setMatching.count) uniqueSlugs=\(uniqueSlugs.count) sample=\(uniqueSlugs.prefix(3))")
             }
             #endif
             if uniqueSlugs.count == 1 {
@@ -345,7 +346,7 @@ public final class OfflineIdentifier {
             #if DEBUG
             if dbg {
                 let knnSlugs = Self.dedupeBySlugPreservingOrder(knnHits).prefix(5).map { $0.row.canonicalSlug }
-                print("[identify.dbg.B] intersect=\(intersect.count) knnTop5Slugs=\(Array(knnSlugs)) directSlugCount=\(directSlugs.count)")
+                Logger.scan.debug("intersect=\(intersect.count) knnTop5Slugs=\(Array(knnSlugs)) directSlugCount=\(directSlugs.count)")
             }
             #endif
             if intersect.count == 1 {

@@ -36,6 +36,7 @@ import CoreML
 import CoreVideo
 import Foundation
 import UIKit
+import OSLog
 
 public enum OfflineEmbedderError: Error, LocalizedError {
     case modelNotFoundInBundle
@@ -188,7 +189,7 @@ public final class OfflineEmbedder {
         let stride = CVPixelBufferGetBytesPerRow(pb)
         let pixfmt = CVPixelBufferGetPixelFormatType(pb)
         guard let base = CVPixelBufferGetBaseAddress(pb) else {
-            print("[embedder.debug] pixelBuffer base addr nil")
+            Logger.scan.debug("pixelBuffer base addr nil")
             return
         }
         let ptr = base.bindMemory(to: UInt8.self, capacity: stride * h)
@@ -209,7 +210,7 @@ public final class OfflineEmbedder {
             UInt8((pixfmt >> 8) & 0xFF),
             UInt8(pixfmt & 0xFF),
         )
-        print("[embedder.debug] pixelBuffer \(w)×\(h) fmt=\(fmtStr) stride=\(stride) meanB=\(sumB/n) meanG=\(sumG/n) meanR=\(sumR/n)")
+        Logger.scan.debug("pixelBuffer \(w)×\(h) fmt=\(fmtStr) stride=\(stride) meanB=\(sumB/n) meanG=\(sumG/n) meanR=\(sumR/n)")
     }
 
     /// Prints output spec + a few raw values from the prediction so
@@ -222,11 +223,11 @@ public final class OfflineEmbedder {
         if alreadyDumped { return }
 
         guard let v = pred.featureValue(for: outputName) else {
-            print("[embedder.debug] no feature \(outputName); names=\(pred.featureNames)")
+            Logger.scan.debug("no feature \(outputName); names=\(pred.featureNames)")
             return
         }
         guard let arr = v.multiArrayValue else {
-            print("[embedder.debug] feature \(outputName) is not multiarray (type=\(v.type))")
+            Logger.scan.debug("feature \(outputName) is not multiarray (type=\(String(describing: v.type)))")
             return
         }
         let rawDtype = arr.dataType.rawValue
@@ -234,7 +235,7 @@ public final class OfflineEmbedder {
         for i in 0..<min(8, arr.count) {
             samples.append(String(format: "%.4f", arr[i].floatValue))
         }
-        print("[embedder.debug] output shape=\(arr.shape) strides=\(arr.strides) dtype=raw=\(rawDtype) count=\(arr.count) first8=[\(samples.joined(separator: ", "))]")
+        Logger.scan.debug("output shape=\(arr.shape) strides=\(arr.strides) dtype=raw=\(rawDtype) count=\(arr.count) first8=[\(samples.joined(separator: ", "))]")
     }
     #endif
 

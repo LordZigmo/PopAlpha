@@ -15,7 +15,12 @@ enum HoldingSource: String, Decodable, Hashable {
 }
 
 struct HoldingRow: Decodable, Identifiable, Hashable {
-    let id: Int
+    /// Holdings.id is a UUID column on the server, so this is the
+    /// raw UUID string. Earlier this was typed as Int with a hashValue
+    /// fallback — that produced a meaningless integer that the server
+    /// then rejected with "invalid input syntax for type uuid" when
+    /// the client tried to PATCH/DELETE.
+    let id: String
     let canonicalSlug: String?
     let printingId: String?
     let grade: String
@@ -56,12 +61,18 @@ struct HoldingRow: Decodable, Identifiable, Hashable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
 
-        // id: may arrive as Int or String
-        if let intId = try? c.decode(Int.self, forKey: .id) {
-            id = intId
+        // id: server returns a UUID string, but tolerate Int just in
+        // case a future schema change brings back an integer key.
+        if let strId = try? c.decode(String.self, forKey: .id) {
+            id = strId
+        } else if let intId = try? c.decode(Int.self, forKey: .id) {
+            id = String(intId)
         } else {
-            let strId = try c.decode(String.self, forKey: .id)
-            id = Int(strId) ?? strId.hashValue
+            throw DecodingError.dataCorruptedError(
+                forKey: .id,
+                in: c,
+                debugDescription: "holdings.id missing or wrong type"
+            )
         }
 
         canonicalSlug = try c.decodeIfPresent(String.self, forKey: .canonicalSlug)

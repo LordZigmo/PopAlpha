@@ -34,6 +34,7 @@
 
 import UIKit
 import Photos
+import OSLog
 
 enum ScanDebugCapture {
 
@@ -63,7 +64,7 @@ enum ScanDebugCapture {
             // fall back to .readWrite so older OS versions still work.
             let granted = await Self.ensurePhotoAddPermission()
             guard granted else {
-                print("[scan.debug] photo permission not granted; skipping capture save")
+                Logger.scan.debug("photo permission not granted; skipping capture save")
                 return
             }
             let banner = Self.makeBanner(
@@ -77,9 +78,9 @@ enum ScanDebugCapture {
                 try await PHPhotoLibrary.shared().performChanges {
                     PHAssetChangeRequest.creationRequestForAsset(from: composed)
                 }
-                print("[scan.debug] saved capture to Photos: \(banner.replacingOccurrences(of: "\n", with: " | "))")
+                Logger.scan.debug("saved capture to Photos: \(banner.replacingOccurrences(of: "\n", with: " | "))")
             } catch {
-                print("[scan.debug] save failed: \(error.localizedDescription)")
+                Logger.scan.debug("save failed: \(error.localizedDescription)")
             }
         }
     }

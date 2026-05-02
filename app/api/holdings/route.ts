@@ -112,9 +112,16 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ ok: false, error: "Invalid JSON." }, { status: 400 });
   }
 
-  const id = typeof body.id === "number" ? Math.floor(body.id) : NaN;
-  if (!Number.isFinite(id) || id <= 0) {
-    return NextResponse.json({ ok: false, error: "id must be a positive integer." }, { status: 400 });
+  // holdings.id is a UUID column. Accept the string directly. Tolerate
+  // a number coming in from older clients by stringifying it — the
+  // database will still reject anything that isn't a real UUID.
+  const id =
+    typeof body.id === "string" ? body.id.trim()
+      : typeof body.id === "number" ? String(body.id)
+      : "";
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!id || !UUID_RE.test(id)) {
+    return NextResponse.json({ ok: false, error: "id must be a UUID string." }, { status: 400 });
   }
 
   // Build the update payload out of only the keys the caller actually
@@ -232,13 +239,14 @@ export async function DELETE(req: Request) {
 
   const url = new URL(req.url);
   const rawIds = url.searchParams.get("ids") ?? "";
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const ids = rawIds
     .split(",")
-    .map((s) => Number(s.trim()))
-    .filter((n) => Number.isFinite(n) && n > 0);
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0 && UUID_RE.test(s));
 
   if (ids.length === 0) {
-    return NextResponse.json({ ok: false, error: "ids query param required." }, { status: 400 });
+    return NextResponse.json({ ok: false, error: "ids query param required (UUIDs)." }, { status: 400 });
   }
 
   const supabase = dbAdmin();

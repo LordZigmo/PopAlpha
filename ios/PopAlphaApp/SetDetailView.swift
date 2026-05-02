@@ -1,5 +1,6 @@
 import SwiftUI
 import NukeUI
+import OSLog
 
 // MARK: - Set Browser
 //
@@ -128,7 +129,7 @@ struct SetDetailView: View {
         do {
             cards = try await CardService.shared.fetchSetCards(setName: setName)
         } catch {
-            print("[SetDetailView] Failed to load set: \(error)")
+            Logger.ui.debug("Failed to load set: \(error)")
             cards = []
         }
         loading = false

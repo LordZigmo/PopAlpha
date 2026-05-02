@@ -1,6 +1,7 @@
 import Foundation
 import UIKit
 import UserNotifications
+import OSLog
 
 // MARK: - Push Service
 //
@@ -54,7 +55,7 @@ final class PushService {
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
         authorizationStatus = settings.authorizationStatus
-        print("[PushService] requestAuthorizationIfNeeded: status=\(settings.authorizationStatus.rawValue)")
+        Logger.push.debug("requestAuthorizationIfNeeded: status=\(settings.authorizationStatus.rawValue)")
 
         switch settings.authorizationStatus {
         case .notDetermined:
@@ -62,7 +63,7 @@ final class PushService {
             do {
                 let granted = try await center.requestAuthorization(options: [.alert, .sound, .badge])
                 await refreshAuthorizationStatus()
-                print("[PushService] permission granted=\(granted) — calling registerForRemoteNotifications()")
+                Logger.push.debug("permission granted=\(granted) — calling registerForRemoteNotifications()")
                 AnalyticsService.shared.capture(
                     .pushPermissionResponse,
                     properties: ["granted": granted]
@@ -71,16 +72,16 @@ final class PushService {
                     await MainActor.run { UIApplication.shared.registerForRemoteNotifications() }
                 }
             } catch {
-                print("[PushService] requestAuthorization threw: \(error)")
+                Logger.push.debug("requestAuthorization threw: \(error)")
                 lastUploadError = error.localizedDescription
             }
         case .authorized, .provisional, .ephemeral:
-            print("[PushService] already authorized — calling registerForRemoteNotifications()")
+            Logger.push.debug("already authorized — calling registerForRemoteNotifications()")
             await MainActor.run { UIApplication.shared.registerForRemoteNotifications() }
         case .denied:
             // User opted out; don't bother re-prompting. UI can route
             // them to iOS Settings if we ever need to re-ask.
-            print("[PushService] user denied previously — not re-prompting")
+            Logger.push.debug("user denied previously — not re-prompting")
             break
         @unknown default:
             break
@@ -100,14 +101,14 @@ final class PushService {
     /// Debounces against the last-uploaded value to avoid hammering the
     /// register endpoint on every launch.
     func handleRegisteredToken(_ hexToken: String) async {
-        print("[PushService] handleRegisteredToken called, length=\(hexToken.count)")
+        Logger.push.debug("handleRegisteredToken called, length=\(hexToken.count)")
         guard !hexToken.isEmpty else {
-            print("[PushService] empty token — bailing")
+            Logger.push.debug("empty token — bailing")
             return
         }
         let composite = compositeSignature(token: hexToken)
         if defaults.string(forKey: lastUploadedTokenKey) == composite {
-            print("[PushService] token already uploaded (cache hit) — no-op")
+            Logger.push.debug("token already uploaded (cache hit) — no-op")
             return
         }
 
@@ -116,11 +117,11 @@ final class PushService {
         // AuthService calls requestAuthorizationIfNeeded() which
         // re-triggers registerForRemoteNotifications() → new callback.
         guard AuthService.shared.isAuthenticated else {
-            print("[PushService] not authenticated yet — token buffered, will upload after sign-in")
+            Logger.push.debug("not authenticated yet — token buffered, will upload after sign-in")
             return
         }
 
-        print("[PushService] uploading device_token suffix=\(hexToken.suffix(8)) env=\(apnsEnvironment)")
+        Logger.push.debug("uploading device_token suffix=\(hexToken.suffix(8)) env=\(self.apnsEnvironment)")
         do {
             try await APIClient.post(
                 path: "/api/device/register",
@@ -134,15 +135,15 @@ final class PushService {
             )
             defaults.set(composite, forKey: lastUploadedTokenKey)
             await MainActor.run { self.lastUploadError = nil }
-            print("[PushService] upload OK")
+            Logger.push.debug("upload OK")
         } catch {
             await MainActor.run { self.lastUploadError = error.localizedDescription }
             // Print both the localized form AND the full debug form so the
             // body of an HTTP error (which carries the server's stage info)
             // is visible in the Xcode console.
-            print("[PushService] upload FAILED: \(error.localizedDescription)")
+            Logger.push.debug("upload FAILED: \(error.localizedDescription)")
             if case let APIError.httpError(status, body) = error {
-                print("[PushService]   status=\(status) body=\(body)")
+                Logger.push.debug("  status=\(status) body=\(body)")
             }
         }
     }
@@ -154,7 +155,7 @@ final class PushService {
         #if targetEnvironment(simulator)
         return
         #else
-        print("[PushService] APNs registration failed: \(error)")
+        Logger.push.debug("APNs registration failed: \(error)")
         lastUploadError = error.localizedDescription
         #endif
     }

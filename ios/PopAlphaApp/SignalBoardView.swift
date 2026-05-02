@@ -1,5 +1,6 @@
 import SwiftUI
 import NukeUI
+import OSLog
 
 // MARK: - Signal Board — homepage content surface
 //
@@ -200,11 +201,11 @@ struct SignalBoardView: View {
         async let signalTask = CardService.shared.fetchHomepageSignalBoard()
         async let briefTask: HomepageAIBriefDTO? = {
             do { return try await CardService.shared.fetchAIBrief() }
-            catch { print("[SignalBoardView] ai-brief load error: \(error)"); return nil }
+            catch { Logger.ui.debug("ai-brief load error: \(error)"); return nil }
         }()
         async let communityTask: HomepageCommunityDTO? = {
             do { return try await CardService.shared.fetchHomepageCommunity() }
-            catch { print("[SignalBoardView] community load error: \(error)"); return nil }
+            catch { Logger.ui.debug("community load error: \(error)"); return nil }
         }()
         do {
             let fetched = try await signalTask
@@ -217,7 +218,7 @@ struct SignalBoardView: View {
                 self.isLoading = false
             }
         } catch {
-            print("[SignalBoardView] load error: \(error)")
+            Logger.ui.debug("load error: \(error)")
             let brief = await briefTask
             let comm = await communityTask
             await MainActor.run {

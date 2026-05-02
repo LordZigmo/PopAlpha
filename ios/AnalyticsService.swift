@@ -1,5 +1,26 @@
 import Foundation
+import OSLog
 import PostHog
+
+// MARK: - Logger categories
+//
+// Use these instead of `print(...)` so debug spew is filtered out of the
+// system unified log on Release builds (Logger.debug is suppressed unless
+// a developer explicitly streams the subsystem). Visible during dev via
+// Xcode console / Console.app filtered to subsystem "ai.popalpha.ios".
+//
+// PopAlphaCore (the Scanner Swift Package) declares its own Logger.scan
+// extension because Swift extensions don't cross module boundaries.
+
+extension Logger {
+    private static let subsystem = "ai.popalpha.ios"
+
+    static let api          = Logger(subsystem: subsystem, category: "api")
+    static let auth         = Logger(subsystem: subsystem, category: "auth")
+    static let push         = Logger(subsystem: subsystem, category: "push")
+    static let scan         = Logger(subsystem: subsystem, category: "scan")
+    static let ui           = Logger(subsystem: subsystem, category: "ui")
+}
 
 // MARK: - Analytics Service (PostHog)
 //

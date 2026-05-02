@@ -1,4 +1,5 @@
 import SwiftUI
+import OSLog
 
 // MARK: - Notification View
 //
@@ -320,7 +321,7 @@ struct NotificationView: View {
         } catch {
             // Non-fatal — leave the picker at the default 9am value so
             // the user can still interact. Next save will still succeed.
-            print("[NotificationView] settings load failed: \(error)")
+            Logger.push.debug("settings load failed: \(error)")
         }
     }
 
@@ -374,7 +375,7 @@ struct NotificationView: View {
                 isSavingTime = false
             }
         } catch {
-            print("[NotificationView] save delivery time failed: \(error)")
+            Logger.push.debug("save delivery time failed: \(error)")
             await MainActor.run { isSavingTime = false }
         }
     }

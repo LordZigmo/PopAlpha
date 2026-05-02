@@ -1,5 +1,6 @@
 import Foundation
 import ClerkKit
+import OSLog
 
 // MARK: - Auth Service (Clerk iOS SDK)
 //
@@ -129,7 +130,7 @@ final class AuthService {
             if !isUserCancel {
                 signInError = error.localizedDescription
             }
-            print("[AuthService] Sign-in failed: \(error)")
+            Logger.auth.debug("Sign-in failed: \(error)")
         }
     }
 
@@ -177,7 +178,7 @@ final class AuthService {
         let user = await Clerk.shared.user
         let session = await Clerk.shared.session
         let clientSessions = await Clerk.shared.client?.sessions ?? []
-        print("[AuthService] restore: user=\(user?.id ?? "nil") session=\(session?.id ?? "nil") clientSessions=\(clientSessions.count)")
+        Logger.auth.debug("restore: user=\(user?.id ?? "nil") session=\(session?.id ?? "nil") clientSessions=\(clientSessions.count)")
 
         // Healthy path: user + active session + token mint succeeds.
         if let user,
@@ -195,19 +196,19 @@ final class AuthService {
         // Either way, every signIn attempt will 400 and every API call
         // will 401 until we explicitly tear down what's on the client.
         if user != nil || !clientSessions.isEmpty {
-            print("[AuthService] restore: limbo — clearing client (sessions=\(clientSessions.count))")
+            Logger.auth.debug("restore: limbo — clearing client (sessions=\(clientSessions.count))")
             do {
                 try await Clerk.shared.auth.signOut()
-                print("[AuthService] signOut(all) ok")
+                Logger.auth.debug("signOut(all) ok")
             } catch {
-                print("[AuthService] signOut(all) failed: \(error)")
+                Logger.auth.debug("signOut(all) failed: \(error)")
             }
             for s in clientSessions {
                 do {
                     try await Clerk.shared.auth.signOut(sessionId: s.id)
-                    print("[AuthService] signOut(sessionId: \(s.id)) ok")
+                    Logger.auth.debug("signOut(sessionId: \(s.id)) ok")
                 } catch {
-                    print("[AuthService] signOut(sessionId: \(s.id)) failed: \(error)")
+                    Logger.auth.debug("signOut(sessionId: \(s.id)) failed: \(error)")
                 }
             }
         }
@@ -326,12 +327,12 @@ final class AuthService {
         if let token = try? await Clerk.shared.auth.getToken(),
            !token.isEmpty,
            token != authToken {
-            print("[AuthService] 401 → minted fresh token, retrying")
+            Logger.auth.debug("401 → minted fresh token, retrying")
             authToken = token
             APIClient.setAuthToken(token)
             return
         }
-        print("[AuthService] 401 → no usable token from Clerk, tearing down")
+        Logger.auth.debug("401 → no usable token from Clerk, tearing down")
         isAuthenticated = false
         authToken = nil
         APIClient.setAuthToken(nil)
@@ -342,16 +343,16 @@ final class AuthService {
         let sessions = Clerk.shared.client?.sessions ?? []
         do {
             try await Clerk.shared.auth.signOut()
-            print("[AuthService] 401 cleanup: signOut(all) ok")
+            Logger.auth.debug("401 cleanup: signOut(all) ok")
         } catch {
-            print("[AuthService] 401 cleanup: signOut(all) failed: \(error)")
+            Logger.auth.debug("401 cleanup: signOut(all) failed: \(error)")
         }
         for s in sessions {
             do {
                 try await Clerk.shared.auth.signOut(sessionId: s.id)
-                print("[AuthService] 401 cleanup: signOut(\(s.id)) ok")
+                Logger.auth.debug("401 cleanup: signOut(\(s.id)) ok")
             } catch {
-                print("[AuthService] 401 cleanup: signOut(\(s.id)) failed: \(error)")
+                Logger.auth.debug("401 cleanup: signOut(\(s.id)) failed: \(error)")
             }
         }
     }

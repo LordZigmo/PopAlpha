@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 // MARK: - Card Service — Fetches live data from Supabase
 
@@ -30,10 +31,10 @@ actor CardService {
         )
         let metrics = try decoder.decode([MetricsRow].self, from: metricsData)
         let slugs = metrics.map(\.canonicalSlug)
-        print("[CardService] Fetched \(metrics.count) metrics rows")
+        Logger.api.debug("Fetched \(metrics.count) metrics rows")
 
         guard !slugs.isEmpty else {
-            print("[CardService] No metrics rows matched filters — returning empty")
+            Logger.api.debug("No metrics rows matched filters — returning empty")
             return []
         }
 
@@ -45,7 +46,7 @@ actor CardService {
             filters: [("slug", "in", slugFilter)]
         )
         let cards = try decoder.decode([CardRow].self, from: cardsData)
-        print("[CardService] Fetched \(cards.count) card metadata rows")
+        Logger.api.debug("Fetched \(cards.count) card metadata rows")
         // Use first occurrence if duplicates exist (uniqueKeysWithValues crashes on dupes)
         let cardMap = Dictionary(cards.map { ($0.slug, $0) }, uniquingKeysWith: { first, _ in first })
 
@@ -61,7 +62,7 @@ actor CardService {
             limit: 20
         )
         let images = try decoder.decode([ImageRow].self, from: imagesData)
-        print("[CardService] Fetched \(images.count) image rows")
+        Logger.api.debug("Fetched \(images.count) image rows")
         var imageMap: [String: String] = [:]
         for img in images where imageMap[img.canonicalSlug] == nil {
             imageMap[img.canonicalSlug] = img.imageUrl
@@ -112,7 +113,7 @@ actor CardService {
                 confidenceScore: m.marketConfidenceScore
             )
         }
-        print("[CardService] Assembled \(result.count) MarketCards")
+        Logger.api.debug("Assembled \(result.count) MarketCards")
         return result
     }
 

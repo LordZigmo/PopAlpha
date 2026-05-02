@@ -3,6 +3,7 @@ import PhotosUI
 import SwiftUI
 import NukeUI
 import PopAlphaCore
+import OSLog
 
 // MARK: - Scan Mode
 
@@ -275,9 +276,9 @@ struct ScannerTabView: View {
         smokeRunning = true
         Task.detached(priority: .userInitiated) {
             let report = await OfflineScannerSmokeTest.run()
-            print("=== OFFLINE_SMOKE_BEGIN ===")
-            print(report.summary)
-            print("=== OFFLINE_SMOKE_END ===")
+            Logger.scan.debug("=== OFFLINE_SMOKE_BEGIN ===")
+            Logger.scan.debug("\(report.summary)")
+            Logger.scan.debug("=== OFFLINE_SMOKE_END ===")
 
             // Tier 6: orchestrator end-to-end. Lives in PopAlphaApp
             // (which has the adapter logic) so it can't sit inside
@@ -285,7 +286,7 @@ struct ScannerTabView: View {
             // same launch flag to keep one debug entry point.
             let orch = await MainActor.run { OfflineScanOrchestrator() }
             let img = Self.makeOrchestratorTestImage()
-            print("=== ORCH_SMOKE_BEGIN ===")
+            Logger.scan.debug("=== ORCH_SMOKE_BEGIN ===")
             do {
                 let t0 = Date()
                 let response = try await orch.identify(
@@ -297,27 +298,21 @@ struct ScannerTabView: View {
                 )
                 let elapsed = Date().timeIntervalSince(t0) * 1000
                 let top = response.matches.first
-                print(String(
-                    format: "[orch] elapsed=%.1fms confidence=%@ winning_path=%@ matches=%d",
-                    elapsed,
-                    response.confidence,
-                    response.winningPath ?? "nil",
-                    response.matches.count,
-                ))
+                Logger.scan.debug("elapsed=\(String(format: "%.1f", elapsed))ms confidence=\(response.confidence) winning_path=\(response.winningPath ?? "nil") matches=\(response.matches.count)")
                 if let top {
-                    print("[orch] top-1 slug=\(top.slug) name=\"\(top.canonicalName)\" set=\"\(top.setName ?? "nil")\" num=\"\(top.cardNumber ?? "nil")\" sim=\(String(format: "%.4f", top.similarity)) imgURL=\(top.mirroredPrimaryImageUrl ?? "nil")")
+                    Logger.scan.debug("top-1 slug=\(top.slug) name=\"\(top.canonicalName)\" set=\"\(top.setName ?? "nil")\" num=\"\(top.cardNumber ?? "nil")\" sim=\(String(format: "%.4f", top.similarity)) imgURL=\(top.mirroredPrimaryImageUrl ?? "nil")")
                 }
-                print("[orch] imageHash=\(response.imageHash ?? "nil")")
+                Logger.scan.debug("imageHash=\(response.imageHash ?? "nil")")
                 let plumbingOk = top != nil
                     && top?.canonicalName.isEmpty == false
                     && top?.mirroredPrimaryImageUrl != nil
                     && response.imageHash != nil
-                print(plumbingOk ? "ALL ORCH PASSED ✅" : "ORCH FAILED ❌")
+                Logger.scan.debug("\(plumbingOk ? "ALL ORCH PASSED ✅" : "ORCH FAILED ❌")")
             } catch {
-                print("[orch] error: \(error.localizedDescription)")
-                print("ORCH FAILED ❌")
+                Logger.scan.debug("error: \(error.localizedDescription)")
+                Logger.scan.debug("ORCH FAILED ❌")
             }
-            print("=== ORCH_SMOKE_END ===")
+            Logger.scan.debug("=== ORCH_SMOKE_END ===")
 
             await MainActor.run {
                 smokeReport = report
@@ -901,13 +896,7 @@ final class ScannerHost: ObservableObject {
         //     until the user re-arms via dismiss / detail-view-back /
         //     low-confidence silent re-arm.
         if self.isIdentifying || self.lastMatch != nil {
-            #if DEBUG
-            print(
-                "[scan] runIdentify dropped — "
-                + "isIdentifying=\(self.isIdentifying) "
-                + "lastMatch=\(self.lastMatch?.slug ?? "nil")"
-            )
-            #endif
+            Logger.scan.debug("runIdentify dropped — isIdentifying=\(self.isIdentifying) lastMatch=\(self.lastMatch?.slug ?? "nil")")
             return
         }
         self.isIdentifying = true
@@ -926,13 +915,7 @@ final class ScannerHost: ObservableObject {
         let ocrMulti = await OCRService.extractCardIdentifiersMulti(from: image)
         let ocr = (cardNumber: ocrMulti.cardNumbers.first, setHint: ocrMulti.setHint)
         self.lastOCR = ocr
-        #if DEBUG
-        print(
-            "[scan ocr] frameSize=\(Int(image.size.width))x\(Int(image.size.height)) "
-            + "cardNumbers=\(ocrMulti.cardNumbers) "
-            + "setHint=\(ocrMulti.setHint ?? "nil")"
-        )
-        #endif
+        Logger.scan.debug("ocr frameSize=\(Int(image.size.width))x\(Int(image.size.height)) cardNumbers=\(ocrMulti.cardNumbers) setHint=\(ocrMulti.setHint ?? "nil")")
 
         // Offline-first when premium gate is open. On any offline
         // failure (catalog not downloaded, model load error, embed
@@ -954,16 +937,10 @@ final class ScannerHost: ObservableObject {
                 )
                 response = r
                 usedOffline = true
-                #if DEBUG
-                print(
-                    "[scan offline] winning_path=\(r.winningPath ?? "nil") "
-                    + "confidence=\(r.confidence) "
-                    + "tried_candidates=\(ocrMulti.cardNumbers)"
-                )
-                #endif
+                Logger.scan.debug("offline winning_path=\(r.winningPath ?? "nil") confidence=\(r.confidence) tried_candidates=\(ocrMulti.cardNumbers)")
             } catch {
                 #if DEBUG
-                print("[scan offline] failed; falling back to network: \(error.localizedDescription)")
+                Logger.scan.debug("failed; falling back to network: \(error.localizedDescription)")
                 #endif
             }
         }
@@ -998,12 +975,8 @@ final class ScannerHost: ObservableObject {
             self.lastScanImage = usedOffline ? image : nil
             self.isIdentifying = false
 
+            Logger.scan.debug("path source=\(usedOffline ? "offline" : "network") winning_path=\(response.winningPath ?? "nil") confidence=\(reranked.confidence)")
             #if DEBUG
-            print(
-                "[scan path] source=\(usedOffline ? "offline" : "network") "
-                + "winning_path=\(response.winningPath ?? "nil") "
-                + "confidence=\(reranked.confidence)"
-            )
             // Save the EXACT frame the embedder saw to Photos when
             // confidence isn't HIGH. Self-documenting — banner
             // overlay carries the result, top-5, OCR.

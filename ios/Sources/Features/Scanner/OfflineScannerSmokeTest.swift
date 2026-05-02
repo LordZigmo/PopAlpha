@@ -58,6 +58,7 @@
 import CoreML
 import Foundation
 import UIKit
+import OSLog
 
 public struct OfflineScannerSmokeReport {
     public struct CheckResult {
@@ -261,7 +262,7 @@ public enum OfflineScannerSmokeTest {
             let probeQuery = extractCatalogRow(catalog: cat, rowIndex: probeRow.rowIndex)
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-debugOfflineIdentifier") {
-                print("[probe] slug=\(probeRow.row.canonicalSlug) setName=\"\(probeRow.row.setName ?? "<nil>")\" cardNumber=\"\(probeRow.row.cardNumber ?? "<nil>")\" language=\"\(probeRow.row.language ?? "<nil>")\" rowIdx=\(probeRow.rowIndex)")
+                Logger.scan.debug("slug=\(probeRow.row.canonicalSlug) setName=\"\(probeRow.row.setName ?? "<nil>")\" cardNumber=\"\(probeRow.row.cardNumber ?? "<nil>")\" language=\"\(probeRow.row.language ?? "<nil>")\" rowIdx=\(probeRow.rowIndex)")
                 // Sanity-check: count rows whose cardNumber normalizes
                 // to the probe's normalized number, regardless of language.
                 let target = OfflineIdentifier.normalizeCardNumberForCompare(probeRow.row.cardNumber)
@@ -272,7 +273,7 @@ public enum OfflineScannerSmokeTest {
                     ($0.language ?? "").uppercased() == "EN"
                 }
                 let probeInRowsMatching = rowsMatchingNumber.contains(where: { $0.canonicalSlug == probeRow.row.canonicalSlug })
-                print("[probe.dbg] target=\"\(target ?? "<nil>")\" rowsMatchingNumber=\(rowsMatchingNumber.count) rowsMatchingNumberAndLangEN=\(rowsMatchingNumberAndLangEN.count) probeRowInMatch=\(probeInRowsMatching)")
+                Logger.scan.debug("target=\"\(target ?? "<nil>")\" rowsMatchingNumber=\(rowsMatchingNumber.count) rowsMatchingNumberAndLangEN=\(rowsMatchingNumberAndLangEN.count) probeRowInMatch=\(probeInRowsMatching)")
             }
             #endif
 
