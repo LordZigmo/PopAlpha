@@ -22,6 +22,13 @@ import PostHog
 //     on the main tabs when you want screen-level coverage.
 //   • sessionReplay = false — disabled for now. Enable later via a flag
 //     once we've decided on privacy masking for card/portfolio views.
+//   • errorTrackingConfig.autoCapture = true — installs PLCrashReporter
+//     under the hood. Captures Mach exceptions (EXC_BAD_ACCESS, EXC_CRASH),
+//     POSIX signals (SIGSEGV/SIGABRT/SIGBUS), and uncaught NSExceptions
+//     as $exception events with level "fatal". Auto-disabled when a
+//     debugger is attached, so verification requires Release builds or
+//     detaching Xcode. Crashes are persisted to disk and reported on
+//     the NEXT app launch — the crashed run itself can't transmit.
 //
 // The phc_* project API key is a public, client-embeddable token (it's
 // rate-limited per IP, not secret) — safe to hardcode just like the
@@ -78,6 +85,11 @@ final class AnalyticsService {
         // Session replay is a paid-tier-sensitive feature. Leave off
         // for launch; turn on after a privacy-masking audit.
         config.sessionReplay = false
+        // Native crash autocapture via PLCrashReporter. Off by default
+        // in the SDK — enabling so production crashes flow into PostHog
+        // alongside the canonical Xcode Organizer copy. See file header
+        // for what gets captured and how to verify.
+        config.errorTrackingConfig.autoCapture = true
 
         PostHogSDK.shared.setup(config)
     }

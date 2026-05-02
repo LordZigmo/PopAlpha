@@ -12,9 +12,12 @@ struct PopAlphaApp: App {
     @UIApplicationDelegateAdaptor(PushNotificationAppDelegate.self) private var pushDelegate
 
     init() {
-        // PostHog first so any errors thrown during Clerk.configure or
-        // image pipeline setup are captured by PostHog's exception
-        // autocapture rather than lost.
+        // PostHog first so any uncaught exceptions thrown during
+        // Clerk.configure or image pipeline setup are captured by
+        // PostHog's exception autocapture (errorTrackingConfig.autoCapture
+        // — see AnalyticsService.swift) rather than lost. Caveat: the
+        // crashed run can't transmit; the $exception event flushes on
+        // the next launch.
         AnalyticsService.shared.configure()
         Clerk.configure(publishableKey: "pk_live_Y2xlcmsucG9wYWxwaGEuYWkk")
         configureImagePipeline()
