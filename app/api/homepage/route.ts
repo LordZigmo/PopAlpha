@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { getHomepageData } from "@/lib/data/homepage";
 
-// Match the homepage ISR window so web and iOS see the same cached payload.
-export const revalidate = 60;
+// Force dynamic rendering — Cache-Control header below gives Vercel's edge CDN
+// the same 60s effective cache as ISR did, but the build no longer pre-renders
+// (and therefore no longer requires NEXT_PUBLIC_SUPABASE_* at build time).
+export const dynamic = "force-dynamic";
 
 export async function GET() {
   const data = await getHomepageData();

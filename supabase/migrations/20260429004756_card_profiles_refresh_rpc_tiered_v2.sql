@@ -1,21 +1,13 @@
--- Tiered refresh logic for card profiles.
+-- Corrects the high-priority signal: liquidity_score is saturated at 100
+-- for 99.97% of cards (same capping issue as active_listings_7d, noted in
+-- the hash comments), so it is useless for tiering.
 --
--- Tier 1 — high-priority (daily):
---   abs(change_pct_7d) >= 10  — significant movers (~21% of catalog)
---   OR canonical_slug in holdings — card owned by at least one user.
---   Refreshed every p_stale_days regardless of hash change.
---   Sorted by dollar_move (price × abs_pct) DESC so expensive movers
---   surface first. A $50 card moving 15% ($7.50) ranks above a $0.05
---   bulk card moving 150% ($0.075).
---   Note: liquidity_score is saturated at 100 for 99.97% of cards
---   (same capping issue as active_listings_7d) and is NOT used here.
+-- New signals:
+--   abs(change_pct_7d) >= 10  — significant mover (top ~21% of cards)
+--   canonical_slug in holdings — card is in at least one user portfolio;
+--                                 these always stay fresh regardless of movement.
 --
--- Tier 2 — low-priority (price-movement only):
---   Everything else. LLM profiles refreshed only when the metrics hash
---   changes (computed in SQL using FLOOR(x + 0.5) to match JS Math.round,
---   including the -0.5 boundary where JS rounds toward +∞).
---
--- Fallbacks always process; within each tier fallbacks come before stale LLM.
+-- Everything else is low-priority: LLM profiles refresh only on hash change.
 DROP FUNCTION IF EXISTS get_cards_needing_profile_refresh(integer, integer);
 
 CREATE OR REPLACE FUNCTION get_cards_needing_profile_refresh(
@@ -59,6 +51,7 @@ LANGUAGE sql STABLE AS $$
       cp.metrics_hash AS existing_hash,
       cp.source       AS existing_source,
       cp.updated_at,
+      -- High-priority: significant mover OR in a user portfolio
       (
         ABS(COALESCE(cm.change_pct_7d, 0)) >= 10
         OR EXISTS (
@@ -66,11 +59,8 @@ LANGUAGE sql STABLE AS $$
           WHERE h.canonical_slug = cc.slug
         )
       ) AS is_high_priority,
-      -- Dollar move magnitude: price × abs(change_pct_7d). Used as the
-      -- within-tier sort key so expensive movers rank above cheap volatile bulk.
-      COALESCE(cm.market_price, 0) * ABS(COALESCE(cm.change_pct_7d, 0))
-        AS dollar_move,
       -- Current hash using JS-compatible rounding: FLOOR(x + 0.5) = Math.round(x)
+      -- for all values including negative (JS rounds -0.5 toward +∞, not away from zero).
       LEFT(encode(sha256((
         COALESCE(FLOOR(cm.market_price  + 0.5)::bigint::text, '') || '|' ||
         COALESCE(FLOOR(cm.median_7d     + 0.5)::bigint::text, '') || '|' ||
@@ -105,6 +95,7 @@ LANGUAGE sql STABLE AS $$
     is_high_priority
   FROM metrics
   WHERE
+    -- High-priority: refresh daily (fallback or stale LLM)
     (
       is_high_priority
       AND (
@@ -112,17 +103,15 @@ LANGUAGE sql STABLE AS $$
         OR updated_at < now() - (p_stale_days || ' days')::interval
       )
     )
+    -- Low-priority fallback: clear the backlog
     OR existing_source = 'fallback'
+    -- Low-priority LLM: refresh only when price data moved
     OR (
       existing_source = 'llm'
       AND existing_hash IS DISTINCT FROM current_hash
     )
   ORDER BY
-    -- High-priority tier first
     CASE WHEN is_high_priority THEN 0 ELSE 1 END,
-    -- Within high-priority: largest dollar move first (homepage-relevant cards surface fastest)
-    CASE WHEN is_high_priority THEN -dollar_move ELSE 0 END,
-    -- Low-priority: fallbacks before stale LLM
     CASE WHEN existing_source = 'fallback' THEN 0 ELSE 1 END,
     updated_at ASC NULLS FIRST
   LIMIT p_limit;

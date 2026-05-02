@@ -45,35 +45,11 @@ create index if not exists daily_top_movers_slug_idx
 
 alter table public.daily_top_movers enable row level security;
 
--- Anonymous read is fine — this is derived from public_card_metrics which
--- is already read by the (unauthenticated) homepage.
 drop policy if exists daily_top_movers_public_read on public.daily_top_movers;
 create policy daily_top_movers_public_read
   on public.daily_top_movers
   for select
   using (true);
-
--- ── compute_daily_top_movers() ──────────────────────────────────────────────
---
--- Idempotent — replaces today's rows on each call. Safe to run hourly from
--- a cron. Returns a summary jsonb.
---
--- Criteria (must satisfy all):
---   - market_price >= 1
---   - market_price_as_of within last 24h
---   - snapshot_count_30d >= 27  (near-daily coverage)
---   - market_confidence_score >= 45
---   - NOT market_low_confidence
---   - change_pct (24h preferred, 7d fallback) exists and magnitude >= 2.5%
---
--- Coverage gate: if the number of mover-eligible cards (above criteria,
--- ignoring the change threshold) is below p_coverage_threshold, the
--- function returns {computed: false, reason: 'coverage_too_low'} without
--- touching the table. Homepage then falls back to yesterday's row or empty.
---
--- Set diversity: window function partitions the candidate pool by set_name
--- and keeps only top p_max_per_set per set, ensuring the final list
--- doesn't cluster in one or two sets.
 
 create or replace function public.compute_daily_top_movers(
   p_coverage_threshold  int default 18000,
@@ -94,15 +70,12 @@ declare
   _gainers_ins    int;
   _losers_ins     int;
 begin
-  -- Coverage gate: count catalog-wide fresh_24h (not filtered by price).
-  -- User intent: "only when we see 18,000 cards priced for the day can we
-  -- determine who the top movers are". This is about completeness of the
-  -- catalog-wide Scrydex poll, not about mover candidates specifically.
   select count(*) into _coverage_count
   from public.public_card_metrics pcm
   where pcm.grade = 'RAW'
     and pcm.printing_id is null
     and pcm.market_price is not null
+    and pcm.market_price >= 1
     and pcm.market_price_as_of > now() - interval '24 hours';
 
   if _coverage_count < p_coverage_threshold then
@@ -115,10 +88,8 @@ begin
     );
   end if;
 
-  -- Replace today's rows.
   delete from public.daily_top_movers where computed_at_date = _today;
 
-  -- Shared candidate CTE
   with candidates as (
     select
       pcm.canonical_slug,
@@ -127,10 +98,8 @@ begin
       pcm.market_price_as_of,
       pcm.active_listings_7d,
       pcm.market_confidence_score,
-      -- Prefer 24h if present, else 7d
       coalesce(pcm.change_pct_24h, pcm.change_pct_7d) as change_pct,
       case when pcm.change_pct_24h is not null then '24H' else '7D' end as change_window,
-      -- Composite score: |change_pct| × (confidence/100) × liquidity_weight
       abs(coalesce(pcm.change_pct_24h, pcm.change_pct_7d)) *
         (coalesce(pcm.market_confidence_score, 0) / 100.0) *
         case
@@ -153,21 +122,15 @@ begin
       and coalesce(pcm.change_pct_24h, pcm.change_pct_7d) is not null
       and abs(coalesce(pcm.change_pct_24h, pcm.change_pct_7d)) >= p_min_change_pct
   ),
-  -- Gainers: positive change, rank by composite desc, cap per set, take top N
   gainers_all as (
-    select
-      c.*,
-      row_number() over (
-        partition by c.set_name
-        order by c.composite_score desc
+    select c.*, row_number() over (
+        partition by c.set_name order by c.composite_score desc
       ) as set_rank
     from candidates c
     where c.change_pct > 0
   ),
   gainers_filtered as (
-    select
-      g.*,
-      row_number() over (order by g.composite_score desc) as global_rank
+    select g.*, row_number() over (order by g.composite_score desc) as global_rank
     from gainers_all g
     where g.set_rank <= p_max_per_set
   ),
@@ -177,29 +140,22 @@ begin
       market_price, market_price_as_of, set_name, active_listings_7d,
       confidence_score, composite_score
     )
-    select
-      _today, 'gainer', global_rank::int, canonical_slug, change_pct, change_window,
+    select _today, 'gainer', global_rank::int, canonical_slug, change_pct, change_window,
       market_price, market_price_as_of, set_name, active_listings_7d,
       market_confidence_score, composite_score
     from gainers_filtered
     where global_rank <= p_gainers_count
     returning 1
   ),
-  -- Losers: mirror of gainers, change_pct < 0
   losers_all as (
-    select
-      c.*,
-      row_number() over (
-        partition by c.set_name
-        order by c.composite_score desc
+    select c.*, row_number() over (
+        partition by c.set_name order by c.composite_score desc
       ) as set_rank
     from candidates c
     where c.change_pct < 0
   ),
   losers_filtered as (
-    select
-      l.*,
-      row_number() over (order by l.composite_score desc) as global_rank
+    select l.*, row_number() over (order by l.composite_score desc) as global_rank
     from losers_all l
     where l.set_rank <= p_max_per_set
   ),
@@ -209,17 +165,14 @@ begin
       market_price, market_price_as_of, set_name, active_listings_7d,
       confidence_score, composite_score
     )
-    select
-      _today, 'loser', global_rank::int, canonical_slug, change_pct, change_window,
+    select _today, 'loser', global_rank::int, canonical_slug, change_pct, change_window,
       market_price, market_price_as_of, set_name, active_listings_7d,
       market_confidence_score, composite_score
     from losers_filtered
     where global_rank <= p_losers_count
     returning 1
   )
-  select
-    (select count(*) from gainers_ins),
-    (select count(*) from losers_ins)
+  select (select count(*) from gainers_ins), (select count(*) from losers_ins)
   into _gainers_ins, _losers_ins;
 
   return jsonb_build_object(
