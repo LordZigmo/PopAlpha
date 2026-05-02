@@ -18,7 +18,10 @@ import { dbPublic } from "@/lib/db";
  * render their own placeholder instead of 404ing.
  */
 
-export const revalidate = 60;
+// Force dynamic rendering — Cache-Control header below gives Vercel's edge CDN
+// the same 60s effective cache as ISR did, but the build no longer pre-renders
+// (and therefore no longer requires NEXT_PUBLIC_SUPABASE_* at build time).
+export const dynamic = "force-dynamic";
 
 type AiBriefRow = {
   version: string;
