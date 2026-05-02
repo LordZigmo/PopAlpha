@@ -98,6 +98,11 @@ struct CardDetailView: View {
         }
         .coordinateSpace(name: "scroll")
         .background(PA.Colors.background)
+        .overlay(alignment: .bottomTrailing) {
+            addHoldingFAB
+                .padding(.trailing, 20)
+                .padding(.bottom, 20)
+        }
         .sheet(isPresented: $showCorrectionSheet) {
             if let hash = scanImageHash {
                 EvalSeedingView(
@@ -236,22 +241,11 @@ struct CardDetailView: View {
                         .accessibilityLabel("Share card")
                     }
 
-                    Button {
-                        PAHaptics.tap()
-                        showAddHolding = true
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "plus")
-                                .font(.system(size: 12, weight: .bold))
-                            Text("Add to Portfolio")
-                                .font(.system(size: 13, weight: .semibold))
-                        }
-                        .foregroundStyle(PA.Colors.background)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(PA.Colors.accent)
-                        .clipShape(Capsule())
-                    }
+                    // "Add to Portfolio" lives in the floating action
+                    // button at the bottom-right of the screen — see
+                    // addHoldingFAB on the root view. Keeps the header
+                    // clean and the primary action persistent during
+                    // scroll.
                 }
             }
         }
@@ -734,32 +728,40 @@ struct CardDetailView: View {
     // user action. Secondary: Wishlist — compact ghost pill.
 
     private var actionButtons: some View {
-        HStack(spacing: 10) {
-            WatchlistButton(
-                slug: card.id,
-                cardName: card.name,
-                setName: card.setName
-            )
+        // "Add to Collection" moved to the floating action button on the
+        // root view (addHoldingFAB) so it stays reachable during scroll.
+        // Watchlist stays inline since it's a secondary action.
+        WatchlistButton(
+            slug: card.id,
+            cardName: card.name,
+            setName: card.setName
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 
-            Button {
-                PAHaptics.tap()
-                showAddHolding = true
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 14, weight: .bold))
-                    Text("Add to Collection")
-                        .font(.system(size: 15, weight: .semibold))
-                }
+    // MARK: - Floating Add-to-Portfolio FAB
+    // Anchored bottom-trailing on the root view (overlay on the
+    // ScrollView, not inside it) so it stays in place during scroll.
+    // Replaces the previous two inline "Add to Portfolio" / "Add to
+    // Collection" buttons in the header and primary action row.
+
+    private var addHoldingFAB: some View {
+        Button {
+            PAHaptics.tap()
+            showAddHolding = true
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 24, weight: .bold))
                 .foregroundStyle(PA.Colors.background)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
+                .frame(width: 56, height: 56)
                 .background(PA.Colors.accent)
-                .clipShape(Capsule())
-                .shadow(color: PA.Colors.accent.opacity(0.25), radius: 14, x: 0, y: 6)
-            }
-            .buttonStyle(.plain)
+                .clipShape(Circle())
+                .shadow(color: PA.Colors.accent.opacity(0.4), radius: 12, x: 0, y: 4)
+                .shadow(color: .black.opacity(0.25), radius: 6, x: 0, y: 2)
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Add to portfolio")
+        .accessibilityHint("Opens the add-card sheet")
     }
 
     // MARK: - AI Brief
