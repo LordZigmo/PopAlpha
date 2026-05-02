@@ -666,7 +666,7 @@ struct FeaturedMoverCard: View {
                 }
 
                 HStack(alignment: .center, spacing: 10) {
-                    VStack(alignment: .leading, spacing: 2) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(formatPrice(card.marketPrice))
                             .font(.system(size: 16, weight: .bold, design: .rounded))
                             .foregroundStyle(PA.Colors.text)
@@ -829,12 +829,13 @@ struct CompactMoverRow: View {
             }
 
             // Price + change
-            VStack(alignment: .trailing, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(formatPrice(card.marketPrice))
                     .font(.system(size: 13, weight: .bold, design: .rounded))
                     .foregroundStyle(PA.Colors.text)
                 ChangePill(changePct: card.changePct, window: windowLabel, small: true)
             }
+            .fixedSize(horizontal: true, vertical: false)
             .frame(minWidth: 64, alignment: .trailing)
         }
         .padding(.vertical, 8)
