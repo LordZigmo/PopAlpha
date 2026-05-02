@@ -161,6 +161,8 @@ struct PortfolioView: View {
                                 .background(PA.Colors.accent)
                                 .clipShape(Circle())
                         }
+                        .accessibilityLabel("Add to portfolio")
+                        .accessibilityHint("Add a card or import from CSV")
                     }
                 }
             }
@@ -207,9 +209,11 @@ struct PortfolioView: View {
             Image(systemName: "rectangle.stack")
                 .font(.system(size: 14))
                 .foregroundStyle(PA.Colors.accent)
+                .accessibilityHidden(true)
             Text("Your Cards")
                 .font(PA.Typography.sectionTitle)
                 .foregroundStyle(PA.Colors.text)
+                .accessibilityAddTraits(.isHeader)
 
             Spacer()
 

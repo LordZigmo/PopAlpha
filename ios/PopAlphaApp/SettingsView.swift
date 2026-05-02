@@ -274,6 +274,7 @@ struct SettingsView: View {
                 .font(.system(size: 16))
                 .foregroundStyle(PA.Colors.accent)
                 .frame(width: 24)
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
@@ -283,10 +284,12 @@ struct SettingsView: View {
                     .font(PA.Typography.caption)
                     .foregroundStyle(PA.Colors.muted)
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(title). \(subtitle)")
 
             Spacer()
 
-            Toggle("", isOn: isOn)
+            Toggle(title, isOn: isOn)
                 .tint(PA.Colors.accent)
                 .labelsHidden()
                 .onChange(of: isOn.wrappedValue) { _, _ in
@@ -309,6 +312,7 @@ struct SettingsView: View {
                 .font(.system(size: 16))
                 .foregroundStyle(PA.Colors.accent)
                 .frame(width: 24)
+                .accessibilityHidden(true)
 
             Text(title)
                 .font(.system(size: 15, weight: .medium))
@@ -337,8 +341,11 @@ struct SettingsView: View {
                     Image(systemName: "chevron.up.chevron.down")
                         .font(.system(size: 10))
                         .foregroundStyle(PA.Colors.muted)
+                        .accessibilityHidden(true)
                 }
             }
+            .accessibilityLabel("\(title): \(selection.wrappedValue.description)")
+            .accessibilityHint("Choose \(title.lowercased())")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -350,6 +357,7 @@ struct SettingsView: View {
                 .font(.system(size: 16))
                 .foregroundStyle(PA.Colors.accent)
                 .frame(width: 24)
+                .accessibilityHidden(true)
             Text(title)
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(PA.Colors.text)
@@ -360,6 +368,8 @@ struct SettingsView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title): \(value)")
     }
 
     private func linkRow(icon: String, title: String, url: String) -> some View {
@@ -369,6 +379,7 @@ struct SettingsView: View {
                     .font(.system(size: 16))
                     .foregroundStyle(PA.Colors.accent)
                     .frame(width: 24)
+                    .accessibilityHidden(true)
                 Text(title)
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(PA.Colors.text)
@@ -376,10 +387,14 @@ struct SettingsView: View {
                 Image(systemName: "arrow.up.right")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(PA.Colors.muted)
+                    .accessibilityHidden(true)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(title)
+        .accessibilityHint("Opens link")
     }
 
     // MARK: - Sign-in Prompt

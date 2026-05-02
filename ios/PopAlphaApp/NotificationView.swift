@@ -225,6 +225,9 @@ struct NotificationView: View {
                         .offset(x: 14, y: -14)
                 }
             }
+            // Avatar initial + unread dot are visual-only; the text below
+            // already says who and what.
+            .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(notification.text)
@@ -240,10 +243,14 @@ struct NotificationView: View {
             Spacer()
 
             notificationIcon(notification.type)
+                // Decorative — type is conveyed by notification.text.
+                .accessibilityHidden(true)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(notification.read ? Color.clear : PA.Colors.accent.opacity(0.04))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(notification.read ? "" : "Unread. ")\(notification.text). \(timeAgo(notification.createdAt))")
     }
 
     private func notificationIcon(_ type: String) -> some View {

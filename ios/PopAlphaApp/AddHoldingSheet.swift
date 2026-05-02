@@ -121,6 +121,8 @@ struct AddHoldingSheet: View {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 14))
                         .foregroundStyle(PA.Colors.muted)
+                        // Decorative — TextField placeholder reads as the field's hint.
+                        .accessibilityHidden(true)
 
                     TextField("Search for a card...", text: $searchQuery)
                         .font(.system(size: 15))
@@ -196,6 +198,7 @@ struct AddHoldingSheet: View {
                         .font(.system(size: 18))
                         .foregroundStyle(PA.Colors.muted)
                 }
+                .accessibilityLabel("Clear selected card")
             }
         }
         .padding(12)
@@ -272,17 +275,21 @@ struct AddHoldingSheet: View {
                         .font(.system(size: 24))
                         .foregroundStyle(quantity > 1 ? PA.Colors.accent : PA.Colors.muted)
                 }
+                .accessibilityLabel("Decrease quantity")
+                .disabled(quantity <= 1)
 
                 Text("\(quantity)")
                     .font(.system(size: 20, weight: .bold, design: .rounded))
                     .foregroundStyle(PA.Colors.text)
                     .frame(width: 40)
+                    .accessibilityLabel("Quantity \(quantity)")
 
                 Button { quantity += 1 } label: {
                     Image(systemName: "plus.circle.fill")
                         .font(.system(size: 24))
                         .foregroundStyle(PA.Colors.accent)
                 }
+                .accessibilityLabel("Increase quantity")
             }
             .padding(12)
             .glassSurface(radius: 12)

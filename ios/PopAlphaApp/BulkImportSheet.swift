@@ -649,6 +649,8 @@ struct BulkImportPreviewView: View {
             }
             .buttonStyle(.plain)
             .disabled(!hasMatch)
+            .accessibilityLabel(r.isIncluded ? "Included in import" : "Excluded from import")
+            .accessibilityHint("Tap to toggle whether this row gets imported")
 
             // Thumbnail (resolved)
             thumbnail(for: r)
@@ -1077,6 +1079,7 @@ private struct MatchPickerSheet: View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(PA.Colors.muted)
+                .accessibilityHidden(true)
             TextField("Card name, set, or number", text: $query)
                 .font(.system(size: 15))
                 .foregroundStyle(PA.Colors.text)
@@ -1095,6 +1098,7 @@ private struct MatchPickerSheet: View {
                         .foregroundStyle(PA.Colors.muted)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
             }
         }
         .padding(10)

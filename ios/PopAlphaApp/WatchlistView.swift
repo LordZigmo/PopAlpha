@@ -106,6 +106,7 @@ struct WatchlistView: View {
                     .font(.system(size: 16))
                     .foregroundStyle(PA.Colors.negative)
             }
+            .accessibilityLabel("Remove from watchlist")
         }
         .padding(12)
         .glassSurface(radius: 12)

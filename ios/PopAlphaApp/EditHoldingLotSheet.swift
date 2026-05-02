@@ -213,6 +213,7 @@ struct EditHoldingLotSheet: View {
                         .font(.system(size: 24))
                         .foregroundStyle(quantity > 1 ? PA.Colors.accent : PA.Colors.muted)
                 }
+                .accessibilityLabel("Decrease quantity")
                 .disabled(quantity <= 1)
 
                 Spacer()
@@ -221,6 +222,7 @@ struct EditHoldingLotSheet: View {
                     .font(.system(size: 28, weight: .bold, design: .rounded))
                     .foregroundStyle(PA.Colors.text)
                     .monospacedDigit()
+                    .accessibilityLabel("Quantity \(quantity)")
 
                 Spacer()
 
@@ -229,6 +231,7 @@ struct EditHoldingLotSheet: View {
                         .font(.system(size: 24))
                         .foregroundStyle(PA.Colors.accent)
                 }
+                .accessibilityLabel("Increase quantity")
             }
             .padding(12)
             .glassSurface(radius: 12)
@@ -266,11 +269,15 @@ struct EditHoldingLotSheet: View {
                     Image(systemName: "chevron.down")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(PA.Colors.muted)
+                        // Decorative — Menu announces "popup button" itself.
+                        .accessibilityHidden(true)
                 }
                 .padding(12)
                 .background(PA.Colors.surfaceSoft)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
+            .accessibilityLabel("Grade: \(selectedGrade.rawValue)")
+            .accessibilityHint("Choose card grade")
         }
     }
 

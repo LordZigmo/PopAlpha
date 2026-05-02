@@ -56,6 +56,8 @@ struct SearchView: View {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 15))
                     .foregroundStyle(PA.Colors.muted)
+                    // Decorative — TextField placeholder is the field's hint.
+                    .accessibilityHidden(true)
 
                 TextField("Search cards, sets, numbers...", text: $query)
                     .font(.system(size: 16))
@@ -76,6 +78,7 @@ struct SearchView: View {
                             .font(.system(size: 16))
                             .foregroundStyle(PA.Colors.muted)
                     }
+                    .accessibilityLabel("Clear search")
                 }
             }
             .padding(10)
@@ -237,12 +240,14 @@ struct SearchView: View {
                     Text("Recent")
                         .font(PA.Typography.sectionTitle)
                         .foregroundStyle(PA.Colors.text)
+                        .accessibilityAddTraits(.isHeader)
                     Spacer()
                     Button("Clear") {
                         recents.clear()
                     }
                     .font(PA.Typography.caption)
                     .foregroundStyle(PA.Colors.muted)
+                    .accessibilityLabel("Clear recent searches")
                 }
                 .padding(.horizontal, 4)
                 .padding(.top, 4)
