@@ -286,11 +286,17 @@ async function loadExistingWriteState(
   }
 
   if (historyVariantRefs.length > 0 && observedAts.length > 0) {
+    // ts >= now() - 7d lets the planner skip 90%+ of price_history_points; the
+    // candidate observedAts come from this ingest cycle so any older row could
+    // not satisfy the .in("ts", ...) predicate anyway. Anti-pattern fix from
+    // playbook incidents #11/#14a.
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
     const { data, error } = await supabase
       .from("price_history_points")
       .select("variant_ref, ts")
       .eq("provider", provider)
       .eq("source_window", "snapshot")
+      .gte("ts", sevenDaysAgo)
       .in("variant_ref", historyVariantRefs)
       .in("ts", observedAts);
     if (error) throw new Error(`price_history_points(load existing): ${error.message}`);
