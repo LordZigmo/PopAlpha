@@ -31,13 +31,11 @@ enum OCRService {
         )
     }()
 
-    /// Combined extractor: runs ONE Vision pass and returns both the
-    /// collector number (digits before the "/" in "70/197" style
-    /// printings) AND a free-text set-name hint (the longest
-    /// recognized line that looks like text not numbers — usually
-    /// the printed set name like "Phantasmal Flames" or
-    /// "Pokémon GO"). Both fields are independently nullable;
-    /// callers can use whichever the OCR successfully extracted.
+    /// Combined extractor: returns the FIRST card-number candidate +
+    /// set-name hint. Convenience wrapper around
+    /// `extractCardIdentifiersMulti`; new code that can handle multi-
+    /// candidate OCR (e.g. the offline scanner's Path B trial loop)
+    /// should call the multi version directly.
     ///
     /// Non-throwing by design. OCR is a boost, not a gate — any
     /// failure should fall through to vanilla CLIP ranking, not
@@ -45,41 +43,173 @@ enum OCRService {
     static func extractCardIdentifiers(
         from image: UIImage
     ) async -> (cardNumber: String?, setHint: String?) {
-        guard let cgImage = image.cgImage else { return (nil, nil) }
+        let multi = await extractCardIdentifiersMulti(from: image)
+        return (multi.cardNumbers.first, multi.setHint)
+    }
 
-        return await withCheckedContinuation { (continuation: CheckedContinuation<(String?, String?), Never>) in
+    /// Multi-candidate OCR. Two innovations over `extractCardIdentifiers`:
+    ///
+    /// 1. **Vision beam search via `topCandidates(N)`.** Single-candidate
+    ///    mode discards N-1 alternate transcriptions per text region.
+    ///    Under glare or stylized fonts, Vision's candidate-1 might be
+    ///    "158/159" while candidate-2 reads "058/159" — only the second
+    ///    matches a real catalog row. This API exposes both.
+    ///
+    /// 2. **Two-pass recognition** — full image AND a 2× upscaled crop
+    ///    of the bottom 18% of the card. Modern Pokemon TCG cards
+    ///    print the collector number in tiny text at the bottom strip
+    ///    (~12-15px tall in our captures); upscaling 3× pushes it to
+    ///    ~36-45px which is solidly in Vision's accurate-mode comfort
+    ///    zone. The two passes run concurrently via `async let`.
+    ///
+    /// Returned `cardNumbers` is deduped, ordered with full-pass
+    /// candidates first (typically more accurate when text is large)
+    /// then strip-pass candidates (rescue for tiny text). Callers
+    /// should try each in turn against Path A/B and accept the first
+    /// one that yields a unique match.
+    ///
+    /// Real-device 2026-05-02: Journey Together Mr. Mime returned
+    /// `cardNumber=158` from candidate-1 of the full pass; Vision's
+    /// candidate-2 had `058`, which the multi version surfaces.
+    /// Drampa Journey Together returned `["30"]` from "1 30/159"
+    /// kerning — the space-split recovery in `collectorNumberCandidates`
+    /// also surfaces "130" as an additional candidate for this case.
+    static func extractCardIdentifiersMulti(
+        from image: UIImage,
+        maxCandidatesPerObservation: Int = 3,
+    ) async -> (cardNumbers: [String], setHint: String?) {
+        async let fullPass = recognizeText(
+            in: image,
+            maxCandidatesPerObservation: maxCandidatesPerObservation,
+        )
+        async let stripPass: ([String], String?) = {
+            // Bottom 18% comfortably contains the collector number on
+            // every modern Pokemon TCG layout I've checked. 3× upscale
+            // takes the ~12-15px digits to ~36-45px — well within
+            // Vision's accurate-mode sweet spot.
+            guard let strip = upscaledBottomStrip(image, ratio: 0.18, scale: 3.0) else {
+                return ([], nil)
+            }
+            return await recognizeText(
+                in: strip,
+                maxCandidatesPerObservation: maxCandidatesPerObservation,
+            )
+        }()
+
+        let (full, strip) = await (fullPass, stripPass)
+
+        // Dedupe-merge: full-pass first (large text already in Vision's
+        // sweet spot), strip pass as rescue for tiny text.
+        var seen = Set<String>()
+        var merged: [String] = []
+        for n in full.0 + strip.0 where seen.insert(n).inserted {
+            merged.append(n)
+        }
+        // Set hint: full-pass only. The bottom strip rarely contains
+        // a usable set name and is dominated by collector number,
+        // copyright, and set code — none of which `pickSetHint` would
+        // accept anyway.
+        return (merged, full.1)
+    }
+
+    /// Inner Vision pass on a single image. Pulled out of
+    /// `extractCardIdentifiersMulti` so the full + strip passes can
+    /// run concurrently via `async let`.
+    private static func recognizeText(
+        in image: UIImage,
+        maxCandidatesPerObservation: Int,
+    ) async -> ([String], String?) {
+        guard let cgImage = image.cgImage else { return ([], nil) }
+
+        return await withCheckedContinuation { (continuation: CheckedContinuation<([String], String?), Never>) in
             let request = VNRecognizeTextRequest { request, _ in
                 guard
                     let results = request.results as? [VNRecognizedTextObservation]
                 else {
-                    continuation.resume(returning: (nil, nil))
+                    continuation.resume(returning: ([], nil))
                     return
                 }
 
-                let lines: [String] = results.compactMap { obs in
+                let topLines: [String] = results.compactMap { obs in
                     obs.topCandidates(1).first?.string
                 }
+                let setHint = pickSetHint(from: topLines)
 
-                let cardNumber = lines.lazy
-                    .compactMap { firstCollectorNumber(in: $0) }
-                    .first
+                var seenCardNumbers = Set<String>()
+                var cardNumbers: [String] = []
+                for obs in results {
+                    let candidates = obs.topCandidates(maxCandidatesPerObservation)
+                    for candidate in candidates {
+                        for n in collectorNumberCandidates(in: candidate.string) {
+                            if seenCardNumbers.insert(n).inserted {
+                                cardNumbers.append(n)
+                            }
+                        }
+                    }
+                }
 
-                let setHint = pickSetHint(from: lines)
-
-                continuation.resume(returning: (cardNumber, setHint))
+                continuation.resume(returning: (cardNumbers, setHint))
             }
 
             request.recognitionLevel = .accurate
             request.recognitionLanguages = ["en-US"]
             request.usesLanguageCorrection = false
+            // Pin to revision 3 (iOS 16+). Default already picks the
+            // latest available, but explicit pin removes any future-
+            // OS ambiguity. V3 is meaningfully better than V1/V2 on
+            // tiny / stylized text.
+            if #available(iOS 16.0, *) {
+                request.revision = VNRecognizeTextRequestRevision3
+            }
 
             let handler = VNImageRequestHandler(cgImage: cgImage, orientation: .up, options: [:])
 
             do {
                 try handler.perform([request])
             } catch {
-                continuation.resume(returning: (nil, nil))
+                continuation.resume(returning: ([], nil))
             }
+        }
+    }
+
+    /// Crops the bottom `ratio` of `image` and renders at `scale`×
+    /// resolution via bicubic interpolation. Used by the multi-pass
+    /// OCR flow to give Vision a much larger pixel canvas for the
+    /// collector-number text region.
+    static func upscaledBottomStrip(
+        _ image: UIImage,
+        ratio: CGFloat,
+        scale: CGFloat,
+    ) -> UIImage? {
+        guard image.size.width > 0, image.size.height > 0,
+              ratio > 0, ratio <= 1, scale >= 1 else {
+            return nil
+        }
+        let stripHeight = image.size.height * ratio
+        let outputSize = CGSize(
+            width: image.size.width * scale,
+            height: stripHeight * scale,
+        )
+        let format = UIGraphicsImageRendererFormat.default()
+        // Output size already includes scale; don't double-bake screen scale.
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: outputSize, format: format)
+        return renderer.image { ctx in
+            ctx.cgContext.interpolationQuality = .high
+            // Draw the FULL image at scale× into a context that's only
+            // stripHeight × scale tall — shift up so the bottom strip
+            // lands in the visible area.
+            let drawSize = CGSize(
+                width: image.size.width * scale,
+                height: image.size.height * scale,
+            )
+            let drawRect = CGRect(
+                x: 0,
+                y: -(drawSize.height - outputSize.height),
+                width: drawSize.width,
+                height: drawSize.height,
+            )
+            image.draw(in: drawRect)
         }
     }
 
@@ -172,21 +302,75 @@ enum OCRService {
     }
 
     /// Scans a single OCR'd line for the first "X/Y" pattern, returns
-    /// the normalized X. Exposed static + internal so tests can poke
-    /// the extractor without firing Vision.
+    /// the normalized X. Legacy single-result extractor — new code
+    /// should call `collectorNumberCandidates(in:)` to also pick up
+    /// space-split readings like "1 30/159" → ["30", "130"].
     static func firstCollectorNumber(in text: String) -> String? {
+        return collectorNumberCandidates(in: text).first
+    }
+
+    /// All plausible collector numbers in `text`. A single OCR'd line
+    /// can produce multiple candidates:
+    ///
+    ///   - **Direct**: "058/159" → ["58"]
+    ///   - **Space-split**: "1 30/159" → ["30", "130"]
+    ///       Vision sometimes inserts a space between digits when
+    ///       printing kerning is unusual, splitting "130/159" into
+    ///       "1 30/159". Without recovery, Path B looks for #30 (no
+    ///       Drampa with #30 exists) and fails. Real-device 2026-05-02:
+    ///       Drampa Journey Together hit this exact pattern.
+    ///   - **Multiple X/Y on one line** (rare): both reported.
+    ///
+    /// Plausibility filters:
+    ///   - Y ∈ [5, 600]: every Pokemon set has ≥5 cards and ≤600 cards.
+    ///     Filters attack damage notations like "30/3" and HP fractions.
+    ///   - X ≤ Y: an "X of Y" cardinal can't exceed Y.
+    static func collectorNumberCandidates(in text: String) -> [String] {
+        var candidates: [String] = []
+        var seen = Set<String>()
         let ns = text as NSString
-        let match = collectorPattern.firstMatch(
+        let allMatches = collectorPattern.matches(
             in: text,
             options: [],
-            range: NSRange(location: 0, length: ns.length)
+            range: NSRange(location: 0, length: ns.length),
         )
-        guard let match, match.numberOfRanges >= 2 else { return nil }
-        let numberRange = match.range(at: 1)
-        guard numberRange.location != NSNotFound else { return nil }
+        for match in allMatches {
+            guard match.numberOfRanges >= 3 else { continue }
+            let xRange = match.range(at: 1)
+            let yRange = match.range(at: 2)
+            guard xRange.location != NSNotFound, yRange.location != NSNotFound else { continue }
+            let xStr = ns.substring(with: xRange)
+            let yStr = ns.substring(with: yRange)
+            guard let yInt = Int(yStr), yInt >= 5, yInt <= 600 else { continue }
+            guard let xInt = Int(xStr), xInt <= yInt else { continue }
+            let normalized = normalizeCardNumber(xStr)
+            if seen.insert(normalized).inserted {
+                candidates.append(normalized)
+            }
 
-        let raw = ns.substring(with: numberRange)
-        return normalizeCardNumber(raw)
+            // Space-split recovery: look for 1-2 digits right before
+            // X (within 3 chars). If found, propose the concatenated
+            // value too. "1 30/159" → also try "130".
+            let lookbackStart = max(0, xRange.location - 3)
+            let lookbackLen = xRange.location - lookbackStart
+            if lookbackLen > 0 {
+                let pre = ns.substring(with: NSRange(location: lookbackStart, length: lookbackLen))
+                let preTrim = pre.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !preTrim.isEmpty,
+                   preTrim.count <= 2,
+                   preTrim.allSatisfy({ $0.isNumber }),
+                   let preInt = Int(preTrim),
+                   preInt >= 1,
+                   let combinedInt = Int("\(preTrim)\(xStr)"),
+                   combinedInt <= yInt {
+                    let combined = normalizeCardNumber("\(preTrim)\(xStr)")
+                    if seen.insert(combined).inserted {
+                        candidates.append(combined)
+                    }
+                }
+            }
+        }
+        return candidates
     }
 
     /// Strips leading zeros so an OCR read of "007" matches an index

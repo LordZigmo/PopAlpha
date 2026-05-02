@@ -2,7 +2,19 @@ import SwiftUI
 import NukeUI
 
 struct ContentView: View {
-    @State private var selectedTab: AppTab = .market
+    // Default to Scanner tab when launched with -runOfflineSmoke or
+    // -debugOfflineIdentifier so the scanner's onAppear fires and the
+    // smoke test runs without needing a manual tab switch. DEBUG-only,
+    // no production cost.
+    @State private var selectedTab: AppTab = {
+        #if DEBUG
+        let args = ProcessInfo.processInfo.arguments
+        if args.contains("-runOfflineSmoke") || args.contains("-debugOfflineIdentifier") {
+            return .scanner
+        }
+        #endif
+        return .market
+    }()
     // Observed so the root-level sign-in error alert fires whenever
     // AuthService.shared.signInError becomes non-nil, no matter which
     // screen triggered the sign-in.
