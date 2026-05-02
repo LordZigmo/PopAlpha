@@ -40,6 +40,7 @@
 		AA00000100000000000000D3 /* CardService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000D5 /* CardService.swift */; };
 		AA00000100000000000000D6 /* InteractiveChartView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000D7 /* InteractiveChartView.swift */; };
 		AA00000100000000000000E0 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000B2 /* Preview Assets.xcassets */; };
+		EE00000100000000000000C1 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = EE00000100000000000000B1 /* PrivacyInfo.xcprivacy */; };
 		AA00000100000000000000E5 /* ActivityService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000E8 /* ActivityService.swift */; };
 		AA00000100000000000000E6 /* ActivityFeedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000E9 /* ActivityFeedView.swift */; };
 		AA00000100000000000000E7 /* ActivityEventCell.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000EA /* ActivityEventCell.swift */; };
@@ -115,6 +116,7 @@
 		AA00000100000000000000B1 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		AA00000100000000000000B2 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
 		AA00000100000000000000B3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		EE00000100000000000000B1 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		AA00000100000000000000C1 /* PopAlphaApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PopAlphaApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA00000100000000000000D4 /* SupabaseClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupabaseClient.swift; sourceTree = "<group>"; };
 		AA00000100000000000000D5 /* CardService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardService.swift; sourceTree = "<group>"; };
@@ -268,6 +270,7 @@
 				1500000100000000000000A1 /* CollectorRadarCard.swift */,
 				AA00000100000000000000B1 /* Assets.xcassets */,
 				AA00000100000000000000B3 /* Info.plist */,
+				EE00000100000000000000B1 /* PrivacyInfo.xcprivacy */,
 				AA00000100000000000000E3 /* Preview Content */,
 			);
 			path = PopAlphaApp;
@@ -364,6 +367,7 @@
 			files = (
 				AA00000100000000000000E0 /* Preview Assets.xcassets in Resources */,
 				AA00000100000000000000D0 /* Assets.xcassets in Resources */,
+				EE00000100000000000000C1 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
