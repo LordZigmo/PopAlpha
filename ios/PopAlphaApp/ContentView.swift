@@ -76,6 +76,25 @@ struct ContentView: View {
                 Text(auth.signInError ?? "Something went wrong. Please try again.")
             }
         )
+        // Universal Links — Apple's CDN routes taps on popalpha.ai links
+        // here when our AASA at /.well-known/apple-app-site-association
+        // matches. SwiftUI bridges both warm-launch and cold-launch
+        // continuations through this modifier on the root view.
+        // DeepLinkRouter parses the URL and stashes a destination;
+        // tab-level views observe pendingDestination to navigate.
+        //
+        // Not also wiring `.onOpenURL` here — Clerk's OAuth callback
+        // (ai.popalpha.ios://callback) is consumed inside ClerkKit via
+        // ASWebAuthenticationSession and shouldn't be intercepted by
+        // a top-level handler.
+        .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
+            guard let url = activity.webpageURL else { return }
+            let didRoute = DeepLinkRouter.shared.handle(url: url)
+            if didRoute, case .card = DeepLinkRouter.shared.pendingDestination {
+                // Card destinations live in the Market tab's stack.
+                selectedTab = .market
+            }
+        }
     }
 
     private func configureTabBarAppearance() {

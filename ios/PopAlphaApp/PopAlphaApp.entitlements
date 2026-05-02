@@ -18,5 +18,23 @@
 	-->
 	<key>aps-environment</key>
 	<string>production</string>
+	<!--
+		Universal Links. Apple's CDN fetches the AASA file from
+		https://popalpha.ai/.well-known/apple-app-site-association
+		(served by app/.well-known/apple-app-site-association/route.ts)
+		on app install / first launch and caches the result. URL paths
+		listed in that AASA route to the iOS app via
+		.onContinueUserActivity(NSUserActivityTypeBrowsingWeb) — see
+		DeepLinkRouter.swift.
+
+		The "applinks:" prefix tells iOS this is a Universal Links domain
+		(vs other associated-domain types like webcredentials). No
+		subdomains are listed; if we ever want www.popalpha.ai or
+		another subdomain to deep-link, add separate "applinks:..." rows.
+	-->
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:popalpha.ai</string>
+	</array>
 </dict>
 </plist>

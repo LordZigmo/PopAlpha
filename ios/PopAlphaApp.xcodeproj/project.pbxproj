@@ -29,6 +29,7 @@
 		9DB7452F2F91E43300AD2083 /* NukeVideo in Frameworks */ = {isa = PBXBuildFile; productRef = 9DB7452E2F91E43300AD2083 /* NukeVideo */; };
 		AA000001000000000000000A /* PopAlphaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000A1 /* PopAlphaApp.swift */; };
 		AA000001000000000000000B /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000A2 /* ContentView.swift */; };
+		EE00000200000000000000F1 /* DeepLinkRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE00000200000000000000A1 /* DeepLinkRouter.swift */; };
 		AA000001000000000000000C /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000A3 /* Theme.swift */; };
 		AA000001000000000000000D /* AppModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000A4 /* AppModels.swift */; };
 		AA000001000000000000000E /* MarketplaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000A5 /* MarketplaceView.swift */; };
@@ -114,6 +115,7 @@
 		9D07CFD12F982DCD004BF9A7 /* AnalyticsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsService.swift; sourceTree = "<group>"; };
 		AA00000100000000000000A1 /* PopAlphaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopAlphaApp.swift; sourceTree = "<group>"; };
 		AA00000100000000000000A2 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		EE00000200000000000000A1 /* DeepLinkRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepLinkRouter.swift; sourceTree = "<group>"; };
 		AA00000100000000000000A3 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		AA00000100000000000000A4 /* AppModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModels.swift; sourceTree = "<group>"; };
 		AA00000100000000000000A5 /* MarketplaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketplaceView.swift; sourceTree = "<group>"; };
@@ -215,6 +217,7 @@
 			children = (
 				AA00000100000000000000A1 /* PopAlphaApp.swift */,
 				AA00000100000000000000A2 /* ContentView.swift */,
+				EE00000200000000000000A1 /* DeepLinkRouter.swift */,
 				AA00000100000000000000A3 /* Theme.swift */,
 				AA00000100000000000000A4 /* AppModels.swift */,
 				AA00000100000000000000A5 /* MarketplaceView.swift */,
@@ -403,6 +406,7 @@
 			files = (
 				AA000001000000000000000A /* PopAlphaApp.swift in Sources */,
 				AA000001000000000000000B /* ContentView.swift in Sources */,
+				EE00000200000000000000F1 /* DeepLinkRouter.swift in Sources */,
 				AA000001000000000000000C /* Theme.swift in Sources */,
 				AA000001000000000000000D /* AppModels.swift in Sources */,
 				AA000001000000000000000E /* MarketplaceView.swift in Sources */,
