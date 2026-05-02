@@ -1,0 +1,13 @@
+# SigLIP-2 .mlpackage is a 177MB build artifact (the weight.bin alone
+# exceeds GitHub's 100MB single-file cap). Regenerate locally with:
+#
+#   cd cog/siglip-features
+#   source venv/bin/activate
+#   python coreml_convert.py
+#   cp -R siglip2_base_patch16_384.mlpackage \
+#     ../../ios/Sources/Features/Scanner/Resources/Models/
+#
+# Production-tier distribution will move this to Supabase Storage /
+# On-Demand Resources so end users download on premium activation
+# rather than shipping the full 177MB in every install.
+siglip2_base_patch16_384.mlpackage/

@@ -23,6 +23,12 @@ import NukeUI
 struct ScanPickerSheet: View {
     let matches: [ScanMatch]
     let imageHash: String?
+    /// Source UIImage for offline scans, retained by ScannerHost so
+    /// the correction-promote flow can re-upload bytes when scan-uploads
+    /// doesn't have them. Nil for online scans (server already uploaded).
+    /// When present, picker/search promotion uses
+    /// `promoteEvalFromBytes` instead of `promoteEvalFromHash`.
+    var scanImage: UIImage? = nil
     let scanLanguage: ScanLanguage
     /// What on-device OCR pulled from the captured frame. Used by the
     /// debug overlay (DEBUG-only) so during sprint real-device testing
@@ -438,7 +444,24 @@ struct ScanPickerSheet: View {
         PAHaptics.tap()
 
         // Fire-and-forget promote — don't block navigation on telemetry.
-        if let hash = imageHash {
+        // For OFFLINE scans `scanImage` is non-nil because no server
+        // upload happened; use the bytes-multipart variant which both
+        // uploads to scan-uploads AND writes the eval row in one call.
+        // For ONLINE scans the server already uploaded via /api/scan/identify,
+        // so the hash-by-reference variant is cheaper.
+        if let bytes = scanImage {
+            let slug = match.slug
+            let lang = scanLanguage
+            Task.detached {
+                _ = try? await ScanService.promoteEvalFromBytes(
+                    image: bytes,
+                    canonicalSlug: slug,
+                    source: .userCorrection,
+                    language: lang,
+                    notes: "picker-sheet-select"
+                )
+            }
+        } else if let hash = imageHash {
             Task.detached {
                 _ = try? await ScanService.promoteEvalFromHash(
                     imageHash: hash,
@@ -464,7 +487,22 @@ struct ScanPickerSheet: View {
         promoting = true
         PAHaptics.tap()
 
-        if let hash = imageHash {
+        // Same offline/online split as handlePickerPick — bytes-multipart
+        // when we have the source UIImage (offline scan), hash-by-reference
+        // otherwise (online scan, server already uploaded).
+        if let bytes = scanImage {
+            let slug = result.canonicalSlug
+            let lang = scanLanguage
+            Task.detached {
+                _ = try? await ScanService.promoteEvalFromBytes(
+                    image: bytes,
+                    canonicalSlug: slug,
+                    source: .userCorrection,
+                    language: lang,
+                    notes: "picker-sheet-search-select"
+                )
+            }
+        } else if let hash = imageHash {
             Task.detached {
                 _ = try? await ScanService.promoteEvalFromHash(
                     imageHash: hash,

@@ -1,0 +1,134 @@
+{
+  "identifier" : "8E9C0D40-9F18-4D0A-B7F9-3E1F4F0A0001",
+  "nonRenewingSubscriptions" : [],
+  "products" : [
+    {
+      "displayPrice" : "59.99",
+      "familyShareable" : false,
+      "internalID" : "8E9C0D40-9F18-4D0A-B7F9-3E1F4F0A1001",
+      "localizations" : [
+        {
+          "description" : "Lifetime Pro: offline scanner + sub-second on-device identify + unlimited scans. One-time purchase.",
+          "displayName" : "PopAlpha Pro (Lifetime)",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "ai.popalpha.premium.pro.lifetime",
+      "referenceName" : "Pro Lifetime",
+      "type" : "NonConsumable"
+    }
+  ],
+  "settings" : {
+    "_failTransactionsEnabled" : false,
+    "_locale" : "en_US",
+    "_storefront" : "USA",
+    "_storeKitErrors" : [
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Load Products"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Purchase"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Verification"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Store Sync"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Subscription Status"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Transaction"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Manage Subscriptions Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Refund Request Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Offer Code Redeem Sheet"
+      }
+    ]
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "8E9C0D40-9F18-4D0A-B7F9-3E1F4F0A2001",
+      "localizations" : [
+        {
+          "description" : "Premium PopAlpha features",
+          "displayName" : "PopAlpha Pro",
+          "locale" : "en_US"
+        }
+      ],
+      "name" : "PopAlpha Pro",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "4.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "8E9C0D40-9F18-4D0A-B7F9-3E1F4F0A3001",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Pro monthly: offline scanner + sub-second on-device identify + unlimited scans.",
+              "displayName" : "PopAlpha Pro (Monthly)",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "ai.popalpha.premium.pro.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Pro Monthly",
+          "subscriptionGroupID" : "8E9C0D40-9F18-4D0A-B7F9-3E1F4F0A2001",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "49.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "8E9C0D40-9F18-4D0A-B7F9-3E1F4F0A3002",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Pro yearly: same offline scanner perks at ~16% off vs monthly.",
+              "displayName" : "PopAlpha Pro (Yearly)",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "ai.popalpha.premium.pro.yearly",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Pro Yearly",
+          "subscriptionGroupID" : "8E9C0D40-9F18-4D0A-B7F9-3E1F4F0A2001",
+          "type" : "RecurringSubscription"
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}

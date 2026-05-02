@@ -1,0 +1,15 @@
+# PopAlpha catalog bundle (.papb) is a 35MB build artifact regenerated
+# by `cog/siglip-features/build_catalog_bundle.py` from the SigLIP-2
+# catalog in Supabase. Production-tier distribution will move this out
+# of the iOS bundle entirely (download on premium activation from
+# Supabase Storage / On-Demand Resources) — this checkin is for dev
+# validation only.
+#
+# Regenerate locally with:
+#
+#   cd cog/siglip-features
+#   source venv/bin/activate
+#   python build_catalog_bundle.py
+#   cp siglip2_catalog_v1.papb \
+#     ../../ios/Sources/Features/Scanner/Resources/Catalog/
+*.papb

@@ -21,6 +21,11 @@ struct ScannerTabView: View {
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var showEvalSeeding = false
     @State private var showPickerSheet = false
+    #if DEBUG
+    @State private var smokeReport: OfflineScannerSmokeReport?
+    @State private var smokeRunning = false
+    @StateObject private var premiumGate = PremiumGate.shared
+    #endif
 
     // Package-backed recognition
     @StateObject private var scanner = ScannerHost()
@@ -77,7 +82,11 @@ struct ScannerTabView: View {
             .ignoresSafeArea()
             .navigationBarHidden(true)
             .navigationDestination(item: $navigateToCard) { card in
-                CardDetailView(card: card, scanImageHash: scanner.lastImageHash)
+                CardDetailView(
+                    card: card,
+                    scanImageHash: scanner.lastImageHash,
+                    scanImage: scanner.lastScanImage,
+                )
                     .onDisappear {
                         // Resume auto-scanning when the user returns from the detail view (single mode).
                         if scanMode == .single {
@@ -92,6 +101,7 @@ struct ScannerTabView: View {
                 ScanPickerSheet(
                     matches: scanner.lastMatches,
                     imageHash: scanner.lastImageHash,
+                    scanImage: scanner.lastScanImage,
                     scanLanguage: scanLanguage,
                     ocrCardNumber: scanner.lastOCR.cardNumber,
                     ocrSetHint: scanner.lastOCR.setHint,
@@ -100,6 +110,13 @@ struct ScannerTabView: View {
                     onDismiss: handlePickerDismiss
                 )
             }
+            #if DEBUG
+            .sheet(isPresented: smokeSheetBinding) {
+                if let report = smokeReport {
+                    OfflineSmokeReportSheet(report: report)
+                }
+            }
+            #endif
             .onChange(of: scanner.lastMatch) { _, newValue in
                 handleIdentifyResult(newValue)
             }
@@ -108,6 +125,9 @@ struct ScannerTabView: View {
             }
             .onAppear {
                 scanner.scanLanguage = scanLanguage
+                #if DEBUG
+                runSmokeTestIfRequested()
+                #endif
             }
         }
     }
@@ -145,6 +165,10 @@ struct ScannerTabView: View {
 
                 Spacer()
 
+                #if DEBUG
+                premiumOverrideButton
+                offlineSmokeButton
+                #endif
                 evalSeedingButton
                 libraryPickerButton
                 languagePill
@@ -175,6 +199,174 @@ struct ScannerTabView: View {
                 .clipShape(Circle())
         }
     }
+
+    // MARK: - Premium override toggle (DEBUG only)
+    //
+    // Flips PremiumGate's debug override so the offline scanner path
+    // fires without a real StoreKit purchase. Crown icon = currently
+    // pro (real or override); slashed crown = free.
+
+    #if DEBUG
+    private var premiumOverrideButton: some View {
+        Button {
+            PAHaptics.tap()
+            premiumGate.debugOverrideEnabled.toggle()
+        } label: {
+            Image(systemName: premiumGate.isPro ? "crown.fill" : "crown")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(
+                    premiumGate.isPro ? Color.yellow.opacity(0.9) : .white.opacity(0.5)
+                )
+                .frame(width: 32, height: 32)
+                .background(.ultraThinMaterial.opacity(0.5))
+                .clipShape(Circle())
+        }
+    }
+    #endif
+
+    // MARK: - Offline smoke-test button + sheet plumbing (DEBUG only)
+
+    #if DEBUG
+    private var smokeSheetBinding: Binding<Bool> {
+        Binding(
+            get: { smokeReport != nil },
+            set: { if !$0 { smokeReport = nil } }
+        )
+    }
+
+    private var offlineSmokeButton: some View {
+        Button {
+            PAHaptics.tap()
+            guard !smokeRunning else { return }
+            smokeRunning = true
+            Task.detached(priority: .userInitiated) {
+                let report = await OfflineScannerSmokeTest.run()
+                await MainActor.run {
+                    smokeReport = report
+                    smokeRunning = false
+                }
+            }
+        } label: {
+            ZStack {
+                if smokeRunning {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        .scaleEffect(0.6)
+                } else {
+                    Image(systemName: "wifi.slash")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.85))
+                }
+            }
+            .frame(width: 32, height: 32)
+            .background(.ultraThinMaterial.opacity(0.5))
+            .clipShape(Circle())
+        }
+        .disabled(smokeRunning)
+    }
+
+    private func runSmokeTestIfRequested() {
+        guard ProcessInfo.processInfo.arguments.contains("-runOfflineSmoke")
+            || ProcessInfo.processInfo.arguments.contains("-debugOfflineIdentifier")
+        else {
+            return
+        }
+        guard !smokeRunning, smokeReport == nil else { return }
+        smokeRunning = true
+        Task.detached(priority: .userInitiated) {
+            let report = await OfflineScannerSmokeTest.run()
+            print("=== OFFLINE_SMOKE_BEGIN ===")
+            print(report.summary)
+            print("=== OFFLINE_SMOKE_END ===")
+
+            // Tier 6: orchestrator end-to-end. Lives in PopAlphaApp
+            // (which has the adapter logic) so it can't sit inside
+            // PopAlphaCore's smoke test, but we run it under the
+            // same launch flag to keep one debug entry point.
+            let orch = await MainActor.run { OfflineScanOrchestrator() }
+            let img = Self.makeOrchestratorTestImage()
+            print("=== ORCH_SMOKE_BEGIN ===")
+            do {
+                let t0 = Date()
+                let response = try await orch.identify(
+                    image: img,
+                    cardNumber: nil,
+                    setHint: nil,
+                    language: .en,
+                    limit: 5,
+                )
+                let elapsed = Date().timeIntervalSince(t0) * 1000
+                let top = response.matches.first
+                print(String(
+                    format: "[orch] elapsed=%.1fms confidence=%@ winning_path=%@ matches=%d",
+                    elapsed,
+                    response.confidence,
+                    response.winningPath ?? "nil",
+                    response.matches.count,
+                ))
+                if let top {
+                    print("[orch] top-1 slug=\(top.slug) name=\"\(top.canonicalName)\" set=\"\(top.setName ?? "nil")\" num=\"\(top.cardNumber ?? "nil")\" sim=\(String(format: "%.4f", top.similarity)) imgURL=\(top.mirroredPrimaryImageUrl ?? "nil")")
+                }
+                print("[orch] imageHash=\(response.imageHash ?? "nil")")
+                let plumbingOk = top != nil
+                    && top?.canonicalName.isEmpty == false
+                    && top?.mirroredPrimaryImageUrl != nil
+                    && response.imageHash != nil
+                print(plumbingOk ? "ALL ORCH PASSED ✅" : "ORCH FAILED ❌")
+            } catch {
+                print("[orch] error: \(error.localizedDescription)")
+                print("ORCH FAILED ❌")
+            }
+            print("=== ORCH_SMOKE_END ===")
+
+            await MainActor.run {
+                smokeReport = report
+                smokeRunning = false
+            }
+        }
+    }
+
+    /// Synthesizes a 384×384 deterministic-noise image for the
+    /// orchestrator end-to-end check.
+    private static func makeOrchestratorTestImage() -> UIImage {
+        let side = 384
+        let bytesPerPixel = 4
+        let bytesPerRow = side * bytesPerPixel
+        var pixels = [UInt8](repeating: 0, count: side * bytesPerRow)
+        var state: UInt32 = 1234567 &* 1103515245 &+ 12345
+        for i in 0..<(side * side) {
+            state = state &* 1103515245 &+ 12345
+            let r = UInt8((state >> 16) & 0xFF)
+            state = state &* 1103515245 &+ 12345
+            let g = UInt8((state >> 16) & 0xFF)
+            state = state &* 1103515245 &+ 12345
+            let b = UInt8((state >> 16) & 0xFF)
+            let off = i * bytesPerPixel
+            pixels[off + 0] = r
+            pixels[off + 1] = g
+            pixels[off + 2] = b
+            pixels[off + 3] = 255
+        }
+        let cs = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo.byteOrder32Big.rawValue
+            | CGImageAlphaInfo.premultipliedLast.rawValue
+        let provider = CGDataProvider(data: Data(pixels) as CFData)!
+        let cg = CGImage(
+            width: side,
+            height: side,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: bytesPerRow,
+            space: cs,
+            bitmapInfo: CGBitmapInfo(rawValue: bitmapInfo),
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: false,
+            intent: .defaultIntent,
+        )!
+        return UIImage(cgImage: cg)
+    }
+    #endif
 
     // MARK: - Library picker (scan a saved photo instead of live camera)
 
@@ -588,6 +780,14 @@ final class ScannerHost: ObservableObject {
     /// re-arming. Populated alongside lastMatch; cleared in lockstep.
     @Published private(set) var lastMatches: [ScanMatch] = []
 
+    /// The UIImage that fed the most recent OFFLINE scan, retained
+    /// so the eval-promote correction flow can re-upload bytes via
+    /// `promoteEvalFromBytes` when scan-uploads doesn't have them.
+    /// Online scans set this to nil because /api/scan/identify
+    /// already uploaded the JPEG to scan-uploads/<hash>.jpg and the
+    /// existing hash-based promote flow can find it server-side.
+    @Published private(set) var lastScanImage: UIImage?
+
     /// What on-device OCR pulled from the last captured frame
     /// (collector number and/or set-name hint). Surfaced so the
     /// debug overlay in ScanPickerSheet can show what Vision
@@ -618,6 +818,10 @@ final class ScannerHost: ObservableObject {
 
     private var observers: [NSKeyValueObservation] = []
     private var cancellable: AnyObject?
+    /// Lazily-built offline orchestrator. Only constructed once
+    /// PremiumGate.shared.offlineScannerEnabled flips true — keeps
+    /// free-tier launches from incurring the model-load cost.
+    private var offlineOrchestrator: OfflineScanOrchestrator?
 
     init() {
         #if targetEnvironment(simulator)
@@ -670,51 +874,112 @@ final class ScannerHost: ObservableObject {
         }
     }
 
+    /// Returns the offline orchestrator, initializing it on first
+    /// access. Idempotent.
+    private func makeOrchestrator() -> OfflineScanOrchestrator {
+        if let existing = offlineOrchestrator { return existing }
+        let o = OfflineScanOrchestrator()
+        offlineOrchestrator = o
+        return o
+    }
+
     private func runIdentify(image: UIImage) async {
+        // RE-ENTRY GUARD. PopAlphaVisionEngine.reset() clears the
+        // current stability candidate but does NOT stop frame
+        // analysis. So while we're inside an identify call, Vision
+        // can detect another stable rectangle and re-fire
+        // onStableCardCaptured. Without this guard, that produces
+        // concurrent runIdentify calls — and the second one's HIGH
+        // result yanks the picker out from under the user when the
+        // first one returned MEDIUM.
+        //
+        // Two reasons to skip:
+        //   - isIdentifying: we're already mid-flight.
+        //   - lastMatch != nil: a result is sitting on screen waiting
+        //     for the user (HIGH navigated to detail, MEDIUM picker
+        //     shown). Either way, fresh scans should not steal focus
+        //     until the user re-arms via dismiss / detail-view-back /
+        //     low-confidence silent re-arm.
+        if self.isIdentifying || self.lastMatch != nil {
+            #if DEBUG
+            print(
+                "[scan] runIdentify dropped — "
+                + "isIdentifying=\(self.isIdentifying) "
+                + "lastMatch=\(self.lastMatch?.slug ?? "nil")"
+            )
+            #endif
+            return
+        }
         self.isIdentifying = true
         self.identifyError = nil
+        // Belt-and-braces: clear Vision's stability buffer so the
+        // next post-arm re-detection requires a fresh stable window.
+        self.viewModel?.pauseForExternalCapture()
+        self.isScanning = self.viewModel?.isScanning ?? false
 
-        // Run on-device OCR FIRST (~100-300ms) to extract BOTH a
-        // collector number AND a set-name hint, then forward both to
-        // the server's identify endpoint. The server uses
-        // ?card_number= and ?set_hint= to filter the kNN's INTERNAL
-        // ~20-candidate pool — strictly higher recall than letting
-        // the server return a top-5 and reranking client-side because
-        // the server filters see candidates that never made top-5.
-        //
-        // Why both fields: card_number alone resolves V/VMAX/VSTAR/ex
-        // confusion within a printing, but it COLLIDES across sets
-        // (Umbreon V #94 Evolving Skies vs Suicune & Entei LEGEND #94
-        // HS Unleashed). Set hint resolves those collisions.
-        //
-        // OCR is fail-graceful per-field: if either field is nil
-        // (Vision errored, the corner was occluded, the set name was
-        // ambiguous text), the request just omits that filter and the
-        // route behaves like it does without that hint. The server
-        // also falls back gracefully if its filter would drop every
-        // candidate.
-        //
-        // ScanMatchReranker still runs locally as defense in depth:
-        // when the server returns multiple candidates surviving its
-        // filters, client-side promotion + confidence upgrade catches
-        // any drift between canonical_cards.card_number and what the
-        // server returned in match.cardNumber.
-        let ocr = await OCRService.extractCardIdentifiers(from: image)
+        // Multi-candidate OCR via Vision's beam search (topCandidates(3))
+        // PLUS a second pass on the bicubic-upscaled bottom strip —
+        // recovers tiny collector-number text the full pass misses
+        // under blur. Only the top candidate is sent to the server
+        // (legacy single-candidate API); the offline path uses the
+        // full list via Path B trial.
+        let ocrMulti = await OCRService.extractCardIdentifiersMulti(from: image)
+        let ocr = (cardNumber: ocrMulti.cardNumbers.first, setHint: ocrMulti.setHint)
         self.lastOCR = ocr
         #if DEBUG
         print(
-            "[scan ocr] cardNumber=\(ocr.cardNumber ?? "nil") "
-            + "setHint=\(ocr.setHint ?? "nil")"
+            "[scan ocr] frameSize=\(Int(image.size.width))x\(Int(image.size.height)) "
+            + "cardNumbers=\(ocrMulti.cardNumbers) "
+            + "setHint=\(ocrMulti.setHint ?? "nil")"
         )
         #endif
 
+        // Offline-first when premium gate is open. On any offline
+        // failure (catalog not downloaded, model load error, embed
+        // error, identify error) we silently fall back to the
+        // network path — free-tier behavior never regresses when
+        // premium turns on.
+        let offlineEnabled = await MainActor.run { PremiumGate.shared.offlineScannerEnabled }
+        var response: ScanIdentifyResponse?
+        var usedOffline = false
+
+        if offlineEnabled {
+            let orchestrator = await MainActor.run { self.makeOrchestrator() }
+            do {
+                let r = try await orchestrator.identifyMulti(
+                    image: image,
+                    cardNumberCandidates: ocrMulti.cardNumbers,
+                    setHint: ocrMulti.setHint,
+                    language: self.scanLanguage,
+                )
+                response = r
+                usedOffline = true
+                #if DEBUG
+                print(
+                    "[scan offline] winning_path=\(r.winningPath ?? "nil") "
+                    + "confidence=\(r.confidence) "
+                    + "tried_candidates=\(ocrMulti.cardNumbers)"
+                )
+                #endif
+            } catch {
+                #if DEBUG
+                print("[scan offline] failed; falling back to network: \(error.localizedDescription)")
+                #endif
+            }
+        }
+
         do {
-            let response = try await ScanService.identify(
-                image: image,
-                language: self.scanLanguage,
-                cardNumber: ocr.cardNumber,
-                setHint: ocr.setHint
-            )
+            if response == nil {
+                response = try await ScanService.identify(
+                    image: image,
+                    language: self.scanLanguage,
+                    cardNumber: ocr.cardNumber,
+                    setHint: ocr.setHint
+                )
+            }
+            guard let response else {
+                throw ScanServiceError.imageEncodingFailed  // unreachable — keeps the optional checked
+            }
 
             let reranked = ScanMatchReranker.rerank(
                 matches: response.matches,
@@ -727,13 +992,39 @@ final class ScannerHost: ObservableObject {
             self.lastConfidence = reranked.confidence
             self.lastImageHash = response.imageHash
             self.lastWinningPath = response.winningPath
+            // Retain JPEG-source UIImage only for offline scans —
+            // online scans already uploaded to scan-uploads/<hash>.jpg
+            // so the correction-via-hash path works without it.
+            self.lastScanImage = usedOffline ? image : nil
             self.isIdentifying = false
 
             #if DEBUG
             print(
-                "[scan path] winning_path=\(response.winningPath ?? "nil") "
+                "[scan path] source=\(usedOffline ? "offline" : "network") "
+                + "winning_path=\(response.winningPath ?? "nil") "
                 + "confidence=\(reranked.confidence)"
             )
+            // Save the EXACT frame the embedder saw to Photos when
+            // confidence isn't HIGH. Self-documenting — banner
+            // overlay carries the result, top-5, OCR.
+            if reranked.confidence != "high" {
+                let rerankedResponse = ScanIdentifyResponse(
+                    ok: response.ok,
+                    confidence: reranked.confidence,
+                    matches: reranked.matches,
+                    languageFilter: response.languageFilter,
+                    modelVersion: response.modelVersion,
+                    imageHash: response.imageHash,
+                    winningPath: response.winningPath,
+                )
+                ScanDebugCapture.capture(
+                    image: image,
+                    response: rerankedResponse,
+                    source: usedOffline ? .offline : .network,
+                    ocrCardNumbers: ocrMulti.cardNumbers,
+                    ocrSetHint: ocrMulti.setHint,
+                )
+            }
             #endif
 
             // Low-confidence → auto-resume so the user can try again
@@ -746,6 +1037,15 @@ final class ScannerHost: ObservableObject {
         } catch {
             self.isIdentifying = false
             self.identifyError = error.localizedDescription
+            #if DEBUG
+            ScanDebugCapture.capture(
+                image: image,
+                response: nil,
+                source: usedOffline ? .offline : .network,
+                ocrCardNumbers: ocrMulti.cardNumbers,
+                ocrSetHint: ocrMulti.setHint,
+            )
+            #endif
             self.resumeScanning()
         }
     }
@@ -753,15 +1053,9 @@ final class ScannerHost: ObservableObject {
     /// Identifies a card from the user's photo library (or any already-
     /// captured UIImage) by feeding it straight through the server
     /// identify pipeline, skipping the Vision rectangle stability gate.
-    /// Used by the scanner UI's PhotosPicker button so users can scan
-    /// photos they already have — especially useful for building out
-    /// the eval corpus from saved captures.
+    /// `runIdentify` itself now handles the camera pause + re-entry
+    /// guard, so the previous explicit pause here was redundant.
     func runIdentifyFromLibrary(image: UIImage) async {
-        // Pause live scanning so the camera's stability gate doesn't
-        // also fire an identify concurrently — we only want the library
-        // photo's result to drive navigation.
-        viewModel?.pauseForExternalCapture()
-        isScanning = viewModel?.isScanning ?? false
         await runIdentify(image: image)
     }
 
@@ -780,6 +1074,7 @@ final class ScannerHost: ObservableObject {
         lastConfidence = nil
         identifyError = nil
         lastImageHash = nil
+        lastScanImage = nil
         lastOCR = (nil, nil)
         lastWinningPath = nil
     }

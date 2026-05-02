@@ -39,6 +39,12 @@ struct PopAlphaApp: App {
                 .environment(Clerk.shared)
                 .preferredColorScheme(.dark)
                 .task { await AuthService.shared.restoreSession() }
+                .task {
+                    // StoreKit 2: start the transaction listener and
+                    // refresh entitlements against Apple. Idempotent.
+                    await PremiumStore.shared.start()
+                    await PremiumStore.shared.loadProducts()
+                }
                 .onChange(of: scenePhase) { _, newPhase in
                     switch newPhase {
                     case .active:

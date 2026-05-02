@@ -39,6 +39,13 @@ enum EvalSeedingMode: Equatable {
 
 struct EvalSeedingView: View {
     let mode: EvalSeedingMode
+    /// Source UIImage for offline-scan corrections. When present and
+    /// `mode == .correction`, the save() flow uses
+    /// `promoteEvalFromBytes` (multipart upload + eval-write in one
+    /// request) instead of `promoteEvalFromHash` (which 404s when
+    /// scan-uploads doesn't have the file — the offline-scan case).
+    /// Nil for fresh-photo seeding and for online-scan corrections.
+    var scanImage: UIImage? = nil
     @Binding var isPresented: Bool
 
     @State private var pickerItem: PhotosPickerItem?
@@ -471,12 +478,31 @@ struct EvalSeedingView: View {
                     notes.isEmpty ? nil : notes,
                     predictedSlug.map { "model predicted \($0)" }
                 ].compactMap { $0 }.joined(separator: " | ")
-                response = try await ScanService.promoteEvalFromHash(
-                    imageHash: imageHash,
-                    canonicalSlug: card.canonicalSlug,
-                    source: .userCorrection,
-                    notes: augmentedNotes.isEmpty ? nil : augmentedNotes
-                )
+                let notesValue = augmentedNotes.isEmpty ? nil : augmentedNotes
+                if let bytes = scanImage {
+                    // Offline-scan path: scan-uploads/<hash>.jpg doesn't
+                    // exist server-side because we never uploaded.
+                    // promoteEvalFromBytes uploads + writes the eval
+                    // entry in one multipart request — same end state
+                    // as upload-then-promote-by-hash.
+                    response = try await ScanService.promoteEvalFromBytes(
+                        image: bytes,
+                        canonicalSlug: card.canonicalSlug,
+                        source: .userCorrection,
+                        notes: notesValue
+                    )
+                } else {
+                    // Online-scan path: server already uploaded during
+                    // /api/scan/identify, so the hash-based copy is
+                    // cheaper than re-uploading.
+                    _ = imageHash // silence "unused" if no bytes path
+                    response = try await ScanService.promoteEvalFromHash(
+                        imageHash: imageHash,
+                        canonicalSlug: card.canonicalSlug,
+                        source: .userCorrection,
+                        notes: notesValue
+                    )
+                }
             }
 
             await MainActor.run {

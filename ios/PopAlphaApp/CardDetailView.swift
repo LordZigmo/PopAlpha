@@ -41,10 +41,16 @@ struct CardDetailView: View {
     /// re-photographing the card. Defaults nil so existing call sites
     /// (portfolio, signals, marketplace, set detail) don't need updates.
     let scanImageHash: String?
+    /// Source UIImage retained for offline scans only — needed because
+    /// no scan-uploads/<hash>.jpg exists on the server, so the
+    /// correction-promote flow must re-upload bytes via the multipart
+    /// variant. Nil for online scans (server already has the file).
+    let scanImage: UIImage?
 
-    init(card: MarketCard, scanImageHash: String? = nil) {
+    init(card: MarketCard, scanImageHash: String? = nil, scanImage: UIImage? = nil) {
         self.card = card
         self.scanImageHash = scanImageHash
+        self.scanImage = scanImage
     }
 
     @Environment(\.dismiss) private var dismiss
@@ -96,6 +102,7 @@ struct CardDetailView: View {
             if let hash = scanImageHash {
                 EvalSeedingView(
                     mode: .correction(imageHash: hash, predictedSlug: card.id),
+                    scanImage: scanImage,
                     isPresented: $showCorrectionSheet
                 )
             }
