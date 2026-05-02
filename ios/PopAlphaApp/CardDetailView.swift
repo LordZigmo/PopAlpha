@@ -211,6 +211,31 @@ struct CardDetailView: View {
                     }
                     .accessibilityLabel("Notifications")
 
+                    // Share — produces the same popalpha.ai/c/<slug> URL
+                    // that the AASA file declares as a Universal Link
+                    // path. Tapping a shared link from Messages/Mail/etc.
+                    // opens the recipient's PopAlpha app directly on the
+                    // card detail page (DeepLinkRouter +
+                    // MarketplaceView consumePendingDeepLink). When the
+                    // app isn't installed, the URL falls through to the
+                    // web card detail page. Doubles as a quick way to
+                    // self-test the Universal Links pipeline during
+                    // TestFlight.
+                    if let shareURL = URL(string: "https://popalpha.ai/c/\(card.id)") {
+                        ShareLink(
+                            item: shareURL,
+                            subject: Text(card.name.isEmpty ? "PopAlpha card" : card.name)
+                        ) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(PA.Colors.text)
+                                .frame(width: 36, height: 36)
+                                .background(.ultraThinMaterial.opacity(0.5))
+                                .clipShape(Circle())
+                        }
+                        .accessibilityLabel("Share card")
+                    }
+
                     Button {
                         PAHaptics.tap()
                         showAddHolding = true
