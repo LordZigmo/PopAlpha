@@ -17,10 +17,12 @@ import { resolveCardImage } from "@/lib/images/resolve";
  * logged-out users). The third is populated only for authenticated users
  * who follow at least one person.
  *
- * Cached via ISR 60s + SWR 300s to match /api/homepage.
+ * Cached at the CDN layer via Cache-Control: s-maxage=60, stale-while-revalidate=300.
+ * Force dynamic so the build doesn't try to pre-render (which would require
+ * NEXT_PUBLIC_SUPABASE_* at build time and break on env config drift).
  */
 
-export const revalidate = 60;
+export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 type CommunityCard = {
