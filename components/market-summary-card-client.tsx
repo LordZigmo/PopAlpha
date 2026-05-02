@@ -81,7 +81,13 @@ function changeTone(value: number | null): "neutral" | "positive" | "negative" {
 
 type WindowKey = "7d" | "30d" | "90d";
 
-const WINDOWS: WindowKey[] = ["7d", "30d", "90d"];
+const ALL_WINDOWS: WindowKey[] = ["7d", "30d", "90d"];
+// Mirrors enhanced-chart.tsx's `points.length < 2` empty-state guard. A
+// window with fewer than two points has no curve to draw, so we hide its
+// tab rather than letting the user click into a "Not enough data to chart"
+// dead end. 30D is always shown; the empty state lives at the parent
+// MarketSummaryCard level when there is no current market price at all.
+const MIN_POINTS_FOR_CHART = 2;
 
 function resolveActiveWindow(params: {
   activeWindow: WindowKey;
@@ -97,24 +103,32 @@ function resolveActiveWindow(params: {
   } = params;
 
   const chartSeries =
-    activeWindow === "90d" && history90d.length > 0
+    activeWindow === "90d" && history90d.length >= MIN_POINTS_FOR_CHART
       ? history90d
-      : activeWindow === "7d" && history7d.length > 0
+      : activeWindow === "7d" && history7d.length >= MIN_POINTS_FOR_CHART
         ? history7d
         : history30d;
   const effectiveWindow: WindowKey =
-    activeWindow === "90d" && history90d.length > 0
+    activeWindow === "90d" && history90d.length >= MIN_POINTS_FOR_CHART
       ? "90d"
-      : activeWindow === "7d" && history7d.length > 0
+      : activeWindow === "7d" && history7d.length >= MIN_POINTS_FOR_CHART
         ? "7d"
         : "30d";
 
   return { chartSeries, effectiveWindow };
 }
 
-function WindowTabs({ active, onChange }: { active: WindowKey; onChange: (w: WindowKey) => void }) {
+function WindowTabs({
+  active,
+  available,
+  onChange,
+}: {
+  active: WindowKey;
+  available: WindowKey[];
+  onChange: (w: WindowKey) => void;
+}) {
   const trackRef = useRef<HTMLDivElement>(null);
-  const activeIndex = WINDOWS.indexOf(active);
+  const activeIndex = Math.max(0, available.indexOf(active));
 
   return (
     <div
@@ -125,11 +139,11 @@ function WindowTabs({ active, onChange }: { active: WindowKey; onChange: (w: Win
       <div
         className="sliding-pill-bg"
         style={{
-          width: `calc(${100 / WINDOWS.length}% - 0px)`,
+          width: `calc(${100 / available.length}% - 0px)`,
           transform: `translateX(${activeIndex * 100}%)`,
         }}
       />
-      {WINDOWS.map((windowKey) => {
+      {available.map((windowKey) => {
         const isActive = active === windowKey;
         return (
           <button
@@ -180,6 +194,26 @@ export default function MarketSummaryCardClient({
   const history30d = activeVariant?.history30d ?? [];
   const history90d = activeVariant?.history90d ?? [];
 
+  // Only show tabs whose window actually has enough points to draw a chart.
+  // Stops the user from clicking 7D and getting a "Not enough data" panel
+  // (or worse, a 30D-data-under-a-7D-tab visual mismatch).
+  const availableWindows: WindowKey[] = ALL_WINDOWS.filter((windowKey) => {
+    if (windowKey === "30d") return true;
+    if (windowKey === "7d") return history7d.length >= MIN_POINTS_FOR_CHART;
+    if (windowKey === "90d") return history90d.length >= MIN_POINTS_FOR_CHART;
+    return false;
+  });
+
+  // If a deeper-link / variant-switch leaves us on a window that no longer
+  // exists for this variant's data, snap back to 30D.
+  useEffect(() => {
+    if (activeWindow === "7d" && history7d.length < MIN_POINTS_FOR_CHART) {
+      setActiveWindow("30d");
+    } else if (activeWindow === "90d" && history90d.length < MIN_POINTS_FOR_CHART) {
+      setActiveWindow("30d");
+    }
+  }, [activeWindow, history7d.length, history90d.length]);
+
   const { chartSeries, effectiveWindow } = resolveActiveWindow({
     activeWindow,
     history7d,
@@ -219,7 +253,7 @@ export default function MarketSummaryCardClient({
           <div className="space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
               <p className="text-[22px] font-semibold text-[#F0F0F0]">Market Summary</p>
-              <WindowTabs active={activeWindow} onChange={setWindow} />
+              <WindowTabs active={activeWindow} available={availableWindows} onChange={setWindow} />
             </div>
           </div>
         }
