@@ -370,12 +370,11 @@ struct CardDetailView: View {
                 finishPillSection
             }
 
-            // 3. Primary action row — moved high so Add to Collection is
-            // reachable within one short scroll of the hero.
-            actionButtons
-
-            // 4. PopAlpha insight — the wedge. First real payoff on the page;
-            // anchors the user around our interpretation before raw mechanics.
+            // PopAlpha insight — the wedge. First real payoff on the
+            // page; anchors the user around our interpretation before
+            // raw mechanics. (Watchlist row was removed; "Add to
+            // Portfolio" lives in the floating action button on the
+            // root view, so this card stays in its previous slot.)
             if cardProfile != nil {
                 aiBriefSection
             }
@@ -726,18 +725,6 @@ struct CardDetailView: View {
     // Primary: Add to Collection — dominant, accent-filled, expands to
     // fill the remaining width so it clearly reads as the next logical
     // user action. Secondary: Wishlist — compact ghost pill.
-
-    private var actionButtons: some View {
-        // "Add to Collection" moved to the floating action button on the
-        // root view (addHoldingFAB) so it stays reachable during scroll.
-        // Watchlist stays inline since it's a secondary action.
-        WatchlistButton(
-            slug: card.id,
-            cardName: card.name,
-            setName: card.setName
-        )
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
 
     // MARK: - Floating Add-to-Portfolio FAB
     // Anchored bottom-trailing on the root view (overlay on the
