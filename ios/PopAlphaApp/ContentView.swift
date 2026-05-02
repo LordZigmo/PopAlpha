@@ -395,6 +395,9 @@ struct ProfileTabView: View {
                 .font(PA.Typography.caption)
                 .foregroundStyle(PA.Colors.muted)
         }
+        // VoiceOver: read as "5 Posts" instead of two separate elements.
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(value) \(label)")
     }
 
     private func profileMenuRow(icon: String, title: String, isLast: Bool = false) -> some View {
@@ -404,6 +407,8 @@ struct ProfileTabView: View {
                     .font(.system(size: 16))
                     .foregroundStyle(PA.Colors.accent)
                     .frame(width: 24)
+                    // Decorative — title carries the same meaning.
+                    .accessibilityHidden(true)
 
                 Text(title)
                     .font(.system(size: 15, weight: .medium))
@@ -414,6 +419,8 @@ struct ProfileTabView: View {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(PA.Colors.muted)
+                    // Decorative — NavigationLink already announces "button".
+                    .accessibilityHidden(true)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
@@ -431,6 +438,10 @@ struct ProfileTabView: View {
                     .padding(.leading, 52)
             }
         }
+        // VoiceOver reads just the title; the icon + chevron are visual
+        // chrome that don't add information.
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(title)
     }
 
     // MARK: - Data

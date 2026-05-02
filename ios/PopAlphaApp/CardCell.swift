@@ -5,6 +5,19 @@ struct CardCell: View {
     let card: MarketCard
     @State private var isHovered = false
 
+    /// VoiceOver summary so the cell reads as a single coherent element
+    /// instead of name → set → price → change → confidence one-by-one.
+    /// Saves screen-reader users 6+ swipes per card on rails.
+    private var accessibilitySummary: String {
+        var parts: [String] = ["\(card.name), \(card.setName)"]
+        let direction = card.isPositive ? "up" : "down"
+        parts.append("\(card.formattedPrice), \(direction) \(card.changeText) over \(card.changeWindow)")
+        if let level = card.confidenceLabel {
+            parts.append("Confidence: \(level.label)")
+        }
+        return parts.joined(separator: ". ")
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Card image — 63:88 aspect ratio matching the website
@@ -13,6 +26,9 @@ struct CardCell: View {
             // Info below the card image
             cardInfoArea
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilitySummary)
+        .accessibilityAddTraits(.isButton)
     }
 
     // MARK: - Card Image (matches web card-tile-mini)

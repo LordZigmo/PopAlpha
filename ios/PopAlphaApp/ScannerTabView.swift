@@ -378,6 +378,8 @@ struct ScannerTabView: View {
                 .background(.ultraThinMaterial.opacity(0.5))
                 .clipShape(Circle())
         }
+        .accessibilityLabel("Choose photo from library")
+        .accessibilityHint("Identify a card from a saved image instead of the camera")
         .disabled(scanner.isIdentifying)
         .onChange(of: selectedPhotoItem) { _, newItem in
             guard let newItem else { return }
@@ -435,6 +437,8 @@ struct ScannerTabView: View {
                         .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Scan \(lang.displayName) cards")
+                .accessibilityAddTraits(scanLanguage == lang ? .isSelected : [])
             }
         }
         .padding(2)

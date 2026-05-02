@@ -6,6 +6,24 @@ struct SparklineView: View {
     var lineWidth: CGFloat = 1.5
     var height: CGFloat = 32
 
+    /// VoiceOver summary of the price trend. Without this, the chart is
+    /// invisible to screen-reader users. Renders as e.g.
+    /// "Price trend: $10.50 to $12.30, up 17 percent."
+    private var accessibilitySummary: String {
+        guard let first = data.first, let last = data.last,
+              data.count >= 2 else {
+            return "no data"
+        }
+        let pctChange: Double = first != 0
+            ? ((last - first) / abs(first)) * 100
+            : 0
+        let direction = isPositive ? "up" : "down"
+        return String(
+            format: "$%.2f to $%.2f, %@ %.0f percent",
+            first, last, direction, abs(pctChange)
+        )
+    }
+
     var body: some View {
         GeometryReader { geo in
             let w = geo.size.width
@@ -67,6 +85,9 @@ struct SparklineView: View {
             )
         }
         .frame(height: height)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Price trend")
+        .accessibilityValue(accessibilitySummary)
     }
 }
 
