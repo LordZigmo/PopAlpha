@@ -63,8 +63,8 @@ struct CollectorRadarView: View {
             ctx.stroke(fill, with: .color(accentColor), style: StrokeStyle(lineWidth: 1.5, lineJoin: .round))
 
             // Data-point dots
-            for axis in axes {
-                let pt = point(axes.firstIndex(where: { $0.label == axis.label })!, radius: r * profile[keyPath: axis.value])
+            for (i, axis) in axes.enumerated() {
+                let pt = point(i, radius: r * profile[keyPath: axis.value])
                 let dot = Path(ellipseIn: CGRect(x: pt.x - 3, y: pt.y - 3, width: 6, height: 6))
                 ctx.fill(dot, with: .color(accentColor))
             }

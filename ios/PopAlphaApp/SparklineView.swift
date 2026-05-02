@@ -31,12 +31,13 @@ struct SparklineView: View {
                 ZStack {
                     // Fill gradient
                     Path { path in
-                        path.move(to: CGPoint(x: points[0].x, y: h))
-                        path.addLine(to: points[0])
+                        guard let firstPoint = points.first, let lastPoint = points.last else { return }
+                        path.move(to: CGPoint(x: firstPoint.x, y: h))
+                        path.addLine(to: firstPoint)
                         for pt in points.dropFirst() {
                             path.addLine(to: pt)
                         }
-                        path.addLine(to: CGPoint(x: points.last!.x, y: h))
+                        path.addLine(to: CGPoint(x: lastPoint.x, y: h))
                         path.closeSubpath()
                     }
                     .fill(
@@ -52,7 +53,8 @@ struct SparklineView: View {
 
                     // Line
                     Path { path in
-                        path.move(to: points[0])
+                        guard let firstPoint = points.first else { return }
+                        path.move(to: firstPoint)
                         for pt in points.dropFirst() {
                             path.addLine(to: pt)
                         }

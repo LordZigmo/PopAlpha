@@ -25,7 +25,9 @@ enum Supabase {
         order: String? = nil,
         limit: Int? = nil
     ) async throws -> Data {
-        var components = URLComponents(string: "\(restURL)/\(table)")!
+        guard var components = URLComponents(string: "\(restURL)/\(table)") else {
+            throw SupabaseError.invalidURL("malformed table=\(table)")
+        }
         var queryItems = [URLQueryItem(name: "select", value: select)]
 
         for filter in filters {
@@ -42,7 +44,10 @@ enum Supabase {
 
         components.queryItems = queryItems
 
-        var request = URLRequest(url: components.url!)
+        guard let url = components.url else {
+            throw SupabaseError.invalidURL("query: URLComponents produced nil URL for table=\(table)")
+        }
+        var request = URLRequest(url: url)
         request.httpMethod = "GET"
         for (key, value) in defaultHeaders {
             request.setValue(value, forHTTPHeaderField: key)
@@ -64,7 +69,9 @@ enum Supabase {
         table: String,
         filters: [(column: String, op: String, value: String)] = []
     ) async throws -> Int {
-        var components = URLComponents(string: "\(restURL)/\(table)")!
+        guard var components = URLComponents(string: "\(restURL)/\(table)") else {
+            throw SupabaseError.invalidURL("malformed table=\(table)")
+        }
         var queryItems = [URLQueryItem(name: "select", value: "canonical_slug")]
 
         for filter in filters {
@@ -73,7 +80,10 @@ enum Supabase {
 
         components.queryItems = queryItems
 
-        var request = URLRequest(url: components.url!)
+        guard let url = components.url else {
+            throw SupabaseError.invalidURL("count: URLComponents produced nil URL for table=\(table)")
+        }
+        var request = URLRequest(url: url)
         request.httpMethod = "HEAD"
         for (key, value) in defaultHeaders {
             request.setValue(value, forHTTPHeaderField: key)
@@ -102,6 +112,7 @@ enum Supabase {
 enum SupabaseError: LocalizedError {
     case httpError(statusCode: Int, body: String)
     case decodingError(String)
+    case invalidURL(String)
 
     var errorDescription: String? {
         switch self {
@@ -109,6 +120,8 @@ enum SupabaseError: LocalizedError {
             return "Supabase HTTP \(code): \(body.prefix(200))"
         case .decodingError(let msg):
             return "Decode error: \(msg)"
+        case .invalidURL(let detail):
+            return "Could not build Supabase URL: \(detail)"
         }
     }
 }
