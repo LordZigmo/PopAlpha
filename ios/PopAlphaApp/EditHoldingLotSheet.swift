@@ -39,6 +39,10 @@ struct EditHoldingLotSheet: View {
 
     @State private var isSaving = false
     @State private var saveError: String?
+    /// Tracks focus on the price field so we can auto-clear a placeholder
+    /// 0.00 the first time the user taps in — saves them from having to
+    /// manually delete a value they didn't enter.
+    @FocusState private var priceFieldFocused: Bool
 
     init(lot: HoldingRow, cardName: String?, onSaved: (() async -> Void)? = nil) {
         self.lot = lot
@@ -172,6 +176,18 @@ struct EditHoldingLotSheet: View {
                     .font(.system(size: 18, weight: .medium))
                     .foregroundStyle(PA.Colors.text)
                     .keyboardType(.decimalPad)
+                    .focused($priceFieldFocused)
+                    .onChange(of: priceFieldFocused) { _, focused in
+                        // On focus, if the current value is exactly zero
+                        // (0, 0.0, 0.00, etc.), clear it so the user can
+                        // type a real price without first deleting the
+                        // placeholder. Non-zero values are preserved.
+                        if focused,
+                           let v = Double(pricePaid.trimmingCharacters(in: .whitespaces)),
+                           v == 0 {
+                            pricePaid = ""
+                        }
+                    }
             }
             .padding(12)
             .background(PA.Colors.surfaceSoft)
