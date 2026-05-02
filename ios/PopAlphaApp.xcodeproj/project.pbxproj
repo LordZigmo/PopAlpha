@@ -20,6 +20,7 @@
 		1300000100000000000000F1 /* CollectorRadarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1300000100000000000000A1 /* CollectorRadarView.swift */; };
 		1400000100000000000000F1 /* SwipeRevealRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1400000100000000000000A1 /* SwipeRevealRow.swift */; };
 		1500000100000000000000F1 /* CollectorRadarCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1500000100000000000000A1 /* CollectorRadarCard.swift */; };
+		1600000100000000000000F1 /* PortfolioDemoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1600000100000000000000A1 /* PortfolioDemoView.swift */; };
 		9D07CFCE2F982B7B004BF9A7 /* PostHog in Frameworks */ = {isa = PBXBuildFile; productRef = 9D07CFCD2F982B7B004BF9A7 /* PostHog */; };
 		9D07CFD22F982DCD004BF9A7 /* AnalyticsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D07CFD12F982DCD004BF9A7 /* AnalyticsService.swift */; };
 		9DB745292F91E43300AD2083 /* Nuke in Frameworks */ = {isa = PBXBuildFile; productRef = 9DB745282F91E43300AD2083 /* Nuke */; };
@@ -109,6 +110,7 @@
 		1300000100000000000000A1 /* CollectorRadarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollectorRadarView.swift; sourceTree = "<group>"; };
 		1400000100000000000000A1 /* SwipeRevealRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipeRevealRow.swift; sourceTree = "<group>"; };
 		1500000100000000000000A1 /* CollectorRadarCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollectorRadarCard.swift; sourceTree = "<group>"; };
+		1600000100000000000000A1 /* PortfolioDemoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioDemoView.swift; sourceTree = "<group>"; };
 		9D07CFD12F982DCD004BF9A7 /* AnalyticsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsService.swift; sourceTree = "<group>"; };
 		AA00000100000000000000A1 /* PopAlphaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopAlphaApp.swift; sourceTree = "<group>"; };
 		AA00000100000000000000A2 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -288,6 +290,7 @@
 				1300000100000000000000A1 /* CollectorRadarView.swift */,
 				1400000100000000000000A1 /* SwipeRevealRow.swift */,
 				1500000100000000000000A1 /* CollectorRadarCard.swift */,
+				1600000100000000000000A1 /* PortfolioDemoView.swift */,
 				AA00000100000000000000B1 /* Assets.xcassets */,
 				AA00000100000000000000B3 /* Info.plist */,
 				EE00000100000000000000B1 /* PrivacyInfo.xcprivacy */,
@@ -474,6 +477,7 @@
 				1300000100000000000000F1 /* CollectorRadarView.swift in Sources */,
 				1400000100000000000000F1 /* SwipeRevealRow.swift in Sources */,
 				1500000100000000000000F1 /* CollectorRadarCard.swift in Sources */,
+				1600000100000000000000F1 /* PortfolioDemoView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

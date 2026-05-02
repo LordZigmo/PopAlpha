@@ -120,7 +120,12 @@ struct PortfolioView: View {
             ZStack {
                 PA.Colors.background.ignoresSafeArea()
 
-                if isLoading && holdings.isEmpty {
+                if !auth.isAuthenticated {
+                    // Unsigned-in users see a fully-rendered demo
+                    // portfolio with sample data and a sticky sign-up
+                    // CTA. Highest-converting surface in the app.
+                    PortfolioDemoView()
+                } else if isLoading && holdings.isEmpty {
                     loadingState
                 } else if let error, holdings.isEmpty {
                     errorState(error)

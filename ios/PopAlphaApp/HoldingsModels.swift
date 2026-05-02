@@ -58,6 +58,33 @@ struct HoldingRow: Decodable, Identifiable, Hashable {
         case id, canonicalSlug, printingId, grade, qty, pricePaidUsd, acquiredOn, venue, certNumber, source
     }
 
+    /// Direct memberwise initializer for synthetic instances (demo
+    /// preview data, tests). The custom Decodable initializer below
+    /// remains the path the network layer uses.
+    init(
+        id: String,
+        canonicalSlug: String?,
+        printingId: String?,
+        grade: String,
+        qty: Int,
+        pricePaidUsd: Double?,
+        acquiredOn: String?,
+        venue: String?,
+        certNumber: String?,
+        source: HoldingSource = .manual
+    ) {
+        self.id = id
+        self.canonicalSlug = canonicalSlug
+        self.printingId = printingId
+        self.grade = grade
+        self.qty = qty
+        self.pricePaidUsd = pricePaidUsd
+        self.acquiredOn = acquiredOn
+        self.venue = venue
+        self.certNumber = certNumber
+        self.source = source
+    }
+
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
 
