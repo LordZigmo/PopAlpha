@@ -463,16 +463,25 @@ struct EvalSeedingView: View {
         defer { isSaving = false }
 
         do {
-            let response: ScanEvalPromoteResponse
+            // Two response shapes — freshPhoto/admin-correction hit
+            // the admin promote endpoint (writes eval corpus + anchor),
+            // user-correction hits the user-gated correction endpoint
+            // (anchor only). Track success uniformly.
+            var responseOK: Bool = false
+            var responseSlug: String? = card.canonicalSlug
+            var responseError: String? = nil
             switch mode {
             case .freshPhoto:
                 guard let image = pickedImage else { return }
-                response = try await ScanService.promoteEvalFromBytes(
+                let r = try await ScanService.promoteEvalFromBytes(
                     image: image,
                     canonicalSlug: card.canonicalSlug,
                     source: .userPhoto,
-                    notes: notes.isEmpty ? nil : notes
+                    notes: notes.isEmpty ? nil : notes,
                 )
+                responseOK = r.ok
+                responseSlug = r.canonicalSlug
+                responseError = r.error
             case .correction(let imageHash, let predictedSlug):
                 let augmentedNotes = [
                     notes.isEmpty ? nil : notes,
@@ -480,34 +489,41 @@ struct EvalSeedingView: View {
                 ].compactMap { $0 }.joined(separator: " | ")
                 let notesValue = augmentedNotes.isEmpty ? nil : augmentedNotes
                 if let bytes = scanImage {
-                    // Offline-scan path: scan-uploads/<hash>.jpg doesn't
-                    // exist server-side because we never uploaded.
-                    // promoteEvalFromBytes uploads + writes the eval
-                    // entry in one multipart request — same end state
-                    // as upload-then-promote-by-hash.
-                    response = try await ScanService.promoteEvalFromBytes(
+                    // User-gated correction: hits /api/scan/correction
+                    // which only writes the kNN anchor (no eval-corpus
+                    // side effect). This is the right path for non-
+                    // admin users — pre-2026-05-02 we hit the admin
+                    // promote endpoint here too which 401'd for non-
+                    // admins AND triggered an auth teardown that
+                    // signed them out of their own session.
+                    let r = try await ScanService.submitCorrection(
                         image: bytes,
                         canonicalSlug: card.canonicalSlug,
-                        source: .userCorrection,
-                        notes: notesValue
+                        notes: notesValue,
                     )
+                    responseOK = r.ok
+                    responseError = r.error
                 } else {
-                    // Online-scan path: server already uploaded during
-                    // /api/scan/identify, so the hash-based copy is
-                    // cheaper than re-uploading.
-                    _ = imageHash // silence "unused" if no bytes path
-                    response = try await ScanService.promoteEvalFromHash(
+                    // Online-scan path with no bytes available —
+                    // fall back to the admin promote endpoint so
+                    // admin users still get the eval corpus side
+                    // effect from CardDetailView corrections.
+                    _ = imageHash
+                    let r = try await ScanService.promoteEvalFromHash(
                         imageHash: imageHash,
                         canonicalSlug: card.canonicalSlug,
                         source: .userCorrection,
-                        notes: notesValue
+                        notes: notesValue,
                     )
+                    responseOK = r.ok
+                    responseSlug = r.canonicalSlug
+                    responseError = r.error
                 }
             }
 
             await MainActor.run {
-                if response.ok {
-                    saveResult = .success(response.canonicalSlug ?? card.canonicalSlug)
+                if responseOK {
+                    saveResult = .success(responseSlug ?? card.canonicalSlug)
                     PAHaptics.success()
                     // If the user picked from their library AND we
                     // captured an asset identifier, surface the
@@ -520,7 +536,7 @@ struct EvalSeedingView: View {
                         pendingLibraryDeleteAssetId = assetId
                     }
                 } else {
-                    saveResult = .failure(response.error ?? "Save failed")
+                    saveResult = .failure(responseError ?? "Save failed")
                 }
             }
         } catch {

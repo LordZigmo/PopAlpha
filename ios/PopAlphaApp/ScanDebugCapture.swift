@@ -39,14 +39,21 @@ import OSLog
 enum ScanDebugCapture {
 
     /// Saves `image` with a result-summary banner to the user's
-    /// Photos library if the scan was low/medium confidence. Always
-    /// returns immediately — never blocks the scan flow.
+    /// Photos library. Always returns immediately — never blocks the
+    /// scan flow.
     ///
     /// `ocrCardNumbers` is the full list of Vision transcription
     /// candidates (top-3 per text observation, deduped). Showing
     /// all candidates makes "OCR misread digit" failures self-evident
     /// in the saved frame: if candidate-1 is wrong but candidate-2
     /// is right, we want to see that in the banner.
+    ///
+    /// Saves HIGH-confidence scans too in DEBUG (not just MEDIUM/LOW).
+    /// Without this, HIGH-but-wrong scans (the worst kind — auto-
+    /// navigate to a wrong card) are invisible to the diagnostic
+    /// trail. Real-device 2026-05-02: a Premium Power Pro scan
+    /// auto-navigated to Pawniard at HIGH and we couldn't see the
+    /// captured frame because HIGH was being skipped.
     static func capture(
         image: UIImage,
         response: ScanIdentifyResponse?,
@@ -54,10 +61,6 @@ enum ScanDebugCapture {
         ocrCardNumbers: [String],
         ocrSetHint: String?,
     ) {
-        // Only persist questionable results — high-confidence scans
-        // worked, no need to clutter Photos.
-        let confidence = response?.confidence ?? "error"
-        guard confidence != "high" else { return }
 
         Task.detached(priority: .background) {
             // Permission. We try addOnly first (newer, narrower) and

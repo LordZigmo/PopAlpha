@@ -47,6 +47,12 @@ struct ScanPickerSheet: View {
     var winningPath: String? = nil
     let onPick: (ScanMatch) -> Void
     let onDismiss: () -> Void
+    /// Called after a correction successfully posts to the server.
+    /// ScannerTabView wires this to `OfflineScanOrchestrator.syncAnchorsInBackground`
+    /// so the just-submitted user_correction anchor reaches the
+    /// device before the user's next scan. Optional so existing
+    /// callers don't need to update.
+    var onCorrectionSubmitted: (() -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
     @State private var promoting = false
@@ -443,33 +449,30 @@ struct ScanPickerSheet: View {
         promoting = true
         PAHaptics.tap()
 
-        // Fire-and-forget promote — don't block navigation on telemetry.
-        // For OFFLINE scans `scanImage` is non-nil because no server
-        // upload happened; use the bytes-multipart variant which both
-        // uploads to scan-uploads AND writes the eval row in one call.
-        // For ONLINE scans the server already uploaded via /api/scan/identify,
-        // so the hash-by-reference variant is cheaper.
+        // Fire-and-forget correction. Premium offline scans go through
+        // /api/scan/correction (user-gated, anchor-only) — pre-2026-05-02
+        // we hit /api/admin/scan-eval/promote which 401'd for non-admin
+        // users AND triggered an aggressive auth teardown that signed
+        // them out of their own session. The new endpoint just writes
+        // the kNN anchor; admin curation of the eval corpus stays on
+        // the testtube/EvalSeedingView path.
         if let bytes = scanImage {
             let slug = match.slug
             let lang = scanLanguage
+            let store = onCorrectionSubmitted
             Task.detached {
-                _ = try? await ScanService.promoteEvalFromBytes(
+                let result = try? await ScanService.submitCorrection(
                     image: bytes,
                     canonicalSlug: slug,
-                    source: .userCorrection,
                     language: lang,
-                    notes: "picker-sheet-select"
+                    notes: "picker-sheet-select",
                 )
-            }
-        } else if let hash = imageHash {
-            Task.detached {
-                _ = try? await ScanService.promoteEvalFromHash(
-                    imageHash: hash,
-                    canonicalSlug: match.slug,
-                    source: .userCorrection,
-                    language: scanLanguage,
-                    notes: "picker-sheet-select"
-                )
+                if result?.ok == true {
+                    // Trigger an anchor sync so the next scan can
+                    // see this correction. Non-blocking; the picker
+                    // dismiss has already navigated.
+                    await MainActor.run { store?() }
+                }
             }
         }
 
@@ -487,30 +490,23 @@ struct ScanPickerSheet: View {
         promoting = true
         PAHaptics.tap()
 
-        // Same offline/online split as handlePickerPick — bytes-multipart
-        // when we have the source UIImage (offline scan), hash-by-reference
-        // otherwise (online scan, server already uploaded).
+        // Same anchor-only correction path as handlePickerPick — see
+        // notes there for why we stopped hitting the admin promote
+        // endpoint from the picker.
         if let bytes = scanImage {
             let slug = result.canonicalSlug
             let lang = scanLanguage
+            let store = onCorrectionSubmitted
             Task.detached {
-                _ = try? await ScanService.promoteEvalFromBytes(
+                let r = try? await ScanService.submitCorrection(
                     image: bytes,
                     canonicalSlug: slug,
-                    source: .userCorrection,
                     language: lang,
-                    notes: "picker-sheet-search-select"
+                    notes: "picker-sheet-search-select",
                 )
-            }
-        } else if let hash = imageHash {
-            Task.detached {
-                _ = try? await ScanService.promoteEvalFromHash(
-                    imageHash: hash,
-                    canonicalSlug: result.canonicalSlug,
-                    source: .userCorrection,
-                    language: scanLanguage,
-                    notes: "picker-sheet-search-select"
-                )
+                if r?.ok == true {
+                    await MainActor.run { store?() }
+                }
             }
         }
 

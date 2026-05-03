@@ -86,6 +86,7 @@ final class OfflineScanOrchestrator: ObservableObject {
     // MARK: - Internal state
 
     private let manager: OfflineCatalogManager
+    private let anchorStore: OfflineCatalogAnchorStore
     private var catalog: OfflineCatalog?
     private var embedder: OfflineEmbedder?
     private var knn: OfflineKNN?
@@ -94,8 +95,12 @@ final class OfflineScanOrchestrator: ObservableObject {
     /// In-flight setup task. Coalesces concurrent setup calls.
     private var setupTask: Task<Void, Error>?
 
-    init(manager: OfflineCatalogManager = .shared) {
+    init(
+        manager: OfflineCatalogManager = .shared,
+        anchorStore: OfflineCatalogAnchorStore = OfflineCatalogAnchorStore(),
+    ) {
         self.manager = manager
+        self.anchorStore = anchorStore
     }
 
     // MARK: - Setup
@@ -137,7 +142,13 @@ final class OfflineScanOrchestrator: ObservableObject {
             throw OfflineScanOrchestratorError.setupFailed(msg)
         }
 
-        let k = OfflineKNN(catalog: cat)
+        // Hydrate anchor cache from disk synchronously (fast — small
+        // file, microseconds) so the very first scan after a cold
+        // launch already has any previously-synced anchors. Network
+        // sync runs in parallel with the first scan via the
+        // syncAnchorsInBackground call below.
+        anchorStore.loadFromDiskIfPresent()
+        let k = OfflineKNN(catalog: cat, anchorStore: anchorStore)
         let ident = OfflineIdentifier(catalog: cat, knn: k)
 
         self.catalog = cat
@@ -145,6 +156,28 @@ final class OfflineScanOrchestrator: ObservableObject {
         self.knn = k
         self.identifier = ident
         setupState = .ready
+
+        // Kick off a background anchor sync. Non-blocking; if network
+        // is down we fall back to whatever loadFromDiskIfPresent
+        // hydrated. New anchors are visible to subsequent scans.
+        syncAnchorsInBackground()
+    }
+
+    /// Pull the anchor delta in the background. Coalesces against
+    /// in-flight syncs. Errors are logged + swallowed — sync failures
+    /// shouldn't block scanning.
+    func syncAnchorsInBackground() {
+        Task.detached { [weak self] in
+            guard let self else { return }
+            do {
+                let added = try await self.anchorStore.sync()
+                if added > 0 {
+                    print("[orch] anchor sync added \(added) new anchor(s)")
+                }
+            } catch {
+                print("[orch] anchor sync failed (non-fatal): \(error.localizedDescription)")
+            }
+        }
     }
 
     // MARK: - Identify

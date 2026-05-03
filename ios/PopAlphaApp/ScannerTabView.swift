@@ -108,7 +108,13 @@ struct ScannerTabView: View {
                     ocrSetHint: scanner.lastOCR.setHint,
                     winningPath: scanner.lastWinningPath,
                     onPick: handlePickerSelection,
-                    onDismiss: handlePickerDismiss
+                    onDismiss: handlePickerDismiss,
+                    onCorrectionSubmitted: {
+                        // Anchor sync — the just-submitted user_correction
+                        // should reach the offline catalog before the
+                        // user's next scan. Non-blocking.
+                        scanner.syncOfflineAnchorsInBackground()
+                    },
                 )
             }
             #if DEBUG
@@ -276,9 +282,18 @@ struct ScannerTabView: View {
         smokeRunning = true
         Task.detached(priority: .userInitiated) {
             let report = await OfflineScannerSmokeTest.run()
-            Logger.scan.debug("=== OFFLINE_SMOKE_BEGIN ===")
-            Logger.scan.debug("\(report.summary)")
-            Logger.scan.debug("=== OFFLINE_SMOKE_END ===")
+            // Log each check on its own line so the unified-logging
+            // backend doesn't truncate a single multi-line message
+            // (which would hide the failure mode of any specific
+            // check). Header + footer wrap the per-check entries so
+            // log filters can easily scope.
+            Logger.scan.notice("=== OFFLINE_SMOKE_BEGIN ===")
+            Logger.scan.notice("catalog: \(report.catalogPath)")
+            Logger.scan.notice("model:   \(report.modelPath)")
+            for check in report.checks {
+                Logger.scan.notice("\(check.line)")
+            }
+            Logger.scan.notice("=== OFFLINE_SMOKE_END (\(report.allPassed ? "ALL PASSED" : "SOME FAILED")) ===")
 
             // Tier 6: orchestrator end-to-end. Lives in PopAlphaApp
             // (which has the adapter logic) so it can't sit inside
@@ -882,6 +897,16 @@ final class ScannerHost: ObservableObject {
         return o
     }
 
+    /// Triggers a non-blocking anchor sync against /api/catalog/anchors-since.
+    /// Called from the picker after a correction lands so the just-
+    /// submitted user_correction anchor reaches the offline catalog
+    /// before the user's next scan. No-op if the orchestrator hasn't
+    /// been instantiated yet (free tier; the offline path was never
+    /// activated for this session).
+    func syncOfflineAnchorsInBackground() {
+        offlineOrchestrator?.syncAnchorsInBackground()
+    }
+
     private func runIdentify(image: UIImage) async {
         // RE-ENTRY GUARD. PopAlphaVisionEngine.reset() clears the
         // current stability candidate but does NOT stop frame
@@ -981,27 +1006,28 @@ final class ScannerHost: ObservableObject {
 
             Logger.scan.debug("path source=\(usedOffline ? "offline" : "network") winning_path=\(response.winningPath ?? "nil") confidence=\(reranked.confidence)")
             #if DEBUG
-            // Save the EXACT frame the embedder saw to Photos when
-            // confidence isn't HIGH. Self-documenting — banner
-            // overlay carries the result, top-5, OCR.
-            if reranked.confidence != "high" {
-                let rerankedResponse = ScanIdentifyResponse(
-                    ok: response.ok,
-                    confidence: reranked.confidence,
-                    matches: reranked.matches,
-                    languageFilter: response.languageFilter,
-                    modelVersion: response.modelVersion,
-                    imageHash: response.imageHash,
-                    winningPath: response.winningPath,
-                )
-                ScanDebugCapture.capture(
-                    image: image,
-                    response: rerankedResponse,
-                    source: usedOffline ? .offline : .network,
-                    ocrCardNumbers: ocrMulti.cardNumbers,
-                    ocrSetHint: ocrMulti.setHint,
-                )
-            }
+            // Save the EXACT frame the embedder saw to Photos for EVERY
+            // scan, including HIGH. HIGH-but-wrong is the worst-case
+            // failure (auto-navigate to wrong card with no picker
+            // recovery) — pre-2026-05-02 we skipped saving HIGH and
+            // lost diagnostic data on those cases. Self-documenting:
+            // banner overlay carries the result, top-5, OCR.
+            let rerankedResponse = ScanIdentifyResponse(
+                ok: response.ok,
+                confidence: reranked.confidence,
+                matches: reranked.matches,
+                languageFilter: response.languageFilter,
+                modelVersion: response.modelVersion,
+                imageHash: response.imageHash,
+                winningPath: response.winningPath,
+            )
+            ScanDebugCapture.capture(
+                image: image,
+                response: rerankedResponse,
+                source: usedOffline ? .offline : .network,
+                ocrCardNumbers: ocrMulti.cardNumbers,
+                ocrSetHint: ocrMulti.setHint,
+            )
             #endif
 
             // Low-confidence → auto-resume so the user can try again

@@ -103,13 +103,16 @@ enum APIClient {
             throw APIError.httpError(statusCode: 0, body: "No HTTP response")
         }
         if http.statusCode == 401 {
-            // Server rejected our token. Either it expired between mint
-            // and arrival, or Clerk handed us a stale cached one. Tell
-            // AuthService to refresh / clear local state so the UI
-            // doesn't stay wedged in a phantom signed-in state.
+            // Server rejected our token. EITHER it expired (real session
+            // problem — auto-recover via Clerk re-mint or sign out) OR
+            // the user lacks a role for this endpoint (token is fine,
+            // ignore). See `shouldTriggerAuthRecoveryFor401`.
             let bodyText = String(data: data, encoding: .utf8) ?? ""
-            Logger.api.debug("401 \(request.url?.path ?? "?"): \(bodyText.prefix(300))")
-            Task { await AuthService.shared.handleServerAuthRejection() }
+            let path = request.url?.path ?? "?"
+            Logger.api.debug("401 \(path): \(bodyText.prefix(300))")
+            if shouldTriggerAuthRecoveryFor401(path: path) {
+                Task { await AuthService.shared.handleServerAuthRejection() }
+            }
             throw APIError.unauthorized
         }
         guard (200...299).contains(http.statusCode) else {
@@ -132,6 +135,23 @@ enum APIClient {
             throw APIError.invalidURL(path)
         }
         return url
+    }
+
+    /// Should a 401 from this URL trigger auto-session-teardown?
+    ///
+    /// AuthService.handleServerAuthRejection nukes the local session when
+    /// it can't mint a fresh Clerk token to retry — that's correct when
+    /// 401 means "your token is invalid." But role-gated endpoints
+    /// (/api/admin/*) also return 401 when the token is fine and the
+    /// user just lacks the role. Pre-2026-05-02, fire-and-forget admin
+    /// calls (the picker correction's promoteEvalFromHash) were tearing
+    /// down sessions for non-admin users — every offline scan correction
+    /// signed them out of their own account. The whitelist below is
+    /// intentionally narrow: when in doubt, treat 401 as a real session
+    /// problem and let the recovery path handle it.
+    private static func shouldTriggerAuthRecoveryFor401(path: String) -> Bool {
+        if path.hasPrefix("/api/admin/") { return false }
+        return true
     }
 
     private static func applyHeaders(_ request: inout URLRequest) {
@@ -166,14 +186,16 @@ enum APIClient {
         }
 
         if http.statusCode == 401 {
-            // See note in `post(path:body:)` — keep local auth state
-            // honest when the server says our token is no good. Log the
-            // body so we can tell *why* the server rejected the token
-            // (expired, bad signature, missing claim, etc.) — without
-            // this, every 401 looks identical.
+            // Same dual interpretation as `post(path:body:)` — token-
+            // expired vs role-missing. shouldTriggerAuthRecoveryFor401
+            // gates the teardown path so admin-only routes don't nuke
+            // sessions for non-admin users.
             let bodyText = String(data: data, encoding: .utf8) ?? ""
-            Logger.api.debug("401 \(request.url?.path ?? "?"): \(bodyText.prefix(300))")
-            Task { await AuthService.shared.handleServerAuthRejection() }
+            let path = request.url?.path ?? "?"
+            Logger.api.debug("401 \(path): \(bodyText.prefix(300))")
+            if shouldTriggerAuthRecoveryFor401(path: path) {
+                Task { await AuthService.shared.handleServerAuthRejection() }
+            }
             throw APIError.unauthorized
         }
 

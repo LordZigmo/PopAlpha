@@ -72,6 +72,21 @@ struct ScanEvalPromoteResponse: Decodable, Sendable {
     let error: String?
 }
 
+// MARK: - User-correction response (anchor-only flow)
+
+/// Returned by /api/scan/correction. Pure kNN-anchor path — no
+/// scan_eval_images write, no curated-corpus side effect. Distinct
+/// from ScanEvalPromoteResponse which is the admin-gated eval-corpus
+/// promote endpoint's shape.
+struct ScanCorrectionResponse: Decodable, Sendable {
+    let ok: Bool
+    let imageHash: String?
+    let modelVersion: String?
+    let variantIndex: Int?
+    let skipped: Bool?
+    let error: String?
+}
+
 /// Which seeding path the user took. Feeds into scan_eval_images.captured_source
 /// so corrections show up distinctly from "I manually labeled a photo."
 enum EvalCaptureSource: String, Sendable {
@@ -152,6 +167,49 @@ enum ScanService {
         return try await APIClient.post(
             path: "/api/admin/scan-eval/promote",
             body: body
+        )
+    }
+
+    /// User-gated correction. Posts the offline-scan JPEG bytes + the
+    /// corrected canonical_slug to /api/scan/correction, which creates
+    /// a `user_correction` kNN anchor in the SAME embedding space as
+    /// the offline catalog. Next sync of the offline catalog picks it
+    /// up so subsequent scans of visually-similar cards resolve
+    /// correctly.
+    ///
+    /// Distinct from `promoteEvalFromBytes`/`promoteEvalFromHash`:
+    /// those hit /api/admin/scan-eval/promote which writes to
+    /// scan_eval_images (curated training corpus, admin-only). This
+    /// hits /api/scan/correction which is user-gated and ONLY writes
+    /// the kNN anchor — the right path for non-admin premium users
+    /// reporting a wrong scan from the picker.
+    ///
+    /// `skipped: true` means the same (slug, image_hash, model) was
+    /// already an anchor — idempotent re-submit, harmless.
+    static func submitCorrection(
+        image: UIImage,
+        canonicalSlug: String,
+        language: ScanLanguage = .en,
+        notes: String? = nil,
+        maxEdgePixels: CGFloat = 1024,
+        compressionQuality: CGFloat = 0.85,
+    ) async throws -> ScanCorrectionResponse {
+        guard let jpegData = resizedJPEG(
+            from: image,
+            maxEdge: maxEdgePixels,
+            quality: compressionQuality,
+        ) else {
+            throw ScanServiceError.imageEncodingFailed
+        }
+        var body: [String: Any] = [
+            "canonical_slug": canonicalSlug,
+            "image_base64": jpegData.base64EncodedString(),
+            "language": language.rawValue,
+        ]
+        if let notes, !notes.isEmpty { body["notes"] = notes }
+        return try await APIClient.post(
+            path: "/api/scan/correction",
+            body: body,
         )
     }
 

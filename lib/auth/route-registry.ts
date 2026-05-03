@@ -19,6 +19,12 @@ export const PUBLIC_ROUTES = [
   "cards/[slug]/detail",
   "cards/[slug]/view",
   "scan/identify",
+  // Anchor delta sync for the offline scanner. Returns user_correction
+  // rows (slug + metadata + 768d embedding) added since a watermark.
+  // Public read because the data is derived from the public catalog
+  // and non-PII corrections; the .papb base catalog is also publicly
+  // served.
+  "catalog/anchors-since",
   "search/cards",
   "search/suggest",
   "canonical/match",
@@ -122,6 +128,13 @@ export const USER_ROUTES = [
   "private-sales",
   "private-sales/[id]",
   "pro/signals",
+  // Premium offline scanner correction. User reports a wrong scan
+  // via the picker; this endpoint creates a kNN anchor (source =
+  // 'user_correction') tagged with the active embedder's
+  // model_version so the offline catalog's anchor sync surfaces it.
+  // Distinct from /api/admin/scan-eval/promote which ALSO writes to
+  // scan_eval_images (the curated training corpus, admin-only).
+  "scan/correction",
   "holdings",
   "holdings/bulk-import",
   "holdings/summary",

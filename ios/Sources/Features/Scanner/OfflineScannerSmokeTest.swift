@@ -361,6 +361,65 @@ public enum OfflineScannerSmokeTest {
             ))
         }
 
+        // -- Tier 9: anchor merge into kNN --
+        // Anchor delta sync (OfflineCatalogAnchorStore) is the
+        // mechanism that makes user_correction anchors reach the
+        // offline catalog after the .papb is built. The network sync
+        // path can't run as part of the smoke test (the
+        // /api/catalog/anchors-since endpoint isn't necessarily
+        // deployed in the test environment), so this check directly
+        // injects a synthetic anchor via the test seam, then verifies
+        // OfflineKNN.topK(query:) surfaces it when the query is the
+        // anchor's own embedding. Synthetic-but-realistic: the anchor
+        // gets a distinct slug + a unit vector orthogonal-ish to the
+        // catalog so we don't accidentally collide with a real card.
+        let anchorStore = OfflineCatalogAnchorStore(
+            modelVersion: cat.modelVersion,
+            vectorDim: cat.vectorDim,
+        )
+        // Generate a deterministic synthetic embedding (random unit
+        // vector seeded so the test is reproducible).
+        var rng = SystemRandomNumberGenerator()
+        _ = rng  // silence unused
+        var rawEmbedding = [Float](repeating: 0, count: cat.vectorDim)
+        var lcgState: UInt32 = 0xCAFEBABE
+        for i in 0..<cat.vectorDim {
+            lcgState = lcgState &* 1103515245 &+ 12345
+            rawEmbedding[i] = (Float(lcgState & 0xFFFF) / Float(0xFFFF) - 0.5) * 2
+        }
+        let norm = sqrt(rawEmbedding.reduce(0) { $0 + $1 * $1 })
+        if norm > 0 {
+            for i in 0..<rawEmbedding.count {
+                rawEmbedding[i] /= norm
+            }
+        }
+        let testSlug = "smoketest-anchor-9-synthetic-merge"
+        let testAnchor = OfflineCatalogAnchor(
+            canonicalSlug: testSlug,
+            setName: "Smoke Test",
+            cardNumber: "9",
+            language: "EN",
+            variantIndex: 99999,
+            updatedAtMs: Int64(Date().timeIntervalSince1970 * 1000),
+            embedding: rawEmbedding,
+        )
+        anchorStore._seedAnchorsForTesting([testAnchor])
+        let knnWithAnchor = OfflineKNN(catalog: cat, anchorStore: anchorStore)
+        let t9 = Date()
+        let mergedHits = knnWithAnchor.topK(query: rawEmbedding, k: 3)
+        let elapsed9 = Date().timeIntervalSince(t9) * 1000
+        let foundAnchor = mergedHits.first?.row.canonicalSlug == testSlug
+        let anchorSimulator = mergedHits.first?.similarity ?? 0
+        let anchorPlausible = anchorSimulator > 0.99
+        checks.append(.init(
+            name: "knn.anchorMerge",
+            passed: foundAnchor && anchorPlausible,
+            elapsedMs: elapsed9,
+            detail: (foundAnchor && anchorPlausible)
+                ? "synthetic anchor surfaced as top-1 sim=\(String(format: "%.4f", anchorSimulator)) — anchor delta path is wired"
+                : "expected top-1 = \(testSlug) sim≈1.0; got \(mergedHits.first?.row.canonicalSlug ?? "<nil>") sim=\(String(format: "%.4f", anchorSimulator))",
+        ))
+
         // -- Tier 5: OfflineCatalogManager download + validate --
         // Forces a fresh download from Supabase Storage so we exercise
         // the remote sync path even when a local cache + bundled

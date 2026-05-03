@@ -37,7 +37,7 @@ import {
   ensureCardImageEmbeddingsSchema,
   IMAGE_EMBED_USER_CORRECTION_VARIANT_OFFSET,
 } from "./card-image-embeddings";
-import { getReplicateClipEmbedder } from "./image-embedder";
+import { getImageEmbedder } from "./image-embedder";
 
 /**
  * Caller-supplied canonical metadata for the slug being anchored.
@@ -78,7 +78,15 @@ export async function embedAndStoreUserCorrection(args: {
 
   await ensureCardImageEmbeddingsSchema();
 
-  const embedder = getReplicateClipEmbedder();
+  // Use the active embedder (env-configured: SigLIP in production via
+  // IMAGE_EMBEDDER_VARIANT=modal-siglip, falls back to CLIP). The
+  // anchor MUST land in the same embedding space as the catalog —
+  // otherwise it's noise in the wrong vector space and the offline
+  // scanner's kNN won't find it. Pre-2026-05-02 this was hard-pinned
+  // to ReplicateClipEmbedder, which produced CLIP-tagged anchors that
+  // never made it into the SigLIP .papb catalog → user corrections
+  // silently disappeared from the offline scanner's view.
+  const embedder = getImageEmbedder();
 
   // 1. Idempotency check: if we've already embedded this exact image
   //    for this slug under the current model_version, no-op. Saves a
