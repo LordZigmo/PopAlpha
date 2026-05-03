@@ -1,5 +1,7 @@
 -- 20260502020000_touch_verified_snapshots_observation_anchor_guard.sql
 --
+-- supersedes: 20260419205250_touch_verified_snapshots.sql
+--
 -- Tightens public.touch_verified_snapshots so it only refreshes
 -- price_snapshots rows that still have a matching live upstream observation
 -- in provider_normalized_observations.

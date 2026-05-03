@@ -92,6 +92,69 @@ export async function GET(req: Request) {
   }
 
   const durationMs = Date.now() - startedAt;
+
+  // The RPC silently returns `{ computed: false, reason: 'coverage_too_low' }`
+  // when fresh_24h is below threshold. That's invisible in `ok: true` runs
+  // and stranded the homepage rails for two days during the 2026-05-01
+  // refresh_price_changes incident. Surface gate-trips as console.error so
+  // Vercel logs flag them as errors, and look back to detect multi-day
+  // staleness — the failure mode the original incident produced.
+  const result = (data ?? {}) as {
+    computed?: boolean;
+    reason?: string;
+    coverage_count?: number;
+    threshold?: number;
+    computed_at_date?: string;
+  };
+
+  if (result.computed === false) {
+    const today = new Date().toISOString().slice(0, 10);
+    const { data: latestRow } = await supabase
+      .from("daily_top_movers")
+      .select("computed_at_date")
+      .order("computed_at_date", { ascending: false })
+      .limit(1)
+      .maybeSingle<{ computed_at_date: string }>();
+    const newest = latestRow?.computed_at_date ?? null;
+    const stuckDays = newest
+      ? Math.max(
+          0,
+          Math.floor(
+            (Date.parse(today) - Date.parse(newest)) / (1000 * 60 * 60 * 24),
+          ),
+        )
+      : null;
+
+    const payload = {
+      reason: result.reason ?? "unknown",
+      coverage_count: result.coverage_count ?? null,
+      threshold: result.threshold ?? null,
+      newest_existing_row: newest,
+      stuck_days: stuckDays,
+      today,
+    };
+
+    if (stuckDays !== null && stuckDays >= 2) {
+      console.error(
+        "[cron/compute-daily-top-movers] CRITICAL: rails stale for >=2 days — homepage is showing repeat cards",
+        { durationMs, ...payload },
+      );
+    } else {
+      console.error(
+        "[cron/compute-daily-top-movers] coverage gate tripped — no rows written",
+        { durationMs, ...payload },
+      );
+    }
+
+    // ok: false even though no exception was thrown — the substantive work
+    // (writing today's rails) did not happen. Any synthetic monitor or
+    // future caller checking `ok` should see this as a failure.
+    return NextResponse.json(
+      { ok: false, gated: true, durationMs, result: data, ...payload },
+      { status: 200 },
+    );
+  }
+
   console.log("[cron/compute-daily-top-movers] done", { durationMs, result: data });
 
   return NextResponse.json({ ok: true, durationMs, result: data });

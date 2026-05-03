@@ -443,6 +443,61 @@ The 04-09 migration (incident #1) and today's 04-16 `DISTINCT ON` migration both
 
 ---
 
+### 15. `refresh_price_changes` body-lifted from an old migration → coverage gate tripped → homepage stale for 2 days (2026-05-01)
+
+**Symptom.** User reported the homepage rails (Top Movers, Biggest Drops, momentum, etc.) had been showing identical cards for two consecutive days. iOS pull-to-refresh produced no change. The `daily_top_movers` table's newest `computed_at_date` was 2026-04-30 — neither May 1 nor May 2 had written a row.
+
+**Root cause.** Migration [`20260501010000_refresh_price_changes_time_anchored_baseline.sql`](../supabase/migrations/20260501010000_refresh_price_changes_time_anchored_baseline.sql) was authored to fix sparse-card 24h/7d delta inflation. The new function body was **lifted from `20260303115000_refresh_price_changes_no_lock_timeout.sql`** — an old JustTCG-only definition — and modified to add the time-anchor windows. But the *latest* prior body was `refresh_price_changes_core(...)` (in `20260317093000_phase1_public_live_market_truth_followup.sql`) wrapped by a thin `refresh_price_changes()` (in `20260309224000_fix_price_change_scope_selection.sql`); the latest wrapper did NOT touch `market_price` or `market_price_as_of` at all.
+
+The lifted body re-introduced an UPDATE clause:
+
+```sql
+update public.card_metrics cm
+set market_price       = c.price_now,
+    market_price_as_of = c.latest_ts
+```
+
+sourcing `latest_ts` from JUSTTCG. JustTCG polls at a much lower cadence than Scrydex, so on every cron tick this clobbered Scrydex-fresh `market_price_as_of` values across thousands of canonical RAW rows. The catalog-wide `fresh_24h` count cratered from ~18k+ to ~2.6k, tripping the `coverage_too_low` gate inside `compute_daily_top_movers` (threshold 18,000). The cron silently returned `{ ok: true, computed: false, reason: 'coverage_too_low' }` for the next four scheduled runs, so [`daily_top_movers`](../lib/data/homepage.ts) never got May-1 or May-2 rows. The homepage's `loadDailyTopMoversBundle` falls back to the most-recent existing row, which was April 30's — for both days.
+
+**Detection.** Pure symptomatic — a human looked at the homepage and noticed Rayquaza-Deoxys was still featured. There was no monitoring on the gate trip; the cron logged `console.log` (not `console.error`), so Vercel didn't surface it as an error.
+
+**Fix (commit `c6f0dca`, 2026-05-02 00:06 EDT).** Migration [`20260502010000_revert_refresh_price_changes_to_core_wrapper.sql`](../supabase/migrations/20260502010000_revert_refresh_price_changes_to_core_wrapper.sql) restores `refresh_price_changes()` to a thin wrapper around `refresh_price_changes_core(null)` — the actual time-anchored logic that already lived in `_core` and was the intended target of the May-1 work. Manual data repopulation (run in Supabase SQL editor):
+
+```sql
+SELECT public.refresh_card_metrics();      -- restore market_price_as_of from real Scrydex snapshots
+SELECT public.refresh_price_changes();     -- recompute change_pct via _core
+SELECT public.compute_daily_top_movers();  -- re-bake homepage rails (idempotent)
+```
+
+The `compute_daily_top_movers()` call is idempotent — it `DELETE`s today's rows and rewrites them — so it's safe to run mid-day even if a cron later fires the same day's compute.
+
+**Lessons.**
+
+- **Filename match ≠ active body.** Postgres functions get redefined dozens of times across migrations. `refresh_price_changes` had been redefined 11 times before the May-1 incident (the search hit migrations from March-3 through March-9). Lifting the body from any one of them and modifying it without diffing against the *latest* definer is how this class of bug happens.
+- **Watch UPDATE columns.** Diffing the new body's UPDATE columns against the latest prior body's is the cheapest red-flag detector. The new body wrote columns the latest prior body did NOT touch (`market_price`, `market_price_as_of`) — that's a clobber, not a change-detection refinement.
+- **Silent gate trips hide outages.** The `coverage_too_low` return path was a normal control-flow branch in the cron and logged at `console.log` level. Vercel's log dashboard treats that as healthy; the only signal that anything was wrong was the homepage UI itself.
+
+**Preventative (shipped with this incident's PR):**
+
+- **Migration linter** ([scripts/check-migration-function-body.mjs](../scripts/check-migration-function-body.mjs)) — for every migration that redefines a public function, requires a header comment referencing the latest prior definer (`-- supersedes: <filename>` / `-- Revert of <filename>`). The reference is a forcing function: the author has to open the prior file. Wired into `npm run check:security:invariants`, `npm run check:security:static`, and a pre-deploy step in `.github/workflows/supabase-migrations.yml`.
+- **Cron observability** ([app/api/cron/compute-daily-top-movers/route.ts](../app/api/cron/compute-daily-top-movers/route.ts)) — gate trips now `console.error` (not `console.log`) and look back at `daily_top_movers` for the newest existing row. If the rails are stale for ≥2 days the message escalates to "CRITICAL: rails stale for >=2 days". Vercel surfaces `console.error` as an error in the log dashboard.
+
+**Fix summary:**
+
+| Commit | Scope |
+|--------|-------|
+| `d17becb` | (the bug) `refresh_price_changes` time-anchored baseline — body lifted from old migration |
+| `c6f0dca` | Revert `refresh_price_changes` to `_core` wrapper |
+
+**Files touched (preventative):**
+- [scripts/check-migration-function-body.mjs](../scripts/check-migration-function-body.mjs) — NEW
+- [scripts/check-security-invariants.mjs](../scripts/check-security-invariants.mjs) — registry entry
+- [package.json](../package.json) — `check:migrations:fnbody` script + `check:security:static` chain
+- [.github/workflows/supabase-migrations.yml](../.github/workflows/supabase-migrations.yml) — pre-deploy step
+- [app/api/cron/compute-daily-top-movers/route.ts](../app/api/cron/compute-daily-top-movers/route.ts) — gate-trip observability
+
+---
+
 ## Operational checklists
 
 ### Healthy steady-state signals (copy-paste diagnostic)

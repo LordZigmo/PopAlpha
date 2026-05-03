@@ -56,6 +56,12 @@ const CHECKS = [
     ...buildNodeCommand("scripts/check-dbadmin-imports.mjs"),
   },
   {
+    id: "migration-function-body",
+    invariant:
+      "Migrations redefining a public function reference the latest prior definer in their header (forces author to diff the body before lifting).",
+    ...buildNodeCommand("scripts/check-migration-function-body.mjs"),
+  },
+  {
     id: "schema-contract",
     invariant: "Public table/view/function/sequence contracts do not drift from config.",
     ...buildNodeCommand("scripts/check-supabase-security.mjs", { useEnvFile: true }),
