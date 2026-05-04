@@ -45,6 +45,14 @@
 -- source_window='snapshot' keeps the scan small (~37k rows).
 --------------------------------------------------------------------------
 
+-- The first INSERT below scans ~13M rows of price_history_points with a
+-- leading-wildcard suffix LIKE (`variant_ref like '%::RAW'`) which cannot
+-- use a btree index, so the planner falls back to a full sequential scan.
+-- Default 2-minute statement_timeout kills it before completion. Scoping
+-- the timeout off via `set local` keeps the change confined to this
+-- migration's transaction.
+set local statement_timeout = '0';
+
 create temporary table if not exists _phase2b_gaps (
   canonical_slug text not null,
   finish text not null,
