@@ -160,13 +160,28 @@ public final class PopAlphaVisionEngine {
 
     private func makeRectangleRequest() -> VNDetectRectanglesRequest {
         let request = VNDetectRectanglesRequest()
+        // Apple has only ever shipped Revision 1 for VNDetectRectanglesRequest;
+        // no newer revision to upgrade to. The improvement work in this
+        // change is the threshold loosening below.
         request.revision = VNDetectRectanglesRequestRevision1
         request.preferBackgroundProcessing = false
-        request.minimumConfidence = 0.85
+        // Loosened from 0.85 → 0.70 to handle finger-shadow / hand-occlusion
+        // cases. Real-device 2026-05-03: card held between fingers with a
+        // shadow on the edge → Vision saw an edge gradient softer than
+        // 0.85 → no detection → user had to physically move their finger
+        // before the scanner would fire. Risk profile is asymmetric in
+        // our favor: false positives (a tabletop edge / book spine
+        // mistakenly classified as a rectangle) flow through to the
+        // embedder which returns sim<0.70 → LOW confidence → silent
+        // re-arm with no user-visible disruption. False negatives force
+        // physical-world recovery.
+        request.minimumConfidence = 0.70
         request.minimumSize = Float(minimumCardSize)
         request.minimumAspectRatio = Float(max(0.0, expectedCardAspectRatio - aspectRatioTolerance))
         request.maximumAspectRatio = Float(min(1.0, expectedCardAspectRatio + aspectRatioTolerance))
-        request.quadratureTolerance = 18
+        // 18° → 25° accommodates the ~5-10° apparent skew a finger pushes
+        // into a card edge before reaching the threshold for rejection.
+        request.quadratureTolerance = 25
         request.maximumObservations = 3
         request.regionOfInterest = Self.fullFrameROI
 
