@@ -123,12 +123,6 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
     private var isSessionConfigured = false
     private var hasInstalledConverter = false
     private let cameraPosition: AVCaptureDevice.Position = .back
-    /// Held so `handleSubjectAreaChange` can re-anchor focus / exposure
-    /// without round-tripping through `captureSession.inputs`.
-    private var configuredDevice: AVCaptureDevice?
-    /// Observer token from `NotificationCenter.default.addObserver`. Stored
-    /// so we can remove it in `deinit` — leaks the observer otherwise.
-    private var subjectAreaObserver: NSObjectProtocol?
 
     init(viewModel: ScannerViewModel, engine: PopAlphaVisionEngine) {
         self.viewModel = viewModel
@@ -139,12 +133,6 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
-    }
-
-    deinit {
-        if let token = subjectAreaObserver {
-            NotificationCenter.default.removeObserver(token)
-        }
     }
 
     override func loadView() {
@@ -261,23 +249,24 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
             }
 
             self.captureSession.addInput(input)
-            self.configuredDevice = device
             // Configure focus / exposure / white-balance for the scanner's
             // actual use case: a small, close-up, mostly-stationary card
             // ~10 inches from the lens. AVCapture's default focus mode is
             // optimized for general photography (mid- to far-range scenes),
             // which left the AF motor visibly hunting on close-up cards
-            // pre-2026-05-03 ("I have to wave the phone around"). Setting
-            // continuous AF + .near range restriction biases the motor
-            // toward near depths so it locks within ~0.3-0.5s instead of
-            // hunting to infinity and back.
+            // ("I have to wave the phone around"). Continuous AF + .near
+            // range restriction biases the motor toward near depths so it
+            // locks within ~0.3-0.5s instead of hunting to infinity.
+            //
+            // We deliberately do NOT enable subject-area-change monitoring
+            // here, even though it's the textbook pattern from "AVCam:
+            // Building a Camera App." Reason: re-anchoring focus on every
+            // scene shift produces a momentary blur in the video output
+            // right when Vision is trying to lock onto a stable rectangle,
+            // causing the scanner to re-fire repeatedly without ever
+            // making a selection. Continuous AF alone handles scene shifts
+            // without that disruption.
             self.configureFocusAndExposure(on: device)
-            // After the device has continuous monitoring enabled, subscribe
-            // to subject-area-change notifications so we re-anchor AF/AE
-            // when the scene shifts (e.g. user moves the card to a different
-            // position on the table). Apple's documented pattern from
-            // "AVCam: Building a Camera App."
-            self.installSubjectAreaChangeObserver(for: device)
 
             self.videoOutput.alwaysDiscardsLateVideoFrames = true
             self.videoOutput.videoSettings = [
@@ -334,6 +323,16 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
     /// `lockForConfiguration` blocks the entire device, so doing it
     /// once at setup is critical — the per-frame video output path
     /// would deadlock if it tried to lock concurrently.
+    ///
+    /// Notably absent: `isSubjectAreaChangeMonitoringEnabled`. The
+    /// textbook AVCam pattern subscribes to subject-area-change
+    /// notifications and re-anchors focus to center on each fire. We
+    /// tried that and it caused the Vision rectangle stability gate to
+    /// trip on the AF-induced blur, sending the scanner into a
+    /// re-fire loop that never made a selection. Continuous AF + AE +
+    /// AWB without explicit re-anchoring handles scene shifts
+    /// gracefully on its own; the camera's continuous algorithms ARE
+    /// the subject-area response we want.
     private func configureFocusAndExposure(on device: AVCaptureDevice) {
         do {
             try device.lockForConfiguration()
@@ -367,53 +366,6 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
         // visual axis than card-content similarity.
         if device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) {
             device.whiteBalanceMode = .continuousAutoWhiteBalance
-        }
-        // Required for `AVCaptureDeviceSubjectAreaDidChange` notifications
-        // to fire — without this the camera doesn't even compute the
-        // subject-area-changed signal.
-        device.isSubjectAreaChangeMonitoringEnabled = true
-    }
-
-    /// Subscribes to subject-area-change notifications. When the scene
-    /// shifts substantially (user moves the card, panel-light flickers,
-    /// hand enters/exits frame), the camera's previous focus lock no
-    /// longer represents reality. Apple's recommendation: reset focus
-    /// and exposure points to the frame center and re-run continuous
-    /// AF/AE. The card guide is visually centered, so center is also
-    /// the right anchor for the scanner's UX.
-    private func installSubjectAreaChangeObserver(for device: AVCaptureDevice) {
-        if let existing = subjectAreaObserver {
-            NotificationCenter.default.removeObserver(existing)
-        }
-        subjectAreaObserver = NotificationCenter.default.addObserver(
-            forName: AVCaptureDevice.subjectAreaDidChangeNotification,
-            object: device,
-            queue: nil
-        ) { [weak self] _ in
-            self?.sessionQueue.async {
-                self?.handleSubjectAreaChange()
-            }
-        }
-    }
-
-    private func handleSubjectAreaChange() {
-        guard let device = configuredDevice else { return }
-        do {
-            try device.lockForConfiguration()
-        } catch {
-            return
-        }
-        defer { device.unlockForConfiguration() }
-        let center = CGPoint(x: 0.5, y: 0.5)
-        if device.isFocusPointOfInterestSupported,
-           device.isFocusModeSupported(.continuousAutoFocus) {
-            device.focusPointOfInterest = center
-            device.focusMode = .continuousAutoFocus
-        }
-        if device.isExposurePointOfInterestSupported,
-           device.isExposureModeSupported(.continuousAutoExposure) {
-            device.exposurePointOfInterest = center
-            device.exposureMode = .continuousAutoExposure
         }
     }
 
