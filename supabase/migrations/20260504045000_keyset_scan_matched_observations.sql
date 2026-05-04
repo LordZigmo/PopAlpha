@@ -24,16 +24,21 @@
 -- multiple rows sharing an updated_at timestamp; without it keyset
 -- can lose or duplicate rows on ties.
 --
--- Callers must update simultaneously: the migration drops the OFFSET
--- signature before creating the keyset signature so PostgREST cannot
--- bind to the old shape after deploy. The NOTIFY at the end forces
--- PostgREST to reload its schema cache without an out-of-band step.
+-- DEPLOY-SAFETY: this migration ADDS the keyset overload alongside the
+-- existing OFFSET signature instead of dropping it. Postgres allows
+-- function overloading by parameter list; PostgREST routes RPC calls by
+-- the parameter names in the JSON body, so old callers passing
+-- p_offset continue to hit the OFFSET function while new callers
+-- passing p_after_updated_at/p_after_id hit the keyset overload.
+-- This eliminates the deploy-split window where Vercel's ~3min code
+-- rollout would race the ~15-25min migrations workflow and break
+-- in-flight pipeline jobs (max_attempts=1 makes those failures
+-- permanent). After keyset is verified live in prod, a follow-up
+-- migration drops the OFFSET signature.
 --
 -- If a future workflow ever needs OFFSET/historical-replay semantics,
 -- write a separate admin RPC. Do not re-introduce p_offset to this
--- hot-path function.
-
-drop function if exists public.scan_matched_observations(text, text, integer, integer);
+-- keyset overload.
 
 create or replace function public.scan_matched_observations(
   p_provider text,

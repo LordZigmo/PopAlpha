@@ -23,6 +23,7 @@ type SupportedProvider = AnalyticsPipelineProvider;
 
 type MatchScanRow = {
   provider_normalized_observation_id: string;
+  updated_at: string;
 };
 
 type VariantMetricsStateRow = {
@@ -299,19 +300,26 @@ async function loadCandidateRows(params: {
   const supabase = dbAdmin();
   const selected: CandidateRow[] = [];
   let scanned = 0;
+  // Keyset cursor — see migration 20260504045000.
+  let cursorUpdatedAt: string | null = null;
+  let cursorObservationId: string | null = null;
 
-  for (let from = 0; selected.length < params.observationLimit; from += SCAN_PAGE_SIZE) {
+  while (selected.length < params.observationLimit) {
     const { data, error } = await supabase.rpc("scan_matched_observations", {
       p_provider: params.provider,
       p_provider_set_id: params.providerSetId ?? null,
       p_limit: SCAN_PAGE_SIZE,
-      p_offset: from,
+      p_after_updated_at: cursorUpdatedAt,
+      p_after_id: cursorObservationId,
     });
     if (error) throw new Error(`provider_observation_matches(scan): ${error.message}`);
 
     const scanRows = (data ?? []) as MatchScanRow[];
     if (scanRows.length === 0) break;
     scanned += scanRows.length;
+    const lastScanRow = scanRows[scanRows.length - 1];
+    cursorUpdatedAt = lastScanRow.updated_at;
+    cursorObservationId = lastScanRow.provider_normalized_observation_id;
 
     const selectedIds = scanRows
       .map((row) => row.provider_normalized_observation_id)
