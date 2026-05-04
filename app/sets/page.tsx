@@ -82,13 +82,16 @@ export default async function SetsPage() {
     });
   }
 
-  let catalogData = await supabase
+  const catalogResponse = await supabase
     .from("canonical_set_catalog")
     .select("set_name, year, card_count")
     .order("year", { ascending: false })
     .order("set_name", { ascending: true });
 
-  if (catalogData.error || (catalogData.data ?? []).length === 0) {
+  type CatalogRow = { set_name: string | null; year: number | null; card_count: number | null };
+  let catalogRows: CatalogRow[] = catalogResponse.data ?? [];
+
+  if (catalogResponse.error || catalogRows.length === 0) {
     const fallback = await supabase
       .from("canonical_cards")
       .select("set_name, year")
@@ -105,20 +108,15 @@ export default async function SetsPage() {
         map.set(key, { set_name: row.set_name, year: row.year, card_count: 1 });
       }
     }
-    catalogData = {
-      ...catalogData,
-      data: Array.from(map.values()).map((entry) => ({
-        set_name: entry.set_name,
-        year: entry.year,
-        card_count: entry.card_count,
-        set_id: null,
-      })),
-      error: null,
-    };
+    catalogRows = Array.from(map.values()).map((entry) => ({
+      set_name: entry.set_name,
+      year: entry.year,
+      card_count: entry.card_count,
+    }));
   }
 
   const sets: SetEntry[] = [];
-  for (const entry of catalogData.data ?? []) {
+  for (const entry of catalogRows) {
     if (!entry?.set_name) continue;
     if (!isPhysicalPokemonSet({ setName: entry.set_name })) continue;
     const key = entry.set_name;
