@@ -37,6 +37,17 @@
 -- (SHADOWLESS SpecialVariantSpec; ScrydexNormalizedEdition already
 -- handled the firstedition/unlimited distinction).
 
+-- Same timeout handling as phase3a (20260423040000): the INSERT into
+-- _phase3b_refs scans ~13M rows of price_history_points filtered by
+-- `variant_ref like '%::RAW'` (leading-wildcard suffix match, no index
+-- support). Default 2-minute statement_timeout kills it. SET (not
+-- SET LOCAL) is required because supabase db push doesn't run migrations
+-- in transactions; the GUC scopes to this connection only and is reset
+-- when db push exits. Note that supabase db push opens a fresh connection
+-- per migration, so this SET must be repeated in every slow-scan
+-- migration — phase3a's SET does NOT carry over here.
+set statement_timeout = '0';
+
 --------------------------------------------------------------------------
 -- Classifier additions
 --------------------------------------------------------------------------
