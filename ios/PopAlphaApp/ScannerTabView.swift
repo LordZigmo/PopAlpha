@@ -125,7 +125,24 @@ struct ScannerTabView: View {
                     resetToIdle()
                 }
             }
-            .sheet(isPresented: $showPickerSheet) {
+            // SwiftUI-level onDismiss fires for ANY dismissal — swipe-
+            // down, tap-outside, programmatic. The `onDismiss:` we pass
+            // into ScanPickerSheet only fires when the sheet's own X
+            // button is tapped. Without this top-level onDismiss, swipe-
+            // down dismissals leave `lastMatch` non-nil, and the
+            // re-entry guard in `runIdentify` permanently blocks new
+            // scans until the app restarts. Real-device 2026-05-04:
+            // user dismissed a Snover picker by swipe and was then
+            // unable to scan any other card — runIdentify produced 24+
+            // "dropped — lastMatch=space-time-smackdown-44-snover"
+            // log lines before they gave up. clearLastMatch is
+            // idempotent, so the pick path (which already clears
+            // lastMatch in handlePickerSelection) double-clears
+            // harmlessly.
+            .sheet(
+                isPresented: $showPickerSheet,
+                onDismiss: handlePickerDismiss,
+            ) {
                 ScanPickerSheet(
                     matches: scanner.lastMatches,
                     imageHash: scanner.lastImageHash,
