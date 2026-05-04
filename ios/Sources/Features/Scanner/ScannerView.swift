@@ -408,15 +408,29 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
         engine.process(sampleBuffer: sampleBuffer, orientation: orientation)
     }
 
-    /// Snapshot the most recent video frame as a `UIImage`. Used by the
-    /// scanner's manual capture button. Returns nil if the camera hasn't
-    /// produced a frame yet (e.g., session is still warming up).
+    /// Snapshot the most recent video frame as a `UIImage`, cropped to
+    /// a centered card-shaped region. Used by the scanner's manual
+    /// capture button. Returns nil if the camera hasn't produced a
+    /// frame yet (e.g., session is still warming up).
     ///
-    /// Renders via Core Image so we honor the orientation Vision was
-    /// using at capture time — without that, full-bleed full-art cards
-    /// would come back rotated 90° and the embedder would produce a
-    /// wildly different vector than it would for the same card via the
-    /// auto-capture rectangle path.
+    /// Why the center crop matters: the auto-capture path uses Vision's
+    /// rectangle detection to pull just the card region out of each
+    /// frame. The shutter button bypasses Vision entirely, which means
+    /// without a deliberate crop the embedder would see ~40% card +
+    /// ~60% table / hand / background. SigLIP isn't a card classifier;
+    /// background pixels pull the embedding off the card-content
+    /// manifold. Real-device 2026-05-04: a Cinderace V scan via the
+    /// shutter returned Umbreon V at top-1 (with 4 Cinderace variants
+    /// at rank 2-5) because the messy background tilted the embedding
+    /// toward "generic V card layout" rather than "Cinderace
+    /// specifically."
+    ///
+    /// Crop math: portrait card aspect ratio (2.5/3.5 ≈ 0.714 w/h),
+    /// sized to fill 85% of whichever frame dimension is the binding
+    /// constraint, centered. Works regardless of whether the captured
+    /// frame is portrait (~1080x1920) or landscape (~1920x1080) since
+    /// the user might be on a device whose AVCaptureConnection rotates
+    /// output buffers and might not.
     func captureCurrentFrame() -> UIImage? {
         latestFrameLock.lock()
         let pixelBuffer = latestPixelBuffer
@@ -424,7 +438,29 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
         latestFrameLock.unlock()
         guard let pixelBuffer else { return nil }
         let ci = CIImage(cvPixelBuffer: pixelBuffer).oriented(orientation)
-        guard let cg = frameRenderContext.createCGImage(ci, from: ci.extent) else {
+        let extent = ci.extent
+        guard extent.width > 0, extent.height > 0 else { return nil }
+
+        // Card aspect ratio in portrait orientation (the natural way to
+        // hold a Pokémon card). 2.5"/3.5" ≈ 0.714.
+        let cardAspectRatio: CGFloat = 2.5 / 3.5
+        let scale: CGFloat = 0.85
+        // Maximum card-shape rectangle that fits in the frame. Picking
+        // the binding-dimension lets us produce the SAME crop quality
+        // regardless of whether the buffer arrived as portrait or
+        // landscape.
+        let maxCardHeightFromHeight = extent.height * scale
+        let maxCardHeightFromWidth = (extent.width * scale) / cardAspectRatio
+        let cardHeight = min(maxCardHeightFromHeight, maxCardHeightFromWidth)
+        let cardWidth = cardHeight * cardAspectRatio
+        let cropRect = CGRect(
+            x: extent.midX - cardWidth / 2,
+            y: extent.midY - cardHeight / 2,
+            width: cardWidth,
+            height: cardHeight,
+        )
+        let cropped = ci.cropped(to: cropRect)
+        guard let cg = frameRenderContext.createCGImage(cropped, from: cropRect) else {
             return nil
         }
         return UIImage(cgImage: cg)
