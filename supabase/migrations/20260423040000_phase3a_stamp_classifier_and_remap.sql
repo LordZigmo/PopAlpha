@@ -24,6 +24,16 @@
 -- Parity: lib/backfill/scrydex-variant-semantics.ts mirrors this
 -- vocabulary. Update both in lockstep.
 
+-- The INSERT below (~line 186) does a SELECT over ~13M rows of
+-- price_history_points filtered by `variant_ref like '%::RAW'` — a
+-- leading-wildcard suffix match the planner cannot serve from a btree
+-- index, forcing a full sequential scan. Default 2-minute statement_timeout
+-- kills it. SET (without LOCAL) is required because supabase db push does
+-- not wrap migrations in transactions; the GUC scopes to the current
+-- connection and is reset when db push exits. Phase2b (20260423000000) hit
+-- the same wall and was applied with this fix bypassed by chance.
+set statement_timeout = '0';
+
 --------------------------------------------------------------------------
 -- Classifier: token -> stamp value.
 -- Order is significant: most specific aliases first so a compound token

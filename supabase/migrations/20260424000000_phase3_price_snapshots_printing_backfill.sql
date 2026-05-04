@@ -30,6 +30,14 @@
 -- (rows still reference real card_printings ids), so no data rollback
 -- is destructive.
 
+-- Same timeout handling as phase3a (20260423040000): the INSERT into
+-- _phase3c_snapshots scans price_snapshots over a 30-day window which can
+-- exceed the default 2-minute statement_timeout. SET (not SET LOCAL)
+-- because supabase db push does not run migrations inside a transaction
+-- block; LOCAL would warn and have no effect. Scoped to this connection,
+-- reset when db push exits.
+set statement_timeout = '0';
+
 --------------------------------------------------------------------------
 -- Trigger: BEFORE INSERT OR UPDATE OF provider_ref — routes new rows to
 -- the correct (slug, finish, edition, stamp) card_printings row.
