@@ -89,11 +89,31 @@ struct ScannerTabView: View {
                     scanImage: scanner.lastScanImage,
                 )
                     .onDisappear {
-                        // Resume auto-scanning when the user returns from the detail view (single mode).
+                        // Belt: resume auto-scanning when the user returns
+                        // from the detail view (single mode).
                         if scanMode == .single {
                             resetToIdle()
                         }
                     }
+            }
+            // Braces: SwiftUI's `.navigationDestination(item:)` has a
+            // longstanding bug where the attached `.onDisappear` doesn't
+            // always fire when the destination pops back — most reliably
+            // reproducible after a back-swipe or tab-switch round-trip.
+            // When `.onDisappear` misses, `resetToIdle` never runs,
+            // `lastMatch` stays set, and the re-entry guard in
+            // `runIdentify` drops every subsequent scan until the
+            // ScannerHost is recreated (i.e. by switching tabs and back).
+            //
+            // Watching the binding's transition from non-nil → nil is
+            // semantically the pop event itself, so this fires reliably
+            // even when `.onDisappear` doesn't. Both hooks call
+            // `resetToIdle` which is idempotent, so a double-fire is
+            // harmless.
+            .onChange(of: navigateToCard) { oldValue, newValue in
+                if oldValue != nil, newValue == nil, scanMode == .single {
+                    resetToIdle()
+                }
             }
             .sheet(isPresented: $showEvalSeeding) {
                 EvalSeedingView(mode: .freshPhoto, isPresented: $showEvalSeeding)
