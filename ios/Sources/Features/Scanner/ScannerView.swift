@@ -423,34 +423,15 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
         engine.process(sampleBuffer: sampleBuffer, orientation: orientation)
     }
 
-    /// Snapshot the most recent video frame as a `UIImage`, cropped to
-    /// a centered card-shaped region. Used by the scanner's manual
-    /// capture button. Returns nil if the camera hasn't produced a
-    /// frame yet (e.g., session is still warming up).
-    ///
-    /// Why the center crop matters: the auto-capture path uses Vision's
-    /// rectangle detection to pull just the card region out of each
-    /// frame. The shutter button bypasses Vision entirely, which means
-    /// without a deliberate crop the embedder would see ~40% card +
-    /// ~60% table / hand / background. SigLIP isn't a card classifier;
-    /// background pixels pull the embedding off the card-content
-    /// manifold. Real-device 2026-05-04: a Cinderace V scan via the
-    /// shutter returned Umbreon V at top-1 (with 4 Cinderace variants
-    /// at rank 2-5) because the messy background tilted the embedding
-    /// toward "generic V card layout" rather than "Cinderace
-    /// specifically."
-    ///
-    /// Crop math: portrait card aspect ratio (2.5/3.5 ≈ 0.714 w/h),
-    /// sized to fill 85% of whichever frame dimension is the binding
-    /// constraint, centered. Works regardless of whether the captured
-    /// frame is portrait (~1080x1920) or landscape (~1920x1080) since
-    /// the user might be on a device whose AVCaptureConnection rotates
-    /// output buffers and might not.
     /// Returns the FULL oriented camera frame with no center-crop, for
     /// OCR. Pairs with `captureCurrentFrame` (the embedder path which
     /// crops to remove background): both read from the same latest
     /// pixel buffer so the OCR text and the embedded crop are
-    /// guaranteed to come from the same instant in time.
+    /// guaranteed to come from the same instant in time. The collector
+    /// number prints in the bottom 5% of the card; on cards held
+    /// filling the viewfinder that's exactly what `captureCurrentFrame`'s
+    /// 0.85 center-crop strips, so OCR has to see the wider image to
+    /// keep the X/Y in scope.
     func captureFullFrame() -> UIImage? {
         latestFrameLock.lock()
         let pixelBuffer = latestPixelBuffer
@@ -466,6 +447,36 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
         return UIImage(cgImage: cg)
     }
 
+    /// Snapshot the most recent video frame as a `UIImage`, cropped to
+    /// a centered card-shaped region. Used by the scanner's manual
+    /// capture button. Returns nil if the camera hasn't produced a
+    /// frame yet (e.g., session is still warming up).
+    ///
+    /// Why the center crop matters: the auto-capture path uses Vision's
+    /// rectangle detection to pull just the card region out of each
+    /// frame. The shutter button bypasses Vision entirely, which means
+    /// without a deliberate crop the embedder would see ~40% card +
+    /// ~60% table / hand / background. SigLIP isn't a card classifier;
+    /// background pixels pull the embedding off the card-content
+    /// manifold. Real-device 2026-05-03: a Cinderace V scan via the
+    /// shutter returned Umbreon V at top-1 (with 4 Cinderace variants
+    /// at rank 2-5) because the messy background tilted the embedding
+    /// toward "generic V card layout" rather than "Cinderace
+    /// specifically." Real-device 2026-05-04 confirmed regression on
+    /// revert (commit 2f73d95) — same Cinderace V → Umbreon V case
+    /// reproduced — so the crop is back.
+    ///
+    /// OCR still gets the wider frame via `captureFullFrame` so the
+    /// bottom-edge collector number stays readable; the embedder's
+    /// background-noise problem and OCR's bottom-edge problem are now
+    /// solved with two separate captures from the same pixel buffer.
+    ///
+    /// Crop math: portrait card aspect ratio (2.5/3.5 ≈ 0.714 w/h),
+    /// sized to fill 85% of whichever frame dimension is the binding
+    /// constraint, centered. Works regardless of whether the captured
+    /// frame is portrait (~1080x1920) or landscape (~1920x1080) since
+    /// the user might be on a device whose AVCaptureConnection rotates
+    /// output buffers and might not.
     func captureCurrentFrame() -> UIImage? {
         latestFrameLock.lock()
         let pixelBuffer = latestPixelBuffer
