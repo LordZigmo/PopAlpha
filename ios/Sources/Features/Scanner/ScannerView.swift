@@ -208,9 +208,24 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
         let capturer: @Sendable () -> UIImage? = { [weak self] in
             self?.captureCurrentFrame()
         }
+        // OCR-only capturer that returns the FULL oriented frame
+        // (no center-crop). The 0.85 center-crop the embedder uses to
+        // remove background from SigLIP input also strips the bottom
+        // 7.5% of the camera frame — which is exactly where the
+        // collector number prints on a card held filling the view.
+        // OCR runs on this wider image so the bottom-strip text is in
+        // scope; the embedder still gets the tight crop. Real-device
+        // 2026-05-04: White Flare Hydreigon ex repeatedly produced
+        // cardNumbers=[] not because the regex was rejecting the
+        // number, but because the cropped image never contained the
+        // number to begin with.
+        let fullFrameCapturer: @Sendable () -> UIImage? = { [weak self] in
+            self?.captureFullFrame()
+        }
         Task { @MainActor [weak viewModel] in
             viewModel?.normalizedRectConverter = converter
             viewModel?.frameCapturer = capturer
+            viewModel?.fullFrameCapturer = fullFrameCapturer
         }
     }
 
@@ -431,6 +446,26 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
     /// frame is portrait (~1080x1920) or landscape (~1920x1080) since
     /// the user might be on a device whose AVCaptureConnection rotates
     /// output buffers and might not.
+    /// Returns the FULL oriented camera frame with no center-crop, for
+    /// OCR. Pairs with `captureCurrentFrame` (the embedder path which
+    /// crops to remove background): both read from the same latest
+    /// pixel buffer so the OCR text and the embedded crop are
+    /// guaranteed to come from the same instant in time.
+    func captureFullFrame() -> UIImage? {
+        latestFrameLock.lock()
+        let pixelBuffer = latestPixelBuffer
+        let orientation = latestPixelBufferOrientation
+        latestFrameLock.unlock()
+        guard let pixelBuffer else { return nil }
+        let ci = CIImage(cvPixelBuffer: pixelBuffer).oriented(orientation)
+        let extent = ci.extent
+        guard extent.width > 0, extent.height > 0 else { return nil }
+        guard let cg = frameRenderContext.createCGImage(ci, from: extent) else {
+            return nil
+        }
+        return UIImage(cgImage: cg)
+    }
+
     func captureCurrentFrame() -> UIImage? {
         latestFrameLock.lock()
         let pixelBuffer = latestPixelBuffer

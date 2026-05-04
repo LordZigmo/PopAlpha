@@ -603,7 +603,15 @@ final class ScannerHost: ObservableObject {
         offlineOrchestrator?.syncAnchorsInBackground()
     }
 
-    private func runIdentify(image: UIImage) async {
+    /// `image` is the input the embedder will see — typically the
+    /// 0.85 center-crop produced by the camera frame capturer.
+    /// `ocrImage`, when supplied, is used for OCR instead of `image`.
+    /// The tap-anywhere path passes the FULL uncropped frame here so
+    /// the bottom-edge collector number stays in scope (the embed
+    /// crop trims it). When `ocrImage` is nil, OCR runs on `image` —
+    /// preserves prior behavior for the photo-picker and Vision
+    /// auto-detect paths, where the input is already untruncated.
+    private func runIdentify(image: UIImage, ocrImage: UIImage? = nil) async {
         // RE-ENTRY GUARD. PopAlphaVisionEngine.reset() clears the
         // current stability candidate but does NOT stop frame
         // analysis. So while we're inside an identify call, Vision
@@ -637,10 +645,21 @@ final class ScannerHost: ObservableObject {
         // under blur. Only the top candidate is sent to the server
         // (legacy single-candidate API); the offline path uses the
         // full list via Path B trial.
-        let ocrMulti = await OCRService.extractCardIdentifiersMulti(from: image)
+        //
+        // OCR sees `ocrImage` when provided (full uncropped frame from
+        // tap-anywhere capture), else falls back to the embedder's
+        // `image`. Routing the wider frame to OCR was needed because
+        // the embed crop strips the bottom 7.5% of the camera view —
+        // exactly where the collector number prints on a card held
+        // filling the viewfinder. Real-device 2026-05-04: White Flare
+        // Hydreigon ex repeatedly produced cardNumbers=[] not because
+        // the regex was rejecting "161/091" but because the image
+        // never contained that text in the first place.
+        let imageForOCR = ocrImage ?? image
+        let ocrMulti = await OCRService.extractCardIdentifiersMulti(from: imageForOCR)
         let ocr = (cardNumber: ocrMulti.cardNumbers.first, setHint: ocrMulti.setHint)
         self.lastOCR = ocr
-        Logger.scan.debug("ocr frameSize=\(Int(image.size.width))x\(Int(image.size.height)) cardNumbers=\(ocrMulti.cardNumbers) setHint=\(ocrMulti.setHint ?? "nil")")
+        Logger.scan.debug("ocr frameSize=\(Int(imageForOCR.size.width))x\(Int(imageForOCR.size.height)) cardNumbers=\(ocrMulti.cardNumbers) setHint=\(ocrMulti.setHint ?? "nil")")
 
         // Offline-first when premium gate is open. On any offline
         // failure (catalog not downloaded, model load error, embed
@@ -773,7 +792,12 @@ final class ScannerHost: ObservableObject {
               let image = capturer() else {
             return
         }
-        await runIdentify(image: image)
+        // The full-frame capturer is best-effort. If it's not installed
+        // (simulator, or some future code path that forgets to wire it
+        // up) fall back to nil and runIdentify will OCR the cropped
+        // image — same as before this fix, no regression.
+        let ocrImage = viewModel?.fullFrameCapturer?()
+        await runIdentify(image: image, ocrImage: ocrImage)
     }
 
     func resumeScanning() {

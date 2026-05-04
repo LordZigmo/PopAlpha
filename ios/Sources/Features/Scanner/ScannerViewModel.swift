@@ -45,6 +45,17 @@ public final class ScannerViewModel: ObservableObject, PopAlphaVisionEngineDeleg
     /// Nil on simulator (no camera).
     public var frameCapturer: (@Sendable () -> UIImage?)?
 
+    /// Twin of `frameCapturer` that returns the FULL oriented camera
+    /// frame (no center-crop). OCR runs on this wider image so the
+    /// collector-number text printed at the very bottom of the card
+    /// stays in scope — the 0.85 center-crop used by `frameCapturer`
+    /// for the embedder strips the bottom 7.5% of the frame, which on
+    /// any card held filling the camera view is exactly where the
+    /// number prints. Both capturers read from the same latest pixel
+    /// buffer, so the OCR text and the embedded crop come from the
+    /// same instant. Nil on simulator (no camera).
+    public var fullFrameCapturer: (@Sendable () -> UIImage?)?
+
     /// Hook the app layer installs to replace the on-device CoreML
     /// classifier with a network identifier (e.g. /api/scan/identify).
     /// When non-nil, the stability-gated captured UIImage is handed to
