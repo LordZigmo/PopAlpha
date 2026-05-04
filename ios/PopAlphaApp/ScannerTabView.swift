@@ -42,12 +42,21 @@ struct ScannerTabView: View {
                     idleBackground
                 }
 
-                // Full-screen tap gesture to force a scan restart.
-                // Sits behind the interactive overlay (mode pill) so buttons still receive taps first.
+                // Full-screen tap = capture this frame. Subsumes the
+                // previous tap-to-resume affordance because
+                // captureFrameAndIdentify implicitly resumes (the
+                // re-entry guard drops the tap as a no-op if scanner
+                // is mid-flight, otherwise it kicks identify on the
+                // current frame). Replaces the shutter button — on
+                // a touchscreen, the whole viewfinder IS the shutter.
+                // Sits behind the interactive overlay (mode pill /
+                // language pill / debug buttons) so those still
+                // receive taps first.
                 Color.clear
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        scanner.resumeScanning()
+                        PAHaptics.tap()
+                        Task { await scanner.captureFrameAndIdentify() }
                     }
                     .allowsHitTesting(scanner.initError == nil)
 
@@ -640,51 +649,9 @@ struct ScannerTabView: View {
         VStack(spacing: 12) {
             if scanMode == .multi && !scannedCards.isEmpty {
                 multiCardTray
-            }
-            captureButton
-                .padding(.bottom, 100)
-        }
-    }
-
-    // MARK: - Manual capture button (escape hatch for full-art / VMax / ex cards)
-    //
-    // Vision's rectangle detector can't always find a card edge on
-    // full-art Pokemon cards because the artwork bleeds to the card
-    // border, leaving no contrast gradient between "card" and
-    // "background." Auto-capture silently fails for those.
-    //
-    // The button bypasses rectangle detection entirely: it snapshots
-    // whatever is currently in the camera viewfinder and runs the
-    // SAME identify pipeline the photos-picker uses. The user just
-    // points the camera at a card and taps; identify runs on the
-    // raw frame.
-    //
-    // Disabled while another identify is in flight or a result is
-    // already on screen — the re-entry guard in `runIdentify` would
-    // drop the call anyway, this just makes the disabled state
-    // visually obvious.
-
-    private var captureButton: some View {
-        Button {
-            PAHaptics.tap()
-            Task { await scanner.captureFrameAndIdentify() }
-        } label: {
-            ZStack {
-                Circle()
-                    .strokeBorder(.white.opacity(0.7), lineWidth: 4)
-                    .frame(width: 76, height: 76)
-                Circle()
-                    .fill(.white.opacity(0.95))
-                    .frame(width: 60, height: 60)
-                    .scaleEffect(scanner.isIdentifying ? 0.85 : 1.0)
-                    .animation(.easeInOut(duration: 0.15), value: scanner.isIdentifying)
+                    .padding(.bottom, 100)
             }
         }
-        .buttonStyle(.plain)
-        .disabled(scanner.isIdentifying || scanner.lastMatch != nil || scanner.initError != nil)
-        .opacity(scanner.initError != nil ? 0.3 : 1.0)
-        .accessibilityLabel("Capture this frame")
-        .accessibilityHint("Tap to identify the card currently in the camera view, even if the auto-detector can't find its edges.")
     }
 
     // MARK: - Multi Card Tray
