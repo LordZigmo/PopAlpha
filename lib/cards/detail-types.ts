@@ -41,6 +41,24 @@ export type CardPrintingPill = {
   imageUrl: string | null;
 };
 
+export type FinishKind = "NON_HOLO" | "HOLO" | "REVERSE_HOLO" | "ALT_HOLO" | "UNKNOWN";
+export type EditionKind = "UNLIMITED" | "FIRST_EDITION" | "UNKNOWN";
+
+export type FinishStampVariant = {
+  printingId: string;
+  stamp: string | null;
+  stampLabel: string;
+  edition: EditionKind;
+  imageUrl: string | null;
+};
+
+export type FinishGroup = {
+  finish: FinishKind;
+  finishLabel: string;
+  defaultPrintingId: string;
+  variants: FinishStampVariant[];
+};
+
 export type CardDetailResponse = {
   canonical: {
     slug: string;
@@ -64,6 +82,7 @@ export type CardDetailResponse = {
         pricing: CardDetailPriceCompare | null;
       }
     >;
+    finishGroups: FinishGroup[];
   };
   pricing: CardDetailPriceCompare | null;
   graded: {

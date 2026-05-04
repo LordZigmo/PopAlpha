@@ -2,10 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import FinishVariantPicker from "@/components/finish-variant-picker";
 import { GroupCard, GroupedSection } from "@/components/ios-grouped-ui";
 import PriceTickerStrip from "@/components/price-ticker-strip";
 import EnhancedChart from "@/components/enhanced-chart";
 import type { HistoryPointRow } from "@/components/raw-card-variant-types";
+import type { FinishGroup } from "@/lib/cards/detail-types";
 
 type MarketSummaryCardClientProps = {
   variants: Array<{
@@ -23,6 +25,7 @@ type MarketSummaryCardClientProps = {
     history30d: HistoryPointRow[];
     history90d: HistoryPointRow[];
   }>;
+  finishGroups?: FinishGroup[];
   selectedPrintingId: string | null;
   selectedWindow: "7d" | "30d" | "90d";
   onVariantChange?: (printingId: string) => void;
@@ -165,6 +168,7 @@ function WindowTabs({
 
 export default function MarketSummaryCardClient({
   variants,
+  finishGroups,
   selectedPrintingId,
   selectedWindow,
   onVariantChange,
@@ -309,29 +313,14 @@ export default function MarketSummaryCardClient({
               ]}
             />
 
-            {variants.length > 1 ? (
+            {finishGroups && finishGroups.length > 0 ? (
               <>
                 <div className="border-t border-white/[0.06]" />
-                <div className="flex flex-wrap gap-2">
-                  {variants.map((variant) => {
-                    const active = variant.printingId === (activeVariant?.printingId ?? null);
-                    return (
-                      <button
-                        key={variant.printingId}
-                        type="button"
-                        onClick={() => setVariant(variant.printingId)}
-                        className={[
-                          "inline-flex min-h-10 items-center rounded-full border px-3 text-[14px] font-semibold transition-all duration-150",
-                          active
-                            ? "border-white/[0.1] bg-[#222] text-[#F0F0F0] shadow-[0_2px_8px_rgba(0,0,0,0.2)]"
-                            : "border-white/[0.04] bg-transparent text-[#555]",
-                        ].join(" ")}
-                      >
-                        {variant.label}
-                      </button>
-                    );
-                  })}
-                </div>
+                <FinishVariantPicker
+                  finishGroups={finishGroups}
+                  selectedPrintingId={activeVariant?.printingId ?? null}
+                  onChange={setVariant}
+                />
               </>
             ) : null}
           </div>

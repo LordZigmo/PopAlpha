@@ -181,7 +181,15 @@ export async function enqueuePipelineJob(input: {
       job_kind: input.jobKind,
       params_json: safeParams,
       priority: input.priority ?? 100,
-      max_attempts: input.maxAttempts ?? 6,
+      // PIPELINE jobs get a single attempt: per-attempt timeout is 480s, but real
+      // SCRYDEX work distribution is p50=357s / p95=4799s / p99=7341s. The 6×
+      // retries we used to do mostly burned compute on jobs that mathematically
+      // couldn't fit (6×480=2880s budget) and were already silently failing.
+      // The 4 daily Scrydex crons (00:05/06:20/12:35/18:50 UTC) provide the
+      // natural retry cadence; observations are checkpointed durably between
+      // runs. RETRY jobKind keeps 6 because it's invoked explicitly for backlog
+      // catch-up where in-day attempts genuinely matter.
+      max_attempts: input.maxAttempts ?? (input.jobKind === "RETRY" ? 6 : 1),
       status: "QUEUED",
     })
     .select("id")

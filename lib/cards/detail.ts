@@ -11,6 +11,10 @@ import {
   type CardDetailPriceCompare,
   type CardDetailResponse,
   type CardPrintingPill,
+  type EditionKind,
+  type FinishGroup,
+  type FinishKind,
+  type FinishStampVariant,
   type GradeBucket,
   type GradedProvider,
 } from "@/lib/cards/detail-types";
@@ -100,14 +104,140 @@ function editionPillLabel(edition: string): string {
 }
 
 function stampPillLabel(stamp: string): string {
-  if (stamp.toUpperCase() === "SHADOWLESS") return "Shadowless";
-  return toTitleLabel(stamp);
+  switch (stamp.toUpperCase()) {
+    case "POKE_BALL_PATTERN":
+      return "Poké Ball";
+    case "MASTER_BALL_PATTERN":
+      return "Master Ball";
+    case "SHADOWLESS":
+      return "Shadowless";
+    default:
+      return toTitleLabel(stamp);
+  }
 }
 
 function normalizeRawProviderName(provider: string | null | undefined): "SCRYDEX" | null {
   const normalized = String(provider ?? "").trim().toUpperCase();
   if (normalized === "SCRYDEX" || normalized === "POKEMON_TCG_API") return "SCRYDEX";
   return null;
+}
+
+type FinishGroupInputRow = {
+  id: string;
+  finish: string;
+  edition: string;
+  stamp: string | null;
+  image_url?: string | null;
+  mirrored_image_url?: string | null;
+  mirrored_thumb_url?: string | null;
+};
+
+const FINISH_PRIORITY: Record<FinishKind, number> = {
+  NON_HOLO: 0,
+  HOLO: 1,
+  REVERSE_HOLO: 2,
+  ALT_HOLO: 3,
+  UNKNOWN: 4,
+};
+
+const FINISH_GROUP_LABEL: Record<FinishKind, string> = {
+  NON_HOLO: "Regular",
+  HOLO: "Holo",
+  REVERSE_HOLO: "Reverse Holo",
+  ALT_HOLO: "Alt Art",
+  UNKNOWN: "Variant",
+};
+
+function asFinishKind(value: string): FinishKind {
+  switch (value) {
+    case "NON_HOLO":
+    case "HOLO":
+    case "REVERSE_HOLO":
+    case "ALT_HOLO":
+      return value;
+    default:
+      return "UNKNOWN";
+  }
+}
+
+function asEditionKind(value: string): EditionKind {
+  switch (value) {
+    case "UNLIMITED":
+    case "FIRST_EDITION":
+      return value;
+    default:
+      return "UNKNOWN";
+  }
+}
+
+function buildStampVariantLabel(stamp: string | null, edition: EditionKind): string {
+  const stampText = stamp ? stampPillLabel(stamp) : null;
+  const isFirstEd = edition === "FIRST_EDITION";
+  if (stampText && isFirstEd) return `1st Ed · ${stampText}`;
+  if (stampText) return stampText;
+  if (isFirstEd) return "1st Edition";
+  return "Standard";
+}
+
+function isStandardVariant(row: FinishGroupInputRow): boolean {
+  return row.stamp === null && asEditionKind(row.edition) === "UNLIMITED";
+}
+
+function resolveImageUrl(row: FinishGroupInputRow): string | null {
+  return row.mirrored_image_url ?? row.image_url ?? null;
+}
+
+export function buildFinishGroups(rows: FinishGroupInputRow[]): FinishGroup[] {
+  const buckets = new Map<FinishKind, FinishGroupInputRow[]>();
+  for (const row of rows) {
+    const finish = asFinishKind(row.finish);
+    const bucket = buckets.get(finish) ?? [];
+    bucket.push(row);
+    buckets.set(finish, bucket);
+  }
+
+  const groups: FinishGroup[] = [];
+  const orderedFinishes = [...buckets.keys()].sort(
+    (a, b) => FINISH_PRIORITY[a] - FINISH_PRIORITY[b],
+  );
+
+  for (const finish of orderedFinishes) {
+    const bucket = buckets.get(finish) ?? [];
+    const sortedRows = [...bucket].sort((a, b) => {
+      const aStandard = isStandardVariant(a) ? 0 : 1;
+      const bStandard = isStandardVariant(b) ? 0 : 1;
+      if (aStandard !== bStandard) return aStandard - bStandard;
+      const aLabel = buildStampVariantLabel(a.stamp, asEditionKind(a.edition));
+      const bLabel = buildStampVariantLabel(b.stamp, asEditionKind(b.edition));
+      const labelDelta = aLabel.localeCompare(bLabel);
+      if (labelDelta !== 0) return labelDelta;
+      return a.id.localeCompare(b.id);
+    });
+
+    const variants: FinishStampVariant[] = sortedRows.map((row) => {
+      const edition = asEditionKind(row.edition);
+      return {
+        printingId: row.id,
+        stamp: row.stamp,
+        stampLabel: buildStampVariantLabel(row.stamp, edition),
+        edition,
+        imageUrl: resolveImageUrl(row),
+      };
+    });
+
+    const standard = sortedRows.find(isStandardVariant);
+    const defaultPrintingId = standard?.id ?? variants[0]?.printingId;
+    if (!defaultPrintingId) continue;
+
+    groups.push({
+      finish,
+      finishLabel: FINISH_GROUP_LABEL[finish],
+      defaultPrintingId,
+      variants,
+    });
+  }
+
+  return groups;
 }
 
 export function buildPrintingPill(row: CardPrintingRow): CardPrintingPill {
@@ -401,6 +531,7 @@ export async function buildCardDetailResponse(inputSlug: string): Promise<CardDe
     },
     raw: {
       variants: rawVariants,
+      finishGroups: buildFinishGroups(printingRows),
     },
     pricing: await buildPriceCompare({
       supabase,

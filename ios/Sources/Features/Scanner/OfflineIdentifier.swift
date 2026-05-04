@@ -144,11 +144,19 @@ public final class OfflineIdentifier {
     public static let mediumCosDist: Float = 0.30     // similarity ≥ 0.70
     public static let highMinGap: Float = 0.04
 
-    /// Larger pool for Path B intersection. Server uses pgvector
-    /// limit≈20 for the kNN candidate pool; matching that here keeps
-    /// recall comparable in the offline path. Final response is sliced
-    /// to `request.limit` (default 5).
-    public static let candidatePoolSize: Int = 20
+    /// Larger pool for Path B intersection. The kNN already computes
+    /// dot-products for every row in the catalog (vDSP matrix-vector
+    /// multiply over all 23k rows); changing this only changes top-K
+    /// extraction, not the inner loop, so larger pool is essentially
+    /// free. The wider this is, the more likely a real-camera scan of
+    /// a never-seen-before card surfaces in Path B intersection — even
+    /// when the card sits in the 0.7-0.8 sim range that would miss a
+    /// tighter top-K. Real-device 2026-05-04: White Flare Hydreigon ex
+    /// landed in the 0.7-0.78 sim region against a phone capture; with
+    /// pool=20 the kNN never showed it, so OCR card_number=161 had
+    /// nothing to intersect with. Pool=100 gives Path B headroom for
+    /// these "right card, weak sim" cases.
+    public static let candidatePoolSize: Int = 100
 
     public init(catalog: OfflineCatalog, knn: OfflineKNN) {
         self.catalog = catalog

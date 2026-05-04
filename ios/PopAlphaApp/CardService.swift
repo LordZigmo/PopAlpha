@@ -628,21 +628,18 @@ struct CardPrintingOption: Decodable, Identifiable, Hashable {
     let stamp: String?
 
     var finishLabel: String {
-        if let stamp {
-            return Self.stampLabel(stamp)
-        }
         switch finish {
         case "NON_HOLO": return "Regular"
         case "HOLO": return "Holo"
         case "REVERSE_HOLO": return "Reverse Holo"
         case "ALT_HOLO": return "Alt Art"
-        default: return "Standard"
+        default: return "Variant"
         }
     }
 
-    private static func stampLabel(_ stamp: String) -> String {
+    static func stampLabel(_ stamp: String) -> String {
         switch stamp.uppercased() {
-        case "POKE_BALL_PATTERN":   return "Poke Ball"
+        case "POKE_BALL_PATTERN":   return "Poké Ball"
         case "MASTER_BALL_PATTERN": return "Master Ball"
         case "SHADOWLESS":          return "Shadowless"
         default:
@@ -650,6 +647,106 @@ struct CardPrintingOption: Decodable, Identifiable, Hashable {
                         .map { $0.prefix(1).uppercased() + $0.dropFirst().lowercased() }
                         .joined(separator: " ")
         }
+    }
+}
+
+struct FinishStampVariant: Identifiable, Hashable {
+    let printingId: String
+    let stamp: String?
+    let stampLabel: String
+    let edition: String
+
+    var id: String { printingId }
+}
+
+struct FinishGroup: Identifiable, Hashable {
+    let finish: String
+    let finishLabel: String
+    let defaultPrintingId: String
+    let variants: [FinishStampVariant]
+
+    var id: String { finish }
+}
+
+extension Array where Element == CardPrintingOption {
+    func toFinishGroups() -> [FinishGroup] {
+        let priority: [String: Int] = [
+            "NON_HOLO": 0,
+            "HOLO": 1,
+            "REVERSE_HOLO": 2,
+            "ALT_HOLO": 3,
+            "UNKNOWN": 4,
+        ]
+        let labels: [String: String] = [
+            "NON_HOLO": "Regular",
+            "HOLO": "Holo",
+            "REVERSE_HOLO": "Reverse Holo",
+            "ALT_HOLO": "Alt Art",
+            "UNKNOWN": "Variant",
+        ]
+
+        func canonicalFinish(_ value: String) -> String {
+            return labels[value] != nil ? value : "UNKNOWN"
+        }
+        func canonicalEdition(_ value: String?) -> String {
+            switch value {
+            case "UNLIMITED", "FIRST_EDITION": return value!
+            default: return "UNKNOWN"
+            }
+        }
+        func stampVariantLabel(stamp: String?, edition: String) -> String {
+            let stampText = stamp.map { CardPrintingOption.stampLabel($0) }
+            let isFirstEd = edition == "FIRST_EDITION"
+            if let stampText, isFirstEd { return "1st Ed · \(stampText)" }
+            if let stampText { return stampText }
+            if isFirstEd { return "1st Edition" }
+            return "Standard"
+        }
+        func isStandard(_ row: CardPrintingOption) -> Bool {
+            return row.stamp == nil && canonicalEdition(row.edition) == "UNLIMITED"
+        }
+
+        var buckets: [String: [CardPrintingOption]] = [:]
+        for row in self {
+            let finish = canonicalFinish(row.finish)
+            buckets[finish, default: []].append(row)
+        }
+
+        let orderedFinishes = buckets.keys.sorted {
+            (priority[$0] ?? 99) < (priority[$1] ?? 99)
+        }
+
+        var groups: [FinishGroup] = []
+        for finish in orderedFinishes {
+            let bucket = buckets[finish] ?? []
+            let sorted = bucket.sorted { lhs, rhs in
+                let lhsStandard = isStandard(lhs) ? 0 : 1
+                let rhsStandard = isStandard(rhs) ? 0 : 1
+                if lhsStandard != rhsStandard { return lhsStandard < rhsStandard }
+                let lhsLabel = stampVariantLabel(stamp: lhs.stamp, edition: canonicalEdition(lhs.edition))
+                let rhsLabel = stampVariantLabel(stamp: rhs.stamp, edition: canonicalEdition(rhs.edition))
+                if lhsLabel != rhsLabel { return lhsLabel < rhsLabel }
+                return lhs.id < rhs.id
+            }
+            let variants: [FinishStampVariant] = sorted.map { row in
+                let edition = canonicalEdition(row.edition)
+                return FinishStampVariant(
+                    printingId: row.id,
+                    stamp: row.stamp,
+                    stampLabel: stampVariantLabel(stamp: row.stamp, edition: edition),
+                    edition: edition
+                )
+            }
+            let standard = sorted.first(where: isStandard)
+            guard let defaultId = standard?.id ?? variants.first?.printingId else { continue }
+            groups.append(FinishGroup(
+                finish: finish,
+                finishLabel: labels[finish] ?? "Variant",
+                defaultPrintingId: defaultId,
+                variants: variants
+            ))
+        }
+        return groups
     }
 }
 

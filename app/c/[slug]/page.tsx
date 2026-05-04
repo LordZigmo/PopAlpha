@@ -27,7 +27,7 @@ import type { RawCardMarketVariantInput } from "@/components/raw-card-variant-ty
 import CardTileMini from "@/components/card-tile-mini";
 import type { HomepageCard } from "@/lib/data/homepage";
 import { buildEbaySearchQueries, type GradeSelection, type GradedSource } from "@/lib/ebay-query";
-import { buildPrintingPill } from "@/lib/cards/detail";
+import { buildFinishGroups, buildPrintingPill } from "@/lib/cards/detail";
 import { getCardViewSnapshot } from "@/lib/data/card-views";
 import { getCommunityPulseSnapshot } from "@/lib/data/community-pulse";
 import { getRelatedCardCarousels } from "@/lib/data/related-cards";
@@ -383,52 +383,14 @@ function printingOptionLabel(printing: CardPrintingRow): string | null {
     .join(" • ") || null;
 }
 
-function rawVariantSegmentLabel(
-  printing: CardPrintingRow,
-  allPrintings: CardPrintingRow[],
-): string {
-  const distinctFinishes = new Set(
-    allPrintings
-      .map((row) => row.finish)
-      .filter((value) => value && value !== "UNKNOWN")
-  );
-  const distinctEditions = new Set(
-    allPrintings
-      .map((row) => row.edition)
-      .filter((value) => value && value !== "UNKNOWN")
-  );
-
-  if (printing.stamp) return buildPrintingPill({
-    id: printing.id,
-    canonical_slug: "",
-    finish: printing.finish,
-    finish_detail: printing.finish_detail,
-    edition: printing.edition,
-    stamp: printing.stamp,
-    image_url: printing.image_url,
-    mirrored_image_url: null,
-    mirrored_thumb_url: null,
-  }).pillLabel;
-
-  const finishText = printing.finish !== "UNKNOWN" ? finishLabel(printing.finish) : null;
-  if (distinctFinishes.size > 1 && finishText) {
-    if (printing.edition === "FIRST_EDITION") return `1st ${finishText}`;
-    return finishText;
+function rawVariantSegmentLabel(printing: CardPrintingRow): string {
+  switch (printing.finish) {
+    case "NON_HOLO": return "Regular";
+    case "HOLO": return "Holo";
+    case "REVERSE_HOLO": return "Reverse Holo";
+    case "ALT_HOLO": return "Alt Art";
+    default: return "Variant";
   }
-
-  if (printing.edition === "FIRST_EDITION") {
-    return finishText ? `1st ${finishText}` : "1st Edition";
-  }
-
-  if (distinctEditions.size > 1 && printing.edition !== "UNKNOWN") {
-    return printing.edition === "UNLIMITED" && finishText
-      ? `${finishText}`
-      : printing.edition === "UNLIMITED"
-        ? "Unlimited"
-        : "1st Edition";
-  }
-
-  return finishText ?? "Variant";
 }
 
 function resolveBackHref(returnTo: string | undefined): string {
@@ -828,7 +790,7 @@ export default async function CanonicalCardPage({
     })
     .map((row) => ({
       printingId: row.id,
-      label: rawVariantSegmentLabel(row, printings),
+      label: rawVariantSegmentLabel(row),
       descriptorLabel: printingOptionLabel(row),
       imageUrl: row.image_url,
       rarity: row.rarity,
@@ -836,6 +798,7 @@ export default async function CanonicalCardPage({
       edition: row.edition,
       stamp: row.stamp,
     }));
+  const rawFinishGroups = buildFinishGroups(printings);
   const rawVariantPayload = viewMode === "RAW"
     ? await loadRawCardMarketVariants({
         canonicalSlug: slug,
@@ -1068,6 +1031,7 @@ export default async function CanonicalCardPage({
           cardNumber={canonical.card_number}
           canonicalSetHref={canonicalSetHref}
           variants={rawVariantPayload}
+          finishGroups={rawFinishGroups}
           selectedPrintingId={selectedPrinting?.id ?? null}
           selectedWindow={activeMarketWindow}
           rawHref={rawModeHref}

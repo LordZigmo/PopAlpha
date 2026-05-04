@@ -5,11 +5,13 @@ import { useEffect, useState } from "react";
 import DealWheel from "@/components/deal-wheel";
 import LiquidityModule from "@/components/liquidity-module";
 import MarketSummaryCardClient from "@/components/market-summary-card-client";
+import type { FinishGroup } from "@/lib/cards/detail-types";
 import type { RawCardMarketVariant } from "@/components/raw-card-variant-types";
 import SignalGauge from "@/components/signal-gauge";
 
 type CardMarketIntelClientProps = {
   variants: RawCardMarketVariant[];
+  finishGroups?: FinishGroup[];
   selectedPrintingId: string | null;
   selectedWindow: "7d" | "30d" | "90d";
   onVariantChange?: (printingId: string) => void;
@@ -38,6 +40,7 @@ function formatSignalsUpdated(value: string | null): string {
 
 export default function CardMarketIntelClient({
   variants,
+  finishGroups,
   selectedPrintingId,
   selectedWindow,
   onVariantChange,
@@ -117,6 +120,7 @@ export default function CardMarketIntelClient({
           history30d: variant.history30d,
           history90d: variant.history90d,
         }))}
+        finishGroups={finishGroups}
         selectedPrintingId={activeVariant?.printingId ?? selectedPrintingId}
         selectedWindow={selectedWindow}
         onVariantChange={handleVariantChange}

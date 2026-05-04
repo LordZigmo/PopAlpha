@@ -141,15 +141,14 @@ struct CardDetailView: View {
                     variantRef: selectedPrintingId.map { "\($0)::RAW" }
                 )
             )
-            // Load available finish variants
+            // Load available finish variants. Ordering is handled downstream
+            // by `toFinishGroups()` so the picker controls the visual order.
             if let printings = try? await CardService.shared.fetchPrintings(slug: card.id) {
-                let finishOrder = ["NON_HOLO", "HOLO", "REVERSE_HOLO", "ALT_HOLO", "UNKNOWN"]
-                let sorted = printings.sorted {
-                    (finishOrder.firstIndex(of: $0.finish) ?? 99) < (finishOrder.firstIndex(of: $1.finish) ?? 99)
-                }
+                let groups = printings.toFinishGroups()
+                let initialId = groups.first?.defaultPrintingId ?? printings.first?.id
                 await MainActor.run {
-                    availablePrintings = sorted
-                    if selectedPrintingId == nil { selectedPrintingId = sorted.first?.id }
+                    availablePrintings = printings
+                    if selectedPrintingId == nil { selectedPrintingId = initialId }
                 }
             }
             // Load condition-based prices
@@ -378,7 +377,7 @@ struct CardDetailView: View {
             pricingSection
 
             // 2. Finish variant pill selector — identity cue, stays near title
-            if availablePrintings.count > 1 {
+            if shouldShowFinishPicker {
                 finishPillSection
             }
 
@@ -987,29 +986,80 @@ struct CardDetailView: View {
 
     // MARK: - Finish Variant Selector
 
+    private var finishGroups: [FinishGroup] {
+        availablePrintings.toFinishGroups()
+    }
+
+    private var activeFinishGroup: FinishGroup? {
+        let groups = finishGroups
+        if let id = selectedPrintingId,
+           let match = groups.first(where: { group in
+               group.variants.contains(where: { $0.printingId == id })
+           }) {
+            return match
+        }
+        return groups.first
+    }
+
+    private var shouldShowFinishPicker: Bool {
+        let groups = finishGroups
+        if groups.count > 1 { return true }
+        if let only = groups.first, only.variants.count > 1 { return true }
+        return false
+    }
+
     private var finishPillSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let groups = finishGroups
+        let active = activeFinishGroup
+
+        return VStack(alignment: .leading, spacing: 10) {
             Text("Finish")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(PA.Colors.muted)
                 .textCase(.uppercase)
 
             HStack(spacing: 6) {
-                ForEach(availablePrintings) { printing in
+                ForEach(groups) { group in
+                    let isActive = active?.id == group.id
                     Button {
                         PAHaptics.selection()
-                        selectedPrintingId = printing.id
+                        selectedPrintingId = group.defaultPrintingId
                     } label: {
-                        Text(printing.finishLabel)
+                        Text(group.finishLabel)
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(selectedPrintingId == printing.id ? PA.Colors.background : PA.Colors.text)
+                            .foregroundStyle(isActive ? PA.Colors.background : PA.Colors.text)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 7)
-                            .background(selectedPrintingId == printing.id ? PA.Colors.accent : PA.Colors.surfaceSoft)
+                            .background(isActive ? PA.Colors.accent : PA.Colors.surfaceSoft)
                             .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
                 }
+            }
+
+            if let active, active.variants.count > 1 {
+                HStack(spacing: 6) {
+                    ForEach(active.variants) { variant in
+                        let isActive = selectedPrintingId == variant.printingId
+                        Button {
+                            PAHaptics.selection()
+                            selectedPrintingId = variant.printingId
+                        } label: {
+                            Text(variant.stampLabel)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(isActive ? PA.Colors.text : PA.Colors.muted)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(isActive ? PA.Colors.surfaceSoft : Color.clear)
+                                .overlay(
+                                    Capsule().stroke(isActive ? PA.Colors.accent.opacity(0.4) : PA.Colors.muted.opacity(0.15), lineWidth: 1)
+                                )
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.leading, 4)
             }
         }
     }

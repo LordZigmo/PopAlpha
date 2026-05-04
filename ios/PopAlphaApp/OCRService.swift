@@ -1,5 +1,8 @@
+import OSLog
 import UIKit
 @preconcurrency import Vision
+
+private let ocrLogger = Logger(subsystem: "ai.popalpha.ios", category: "scan")
 
 /// On-device OCR for the scanner. Pulls both the collector number
 /// (X/Y in the bottom corner) and a set-name hint from any other
@@ -137,9 +140,17 @@ enum OCRService {
 
                 var seenCardNumbers = Set<String>()
                 var cardNumbers: [String] = []
+                // Track which lines contained a "X/Y" shape but were
+                // discarded — diagnostic for "OCR saw the number but
+                // the filter rejected it" vs "OCR didn't see it at
+                // all". Keyed off the regex's slash pattern.
+                var slashLinesSeen: [String] = []
                 for obs in results {
                     let candidates = obs.topCandidates(maxCandidatesPerObservation)
                     for candidate in candidates {
+                        if candidate.string.contains("/") {
+                            slashLinesSeen.append(candidate.string)
+                        }
                         for n in collectorNumberCandidates(in: candidate.string) {
                             if seenCardNumbers.insert(n).inserted {
                                 cardNumbers.append(n)
@@ -147,6 +158,15 @@ enum OCRService {
                         }
                     }
                 }
+                #if DEBUG
+                if cardNumbers.isEmpty && !slashLinesSeen.isEmpty {
+                    // OCR found "/"-bearing text but no candidate survived
+                    // the regex + plausibility filters. Surface it so we
+                    // can tell whether the secret-rare fix landed.
+                    let preview = slashLinesSeen.prefix(5).joined(separator: " | ")
+                    ocrLogger.debug("ocr slash-lines (no card_number extracted): \(preview, privacy: .public)")
+                }
+                #endif
 
                 continuation.resume(returning: (cardNumbers, setHint))
             }
@@ -324,7 +344,15 @@ enum OCRService {
     /// Plausibility filters:
     ///   - Y ∈ [5, 600]: every Pokemon set has ≥5 cards and ≤600 cards.
     ///     Filters attack damage notations like "30/3" and HP fractions.
-    ///   - X ≤ Y: an "X of Y" cardinal can't exceed Y.
+    ///   - X ∈ [1, 999]: any real Pokemon card number fits here. We do
+    ///     NOT enforce X ≤ Y because **secret rares are numbered ABOVE
+    ///     the printed total** — White Flare Hydreigon ex prints
+    ///     `161/091`, Surging Sparks prints `223/191`, etc. Real-device
+    ///     2026-05-04: White Flare Hydreigon ex went undetected through
+    ///     three retries because the old `xInt <= yInt` filter silently
+    ///     dropped every secret rare. The Y range above already filters
+    ///     attack damage; the X cap of 999 catches OCR garbage without
+    ///     rejecting real numbering.
     static func collectorNumberCandidates(in text: String) -> [String] {
         var candidates: [String] = []
         var seen = Set<String>()
@@ -342,7 +370,7 @@ enum OCRService {
             let xStr = ns.substring(with: xRange)
             let yStr = ns.substring(with: yRange)
             guard let yInt = Int(yStr), yInt >= 5, yInt <= 600 else { continue }
-            guard let xInt = Int(xStr), xInt <= yInt else { continue }
+            guard let xInt = Int(xStr), xInt >= 1, xInt <= 999 else { continue }
             let normalized = normalizeCardNumber(xStr)
             if seen.insert(normalized).inserted {
                 candidates.append(normalized)
@@ -362,7 +390,8 @@ enum OCRService {
                    let preInt = Int(preTrim),
                    preInt >= 1,
                    let combinedInt = Int("\(preTrim)\(xStr)"),
-                   combinedInt <= yInt {
+                   combinedInt >= 1,
+                   combinedInt <= 999 {
                     let combined = normalizeCardNumber("\(preTrim)\(xStr)")
                     if seen.insert(combined).inserted {
                         candidates.append(combined)

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import FinishVariantPicker from "@/components/finish-variant-picker";
 import type { CardDetailResponse, CardDetailMetrics, GradeBucket, GradedProvider } from "@/lib/cards/detail-types";
 import {
   breakoutSignalLabel,
@@ -89,17 +90,12 @@ export default function CardDetailInstruments({ detail }: CardDetailInstrumentsP
 
       {mode === "RAW" ? (
         <>
-          <div className="mt-4 flex flex-wrap gap-2">
-            {detail.raw.variants.map((variant) => (
-              <button
-                key={variant.printingId}
-                type="button"
-                className={pillClass(printingId === variant.printingId, !variant.available)}
-                onClick={() => setPrintingId(variant.printingId)}
-              >
-                {variant.pillLabel}
-              </button>
-            ))}
+          <div className="mt-4">
+            <FinishVariantPicker
+              finishGroups={detail.raw.finishGroups}
+              selectedPrintingId={printingId}
+              onChange={setPrintingId}
+            />
           </div>
           <div className="mt-4">
             {metricCard(selectedRaw?.pillLabel ?? "RAW", selectedRaw?.metrics ?? null)}
@@ -107,17 +103,12 @@ export default function CardDetailInstruments({ detail }: CardDetailInstrumentsP
         </>
       ) : (
         <>
-          <div className="mt-4 flex flex-wrap gap-2">
-            {detail.raw.variants.map((variant) => (
-              <button
-                key={variant.printingId}
-                type="button"
-                className={pillClass(printingId === variant.printingId)}
-                onClick={() => setPrintingId(variant.printingId)}
-              >
-                {variant.pillLabel}
-              </button>
-            ))}
+          <div className="mt-4">
+            <FinishVariantPicker
+              finishGroups={detail.raw.finishGroups}
+              selectedPrintingId={printingId}
+              onChange={setPrintingId}
+            />
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
             {detail.graded.providers.map((item) => (

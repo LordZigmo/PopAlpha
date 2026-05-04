@@ -91,6 +91,7 @@ export const ADMIN_ROUTES = [
   "admin/discover-sets",
   "admin/scan-eval/promote",
   "admin/scan-eval/pre-label",
+  "admin/card-profile-coverage",
   // 2026-04-29: admin/variant-tokens registry entry was committed
   // ahead of its implementation files (still untracked locally:
   // app/api/admin/variant-tokens/route.ts + sibling lib/internal pages).

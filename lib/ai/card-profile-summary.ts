@@ -1,18 +1,44 @@
 import "server-only";
 
-import crypto from "node:crypto";
 import { generateText } from "ai";
 
 import { getPopAlphaModel } from "@/lib/ai/models";
+import {
+  buildFallbackProfile,
+  buildMetricsHash,
+  CARD_PROFILE_MODEL_LABEL,
+  pickSignal,
+  priceTrackingBucket,
+  SIGNAL_LABELS,
+  VERDICTS,
+  type CardProfileInput,
+  type CardProfileResult,
+  type SignalLabel,
+  type Verdict,
+} from "@/lib/ai/card-profile-fallback";
 
-// ── Constants ───────────────────────────────────────────────────────────────
+// Re-export the public surface from card-profile-fallback so existing
+// callers (cron route, personalization explanation) don't need to
+// retarget their imports. The split is mechanical: deterministic logic
+// lives in card-profile-fallback (no server-only barrier, unit-testable);
+// the LLM call itself stays here.
+export {
+  buildFallbackProfile,
+  buildMetricsHash,
+  CARD_PROFILE_MODEL_LABEL,
+  priceTrackingBucket,
+  SIGNAL_LABELS,
+  VERDICTS,
+  type CardProfileInput,
+  type CardProfileResult,
+  type SignalLabel,
+  type Verdict,
+};
+
+// ── Constants used only by the LLM-call path ────────────────────────────────
 
 export const CARD_PROFILE_VERSION = "card-profile-v2";
 export const CARD_PROFILE_MODEL_TIER = "Ace" as const;
-// Keep in sync with getPopAlphaModel("Ace"). Stored alongside every
-// card_profiles row so historical data can be traced back to the
-// model that produced it.
-export const CARD_PROFILE_MODEL_LABEL = "gemini-2.5-flash";
 // Upper bound per card. Prior value (6s) was too tight for
 // gemini-2.5-flash in practice — first smoke test showed 2 of 3 cards
 // timing out at ~6s. 15s gives ~3× headroom over the measured single-
@@ -20,288 +46,6 @@ export const CARD_PROFILE_MODEL_LABEL = "gemini-2.5-flash";
 // 15s / concurrency=5 = ~25 min worst case vs. 300s maxDuration on
 // Vercel, which is why we also have the deadline guard in the route).
 export const CARD_PROFILE_TIMEOUT_MS = 15_000;
-
-export const SIGNAL_LABELS = [
-  "BREAKOUT",
-  "COOLING",
-  "VALUE_ZONE",
-  "STEADY",
-  "OVERHEATED",
-] as const;
-export type SignalLabel = (typeof SIGNAL_LABELS)[number];
-
-export const VERDICTS = [
-  "UNDERVALUED",
-  "FAIR",
-  "OVERHEATED",
-  "INSUFFICIENT_DATA",
-] as const;
-export type Verdict = (typeof VERDICTS)[number];
-
-// ── Types ───────────────────────────────────────────────────────────────────
-
-export type CardProfileInput = {
-  canonicalSlug: string;
-  canonicalName: string;
-  setName: string | null;
-  cardNumber: string | null;
-  marketPrice: number | null;
-  median7d: number | null;
-  median30d: number | null;
-  changePct7d: number | null;
-  low30d: number | null;
-  high30d: number | null;
-  // Rolled-up price-observation count over 7 days (DB column:
-  // active_listings_7d). Defined as
-  //   greatest(history_7d_count, snapshot_active_7d_count)
-  // summed across printing variants — see migration
-  // 20260304120000_refresh_card_metrics_use_history_counts.sql.
-  // Dominated by data-provider price-history rows for popular cards
-  // and uncapped (an earlier comment claiming a "*20-then-clamp" cap
-  // was wrong — that cap is on liquidity_score). The absolute number
-  // is not meaningful to a collector, so prompts and fallbacks
-  // translate it to a qualitative bucket via priceTrackingBucket()
-  // and never surface the raw count. NOT marketplace listings or
-  // copies for sale.
-  priceObservations7d: number | null;
-  volatility30d: number | null;
-  liquidityScore: number | null;
-  conditionPrices: Array<{ condition: string; price: number }> | null;
-};
-
-export type CardProfileResult = {
-  signalLabel: SignalLabel;
-  verdict: Verdict;
-  chip: string;
-  summaryShort: string;
-  summaryLong: string;
-  source: "llm" | "fallback";
-  modelLabel: string;
-  inputTokens: number | null;
-  outputTokens: number | null;
-  metricsHash: string;
-  // When source === "fallback", carries the reason the LLM path failed
-  // so the caller (cron route) can report it instead of silently
-  // writing 100% fallbacks and returning ok:true. See
-  // docs/project_silent_rpc_fallbacks.md — same lesson.
-  //   - "llm-threw:<error>" — generateText threw synchronously (auth,
-  //     model-not-found, rate-limit, abort, etc.)
-  //   - "parse-miss"         — LLM returned text but parseLlmProfile
-  //     rejected the shape
-  //   - undefined            — source === "llm", no failure
-  failureReason?: string;
-};
-
-// ── Metrics hash ────────────────────────────────────────────────────────────
-//
-// The hash is the refresh trigger for the card-profile cron — when it
-// changes, the card's LLM summary gets regenerated. So sensitivity
-// here directly controls how often we pay for an LLM call per card,
-// and by extension steady-state cost.
-//
-// Coarsened 2026-04-26 to bound steady-state cost. Prior version
-// rounded prices to the cent and changePct to 0.1% — sensitive enough
-// that pure noise (cent-level price ticks, percent-point reporting
-// precision, day-edge poll-window flicker on activeListings) was
-// triggering LLM refreshes for cards whose narrative was unchanged.
-//
-// What's in the hash now:
-//   marketPrice / median7d / low30d / high30d  → rounded to whole dollars
-//   changePct7d                                 → rounded to whole percent
-//
-// What was DROPPED:
-//   priceObservations7d (DB column: active_listings_7d) — flickers from
-//   rolling-window edge timing (a card's count can move ±1 just because
-//   yesterday's poll fell outside the window today). Was triggering
-//   pure-noise refreshes. Still passed to the LLM in the prompt for
-//   qualitative reasoning context (thin/steady/dense bucket) — just
-//   not used as a refresh trigger.
-//
-// Note on what priceObservations7d actually is: it's
-//   greatest(history_7d_count, snapshot_active_7d_count)
-// rolled up across all printing variants of the card (see migration
-// 20260304120000_refresh_card_metrics_use_history_counts.sql lines
-// 138-167). It is NOT capped — earlier comments in this file claimed a
-// "*20-then-clamp" cap to 100, but that cap is on liquidity_score, not
-// on this field. The number can run into the hundreds for popular
-// cards with many variants, which is why we now translate it to a
-// qualitative bucket (thin/steady/dense) before surfacing to users.
-//
-// Combined with changePct rounded to integers, this still catches:
-//   - $0.50 → $1.00      (100% move; changePct flips 0 → 100)
-//   - $20  → $21         (5% move;  changePct flips 0 → 5)
-//   - $200 → $210        (same 5% logic at any price level)
-// While suppressing:
-//   - $4.97 → $4.98      (penny tick, narrative unchanged)
-//   - 4.4% → 4.5%        (sub-percent move, within reporting precision)
-//   - reads 14 → 15      (poll-edge flicker, no real activity change)
-
-function round0(v: number | null): string {
-  return v != null && Number.isFinite(v) ? Math.round(v).toString() : "";
-}
-
-export function buildMetricsHash(input: CardProfileInput): string {
-  const payload = [
-    round0(input.marketPrice),
-    round0(input.median7d),
-    round0(input.changePct7d),
-    round0(input.low30d),
-    round0(input.high30d),
-  ].join("|");
-  return crypto.createHash("sha256").update(payload).digest("hex").slice(0, 16);
-}
-
-// ── Deterministic signal/verdict (used by fallback and as a sanity guard) ───
-
-function pickSignal(input: CardProfileInput): SignalLabel {
-  const change = input.changePct7d;
-  const liquidity = input.liquidityScore;
-  const volatility = input.volatility30d;
-
-  if (typeof change === "number") {
-    if (change >= 12) return "BREAKOUT";
-    if (change <= -10) return "COOLING";
-  }
-  if (typeof volatility === "number" && volatility >= 35) return "OVERHEATED";
-
-  // Value zone: priced in the lower half of the 30-day range with reasonable
-  // liquidity — a soft "looks cheap, with depth" tag.
-  if (
-    typeof input.marketPrice === "number" &&
-    typeof input.low30d === "number" &&
-    typeof input.high30d === "number" &&
-    input.high30d > input.low30d
-  ) {
-    const positionInRange =
-      (input.marketPrice - input.low30d) / (input.high30d - input.low30d);
-    if (positionInRange <= 0.35 && (liquidity ?? 0) >= 30) {
-      return "VALUE_ZONE";
-    }
-  }
-
-  return "STEADY";
-}
-
-function pickVerdict(input: CardProfileInput, signal: SignalLabel): Verdict {
-  if (input.marketPrice == null) return "INSUFFICIENT_DATA";
-  if (signal === "BREAKOUT" || signal === "OVERHEATED") return "OVERHEATED";
-  if (signal === "VALUE_ZONE") return "UNDERVALUED";
-  return "FAIR";
-}
-
-const SIGNAL_TO_CHIP: Record<SignalLabel, string> = {
-  BREAKOUT: "🔥 Breakout",
-  COOLING: "📉 Cooling Off",
-  VALUE_ZONE: "💎 Good Buying Range",
-  STEADY: "🔁 Holding Steady",
-  OVERHEATED: "⚠️ Running Hot",
-};
-
-// ── Deterministic fallback ──────────────────────────────────────────────────
-
-function formatUsd(value: number | null): string {
-  if (value == null || !Number.isFinite(value)) return "an unpriced level";
-  return new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: value >= 1000 ? 0 : 2,
-  }).format(value);
-}
-
-// Translates the raw `priceObservations7d` count into a qualitative bucket.
-// The raw number is technically meaningless to a reader (it's summed across
-// printing variants over 7 days, with provider feeds dominating the count
-// for popular cards). The bucket conveys the only thing that actually
-// matters: how reliable today's price level is.
-type PriceTrackingBucket = "thin" | "steady" | "dense";
-
-export function priceTrackingBucket(count: number | null): PriceTrackingBucket | null {
-  if (count == null || !Number.isFinite(count)) return null;
-  if (count <= 4) return "thin";
-  if (count < 30) return "steady";
-  return "dense";
-}
-
-function formatSignedPct(value: number | null): string | null {
-  if (value == null || !Number.isFinite(value)) return null;
-  const abs = Math.abs(value);
-  const formatted = abs >= 10 ? abs.toFixed(0) : abs.toFixed(1);
-  return `${value > 0 ? "+" : value < 0 ? "-" : ""}${formatted}%`;
-}
-
-export function buildFallbackProfile(input: CardProfileInput): CardProfileResult {
-  const { canonicalName, setName, marketPrice, changePct7d, priceObservations7d } = input;
-  const priceText = formatUsd(marketPrice);
-  const changeText = formatSignedPct(changePct7d);
-  const signal = pickSignal(input);
-  const verdict = pickVerdict(input, signal);
-
-  // Sentence 1 — what is happening (the move)
-  let happeningLine: string;
-  if (changeText && changePct7d != null && changePct7d > 0) {
-    happeningLine = `${canonicalName} is up ${changeText} over the last 7 days, trading around ${priceText}.`;
-  } else if (changeText && changePct7d != null && changePct7d < 0) {
-    happeningLine = `${canonicalName} is down ${changeText} over the last 7 days, trading around ${priceText}.`;
-  } else {
-    happeningLine = `${canonicalName} is holding steady around ${priceText}.`;
-  }
-
-  // Sentence 2 — why it matters (signal-aware)
-  let mattersLine: string;
-  switch (signal) {
-    case "BREAKOUT":
-      mattersLine = "That is a strong move higher in a short window.";
-      break;
-    case "COOLING":
-      mattersLine = "That is a clear pullback from recent highs.";
-      break;
-    case "VALUE_ZONE":
-      mattersLine = "That puts it in a good buying range vs. the last 30 days.";
-      break;
-    case "OVERHEATED":
-      mattersLine = "Price swings have been bigger than usual lately.";
-      break;
-    default:
-      mattersLine = "There is no clear move in either direction right now.";
-  }
-
-  // Sentence 3 — what to watch next. The raw priceObservations7d count is
-  // a rolled-up data-provider artifact (often in the dozens for popular
-  // cards) and means nothing to a collector, so we translate to a
-  // qualitative bucket and never surface the number itself.
-  const bucket = priceTrackingBucket(priceObservations7d);
-  let watchLine: string;
-  switch (bucket) {
-    case "thin":
-      watchLine = "Price tracking on this card is thin, so the next sale will tell you a lot.";
-      break;
-    case "steady":
-      watchLine = "Price tracking is steady — watch whether the move holds across the next few sales.";
-      break;
-    case "dense":
-      watchLine = "Price tracking is dense, so a clean move shows up fast — watch whether it holds across the next few sales.";
-      break;
-    default:
-      watchLine = "Watch whether the move holds across the next few sales.";
-  }
-
-  const summaryShort = `${happeningLine} ${mattersLine}`;
-  const setContext = setName ? ` This card is from the ${setName} set.` : "";
-  const summaryLong = `${happeningLine} ${mattersLine} ${watchLine}${setContext}`;
-
-  return {
-    signalLabel: signal,
-    verdict,
-    chip: SIGNAL_TO_CHIP[signal],
-    summaryShort,
-    summaryLong,
-    source: "fallback",
-    modelLabel: CARD_PROFILE_MODEL_LABEL,
-    inputTokens: null,
-    outputTokens: null,
-    metricsHash: buildMetricsHash(input),
-  };
-}
 
 // ── Prompt ───────────────────────────────────────────────────────────────────
 

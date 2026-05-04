@@ -9,6 +9,7 @@ import CardModeToggle from "@/components/card-mode-toggle";
 import { Pill } from "@/components/ios-grouped-ui";
 import MarketPulse from "@/components/market-pulse";
 import PopAlphaScoutPreview from "@/components/popalpha-scout-preview";
+import type { FinishGroup } from "@/lib/cards/detail-types";
 import type { RawCardMarketVariant } from "@/components/raw-card-variant-types";
 
 type RawCardMarketSurfaceProps = {
@@ -19,6 +20,7 @@ type RawCardMarketSurfaceProps = {
   cardNumber: string | null;
   canonicalSetHref: string | null;
   variants: RawCardMarketVariant[];
+  finishGroups: FinishGroup[];
   selectedPrintingId: string | null;
   selectedWindow: "7d" | "30d" | "90d";
   rawHref: string;
@@ -131,6 +133,7 @@ export default function RawCardMarketSurface({
   cardNumber,
   canonicalSetHref,
   variants,
+  finishGroups,
   selectedPrintingId,
   selectedWindow,
   rawHref,
@@ -341,6 +344,7 @@ export default function RawCardMarketSurface({
 
           <CardMarketIntelClient
             variants={variants}
+            finishGroups={finishGroups}
             selectedPrintingId={activeVariant?.printingId ?? null}
             selectedWindow={selectedWindow}
             onVariantChange={handleVariantChange}

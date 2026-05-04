@@ -62,6 +62,12 @@ type CardRow = {
   liquidity_score: number | null;
   existing_source?: string | null;
   is_high_priority?: boolean | null;
+  // Card-level metadata returned by both selection RPCs as of
+  // 20260503120100_card_profiles_refresh_rpc_add_metadata.sql.
+  // Used by buildFallbackProfile to produce tier-aware copy.
+  rarity?: string | null;
+  year?: number | null;
+  is_digital?: boolean | null;
 };
 
 type ConditionPriceRow = {
@@ -93,6 +99,9 @@ function toProfileInput(
     volatility30d: row.volatility_30d,
     liquidityScore: row.liquidity_score,
     conditionPrices,
+    rarity: row.rarity ?? null,
+    year: row.year ?? null,
+    isDigital: row.is_digital ?? null,
   };
 }
 
@@ -160,6 +169,15 @@ async function upsertProfile(
         input_tokens: result.inputTokens,
         output_tokens: result.outputTokens,
         metrics_hash: result.metricsHash,
+        // failure_reason persists the reason a row landed on
+        // source=fallback (parse-miss / llm-threw:<error>). The cron
+        // already aggregates these in its HTTP response, but persisting
+        // them lets the admin coverage view answer "of cards currently
+        // on fallback, why did they get there?" days/weeks later.
+        // Explicitly write null on source=llm so an upsert from
+        // fallback → llm clears the reason column rather than leaking
+        // a stale value.
+        failure_reason: result.failureReason ?? null,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "canonical_slug" },

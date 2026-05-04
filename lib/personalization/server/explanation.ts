@@ -49,6 +49,8 @@ type CanonicalCardRow = {
   canonical_name: string;
   set_name: string | null;
   card_number: string | null;
+  year: number | null;
+  is_digital: boolean | null;
 };
 
 function metricsHashFor(
@@ -136,7 +138,7 @@ async function ensureMarketSignal(
     const [canonicalRes, metricsRes, conditionsRes] = await Promise.all([
       admin
         .from("canonical_cards")
-        .select("canonical_name, set_name, card_number")
+        .select("canonical_name, set_name, card_number, year, is_digital")
         .eq("slug", canonicalSlug)
         .maybeSingle<CanonicalCardRow>(),
       admin
@@ -182,6 +184,15 @@ async function ensureMarketSignal(
       volatility30d: metrics.volatility_30d,
       liquidityScore: metrics.liquidity_score,
       conditionPrices: conditionPrices.length > 0 ? conditionPrices : null,
+      // year + is_digital are read on this fast-path. rarity lives on
+      // card_printings (one card → many printings) and adding a 4th
+      // round-trip just to flavor the deterministic fallback isn't
+      // worth it on a path that mostly only fires for the very first
+      // viewer of a brand-new card. The cron RPC supplies rarity on
+      // refresh, so the next pass will upgrade the copy.
+      rarity: null,
+      year: canonical.year,
+      isDigital: canonical.is_digital,
     };
 
     let result;
