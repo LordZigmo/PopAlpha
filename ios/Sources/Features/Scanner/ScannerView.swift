@@ -123,6 +123,17 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
     private var isSessionConfigured = false
     private var hasInstalledConverter = false
     private let cameraPosition: AVCaptureDevice.Position = .back
+    /// Most recent pixel buffer the video output produced. Held so a
+    /// manual capture (the "shutter" button on the scanner overlay) can
+    /// snapshot the current frame on demand. Replaced every frame via
+    /// `captureOutput` — only one buffer is retained at a time so we
+    /// don't starve `AVCaptureVideoDataOutput`'s buffer pool. Reads
+    /// from `captureCurrentFrame` happen on whatever queue the user
+    /// taps the button on, so a lock guards the assignment.
+    private var latestPixelBuffer: CVPixelBuffer?
+    private var latestPixelBufferOrientation: CGImagePropertyOrientation = .right
+    private let latestFrameLock = NSLock()
+    private let frameRenderContext = CIContext(options: nil)
 
     init(viewModel: ScannerViewModel, engine: PopAlphaVisionEngine) {
         self.viewModel = viewModel
@@ -190,8 +201,16 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
             return layer.layerRectConverted(fromMetadataOutputRect: landscapeRect)
         }
         // Assign on the main actor since ScannerViewModel is @MainActor.
+        // Same install pattern is used for the frame capturer so the
+        // app layer's manual-capture button can snapshot the current
+        // video frame for cards Vision can't auto-detect (full-art /
+        // VMax / ex cards whose art bleeds to the card border).
+        let capturer: @Sendable () -> UIImage? = { [weak self] in
+            self?.captureCurrentFrame()
+        }
         Task { @MainActor [weak viewModel] in
             viewModel?.normalizedRectConverter = converter
+            viewModel?.frameCapturer = capturer
         }
     }
 
@@ -375,7 +394,40 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
         from connection: AVCaptureConnection
     ) {
         let orientation = cgImageOrientation(for: connection.videoRotationAngle)
+        // Stash the latest frame so the manual-capture path can snapshot
+        // it on demand. Replaces (rather than appends) so the buffer pool
+        // can reclaim the prior frame — holding multiple frames would
+        // eventually starve the pool. Lock keeps the read in
+        // captureCurrentFrame from racing the write here.
+        if let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
+            latestFrameLock.lock()
+            latestPixelBuffer = pixelBuffer
+            latestPixelBufferOrientation = orientation
+            latestFrameLock.unlock()
+        }
         engine.process(sampleBuffer: sampleBuffer, orientation: orientation)
+    }
+
+    /// Snapshot the most recent video frame as a `UIImage`. Used by the
+    /// scanner's manual capture button. Returns nil if the camera hasn't
+    /// produced a frame yet (e.g., session is still warming up).
+    ///
+    /// Renders via Core Image so we honor the orientation Vision was
+    /// using at capture time — without that, full-bleed full-art cards
+    /// would come back rotated 90° and the embedder would produce a
+    /// wildly different vector than it would for the same card via the
+    /// auto-capture rectangle path.
+    func captureCurrentFrame() -> UIImage? {
+        latestFrameLock.lock()
+        let pixelBuffer = latestPixelBuffer
+        let orientation = latestPixelBufferOrientation
+        latestFrameLock.unlock()
+        guard let pixelBuffer else { return nil }
+        let ci = CIImage(cvPixelBuffer: pixelBuffer).oriented(orientation)
+        guard let cg = frameRenderContext.createCGImage(ci, from: ci.extent) else {
+            return nil
+        }
+        return UIImage(cgImage: cg)
     }
 
     private func interfaceRotationAngle() -> CGFloat {

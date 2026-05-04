@@ -34,6 +34,17 @@ public final class ScannerViewModel: ObservableObject, PopAlphaVisionEngineDeleg
     /// handling rotation + aspectFill crop. Nil on simulator (no camera).
     public var normalizedRectConverter: ((CGRect) -> CGRect?)?
 
+    /// Installed by `ScannerCameraViewController` to expose a snapshot of
+    /// the most recent video frame as a `UIImage`. Used by the scanner's
+    /// manual "capture this frame" button — the rectangle detector can't
+    /// always find an edge on full-art / VMax / ex cards (their art bleeds
+    /// to the card border, leaving Vision no contrast gradient), so the
+    /// auto-capture path silently fails for those. The button feeds the
+    /// captured frame through the same identify pipeline the photos-picker
+    /// uses, bypassing rectangle detection entirely.
+    /// Nil on simulator (no camera).
+    public var frameCapturer: (@Sendable () -> UIImage?)?
+
     /// Hook the app layer installs to replace the on-device CoreML
     /// classifier with a network identifier (e.g. /api/scan/identify).
     /// When non-nil, the stability-gated captured UIImage is handed to
