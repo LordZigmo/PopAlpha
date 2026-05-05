@@ -13,6 +13,7 @@ type HomepageSignalBoardProps = {
   topMoversByWindow: HomepageWindowedCards;
   biggestDropsByWindow: HomepageWindowedCards;
   momentumByWindow: HomepageWindowedCards;
+  midMovers: HomepageCard[];
   budgetMovers: HomepageCard[];
 };
 
@@ -33,6 +34,7 @@ export default function HomepageSignalBoard({
   topMoversByWindow,
   biggestDropsByWindow,
   momentumByWindow,
+  midMovers,
   budgetMovers,
 }: HomepageSignalBoardProps) {
   const [selectedWindow, setSelectedWindow] = useState<SignalWindow>("24H");
@@ -79,8 +81,17 @@ export default function HomepageSignalBoard({
       />
 
       <SignalRailSection
+        id="mid-movers"
+        eyebrow="$8 – $50"
+        eyebrowClassName="text-[#10B981]"
+        title="Mid-tier movers"
+        cards={midMovers}
+        emptyMessage="No mid-tier movers yet"
+      />
+
+      <SignalRailSection
         id="budget-movers"
-        eyebrow="Under $20"
+        eyebrow="Under $8"
         eyebrowClassName="text-[#F59E0B]"
         title="Budget movers"
         cards={budgetMovers}

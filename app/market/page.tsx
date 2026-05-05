@@ -61,6 +61,7 @@ const EMPTY_DATA: {
     momentum: { "24H": HomepageCard[]; "7D": HomepageCard[] };
     unusual_volume: HomepageCard[];
     breakouts: HomepageCard[];
+    mid_movers: HomepageCard[];
     budget_movers: HomepageCard[];
   };
   as_of: string | null;
@@ -78,6 +79,7 @@ const EMPTY_DATA: {
     momentum: { "24H": [], "7D": [] },
     unusual_volume: [],
     breakouts: [],
+    mid_movers: [],
     budget_movers: [],
   },
   as_of: null,
@@ -969,6 +971,7 @@ export default async function Home() {
         topMoversByWindow={topMoverCardsByWindow}
         biggestDropsByWindow={biggestDropsByWindow}
         momentumByWindow={momentumCardsByWindow}
+        midMovers={signalBoard.mid_movers}
         budgetMovers={signalBoard.budget_movers}
       />
 
