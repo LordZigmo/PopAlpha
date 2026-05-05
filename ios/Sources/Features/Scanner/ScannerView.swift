@@ -1,5 +1,6 @@
 import AVFoundation
 import ImageIO
+import OSLog
 import SwiftUI
 import UIKit
 
@@ -448,35 +449,39 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
     }
 
     /// Snapshot the most recent video frame as a `UIImage`, cropped to
-    /// a centered card-shaped region. Used by the scanner's manual
-    /// capture button. Returns nil if the camera hasn't produced a
-    /// frame yet (e.g., session is still warming up).
+    /// just the card region. Used by the scanner's manual capture
+    /// button. Returns nil if the camera hasn't produced a frame yet
+    /// (e.g., session is still warming up).
     ///
-    /// Why the center crop matters: the auto-capture path uses Vision's
-    /// rectangle detection to pull just the card region out of each
-    /// frame. The shutter button bypasses Vision entirely, which means
-    /// without a deliberate crop the embedder would see ~40% card +
-    /// ~60% table / hand / background. SigLIP isn't a card classifier;
-    /// background pixels pull the embedding off the card-content
-    /// manifold. Real-device 2026-05-03: a Cinderace V scan via the
-    /// shutter returned Umbreon V at top-1 (with 4 Cinderace variants
-    /// at rank 2-5) because the messy background tilted the embedding
-    /// toward "generic V card layout" rather than "Cinderace
-    /// specifically." Real-device 2026-05-04 confirmed regression on
-    /// revert (commit 2f73d95) — same Cinderace V → Umbreon V case
-    /// reproduced — so the crop is back.
+    /// Two-tier crop strategy:
     ///
-    /// OCR still gets the wider frame via `captureFullFrame` so the
-    /// bottom-edge collector number stays readable; the embedder's
-    /// background-noise problem and OCR's bottom-edge problem are now
-    /// solved with two separate captures from the same pixel buffer.
+    ///   1. **Vision-detect-on-tap (preferred).** Run a one-shot
+    ///      VNDetectRectanglesRequest on the captured frame. If a
+    ///      rectangle scores above the confidence threshold, crop to
+    ///      it (with 4% padding) — same logic the continuous
+    ///      auto-detect path uses to feed the embedder a tight crop.
+    ///      Cost: ~10-20ms per tap. Wins: card_number row preserved
+    ///      (the dumb 0.85 center-crop trims it on full-frame cards),
+    ///      better embedder input (just card content, no background
+    ///      pixels diluting the cluster), works regardless of how the
+    ///      user frames the card.
     ///
-    /// Crop math: portrait card aspect ratio (2.5/3.5 ≈ 0.714 w/h),
-    /// sized to fill 85% of whichever frame dimension is the binding
-    /// constraint, centered. Works regardless of whether the captured
-    /// frame is portrait (~1080x1920) or landscape (~1920x1080) since
-    /// the user might be on a device whose AVCaptureConnection rotates
-    /// output buffers and might not.
+    ///   2. **0.85 center-crop (fallback).** Used when Vision can't
+    ///      lock on a rectangle in this single frame — e.g., very
+    ///      poor lighting, full-bleed art card with no edge contrast,
+    ///      heavy hand occlusion. Trims 7.5% from each side of the
+    ///      camera frame, centered. Same logic as before. Acts as a
+    ///      safety net so a tap always produces *some* image rather
+    ///      than failing silently.
+    ///
+    /// Real-device 2026-05-05: Cinderace V tap-captured with the
+    /// center-crop alone returned Hydreigon ex White Flare at top-1
+    /// because (a) the bottom 7.5% containing card_number=44 was
+    /// trimmed, so OCR couldn't fire Path B intersection, and (b)
+    /// SigLIP couldn't distinguish the phone-camera Cinderace V
+    /// embedding from the dark V-card cluster. Vision-detect-on-tap
+    /// fixes (a) — OCR sees the card_number, Path B fires, Cinderace
+    /// V wins via dual-signal regardless of kNN ranking.
     func captureCurrentFrame() -> UIImage? {
         latestFrameLock.lock()
         let pixelBuffer = latestPixelBuffer
@@ -487,14 +492,32 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
         let extent = ci.extent
         guard extent.width > 0, extent.height > 0 else { return nil }
 
-        // Card aspect ratio in portrait orientation (the natural way to
-        // hold a Pokémon card). 2.5"/3.5" ≈ 0.714.
+        // Render the FULL oriented frame to a UIImage. Vision needs a
+        // CGImage to run rectangle detection, and the same UIImage
+        // also feeds the center-crop fallback below — one render for
+        // both paths.
+        guard let fullCG = frameRenderContext.createCGImage(ci, from: extent) else {
+            return nil
+        }
+        let fullImage = UIImage(cgImage: fullCG)
+
+        // Tier 1 — Vision-detect-on-tap. ~10-20ms per call. The engine
+        // reuses the same VNDetectRectanglesRequest configuration
+        // (loosened confidence + quadrature thresholds, card aspect
+        // ratio bounds) that powers continuous auto-detect, so tuning
+        // stays in one place.
+        let detectT0 = Date()
+        let detected = engine.detectAndCrop(fullImage)
+        let detectMs = Date().timeIntervalSince(detectT0) * 1000
+        Logger.scan.debug("tap_detect: hit=\(detected != nil) ms=\(String(format: "%.1f", detectMs))")
+        if let detected {
+            return detected
+        }
+
+        // Tier 2 — center-crop fallback. Only fires when Vision can't
+        // lock on a rectangle.
         let cardAspectRatio: CGFloat = 2.5 / 3.5
         let scale: CGFloat = 0.85
-        // Maximum card-shape rectangle that fits in the frame. Picking
-        // the binding-dimension lets us produce the SAME crop quality
-        // regardless of whether the buffer arrived as portrait or
-        // landscape.
         let maxCardHeightFromHeight = extent.height * scale
         let maxCardHeightFromWidth = (extent.width * scale) / cardAspectRatio
         let cardHeight = min(maxCardHeightFromHeight, maxCardHeightFromWidth)
@@ -507,7 +530,9 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
         )
         let cropped = ci.cropped(to: cropRect)
         guard let cg = frameRenderContext.createCGImage(cropped, from: cropRect) else {
-            return nil
+            // If the center-crop fails too, return the full frame
+            // rather than nil — better to scan something than nothing.
+            return fullImage
         }
         return UIImage(cgImage: cg)
     }

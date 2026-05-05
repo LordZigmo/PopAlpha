@@ -354,6 +354,58 @@ public final class PopAlphaVisionEngine {
         return UIImage(cgImage: croppedCG, scale: 1, orientation: .up)
     }
 
+    /// One-shot rectangle detection on a single frame. Used by the
+    /// tap-to-capture path to give it the same tight, edge-aligned
+    /// crop the continuous auto-detect path produces — instead of
+    /// the dumb 0.85 center-crop that blindly trims 7.5% off each
+    /// edge (and loses the bottom collector-number row when the
+    /// card fills the viewfinder).
+    ///
+    /// Synchronous: blocks the calling thread for ~10-20ms while
+    /// VNImageRequestHandler runs a single rectangle pass. Caller
+    /// is expected to invoke from a non-main queue or accept the
+    /// brief block — tap-to-capture already runs in an async Task,
+    /// so this is fine.
+    ///
+    /// Returns nil when no rectangle is found at the configured
+    /// confidence (caller should fall back to a center-crop or the
+    /// full frame). Reuses the same configured request the
+    /// continuous detection path uses, so tuning stays in one place.
+    public func detectAndCrop(_ image: UIImage) -> UIImage? {
+        guard let cg = image.cgImage else { return nil }
+
+        // Fresh request per call. Sharing rectangleRequest across the
+        // continuous and one-shot paths would race on internal state
+        // (e.g. regionOfInterest mutated by expireCandidateIfNeeded);
+        // creating a new request is microseconds, well below the
+        // 10-20ms detection cost.
+        let request = makeRectangleRequest()
+
+        let handler = VNImageRequestHandler(cgImage: cg, orientation: .up, options: [:])
+        do {
+            try handler.perform([request])
+        } catch {
+            return nil
+        }
+
+        guard let observations = request.results as? [VNRectangleObservation],
+              !observations.isEmpty else {
+            return nil
+        }
+
+        // Pick the largest observation — same heuristic the continuous
+        // path uses (the card is typically the dominant rectangle in
+        // the frame; small false positives would have been filtered
+        // by `minimumSize` already).
+        let best = observations.max {
+            ($0.boundingBox.width * $0.boundingBox.height) <
+            ($1.boundingBox.width * $1.boundingBox.height)
+        }
+        guard let box = best?.boundingBox else { return nil }
+
+        return croppedToCard(image, normalizedBox: box)
+    }
+
     private func expireCandidateIfNeeded(at timestamp: TimeInterval) {
         guard let candidate else {
             return
