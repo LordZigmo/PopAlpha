@@ -227,6 +227,41 @@ public final class OfflineCatalogManager: @unchecked Sendable {
             return try await inflight.value
         }
 
+        // Stale-while-revalidate fast path: when forceRefresh is off
+        // (the default), prefer any local copy we already have over
+        // the network round-trip. The bundled .papb in
+        // Resources/Catalog/ is the always-available fallback for
+        // first launch; the cache supersedes it once we've ever
+        // downloaded a newer version.
+        //
+        // Real-device 2026-05-05 measured runEnsureReady's HEAD-then-
+        // download path at 6562ms on cold launch. With the bundle
+        // committed, this fast path returns in ~50ms (mmap'd file
+        // load) and the network revalidation runs in the background
+        // — visible to the next launch, not this one.
+        //
+        // forceRefresh: true bypasses the fast path (QA / debug menu
+        // "redownload now"). allowBundledFallback: false reserves the
+        // option to require a freshly-downloaded copy if a future
+        // caller has integrity concerns.
+        if !forceRefresh, allowBundledFallback,
+           let local = try? loadFromLocalIfPresent(allowBundledFallback: true) {
+            self.state = .ready
+            // Fire-and-forget background revalidation. If the server
+            // has a newer .papb (we re-baked the catalog), this
+            // downloads it into the cache. The newly-downloaded copy
+            // becomes visible on the NEXT cold launch — the current
+            // process keeps using `local` since the kNN/identifier
+            // already captured it.
+            Task.detached(priority: .background) { [weak self] in
+                _ = try? await self?.runEnsureReady(
+                    forceRefresh: false,
+                    allowBundledFallback: false,
+                )
+            }
+            return local
+        }
+
         let task = Task<OfflineCatalog, Error> {
             do {
                 let cat = try await self.runEnsureReady(

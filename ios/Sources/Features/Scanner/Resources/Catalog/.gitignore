@@ -1,15 +1,26 @@
-# PopAlpha catalog bundle (.papb) is a 35MB build artifact regenerated
-# by `cog/siglip-features/build_catalog_bundle.py` from the SigLIP-2
-# catalog in Supabase. Production-tier distribution will move this out
-# of the iOS bundle entirely (download on premium activation from
-# Supabase Storage / On-Demand Resources) — this checkin is for dev
-# validation only.
+# PopAlpha catalog bundle (.papb) — 37MB binary built from the SigLIP-2
+# catalog in Supabase by `cog/siglip-features/build_catalog_bundle.py`.
 #
-# Regenerate locally with:
+# 2026-05-05: previously gitignored (intent: download on premium
+# activation from Supabase Storage). Real-device measurements showed
+# the cold-launch HEAD+download path at ~6.5s, blocking the offline
+# scanner during the user's first scan. The catalog manager now uses
+# stale-while-revalidate: load the bundled .papb immediately, kick off
+# a background ETag check, atomic-swap a newer copy into the cache if
+# one exists. To make that work in CI / TestFlight builds, the .papb
+# itself has to be committed — the previous "regenerate locally" path
+# only worked on dev machines.
+#
+# So the .papb is intentionally tracked now. Regenerate with:
 #
 #   cd cog/siglip-features
 #   source venv/bin/activate
-#   python build_catalog_bundle.py
+#   python build_catalog_bundle.py --output siglip2_catalog_v1.papb --quantize-fp16
+#   python upload_catalog_bundle.py --input siglip2_catalog_v1.papb
 #   cp siglip2_catalog_v1.papb \
 #     ../../ios/Sources/Features/Scanner/Resources/Catalog/
-*.papb
+#
+# The upload step keeps Supabase Storage in sync with the committed
+# binary so background revalidation picks up the same bake. Both have
+# to move together — if you only re-bake locally, CI builds drift from
+# what users get over the air.
