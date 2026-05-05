@@ -838,12 +838,24 @@ final class ScannerHost: ObservableObject {
               let image = capturer() else {
             return
         }
-        // The full-frame capturer is best-effort. If it's not installed
-        // (simulator, or some future code path that forgets to wire it
-        // up) fall back to nil and runIdentify will OCR the cropped
-        // image — same as before this fix, no regression.
-        let ocrImage = viewModel?.fullFrameCapturer?()
-        await runIdentify(image: image, ocrImage: ocrImage, triggerSource: "tap")
+        // Path A (2026-05-05): OCR runs on the same image the embedder
+        // sees (the 0.85 center-crop) — NOT the full uncropped frame
+        // we previously routed via captureFullFrame.
+        //
+        // Baseline data 2026-05-05 showed OCR finding card_numbers in
+        // 100% (6/6) of Vision-cropped auto-detect captures vs 33%
+        // (1/3) of full uncropped tap captures. Vision text
+        // recognition is dramatically better when the input is tight
+        // to the card — background pixels and sub-card aspect ratio
+        // confuse it more than they help. The earlier theory (full
+        // frame preserves the bottom edge of cards held filling the
+        // viewfinder) wasn't supported by the actual hit rate.
+        //
+        // captureFullFrame stays installed on the view model but is
+        // unused for now. Easy to re-route here if Path A regresses
+        // and we discover the bottom-edge concern was real for some
+        // framing pattern we didn't sample.
+        await runIdentify(image: image, triggerSource: "tap")
     }
 
     func resumeScanning() {
