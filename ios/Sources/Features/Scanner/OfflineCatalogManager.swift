@@ -184,9 +184,26 @@ public final class OfflineCatalogManager: @unchecked Sendable {
     }
 
     public func bundledFileURL() -> URL? {
+        // Search the WHOLE Bundle.module — if SwiftPM's .process rule
+        // flattened the Resources/Catalog/ subdirectory, the file lives
+        // at the bundle root. If it preserved the directory structure,
+        // we need the explicit subdirectory hint. Try both.
+        if let url = Bundle.module.url(
+            forResource: Self.bundledResourceName,
+            withExtension: Self.bundledResourceExt,
+        ) {
+            return url
+        }
+        // Fallback: explicit subdirectory. SwiftPM packages sometimes
+        // preserve the source directory layout in the resource bundle
+        // for `.process` rules with no special handling — depends on
+        // file extension recognition. .papb is unknown to SwiftPM so
+        // it gets treated as opaque data; layout preservation is
+        // implementation-defined.
         return Bundle.module.url(
             forResource: Self.bundledResourceName,
             withExtension: Self.bundledResourceExt,
+            subdirectory: "Catalog",
         )
     }
 
@@ -244,8 +261,23 @@ public final class OfflineCatalogManager: @unchecked Sendable {
         // "redownload now"). allowBundledFallback: false reserves the
         // option to require a freshly-downloaded copy if a future
         // caller has integrity concerns.
+        // Diagnostic logging: tell us EXACTLY what the fast path saw.
+        // Real-device 2026-05-05: setup= measured 11764ms (network
+        // download path) when bundled .papb commit was supposed to
+        // make it ~50ms. Need to know which check failed — cache
+        // exists? bundle URL found? load succeeded? Logs print at
+        // the print() level (not Logger.debug) so they survive in
+        // both Release and Debug to make this easy to trace if it
+        // recurs in TestFlight.
+        let fm = FileManager.default
+        let cacheURL = try? cacheFileURL()
+        let cacheExists = cacheURL.map { fm.fileExists(atPath: $0.path) } ?? false
+        let bundleURL = bundledFileURL()
+        print("[catalog] fast-path probe: cacheURL=\(cacheURL?.lastPathComponent ?? "nil") cacheExists=\(cacheExists) bundleURL=\(bundleURL?.lastPathComponent ?? "nil")")
+
         if !forceRefresh, allowBundledFallback,
            let local = try? loadFromLocalIfPresent(allowBundledFallback: true) {
+            print("[catalog] fast-path HIT: returning local catalog (rows=\(local.numRows))")
             self.state = .ready
             // Fire-and-forget background revalidation. If the server
             // has a newer .papb (we re-baked the catalog), this
@@ -261,6 +293,8 @@ public final class OfflineCatalogManager: @unchecked Sendable {
             }
             return local
         }
+
+        print("[catalog] fast-path MISS — falling back to network: forceRefresh=\(forceRefresh) allowBundled=\(allowBundledFallback) cacheExists=\(cacheExists) bundleFound=\(bundleURL != nil)")
 
         let task = Task<OfflineCatalog, Error> {
             do {
