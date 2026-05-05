@@ -150,7 +150,7 @@ export async function embedAndStoreUserCorrection(args: {
        source,
        updated_at
      ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::vector, $11, 'full', 'user_correction', now())
-     on conflict (canonical_slug, variant_index, crop_type) do nothing`,
+     on conflict (canonical_slug, variant_index, crop_type, model_version) do nothing`,
     [
       args.canonicalSlug,
       args.canonical.canonicalName,

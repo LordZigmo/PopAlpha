@@ -417,7 +417,7 @@ export async function GET(req: Request) {
             ) values (
               $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::vector, 0, $11, 'art', now()
             )
-            on conflict (canonical_slug, variant_index, crop_type) do update set
+            on conflict (canonical_slug, variant_index, crop_type, model_version) do update set
               canonical_name = excluded.canonical_name,
               language = excluded.language,
               set_name = excluded.set_name,
@@ -425,7 +425,6 @@ export async function GET(req: Request) {
               variant = excluded.variant,
               source_image_url = excluded.source_image_url,
               source_hash = excluded.source_hash,
-              model_version = excluded.model_version,
               embedding = excluded.embedding,
               is_digital_only = excluded.is_digital_only,
               updated_at = excluded.updated_at
