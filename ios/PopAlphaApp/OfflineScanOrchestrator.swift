@@ -97,6 +97,23 @@ final class OfflineScanOrchestrator: ObservableObject {
     /// In-flight setup task. Coalesces concurrent setup calls.
     private var setupTask: Task<Void, Error>?
 
+    /// App-wide singleton instance. Used so the prewarm trigger in
+    /// PopAlphaApp's .task can warm the orchestrator at launch — and
+    /// the same warmed instance is what ScannerHost.makeOrchestrator
+    /// returns when the user eventually navigates to the Scanner tab.
+    ///
+    /// Real-device 2026-05-05 caught the previous architecture: the
+    /// orchestrator was @StateObject-owned by ScannerTabView, so on
+    /// iOS 17+ where TabView lazy-initializes tab bodies the prewarm
+    /// only fired on Scanner-tab-open. The user pasted "I sat on the
+    /// home screen for a bit, and then when I opened the scan tab it
+    /// started preloading everything" — exactly that lazy behavior.
+    /// Lifting to a shared instance + App.task firing the warmup
+    /// means the 9s setup runs WHILE the user is still on Market /
+    /// Activity / Portfolio, so by the time they tap Scanner the
+    /// orchestrator is hot.
+    static let shared = OfflineScanOrchestrator()
+
     init(
         manager: OfflineCatalogManager = .shared,
         anchorStore: OfflineCatalogAnchorStore = OfflineCatalogAnchorStore(),

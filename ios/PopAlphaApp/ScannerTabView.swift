@@ -662,37 +662,35 @@ final class ScannerHost: ObservableObject {
         }
     }
 
-    /// Background prewarm of the offline pipeline. Called from
-    /// ScannerHost.init() so the user's first scan doesn't pay
-    /// cold-start cost. No-op if premium isn't enabled.
+    /// Background prewarm of the offline pipeline. The heavy work
+    /// (orchestrator + OCR) is done at App.body.task — see
+    /// OfflineScannerWarmup.startIfNeeded(). This entry point is
+    /// retained as a fallback (in case App-level wasn't called yet)
+    /// AND to fire the Vision rectangle prewarm, which needs the
+    /// engine from the view model and therefore can only run after
+    /// the scanner tab activates.
     ///
-    /// `nonisolated` so the three child tasks below ACTUALLY run in
-    /// parallel. ScannerHost is @MainActor; without nonisolated, the
-    /// async-let tasks would inherit main-actor isolation and queue
-    /// serially on the main thread. Real-device 2026-05-05 measured
-    /// all three warmup totals at ~7175ms (identical), confirming
-    /// they were running in series, not parallel.
+    /// `nonisolated` so the child tasks ACTUALLY run in parallel.
+    /// ScannerHost is @MainActor; without nonisolated, the async-let
+    /// tasks would inherit main-actor isolation and queue serially.
     nonisolated private func prewarmIfPossible() async {
         let enabled = await MainActor.run { PremiumGate.shared.offlineScannerEnabled }
         guard enabled else { return }
-        let orchestrator = await MainActor.run { self.makeOrchestrator() }
         // Read the engine off main once so the rest runs nonisolated.
         let engine: PopAlphaVisionEngine? = await MainActor.run { self.viewModel?.visionEngine }
-        // Three parallel warm tasks:
-        //   - Orchestrator: catalog + CoreML SigLIP model + kNN scratch
-        //   - OCR: Vision's VNRecognizeTextRequest internal state
-        //   - Vision rectangle: VNDetectRectanglesRequest (the
-        //     detector that runs on every tap-to-capture). Real-device
+        // Two parallel warm tasks:
+        //   - App-level warmup (orchestrator + OCR). Idempotent — if
+        //     PopAlphaApp.body.task already fired this, second call
+        //     is a no-op via the dispatchOnce-style guard inside
+        //     OfflineScannerWarmup. Belt-and-braces.
+        //   - Vision rectangle: VNDetectRectanglesRequest. Real-device
         //     2026-05-05 saw the FIRST tap_detect call take 672ms vs
         //     ~10-20ms steady state. Pre-warming absorbs that cost.
-        //
-        // All three run concurrently because all three helpers are
-        // nonisolated/static — none of them need to touch the
-        // main-actor-isolated ScannerHost properties.
-        async let warmOrch: Void = orchestrator.prewarm()
-        async let warmOCR: Void = Self.prewarmOCR()
+        //     This stays in ScannerHost because the engine isn't
+        //     available until the scanner tab activates.
+        async let warmApp: Void = OfflineScannerWarmup.startIfNeeded()
         async let warmVision: Void = Self.prewarmVisionRectangle(engine: engine)
-        _ = await (warmOrch, warmOCR, warmVision)
+        _ = await (warmApp, warmVision)
     }
 
     /// One-time OCR warmup. Vision's VNRecognizeTextRequest does
@@ -779,23 +777,29 @@ final class ScannerHost: ObservableObject {
         }
     }
 
-    /// Returns the offline orchestrator, initializing it on first
-    /// access. Idempotent.
+    /// Returns the offline orchestrator. Always the app-wide shared
+    /// instance — see OfflineScanOrchestrator.shared docstring for
+    /// why we don't per-scanner-tab instantiate. Idempotent: same
+    /// instance every call, prewarm work done once at App-task time.
+    /// Local `offlineOrchestrator` cache is retained so callers that
+    /// previously checked `offlineOrchestrator != nil` (e.g.,
+    /// syncOfflineAnchorsInBackground) keep behaving correctly.
     private func makeOrchestrator() -> OfflineScanOrchestrator {
-        if let existing = offlineOrchestrator { return existing }
-        let o = OfflineScanOrchestrator()
-        offlineOrchestrator = o
-        return o
+        let shared = OfflineScanOrchestrator.shared
+        if offlineOrchestrator !== shared {
+            offlineOrchestrator = shared
+        }
+        return shared
     }
 
     /// Triggers a non-blocking anchor sync against /api/catalog/anchors-since.
     /// Called from the picker after a correction lands so the just-
     /// submitted user_correction anchor reaches the offline catalog
-    /// before the user's next scan. No-op if the orchestrator hasn't
-    /// been instantiated yet (free tier; the offline path was never
-    /// activated for this session).
+    /// before the user's next scan. Always uses the shared
+    /// orchestrator now (see makeOrchestrator above) so this fires
+    /// even before the user has opened the Scanner tab.
     func syncOfflineAnchorsInBackground() {
-        offlineOrchestrator?.syncAnchorsInBackground()
+        OfflineScanOrchestrator.shared.syncAnchorsInBackground()
     }
 
     /// `image` is the input the embedder will see — typically the
@@ -1071,7 +1075,7 @@ private extension ScanMatch {
             setName: setName ?? "Unknown",
             cardNumber: cardNumber ?? "",
             price: 0,
-            changePct: 0,
+            changePct: nil,
             changeWindow: "24H",
             rarity: .common,
             sparkline: [0],

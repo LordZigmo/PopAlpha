@@ -48,6 +48,27 @@ struct PopAlphaApp: App {
                     await PremiumStore.shared.start()
                     await PremiumStore.shared.loadProducts()
                 }
+                .task(priority: .utility) {
+                    // Warm the offline scanner pipeline eagerly so the
+                    // 9s catalog+model load happens WHILE the user is
+                    // browsing Market/Activity, not when they finally
+                    // tap Scanner. ScannerHost was previously
+                    // @StateObject inside ScannerTabView, which on
+                    // iOS 17+ lazy-instantiates tab bodies — the
+                    // prewarm Task in ScannerHost.init() never fired
+                    // until the user navigated to the Scanner tab,
+                    // defeating the whole purpose. Calling shared
+                    // orchestrator + OCR prewarm at App-task time
+                    // gates only on premium (free-tier launches don't
+                    // pay the model-load cost).
+                    //
+                    // .utility priority so this competes minimally
+                    // with the active tab's UI work. ScannerHost
+                    // still triggers a redundant .startIfNeeded()
+                    // when it inits — idempotent guard makes that a
+                    // no-op the second time around.
+                    await OfflineScannerWarmup.startIfNeeded()
+                }
                 .onChange(of: scenePhase) { _, newPhase in
                     switch newPhase {
                     case .active:

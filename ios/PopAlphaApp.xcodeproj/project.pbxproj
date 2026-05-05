@@ -78,6 +78,9 @@
 		DD00000100000000000000F6 /* PersonalPulseSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000A6 /* PersonalPulseSection.swift */; };
 		DD00000100000000000000F7 /* ForYouRail.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000A7 /* ForYouRail.swift */; };
 		DD00000100000000000000F8 /* MarketPulseSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000A8 /* MarketPulseSection.swift */; };
+		DD00000100000000000000F0 /* AIBriefCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000B0 /* AIBriefCard.swift */; };
+		DD00000100000000000000F9 /* MarketHeroCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000B1 /* MarketHeroCard.swift */; };
+		DD00000100000000000000FA /* SignInPromoCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000B2 /* SignInPromoCard.swift */; };
 		DD00000100000000000000FB /* PushService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000AB /* PushService.swift */; };
 		DD00000100000000000000FC /* PushNotificationAppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000AC /* PushNotificationAppDelegate.swift */; };
 		DD00000100000000000000FD /* ScanService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000AD /* ScanService.swift */; };
@@ -91,6 +94,7 @@
 		DD000001000000000000F203 /* PremiumStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F202 /* PremiumStore.swift */; };
 		DD000001000000000000F205 /* PremiumGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F204 /* PremiumGate.swift */; };
 		DD000001000000000000F207 /* OfflineScanOrchestrator.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F206 /* OfflineScanOrchestrator.swift */; };
+		DD000001000000000000F801 /* OfflineScannerWarmup.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F800 /* OfflineScannerWarmup.swift */; };
 		DD000001000000000000F401 /* ScanDebugCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F400 /* ScanDebugCapture.swift */; };
 		EE00000100000000000000F1 /* PopAlphaCore in Frameworks */ = {isa = PBXBuildFile; productRef = EE00000100000000000000A2 /* PopAlphaCore */; };
 		EE00000100000000000000F2 /* SetDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE00000100000000000000A3 /* SetDetailView.swift */; };
@@ -166,6 +170,9 @@
 		DD00000100000000000000A6 /* PersonalPulseSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalPulseSection.swift; sourceTree = "<group>"; };
 		DD00000100000000000000A7 /* ForYouRail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForYouRail.swift; sourceTree = "<group>"; };
 		DD00000100000000000000A8 /* MarketPulseSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketPulseSection.swift; sourceTree = "<group>"; };
+		DD00000100000000000000B0 /* AIBriefCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIBriefCard.swift; sourceTree = "<group>"; };
+		DD00000100000000000000B1 /* MarketHeroCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketHeroCard.swift; sourceTree = "<group>"; };
+		DD00000100000000000000B2 /* SignInPromoCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInPromoCard.swift; sourceTree = "<group>"; };
 		DD00000100000000000000AA /* PopAlphaApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PopAlphaApp.entitlements; sourceTree = "<group>"; };
 		DD00000100000000000000AB /* PushService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushService.swift; sourceTree = "<group>"; };
 		DD00000100000000000000AC /* PushNotificationAppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushNotificationAppDelegate.swift; sourceTree = "<group>"; };
@@ -180,6 +187,7 @@
 		DD000001000000000000F202 /* PremiumStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumStore.swift; sourceTree = "<group>"; };
 		DD000001000000000000F204 /* PremiumGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumGate.swift; sourceTree = "<group>"; };
 		DD000001000000000000F206 /* OfflineScanOrchestrator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineScanOrchestrator.swift; sourceTree = "<group>"; };
+		DD000001000000000000F800 /* OfflineScannerWarmup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineScannerWarmup.swift; sourceTree = "<group>"; };
 		DD000001000000000000F300 /* Products.storekit */ = {isa = PBXFileReference; lastKnownFileType = file.storekit; path = Products.storekit; sourceTree = "<group>"; };
 		DD000001000000000000F400 /* ScanDebugCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanDebugCapture.swift; sourceTree = "<group>"; };
 		EE00000100000000000000A3 /* SetDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetDetailView.swift; sourceTree = "<group>"; };
@@ -263,6 +271,9 @@
 				DD00000100000000000000A6 /* PersonalPulseSection.swift */,
 				DD00000100000000000000A7 /* ForYouRail.swift */,
 				DD00000100000000000000A8 /* MarketPulseSection.swift */,
+				DD00000100000000000000B0 /* AIBriefCard.swift */,
+				DD00000100000000000000B1 /* MarketHeroCard.swift */,
+				DD00000100000000000000B2 /* SignInPromoCard.swift */,
 				DD00000100000000000000AA /* PopAlphaApp.entitlements */,
 				DD00000100000000000000AB /* PushService.swift */,
 				DD00000100000000000000AC /* PushNotificationAppDelegate.swift */,
@@ -277,6 +288,7 @@
 				DD000001000000000000F202 /* PremiumStore.swift */,
 				DD000001000000000000F204 /* PremiumGate.swift */,
 				DD000001000000000000F206 /* OfflineScanOrchestrator.swift */,
+				DD000001000000000000F800 /* OfflineScannerWarmup.swift */,
 				DD000001000000000000F300 /* Products.storekit */,
 				DD000001000000000000F400 /* ScanDebugCapture.swift */,
 				EE00000100000000000000A3 /* SetDetailView.swift */,
@@ -452,6 +464,9 @@
 				DD00000100000000000000F6 /* PersonalPulseSection.swift in Sources */,
 				DD00000100000000000000F7 /* ForYouRail.swift in Sources */,
 				DD00000100000000000000F8 /* MarketPulseSection.swift in Sources */,
+				DD00000100000000000000F0 /* AIBriefCard.swift in Sources */,
+				DD00000100000000000000F9 /* MarketHeroCard.swift in Sources */,
+				DD00000100000000000000FA /* SignInPromoCard.swift in Sources */,
 				DD00000100000000000000FB /* PushService.swift in Sources */,
 				9D07CFD22F982DCD004BF9A7 /* AnalyticsService.swift in Sources */,
 				DD00000100000000000000FC /* PushNotificationAppDelegate.swift in Sources */,
@@ -466,6 +481,7 @@
 				DD000001000000000000F203 /* PremiumStore.swift in Sources */,
 				DD000001000000000000F205 /* PremiumGate.swift in Sources */,
 				DD000001000000000000F207 /* OfflineScanOrchestrator.swift in Sources */,
+				DD000001000000000000F801 /* OfflineScannerWarmup.swift in Sources */,
 				DD000001000000000000F401 /* ScanDebugCapture.swift in Sources */,
 				EE00000100000000000000F2 /* SetDetailView.swift in Sources */,
 				1100000100000000000000F1 /* PortfolioModels.swift in Sources */,
