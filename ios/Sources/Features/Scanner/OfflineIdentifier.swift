@@ -247,7 +247,7 @@ public final class OfflineIdentifier {
         // is the dot-product vs path-routing logic. vDSP_mmul over 23k
         // rows × 768d should be ~1-3ms on Apple Silicon — anything
         // larger means CPU fallback or thermal throttling.
-        Logger.scan.debug("knn_timing: rows=\(catalog.numRows) poolK=\(poolK) ms=\(String(format: "%.2f", knnMs))")
+        Logger.scan.debug("knn_timing: rows=\(self.catalog.numRows) poolK=\(poolK) ms=\(String(format: "%.2f", knnMs))")
         let clipOriginalTopSlug = knnHits.first?.row.canonicalSlug
 
         // -- Direct catalog lookup by language + card_number --
