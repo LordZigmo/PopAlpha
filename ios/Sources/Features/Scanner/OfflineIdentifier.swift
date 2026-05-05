@@ -240,7 +240,14 @@ public final class OfflineIdentifier {
         // candidates for an intersection to find a survivor that
         // wasn't in the top-5.
         let poolK = max(OfflineIdentifier.candidatePoolSize, request.limit)
+        let knnT0 = Date()
         let knnHits = knn.topK(query: request.queryEmbedding, k: poolK)
+        let knnMs = Date().timeIntervalSince(knnT0) * 1000
+        // Surface kNN-only timing so we know how much of identify-time
+        // is the dot-product vs path-routing logic. vDSP_mmul over 23k
+        // rows × 768d should be ~1-3ms on Apple Silicon — anything
+        // larger means CPU fallback or thermal throttling.
+        Logger.scan.debug("knn_timing: rows=\(catalog.numRows) poolK=\(poolK) ms=\(String(format: "%.2f", knnMs))")
         let clipOriginalTopSlug = knnHits.first?.row.canonicalSlug
 
         // -- Direct catalog lookup by language + card_number --

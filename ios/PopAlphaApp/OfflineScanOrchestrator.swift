@@ -49,6 +49,7 @@
 //   columns), these fallbacks become exact.
 
 import Foundation
+import QuartzCore
 import UIKit
 import CryptoKit
 import PopAlphaCore
@@ -224,6 +225,7 @@ final class OfflineScanOrchestrator: ObservableObject {
         }
 
         // 1. Embed off the main actor.
+        let tEmbedStart = CACurrentMediaTime()
         let queryEmbedding: [Float]
         do {
             queryEmbedding = try await Task.detached(priority: .userInitiated) {
@@ -233,6 +235,7 @@ final class OfflineScanOrchestrator: ObservableObject {
             let msg = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             throw OfflineScanOrchestratorError.embedderFailed(msg)
         }
+        let tEmbedEnd = CACurrentMediaTime()
 
         // 2. Multi-candidate Path A/B/C routing.
         let result = identifier.identifyWithCandidates(
@@ -242,6 +245,14 @@ final class OfflineScanOrchestrator: ObservableObject {
             ocrSetHint: setHint,
             limit: limit,
         )
+        let tIdentifyEnd = CACurrentMediaTime()
+
+        // Per-stage timings. embed= SigLIP CoreML inference (input: 384x384
+        // BGRA pixel buffer; output: 768-d float vector). identify= kNN
+        // top-K + Path A/B candidate intersection over 23k catalog rows.
+        // total= sum of both. Compare to the e2e number logged in
+        // ScannerTabView.runIdentify (which adds OCR + UI overhead).
+        Logger.scan.debug("orch_timing: embed=\(Self.fmtMs(tEmbedStart, tEmbedEnd))ms identify=\(Self.fmtMs(tEmbedEnd, tIdentifyEnd))ms total=\(Self.fmtMs(tEmbedStart, tIdentifyEnd))ms")
 
         // 3. Adapt to the network-shaped response.
         let imageHash = Self.computeImageHash(image: image)
@@ -365,5 +376,12 @@ final class OfflineScanOrchestrator: ObservableObject {
         guard let jpeg = image.jpegData(compressionQuality: 0.8) else { return nil }
         let digest = SHA256.hash(data: jpeg)
         return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Format an interval between two CACurrentMediaTime() readings as a
+    /// 1-decimal millisecond string. Used by orchestrator + identifier
+    /// timing logs to keep the format consistent for grep/awk parsing.
+    fileprivate static func fmtMs(_ start: CFTimeInterval, _ end: CFTimeInterval) -> String {
+        String(format: "%.1f", (end - start) * 1000)
     }
 }

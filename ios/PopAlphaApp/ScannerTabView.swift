@@ -597,7 +597,7 @@ final class ScannerHost: ObservableObject {
     private func installNetworkIdentifier(_ vm: ScannerViewModel) {
         vm.onStableCardCaptured = { [weak self] image in
             guard let self else { return }
-            await self.runIdentify(image: image)
+            await self.runIdentify(image: image, triggerSource: "auto")
         }
     }
 
@@ -628,7 +628,11 @@ final class ScannerHost: ObservableObject {
     /// crop trims it). When `ocrImage` is nil, OCR runs on `image` —
     /// preserves prior behavior for the photo-picker and Vision
     /// auto-detect paths, where the input is already untruncated.
-    private func runIdentify(image: UIImage, ocrImage: UIImage? = nil) async {
+    /// `triggerSource` tags the entry path for telemetry — "auto"
+    /// (Vision rectangle stable-fire), "tap" (manual tap-to-capture),
+    /// or "library" (Photos picker). Surfaces in scan_e2e log lines
+    /// so a baseline can compare auto-detect fire rate vs manual.
+    private func runIdentify(image: UIImage, ocrImage: UIImage? = nil, triggerSource: String = "unknown") async {
         // RE-ENTRY GUARD. PopAlphaVisionEngine.reset() clears the
         // current stability candidate but does NOT stop frame
         // analysis. So while we're inside an identify call, Vision
@@ -656,6 +660,16 @@ final class ScannerHost: ObservableObject {
         self.viewModel?.pauseForExternalCapture()
         self.isScanning = self.viewModel?.isScanning ?? false
 
+        // Telemetry — wall-clock t0 for the end-to-end scan_e2e log.
+        // Captures everything from "we have an image" to "we have a
+        // result ready for the UI": OCR, embedder, kNN, Path A/B,
+        // network fallback, reranker. Used as the baseline against
+        // any future detector swap (RFDETR vs the current Vision
+        // rectangle path). Per-stage breakdowns come from
+        // `orch_timing` (embed + identify) and `knn_timing` (kNN
+        // alone) inside the offline pipeline.
+        let scanT0 = Date()
+
         // Multi-candidate OCR via Vision's beam search (topCandidates(3))
         // PLUS a second pass on the bicubic-upscaled bottom strip —
         // recovers tiny collector-number text the full pass misses
@@ -673,10 +687,12 @@ final class ScannerHost: ObservableObject {
         // the regex was rejecting "161/091" but because the image
         // never contained that text in the first place.
         let imageForOCR = ocrImage ?? image
+        let ocrT0 = Date()
         let ocrMulti = await OCRService.extractCardIdentifiersMulti(from: imageForOCR)
+        let ocrMs = Date().timeIntervalSince(ocrT0) * 1000
         let ocr = (cardNumber: ocrMulti.cardNumbers.first, setHint: ocrMulti.setHint)
         self.lastOCR = ocr
-        Logger.scan.debug("ocr frameSize=\(Int(imageForOCR.size.width))x\(Int(imageForOCR.size.height)) cardNumbers=\(ocrMulti.cardNumbers) setHint=\(ocrMulti.setHint ?? "nil")")
+        Logger.scan.debug("ocr frameSize=\(Int(imageForOCR.size.width))x\(Int(imageForOCR.size.height)) cardNumbers=\(ocrMulti.cardNumbers) setHint=\(ocrMulti.setHint ?? "nil") ms=\(String(format: "%.1f", ocrMs))")
 
         // Offline-first when premium gate is open. On any offline
         // failure (catalog not downloaded, model load error, embed
@@ -737,6 +753,19 @@ final class ScannerHost: ObservableObject {
             self.isIdentifying = false
 
             Logger.scan.debug("path source=\(usedOffline ? "offline" : "network") winning_path=\(response.winningPath ?? "nil") confidence=\(reranked.confidence)")
+
+            // End-to-end timing — the user-facing latency number. This
+            // includes everything: OCR (Vision text recognition over
+            // the full + bottom-strip pass) + offline identify (embed +
+            // kNN + path routing) OR network identify (HTTPS round-trip
+            // + server kNN) + reranker + UI state propagation. Use this
+            // as the apples-to-apples baseline against any future
+            // detector / pipeline change. trigger= tells us whether the
+            // scan came from auto-detect (Vision rectangle stable-fire)
+            // or manual tap — combined over many scans, this gives the
+            // auto-detect fire rate.
+            let scanMs = Date().timeIntervalSince(scanT0) * 1000
+            Logger.scan.debug("scan_e2e: trigger=\(triggerSource) source=\(usedOffline ? "offline" : "network") confidence=\(reranked.confidence) ocr_ms=\(String(format: "%.1f", ocrMs)) total_ms=\(String(format: "%.1f", scanMs))")
             #if DEBUG
             // Save the EXACT frame the embedder saw to Photos for EVERY
             // scan, including HIGH. HIGH-but-wrong is the worst-case
@@ -791,7 +820,7 @@ final class ScannerHost: ObservableObject {
     /// `runIdentify` itself now handles the camera pause + re-entry
     /// guard, so the previous explicit pause here was redundant.
     func runIdentifyFromLibrary(image: UIImage) async {
-        await runIdentify(image: image)
+        await runIdentify(image: image, triggerSource: "library")
     }
 
     /// Manual-capture path. Snapshots the most recent video frame from
@@ -814,7 +843,7 @@ final class ScannerHost: ObservableObject {
         // up) fall back to nil and runIdentify will OCR the cropped
         // image — same as before this fix, no regression.
         let ocrImage = viewModel?.fullFrameCapturer?()
-        await runIdentify(image: image, ocrImage: ocrImage)
+        await runIdentify(image: image, ocrImage: ocrImage, triggerSource: "tap")
     }
 
     func resumeScanning() {
