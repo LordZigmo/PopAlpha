@@ -85,8 +85,8 @@
       "schedule": "10 */6 * * *"
     },
     {
-      "path": "/api/cron/refresh-card-profiles?mode=refresh&maxCards=2000",
-      "schedule": "45 10 * * *"
+      "path": "/api/cron/refresh-card-profiles?mode=refresh&maxCards=500",
+      "schedule": "45 * * * *"
     },
     {
       "path": "/api/cron/downsample-price-history",

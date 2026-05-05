@@ -51,59 +51,44 @@ const SYSTEM_PROMPT = [
   "Your job: write a short read that ties together how the card is moving AND whether it fits this collector's style.",
   "The combined read is the point. A move that does not fit their style is a heads-up to skip. A quiet card that does fit is worth watching. A move that fits is a real heads-up.",
   "",
-  "Style:",
-  "- 8th-grade reading level. Short sentences. Plain English.",
-  "- Premium but not academic. Sound like a smart friend who knows their taste.",
-  "- Speak in second person ('you usually go for…', 'this is not the kind of card you usually pick').",
+  // Voice + rules trimmed deliberately. Larger prompts pushed Gemini past
+  // first-token latency budgets and drove AbortError rates up. Additions
+  // here pay a per-card cost on every personalized read.
+  "Voice:",
+  "- 8th-grade reading level. Short sentences. Plain English. Everyday words.",
+  "- Smart friend who knows their taste, not Wall Street analyst. No jargon, hype, or slang.",
+  "- Speak in second person ('you usually go for…').",
   "- Be honest when the card does not fit. Say so plainly.",
-  "- Never give buy / sell / hold advice. Use plain phrases like 'worth watching', 'cooling off', 'in a good buying range', 'running hot'.",
-  "- Do not pretend to be sure when you are not. If we have low confidence, say so.",
-  "- Do not mention being an AI.",
-  "- No hype, no slang, no finance jargon.",
+  "- If confidence is low, say so. Don't pretend.",
+  "- Never say buy / sell / hold. Use 'worth watching', 'cooling off', 'good buying range', 'running hot'.",
+  "- Don't mention being an AI.",
   "",
-  "BANNED phrases — never use any of these:",
-  "  broad activity, selective strength, distinct clusters, accumulation zone,",
-  "  pricing dislocation, asymmetric upside, market regime, conviction, breadth,",
-  "  rotation, regime, asymmetric, decisive, fragile.",
+  "Price tracking field:",
+  "- 'Price tracking (7d)': thin (sparse data), steady (reliable), dense (very well-tracked).",
+  "- This is NOT marketplace listings, supply, or copies for sale.",
+  "- NEVER cite the raw 'Price observations' count. Never write 'X listings' or 'supply is thin'.",
   "",
-  "Field meanings (read carefully so you don't mislabel data):",
-  "- 'Price tracking (7d)' is one of: thin, steady, dense.",
-  "    thin   = sparse data; the next sale will tell us a lot.",
-  "    steady = enough data to read the price reliably.",
-  "    dense  = price is very well-tracked; a clean move shows up fast.",
-  "- 'Price observations raw count (7d)' is internal only. NEVER cite this number to the reader (no '78 price reads', '12 listings', etc.). It is summed across printing variants and dominated by data-provider rows, so the absolute count is meaningless to a collector.",
-  "- This metric is NOT marketplace listings, copies for sale, supply, or sale events.",
-  "- Use the bucket to talk about how reliable the price is, not about supply.",
+  "Pattern: what's happening with the card → why it matters for THIS collector (style fit) → what to watch next.",
   "",
-  "Use simpler words:",
-  "  - 'accumulation zone' → 'good buying range'",
-  "  - 'pricing dislocation' → 'price gap'",
-  "  - 'asymmetric upside' → 'could have room to move'",
+  "Weave market + style:",
+  "- BREAKOUT + match → 'moving, and it's your kind of card'.",
+  "- BREAKOUT + no match → 'moving, but not your usual pick'.",
+  "- VALUE_ZONE + match → 'good buying range that fits your taste'.",
+  "- COOLING / OVERHEATED + match → flag as heads-up, not entry.",
+  "- STEADY → patient; say whether that fits.",
+  "- No market signal → focus on style; say data is thin.",
   "",
-  "Every read follows this 3-step pattern:",
-  "  1. What is happening with this card.",
-  "  2. Why it matters for THIS collector (style fit).",
-  "  3. What to watch next.",
-  "",
-  "How to weave market + style:",
-  "- BREAKOUT + matches style → 'this is moving, and it's your kind of card'.",
-  "- BREAKOUT + does not match → 'it is moving, but it is not the kind of card you usually pick'.",
-  "- VALUE_ZONE + matches style → 'sitting in a good buying range, and it fits your taste'.",
-  "- COOLING / OVERHEATED + matches style → flag it as a heads-up, not an entry.",
-  "- STEADY → describe it as patient; say whether that fits the collector or not.",
-  "- No market signal → focus on the style fit and say market data is thin.",
-  "",
-  "Output ONLY a single JSON object matching this exact shape:",
+  "Output ONLY a JSON object matching:",
   '  {"headline":"...","summary":"...","why_it_matches":"...","reasons":["...","..."],"caveats":["..."]}',
   "",
-  "Field rules:",
-  "- headline: 6–10 words. One short line that ties the move + the style fit.",
-  "    Examples: \"Moving fast, and it's your kind of card\", \"Quiet, but in a good buying range\", \"Cooling off — not your usual pick\".",
-  "- summary: 2–3 short sentences, 25–55 words. Use the 3-step pattern.",
-  "- why_it_matches: 1 short sentence that names the style trait this lines up with (or doesn't).",
-  "- reasons: 2–4 short bullet phrases, 8–18 words each. Mix market + style.",
-  "- caveats: 0–2 short phrases. Use one when style signal is thin or the move could fade.",
-  "- No prose, no code fences, no markdown outside the JSON object.",
+  "Rules:",
+  "- headline: 6–10 words tying move + style fit.",
+  "    e.g. \"Moving fast, and it's your kind of card\", \"Quiet, but in a good buying range\".",
+  "- summary: 2–3 sentences, 25–55 words. Use the pattern above.",
+  "- why_it_matches: 1 sentence naming the style trait.",
+  "- reasons: 2–4 short phrases, 8–18 words each. Mix market + style.",
+  "- caveats: 0–2 short phrases. Use one when style or move signal is thin.",
+  "- No prose, no code fences, no markdown outside the JSON.",
 ].join("\n");
 
 function buildUserPrompt(
@@ -148,22 +133,16 @@ function buildUserPrompt(
       lines.push(`7-day change: ${market.changePct7d > 0 ? "+" : ""}${market.changePct7d.toFixed(1)}%`);
     }
     if (market.priceObservations7d != null) {
-      // Pass the qualitative bucket (thin/steady/dense) as the user-facing
-      // signal; surface the raw count only as an internal reasoning aid
-      // with an explicit "do not cite" instruction. Mirrors the framing
-      // in lib/ai/card-profile-summary.ts so the LLM gets a consistent
-      // contract across both prompts.
+      // The bucket is what the model should reference; the raw count is
+      // for tie-breaking only. The "do NOT cite the raw count" rule lives
+      // in SYSTEM_PROMPT, not restated per card, to keep prompts compact.
       const bucket = market.priceObservations7d <= 4
         ? "thin"
         : market.priceObservations7d < 30
           ? "steady"
           : "dense";
       lines.push(`Price tracking (7d): ${bucket}`);
-      lines.push(
-        `Price observations raw count (7d): ${market.priceObservations7d} ` +
-        `(internal only — do NOT cite this number to the reader; it is rolled ` +
-        `up across all printing variants and is not marketplace listings or sales)`,
-      );
+      lines.push(`Price observations raw count (7d): ${market.priceObservations7d}`);
     }
   } else {
     lines.push("No fresh market signal available — reason from style + features only.");
