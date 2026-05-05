@@ -180,6 +180,28 @@ actor CardService {
         return try decoder.decode([GradedVariantMetricRow].self, from: data)
     }
 
+    /// Fetch per-grade-bucket card_metrics rows for a card. card_metrics is keyed
+    /// by (canonical_slug, printing_id, grade) — one row per bucket, aggregate
+    /// across providers (no provider column). The Grade Board summary section
+    /// uses this to show median/range/sample stats for the selected bucket.
+    /// Filters to printing_id IS NULL so we get the canonical-level row, matching
+    /// how the existing graded reference price (`gradeSnapMap[grade].median_7d`)
+    /// is sourced on web (`app/c/[slug]/page.tsx`).
+    func fetchGradedCardMetrics(slug: String) async throws -> [GradedCardMetricRow] {
+        let data = try await Supabase.query(
+            table: "public_card_metrics",
+            select: "canonical_slug,printing_id,grade,median_7d,median_30d,low_30d,high_30d,trimmed_median_30d,snapshot_count_30d,updated_at",
+            filters: [
+                ("canonical_slug", "eq", slug),
+                ("grade", "in", "(LE_7,G8,G9,G9_5,G10,G10_PERFECT)"),
+                ("printing_id", "is", "null"),
+            ],
+            order: "grade.asc",
+            limit: 10
+        )
+        return try decoder.decode([GradedCardMetricRow].self, from: data)
+    }
+
     // MARK: - Card Printings (finish variants)
 
     func fetchPrintings(slug: String) async throws -> [CardPrintingOption] {
@@ -592,6 +614,24 @@ struct GradedVariantMetricRow: Decodable {
     let grade: String
     let providerAsOfTs: String?
     let historyPoints30d: Int?
+}
+
+/// Aggregate market summary stats per (slug, grade bucket). Sourced from
+/// public_card_metrics — no provider dimension. Powers the Grade Board's
+/// "Market Summary" section in graded mode.
+struct GradedCardMetricRow: Decodable, Identifiable {
+    let canonicalSlug: String
+    let printingId: String?
+    let grade: String
+    let median7d: Double?
+    let median30d: Double?
+    let low30d: Double?
+    let high30d: Double?
+    let trimmedMedian30d: Double?
+    let snapshotCount30d: Int?
+    let updatedAt: String?
+
+    var id: String { "\(canonicalSlug)::\(printingId ?? "null")::\(grade)" }
 }
 
 struct ConditionPriceRow: Decodable, Identifiable {

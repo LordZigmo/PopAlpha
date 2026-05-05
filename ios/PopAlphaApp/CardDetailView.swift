@@ -73,6 +73,10 @@ struct CardDetailView: View {
     @State private var selectedPrintingId: String?
     @State private var printingHeroPrice: Double?
     @State private var conditionPrices: [ConditionPriceRow] = []
+    /// Per-grade-bucket aggregate market summary, keyed by grade bucket
+    /// (LE_7, G8, G9, G9_5, G10, G10_PERFECT). Sourced from card_metrics
+    /// which is keyed (slug, printing_id, grade) — no provider dimension.
+    @State private var gradedCardMetricsByBucket: [String: GradedCardMetricRow] = [:]
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
@@ -157,6 +161,13 @@ struct CardDetailView: View {
                 printingId: selectedPrintingId
             ) {
                 await MainActor.run { conditionPrices = prices }
+            }
+            // Load per-bucket graded market summary stats. Cheap query
+            // (≤6 rows, indexed on canonical_slug+grade); fired in the
+            // background and ignored if it fails.
+            if let rows = try? await CardService.shared.fetchGradedCardMetrics(slug: card.id) {
+                let map = Dictionary(rows.map { ($0.grade, $0) }, uniquingKeysWith: { first, _ in first })
+                await MainActor.run { gradedCardMetricsByBucket = map }
             }
             // Load available graded options lazily
             if let rows = try? await CardService.shared.fetchGradedVariantMetrics(slug: card.id) {
@@ -392,12 +403,17 @@ struct CardDetailView: View {
 
             // 5 + 6. Practical pricing cluster — grade toggle + condition
             // breakdown grouped tighter so they read as one details block
-            // rather than two equal siblings.
+            // rather than two equal siblings. In graded mode the condition
+            // breakdown is replaced by the per-bucket market summary.
             VStack(alignment: .leading, spacing: 12) {
                 gradePillSection
 
                 if !conditionPrices.isEmpty && !selectedPriceMode.isGraded {
                     conditionPriceSection
+                }
+
+                if selectedPriceMode.isGraded {
+                    gradedMarketSummarySection
                 }
             }
 
@@ -982,6 +998,92 @@ struct CardDetailView: View {
     private func formatConditionPrice(_ value: Double) -> String {
         if value >= 1000 { return String(format: "$%.0f", value) }
         return String(format: "$%.2f", value)
+    }
+
+    // MARK: - Graded Market Summary
+
+    /// Aggregate market-summary stats for the currently-selected graded
+    /// bucket. card_metrics is per (slug, printing, grade) — no provider —
+    /// so this section is bucket-level (e.g. "10 Market Summary"), not
+    /// per-(provider, bucket). Renders only when graded mode is selected
+    /// AND we have a card_metrics row for the active bucket.
+    @ViewBuilder
+    private var gradedMarketSummarySection: some View {
+        if case .graded(_, let bucket) = selectedPriceMode,
+           let metric = gradedCardMetricsByBucket[bucket] {
+            let rows = buildGradedSummaryRows(metric)
+            if !rows.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Market Summary")
+                        .font(PA.Typography.sectionTitle)
+                        .foregroundStyle(PA.Colors.text)
+
+                    VStack(spacing: 0) {
+                        ForEach(Array(rows.enumerated()), id: \.element.label) { index, row in
+                            HStack {
+                                Text(row.label)
+                                    .font(.system(size: 14, weight: row.emphasized ? .semibold : .medium))
+                                    .foregroundStyle(row.emphasized ? PA.Colors.text : PA.Colors.muted)
+                                Spacer()
+                                Text(row.value)
+                                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(row.emphasized ? PA.Colors.accent : PA.Colors.text)
+                            }
+                            .padding(.vertical, 10)
+                            .padding(.horizontal, 16)
+
+                            if index < rows.count - 1 {
+                                Divider()
+                                    .background(PA.Colors.border)
+                                    .padding(.horizontal, 16)
+                            }
+                        }
+                    }
+                    .glassSurface()
+
+                    if let asOf = formatGradedSummaryAsOf(metric.updatedAt) {
+                        Text(asOf)
+                            .font(.system(size: 11))
+                            .foregroundStyle(PA.Colors.muted)
+                            .padding(.top, 2)
+                    }
+                }
+            }
+        }
+    }
+
+    private struct GradedSummaryRow {
+        let label: String
+        let value: String
+        let emphasized: Bool
+    }
+
+    private func buildGradedSummaryRows(_ metric: GradedCardMetricRow) -> [GradedSummaryRow] {
+        var rows: [GradedSummaryRow] = []
+        if let median7d = metric.median7d {
+            rows.append(.init(label: "7D Median", value: formatConditionPrice(median7d), emphasized: true))
+        }
+        if let median30d = metric.median30d {
+            rows.append(.init(label: "30D Median", value: formatConditionPrice(median30d), emphasized: false))
+        }
+        if let low = metric.low30d, let high = metric.high30d {
+            rows.append(.init(
+                label: "30D Range",
+                value: "\(formatConditionPrice(low)) – \(formatConditionPrice(high))",
+                emphasized: false
+            ))
+        }
+        if let count = metric.snapshotCount30d {
+            rows.append(.init(label: "Sample Size (30D)", value: "\(count) sales", emphasized: false))
+        }
+        return rows
+    }
+
+    private func formatGradedSummaryAsOf(_ updatedAt: String?) -> String? {
+        guard let updatedAt, let date = ISO8601DateFormatter().date(from: updatedAt) else { return nil }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return "Updated \(formatter.localizedString(for: date, relativeTo: Date()))"
     }
 
     // MARK: - Finish Variant Selector
