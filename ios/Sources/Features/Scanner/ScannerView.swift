@@ -417,9 +417,22 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
         // captureCurrentFrame from racing the write here.
         if let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
             latestFrameLock.lock()
+            let wasFirstFrame = (latestPixelBuffer == nil)
             latestPixelBuffer = pixelBuffer
             latestPixelBufferOrientation = orientation
             latestFrameLock.unlock()
+
+            // First sample buffer of this session — flip the
+            // firstFrameRendered flag so the SwiftUI loading placeholder
+            // can hand the screen over to the real preview layer.
+            // Dispatched to MainActor because ScannerViewModel is
+            // @MainActor-isolated and this callback runs on the
+            // sample-buffer queue.
+            if wasFirstFrame, let viewModel {
+                Task { @MainActor [weak viewModel] in
+                    viewModel?.markFirstFrameRendered()
+                }
+            }
         }
         engine.process(sampleBuffer: sampleBuffer, orientation: orientation)
     }

@@ -42,6 +42,23 @@ struct ScannerTabView: View {
                     Color.black.ignoresSafeArea()
                 }
 
+                // Camera-startup placeholder. AVCaptureSession HAL
+                // takes 1-3s on real device to produce the first
+                // sample buffer; without this overlay, the user sees
+                // pure black and assumes the app is broken (we
+                // measured this as the main UX friction on cold
+                // launch). Time Profiler 2026-05-05 confirmed the
+                // delay is hardware-bound, not a CPU hang. Fades out
+                // when ScannerViewModel.firstFrameRendered flips to
+                // true (mirrored via ScannerHost). After the first
+                // frame arrives, this view never reappears for the
+                // rest of the session — the camera preview keeps its
+                // last frame even during pauses.
+                if scanner.viewModel != nil, !scanner.firstFrameRendered, scanner.initError == nil {
+                    cameraStartingPlaceholder
+                        .transition(.opacity)
+                }
+
                 // Full-screen tap = capture this frame. The whole
                 // viewport IS the shutter. captureFrameAndIdentify
                 // implicitly resumes scanning, so this single gesture
@@ -101,6 +118,10 @@ struct ScannerTabView: View {
             }
             .ignoresSafeArea()
             .navigationBarHidden(true)
+            // Drives the cameraStartingPlaceholder fade-out when the
+            // first sample buffer arrives. 0.25s easeOut feels like
+            // "the camera just turned on" rather than a UI dissolve.
+            .animation(.easeOut(duration: 0.25), value: scanner.firstFrameRendered)
             .navigationDestination(item: $navigateToCard) { card in
                 CardDetailView(
                     card: card,
@@ -177,6 +198,41 @@ struct ScannerTabView: View {
                 #endif
             }
         }
+    }
+
+    // MARK: - Camera-starting placeholder
+    //
+    // Shown until ScannerHost.firstFrameRendered flips to true (i.e.,
+    // until the AVCaptureSession produces its first sample buffer).
+    // The HAL takes 1-3s on real device for cold launch — we don't
+    // try to make that faster (battery + privacy cost; see
+    // Option 2 evaluation 2026-05-05), we just communicate that
+    // something is loading.
+    //
+    // Visual is intentionally restrained: a viewfinder symbol,
+    // "Starting camera…" label, and a small spinner. Matches the
+    // scanner's stripped-down aesthetic — no pulsing borders or
+    // animated brackets that the user explicitly didn't want
+    // (commit 997445c).
+
+    private var cameraStartingPlaceholder: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            VStack(spacing: 14) {
+                Image(systemName: "viewfinder")
+                    .font(.system(size: 56, weight: .light))
+                    .foregroundStyle(.white.opacity(0.45))
+                Text("Starting camera…")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.6))
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .tint(.white.opacity(0.55))
+                    .padding(.top, 6)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Starting camera")
     }
 
     // MARK: - Init-error overlay
@@ -491,6 +547,12 @@ final class ScannerHost: ObservableObject {
     @Published private(set) var initError: String?
     @Published private(set) var candidateBoundingBox: CGRect?
 
+    /// Mirrors `ScannerViewModel.firstFrameRendered`. Drives the
+    /// "Starting camera…" placeholder in ScannerTabView's body so the
+    /// user sees motion + text instead of pure black during the
+    /// 1-3s AVCaptureSession HAL startup on cold launch.
+    @Published private(set) var firstFrameRendered: Bool = false
+
     // MARK: - Zero-tap identify state
 
     @Published private(set) var lastMatch: ScanMatch?
@@ -697,6 +759,9 @@ final class ScannerHost: ObservableObject {
                 }
                 if self.candidateBoundingBox != vm.candidateBoundingBox {
                     self.candidateBoundingBox = vm.candidateBoundingBox
+                }
+                if self.firstFrameRendered != vm.firstFrameRendered {
+                    self.firstFrameRendered = vm.firstFrameRendered
                 }
             }
         }

@@ -24,6 +24,17 @@ public final class ScannerViewModel: ObservableObject, PopAlphaVisionEngineDeleg
     @Published public private(set) var isScanning = true
     @Published public var useMockData: Bool
 
+    /// True once the camera has produced its first sample buffer (i.e.,
+    /// the preview layer has real pixels to render). Stays true for the
+    /// rest of the scanner's lifetime — we don't toggle back during
+    /// session pauses because the preview layer keeps its last frame.
+    /// SwiftUI bridges this via `ScannerHost.firstFrameRendered` so the
+    /// scanner tab can show a "Starting camera…" placeholder until the
+    /// hardware HAL produces real video frames (cold-launch cost is
+    /// 1-3s on real device; iOS hang detection misreads this as a
+    /// 5-6s "hang" because the runloop is idle waiting for frames).
+    @Published public private(set) var firstFrameRendered = false
+
     /// Vision-normalized bounding box of the current live candidate (origin bottom-left, 0–1 range),
     /// or nil when the engine has no active candidate. Updated every frame the candidate is visible.
     @Published public private(set) var candidateBoundingBox: CGRect?
@@ -90,6 +101,16 @@ public final class ScannerViewModel: ObservableObject, PopAlphaVisionEngineDeleg
 
     deinit {
         identificationTask?.cancel()
+    }
+
+    /// Called from `ScannerCameraViewController` on the first sample
+    /// buffer the camera produces. Idempotent — subsequent calls are
+    /// no-ops since we only need to know "have any pixels arrived
+    /// yet" not "how many pixels."
+    public func markFirstFrameRendered() {
+        if !firstFrameRendered {
+            firstFrameRendered = true
+        }
     }
 
     public func resumeScanning() {
