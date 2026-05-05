@@ -569,6 +569,63 @@ final class ScannerHost: ObservableObject {
             self.viewModel = nil
             self.initError = error.localizedDescription
         }
+
+        // Fire-and-forget pre-warm. Real-device 2026-05-05 measured
+        // 7.7s for the first scan after launch (vs 226ms steady state)
+        // because the orchestrator was lazy-instantiated on first tap
+        // — runSetup() (catalog + CoreML model load), the first
+        // ensureFp16Scratch (17.7M Float16→Float in Swift), and Vision
+        // text recognition warmup all stacked onto the user's first
+        // capture. Doing the work here at ScannerHost-init time means
+        // the scanner is warm before the user ever taps. Gated on the
+        // premium toggle so free-tier users don't pay the model-load
+        // cost.
+        //
+        // Idempotent: prewarm internally calls ensureReady which is
+        // idempotent, and the dummy-embed + dummy-knn pass is cheap.
+        // If the user starts scanning before prewarm completes, the
+        // first scan will block on the in-flight setupTask the same
+        // way it does today — strictly no worse than before.
+        Task { [weak self] in
+            await self?.prewarmIfPossible()
+        }
+    }
+
+    /// Background prewarm of the offline pipeline. Called from
+    /// ScannerHost.init() so the user's first scan doesn't pay
+    /// cold-start cost. No-op if premium isn't enabled.
+    private func prewarmIfPossible() async {
+        let enabled = await MainActor.run { PremiumGate.shared.offlineScannerEnabled }
+        guard enabled else { return }
+        let orchestrator = await MainActor.run { self.makeOrchestrator() }
+        // Two parallel warm tasks. Orchestrator pre-warm covers
+        // catalog/model/kNN; OCR pre-warm covers Vision text
+        // recognition's internal state (real-device cold OCR was
+        // 365ms vs steady 155ms — ~200ms warmup cost).
+        async let warmOrch: Void = orchestrator.prewarm()
+        async let warmOCR: Void = Self.prewarmOCR()
+        _ = await (warmOrch, warmOCR)
+    }
+
+    /// One-time OCR warmup. Vision's VNRecognizeTextRequest does
+    /// internal JIT/state allocation on first invocation that adds
+    /// ~200ms to scan_e2e on the user's first scan. Running it once
+    /// against a tiny synthetic image during prewarm absorbs that
+    /// cost off the user's critical path.
+    private static func prewarmOCR() async {
+        let t0 = Date()
+        // Synthetic image just needs to drive Vision through one full
+        // recognition pass. Mid-gray 256×256 is enough — Vision sees
+        // no text but still goes through detector init.
+        let size = CGSize(width: 256, height: 256)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let dummy = renderer.image { ctx in
+            UIColor.gray.setFill()
+            ctx.fill(CGRect(origin: .zero, size: size))
+        }
+        _ = await OCRService.extractCardIdentifiersMulti(from: dummy)
+        let elapsed = Date().timeIntervalSince(t0) * 1000
+        Logger.scan.debug("prewarm_ocr: total=\(String(format: "%.1f", elapsed))ms")
     }
 
     private func bind(_ vm: ScannerViewModel) {

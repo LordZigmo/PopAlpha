@@ -165,6 +165,84 @@ final class OfflineScanOrchestrator: ObservableObject {
         syncAnchorsInBackground()
     }
 
+    /// Pre-warm the scan pipeline so the first user-facing scan
+    /// doesn't pay cold-start costs. Real-device 2026-05-05: first
+    /// scan after launch took 7.7s end-to-end vs 226ms for steady
+    /// state. The 7.5s gap was three things stacked:
+    ///   - runSetup() (catalog load + CoreML model load): ~5300ms
+    ///   - First ensureFp16Scratch (17.7M Float16→Float in Swift): ~1900ms
+    ///   - First CoreML embed (model warmup): ~25ms extra
+    ///
+    /// This method does the same work proactively at app launch so
+    /// the first real scan only pays its own latency. Idempotent —
+    /// safe to call from multiple entry points.
+    ///
+    /// All errors swallowed (and logged); a prewarm failure shouldn't
+    /// block scanning. The first scan will pay cold-start cost as
+    /// before in that case.
+    func prewarm() async {
+        let prewarmT0 = Date()
+        do {
+            try await ensureReady()
+        } catch {
+            Logger.scan.debug("prewarm: ensureReady failed: \(error.localizedDescription)")
+            return
+        }
+        guard let embedder = self.embedder, let identifier = self.identifier else {
+            Logger.scan.debug("prewarm: orchestrator components missing post-ensureReady")
+            return
+        }
+        let setupMs = Date().timeIntervalSince(prewarmT0) * 1000
+
+        // Generate a tiny synthetic image — content doesn't matter, we
+        // just need something to push through the embedder so CoreML
+        // allocates compute resources and the kNN expands fp16 scratch.
+        // 384×384 BGRA matches the embedder's input shape, so no
+        // resize cost.
+        let dummy = Self.makeDummyImage()
+
+        let embedT0 = Date()
+        let queryEmbedding: [Float]
+        do {
+            queryEmbedding = try await Task.detached(priority: .userInitiated) {
+                try embedder.embed(image: dummy)
+            }.value
+        } catch {
+            Logger.scan.debug("prewarm: embedder failed: \(error.localizedDescription)")
+            return
+        }
+        let embedMs = Date().timeIntervalSince(embedT0) * 1000
+
+        // First kNN call expands fp16 scratch (the 1.9s cold-start
+        // cost on the user's device). Subsequent calls reuse it.
+        let knnT0 = Date()
+        _ = identifier.identify(OfflineIdentifyRequest(
+            queryEmbedding: queryEmbedding,
+            language: "EN",
+            ocrCardNumber: nil,
+            ocrSetHint: nil,
+            limit: 5,
+        ))
+        let knnMs = Date().timeIntervalSince(knnT0) * 1000
+
+        let totalMs = Date().timeIntervalSince(prewarmT0) * 1000
+        Logger.scan.debug("prewarm_timing: setup=\(String(format: "%.1f", setupMs))ms embed=\(String(format: "%.1f", embedMs))ms knn=\(String(format: "%.1f", knnMs))ms total=\(String(format: "%.1f", totalMs))ms")
+    }
+
+    private static func makeDummyImage() -> UIImage {
+        // Solid mid-gray 384×384. Cheap to render, matches embedder
+        // input shape (384 = SigLIP-2-Base-384), avoids any internal
+        // resize. Whatever the embedder produces is thrown away —
+        // we just need to force CoreML through one inference to
+        // allocate Neural Engine resources.
+        let size = CGSize(width: 384, height: 384)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { ctx in
+            UIColor.gray.setFill()
+            ctx.fill(CGRect(origin: .zero, size: size))
+        }
+    }
+
     /// Pull the anchor delta in the background. Coalesces against
     /// in-flight syncs. Errors are logged + swallowed — sync failures
     /// shouldn't block scanning.
