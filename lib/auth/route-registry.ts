@@ -103,6 +103,7 @@ export const ADMIN_ROUTES = [
 
 export const DEBUG_ROUTES = [
   "debug/asset-inspect",
+  "debug/graded-coverage",
   "debug/market-summary",
   "debug/provider-price-readings",
   "debug/tracked-assets",

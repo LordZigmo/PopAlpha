@@ -487,6 +487,7 @@ export const INTERNAL_ROUTE_TRUST_CONTRACTS = {
 
 export const DEBUG_ROUTE_TRUST_CONTRACTS = {
   "debug/asset-inspect": debugCronRoute("internal diagnostic requests and operator troubleshooting"),
+  "debug/graded-coverage": debugCronRoute("graded-pricing surfacing coverage check (operator-facing diagnostic)"),
   "debug/market-summary": debugCronRoute("internal diagnostic requests and cache verification"),
   "debug/provider-price-readings": debugCronRoute("internal diagnostic requests and operator troubleshooting"),
   "debug/tracked-assets": debugCronRoute("internal diagnostic requests and operator troubleshooting"),
@@ -856,6 +857,15 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
     requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
     expectedSignals: ["service_role_client"],
     usesServiceRole: true,
+  }),
+  "scripts/report-graded-pricing-coverage.mjs": operationalScript({
+    classification: "service_role_report",
+    executionMode: "manual_report",
+    intendedCaller: "trusted operator quantifying graded-pricing surfacing coverage (read-only across observation, snapshot, metrics, and price-history layers)",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+    notes: "Read-only — issues exact and estimated COUNTs and a bounded ORDER BY observed_at sample for distinct slug enumeration. Writes a dated markdown report to docs/graded-pricing-coverage-YYYY-MM-DD.md. Companion to docs/graded-surfacing-plan.md.",
   }),
   "scripts/report-set-efficiency.mjs": operationalScript({
     classification: "service_role_report",
