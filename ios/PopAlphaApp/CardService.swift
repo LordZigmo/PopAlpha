@@ -847,10 +847,12 @@ struct HomepageSignalBoardDTO: Decodable, Hashable {
     // Phase 2 conviction signals — non-windowed; optional during rollout
     let unusualVolume: [HomepageCardDTO]?
     let breakouts: [HomepageCardDTO]?
-    // Budget tier ($1 .. premium_min_price) gainers. Server filters
-    // top_movers / biggest_drops / momentum to a premium price floor
-    // (default $20); this rail surfaces gainers below that floor.
-    // Optional during rollout — older server builds may not include it.
+    // Three-tier price segmentation (server migration 20260504230000):
+    //   premium ≥ $50 → top_movers / biggest_drops / momentum (windowed)
+    //   mid $8..$50   → mid_movers (gainers, non-windowed)
+    //   budget $1..$8 → budget_movers (gainers, non-windowed)
+    // Both mid and budget are optional so older server builds still decode.
+    let midMovers: [HomepageCardDTO]?
     let budgetMovers: [HomepageCardDTO]?
 }
 
