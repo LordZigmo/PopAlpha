@@ -49,6 +49,7 @@
 //   columns), these fallbacks become exact.
 
 import Foundation
+import OSLog
 import QuartzCore
 import UIKit
 import CryptoKit
