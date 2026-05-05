@@ -603,10 +603,19 @@ final class ScannerHost: ObservableObject {
     /// Background prewarm of the offline pipeline. Called from
     /// ScannerHost.init() so the user's first scan doesn't pay
     /// cold-start cost. No-op if premium isn't enabled.
-    private func prewarmIfPossible() async {
+    ///
+    /// `nonisolated` so the three child tasks below ACTUALLY run in
+    /// parallel. ScannerHost is @MainActor; without nonisolated, the
+    /// async-let tasks would inherit main-actor isolation and queue
+    /// serially on the main thread. Real-device 2026-05-05 measured
+    /// all three warmup totals at ~7175ms (identical), confirming
+    /// they were running in series, not parallel.
+    nonisolated private func prewarmIfPossible() async {
         let enabled = await MainActor.run { PremiumGate.shared.offlineScannerEnabled }
         guard enabled else { return }
         let orchestrator = await MainActor.run { self.makeOrchestrator() }
+        // Read the engine off main once so the rest runs nonisolated.
+        let engine: PopAlphaVisionEngine? = await MainActor.run { self.viewModel?.visionEngine }
         // Three parallel warm tasks:
         //   - Orchestrator: catalog + CoreML SigLIP model + kNN scratch
         //   - OCR: Vision's VNRecognizeTextRequest internal state
@@ -615,11 +624,12 @@ final class ScannerHost: ObservableObject {
         //     2026-05-05 saw the FIRST tap_detect call take 672ms vs
         //     ~10-20ms steady state. Pre-warming absorbs that cost.
         //
-        // All three run concurrently on .utility priority so iOS
-        // scheduler can balance them against camera-session setup.
+        // All three run concurrently because all three helpers are
+        // nonisolated/static — none of them need to touch the
+        // main-actor-isolated ScannerHost properties.
         async let warmOrch: Void = orchestrator.prewarm()
         async let warmOCR: Void = Self.prewarmOCR()
-        async let warmVision: Void = self.prewarmVisionRectangle()
+        async let warmVision: Void = Self.prewarmVisionRectangle(engine: engine)
         _ = await (warmOrch, warmOCR, warmVision)
     }
 
@@ -628,7 +638,7 @@ final class ScannerHost: ObservableObject {
     /// ~200ms to scan_e2e on the user's first scan. Running it once
     /// against a tiny synthetic image during prewarm absorbs that
     /// cost off the user's critical path.
-    private static func prewarmOCR() async {
+    nonisolated private static func prewarmOCR() async {
         let t0 = Date()
         // Synthetic image just needs to drive Vision through one full
         // recognition pass. Mid-gray 256×256 is enough — Vision sees
@@ -651,23 +661,25 @@ final class ScannerHost: ObservableObject {
     /// running detection once on a synthetic image during prewarm
     /// brings the steady-state ~15ms timing onto the user's first
     /// real tap.
-    private func prewarmVisionRectangle() async {
-        guard let viewModel = self.viewModel else { return }
-        let engine = viewModel.visionEngine
+    ///
+    /// Static + nonisolated + engine-as-parameter so this can run
+    /// off the main actor in true parallel with the orchestrator and
+    /// OCR warmups (vs the prior instance method which serialized on
+    /// the main actor and added ~7s of fake work).
+    nonisolated private static func prewarmVisionRectangle(engine: PopAlphaVisionEngine?) async {
+        guard let engine else { return }
         let t0 = Date()
-        await Task.detached(priority: .utility) {
-            // 1280×720 mid-gray. Vision won't find a card-shaped
-            // rectangle (no edges in a solid color), but the framework
-            // still walks its full detector pipeline once to allocate
-            // internal state. That's all we need.
-            let size = CGSize(width: 1280, height: 720)
-            let renderer = UIGraphicsImageRenderer(size: size)
-            let dummy = renderer.image { ctx in
-                UIColor.gray.setFill()
-                ctx.fill(CGRect(origin: .zero, size: size))
-            }
-            _ = engine.detectAndCrop(dummy)
-        }.value
+        // 1280×720 mid-gray. Vision won't find a card-shaped
+        // rectangle (no edges in a solid color), but the framework
+        // still walks its full detector pipeline once to allocate
+        // internal state. That's all we need.
+        let size = CGSize(width: 1280, height: 720)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let dummy = renderer.image { ctx in
+            UIColor.gray.setFill()
+            ctx.fill(CGRect(origin: .zero, size: size))
+        }
+        _ = engine.detectAndCrop(dummy)
         let elapsed = Date().timeIntervalSince(t0) * 1000
         Logger.scan.debug("prewarm_vision_rect: total=\(String(format: "%.1f", elapsed))ms")
     }
