@@ -13,6 +13,7 @@ import {
   computeRadarProfile,
   isGraded,
 } from "@/lib/data/portfolio";
+import { normalizeHoldingGrade, type GradeBucket } from "@/lib/holdings/grade-normalize";
 import { resolveCardImage } from "@/lib/images/resolve";
 
 export const runtime = "nodejs";
@@ -146,7 +147,9 @@ export async function GET(req: Request) {
       printingMetaMap.set(p.id, { finish: p.finish, rarity: p.rarity, language: p.language });
     }
 
-    const priceMap = new Map<string, number>();
+    // slug-only RAW reference price — keeps powering the per-card sparkline
+    // and cardMetadata (those are slug-level views, not per-holding).
+    const slugRawPriceMap = new Map<string, number>();
     const changeMap = new Map<string, number>();
     for (const slug of slugs) {
       const pulse = pulseMap.get(slug);
@@ -156,9 +159,42 @@ export async function GET(req: Request) {
         ?? pulse?.justtcgPrice
         ?? pulse?.pokemontcgPrice
         ?? null;
-      if (price != null) priceMap.set(slug, price);
+      if (price != null) slugRawPriceMap.set(slug, price);
       const chg = pulse?.changePct24h ?? pulse?.changePct7d ?? 0;
       changeMap.set(slug, chg);
+    }
+
+    // priceMap is keyed by `${slug}::${bucket}` so per-holding valuation
+    // (totalValue, computeAttributes/Composition/RadarProfile/TopHoldings)
+    // picks up the right graded price. Seed with RAW from pulseMap, then
+    // supplement with graded buckets for any (slug, bucket) pair that an
+    // actual holding cares about — bounded by the user's 120-row holdings
+    // limit, so the extra query is trivial in size.
+    const priceMap = new Map<string, number>();
+    for (const [slug, price] of slugRawPriceMap) {
+      priceMap.set(`${slug}::RAW`, price);
+    }
+
+    const gradedBucketsNeeded = new Set<GradeBucket>();
+    for (const h of holdings) {
+      const bucket = normalizeHoldingGrade(h.grade);
+      if (bucket !== "RAW") gradedBucketsNeeded.add(bucket);
+    }
+    if (gradedBucketsNeeded.size > 0) {
+      const { data: gradedMetricRows, error: gradedMetricErr } = await pub
+        .from("public_card_metrics")
+        .select("canonical_slug, grade, market_price, median_7d")
+        .in("canonical_slug", slugs)
+        .in("grade", [...gradedBucketsNeeded])
+        .is("printing_id", null);
+      if (gradedMetricErr) throw new Error(gradedMetricErr.message);
+      for (const row of (gradedMetricRows ?? []) as Array<{ canonical_slug: string; grade: string; market_price: number | null; median_7d: number | null }>) {
+        // market_price is computed on the RAW provider blend and may be
+        // null for graded buckets; fall back to median_7d so graded
+        // holdings still get a number.
+        const price = row.market_price ?? row.median_7d;
+        if (price != null) priceMap.set(`${row.canonical_slug}::${row.grade}`, price);
+      }
     }
 
     // Build per-slug card metadata for the iOS positions list
@@ -169,17 +205,19 @@ export async function GET(req: Request) {
         name: c?.canonical_name ?? slug,
         set_name: c?.set_name ?? null,
         image_url: imageMap.get(slug) ?? null,
-        market_price: priceMap.get(slug) ?? null,
+        market_price: slugRawPriceMap.get(slug) ?? null,
         change_pct: changeMap.get(slug) ?? 0,
       };
     }
 
-    // Compute portfolio value sparkline from price history.
-    // For each day we have data, sum (price × qty) using last-known prices.
+    // Compute portfolio value sparkline from RAW price history. The
+    // sparkline backfills graded holdings' historical curve with their
+    // slug's RAW price (price_history is RAW-only); a known approximation
+    // for graded holders, bounded by Phase 4's eventual graded analytics.
     const sparkline = computeSparkline(
       (historyResult.data ?? []) as PriceHistoryRow[],
       holdings,
-      priceMap,
+      slugRawPriceMap,
     );
 
     // 4. Compute summary
@@ -194,7 +232,10 @@ export async function GET(req: Request) {
       cardCount += qty;
       if (isGraded(h.grade)) gradedCount += qty; else rawCount += qty;
 
-      const price = priceMap.get(h.canonical_slug) ?? h.price_paid_usd;
+      const bucket = normalizeHoldingGrade(h.grade);
+      const price = priceMap.get(`${h.canonical_slug}::${bucket}`)
+        ?? priceMap.get(`${h.canonical_slug}::RAW`)
+        ?? h.price_paid_usd;
       totalValue += price * qty;
       totalCostBasis += h.price_paid_usd * qty;
     }

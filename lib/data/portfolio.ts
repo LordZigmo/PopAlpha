@@ -1,11 +1,28 @@
 import "server-only";
+import { normalizeHoldingGrade } from "@/lib/holdings/grade-normalize";
 
 /**
  * Portfolio analysis library.
  *
  * Computes collector identity, composition, attributes, top holdings,
  * and heuristic insights from raw holdings + market data.
+ *
+ * Pricing convention (Phase 2, 2026-05): the `priceMap` parameter is keyed
+ * by `${canonical_slug}::${bucket}` where bucket is the graded bucket from
+ * `lib/holdings/grade-normalize` (RAW, LE_7, G8, G9, G9_5, G10, G10_PERFECT).
+ * Each lookup tries the holding's own bucket first and falls back to RAW so
+ * a graded holding without a per-bucket card_metrics row still contributes
+ * its slug's RAW price rather than dropping to zero.
  */
+
+function lookupHoldingPrice(
+  priceMap: Map<string, number>,
+  slug: string,
+  grade: string,
+): number | undefined {
+  const bucket = normalizeHoldingGrade(grade);
+  return priceMap.get(`${slug}::${bucket}`) ?? priceMap.get(`${slug}::RAW`);
+}
 
 // ── Era Classification ──────────────────────────────────────────────────────
 
@@ -102,7 +119,7 @@ export function computeAttributes(
       if (num != null) { gradeSum += num * qty; gradeCount += qty; }
     }
 
-    const marketPrice = priceMap.get(h.canonical_slug) ?? h.price_paid_usd;
+    const marketPrice = lookupHoldingPrice(priceMap, h.canonical_slug, h.grade) ?? h.price_paid_usd;
     const positionValue = marketPrice * qty;
     holdingValues.push(positionValue);
     totalValue += positionValue;
@@ -235,7 +252,7 @@ export function computeComposition(
   for (const h of holdings) {
     const meta = cardMap.get(h.canonical_slug);
     const era = classifyEra(meta?.year ?? null);
-    const price = priceMap.get(h.canonical_slug) ?? h.price_paid_usd;
+    const price = lookupHoldingPrice(priceMap, h.canonical_slug, h.grade) ?? h.price_paid_usd;
     const val = price * (h.qty || 1);
 
     eraValues[era] = (eraValues[era] || 0) + val;
@@ -373,7 +390,7 @@ export function computeRadarProfile(
     if (printMeta?.language === "JP") jpQty += qty;
     if (printMeta?.finish === "ALT_HOLO" || isPremiumRarity(printMeta?.rarity)) premiumQty += qty;
 
-    const price = priceMap.get(h.canonical_slug) ?? 0;
+    const price = lookupHoldingPrice(priceMap, h.canonical_slug, h.grade) ?? 0;
     if (price >= 500) grailQty += qty;
   }
 
@@ -432,7 +449,7 @@ export function computeTopHoldings(
 
   const enriched: EnrichedHolding[] = [...groups.values()].map((g) => {
     const meta = cardMap.get(g.slug);
-    const mp = priceMap.get(g.slug) ?? 0;
+    const mp = lookupHoldingPrice(priceMap, g.slug, g.grade) ?? 0;
     return {
       canonical_slug: g.slug,
       qty: g.qty,

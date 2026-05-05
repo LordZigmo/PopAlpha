@@ -2,12 +2,14 @@ import { NextResponse } from "next/server";
 import { requireOnboarded } from "@/lib/auth/require";
 import { getCommunityVoteWeekStart } from "@/lib/data/community-pulse";
 import { createServerSupabaseUserClient } from "@/lib/db/user";
+import { normalizeHoldingGrade, type GradeBucket } from "@/lib/holdings/grade-normalize";
 
 export const runtime = "nodejs";
 
 type HoldingRow = {
   canonical_slug: string | null;
   qty: number | null;
+  grade: string | null;
   created_at: string;
 };
 
@@ -24,7 +26,9 @@ type PrintingRow = {
 
 type MetricRow = {
   canonical_slug: string;
+  grade: string;
   market_price: number | null;
+  median_7d: number | null;
   change_pct_7d: number | null;
 };
 
@@ -51,7 +55,7 @@ export async function GET(req: Request) {
     const supabase = await createServerSupabaseUserClient();
     const { data: holdingsData, error: holdingsError } = await supabase
       .from("holdings")
-      .select("canonical_slug, qty, created_at")
+      .select("canonical_slug, qty, grade, created_at")
       .eq("owner_clerk_id", auth.userId)
       .not("canonical_slug", "is", null)
       .order("created_at", { ascending: false })
@@ -90,14 +94,31 @@ export async function GET(req: Request) {
 
     if (imageError) throw new Error(imageError.message);
 
+    // Build the set of (slug, bucket) pairs that any holding actually
+    // needs valued. card_metrics is keyed by (slug, printing_id, grade)
+    // with no provider column, so per-bucket aggregate is the right
+    // resolution here (matches the Grade Board's reference price on
+    // both web and iOS).
+    const neededBuckets = new Set<GradeBucket>();
+    neededBuckets.add("RAW");
+    for (const row of holdings) {
+      neededBuckets.add(normalizeHoldingGrade(row.grade));
+    }
+    const bucketsArray = [...neededBuckets];
+
     const { data: metricData, error: metricError } = await supabase
       .from("public_card_metrics")
-      .select("canonical_slug, market_price, change_pct_7d")
+      .select("canonical_slug, grade, market_price, median_7d, change_pct_7d")
       .in("canonical_slug", uniqueSlugs)
-      .eq("grade", "RAW");
+      .in("grade", bucketsArray)
+      .is("printing_id", null);
 
     if (metricError) throw new Error(metricError.message);
 
+    // Hot-mover detection stays RAW-only because the underlying signal
+    // pipeline is RAW-only (variant_metrics graded rows have no
+    // signal_trend per the Phase 0 coverage report). Revisit once
+    // graded signals exist (Phase 4 in graded-surfacing-plan.md).
     const { data: hotMoverData, error: hotMoverError } = await supabase
       .from("public_variant_movers_priced")
       .select("canonical_slug")
@@ -120,14 +141,25 @@ export async function GET(req: Request) {
       }
     }
 
+    // marketPriceMap is now keyed by `${slug}::${bucket}` so per-grade
+    // holdings get the right valuation. changeMap stays per-slug because
+    // the watchlist's "change %" displays at the card level, not the
+    // holding level.
     const changeMap = new Map<string, number>();
     const marketPriceMap = new Map<string, number>();
     for (const row of (metricData ?? []) as MetricRow[]) {
-      if (row.canonical_slug && row.market_price != null && !marketPriceMap.has(row.canonical_slug)) {
-        marketPriceMap.set(row.canonical_slug, row.market_price);
+      if (!row.canonical_slug) continue;
+      // Graded buckets sometimes have median_7d but null market_price
+      // (market_price is computed on the RAW provider blend); fall back
+      // to median_7d so graded holdings still get a number.
+      const price = row.market_price ?? row.median_7d;
+      const key = `${row.canonical_slug}::${row.grade}`;
+      if (price != null && !marketPriceMap.has(key)) {
+        marketPriceMap.set(key, price);
       }
-      if (!row.canonical_slug || row.change_pct_7d == null || changeMap.has(row.canonical_slug)) continue;
-      changeMap.set(row.canonical_slug, row.change_pct_7d);
+      if (row.grade === "RAW" && row.change_pct_7d != null && !changeMap.has(row.canonical_slug)) {
+        changeMap.set(row.canonical_slug, row.change_pct_7d);
+      }
     }
     const hotSlugSet = new Set(
       ((hotMoverData ?? []) as HotMoverRow[]).map((row) => row.canonical_slug).filter(Boolean),
@@ -181,7 +213,12 @@ export async function GET(req: Request) {
     for (const row of holdings) {
       const slug = row.canonical_slug;
       if (!slug) continue;
-      const marketPrice = marketPriceMap.get(slug);
+      const bucket = normalizeHoldingGrade(row.grade);
+      // Try the holding's actual bucket first; fall back to RAW so a
+      // graded holding without a card_metrics row at that bucket still
+      // contributes its RAW-equivalent value rather than dropping to 0.
+      const marketPrice =
+        marketPriceMap.get(`${slug}::${bucket}`) ?? marketPriceMap.get(`${slug}::RAW`);
       if (marketPrice == null) continue;
       collectionValue += marketPrice * (row.qty ?? 0);
     }
@@ -228,12 +265,16 @@ export async function GET(req: Request) {
       })
       .slice(0, 5)
       .map((slug) => ({
-      slug,
-      name: cardMap.get(slug)?.canonical_name ?? slug,
-      setName: cardMap.get(slug)?.set_name ?? null,
-      imageUrl: imageMap.get(slug) ?? null,
-      currentPrice: marketPriceMap.get(slug) ?? null,
-      isHotMover: hotSlugSet.has(slug),
+        slug,
+        name: cardMap.get(slug)?.canonical_name ?? slug,
+        setName: cardMap.get(slug)?.set_name ?? null,
+        imageUrl: imageMap.get(slug) ?? null,
+        // Watchlist shows the slug's RAW market price as a "what this
+        // card costs in general" reference. Per-holding graded prices
+        // affect collectionValue (above) but not this card-level rail
+        // — same convention the homepage uses.
+        currentPrice: marketPriceMap.get(`${slug}::RAW`) ?? null,
+        isHotMover: hotSlugSet.has(slug),
       }));
 
     return NextResponse.json({
