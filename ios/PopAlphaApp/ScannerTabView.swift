@@ -581,12 +581,21 @@ final class ScannerHost: ObservableObject {
         // premium toggle so free-tier users don't pay the model-load
         // cost.
         //
+        // Priority: .utility (background-tier). Earlier we used
+        // default priority and the user reported a 5s black scanner
+        // page on launch — camera-session startup was contending for
+        // compute with prewarm's CoreML inference and catalog parse.
+        // Dropping to .utility lets iOS scheduler give camera setup
+        // priority so frames arrive faster, even if prewarm itself
+        // takes slightly longer wall-clock. Net UX win: black screen
+        // shorter, first scan still warm by the time user taps.
+        //
         // Idempotent: prewarm internally calls ensureReady which is
         // idempotent, and the dummy-embed + dummy-knn pass is cheap.
         // If the user starts scanning before prewarm completes, the
         // first scan will block on the in-flight setupTask the same
         // way it does today — strictly no worse than before.
-        Task { [weak self] in
+        Task(priority: .utility) { [weak self] in
             await self?.prewarmIfPossible()
         }
     }
@@ -598,13 +607,20 @@ final class ScannerHost: ObservableObject {
         let enabled = await MainActor.run { PremiumGate.shared.offlineScannerEnabled }
         guard enabled else { return }
         let orchestrator = await MainActor.run { self.makeOrchestrator() }
-        // Two parallel warm tasks. Orchestrator pre-warm covers
-        // catalog/model/kNN; OCR pre-warm covers Vision text
-        // recognition's internal state (real-device cold OCR was
-        // 365ms vs steady 155ms — ~200ms warmup cost).
+        // Three parallel warm tasks:
+        //   - Orchestrator: catalog + CoreML SigLIP model + kNN scratch
+        //   - OCR: Vision's VNRecognizeTextRequest internal state
+        //   - Vision rectangle: VNDetectRectanglesRequest (the
+        //     detector that runs on every tap-to-capture). Real-device
+        //     2026-05-05 saw the FIRST tap_detect call take 672ms vs
+        //     ~10-20ms steady state. Pre-warming absorbs that cost.
+        //
+        // All three run concurrently on .utility priority so iOS
+        // scheduler can balance them against camera-session setup.
         async let warmOrch: Void = orchestrator.prewarm()
         async let warmOCR: Void = Self.prewarmOCR()
-        _ = await (warmOrch, warmOCR)
+        async let warmVision: Void = self.prewarmVisionRectangle()
+        _ = await (warmOrch, warmOCR, warmVision)
     }
 
     /// One-time OCR warmup. Vision's VNRecognizeTextRequest does
@@ -626,6 +642,34 @@ final class ScannerHost: ObservableObject {
         _ = await OCRService.extractCardIdentifiersMulti(from: dummy)
         let elapsed = Date().timeIntervalSince(t0) * 1000
         Logger.scan.debug("prewarm_ocr: total=\(String(format: "%.1f", elapsed))ms")
+    }
+
+    /// One-time Vision rectangle detection warmup. The same detector
+    /// that powers continuous auto-detect is also called via
+    /// `engine.detectAndCrop` on every tap-to-capture. Real-device
+    /// 2026-05-05 the first tap_detect call (cold) measured 672ms;
+    /// running detection once on a synthetic image during prewarm
+    /// brings the steady-state ~15ms timing onto the user's first
+    /// real tap.
+    private func prewarmVisionRectangle() async {
+        guard let viewModel = self.viewModel else { return }
+        let engine = viewModel.visionEngine
+        let t0 = Date()
+        await Task.detached(priority: .utility) {
+            // 1280×720 mid-gray. Vision won't find a card-shaped
+            // rectangle (no edges in a solid color), but the framework
+            // still walks its full detector pipeline once to allocate
+            // internal state. That's all we need.
+            let size = CGSize(width: 1280, height: 720)
+            let renderer = UIGraphicsImageRenderer(size: size)
+            let dummy = renderer.image { ctx in
+                UIColor.gray.setFill()
+                ctx.fill(CGRect(origin: .zero, size: size))
+            }
+            _ = engine.detectAndCrop(dummy)
+        }.value
+        let elapsed = Date().timeIntervalSince(t0) * 1000
+        Logger.scan.debug("prewarm_vision_rect: total=\(String(format: "%.1f", elapsed))ms")
     }
 
     private func bind(_ vm: ScannerViewModel) {

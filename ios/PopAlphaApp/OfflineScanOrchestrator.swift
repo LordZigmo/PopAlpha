@@ -204,7 +204,14 @@ final class OfflineScanOrchestrator: ObservableObject {
         let embedT0 = Date()
         let queryEmbedding: [Float]
         do {
-            queryEmbedding = try await Task.detached(priority: .userInitiated) {
+            // .utility (vs .userInitiated): camera-session startup
+            // contends with this for Neural Engine cycles during app
+            // launch. Real-device 2026-05-05 the user reported a 5s
+            // black scanner page on cold launch because prewarm was
+            // saturating compute. Dropping priority lets iOS give
+            // camera setup priority. The embed itself still completes
+            // in ~50ms when nothing else is competing.
+            queryEmbedding = try await Task.detached(priority: .utility) {
                 try embedder.embed(image: dummy)
             }.value
         } catch {
