@@ -132,7 +132,7 @@ struct PaywallView: View {
             PA.Colors.background.ignoresSafeArea()
 
             ScrollView {
-                VStack(spacing: 28) {
+                VStack(spacing: 20) {
                     closeButton
                     hero
                     benefits
@@ -143,8 +143,8 @@ struct PaywallView: View {
                     footerLinks
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, 8)
-                .padding(.bottom, 32)
+                .padding(.top, 4)
+                .padding(.bottom, 20)
             }
         }
         .task {
@@ -204,24 +204,23 @@ struct PaywallView: View {
     }
 
     private var hero: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 8) {
             ZStack {
                 Circle()
                     .fill(PA.Colors.gold.opacity(0.12))
-                    .frame(width: 72, height: 72)
+                    .frame(width: 60, height: 60)
                 Image(systemName: "crown.fill")
-                    .font(.system(size: 32))
+                    .font(.system(size: 26))
                     .foregroundStyle(PA.Colors.gold.opacity(0.95))
             }
-            .padding(.bottom, 2)
 
             Text("PopAlpha Pro")
-                .font(.system(size: 28, weight: .bold, design: .rounded))
+                .font(.system(size: 24, weight: .bold, design: .rounded))
                 .foregroundStyle(PA.Colors.text)
 
             // Prominent value prop — leads the paywall narrative.
             Text(heroHeadline)
-                .font(.system(size: 18, weight: .semibold, design: .rounded))
+                .font(.system(size: 17, weight: .semibold, design: .rounded))
                 .foregroundStyle(PA.Colors.text)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
@@ -235,7 +234,6 @@ struct PaywallView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: 320)
         }
-        .padding(.top, 4)
     }
 
     /// Prominent value prop. Driven by the surface that opened the
@@ -274,7 +272,7 @@ struct PaywallView: View {
         // emotionally compelling value (insights > signals > offline
         // scanning). Offline scanning is useful but not the strongest
         // first sell.
-        VStack(spacing: 12) {
+        VStack(spacing: 8) {
             benefitRow(
                 icon: "person.crop.square.filled.and.at.rectangle",
                 title: "Collector Insights",
@@ -314,7 +312,8 @@ struct PaywallView: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(14)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
         .background(PA.Colors.surface)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
@@ -394,7 +393,8 @@ struct PaywallView: View {
                     .font(.system(size: 17, weight: .bold, design: .rounded))
                     .foregroundStyle(PA.Colors.text)
             }
-            .padding(14)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
             .background(isSelected ? PA.Colors.accentSoft : PA.Colors.surface)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay(
