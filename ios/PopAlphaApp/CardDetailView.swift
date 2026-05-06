@@ -699,20 +699,27 @@ struct CardDetailView: View {
                     )
                 }
             case .graded(let provider, let bucket):
-                let resolvedBucket = gradeBucketToVariantRefBucket(bucket)
+                // Pass the bucket name (G8/G9/G9_5/G10/G10_PERFECT) DIRECTLY.
+                // price_history_points stores graded variant_refs in the
+                // long form `…::GRADED::PROVIDER::BUCKET::RAW` using the
+                // bucket *name*, not the constraint token (8/9/9_5/10/…).
+                // The converter previously here was a leftover from when
+                // iOS queried variant_metrics short-form refs and is wrong
+                // after commit 96d89bb moved the chart query to
+                // price_history_points.
                 if let printingId = selectedPrintingId {
                     points = try await CardService.shared.fetchPrintingGradedPriceHistory(
                         slug: card.id,
                         printingId: printingId,
                         provider: provider,
-                        bucket: resolvedBucket,
+                        bucket: bucket,
                         timeframe: selectedTimeframe
                     )
                 } else {
                     points = try await CardService.shared.fetchGradedPriceHistory(
                         slug: card.id,
                         provider: provider,
-                        bucket: resolvedBucket,
+                        bucket: bucket,
                         timeframe: selectedTimeframe
                     )
                 }
@@ -1496,17 +1503,6 @@ struct CardDetailView: View {
         }
     }
 
-    private func gradeBucketToVariantRefBucket(_ bucket: String) -> String {
-        switch bucket {
-        case "LE_7": return "7_OR_LESS"
-        case "G8": return "8"
-        case "G9": return "9"
-        case "G9_5": return "9_5"
-        case "G10": return "10"
-        case "G10_PERFECT": return "10_PERFECT"
-        default: return bucket
-        }
-    }
 
     private func infoRow(label: String, value: String) -> some View {
         HStack {
