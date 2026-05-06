@@ -477,6 +477,7 @@ export const INTERNAL_ROUTE_TRUST_CONTRACTS = {
   "cron/refresh-derived-signals": cronSecretRoute("cron/internal automation"),
   "cron/refresh-set-summaries": cronSecretRoute("cron/internal automation"),
   "cron/run-scrydex-daily/[chunk]": cronSecretRoute("cron/internal automation"),
+  "cron/run-scrydex-weekly-dormant": cronSecretRoute("cron/internal automation"),
   "cron/run-scrydex-2024plus-catchup": cronSecretRoute("cron/internal automation"),
   "cron/run-scrydex-2024plus-daily/[chunk]": cronSecretRoute("cron/internal automation"),
   "cron/run-scrydex-pipeline": cronSecretRoute("cron/internal automation"),

@@ -1,3 +1,23 @@
+/**
+ * Cron: run-scrydex-weekly-dormant
+ *
+ * Phase 4 of the tiered-refresh plan. The daily Scrydex cron filters
+ * out dormant-heavy sets (>50% of matched cards have no SCRYDEX
+ * snapshot in the last 30d) so we don't burn budget refreshing the
+ * long tail. This cron picks them up once per week so their snapshots
+ * don't go completely stale.
+ *
+ * Same enqueue path as /api/cron/run-scrydex-daily — only difference
+ * is `dormantHeavyMode: "only"`, so the planner returns ONLY the
+ * dormant-heavy sets the daily cron skipped.
+ *
+ * Schedule: weekly, Sunday 06:00 UTC. Runs after recompute-refresh-tier
+ * (04:30 UTC Sunday) so tier labels are current before we pick which
+ * sets to fetch.
+ *
+ * Auth: Authorization: Bearer <CRON_SECRET>
+ */
+
 import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/auth/require";
 import { enqueuePipelineJob } from "@/lib/backfill/provider-pipeline-job-queue";
@@ -7,33 +27,17 @@ import { planScrydexDailyCapture } from "@/lib/backfill/scrydex-price-history";
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-const SCRYDEX_DAILY_CHUNK_COUNT = 8;
-
-function parseChunkParam(value: string | string[] | undefined): number {
-  const raw = Array.isArray(value) ? value[0] : value;
-  const parsed = Number.parseInt(String(raw ?? ""), 10);
-  if (!Number.isFinite(parsed) || parsed < 1 || parsed > SCRYDEX_DAILY_CHUNK_COUNT) {
-    throw new Error(`chunk must be between 1 and ${SCRYDEX_DAILY_CHUNK_COUNT}`);
-  }
-  return parsed;
-}
-
 function parseOptionalInt(value: string | null): number | undefined {
   if (!value) return undefined;
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-export async function GET(
-  req: Request,
-  context: { params: Promise<{ chunk: string }> },
-) {
+export async function GET(req: Request) {
   const auth = await requireCron(req);
   if (!auth.ok) return auth.response;
 
   try {
-    const { chunk } = await context.params;
-    const chunkNumber = parseChunkParam(chunk);
     const url = new URL(req.url);
     const matchObservations = parseOptionalInt(url.searchParams.get("observations")) ?? 100;
     const timeseriesObservations = parseOptionalInt(url.searchParams.get("timeseriesObservations")) ?? matchObservations;
@@ -46,26 +50,19 @@ export async function GET(
       return NextResponse.json({
         ok: true,
         mode: "blocked",
-        chunk: chunkNumber,
-        chunkCount: SCRYDEX_DAILY_CHUNK_COUNT,
         reason: "provider_cooldown_active",
         cooldownUntil: providerCooldown.cooldownUntil,
         providerSetIds: [],
         plannedRequests: 0,
-        plannedExpectedCardCount: 0,
-        plannedMatchedCardCount: 0,
         queuedJobs: 0,
         runs: [],
       });
     }
 
-    // Each chunk enqueues ALL sets that need coverage. The job queue dedup
-    // skips sets with active QUEUED/RUNNING/RETRY jobs, so only failed or
-    // unqueued sets get new jobs. This makes every 3-hour chunk a catch-up
-    // pass instead of a static partition.
     const plan = await planScrydexDailyCapture({
       chunkCount: 1,
       maxRequests,
+      dormantHeavyMode: "only",
     });
     const providerSetIds = plan.selectedSets.map((s) => s.providerSetId);
 
@@ -93,7 +90,9 @@ export async function GET(
           metricsObservations,
           force,
         },
-        priority: 125,
+        // Slightly lower priority than the daily cron's 125 — the
+        // daily run should always have queue precedence.
+        priority: 110,
       });
 
       if (queued.enqueued) queuedJobs += 1;
@@ -103,7 +102,6 @@ export async function GET(
         setCode: selectedSet.setCode ?? providerSetId,
         setName: selectedSet.setName ?? providerSetId,
         expectedCardCount: selectedSet.expectedCardCount,
-        providerCardCount: selectedSet.providerCardCount,
         matchedCardCount: selectedSet.matchedCardCount,
         dailyCaptureRequests,
         priorityWeight: selectedSet.priorityWeight,
@@ -114,30 +112,20 @@ export async function GET(
       });
     }
 
-    if (plan.dormantSkippedSetCount > 0) {
-      console.log(
-        "[cron/run-scrydex-daily] dormant-heavy sets excluded from this run",
-        {
-          chunk: chunkNumber,
-          mode: plan.dormantHeavyMode,
-          dormantSkippedSetCount: plan.dormantSkippedSetCount,
-          dormantSkippedCardCount: plan.dormantSkippedCardCount,
-        },
-      );
-    }
+    console.log("[cron/run-scrydex-weekly-dormant] done", {
+      mode: plan.dormantHeavyMode,
+      selectedSets: plan.selectedSets.length,
+      queuedJobs,
+      plannedRequests,
+    });
 
     return NextResponse.json({
       ok,
       mode: "queued",
-      chunk: chunkNumber,
-      chunkCount: SCRYDEX_DAILY_CHUNK_COUNT,
       generatedAt: plan.generatedAt,
       totalAvailableRequests: plan.totalAvailableRequests,
       maxRequests: plan.maxRequests,
-      recentSuccessfulRequests: plan.recentSuccessfulRequests,
       dormantHeavyMode: plan.dormantHeavyMode,
-      dormantSkippedSetCount: plan.dormantSkippedSetCount,
-      dormantSkippedCardCount: plan.dormantSkippedCardCount,
       providerSetIds,
       plannedRequests,
       selectedSets: plan.selectedSets.length,

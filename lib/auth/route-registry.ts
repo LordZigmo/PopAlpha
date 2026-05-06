@@ -52,6 +52,7 @@ export const CRON_ROUTES = [
   "cron/write-provider-timeseries",
   "cron/run-scrydex-pipeline",
   "cron/run-scrydex-daily/[chunk]",
+  "cron/run-scrydex-weekly-dormant",
   "cron/backfill-scrydex-price-history",
   "cron/run-scrydex-2024plus-catchup",
   "cron/run-scrydex-2024plus-daily/[chunk]",

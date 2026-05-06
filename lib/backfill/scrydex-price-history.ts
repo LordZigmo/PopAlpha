@@ -213,6 +213,16 @@ export type ScrydexDailyCapturePlanChunk = {
   selectedSets: ScrydexDailyCapturePlanRow[];
 };
 
+/**
+ * Phase 4 of tiered-refresh: dormant-tier exclusion.
+ *   "exclude" — daily default: skip sets where >50% of matched cards are
+ *               dormant (no SCRYDEX snapshot in 30d).
+ *   "only"    — weekly cron: include ONLY dormant-heavy sets, so they get
+ *               at least one fetch per week.
+ *   "all"     — escape hatch (manual triggers, debug): no dormant filter.
+ */
+export type DormantHeavyMode = "exclude" | "only" | "all";
+
 export type ScrydexDailyCapturePlan = {
   ok: true;
   generatedAt: string;
@@ -220,6 +230,9 @@ export type ScrydexDailyCapturePlan = {
   totalAvailableRequests: number;
   maxRequests: number;
   recentSuccessfulRequests: number;
+  dormantHeavyMode: DormantHeavyMode;
+  dormantSkippedSetCount: number;
+  dormantSkippedCardCount: number;
   selectedSets: ScrydexDailyCapturePlanRow[];
   skippedSets: ScrydexDailyCapturePlanRow[];
   chunks: ScrydexDailyCapturePlanChunk[];
@@ -717,6 +730,72 @@ export async function loadScrydexSetFootprints(opts: {
   return footprints;
 }
 
+/**
+ * Phase 4 helper: count dormant-tier cards per provider set.
+ *
+ * Joins provider_card_map (MATCHED) to canonical_cards.refresh_tier and
+ * returns the per-set count of dormant cards. Used by
+ * planScrydexDailyCapture to filter dormant-heavy sets out of the daily
+ * fetch (and to surface them on the weekly cron). Threshold logic
+ * (>50% dormant = skip) lives at the call site so the helper stays
+ * dumb.
+ */
+async function loadDormantCardCountsBySet(
+  providerSetIds: string[],
+): Promise<Map<string, number>> {
+  const supabase = dbAdmin();
+  const counts = new Map<string, number>();
+  const ids = normalizeStringList(providerSetIds);
+  if (ids.length === 0) return counts;
+
+  // Batch in chunks of 200 to keep the IN-list under PostgREST's URL limit.
+  for (const chunk of chunkValues(ids, 200)) {
+    const rows: Array<{ provider_set_id: string; canonical_slug: string | null }> = [];
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await supabase
+        .from("provider_card_map")
+        .select("provider_set_id, canonical_slug")
+        .eq("provider", PROVIDER)
+        .eq("mapping_status", "MATCHED")
+        .in("provider_set_id", chunk)
+        .range(from, from + 999)
+        .returns<Array<{ provider_set_id: string; canonical_slug: string | null }>>();
+      if (error) throw new Error(`provider_card_map(load dormant counts): ${error.message}`);
+      const batch = data ?? [];
+      rows.push(...batch);
+      if (batch.length < 1000) break;
+    }
+    if (rows.length === 0) continue;
+
+    // Distinct canonical slugs across this batch — look them up against
+    // canonical_cards.refresh_tier in one query, then walk back to count
+    // dormants per set.
+    const distinctSlugs = [...new Set(rows.map((r) => r.canonical_slug).filter((s): s is string => !!s))];
+    if (distinctSlugs.length === 0) continue;
+    const dormantSlugs = new Set<string>();
+    for (const slugChunk of chunkValues(distinctSlugs, 1000)) {
+      const { data, error } = await supabase
+        .from("canonical_cards")
+        .select("slug, refresh_tier")
+        .eq("refresh_tier", "dormant")
+        .in("slug", slugChunk);
+      if (error) throw new Error(`canonical_cards(load dormant tiers): ${error.message}`);
+      for (const row of (data ?? []) as Array<{ slug: string }>) {
+        if (row.slug) dormantSlugs.add(row.slug);
+      }
+    }
+
+    for (const row of rows) {
+      const setId = normalizeText(row.provider_set_id);
+      const slug = row.canonical_slug;
+      if (!setId || !slug || !dormantSlugs.has(slug)) continue;
+      counts.set(setId, (counts.get(setId) ?? 0) + 1);
+    }
+  }
+
+  return counts;
+}
+
 function buildPriorityRankMap(providerSetIds: string[]): Map<string, number> {
   const normalized = normalizeStringList(providerSetIds);
   const size = normalized.length;
@@ -987,14 +1066,41 @@ export async function planScrydexDailyCapture(opts: {
   lookbackHours?: number;
   requestBudgetHeadroom?: number;
   requestBudgetMinSweepPct?: number;
+  dormantHeavyMode?: DormantHeavyMode;
 } = {}): Promise<ScrydexDailyCapturePlan> {
   const explicitSetIds = normalizeStringList(opts.providerSetIds ?? []);
   const chunkCount = Math.max(1, Math.floor(opts.chunkCount ?? 8));
   const lookbackHours = Math.max(1, Math.floor(opts.lookbackHours ?? DEFAULT_DAILY_REQUEST_BUDGET_LOOKBACK_HOURS));
+  const dormantHeavyMode: DormantHeavyMode = opts.dormantHeavyMode ?? "exclude";
   const footprints = await loadScrydexSetFootprints({ providerSetIds: explicitSetIds });
-  const candidateFootprints = footprints.filter((footprint) => (
+  const initialCandidateFootprints = footprints.filter((footprint) => (
     footprint.matchedCardCount > 0 && footprint.dailyCaptureRequests > 0
   ));
+
+  // Phase 4: filter by dormant-heaviness. "exclude" drops sets that are
+  // mostly dormant cards from the daily plan; "only" keeps only those
+  // sets (used by the weekly dormant cron); "all" disables the filter
+  // for manual / debug triggers.
+  let candidateFootprints = initialCandidateFootprints;
+  let dormantSkippedSetCount = 0;
+  let dormantSkippedCardCount = 0;
+  if (dormantHeavyMode !== "all" && initialCandidateFootprints.length > 0) {
+    const candidateSetIds = initialCandidateFootprints.map((f) => f.providerSetId);
+    const dormantCountsBySet = await loadDormantCardCountsBySet(candidateSetIds);
+    candidateFootprints = initialCandidateFootprints.filter((footprint) => {
+      const dormantCount = dormantCountsBySet.get(footprint.providerSetId) ?? 0;
+      const dormantPct = footprint.matchedCardCount > 0
+        ? dormantCount / footprint.matchedCardCount
+        : 0;
+      const isDormantHeavy = dormantPct > 0.5;
+      const keep = dormantHeavyMode === "only" ? isDormantHeavy : !isDormantHeavy;
+      if (!keep) {
+        dormantSkippedSetCount += 1;
+        dormantSkippedCardCount += footprint.matchedCardCount;
+      }
+      return keep;
+    });
+  }
   const totalAvailableRequests = candidateFootprints.reduce((sum, footprint) => (
     sum + Math.max(0, footprint.dailyCaptureRequests)
   ), 0);
@@ -1080,6 +1186,9 @@ export async function planScrydexDailyCapture(opts: {
     totalAvailableRequests,
     maxRequests,
     recentSuccessfulRequests,
+    dormantHeavyMode,
+    dormantSkippedSetCount,
+    dormantSkippedCardCount,
     selectedSets,
     skippedSets,
     chunks,
