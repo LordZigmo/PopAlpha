@@ -684,16 +684,23 @@ export default async function CanonicalCardPage({
       })
     ),
     buildAssetViewModel(slug, "RAW", 30, rawPrintingIdForQuery),
-    gradedVariantRefsForActiveBucket.length > 0
+    gradedVariantRefsForActiveBucket.length > 0 && selectedPrinting && activeBucket
       ? supabase
           .from("public_price_history")
           .select("variant_ref, price, currency, ts")
           .eq("canonical_slug", slug)
           .eq("provider", "SCRYDEX")
           .eq("source_window", "snapshot")
-          .in("variant_ref", gradedVariantRefsForActiveBucket.map((entry) => entry.variantRef))
+          // price_history_points stores graded variant_refs in the long
+          // form `<printingId>::<providerVariantId>::GRADED::PROVIDER::BUCKET::RAW`,
+          // not the short form buildGradedVariantRef() returns. Querying
+          // with .in([short-refs]) silently matches zero rows. Anchor on
+          // the GRADED + bucket + RAW tail and let any provider through;
+          // the loop below re-keys each result to the short-form ref so
+          // gradedProviderCards.get(entry.variantRef) keeps working.
+          .ilike("variant_ref", `${selectedPrinting.id}::%::GRADED::%::${activeBucket}::RAW`)
           .order("ts", { ascending: false })
-          .limit(Math.max(gradedVariantRefsForActiveBucket.length * 4, 12))
+          .limit(Math.max(gradedVariantRefsForActiveBucket.length * 12, 48))
       : Promise.resolve({ data: [] as GradedPriceHistoryRow[] }),
     (() => {
       let q = supabase
@@ -764,10 +771,22 @@ export default async function CanonicalCardPage({
   const gradedPriceHistoryRows = (gradedPriceHistoryQuery.data ?? []) as GradedPriceHistoryRow[];
   const rawProviderHistoryRows = (rawProviderHistoryQuery.data ?? []) as RawProviderHistoryRow[];
   const rawParityStatus = rawParityQuery.data?.parity_status ?? "UNKNOWN";
+  // Re-key each long-form variant_ref (`<printing>::<provVarId>::GRADED::PROVIDER::BUCKET::RAW`)
+  // to the short-form ref buildGradedVariantRef() emits, so the downstream
+  // gradedProviderCards lookup against entry.variantRef matches. Rows that
+  // don't parse (legacy / non-graded ones) are skipped. ts-desc ordering
+  // means the first match per provider is the latest.
+  const GRADED_LONG_REF_RE = /^([0-9a-f-]{36})::.*::GRADED::(PSA|CGC|BGS|TAG)::(LE_7|G8|G9|G9_5|G10|G10_PERFECT)::RAW$/;
   const latestGradedPriceByVariantRef = new Map<string, GradedPriceHistoryRow>();
   for (const row of gradedPriceHistoryRows) {
-    if (!row.variant_ref || latestGradedPriceByVariantRef.has(row.variant_ref)) continue;
-    latestGradedPriceByVariantRef.set(row.variant_ref, row);
+    if (!row.variant_ref) continue;
+    const match = row.variant_ref.match(GRADED_LONG_REF_RE);
+    if (!match) continue;
+    const provider = match[2] as "PSA" | "CGC" | "BGS" | "TAG";
+    const bucket = match[3] as GradeBucket;
+    const shortRef = buildGradedVariantRef(match[1], provider, bucket);
+    if (latestGradedPriceByVariantRef.has(shortRef)) continue;
+    latestGradedPriceByVariantRef.set(shortRef, row);
   }
 
   const snapshotData = selectedSnapshotGrade ? gradeSnapMap[selectedSnapshotGrade] : null;
