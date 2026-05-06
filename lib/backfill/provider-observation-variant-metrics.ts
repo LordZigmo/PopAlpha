@@ -11,6 +11,10 @@ import {
 import type { AnalyticsPipelineProvider } from "@/lib/backfill/provider-registry";
 import { retrySupabaseWriteOperation } from "@/lib/backfill/supabase-write-retry";
 import { buildRawVariantRef } from "@/lib/identity/variant-ref.mjs";
+import {
+  PIPELINE_TIER_SKIP_ENABLED,
+  shouldRefreshVariantMetrics,
+} from "@/lib/backfill/refresh-tier-skip-policy";
 
 const JOB = "provider_observation_variant_metrics";
 const DEFAULT_OBSERVATIONS_PER_RUN = process.env.PROVIDER_OBSERVATION_VARIANT_METRICS_OBSERVATIONS_PER_RUN
@@ -57,6 +61,7 @@ type ObservationRow = {
 type CandidateRow = {
   mapping: ProviderCardMapRow;
   observation: ObservationRow;
+  tier: string | null;
 };
 
 type PriceHistoryCountRow = {
@@ -108,6 +113,11 @@ type VariantMetricsResult = {
   observationsSkippedCondition: number;
   observationsSkippedNonSingle: number;
   metricsRowsUpserted: number;
+  // Phase 3 tier-skip telemetry: number of would-be variant_metrics
+  // upserts we declined to do because the card's refresh_tier is
+  // sparse/dormant (or warm with no new observation since the last
+  // metrics row).
+  tieredMetricsSkipped: number;
   signalRowsUpdated: number;
   variantSignalsLatestRows: number;
   firstError: string | null;
@@ -370,7 +380,35 @@ async function loadCandidateRows(params: {
       if (!mapping || mapping.mapping_status !== "MATCHED" || !mapping.canonical_slug || !mapping.printing_id) {
         continue;
       }
-      candidateRows.push({ mapping, observation });
+      candidateRows.push({ mapping, observation, tier: null });
+    }
+
+    // Phase 3 tier-skip: batch-load refresh_tier for candidate slugs.
+    // Same pattern as the timeseries stage; lets shouldRefreshVariantMetrics
+    // skip warm/sparse/dormant cards in the per-row loop below.
+    if (PIPELINE_TIER_SKIP_ENABLED && candidateRows.length > 0) {
+      const candidateSlugs = [...new Set(
+        candidateRows
+          .map((row) => row.mapping.canonical_slug)
+          .filter((slug): slug is string => typeof slug === "string" && slug.length > 0),
+      )];
+      if (candidateSlugs.length > 0) {
+        const tierSupabase = dbAdmin();
+        const { data: tierData, error: tierError } = await tierSupabase
+          .from("canonical_cards")
+          .select("slug, refresh_tier")
+          .in("slug", candidateSlugs);
+        if (!tierError && tierData) {
+          const tierBySlug = new Map<string, string>();
+          for (const row of tierData as Array<{ slug: string; refresh_tier: string | null }>) {
+            if (row.slug && row.refresh_tier) tierBySlug.set(row.slug, row.refresh_tier);
+          }
+          for (const candidate of candidateRows) {
+            const slug = candidate.mapping.canonical_slug;
+            candidate.tier = slug ? (tierBySlug.get(slug) ?? null) : null;
+          }
+        }
+      }
     }
 
     const existingMetricsByKey = !params.force && candidateRows.length > 0
@@ -453,6 +491,7 @@ export async function runProviderObservationVariantMetrics(opts: {
   let observationsSkippedCondition = 0;
   let observationsSkippedNonSingle = 0;
   let metricsRowsUpserted = 0;
+  let tieredMetricsSkipped = 0;
   let signalRowsUpdated = 0;
   let variantSignalsLatestRows = 0;
   const sampleRows: MetricsSample[] = [];
@@ -539,6 +578,23 @@ export async function runProviderObservationVariantMetrics(opts: {
       const printingId = String(row.mapping.printing_id);
       const variantRef = buildRawVariantRef(printingId);
       const observedPrice = toFiniteNumber(row.observation.observed_price);
+
+      // Phase 3 tier-skip: sparse/dormant cards skip variant_metrics
+      // updates entirely (they accumulate cost with no analytic value
+      // because their stats are dominated by single observations).
+      // Hot tier always; warm currently falls through to "refresh"
+      // because existingMetricsByKey is scoped inside loadCandidateRows
+      // and not visible here — a follow-up could plumb it through for a
+      // tighter warm gate. The big sparse/dormant cohort is the main
+      // saving regardless.
+      if (!shouldRefreshVariantMetrics({
+        tier: row.tier,
+        observedAtIso: row.observation.observed_at,
+        currentMetricsAsOfIso: null,
+      })) {
+        tieredMetricsSkipped += 1;
+        continue;
+      }
       const stagedHistoryPoints = parseHistoryPoints(row.observation.history_points_30d);
       const analytics = extractProviderAnalytics({
         provider: opts.provider,
@@ -666,6 +722,7 @@ export async function runProviderObservationVariantMetrics(opts: {
     observationsSkippedCondition,
     observationsSkippedNonSingle,
     metricsRowsUpserted,
+    tieredMetricsSkipped,
     signalRowsUpdated,
     variantSignalsLatestRows,
     firstError,

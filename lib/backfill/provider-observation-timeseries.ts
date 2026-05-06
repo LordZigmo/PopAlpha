@@ -12,6 +12,10 @@ import type { AnalyticsPipelineProvider } from "@/lib/backfill/provider-registry
 import { type VariantSignalRefreshKey } from "@/lib/backfill/provider-derived-signals";
 import { buildProviderHistoryVariantRef } from "@/lib/identity/variant-ref.mjs";
 import { convertToUsd } from "@/lib/pricing/fx";
+import {
+  PIPELINE_TIER_SKIP_ENABLED,
+  shouldWriteHistoryPoint,
+} from "@/lib/backfill/refresh-tier-skip-policy";
 // TODO: re-enable after debugging pipeline failures
 // import { writeConditionPrices } from "@/lib/backfill/condition-price-writer";
 // import type { ConditionPriceEntry } from "@/lib/backfill/scrydex-condition-price-extract";
@@ -84,6 +88,7 @@ type ObservationRow = {
 type CandidateRow = {
   mapping: ProviderCardMapRow;
   observation: ObservationRow;
+  tier: string | null;
 };
 
 type PriceSnapshotWriteRow = {
@@ -141,6 +146,10 @@ type TimeseriesResult = {
   observationsSkippedCondition: number;
   snapshotsUpserted: number;
   historyPointsUpserted: number;
+  // Phase 3 tier-skip telemetry: number of would-be price_history_point
+  // writes we declined to do because the card's refresh_tier is sparse/
+  // dormant or warm-with-recent-write.
+  tieredHistorySkipped: number;
   firstError: string | null;
   sampleWrites: TimeseriesSample[];
   touchedVariantKeys: VariantSignalRefreshKey[];
@@ -365,7 +374,7 @@ async function loadCandidateRows(params: {
     }
 
     return {
-      rows: [{ mapping, observation: obsData }],
+      rows: [{ mapping, observation: obsData, tier: null }],
       scanned: 1,
       skippedAlreadyWritten: 0,
     };
@@ -432,7 +441,35 @@ async function loadCandidateRows(params: {
       const providerKey = buildProviderCardMapKey(observation.provider_card_id, observation.provider_variant_id);
       const mapping = providerCardMapByKey.get(providerKey) ?? null;
       if (!mapping || mapping.mapping_status !== "MATCHED" || !mapping.canonical_slug) continue;
-      candidateRows.push({ mapping, observation });
+      candidateRows.push({ mapping, observation, tier: null });
+    }
+
+    // Phase 3 tier-skip: batch-load refresh_tier for all candidate slugs
+    // so the write loop below can decide per-row whether to emit a
+    // price_history_point. Only fired when the env flag is enabled.
+    if (PIPELINE_TIER_SKIP_ENABLED && candidateRows.length > 0) {
+      const candidateSlugs = [...new Set(
+        candidateRows
+          .map((row) => row.mapping.canonical_slug)
+          .filter((slug): slug is string => typeof slug === "string" && slug.length > 0),
+      )];
+      if (candidateSlugs.length > 0) {
+        const tierSupabase = dbAdmin();
+        const { data: tierData, error: tierError } = await tierSupabase
+          .from("canonical_cards")
+          .select("slug, refresh_tier")
+          .in("slug", candidateSlugs);
+        if (!tierError && tierData) {
+          const tierBySlug = new Map<string, string>();
+          for (const row of tierData as Array<{ slug: string; refresh_tier: string | null }>) {
+            if (row.slug && row.refresh_tier) tierBySlug.set(row.slug, row.refresh_tier);
+          }
+          for (const candidate of candidateRows) {
+            const slug = candidate.mapping.canonical_slug;
+            candidate.tier = slug ? (tierBySlug.get(slug) ?? null) : null;
+          }
+        }
+      }
     }
 
     let existingWriteState: Awaited<ReturnType<typeof loadExistingWriteState>> | null = null;
@@ -697,6 +734,7 @@ export async function runProviderObservationTimeseries(opts: {
   let observationsSkippedCondition = 0;
   let snapshotsUpserted = 0;
   let historyPointsUpserted = 0;
+  let tieredHistorySkipped = 0;
   const sampleWrites: TimeseriesSample[] = [];
   let touchedVariantKeys: VariantSignalRefreshKey[] = [];
 
@@ -807,27 +845,46 @@ export async function runProviderObservationTimeseries(opts: {
         observed_at: row.observation.observed_at,
       });
 
-      historyRows.push({
-        canonical_slug: row.mapping.canonical_slug,
-        variant_ref: historyVariantRef,
-        provider: opts.provider,
-        ts: row.observation.observed_at,
-        price: observedPriceUsd,
-        currency: "USD",
-        source_window: "snapshot",
+      // Phase 3 tier-skip: per-card decision on writing the history
+      // point. Snapshots are still upserted above (cheap, used by the
+      // homepage). Anchor history points stay coupled to the snapshot
+      // history point — if we skip the snapshot entry, we skip its
+      // anchors too. For sparse/dormant the policy returns false; for
+      // warm without per-row last-snapshot state visible here, the
+      // policy currently falls through to "write" (acceptable — the
+      // sparse/dormant skip is the biggest cohort).
+      const writeHistory = shouldWriteHistoryPoint({
+        tier: row.tier,
+        observedAtIso: row.observation.observed_at,
+        observedPriceUsd,
+        latestSnapshotObservedAtIso: null,
+        latestSnapshotPriceUsd: null,
       });
-
-      for (const point of parseTrendAnchorPoints(row.observation.metadata)) {
-        const anchorPriceUsd = convertToUsd(point.price, point.currency);
+      if (!writeHistory) {
+        tieredHistorySkipped += 1;
+      } else {
         historyRows.push({
           canonical_slug: row.mapping.canonical_slug,
           variant_ref: historyVariantRef,
           provider: opts.provider,
-          ts: point.ts,
-          price: anchorPriceUsd,
+          ts: row.observation.observed_at,
+          price: observedPriceUsd,
           currency: "USD",
-          source_window: point.sourceWindow,
+          source_window: "snapshot",
         });
+
+        for (const point of parseTrendAnchorPoints(row.observation.metadata)) {
+          const anchorPriceUsd = convertToUsd(point.price, point.currency);
+          historyRows.push({
+            canonical_slug: row.mapping.canonical_slug,
+            variant_ref: historyVariantRef,
+            provider: opts.provider,
+            ts: point.ts,
+            price: anchorPriceUsd,
+            currency: "USD",
+            source_window: point.sourceWindow,
+          });
+        }
       }
 
       if (sampleWrites.length < 25) {
@@ -921,6 +978,7 @@ export async function runProviderObservationTimeseries(opts: {
     observationsSkippedCondition,
     snapshotsUpserted,
     historyPointsUpserted,
+    tieredHistorySkipped,
     firstError,
     sampleWrites,
     touchedVariantKeys,
