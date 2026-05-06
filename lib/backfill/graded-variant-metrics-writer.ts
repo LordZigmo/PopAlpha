@@ -180,6 +180,39 @@ function derivePriceChangesCount30d(points: HistoryPoint[]): number {
   return changes;
 }
 
+// ── card_metrics analytics primitives ───────────────────────────────────────
+// Used by the per-(slug, printing, bucket) and per-(slug, NULL, bucket)
+// rollups that fill graded card_metrics rows so the iOS Market Summary
+// panel + web Grade Board reference price have data for every card.
+
+function pricesWithin(points: HistoryPoint[], windowMs: number): number[] {
+  const cutoff = Date.now() - windowMs;
+  const out: number[] = [];
+  for (const p of points) {
+    const t = Date.parse(p.ts);
+    if (Number.isFinite(t) && t >= cutoff) out.push(p.price);
+  }
+  return out;
+}
+
+function median(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? roundMetric((sorted[mid - 1] + sorted[mid]) / 2)
+    : roundMetric(sorted[mid]);
+}
+
+function trimmedMedian(values: number[], trimPct: number = 0.1): number | null {
+  if (values.length === 0) return null;
+  if (values.length < 5) return median(values); // not enough to trim
+  const sorted = [...values].sort((a, b) => a - b);
+  const drop = Math.floor(sorted.length * trimPct);
+  const trimmed = sorted.slice(drop, sorted.length - drop);
+  return median(trimmed);
+}
+
 // ── Signal derivation ──────────────────────────────────────────────────────
 // Mirrors public.refresh_derived_signals_for_variants from migration
 // 20260301223000_refresh_derived_signals_for_variants.sql exactly.
@@ -245,6 +278,14 @@ export type GradedWriterResult = {
   groupsComputed: number;
   variant_metrics_upserted: number;
   signals_with_full_threshold: number;
+  /**
+   * card_metrics graded rows upserted (per-printing rows + canonical
+   * `printing_id IS NULL` aggregate rows). Closes the ~17%-of-catalog
+   * Market Summary coverage gap (3,200 slugs that previously had
+   * graded variant_metrics + price_history_points rows but zero
+   * card_metrics graded rows).
+   */
+  card_metrics_upserted: number;
   firstError: string | null;
 };
 
@@ -277,6 +318,7 @@ export async function runGradedVariantMetricsWriter(args: {
   let groupsComputed = 0;
   let variant_metrics_upserted = 0;
   let signals_with_full_threshold = 0;
+  let card_metrics_upserted = 0;
 
   // 1. Resolve scope. We pull slugs from canonical_cards rather than
   // from price_history_points so the caller can run "process this set"
@@ -295,6 +337,7 @@ export async function runGradedVariantMetricsWriter(args: {
       groupsComputed: 0,
       variant_metrics_upserted: 0,
       signals_with_full_threshold: 0,
+      card_metrics_upserted: 0,
       firstError: `canonical_cards select failed: ${slugErr.message}`,
     };
   }
@@ -308,21 +351,37 @@ export async function runGradedVariantMetricsWriter(args: {
     slugsScanned += chunk.length;
 
     // 2a. Fetch graded history points for this chunk in last 30d.
-    const { data: histRowsRaw, error: histErr } = await supabase
-      .from("price_history_points")
-      .select("canonical_slug, variant_ref, ts, price, provider")
-      .in("canonical_slug", chunk)
-      .like("variant_ref", "%::GRADED::%")
-      .gte("ts", cutoff30dIso)
-      .order("ts", { ascending: true });
-
-    if (histErr) {
-      firstError = firstError ?? `price_history_points select failed (chunk ${i}): ${histErr.message}`;
-      log.error(`[graded-vm-writer] chunk ${i} fetch error: ${histErr.message}`);
+    // PostgREST caps default page size at 1000 rows. A chunk of 100 slugs
+    // averaging ~30 graded points each easily exceeds that, so we page
+    // explicitly to avoid silently dropping points (which would skew
+    // median/low/high downstream). Bounded at 50k rows per chunk so a
+    // pathological set can't blow memory.
+    const PAGE = 1000;
+    const HIST_HARD_CAP = 50_000;
+    const histRows: GradedHistoryRow[] = [];
+    let pagedFetchError: string | null = null;
+    for (let from = 0; from < HIST_HARD_CAP; from += PAGE) {
+      const { data: pageRowsRaw, error: pageErr } = await supabase
+        .from("price_history_points")
+        .select("canonical_slug, variant_ref, ts, price, provider")
+        .in("canonical_slug", chunk)
+        .like("variant_ref", "%::GRADED::%")
+        .gte("ts", cutoff30dIso)
+        .order("ts", { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (pageErr) {
+        pagedFetchError = pageErr.message;
+        break;
+      }
+      const batch = (pageRowsRaw ?? []) as GradedHistoryRow[];
+      histRows.push(...batch);
+      if (batch.length < PAGE) break;
+    }
+    if (pagedFetchError) {
+      firstError = firstError ?? `price_history_points select failed (chunk ${i}): ${pagedFetchError}`;
+      log.error(`[graded-vm-writer] chunk ${i} fetch error: ${pagedFetchError}`);
       continue;
     }
-
-    const histRows = (histRowsRaw ?? []) as GradedHistoryRow[];
     graded_history_rows_loaded += histRows.length;
 
     // 2b. Group by (canonical_slug, printingId, provider, bucket).
@@ -416,6 +475,86 @@ export async function runGradedVariantMetricsWriter(args: {
       firstError = firstError ?? `upsert failed (chunk ${i}): ${msg}`;
       log.error(`[graded-vm-writer] chunk ${i} upsert error: ${msg}`);
     }
+
+    // 2e. card_metrics rollup. Two grouping levels per (slug, bucket):
+    //   - per-printing: keyed (slug, printing_id, bucket); aggregates
+    //     across providers within that printing.
+    //   - canonical: keyed (slug, NULL, bucket); aggregates across all
+    //     printings for that bucket. Required so iOS Market Summary's
+    //     "prefer canonical, fall back to printing-scoped" picker has a
+    //     row to lock onto for cards that don't have a printing already
+    //     selected by the time the panel renders.
+    const cmGroups = new Map<
+      string,
+      { canonicalSlug: string; printingId: string | null; bucket: GradedBucket; points: HistoryPoint[] }
+    >();
+    for (const row of histRows) {
+      const parsed = parseGradedVariantRef(row.variant_ref);
+      if (!parsed) continue;
+      if (!Number.isFinite(row.price) || row.price <= 0) continue;
+      const point: HistoryPoint = { ts: row.ts, price: row.price };
+
+      const printingKey = `${row.canonical_slug}::${parsed.printingId}::${parsed.bucket}`;
+      let pg = cmGroups.get(printingKey);
+      if (!pg) {
+        pg = { canonicalSlug: row.canonical_slug, printingId: parsed.printingId, bucket: parsed.bucket, points: [] };
+        cmGroups.set(printingKey, pg);
+      }
+      pg.points.push(point);
+
+      const canonicalKey = `${row.canonical_slug}::NULL::${parsed.bucket}`;
+      let cg = cmGroups.get(canonicalKey);
+      if (!cg) {
+        cg = { canonicalSlug: row.canonical_slug, printingId: null, bucket: parsed.bucket, points: [] };
+        cmGroups.set(canonicalKey, cg);
+      }
+      cg.points.push(point);
+    }
+
+    if (cmGroups.size > 0) {
+      const cmWrites: Array<Record<string, unknown>> = [];
+      for (const g of cmGroups.values()) {
+        const w7 = pricesWithin(g.points, 7 * 24 * 60 * 60 * 1000);
+        const w30 = pricesWithin(g.points, THIRTY_DAYS_MS);
+        if (w30.length === 0) continue;
+        cmWrites.push({
+          canonical_slug: g.canonicalSlug,
+          printing_id: g.printingId,
+          grade: g.bucket,
+          median_7d: median(w7),
+          median_30d: median(w30),
+          low_30d: Math.min(...w30),
+          high_30d: Math.max(...w30),
+          trimmed_median_30d: trimmedMedian(w30),
+          snapshot_count_30d: w30.length,
+          updated_at: nowIso,
+        });
+      }
+
+      if (cmWrites.length > 0) {
+        try {
+          const data = await retrySupabaseWriteOperation(
+            "graded_card_metrics(upsert)",
+            async () => {
+              const { data, error } = await supabase
+                .from("card_metrics")
+                // NULLS NOT DISTINCT on the unique index means
+                // (slug, NULL, bucket) is one stable row, not duplicated.
+                .upsert(cmWrites, { onConflict: "canonical_slug,printing_id,grade" })
+                .select("id");
+              if (error) throw new Error(error.message);
+              return (data ?? []) as Array<{ id: string }>;
+            },
+          );
+          card_metrics_upserted += data.length;
+          log.info(`[graded-cm-writer] chunk ${i} upserted ${data.length} card_metrics rows`);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          firstError = firstError ?? `card_metrics upsert failed (chunk ${i}): ${msg}`;
+          log.error(`[graded-cm-writer] chunk ${i} upsert error: ${msg}`);
+        }
+      }
+    }
   }
 
   return {
@@ -427,6 +566,7 @@ export async function runGradedVariantMetricsWriter(args: {
     groupsComputed,
     variant_metrics_upserted,
     signals_with_full_threshold,
+    card_metrics_upserted,
     firstError,
   };
 }
