@@ -20,12 +20,7 @@ export const DBADMIN_ALLOWED_FILES = [
   "app/api/ebay/deletion-notification/route.ts",
   "app/api/holdings/route.ts",
   "app/api/holdings/bulk-import/route.ts",
-  // 2026-05-06: iap+webhook registry entries reverted alongside the
-  // route registrations because the implementation files (app/api/iap/,
-  // app/api/webhooks/apple/, lib/iap/) are still uncommitted in working
-  // tree, breaking Vercel's check:public-writes ("no write route file
-  // was found"). Re-add when committing the matching feature files.
-  // "app/api/iap/verify/route.ts",
+  "app/api/iap/verify/route.ts",
   "app/api/personalization/events/route.ts",
   "app/api/personalization/explanation/route.ts",
   "app/api/personalization/profile/route.ts",
@@ -33,18 +28,18 @@ export const DBADMIN_ALLOWED_FILES = [
   "app/api/portfolio/activity/route.ts",
   "app/api/pro/signals/route.ts",
   "app/api/scan/identify/route.ts",
-  // "app/api/webhooks/apple/notifications/route.ts",
+  "app/api/webhooks/apple/notifications/route.ts",
   "lib/data/canonical-card-match.ts",
   "lib/db/admin.ts",
   "lib/entitlements.ts",
-  // "lib/iap/upsert-subscription.ts",
+  "lib/iap/upsert-subscription.ts",
 ];
 
 export const DBADMIN_ALLOWED_ROUTE_KEYS = [
   "cards/[slug]/view",
   "holdings",
   "holdings/bulk-import",
-  // "iap/verify",            // re-add with the iap WIP commit
+  "iap/verify",
   "personalization/events",
   "personalization/explanation",
   "personalization/profile",
@@ -52,7 +47,7 @@ export const DBADMIN_ALLOWED_ROUTE_KEYS = [
   "portfolio/activity",
   "pro/signals",
   "scan/identify",
-  // "webhooks/apple/notifications",  // re-add with the webhook WIP commit
+  "webhooks/apple/notifications",
 ];
 
 export const INTERNAL_ADMIN_PAGE_ROOTS = [
@@ -529,19 +524,15 @@ export const PUBLIC_WRITE_ROUTE_CONTRACTS = {
     dbContract: "server-only insert into public.ebay_deletion_notification_receipts after verified signature",
     recommendedAction: "keep quarantine-first; do not trigger destructive deletion work directly from the webhook route",
   },
-  // 2026-05-06: webhooks/apple/notifications classification reverted —
-  // route file uncommitted, breaking Vercel's check:public-writes guard
-  // ("no write route file was found"). Re-add this block when committing
-  // app/api/webhooks/apple/notifications/route.ts.
-  // "webhooks/apple/notifications": {
-  //   routeClass: "ingest",
-  //   access: "webhook",
-  //   methods: ["POST"],
-  //   writeType: "webhook_receiver",
-  //   abuseControls: ["apple_jws_verification", "x5c_chain_validation", "bundle_id_check", "structured_logging"],
-  //   dbContract: "server-only update of public.apple_subscriptions (existing row only) after verified ASSN V2 + inner transaction JWS chain",
-  //   recommendedAction: "keep update-by-original_transaction_id only; do not let webhook create new entitlement rows — the iOS /api/iap/verify path is the only writer that can associate a Clerk user",
-  // },
+  "webhooks/apple/notifications": {
+    routeClass: "ingest",
+    access: "webhook",
+    methods: ["POST"],
+    writeType: "webhook_receiver",
+    abuseControls: ["apple_jws_verification", "x5c_chain_validation", "bundle_id_check", "structured_logging"],
+    dbContract: "server-only update of public.apple_subscriptions (existing row only) after verified ASSN V2 + inner transaction JWS chain",
+    recommendedAction: "keep update-by-original_transaction_id only; do not let webhook create new entitlement rows — the iOS /api/iap/verify path is the only writer that can associate a Clerk user",
+  },
   "personalization/events": {
     routeClass: "public",
     access: "anon_or_authenticated",
@@ -1488,10 +1479,6 @@ export const FIXED_ROUTE_CLASSIFICATIONS = {
   // "admin/variant-tokens": "admin" — reverted 2026-04-29.
   "cron/process-ebay-deletion-receipts": "cron",
   "ebay/deletion-notification": "ingest",
-  // 2026-05-06: iap/webhook entries reverted alongside the registry +
-  // PUBLIC_WRITE_ROUTE_CONTRACTS + DBADMIN_ALLOWED_FILES entries because
-  // their route files (app/api/iap/, app/api/webhooks/apple/) are still
-  // uncommitted in working tree. Re-add when shipping the implementation.
-  // "iap/verify": "user",
-  // "webhooks/apple/notifications": "ingest",
+  "iap/verify": "user",
+  "webhooks/apple/notifications": "ingest",
 };
