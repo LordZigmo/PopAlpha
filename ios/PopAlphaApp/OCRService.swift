@@ -84,6 +84,28 @@ enum OCRService {
         async let fullPass = recognizeText(
             in: image,
             maxCandidatesPerObservation: maxCandidatesPerObservation,
+            // Spatial filtering for card_number extraction on the full
+            // pass: only consider text whose bounding-box CENTER is in
+            // the bottom ~22% of the image. Pokemon's card_number has
+            // printed in one of the lower corners ("X/Y" with the set
+            // size as Y) for decades — that layout convention lets us
+            // reject false positives from middle/top regions (attack
+            // damage like "30/3", deck-set notation, set symbols that
+            // visually resemble fractions).
+            //
+            // Real-device 2026-05-06: a Pokemon TCG Classic Chansey
+            // (deck Venusaur, card #15) was misidentified as Charizard
+            // because OCR's full-pass picked up a "3/Y" pattern from
+            // somewhere mid-card and the regex couldn't tell that "3"
+            // wasn't the actual card_number. With this filter, only
+            // bottom-region observations contribute to the cardNumbers
+            // list — text matching "X/Y" up in attack-damage territory
+            // is ignored.
+            //
+            // setHint extraction is unaffected because it scans all
+            // observations regardless of position (set names print
+            // higher up — usually right under the card name).
+            restrictCardNumbersToBottomRegion: true,
         )
         async let stripPass: ([String], String?) = {
             // Bottom 18% comfortably contains the collector number on
@@ -96,6 +118,13 @@ enum OCRService {
             return await recognizeText(
                 in: strip,
                 maxCandidatesPerObservation: maxCandidatesPerObservation,
+                // Strip pass already operates on the bottom 18% of the
+                // input, so all of its observations are implicitly in
+                // the card's bottom region. Applying the spatial
+                // filter here would compound — bottom 22% of the strip
+                // is the bottom ~4% of the original, which can miss
+                // the card_number row entirely. Disabled.
+                restrictCardNumbersToBottomRegion: false,
             )
         }()
 
@@ -118,9 +147,16 @@ enum OCRService {
     /// Inner Vision pass on a single image. Pulled out of
     /// `extractCardIdentifiersMulti` so the full + strip passes can
     /// run concurrently via `async let`.
+    ///
+    /// `restrictCardNumbersToBottomRegion`: when true, only consider
+    /// observations whose bounding box center is in the bottom 22% of
+    /// the image for card_number extraction. setHint extraction is
+    /// always position-unrestricted because set names print elsewhere
+    /// (usually under the card name, not at the bottom).
     private static func recognizeText(
         in image: UIImage,
         maxCandidatesPerObservation: Int,
+        restrictCardNumbersToBottomRegion: Bool,
     ) async -> ([String], String?) {
         guard let cgImage = image.cgImage else { return ([], nil) }
 
@@ -138,6 +174,26 @@ enum OCRService {
                 }
                 let setHint = pickSetHint(from: topLines)
 
+                // Vision's coordinate space is bottom-left origin
+                // (per Apple docs) so "bottom of the image" =
+                // "low Y". A bounding box near the bottom of the
+                // image has midY ≈ 0; near the top, midY ≈ 1.
+                //
+                // 0.22 is generous enough to catch:
+                //   - card_number row (typically ~5-8% from bottom)
+                //   - illustrator credit + copyright line right above
+                //   - set code below the artwork
+                // …without admitting middle-of-card text like attack
+                // damage or the rules-text block.
+                let cardNumberObservations: [VNRecognizedTextObservation]
+                if restrictCardNumbersToBottomRegion {
+                    cardNumberObservations = results.filter { obs in
+                        obs.boundingBox.midY < 0.22
+                    }
+                } else {
+                    cardNumberObservations = results
+                }
+
                 var seenCardNumbers = Set<String>()
                 var cardNumbers: [String] = []
                 // Track which lines contained a "X/Y" shape but were
@@ -145,7 +201,7 @@ enum OCRService {
                 // the filter rejected it" vs "OCR didn't see it at
                 // all". Keyed off the regex's slash pattern.
                 var slashLinesSeen: [String] = []
-                for obs in results {
+                for obs in cardNumberObservations {
                     let candidates = obs.topCandidates(maxCandidatesPerObservation)
                     for candidate in candidates {
                         if candidate.string.contains("/") {
@@ -165,6 +221,21 @@ enum OCRService {
                     // can tell whether the secret-rare fix landed.
                     let preview = slashLinesSeen.prefix(5).joined(separator: " | ")
                     ocrLogger.debug("ocr slash-lines (no card_number extracted): \(preview, privacy: .public)")
+                }
+                if cardNumbers.isEmpty && restrictCardNumbersToBottomRegion {
+                    // Diagnostic: how much text did the spatial filter
+                    // reject? If we routinely see many observations
+                    // with `/`-bearing text in the upper 78% but none
+                    // in the bottom 22%, that's a sign cards are being
+                    // framed such that the bottom edge is out of view
+                    // and we should widen the threshold.
+                    let allSlashAcrossImage = results.flatMap { obs in
+                        obs.topCandidates(maxCandidatesPerObservation).map { $0.string }
+                    }.filter { $0.contains("/") }
+                    if !allSlashAcrossImage.isEmpty {
+                        let preview = allSlashAcrossImage.prefix(5).joined(separator: " | ")
+                        ocrLogger.debug("ocr spatial filter rejected \(allSlashAcrossImage.count) slash-line(s) outside bottom region: \(preview, privacy: .public)")
+                    }
                 }
                 #endif
 
