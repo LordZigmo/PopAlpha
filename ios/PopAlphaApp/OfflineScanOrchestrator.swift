@@ -71,6 +71,20 @@ public enum OfflineScanOrchestratorError: Error, LocalizedError {
     }
 }
 
+/// @MainActor for state-safety on `setupTask`, `catalog`, `embedder`,
+/// `knn`, `identifier`, and `setupState` — these are read + written
+/// from multiple call sites (ensureReady coalescing check, runSetup
+/// completion, identify() reads, syncAnchorsInBackground) and need
+/// the actor's serialization to avoid races.
+///
+/// The synchronous heavy work (OfflineEmbedder() loading a 177 MB
+/// SigLIP CoreML model with MLModel(contentsOf:), 10-15s on cold
+/// launch) is explicitly hoisted off main via Task.detached inside
+/// runSetup. Real-device 2026-05-06: without that detach, the model
+/// load ran on the main actor and produced a 14.5s hang during which
+/// the user couldn't scroll or tap anything. With it, the main actor
+/// stays responsive — only the awaitable suspension points are on
+/// main; the actual CoreML load is on a .utility background task.
 @MainActor
 final class OfflineScanOrchestrator: ObservableObject {
 
@@ -154,7 +168,19 @@ final class OfflineScanOrchestrator: ObservableObject {
         setupState = .preparing(message: "Loading model…")
         let emb: OfflineEmbedder
         do {
-            emb = try OfflineEmbedder()
+            // CRITICAL: OfflineEmbedder() does the synchronous CoreML
+            // model load — MLModel(contentsOf: pkg) over a 177 MB
+            // SigLIP .mlpackage. On cold launch this takes 10-15
+            // seconds. The orchestrator class is @MainActor for state
+            // safety, so without this Task.detached the model load
+            // would block the main actor and produce a 14.5s hang
+            // (real-device 2026-05-06). The detached task runs at
+            // .utility priority on a background thread; we await its
+            // result, which suspends the main actor cooperatively
+            // (releasing it for UI work) until the load completes.
+            emb = try await Task.detached(priority: .utility) {
+                try OfflineEmbedder()
+            }.value
         } catch {
             let msg = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             setupState = .failed(message: msg)
