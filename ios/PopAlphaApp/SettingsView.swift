@@ -22,6 +22,10 @@ struct SettingsView: View {
     @State private var isExporting = false
     @State private var exportComplete = false
 
+    // Paywall sheet
+    @State private var showPaywallSheet = false
+    @StateObject private var premiumGate = PremiumGate.shared
+
     private var auth: AuthService { AuthService.shared }
 
     var body: some View {
@@ -56,6 +60,67 @@ struct SettingsView: View {
             Button("OK") { deleteError = nil }
         } message: {
             Text(deleteError ?? "")
+        }
+        .sheet(isPresented: $showPaywallSheet) {
+            PaywallView()
+        }
+    }
+
+    // MARK: - Subscription row
+
+    @ViewBuilder
+    private var subscriptionRow: some View {
+        if premiumGate.isPro {
+            // Active subscription — link out to App Store for management.
+            Link(destination: URL(string: "https://apps.apple.com/account/subscriptions")!) {
+                HStack(spacing: 12) {
+                    Image(systemName: "crown.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(PA.Colors.gold)
+                        .frame(width: 24)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("PopAlpha Pro")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(PA.Colors.text)
+                        Text("Manage your subscription in App Store")
+                            .font(PA.Typography.caption)
+                            .foregroundStyle(PA.Colors.muted)
+                    }
+                    Spacer()
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(PA.Colors.muted)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+            }
+        } else {
+            // Free user — open paywall.
+            Button {
+                showPaywallSheet = true
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "crown")
+                        .font(.system(size: 16))
+                        .foregroundStyle(PA.Colors.accent)
+                        .frame(width: 24)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Upgrade to PopAlpha Pro")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(PA.Colors.text)
+                        Text("Offline scanner, collector insights, and pro signals")
+                            .font(PA.Typography.caption)
+                            .foregroundStyle(PA.Colors.muted)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(PA.Colors.muted)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -136,6 +201,11 @@ struct SettingsView: View {
                         selection: $activityVisibility,
                         options: ActivityVisibility.allCases
                     ) { await save(activityVisibility: activityVisibility.rawValue) }
+                }
+
+                // Subscription
+                settingsSection("Subscription") {
+                    subscriptionRow
                 }
 
                 // Data & Privacy (Apple compliance)

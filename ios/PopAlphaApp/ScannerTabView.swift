@@ -21,10 +21,12 @@ import OSLog
 struct ScannerTabView: View {
     @State private var navigateToCard: MarketCard?
     @State private var showPickerSheet = false
+    @State private var showPaywallSheet = false
+    @StateObject private var premiumGate = PremiumGate.shared
+    @StateObject private var scanQuota = ScanQuota.shared
     #if DEBUG
     @State private var smokeReport: OfflineScannerSmokeReport?
     @State private var smokeRunning = false
-    @StateObject private var premiumGate = PremiumGate.shared
     #endif
 
     // Package-backed recognition
@@ -69,6 +71,19 @@ struct ScannerTabView: View {
                     .contentShape(Rectangle())
                     .onTapGesture {
                         PAHaptics.tap()
+                        // Drop the tap if a scan is already in flight —
+                        // ScannerHost has its own re-entry guard, but
+                        // bypassing the quota counter here keeps mashed
+                        // taps from over-spending the daily allowance.
+                        guard !scanner.isIdentifying else { return }
+                        if !premiumGate.isPro {
+                            scanQuota.rolloverIfNewDay()
+                            if !scanQuota.canScan {
+                                showPaywallSheet = true
+                                return
+                            }
+                            scanQuota.recordScan()
+                        }
                         Task { await scanner.captureFrameAndIdentify() }
                     }
                     .allowsHitTesting(scanner.initError == nil)
@@ -97,24 +112,27 @@ struct ScannerTabView: View {
                     .animation(.easeInOut(duration: 0.2), value: scanner.identifyError)
                 }
 
-                // DEBUG-only corner buttons for the smoke test +
-                // premium override. Top-right so they don't visually
-                // dominate the camera viewport. Compile-stripped from
-                // release builds — production users never see these.
-                #if DEBUG
+                // Top-right corner buttons. Crown is always visible
+                // (taps open the paywall, long-press toggles the DEBUG
+                // override). The smoke-test button is DEBUG-only and
+                // compile-stripped from release builds.
                 VStack {
                     HStack {
                         Spacer()
-                        VStack(spacing: 8) {
-                            premiumOverrideButton
+                        VStack(spacing: 6) {
+                            crownButton
+                            if !premiumGate.isPro {
+                                scanQuotaIndicator
+                            }
+                            #if DEBUG
                             offlineSmokeButton
+                            #endif
                         }
                         .padding(.top, 60)
                         .padding(.trailing, 16)
                     }
                     Spacer()
                 }
-                #endif
             }
             .ignoresSafeArea()
             .navigationBarHidden(true)
@@ -189,6 +207,9 @@ struct ScannerTabView: View {
                 }
             }
             #endif
+            .sheet(isPresented: $showPaywallSheet) {
+                PaywallView()
+            }
             .onChange(of: scanner.lastMatch) { _, newValue in
                 handleIdentifyResult(newValue)
             }
@@ -254,17 +275,34 @@ struct ScannerTabView: View {
         }
     }
 
-    // MARK: - Premium override toggle (DEBUG only)
+    // MARK: - Free-tier scan-quota indicator
     //
-    // Flips PremiumGate's debug override so the offline scanner path
-    // fires without a real StoreKit purchase. Crown icon = currently
-    // pro (real or override); slashed crown = free.
+    // Tiny pill below the crown showing "X left" today. Hidden for
+    // pro users (they're unlimited). Lets the user see why a tap
+    // got intercepted into the paywall sheet on their 6th attempt.
 
-    #if DEBUG
-    private var premiumOverrideButton: some View {
+    private var scanQuotaIndicator: some View {
+        let remaining = scanQuota.remaining
+        return Text(remaining > 0 ? "\(remaining) left" : "Daily limit")
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundStyle(remaining > 0 ? Color.white.opacity(0.75) : Color.yellow.opacity(0.95))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(.ultraThinMaterial.opacity(0.5))
+            .clipShape(Capsule())
+    }
+
+    // MARK: - Crown button (paywall entry + DEBUG override toggle)
+    //
+    // Tap: open the paywall sheet (always — production + DEBUG).
+    // Long-press: in DEBUG builds only, flip PremiumGate's override
+    // so QA can exercise the pro path without a real StoreKit purchase.
+    // Filled crown = currently pro (real or override), hollow = free.
+
+    private var crownButton: some View {
         Button {
             PAHaptics.tap()
-            premiumGate.debugOverrideEnabled.toggle()
+            showPaywallSheet = true
         } label: {
             Image(systemName: premiumGate.isPro ? "crown.fill" : "crown")
                 .font(.system(size: 14, weight: .semibold))
@@ -275,8 +313,15 @@ struct ScannerTabView: View {
                 .background(.ultraThinMaterial.opacity(0.5))
                 .clipShape(Circle())
         }
+        #if DEBUG
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.6).onEnded { _ in
+                PAHaptics.tap()
+                premiumGate.debugOverrideEnabled.toggle()
+            }
+        )
+        #endif
     }
-    #endif
 
     // MARK: - Offline smoke-test button + sheet plumbing (DEBUG only)
 

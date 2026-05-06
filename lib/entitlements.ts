@@ -6,8 +6,8 @@ import { dbAdmin } from "@/lib/db/admin";
  *
  * Reads from `apple_subscriptions` (RLS denies anon; service-role only).
  * A user is "pro" if they have any active subscription whose expiration
- * is unset (lifetime / non-consumable) or in the future. Revoked rows
- * are filtered by status, so refunds + chargebacks remove the entitlement.
+ * is unset or in the future. Revoked rows are filtered by status, so
+ * refunds + chargebacks remove the entitlement.
  *
  * Called from gated API routes; must be awaited. Cheap point lookup
  * via the (clerk_user_id, status, expires_at) index.

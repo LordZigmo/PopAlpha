@@ -59,6 +59,7 @@
 //     returns a store wired to in-memory mock state.
 
 import Foundation
+import OSLog
 import StoreKit
 
 @MainActor
@@ -173,6 +174,7 @@ public final class PremiumStore: ObservableObject {
             // the same purchase on every launch.
             await transaction.finish()
             await refreshStatus()
+            await syncEntitlementToServer(jws: verificationResult.jwsRepresentation)
             return .success
         case .userCancelled:
             return .userCancelled
@@ -190,10 +192,43 @@ public final class PremiumStore: ObservableObject {
         do {
             try await AppStore.sync()
             await refreshStatus()
+            await syncCurrentEntitlementToServer()
         } catch {
             await MainActor.run {
                 self.lastError = "Restore failed: \(error.localizedDescription)"
             }
+        }
+    }
+
+    // MARK: - Server entitlement sync
+    //
+    // Local StoreKit is authoritative for UI gating; this POST exists so
+    // server-side `hasPro()` checks (e.g. /api/pro/signals) can recognize
+    // the user. The endpoint is idempotent on original_transaction_id, so
+    // calling it on every purchase + restore is safe.
+    //
+    // Failures are logged but never surface to the UI — the user already
+    // has the entitlement locally and the App Store Server Notifications
+    // V2 webhook keeps the row fresh on renewals/cancels independently.
+
+    private func syncEntitlementToServer(jws: String) async {
+        do {
+            let response = try await APIClient.verifyPurchase(jws: jws)
+            if !(response.ok && (response.isPro ?? false)) {
+                Logger.api.warning("[premium] /api/iap/verify ok=\(response.ok) isPro=\(String(describing: response.isPro)) error=\(response.error ?? "nil")")
+            }
+        } catch {
+            Logger.api.warning("[premium] /api/iap/verify failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func syncCurrentEntitlementToServer() async {
+        for await result in Transaction.currentEntitlements {
+            guard let transaction = try? checkVerified(result) else { continue }
+            guard PremiumProducts.proEntitlementProductIDs.contains(transaction.productID) else { continue }
+            guard transaction.revocationDate == nil else { continue }
+            await syncEntitlementToServer(jws: result.jwsRepresentation)
+            return
         }
     }
 

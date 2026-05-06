@@ -93,6 +93,8 @@
 		DD000001000000000000F201 /* PremiumProducts.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F200 /* PremiumProducts.swift */; };
 		DD000001000000000000F203 /* PremiumStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F202 /* PremiumStore.swift */; };
 		DD000001000000000000F205 /* PremiumGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F204 /* PremiumGate.swift */; };
+		DD000001000000000000F211 /* PaywallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F210 /* PaywallView.swift */; };
+		DD000001000000000000F221 /* ScanQuota.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F220 /* ScanQuota.swift */; };
 		DD000001000000000000F207 /* OfflineScanOrchestrator.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F206 /* OfflineScanOrchestrator.swift */; };
 		DD000001000000000000F801 /* OfflineScannerWarmup.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F800 /* OfflineScannerWarmup.swift */; };
 		DD000001000000000000F401 /* ScanDebugCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F400 /* ScanDebugCapture.swift */; };
@@ -186,6 +188,8 @@
 		DD000001000000000000F200 /* PremiumProducts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumProducts.swift; sourceTree = "<group>"; };
 		DD000001000000000000F202 /* PremiumStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumStore.swift; sourceTree = "<group>"; };
 		DD000001000000000000F204 /* PremiumGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumGate.swift; sourceTree = "<group>"; };
+		DD000001000000000000F210 /* PaywallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaywallView.swift; sourceTree = "<group>"; };
+		DD000001000000000000F220 /* ScanQuota.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanQuota.swift; sourceTree = "<group>"; };
 		DD000001000000000000F206 /* OfflineScanOrchestrator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineScanOrchestrator.swift; sourceTree = "<group>"; };
 		DD000001000000000000F800 /* OfflineScannerWarmup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineScannerWarmup.swift; sourceTree = "<group>"; };
 		DD000001000000000000F300 /* Products.storekit */ = {isa = PBXFileReference; lastKnownFileType = file.storekit; path = Products.storekit; sourceTree = "<group>"; };
@@ -287,6 +291,8 @@
 				DD000001000000000000F200 /* PremiumProducts.swift */,
 				DD000001000000000000F202 /* PremiumStore.swift */,
 				DD000001000000000000F204 /* PremiumGate.swift */,
+				DD000001000000000000F210 /* PaywallView.swift */,
+				DD000001000000000000F220 /* ScanQuota.swift */,
 				DD000001000000000000F206 /* OfflineScanOrchestrator.swift */,
 				DD000001000000000000F800 /* OfflineScannerWarmup.swift */,
 				DD000001000000000000F300 /* Products.storekit */,
@@ -480,6 +486,8 @@
 				DD000001000000000000F201 /* PremiumProducts.swift in Sources */,
 				DD000001000000000000F203 /* PremiumStore.swift in Sources */,
 				DD000001000000000000F205 /* PremiumGate.swift in Sources */,
+				DD000001000000000000F211 /* PaywallView.swift in Sources */,
+				DD000001000000000000F221 /* ScanQuota.swift in Sources */,
 				DD000001000000000000F207 /* OfflineScanOrchestrator.swift in Sources */,
 				DD000001000000000000F801 /* OfflineScannerWarmup.swift in Sources */,
 				DD000001000000000000F401 /* ScanDebugCapture.swift in Sources */,

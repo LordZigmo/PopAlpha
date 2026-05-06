@@ -22,25 +22,18 @@
 //   Pro Yearly   — auto-renewing subscription, 1 year period
 //                  Same entitlement as monthly with annual discount.
 //                  Defaults to ~16% savings vs 12 × monthly.
-//
-//   Pro Lifetime — non-consumable IAP (single purchase)
-//                  Same entitlement, no recurring charge. Higher
-//                  one-time fee. Optional — can leave out of v1
-//                  if subscription-only is the easier ASC config.
 
 import Foundation
 
 public enum PremiumProducts {
     public static let proMonthly = "ai.popalpha.premium.pro.monthly"
     public static let proYearly = "ai.popalpha.premium.pro.yearly"
-    public static let proLifetime = "ai.popalpha.premium.pro.lifetime"
 
     /// All registered product IDs. StoreKit's `Product.products(for:)`
     /// fetches the full catalog from this list.
     public static let allProductIDs: Set<String> = [
         proMonthly,
         proYearly,
-        proLifetime,
     ]
 
     /// Product IDs that grant the "pro" entitlement. Adding a new
@@ -49,7 +42,6 @@ public enum PremiumProducts {
     public static let proEntitlementProductIDs: Set<String> = [
         proMonthly,
         proYearly,
-        proLifetime,
     ]
 }
 

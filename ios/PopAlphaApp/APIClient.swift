@@ -212,6 +212,26 @@ enum APIClient {
     }
 }
 
+// MARK: - IAP verification
+
+extension APIClient {
+    struct IapVerifyResponse: Decodable {
+        let ok: Bool
+        let isPro: Bool?
+        let expiresAt: String?
+        let error: String?
+    }
+
+    /// Posts the StoreKit `Transaction.jwsRepresentation` to the server so
+    /// the canonical apple_subscriptions row gets associated with the
+    /// current Clerk user. The local entitlement is already authoritative
+    /// from StoreKit — this call is for server-side `hasPro()` lookups
+    /// (e.g. /api/pro/signals). Idempotent on original_transaction_id.
+    static func verifyPurchase(jws: String) async throws -> IapVerifyResponse {
+        return try await post(path: "/api/iap/verify", body: ["jwsRepresentation": jws])
+    }
+}
+
 // MARK: - Error Type
 
 enum APIError: LocalizedError {
