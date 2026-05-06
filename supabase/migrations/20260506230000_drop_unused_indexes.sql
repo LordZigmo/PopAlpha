@@ -1,0 +1,86 @@
+-- Drop four unused indexes flagged by the 2026-05-06 perf audit.
+--
+-- Rationale per index:
+--
+-- 1. provider_normalized_observations_provider_observed_id_idx (760 MB, 0 scans)
+--    Definition: btree (provider, observed_at desc, id desc)
+--    Shadowed by:
+--      - provider_normalized_observations_provider_set_provider_observed
+--          (provider, provider_set_id, observed_at desc, id desc) — 301k scans
+--      - provider_normalized_observations_provider_observed_idx
+--          (provider, observed_at desc) — 11 scans
+--    The set-scoped index is what callers actually use; this one was an
+--    earlier rev that was never adopted. On a 4.4M-row, continuously-
+--    written table, a 760 MB index is real write amplification we don't
+--    need.
+--
+--    Schema-drift note: the high-scan winner
+--    `provider_normalized_observations_provider_set_provider_observed`
+--    is in prod (verified via pg_indexes 2026-05-06) but no migration
+--    in supabase/migrations/ creates it — it was apparently added out
+--    of band via the Supabase Dashboard or manual SQL. Filing a
+--    follow-up migration to bring it back into source control is
+--    queued; it is NOT a blocker for this drop because the IS-NULL
+--    callers fall through to `..._provider_observed_idx` (3-col, in
+--    source control) and the SET-scoped callers continue to use the
+--    drift index.
+--
+-- 2. canonical_cards_search_doc_norm_idx (2.2 MB, 0 scans)
+--    Definition: btree (search_doc_norm)
+--    Shadowed by:
+--      - canonical_cards_search_doc_norm_trgm_idx
+--          gin (search_doc_norm gin_trgm_ops) — 1,917 scans
+--    /api/search/cards uses `ilike '%token%'` (leading wildcard) which
+--    ONLY a trigram-GIN index can serve. The btree version was never
+--    going to be used; the trgm sibling is what actually drives search.
+--
+-- 3. canonical_cards_canonical_name_lower_idx (680 KB, 0 scans)
+--    Definition: btree (lower(canonical_name))
+--    Shadowed by:
+--      - canonical_cards_canonical_name_idx
+--          btree (canonical_name) — 424 scans
+--    Callers use `.ilike("canonical_name", ...)`. The planner picks the
+--    plain-column index plus a recheck rather than rewriting predicates
+--    to lower(). The lower() variant has not been chosen since the
+--    pg_stat_user_indexes counter was reset.
+--
+-- 4. canonical_cards_subject_lower_idx (648 KB, 0 scans)
+--    Definition: btree (lower(subject))
+--    No companion non-lower index, but every `subject` query in the
+--    codebase uses leading-wildcard ilike (`%term%`), which no btree
+--    can serve. Like #3 — wrong shape for the actual workload.
+--
+-- Total reclaim: 763.5 MB across the largest write-hot table
+-- (provider_normalized_observations) plus three small tag-along
+-- indexes on canonical_cards.
+--
+-- Rollback: each index can be recreated by re-running the matching
+-- statement from these source migrations:
+--   1. 20260409100000_fix_match_scan_index.sql
+--   2. 20260301190000_search_normalization.sql
+--   3+4. 20260227131000_search_perf_indexes.sql
+-- The originals used plain `CREATE INDEX`. If a recreate is needed
+-- on the live DB, prefer `CREATE INDEX CONCURRENTLY` to avoid the
+-- ACCESS EXCLUSIVE lock the original would take on a 4.4M-row table.
+--
+-- Safety: plain `DROP INDEX` takes a brief ACCESS EXCLUSIVE lock on
+-- the parent table — held only for the catalog update, not for any
+-- physical scan, so it's a milliseconds-scale operation even on the
+-- 760 MB index (DROP INDEX is metadata-only; freed pages are reclaimed
+-- by a later VACUUM). DROP INDEX CONCURRENTLY would have been the
+-- "right" choice for a fully transactional client, but supabase db
+-- push uses Postgres' pipelined protocol which rejects CONCURRENTLY
+-- with `DROP INDEX CONCURRENTLY cannot be executed within a pipeline
+-- (SQLSTATE 25001)`. The trade is acceptable here: the four indexes
+-- are unused (idx_scan = 0 across the entire pg_stat lifetime), so no
+-- query is waiting on them at the moment of the drop, and the brief
+-- write-lock blip on a 4.4M-row table is negligible vs. the 760 MB
+-- of permanent write-amplification recovered.
+
+drop index if exists public.provider_normalized_observations_provider_observed_id_idx;
+
+drop index if exists public.canonical_cards_search_doc_norm_idx;
+
+drop index if exists public.canonical_cards_canonical_name_lower_idx;
+
+drop index if exists public.canonical_cards_subject_lower_idx;
