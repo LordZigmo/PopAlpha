@@ -646,10 +646,10 @@ struct CardDetailView: View {
                         timeframe: selectedTimeframe
                     )
                 } else {
-                    let variantSuffix = "::\(provider)::\(resolvedBucket)"
                     points = try await CardService.shared.fetchGradedPriceHistory(
                         slug: card.id,
-                        variantRef: variantSuffix,
+                        provider: provider,
+                        bucket: resolvedBucket,
                         timeframe: selectedTimeframe
                     )
                 }

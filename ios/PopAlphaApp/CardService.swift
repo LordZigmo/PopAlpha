@@ -143,10 +143,17 @@ actor CardService {
         return try decoder.decode([PricePoint].self, from: data)
     }
 
-    /// Fetch graded price history matching a variant_ref suffix pattern.
-    /// Used when the user selects a graded pill (e.g. PSA G10).
-    /// The suffix is like "::PSA::10" and we match with ilike.
-    func fetchGradedPriceHistory(slug: String, variantRef: String, timeframe: ChartTimeframe) async throws -> [PricePoint] {
+    /// Fetch graded price history for a (provider, bucket) cohort across
+    /// all printings of a card. Used by the Grade Board chart when no
+    /// specific printing is selected.
+    ///
+    /// price_history_points stores graded variant_refs in the long form
+    /// `<printingId>::<providerVariantId>::GRADED::<PROVIDER>::<BUCKET>::RAW`
+    /// — six `::`-separated segments ending in `::RAW`. The previous
+    /// pattern (`%::PROVIDER::BUCKET`) silently matched zero rows because
+    /// graded refs end in `::RAW`, not in the bucket. The corrected
+    /// pattern anchors on the `::GRADED::<PROVIDER>::<BUCKET>::RAW` tail.
+    func fetchGradedPriceHistory(slug: String, provider: String, bucket: String, timeframe: ChartTimeframe) async throws -> [PricePoint] {
         let cutoff = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-timeframe.seconds))
 
         let data = try await Supabase.query(
@@ -154,7 +161,7 @@ actor CardService {
             select: "ts,price",
             filters: [
                 ("canonical_slug", "eq", slug),
-                ("variant_ref", "ilike", "%\(variantRef)"),
+                ("variant_ref", "ilike", "%::GRADED::\(provider)::\(bucket)::RAW"),
                 ("source_window", "eq", "snapshot"),
                 ("ts", "gte", cutoff),
             ],
@@ -262,16 +269,22 @@ actor CardService {
         return try decoder.decode([PricePoint].self, from: data)
     }
 
-    /// Fetch graded price history for a specific printing + provider + grade.
+    /// Fetch graded price history for a specific printing + provider + bucket.
+    /// Same long-format variant_ref shape as fetchGradedPriceHistory above
+    /// (`<printingId>::<providerVariantId>::GRADED::<PROVIDER>::<BUCKET>::RAW`),
+    /// just additionally scoped to the printing prefix. Uses ilike rather
+    /// than eq because the providerVariantId in the middle of the ref
+    /// makes exact-match impossible without round-tripping it from the
+    /// API.
     func fetchPrintingGradedPriceHistory(slug: String, printingId: String, provider: String, bucket: String, timeframe: ChartTimeframe) async throws -> [PricePoint] {
         let cutoff = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-timeframe.seconds))
-        let variantRef = "\(printingId)::\(provider)::\(bucket)"
+        let pattern = "\(printingId)::%::GRADED::\(provider)::\(bucket)::RAW"
         let data = try await Supabase.query(
             table: "public_price_history",
             select: "ts,price",
             filters: [
                 ("canonical_slug", "eq", slug),
-                ("variant_ref", "eq", variantRef),
+                ("variant_ref", "ilike", pattern),
                 ("source_window", "eq", "snapshot"),
                 ("ts", "gte", cutoff),
             ],
