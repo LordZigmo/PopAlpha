@@ -5,7 +5,7 @@ import SwiftUI
 struct InteractiveChartView: View {
     let data: [Double]
     let timestamps: [String]
-    let isPositive: Bool
+    let direction: ChangeDirection
     var lineWidth: CGFloat = 2
     var height: CGFloat = 120
 
@@ -26,12 +26,12 @@ struct InteractiveChartView: View {
         return formatTimestamp(timestamps[idx])
     }
 
-    private var displayChange: (text: String, positive: Bool)? {
+    private var displayChange: (text: String, direction: ChangeDirection)? {
         guard let idx = scrubIndex, idx < data.count, let first = data.first, first > 0 else { return nil }
         let current = data[idx]
         let pct = ((current - first) / first) * 100
-        let sign = pct >= 0 ? "+" : ""
-        return ("\(sign)\(String(format: "%.2f", pct))%", pct >= 0)
+        let sign = pct > 0 ? "+" : ""
+        return ("\(sign)\(String(format: "%.2f", pct))%", ChangeDirection.from(pct))
     }
 
     /// VoiceOver summary so the scrubber-based chart is at least
@@ -46,10 +46,9 @@ struct InteractiveChartView: View {
         let pctChange: Double = first != 0
             ? ((last - first) / abs(first)) * 100
             : 0
-        let direction = isPositive ? "up" : "down"
         return String(
             format: "$%.2f to $%.2f, %@ %.0f percent over %d data points",
-            first, last, direction, abs(pctChange), data.count
+            first, last, direction.accessibilityWord, abs(pctChange), data.count
         )
     }
 
@@ -133,7 +132,7 @@ struct InteractiveChartView: View {
                 if let change = displayChange {
                     Text(change.text)
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(change.positive ? PA.Colors.positive : PA.Colors.negative)
+                        .foregroundStyle(change.direction.color)
                 }
 
                 Spacer()
@@ -167,9 +166,9 @@ struct InteractiveChartView: View {
 
             // Glow dot
             Circle()
-                .fill(isPositive ? PA.Colors.positive : PA.Colors.negative)
+                .fill(direction.color)
                 .frame(width: 10, height: 10)
-                .shadow(color: (isPositive ? PA.Colors.positive : PA.Colors.negative).opacity(0.5), radius: 6)
+                .shadow(color: direction.color.opacity(0.5), radius: 6)
                 .position(point)
 
             // Outer ring
@@ -197,7 +196,7 @@ struct InteractiveChartView: View {
                 colors: [
                     (scrubbing
                         ? Color.white.opacity(0.08)
-                        : (isPositive ? PA.Colors.positive : PA.Colors.negative).opacity(0.15)),
+                        : direction.color.opacity(0.15)),
                     .clear
                 ],
                 startPoint: .top,
@@ -214,7 +213,7 @@ struct InteractiveChartView: View {
             }
         }
         .stroke(
-            isPositive ? PA.Colors.positive : PA.Colors.negative,
+            direction.color,
             style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round)
         )
     }
@@ -249,7 +248,21 @@ struct InteractiveChartView: View {
         timestamps: (0..<10).map { i in
             ISO8601DateFormatter().string(from: Date().addingTimeInterval(Double(i) * -86400))
         }.reversed(),
-        isPositive: true,
+        direction: .up,
+        height: 140
+    )
+    .padding()
+    .background(PA.Colors.background)
+    .preferredColorScheme(.dark)
+}
+
+#Preview("Interactive Chart Flat") {
+    InteractiveChartView(
+        data: [200, 201, 199, 200, 200, 201, 199, 200, 200, 200],
+        timestamps: (0..<10).map { i in
+            ISO8601DateFormatter().string(from: Date().addingTimeInterval(Double(i) * -86400))
+        }.reversed(),
+        direction: .flat,
         height: 140
     )
     .padding()

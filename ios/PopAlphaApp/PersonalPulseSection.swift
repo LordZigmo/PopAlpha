@@ -2,85 +2,37 @@ import SwiftUI
 
 // MARK: - Personal Pulse Section
 //
-// Replaces the old `YourWorldSection`. Sits at the very top of
-// MarketplaceView — the *first* thing a collector sees — and answers
-// "what's mine today?" before the page shows a single market stat.
+// Authed-only tri-stat row that sits below the TopBar on the Market tab
+// and answers "what's mine today?" before any broad market stats. Each
+// chip is a compact KPI tile with an eyebrow label, a primary value, and
+// a secondary line — Watchlist · Portfolio · Style.
 //
-// Three states, all rendered in the same 1-card footprint so the top of
-// the home screen never grows or shrinks between sessions:
+// Renders nothing for guests. The old "Sign in to personalize" guest
+// banner that used to sit at the top of the screen has been replaced by
+// `MarketHeroCard` (top of screen) and `SignInPromoCard` (further down,
+// after the user has seen the value prop and a market read).
 //
-//   • Guest            → single-line "Sign in to personalize" card with
-//                        an inline button. Intentionally small so it
-//                        doesn't steal prime real estate from content.
-//   • Signed-in, data  → tri-stat row: Watchlist · Portfolio · Style.
-//                        Each stat is a compact KPI tile with an eyebrow
-//                        label, a primary value, and a secondary line.
-//   • Signed-in, empty → same tri-stat row, aspirational empty copy
-//                        ("Add a card to start tracking"), no CTA button
-//                        (nudge is implicit via Portfolio / Watchlist
-//                        tabs). Keeps the card alive without nagging.
-//
-// Reuses `.glassSurface()`, `PA.Typography`, `PA.Colors.accent`. No new
-// visual tokens. The only new moving part is the third chip — the
-// personalization style label — which comes from
-// `PersonalizationService.fetchProfile()`.
+// Reuses `.glassSurface()`, `PA.Typography`, `PA.Colors.accent`. The
+// Style chip's label comes from `PersonalizationService.fetchProfile()`.
 
 struct PersonalPulseSection: View {
     let me: HomepageMeDTO?
     /// Personalization profile's dominant style label ("Graded PSA Collector",
-    /// "Modern Sealed", etc). Nil for guests or profiles that haven't hit
-    /// the minimum-event threshold yet. Passed down from MarketplaceView
-    /// so the Style chip can render consistently here and in the AI Brief.
+    /// "Modern Sealed", etc). Nil for profiles that haven't hit the
+    /// minimum-event threshold yet. Passed down from MarketplaceView so
+    /// the Style chip can render consistently here and in the AI Brief.
     let styleLabel: String?
 
     private var auth: AuthService { AuthService.shared }
 
     var body: some View {
-        if !auth.isAuthenticated {
-            guestCard
-        } else {
+        if auth.isAuthenticated {
             authedCard
+        } else {
+            // Guests see MarketHeroCard at the top + SignInPromoCard
+            // further down — no per-stat row to render here.
+            EmptyView()
         }
-    }
-
-    // MARK: - Guest state
-
-    private var guestCard: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(PA.Colors.accent)
-            Text("Sign in to personalize your feed")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(PA.Colors.text)
-                .lineLimit(1)
-            Spacer(minLength: 8)
-            Button {
-                AuthService.shared.signIn()
-            } label: {
-                HStack(spacing: 6) {
-                    if auth.isSigningIn {
-                        ProgressView()
-                            .progressViewStyle(.circular)
-                            .controlSize(.mini)
-                            .tint(PA.Colors.background)
-                    }
-                    Text(auth.isSigningIn ? "Signing in…" : "Sign in")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(PA.Colors.background)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 7)
-                .background(PA.Colors.accent.opacity(auth.isSigningIn ? 0.6 : 1.0))
-                .clipShape(Capsule())
-            }
-            .buttonStyle(.plain)
-            .disabled(auth.isSigningIn)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .glassSurface(radius: PA.Layout.cardRadius)
     }
 
     // MARK: - Authed state
@@ -266,9 +218,3 @@ struct PersonalPulseSection: View {
     .preferredColorScheme(.dark)
 }
 
-#Preview("Personal Pulse — guest") {
-    PersonalPulseSection(me: nil, styleLabel: nil)
-        .padding()
-        .background(PA.Colors.background)
-        .preferredColorScheme(.dark)
-}

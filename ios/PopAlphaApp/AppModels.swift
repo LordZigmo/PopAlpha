@@ -1,4 +1,42 @@
 import Foundation
+import SwiftUI
+
+// MARK: - Change Direction
+
+/// 3-state direction for change percentages: up, down, or flat (exactly 0%).
+enum ChangeDirection {
+    case up, down, flat
+
+    static func from(_ pct: Double?) -> ChangeDirection {
+        guard let p = pct, p != 0 else { return .flat }
+        return p > 0 ? .up : .down
+    }
+
+    var color: Color {
+        switch self {
+        case .up:   return PA.Colors.positive
+        case .down: return PA.Colors.negative
+        case .flat: return PA.Colors.neutral
+        }
+    }
+
+    /// SF Symbol name for the directional arrow / flat marker.
+    var arrowSymbol: String {
+        switch self {
+        case .up:   return "arrow.up.right"
+        case .down: return "arrow.down.right"
+        case .flat: return "minus"
+        }
+    }
+
+    var accessibilityWord: String {
+        switch self {
+        case .up:   return "up"
+        case .down: return "down"
+        case .flat: return "unchanged"
+        }
+    }
+}
 
 // MARK: - Marketplace Card Model
 
@@ -8,7 +46,9 @@ struct MarketCard: Identifiable, Hashable {
     let setName: String
     let cardNumber: String
     let price: Double
-    let changePct: Double
+    /// nil when no metrics row exists for this slug yet — distinct from `0`
+    /// (a real, observed flat). Render as "—" rather than "0.0%".
+    let changePct: Double?
     let changeWindow: String
     let rarity: CardRarity
     let sparkline: [Double]
@@ -24,11 +64,12 @@ struct MarketCard: Identifiable, Hashable {
     }
 
     var changeText: String {
-        let sign = changePct >= 0 ? "+" : ""
-        return "\(sign)\(String(format: "%.1f", changePct))%"
+        guard let pct = changePct else { return "—" }
+        let sign = pct > 0 ? "+" : ""
+        return "\(sign)\(String(format: "%.1f", pct))%"
     }
 
-    var isPositive: Bool { changePct >= 0 }
+    var direction: ChangeDirection { ChangeDirection.from(changePct) }
 
     var confidenceLabel: ConfidenceLevel? {
         guard let score = confidenceScore else { return nil }
@@ -46,7 +87,7 @@ struct MarketCard: Identifiable, Hashable {
             setName: setName,
             cardNumber: cardNumber,
             price: 0,
-            changePct: 0,
+            changePct: nil,
             changeWindow: "24H",
             rarity: .common,
             sparkline: [],

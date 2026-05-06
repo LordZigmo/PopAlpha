@@ -80,7 +80,7 @@ struct PortfolioSummary {
 struct PortfolioChange {
     let amount: Double
     let percent: Double
-    var isPositive: Bool { percent >= 0 }
+    var direction: ChangeDirection { ChangeDirection.from(percent) }
 }
 
 struct CollectorIdentityProfile {
@@ -302,7 +302,7 @@ extension PortfolioOverviewResponse {
                 currentValue: h.currentValue,
                 changePct: h.changePct,
                 descriptor: h.descriptor,
-                accentColor: h.changePct >= 0 ? PA.Colors.positive.opacity(0.7) : PA.Colors.negative.opacity(0.7)
+                accentColor: ChangeDirection.from(h.changePct).color.opacity(0.7)
             )
         }
     }

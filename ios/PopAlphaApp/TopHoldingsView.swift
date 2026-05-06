@@ -95,7 +95,7 @@ struct TopHoldingsView: View {
 
                 Text(formatChange(holding.changePct))
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(holding.changePct >= 0 ? PA.Colors.positive : PA.Colors.negative)
+                    .foregroundStyle(ChangeDirection.from(holding.changePct).color)
             }
         }
         .padding(PA.Layout.cardPadding)
@@ -117,7 +117,7 @@ struct TopHoldingsView: View {
     }
 
     private func formatChange(_ pct: Double) -> String {
-        let sign = pct >= 0 ? "+" : ""
+        let sign = pct > 0 ? "+" : ""
         return "\(sign)\(String(format: "%.1f", pct))%"
     }
 }

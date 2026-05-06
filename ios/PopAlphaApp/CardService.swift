@@ -104,7 +104,7 @@ actor CardService {
                 setName: card?.setName ?? "Unknown",
                 cardNumber: card?.cardNumber.map { "#\($0)" } ?? "",
                 price: price,
-                changePct: changePct ?? 0,
+                changePct: changePct,
                 changeWindow: m.changePct24h != nil ? "24H" : "7D",
                 rarity: classifyRarity(price: price, listings: m.activeListings7d),
                 sparkline: sparkline.isEmpty ? [price] : sparkline,
@@ -490,7 +490,14 @@ actor CardService {
         let result = cards.map { card -> MarketCard in
             let m = metricsMap[card.slug]
             let price = m?.marketPrice ?? 0
-            let changePct = m?.changePct24h ?? m?.changePct7d ?? 0
+            // Preserve nil when the metrics row is missing — UI renders "—"
+            // rather than fabricating a fake 0%. Only fall through 24h → 7d
+            // when the row exists but the 24h column is null.
+            let changePct = m?.changePct24h ?? m?.changePct7d
+            let changeWindow: String = {
+                guard let m else { return "24H" }
+                return m.changePct24h != nil ? "24H" : "7D"
+            }()
 
             return MarketCard(
                 id: card.slug,
@@ -499,7 +506,7 @@ actor CardService {
                 cardNumber: card.cardNumber.map { "#\($0)" } ?? "",
                 price: price,
                 changePct: changePct,
-                changeWindow: m?.changePct24h != nil ? "24H" : "7D",
+                changeWindow: changeWindow,
                 rarity: classifyRarity(price: price, listings: nil),
                 sparkline: price > 0 ? [price] : [],
                 imageGradient: [],
@@ -985,7 +992,7 @@ extension HomepageCardDTO {
             setName: setName ?? "Unknown",
             cardNumber: "",
             price: price,
-            changePct: changePct ?? 0,
+            changePct: changePct,
             changeWindow: window,
             rarity: CardService.classifyRarityForPrice(price),
             sparkline: sparkline,

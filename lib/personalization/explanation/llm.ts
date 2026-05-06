@@ -19,11 +19,7 @@ import { buildTemplateExplanation, type ExplanationCardInput } from "./template"
 // any reasonable end-user wait expectation; the response is cached, so
 // only the first request per (actor, card, metricsHash) tuple pays this.
 const LLM_TIMEOUT_MS = 15_000;
-const LLM_MODEL_TIER = "Ace" as const;
-// Model-agnostic label so this constant doesn't drift the next time
-// getPopAlphaModel("Ace") moves to a new generation. The actual model
-// name is owned by lib/ai/models.ts; the label here is just for cache-
-// row provenance.
+// Cache-row provenance label; actual model is owned by lib/ai/models.ts.
 const SOURCE_VERSION = `llm-v${PROFILE_VERSION}`;
 
 /**
@@ -222,7 +218,7 @@ export async function buildLlmExplanation(
   const timeoutId = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
   try {
     const result = await generateText({
-      model: getPopAlphaModel(LLM_MODEL_TIER),
+      model: getPopAlphaModel(),
       system: SYSTEM_PROMPT,
       prompt: buildUserPrompt(card, features, profile, market),
       abortSignal: controller.signal,

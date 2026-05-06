@@ -486,18 +486,18 @@ struct CardDetailView: View {
 
                 if !selectedPriceMode.isGraded {
                     HStack(spacing: 4) {
-                        Image(systemName: card.isPositive ? "arrow.up.right" : "arrow.down.right")
+                        Image(systemName: heroChange.direction.arrowSymbol)
                             .font(.system(size: 12, weight: .bold))
                             // Decorative — adjacent percent text conveys direction.
                             .accessibilityHidden(true)
-                        Text(card.changeText)
+                        Text(heroChange.text)
                             .font(.system(size: 15, weight: .semibold))
                     }
-                    .foregroundStyle(card.isPositive ? PA.Colors.positive : PA.Colors.negative)
+                    .foregroundStyle(heroChange.direction.color)
                     .accessibilityElement(children: .combine)
-                    .accessibilityLabel("\(card.isPositive ? "Up" : "Down") \(card.changeText)")
+                    .accessibilityLabel("\(heroChange.direction.accessibilityWord) \(heroChange.text)")
 
-                    Text(card.changeWindow)
+                    Text(heroChange.window)
                         .font(PA.Typography.caption)
                         .foregroundStyle(PA.Colors.muted)
                 }
@@ -515,11 +515,35 @@ struct CardDetailView: View {
         chartTimestamps
     }
 
-    private var chartIsPositive: Bool {
+    private var chartDirection: ChangeDirection {
         guard activeChartPrices.count >= 2, let first = activeChartPrices.first, let last = activeChartPrices.last else {
-            return card.isPositive
+            return heroChange.direction
         }
-        return last >= first
+        return ChangeDirection.from(last - first)
+    }
+
+    /// Authoritative 24H change for the hero badge. The parent (set browser,
+    /// signal board, search) passes a `MarketCard.changePct` whose freshness
+    /// depends on whatever bulk fetch they ran — sometimes 0 when their
+    /// metrics map missed the slug. Once `cardMetrics` lands here, prefer it.
+    private var heroChange: (pct: Double?, direction: ChangeDirection, text: String, window: String) {
+        let pct: Double?
+        let window: String
+        if let metrics = cardMetrics, let m24 = metrics.changePct24h {
+            pct = m24; window = "24H"
+        } else if let metrics = cardMetrics, let m7 = metrics.changePct7d {
+            pct = m7; window = "7D"
+        } else {
+            pct = card.changePct; window = card.changeWindow
+        }
+        let text: String
+        if let p = pct {
+            let sign = p > 0 ? "+" : ""
+            text = "\(sign)\(String(format: "%.1f", p))%"
+        } else {
+            text = "—"
+        }
+        return (pct, ChangeDirection.from(pct), text, window)
     }
 
     private var chartSection: some View {
@@ -556,7 +580,7 @@ struct CardDetailView: View {
                 InteractiveChartView(
                     data: activeChartPrices,
                     timestamps: activeChartTimestamps,
-                    isPositive: chartIsPositive,
+                    direction: chartDirection,
                     lineWidth: 2,
                     height: 140
                 )

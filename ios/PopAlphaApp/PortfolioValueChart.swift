@@ -10,7 +10,7 @@ import SwiftUI
 
 struct PortfolioValueChart: View {
     let data: [Double]
-    let isPositive: Bool
+    let direction: ChangeDirection
     var height: CGFloat = 110
 
     /// Called as the user scrubs. nil when the gesture ends.
@@ -143,7 +143,7 @@ struct PortfolioValueChart: View {
     // MARK: - Style helpers
 
     private var lineColor: Color {
-        isPositive ? PA.Colors.positive : PA.Colors.negative
+        direction.color
     }
 
     private var lineGradient: LinearGradient {
@@ -194,7 +194,19 @@ struct PortfolioValueChart: View {
         PA.Colors.background.ignoresSafeArea()
         PortfolioValueChart(
             data: [50, 52, 51, 54, 55, 53, 57, 60, 58, 62, 64, 63, 67, 70],
-            isPositive: true
+            direction: .up
+        )
+        .padding()
+    }
+    .preferredColorScheme(.dark)
+}
+
+#Preview("Scrubbable Flat") {
+    ZStack {
+        PA.Colors.background.ignoresSafeArea()
+        PortfolioValueChart(
+            data: [60, 61, 59, 60, 60, 61, 60, 59, 60, 60],
+            direction: .flat
         )
         .padding()
     }

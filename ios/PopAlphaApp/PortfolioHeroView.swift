@@ -81,7 +81,7 @@ struct PortfolioHeroView: View {
                                 .foregroundStyle(PA.Colors.muted)
                         }
                     }
-                    .foregroundStyle(chg.isPositive ? PA.Colors.positive : PA.Colors.negative)
+                    .foregroundStyle(chg.direction.color)
                 }
             }
 
@@ -89,7 +89,7 @@ struct PortfolioHeroView: View {
             if sparkline.count >= 2 {
                 PortfolioValueChart(
                     data: sparkline,
-                    isPositive: displayChange.isPositive,
+                    direction: displayChange.direction,
                     height: 130,
                     onScrub: { idx in
                         scrubIndex = idx

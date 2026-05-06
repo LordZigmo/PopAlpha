@@ -181,15 +181,18 @@ export async function enqueuePipelineJob(input: {
       job_kind: input.jobKind,
       params_json: safeParams,
       priority: input.priority ?? 100,
-      // PIPELINE jobs get a single attempt: per-attempt timeout is 480s, but real
-      // SCRYDEX work distribution is p50=357s / p95=4799s / p99=7341s. The 6×
-      // retries we used to do mostly burned compute on jobs that mathematically
-      // couldn't fit (6×480=2880s budget) and were already silently failing.
-      // The 4 daily Scrydex crons (00:05/06:20/12:35/18:50 UTC) provide the
-      // natural retry cadence; observations are checkpointed durably between
-      // runs. RETRY jobKind keeps 6 because it's invoked explicitly for backlog
-      // catch-up where in-day attempts genuinely matter.
-      max_attempts: input.maxAttempts ?? (input.jobKind === "RETRY" ? 6 : 1),
+      // Default 6 attempts. The 2026-05-04 reduction to 1 attempt was made on
+      // the theory that big sets retrying 6× was burning compute on
+      // mathematically-impossible jobs. Empirically over 2026-05-04→05-06 it
+      // collapsed catalog freshness: the keyset deploy halved per-job latency
+      // (p50=310s, p90=471s) but ~34% of SCRYDEX jobs still genuinely need
+      // >480s and need cumulative checkpointed progress across attempts to
+      // complete. With max_attempts=1 they failed one-shot per daily run,
+      // fresh_24h dropped from ~16k to 7k, the rails gate kept tripping.
+      // Reverting restores throughput; keyset alone reduced the per-attempt
+      // cost so the steady-state retry compute is roughly half what the
+      // pre-keyset 6-attempt regime cost.
+      max_attempts: input.maxAttempts ?? 6,
       status: "QUEUED",
     })
     .select("id")

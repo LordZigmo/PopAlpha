@@ -26,8 +26,15 @@ function formatPrice(n: number | null): string {
 
 function formatPct(n: number | null): string {
   if (n == null) return "--";
-  const sign = n >= 0 ? "+" : "";
+  const sign = n > 0 ? "+" : "";
   return `${sign}${n.toFixed(1)}%`;
+}
+
+function pillClasses(n: number | null): string {
+  const v = n ?? 0;
+  if (v > 0) return "bg-[#00DC5A]/10 text-[#00DC5A]";
+  if (v < 0) return "bg-[#FF3B30]/10 text-[#FF3B30]";
+  return "bg-white/[0.06] text-[#9CA3AF]";
 }
 
 export default function HomepageSignalBoard({
@@ -211,7 +218,7 @@ function SignalCard({ card }: { card: HomepageCard }) {
         <p className="mt-0.5 truncate text-[11px] text-[#555]">{card.set_name}</p>
         <div className="mt-2 flex items-center justify-between border-t border-white/[0.04] pt-2">
           <span className="text-[15px] font-bold tabular-nums text-white">{formatPrice(card.market_price)}</span>
-          <span className={`rounded-md px-1.5 py-0.5 text-[12px] font-bold tabular-nums ${(card.change_pct ?? 0) >= 0 ? "bg-[#00DC5A]/10 text-[#00DC5A]" : "bg-[#FF3B30]/10 text-[#FF3B30]"}`}>
+          <span className={`rounded-md px-1.5 py-0.5 text-[12px] font-bold tabular-nums ${pillClasses(card.change_pct)}`}>
             {formatPct(card.change_pct)}
           </span>
         </div>

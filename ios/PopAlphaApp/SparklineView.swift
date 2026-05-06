@@ -2,7 +2,7 @@ import SwiftUI
 
 struct SparklineView: View {
     let data: [Double]
-    let isPositive: Bool
+    let direction: ChangeDirection
     var lineWidth: CGFloat = 1.5
     var height: CGFloat = 32
 
@@ -17,10 +17,9 @@ struct SparklineView: View {
         let pctChange: Double = first != 0
             ? ((last - first) / abs(first)) * 100
             : 0
-        let direction = isPositive ? "up" : "down"
         return String(
             format: "$%.2f to $%.2f, %@ %.0f percent",
-            first, last, direction, abs(pctChange)
+            first, last, direction.accessibilityWord, abs(pctChange)
         )
     }
 
@@ -61,7 +60,7 @@ struct SparklineView: View {
                     .fill(
                         LinearGradient(
                             colors: [
-                                (isPositive ? PA.Colors.positive : PA.Colors.negative).opacity(0.15),
+                                direction.color.opacity(0.15),
                                 .clear
                             ],
                             startPoint: .top,
@@ -78,7 +77,7 @@ struct SparklineView: View {
                         }
                     }
                     .stroke(
-                        isPositive ? PA.Colors.positive : PA.Colors.negative,
+                        direction.color,
                         style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round)
                     )
                 }
@@ -96,7 +95,7 @@ struct SparklineView: View {
 #Preview("Sparkline Positive") {
     SparklineView(
         data: [105, 108, 112, 118, 115, 122, 130],
-        isPositive: true,
+        direction: .up,
         lineWidth: 2,
         height: 60
     )
@@ -108,7 +107,19 @@ struct SparklineView: View {
 #Preview("Sparkline Negative") {
     SparklineView(
         data: [430, 425, 420, 418, 415, 410, 412],
-        isPositive: false,
+        direction: .down,
+        lineWidth: 2,
+        height: 60
+    )
+    .padding()
+    .background(PA.Colors.background)
+    .preferredColorScheme(.dark)
+}
+
+#Preview("Sparkline Flat") {
+    SparklineView(
+        data: [200, 201, 199, 200, 200, 201, 200],
+        direction: .flat,
         lineWidth: 2,
         height: 60
     )

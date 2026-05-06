@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { SignOutButton } from "@clerk/nextjs";
 import { useSafeUser } from "@/lib/auth/use-safe-user";
 import PricingModal from "@/components/billing/pricing-modal";
@@ -37,13 +37,6 @@ const DEFAULT_SETTINGS: SettingsDraft = {
 };
 
 const STRIPE_PORTAL_URL = process.env.NEXT_PUBLIC_STRIPE_PORTAL_URL;
-
-function getTierLabel(value: unknown): "Trainer" | "Ace" | "Elite" {
-  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
-  if (normalized === "elite") return "Elite";
-  if (normalized === "ace") return "Ace";
-  return "Trainer";
-}
 
 function SettingToggle({
   title,
@@ -122,13 +115,6 @@ export default function SettingsPage() {
       cancelled = true;
     };
   }, [isLoaded, user]);
-
-  const currentTier = useMemo(() => {
-    if (!user) return "Trainer";
-    return getTierLabel(
-      user.publicMetadata.subscriptionTier ?? user.publicMetadata.tier ?? user.publicMetadata.plan,
-    );
-  }, [user]);
 
   const publicProfileHref = settings.handle ? `/u/${encodeURIComponent(settings.handle)}` : null;
 
@@ -290,7 +276,7 @@ export default function SettingsPage() {
               <p className="text-[12px] font-semibold uppercase tracking-[0.16em] text-[#6B6B6B]">Billing</p>
               <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
                 <div>
-                  <p className="text-[16px] font-semibold text-white">{currentTier} Plan</p>
+                  <p className="text-[16px] font-semibold text-white">Free Plan</p>
                   <p className="mt-1 text-[13px] leading-6 text-[#8A8A8A]">
                     Upgrade when you want more signal, or manage your subscription if you are already paid.
                   </p>
@@ -301,7 +287,7 @@ export default function SettingsPage() {
                     onClick={() => setPricingOpen(true)}
                     className="rounded-2xl border border-[#1E1E1E] bg-white/[0.06] px-4 py-2 text-[13px] font-semibold text-white transition hover:bg-white/[0.1]"
                   >
-                    {currentTier === "Trainer" ? "Upgrade Plan" : "Change Plan"}
+                    Upgrade Plan
                   </button>
                   {STRIPE_PORTAL_URL ? (
                     <Link

@@ -1,7 +1,7 @@
 "use server";
 
 import { generateText } from "ai";
-import { getPopAlphaModel, type PopAlphaTier } from "@/lib/ai/models";
+import { getPopAlphaModel } from "@/lib/ai/models";
 
 type CardSummaryInput = {
   cardName: string;
@@ -15,11 +15,8 @@ type CardSummaryInput = {
   populationHigherPct: number | null;
 };
 
-export async function generateCardSummary(
-  input: CardSummaryInput,
-  tier: PopAlphaTier = "Trainer",
-): Promise<string> {
-  const model = getPopAlphaModel(tier);
+export async function generateCardSummary(input: CardSummaryInput): Promise<string> {
+  const model = getPopAlphaModel();
 
   const priceLines = [
     input.median7d != null ? `7-day median price: $${input.median7d.toFixed(2)}` : null,

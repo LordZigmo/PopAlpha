@@ -21,7 +21,7 @@ export async function GET(req: Request) {
   const auth = await requireOnboarded(req);
   if (!auth.ok) return auth.response;
 
-  if (!hasPro(auth.userId)) {
+  if (!(await hasPro(auth.userId))) {
     return NextResponse.json(
       { ok: false, error: "Pro subscription required." },
       { status: 403 },

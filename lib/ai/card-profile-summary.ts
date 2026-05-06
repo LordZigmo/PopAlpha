@@ -38,7 +38,6 @@ export {
 // ── Constants used only by the LLM-call path ────────────────────────────────
 
 export const CARD_PROFILE_VERSION = "card-profile-v2";
-export const CARD_PROFILE_MODEL_TIER = "Ace" as const;
 // Upper bound per card. Prior value (6s) was too tight for
 // gemini-2.5-flash in practice — first smoke test showed 2 of 3 cards
 // timing out at ~6s. 15s gives ~3× headroom over the measured single-
@@ -223,7 +222,7 @@ export async function generateCardProfile(
 
   try {
     const result = await generateText({
-      model: getPopAlphaModel(CARD_PROFILE_MODEL_TIER),
+      model: getPopAlphaModel(),
       system: SYSTEM_PROMPT,
       prompt: buildUserPrompt(input),
       abortSignal: abortController.signal,

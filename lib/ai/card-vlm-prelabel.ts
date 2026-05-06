@@ -21,7 +21,6 @@ import { generateObject } from "ai";
 import { z } from "zod";
 import { getPopAlphaModel } from "@/lib/ai/models";
 
-export const VLM_PRELABEL_MODEL_TIER = "Ace" as const;
 export const VLM_PRELABEL_TIMEOUT_MS = 12_000;
 // Stable ID stored alongside any persisted suggestions so we can
 // re-process when the prompt or model materially changes.
@@ -123,7 +122,7 @@ export async function prelabelCardImage(
 
   try {
     const result = await generateObject({
-      model: getPopAlphaModel(VLM_PRELABEL_MODEL_TIER),
+      model: getPopAlphaModel(),
       schema: VlmGuessSchema,
       system: SYSTEM_PROMPT,
       messages: [

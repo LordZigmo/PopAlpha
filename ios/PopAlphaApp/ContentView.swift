@@ -32,7 +32,10 @@ struct ContentView: View {
                 selectedTab = newValue
             }
         )) {
-            MarketplaceView()
+            // Bind selectedTab into MarketplaceView so the new
+            // MarketHeroCard / MarketScanStrip can switch to the Scan
+            // tab without going through NotificationCenter or a singleton.
+            MarketplaceView(selectedTab: $selectedTab)
                 .tabItem {
                     Label("Market", systemImage: "chart.line.uptrend.xyaxis")
                 }

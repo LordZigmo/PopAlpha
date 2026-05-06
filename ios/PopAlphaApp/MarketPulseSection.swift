@@ -76,12 +76,12 @@ struct MarketPulseSection: View {
 
         var title: String {
             switch self {
-            case .movers: return "Top movers"
+            case .movers: return "Top Movers"
             case .breakouts: return "Breakouts"
-            case .unusual: return "Unusual volume"
+            case .unusual: return "Unusual Volume"
             case .pullbacks: return "Pullbacks"
-            case .mid: return "Mid movers"
-            case .budget: return "Budget movers"
+            case .mid: return "Mid Movers"
+            case .budget: return "Budget Movers"
             }
         }
 
@@ -132,32 +132,33 @@ struct MarketPulseSection: View {
         }
     }
 
-    // MARK: - Header strip (KPIs + window toggle)
+    // MARK: - Header strip (KPIs)
+    //
+    // The 24H / 7D window toggle used to live on the right side of this
+    // strip; it now sits inline with the section title (see
+    // `activeSection`) so the control is directly adjacent to the data
+    // it switches. The KPIs alone fill this row.
 
     private var headerStrip: some View {
-        HStack(alignment: .center, spacing: 12) {
-            HStack(spacing: 14) {
-                if let count = pricesRefreshed24h {
-                    kpi(label: "Prices 24H", value: formatCount(count))
-                }
-                if let avg = avgChange24h {
-                    kpi(
-                        label: "Avg 24H",
-                        value: formatSignedPct(avg),
-                        tone: avg >= 0 ? PA.Colors.positive : PA.Colors.negative
-                    )
-                }
-                if let cap = marketCap, cap > 0 {
-                    kpi(label: "Mkt Cap", value: formatDollar(cap))
-                }
+        HStack(spacing: 14) {
+            // Friendlier labels — the old "Prices 24H" / "Mkt Cap"
+            // read like a Bloomberg ticker; collectors who don't
+            // come from finance bounced off them. Same numbers,
+            // plain English.
+            if let count = pricesRefreshed24h {
+                kpi(label: "Cards tracked 24H", value: formatCount(count))
             }
-            Spacer(minLength: 8)
-            if category.isWindowed {
-                windowToggle
-                    // Only makes sense for windowed categories; hide on
-                    // Breakouts / Unusual so it doesn't mislead.
-                    .transition(.opacity)
+            if let avg = avgChange24h {
+                kpi(
+                    label: "Avg change 24H",
+                    value: formatSignedPct(avg),
+                    tone: avg >= 0 ? PA.Colors.positive : PA.Colors.negative
+                )
             }
+            if let cap = marketCap, cap > 0 {
+                kpi(label: "Tracked market cap", value: formatDollar(cap))
+            }
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, PA.Layout.sectionPadding)
     }
@@ -260,7 +261,18 @@ struct MarketPulseSection: View {
             emptyMessage: emptyMessage(for: category),
             onSelect: onSelect,
             watchlistSlugs: watchlistSlugs,
-            sectionRationale: category.sectionRationale
+            sectionRationale: category.sectionRationale,
+            trailingAccessory: {
+                // Window toggle sits inline with the section title for
+                // windowed categories (Movers, Pullbacks). Non-windowed
+                // tabs (Breakouts, Unusual, Mid, Budget) come from
+                // pre-computed daily lists and ignore the toggle, so we
+                // hide it there to avoid misleading the user.
+                if category.isWindowed {
+                    windowToggle
+                        .transition(.opacity)
+                }
+            }
         )
         .id(category)   // ensures fresh transition state when swapping
         .transition(.opacity.combined(with: .move(edge: .trailing)))

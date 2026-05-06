@@ -1,535 +1,35 @@
 import SwiftUI
 import NukeUI
-import OSLog
 
-// MARK: - Signal Board — homepage content surface
+// MARK: - Signal board shared types
 //
-// Renders the market-intelligence sections that sit below the compact
-// PersonalPulseSection in MarketplaceView. Section order (post-Apr 2026
-// rebalance — see docs/plans/jazzy-rolling-rocket.md):
+// This file used to host `SignalBoardView` (the homepage content surface)
+// and a private `AIBriefCard`. Both have been removed: MarketplaceView
+// now owns all homepage fetches and renders the sections directly so
+// the order can differ between guest and authed flows. AIBriefCard lives
+// in its own file (AIBriefCard.swift).
 //
-//   1. AIBriefCard       (/api/homepage/ai-brief + style-aware tertiary)
-//   2. ForYouRail        (personalized rail; falls back to global trending)
-//   3. MarketPulseSection (tabbed: Movers / Breakouts / Unusual / Pullbacks)
-//   4. CommunitySection  (reframed as "Collectors like you" when style known)
-//   5. Footer            (data provenance)
+// What remains here are the shared low-level types reused across the
+// homepage (MarketPulseSection, ForYouRail, Community microfeeds):
 //
-// The KPI strip (Prices 24H · Avg 24H · Mkt Cap) is folded into the
-// MarketPulseSection header, and the 24H / 7D window toggle lives inside
-// the same module. Both are owned by MarketplaceView and passed down so
-// pull-to-refresh continues to refresh everything in one shot.
-//
-// Backed by /api/homepage (getHomepageData on the server).
-
-struct SignalBoardView: View {
-    @Binding var selectedWindow: SignalWindow
-
-    // Passed down from MarketplaceView so the market module can render
-    // the folded KPI strip and the "Watchlist spike" rationale chip.
-    let styleLabel: String?
-    let meData: HomepageMeDTO?
-    let pricesRefreshed24h: Int?
-    let avgChange24h: Double?
-    let marketCap: Double?
-
-    @State private var data: HomepageDataDTO?
-    @State private var aiBrief: HomepageAIBriefDTO?
-    @State private var community: HomepageCommunityDTO?
-    @State private var isLoading = true
-    @State private var loadError: String?
-    @State private var selectedCard: MarketCard?
-
-    var body: some View {
-        Group {
-            if isLoading && data == nil {
-                loadingState
-            } else if let error = loadError, data == nil {
-                errorState(error)
-            } else if let data {
-                content(for: data)
-            } else {
-                emptyState
-            }
-        }
-        // .task(id:) so the full signal-board / AI brief / community
-        // fetch only fires when auth state flips — not on every view
-        // re-appear after a pop. Scroll position in the parent
-        // MarketplaceView ScrollView is preserved on back-navigation.
-        // Manual refresh still goes through .refreshable below.
-        .task(id: AuthService.shared.isAuthenticated) {
-            await load()
-        }
-        .refreshable {
-            await load()
-        }
-        .navigationDestination(item: $selectedCard) { card in
-            CardDetailView(card: card)
-        }
-    }
-
-    // MARK: - Content
-
-    @ViewBuilder
-    private func content(for data: HomepageDataDTO) -> some View {
-        VStack(spacing: 24) {
-            // 1. AI Brief — the editorial anchor
-            AIBriefCard(
-                brief: aiBrief,
-                fallbackAsOf: data.asOf,
-                styleLabel: styleLabel
-            )
-            .padding(.horizontal, PA.Layout.sectionPadding)
-
-            // 2. For You — personalized rail with rationale chips;
-            //    falls back to global trending for guests / low-data.
-            ForYouRail(
-                signalBoard: data.signalBoard,
-                fallbackWindow: selectedWindow,
-                hasProfile: styleLabel != nil,
-                onSelect: handleSelect
-            )
-
-            // 3. Market Pulse — tabbed wrapper over the four mover sections.
-            //    Folds the old TodayPulseStrip KPIs and 24H/7D toggle into
-            //    its header so this is the *single* market module.
-            MarketPulseSection(
-                selectedWindow: $selectedWindow,
-                signalBoard: data.signalBoard,
-                highConfidenceMovers: data.highConfidenceMovers,
-                watchlistSlugs: watchlistSlugs,
-                pricesRefreshed24h: pricesRefreshed24h,
-                avgChange24h: avgChange24h,
-                marketCap: marketCap,
-                onSelect: handleSelect
-            )
-
-            // 4. Collector Pulse — reframed eyebrow when we know the style.
-            if let community, !(community.trending.isEmpty && community.mostSaved.isEmpty && community.friendsAdded.isEmpty) {
-                CommunitySection(data: community, styleLabel: styleLabel)
-            }
-
-            // 5. Footer
-            if let asOf = data.asOf {
-                Text("Data as of \(formatAsOf(asOf)) · Scrydex & PokémonTCG")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(PA.Colors.muted)
-                    .padding(.top, 8)
-                    .frame(maxWidth: .infinity)
-            }
-        }
-        .padding(.vertical, 8)
-    }
-
-    /// Slugs of cards the signed-in user is watching — used by
-    /// MarketPulseSection to annotate rows with a "Watchlist spike"
-    /// rationale chip. Empty set for guests / missing data.
-    private var watchlistSlugs: Set<String> {
-        Set((meData?.watchlistMovers ?? []).map { $0.slug })
-    }
-
-    // MARK: - States
-
-    private var loadingState: some View {
-        VStack(spacing: 16) {
-            ProgressView().tint(PA.Colors.accent)
-            Text("Loading market signals...")
-                .font(PA.Typography.cardSubtitle)
-                .foregroundStyle(PA.Colors.muted)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 60)
-    }
-
-    private func errorState(_ message: String) -> some View {
-        VStack(spacing: 12) {
-            Image(systemName: "wifi.exclamationmark")
-                .font(.system(size: 28))
-                .foregroundStyle(PA.Colors.muted)
-            Text("Couldn't load signals")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(PA.Colors.text)
-            Text(message)
-                .font(PA.Typography.caption)
-                .foregroundStyle(PA.Colors.muted)
-                .multilineTextAlignment(.center)
-                .lineLimit(3)
-            Button {
-                Task { await load() }
-            } label: {
-                Text("Retry")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(PA.Colors.accent)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 8)
-                    .background(PA.Colors.accent.opacity(0.12))
-                    .clipShape(Capsule())
-            }
-            .buttonStyle(.plain)
-            .padding(.top, 4)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 60)
-        .padding(.horizontal, 32)
-    }
-
-    private var emptyState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "square.stack.3d.up.slash")
-                .font(.system(size: 28))
-                .foregroundStyle(PA.Colors.muted)
-            Text("No signals available")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(PA.Colors.text)
-            Text("Pull down to refresh")
-                .font(PA.Typography.caption)
-                .foregroundStyle(PA.Colors.muted)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 60)
-    }
-
-    // MARK: - Actions
-
-    private func handleSelect(_ card: HomepageCardDTO) {
-        PAHaptics.tap()
-        selectedCard = card.toMarketCard()
-    }
-
-    private func load() async {
-        isLoading = true
-        loadError = nil
-        async let signalTask = CardService.shared.fetchHomepageSignalBoard()
-        async let briefTask: HomepageAIBriefDTO? = {
-            do { return try await CardService.shared.fetchAIBrief() }
-            catch { Logger.ui.debug("ai-brief load error: \(error)"); return nil }
-        }()
-        async let communityTask: HomepageCommunityDTO? = {
-            do { return try await CardService.shared.fetchHomepageCommunity() }
-            catch { Logger.ui.debug("community load error: \(error)"); return nil }
-        }()
-        do {
-            let fetched = try await signalTask
-            let brief = await briefTask
-            let comm = await communityTask
-            await MainActor.run {
-                self.data = fetched
-                self.aiBrief = brief
-                self.community = comm
-                self.isLoading = false
-            }
-        } catch {
-            Logger.ui.debug("load error: \(error)")
-            let brief = await briefTask
-            let comm = await communityTask
-            await MainActor.run {
-                self.aiBrief = brief
-                self.community = comm
-                self.loadError = error.localizedDescription
-                self.isLoading = false
-            }
-        }
-    }
-
-    private func formatAsOf(_ iso: String) -> String {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let date = f.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
-        guard let date else { return iso }
-        let df = DateFormatter()
-        df.dateFormat = "h:mm a"
-        return df.string(from: date)
-    }
-}
-
-// MARK: - AI Brief Card
-
-private struct AIBriefCard: View {
-    let brief: HomepageAIBriefDTO?
-    let fallbackAsOf: String?
-    /// Personalization profile's dominant style label, when known.
-    /// Drives the "Matters most for: …" tertiary line so the brief feels
-    /// aimed at the reader instead of the whole market.
-    let styleLabel: String?
-
-    /// In-place expansion state. Tapping "Read more" un-truncates the
-    /// summary and reveals the provenance footer (model, focus set, data
-    /// freshness) without pushing a new screen. Preserves home-screen
-    /// context and feels more modern than a detail-view push.
-    @State private var isExpanded = false
-
-    // Placeholder copy used only when the /api/homepage/ai-brief cache is
-    // empty (e.g. fresh deploy, cron hasn't run yet). Real briefs come
-    // from Gemini via the hourly cron.
-    private static let placeholderSummary = "Your AI market brief shows up here once today's data is ready. It tells you which cards and sets are moving, why it matters, and what to watch next."
-    private static let placeholderTakeaway = "Updating shortly"
-
-    private var summary: String { brief?.summary ?? Self.placeholderSummary }
-    private var takeaway: String { brief?.takeaway ?? Self.placeholderTakeaway }
-    private var isLive: Bool { brief != nil && brief?.source != "fallback" }
-
-    /// Returns the 3-step trio iff all three labeled fields are present
-    /// on the current brief. Older v1 briefs don't have them yet, so we
-    /// fall back to the single `summary` blob in those cases.
-    private var threeStep: (whats: String, why: String, watch: String)? {
-        guard
-            let h = brief?.whatsHappening, !h.isEmpty,
-            let w = brief?.whyItMatters,   !w.isEmpty,
-            let n = brief?.whatToWatch,    !n.isEmpty
-        else { return nil }
-        return (h, w, n)
-    }
-    private var mattersLine: String {
-        // Falls back to "Modern collectors" so guests still see a line
-        // rather than an awkward gap. Keep copy warm and declarative.
-        "Matters most for: \(styleLabel ?? "Modern collectors")"
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Header row
-            HStack(spacing: 8) {
-                HStack(spacing: 6) {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(PA.Colors.accent)
-                        .accessibilityHidden(true)
-                    Text("AI BRIEF")
-                        .font(.system(size: 10, weight: .semibold))
-                        .tracking(2.0)
-                        .foregroundStyle(PA.Colors.accent)
-                        .accessibilityAddTraits(.isHeader)
-                }
-                Circle()
-                    .fill(isLive ? PA.Colors.positive : PA.Colors.muted)
-                    .frame(width: 5, height: 5)
-                Text(timestampLabel)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(PA.Colors.muted)
-                Spacer()
-            }
-
-            // Body summary. Collapsed → preview the full single-blob
-            // summary, line-limited. Expanded → if the brief has labeled
-            // 3-step content, render it as three captioned sections; if
-            // not (older v1 cached briefs), fall back to the full summary.
-            if isExpanded, let trio = threeStep {
-                threeStepSummary(trio.whats, trio.why, trio.watch)
-            } else {
-                Text(summary)
-                    .font(.system(size: 14))
-                    .foregroundStyle(PA.Colors.text)
-                    .lineSpacing(3)
-                    .lineLimit(isExpanded ? nil : 3)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            // Takeaway chip + toggle (read more ↔ show less)
-            HStack(spacing: 10) {
-                HStack(spacing: 6) {
-                    Text("🔥")
-                        .font(.system(size: 11))
-                    Text(takeaway)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(PA.Colors.text)
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(PA.Colors.accent.opacity(0.12))
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .stroke(PA.Colors.accent.opacity(0.2), lineWidth: 0.5)
-                )
-
-                Spacer()
-
-                Button {
-                    let willExpand = !isExpanded
-                    withAnimation(.easeInOut(duration: 0.25)) {
-                        isExpanded.toggle()
-                    }
-                    PAHaptics.tap()
-                    // Fire the personalization event only on expansion —
-                    // collapsing back doesn't carry intent. Best-effort:
-                    // PersonalizationService.track is debounced + batched.
-                    if willExpand {
-                        PersonalizationService.shared.track(
-                            PersonalizedEvent(type: .aiBriefReadMoreTapped)
-                        )
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Text(isExpanded ? "Show less" : "Read more")
-                            .font(.system(size: 12, weight: .semibold))
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 10, weight: .bold))
-                            .rotationEffect(.degrees(isExpanded ? 180 : 0))
-                            .accessibilityHidden(true)
-                    }
-                    .foregroundStyle(PA.Colors.accent)
-                }
-                .buttonStyle(.plain)
-                .accessibilityHint(isExpanded ? "Collapses the AI brief" : "Expands the full AI brief")
-            }
-
-            // Tertiary "who this matters to" line — personalizes without
-            // new data. Always rendered (falls back to a generic persona)
-            // so the card has a consistent 3-line body rhythm.
-            HStack(spacing: 6) {
-                Image(systemName: "scope")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(PA.Colors.muted)
-                    .accessibilityHidden(true)
-                Text(mattersLine)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(PA.Colors.textSecondary)
-                    .lineLimit(1)
-            }
-
-            // Expanded-only provenance footer. Shows up below the
-            // "matters most for" line with a thin divider so the card
-            // stays visually cohesive. Collapsed state hides this
-            // entirely — no reserved space, no layout jitter.
-            if isExpanded {
-                expandedFooter
-                    .transition(
-                        .opacity.combined(with: .move(edge: .top))
-                    )
-            }
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            ZStack {
-                PA.Gradients.cardSurface
-                // subtle accent glow top-left
-                RadialGradient(
-                    colors: [PA.Colors.accent.opacity(0.12), .clear],
-                    center: .topLeading,
-                    startRadius: 0,
-                    endRadius: 220
-                )
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: PA.Layout.panelRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: PA.Layout.panelRadius, style: .continuous)
-                .stroke(PA.Colors.accent.opacity(0.35), lineWidth: 1)
-        )
-    }
-
-    // MARK: - Three-step summary (expanded body)
-    // Renders the labeled "What's happening / Why it matters / What to
-    // watch" trio as three captioned sections. Used when the brief has
-    // the 3-step fields populated and the card is expanded.
-
-    private func threeStepSummary(_ whats: String, _ why: String, _ watch: String) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            threeStepRow(label: "What's happening", text: whats, icon: "dot.circle.fill")
-            threeStepRow(label: "Why it matters",   text: why,   icon: "scope")
-            threeStepRow(label: "What to watch",    text: watch, icon: "binoculars.fill")
-        }
-    }
-
-    private func threeStepRow(label: String, text: String, icon: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(PA.Colors.accent)
-                    .accessibilityHidden(true)
-                Text(label.uppercased())
-                    .font(.system(size: 10, weight: .bold))
-                    .tracking(1.2)
-                    .foregroundStyle(PA.Colors.accent)
-            }
-            Text(text)
-                .font(.system(size: 14))
-                .foregroundStyle(PA.Colors.text)
-                .lineSpacing(3)
-                .multilineTextAlignment(.leading)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        // Voiceover reads the label and body as a single sentence so
-        // screen-reader users don't hear the caption read separately.
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(label). \(text)")
-    }
-
-    // MARK: - Expanded footer
-
-    private var expandedFooter: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Divider().background(PA.Colors.border)
-                .padding(.vertical, 2)
-
-            Text("HOW THIS WAS BUILT")
-                .font(.system(size: 9, weight: .semibold))
-                .tracking(1.5)
-                .foregroundStyle(PA.Colors.muted)
-
-            metaRow(label: "Model", value: brief?.modelLabel ?? "PopAlpha mix")
-            if let focus = brief?.focusSet, !focus.isEmpty {
-                metaRow(label: "Focus set", value: focus)
-            }
-            metaRow(label: "Source", value: (brief?.source ?? "fallback").capitalized)
-            metaRow(label: "Data as of", value: formatRelative(brief?.dataAsOf ?? fallbackAsOf))
-            metaRow(label: "Generated", value: formatRelative(brief?.generatedAt ?? fallbackAsOf))
-        }
-    }
-
-    private func metaRow(label: String, value: String) -> some View {
-        HStack(spacing: 10) {
-            Text(label)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(PA.Colors.muted)
-                .frame(width: 78, alignment: .leading)
-            Text(value)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(PA.Colors.textSecondary)
-                .lineLimit(2)
-                .multilineTextAlignment(.leading)
-            Spacer(minLength: 0)
-        }
-    }
-
-    private func formatRelative(_ iso: String?) -> String {
-        guard let iso else { return "—" }
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let date = f.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
-        guard let date else { return iso }
-        let minutes = Int(-date.timeIntervalSinceNow / 60)
-        if minutes < 1 { return "just now" }
-        if minutes < 60 { return "\(minutes)m ago" }
-        let hours = minutes / 60
-        if hours < 24 { return "\(hours)h ago" }
-        return "\(hours / 24)d ago"
-    }
-
-    private var timestampLabel: String {
-        let source = brief?.generatedAt ?? fallbackAsOf
-        guard let source else { return "Updating" }
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let date = f.date(from: source) ?? ISO8601DateFormatter().date(from: source)
-        guard let date else { return "Updating" }
-        let minutes = Int(-date.timeIntervalSinceNow / 60)
-        if minutes < 1 { return "Updated just now" }
-        if minutes < 60 { return "Updated \(minutes)m ago" }
-        let hours = minutes / 60
-        if hours < 24 { return "Updated \(hours)h ago" }
-        return "Updated \(hours / 24)d ago"
-    }
-}
+//   • MoverSection         — eyebrow + 1 featured + N compact rows
+//   • FeaturedMoverCard    — large hero row inside MoverSection
+//   • CompactMoverRow      — slim row beneath the featured card
+//   • ChangePill           — colored "+x.y% 24H" badge
+//   • SignalBadgeKind /
+//     SignalBadgeView      — HOT / BREAKOUT / WATCH / VALUE chips
+//   • formatPrice / formatPct / formatRelativeUpdate — shared formatters
+//   • CommunitySection     — "Trending / Most saved / Friends" microfeed
 
 // MARK: - Mover Section — eyebrow + title + 1 featured + compact rows
 //
 // Exposed as `internal` (drop the `private`) so MarketPulseSection can
 // reuse the exact same section template inside its tabbed wrapper.
+// Generic over a trailing accessory view so callers can place a
+// section-scoped control (e.g. the 24H/7D window toggle) inline with
+// the title — keeps the toggle adjacent to the data it switches.
 
-struct MoverSection: View {
+struct MoverSection<TrailingAccessory: View>: View {
     let eyebrow: String
     let eyebrowColor: Color
     let title: String
@@ -545,8 +45,36 @@ struct MoverSection: View {
     /// per-row badge-derived rationale (e.g. the Unusual tab wants every
     /// row to read "Unusual volume" regardless of each card's badge).
     var sectionRationale: String? = nil
+    /// Optional control rendered inline with the title (e.g. window
+    /// toggle). Sits between the title and the "See all" link so the
+    /// toggle is adjacent to the data it controls.
+    let trailingAccessory: () -> TrailingAccessory
 
     private let maxCompactRows = 4
+
+    init(
+        eyebrow: String,
+        eyebrowColor: Color,
+        title: String,
+        window: SignalWindow?,
+        cards: [HomepageCardDTO],
+        emptyMessage: String,
+        onSelect: @escaping (HomepageCardDTO) -> Void,
+        watchlistSlugs: Set<String> = [],
+        sectionRationale: String? = nil,
+        @ViewBuilder trailingAccessory: @escaping () -> TrailingAccessory = { EmptyView() }
+    ) {
+        self.eyebrow = eyebrow
+        self.eyebrowColor = eyebrowColor
+        self.title = title
+        self.window = window
+        self.cards = cards
+        self.emptyMessage = emptyMessage
+        self.onSelect = onSelect
+        self.watchlistSlugs = watchlistSlugs
+        self.sectionRationale = sectionRationale
+        self.trailingAccessory = trailingAccessory
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -562,6 +90,7 @@ struct MoverSection: View {
                         .foregroundStyle(PA.Colors.text)
                 }
                 Spacer(minLength: 8)
+                trailingAccessory()
                 if cards.count > (1 + maxCompactRows) {
                     Button {
                         // Phase 2: navigation to full section view
@@ -678,7 +207,7 @@ struct FeaturedMoverCard: View {
                     if card.sparkline7D.count >= 2 {
                         SparklineView(
                             data: card.sparkline7D,
-                            isPositive: (card.changePct ?? 0) >= 0,
+                            direction: ChangeDirection.from(card.changePct),
                             lineWidth: 1.5,
                             height: 28
                         )
@@ -821,7 +350,7 @@ struct CompactMoverRow: View {
             if card.sparkline7D.count >= 2 {
                 SparklineView(
                     data: card.sparkline7D,
-                    isPositive: (card.changePct ?? 0) >= 0,
+                    direction: ChangeDirection.from(card.changePct),
                     lineWidth: 1.2,
                     height: 20
                 )
@@ -880,9 +409,7 @@ struct ChangePill: View {
     var small: Bool = false
 
     var body: some View {
-        let value = changePct ?? 0
-        let isPositive = value >= 0
-        let color: Color = isPositive ? PA.Colors.positive : PA.Colors.negative
+        let color = ChangeDirection.from(changePct).color
         HStack(spacing: 3) {
             Text(formatPct(changePct))
                 .font(.system(size: small ? 10 : 11, weight: .bold, design: .rounded))
@@ -909,7 +436,8 @@ enum SignalBadgeKind {
     static func from(_ card: HomepageCardDTO) -> SignalBadgeKind? {
         let tier = card.moverTier?.lowercased()
         let direction = card.marketDirection?.lowercased() ?? ""
-        let change = card.changePct ?? 0
+        // No badge when we have no change signal — don't fabricate one from a zero default.
+        guard let change = card.changePct else { return nil }
         if tier == "hot" && change > 0 {
             return direction.contains("up") || direction.contains("rising") ? .breakout : .hot
         }
@@ -974,7 +502,7 @@ func formatPrice(_ n: Double?) -> String {
 
 func formatPct(_ n: Double?) -> String {
     guard let n else { return "--" }
-    let sign = n >= 0 ? "+" : ""
+    let sign = n > 0 ? "+" : ""
     return "\(sign)\(String(format: "%.1f", n))%"
 }
 
@@ -997,8 +525,11 @@ func formatRelativeUpdate(_ iso: String?) -> String? {
 }
 
 // MARK: - Community Section
+//
+// Exposed as `internal` so MarketplaceView can render it directly now
+// that the SignalBoardView wrapper has been removed.
 
-private struct CommunitySection: View {
+struct CommunitySection: View {
     let data: HomepageCommunityDTO
     /// When we know the reader's style, reframe the eyebrow to
     /// "COLLECTORS LIKE YOU" so this rail feels socially adjacent
@@ -1190,31 +721,8 @@ private struct FriendEventRow: View {
     }
 }
 
-// MARK: - Preview
-
-#Preview("Signal Board") {
-    StatefulPreviewWrapper(SignalWindow.h24) { binding in
-        ScrollView {
-            SignalBoardView(
-                selectedWindow: binding,
-                styleLabel: nil,
-                meData: nil,
-                pricesRefreshed24h: nil,
-                avgChange24h: nil,
-                marketCap: nil
-            )
-        }
-        .background(PA.Colors.background)
-        .preferredColorScheme(.dark)
-    }
-}
-
-private struct StatefulPreviewWrapper<Value, Content: View>: View {
-    @State var value: Value
-    var content: (Binding<Value>) -> Content
-    init(_ value: Value, @ViewBuilder content: @escaping (Binding<Value>) -> Content) {
-        self._value = State(initialValue: value)
-        self.content = content
-    }
-    var body: some View { content($value) }
-}
+// Previews live with the views they exercise — see MarketplaceView.swift
+// for the full home-screen preview, and the individual section files
+// (MoverSection used by MarketPulseSection.swift, etc.) for component
+// previews. The old SignalBoardView preview that lived here was removed
+// when SignalBoardView itself was deleted.

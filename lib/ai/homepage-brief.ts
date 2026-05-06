@@ -32,9 +32,7 @@ import type { HomepageCard, HomepageData } from "@/lib/data/homepage";
  */
 
 export const HOMEPAGE_BRIEF_VERSION = "homepage-brief-v1";
-export const HOMEPAGE_BRIEF_MODEL_TIER = "Ace" as const;
-// Keep in sync with getPopAlphaModel("Ace"). Stored on generated
-// brief rows so each entry carries its producing model.
+// Stored on generated brief rows so each entry carries its producing model.
 export const HOMEPAGE_BRIEF_MODEL_LABEL = "gemini-2.5-flash";
 // Bumped from 8_000 to 15_000 in the same wave as card-profile-summary
 // (commit 564ce8c) and personalization/llm. Gemini 2.5-flash p95 sits in
@@ -199,44 +197,49 @@ function stringifyContextForPrompt(ctx: BriefContext): string {
 
 const SYSTEM_PROMPT = [
   "You are PopAlpha's market guide for Pokémon TCG collectors.",
-  "Write a short, easy-to-read brief about what the market is doing today.",
+  "Write a short, useful brief that helps a collector make a decision today.",
   "",
   "Style:",
-  "- 8th-grade reading level. Short sentences. Plain English.",
-  "- Premium but not academic. Calm, clear, and useful.",
-  "- Written for Pokémon collectors, not Wall Street analysts.",
-  "- No hype, no slang, no finance jargon.",
-  "- Do not mention being an AI. Do not invent sets or numbers that are not in the data.",
+  "- 8th-grade reading level. Short, decisive sentences.",
+  "- SPECIFIC. Name the actual sets driving today's action whenever possible.",
+  "- Useful. The brief should help the reader pick what to look at next.",
+  "- No hedging or filler. Skip vague phrasing.",
+  "- No finance jargon, no hype, no slang.",
+  "- Do not mention being an AI. Do not invent sets or numbers not in the data.",
   "",
-  "BANNED phrases — never use any of these:",
-  "  broad activity, selective strength, distinct clusters, accumulation zone,",
-  "  pricing dislocation, asymmetric upside, market regime, breadth, conviction,",
-  "  rotation, concentrating, dominant pocket, board-wide.",
+  "BANNED phrases — never use any of these (or close variants):",
+  "  \"a lot of cards are moving\", \"mixed energy\", \"various sets\", \"some cards\",",
+  "  \"broad activity\", \"selective strength\", \"distinct clusters\", \"accumulation zone\",",
+  "  \"pricing dislocation\", \"asymmetric upside\", \"market regime\", \"breadth\",",
+  "  \"conviction\", \"rotation\", \"concentrating\", \"dominant pocket\", \"board-wide\",",
+  "  \"good buying range\", \"market is showing\", \"market activity\".",
   "",
-  "Use simpler words instead:",
-  "  - 'broad activity' → 'a lot of cards are moving'",
-  "  - 'selective strength' → 'the strongest gains are in a few areas'",
-  "  - 'accumulation zone' → 'good buying range'",
-  "  - 'pricing dislocation' → 'price gap'",
-  "  - 'asymmetric upside' → 'could have room to move'",
-  "  - 'market regime' → 'how the market is acting'",
-  "  - 'breadth' → 'how many cards are moving'",
+  "Replace vague language with specific, decisive language:",
+  "  - Instead of \"a lot of cards are moving\" → \"151 and Astral Radiance are leading today\".",
+  "  - Instead of \"mixed energy\" → \"momentum is selective\" or \"no single set is in charge\".",
+  "  - Instead of \"some sets\" → name the actual sets from the data.",
+  "  - Instead of \"various cards\" → name the specific set that's leading.",
   "",
-  "Each summary follows this 3-step pattern:",
-  "  1. What is happening? (one short sentence)",
-  "  2. Why it matters. (one short sentence)",
-  "  3. What to watch next. (one short sentence)",
+  "The brief follows this exact 3-step pattern:",
+  "  1. WHAT'S HAPPENING — one decisive sentence naming the specific sets driving demand.",
+  "     Example: \"151 and Astral Radiance are attracting the strongest focused demand today.\"",
+  "  2. WHY IT MATTERS — one sentence explaining what the action pattern tells the reader.",
+  "     Example: \"Momentum is selective, so the best opportunities are clustering in a few sets.\"",
+  "  3. WHAT TO WATCH — one specific, action-oriented sentence pointing at the next step.",
+  "     Example: \"Modern-focused collectors should watch breakout cards in 151 first.\"",
   "",
   "Output ONLY a single JSON object matching this exact shape:",
-  '  {"whatsHappening":"...","whyItMatters":"...","whatToWatch":"...","takeaway":"...","focusSet":"..." | null}',
+  '  {"summary":"...","whatsHappening":"...","whyItMatters":"...","whatToWatch":"...","takeaway":"...","focusSet":"..." | null}',
   "",
   "Field rules:",
-  "- whatsHappening: one short sentence (10–18 words) answering pattern step 1.",
-  "- whyItMatters:   one short sentence (10–18 words) answering pattern step 2.",
-  "- whatToWatch:    one short sentence (10–18 words) answering pattern step 3.",
-  "- takeaway: one short headline, 4–8 words, no trailing period.",
-  "    Examples: \"Some vintage cards are heating up\", \"Mixed market, no clear leader\",",
-  "    \"Modern sets quietly leading\", \"A few cards doing the work\".",
+  "- summary: a 2-sentence condensed version (30–55 words total) shown on the home screen.",
+  "    Combines the most important parts of WHAT'S HAPPENING and WHAT TO WATCH for a fast read.",
+  "    Example: \"151 and Astral Radiance are seeing the strongest focused demand today. Momentum is selective, so watch the cards holding gains instead of chasing every spike.\"",
+  "- whatsHappening: one sentence (12–22 words) for pattern step 1.",
+  "- whyItMatters:   one sentence (12–22 words) for pattern step 2.",
+  "- whatToWatch:    one sentence (12–22 words) for pattern step 3.",
+  "- takeaway: 2–4 words. A decisive headline naming today's pattern. No trailing period.",
+  "    Examples: \"Selective momentum\", \"151 leading\", \"Few sets pulling away\", \"Quiet day, watch breakouts\".",
   "- focusSet: the single most important set name from the data, or null if no set stands out.",
   "- Do not output anything outside the JSON object. No prose, no code fences, no markdown.",
 ].join("\n");
@@ -257,47 +260,52 @@ export function buildFallbackHomepageBrief(
   ctx: BriefContext,
   dataAsOf: string | null,
 ): HomepageBrief {
-  const leader = ctx.dominantSet;
+  const leader  = ctx.dominantSet;
+  const second  = ctx.moverSets[1]?.name ?? null;
   const leaderCount = ctx.moverSets[0]?.count ?? 0;
-  const avg = ctx.topMoverAvgPct;
 
   let whatsHappening: string;
   let whyItMatters:   string;
   let whatToWatch:    string;
-  let takeaway: string;
+  let summary:        string;
+  let takeaway:       string;
 
   if (leader && leaderCount >= 3) {
-    whatsHappening = `${leader} is leading today.`;
-    whyItMatters   = "Most of the biggest movers come from the same set, so the gains are not spread across the whole market.";
-    whatToWatch    = `Watch whether other sets join in or ${leader} keeps doing the work.`;
-    takeaway = avg != null && avg > 0
-      ? `${leader} +${avg}% on average`
-      : `${leader} is leading today`;
-  } else if (leader && ctx.moverSets.length >= 3) {
-    whatsHappening = `${leader} is moving, but a few other sets are moving too.`;
-    whyItMatters   = "No single set is in charge today.";
-    whatToWatch    = "Watch which set holds its gains by the end of the day.";
-    takeaway = "Mixed market, no clear leader";
+    // Single set running the show. Specific and decisive.
+    whatsHappening = `${leader} is attracting the strongest focused demand today, with most of the biggest movers from this single set.`;
+    whyItMatters   = "When one set carries the day, momentum is selective and the best opportunities cluster in a few cards.";
+    whatToWatch    = `Watch whether ${leader} holds gains through the afternoon — that confirms today's leader.`;
+    summary        = `${leader} is attracting the strongest focused demand today. Watch whether the gains hold through the afternoon to confirm today's leader.`;
+    takeaway       = `${leader} leading`;
+  } else if (leader && second) {
+    // Two-set lead. Name both — that's what makes it specific.
+    whatsHappening = `${leader} and ${second} are sharing today's biggest moves, with the rest of the market quieter.`;
+    whyItMatters   = "Demand is split across two sets, so opportunities exist in both — but neither has fully taken over.";
+    whatToWatch    = `Watch which of ${leader} or ${second} holds gains by the end of the day — that becomes tomorrow's leader.`;
+    summary        = `${leader} and ${second} are sharing today's strongest demand. Watch which one holds gains into the afternoon to spot tomorrow's leader.`;
+    takeaway       = "Two sets pulling ahead";
   } else if (leader) {
-    whatsHappening = `${leader} looks strongest right now, but only a few cards are doing the work.`;
-    whyItMatters   = "The rest of the market is still quiet.";
-    whatToWatch    = "Watch for more sets to join before calling this a real run.";
-    takeaway = `${leader} leads, but quietly`;
+    // One set, but thin participation. Still specific.
+    whatsHappening = `${leader} is the strongest set right now, but only a few cards are doing the work.`;
+    whyItMatters   = "Thin participation means a small group of cards is responsible for most of today's gains.";
+    whatToWatch    = `Watch for more ${leader} cards to join in before treating this as a real run.`;
+    summary        = `${leader} is leading today, but only a few cards are carrying the move. Watch for broader participation before chasing.`;
+    takeaway       = `${leader} carrying the day`;
   } else if ((ctx.topPullbackAvgPct ?? 0) < 0) {
-    whatsHappening = "The market is cooling off today.";
-    whyItMatters   = "Most cards are flat or slipping, and very few are bid up.";
-    whatToWatch    = "Watch for the first set that finds a floor and bounces.";
-    takeaway = "Cool day, few bids";
+    // Cool day. Still actionable.
+    whatsHappening = "Most cards are slipping today, with very few bids holding firm.";
+    whyItMatters   = "When pullbacks outweigh gains, the market is digesting recent moves rather than starting new ones.";
+    whatToWatch    = "Watch for the first set that finds a floor and bounces — that signals where buyers return.";
+    summary        = "Most cards are slipping today as the market digests recent moves. Watch for the first set that finds a floor and bounces.";
+    takeaway       = "Cool day, watch floors";
   } else {
-    whatsHappening = "The market is quiet today.";
-    whyItMatters   = "No set has pulled ahead yet, so it is hard to say where the next move comes from.";
-    whatToWatch    = "Watch for the first card or set that breaks out.";
-    takeaway = "Market is quiet today";
+    // Quiet day. Make the action useful anyway.
+    whatsHappening = "The market is quiet today, with no set pulling clearly ahead.";
+    whyItMatters   = "Quiet days are when watchlists do their work — they highlight the next breakout before everyone else.";
+    whatToWatch    = "Watch for the first card or set that breaks out and gets confirmation through the afternoon.";
+    summary        = "The market is quiet today, with no clear leader. Watch for the first card or set that breaks out and gets confirmation.";
+    takeaway       = "Quiet day, watch breakouts";
   }
-
-  // Concatenated `summary` is the legacy single-blob form, kept around
-  // for older clients reading the v1 shape.
-  const summary = [whatsHappening, whyItMatters, whatToWatch].join(" ");
 
   return {
     version: HOMEPAGE_BRIEF_VERSION,
@@ -429,7 +437,7 @@ export async function generateHomepageBrief(
 
   try {
     const result = await generateText({
-      model: getPopAlphaModel(HOMEPAGE_BRIEF_MODEL_TIER),
+      model: getPopAlphaModel(),
       system,
       prompt,
       abortSignal: abortController.signal,

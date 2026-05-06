@@ -2,11 +2,10 @@
 
 import { generateText } from "ai";
 import { auth } from "@clerk/nextjs/server";
-import { getAnalysisPromptForTier } from "@/lib/ai/prompts";
-import { getPopAlphaModel, type PopAlphaTier } from "@/lib/ai/models";
+import { POPALPHA_ANALYSIS_PROMPT } from "@/lib/ai/prompts";
+import { getPopAlphaModel } from "@/lib/ai/models";
 
 export type CardAnalysisInput = {
-  tier: PopAlphaTier;
   card: {
     name: string;
     setName?: string | null;
@@ -24,7 +23,6 @@ export type CardAnalysisInput = {
 };
 
 export type CardAnalysisResult = {
-  tier: PopAlphaTier;
   persona: string;
   text: string;
 };
@@ -84,8 +82,7 @@ export async function generateCardAnalysis(
   input: CardAnalysisInput,
 ): Promise<CardAnalysisResult> {
   const { userId } = await auth();
-  const { tier, card } = input;
-  const prompt = getAnalysisPromptForTier(tier);
+  const { card } = input;
   const gradingGap = calculateGradingGap(card.grade10Price, card.rawPrice);
   const viewGrowthPct = calculateViewGrowth(card.viewCount24h, card.previousViewCount24h);
 
@@ -115,20 +112,15 @@ export async function generateCardAnalysis(
     card.notes ? `Additional notes: ${card.notes}` : "Additional notes: none",
   ].join("\n");
 
-  const tierInstructions =
-    tier === "Elite"
-      ? "For Elite, look at how fast attention is growing using view counts and community votes. End with exactly one short call: 'Worth Buying', 'Worth Watching', or 'Worth Trimming'. If view growth is more than 50%, start the response with 'WHALE ALERT:' and explain in one line why attention is spiking. Plain words, short sentences, no Wall Street jargon."
-      : tier === "Ace"
-        ? "For Ace, look at supply (how many copies are listed), whether the card is heating up or cooling off, and whether graded copies trade for much more than raw (and what that means in plain words). Short sentences. No jargon unless you explain it in the same line."
-        : "For Trainer, keep it to 2-4 short sentences, very easy to read, and helpful for a casual collector.";
+  const instructions = "Look at supply (how many copies are listed), whether the card is heating up or cooling off, and whether graded copies trade for much more than raw (and what that means in plain words). Short sentences. No jargon unless you explain it in the same line.";
 
   const { text } = await generateText({
-    model: getPopAlphaModel(tier),
-    system: prompt.system,
+    model: getPopAlphaModel(),
+    system: POPALPHA_ANALYSIS_PROMPT.system,
     prompt: [
-      `Persona: ${prompt.persona}`,
-      `Tone: ${prompt.tone}`,
-      tierInstructions,
+      `Persona: ${POPALPHA_ANALYSIS_PROMPT.persona}`,
+      `Tone: ${POPALPHA_ANALYSIS_PROMPT.tone}`,
+      instructions,
       "Use only the supplied metrics. If a metric is unavailable, say that the data is thin instead of inventing it.",
       "",
       dynamicContext,
@@ -136,16 +128,12 @@ export async function generateCardAnalysis(
     experimental_telemetry: {
       isEnabled: true,
       functionId: "card-analysis",
-      metadata: {
-        tier,
-        ...(userId ? { posthog_distinct_id: userId } : {}),
-      },
+      metadata: userId ? { posthog_distinct_id: userId } : {},
     },
   });
 
   return {
-    tier,
-    persona: prompt.persona,
+    persona: POPALPHA_ANALYSIS_PROMPT.persona,
     text,
   };
 }

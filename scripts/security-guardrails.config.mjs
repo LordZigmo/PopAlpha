@@ -29,6 +29,7 @@ export const DBADMIN_ALLOWED_FILES = [
   "app/api/scan/identify/route.ts",
   "lib/data/canonical-card-match.ts",
   "lib/db/admin.ts",
+  "lib/entitlements.ts",
 ];
 
 export const DBADMIN_ALLOWED_ROUTE_KEYS = [

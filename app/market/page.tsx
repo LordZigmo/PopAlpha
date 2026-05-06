@@ -33,7 +33,7 @@ function timeAgo(iso: string | null): string {
 
 function formatPct(n: number | null): string {
   if (n == null) return "--";
-  const sign = n >= 0 ? "+" : "";
+  const sign = n > 0 ? "+" : "";
   return `${sign}${n.toFixed(1)}%`;
 }
 
@@ -105,7 +105,6 @@ const HERO_SECONDARY_CTA = "Read live brief";
 const HOMEPAGE_SCOUT_NARRATIVE =
   "Only a few chase cards are doing the work today. The move has not spread to the rest of the market yet. Watch whether deeper cards and sealed product start to follow.";
 
-type PopAlphaTier = "Trainer" | "Ace" | "Elite";
 type HomepageSummaryCommunityCard = {
   name: string;
   setName: string | null;
@@ -115,7 +114,6 @@ type HomepageSummaryCommunityCard = {
 };
 type HomepageSummaryConfig = {
   version: string;
-  modelTier: PopAlphaTier;
   modelLabel: string;
   timeoutMs: number;
   logKey: string;
@@ -143,7 +141,6 @@ type HomepageSummaryConfig = {
 
 const HOMEPAGE_SUMMARY_CONFIG = {
   version: "homepage-summary-v2",
-  modelTier: "Ace",
   modelLabel: "gemini-2.0-flash",
   timeoutMs: AI_TIMEOUT_MS,
   logKey: "[homepage.ai-summary]",
@@ -191,15 +188,7 @@ const HOMEPAGE_SUMMARY_CONFIG = {
   },
 } as const satisfies HomepageSummaryConfig;
 
-function getTierLabel(value: unknown): PopAlphaTier {
-  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
-  if (normalized === "elite") return "Elite";
-  if (normalized === "ace") return "Ace";
-  return "Trainer";
-}
-
 function buildMarketNarrative(
-  tier: PopAlphaTier,
   movers: HomepageCard[],
   losers: HomepageCard[],
   trending: HomepageCard[],
@@ -386,7 +375,6 @@ function logHomepageSummaryUsage(
   console.info(config.logKey, JSON.stringify({
     event: "usage",
     version: config.version,
-    modelTier: config.modelTier,
     modelLabel: config.modelLabel,
     durationMs: meta.durationMs,
     finishReason: meta.finishReason,
@@ -413,7 +401,6 @@ function logHomepageSummaryFallback(
   console.info(config.logKey, JSON.stringify({
     event: "fallback",
     version: config.version,
-    modelTier: config.modelTier,
     modelLabel: config.modelLabel,
     durationMs,
     reason,
@@ -550,7 +537,7 @@ async function generateAceSummary(
 
   try {
     const result = await generateText({
-      model: getPopAlphaModel(HOMEPAGE_SUMMARY_CONFIG.modelTier),
+      model: getPopAlphaModel(),
       abortSignal: abortController.signal,
       system,
       prompt,
@@ -576,7 +563,6 @@ async function generateAceSummary(
 
 export default async function Home() {
   const user = await currentUser().catch(() => null);
-  const userTier: PopAlphaTier = getTierLabel(user?.publicMetadata?.popalpha_tier);
 
   let data: Awaited<ReturnType<typeof getHomepageData>>;
   try {
@@ -608,7 +594,7 @@ export default async function Home() {
     communityPulse = { cards: [], votesRemaining: 0, weeklyLimit: 0, weekEndsAt: 0 };
   }
 
-  const marketNarrative = buildMarketNarrative(userTier, movers, losers, trending);
+  const marketNarrative = buildMarketNarrative(movers, losers, trending);
   const aceSummary = await generateAceSummary(
     movers, trending, losers,
     communityPulse.cards.map((c) => ({

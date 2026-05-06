@@ -19,6 +19,7 @@ enum PA {
         static let borderLight = Color.white.opacity(0.06)
         static let positive = Color(red: 0.0, green: 0.863, blue: 0.353)            // #00DC5A
         static let negative = Color(red: 1.0, green: 0.231, blue: 0.188)            // #FF3B30
+        static let neutral = Color(red: 0.612, green: 0.639, blue: 0.686)           // #9CA3AF
         static let gold = Color(red: 1.0, green: 0.843, blue: 0.0)                  // #FFD700
         static let shimmer = Color.white.opacity(0.04)
     }

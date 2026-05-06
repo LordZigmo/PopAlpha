@@ -10,8 +10,7 @@ struct CardCell: View {
     /// Saves screen-reader users 6+ swipes per card on rails.
     private var accessibilitySummary: String {
         var parts: [String] = ["\(card.name), \(card.setName)"]
-        let direction = card.isPositive ? "up" : "down"
-        parts.append("\(card.formattedPrice), \(direction) \(card.changeText) over \(card.changeWindow)")
+        parts.append("\(card.formattedPrice), \(card.direction.accessibilityWord) \(card.changeText) over \(card.changeWindow)")
         if let level = card.confidenceLabel {
             parts.append("Confidence: \(level.label)")
         }
@@ -174,20 +173,19 @@ struct CardCell: View {
     // MARK: - Change Badge
 
     private var changeBadge: some View {
-        HStack(spacing: 2) {
+        let color = card.direction.color
+        return HStack(spacing: 2) {
             Text(card.changeText)
                 .font(.system(size: 11, weight: .semibold))
 
             Text(card.changeWindow)
                 .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(card.isPositive ? PA.Colors.positive.opacity(0.6) : PA.Colors.negative.opacity(0.6))
+                .foregroundStyle(color.opacity(0.6))
         }
-        .foregroundStyle(card.isPositive ? PA.Colors.positive : PA.Colors.negative)
+        .foregroundStyle(color)
         .padding(.horizontal, 6)
         .padding(.vertical, 3)
-        .background(
-            (card.isPositive ? PA.Colors.positive : PA.Colors.negative).opacity(0.1)
-        )
+        .background(color.opacity(0.1))
         .clipShape(Capsule())
     }
 

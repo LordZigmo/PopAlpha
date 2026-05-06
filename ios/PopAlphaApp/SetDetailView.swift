@@ -188,11 +188,9 @@ private struct SetCardCell: View {
                         .font(.system(size: 12, weight: .bold, design: .rounded))
                         .foregroundStyle(PA.Colors.accent)
 
-                    if card.changePct != 0 {
-                        Text(card.changeText)
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(card.isPositive ? PA.Colors.positive : PA.Colors.negative)
-                    }
+                    Text(card.changeText)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(card.direction.color)
                 }
             } else {
                 Text("—")
