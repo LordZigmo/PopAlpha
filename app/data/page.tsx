@@ -214,6 +214,7 @@ export default async function DataPage() {
   const pageLinks = [
     { href: "#tiers", label: "The Four Tiers" },
     { href: "#truth", label: "The Honest Take" },
+    { href: "#contribute", label: "Shape the Market" },
     { href: "#methodology", label: "How We Compute This" },
   ];
 
@@ -335,6 +336,50 @@ export default async function DataPage() {
               </p>
             </section>
           ) : null}
+
+          <section id="contribute" className="rounded-[28px] border border-[#1E3A5F] bg-gradient-to-br from-[#0F1B2E] to-[#101010] p-6 sm:p-8">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#60A5FA]">
+              Shape the Market
+            </p>
+            <h2 className="mt-3 text-[22px] font-semibold tracking-[-0.03em] sm:text-[28px]">
+              Watch your purchase appear on the chart
+            </h2>
+            <p className="mt-4 max-w-2xl text-[15px] leading-7 text-[#A8AEB6] sm:text-[16px]">
+              Every card you add to your portfolio carries a price you paid. When you opt in, that price becomes an anonymous dot on the public chart for that card — a real transaction, alongside the dealer-listing line. Sparse-market cards are starved for honest signal. Yours fixes that.
+            </p>
+            <div className="mt-6 grid gap-3 sm:grid-cols-3">
+              <div className="rounded-2xl border border-white/[0.05] bg-[#0A0F18] p-4">
+                <p className="text-[11px] uppercase tracking-[0.14em] text-[#60A5FA]">1. Add a card</p>
+                <p className="mt-2 text-[14px] leading-6 text-[#C9CDD3]">
+                  Open your portfolio. Add the card with the price you paid and the date you got it.
+                </p>
+              </div>
+              <div className="rounded-2xl border border-white/[0.05] bg-[#0A0F18] p-4">
+                <p className="text-[11px] uppercase tracking-[0.14em] text-[#60A5FA]">2. Tick the box</p>
+                <p className="mt-2 text-[14px] leading-6 text-[#C9CDD3]">
+                  Check &ldquo;Anonymously share this price with the community.&rdquo; Off by default. Only price + date are shared. Never your identity.
+                </p>
+              </div>
+              <div className="rounded-2xl border border-white/[0.05] bg-[#0A0F18] p-4">
+                <p className="text-[11px] uppercase tracking-[0.14em] text-[#60A5FA]">3. Watch it appear</p>
+                <p className="mt-2 text-[14px] leading-6 text-[#C9CDD3]">
+                  Visit the card&rsquo;s detail page. Your purchase is a blue dot on the chart, sitting next to the dealer line.
+                </p>
+              </div>
+            </div>
+            <div className="mt-6 flex flex-wrap items-center gap-3">
+              <Link
+                href="/portfolio"
+                className="inline-flex items-center gap-2 rounded-xl bg-[#3B82F6] px-5 py-2.5 text-[14px] font-semibold text-white transition hover:bg-[#2563EB]"
+              >
+                Open my portfolio
+                <ArrowRight size={14} />
+              </Link>
+              <p className="text-[12px] text-[#6B7280]">
+                The toggle is on the &ldquo;Add lot&rdquo; form.
+              </p>
+            </div>
+          </section>
 
           <section id="methodology" className="rounded-[28px] border border-[#1E1E1E] bg-[#101010] p-6 sm:p-8">
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6B6B6B]">

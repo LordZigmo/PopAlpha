@@ -97,6 +97,7 @@ function PortfolioInner() {
   const [pricePaid, setPricePaid] = useState<number>(100);
   const [acquiredOn, setAcquiredOn] = useState<string>("");
   const [venue, setVenue] = useState<string>("");
+  const [sharePublicly, setSharePublicly] = useState<boolean>(false);
 
   const modalRef = useRef<HTMLDivElement | null>(null);
 
@@ -402,6 +403,7 @@ function PortfolioInner() {
           price_paid_usd: pricePaid,
           acquired_on: acquiredOn || null,
           venue: venue || null,
+          share_price_publicly: sharePublicly,
         }),
       });
 
@@ -430,6 +432,7 @@ function PortfolioInner() {
     setQty(1);
     setAcquiredOn("");
     setVenue("");
+    setSharePublicly(false);
     setAddSuccess(true);
     setAddSaving(false);
 
@@ -756,6 +759,22 @@ function PortfolioInner() {
                       className="w-full rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-2.5 text-sm text-white placeholder:text-[#555] focus:outline-none focus:ring-1 focus:ring-white/20"
                     />
                   </div>
+                  <label className="flex items-start gap-3 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-3 text-left">
+                    <input
+                      type="checkbox"
+                      checked={sharePublicly}
+                      onChange={(e) => setSharePublicly(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 cursor-pointer accent-white"
+                    />
+                    <span className="space-y-0.5">
+                      <span className="block text-xs font-medium text-[#E5E7EB]">
+                        Anonymously share this price with the community
+                      </span>
+                      <span className="block text-[11px] leading-4 text-[#9CA3AF]">
+                        Watch your purchase appear on the chart. Only the price and date are shared — never your identity.
+                      </span>
+                    </span>
+                  </label>
                   <div className="flex justify-end gap-2 pt-1">
                     <button
                       type="button"

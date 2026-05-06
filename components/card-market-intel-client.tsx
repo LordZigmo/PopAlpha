@@ -7,6 +7,7 @@ import LiquidityModule from "@/components/liquidity-module";
 import MarketSummaryCardClient from "@/components/market-summary-card-client";
 import type { FinishGroup } from "@/lib/cards/detail-types";
 import type { RawCardMarketVariant } from "@/components/raw-card-variant-types";
+import type { SharedPrivateSale } from "@/lib/data/shared-private-sales";
 import SignalGauge from "@/components/signal-gauge";
 
 type CardMarketIntelClientProps = {
@@ -14,6 +15,7 @@ type CardMarketIntelClientProps = {
   finishGroups?: FinishGroup[];
   selectedPrintingId: string | null;
   selectedWindow: "7d" | "30d" | "90d";
+  sharedSales?: SharedPrivateSale[];
   onVariantChange?: (printingId: string) => void;
 };
 
@@ -43,6 +45,7 @@ export default function CardMarketIntelClient({
   finishGroups,
   selectedPrintingId,
   selectedWindow,
+  sharedSales,
   onVariantChange,
 }: CardMarketIntelClientProps) {
   const [internalPrintingId, setInternalPrintingId] = useState<string | null>(selectedPrintingId);
@@ -123,6 +126,7 @@ export default function CardMarketIntelClient({
         finishGroups={finishGroups}
         selectedPrintingId={activeVariant?.printingId ?? selectedPrintingId}
         selectedWindow={selectedWindow}
+        sharedSales={sharedSales}
         onVariantChange={handleVariantChange}
         onWindowChange={setActiveWindow}
       />

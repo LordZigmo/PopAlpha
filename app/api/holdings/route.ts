@@ -19,7 +19,7 @@ export async function GET(req: Request) {
   const supabase = dbAdmin();
   const { data, error } = await supabase
     .from("holdings")
-    .select("id, canonical_slug, printing_id, grade, qty, price_paid_usd, acquired_on, venue, cert_number, source")
+    .select("id, canonical_slug, printing_id, grade, qty, price_paid_usd, acquired_on, venue, cert_number, source, share_price_publicly")
     .eq("owner_clerk_id", auth.userId)
     .order("created_at", { ascending: false });
 
@@ -58,6 +58,10 @@ export async function POST(req: Request) {
   const cert_number = typeof body.cert_number === "string" && body.cert_number.trim()
     ? body.cert_number.trim()
     : null;
+  // Opt-in flag: when true, the holding's price_paid_usd + acquired_on
+  // surface anonymously on the public card-detail chart. Default false.
+  // Tolerate any truthy/falsy from older clients that send a string.
+  const share_price_publicly = body.share_price_publicly === true;
 
   if (!canonical_slug) {
     return NextResponse.json({ ok: false, error: "canonical_slug is required." }, { status: 400 });
@@ -85,6 +89,7 @@ export async function POST(req: Request) {
     acquired_on,
     venue,
     cert_number,
+    share_price_publicly,
   });
 
   if (error) {
@@ -178,6 +183,16 @@ export async function PATCH(req: Request) {
     } else {
       return NextResponse.json({ ok: false, error: "venue must be a string or null." }, { status: 400 });
     }
+  }
+
+  if ("share_price_publicly" in body) {
+    if (typeof body.share_price_publicly !== "boolean") {
+      return NextResponse.json(
+        { ok: false, error: "share_price_publicly must be a boolean." },
+        { status: 400 },
+      );
+    }
+    update.share_price_publicly = body.share_price_publicly;
   }
 
   if ("cert_number" in body) {

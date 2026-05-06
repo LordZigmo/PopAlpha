@@ -7,6 +7,10 @@ import type {
 import { computeLiquidity } from "@/lib/cards/liquidity";
 import { dbPublic } from "@/lib/db";
 import { getEurToUsdRate } from "@/lib/pricing/fx";
+import {
+  getSharedPrivateSalesForSlug,
+  type SharedPrivateSale,
+} from "@/lib/data/shared-private-sales";
 
 type MarketSummaryCardProps = {
   canonicalSlug: string;
@@ -490,11 +494,32 @@ export default async function MarketSummaryCard({
     variants,
   });
 
+  // Anchor outlier filter on the median market price across the variants
+  // we resolved above (whichever has data). Falls back to no median →
+  // OUTLIER_BAND short-circuits and keeps all opted-in sales.
+  const marketMedianUsd =
+    variantPayload
+      .map((variant) => variant.marketBalancePrice)
+      .find((value): value is number => Number.isFinite(value) && (value ?? 0) > 0)
+    ?? null;
+
+  let sharedSales: SharedPrivateSale[] = [];
+  try {
+    sharedSales = await getSharedPrivateSalesForSlug({
+      canonicalSlug,
+      marketMedianUsd,
+    });
+  } catch (error) {
+    console.error("[MarketSummaryCard] shared sales load failed:",
+      error instanceof Error ? error.message : String(error));
+  }
+
   return (
     <CardMarketIntelClient
       variants={variantPayload}
       selectedPrintingId={selectedPrintingId}
       selectedWindow={selectedWindow}
+      sharedSales={sharedSales}
     />
   );
 }

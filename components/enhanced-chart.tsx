@@ -1,6 +1,8 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
+
+import type { SharedPrivateSale } from "@/lib/data/shared-private-sales";
 
 type ChartPoint = { ts: string; price: number };
 
@@ -9,6 +11,13 @@ type EnhancedChartProps = {
   windowLabel?: string;
   currentPrice?: number | null;
   changePercent?: number | null;
+  /**
+   * Anonymous opt-in private-sale data points overlaid as dots on the
+   * existing market line. Each dot is `{date, priceUsd}` from a holder
+   * who chose "share with the community" when adding their lot. Only
+   * dots whose date falls inside the visible window get rendered.
+   */
+  sharedSales?: SharedPrivateSale[];
 };
 
 function formatUsd(value: number): string {
@@ -37,11 +46,21 @@ export default function EnhancedChart({
   points,
   currentPrice,
   changePercent,
+  sharedSales,
 }: EnhancedChartProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [hover, setHover] = useState<{ x: number; y: number; price: number; ts: string } | null>(null);
+  const [hoverDot, setHoverDot] = useState<{ x: number; y: number; price: number; date: string } | null>(null);
 
-  const prices = points.map((p) => p.price).filter((v) => Number.isFinite(v));
+  // Y range needs to accommodate both the market line AND the shared-
+  // sale dots so an outlier-but-in-band sale doesn't clip the chart.
+  const sharedSalePrices = (sharedSales ?? [])
+    .map((sale) => sale.priceUsd)
+    .filter((value) => Number.isFinite(value) && value > 0);
+  const prices = [
+    ...points.map((p) => p.price).filter((v) => Number.isFinite(v)),
+    ...sharedSalePrices,
+  ];
   const min = prices.length > 0 ? Math.min(...prices) : 0;
   const max = prices.length > 0 ? Math.max(...prices) : 1;
   const range = Math.max(max - min, 0.01);
@@ -76,6 +95,30 @@ export default function EnhancedChart({
   const lastPoint = points.length >= 2 ? points[points.length - 1] : null;
   const lastX = lastPoint ? toX(points.length - 1) : 0;
   const lastY = lastPoint ? toY(lastPoint.price) : 0;
+
+  // Map each shared sale's date onto the chart's X axis by linear
+  // interpolation against the visible window's first/last timestamps.
+  // Sales outside the window are dropped. The chart's existing X axis
+  // is positional (i / N), so this approximation matches the visual
+  // density of the market line for daily snapshots.
+  const visibleSharedSales = useMemo(() => {
+    if (!sharedSales || sharedSales.length === 0 || points.length < 2) return [];
+    const firstTs = Date.parse(points[0].ts);
+    const lastTs = Date.parse(points[points.length - 1].ts);
+    if (!Number.isFinite(firstTs) || !Number.isFinite(lastTs) || lastTs <= firstTs) return [];
+    const span = lastTs - firstTs;
+    return sharedSales
+      .map((sale) => {
+        const ts = Date.parse(sale.date);
+        if (!Number.isFinite(ts)) return null;
+        if (ts < firstTs || ts > lastTs) return null;
+        const fraction = (ts - firstTs) / span;
+        const x = PAD_X + fraction * (SVG_W - PAD_X * 2);
+        const y = toY(sale.priceUsd);
+        return { x, y, price: sale.priceUsd, date: sale.date };
+      })
+      .filter((value): value is { x: number; y: number; price: number; date: string } => value !== null);
+  }, [sharedSales, points, toY]);
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<SVGSVGElement>) => {
@@ -181,6 +224,22 @@ export default function EnhancedChart({
             <circle cx={hover.x} cy={hover.y} r="5" fill="var(--color-accent)" stroke="#0A0A0A" strokeWidth="2" />
           </g>
         )}
+
+        {/* Shared private sales — anonymous community contributions */}
+        {visibleSharedSales.map((dot) => (
+          <circle
+            key={`${dot.date}-${dot.price}-${dot.x.toFixed(2)}`}
+            cx={dot.x}
+            cy={dot.y}
+            r="4.5"
+            fill="#60A5FA"
+            stroke="#0A0A0A"
+            strokeWidth="1.5"
+            style={{ cursor: "pointer" }}
+            onMouseEnter={() => setHoverDot({ x: dot.x, y: dot.y, price: dot.price, date: dot.date })}
+            onMouseLeave={() => setHoverDot(null)}
+          />
+        ))}
       </svg>
 
       {/* Y-axis labels */}
@@ -189,8 +248,8 @@ export default function EnhancedChart({
         <span className="text-[12px] font-tabular text-[#444] pl-1">{formatUsd(min)}</span>
       </div>
 
-      {/* Hover tooltip */}
-      {hover && (
+      {/* Hover tooltip — market line */}
+      {hover && !hoverDot && (
         <div
           className="pointer-events-none absolute top-0 z-10 rounded-lg border border-white/[0.08] bg-[#151515] px-2.5 py-1.5 text-[14px] shadow-lg"
           style={{
@@ -200,6 +259,35 @@ export default function EnhancedChart({
         >
           <span className="font-semibold tabular-nums text-[#F0F0F0]">{formatUsd(hover.price)}</span>
           <span className="ml-2 text-[#6B6B6B]">{formatChartDate(hover.ts)}</span>
+        </div>
+      )}
+
+      {/* Hover tooltip — community sale dot */}
+      {hoverDot && (
+        <div
+          className="pointer-events-none absolute top-0 z-10 rounded-lg border border-[#1E3A5F] bg-[#0F1B2E] px-2.5 py-1.5 text-[13px] shadow-lg"
+          style={{
+            left: `${(hoverDot.x / SVG_W) * 100}%`,
+            transform: "translateX(-50%)",
+          }}
+        >
+          <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#60A5FA]">Community</span>
+          <span className="ml-2 font-semibold tabular-nums text-[#E5E7EB]">{formatUsd(hoverDot.price)}</span>
+          <span className="ml-2 text-[#7A8AA0]">{formatChartDate(hoverDot.date)}</span>
+        </div>
+      )}
+
+      {/* Legend — only shown when there's at least one community dot */}
+      {visibleSharedSales.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-3 text-[11px] text-[#6B7280]">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="h-0.5 w-3 rounded bg-[var(--color-accent)]" aria-hidden="true" />
+            Market price
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-[#60A5FA]" aria-hidden="true" />
+            Community sale ({visibleSharedSales.length})
+          </span>
         </div>
       )}
     </div>

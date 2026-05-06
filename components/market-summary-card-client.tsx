@@ -8,6 +8,7 @@ import PriceTickerStrip from "@/components/price-ticker-strip";
 import EnhancedChart from "@/components/enhanced-chart";
 import type { HistoryPointRow } from "@/components/raw-card-variant-types";
 import type { FinishGroup } from "@/lib/cards/detail-types";
+import type { SharedPrivateSale } from "@/lib/data/shared-private-sales";
 
 type MarketSummaryCardClientProps = {
   variants: Array<{
@@ -28,6 +29,7 @@ type MarketSummaryCardClientProps = {
   finishGroups?: FinishGroup[];
   selectedPrintingId: string | null;
   selectedWindow: "7d" | "30d" | "90d";
+  sharedSales?: SharedPrivateSale[];
   onVariantChange?: (printingId: string) => void;
   onWindowChange?: (windowKey: WindowKey) => void;
 };
@@ -171,6 +173,7 @@ export default function MarketSummaryCardClient({
   finishGroups,
   selectedPrintingId,
   selectedWindow,
+  sharedSales,
   onVariantChange,
   onWindowChange,
 }: MarketSummaryCardClientProps) {
@@ -299,6 +302,7 @@ export default function MarketSummaryCardClient({
               windowLabel={effectiveWindow.toUpperCase()}
               currentPrice={currentPrice}
               changePercent={changeValue}
+              sharedSales={sharedSales}
             />
 
             <div className="border-t border-white/[0.06]" />
