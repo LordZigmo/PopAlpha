@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabaseClient";
 import posthog from "posthog-js";
 import { CollectorRadar } from "@/components/portfolio/CollectorRadar";
 import type { RadarProfile } from "@/lib/data/portfolio";
+import { PRICING_DISPLAY_V2_ENABLED } from "@/lib/pricing/displayed-market-price";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -81,6 +82,7 @@ function PortfolioInner() {
   const [cards, setCards] = useState<Card[]>([]);
   const [holdings, setHoldings] = useState<HoldingRow[]>([]);
   const [marketPrices, setMarketPrices] = useState<Record<string, number>>({});
+  const [marketPricesAsOf, setMarketPricesAsOf] = useState<Record<string, string>>({});
   const [expanded, setExpanded] = useState<string | null>(null);
   const [radarProfile, setRadarProfile] = useState<RadarProfile | null>(null);
 
@@ -253,14 +255,18 @@ function PortfolioInner() {
       (async () => {
         const { data: marketData } = await supabase
           .from("market_snapshots")
-          .select("canonical_slug, printing_id, grade, price_usd")
+          .select("canonical_slug, printing_id, grade, price_usd, observed_at")
           .eq("source", "tcgplayer");
 
         const priceMap: Record<string, number> = {};
-        (marketData ?? []).forEach((row: MarketRow) => {
-          priceMap[identityKey(row)] = Number(row.price_usd);
+        const asOfMap: Record<string, string> = {};
+        (marketData ?? []).forEach((row: MarketRow & { observed_at?: string | null }) => {
+          const key = identityKey(row);
+          priceMap[key] = Number(row.price_usd);
+          if (row.observed_at) asOfMap[key] = row.observed_at;
         });
         setMarketPrices(priceMap);
+        setMarketPricesAsOf(asOfMap);
       })(),
       (async () => {
         try {
@@ -487,6 +493,32 @@ function PortfolioInner() {
           <p className={`mt-1 text-xl font-semibold ${pnlClass}`}>{totalPct.toFixed(2)}%</p>
         </div>
       </div>
+      {(() => {
+        // Phase 2 of tiered-refresh: warn the user when their portfolio
+        // valuation includes positions whose market price hasn't been
+        // refreshed in >7 days. Silently rolling them up as if current
+        // is dishonest. Threshold matches the "stale_recent" cutoff in
+        // lib/pricing/displayed-market-price.
+        if (!PRICING_DISPLAY_V2_ENABLED) return null;
+        const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+        const nowMs = Date.now();
+        const stalePositions = positions.filter((p) => {
+          const asOf = marketPricesAsOf[p.key];
+          if (!asOf) return false;
+          const t = new Date(asOf).getTime();
+          if (!Number.isFinite(t)) return false;
+          return nowMs - t > SEVEN_DAYS_MS;
+        });
+        if (stalePositions.length === 0) return null;
+        return (
+          <div className="rounded-xl border border-[#3F3F1A] bg-[#1A1A0F] px-3 py-2 text-[12px] text-[#D4C77A]">
+            <span className="font-semibold">{stalePositions.length}</span>
+            {" "}
+            {stalePositions.length === 1 ? "position has" : "positions have"} market data older than 7 days.
+            Total Market Value reflects last-known prices for those.
+          </div>
+        );
+      })()}
 
       {/* Grading stats */}
       <div className="grid grid-cols-3 gap-3">

@@ -8,6 +8,11 @@ import { getSetSummaryPageData, getSetSummaryHistory } from "@/lib/sets/summary"
 import ChangeBadge from "@/components/change-badge";
 import EnhancedChart from "@/components/enhanced-chart";
 import { dbPublic } from "@/lib/db";
+import {
+  PRICING_DISPLAY_V2_ENABLED,
+  formatPriceDisplay,
+  resolveDisplayedMarketPrice,
+} from "@/lib/pricing/displayed-market-price";
 import { isPhysicalPokemonSet } from "@/lib/sets/physical";
 
 type CanonicalRow = {
@@ -31,6 +36,7 @@ type CardEntry = {
   cardNumber: string | null;
   imageUrl: string | null;
   rawPrice: number | null;
+  rawPriceAsOf: string | null;
   changePct: number | null;
   changeWindow: "24H" | "7D" | null;
 };
@@ -244,6 +250,7 @@ export default async function SetBrowserPage({ params }: { params: Promise<{ set
     cardNumber: card.card_number,
     imageUrl: chooseBestImage(printingsBySlug.get(card.slug) ?? []),
     rawPrice: marketPulseBySlug.get(card.slug)?.marketPrice ?? null,
+    rawPriceAsOf: marketPulseBySlug.get(card.slug)?.marketPriceAsOf ?? null,
     changePct: marketPulseBySlug.get(card.slug)?.changePct ?? null,
     changeWindow: marketPulseBySlug.get(card.slug)?.changeWindow ?? null,
   }));
@@ -410,14 +417,31 @@ export default async function SetBrowserPage({ params }: { params: Promise<{ set
                   <p className="text-muted mt-0.5 truncate text-xs">
                     {entry.cardNumber ? `#${entry.cardNumber}` : "—"}
                   </p>
-                  {entry.rawPrice != null ? (
-                    <div className="mt-0.5 flex items-center gap-1">
-                      <span className="text-xs font-semibold" style={{ color: "var(--color-accent)" }}>
-                        ${entry.rawPrice < 1 ? entry.rawPrice.toFixed(2) : entry.rawPrice.toFixed(0)} RAW
-                      </span>
-                      <ChangeBadge pct={entry.changePct} windowLabel={entry.changeWindow} />
-                    </div>
-                  ) : (
+                  {entry.rawPrice != null ? (() => {
+                    const display = PRICING_DISPLAY_V2_ENABLED
+                      ? resolveDisplayedMarketPrice({
+                          marketPrice: entry.rawPrice,
+                          marketPriceAsOf: entry.rawPriceAsOf,
+                        })
+                      : null;
+                    const meta = display ? formatPriceDisplay(display) : null;
+                    const legacyLabel = `$${entry.rawPrice < 1 ? entry.rawPrice.toFixed(2) : entry.rawPrice.toFixed(0)} RAW`;
+                    const styleColor = meta?.subdued ? "var(--color-muted)" : "var(--color-accent)";
+                    return (
+                      <div className="mt-0.5 flex items-center gap-1">
+                        <span
+                          className={meta && display?.kind !== "live" ? "text-[10px] font-medium" : "text-xs font-semibold"}
+                          style={{ color: styleColor }}
+                          title={display?.kind === "stale_old" ? "Sparse market — last sold price shown" : undefined}
+                        >
+                          {meta ? meta.label : legacyLabel}
+                        </span>
+                        {(meta?.showChangeBadge ?? true) ? (
+                          <ChangeBadge pct={entry.changePct} windowLabel={entry.changeWindow} />
+                        ) : null}
+                      </div>
+                    );
+                  })() : (
                     <p className="mt-0.5 text-xs text-muted">—</p>
                   )}
                 </div>

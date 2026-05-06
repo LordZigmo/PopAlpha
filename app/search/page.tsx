@@ -81,6 +81,7 @@ type GroupedSearchRow = {
   canonical: CanonicalCardRow;
   printings: PrintingRow[];
   rawPrice: number | null;
+  rawPriceAsOf: string | null;
   changePct: number | null;
   changeWindow: "24H" | "7D" | null;
 };
@@ -98,6 +99,7 @@ type SearchDisplayRow = {
   set_name: string | null;
   year: number | null;
   raw_price: number | null;
+  raw_price_as_of: string | null;
   change_pct: number | null;
   change_window: "24H" | "7D" | null;
   primary_image_url: string | null;
@@ -494,6 +496,7 @@ async function runBroadSearch(params: {
         canonical,
         printings: printingsBySlug.get(slug) ?? [],
         rawPrice: marketPulse?.marketPrice ?? null,
+        rawPriceAsOf: marketPulse?.marketPriceAsOf ?? null,
         changePct: marketPulse?.changePct ?? null,
         changeWindow: marketPulse?.changeWindow ?? null,
       };
@@ -599,6 +602,7 @@ async function loadSetSearchEnhancements(setName: string): Promise<{
         set_name: row.set_name,
         year: row.year,
         raw_price: marketPulse?.marketPrice ?? null,
+        raw_price_as_of: marketPulse?.marketPriceAsOf ?? null,
         change_pct: marketPulse?.changePct ?? null,
         change_window: marketPulse?.changeWindow ?? null,
         primary_image_url: primaryPrinting?.image_url ?? null,
@@ -811,6 +815,7 @@ export default async function SearchPage({
       set_name: row.canonical.set_name,
       year: row.canonical.year,
       raw_price: row.rawPrice,
+      raw_price_as_of: row.rawPriceAsOf,
       change_pct: row.changePct,
       change_window: row.changeWindow,
       primary_image_url: primaryPrinting?.image_url ?? null,

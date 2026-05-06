@@ -6,6 +6,11 @@ import { usePathname, useRouter } from "next/navigation";
 import { parseSearchSort, SEARCH_SORTS, sortSearchResults } from "@/lib/search/sort.mjs";
 import type { SetSummarySnapshot } from "@/lib/sets/summary";
 import ChangeBadge from "@/components/change-badge";
+import {
+  PRICING_DISPLAY_V2_ENABLED,
+  formatPriceDisplay,
+  resolveDisplayedMarketPrice,
+} from "@/lib/pricing/displayed-market-price";
 
 type SearchSort = "relevance" | "market-price" | "newest" | "oldest";
 type SearchPageSize = 24 | 48 | 96;
@@ -17,6 +22,7 @@ type SearchDisplayRow = {
   set_name: string | null;
   year: number | null;
   raw_price: number | null;
+  raw_price_as_of: string | null;
   change_pct: number | null;
   change_window: "24H" | "7D" | null;
   primary_image_url: string | null;
@@ -120,14 +126,30 @@ function ResultCard({
           {row.year ? `${row.year}` : ""}
           {row.set_name ? `${row.year ? " · " : ""}${row.set_name}` : ""}
         </p>
-        {row.raw_price != null ? (
-          <div className="mt-1 flex items-center gap-1.5">
-            <span className="text-[11px] font-semibold tabular-nums text-[#ccc] sm:text-[12px]">
-              {formatCurrency(row.raw_price)}
-            </span>
-            <ChangeBadge pct={row.change_pct} windowLabel={row.change_window} />
-          </div>
-        ) : null}
+        {row.raw_price != null ? (() => {
+          const display = PRICING_DISPLAY_V2_ENABLED
+            ? resolveDisplayedMarketPrice({
+                marketPrice: row.raw_price,
+                marketPriceAsOf: row.raw_price_as_of,
+              })
+            : null;
+          const meta = display ? formatPriceDisplay(display) : null;
+          return (
+            <div className="mt-1 flex items-center gap-1.5">
+              <span
+                className={`tabular-nums sm:text-[12px] ${
+                  meta?.subdued ? "text-[#888]" : "text-[#ccc]"
+                } ${meta && display?.kind !== "live" ? "text-[10px] font-medium" : "text-[11px] font-semibold"}`}
+                title={display?.kind === "stale_old" ? "Sparse market — last sold price shown" : undefined}
+              >
+                {meta ? meta.label : formatCurrency(row.raw_price)}
+              </span>
+              {(meta?.showChangeBadge ?? true) ? (
+                <ChangeBadge pct={row.change_pct} windowLabel={row.change_window} />
+              ) : null}
+            </div>
+          );
+        })() : null}
       </div>
     </Link>
   );
