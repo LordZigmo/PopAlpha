@@ -323,11 +323,29 @@ export async function runGradedVariantMetricsWriter(args: {
   // 1. Resolve scope. We pull slugs from canonical_cards rather than
   // from price_history_points so the caller can run "process this set"
   // even if the set has no graded data yet (in which case this is a no-op).
-  const slugQuery = supabase.from("canonical_cards").select("slug");
-  if (args.slugPattern) slugQuery.like("slug", args.slugPattern);
-  const slugQueryFinal = slugQuery.limit(args.maxSlugs ?? 200);
-  const { data: slugRows, error: slugErr } = await slugQueryFinal;
-  if (slugErr) {
+  //
+  // PostgREST default max-rows is 1000, which silently caps `.limit(N)`
+  // for any N > 1000. Page explicitly so a slug pattern like `b%` (which
+  // has more than 1000 slugs in the catalog) doesn't drop its tail.
+  const SLUG_PAGE = 1000;
+  const targetMaxSlugs = args.maxSlugs ?? 200;
+  const allSlugs: string[] = [];
+  let slugPagedError: string | null = null;
+  for (let from = 0; from < targetMaxSlugs; from += SLUG_PAGE) {
+    const remaining = targetMaxSlugs - from;
+    const upperBound = from + Math.min(SLUG_PAGE, remaining) - 1;
+    const slugQuery = supabase.from("canonical_cards").select("slug").order("slug", { ascending: true });
+    if (args.slugPattern) slugQuery.like("slug", args.slugPattern);
+    const { data: slugRows, error: slugErr } = await slugQuery.range(from, upperBound);
+    if (slugErr) {
+      slugPagedError = slugErr.message;
+      break;
+    }
+    const batch = (slugRows ?? []).map((r) => (r as { slug: string }).slug).filter(Boolean);
+    allSlugs.push(...batch);
+    if (batch.length < SLUG_PAGE || batch.length === 0) break;
+  }
+  if (slugPagedError) {
     return {
       ok: false,
       durationMs: Date.now() - startedAt,
@@ -338,10 +356,9 @@ export async function runGradedVariantMetricsWriter(args: {
       variant_metrics_upserted: 0,
       signals_with_full_threshold: 0,
       card_metrics_upserted: 0,
-      firstError: `canonical_cards select failed: ${slugErr.message}`,
+      firstError: `canonical_cards select failed: ${slugPagedError}`,
     };
   }
-  const allSlugs = (slugRows ?? []).map((r) => (r as { slug: string }).slug).filter(Boolean);
 
   log.info(`[graded-vm-writer] scope=${args.slugPattern ?? "<all>"} slugs=${allSlugs.length}`);
 
