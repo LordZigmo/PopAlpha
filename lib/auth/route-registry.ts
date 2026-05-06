@@ -119,11 +119,17 @@ export const INGEST_ROUTES = [
   "market/observe",
   "ingest/psa",
   "ebay/deletion-notification",
-  "webhooks/apple/notifications",
+  // 2026-05-06: webhooks/apple/notifications reverted — route file is
+  // uncommitted in working tree, breaking Vercel's check:public-writes.
+  // Re-add when committing app/api/webhooks/apple/notifications/route.ts.
+  // "webhooks/apple/notifications",
 ];
 
 export const USER_ROUTES = [
-  "iap/verify",
+  // 2026-05-06: iap/verify reverted — route file is uncommitted in
+  // working tree, breaking Vercel's check:public-writes. Re-add when
+  // committing app/api/iap/verify/route.ts.
+  // "iap/verify",
   "activity/card",
   "activity/comments",
   "activity/feed",
