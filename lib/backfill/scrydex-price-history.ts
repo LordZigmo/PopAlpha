@@ -773,7 +773,9 @@ async function loadDormantCardCountsBySet(
     const distinctSlugs = [...new Set(rows.map((r) => r.canonical_slug).filter((s): s is string => !!s))];
     if (distinctSlugs.length === 0) continue;
     const dormantSlugs = new Set<string>();
-    for (const slugChunk of chunkValues(distinctSlugs, 1000)) {
+    // PostgREST IN-list with ~1000 36-char slugs blows past Vercel's URL
+    // limit and surfaces as a 400 with empty body. 200 is a safe ceiling.
+    for (const slugChunk of chunkValues(distinctSlugs, 200)) {
       const { data, error } = await supabase
         .from("canonical_cards")
         .select("slug, refresh_tier")
