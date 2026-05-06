@@ -73,17 +73,32 @@ struct MarketplaceView: View {
     /// don't fight over the same NavigationStack destination state.
     @State private var selectedCard: MarketCard?
 
-    /// Timestamp of the last loadAll fire. Used to debounce runaway
-    /// .task re-fires triggered by @Observable churn (e.g., when
-    /// AuthService.handleServerAuthRejection sets isAuthenticated =
-    /// false and cascading Clerk SDK state writes invalidate the
-    /// MarketplaceView body in a tight loop). Real-device 2026-05-05:
-    /// after a 401 on /api/scan/correction, this view fired
-    /// fetchAIBrief + fetchHomepageCommunity hundreds of times per
-    /// second, each cancelled by the next, until the user force-quit.
-    /// 1.5s window is well above any legitimate auth-flip cadence
-    /// (real auth flips happen on user action, not every frame).
+    /// Timestamp + auth-state-key for the last loadAll fire.
+    /// Together they form a debounce key that suppresses runaway
+    /// .task re-fires (the @Observable AuthService cascade caught
+    /// 2026-05-05) WITHOUT suppressing legitimate auth-state-change
+    /// retries (the cold-launch `nil → user` flip caught 2026-05-06).
+    ///
+    /// Logic: a new loadAll is debounced only when BOTH the previous
+    /// fire was within 1.5s AND the auth state hasn't changed. An
+    /// auth flip in the same window bypasses the debounce — that's
+    /// exactly the case where we DO want to re-fetch (the previous
+    /// fetch went out with the wrong auth state and got cancelled
+    /// when SwiftUI's .task(id:) saw the new id).
     @State private var lastLoadAllFiredAt: Date?
+    @State private var lastLoadAllAuthState: Bool?
+
+    /// Set when a cancellation catch arm runs. A delayed sentinel
+    /// task waits a few seconds and then checks: did data arrive
+    /// while we were waiting (i.e., a retry succeeded)? If yes,
+    /// great — the sentinel exits silently. If no, we surface a
+    /// recoverable error so the user can pull-to-refresh instead
+    /// of staring at an infinite spinner. Real-device 2026-05-06:
+    /// user waited 30s+ then 15min on a stuck spinner because the
+    /// cancellation-suppress fix in 0b92915 left isLoading=true
+    /// and the auth-flip retry was being blocked by an over-eager
+    /// debounce.
+    @State private var cancellationSentinelArmed: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -410,25 +425,26 @@ struct MarketplaceView: View {
     // MARK: - Data loaders
 
     private func loadAll() async {
-        // Debounce against runaway .task re-fires. Real-device
-        // 2026-05-05: after a 401 on a scanner correction submit,
-        // AuthService.handleServerAuthRejection's cleanup chain
-        // cascaded @Observable invalidations through
-        // MarketplaceView's body, causing .task(id: isAuthenticated)
-        // to cancel-and-restart hundreds of times per second.
-        // Each restart kicked off fetchAIBrief +
-        // fetchHomepageCommunity, immediately cancelled by the next,
-        // flooding the console with "cancelled" errors. 1.5s window
-        // is well above any legitimate user-driven re-fire cadence
-        // (auth state flips happen on real user actions, not at
-        // SwiftUI body-recompute frequency); manual pull-to-refresh
-        // bypasses this guard since refreshable's gesture is
-        // necessarily slower than the threshold.
+        // Debounce against runaway .task re-fires (the @Observable
+        // cascade caught 2026-05-05) — but ONLY when the auth state
+        // is unchanged. An auth-state flip in the same window means
+        // SwiftUI's .task(id: isAuthenticated) saw a real id change
+        // and cancelled-and-restarted on purpose; that retry must
+        // run because the cancelled fetch went out with the wrong
+        // auth state. Real-device 2026-05-06: cold launch with
+        // restore-from-keychain produced exactly this case (auth
+        // flipped nil → user mid-fetch); the previous timestamp-
+        // only debounce blocked the legitimate retry and the user
+        // saw an infinite spinner.
         let now = Date()
-        if let last = lastLoadAllFiredAt, now.timeIntervalSince(last) < 1.5 {
+        let currentAuth = AuthService.shared.isAuthenticated
+        let withinDebounceWindow = lastLoadAllFiredAt.map { now.timeIntervalSince($0) < 1.5 } ?? false
+        let authStateUnchanged = lastLoadAllAuthState == currentAuth
+        if withinDebounceWindow && authStateUnchanged {
             return
         }
         lastLoadAllFiredAt = now
+        lastLoadAllAuthState = currentAuth
 
         // Reset the loading flag so the placeholder shows on cold start
         // and on .task re-fire after auth flips. `data` is intentionally
@@ -476,26 +492,26 @@ struct MarketplaceView: View {
                 self.styleLabel = profile?.profile?.dominantStyleLabel
                     .flatMap { $0.isEmpty ? nil : $0 }
                 self.isLoading = false
+                // A successful fire short-circuits any pending
+                // cancellation sentinel — data arrived, no need for
+                // the fallback error.
+                self.cancellationSentinelArmed = false
             }
         } catch is CancellationError {
             // Cooperative-cancellation error from Swift Concurrency —
             // happens when the Task running loadAll was cancelled
-            // (e.g., .task re-fire, view disappear). Not a real
-            // failure; the next attempt will set its own loading
-            // state. Returning without touching @State leaves
-            // isLoading=true so the spinner stays visible until the
-            // retry resolves. Real-device 2026-05-06: user reported
-            // "failed to load market signals" flashing then data
-            // arriving 500ms later — that flash was this catch path
-            // setting loadError on what was actually a transient
-            // cancellation.
-            Logger.ui.debug("loadAll cancelled (Swift Concurrency); leaving spinner")
+            // (e.g., .task re-fire, view disappear). Don't show an
+            // error UI; the next .task fire (auth-flip-driven, since
+            // the debounce now permits auth-state changes) takes
+            // over the loading state.
+            Logger.ui.debug("loadAll cancelled (Swift Concurrency); arming sentinel")
+            armCancellationSentinel()
             return
         } catch let urlError as URLError where urlError.code == .cancelled {
             // URLSession-level cancellation (Code=-999). Same
-            // semantics as Swift's CancellationError: a new fetch is
-            // taking over, don't surface an error UI.
-            Logger.ui.debug("loadAll cancelled (URLSession -999); leaving spinner")
+            // semantics as Swift's CancellationError.
+            Logger.ui.debug("loadAll cancelled (URLSession -999); arming sentinel")
+            armCancellationSentinel()
             return
         } catch {
             // Signal board genuinely failed (network, 5xx, etc.) but
@@ -510,6 +526,44 @@ struct MarketplaceView: View {
                     .flatMap { $0.isEmpty ? nil : $0 }
                 self.loadError = error.localizedDescription
                 self.isLoading = false
+            }
+        }
+    }
+
+    /// Fallback for the cancellation arms: if no successful retry
+    /// resolves the loading state within `sentinelDelay`, surface a
+    /// recoverable error so the user can pull-to-refresh instead of
+    /// staring at an infinite spinner.
+    ///
+    /// Real-device 2026-05-06: user reported sitting on a stuck
+    /// spinner for 30s+ after cancellation-suppress (0b92915) left
+    /// isLoading=true expecting an auto-retry — but the over-eager
+    /// timestamp-only debounce blocked the auth-flip retry that
+    /// would have resolved it. Even with the auth-aware debounce
+    /// fix, this sentinel is belt-and-braces: any cancellation
+    /// path that doesn't get a retry within 3s falls through to
+    /// "tap to retry" UX.
+    ///
+    /// Idempotent — only one sentinel can be armed at a time;
+    /// repeated cancellations during the wait don't pile up timers.
+    private func armCancellationSentinel() {
+        guard !cancellationSentinelArmed else { return }
+        cancellationSentinelArmed = true
+        Task {
+            try? await Task.sleep(for: .seconds(3))
+            await MainActor.run {
+                // If a retry succeeded while we were sleeping, the
+                // success branch will have cleared the sentinel and
+                // populated `data`. Don't surface an error in that
+                // case. We also don't surface if loadError is
+                // already set by a real failure that ran in the
+                // meantime — that path has its own retry CTA.
+                guard self.cancellationSentinelArmed else { return }
+                self.cancellationSentinelArmed = false
+                if self.data == nil && self.loadError == nil {
+                    self.loadError = "Couldn't load market signals — pull to refresh."
+                    self.isLoading = false
+                }
             }
         }
     }
