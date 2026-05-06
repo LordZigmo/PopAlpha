@@ -7,17 +7,18 @@
  * Behavior:
  *   1. If today's rows already exist, skip (user: "generated once daily").
  *   2. Otherwise call compute_daily_top_movers RPC.
- *   3. RPC has a coverage gate — if catalog-wide fresh_24h count < 18k,
- *      it returns without writing. Cron quietly logs "waiting" and will
- *      retry on the next tick (every 2 hours).
+ *   3. RPC has a tier-aware coverage gate — fresh_24h count of hot-tier
+ *      slugs and fresh_7d count of warm-tier slugs must each clear their
+ *      thresholds (default hot ≥ 500, warm ≥ 7,500). If not, it returns
+ *      without writing. Cron quietly logs "waiting" and will retry on
+ *      the next tick.
  *
  * Schedule: 0 14,17,21 * * * (14:00 UTC = 9am EST, with retries at
  * 17:00 UTC and 21:00 UTC). The 9am EST primary attempt gives a stable
- * morning refresh. If the catalog coverage gate (18k fresh_24h cards)
- * isn't met yet because the morning Scrydex chunks haven't landed, the
- * 17:00 UTC retry picks it up mid-afternoon, and the 21:00 UTC fallback
- * is positioned after the day's final Scrydex chunk (18:50 UTC) so
- * coverage is guaranteed to be met by then.
+ * morning refresh. If the gate trips because the morning Scrydex chunks
+ * haven't landed, the 17:00 UTC retry picks it up mid-afternoon, and
+ * the 21:00 UTC fallback is positioned after the day's final Scrydex
+ * chunk (18:50 UTC) so coverage is guaranteed to be met by then.
  *
  * Manual override: query-string ?force=1 skips the "already computed"
  * check and re-computes even if today's rows exist. Useful for debugging.
@@ -94,7 +95,7 @@ export async function GET(req: Request) {
   const durationMs = Date.now() - startedAt;
 
   // The RPC silently returns `{ computed: false, reason: 'coverage_too_low' }`
-  // when fresh_24h is below threshold. That's invisible in `ok: true` runs
+  // when the tier-aware gate trips. That's invisible in `ok: true` runs
   // and stranded the homepage rails for two days during the 2026-05-01
   // refresh_price_changes incident. Surface gate-trips as console.error so
   // Vercel logs flag them as errors, and look back to detect multi-day
@@ -102,8 +103,10 @@ export async function GET(req: Request) {
   const result = (data ?? {}) as {
     computed?: boolean;
     reason?: string;
-    coverage_count?: number;
-    threshold?: number;
+    hot_fresh_24h?: number;
+    warm_fresh_7d?: number;
+    hot_fresh_24h_threshold?: number;
+    warm_fresh_7d_threshold?: number;
     computed_at_date?: string;
   };
 
@@ -127,8 +130,10 @@ export async function GET(req: Request) {
 
     const payload = {
       reason: result.reason ?? "unknown",
-      coverage_count: result.coverage_count ?? null,
-      threshold: result.threshold ?? null,
+      hot_fresh_24h: result.hot_fresh_24h ?? null,
+      hot_fresh_24h_threshold: result.hot_fresh_24h_threshold ?? null,
+      warm_fresh_7d: result.warm_fresh_7d ?? null,
+      warm_fresh_7d_threshold: result.warm_fresh_7d_threshold ?? null,
       newest_existing_row: newest,
       stuck_days: stuckDays,
       today,
