@@ -55,6 +55,17 @@ struct CardDetailView: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var showCorrectionSheet = false
+    /// Tracks the "sign in then auto-save this card" flow. Set when an
+    /// unauthenticated user taps the + FAB; cleared on completion or
+    /// cancel. Watched by an .onChange so when isAuthenticated flips
+    /// true while pending, we save the card without making the user
+    /// re-tap anything.
+    @State private var pendingAddAfterSignIn = false
+    @State private var showSignInPromptForAdd = false
+    /// Brief success banner shown after the auto-save lands. Non-modal
+    /// so the user immediately sees they're back on the same card.
+    @State private var showAddedBanner = false
+    @State private var autoAddError: String?
     @State private var selectedTimeframe: ChartTimeframe = .week
     @State private var chartPrices: [Double] = []
     @State private var chartTimestamps: [String] = []
@@ -118,6 +129,42 @@ struct CardDetailView: View {
             }
             .padding(.trailing, 20)
             .padding(.bottom, 20)
+        }
+        .overlay(alignment: .top) {
+            if showAddedBanner {
+                addedToPortfolioBanner
+            }
+        }
+        .alert("Sign in to save \(card.name)?", isPresented: $showSignInPromptForAdd) {
+            Button("Sign In") {
+                AuthService.shared.signIn()
+                // pendingAddAfterSignIn stays true; the .onChange below
+                // catches the isAuthenticated flip and runs the save.
+            }
+            Button("Cancel", role: .cancel) {
+                pendingAddAfterSignIn = false
+            }
+        } message: {
+            Text("Sign in and we'll save this card to your portfolio automatically. You can adjust grade and cost basis afterwards.")
+        }
+        .alert("Couldn't save", isPresented: Binding(
+            get: { autoAddError != nil },
+            set: { if !$0 { autoAddError = nil } }
+        )) {
+            Button("OK", role: .cancel) { autoAddError = nil }
+        } message: {
+            Text(autoAddError ?? "")
+        }
+        .onChange(of: AuthService.shared.isAuthenticated) { wasAuthed, isAuthed in
+            // Deferred-action handoff: when the user signs in while we're
+            // holding a pending add for this card, fire the save in the
+            // background. Guarded by pendingAddAfterSignIn so an unrelated
+            // re-auth (token refresh on app foreground, etc.) doesn't
+            // accidentally re-add the card.
+            if !wasAuthed && isAuthed && pendingAddAfterSignIn {
+                pendingAddAfterSignIn = false
+                Task { await autoSavePendingHolding() }
+            }
         }
         .sheet(isPresented: $showCorrectionSheet) {
             if let hash = scanImageHash {
@@ -786,7 +833,7 @@ struct CardDetailView: View {
     private var addHoldingFAB: some View {
         Button {
             PAHaptics.tap()
-            showAddHolding = true
+            handleAddTap()
         } label: {
             Image(systemName: "plus")
                 .font(.system(size: 24, weight: .bold))
@@ -800,6 +847,76 @@ struct CardDetailView: View {
         .buttonStyle(.plain)
         .accessibilityLabel("Add to portfolio")
         .accessibilityHint("Opens the add-card sheet")
+    }
+
+    // MARK: - Sign-in gated add
+
+    /// Routes the FAB tap based on auth state. Authenticated users go
+    /// straight to the AddHoldingSheet so they can fill in cost basis;
+    /// guests get a sign-in prompt that, on success, auto-saves this
+    /// card with default values (RAW / qty 1 / no cost). The user can
+    /// edit the lot afterwards via swipe-to-edit on the portfolio.
+    private func handleAddTap() {
+        if AuthService.shared.isAuthenticated {
+            showAddHolding = true
+        } else {
+            pendingAddAfterSignIn = true
+            showSignInPromptForAdd = true
+        }
+    }
+
+    /// Fires when the auth flag flips during a pending add. Saves the
+    /// current card to the portfolio with default values, surfaces a
+    /// brief success banner, and clears the pending flag. Errors are
+    /// captured into autoAddError so the user knows the save didn't
+    /// land instead of silently dropping it.
+    private func autoSavePendingHolding() async {
+        do {
+            try await HoldingsService.shared.addHolding(
+                canonicalSlug: card.id,
+                grade: "RAW",
+                qty: 1
+            )
+            await MainActor.run {
+                PAHaptics.tap()
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                    showAddedBanner = true
+                }
+            }
+            try? await Task.sleep(for: .seconds(2.5))
+            await MainActor.run {
+                withAnimation(.easeOut(duration: 0.25)) {
+                    showAddedBanner = false
+                }
+            }
+        } catch {
+            await MainActor.run {
+                autoAddError = "Couldn't save \(card.name) — try again from the + button."
+            }
+        }
+    }
+
+    /// Banner overlay shown briefly after a deferred-add auto-save lands.
+    private var addedToPortfolioBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(PA.Colors.positive)
+            Text("Added \(card.name) to your portfolio")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(PA.Colors.text)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial)
+        .clipShape(Capsule())
+        .overlay(
+            Capsule().stroke(Color.white.opacity(0.08), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.25), radius: 10, x: 0, y: 4)
+        .padding(.top, 12)
+        .transition(.move(edge: .top).combined(with: .opacity))
     }
 
     // MARK: - AI Brief
