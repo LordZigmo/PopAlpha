@@ -1,6 +1,10 @@
 import { dbAdmin } from "@/lib/db/admin";
 import { refreshPipelineRollupsForVariantKeys } from "@/lib/backfill/provider-pipeline-rollups";
 import {
+  PIPELINE_TIER_SKIP_ENABLED,
+  shouldWriteHistoryPoint,
+} from "@/lib/backfill/refresh-tier-skip-policy";
+import {
   loadCoverageGapSetPriority,
   loadHighValueStaleSetPriority,
   loadRecentSetConsistencyPriority,
@@ -258,6 +262,7 @@ export type ScrydexHistoryBackfillResult = {
   historyRowsSkippedExistingDay: number;
   historyRowsSkippedNoNearMint: number;
   historyRowsForwardFilled: number;
+  historyRowsTieredSkipped: number;
   distinctSnapshotDaysWritten: number;
   sampleWrites: HistoryBackfillSample[];
   touchedVariantKeys: Array<{
@@ -1504,6 +1509,7 @@ export async function backfillScrydexPriceHistoryForSet(opts: {
   let historyRowsSkippedExistingDay = 0;
   let historyRowsSkippedNoNearMint = 0;
   let historyRowsForwardFilled = 0;
+  let historyRowsTieredSkipped = 0;
   let firstError: string | null = null;
   const sampleWrites: HistoryBackfillSample[] = [];
   const distinctSnapshotDaysWritten = new Set<string>();
@@ -1637,9 +1643,55 @@ export async function backfillScrydexPriceHistoryForSet(opts: {
   ).values()];
   historyRowsPrepared = dedupedRows.length;
 
-  if (!dryRun && firstError === null && dedupedRows.length > 0) {
+  // Phase 3 tier-skip (extended 2026-05-06): the realtime timeseries
+  // writer in provider-observation-timeseries.ts already gates history
+  // writes by canonical_cards.refresh_tier, but this catchup path was
+  // bypassing it — sparse-tier slugs were still receiving history points
+  // through the 2024+ catchup cron, undermining the expected ~70% write
+  // reduction. Apply the same policy here so both writers agree.
+  let writableRows = dedupedRows;
+  if (PIPELINE_TIER_SKIP_ENABLED && dedupedRows.length > 0) {
+    const candidateSlugs = [...new Set(
+      dedupedRows
+        .map((row) => row.canonical_slug)
+        .filter((slug): slug is string => typeof slug === "string" && slug.length > 0),
+    )];
+    if (candidateSlugs.length > 0) {
+      const tierBySlug = new Map<string, string>();
+      for (const slugChunk of chunkValues(candidateSlugs, 200)) {
+        const supabase = dbAdmin();
+        const { data, error } = await supabase
+          .from("canonical_cards")
+          .select("slug, refresh_tier")
+          .in("slug", slugChunk);
+        if (error) {
+          firstError = `canonical_cards(load tiers): ${error.message}`;
+          break;
+        }
+        for (const row of (data ?? []) as Array<{ slug: string; refresh_tier: string | null }>) {
+          if (row.slug && row.refresh_tier) tierBySlug.set(row.slug, row.refresh_tier);
+        }
+      }
+      if (firstError === null) {
+        writableRows = dedupedRows.filter((row) => {
+          const tier = row.canonical_slug ? tierBySlug.get(row.canonical_slug) ?? null : null;
+          const writeOk = shouldWriteHistoryPoint({
+            tier,
+            observedAtIso: row.ts,
+            observedPriceUsd: row.price ?? 0,
+            latestSnapshotObservedAtIso: null,
+            latestSnapshotPriceUsd: null,
+          });
+          if (!writeOk) historyRowsTieredSkipped += 1;
+          return writeOk;
+        });
+      }
+    }
+  }
+
+  if (!dryRun && firstError === null && writableRows.length > 0) {
     const supabase = dbAdmin();
-    const writeChunks = chunkValues(dedupedRows, WRITE_CHUNK_SIZE);
+    const writeChunks = chunkValues(writableRows, WRITE_CHUNK_SIZE);
     for (let chunkIndex = 0; chunkIndex < writeChunks.length; chunkIndex += 1) {
       const chunk = writeChunks[chunkIndex];
       try {
@@ -1702,6 +1754,7 @@ export async function backfillScrydexPriceHistoryForSet(opts: {
     historyRowsSkippedExistingDay,
     historyRowsSkippedNoNearMint,
     historyRowsForwardFilled,
+    historyRowsTieredSkipped,
     distinctSnapshotDaysWritten: distinctSnapshotDaysWritten.size,
     sampleWrites,
     touchedVariantKeys,
