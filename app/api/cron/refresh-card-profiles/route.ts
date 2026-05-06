@@ -31,11 +31,22 @@ import {
 } from "@/lib/ai/card-profile-summary";
 
 export const runtime = "nodejs";
-export const maxDuration = 300;
+// Was 300s (Vercel Hobby cap). Bumped to 800s on Pro to chew through more
+// cards per invocation while we drain the ~17k fallback backlog. Each
+// run still bails early via the deadline guard at maxDuration -
+// DEADLINE_RESERVE_MS, so this is a ceiling not a floor — short batches
+// still exit fast.
+export const maxDuration = 800;
 
 const DEADLINE_RESERVE_MS = 30_000;
 const DEFAULT_MAX_CARDS = 500;
-const DEFAULT_CONCURRENCY = 5;
+// Was 5. Each window of N cards waits on the slowest of N before moving
+// on, so doubling concurrency processes 2× cards in roughly the same
+// wall time. Bumped to 10 (also the upper bound on the ?concurrency=
+// query param) to drain backlog faster. If Gemini starts returning
+// RESOURCE_EXHAUSTED instead of AbortError under sustained load, drop
+// back to 8.
+const DEFAULT_CONCURRENCY = 10;
 const DEFAULT_BATCH_SIZE = 50;
 const STALE_DAYS = 1;
 
