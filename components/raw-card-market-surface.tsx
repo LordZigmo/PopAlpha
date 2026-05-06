@@ -11,6 +11,10 @@ import MarketPulse from "@/components/market-pulse";
 import PopAlphaScoutPreview from "@/components/popalpha-scout-preview";
 import type { FinishGroup } from "@/lib/cards/detail-types";
 import type { RawCardMarketVariant } from "@/components/raw-card-variant-types";
+import {
+  PRICING_DISPLAY_V2_ENABLED,
+  resolveDisplayedMarketPrice,
+} from "@/lib/pricing/displayed-market-price";
 
 type RawCardMarketSurfaceProps = {
   canonicalSlug: string;
@@ -160,6 +164,28 @@ export default function RawCardMarketSurface({
   const displayPrimaryPrice = currentPrice;
   const primaryPrice = displayPrimaryPrice != null ? formatUsdCompact(displayPrimaryPrice) : null;
   const formattedAsOf = formatAsOf(activeVariant?.asOfTs ?? null);
+  // Phase 2 of tiered-refresh: classify the price by age. Stale cards
+  // get a "Last sold · {date}" label instead of "Near-mint market price".
+  const heroPriceDisplay = PRICING_DISPLAY_V2_ENABLED
+    ? resolveDisplayedMarketPrice({
+        marketPrice: currentPrice,
+        marketPriceAsOf: activeVariant?.asOfTs ?? null,
+      })
+    : null;
+  const heroPriceLabel = (() => {
+    if (heroPriceDisplay?.kind === "stale_recent") {
+      return `Last sold · ${heroPriceDisplay.ageLabel}`;
+    }
+    if (heroPriceDisplay?.kind === "stale_old") {
+      return `Last sold · ${heroPriceDisplay.ageLabel} · Sparse market`;
+    }
+    if (heroPriceDisplay?.kind === "no_market") {
+      return "No recent market";
+    }
+    return formattedAsOf
+      ? `Near-mint market price · Updated ${formattedAsOf}`
+      : "Near-mint market price";
+  })();
   const priceChangeColor = priceChangePct == null
     ? "#6B6B6B"
     : priceChangePct > 0
@@ -255,7 +281,7 @@ export default function RawCardMarketSurface({
                       </div>
                     ) : null}
                     <p className="mt-1 text-[14px] text-[#555]">
-                      {formattedAsOf ? `Near-mint market price · Updated ${formattedAsOf}` : "Near-mint market price"}
+                      {heroPriceLabel}
                     </p>
                     {activeVariant?.scrydexPrice != null ? (
                       <div className="mt-1 text-[13px] tabular-nums text-[#7A7A7A]">

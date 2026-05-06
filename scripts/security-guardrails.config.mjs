@@ -490,6 +490,7 @@ export const INTERNAL_ROUTE_TRUST_CONTRACTS = {
   "cron/compute-daily-top-movers": cronSecretRoute("cron/internal automation"),
   "cron/discover-new-sets": cronSecretRoute("cron/internal automation"),
   "cron/recompute-refresh-tier": cronSecretRoute("cron/internal automation"),
+  "cron/refresh-graded-variant-metrics": cronSecretRoute("cron/internal automation"),
 };
 
 export const DEBUG_ROUTE_TRUST_CONTRACTS = {

@@ -1,6 +1,11 @@
 import Link from "next/link";
 import type { HomepageCard } from "@/lib/data/homepage";
 import ChangeBadge from "@/components/change-badge";
+import {
+  PRICING_DISPLAY_V2_ENABLED,
+  formatPriceDisplay,
+  resolveDisplayedMarketPrice,
+} from "@/lib/pricing/displayed-market-price";
 
 function formatPrice(n: number | null): string {
   if (n == null || n <= 0) return "--";
@@ -48,7 +53,20 @@ export default function CardTileMini({
 }: {
   card: HomepageCard;
 }) {
+  // Phase 2 of tiered-refresh plan: classify the price by age so stale
+  // cards stop pretending to be live. When the v2 flag is off, fall
+  // through to the legacy "always show $X" behavior so we can disable
+  // by env without redeploying.
+  const priceDisplay = PRICING_DISPLAY_V2_ENABLED
+    ? resolveDisplayedMarketPrice({
+        marketPrice: card.market_price,
+        marketPriceAsOf: card.updated_at,
+      })
+    : null;
+  const priceMeta = priceDisplay ? formatPriceDisplay(priceDisplay) : null;
+
   const confidence = getConfidenceVisual(card.confidence_score, card.low_confidence);
+  const showConfidence = confidence !== null && (priceMeta?.showConfidencePill ?? true);
   const filledSegments = confidence
     ? confidence.score >= 85
       ? 4
@@ -94,16 +112,23 @@ export default function CardTileMini({
 
         <div className="mt-2 flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
-            <span className="block truncate text-[14px] font-bold tabular-nums text-[#F0F0F0]">
-              {formatPrice(card.market_price)}
+            <span
+              className={`block truncate font-bold tabular-nums ${
+                priceMeta?.subdued ? "text-[#9CA3AF]" : "text-[#F0F0F0]"
+              } ${priceMeta && priceDisplay?.kind !== "live" ? "text-[12px]" : "text-[14px]"}`}
+              title={priceDisplay?.kind === "stale_old" ? "Sparse market — last sold price shown" : undefined}
+            >
+              {priceMeta ? priceMeta.label : formatPrice(card.market_price)}
             </span>
           </div>
-          <div className="shrink-0 pt-0.5">
-            <ChangeBadge pct={card.change_pct} windowLabel={card.change_window} />
-          </div>
+          {(priceMeta?.showChangeBadge ?? true) ? (
+            <div className="shrink-0 pt-0.5">
+              <ChangeBadge pct={card.change_pct} windowLabel={card.change_window} />
+            </div>
+          ) : null}
         </div>
 
-        {confidence ? (
+        {showConfidence && confidence ? (
           <div className="mt-2">
             <div className="flex items-center justify-between gap-2">
               <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#8A8A8A]">

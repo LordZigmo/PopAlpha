@@ -36,6 +36,10 @@ import { dbPublic } from "@/lib/db";
 import { createServerSupabaseUserClient } from "@/lib/db/user";
 import { buildAssetViewModel } from "@/lib/data/assets";
 import { resolveWeightedMarketPrice } from "@/lib/pricing/market-confidence";
+import {
+  PRICING_DISPLAY_V2_ENABLED,
+  resolveDisplayedMarketPrice,
+} from "@/lib/pricing/displayed-market-price";
 import { isPhysicalPokemonSet } from "@/lib/sets/physical";
 
 type CanonicalCardRow = {
@@ -839,6 +843,16 @@ export default async function CanonicalCardPage({
 
   const rawSourceScrydex = rawSnap.data?.market_price ?? null;
   const rawSourceScrydexTs = rawSourceScrydex !== null ? (rawSnap.data?.market_price_as_of ?? null) : null;
+  // Phase 2 of tiered-refresh: classify the raw price by age so a 30-day
+  // -old "current market price" label gets rewritten as "Last sold · {date}".
+  // Computed here once and consumed below by primaryPriceLabel.
+  const rawPriceDisplay =
+    PRICING_DISPLAY_V2_ENABLED && viewMode === "RAW"
+      ? resolveDisplayedMarketPrice({
+          marketPrice: rawSourceScrydex,
+          marketPriceAsOf: rawSourceScrydexTs,
+        })
+      : null;
   let rawPointsScrydex7d = 0;
   if (rawSourceScrydex !== null) {
     const referenceTsMs = rawProviderHistoryRows
@@ -870,6 +884,15 @@ export default async function CanonicalCardPage({
   const primaryPrice = displayPrimaryPrice != null ? formatUsdCompact(displayPrimaryPrice) : null;
   const primaryPriceLabel = currentRawPrice != null
     ? (() => {
+      if (rawPriceDisplay && rawPriceDisplay.kind === "stale_recent") {
+        return `Last sold · ${rawPriceDisplay.ageLabel}`;
+      }
+      if (rawPriceDisplay && rawPriceDisplay.kind === "stale_old") {
+        return `Last sold · ${rawPriceDisplay.ageLabel} · Sparse market`;
+      }
+      if (rawPriceDisplay && rawPriceDisplay.kind === "no_market") {
+        return "No recent market";
+      }
       const confidenceSuffix = rawPricing
         ? ` · Confidence ${rawPricing.confidenceScore}%${rawPricing.lowConfidence ? " (low)" : ""}`
         : "";
