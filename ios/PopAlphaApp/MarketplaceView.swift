@@ -477,10 +477,31 @@ struct MarketplaceView: View {
                     .flatMap { $0.isEmpty ? nil : $0 }
                 self.isLoading = false
             }
+        } catch is CancellationError {
+            // Cooperative-cancellation error from Swift Concurrency —
+            // happens when the Task running loadAll was cancelled
+            // (e.g., .task re-fire, view disappear). Not a real
+            // failure; the next attempt will set its own loading
+            // state. Returning without touching @State leaves
+            // isLoading=true so the spinner stays visible until the
+            // retry resolves. Real-device 2026-05-06: user reported
+            // "failed to load market signals" flashing then data
+            // arriving 500ms later — that flash was this catch path
+            // setting loadError on what was actually a transient
+            // cancellation.
+            Logger.ui.debug("loadAll cancelled (Swift Concurrency); leaving spinner")
+            return
+        } catch let urlError as URLError where urlError.code == .cancelled {
+            // URLSession-level cancellation (Code=-999). Same
+            // semantics as Swift's CancellationError: a new fetch is
+            // taking over, don't surface an error UI.
+            Logger.ui.debug("loadAll cancelled (URLSession -999); leaving spinner")
+            return
         } catch {
-            // Signal board failed but the AI brief, community, and
-            // personal data may still have arrived — render those parts
-            // and surface a retry CTA for the movers section.
+            // Signal board genuinely failed (network, 5xx, etc.) but
+            // the AI brief, community, and personal data may still
+            // have arrived — render those parts and surface a retry
+            // CTA for the movers section.
             await MainActor.run {
                 self.aiBrief = brief
                 self.community = comm
