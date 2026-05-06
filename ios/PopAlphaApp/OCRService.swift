@@ -460,11 +460,23 @@ enum ScanMatchReranker {
         }
 
         if promoteIndex == 0 {
-            // CLIP's top-1 already agrees with OCR. Upgrade confidence
-            // to "high" regardless of what CLIP originally said — two
-            // independent signals agreeing is the strongest possible
-            // evidence we have at the API layer.
-            return Result(matches: matches, confidence: "high", ocrNumberUsed: ocrNumber)
+            // CLIP's top-1 already agrees with OCR. The upstream
+            // identifier (server route or OfflineIdentifier) already
+            // analyzed dual-signal agreement and chose its
+            // confidence accordingly — typically HIGH when both
+            // signals point to the same slug. We TRUST that decision
+            // here rather than re-applying the rule, because the
+            // upstream also handles the trust-killer case where the
+            // signals AGREE but still warrant a downgrade (e.g.,
+            // ocr_intersect_unique that agrees with kNN top-1 but
+            // the gap to rank-2 is borderline). Preserving
+            // originalConfidence avoids the iOS reranker fighting
+            // server-side downgrade decisions.
+            return Result(
+                matches: matches,
+                confidence: originalConfidence,
+                ocrNumberUsed: ocrNumber,
+            )
         }
 
         // Promote the matching card to position 1, preserving the
@@ -475,6 +487,37 @@ enum ScanMatchReranker {
             reordered.append(match)
         }
 
-        return Result(matches: reordered, confidence: "high", ocrNumberUsed: ocrNumber)
+        // OCR found a match further down the list and we promoted it
+        // to top-1. This is the "OCR overrode CLIP" case the
+        // upstream's trust-killer logic explicitly demotes to MEDIUM.
+        // The previous behavior here unconditionally upgraded to HIGH,
+        // which UNDOES that demotion — real-device 2026-05-06: Chansey
+        // scan, OCR misread card_number as "3", Path B intersect-
+        // unique picked Charizard #3, OfflineIdentifier correctly
+        // returned MEDIUM (Path B changed CLIP top-1), but this
+        // reranker promoted Charizard to top-1 AND set confidence
+        // HIGH. Result: auto-navigate to Charizard for a card that
+        // was actually a Chansey.
+        //
+        // Fix: reorder, but cap confidence at MEDIUM. If the user's
+        // OCR was right we'll still land on the correct card via the
+        // picker; if it was wrong (the Chansey case) the picker still
+        // shows and the user can search-correct.
+        let cappedConfidence: String
+        switch originalConfidence {
+        case "high":
+            // Upstream said HIGH but OCR is overriding its top-1 —
+            // disagreement, demote.
+            cappedConfidence = "medium"
+        default:
+            // Already MEDIUM or LOW — preserve.
+            cappedConfidence = originalConfidence
+        }
+
+        return Result(
+            matches: reordered,
+            confidence: cappedConfidence,
+            ocrNumberUsed: ocrNumber,
+        )
     }
 }
