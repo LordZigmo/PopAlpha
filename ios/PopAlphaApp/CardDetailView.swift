@@ -209,12 +209,28 @@ struct CardDetailView: View {
             ) {
                 await MainActor.run { conditionPrices = prices }
             }
-            // Load per-bucket graded market summary stats. Cheap query
-            // (≤6 rows, indexed on canonical_slug+grade); fired in the
-            // background and ignored if it fails.
+            // Load per-bucket graded market summary stats. Each card may
+            // have several rows per bucket (one canonical printing_id=NULL
+            // aggregate plus one row per printing). Pick the best row per
+            // bucket: prefer canonical (NULL) since it aggregates all
+            // printings; fall back to the printing-scoped row with the
+            // most snapshot_count_30d data; final fallback to whatever
+            // row we have.
             if let rows = try? await CardService.shared.fetchGradedCardMetrics(slug: card.id) {
-                let map = Dictionary(rows.map { ($0.grade, $0) }, uniquingKeysWith: { first, _ in first })
-                await MainActor.run { gradedCardMetricsByBucket = map }
+                var grouped: [String: [GradedCardMetricRow]] = [:]
+                for row in rows {
+                    grouped[row.grade, default: []].append(row)
+                }
+                var resolved: [String: GradedCardMetricRow] = [:]
+                for (bucket, candidates) in grouped {
+                    if let canonical = candidates.first(where: { $0.printingId == nil }) {
+                        resolved[bucket] = canonical
+                    } else {
+                        let best = candidates.max { ($0.snapshotCount30d ?? 0) < ($1.snapshotCount30d ?? 0) }
+                        if let best { resolved[bucket] = best }
+                    }
+                }
+                await MainActor.run { gradedCardMetricsByBucket = resolved }
             }
             // Load available graded options lazily
             if let rows = try? await CardService.shared.fetchGradedVariantMetrics(slug: card.id) {

@@ -191,9 +191,14 @@ actor CardService {
     /// by (canonical_slug, printing_id, grade) — one row per bucket, aggregate
     /// across providers (no provider column). The Grade Board summary section
     /// uses this to show median/range/sample stats for the selected bucket.
-    /// Filters to printing_id IS NULL so we get the canonical-level row, matching
-    /// how the existing graded reference price (`gradeSnapMap[grade].median_7d`)
-    /// is sourced on web (`app/c/[slug]/page.tsx`).
+    ///
+    /// We fetch ALL graded rows for the slug (both canonical printing_id=NULL
+    /// rows and printing-scoped rows) because cards differ in coverage — some
+    /// have only canonical, some only printing-scoped, some both. Roughly
+    /// 56k of 125k graded rows are canonical, 69k printing-scoped.
+    /// CardDetailView picks the best row per bucket: prefer the row matching
+    /// the user's selectedPrintingId; fall back to canonical (NULL); fall
+    /// back to any row.
     func fetchGradedCardMetrics(slug: String) async throws -> [GradedCardMetricRow] {
         let data = try await Supabase.query(
             table: "public_card_metrics",
@@ -201,10 +206,9 @@ actor CardService {
             filters: [
                 ("canonical_slug", "eq", slug),
                 ("grade", "in", "(LE_7,G8,G9,G9_5,G10,G10_PERFECT)"),
-                ("printing_id", "is", "null"),
             ],
             order: "grade.asc",
-            limit: 10
+            limit: 60
         )
         return try decoder.decode([GradedCardMetricRow].self, from: data)
     }
