@@ -71,6 +71,7 @@ export const CRON_ROUTES = [
   "cron/capture-matching-quality",
   "cron/snapshot-price-history",
   "cron/refresh-derived-signals",
+  "cron/refresh-graded-variant-metrics",
   "cron/refresh-set-summaries",
   "cron/refresh-ai-brief",
   "cron/refresh-card-profiles",
