@@ -64,15 +64,24 @@ struct InteractiveChartView: View {
 
                 if data.count >= 2,
                    let minVal = data.min(),
-                   let maxVal = data.max(),
-                   maxVal > minVal {
+                   let maxVal = data.max() {
 
+                    // When every point is identical (common for graded
+                    // cards with stable Scrydex `market` estimates) the
+                    // strict maxVal > minVal gate used to skip the entire
+                    // chart body, leaving the user with a "Calibrated on N
+                    // data points" caption but no visible line. Treat
+                    // a zero-range series as a flat midline instead so
+                    // the user sees the data exists and isn't moving.
                     let range = maxVal - minVal
                     let step = w / CGFloat(data.count - 1)
+                    let flat = range <= 0
                     let points: [CGPoint] = data.enumerated().map { i, val in
                         CGPoint(
                             x: CGFloat(i) * step,
-                            y: h - ((CGFloat(val - minVal) / CGFloat(range)) * h)
+                            y: flat
+                                ? h * 0.5
+                                : h - ((CGFloat(val - minVal) / CGFloat(range)) * h)
                         )
                     }
 
