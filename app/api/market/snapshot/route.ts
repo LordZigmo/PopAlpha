@@ -92,7 +92,7 @@ export async function GET(req: Request) {
 
   const pointCounts = { scrydex: 0 };
   let historyRows: ProviderHistoryAsOfRow[] = [];
-  if (grade === "RAW" && scrydex.usdPrice !== null) {
+  if (scrydex.usdPrice !== null) {
     let historyRowsQuery = supabase
       .from("public_price_history")
       .select("provider, ts, price, currency")
@@ -102,7 +102,25 @@ export async function GET(req: Request) {
       .gte("ts", new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
       .order("ts", { ascending: false })
       .limit(800);
-    if (printing) historyRowsQuery = historyRowsQuery.ilike("variant_ref", `${printing}::%`);
+    if (grade === "RAW") {
+      // RAW chart: exclude graded rows (which use the long-format
+      // <printing>::<providerVariantId>::GRADED::PROVIDER::BUCKET::RAW
+      // variant_ref) to match the public_price_history_canonical
+      // semantics established by commit cbefdec.
+      historyRowsQuery = historyRowsQuery.not("variant_ref", "ilike", "%::GRADED::%");
+      if (printing) historyRowsQuery = historyRowsQuery.ilike("variant_ref", `${printing}::%`);
+    } else {
+      // Graded chart: match the long-format variant_ref tail
+      // `::GRADED::%::${bucket}::RAW` — aggregate across providers at
+      // that bucket since card_metrics is per-bucket without a
+      // provider dimension. Caller can scope to a specific printing
+      // via ?printing=, which becomes a leading prefix match.
+      const tail = `%::GRADED::%::${grade}::RAW`;
+      historyRowsQuery = historyRowsQuery.ilike(
+        "variant_ref",
+        printing ? `${printing}::${tail.slice(1)}` : tail,
+      );
+    }
     const historyRowsResult = await historyRowsQuery;
     if (historyRowsResult.error) {
       return NextResponse.json({ ok: false, error: historyRowsResult.error.message }, { status: 500 });
