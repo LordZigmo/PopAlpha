@@ -626,9 +626,17 @@ struct PaywallView: View {
             let outcome = try await store.purchase(product)
             switch outcome {
             case .success:
-                // The .onChange(of: gate.isPro) handler will dismiss the
-                // sheet; nothing more to do here.
-                break
+                // Dismiss explicitly so the paywall closes immediately
+                // after the system purchase sheet does. The onChange
+                // handler on gate.isPro is a safety net (covers the
+                // restore path), but real-device tests showed the
+                // observation chain (StoreKit → Transaction.finish →
+                // refreshStatus → @Published store.status → Combine
+                // sink → gate.isPro → onChange → dismiss) sometimes
+                // races with view re-render and the user briefly sees
+                // the paywall again. Calling dismiss directly removes
+                // that gap.
+                dismiss()
             case .userCancelled:
                 break
             case .pending:
@@ -647,6 +655,11 @@ struct PaywallView: View {
             errorMessage = storeError
         } else if !gate.isPro {
             errorMessage = "No active subscription found for this Apple ID."
+        } else {
+            // Same rationale as the purchase success path: dismiss
+            // explicitly rather than waiting for the gate.isPro
+            // onChange observer to fire.
+            dismiss()
         }
     }
 }
