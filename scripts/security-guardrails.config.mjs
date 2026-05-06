@@ -20,6 +20,7 @@ export const DBADMIN_ALLOWED_FILES = [
   "app/api/ebay/deletion-notification/route.ts",
   "app/api/holdings/route.ts",
   "app/api/holdings/bulk-import/route.ts",
+  "app/api/iap/verify/route.ts",
   "app/api/personalization/events/route.ts",
   "app/api/personalization/explanation/route.ts",
   "app/api/personalization/profile/route.ts",
@@ -27,15 +28,18 @@ export const DBADMIN_ALLOWED_FILES = [
   "app/api/portfolio/activity/route.ts",
   "app/api/pro/signals/route.ts",
   "app/api/scan/identify/route.ts",
+  "app/api/webhooks/apple/notifications/route.ts",
   "lib/data/canonical-card-match.ts",
   "lib/db/admin.ts",
   "lib/entitlements.ts",
+  "lib/iap/upsert-subscription.ts",
 ];
 
 export const DBADMIN_ALLOWED_ROUTE_KEYS = [
   "cards/[slug]/view",
   "holdings",
   "holdings/bulk-import",
+  "iap/verify",
   "personalization/events",
   "personalization/explanation",
   "personalization/profile",
@@ -43,6 +47,7 @@ export const DBADMIN_ALLOWED_ROUTE_KEYS = [
   "portfolio/activity",
   "pro/signals",
   "scan/identify",
+  "webhooks/apple/notifications",
 ];
 
 export const INTERNAL_ADMIN_PAGE_ROOTS = [
@@ -484,6 +489,7 @@ export const INTERNAL_ROUTE_TRUST_CONTRACTS = {
   "cron/mirror-card-images": cronSecretRoute("cron/internal automation"),
   "cron/compute-daily-top-movers": cronSecretRoute("cron/internal automation"),
   "cron/discover-new-sets": cronSecretRoute("cron/internal automation"),
+  "cron/recompute-refresh-tier": cronSecretRoute("cron/internal automation"),
 };
 
 export const DEBUG_ROUTE_TRUST_CONTRACTS = {
@@ -515,6 +521,15 @@ export const PUBLIC_WRITE_ROUTE_CONTRACTS = {
     abuseControls: ["ip_burst", "ebay_jws_verification", "verified_receipt_quarantine", "structured_logging"],
     dbContract: "server-only insert into public.ebay_deletion_notification_receipts after verified signature",
     recommendedAction: "keep quarantine-first; do not trigger destructive deletion work directly from the webhook route",
+  },
+  "webhooks/apple/notifications": {
+    routeClass: "ingest",
+    access: "webhook",
+    methods: ["POST"],
+    writeType: "webhook_receiver",
+    abuseControls: ["apple_jws_verification", "x5c_chain_validation", "bundle_id_check", "structured_logging"],
+    dbContract: "server-only update of public.apple_subscriptions (existing row only) after verified ASSN V2 + inner transaction JWS chain",
+    recommendedAction: "keep update-by-original_transaction_id only; do not let webhook create new entitlement rows — the iOS /api/iap/verify path is the only writer that can associate a Clerk user",
   },
   "personalization/events": {
     routeClass: "public",
@@ -1462,4 +1477,6 @@ export const FIXED_ROUTE_CLASSIFICATIONS = {
   // "admin/variant-tokens": "admin" — reverted 2026-04-29.
   "cron/process-ebay-deletion-receipts": "cron",
   "ebay/deletion-notification": "ingest",
+  "iap/verify": "user",
+  "webhooks/apple/notifications": "ingest",
 };

@@ -107,6 +107,10 @@
     {
       "path": "/api/cron/discover-new-sets",
       "schedule": "0 8 * * 0"
+    },
+    {
+      "path": "/api/cron/recompute-refresh-tier",
+      "schedule": "30 4 * * 0"
     }
   ]
 }

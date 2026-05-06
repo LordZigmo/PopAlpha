@@ -79,6 +79,7 @@ export const CRON_ROUTES = [
   "cron/mirror-card-images",
   "cron/compute-daily-top-movers",
   "cron/discover-new-sets",
+  "cron/recompute-refresh-tier",
   "admin/cleanup/delete-thumb-overlay-augs",
 ];
 
@@ -116,9 +117,11 @@ export const INGEST_ROUTES = [
   "market/observe",
   "ingest/psa",
   "ebay/deletion-notification",
+  "webhooks/apple/notifications",
 ];
 
 export const USER_ROUTES = [
+  "iap/verify",
   "activity/card",
   "activity/comments",
   "activity/feed",

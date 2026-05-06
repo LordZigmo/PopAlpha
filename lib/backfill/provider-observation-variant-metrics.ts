@@ -620,6 +620,33 @@ export async function runProviderObservationVariantMetrics(opts: {
       if (!signalRefresh.ok) {
         throw new Error(signalRefresh.firstError ?? "provider derived signals refresh failed");
       }
+
+      // Hot-promotion fast path (Phase 1 of tiered-refresh plan,
+      // 2026-05-06). Cards whose 30-day price-change count clears the
+      // hot threshold get promoted immediately rather than waiting for
+      // the weekly /api/cron/recompute-refresh-tier sweep — relevant
+      // when a fresh set release starts trading. Slight over-
+      // classification is preferred over missing a surge for up to 7
+      // days; the Sunday recompute corrects any drift.
+      const HOT_PROMOTION_PRICE_CHANGES_THRESHOLD = 8;
+      const hotPromotionSlugs = [
+        ...new Set(
+          writes
+            .filter((w) => (w.provider_price_changes_count_30d ?? 0) >= HOT_PROMOTION_PRICE_CHANGES_THRESHOLD)
+            .map((w) => w.canonical_slug),
+        ),
+      ];
+      if (hotPromotionSlugs.length > 0) {
+        const { error: promotionError } = await supabase
+          .from("canonical_cards")
+          .update({ refresh_tier: "hot", refresh_tier_computed_at: nowIso })
+          .in("slug", hotPromotionSlugs)
+          .in("refresh_tier", ["unknown", "warm", "sparse"]);
+        if (promotionError) {
+          // Non-fatal — the weekly recompute cron picks up any miss.
+          console.warn(`[${JOB}] hot-promotion warning:`, promotionError.message);
+        }
+      }
     }
   } catch (error) {
     firstError = error instanceof Error ? error.message : String(error);
