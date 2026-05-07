@@ -976,10 +976,22 @@ final class ScannerHost: ObservableObject {
         // never contained that text in the first place.
         let imageForOCR = ocrImage ?? image
         let ocrT0 = Date()
-        let ocrMulti = await OCRService.extractCardIdentifiersMulti(
-            from: imageForOCR,
-            language: self.scanLanguage,
-        )
+        let ocrMulti = await OCRService.extractCardIdentifiersMulti(from: imageForOCR)
+        // Zero-tap language detection: extractCardIdentifiersMulti
+        // always runs Vision with both ja-JP and en-US loaded and
+        // detects the card's language by scanning the recognized text
+        // for CJK characters. Update the published scanLanguage so
+        // (a) downstream identify uses the right language filter,
+        // (b) the picker sheet records the right captured_language
+        //     when a user corrects a scan,
+        // (c) the languagePill in the scanner overlay reflects the
+        //     detected language as a status indicator.
+        // The user can still tap the pill to manually override; the
+        // override is per-scan (next scan re-detects).
+        let detectedLanguage = ocrMulti.detectedLanguage
+        if self.scanLanguage != detectedLanguage {
+            self.scanLanguage = detectedLanguage
+        }
         let ocrMs = Date().timeIntervalSince(ocrT0) * 1000
         let ocr = (cardNumber: ocrMulti.cardNumbers.first, setHint: ocrMulti.setHint)
         self.lastOCR = ocr
@@ -995,13 +1007,21 @@ final class ScannerHost: ObservableObject {
         // catalog has zero JP rows (it's built from EN siglip2 rows
         // only). Routing JP through the offline path would either
         // return zero matches or, worse, force a JP card's embedding
-        // through the EN catalog and surface incorrect EN
-        // top-1s. The server route at /api/scan/identify handles
-        // language=JP correctly against the 379 JP siglip2 rows in
+        // through the EN catalog and surface incorrect EN top-1s. The
+        // server route at /api/scan/identify handles language=JP
+        // correctly against the 379 JP siglip2 rows in
         // card_image_embeddings (Supabase). When we eventually bundle
         // a multilingual .papb, this guard becomes the single line to
         // remove.
-        let useOffline = offlineEnabled && self.scanLanguage == .en
+        //
+        // We use `detectedLanguage` from the OCR pass (rather than
+        // self.scanLanguage) so the gate is correct on the FIRST
+        // scan after launch — self.scanLanguage starts at .en and
+        // only updates after this detection landed. The two will
+        // be equal by this line because we set self.scanLanguage =
+        // detectedLanguage above, but reading the local makes the
+        // intent unambiguous.
+        let useOffline = offlineEnabled && detectedLanguage == .en
         var response: ScanIdentifyResponse?
         var usedOffline = false
 

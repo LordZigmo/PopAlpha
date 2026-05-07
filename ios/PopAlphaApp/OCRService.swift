@@ -45,10 +45,9 @@ enum OCRService {
     /// block the scan.
     static func extractCardIdentifiers(
         from image: UIImage,
-        language: ScanLanguage = .en,
-    ) async -> (cardNumber: String?, setHint: String?) {
-        let multi = await extractCardIdentifiersMulti(from: image, language: language)
-        return (multi.cardNumbers.first, multi.setHint)
+    ) async -> (cardNumber: String?, setHint: String?, detectedLanguage: ScanLanguage) {
+        let multi = await extractCardIdentifiersMulti(from: image)
+        return (multi.cardNumbers.first, multi.setHint, multi.detectedLanguage)
     }
 
     /// Multi-candidate OCR. Two innovations over `extractCardIdentifiers`:
@@ -81,12 +80,10 @@ enum OCRService {
     static func extractCardIdentifiersMulti(
         from image: UIImage,
         maxCandidatesPerObservation: Int = 3,
-        language: ScanLanguage = .en,
-    ) async -> (cardNumbers: [String], setHint: String?) {
+    ) async -> (cardNumbers: [String], setHint: String?, detectedLanguage: ScanLanguage) {
         async let fullPass = recognizeText(
             in: image,
             maxCandidatesPerObservation: maxCandidatesPerObservation,
-            language: language,
             // Spatial filtering for card_number extraction on the full
             // pass: only consider text whose bounding-box CENTER is in
             // the bottom ~22% of the image. Pokemon's card_number has
@@ -110,18 +107,17 @@ enum OCRService {
             // higher up — usually right under the card name).
             restrictCardNumbersToBottomRegion: true,
         )
-        async let stripPass: ([String], String?) = {
+        async let stripPass: ([String], String?, ScanLanguage) = {
             // Bottom 18% comfortably contains the collector number on
             // every modern Pokemon TCG layout I've checked. 3× upscale
             // takes the ~12-15px digits to ~36-45px — well within
             // Vision's accurate-mode sweet spot.
             guard let strip = upscaledBottomStrip(image, ratio: 0.18, scale: 3.0) else {
-                return ([], nil)
+                return ([], nil, .en)
             }
             return await recognizeText(
                 in: strip,
                 maxCandidatesPerObservation: maxCandidatesPerObservation,
-                language: language,
                 // Strip pass already operates on the bottom 18% of the
                 // input, so all of its observations are implicitly in
                 // the card's bottom region. Applying the spatial
@@ -145,7 +141,14 @@ enum OCRService {
         // a usable set name and is dominated by collector number,
         // copyright, and set code — none of which `pickSetHint` would
         // accept anyway.
-        return (merged, full.1)
+        //
+        // Detected language: if EITHER pass saw CJK characters, the
+        // card is JP. The strip pass alone is rarely conclusive
+        // (bottom strip has card_number / © / set code in Latin even
+        // on JP cards), but the full-pass card name is the giveaway.
+        // Take the union: any JP signal wins.
+        let detectedLanguage: ScanLanguage = (full.2 == .jp || strip.2 == .jp) ? .jp : .en
+        return (merged, full.1, detectedLanguage)
     }
 
     /// Inner Vision pass on a single image. Pulled out of
@@ -160,21 +163,21 @@ enum OCRService {
     private static func recognizeText(
         in image: UIImage,
         maxCandidatesPerObservation: Int,
-        language: ScanLanguage,
         restrictCardNumbersToBottomRegion: Bool,
-    ) async -> ([String], String?) {
-        guard let cgImage = image.cgImage else { return ([], nil) }
+    ) async -> ([String], String?, ScanLanguage) {
+        guard let cgImage = image.cgImage else { return ([], nil, .en) }
 
-        return await withCheckedContinuation { (continuation: CheckedContinuation<([String], String?), Never>) in
+        return await withCheckedContinuation { (continuation: CheckedContinuation<([String], String?, ScanLanguage), Never>) in
             let request = VNRecognizeTextRequest { request, _ in
                 guard
                     let results = request.results as? [VNRecognizedTextObservation]
                 else {
-                    continuation.resume(returning: ([], nil))
+                    continuation.resume(returning: ([], nil, .en))
                     return
                 }
 
                 let setHint = pickSetHint(from: results)
+                let detectedLanguage = detectLanguage(from: results)
 
                 // Vision's coordinate space is bottom-left origin
                 // (per Apple docs) so "bottom of the image" =
@@ -260,22 +263,29 @@ enum OCRService {
                 }
                 #endif
 
-                continuation.resume(returning: (cardNumbers, setHint))
+                continuation.resume(returning: (cardNumbers, setHint, detectedLanguage))
             }
 
             request.recognitionLevel = .accurate
-            // JP cards mix Japanese (card name, attack name, flavor text)
-            // with Latin (HP value, card_number "001/100", set code,
-            // copyright). Vision benefits from the primary language
-            // listed FIRST — the recognizer picks it for ambiguous
-            // glyphs. EN cards skip JP entirely; loading both languages
-            // adds latency we don't need on the EN path.
-            switch language {
-            case .en:
-                request.recognitionLanguages = ["en-US"]
-            case .jp:
-                request.recognitionLanguages = ["ja-JP", "en-US"]
-            }
+            // Always load both languages so language detection can run
+            // against the recognized text — this is what makes
+            // zero-tap JP recognition possible. Order matters: Vision
+            // favors the FIRST listed language for ambiguous glyphs.
+            // We put en-US first because:
+            //   - The vast majority of scans are EN cards, and EN-first
+            //     keeps Latin glyphs from being mis-recognized as
+            //     visually-similar JP characters.
+            //   - The CJK Unicode blocks have no visual overlap with
+            //     Latin, so JP card names are still recognized
+            //     correctly via the ja-JP fallback.
+            //   - Card_number ("001/100"), HP, set code, and copyright
+            //     print in Latin on both EN and JP cards — these are
+            //     handled by the en-US recognizer regardless.
+            //
+            // Cost: Vision lazy-loads each language model on first use.
+            // Cold-start adds ~50–100ms once per app session; subsequent
+            // calls are cached.
+            request.recognitionLanguages = ["en-US", "ja-JP"]
             request.usesLanguageCorrection = false
             // Pin to revision 3 (iOS 16+). Default already picks the
             // latest available, but explicit pin removes any future-
@@ -290,7 +300,7 @@ enum OCRService {
             do {
                 try handler.perform([request])
             } catch {
-                continuation.resume(returning: ([], nil))
+                continuation.resume(returning: ([], nil, .en))
             }
         }
     }
@@ -342,6 +352,48 @@ enum OCRService {
     /// set hint in one Vision pass.
     static func extractCollectorNumber(from image: UIImage) async -> String? {
         await extractCardIdentifiers(from: image).cardNumber
+    }
+
+    /// Detect the dominant language of the OCR result by inspecting
+    /// the recognized text for CJK Unicode codepoints.
+    ///
+    /// JP Pokemon cards always print Hiragana (HP value gets the
+    /// "HP" Latin marker but the card name is Hiragana/Katakana/
+    /// Kanji), Katakana (most Pokemon names), or Kanji (some
+    /// attack names, type labels) somewhere on the front. EN cards
+    /// never contain those Unicode blocks. So a single CJK
+    /// character anywhere in the OCR output is a definitive JP
+    /// signal — the false-positive rate is essentially zero (Vision
+    /// would have to misread a Latin glyph as a Japanese one,
+    /// which doesn't happen for ja-JP / en-US recognizers in
+    /// practice on text we'd be scanning).
+    ///
+    /// Empty observations (Vision returned no recognized text)
+    /// default to .en — the offline scanner path is EN-optimized
+    /// and the default card population is overwhelmingly EN.
+    ///
+    /// Codepoint ranges checked:
+    ///   - U+3040–309F  Hiragana
+    ///   - U+30A0–30FF  Katakana
+    ///   - U+FF66–FF9F  Halfwidth Katakana
+    ///   - U+4E00–9FFF  CJK Unified Ideographs (Kanji)
+    ///   - U+3000–303F  CJK Symbols & Punctuation (covers full-width
+    ///                  punctuation like 「」 that printed on JP cards)
+    static func detectLanguage(from observations: [VNRecognizedTextObservation]) -> ScanLanguage {
+        for obs in observations {
+            guard let text = obs.topCandidates(1).first?.string else { continue }
+            for scalar in text.unicodeScalars {
+                let v = scalar.value
+                if (v >= 0x3040 && v <= 0x309F)        // Hiragana
+                    || (v >= 0x30A0 && v <= 0x30FF)    // Katakana
+                    || (v >= 0xFF66 && v <= 0xFF9F)    // Halfwidth Katakana
+                    || (v >= 0x4E00 && v <= 0x9FFF)    // Kanji
+                    || (v >= 0x3000 && v <= 0x303F) {  // CJK punctuation
+                    return .jp
+                }
+            }
+        }
+        return .en
     }
 
     /// Pick the most set-name-looking line from a Vision OCR pass,
