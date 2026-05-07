@@ -330,14 +330,40 @@ way the input parameter labels would suggest. The card emerges
 inverted.
 
 **Fix or mitigation.**
-- **Tier 1.1 stage 3.1 (TBD commit, 2026-05-07): vertical flip on
-  CIPerspectiveCorrection output.** Apply
+- **Stage 3.1 attempted (b6e18b5, 2026-05-07) — REVERTED 2026-05-07
+  same day.** The fix was supposed to apply
   `CGAffineTransform(scaleX: 1, y: -1).translatedBy(x: 0, y: -extent.height)`
-  to the output CIImage before `createCGImage`. After the flip,
-  the input's topLeft (card's top-left) maps to CGImage row 0,
-  column 0 — display top-left as expected. card_number
-  observations should land at `midY ~0.05` again and the spatial
-  filter should accept them on pass 1.
+  to the output CIImage to "undo" what looked like a Y-flip in
+  the perspective-correction output. Real-device smoke
+  immediately revealed this fix horizontally MIRRORED the
+  rendered image instead of vertically flipping it. Post-fix
+  setHints came back as `noitzudmo)` for "(Combustion",
+  `92u& noTl` for "Iron Buster" — clear right-to-left mirrored
+  text. card_numbers stopped extracting entirely because Vision
+  saw mirrored digit shapes that didn't match the
+  collector-pattern regex. End-to-end accuracy degraded
+  (mirrored cards' embeddings still mostly worked, but pass-2
+  fallback couldn't recover card_numbers for the disambiguation
+  step).
+- **Lesson learned**: my mental model of CIImage's
+  bottom-left-origin coordinate space + `createCGImage(from:)`
+  Y-axis flip behavior was wrong. The interaction is more subtle
+  than I diagnosed analytically. Properly fixing this would
+  require either inspecting actual saved capture images
+  visually or adding diagnostic logging of (input
+  quadrilateral corners, output extent, sample observation
+  midY values) so the coordinate convention can be determined
+  empirically rather than guessed.
+- **Current state — ACCEPTED, not fixed**: pre-stage-3.1 (just
+  053a9a9 perspective correction + the existing stage-1 pass-2
+  fallback) is the shipping behavior. Pass-2 fallback handles
+  the spatial-filter rejection gracefully — 8 of 9 pass-2
+  firings on 2026-05-07T05:35Z (28-scan baseline) recovered
+  the correct card_number. End-to-end behavior is HIGH-confidence
+  on most scans where the embedder can identify the card. This
+  is a cosmetic "internal pass-1 vs pass-2" distinction, not a
+  user-facing accuracy issue. Defer the proper fix until we
+  have time to do it correctly with diagnostic instrumentation.
 
 **Repro.** Real-device 2026-05-07T05:49:29Z (Heatran),
 T05:49:34Z (Budew with `cardNumbers=["104"]` — Mode 7 OCR
@@ -519,7 +545,7 @@ Update this whenever you have aggregate data to back it up.
 | 5 (no card_number printed) | TBD | TBD | TBD | Won't fix; Path C is correct fallback |
 | 6 (Vision didn't see slash-bearing text) | 2026-05-07 | ~12/28 (~43%) pre-stage-3 sample | TBD | OPEN — Tier 1.1 stage 4 (image quality gates) — but kNN won HIGH on most observed cases |
 | 7 (OCR misread digits, e.g. 068→163) | 2026-05-07 | 1/9 pass-2 firings (~11%) | TBD | OPEN — Tier 1.1 stage 5 (multi-candidate digit ranking). Failure mode is graceful: wrong card_number → Path B no-match → vision_only fallback. End-to-end result still correct in observed case. |
-| 8 (Stage-3 Y-flip — perspective-corrected card upside-down) | 2026-05-07 | 25/25 (100%) post-stage-3 sample | TBD | **OPEN — Tier 1.1 stage 3.1** vertical flip on CIPerspectiveCorrection output. Pass-2 fallback recovers card_number gracefully so end-to-end accuracy is unaffected, but pass-1 never fires until fixed. |
+| 8 (Stage-3 perspective-correction coord quirk — card_number rejected by spatial filter) | 2026-05-07 | 25/25 (100%) post-stage-3 sample | TBD | **DEFERRED, not blocking.** Stage 3.1 attempted Y-flip mis-modeled the CIImage coord interaction and produced mirrored text — reverted same day. Pass-2 fallback recovers card_number gracefully (8/9 success on real device), so this is internal-pass-distinction only, NOT a user-facing accuracy issue. Proper fix needs diagnostic instrumentation (saved-image inspection or extent/corner logging) — deferred until we have time to do it right. |
 
 The 5-scan sample on 2026-05-07 is too small to draw conclusions
 about real-device frequency. A meaningful scoreboard requires:

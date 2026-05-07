@@ -399,38 +399,35 @@ public final class PopAlphaVisionEngine {
         filter.bottomLeft = bottomLeft
         filter.bottomRight = bottomRight
 
-        guard let rawOutput = filter.outputImage else { return nil }
+        guard let outputImage = filter.outputImage else { return nil }
 
-        // Vertical flip the perspective-correction output before
-        // rendering to CGImage. Real-device evidence 2026-05-07
-        // (post-stage-3 smoke session) showed that without this flip,
-        // CIPerspectiveCorrection's output emerges upside-down in the
-        // resulting UIImage — card_number observations landed at
-        // midY > 0.35 (rejected by the bottom-region spatial filter)
-        // and the copyright line "Nintendo / Creatures / GAME FREAK",
-        // which prints at the very bottom of an upright card, was
-        // being picked as the setHint (requires midY > 0.22). Both
-        // signals confirm the card was rendered with its bottom edge
-        // at the display top.
+        // Note 2026-05-07: an attempted Y-flip on the
+        // CIPerspectiveCorrection output (commit b6e18b5) was reverted
+        // after real-device evidence showed it horizontally MIRRORED
+        // the rendered image rather than vertically flipping it
+        // (post-fix setHints came back as `noitzudmo)` for
+        // "(Combustion", `92u& noTl` for "Iron Buster" — clear
+        // right-to-left text). The intended fix mis-modeled the
+        // CIImage / CGImage Y-axis interaction.
         //
-        // Mechanism: CIPerspectiveCorrection's input topLeft/bottomLeft
-        // labels are in CIImage's bottom-left-origin coordinate space,
-        // and the output emerges in the same space — but
-        // `createCGImage(from: extent)` does NOT apply the Y-axis flip
-        // I expected to translate from CIImage's BL-origin to
-        // CGImage's TL-origin display convention. The result is that
-        // the input's "top" corner (high y in BL-origin) ends up at
-        // CGImage row H-1 (display bottom) instead of row 0.
+        // Current behavior of this `croppedToCard` (without the broken
+        // Y-flip): Vision OCR's spatial filter consistently rejects
+        // card_numbers as being at midY > 0.35 — the "Mode 8"
+        // perspective-correction coordinate-system quirk in
+        // scanner-ocr-failure-modes.md. The pass-2 fallback in
+        // OCRService.extractCardIdentifiersMulti handles this
+        // gracefully (re-runs without spatial filter, plausibility
+        // filter recovers the card_number), so end-to-end accuracy is
+        // unaffected — only the internal pass-1-vs-pass-2 distinction
+        // changes. Real-device data 2026-05-07 confirms 8 of 9 pass-2
+        // firings recovered the correct card_number on cards Vision
+        // saw clearly.
         //
-        // The fix flips the output CIImage vertically before rendering.
-        // After the flip, the input's topLeft (card's top-left)
-        // becomes the output's CGImage row 0, column 0 — display
-        // top-left as expected. card_number observations land at
-        // midY ~0.05 again and the spatial filter accepts them on
-        // pass 1.
-        let flipTransform = CGAffineTransform(scaleX: 1, y: -1)
-            .translatedBy(x: 0, y: -rawOutput.extent.height)
-        let outputImage = rawOutput.transformed(by: flipTransform)
+        // Properly diagnosing the coordinate-system quirk requires
+        // either inspecting saved capture images or adding diagnostic
+        // logging of (input quadrilateral corners, output extent,
+        // sample observation midY) — out of scope for this iteration.
+        // The current behavior is acceptable and shipping.
 
         let context = CIContext(options: nil)
         guard let outputCG = context.createCGImage(outputImage, from: outputImage.extent) else {
