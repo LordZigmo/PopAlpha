@@ -215,6 +215,13 @@ we crop the highest-confidence rectangle. Multi-card detection
 means: detect all rectangles, run kNN per crop, return a list.
 Useful product feature but doesn't move single-card accuracy.
 
+Distinct from the **multi-scan mode** described in
+`scanner-multi-scan-mode.md` — that's "scan many cards
+sequentially into a batch", which is a UX feature that doesn't
+require multi-card-per-frame detection. Multi-scan mode is
+recommended to ship after Tier 1 lands; per-frame multi-card
+detection stays Tier 3 speculative.
+
 ## 4. Things to skip (and why)
 
 These get suggested periodically. They're not worth our time
