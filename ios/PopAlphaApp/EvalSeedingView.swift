@@ -1,5 +1,13 @@
 import PhotosUI
+#if DEBUG
+// Photos.framework is only used by the `.freshPhoto` admin-curation
+// path (delete-from-library after upload) — gated to DEBUG so release
+// builds neither link Photos.framework nor declare a permission string
+// for a feature reviewers can't reach. PhotosUI / PhotosPicker stay
+// available in all configs because the picker doesn't require photo-
+// library permission.
 import Photos
+#endif
 import SwiftUI
 import NukeUI
 
@@ -65,13 +73,16 @@ struct EvalSeedingView: View {
     @State private var isSaving = false
     @State private var saveResult: SaveOutcome?
     @State private var notes: String = ""
+    #if DEBUG
     // Drives the post-save "Delete from your photos?" alert. We don't
     // delete silently — iOS forces its own confirmation on top of
     // ours anyway, but a soft pre-prompt makes the workflow read
     // better ("just saved as journey-together-23-combusken — clear
     // the original from your library?") and gives the operator one
     // chance to skip without seeing the system dialog at all.
+    // DEBUG-only: only the freshPhoto admin path triggers this.
     @State private var pendingLibraryDeleteAssetId: String?
+    #endif
     @FocusState private var searchFocused: Bool
 
     private enum SaveOutcome: Equatable {
@@ -111,13 +122,14 @@ struct EvalSeedingView: View {
         .task(id: searchQuery) {
             await runSearchIfNeeded()
         }
+        #if DEBUG
         // Two-step delete confirmation. Our alert is the soft prompt
         // ("you just uploaded — also clear the original from your
         // library?"), and PHAssetChangeRequest then triggers iOS's
         // native confirmation. The double-prompt feels right for
         // this destructive action — accidentally tapping Delete in
         // a fast labeling rhythm shouldn't silently lose the user's
-        // original photo.
+        // original photo. DEBUG-only — release never sets the trigger.
         .alert(
             "Delete photo from library?",
             isPresented: Binding(
@@ -142,6 +154,7 @@ struct EvalSeedingView: View {
                 "Saved to the eval corpus. Removing the photo from your library lets you keep tapping the top photo to seed the next card without uploading duplicates."
             )
         }
+        #endif
     }
 
     // MARK: - Header
@@ -532,9 +545,14 @@ struct EvalSeedingView: View {
                     // for picker selections that didn't yield an
                     // identifier (rare — usually means the asset was
                     // a transient screenshot or shared-album item).
+                    // DEBUG-only: only the freshPhoto admin path can
+                    // trigger this; the prompt is removed entirely from
+                    // release builds along with the PHAsset deletion code.
+                    #if DEBUG
                     if mode.requiresPhotoPick, let assetId = pickedAssetIdentifier {
                         pendingLibraryDeleteAssetId = assetId
                     }
+                    #endif
                 } else {
                     saveResult = .failure(responseError ?? "Save failed")
                 }
@@ -546,12 +564,18 @@ struct EvalSeedingView: View {
         }
     }
 
+    #if DEBUG
     /// Removes the just-uploaded source photo from the user's photo
     /// library. iOS shows its own native confirmation dialog when
     /// PHAssetChangeRequest.deleteAssets is invoked, so the user
     /// gets a final yes/no even if they accidentally tap our
     /// "Delete" button. On success, also resets the picker state
     /// so the next card's photo can be picked fresh.
+    /// DEBUG-only: this is the only call site that hits PHPhotoLibrary,
+    /// so excluding it from release means release builds never trigger
+    /// the iOS photo-library permission prompt and the
+    /// NSPhotoLibraryUsageDescription Info.plist key is no longer
+    /// required.
     private func deletePickedAssetFromLibrary(_ assetIdentifier: String) {
         // Authorization status is also auto-prompted by performChanges
         // on first call, but checking ahead of time lets us bail out
@@ -600,6 +624,7 @@ struct EvalSeedingView: View {
             }
         }
     }
+    #endif
 
     /// Clears the picker / selected-card / search state so the operator
     /// can immediately tap "Photo" again and the system will surface
@@ -614,6 +639,8 @@ struct EvalSeedingView: View {
         selectedCard = nil
         searchQuery = ""
         searchResults = []
+        #if DEBUG
         pendingLibraryDeleteAssetId = nil
+        #endif
     }
 }

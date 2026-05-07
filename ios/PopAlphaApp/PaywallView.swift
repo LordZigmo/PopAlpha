@@ -667,6 +667,5 @@ struct PaywallView: View {
 #if DEBUG
 #Preview {
     PaywallView()
-        .preferredColorScheme(.dark)
 }
 #endif

@@ -61,17 +61,14 @@
 		<string>remote-notification</string>
 	</array>
 	<!--
-		Photo library access is requested ONLY when the operator running
-		the eval seeding flow ticks "Delete from library after upload."
-		That flow calls PHAssetChangeRequest.deleteAssets() so the just-
-		uploaded photo disappears from the user's library, letting them
-		keep tapping the top photo for the next card without re-uploading
-		duplicates. iOS shows its own confirmation prompt per delete.
-		Bulk picker access for upload doesn't need this — PhotosPicker
-		runs out-of-process. This string is the prompt iOS shows the
-		first time the app calls into PHPhotoLibrary.
+		NSPhotoLibraryUsageDescription was previously declared here for
+		the eval-seeding photo-deletion flow. That code path is now
+		#if DEBUG-gated in EvalSeedingView (only the .freshPhoto admin-
+		curation mode reaches PHPhotoLibrary, and it has no production
+		callsite). Release builds neither link Photos.framework nor
+		trigger the permission prompt, so the usage description is no
+		longer required and removing it eliminates a misleading
+		permission string for App Review.
 	-->
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>PopAlpha needs photo library access to remove eval-corpus photos from your library after upload, so you can continue picking the next card without uploading duplicates.</string>
 </dict>
 </plist>

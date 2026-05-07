@@ -35,10 +35,18 @@ final class PushService {
     private(set) var authorizationStatus: UNAuthorizationStatus = .notDetermined
     private(set) var lastUploadError: String?
 
+    /// Drives PushPermissionPromptSheet presentation from the root view.
+    /// Set true by maybeShowSoftPrompt() when a fresh sign-in lands and
+    /// the user hasn't seen the soft prompt yet; cleared when the sheet
+    /// dismisses. The sheet, not this flag, owns whether to fire the
+    /// underlying system prompt.
+    var showSoftPrompt: Bool = false
+
     // Last successfully uploaded token — avoids re-uploading on every
     // app launch when Apple hands us the same token we already sent.
     private let defaults = UserDefaults.standard
     private let lastUploadedTokenKey = "popalpha.push.lastUploadedToken.v1"
+    private let softPromptSeenKey = "popalpha.push.softPromptSeen.v1"
 
     private init() {
         Task { await refreshAuthorizationStatus() }
@@ -93,6 +101,39 @@ final class PushService {
     func refreshAuthorizationStatus() async {
         let settings = await UNUserNotificationCenter.current().notificationSettings()
         await MainActor.run { self.authorizationStatus = settings.authorizationStatus }
+    }
+
+    // MARK: - Soft pre-prompt
+
+    /// Decide whether to show our PushPermissionPromptSheet (Apple HIG +
+    /// Guideline 4.5.4). Called after a fresh sign-in. If the user is
+    /// already authorized/denied, or has already dismissed our sheet
+    /// before, we skip straight to requestAuthorizationIfNeeded() so
+    /// the existing register-token flow runs unchanged.
+    func maybeShowSoftPrompt() async {
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        await MainActor.run { self.authorizationStatus = settings.authorizationStatus }
+
+        let alreadyResponded = settings.authorizationStatus != .notDetermined
+        let alreadySeenSoft = defaults.bool(forKey: softPromptSeenKey)
+
+        if alreadyResponded || alreadySeenSoft {
+            // System prompt is unreachable (post-decision) or we already
+            // showed our soft prompt. Fall through to the existing flow,
+            // which is a no-op when status != .notDetermined.
+            await requestAuthorizationIfNeeded()
+            return
+        }
+
+        await MainActor.run { self.showSoftPrompt = true }
+    }
+
+    /// Called by the sheet after the user picks Enable or Not Now —
+    /// either way we record that the soft prompt has run so we don't
+    /// nag on subsequent sign-ins / launches.
+    func markSoftPromptSeen() {
+        defaults.set(true, forKey: softPromptSeenKey)
+        showSoftPrompt = false
     }
 
     // MARK: - Token upload

@@ -21,6 +21,7 @@ export const DBADMIN_ALLOWED_FILES = [
   "app/api/holdings/route.ts",
   "app/api/holdings/bulk-import/route.ts",
   "app/api/iap/verify/route.ts",
+  "app/api/me/route.ts",
   "app/api/personalization/events/route.ts",
   "app/api/personalization/explanation/route.ts",
   "app/api/personalization/profile/route.ts",
@@ -40,6 +41,7 @@ export const DBADMIN_ALLOWED_ROUTE_KEYS = [
   "holdings",
   "holdings/bulk-import",
   "iap/verify",
+  "me",
   "personalization/events",
   "personalization/explanation",
   "personalization/profile",
@@ -1166,6 +1168,8 @@ export const RLS_REQUIRED_PUBLIC_TABLES = [
   "profile_post_card_mentions",
   "profile_posts",
   "push_subscriptions",
+  "user_blocks",
+  "moderation_reports",
 ];
 
 export const RLS_EXEMPT_PUBLIC_TABLES = [
@@ -1257,6 +1261,8 @@ export const AUTHENTICATED_DML_OBJECT_GRANTS = {
   profile_post_card_mentions: ["DELETE", "INSERT", "SELECT"],
   profile_posts: ["DELETE", "INSERT", "SELECT", "UPDATE"],
   push_subscriptions: ["DELETE", "INSERT", "SELECT", "UPDATE"],
+  user_blocks: ["DELETE", "INSERT", "SELECT"],
+  moderation_reports: ["INSERT", "SELECT"],
 };
 
 export const AUTHENTICATED_SELECT_ONLY_OBJECTS = [
@@ -1352,6 +1358,10 @@ export const SEQUENCE_GRANT_CONTRACTS = {
     authenticated: ["USAGE"],
   },
   apns_device_tokens_id_seq: {
+    anon: [],
+    authenticated: ["USAGE"],
+  },
+  moderation_reports_id_seq: {
     anon: [],
     authenticated: ["USAGE"],
   },

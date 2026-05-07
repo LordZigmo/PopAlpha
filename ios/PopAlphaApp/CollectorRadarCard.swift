@@ -71,7 +71,7 @@ struct CollectorRadarCard: View {
                     colors: [
                         PA.Colors.accent.opacity(0.2),
                         PA.Colors.accent.opacity(0.05),
-                        Color.white.opacity(0.03),
+                        PA.Colors.hairline(0.03),
                     ],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing

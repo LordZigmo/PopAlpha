@@ -17,7 +17,14 @@ struct UserProfileView: View {
     @State private var activityItems: [ActivityService.ActivityFeedItem] = []
     @State private var selectedSegment: ProfileSegment = .posts
 
+    @State private var showReportSheet = false
+    @State private var showBlockConfirm = false
+    @State private var moderationError: String?
+
+    @StateObject private var blockedStore = BlockedUsersStore.shared
+
     private var auth: AuthService { AuthService.shared }
+    private var isOwnProfile: Bool { handle == auth.currentHandle }
 
     enum ProfileSegment: String, CaseIterable {
         case posts = "Posts"
@@ -40,8 +47,73 @@ struct UserProfileView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(PA.Colors.surface, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
+        .toolbar {
+            if !isOwnProfile {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button {
+                            showReportSheet = true
+                        } label: {
+                            Label("Report @\(handle)", systemImage: "flag")
+                        }
+                        Button(role: .destructive) {
+                            showBlockConfirm = true
+                        } label: {
+                            Label("Block @\(handle)", systemImage: "hand.raised")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .accessibilityLabel("More options for @\(handle)")
+                    }
+                }
+            }
+        }
         .task {
             await loadProfile()
+        }
+        .sheet(isPresented: $showReportSheet) {
+            ReportSheet(
+                targetKind: .profile,
+                targetId: "",
+                targetLabel: "@\(handle)",
+                profileHandle: handle,
+            )
+        }
+        .alert(
+            "Block @\(handle)?",
+            isPresented: $showBlockConfirm,
+        ) {
+            Button("Block", role: .destructive) {
+                Task { await performBlockHandle() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("They won't be able to see or comment on your activity. You can unblock anytime in Settings.")
+        }
+        .alert(
+            "Couldn't block",
+            isPresented: Binding(
+                get: { moderationError != nil },
+                set: { if !$0 { moderationError = nil } },
+            ),
+            presenting: moderationError,
+        ) { _ in
+            Button("OK", role: .cancel) {}
+        } message: { msg in
+            Text(msg)
+        }
+    }
+
+    private func performBlockHandle() async {
+        do {
+            try await APIClient.blockUser(handle: handle)
+            // We don't have the clerk_user_id locally; refresh to pick
+            // up the new entry from the server.
+            await blockedStore.refresh()
+        } catch APIError.httpError(_, let body) {
+            moderationError = body.isEmpty ? "Couldn't block this user." : body
+        } catch {
+            moderationError = "Couldn't block this user. Please try again."
         }
     }
 

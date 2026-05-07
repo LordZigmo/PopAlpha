@@ -78,5 +78,4 @@ struct SignInPromoCard: View {
     SignInPromoCard()
         .padding()
         .background(PA.Colors.background)
-        .preferredColorScheme(.dark)
 }

@@ -215,5 +215,4 @@ private struct SetCardCell: View {
     NavigationStack {
         SetDetailView(setName: "Prismatic Evolutions")
     }
-    .preferredColorScheme(.dark)
 }

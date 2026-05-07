@@ -641,7 +641,6 @@ private struct TopBar: View {
 
 #Preview("Marketplace") {
     StatefulMarketplacePreview()
-        .preferredColorScheme(.dark)
 }
 
 private struct StatefulMarketplacePreview: View {

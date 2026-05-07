@@ -64,7 +64,7 @@ struct PortfolioCardGridCell: View {
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                    .stroke(PA.Colors.hairline(0.06), lineWidth: 1)
             )
 
             // Quantity chip if more than 1

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require";
 import { createServerSupabaseUserClient } from "@/lib/db/user";
 import type { ActivityFeedItem, ActivityFeedResponse } from "@/lib/activity/types";
+import { getBlockedUserIds } from "@/lib/moderation/blocked-users";
 
 export const runtime = "nodejs";
 
@@ -19,13 +20,21 @@ export async function GET(req: Request) {
 
   const db = await createServerSupabaseUserClient();
 
+  // Block-aware feed: blocked users (in either direction) never appear
+  // in the feed, even if they're somehow still in followedIds. The follow
+  // relationship is torn down on block, so this is a defense-in-depth.
+  const blockedIds = await getBlockedUserIds(db, auth.userId);
+  const blockedSet = new Set(blockedIds);
+
   // Get IDs of users we follow
   const { data: followRows } = await db
     .from("profile_follows")
     .select("followee_id")
     .eq("follower_id", auth.userId);
 
-  const followedIds = (followRows ?? []).map((r: { followee_id: string }) => r.followee_id);
+  const followedIds = (followRows ?? [])
+    .map((r: { followee_id: string }) => r.followee_id)
+    .filter((id: string) => !blockedSet.has(id));
   const feedUserIds = [...followedIds, auth.userId];
 
   // Fetch events

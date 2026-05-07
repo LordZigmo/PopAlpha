@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require";
 import { createServerSupabaseUserClient } from "@/lib/db/user";
 import type { ActivityFeedItem, ActivityFeedResponse } from "@/lib/activity/types";
+import { isBlockedEitherWay } from "@/lib/moderation/blocked-users";
 
 export const runtime = "nodejs";
 
@@ -31,6 +32,14 @@ export async function GET(req: Request) {
 
   if (!targetUserId) {
     return NextResponse.json({ ok: false, error: "user_id or handle required." }, { status: 400 });
+  }
+
+  // If the requester and target have a block relationship in either
+  // direction, return an empty feed. We use 200 + empty rather than 404
+  // to avoid leaking which side issued the block.
+  if (await isBlockedEitherWay(db, auth.userId, targetUserId)) {
+    const empty: ActivityFeedResponse = { ok: true, items: [], next_cursor: null };
+    return NextResponse.json(empty);
   }
 
   let query = db

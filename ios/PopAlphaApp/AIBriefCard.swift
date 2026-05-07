@@ -450,5 +450,4 @@ struct AIBriefCard: View {
     AIBriefCard(brief: nil, fallbackAsOf: nil, styleLabel: nil)
         .padding()
         .background(PA.Colors.background)
-        .preferredColorScheme(.dark)
 }

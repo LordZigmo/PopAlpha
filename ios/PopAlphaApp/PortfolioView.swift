@@ -476,7 +476,6 @@ struct PortfolioView: View {
 
 #Preview("Portfolio") {
     PortfolioView()
-        .preferredColorScheme(.dark)
 }
 
 #Preview("Empty State") {
@@ -484,5 +483,4 @@ struct PortfolioView: View {
         PA.Colors.background.ignoresSafeArea()
         PortfolioEmptyStateView()
     }
-    .preferredColorScheme(.dark)
 }

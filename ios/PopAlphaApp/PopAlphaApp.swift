@@ -40,13 +40,24 @@ struct PopAlphaApp: App {
         WindowGroup {
             ContentView()
                 .environment(Clerk.shared)
-                .preferredColorScheme(.dark)
                 .task { await AuthService.shared.restoreSession() }
                 .task {
                     // StoreKit 2: start the transaction listener and
                     // refresh entitlements against Apple. Idempotent.
                     await PremiumStore.shared.start()
                     await PremiumStore.shared.loadProducts()
+                }
+                .task(id: AuthService.shared.currentUserId) {
+                    // Pull the user's outgoing block list whenever the
+                    // signed-in identity changes (sign-in / sign-out /
+                    // account switch). Server-side filtering is
+                    // authoritative; this cache lets views hide blocked
+                    // content immediately on subsequent renders.
+                    if AuthService.shared.isAuthenticated {
+                        await BlockedUsersStore.shared.refresh()
+                    } else {
+                        BlockedUsersStore.shared.clear()
+                    }
                 }
                 .task(priority: .utility) {
                     // Warm the offline scanner pipeline eagerly so the

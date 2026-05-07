@@ -28,7 +28,7 @@ struct OfflineSmokeReportSheet: View {
                 }
                 .padding(20)
             }
-            .background(Color.black.ignoresSafeArea())
+            .background(PA.Colors.background.ignoresSafeArea())
             .navigationTitle("Offline Smoke Test")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarColorScheme(.dark, for: .navigationBar)
@@ -60,7 +60,7 @@ struct OfflineSmokeReportSheet: View {
             Spacer()
         }
         .padding(14)
-        .background(Color.white.opacity(0.04))
+        .background(PA.Colors.hairline(0.04))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
@@ -98,7 +98,7 @@ struct OfflineSmokeReportSheet: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(10)
-                .background(Color.white.opacity(check.passed ? 0.03 : 0.06))
+                .background(PA.Colors.hairline(check.passed ? 0.03 : 0.06))
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
         }
@@ -114,7 +114,7 @@ struct OfflineSmokeReportSheet: View {
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
-                    .background(Color.white.opacity(0.08))
+                    .background(PA.Colors.hairline(0.08))
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
             .buttonStyle(.plain)

@@ -322,5 +322,4 @@ struct PortfolioDemoView: View {
         PA.Colors.background.ignoresSafeArea()
         PortfolioDemoView()
     }
-    .preferredColorScheme(.dark)
 }

@@ -1,27 +1,105 @@
 import SwiftUI
+import UIKit
 
 // MARK: - PopAlpha Design System
+//
+// Every UI surface routes through PA.Colors.* values. The dark palette
+// is the original brand identity (near-black surfaces, near-white text);
+// the light palette is the trait-aware mirror. Switching is automatic
+// via UITraitCollection — no per-view branching required, just stop
+// forcing the app into .dark.
+
+private extension Color {
+    /// Returns a color that resolves against the current trait collection
+    /// at render time, so it auto-flips when the user switches between
+    /// light and dark mode (Settings → Display & Brightness, or system
+    /// schedule). All adaptive PA.Colors entries are built from this.
+    init(light: Color, dark: Color) {
+        self = Color(UIColor { trait in
+            trait.userInterfaceStyle == .dark
+                ? UIColor(dark)
+                : UIColor(light)
+        })
+    }
+}
 
 enum PA {
 
     // MARK: Colors
     enum Colors {
-        static let background = Color(red: 0.039, green: 0.039, blue: 0.039)       // #0A0A0A
-        static let surface = Color(red: 0.067, green: 0.067, blue: 0.067)           // #111111
-        static let surfaceSoft = Color(red: 0.102, green: 0.102, blue: 0.102)       // #1A1A1A
-        static let surfaceHover = Color(red: 0.133, green: 0.133, blue: 0.133)      // #222222
+        // Backgrounds
+        static let background = Color(
+            light: Color(red: 0.969, green: 0.969, blue: 0.969),    // #F7F7F7
+            dark:  Color(red: 0.039, green: 0.039, blue: 0.039)     // #0A0A0A
+        )
+        static let surface = Color(
+            light: Color(red: 1.000, green: 1.000, blue: 1.000),    // #FFFFFF
+            dark:  Color(red: 0.067, green: 0.067, blue: 0.067)     // #111111
+        )
+        static let surfaceSoft = Color(
+            light: Color(red: 0.941, green: 0.941, blue: 0.941),    // #F0F0F0
+            dark:  Color(red: 0.102, green: 0.102, blue: 0.102)     // #1A1A1A
+        )
+        static let surfaceHover = Color(
+            light: Color(red: 0.898, green: 0.898, blue: 0.898),    // #E5E5E5
+            dark:  Color(red: 0.133, green: 0.133, blue: 0.133)     // #222222
+        )
+
+        // Brand accent — cyan reads on both white and black, so single value.
         static let accent = Color(red: 0.0, green: 0.706, blue: 0.847)              // #00B4D8
         static let accentSoft = Color(red: 0.0, green: 0.706, blue: 0.847).opacity(0.15)
-        static let text = Color(red: 0.941, green: 0.941, blue: 0.941)              // #F0F0F0
-        static let textSecondary = Color(red: 0.580, green: 0.580, blue: 0.580)     // #949494
-        static let muted = Color(red: 0.420, green: 0.420, blue: 0.420)             // #6B6B6B
-        static let border = Color(red: 0.118, green: 0.118, blue: 0.118)            // #1E1E1E
-        static let borderLight = Color.white.opacity(0.06)
+
+        // Text
+        static let text = Color(
+            light: Color(red: 0.039, green: 0.039, blue: 0.039),    // #0A0A0A
+            dark:  Color(red: 0.941, green: 0.941, blue: 0.941)     // #F0F0F0
+        )
+        static let textSecondary = Color(
+            light: Color(red: 0.420, green: 0.420, blue: 0.420),    // #6B6B6B
+            dark:  Color(red: 0.580, green: 0.580, blue: 0.580)     // #949494
+        )
+        static let muted = Color(
+            light: Color(red: 0.580, green: 0.580, blue: 0.580),    // #949494
+            dark:  Color(red: 0.420, green: 0.420, blue: 0.420)     // #6B6B6B
+        )
+
+        // Borders
+        static let border = Color(
+            light: Color(red: 0.898, green: 0.898, blue: 0.898),    // #E5E5E5
+            dark:  Color(red: 0.118, green: 0.118, blue: 0.118)     // #1E1E1E
+        )
+        static let borderLight = Color(
+            light: Color.black.opacity(0.06),
+            dark:  Color.white.opacity(0.06)
+        )
+
+        // Semantic indicators — same in both modes (universal red/green/gold).
         static let positive = Color(red: 0.0, green: 0.863, blue: 0.353)            // #00DC5A
         static let negative = Color(red: 1.0, green: 0.231, blue: 0.188)            // #FF3B30
         static let neutral = Color(red: 0.612, green: 0.639, blue: 0.686)           // #9CA3AF
         static let gold = Color(red: 1.0, green: 0.843, blue: 0.0)                  // #FFD700
-        static let shimmer = Color.white.opacity(0.04)
+
+        // Subtle overlay (adaptive)
+        static let shimmer = Color(
+            light: Color.black.opacity(0.04),
+            dark:  Color.white.opacity(0.04)
+        )
+
+        /// Adaptive hairline / glass-overlay color.
+        ///
+        /// The all-dark era used `Color.white.opacity(N)` everywhere for
+        /// hairlines, separators, and glass surfaces. On a white light-mode
+        /// background those overlays vanish. This helper returns the
+        /// equivalent black-opacity value in light mode so subtle UI
+        /// stays visible without losing the dark-mode aesthetic.
+        ///
+        /// Use anywhere you'd otherwise write `Color.white.opacity(N)`.
+        static func hairline(_ opacity: Double) -> Color {
+            Color(
+                light: Color.black.opacity(opacity),
+                dark:  Color.white.opacity(opacity)
+            )
+        }
     }
 
     // MARK: Gradients
@@ -29,7 +107,10 @@ enum PA {
         static let cardSurface = LinearGradient(
             colors: [
                 Colors.surface,
-                Color(red: 0.055, green: 0.055, blue: 0.063)
+                Color(
+                    light: Color(red: 0.953, green: 0.953, blue: 0.961),    // off-white
+                    dark:  Color(red: 0.055, green: 0.055, blue: 0.063)
+                )
             ],
             startPoint: .topLeading,
             endPoint: .bottomTrailing
@@ -37,8 +118,14 @@ enum PA {
 
         static let cardBorder = LinearGradient(
             colors: [
-                Color.white.opacity(0.08),
-                Color.white.opacity(0.02)
+                Color(
+                    light: Color.black.opacity(0.08),
+                    dark:  Color.white.opacity(0.08)
+                ),
+                Color(
+                    light: Color.black.opacity(0.02),
+                    dark:  Color.white.opacity(0.02)
+                )
             ],
             startPoint: .topLeading,
             endPoint: .bottomTrailing
@@ -78,6 +165,47 @@ enum PA {
         static let gridSpacing: CGFloat = 12
         static let sectionPadding: CGFloat = 20
         static let cardPadding: CGFloat = 12
+    }
+}
+
+// MARK: - Appearance Mode
+//
+// User-selectable override for the system color scheme. Defaults to
+// `.system` so the app honours iOS Settings → Display & Brightness;
+// `.light` / `.dark` let users pin a specific mode in PopAlpha
+// regardless of the system setting (useful for collectors who want a
+// dark hobby app on a light-mode phone, or vice versa). Persisted
+// via `@AppStorage("popalpha.appearance.v1")` and applied at the root
+// via `.preferredColorScheme(appearance.colorScheme)`.
+
+enum AppearanceMode: String, CaseIterable, Identifiable, CustomStringConvertible {
+    case system, light, dark
+
+    /// UserDefaults key. Reusing for any future opt-in appearance
+    /// migrations would bump the suffix.
+    static let storageKey = "popalpha.appearance.v1"
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .system: "System Default"
+        case .light:  "Light"
+        case .dark:   "Dark"
+        }
+    }
+
+    var description: String { label }
+
+    /// Maps to SwiftUI's `.preferredColorScheme(_:)` argument.
+    /// `nil` = inherit system; an explicit value pins the app to that
+    /// scheme regardless of the global setting.
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: nil
+        case .light:  .light
+        case .dark:   .dark
+        }
     }
 }
 
