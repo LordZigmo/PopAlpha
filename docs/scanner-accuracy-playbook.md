@@ -193,14 +193,11 @@ the stage 3.1 revert. Two reasons:
 **Estimated effort:** ~half-day for the telemetry, ~half-day
 for the saved-image inspection harness. Total ~1 day.
 
-#### 1.6 HIGH-confidence threshold review on `ocr_intersect_unique`
-
-#### 1.6 HIGH-confidence threshold review on `ocr_intersect_unique`
+#### 1.6 Trust-killer sim-floor refinement on `ocr_intersect_unique` — ✅ shipped 2026-05-08
 
 Real-device 2026-05-07 evidence (28-scan baseline) showed 5
 scans hit `ocr_intersect_unique` with the right answer but
-stayed at `confidence=medium` because the kNN top-1 sim was
-below ~0.85. Examples:
+stayed at `confidence=medium`. Examples:
 
 ```
 Naclstack #83  ocr_intersect_unique sim=0.842 → medium
@@ -208,29 +205,36 @@ Hippowdon #53  ocr_intersect_unique sim=0.834 → medium
 Kleavor #85    ocr_intersect_unique sim=0.764 → medium
 ```
 
-When OCR card_number AND kNN top-1 AGREE on a unique slug,
-that's two independent signals confirming the same answer —
-should be HIGH regardless of the kNN's absolute sim. The
-current threshold appears to gate HIGH on sim alone, ignoring
-the OCR-confirmation signal.
+**Actual mechanism (verified 2026-05-08 by reading the code).**
+Not an absolute sim threshold — the trust-killer at
+`route.ts:1364-1368` and `OfflineIdentifier.swift:367-392`
+demoted to MEDIUM whenever Path B's promoted slug ≠ kNN top-1,
+regardless of how strong the kNN sim was. Original rationale
+(5f2df4f, 2026-04-29): defend Umbreon V → Suicune & Entei
+LEGEND #94 false-positive where OCR `card_number=94` pulled an
+unrelated card from a different set/era to the top.
 
-Investigation: read the offline orchestrator's
-`OfflineIdentifier.identifyWithCandidates` confidence-tier
-logic. Adjust the threshold so `ocr_intersect_unique` returns
-HIGH when:
-- kNN top-1 slug matches the OCR card_number search result, AND
-- The match is unique (only one slug in canonical_cards has
-  that card_number), AND
-- kNN top-1 sim > some lower bar like 0.75 (filtering out
-  pure noise)
+**Fix shipped 2026-05-08 (this session).** Trust-killer now also
+gates on visual-sim weakness: only demotes when the promoted
+slug has `cos_dist > CONFIDENCE_HIGH_COS_DIST` (= sim < 0.75).
+At sim ≥ 0.75 (the same HIGH-eligibility floor Path C uses),
+OCR card_number + visual top-K membership are two independent
+signals confirming the same answer → HIGH. The Umbreon →
+wrong-set false-positive sits well below 0.75 (different sets,
+different eras visually unrelated) so the original defense
+still catches it.
 
-Estimated effort: ~half day (logic + threshold tuning + eval
-re-run to confirm no false-HIGH regressions).
+**Expected impact.** Real-device first-time-HIGH rate +5–10pp.
+Eval scoreboard percentages unchanged (eval counts top-1
+correctness, not confidence tier — and top-1 doesn't flip,
+only the tier does). Confidence-tier distribution within the
+eval `detailed_results` should show fewer correct-but-MEDIUM
+rows on the Path B ceiling run.
 
-**Expected eval impact:** Default mode +5–10pp; Path B ceiling
-unchanged (eval uses perfect OCR). Real-device top-1 should jump
-10–20pp because most current real-device failures are
-OCR-pipeline failures, not model failures.
+**Validation.** Re-run the 3-mode eval after deploy. Look at
+`scan_eval_runs.detailed_results` for any per-image
+correct→wrong flips. Real-device smoke session is the ultimate
+proof of the user-facing lift.
 
 #### 1.2 Multi-frame consensus on tap
 

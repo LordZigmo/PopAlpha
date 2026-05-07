@@ -342,6 +342,26 @@ function parseSetHintFilter(raw: string | null): string | null {
   return trimmed;
 }
 
+// Phase 0 (Tier 1.5) telemetry parsers. Tristate semantics: null when
+// the client did not report the value at all (older builds or non-iOS
+// callers); true/false/integer when reported. Stays null on parse
+// failure so we never mis-attribute a 0 to a non-reporting client.
+function parseTriBool(raw: string | null): boolean | null {
+  if (raw === null || raw === "") return null;
+  const lower = raw.trim().toLowerCase();
+  if (lower === "true" || lower === "1") return true;
+  if (lower === "false" || lower === "0") return false;
+  return null;
+}
+
+function parseNonNegativeInt(raw: string | null): number | null {
+  if (raw === null || raw === "") return null;
+  if (!/^\d+$/.test(raw.trim())) return null;
+  const n = Number(raw.trim());
+  if (!Number.isFinite(n) || n < 0 || n > 1000) return null;
+  return n;
+}
+
 function normalizeSetNameForCompare(raw: string | null | undefined): string {
   if (!raw) return "";
   return raw
@@ -464,6 +484,20 @@ export async function POST(req: Request) {
   // (in either direction) against canonical_cards.set_name, so e.g.
   // "PE" abbreviation isn't useful but "Prismatic Evolutions" is.
   const setHintFilter = parseSetHintFilter(searchParams.get("set_hint"));
+  // Phase 0 (Tier 1.5) telemetry: pure diagnostics, never affect
+  // routing. iOS sends these alongside card_number/set_hint so we
+  // can aggregate "what fraction of scans had pass-2 fallback fire?"
+  // and "are there many spatial-filter rejections in production?"
+  // on real-device traffic. Older builds omit these → null in DB.
+  const ocrCardNumberExtractedTel = parseTriBool(
+    searchParams.get("ocr_card_number_extracted"),
+  );
+  const ocrPass2FallbackFiredTel = parseTriBool(
+    searchParams.get("ocr_pass2_fallback_fired"),
+  );
+  const ocrSpatialFilterRejectedCountTel = parseNonNegativeInt(
+    searchParams.get("ocr_spatial_filter_rejected_count"),
+  );
 
   if (!hasVercelPostgresConfig()) {
     emitScanFailureEvent({
@@ -1354,18 +1388,23 @@ export async function POST(req: Request) {
     confidence = "high";
   } else if (winningPath === "ocr_intersect_unique") {
     // Path B unique: card_number filter narrowed kNN top-K to one
-    // survivor. Trust-killer guard (2026-04-30): if the survivor
-    // was NOT CLIP's original top-1, OCR forcibly overrode CLIP.
-    // This is the same risk the Day 1 fix (5f2df4f) addressed for
-    // vision_only — Suicune & Entei LEGEND #94 false-positives on
-    // Umbreon V scans because both share card_number=94.
-    // Demote to MEDIUM so the picker sheet's correction-search
-    // surfaces the disagreement instead of auto-navigating.
+    // survivor. Trust-killer (5f2df4f, 2026-04-30) originally demoted
+    // on ANY top-1 disagreement to defend Umbreon V → Suicune & Entei
+    // LEGEND #94 (different sets/eras share card_number=94).
+    // Refined 2026-05-08 (Phase 1, scanner-accuracy-playbook §3 Tier 1.6):
+    // only demote when the promoted slug ALSO has weak visual sim.
+    // At cos_dist ≤ 0.25 (= sim ≥ 0.75, same HIGH-eligibility floor
+    // Path C uses) OCR + visual top-K membership are two independent
+    // signals confirming the same answer → HIGH. The Umbreon /
+    // Suicune wrong-set false-positive is visually unrelated and falls
+    // well below 0.75, so this guard still catches it.
     const pathBChangedTop1 =
       clipOriginalTopSlug !== null &&
       matches[0] != null &&
       matches[0].canonical_slug !== clipOriginalTopSlug;
-    confidence = pathBChangedTop1 ? "medium" : "high";
+    const pathBWinnerCosDist = matches[0]?.cos_dist ?? 1.0;
+    const pathBVisuallyWeak = pathBWinnerCosDist > CONFIDENCE_HIGH_COS_DIST;
+    confidence = pathBChangedTop1 && pathBVisuallyWeak ? "medium" : "high";
   } else if (winningPath === "ocr_direct_narrow" || winningPath === "ocr_intersect_narrow") {
     confidence = "medium";
   } else {
@@ -1409,6 +1448,9 @@ export async function POST(req: Request) {
     winningPath,
     ocrCardNumber: cardNumberFilter ?? null,
     ocrSetHint: setHintFilter ?? null,
+    ocrCardNumberExtracted: ocrCardNumberExtractedTel,
+    ocrPass2FallbackFired: ocrPass2FallbackFiredTel,
+    ocrSpatialFilterRejectedCount: ocrSpatialFilterRejectedCountTel,
   });
 
   return NextResponse.json({
@@ -1504,6 +1546,12 @@ type ScanEventInput = {
   // guess what iOS extracted, which is a brutal feedback loop.
   ocrCardNumber?: string | null;
   ocrSetHint?: string | null;
+  // Phase 0 (Tier 1.5) — per-scan OCR diagnostic counters. Tristate
+  // bools / nullable ints so we distinguish "client didn't report"
+  // from "client reported false / 0".
+  ocrCardNumberExtracted?: boolean | null;
+  ocrPass2FallbackFired?: boolean | null;
+  ocrSpatialFilterRejectedCount?: number | null;
 };
 
 async function logScanEvent(event: ScanEventInput): Promise<void> {
@@ -1531,6 +1579,9 @@ async function logScanEvent(event: ScanEventInput): Promise<void> {
         winning_path: event.winningPath ?? null,
         ocr_card_number: event.ocrCardNumber ?? null,
         ocr_set_hint: event.ocrSetHint ?? null,
+        ocr_card_number_extracted: event.ocrCardNumberExtracted ?? null,
+        ocr_pass2_fallback_fired: event.ocrPass2FallbackFired ?? null,
+        ocr_spatial_filter_rejected_count: event.ocrSpatialFilterRejectedCount ?? null,
       });
 
     if (error) {

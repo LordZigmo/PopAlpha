@@ -19,9 +19,11 @@
 //   Path B (middle)   — card_number-only intersection of
 //                       canonical_cards rows with kNN top-K survivors.
 //                          1 → ocr_intersect_unique → HIGH
-//                              (downgrades to MEDIUM if Path B forced
-//                              an override of CLIP's original top-1
-//                              — the Umbreon V #94 trust-killer.)
+//                              (downgrades to MEDIUM only if Path B's
+//                              winner replaces CLIP's top-1 AND has
+//                              weak visual sim < 0.75 — the
+//                              Umbreon V #94 trust-killer with sim
+//                              floor refined 2026-05-08.)
 //                        2-3 → ocr_intersect_narrow → MEDIUM
 //                         0 → fall through to Path C
 //                         >3 → fall through to Path C (too noisy)
@@ -372,14 +374,22 @@ public final class OfflineIdentifier {
                     cosDistance: 1.0 - hit.similarity,
                     source: .knn,
                 )
-                // Trust-killer guard: if Path B's unique survivor is
-                // NOT CLIP's natural top-1, OCR forced an override —
-                // demote to MEDIUM so the picker surfaces the
-                // disagreement (mirrors route.ts line 1363).
+                // Trust-killer (5f2df4f, 2026-04-29) originally demoted
+                // on ANY top-1 disagreement to defend Umbreon V →
+                // Suicune & Entei LEGEND #94 (different sets share
+                // card_number=94). Refined 2026-05-08 (Phase 1,
+                // scanner-accuracy-playbook §3 Tier 1.6): only demote
+                // when the promoted slug ALSO has weak visual sim.
+                // At cos_dist ≤ highCosDist (= sim ≥ 0.75) OCR + visual
+                // top-K membership are two independent signals → HIGH.
+                // The Umbreon → wrong-set case sits well below 0.75, so
+                // this guard still catches it. Mirrors route.ts.
                 let pathBChangedTop1 =
                     clipOriginalTopSlug != nil
                     && match.row.canonicalSlug != clipOriginalTopSlug
-                let confidence: OfflineScanConfidence = pathBChangedTop1 ? .medium : .high
+                let pathBVisuallyWeak = match.cosDistance > Self.highCosDist
+                let confidence: OfflineScanConfidence =
+                    (pathBChangedTop1 && pathBVisuallyWeak) ? .medium : .high
                 return result(
                     matches: [match],
                     confidence: confidence,
