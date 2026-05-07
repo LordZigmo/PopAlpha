@@ -74,6 +74,7 @@ struct ContentView: View {
                 .tag(AppTab.profile)
         }
         .tint(PA.Colors.accent)
+        .offlineBanner()
         .alert(
             "Sign-in failed",
             isPresented: Binding(
