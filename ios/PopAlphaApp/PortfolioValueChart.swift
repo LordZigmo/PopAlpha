@@ -119,7 +119,7 @@ struct PortfolioValueChart: View {
                 p.addLine(to: CGPoint(x: point.x, y: size.height))
             }
             .stroke(
-                Color.white.opacity(0.25),
+                PA.Colors.hairline(0.25),
                 style: StrokeStyle(lineWidth: 1, dash: [4, 3])
             )
 
@@ -134,7 +134,7 @@ struct PortfolioValueChart: View {
                 .shadow(color: lineColor, radius: 5)
                 .position(point)
             Circle()
-                .stroke(Color.white.opacity(0.35), lineWidth: 1.5)
+                .stroke(PA.Colors.hairline(0.35), lineWidth: 1.5)
                 .frame(width: 16, height: 16)
                 .position(point)
         }
@@ -198,7 +198,6 @@ struct PortfolioValueChart: View {
         )
         .padding()
     }
-    .preferredColorScheme(.dark)
 }
 
 #Preview("Scrubbable Flat") {
@@ -210,5 +209,4 @@ struct PortfolioValueChart: View {
         )
         .padding()
     }
-    .preferredColorScheme(.dark)
 }

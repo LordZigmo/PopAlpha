@@ -40,7 +40,6 @@ struct PopAlphaApp: App {
         WindowGroup {
             ContentView()
                 .environment(Clerk.shared)
-                .preferredColorScheme(.dark)
                 .task { await AuthService.shared.restoreSession() }
                 .task {
                     // StoreKit 2: start the transaction listener and

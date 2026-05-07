@@ -169,7 +169,7 @@ struct InteractiveChartView: View {
                 path.addLine(to: CGPoint(x: point.x, y: size.height))
             }
             .stroke(
-                Color.white.opacity(0.2),
+                PA.Colors.hairline(0.2),
                 style: StrokeStyle(lineWidth: 1, dash: [4, 3])
             )
 
@@ -182,7 +182,7 @@ struct InteractiveChartView: View {
 
             // Outer ring
             Circle()
-                .stroke(Color.white.opacity(0.3), lineWidth: 1.5)
+                .stroke(PA.Colors.hairline(0.3), lineWidth: 1.5)
                 .frame(width: 16, height: 16)
                 .position(point)
         }
@@ -204,7 +204,7 @@ struct InteractiveChartView: View {
             LinearGradient(
                 colors: [
                     (scrubbing
-                        ? Color.white.opacity(0.08)
+                        ? PA.Colors.hairline(0.08)
                         : direction.color.opacity(0.15)),
                     .clear
                 ],
@@ -262,7 +262,6 @@ struct InteractiveChartView: View {
     )
     .padding()
     .background(PA.Colors.background)
-    .preferredColorScheme(.dark)
 }
 
 #Preview("Interactive Chart Flat") {
@@ -276,5 +275,4 @@ struct InteractiveChartView: View {
     )
     .padding()
     .background(PA.Colors.background)
-    .preferredColorScheme(.dark)
 }

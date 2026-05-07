@@ -54,5 +54,4 @@ struct RationaleChip: View {
     }
     .padding()
     .background(PA.Colors.background)
-    .preferredColorScheme(.dark)
 }

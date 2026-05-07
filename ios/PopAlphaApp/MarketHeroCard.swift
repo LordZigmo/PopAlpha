@@ -234,12 +234,10 @@ struct MarketScanStrip: View {
     MarketHeroCard(onScan: {}, onSeeMovers: {})
         .padding()
         .background(PA.Colors.background)
-        .preferredColorScheme(.dark)
 }
 
 #Preview("Market Scan Strip — authed") {
     MarketScanStrip(onScan: {}, onSeeMovers: {})
         .padding()
         .background(PA.Colors.background)
-        .preferredColorScheme(.dark)
 }

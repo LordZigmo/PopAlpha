@@ -41,7 +41,7 @@ struct CardCell: View {
                     LinearGradient(
                         colors: [
                             PA.Colors.accent.opacity(isHovered ? 0.6 : 0),
-                            Color.white.opacity(isHovered ? 0.08 : 0),
+                            PA.Colors.hairline(isHovered ? 0.08 : 0),
                             Color(red: 0.375, green: 0.647, blue: 0.98).opacity(isHovered ? 0.45 : 0)
                         ],
                         startPoint: .topLeading,
@@ -110,7 +110,7 @@ struct CardCell: View {
 
             // Radial glow at top like web placeholder
             RadialGradient(
-                colors: [Color.white.opacity(0.06), .clear],
+                colors: [PA.Colors.hairline(0.06), .clear],
                 center: .top,
                 startRadius: 0,
                 endRadius: 200
@@ -209,7 +209,7 @@ struct CardCell: View {
             HStack(spacing: 3) {
                 ForEach(0..<4, id: \.self) { index in
                     Capsule()
-                        .fill(index < level.segments ? confidenceColor(level) : Color.white.opacity(0.07))
+                        .fill(index < level.segments ? confidenceColor(level) : PA.Colors.hairline(0.07))
                         .frame(height: 5)
                 }
             }
@@ -246,5 +246,4 @@ struct CardCell: View {
     .frame(width: 172)
     .padding()
     .background(PA.Colors.background)
-    .preferredColorScheme(.dark)
 }

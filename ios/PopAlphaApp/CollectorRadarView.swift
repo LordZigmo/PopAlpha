@@ -17,7 +17,7 @@ struct CollectorRadarView: View {
     ]
 
     private let accentColor = PA.Colors.accent // #00B4D8
-    private let gridColor   = Color.white.opacity(0.08)
+    private let gridColor   = PA.Colors.hairline(0.08)
     private let rings       = 4
 
     var body: some View {
@@ -88,7 +88,7 @@ struct CollectorRadarView: View {
 
                 Text(axis.label)
                     .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(Color.white.opacity(0.55))
+                    .foregroundStyle(PA.Colors.hairline(0.55))
                     .position(x: x, y: y)
             }
         }

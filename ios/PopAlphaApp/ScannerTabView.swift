@@ -285,7 +285,7 @@ struct ScannerTabView: View {
         let remaining = scanQuota.remaining
         return Text(remaining > 0 ? "\(remaining) left" : "Daily limit")
             .font(.system(size: 9, weight: .semibold))
-            .foregroundStyle(remaining > 0 ? Color.white.opacity(0.75) : Color.yellow.opacity(0.95))
+            .foregroundStyle(remaining > 0 ? PA.Colors.hairline(0.75) : Color.yellow.opacity(0.95))
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
             .background(.ultraThinMaterial.opacity(0.5))
@@ -1138,5 +1138,4 @@ private extension ScanMatch {
 
 #Preview("Scanner") {
     ScannerTabView()
-        .preferredColorScheme(.dark)
 }

@@ -215,6 +215,5 @@ struct PersonalPulseSection: View {
     )
     .padding()
     .background(PA.Colors.background)
-    .preferredColorScheme(.dark)
 }
 

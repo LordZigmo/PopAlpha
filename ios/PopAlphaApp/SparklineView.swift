@@ -101,7 +101,6 @@ struct SparklineView: View {
     )
     .padding()
     .background(PA.Colors.background)
-    .preferredColorScheme(.dark)
 }
 
 #Preview("Sparkline Negative") {
@@ -113,7 +112,6 @@ struct SparklineView: View {
     )
     .padding()
     .background(PA.Colors.background)
-    .preferredColorScheme(.dark)
 }
 
 #Preview("Sparkline Flat") {
@@ -125,5 +123,4 @@ struct SparklineView: View {
     )
     .padding()
     .background(PA.Colors.background)
-    .preferredColorScheme(.dark)
 }

@@ -81,7 +81,7 @@ struct InsightsUnlockProgress: View {
             RoundedRectangle(cornerRadius: PA.Layout.panelRadius, style: .continuous)
                 .stroke(
                     LinearGradient(
-                        colors: [PA.Colors.accent.opacity(0.2), Color.white.opacity(0.05)],
+                        colors: [PA.Colors.accent.opacity(0.2), PA.Colors.hairline(0.05)],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ),
@@ -118,7 +118,6 @@ struct InsightsUnlockProgress: View {
         PA.Colors.background.ignoresSafeArea()
         InsightsUnlockProgress(cardsAdded: 1)
     }
-    .preferredColorScheme(.dark)
 }
 
 #Preview("2 of 3") {
@@ -126,5 +125,4 @@ struct InsightsUnlockProgress: View {
         PA.Colors.background.ignoresSafeArea()
         InsightsUnlockProgress(cardsAdded: 2)
     }
-    .preferredColorScheme(.dark)
 }

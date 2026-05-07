@@ -84,7 +84,7 @@ struct WatchlistButton: View {
         .clipShape(Circle())
         .overlay(
             Circle()
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                .stroke(PA.Colors.hairline(0.08), lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.25), radius: 6, x: 0, y: 2)
     }

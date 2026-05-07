@@ -201,7 +201,12 @@ struct MarketPulseSection: View {
                         .padding(.vertical, 5)
                         .background {
                             if selectedWindow == window {
-                                Capsule().fill(Color.white)
+                                // PA.Colors.text adapts: white in dark mode,
+                                // near-black in light mode. Paired with the
+                                // text foregroundStyle of PA.Colors.background
+                                // above, the selected pill stays high-contrast
+                                // in both modes.
+                                Capsule().fill(PA.Colors.text)
                             }
                         }
                 }
@@ -209,8 +214,8 @@ struct MarketPulseSection: View {
             }
         }
         .padding(2)
-        .background(Capsule().fill(Color.white.opacity(0.03)))
-        .overlay(Capsule().stroke(Color.white.opacity(0.08), lineWidth: 1))
+        .background(Capsule().fill(PA.Colors.hairline(0.03)))
+        .overlay(Capsule().stroke(PA.Colors.hairline(0.08), lineWidth: 1))
     }
 
     // MARK: - Category tabs
@@ -236,14 +241,14 @@ struct MarketPulseSection: View {
                                 Capsule().fill(
                                     category == cat
                                         ? cat.color.opacity(0.14)
-                                        : Color.white.opacity(0.03)
+                                        : PA.Colors.hairline(0.03)
                                 )
                             )
                             .overlay(
                                 Capsule().stroke(
                                     category == cat
                                         ? cat.color.opacity(0.38)
-                                        : Color.white.opacity(0.08),
+                                        : PA.Colors.hairline(0.08),
                                     lineWidth: 1
                                 )
                             )

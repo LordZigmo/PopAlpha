@@ -160,7 +160,7 @@ struct PortfolioPositionCell: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                        .stroke(PA.Colors.hairline(0.06), lineWidth: 1)
                 )
             } else {
                 thumbnailPlaceholder

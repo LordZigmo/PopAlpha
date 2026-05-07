@@ -422,7 +422,7 @@ struct CardDetailView: View {
 
     private var heroPlaceholder: some View {
         RoundedRectangle(cornerRadius: 20)
-            .fill(Color.white.opacity(0.03))
+            .fill(PA.Colors.hairline(0.03))
             .aspectRatio(63.0 / 88.0, contentMode: .fit)
             .frame(maxHeight: 420)
             .overlay(
@@ -935,7 +935,7 @@ struct CardDetailView: View {
         .background(.ultraThinMaterial)
         .clipShape(Capsule())
         .overlay(
-            Capsule().stroke(Color.white.opacity(0.08), lineWidth: 1)
+            Capsule().stroke(PA.Colors.hairline(0.08), lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.25), radius: 10, x: 0, y: 4)
         .padding(.top, 12)

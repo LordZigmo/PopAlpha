@@ -579,7 +579,7 @@ struct PrimaryAppleSignInButton: View {
             .background(Color.black.opacity(auth.isSigningIn ? 0.6 : 1.0))
             .clipShape(Capsule())
             .overlay(
-                Capsule().stroke(Color.white.opacity(0.15), lineWidth: 1)
+                Capsule().stroke(PA.Colors.hairline(0.15), lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
@@ -610,10 +610,8 @@ enum AppTab {
 
 #Preview("App") {
     ContentView()
-        .preferredColorScheme(.dark)
 }
 
 #Preview("Profile") {
     ProfileTabView()
-        .preferredColorScheme(.dark)
 }

@@ -340,5 +340,4 @@ struct SearchView: View {
 
 #Preview {
     SearchView()
-        .preferredColorScheme(.dark)
 }
