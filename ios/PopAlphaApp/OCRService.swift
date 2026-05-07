@@ -81,189 +81,132 @@ enum OCRService {
         from image: UIImage,
         maxCandidatesPerObservation: Int = 3,
     ) async -> (cardNumbers: [String], setHint: String?, detectedLanguage: ScanLanguage) {
-        async let fullPass = recognizeText(
-            in: image,
-            maxCandidatesPerObservation: maxCandidatesPerObservation,
-            // Spatial filtering for card_number extraction on the full
-            // pass: only consider text whose bounding-box CENTER is in
-            // the bottom ~22% of the image. Pokemon's card_number has
-            // printed in one of the lower corners ("X/Y" with the set
-            // size as Y) for decades — that layout convention lets us
-            // reject false positives from middle/top regions (attack
-            // damage like "30/3", deck-set notation, set symbols that
-            // visually resemble fractions).
+        // Run Vision OCR once on each region (full image + bottom strip).
+        // Both passes run concurrently — embed and pixel-data work is
+        // independent. The post-processing (filtering, multi-pass logic)
+        // is pure and runs after both Vision calls return.
+        async let fullObservations = runVisionTextRecognition(in: image)
+        async let stripObservations: [VNRecognizedTextObservation] = {
+            // Bottom 25% upscaled 3×. Bumped from 0.18 on 2026-05-07
+            // (Tier 1.1 stage 2) — real-device evidence showed
+            // hand-held captures often have the card_number row at
+            // ~22-28% from the image bottom because the user's grip
+            // leaves empty space below the card. The narrower 18%
+            // strip missed those rows entirely. Diminishing returns
+            // above 25% (admits more attack/rules text).
             //
-            // Real-device 2026-05-06: a Pokemon TCG Classic Chansey
-            // (deck Venusaur, card #15) was misidentified as Charizard
-            // because OCR's full-pass picked up a "3/Y" pattern from
-            // somewhere mid-card and the regex couldn't tell that "3"
-            // wasn't the actual card_number. With this filter, only
-            // bottom-region observations contribute to the cardNumbers
-            // list — text matching "X/Y" up in attack-damage territory
-            // is ignored.
-            //
-            // setHint extraction is unaffected because it scans all
-            // observations regardless of position (set names print
-            // higher up — usually right under the card name).
-            restrictCardNumbersToBottomRegion: true,
-        )
-        async let stripPass: ([String], String?, ScanLanguage) = {
-            // Bottom 18% comfortably contains the collector number on
-            // every modern Pokemon TCG layout I've checked. 3× upscale
-            // takes the ~12-15px digits to ~36-45px — well within
-            // Vision's accurate-mode sweet spot.
-            guard let strip = upscaledBottomStrip(image, ratio: 0.18, scale: 3.0) else {
-                return ([], nil, .en)
+            // The strip is independently fed to Vision, so even if
+            // the full-pass spatial filter rejects the card_number,
+            // the strip pass — which has no spatial filter — should
+            // surface it.
+            guard let strip = upscaledBottomStrip(image, ratio: 0.25, scale: 3.0) else {
+                return []
             }
-            return await recognizeText(
-                in: strip,
-                maxCandidatesPerObservation: maxCandidatesPerObservation,
-                // Strip pass already operates on the bottom 18% of the
-                // input, so all of its observations are implicitly in
-                // the card's bottom region. Applying the spatial
-                // filter here would compound — bottom 22% of the strip
-                // is the bottom ~4% of the original, which can miss
-                // the card_number row entirely. Disabled.
-                restrictCardNumbersToBottomRegion: false,
-            )
+            return await runVisionTextRecognition(in: strip)
         }()
+        let (fullObs, stripObs) = await (fullObservations, stripObservations)
 
-        let (full, strip) = await (fullPass, stripPass)
+        // Pass 1 — strict spatial filter on the full image.
+        //
+        // The full-pass uses `restrictToBottomRegion=true` to defend
+        // against the original mid-card "X/Y" false-positive case
+        // (Pokemon TCG Classic Chansey scan, 2026-05-06: OCR picked
+        // up "3/Y" from mid-card and misidentified the card as
+        // Charizard). The strip-pass has no spatial filter — its
+        // observations are already in the bottom region by construction.
+        let pass1FullCardNumbers = extractCardNumbers(
+            from: fullObs,
+            maxCandidatesPerObservation: maxCandidatesPerObservation,
+            restrictToBottomRegion: true,
+        )
+        let stripCardNumbers = extractCardNumbers(
+            from: stripObs,
+            maxCandidatesPerObservation: maxCandidatesPerObservation,
+            restrictToBottomRegion: false,
+        )
 
-        // Dedupe-merge: full-pass first (large text already in Vision's
-        // sweet spot), strip pass as rescue for tiny text.
         var seen = Set<String>()
         var merged: [String] = []
-        for n in full.0 + strip.0 where seen.insert(n).inserted {
+        for n in pass1FullCardNumbers + stripCardNumbers where seen.insert(n).inserted {
             merged.append(n)
         }
-        // Set hint: full-pass only. The bottom strip rarely contains
-        // a usable set name and is dominated by collector number,
-        // copyright, and set code — none of which `pickSetHint` would
-        // accept anyway.
+
+        // Pass 2 — fallback when Pass 1 returns empty AND Vision saw
+        // slash-bearing text outside the bottom region.
         //
-        // Detected language: if EITHER pass saw CJK characters, the
-        // card is JP. The strip pass alone is rarely conclusive
-        // (bottom strip has card_number / © / set code in Latin even
-        // on JP cards), but the full-pass card name is the giveaway.
-        // Take the union: any JP signal wins.
-        let detectedLanguage: ScanLanguage = (full.2 == .jp || strip.2 == .jp) ? .jp : .en
-        return (merged, full.1, detectedLanguage)
+        // Tier 1.1 stage 1 (2026-05-07): real-device evidence showed
+        // the spatial filter was rejecting valid card_numbers in two
+        // cases:
+        //   - Mode 1 (hand-grip): card_number printed at midY ~0.20-
+        //     0.30 because the card is loosely framed.
+        //   - Mode 2 (landscape capture): card photographed sideways,
+        //     card_number on a side edge of the frame.
+        //
+        // Both cases: the strip pass also fails (strip is bottom 25%
+        // of an image where the card-bottom isn't at the image-bottom),
+        // so merged is still empty. Pass 2 disables the spatial filter
+        // on the full image and relies on the plausibility filter
+        // (yInt ∈ [5, 600], xInt ∈ [1, 999]) alone to defend against
+        // the original Chansey case. The plausibility filter parses
+        // mid-card "X/Y" as y < 5 in most attack-damage cases; the
+        // narrow remaining false-positive surface is acceptable
+        // because admitting a wrong card_number falls through to
+        // Path C (vision-only) harmlessly, while rejecting a real
+        // card_number costs HIGH→medium confidence.
+        //
+        // Pass 2 only fires when merged is empty — successful Pass 1
+        // results always win. No second Vision call: we re-process
+        // the same observations with a different filter setting.
+        if merged.isEmpty {
+            let pass2FullCardNumbers = extractCardNumbers(
+                from: fullObs,
+                maxCandidatesPerObservation: maxCandidatesPerObservation,
+                restrictToBottomRegion: false,
+            )
+            for n in pass2FullCardNumbers where seen.insert(n).inserted {
+                merged.append(n)
+            }
+            #if DEBUG
+            if !merged.isEmpty {
+                ocrLogger.debug("ocr pass-2 fallback recovered \(merged.count) card_number(s) — \(merged.joined(separator: ","), privacy: .public)")
+            }
+            #endif
+        }
+
+        // Set hint and language detection use ALL observations
+        // regardless of pass. setHint scans the upper region of the
+        // full image (its own spatial filter, separate from
+        // card_number's). Language detection runs against all OCR
+        // text — any CJK character anywhere is the JP signal.
+        let setHint = pickSetHint(from: fullObs)
+        let fullLanguage = detectLanguage(from: fullObs)
+        let stripLanguage = detectLanguage(from: stripObs)
+        let detectedLanguage: ScanLanguage = (fullLanguage == .jp || stripLanguage == .jp) ? .jp : .en
+
+        return (merged, setHint, detectedLanguage)
     }
 
-    /// Inner Vision pass on a single image. Pulled out of
-    /// `extractCardIdentifiersMulti` so the full + strip passes can
-    /// run concurrently via `async let`.
+    /// Run Vision text recognition on a single image and return raw
+    /// observations. Caller is responsible for post-processing —
+    /// filtering by spatial region, extracting card_numbers via the
+    /// collector pattern, picking set_hint, detecting language.
     ///
-    /// `restrictCardNumbersToBottomRegion`: when true, only consider
-    /// observations whose bounding box center is in the bottom 22% of
-    /// the image for card_number extraction. setHint extraction is
-    /// always position-unrestricted because set names print elsewhere
-    /// (usually under the card name, not at the bottom).
-    private static func recognizeText(
+    /// Split out from the original `recognizeText` on 2026-05-07
+    /// (Tier 1.1 stage 1) so the multi-pass fallback in
+    /// `extractCardIdentifiersMulti` can re-process the same Vision
+    /// observations with different filter settings — re-running
+    /// Vision is the expensive part (~30-100ms), and the filter
+    /// logic is pure data manipulation that should run multiple
+    /// times for free.
+    private static func runVisionTextRecognition(
         in image: UIImage,
-        maxCandidatesPerObservation: Int,
-        restrictCardNumbersToBottomRegion: Bool,
-    ) async -> ([String], String?, ScanLanguage) {
-        guard let cgImage = image.cgImage else { return ([], nil, .en) }
+    ) async -> [VNRecognizedTextObservation] {
+        guard let cgImage = image.cgImage else { return [] }
 
-        return await withCheckedContinuation { (continuation: CheckedContinuation<([String], String?, ScanLanguage), Never>) in
+        return await withCheckedContinuation { (continuation: CheckedContinuation<[VNRecognizedTextObservation], Never>) in
             let request = VNRecognizeTextRequest { request, _ in
-                guard
-                    let results = request.results as? [VNRecognizedTextObservation]
-                else {
-                    continuation.resume(returning: ([], nil, .en))
-                    return
-                }
-
-                let setHint = pickSetHint(from: results)
-                let detectedLanguage = detectLanguage(from: results)
-
-                // Vision's coordinate space is bottom-left origin
-                // (per Apple docs) so "bottom of the image" =
-                // "low Y". A bounding box near the bottom of the
-                // image has midY ≈ 0; near the top, midY ≈ 1.
-                //
-                // 0.35 is the v3.5 threshold (relaxed from 0.22 on
-                // 2026-05-07). Real-device data showed 2 of 5
-                // hand-held scans had the card_number printed at
-                // midY ~0.22-0.30 — the card occupies less than the
-                // full frame because of the user's grip position,
-                // pushing the printed number above the original
-                // 22%-of-image cutoff. The Pokemon TCG Classic
-                // Chansey false-positive that drove the original
-                // 0.22 cutoff is still defended against by the
-                // plausibility filter in collectorNumberCandidates
-                // (yInt >= 5 AND yInt <= 600 AND xInt <= 999) — the
-                // mid-card "3/Y" patterns it caught all parse to
-                // y < 5 once the plausibility filter applies.
-                //
-                // Catches at 0.35:
-                //   - card_number row (typically ~5-8% from bottom)
-                //   - illustrator credit + copyright line right above
-                //   - set code below the artwork
-                //   - card_number on cards where the bottom is
-                //     slightly above the frame's bottom edge (the
-                //     handheld-grip case)
-                // …still without admitting most middle-of-card
-                // attack damage (those parse to y < 5 anyway) or the
-                // rules-text block (~midY 0.30-0.50, no slash
-                // patterns above midY 0.35 in that region).
-                let cardNumberObservations: [VNRecognizedTextObservation]
-                if restrictCardNumbersToBottomRegion {
-                    cardNumberObservations = results.filter { obs in
-                        obs.boundingBox.midY < 0.35
-                    }
-                } else {
-                    cardNumberObservations = results
-                }
-
-                var seenCardNumbers = Set<String>()
-                var cardNumbers: [String] = []
-                // Track which lines contained a "X/Y" shape but were
-                // discarded — diagnostic for "OCR saw the number but
-                // the filter rejected it" vs "OCR didn't see it at
-                // all". Keyed off the regex's slash pattern.
-                var slashLinesSeen: [String] = []
-                for obs in cardNumberObservations {
-                    let candidates = obs.topCandidates(maxCandidatesPerObservation)
-                    for candidate in candidates {
-                        if candidate.string.contains("/") {
-                            slashLinesSeen.append(candidate.string)
-                        }
-                        for n in collectorNumberCandidates(in: candidate.string) {
-                            if seenCardNumbers.insert(n).inserted {
-                                cardNumbers.append(n)
-                            }
-                        }
-                    }
-                }
-                #if DEBUG
-                if cardNumbers.isEmpty && !slashLinesSeen.isEmpty {
-                    // OCR found "/"-bearing text but no candidate survived
-                    // the regex + plausibility filters. Surface it so we
-                    // can tell whether the secret-rare fix landed.
-                    let preview = slashLinesSeen.prefix(5).joined(separator: " | ")
-                    ocrLogger.debug("ocr slash-lines (no card_number extracted): \(preview, privacy: .public)")
-                }
-                if cardNumbers.isEmpty && restrictCardNumbersToBottomRegion {
-                    // Diagnostic: how much text did the spatial filter
-                    // reject? If we routinely see many observations
-                    // with `/`-bearing text in the upper 78% but none
-                    // in the bottom 22%, that's a sign cards are being
-                    // framed such that the bottom edge is out of view
-                    // and we should widen the threshold.
-                    let allSlashAcrossImage = results.flatMap { obs in
-                        obs.topCandidates(maxCandidatesPerObservation).map { $0.string }
-                    }.filter { $0.contains("/") }
-                    if !allSlashAcrossImage.isEmpty {
-                        let preview = allSlashAcrossImage.prefix(5).joined(separator: " | ")
-                        ocrLogger.debug("ocr spatial filter rejected \(allSlashAcrossImage.count) slash-line(s) outside bottom region: \(preview, privacy: .public)")
-                    }
-                }
-                #endif
-
-                continuation.resume(returning: (cardNumbers, setHint, detectedLanguage))
+                let results = (request.results as? [VNRecognizedTextObservation]) ?? []
+                continuation.resume(returning: results)
             }
 
             request.recognitionLevel = .accurate
@@ -300,9 +243,92 @@ enum OCRService {
             do {
                 try handler.perform([request])
             } catch {
-                continuation.resume(returning: ([], nil, .en))
+                continuation.resume(returning: [])
             }
         }
+    }
+
+    /// Pure post-processing: extract card_number candidates from a
+    /// list of Vision observations, with optional spatial filtering.
+    ///
+    /// `restrictToBottomRegion`: when true, only consider observations
+    /// whose `boundingBox.midY < 0.35`. Vision's coordinate space is
+    /// bottom-left origin, so midY ≈ 0 is the bottom of the image and
+    /// midY ≈ 1 is the top.
+    ///
+    /// 0.35 is the v3.5 threshold (relaxed from 0.22 on 2026-05-07).
+    /// Real-device data showed hand-held scans had card_numbers
+    /// printed at midY ~0.22-0.30. The Pokemon TCG Classic Chansey
+    /// false-positive that drove the original 0.22 cutoff is still
+    /// defended against by the plausibility filter in
+    /// `collectorNumberCandidates` — mid-card "3/Y" patterns parse to
+    /// y < 5 once the filter applies.
+    ///
+    /// When restricted-region returns no candidates, callers should
+    /// retry with `restrictToBottomRegion: false` (the multi-pass
+    /// fallback). Plausibility filter alone is the defense at that
+    /// point.
+    private static func extractCardNumbers(
+        from observations: [VNRecognizedTextObservation],
+        maxCandidatesPerObservation: Int,
+        restrictToBottomRegion: Bool,
+    ) -> [String] {
+        let cardNumberObservations: [VNRecognizedTextObservation]
+        if restrictToBottomRegion {
+            cardNumberObservations = observations.filter { obs in
+                obs.boundingBox.midY < 0.35
+            }
+        } else {
+            cardNumberObservations = observations
+        }
+
+        var seenCardNumbers = Set<String>()
+        var cardNumbers: [String] = []
+        // Track which lines contained a "X/Y" shape but were
+        // discarded — diagnostic for "OCR saw the number but the
+        // regex/plausibility filter rejected it" vs "OCR didn't see
+        // it at all". Keyed off the regex's slash pattern.
+        var slashLinesSeen: [String] = []
+        for obs in cardNumberObservations {
+            let candidates = obs.topCandidates(maxCandidatesPerObservation)
+            for candidate in candidates {
+                if candidate.string.contains("/") {
+                    slashLinesSeen.append(candidate.string)
+                }
+                for n in collectorNumberCandidates(in: candidate.string) {
+                    if seenCardNumbers.insert(n).inserted {
+                        cardNumbers.append(n)
+                    }
+                }
+            }
+        }
+        #if DEBUG
+        if cardNumbers.isEmpty && !slashLinesSeen.isEmpty {
+            // OCR found "/"-bearing text but no candidate survived
+            // the regex + plausibility filters. Surface it so we
+            // can tell whether the secret-rare fix landed.
+            let preview = slashLinesSeen.prefix(5).joined(separator: " | ")
+            ocrLogger.debug("ocr slash-lines (no card_number extracted): \(preview, privacy: .public)")
+        }
+        if cardNumbers.isEmpty && restrictToBottomRegion {
+            // Diagnostic: how much text did the spatial filter
+            // reject? If we routinely see many observations with
+            // `/`-bearing text in the upper region but none in the
+            // bottom 35%, that's a signal the card is framed
+            // unusually (Modes 1/2 in scanner-ocr-failure-modes.md).
+            // The multi-pass fallback in extractCardIdentifiersMulti
+            // catches these.
+            let allSlashAcrossImage = observations.flatMap { obs in
+                obs.topCandidates(maxCandidatesPerObservation).map { $0.string }
+            }.filter { $0.contains("/") }
+            if !allSlashAcrossImage.isEmpty {
+                let preview = allSlashAcrossImage.prefix(5).joined(separator: " | ")
+                ocrLogger.debug("ocr spatial filter rejected \(allSlashAcrossImage.count) slash-line(s) outside bottom region (pass-2 fallback may recover): \(preview, privacy: .public)")
+            }
+        }
+        #endif
+
+        return cardNumbers
     }
 
     /// Crops the bottom `ratio` of `image` and renders at `scale`×

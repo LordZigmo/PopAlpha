@@ -116,15 +116,35 @@ not all.
 
 **Fix or mitigation.**
 - Phase 1.5 (5ce0d3e, 2026-05-07): threshold 0.22 → 0.35.
-- OPEN: Tier 1.1.a (orientation-aware spatial filter). Use
-  rectangle-detection angle to rotate `imageForOCR` so card
-  bottom is always at image bottom before OCR runs. See
-  `scanner-accuracy-playbook.md` §3 Tier 1.1.a.
+  Partial fix; closes the looser-grip cases but not the very
+  loose ones at midY > 0.35.
+- **Tier 1.1 stage 1 (TBD commit, 2026-05-07): multi-pass
+  fallback.** When the strict-region pass returns
+  `cardNumbers=[]`, re-process the same Vision observations with
+  `restrictToBottomRegion=false`. The plausibility filter
+  (`yInt ∈ [5, 600]`, `xInt ∈ [1, 999]`) is the only defense
+  against the original Chansey case during the fallback —
+  asymmetric risk strongly favors admission (rejected
+  card_number costs HIGH→medium confidence; admitted false
+  card_number falls through to Path C harmlessly).
+- Tier 1.1 stage 2 (same commit): strip-pass ratio 0.18 → 0.25
+  so the bottom-strip-only OCR also captures card_numbers in
+  the 18-25% band.
+- OPEN: Tier 1.1 stage 3 (separate session). Perspective
+  correction in PopAlphaVisionEngine via CIPerspectiveCorrection
+  using the four corners of `VNRectangleObservation` instead of
+  the current bounding-box crop. Eliminates the orientation
+  problem at its source — no rotation/skew survives the
+  perspective unwrap, so the spatial filter assumption holds.
+  Mode 2 in particular needs this; Mode 1's looser-grip
+  symptom is fully addressed by stage 1+2.
 
 **Repro.** Eval slugs `prismatic-evolutions-68-heatran` and
 `prismatic-evolutions-4-budew`. Real-device scans
 2026-05-07T02:07:43Z and 02:07:55Z (image hashes in
-scan_uploads).
+scan_uploads). Re-scan the same cards post-Tier-1.1 to verify
+`cardNumbers=[68]` / `cardNumbers=[4]` now extract cleanly via
+the multi-pass fallback.
 
 ---
 
@@ -154,17 +174,35 @@ image-bottom. False for landscape captures. The fix in Mode 1
 (threshold relax) is insufficient.
 
 **Fix or mitigation.**
-- OPEN: Tier 1.1.a same as Mode 1. The angle from
-  `PopAlphaVisionEngine.detectAndCrop` already exists; we just
-  need to feed it into the OCR pre-rotation step.
+- **Tier 1.1 stage 1 (TBD commit, 2026-05-07): multi-pass
+  fallback** is the partial fix here too. When the spatial
+  filter rejects ALL slash-bearing observations (because the
+  card is sideways and the card_number observation has midY
+  > 0.35), pass 2 re-runs without the spatial filter and the
+  plausibility filter accepts the valid `068/131` candidate.
+  This recovers the card_number but the card-image embedding
+  itself is still being computed against a sideways card — the
+  kNN may still confuse it with similar-art cards in other
+  orientations. Stage 1 fixes the OCR symptom.
 - Workaround that exists now: when scanLanguage detection runs
   (zero-tap detection from CJK chars, commit 2e22986), the
   detected language flips to .en correctly even when the card
   is sideways — the language detector doesn't depend on
   orientation. Only card_number does.
+- OPEN: Tier 1.1 stage 3 (separate session). The full fix is
+  perspective correction so the OCR'd image is ALWAYS
+  axis-aligned with card-bottom at image-bottom, regardless of
+  how the user held the phone. CIPerspectiveCorrection with the
+  rectangle's 4 corners + portrait-orientation enforcement
+  (rotate 90° if the corrected image is wider than tall, since
+  Pokemon cards are always portrait). This also fixes the
+  embed-side similarity problem because the embedder gets a
+  properly oriented card.
 
 **Repro.** Real-device 2026-05-07T02:07:55Z. The diagnostic line
-above is the literal log text.
+above is the literal log text. After Tier 1.1 stage 1 ships,
+the same scan should log a `pass-2 fallback recovered N
+card_number(s)` line and produce non-empty `cardNumbers`.
 
 ---
 
