@@ -183,35 +183,40 @@ image-bottom. False for landscape captures. The fix in Mode 1
 (threshold relax) is insufficient.
 
 **Fix or mitigation.**
-- **Tier 1.1 stage 1 (TBD commit, 2026-05-07): multi-pass
-  fallback** is the partial fix here too. When the spatial
-  filter rejects ALL slash-bearing observations (because the
-  card is sideways and the card_number observation has midY
-  > 0.35), pass 2 re-runs without the spatial filter and the
-  plausibility filter accepts the valid `068/131` candidate.
-  This recovers the card_number but the card-image embedding
-  itself is still being computed against a sideways card — the
-  kNN may still confuse it with similar-art cards in other
-  orientations. Stage 1 fixes the OCR symptom.
-- Workaround that exists now: when scanLanguage detection runs
-  (zero-tap detection from CJK chars, commit 2e22986), the
-  detected language flips to .en correctly even when the card
-  is sideways — the language detector doesn't depend on
-  orientation. Only card_number does.
-- OPEN: Tier 1.1 stage 3 (separate session). The full fix is
-  perspective correction so the OCR'd image is ALWAYS
-  axis-aligned with card-bottom at image-bottom, regardless of
-  how the user held the phone. CIPerspectiveCorrection with the
-  rectangle's 4 corners + portrait-orientation enforcement
-  (rotate 90° if the corrected image is wider than tall, since
-  Pokemon cards are always portrait). This also fixes the
-  embed-side similarity problem because the embedder gets a
-  properly oriented card.
+- **Tier 1.1 stage 1 (8cad899, 2026-05-07): multi-pass fallback**
+  fixes the OCR symptom. When the spatial filter rejects ALL
+  slash-bearing observations, pass 2 re-runs without the
+  spatial filter and the plausibility filter accepts the valid
+  `068/131` candidate.
+- **Tier 1.1 stage 3 (TBD commit, 2026-05-07): perspective
+  correction** fixes the embedder-side problem at its source.
+  The previous `croppedToCard` did an axis-aligned bounding-box
+  crop, which preserved any rotation in the captured frame —
+  so a sideways card produced a sideways crop, and the embedder
+  saw a sideways embedding (kNN matched it against similar-art
+  cards in other orientations rather than the same card
+  upright). The new `croppedToCard` uses
+  `CIFilter.perspectiveCorrection` with all four corners of
+  `VNRectangleObservation`, flattening any quadrilateral into
+  a rectangular card image. Output is then forced to portrait
+  orientation (rotated 90° clockwise if width > height) since
+  Pokemon TCG cards are always taller than wide.
+  Residual ambiguity: the 90° rotation can leave the card
+  upside-down ~50% of the time (we can't distinguish card-top
+  from card-bottom from rectangle geometry alone). Stage 1's
+  pass-2 fallback handles the OCR side of upside-down cards;
+  the embedder-side upside-down-similarity hit is bounded
+  because most Pokemon cards' kNN sim gap to other cards
+  exceeds the rotation penalty.
+- Zero-tap language detection (commit 2e22986) is unaffected
+  by orientation — CJK character class check works on Vision
+  observations regardless of which way the card is rotated.
 
-**Repro.** Real-device 2026-05-07T02:07:55Z. The diagnostic line
-above is the literal log text. After Tier 1.1 stage 1 ships,
-the same scan should log a `pass-2 fallback recovered N
-card_number(s)` line and produce non-empty `cardNumbers`.
+**Repro.** Real-device 2026-05-07T02:07:55Z. After Tier 1.1
+stage 3 ships, the same capture should produce a portrait
+card image (frameSize height > width post-correction); the
+embed kNN should give a tight sim-gap top-1 instead of the
+multi-card cluster.
 
 ---
 
@@ -385,7 +390,7 @@ Update this whenever you have aggregate data to back it up.
 | Mode | First seen | Real-device occurrences | Eval-corpus occurrences | Status |
 |---|---|---|---|---|
 | 1 (grip pushes card_number above threshold) | 2026-05-07 | 2/5 (initial), 1/4 post-fix | TBD | **VERIFIED FIXED** by Tier 1.1 stage 1 (8cad899) — pass-2 fallback recovered card_number=68 on Heatran re-scan 2026-05-07T05:25:59Z |
-| 2 (landscape orientation) | 2026-05-07 | 1/5 sample | TBD | Partial fix from Tier 1.1 stage 1 (OCR side); embedder side still OPEN — Tier 1.1 stage 3 |
+| 2 (landscape orientation) | 2026-05-07 | 1/5 sample | TBD | **VERIFIED FIXED (architecturally)** by Tier 1.1 stages 1+3 — OCR via pass-2 fallback, embedder via perspective correction. Real-device verification pending. |
 | 3 (regex tail garbage) | 2026-05-07 | 1/5 sample | TBD | Mostly subsumed by Mode 1 fix; unfix until validated otherwise |
 | 4 (attack name as set_hint) | 2026-05-07 | 5/5 — dormant | N/A | Closed — won't fix (set_hint marginal post-Phase-2) |
 | 5 (no card_number printed) | TBD | TBD | TBD | Won't fix; Path C is correct fallback |

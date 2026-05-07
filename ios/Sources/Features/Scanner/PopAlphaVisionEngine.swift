@@ -1,5 +1,7 @@
 import AVFoundation
 import CoreGraphics
+import CoreImage
+import CoreImage.CIFilterBuiltins
 import CoreML
 import ImageIO
 import UIKit
@@ -299,7 +301,7 @@ public final class PopAlphaVisionEngine {
         // similarities near random (~0.19). Cropping to just the card —
         // with a small padding for edge tolerance — brings the query
         // image's visual statistics back in line with the index.
-        let cardImage = croppedToCard(image, normalizedBox: stableCandidate.observation.boundingBox) ?? image
+        let cardImage = croppedToCard(image, observation: stableCandidate.observation) ?? image
 
         callbackQueue.async { [weak self] in
             guard let self else {
@@ -310,21 +312,44 @@ public final class PopAlphaVisionEngine {
         }
     }
 
-    /// Crops the captured image down to the Vision-detected card rectangle,
-    /// accounting for Vision's bottom-left-origin normalized coordinates
-    /// and the UIImage's baked-in orientation. Returns nil if the crop
-    /// math produces a degenerate rect — callers fall back to the full
-    /// frame in that case.
-    private func croppedToCard(_ image: UIImage, normalizedBox: CGRect) -> UIImage? {
-        let padding: CGFloat = 0.04
-        let paddedBox = normalizedBox
-            .insetBy(dx: -padding, dy: -padding)
-            .clampedToUnitRect()
-
-        // Render the oriented image into a flat up-oriented canvas so
-        // subsequent pixel math operates in the display coordinate
-        // system (top-left origin) without wrestling with
-        // UIImage.imageOrientation.
+    /// Crops the captured image down to the Vision-detected card
+    /// quadrilateral and unwarps it into a flat axis-aligned card image.
+    ///
+    /// Tier 1.1 stage 3 (2026-05-07): replaced the previous axis-aligned
+    /// bounding-box crop with a full perspective correction using all
+    /// four corners of `VNRectangleObservation` (`topLeft`, `topRight`,
+    /// `bottomLeft`, `bottomRight`). The bounding-box approach left the
+    /// card at whatever angle/skew the user photographed it — when the
+    /// phone was held in landscape (Mode 2 in
+    /// `scanner-ocr-failure-modes.md`) the cropped image was a
+    /// landscape-oriented sideways card, breaking both the OCR's
+    /// bottom-region spatial filter AND the embedder's
+    /// orientation-sensitive similarity scoring.
+    ///
+    /// `CIPerspectiveCorrection` flattens any quadrilateral to a
+    /// rectangle. The output's dimensions match the input quadrilateral's
+    /// long-vs-short edge proportions, so a cleanly-detected portrait
+    /// card produces a portrait output and a sideways card produces a
+    /// landscape output — at which point we rotate 90° clockwise to
+    /// enforce portrait orientation, since Pokemon TCG cards are always
+    /// printed taller than wide.
+    ///
+    /// The 90° rotation can leave the card upside-down ~50% of the
+    /// time when the original was sideways (we can't tell the card's
+    /// true top from rectangle geometry alone). The OCR pipeline's
+    /// pass-2 fallback (Tier 1.1 stage 1) handles the upside-down
+    /// case — if the spatial filter rejects card_number-like text at
+    /// the image's top, pass-2 admits all observations and the
+    /// plausibility filter recovers the digits.
+    ///
+    /// Returns nil only when the input image has zero size or the
+    /// CoreImage filter chain fails (rare). Callers fall back to the
+    /// full frame in that case — same contract as the previous
+    /// implementation.
+    private func croppedToCard(_ image: UIImage, observation: VNRectangleObservation) -> UIImage? {
+        // Step 1: render the input to a flat up-oriented bitmap so the
+        // CIImage we wrap doesn't carry residual UIImage.imageOrientation
+        // metadata that would skew the corner-coordinate math.
         let orientedSize = image.size
         guard orientedSize.width > 0, orientedSize.height > 0 else { return nil }
 
@@ -337,21 +362,94 @@ public final class PopAlphaVisionEngine {
             image.draw(in: CGRect(origin: .zero, size: orientedSize))
         }
 
-        guard let cg = orientedImage.cgImage else { return nil }
+        guard let cgImage = orientedImage.cgImage else { return nil }
 
-        // Vision's normalized origin is bottom-left. Flip Y into the
-        // top-left origin system before scaling to pixel coordinates.
-        let pixelRect = CGRect(
-            x: paddedBox.minX * orientedSize.width,
-            y: (1 - paddedBox.minY - paddedBox.height) * orientedSize.height,
-            width: paddedBox.width * orientedSize.width,
-            height: paddedBox.height * orientedSize.height
-        ).integral
+        // Step 2: convert Vision's four normalized corners to pixel
+        // coordinates. Vision's normalized space and CIImage's pixel
+        // space share the same bottom-left origin convention, so no
+        // Y-axis flip is needed — just scale by image dimensions.
+        let pixelW = orientedSize.width
+        let pixelH = orientedSize.height
+        let topLeft = CGPoint(
+            x: observation.topLeft.x * pixelW,
+            y: observation.topLeft.y * pixelH,
+        )
+        let topRight = CGPoint(
+            x: observation.topRight.x * pixelW,
+            y: observation.topRight.y * pixelH,
+        )
+        let bottomLeft = CGPoint(
+            x: observation.bottomLeft.x * pixelW,
+            y: observation.bottomLeft.y * pixelH,
+        )
+        let bottomRight = CGPoint(
+            x: observation.bottomRight.x * pixelW,
+            y: observation.bottomRight.y * pixelH,
+        )
 
-        guard pixelRect.width > 0, pixelRect.height > 0 else { return nil }
-        guard let croppedCG = cg.cropping(to: pixelRect) else { return nil }
+        // Step 3: apply CIPerspectiveCorrection. The filter takes the
+        // four corner points and produces a rectangular output where
+        // each corner of the input quadrilateral maps to the
+        // corresponding corner of the output rectangle.
+        let ciImage = CIImage(cgImage: cgImage)
+        let filter = CIFilter.perspectiveCorrection()
+        filter.inputImage = ciImage
+        filter.topLeft = topLeft
+        filter.topRight = topRight
+        filter.bottomLeft = bottomLeft
+        filter.bottomRight = bottomRight
 
-        return UIImage(cgImage: croppedCG, scale: 1, orientation: .up)
+        guard let outputImage = filter.outputImage else { return nil }
+
+        let context = CIContext(options: nil)
+        guard let outputCG = context.createCGImage(outputImage, from: outputImage.extent) else {
+            return nil
+        }
+
+        let corrected = UIImage(cgImage: outputCG, scale: 1, orientation: .up)
+
+        // Step 4: enforce portrait orientation. Pokemon TCG cards are
+        // always taller than wide. If the perspective-corrected output
+        // is wider than tall, the user held the phone in landscape and
+        // we need to rotate 90° to make the card upright (or
+        // upside-down — see docstring above for the 50/50 rotation
+        // ambiguity).
+        if corrected.size.width > corrected.size.height {
+            return rotatedClockwise90(corrected) ?? corrected
+        }
+        return corrected
+    }
+
+    /// Rotate a UIImage 90° clockwise by setting the orientation flag
+    /// to `.right` and then re-rendering into a flat bitmap so the
+    /// rotation is baked into the pixels.
+    ///
+    /// Why bake-then-render rather than just returning the
+    /// orientation-tagged UIImage: downstream consumers (Vision
+    /// OCR's `VNImageRequestHandler(cgImage:orientation:.up)`, the
+    /// embedder's pixel-buffer extraction) read the raw CGImage
+    /// pixels and ignore UIImage's orientation flag — they'd see
+    /// the image un-rotated. Baking the rotation into the bitmap
+    /// makes downstream behavior consistent.
+    ///
+    /// `UIImage.Orientation.right` means "to display correctly,
+    /// rotate the stored pixels 90° clockwise" — exactly what we
+    /// want when transforming a landscape-stored card into a
+    /// portrait display image. Drawing into a renderer at the
+    /// post-rotation size lets UIKit handle the actual pixel
+    /// rotation.
+    private func rotatedClockwise90(_ image: UIImage) -> UIImage? {
+        guard let cgImage = image.cgImage else { return nil }
+        let rotated = UIImage(cgImage: cgImage, scale: image.scale, orientation: .right)
+
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        format.opaque = true
+
+        let renderer = UIGraphicsImageRenderer(size: rotated.size, format: format)
+        return renderer.image { _ in
+            rotated.draw(in: CGRect(origin: .zero, size: rotated.size))
+        }
     }
 
     /// One-shot rectangle detection on a single frame. Used by the
@@ -401,9 +499,9 @@ public final class PopAlphaVisionEngine {
             ($0.boundingBox.width * $0.boundingBox.height) <
             ($1.boundingBox.width * $1.boundingBox.height)
         }
-        guard let box = best?.boundingBox else { return nil }
+        guard let observation = best else { return nil }
 
-        return croppedToCard(image, normalizedBox: box)
+        return croppedToCard(image, observation: observation)
     }
 
     private func expireCandidateIfNeeded(at timestamp: TimeInterval) {
