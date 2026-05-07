@@ -290,6 +290,72 @@ the second case.
 
 ---
 
+### Mode 7 — OCR misreads card_number digits (admitted by pass-2 but Path B finds no match)
+
+**Symptom.** Real-device 2026-05-07T05:41:55Z: re-scan of
+Heatran (Prismatic Evolutions #68). Pass-2 fallback recovered
+`cardNumbers=["163"]` instead of the expected `["68"]`. Vision
+misread the leading `068` digits — `0` → `1`, `6` → `6`, `8` →
+`3` → final read `163`. Path B intersection looked for a slug
+with `card_number="163"` in the kNN top-K, found nothing, fell
+through to `vision_only`.
+
+**Evidence (raw log).**
+```
+ocr spatial filter rejected 1 slash-line(s) outside bottom region (pass-2 fallback may recover): 163/131 •
+ocr pass-2 fallback recovered 1 card_number(s) — 163
+ocr frameSize=973x666 cardNumbers=["163"] setHint=Iron Buster
+offline winning_path=vision_only confidence=medium tried_candidates=["163"]
+top-1: prismatic-evolutions-68-heatran sim=0.967
+```
+Worth noting: `163/131` does pass the plausibility filter
+(`yInt=131 ∈ [5, 600]`, `xInt=163 ∈ [1, 999]`) — Pokemon sets
+do go up past 130 cards (e.g., Surging Sparks 191), so 163 is
+plausible. The filter is doing the right thing; Vision just
+made an OCR error.
+
+**Vision actually saw.** Likely degraded glyphs at the small
+type size of the card_number row. The leading `0` looks like
+`1` under blur; `8` looks like `3` under stylization or
+similar artifact. Vision's beam search exposes alternates via
+`topCandidates(N)`, but the multi-pass loop in
+`extractCardIdentifiersMulti` already passes all candidates
+through `collectorNumberCandidates` — so if Vision's
+candidate-1 was `163` and candidate-2 was `068`, both should
+have been added to `cardNumbers`. The fact that only `163`
+appeared in the final log suggests either (a) Vision returned
+only `163` as a candidate (no alternate), or (b) `068` got
+deduplicated away via the `seenCardNumbers` set somewhere.
+
+**Root cause.** Vision OCR error on small / stylized digits,
+not a pipeline bug. The pass-2 fallback correctly admitted the
+candidate; the plausibility filter correctly accepted it; Path
+B intersection correctly found no matching slug; the system
+correctly fell through to `vision_only` and the kNN got the
+right answer anyway (sim 0.967 unique to Heatran).
+
+**Fix or mitigation.**
+- The end-to-end behavior was actually correct: wrong OCR, no
+  match, fall through, kNN wins. No catastrophic failure.
+- Worth investigating whether Vision's `topCandidates(3)` was
+  returning multiple alternates and whether one of them was
+  the correct `068`. If yes, sort the cardNumbers by frequency
+  / candidate-rank in the multi-pass merge so the most
+  trustworthy candidate is tried first against Path B.
+- OPEN: Tier 1.1 stage 5 (separate session) — improve OCR
+  digit accuracy via post-processing the
+  `topCandidates(N)` per observation, picking the candidate
+  whose card_number matches a slug in the kNN top-K when
+  multiple parse to plausible digits.
+
+**Repro.** Real-device 2026-05-07T05:41:55Z. Image hash in
+scan_uploads. Re-scan the same Heatran post-Tier-1.1-stage-3
+to see if perspective correction changes the OCR result (the
+better-cropped card may give Vision more pixels on the
+card_number, reducing misreads).
+
+---
+
 ### Mode 6 — Vision sees no slash-bearing text at all (card_number row out of frame or unreadable)
 
 **Symptom.** Real-device 2026-05-07T05:26:05Z (Budew) and
@@ -394,7 +460,8 @@ Update this whenever you have aggregate data to back it up.
 | 3 (regex tail garbage) | 2026-05-07 | 1/5 sample | TBD | Mostly subsumed by Mode 1 fix; unfix until validated otherwise |
 | 4 (attack name as set_hint) | 2026-05-07 | 5/5 — dormant | N/A | Closed — won't fix (set_hint marginal post-Phase-2) |
 | 5 (no card_number printed) | TBD | TBD | TBD | Won't fix; Path C is correct fallback |
-| 6 (Vision didn't see slash-bearing text) | 2026-05-07 | 3/4 post-Tier-1.1 sample | TBD | OPEN — Tier 1.1 stage 4 (image quality gates) — but kNN won anyway in observed cases |
+| 6 (Vision didn't see slash-bearing text) | 2026-05-07 | ~12/28 (~43%) pre-stage-3 sample | TBD | OPEN — Tier 1.1 stage 4 (image quality gates) — but kNN won HIGH on most observed cases |
+| 7 (OCR misread digits, e.g. 068→163) | 2026-05-07 | 1/9 pass-2 firings (~11%) | TBD | OPEN — Tier 1.1 stage 5 (multi-candidate digit ranking). Failure mode is graceful: wrong card_number → Path B no-match → vision_only fallback. End-to-end result still correct in observed case. |
 
 The 5-scan sample on 2026-05-07 is too small to draw conclusions
 about real-device frequency. A meaningful scoreboard requires:

@@ -132,6 +132,38 @@ runs; show a status toast if outside [bright, sharp] thresholds.
 **Estimated effort:** 1–2 days for (a)–(c). Image quality gates
 are a polish add-on.
 
+#### 1.6 HIGH-confidence threshold review on `ocr_intersect_unique`
+
+Real-device 2026-05-07 evidence (28-scan baseline) showed 5
+scans hit `ocr_intersect_unique` with the right answer but
+stayed at `confidence=medium` because the kNN top-1 sim was
+below ~0.85. Examples:
+
+```
+Naclstack #83  ocr_intersect_unique sim=0.842 → medium
+Hippowdon #53  ocr_intersect_unique sim=0.834 → medium
+Kleavor #85    ocr_intersect_unique sim=0.764 → medium
+```
+
+When OCR card_number AND kNN top-1 AGREE on a unique slug,
+that's two independent signals confirming the same answer —
+should be HIGH regardless of the kNN's absolute sim. The
+current threshold appears to gate HIGH on sim alone, ignoring
+the OCR-confirmation signal.
+
+Investigation: read the offline orchestrator's
+`OfflineIdentifier.identifyWithCandidates` confidence-tier
+logic. Adjust the threshold so `ocr_intersect_unique` returns
+HIGH when:
+- kNN top-1 slug matches the OCR card_number search result, AND
+- The match is unique (only one slug in canonical_cards has
+  that card_number), AND
+- kNN top-1 sim > some lower bar like 0.75 (filtering out
+  pure noise)
+
+Estimated effort: ~half day (logic + threshold tuning + eval
+re-run to confirm no false-HIGH regressions).
+
 **Expected eval impact:** Default mode +5–10pp; Path B ceiling
 unchanged (eval uses perfect OCR). Real-device top-1 should jump
 10–20pp because most current real-device failures are
