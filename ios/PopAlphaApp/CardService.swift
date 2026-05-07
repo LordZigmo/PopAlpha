@@ -821,6 +821,12 @@ struct HomepageCardDTO: Decodable, Hashable {
     let name: String
     let setName: String?
     let year: Int?
+    /// canonical_cards.card_number — used by CardDetailView's metadata
+    /// tile so cards opened via a homepage rail show "#1" instead of
+    /// "—". Optional during rollout: server builds before commit
+    /// (date) sent HomepageCard without this field; older clients
+    /// keep decoding cleanly because the converter falls back to "".
+    let cardNumber: String?
     let marketPrice: Double?
     let changePct: Double?
     let changeWindow: String?            // "24H" | "7D"
@@ -1007,11 +1013,20 @@ extension HomepageCardDTO {
         let price = marketPrice ?? 0
         let window = changeWindow ?? "24H"
         let sparkline = sparkline7D.isEmpty ? [price] : sparkline7D
+        // Prefix with "#" to match the rest of the iOS conversion paths
+        // (CardService.fetchMarketCards / fetchSetCards both stamp this
+        // before handing the row to CardDetailView). Empty string when
+        // the API response is missing the field (older server builds).
+        let displayCardNumber: String = {
+            guard let raw = cardNumber?.trimmingCharacters(in: .whitespaces),
+                  !raw.isEmpty else { return "" }
+            return raw.hasPrefix("#") ? raw : "#\(raw)"
+        }()
         return MarketCard(
             id: slug,
             name: name,
             setName: setName ?? "Unknown",
-            cardNumber: "",
+            cardNumber: displayCardNumber,
             price: price,
             changePct: changePct,
             changeWindow: window,

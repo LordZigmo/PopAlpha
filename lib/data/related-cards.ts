@@ -8,6 +8,7 @@ type CanonicalCardLookupRow = {
   canonical_name: string;
   set_name: string | null;
   year: number | null;
+  card_number: string | null;
   subject: string | null;
   primary_image_url: string | null;
   mirrored_primary_image_url: string | null;
@@ -33,6 +34,7 @@ function toHomepageCard(
     name: row.canonical_name,
     set_name: row.set_name,
     year: row.year,
+    card_number: row.card_number ?? null,
     market_price: market?.marketPrice ?? null,
     change_pct: market?.changePct ?? null,
     change_window: market?.changeWindow ?? null,
@@ -80,7 +82,7 @@ export async function getRelatedCardCarousels(input: {
     setName
       ? db
           .from("canonical_cards")
-          .select("slug, canonical_name, set_name, year, subject, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url")
+          .select("slug, canonical_name, set_name, year, card_number, subject, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url")
           .eq("set_name", setName)
           .neq("slug", slug)
           .limit(Math.max(limit * 3, 12))
@@ -89,13 +91,13 @@ export async function getRelatedCardCarousels(input: {
       ? subject?.trim()
         ? db
             .from("canonical_cards")
-            .select("slug, canonical_name, set_name, year, subject, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url")
+            .select("slug, canonical_name, set_name, year, card_number, subject, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url")
             .eq("subject", effectiveSubject)
             .neq("slug", slug)
             .limit(Math.max(limit * 4, 16))
         : db
             .from("canonical_cards")
-            .select("slug, canonical_name, set_name, year, subject, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url")
+            .select("slug, canonical_name, set_name, year, card_number, subject, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url")
             .ilike("canonical_name", `${effectiveSubject}%`)
             .neq("slug", slug)
             .limit(Math.max(limit * 4, 16))

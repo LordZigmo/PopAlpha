@@ -33,6 +33,7 @@ export type HomepageCard = {
   name: string;
   set_name: string | null;
   year: number | null;
+  card_number: string | null;
   market_price: number | null;
   change_pct: number | null;
   change_window: HomepageSignalWindow | null;
@@ -111,6 +112,7 @@ type CardRow = {
   canonical_name: string;
   set_name: string | null;
   year: number | null;
+  card_number: string | null;
   primary_image_url?: string | null;
   mirrored_primary_image_url?: string | null;
   mirrored_primary_thumb_url?: string | null;
@@ -194,6 +196,7 @@ function createEmptyWindowedCards(): HomepageWindowedCards {
 type DailyMoverJoinedCard = {
   canonical_name: string | null;
   year: number | null;
+  card_number: string | null;
   primary_image_url: string | null;
   mirrored_primary_image_url: string | null;
   mirrored_primary_thumb_url: string | null;
@@ -256,7 +259,7 @@ async function loadDailyTopMoversBundle(
   const { data, error } = await client
     .from("daily_top_movers")
     .select(
-      "rank, kind, canonical_slug, change_pct, change_window, market_price, market_price_as_of, set_name, active_listings_7d, confidence_score, canonical_cards(canonical_name, year, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url)",
+      "rank, kind, canonical_slug, change_pct, change_window, market_price, market_price_as_of, set_name, active_listings_7d, confidence_score, canonical_cards(canonical_name, year, card_number, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url)",
     )
     .eq("computed_at_date", computedDate)
     .order("kind", { ascending: true })
@@ -281,6 +284,7 @@ async function loadDailyTopMoversBundle(
       name: canonicalCard?.canonical_name ?? row.canonical_slug,
       set_name: row.set_name,
       year: canonicalCard?.year ?? null,
+      card_number: canonicalCard?.card_number ?? null,
       market_price: row.market_price,
       change_pct: row.change_pct,
       change_window: row.change_window,
@@ -352,7 +356,7 @@ async function loadJapaneseRail(
   const { data, error } = await client
     .from("canonical_cards")
     .select(
-      "slug, canonical_name, set_name, year, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url, public_card_metrics!inner(market_price, market_price_as_of, change_pct_24h, change_pct_7d, active_listings_7d, market_confidence_score, snapshot_count_30d, market_low_confidence, printing_id, grade)",
+      "slug, canonical_name, set_name, year, card_number, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url, public_card_metrics!inner(market_price, market_price_as_of, change_pct_24h, change_pct_7d, active_listings_7d, market_confidence_score, snapshot_count_30d, market_low_confidence, printing_id, grade)",
     )
     .eq("language", "JP")
     .eq("public_card_metrics.grade", "RAW")
@@ -399,6 +403,7 @@ async function loadJapaneseRail(
         name: row.canonical_name,
         set_name: row.set_name ?? null,
         year: row.year ?? null,
+        card_number: row.card_number ?? null,
         market_price: metrics.market_price,
         change_pct: changePct,
         change_window: changeWindow,
@@ -759,7 +764,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
       const [cardResults, marketPulseResults, imageResults, sparklineResults] = await Promise.all([
         Promise.all(slugBatches.map((batch) => client
           .from("canonical_cards")
-          .select("slug, canonical_name, set_name, year, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url")
+          .select("slug, canonical_name, set_name, year, card_number, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url")
           .in("slug", batch))),
 
         Promise.all(slugBatches.map((batch) => getCanonicalMarketPulseMap(client, batch))),
@@ -914,6 +919,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
         name: card?.canonical_name ?? slug,
         set_name: card?.set_name ?? null,
         year: card?.year ?? null,
+        card_number: card?.card_number ?? null,
         market_price: marketPulse?.marketPrice ?? overrides.fallbackPrice ?? null,
         change_pct: selectedChangePct,
         change_window: selectedChangeWindow,

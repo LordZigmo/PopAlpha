@@ -739,6 +739,7 @@ export default async function CanonicalCardPage({
         name: canonical.canonical_name,
         set_name: canonical.set_name,
         year: canonical.year,
+        card_number: canonical.card_number ?? null,
         market_price: null,
         change_pct: vm?.change_7d_pct ?? null,
         change_window: vm?.change_7d_pct != null ? "7D" : null,
