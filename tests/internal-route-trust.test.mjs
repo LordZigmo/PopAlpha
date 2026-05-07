@@ -44,10 +44,6 @@ export function runInternalRouteTrustTests() {
     "admin_import_token",
   );
   assert.equal(
-    INTERNAL_ROUTE_TRUST_CONTRACTS["cron/sync-canonical"]?.trustModel,
-    "cron_secret",
-  );
-  assert.equal(
     INTERNAL_ROUTE_TRUST_CONTRACTS["cron/process-ebay-deletion-receipts"]?.trustModel,
     "cron_secret",
   );

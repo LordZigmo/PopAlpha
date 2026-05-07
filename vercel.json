@@ -65,6 +65,10 @@
       "schedule": "*/3 * * * *"
     },
     {
+      "path": "/api/cron/process-ebay-deletion-receipts",
+      "schedule": "15 * * * *"
+    },
+    {
       "path": "/api/cron/batch-refresh-pipeline-rollups",
       "schedule": "22,52 * * * *"
     },
