@@ -176,16 +176,35 @@ enum OCRService {
                 // "low Y". A bounding box near the bottom of the
                 // image has midY ≈ 0; near the top, midY ≈ 1.
                 //
-                // 0.22 is generous enough to catch:
+                // 0.35 is the v3.5 threshold (relaxed from 0.22 on
+                // 2026-05-07). Real-device data showed 2 of 5
+                // hand-held scans had the card_number printed at
+                // midY ~0.22-0.30 — the card occupies less than the
+                // full frame because of the user's grip position,
+                // pushing the printed number above the original
+                // 22%-of-image cutoff. The Pokemon TCG Classic
+                // Chansey false-positive that drove the original
+                // 0.22 cutoff is still defended against by the
+                // plausibility filter in collectorNumberCandidates
+                // (yInt >= 5 AND yInt <= 600 AND xInt <= 999) — the
+                // mid-card "3/Y" patterns it caught all parse to
+                // y < 5 once the plausibility filter applies.
+                //
+                // Catches at 0.35:
                 //   - card_number row (typically ~5-8% from bottom)
                 //   - illustrator credit + copyright line right above
                 //   - set code below the artwork
-                // …without admitting middle-of-card text like attack
-                // damage or the rules-text block.
+                //   - card_number on cards where the bottom is
+                //     slightly above the frame's bottom edge (the
+                //     handheld-grip case)
+                // …still without admitting most middle-of-card
+                // attack damage (those parse to y < 5 anyway) or the
+                // rules-text block (~midY 0.30-0.50, no slash
+                // patterns above midY 0.35 in that region).
                 let cardNumberObservations: [VNRecognizedTextObservation]
                 if restrictCardNumbersToBottomRegion {
                     cardNumberObservations = results.filter { obs in
-                        obs.boundingBox.midY < 0.22
+                        obs.boundingBox.midY < 0.35
                     }
                 } else {
                     cardNumberObservations = results
