@@ -22,27 +22,44 @@ Companion to:
 
 ---
 
-## 1. Where we are (post-Tier-1.1, 2026-05-07)
+## 1. Where we are (post-Phase-1, 2026-05-08)
 
 Three-mode eval against `https://popalpha.ai`, 323 labeled images:
 
 | Mode | What it tests | Top-1 |
 |---|---|---|
-| **Default** (no OCR sent) | Pure pgvector kNN on SigLIP-2 + the orphan/digital-only filters | **72.1%** (233/323) |
-| **Path B ceiling** (perfect OCR card_number, no set_hint) | kNN ∩ canonical_cards.card_number narrowing | **94.4%** (305/323) |
-| **Path A ceiling** (perfect OCR card_number + set_hint) | Direct canonical_cards lookup with kNN tiebreak | **95.7%** (309/323) |
+| **Default** (no OCR sent) | Pure pgvector kNN on SigLIP-2 + the orphan/digital-only filters | **79.3%** (256/323) |
+| **Path B ceiling** (perfect OCR card_number, no set_hint) | kNN ∩ canonical_cards.card_number narrowing | **94.7%** (306/323) |
+| **Path A ceiling** (perfect OCR card_number + set_hint) | Direct canonical_cards lookup with kNN tiebreak | **96.0%** (310/323) |
+
+The Default-mode lift from the previous baseline (72.1% → 79.3%) is
+NOT from Phase 1 — it's from the SigLIP embedding backfill that
+landed after the model-version-aware cron filter shipped (commit
+`23bb75d`, 2026-05-07: ~1,486 rows backfilled). Phase 1 itself moved
+the confidence-tier distribution within Path B (more HIGH, fewer
+MEDIUM-but-correct) without changing top-1 ranking — see §3 Tier 1.6
+for the mechanism.
 
 This shape — and *only* this shape — tells us where the gaps are:
 
 | Gap | Size | What closes it |
 |---|---|---|
-| **Default → Path B** | **22.3pp** | Make iOS card_number OCR extract reliably on real-device captures |
+| **Default → Path B** | **15.4pp** | Make iOS card_number OCR extract reliably on real-device captures |
 | Path B → Path A | 1.3pp | Better set_hint extraction (mostly tapped out post-Phase-1) |
-| Path A → 100% | 4.3pp | Better embedder (SigLIP-2 fine-tune or model swap) |
+| Path A → 100% | 4.0pp | Better embedder (SigLIP-2 fine-tune or model swap) |
 
-**The 22.3pp gap is the entire game right now.** When OCR
-card_number fires correctly, we're at 94%+ regardless of
-set_hint. When it doesn't, we're at 72%.
+**The 15.4pp gap is still the dominant lever** — narrower than the
+22.3pp pre-backfill but the OCR-robustness work remains the highest
+real-device ROI. When OCR card_number fires correctly, we're at
+~95% regardless of set_hint. When it doesn't, we're at 79%.
+
+The eval also surfaced the HIGH-confidence-rate signal that drove
+the user's "first-time HIGH feels low" observation: **Path B run
+shows 267/323 = 82.7% HIGH** (with perfect OCR card_number, post
+Phase 1). That's the realistic upper bound on first-try HIGH-rate
+assuming OCR fires. Real-device OCR isn't 100% — Phase 2 (multi-frame
+consensus on tap) is the lever to close the gap between real-device
+OCR and this ceiling.
 
 ### What Tier 1.1 actually shipped (and didn't)
 
