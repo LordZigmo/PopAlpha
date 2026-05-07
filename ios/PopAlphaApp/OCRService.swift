@@ -44,9 +44,10 @@ enum OCRService {
     /// failure should fall through to vanilla CLIP ranking, not
     /// block the scan.
     static func extractCardIdentifiers(
-        from image: UIImage
+        from image: UIImage,
+        language: ScanLanguage = .en,
     ) async -> (cardNumber: String?, setHint: String?) {
-        let multi = await extractCardIdentifiersMulti(from: image)
+        let multi = await extractCardIdentifiersMulti(from: image, language: language)
         return (multi.cardNumbers.first, multi.setHint)
     }
 
@@ -80,10 +81,12 @@ enum OCRService {
     static func extractCardIdentifiersMulti(
         from image: UIImage,
         maxCandidatesPerObservation: Int = 3,
+        language: ScanLanguage = .en,
     ) async -> (cardNumbers: [String], setHint: String?) {
         async let fullPass = recognizeText(
             in: image,
             maxCandidatesPerObservation: maxCandidatesPerObservation,
+            language: language,
             // Spatial filtering for card_number extraction on the full
             // pass: only consider text whose bounding-box CENTER is in
             // the bottom ~22% of the image. Pokemon's card_number has
@@ -118,6 +121,7 @@ enum OCRService {
             return await recognizeText(
                 in: strip,
                 maxCandidatesPerObservation: maxCandidatesPerObservation,
+                language: language,
                 // Strip pass already operates on the bottom 18% of the
                 // input, so all of its observations are implicitly in
                 // the card's bottom region. Applying the spatial
@@ -156,6 +160,7 @@ enum OCRService {
     private static func recognizeText(
         in image: UIImage,
         maxCandidatesPerObservation: Int,
+        language: ScanLanguage,
         restrictCardNumbersToBottomRegion: Bool,
     ) async -> ([String], String?) {
         guard let cgImage = image.cgImage else { return ([], nil) }
@@ -259,7 +264,18 @@ enum OCRService {
             }
 
             request.recognitionLevel = .accurate
-            request.recognitionLanguages = ["en-US"]
+            // JP cards mix Japanese (card name, attack name, flavor text)
+            // with Latin (HP value, card_number "001/100", set code,
+            // copyright). Vision benefits from the primary language
+            // listed FIRST — the recognizer picks it for ambiguous
+            // glyphs. EN cards skip JP entirely; loading both languages
+            // adds latency we don't need on the EN path.
+            switch language {
+            case .en:
+                request.recognitionLanguages = ["en-US"]
+            case .jp:
+                request.recognitionLanguages = ["ja-JP", "en-US"]
+            }
             request.usesLanguageCorrection = false
             // Pin to revision 3 (iOS 16+). Default already picks the
             // latest available, but explicit pin removes any future-

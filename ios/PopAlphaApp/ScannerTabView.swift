@@ -124,6 +124,7 @@ struct ScannerTabView: View {
                             if !premiumGate.isPro {
                                 scanQuotaIndicator
                             }
+                            languagePill
                             #if DEBUG
                             offlineSmokeButton
                             #endif
@@ -186,7 +187,7 @@ struct ScannerTabView: View {
                     matches: scanner.lastMatches,
                     imageHash: scanner.lastImageHash,
                     scanImage: scanner.lastScanImage,
-                    scanLanguage: .en,
+                    scanLanguage: scanner.scanLanguage,
                     ocrCardNumber: scanner.lastOCR.cardNumber,
                     ocrSetHint: scanner.lastOCR.setHint,
                     winningPath: scanner.lastWinningPath,
@@ -298,28 +299,42 @@ struct ScannerTabView: View {
     // Long-press: in DEBUG builds only, flip PremiumGate's override
     // so QA can exercise the pro path without a real StoreKit purchase.
     // Filled crown = currently pro (real or override), hollow = free.
+    //
+    // We can't use a SwiftUI Button + simultaneousGesture(LongPress)
+    // here — the Button still fires its tap action on touch-up after
+    // a long press completes, so the paywall sheet pops up alongside
+    // the override toggle. Using a plain Image + ExclusiveGesture
+    // (LongPress before Tap) makes the two mutually exclusive: held
+    // ≥0.6s recognizes long-press and cancels tap; released earlier
+    // falls through to tap.
 
     private var crownButton: some View {
-        Button {
+        Image(systemName: premiumGate.isPro ? "crown.fill" : "crown")
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(
+                premiumGate.isPro ? Color.yellow.opacity(0.9) : .white.opacity(0.5)
+            )
+            .frame(width: 32, height: 32)
+            .background(.ultraThinMaterial.opacity(0.5))
+            .clipShape(Circle())
+            .contentShape(Circle())
+            .gesture(crownGesture)
+            .accessibilityLabel(premiumGate.isPro ? "PopAlpha Pro" : "Upgrade to PopAlpha Pro")
+    }
+
+    private var crownGesture: some Gesture {
+        let tap = TapGesture().onEnded {
             PAHaptics.tap()
             showPaywallSheet = true
-        } label: {
-            Image(systemName: premiumGate.isPro ? "crown.fill" : "crown")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(
-                    premiumGate.isPro ? Color.yellow.opacity(0.9) : .white.opacity(0.5)
-                )
-                .frame(width: 32, height: 32)
-                .background(.ultraThinMaterial.opacity(0.5))
-                .clipShape(Circle())
         }
         #if DEBUG
-        .simultaneousGesture(
-            LongPressGesture(minimumDuration: 0.6).onEnded { _ in
-                PAHaptics.tap()
-                premiumGate.debugOverrideEnabled.toggle()
-            }
-        )
+        let longPress = LongPressGesture(minimumDuration: 0.6).onEnded { _ in
+            PAHaptics.tap()
+            premiumGate.debugOverrideEnabled.toggle()
+        }
+        return longPress.exclusively(before: tap)
+        #else
+        return tap
         #endif
     }
 
@@ -481,6 +496,50 @@ struct ScannerTabView: View {
     // is intentionally left so a curious future reader sees what's
     // gone, not just an empty space between two unrelated views.
 
+    // MARK: - Language Pill (top-right toggle, EN ↔ JP)
+    //
+    // Two-segment capsule. Tapping a segment flips
+    // ScannerHost.scanLanguage, which propagates to:
+    //   - OCRService.extractCardIdentifiersMulti: switches Vision's
+    //     recognitionLanguages from ["en-US"] to ["ja-JP", "en-US"]
+    //   - ScanService.identify (server route): sends language=JP query
+    //   - The offline-vs-server gate: JP forces server (the bundled
+    //     .papb has no JP rows yet)
+    //   - ScanPickerSheet: language threads into eval-promote and
+    //     user-correction submission so the right
+    //     captured_language gets recorded.
+    //
+    // Designed to vanish into the chrome on EN (the common case): a
+    // dim "EN | JP" pill where only the active segment is filled.
+    @ViewBuilder
+    private var languagePill: some View {
+        HStack(spacing: 0) {
+            languagePillSegment(.en)
+            languagePillSegment(.jp)
+        }
+        .background(Color.black.opacity(0.5))
+        .clipShape(Capsule())
+        .overlay(languagePillBorder)
+    }
+
+    @ViewBuilder
+    private func languagePillSegment(_ lang: ScanLanguage) -> some View {
+        let isActive = scanner.scanLanguage == lang
+        let fg: Color = isActive ? .white : Color.white.opacity(0.55)
+        let bg: Color = isActive ? PA.Colors.accent : Color.clear
+        Text(lang.shortLabel)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(fg)
+            .frame(width: 28, height: 22)
+            .background(bg)
+            .contentShape(Rectangle())
+            .onTapGesture { scanner.scanLanguage = lang }
+    }
+
+    private var languagePillBorder: some View {
+        Capsule().strokeBorder(Color.white.opacity(0.2), lineWidth: 0.5)
+    }
+
     // MARK: - Identify Status Toast (bottom-center of screen)
 
     @ViewBuilder
@@ -639,7 +698,9 @@ final class ScannerHost: ObservableObject {
 
     /// Language hint passed to /api/scan/identify. Defaults to EN; the
     /// scanner UI exposes a pill toggle so the user can flip to JP.
-    var scanLanguage: ScanLanguage = .en
+    /// `@Published` so the languagePill in the scanner overlay
+    /// re-renders when the user taps to flip.
+    @Published var scanLanguage: ScanLanguage = .en
 
     let viewModel: ScannerViewModel?
     let isUsingMockData: Bool
@@ -915,7 +976,10 @@ final class ScannerHost: ObservableObject {
         // never contained that text in the first place.
         let imageForOCR = ocrImage ?? image
         let ocrT0 = Date()
-        let ocrMulti = await OCRService.extractCardIdentifiersMulti(from: imageForOCR)
+        let ocrMulti = await OCRService.extractCardIdentifiersMulti(
+            from: imageForOCR,
+            language: self.scanLanguage,
+        )
         let ocrMs = Date().timeIntervalSince(ocrT0) * 1000
         let ocr = (cardNumber: ocrMulti.cardNumbers.first, setHint: ocrMulti.setHint)
         self.lastOCR = ocr
@@ -927,10 +991,21 @@ final class ScannerHost: ObservableObject {
         // network path — free-tier behavior never regresses when
         // premium turns on.
         let offlineEnabled = await MainActor.run { PremiumGate.shared.offlineScannerEnabled }
+        // JP scans bypass the offline orchestrator — the bundled .papb
+        // catalog has zero JP rows (it's built from EN siglip2 rows
+        // only). Routing JP through the offline path would either
+        // return zero matches or, worse, force a JP card's embedding
+        // through the EN catalog and surface incorrect EN
+        // top-1s. The server route at /api/scan/identify handles
+        // language=JP correctly against the 379 JP siglip2 rows in
+        // card_image_embeddings (Supabase). When we eventually bundle
+        // a multilingual .papb, this guard becomes the single line to
+        // remove.
+        let useOffline = offlineEnabled && self.scanLanguage == .en
         var response: ScanIdentifyResponse?
         var usedOffline = false
 
-        if offlineEnabled {
+        if useOffline {
             let orchestrator = await MainActor.run { self.makeOrchestrator() }
             do {
                 let r = try await orchestrator.identifyMulti(
