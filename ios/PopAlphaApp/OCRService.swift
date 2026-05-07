@@ -169,10 +169,7 @@ enum OCRService {
                     return
                 }
 
-                let topLines: [String] = results.compactMap { obs in
-                    obs.topCandidates(1).first?.string
-                }
-                let setHint = pickSetHint(from: topLines)
+                let setHint = pickSetHint(from: results)
 
                 // Vision's coordinate space is bottom-left origin
                 // (per Apple docs) so "bottom of the image" =
@@ -312,7 +309,9 @@ enum OCRService {
         await extractCardIdentifiers(from: image).cardNumber
     }
 
-    /// Pick the most set-name-looking line from a Vision OCR pass.
+    /// Pick the most set-name-looking line from a Vision OCR pass,
+    /// given the full observation list (so the scorer can use
+    /// bounding-box positions in addition to text content).
     ///
     /// Iteration history:
     ///   v1 (Day 1): "longest plausible letter-heavy line." Caused
@@ -335,15 +334,53 @@ enum OCRService {
     ///     - Contains a stop word that strongly signals prose ("is",
     ///       "the", "a", "from", "of", "this", "its", "by").
     ///
+    ///   v3 (Day 4 / 2026-05-06): adds spatial preference. Real-device
+    ///   scan of a Pokemon TCG Classic Chansey returned the attack
+    ///   line "Double-edge Chansey does 80" as the winning set
+    ///   hint — long + letter-heavy beats every legitimate
+    ///   candidate under v2's pure-content scoring. But set names
+    ///   never print mid-card: they print mid/upper card under the
+    ///   card name, while attack text and damage notation occupy
+    ///   the middle, and collector # + © + set code dominate the
+    ///   bottom 22%. v3:
+    ///     - **Hard reject** observations whose `boundingBox.midY <
+    ///       0.22` (Vision uses bottom-left-origin coords; midY ≈ 0
+    ///       is the BOTTOM of the image). Kills "© 2025" / set code
+    ///       false positives.
+    ///     - **Soft prefer** observations with midY > 0.30 (upper
+    ///       70%) via score boost. Real set names cluster around
+    ///       midY 0.85-0.95 on modern cards.
+    ///     - **Penalize 4+ word candidates** (real set names are
+    ///       1-3 words; "Sword & Shield Crown Zenith" at 5 words
+    ///       is the longest I could find and it would still survive
+    ///       at score 0). Long lines are nearly always attack text
+    ///       or rules text that slipped past the prefix/period/
+    ///       stop-word filters.
+    ///     - **Add "does", "deal", "deals", "dealt" to prose stop
+    ///       words** to catch the "<Move> does 80" damage-notation
+    ///       pattern explicitly.
+    ///
     /// Modern Pokémon cards rarely print the SET NAME on the front
     /// at all (just a small set CODE like "AR" or "PRE"). So this
     /// function returning nil is the COMMON case. That's fine —
     /// nil set_hint lets server-side Path B activate (the middle
     /// layer), which is strictly better than Path A firing on a
     /// false hint.
-    static func pickSetHint(from lines: [String]) -> String? {
-        let candidates: [(String, Int)] = lines.compactMap { raw in
-            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    static func pickSetHint(from observations: [VNRecognizedTextObservation]) -> String? {
+        // Pair top-candidate text with each observation's midY so the
+        // scorer can apply both content filters and spatial
+        // preference. Vision's coordinate space is bottom-left origin
+        // (Apple docs): midY ≈ 0 = bottom of image, midY ≈ 1 = top.
+        // Hard-reject the bottom 22% here so flavor / © / set-code
+        // text never even reaches the content filters.
+        let upperRegion: [(text: String, midY: CGFloat)] = observations.compactMap { obs in
+            guard obs.boundingBox.midY >= 0.22 else { return nil }
+            guard let text = obs.topCandidates(1).first?.string else { return nil }
+            return (text, obs.boundingBox.midY)
+        }
+
+        let candidates: [(String, Int)] = upperRegion.compactMap { entry in
+            let trimmed = entry.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard trimmed.count >= 3, trimmed.count <= 40 else { return nil }
 
             let letters = trimmed.unicodeScalars.filter { CharacterSet.letters.contains($0) }.count
@@ -370,22 +407,38 @@ enum OCRService {
             // Reject sentence-cased flavor text — ends with period.
             if trimmed.hasSuffix(".") { return nil }
             // Reject prose stop words. Set names don't contain
-            // articles or prepositions ("the", "a", "of", "from").
+            // articles, prepositions, or damage-notation verbs.
+            // "does"/"deal"/"deals"/"dealt" catch the "<Move> does 80"
+            // attack pattern explicitly.
             let proseStopWords: Set<String> = [
                 "is", "the", "a", "from", "of", "this", "its", "by",
                 "to", "with", "and", "but", "or", "for", "as",
                 "have", "has", "had", "be", "been",
+                "does", "deal", "deals", "dealt",
             ]
             let words = lowered.split(separator: " ").map(String.init)
             if words.contains(where: { proseStopWords.contains($0) }) {
                 return nil
             }
 
-            // Score: longer = more likely a real set name (vs a
-            // 3-letter HP value or "EX"). Multi-word lines also
-            // preferred — set names are usually 2+ words.
+            // Score:
+            //   - Letters dominate (long letter-heavy lines beat short
+            //     code-like lines).
+            //   - 2+ word lines preferred — most set names are
+            //     multi-word ("Surging Sparks", "Mega Evolution").
+            //   - 4+ word lines penalized — at that length we're
+            //     almost certainly looking at attack/rules text that
+            //     slipped past the content filters. The penalty is
+            //     mild enough that a 4-word legit set name still
+            //     wins over a 1-word junk candidate.
+            //   - Upper-region soft boost — bonus for midY > 0.30
+            //     (above the bottom 30%). Real set names cluster
+            //     near the top of the card.
             let wordCount = trimmed.split(separator: " ").count
-            let score = letters * 2 + (wordCount > 1 ? 5 : 0)
+            var score = letters * 2
+            if wordCount > 1 { score += 5 }
+            if wordCount >= 4 { score -= 8 }
+            if entry.midY > 0.30 { score += 3 }
             return (trimmed, score)
         }
 
