@@ -3,8 +3,10 @@ import type { Metadata } from "next";
 import { ArrowRight, BookOpen, House, Layers3, Search } from "lucide-react";
 import CanonicalCardShell from "@/components/layout/CanonicalCardShell";
 import {
+  getJapaneseCatalogState,
   getPipelineStatus,
   getTierSummary,
+  type JapaneseCatalogState,
   type PipelineStatus,
   type RefreshTier,
   type TierSummary,
@@ -179,9 +181,10 @@ function SectionJump({ href, label }: { href: string; label: string }) {
 }
 
 export default async function DataPage() {
-  const [tierResult, pipelineResult] = await Promise.allSettled([
+  const [tierResult, pipelineResult, japaneseResult] = await Promise.allSettled([
     getTierSummary(),
     getPipelineStatus(),
+    getJapaneseCatalogState(),
   ]);
 
   if (tierResult.status === "rejected") {
@@ -192,9 +195,14 @@ export default async function DataPage() {
     console.error("[data/page] failed to load pipeline status:",
       pipelineResult.reason instanceof Error ? pipelineResult.reason.message : String(pipelineResult.reason));
   }
+  if (japaneseResult.status === "rejected") {
+    console.error("[data/page] failed to load Japanese catalog state:",
+      japaneseResult.reason instanceof Error ? japaneseResult.reason.message : String(japaneseResult.reason));
+  }
 
   const tierSummary = tierResult.status === "fulfilled" ? tierResult.value : null;
   const pipelineStatus = pipelineResult.status === "fulfilled" ? pipelineResult.value : null;
+  const japanese: JapaneseCatalogState | null = japaneseResult.status === "fulfilled" ? japaneseResult.value : null;
 
   const totalCards = tierSummary?.total ?? 0;
   const hotCount = tierSummary?.tiers.find((t) => t.tier === "hot")?.count ?? 0;
@@ -214,6 +222,7 @@ export default async function DataPage() {
   const pageLinks = [
     { href: "#tiers", label: "The Four Tiers" },
     { href: "#truth", label: "The Honest Take" },
+    { href: "#japanese", label: "Japanese Catalog" },
     { href: "#contribute", label: "Shape the Market" },
     { href: "#methodology", label: "How We Compute This" },
   ];
@@ -336,6 +345,110 @@ export default async function DataPage() {
               </p>
             </section>
           ) : null}
+
+          <section id="japanese" className="rounded-[28px] border border-[#3F1212] bg-gradient-to-br from-[#1A0A0A] to-[#101010] p-6 sm:p-8">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#F87171]">
+              Japanese Catalog
+            </p>
+            <h2 className="mt-3 text-[22px] font-semibold tracking-[-0.03em] sm:text-[28px]">
+              How the JP onboarding is going
+            </h2>
+            <p className="mt-3 max-w-2xl text-[14px] leading-6 text-[#9CA3AF]">
+              Japanese cards came online in May 2026. We're growing the JP catalog one set at a time — measuring price coverage and freshness as we go before scaling up the daily refresh cadence.
+            </p>
+
+            {japanese ? (
+              <>
+                <div className="mt-6 grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-2xl border border-white/[0.05] bg-[#0F0808] p-4">
+                    <p className="text-[11px] uppercase tracking-[0.14em] text-[#F87171]">Catalog</p>
+                    <p className="mt-2 text-[28px] font-semibold leading-none tracking-[-0.04em] text-white">
+                      {formatNumber(japanese.totalCards)}
+                    </p>
+                    <p className="mt-1 text-[12px] text-[#8B8B8B]">
+                      cards across {formatNumber(japanese.totalSets)} {japanese.totalSets === 1 ? "set" : "sets"}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-white/[0.05] bg-[#0F0808] p-4">
+                    <p className="text-[11px] uppercase tracking-[0.14em] text-[#F87171]">Priced</p>
+                    <p className="mt-2 text-[28px] font-semibold leading-none tracking-[-0.04em] text-white">
+                      {formatPct(japanese.pricedPct)}
+                    </p>
+                    <p className="mt-1 text-[12px] text-[#8B8B8B]">
+                      {formatNumber(japanese.pricedCards)} of {formatNumber(japanese.totalCards)} have a market price
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-white/[0.05] bg-[#0F0808] p-4">
+                    <p className="text-[11px] uppercase tracking-[0.14em] text-[#F87171]">Fresh (7d)</p>
+                    <p className="mt-2 text-[28px] font-semibold leading-none tracking-[-0.04em] text-white">
+                      {formatPct(japanese.freshPct)}
+                    </p>
+                    <p className="mt-1 text-[12px] text-[#8B8B8B]">
+                      {formatNumber(japanese.freshCards)} priced within the last 7 days
+                    </p>
+                  </div>
+                </div>
+
+                {japanese.latestPriceAsOf ? (
+                  <p className="mt-4 text-[12px] text-[#6B7280]">
+                    Most recent JP price observed: {formatRelativeTime(japanese.latestPriceAsOf)}
+                  </p>
+                ) : null}
+
+                {japanese.sets.length > 0 ? (
+                  <div className="mt-6 overflow-hidden rounded-2xl border border-white/[0.05] bg-[#0F0808]">
+                    <div className="grid grid-cols-12 gap-3 border-b border-white/[0.04] px-4 py-3 text-[11px] uppercase tracking-[0.14em] text-[#6B7280]">
+                      <span className="col-span-5 sm:col-span-6">Set</span>
+                      <span className="col-span-2 text-right tabular-nums">Cards</span>
+                      <span className="col-span-3 sm:col-span-2 text-right tabular-nums">Priced</span>
+                      <span className="col-span-2 text-right tabular-nums">Fresh</span>
+                    </div>
+                    {japanese.sets.map((entry) => (
+                      <div
+                        key={entry.setName}
+                        className="grid grid-cols-12 gap-3 border-b border-white/[0.04] px-4 py-3 text-[14px] last:border-b-0"
+                      >
+                        <div className="col-span-5 sm:col-span-6">
+                          <p className="text-[14px] font-medium text-white">{entry.setName}</p>
+                          <p className="text-[11px] text-[#6B7280]">
+                            {entry.year ?? "—"}
+                          </p>
+                        </div>
+                        <div className="col-span-2 self-center text-right tabular-nums text-[#C9CDD3]">
+                          {formatNumber(entry.cardCount)}
+                        </div>
+                        <div className="col-span-3 self-center text-right tabular-nums sm:col-span-2">
+                          <p className="text-[#E5E7EB]">{formatPct(entry.pricedPct)}</p>
+                          <p className="text-[11px] text-[#6B7280]">
+                            {formatNumber(entry.pricedCount)}/{formatNumber(entry.cardCount)}
+                          </p>
+                        </div>
+                        <div className="col-span-2 self-center text-right tabular-nums">
+                          <p className={entry.freshPct >= 80 ? "text-[#4ADE80]" : entry.freshPct >= 40 ? "text-[#FBBF24]" : "text-[#F87171]"}>
+                            {formatPct(entry.freshPct)}
+                          </p>
+                          <p className="text-[11px] text-[#6B7280]">
+                            {formatRelativeTime(entry.latestPriceAsOf)}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+
+                <p className="mt-5 text-[13px] leading-6 text-[#8B8B8B]">
+                  <span className="font-semibold text-[#C9CDD3]">What we look for before adding more sets:</span> Priced &gt; 90% means the matching pipeline cleanly attached every Scrydex observation to a canonical card. Fresh &gt; 80% means the daily Scrydex refresh is reaching JP sets, not just EN. When both stay green for a few days on a new set, we know the pipeline is healthy enough to onboard the next batch.
+                </p>
+              </>
+            ) : (
+              <div className="mt-6 rounded-2xl border border-[#78350F] bg-[#1C1917] p-5">
+                <p className="text-[12px] uppercase tracking-[0.14em] text-[#FBBF24]">Temporarily Unavailable</p>
+                <p className="mt-2 text-[15px] text-[#D1D5DB]">
+                  Couldn't load the Japanese catalog snapshot right now. Refresh in a moment.
+                </p>
+              </div>
+            )}
+          </section>
 
           <section id="contribute" className="rounded-[28px] border border-[#1E3A5F] bg-gradient-to-br from-[#0F1B2E] to-[#101010] p-6 sm:p-8">
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#60A5FA]">
