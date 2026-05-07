@@ -9,6 +9,12 @@ struct ActivityEventCell: View {
     var onCommentTap: ((ActivityService.ActivityFeedItem) -> Void)?
     var onCardTap: ((String) -> Void)?
     var onHandleTap: ((String) -> Void)?
+    var onReportTap: ((ActivityService.ActivityFeedItem) -> Void)?
+    var onBlockTap: ((ActivityService.ActivityFeedItem) -> Void)?
+
+    private var isOwn: Bool {
+        item.actor.id == AuthService.shared.currentUserId
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -113,6 +119,34 @@ struct ActivityEventCell: View {
                         }
                     }
                     .buttonStyle(.plain)
+
+                    Spacer()
+
+                    if !isOwn, onReportTap != nil || onBlockTap != nil {
+                        Menu {
+                            if onReportTap != nil {
+                                Button {
+                                    onReportTap?(item)
+                                } label: {
+                                    Label("Report activity", systemImage: "flag")
+                                }
+                            }
+                            if onBlockTap != nil {
+                                Button(role: .destructive) {
+                                    onBlockTap?(item)
+                                } label: {
+                                    Label("Block @\(item.actor.handle)", systemImage: "hand.raised")
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(PA.Colors.muted)
+                                .frame(width: 24, height: 20)
+                                .contentShape(Rectangle())
+                        }
+                        .accessibilityLabel("More options for @\(item.actor.handle)'s activity")
+                    }
                 }
             }
         }

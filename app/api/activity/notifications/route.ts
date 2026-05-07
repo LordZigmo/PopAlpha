@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require";
 import { createServerSupabaseUserClient } from "@/lib/db/user";
 import type { NotificationItem, NotificationsResponse } from "@/lib/activity/types";
+import { getBlockedUserIds } from "@/lib/moderation/blocked-users";
 
 export const runtime = "nodejs";
 
@@ -18,13 +19,19 @@ export async function GET(req: Request) {
   const limit = Math.min(Number(url.searchParams.get("limit") || "20") || 20, 50);
 
   const db = await createServerSupabaseUserClient();
+  const blockedIds = await getBlockedUserIds(db, auth.userId);
+  const blockedFilter = blockedIds.length > 0
+    ? `(${blockedIds.map((id) => `"${id}"`).join(",")})`
+    : null;
 
-  // Get unread count
-  const { data: unreadRows } = await db
+  // Get unread count (excludes blocked actors so the badge matches the list)
+  let unreadQuery = db
     .from("notifications")
     .select("id")
     .eq("recipient_id", auth.userId)
     .eq("read", false);
+  if (blockedFilter) unreadQuery = unreadQuery.not("actor_id", "in", blockedFilter);
+  const { data: unreadRows } = await unreadQuery;
 
   const unreadCount = unreadRows?.length ?? 0;
 
@@ -35,6 +42,10 @@ export async function GET(req: Request) {
     .eq("recipient_id", auth.userId)
     .order("created_at", { ascending: false })
     .limit(limit + 1);
+
+  if (blockedFilter) {
+    query = query.not("actor_id", "in", blockedFilter);
+  }
 
   if (cursor > 0) {
     query = query.lt("id", cursor);

@@ -41,11 +41,19 @@ struct ContentView: View {
                 }
                 .tag(AppTab.market)
 
-            ActivityFeedView()
-                .tabItem {
-                    Label("Feed", systemImage: "newspaper.fill")
-                }
-                .tag(AppTab.activity)
+            // Feed (multi-user activity) is gated by FeatureFlags.isSocialEnabled
+            // because we don't yet have a user-discovery surface — without
+            // followable users the feed would only show your own events,
+            // and exposing the comment/follow/profile entry points behind
+            // it triggers Apple Guideline 1.2 UGC moderation requirements
+            // we'd rather defer until the discovery surface ships.
+            if FeatureFlags.isSocialEnabled {
+                ActivityFeedView()
+                    .tabItem {
+                        Label("Feed", systemImage: "newspaper.fill")
+                    }
+                    .tag(AppTab.activity)
+            }
 
             ScannerTabView()
                 .tabItem {
@@ -298,15 +306,21 @@ struct ProfileTabView: View {
                 }
             }
 
-            // Stats row
-            HStack(spacing: 32) {
-                profileStat(value: "\(stats?.postCount ?? 0)", label: "Posts")
-                profileStat(value: "\(stats?.followerCount ?? 0)", label: "Followers")
-                profileStat(value: "\(stats?.followingCount ?? 0)", label: "Following")
+            // Stats row — Posts/Followers/Following are social metrics that
+            // are meaningless without the social UI surface. With
+            // FeatureFlags.isSocialEnabled off, drop the row entirely
+            // rather than showing 0/0/0 (which reads as "this profile
+            // is dead" instead of "this feature isn't built yet").
+            if FeatureFlags.isSocialEnabled {
+                HStack(spacing: 32) {
+                    profileStat(value: "\(stats?.postCount ?? 0)", label: "Posts")
+                    profileStat(value: "\(stats?.followerCount ?? 0)", label: "Followers")
+                    profileStat(value: "\(stats?.followingCount ?? 0)", label: "Following")
+                }
+                .padding(.vertical, 16)
+                .frame(maxWidth: .infinity)
+                .glassSurface(radius: PA.Layout.panelRadius)
             }
-            .padding(.vertical, 16)
-            .frame(maxWidth: .infinity)
-            .glassSurface(radius: PA.Layout.panelRadius)
 
             // Menu items
             VStack(spacing: 0) {
@@ -317,12 +331,19 @@ struct ProfileTabView: View {
                 }
                 .buttonStyle(.plain)
 
-                NavigationLink {
-                    NotificationView()
-                } label: {
-                    profileMenuRow(icon: "bell", title: "Notifications")
+                // Notifications surface today is exclusively social
+                // (like / comment / follow per the schema CHECK
+                // constraint). With FeatureFlags.isSocialEnabled off,
+                // nothing fires into it, so we hide the row to avoid
+                // showing a permanently-empty list.
+                if FeatureFlags.isSocialEnabled {
+                    NavigationLink {
+                        NotificationView()
+                    } label: {
+                        profileMenuRow(icon: "bell", title: "Notifications")
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
 
                 NavigationLink {
                     SettingsView()

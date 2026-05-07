@@ -27,7 +27,11 @@ export async function emitActivityEvent(opts: {
         .select("activity_visibility")
         .eq("clerk_user_id", opts.actorId)
         .maybeSingle();
-      visibility = (userRow?.activity_visibility as typeof visibility) ?? "public";
+      // Defaults to 'private' so events stay invisible until the social
+      // surface ships (and a user actively opts into broader visibility).
+      // Was previously 'public' which leaked events via direct /api/activity/*
+      // calls even with no iOS UI surfacing them.
+      visibility = (userRow?.activity_visibility as typeof visibility) ?? "private";
     }
 
     const today = new Date().toISOString().slice(0, 10);

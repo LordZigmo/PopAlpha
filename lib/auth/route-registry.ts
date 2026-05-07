@@ -138,6 +138,8 @@ export const USER_ROUTES = [
   // Distinct from /api/admin/scan-eval/promote which ALSO writes to
   // scan_eval_images (the curated training corpus, admin-only).
   "scan/correction",
+  "moderation/blocks",
+  "moderation/reports",
   "holdings",
   "holdings/bulk-import",
   "holdings/summary",

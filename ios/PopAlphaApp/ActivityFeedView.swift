@@ -11,8 +11,16 @@ struct ActivityFeedView: View {
     @State private var commentTarget: ActivityService.ActivityFeedItem?
     @State private var profileHandle: String?
     @State private var navigateToProfile = false
+    @State private var reportTarget: ReportTargetIdentifier?
+    @State private var blockConfirm: BlockTargetIdentifier?
+
+    @StateObject private var blockedStore = BlockedUsersStore.shared
 
     private var auth: AuthService { AuthService.shared }
+
+    private var visibleItems: [ActivityService.ActivityFeedItem] {
+        items.filter { !blockedStore.isBlocked($0.actor.id) }
+    }
 
     var body: some View {
         NavigationStack {
@@ -20,11 +28,11 @@ struct ActivityFeedView: View {
                 VStack(spacing: 0) {
                     headerSection
 
-                    if loading && items.isEmpty {
+                    if loading && visibleItems.isEmpty {
                         skeletonList
-                    } else if let error, items.isEmpty {
+                    } else if let error, visibleItems.isEmpty {
                         errorState(error)
-                    } else if items.isEmpty {
+                    } else if visibleItems.isEmpty {
                         emptyState
                     } else {
                         feedList
@@ -47,11 +55,42 @@ struct ActivityFeedView: View {
             .sheet(item: $commentTarget) { item in
                 ActivityCommentSheet(eventId: item.id, eventActorHandle: item.actor.handle)
             }
+            .sheet(item: $reportTarget) { target in
+                ReportSheet(
+                    targetKind: target.kind,
+                    targetId: target.targetId,
+                    targetLabel: target.label,
+                )
+            }
+            .alert(
+                "Block @\(blockConfirm?.handle ?? "")?",
+                isPresented: Binding(
+                    get: { blockConfirm != nil },
+                    set: { if !$0 { blockConfirm = nil } },
+                ),
+                presenting: blockConfirm,
+            ) { target in
+                Button("Block", role: .destructive) {
+                    Task { await performBlock(target) }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { _ in
+                Text("They won't appear in your activity feed and won't see your activity. You can unblock anytime in Settings.")
+            }
             .navigationDestination(isPresented: $navigateToProfile) {
                 if let handle = profileHandle {
                     UserProfileView(handle: handle)
                 }
             }
+        }
+    }
+
+    private func performBlock(_ target: BlockTargetIdentifier) async {
+        do {
+            try await APIClient.blockUser(target.userId)
+            blockedStore.recordBlock(target.userId)
+        } catch {
+            // Server-side filter is authoritative on next refresh.
         }
     }
 
@@ -76,8 +115,9 @@ struct ActivityFeedView: View {
     // MARK: - Feed List
 
     private var feedList: some View {
-        LazyVStack(spacing: 10) {
-            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+        let rows = visibleItems
+        return LazyVStack(spacing: 10) {
+            ForEach(Array(rows.enumerated()), id: \.element.id) { index, item in
                 ActivityEventCell(
                     item: item,
                     onLikeTap: { eventId in handleLike(eventId: eventId) },
@@ -86,11 +126,24 @@ struct ActivityFeedView: View {
                     onHandleTap: { handle in
                         profileHandle = handle
                         navigateToProfile = true
-                    }
+                    },
+                    onReportTap: { target in
+                        reportTarget = ReportTargetIdentifier(
+                            kind: .event,
+                            targetId: String(target.id),
+                            label: "@\(target.actor.handle): \(target.actionText)",
+                        )
+                    },
+                    onBlockTap: { target in
+                        blockConfirm = BlockTargetIdentifier(
+                            userId: target.actor.id,
+                            handle: target.actor.handle,
+                        )
+                    },
                 )
                 .onAppear {
                     // Infinite scroll — load more when last item appears
-                    if index == items.count - 1, nextCursor != nil, !loadingMore {
+                    if index == rows.count - 1, nextCursor != nil, !loadingMore {
                         Task { await loadMore() }
                     }
                 }

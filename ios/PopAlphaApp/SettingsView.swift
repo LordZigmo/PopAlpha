@@ -193,14 +193,49 @@ struct SettingsView: View {
                         options: ProfileVisibility.allCases
                     ) { await save(profileVisibility: profileVisibility.rawValue) }
 
-                    Divider().background(PA.Colors.border).padding(.leading, 44)
+                    // Activity Visibility + Blocked Users are social-only.
+                    // With FeatureFlags.isSocialEnabled off there's no
+                    // Feed surface, no follow flow, and no Block UI, so
+                    // these rows would gate / list things the user can't
+                    // create. Hide them until the discovery surface ships.
+                    if FeatureFlags.isSocialEnabled {
+                        Divider().background(PA.Colors.border).padding(.leading, 44)
 
-                    pickerRow(
-                        icon: "person.2",
-                        title: "Activity Visibility",
-                        selection: $activityVisibility,
-                        options: ActivityVisibility.allCases
-                    ) { await save(activityVisibility: activityVisibility.rawValue) }
+                        pickerRow(
+                            icon: "person.2",
+                            title: "Activity Visibility",
+                            selection: $activityVisibility,
+                            options: ActivityVisibility.allCases
+                        ) { await save(activityVisibility: activityVisibility.rawValue) }
+
+                        Divider().background(PA.Colors.border).padding(.leading, 44)
+
+                        NavigationLink {
+                            BlockedUsersView()
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "hand.raised")
+                                    .font(.system(size: 16))
+                                    .foregroundStyle(PA.Colors.muted)
+                                    .frame(width: 28)
+
+                                Text("Blocked Users")
+                                    .font(.system(size: 15))
+                                    .foregroundStyle(PA.Colors.text)
+
+                                Spacer()
+
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(PA.Colors.muted)
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Manage blocked users")
+                    }
                 }
 
                 // Subscription
@@ -294,6 +329,10 @@ struct SettingsView: View {
                     Divider().background(PA.Colors.border).padding(.leading, 44)
 
                     linkRow(icon: "hand.raised", title: "Privacy Policy", url: "https://popalpha.ai/privacy")
+
+                    Divider().background(PA.Colors.border).padding(.leading, 44)
+
+                    linkRow(icon: "person.2", title: "Community Guidelines", url: "https://popalpha.ai/community-guidelines")
                 }
 
                 // Sign out (only visible when signed in)

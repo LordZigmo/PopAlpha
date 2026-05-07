@@ -3,6 +3,8 @@ import { requireUser } from "@/lib/auth/require";
 import { createServerSupabaseUserClient } from "@/lib/db/user";
 import { emitNotification } from "@/lib/activity/emit";
 import type { ActivityComment } from "@/lib/activity/types";
+import { getBlockedUserIds } from "@/lib/moderation/blocked-users";
+import { validateUserContent } from "@/lib/moderation/keyword-blocklist";
 
 export const runtime = "nodejs";
 
@@ -23,13 +25,20 @@ export async function GET(req: Request) {
   }
 
   const db = await createServerSupabaseUserClient();
+  const blockedIds = await getBlockedUserIds(db, auth.userId);
 
-  const { data: rows, error } = await db
+  let query = db
     .from("activity_comments")
     .select("id, author_id, body, created_at")
     .eq("event_id", eventId)
     .order("created_at", { ascending: true })
     .limit(limit);
+
+  if (blockedIds.length > 0) {
+    query = query.not("author_id", "in", `(${blockedIds.map((id) => `"${id}"`).join(",")})`);
+  }
+
+  const { data: rows, error } = await query;
 
   if (error) {
     console.error("[activity/comments GET]", error.message);
@@ -84,7 +93,36 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "body must be 1-500 characters." }, { status: 400 });
   }
 
+  const filterCheck = validateUserContent(text);
+  if (!filterCheck.ok) {
+    return NextResponse.json({ ok: false, error: filterCheck.reason }, { status: 400 });
+  }
+
   const db = await createServerSupabaseUserClient();
+
+  // Refuse to comment on an event whose author has blocked the requester
+  // (or vice-versa). Returning 404-shaped error avoids confirming the block.
+  const { data: eventOwner } = await db
+    .from("activity_events")
+    .select("actor_id")
+    .eq("id", eventId)
+    .maybeSingle();
+
+  if (eventOwner?.actor_id && eventOwner.actor_id !== auth.userId) {
+    const { data: blockRow } = await db
+      .from("user_blocks")
+      .select("blocker_id")
+      .or(
+        `and(blocker_id.eq.${auth.userId},blocked_id.eq.${eventOwner.actor_id}),and(blocker_id.eq.${eventOwner.actor_id},blocked_id.eq.${auth.userId})`,
+      )
+      .limit(1);
+    if ((blockRow?.length ?? 0) > 0) {
+      return NextResponse.json(
+        { ok: false, error: "This event is no longer available." },
+        { status: 404 },
+      );
+    }
+  }
 
   const { data: comment, error } = await db
     .from("activity_comments")

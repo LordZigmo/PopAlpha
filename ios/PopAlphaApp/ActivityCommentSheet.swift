@@ -7,15 +7,23 @@ struct ActivityCommentSheet: View {
     let eventActorHandle: String
 
     @Environment(\.dismiss) private var dismiss
+    @StateObject private var blockedStore = BlockedUsersStore.shared
 
     @State private var comments: [ActivityService.ActivityComment] = []
     @State private var isLoading = true
     @State private var error: String?
     @State private var commentText = ""
     @State private var isPosting = false
+    @State private var postError: String?
+    @State private var reportTarget: ReportTargetIdentifier?
+    @State private var blockConfirm: BlockTargetIdentifier?
     @FocusState private var isInputFocused: Bool
 
     private let maxLength = 500
+
+    private var visibleComments: [ActivityService.ActivityComment] {
+        comments.filter { !blockedStore.isBlocked($0.author.id) }
+    }
 
     var body: some View {
         NavigationStack {
@@ -28,13 +36,23 @@ struct ActivityCommentSheet: View {
                         loadingState
                     } else if let error {
                         errorState(error)
-                    } else if comments.isEmpty {
+                    } else if visibleComments.isEmpty {
                         emptyState
                     } else {
                         commentList
                     }
 
                     Divider().background(PA.Colors.border)
+
+                    if let postError {
+                        Text(postError)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.red)
+                            .padding(.horizontal, 16)
+                            .padding(.top, 8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .accessibilityLabel("Post error: \(postError)")
+                    }
 
                     // Input bar
                     inputBar
@@ -53,17 +71,40 @@ struct ActivityCommentSheet: View {
             .task {
                 await loadComments()
             }
+            .sheet(item: $reportTarget) { target in
+                ReportSheet(
+                    targetKind: target.kind,
+                    targetId: target.targetId,
+                    targetLabel: target.label,
+                )
+            }
+            .alert(
+                "Block @\(blockConfirm?.handle ?? "")?",
+                isPresented: Binding(
+                    get: { blockConfirm != nil },
+                    set: { if !$0 { blockConfirm = nil } },
+                ),
+                presenting: blockConfirm,
+            ) { target in
+                Button("Block", role: .destructive) {
+                    Task { await performBlock(target) }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { _ in
+                Text("They won't be able to comment on or see your activity. You can unblock anytime in Settings.")
+            }
         }
     }
 
     // MARK: - Comment List
 
     private var commentList: some View {
-        ScrollView {
+        let rows = visibleComments
+        return ScrollView {
             LazyVStack(spacing: 0) {
-                ForEach(comments) { comment in
+                ForEach(rows) { comment in
                     commentRow(comment)
-                    if comment.id != comments.last?.id {
+                    if comment.id != rows.last?.id {
                         Divider()
                             .background(PA.Colors.border)
                             .padding(.leading, 52)
@@ -75,7 +116,8 @@ struct ActivityCommentSheet: View {
     }
 
     private func commentRow(_ comment: ActivityService.ActivityComment) -> some View {
-        HStack(alignment: .top, spacing: 10) {
+        let isOwn = comment.author.id == AuthService.shared.currentUserId
+        return HStack(alignment: .top, spacing: 10) {
             // Avatar
             Text(comment.author.avatarInitial)
                 .font(.system(size: 12, weight: .semibold))
@@ -102,6 +144,35 @@ struct ActivityCommentSheet: View {
             }
 
             Spacer()
+
+            if !isOwn {
+                Menu {
+                    Button {
+                        reportTarget = ReportTargetIdentifier(
+                            kind: .comment,
+                            targetId: String(comment.id),
+                            label: "@\(comment.author.handle): \(comment.body)",
+                        )
+                    } label: {
+                        Label("Report comment", systemImage: "flag")
+                    }
+                    Button(role: .destructive) {
+                        blockConfirm = BlockTargetIdentifier(
+                            userId: comment.author.id,
+                            handle: comment.author.handle,
+                        )
+                    } label: {
+                        Label("Block @\(comment.author.handle)", systemImage: "hand.raised")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(PA.Colors.muted)
+                        .padding(8)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel("More options for @\(comment.author.handle)'s comment")
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -212,15 +283,28 @@ struct ActivityCommentSheet: View {
         guard !body.isEmpty, body.count <= maxLength else { return }
 
         isPosting = true
+        postError = nil
         do {
             if let comment = try await ActivityService.shared.postComment(eventId: eventId, body: body) {
                 comments.append(comment)
                 commentText = ""
             }
+        } catch APIError.httpError(_, let body) {
+            postError = body.isEmpty ? "Couldn't post comment." : body
         } catch {
-            // Could show an alert here
+            postError = "Couldn't post comment. Please try again."
         }
         isPosting = false
+    }
+
+    private func performBlock(_ target: BlockTargetIdentifier) async {
+        do {
+            try await APIClient.blockUser(target.userId)
+            blockedStore.recordBlock(target.userId)
+        } catch {
+            // Soft-fail: server-side filtering is authoritative on next refetch.
+            // Could surface an alert here in a future polish pass.
+        }
     }
 
     // MARK: - Helpers

@@ -98,6 +98,10 @@
 		DD000001000000000000F207 /* OfflineScanOrchestrator.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F206 /* OfflineScanOrchestrator.swift */; };
 		DD000001000000000000F801 /* OfflineScannerWarmup.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F800 /* OfflineScannerWarmup.swift */; };
 		DD000001000000000000F401 /* ScanDebugCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F400 /* ScanDebugCapture.swift */; };
+		DD000001000000000000F231 /* ModerationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F230 /* ModerationService.swift */; };
+		DD000001000000000000F233 /* ReportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F232 /* ReportSheet.swift */; };
+		DD000001000000000000F235 /* BlockedUsersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F234 /* BlockedUsersView.swift */; };
+		DD000001000000000000F237 /* FeatureFlags.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F236 /* FeatureFlags.swift */; };
 		EE00000100000000000000F1 /* PopAlphaCore in Frameworks */ = {isa = PBXBuildFile; productRef = EE00000100000000000000A2 /* PopAlphaCore */; };
 		EE00000100000000000000F2 /* SetDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE00000100000000000000A3 /* SetDetailView.swift */; };
 		FF00000100000000000000F1 /* ClerkKit in Frameworks */ = {isa = PBXBuildFile; productRef = FF00000100000000000000A2 /* ClerkKit */; };
@@ -192,6 +196,10 @@
 		DD000001000000000000F220 /* ScanQuota.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanQuota.swift; sourceTree = "<group>"; };
 		DD000001000000000000F206 /* OfflineScanOrchestrator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineScanOrchestrator.swift; sourceTree = "<group>"; };
 		DD000001000000000000F800 /* OfflineScannerWarmup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineScannerWarmup.swift; sourceTree = "<group>"; };
+		DD000001000000000000F230 /* ModerationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModerationService.swift; sourceTree = "<group>"; };
+		DD000001000000000000F232 /* ReportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportSheet.swift; sourceTree = "<group>"; };
+		DD000001000000000000F234 /* BlockedUsersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockedUsersView.swift; sourceTree = "<group>"; };
+		DD000001000000000000F236 /* FeatureFlags.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureFlags.swift; sourceTree = "<group>"; };
 		DD000001000000000000F300 /* Products.storekit */ = {isa = PBXFileReference; lastKnownFileType = file.storekit; path = Products.storekit; sourceTree = "<group>"; };
 		DD000001000000000000F400 /* ScanDebugCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanDebugCapture.swift; sourceTree = "<group>"; };
 		EE00000100000000000000A3 /* SetDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetDetailView.swift; sourceTree = "<group>"; };
@@ -295,6 +303,10 @@
 				DD000001000000000000F220 /* ScanQuota.swift */,
 				DD000001000000000000F206 /* OfflineScanOrchestrator.swift */,
 				DD000001000000000000F800 /* OfflineScannerWarmup.swift */,
+				DD000001000000000000F230 /* ModerationService.swift */,
+				DD000001000000000000F232 /* ReportSheet.swift */,
+				DD000001000000000000F234 /* BlockedUsersView.swift */,
+				DD000001000000000000F236 /* FeatureFlags.swift */,
 				DD000001000000000000F300 /* Products.storekit */,
 				DD000001000000000000F400 /* ScanDebugCapture.swift */,
 				EE00000100000000000000A3 /* SetDetailView.swift */,
@@ -491,6 +503,10 @@
 				DD000001000000000000F207 /* OfflineScanOrchestrator.swift in Sources */,
 				DD000001000000000000F801 /* OfflineScannerWarmup.swift in Sources */,
 				DD000001000000000000F401 /* ScanDebugCapture.swift in Sources */,
+				DD000001000000000000F231 /* ModerationService.swift in Sources */,
+				DD000001000000000000F233 /* ReportSheet.swift in Sources */,
+				DD000001000000000000F235 /* BlockedUsersView.swift in Sources */,
+				DD000001000000000000F237 /* FeatureFlags.swift in Sources */,
 				EE00000100000000000000F2 /* SetDetailView.swift in Sources */,
 				1100000100000000000000F1 /* PortfolioModels.swift in Sources */,
 				1100000100000000000000F3 /* PortfolioHeroView.swift in Sources */,
@@ -657,7 +673,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.9.0;
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = ai.popalpha.ios;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -695,7 +711,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.9.0;
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = ai.popalpha.ios;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
