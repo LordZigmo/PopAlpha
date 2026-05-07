@@ -176,39 +176,45 @@ confidence on most of those without the card_number signal.
 Lower priority than originally planned. Revisit if real-device
 top-1 plateau emerges.
 
-#### 1.5 Diagnostic telemetry (NEW, NOW HIGHEST PRIORITY)
+#### 1.5 Diagnostic telemetry — ✅ shipped 2026-05-08 (Phase 0a/b/c)
 
-Promoted from "future polish" to **next active workstream** after
-the stage 3.1 revert. Two reasons:
+Two-surface telemetry foundation complete:
 
-1. **Mode 8 needs empirical instrumentation before any further
-   fix attempt.** Specifically: log the input quadrilateral
-   corners, the perspective-correction output extent, and one
-   sample observation's raw boundingBox values for each scan
-   (or each scan when DEBUG flag is on). Save the
-   post-correction image to scan_uploads with a known prefix
-   so it can be visually inspected. From this data the actual
-   coord-system behavior becomes obvious.
+**Server-routed scans (free-tier + offline-miss fallback)** — DB
+columns added to `scan_identify_events` via migration
+`20260508000000_scan_identify_events_ocr_diagnostics.sql`:
+- `ocr_card_number_extracted: bool`
+- `ocr_pass2_fallback_fired: bool`
+- `ocr_spatial_filter_rejected_count: int`
 
-2. **Real-device aggregate metrics are missing.** We've been
-   reasoning from ~30-scan smoke samples. Add to
-   `scan_identify_events`:
-   - `ocr_card_number_extracted: bool` — did we get any
-     card_number candidates?
-   - `ocr_pass2_fallback_fired: bool` — did pass-1 reject and
-     pass-2 recover?
-   - `ocr_spatial_filter_rejected_count: int` — how many
-     slash-line observations did the spatial filter reject?
-   - `ocr_perspective_corrected_extent: jsonb` — debug-only,
-     the corner points + output extent for one observation per
-     scan.
+iOS sends these as query params on `/api/scan/identify`; the route
+parses and persists them via `logScanEvent` (commit d7f6d30).
 
-   Aggregated weekly, this tells us whether the failure modes
-   we've been chasing are 5% of scans or 50%, and prioritizes
-   accordingly.
+**Offline scans (premium, dominant path)** — PostHog `card_scanned`
+event emitted from `ScannerHost.runIdentify` on every scan
+completion (success AND error paths). Properties cover the full
+diagnostic surface plus winning_path / confidence / top_match_slug /
+top_similarity / ocr_frames_used so we can segment the Phase 2
+multi-frame impact in PostHog without comparing deploys (commit
+60196ff).
 
-**Estimated effort:** ~half-day for the telemetry, ~half-day
-for the saved-image inspection harness. Total ~1 day.
+Aggregate queries now answerable from PostHog within a day of
+real-device usage:
+- "What % of scans returned HIGH on first try, segmented by
+  trigger_source (auto-detect / tap / tap_multiframe)?"
+- "What fraction of medium-confidence scans had cardNumbers=[]?"
+  (the Mode 6 prevalence question)
+- "Does pass2_fallback_fired correlate with confidence outcome?"
+- "What's the spatial_filter_rejected_count distribution and does
+  it predict failure modes?"
+
+**Phase 0d (saved-image inspection harness for Mode 8) deferred.**
+The perspective-correction coord quirk (Mode 8) still needs a
+proper diagnostic-then-fix pass — saving the post-correction CIImage
+to a debug Storage path so we can visually inspect orientation
+before writing the next coord-system transform. Defer until we have
+focused time; pass-2 fallback is handling the OCR side gracefully
+in the meantime.
 
 #### 1.6 Trust-killer sim-floor refinement on `ocr_intersect_unique` — ✅ shipped 2026-05-08
 
