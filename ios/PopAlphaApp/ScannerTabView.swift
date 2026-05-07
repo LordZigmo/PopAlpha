@@ -134,6 +134,15 @@ struct ScannerTabView: View {
                     }
                     Spacer()
                 }
+                #if DEBUG
+                // Path-source indicator — sticky display of the last
+                // scan's routing (offline vs network), winning_path,
+                // and confidence. Lets us verify "is this scan hitting
+                // the offline catalog or falling through to the server"
+                // without tailing logs while testing on-phone.
+                // Compile-stripped from release builds.
+                lastScanDebugBanner
+                #endif
             }
             .ignoresSafeArea()
             .navigationBarHidden(true)
@@ -377,6 +386,51 @@ struct ScannerTabView: View {
             .clipShape(Circle())
         }
         .disabled(smokeRunning)
+    }
+
+    /// DEBUG-only sticky banner showing the last scan's routing.
+    /// Bottom-left of the scanner, small enough not to obscure the
+    /// viewfinder. Goes blank until the first scan completes, then
+    /// stays visible (sticky) until the next scan replaces it. Lets
+    /// the operator verify "this scan went offline / this scan went
+    /// to the server" while iterating on accuracy work without having
+    /// to tail logs from a connected Mac.
+    @ViewBuilder
+    private var lastScanDebugBanner: some View {
+        if let source = scanner.lastSource {
+            VStack {
+                Spacer()
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(source == "offline" ? Color.green : Color.orange)
+                                .frame(width: 6, height: 6)
+                            Text(source.uppercased())
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .foregroundStyle(.white)
+                        }
+                        if let path = scanner.lastWinningPath {
+                            Text("path=\(path)")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.85))
+                        }
+                        if let conf = scanner.lastConfidence {
+                            Text("conf=\(conf)")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.85))
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 6))
+                    Spacer()
+                }
+                .padding(.leading, 16)
+                .padding(.bottom, 100)
+            }
+            .allowsHitTesting(false)
+        }
     }
 
     private func runSmokeTestIfRequested() {
@@ -695,6 +749,14 @@ final class ScannerHost: ObservableObject {
     /// won — direct DB lookup vs CLIP+OCR intersection vs CLIP-only
     /// fallback.
     @Published private(set) var lastWinningPath: String?
+
+    /// "offline" (matched against the bundled .papb catalog on-device)
+    /// or "network" (POSTed to /api/scan/identify). DEBUG-only overlay
+    /// surfaces this so the operator can verify routing while iterating
+    /// on scanner accuracy work — without it, an offline-only fix
+    /// could look like it shipped when the scan actually fell through
+    /// to the server.
+    @Published private(set) var lastSource: String?
 
     /// Language hint passed to /api/scan/identify. Defaults to EN; the
     /// scanner UI exposes a pill toggle so the user can flip to JP.
@@ -1101,6 +1163,7 @@ final class ScannerHost: ObservableObject {
             self.lastConfidence = reranked.confidence
             self.lastImageHash = response.imageHash
             self.lastWinningPath = response.winningPath
+            self.lastSource = usedOffline ? "offline" : "network"
             // Retain JPEG-source UIImage only for offline scans —
             // online scans already uploaded to scan-uploads/<hash>.jpg
             // so the correction-via-hash path works without it.
@@ -1293,6 +1356,7 @@ final class ScannerHost: ObservableObject {
         lastScanImage = nil
         lastOCR = (nil, nil)
         lastWinningPath = nil
+        lastSource = nil
     }
 }
 
