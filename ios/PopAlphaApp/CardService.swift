@@ -878,6 +878,10 @@ struct HomepageSignalBoardDTO: Decodable, Hashable {
     // Both mid and budget are optional so older server builds still decode.
     let midMovers: [HomepageCardDTO]?
     let budgetMovers: [HomepageCardDTO]?
+    // JP catalog discovery rail (commit dbef009 / 2026-05-07). Non-
+    // windowed, sorted server-side by snapshot freshness. Optional
+    // so older server builds without /ja/ ingestion still decode.
+    let japanese: [HomepageCardDTO]?
 }
 
 struct HomepageDataDTO: Decodable, Hashable {

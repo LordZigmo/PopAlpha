@@ -47,6 +47,7 @@ struct MarketPulseSection: View {
         case pullbacks
         case mid
         case budget
+        case japanese
 
         var id: String { rawValue }
 
@@ -58,6 +59,7 @@ struct MarketPulseSection: View {
             case .pullbacks: return "Pullbacks"
             case .mid: return "Mid"
             case .budget: return "Budget"
+            case .japanese: return "Japan"
             }
         }
 
@@ -71,6 +73,7 @@ struct MarketPulseSection: View {
             case .pullbacks: return "PULLBACKS"
             case .mid: return "$8–$50"
             case .budget: return "UNDER $8"
+            case .japanese: return "JAPAN"
             }
         }
 
@@ -82,6 +85,7 @@ struct MarketPulseSection: View {
             case .pullbacks: return "Pullbacks"
             case .mid: return "Mid Movers"
             case .budget: return "Budget Movers"
+            case .japanese: return "Japanese Cards"
             }
         }
 
@@ -93,6 +97,7 @@ struct MarketPulseSection: View {
             case .pullbacks: return Color(red: 1.0, green: 0.42, blue: 0.42)
             case .mid: return Color(red: 0.063, green: 0.725, blue: 0.506) // emerald-500
             case .budget: return Color(red: 0.961, green: 0.620, blue: 0.043) // amber-500
+            case .japanese: return Color(red: 0.973, green: 0.443, blue: 0.443) // matches web rail #F87171
             }
         }
 
@@ -107,17 +112,18 @@ struct MarketPulseSection: View {
             case .pullbacks: return nil
             case .mid: return nil
             case .budget: return nil
+            case .japanese: return nil
             }
         }
 
         /// Whether this category respects the global 24H / 7D window.
-        /// Breakouts, Unusual, Mid, and Budget come from non-windowed
-        /// daily-computed lists server-side, so the toggle is ignored
-        /// there.
+        /// Breakouts, Unusual, Mid, Budget, and Japanese come from
+        /// non-windowed daily-computed (or discovery-sorted) lists
+        /// server-side, so the toggle is ignored there.
         var isWindowed: Bool {
             switch self {
             case .movers, .pullbacks: return true
-            case .breakouts, .unusual, .mid, .budget: return false
+            case .breakouts, .unusual, .mid, .budget, .japanese: return false
             }
         }
     }
@@ -297,6 +303,11 @@ struct MarketPulseSection: View {
             return signalBoard.midMovers ?? []
         case .budget:
             return signalBoard.budgetMovers ?? []
+        case .japanese:
+            // Older server builds (pre 2026-05-07 JP onboarding) won't
+            // include the japanese rail; fall back to empty so the tab
+            // still renders gracefully.
+            return signalBoard.japanese ?? []
         }
     }
 
@@ -308,6 +319,7 @@ struct MarketPulseSection: View {
         case .pullbacks: return "No \(selectedWindow.label) pullbacks"
         case .mid: return "No mid movers yet"
         case .budget: return "No budget movers yet"
+        case .japanese: return "No Japanese cards yet"
         }
     }
 
