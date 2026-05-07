@@ -160,19 +160,37 @@ const JAPANESE_FRESH_WINDOW_MS = JAPANESE_FRESH_WINDOW_DAYS * 24 * 60 * 60 * 100
 export async function getJapaneseCatalogState(): Promise<JapaneseCatalogState> {
   const supabase = publicSupabase();
 
-  // 1. Pull every JP canonical card with its set name.
-  const { data: cards, error: cardsError } = await supabase
-    .from("canonical_cards")
-    .select("slug, set_name, year")
-    .eq("language", "JP")
-    .returns<Array<{
-      slug: string;
-      set_name: string | null;
-      year: number | null;
-    }>>();
-  if (cardsError) throw new Error(`canonical_cards(JP): ${cardsError.message}`);
+  // 1. Pull every JP canonical card with its set name. Paginate via
+  //    .range() because PostgREST defaults to 1000 rows per response,
+  //    and the JP catalog has already crossed that threshold (2,888
+  //    cards as of 2026-05-07). Without pagination the helper would
+  //    silently truncate at 1000 and report a partial catalog as if
+  //    it were the whole thing.
+  type JpCardRow = {
+    slug: string;
+    set_name: string | null;
+    year: number | null;
+  };
+  const cards: JpCardRow[] = [];
+  {
+    const PAGE_SIZE = 1000;
+    let from = 0;
+    while (true) {
+      const { data, error } = await supabase
+        .from("canonical_cards")
+        .select("slug, set_name, year")
+        .eq("language", "JP")
+        .range(from, from + PAGE_SIZE - 1)
+        .returns<JpCardRow[]>();
+      if (error) throw new Error(`canonical_cards(JP): ${error.message}`);
+      const rows = data ?? [];
+      cards.push(...rows);
+      if (rows.length < PAGE_SIZE) break;
+      from += PAGE_SIZE;
+    }
+  }
 
-  if (!cards || cards.length === 0) {
+  if (cards.length === 0) {
     return {
       totalCards: 0,
       totalSets: 0,
