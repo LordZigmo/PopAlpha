@@ -290,6 +290,63 @@ the second case.
 
 ---
 
+### Mode 8 — Stage-3 Y-flip bug — perspective-corrected card emerges upside-down
+
+**Symptom.** Tier 1.1 stage 3 (commit 053a9a9, perspective correction
+in `croppedToCard`) shipped 2026-05-07 and a real-device smoke
+session immediately surfaced this regression: every post-stage-3
+scan had Vision finding the card_number at `midY > 0.35` (rejected
+by pass-1 spatial filter, recovered by pass-2 fallback). 25+ scans,
+zero pass-1 hits. Pre-stage-3 had at least one pass-1 hit
+(Base #11 Nidoking).
+
+**Evidence (raw log, first scan post-stage-3).**
+```
+ocr spatial filter rejected 2 slash-line(s) outside bottom region:
+    068/131 | ndo / Creatures / GAME FREAK
+ocr pass-2 fallback recovered 1 card_number(s) — 68
+ocr frameSize=526x756 cardNumbers=["68"] setHint=ndo / Creatures / GAME FREAK
+```
+
+The decisive signal: `setHint=ndo / Creatures / GAME FREAK` —
+this is the copyright line that prints at the very bottom of an
+upright card (`midY ~0.02-0.05`). For `pickSetHint` to return
+it, the observation must be at `midY ≥ 0.22`. Confirms the card
+is upside-down in the rendered image. Frame size is portrait
+(526×756) so no 90° rotation was applied.
+
+**Vision actually saw.** The card content correctly, just rendered
+upside-down. card_name at the bottom of the image, copyright + card_number at the top.
+This is why pass-2 fallback successfully recovers the digits —
+Vision's OCR is fine; only the spatial filter assumption breaks.
+
+**Root cause.** `CIFilter.perspectiveCorrection`'s output is
+rendered with the input's `topLeft` corner mapped to the output's
+**bottom-left** in CGImage display semantics — not the
+top-left as the parameter name suggests. When
+`createCGImage(from: extent)` renders the BL-origin CIImage to
+a TL-origin CGImage, the expected Y-axis flip doesn't happen the
+way the input parameter labels would suggest. The card emerges
+inverted.
+
+**Fix or mitigation.**
+- **Tier 1.1 stage 3.1 (TBD commit, 2026-05-07): vertical flip on
+  CIPerspectiveCorrection output.** Apply
+  `CGAffineTransform(scaleX: 1, y: -1).translatedBy(x: 0, y: -extent.height)`
+  to the output CIImage before `createCGImage`. After the flip,
+  the input's topLeft (card's top-left) maps to CGImage row 0,
+  column 0 — display top-left as expected. card_number
+  observations should land at `midY ~0.05` again and the spatial
+  filter should accept them on pass 1.
+
+**Repro.** Real-device 2026-05-07T05:49:29Z (Heatran),
+T05:49:34Z (Budew with `cardNumbers=["104"]` — Mode 7 OCR
+misread also exposed by upside-down digits being recognized with
+extra optical noise). Re-scan the same cards post-stage-3.1 to
+verify pass-1 fires directly without invoking the fallback.
+
+---
+
 ### Mode 7 — OCR misreads card_number digits (admitted by pass-2 but Path B finds no match)
 
 **Symptom.** Real-device 2026-05-07T05:41:55Z: re-scan of
@@ -462,6 +519,7 @@ Update this whenever you have aggregate data to back it up.
 | 5 (no card_number printed) | TBD | TBD | TBD | Won't fix; Path C is correct fallback |
 | 6 (Vision didn't see slash-bearing text) | 2026-05-07 | ~12/28 (~43%) pre-stage-3 sample | TBD | OPEN — Tier 1.1 stage 4 (image quality gates) — but kNN won HIGH on most observed cases |
 | 7 (OCR misread digits, e.g. 068→163) | 2026-05-07 | 1/9 pass-2 firings (~11%) | TBD | OPEN — Tier 1.1 stage 5 (multi-candidate digit ranking). Failure mode is graceful: wrong card_number → Path B no-match → vision_only fallback. End-to-end result still correct in observed case. |
+| 8 (Stage-3 Y-flip — perspective-corrected card upside-down) | 2026-05-07 | 25/25 (100%) post-stage-3 sample | TBD | **OPEN — Tier 1.1 stage 3.1** vertical flip on CIPerspectiveCorrection output. Pass-2 fallback recovers card_number gracefully so end-to-end accuracy is unaffected, but pass-1 never fires until fixed. |
 
 The 5-scan sample on 2026-05-07 is too small to draw conclusions
 about real-device frequency. A meaningful scoreboard requires:

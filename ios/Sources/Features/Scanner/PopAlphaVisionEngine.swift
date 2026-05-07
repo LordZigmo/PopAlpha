@@ -399,7 +399,38 @@ public final class PopAlphaVisionEngine {
         filter.bottomLeft = bottomLeft
         filter.bottomRight = bottomRight
 
-        guard let outputImage = filter.outputImage else { return nil }
+        guard let rawOutput = filter.outputImage else { return nil }
+
+        // Vertical flip the perspective-correction output before
+        // rendering to CGImage. Real-device evidence 2026-05-07
+        // (post-stage-3 smoke session) showed that without this flip,
+        // CIPerspectiveCorrection's output emerges upside-down in the
+        // resulting UIImage — card_number observations landed at
+        // midY > 0.35 (rejected by the bottom-region spatial filter)
+        // and the copyright line "Nintendo / Creatures / GAME FREAK",
+        // which prints at the very bottom of an upright card, was
+        // being picked as the setHint (requires midY > 0.22). Both
+        // signals confirm the card was rendered with its bottom edge
+        // at the display top.
+        //
+        // Mechanism: CIPerspectiveCorrection's input topLeft/bottomLeft
+        // labels are in CIImage's bottom-left-origin coordinate space,
+        // and the output emerges in the same space — but
+        // `createCGImage(from: extent)` does NOT apply the Y-axis flip
+        // I expected to translate from CIImage's BL-origin to
+        // CGImage's TL-origin display convention. The result is that
+        // the input's "top" corner (high y in BL-origin) ends up at
+        // CGImage row H-1 (display bottom) instead of row 0.
+        //
+        // The fix flips the output CIImage vertically before rendering.
+        // After the flip, the input's topLeft (card's top-left)
+        // becomes the output's CGImage row 0, column 0 — display
+        // top-left as expected. card_number observations land at
+        // midY ~0.05 again and the spatial filter accepts them on
+        // pass 1.
+        let flipTransform = CGAffineTransform(scaleX: 1, y: -1)
+            .translatedBy(x: 0, y: -rawOutput.extent.height)
+        let outputImage = rawOutput.transformed(by: flipTransform)
 
         let context = CIContext(options: nil)
         guard let outputCG = context.createCGImage(outputImage, from: outputImage.extent) else {
