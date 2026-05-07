@@ -993,7 +993,13 @@ final class ScannerHost: ObservableObject {
         // embedding matches the multi-frame OCR consensus to within
         // sub-pixel motion. Avoids the embedding-averaging complexity
         // for v1.
-        let ocrMulti: (cardNumbers: [String], setHint: String?, detectedLanguage: ScanLanguage)
+        let ocrMulti: (
+            cardNumbers: [String],
+            setHint: String?,
+            detectedLanguage: ScanLanguage,
+            pass2FallbackFired: Bool,
+            spatialFilterRejectedCount: Int
+        )
         if additionalOCRFrames.isEmpty {
             ocrMulti = await OCRService.extractCardIdentifiersMulti(from: imageForOCR)
         } else {
@@ -1074,7 +1080,10 @@ final class ScannerHost: ObservableObject {
                     image: image,
                     language: self.scanLanguage,
                     cardNumber: ocr.cardNumber,
-                    setHint: ocr.setHint
+                    setHint: ocr.setHint,
+                    ocrCardNumberExtracted: !ocrMulti.cardNumbers.isEmpty,
+                    ocrPass2FallbackFired: ocrMulti.pass2FallbackFired,
+                    ocrSpatialFilterRejectedCount: ocrMulti.spatialFilterRejectedCount,
                 )
             }
             guard let response else {
@@ -1112,6 +1121,37 @@ final class ScannerHost: ObservableObject {
             // auto-detect fire rate.
             let scanMs = Date().timeIntervalSince(scanT0) * 1000
             Logger.scan.debug("scan_e2e: trigger=\(triggerSource) source=\(usedOffline ? "offline" : "network") confidence=\(reranked.confidence) ocr_ms=\(String(format: "%.1f", ocrMs)) total_ms=\(String(format: "%.1f", scanMs))")
+
+            // Phase 0c — emit card_scanned event with the dimensions
+            // that diagnose real-device first-time HIGH rate. Server-
+            // routed scans also write these to scan_identify_events
+            // via query params (Phase 0b), but offline scans (the
+            // dominant path for premium users) live ONLY here. PostHog
+            // is queryable for "what % of scans returned HIGH on first
+            // try?" + "what fraction had cardNumbers=[]?" within a day
+            // of usage.
+            //
+            // Property naming mirrors scan_identify_events column
+            // names where they overlap so the two surfaces can be
+            // joined in PostHog if/when we ship the warehouse pipe.
+            AnalyticsService.shared.capture(.cardScanned, properties: [
+                "trigger_source": triggerSource,
+                "source": usedOffline ? "offline" : "network",
+                "language": self.scanLanguage.rawValue,
+                "confidence": reranked.confidence,
+                "winning_path": response.winningPath ?? "nil",
+                "top_match_slug": reranked.matches.first?.slug ?? "nil",
+                "top_similarity": reranked.matches.first?.similarity ?? 0,
+                "ocr_card_number_extracted": !ocrMulti.cardNumbers.isEmpty,
+                "ocr_card_numbers_count": ocrMulti.cardNumbers.count,
+                "ocr_pass2_fallback_fired": ocrMulti.pass2FallbackFired,
+                "ocr_spatial_filter_rejected_count": ocrMulti.spatialFilterRejectedCount,
+                "ocr_set_hint_present": ocrMulti.setHint != nil,
+                "ocr_frames_used": 1 + additionalOCRFrames.count,
+                "ocr_ms": Int(ocrMs),
+                "scan_total_ms": Int(scanMs),
+                "model_version": response.modelVersion ?? "nil",
+            ])
             #if DEBUG
             // Save the EXACT frame the embedder saw to Photos for EVERY
             // scan, including HIGH. HIGH-but-wrong is the worst-case
@@ -1147,6 +1187,22 @@ final class ScannerHost: ObservableObject {
         } catch {
             self.isIdentifying = false
             self.identifyError = error.localizedDescription
+            // Phase 0c — count error scans against the same event so
+            // the HIGH-rate denominator is "all attempted scans" not
+            // "successful scans only." Mirrors server emitScanFailureEvent.
+            AnalyticsService.shared.capture(.cardScanned, properties: [
+                "trigger_source": triggerSource,
+                "source": usedOffline ? "offline" : "network",
+                "language": self.scanLanguage.rawValue,
+                "confidence": "error",
+                "error_message": error.localizedDescription,
+                "ocr_card_number_extracted": !ocrMulti.cardNumbers.isEmpty,
+                "ocr_card_numbers_count": ocrMulti.cardNumbers.count,
+                "ocr_pass2_fallback_fired": ocrMulti.pass2FallbackFired,
+                "ocr_spatial_filter_rejected_count": ocrMulti.spatialFilterRejectedCount,
+                "ocr_set_hint_present": ocrMulti.setHint != nil,
+                "ocr_frames_used": 1 + additionalOCRFrames.count,
+            ])
             #if DEBUG
             ScanDebugCapture.capture(
                 image: image,

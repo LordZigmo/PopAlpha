@@ -47,6 +47,9 @@ enum OCRService {
         from image: UIImage,
     ) async -> (cardNumber: String?, setHint: String?, detectedLanguage: ScanLanguage) {
         let multi = await extractCardIdentifiersMulti(from: image)
+        // Drops pass2FallbackFired / spatialFilterRejectedCount —
+        // legacy single-result API. New code that needs telemetry
+        // should call extractCardIdentifiersMulti directly.
         return (multi.cardNumbers.first, multi.setHint, multi.detectedLanguage)
     }
 
@@ -86,9 +89,15 @@ enum OCRService {
     static func extractCardIdentifiersMultiFrame(
         from frames: [UIImage],
         maxCandidatesPerObservation: Int = 3,
-    ) async -> (cardNumbers: [String], setHint: String?, detectedLanguage: ScanLanguage) {
+    ) async -> (
+        cardNumbers: [String],
+        setHint: String?,
+        detectedLanguage: ScanLanguage,
+        pass2FallbackFired: Bool,
+        spatialFilterRejectedCount: Int
+    ) {
         guard !frames.isEmpty else {
-            return ([], nil, .en)
+            return ([], nil, .en, false, 0)
         }
         if frames.count == 1 {
             // Degenerate case: identical to single-frame path. Skip the
@@ -107,6 +116,8 @@ enum OCRService {
             let cardNumbers: [String]
             let setHint: String?
             let detectedLanguage: ScanLanguage
+            let pass2FallbackFired: Bool
+            let spatialFilterRejectedCount: Int
         }
         let perFrame: [PerFrame] = await withTaskGroup(of: PerFrame.self) { group in
             for (i, frame) in frames.enumerated() {
@@ -120,6 +131,8 @@ enum OCRService {
                         cardNumbers: r.cardNumbers,
                         setHint: r.setHint,
                         detectedLanguage: r.detectedLanguage,
+                        pass2FallbackFired: r.pass2FallbackFired,
+                        spatialFilterRejectedCount: r.spatialFilterRejectedCount,
                     )
                 }
             }
@@ -133,6 +146,8 @@ enum OCRService {
         var hintVotes: [String: Int] = [:]
         var hintFirstSeen: [String: Int] = [:]
         var sawJP = false
+        var anyPass2Fired = false
+        var spatialRejectedSum = 0
 
         for result in perFrame {
             for n in result.cardNumbers {
@@ -150,6 +165,10 @@ enum OCRService {
             if result.detectedLanguage == .jp {
                 sawJP = true
             }
+            if result.pass2FallbackFired {
+                anyPass2Fired = true
+            }
+            spatialRejectedSum += result.spatialFilterRejectedCount
         }
 
         let votedCardNumbers = cardVotes.keys.sorted { a, b in
@@ -171,7 +190,7 @@ enum OCRService {
 
         #if DEBUG
         ocrLogger.debug(
-            "ocr multiframe frames=\(perFrame.count) voted_card_numbers=\(votedCardNumbers, privacy: .public) hint=\(bestHint ?? "nil", privacy: .public) raw_votes=\(cardVotes.map { "\($0.key)x\($0.value)" }.joined(separator: ","), privacy: .public)"
+            "ocr multiframe frames=\(perFrame.count) voted_card_numbers=\(votedCardNumbers, privacy: .public) hint=\(bestHint ?? "nil", privacy: .public) raw_votes=\(cardVotes.map { "\($0.key)x\($0.value)" }.joined(separator: ","), privacy: .public) pass2_fired_any=\(anyPass2Fired) spatial_rejected_sum=\(spatialRejectedSum)"
         )
         #endif
 
@@ -179,6 +198,8 @@ enum OCRService {
             cardNumbers: votedCardNumbers,
             setHint: bestHint,
             detectedLanguage: sawJP ? .jp : .en,
+            pass2FallbackFired: anyPass2Fired,
+            spatialFilterRejectedCount: spatialRejectedSum,
         )
     }
 
@@ -212,7 +233,13 @@ enum OCRService {
     static func extractCardIdentifiersMulti(
         from image: UIImage,
         maxCandidatesPerObservation: Int = 3,
-    ) async -> (cardNumbers: [String], setHint: String?, detectedLanguage: ScanLanguage) {
+    ) async -> (
+        cardNumbers: [String],
+        setHint: String?,
+        detectedLanguage: ScanLanguage,
+        pass2FallbackFired: Bool,
+        spatialFilterRejectedCount: Int
+    ) {
         // Run Vision OCR once on each region (full image + bottom strip).
         // Both passes run concurrently — embed and pixel-data work is
         // independent. The post-processing (filtering, multi-pass logic)
@@ -237,6 +264,20 @@ enum OCRService {
             return await runVisionTextRecognition(in: strip)
         }()
         let (fullObs, stripObs) = await (fullObservations, stripObservations)
+
+        // Telemetry (Phase 0c): count slash-bearing observations the
+        // spatial filter rejected before we even ran the regex/
+        // plausibility filters. High counts indicate Mode 1 (loose
+        // grip pushes card_number above 0.35) or Mode 2 (landscape
+        // capture, card_number on side edge). Aggregated weekly via
+        // scan_identify_events / PostHog this tells us whether
+        // orientation/framing modes are 5% or 50% of real-device
+        // pain.
+        let spatialFilterRejectedCount = fullObs.filter { obs in
+            obs.boundingBox.midY >= 0.35
+        }.filter { obs in
+            obs.topCandidates(maxCandidatesPerObservation).contains { $0.string.contains("/") }
+        }.count
 
         // Pass 1 — strict spatial filter on the full image.
         //
@@ -289,6 +330,7 @@ enum OCRService {
         // Pass 2 only fires when merged is empty — successful Pass 1
         // results always win. No second Vision call: we re-process
         // the same observations with a different filter setting.
+        var pass2FallbackFired = false
         if merged.isEmpty {
             let pass2FullCardNumbers = extractCardNumbers(
                 from: fullObs,
@@ -298,8 +340,14 @@ enum OCRService {
             for n in pass2FullCardNumbers where seen.insert(n).inserted {
                 merged.append(n)
             }
+            // Pass-2 "fired" means we got here AND recovered ≥1
+            // candidate. If pass-2 ran and still produced nothing,
+            // that's Mode 6 (Vision saw no slash text at all) — distinct
+            // from Mode 1/2 (saw it, spatial filter rejected, recovered
+            // by pass-2). Telemetry distinguishes these.
+            pass2FallbackFired = !merged.isEmpty
             #if DEBUG
-            if !merged.isEmpty {
+            if pass2FallbackFired {
                 ocrLogger.debug("ocr pass-2 fallback recovered \(merged.count) card_number(s) — \(merged.joined(separator: ","), privacy: .public)")
             }
             #endif
@@ -315,7 +363,13 @@ enum OCRService {
         let stripLanguage = detectLanguage(from: stripObs)
         let detectedLanguage: ScanLanguage = (fullLanguage == .jp || stripLanguage == .jp) ? .jp : .en
 
-        return (merged, setHint, detectedLanguage)
+        return (
+            cardNumbers: merged,
+            setHint: setHint,
+            detectedLanguage: detectedLanguage,
+            pass2FallbackFired: pass2FallbackFired,
+            spatialFilterRejectedCount: spatialFilterRejectedCount
+        )
     }
 
     /// Run Vision text recognition on a single image and return raw
