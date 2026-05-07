@@ -75,6 +75,14 @@ struct ContentView: View {
         }
         .tint(PA.Colors.accent)
         .offlineBanner()
+        .sheet(
+            isPresented: Binding(
+                get: { PushService.shared.showSoftPrompt },
+                set: { newValue in PushService.shared.showSoftPrompt = newValue }
+            )
+        ) {
+            PushPermissionPromptSheet()
+        }
         .alert(
             "Sign-in failed",
             isPresented: Binding(

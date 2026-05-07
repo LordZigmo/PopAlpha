@@ -113,10 +113,13 @@ final class AuthService {
 
             await loadHandle()
 
-            // Ask for push permission *after* sign-in succeeds —
-            // better conversion than prompting on cold launch, and the
-            // register endpoint requires an authenticated session anyway.
-            await PushService.shared.requestAuthorizationIfNeeded()
+            // Soft pre-prompt before the system permission dialog —
+            // shows our PushPermissionPromptSheet on first sign-in so
+            // the user can say "Not Now" without burning the one-shot
+            // system prompt. PushService falls back to the direct
+            // requestAuthorizationIfNeeded() path on subsequent
+            // sign-ins / when the user has already responded.
+            await PushService.shared.maybeShowSoftPrompt()
         } catch {
             // User-cancel is a non-error path for both providers:
             //   • ASWebAuthenticationSession (Google) throws its own
