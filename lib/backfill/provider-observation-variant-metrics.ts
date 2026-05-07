@@ -62,6 +62,7 @@ type CandidateRow = {
   mapping: ProviderCardMapRow;
   observation: ObservationRow;
   tier: string | null;
+  existingMetricsAsOf: string | null;
 };
 
 type PriceHistoryCountRow = {
@@ -380,7 +381,7 @@ async function loadCandidateRows(params: {
       if (!mapping || mapping.mapping_status !== "MATCHED" || !mapping.canonical_slug || !mapping.printing_id) {
         continue;
       }
-      candidateRows.push({ mapping, observation, tier: null });
+      candidateRows.push({ mapping, observation, tier: null, existingMetricsAsOf: null });
     }
 
     // Phase 3 tier-skip: batch-load refresh_tier for candidate slugs.
@@ -411,14 +412,19 @@ async function loadCandidateRows(params: {
       }
     }
 
-    const existingMetricsByKey = !params.force && candidateRows.length > 0
+    const existingMetricsByKey = candidateRows.length > 0
       ? await loadExistingMetricsState(params.provider, candidateRows)
       : null;
+    if (existingMetricsByKey) {
+      for (const candidate of candidateRows) {
+        const metricsKey = `${candidate.mapping.canonical_slug}::${buildRawVariantRef(String(candidate.mapping.printing_id))}`;
+        candidate.existingMetricsAsOf = existingMetricsByKey.get(metricsKey) ?? null;
+      }
+    }
 
     for (const row of candidateRows) {
       if (!params.force && existingMetricsByKey) {
-        const metricsKey = `${row.mapping.canonical_slug}::${buildRawVariantRef(String(row.mapping.printing_id))}`;
-        const providerAsOfTs = existingMetricsByKey.get(metricsKey) ?? null;
+        const providerAsOfTs = row.existingMetricsAsOf;
         if (providerAsOfTs && providerAsOfTs >= row.observation.observed_at) {
           continue;
         }
@@ -579,18 +585,16 @@ export async function runProviderObservationVariantMetrics(opts: {
       const variantRef = buildRawVariantRef(printingId);
       const observedPrice = toFiniteNumber(row.observation.observed_price);
 
-      // Phase 3 tier-skip: sparse/dormant cards skip variant_metrics
-      // updates entirely (they accumulate cost with no analytic value
-      // because their stats are dominated by single observations).
-      // Hot tier always; warm currently falls through to "refresh"
-      // because existingMetricsByKey is scoped inside loadCandidateRows
-      // and not visible here — a follow-up could plumb it through for a
-      // tighter warm gate. The big sparse/dormant cohort is the main
-      // saving regardless.
+      // Phase 3 tier-skip: hot writes always; warm only on material
+      // change since last metrics write; sparse/dormant only on the
+      // FIRST observation per slug (bootstrap row). The bootstrap
+      // exception broke a catch-22 where new sets auto-tagged dormant
+      // could never accumulate the variant_metrics rows the tier
+      // classifier needed to promote them out of dormant.
       if (!shouldRefreshVariantMetrics({
         tier: row.tier,
         observedAtIso: row.observation.observed_at,
-        currentMetricsAsOfIso: null,
+        currentMetricsAsOfIso: row.existingMetricsAsOf,
       })) {
         tieredMetricsSkipped += 1;
         continue;
