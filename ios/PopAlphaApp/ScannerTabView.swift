@@ -1325,12 +1325,18 @@ final class ScannerHost: ObservableObject {
         let additionalFrameCount = 2  // total = primary + 2 additional = 3
         let interFrameNanos: UInt64 = 200_000_000
         var additionalFrames: [UIImage] = []
-        for _ in 0..<additionalFrameCount {
+        Logger.scan.debug("multiframe BEGIN primary=ok target_additional=\(additionalFrameCount)")
+        for i in 0..<additionalFrameCount {
             try? await Task.sleep(nanoseconds: interFrameNanos)
-            if let f = capturer() {
+            let frame = capturer()
+            if let f = frame {
                 additionalFrames.append(f)
+                Logger.scan.debug("multiframe iter=\(i) capture=ok size=\(Int(f.size.width))x\(Int(f.size.height))")
+            } else {
+                Logger.scan.debug("multiframe iter=\(i) capture=NIL — capturer returned nil after \(interFrameNanos / 1_000_000)ms sleep")
             }
         }
+        Logger.scan.debug("multiframe END additional_frames=\(additionalFrames.count) of \(additionalFrameCount)")
         await runIdentify(
             image: primaryFrame,
             additionalOCRFrames: additionalFrames,
