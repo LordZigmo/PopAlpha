@@ -39,9 +39,23 @@ function parseArgs(argv) {
     return match ? match.slice(prefix.length) : null;
   };
 
+  // --language picks which Scrydex catalog to import from. EN is the default
+  // for backwards-compat. JA routes /ja/ requests and writes language="JP" to
+  // canonical_cards/card_printings. Only EN and JA are supported until the
+  // matcher is verified for non-EN/JP languages.
+  const rawLanguage = (getValue("--language=") ?? "EN").trim().toUpperCase();
+  const languageInput = rawLanguage === "JP" ? "JA" : rawLanguage;
+  if (!["EN", "JA"].includes(languageInput)) {
+    throw new Error(`--language must be EN or JA (got ${rawLanguage})`);
+  }
+  const languageCode = languageInput.toLowerCase();
+  const languageCanonical = languageInput === "JA" ? "JP" : "EN";
+
   return {
     dryRun: args.has("--dry-run"),
     onlyMissing: args.has("--only-missing"),
+    languageCode,
+    languageCanonical,
     setCodes: (getValue("--set-codes=") ?? "")
       .split(",")
       .map((value) => value.trim())
@@ -130,10 +144,26 @@ function buildAliases(cardName, setName, parsedNumber, rawNumber) {
   return [...new Set(raw.map((entry) => normalizeSearchText(entry)).filter(Boolean))];
 }
 
-function toPreparedCard(card, setYearMap) {
+function toPreparedCard(card, setYearMap, languageCanonical) {
   const rawNumber = (card.number ?? card.printed_number ?? "").trim();
   const parsedNumber = parseCardNumber(rawNumber);
-  const setName = card.expansion?.name?.trim() ?? null;
+  const isJp = languageCanonical === "JP";
+  // JP cards have native-language fields plus a translation.en object.
+  // Use the English translation for everything that feeds search,
+  // matching, slug generation, and canonical_name so the rest of the
+  // pipeline can stay English-aware (search, scanner OCR, alias
+  // matching all rely on Latin-character text). The Japanese display
+  // name is preserved on the raw observation row's metadata when the
+  // pricing pipeline normalizes the card; the display layer can
+  // surface it later if we want to show ピカチュウ next to "Pikachu".
+  const enTranslation = card.translation?.en ?? null;
+  const cardName = isJp
+    ? (enTranslation?.name?.trim() || card.name?.trim() || "")
+    : (card.name?.trim() || "");
+  const enExpansion = card.expansion?.translation?.en ?? null;
+  const setName = isJp
+    ? (enExpansion?.name?.trim() || card.expansion?.name?.trim() || null)
+    : (card.expansion?.name?.trim() ?? null);
   const setCode = card.expansion?.id?.trim() ?? null;
   const year =
     setYearMap.get(card.expansion?.id ?? "") ??
@@ -145,9 +175,15 @@ function toPreparedCard(card, setYearMap) {
     firstImage && (firstImage.large ?? firstImage.medium ?? firstImage.small)
       ? (firstImage.large ?? firstImage.medium ?? firstImage.small) ?? null
       : null;
-  const subject = extractSubject(card.name);
+  const subject = extractSubject(cardName);
+  // JP slugs append "-jp" so they're visually distinct from the EN print
+  // of the same card. Without the suffix, the JP "25th Anniversary
+  // Collection 1 Pikachu" would slugify identically to a hypothetical
+  // EN re-release of the same set.
+  const slugSuffix = isJp ? "-jp" : "";
   const canonicalSlug =
-    slugify(`${setName ?? "unknown-set"}-${parsedNumber}-${card.name}`) || slugify(card.id);
+    slugify(`${setName ?? "unknown-set"}-${parsedNumber}-${cardName}${slugSuffix}`)
+    || slugify(`${card.id}${slugSuffix}`);
 
   const variants = card.variants?.length ? card.variants : [{ name: "unknown" }];
   const printings = variants.map((variant) => {
@@ -173,18 +209,18 @@ function toPreparedCard(card, setYearMap) {
       year,
       cardNumber: parsedNumber,
       rawNumber,
-      language: "EN",
+      language: languageCanonical,
       finish,
       finishDetail,
       edition,
       rarity: card.rarity ?? null,
       imageUrl: imageUrl ?? variantImageUrl,
-      aliases: buildAliases(card.name, setName, parsedNumber, rawNumber),
+      aliases: buildAliases(cardName, setName, parsedNumber, rawNumber),
     };
   });
 
   const searchDoc = buildCanonicalSearchDoc({
-    canonical_name: card.name,
+    canonical_name: cardName,
     subject,
     set_name: setName,
     card_number: parsedNumber || null,
@@ -194,12 +230,12 @@ function toPreparedCard(card, setYearMap) {
   return {
     canonical: {
       slug: canonicalSlug,
-      canonical_name: card.name,
+      canonical_name: cardName,
       subject,
       set_name: setName,
       year,
       card_number: parsedNumber || null,
-      language: "EN",
+      language: languageCanonical,
       variant: "SCRYDEX",
       primary_image_url: imageUrl,
       search_doc: searchDoc,
@@ -209,9 +245,9 @@ function toPreparedCard(card, setYearMap) {
     canonicalAliases: [
       ...new Set(
         [
-          normalizeSearchText(card.name),
-          setName ? normalizeSearchText(`${setName} ${card.name}`) : "",
-          parsedNumber ? normalizeSearchText(`${card.name} ${parsedNumber}`) : "",
+          normalizeSearchText(cardName),
+          setName ? normalizeSearchText(`${setName} ${cardName}`) : "",
+          parsedNumber ? normalizeSearchText(`${cardName} ${parsedNumber}`) : "",
         ].filter(Boolean),
       ),
     ],
@@ -288,7 +324,7 @@ async function fetchScrydexJson(path, params, credentials) {
   throw new Error(lastError ?? "Scrydex request failed");
 }
 
-async function fetchAllExpansions(credentials) {
+async function fetchAllExpansions(credentials, languageCode) {
   const expansions = [];
   let page = 1;
   while (true) {
@@ -296,7 +332,7 @@ async function fetchAllExpansions(credentials) {
       page: String(page),
       page_size: String(DEFAULT_PAGE_SIZE),
     });
-    const payload = await fetchScrydexJson("/en/expansions", params, credentials);
+    const payload = await fetchScrydexJson(`/${languageCode}/expansions`, params, credentials);
     const rows = payload.data ?? [];
     expansions.push(...rows);
     if (rows.length < DEFAULT_PAGE_SIZE) break;
@@ -306,7 +342,7 @@ async function fetchAllExpansions(credentials) {
   return expansions;
 }
 
-async function loadExistingPrintingSetCodes(supabase) {
+async function loadExistingPrintingSetCodes(supabase, languageCanonical) {
   const rows = [];
   const pageSize = 1000;
   let offset = 0;
@@ -315,7 +351,7 @@ async function loadExistingPrintingSetCodes(supabase) {
     const { data, error } = await supabase
       .from("card_printings")
       .select("set_code")
-      .eq("language", "EN")
+      .eq("language", languageCanonical)
       .range(offset, offset + pageSize - 1);
     if (error) throw new Error(`card_printings(set_code): ${error.message}`);
     rows.push(...(data ?? []));
@@ -471,7 +507,7 @@ async function syncPrintingRows(supabase, rows) {
   return sourceIdToPrintingId;
 }
 
-async function importExpansionCards({ supabase, credentials, expansion, setYearMap, dryRun }) {
+async function importExpansionCards({ supabase, credentials, expansion, setYearMap, dryRun, languageCode, languageCanonical }) {
   let page = 1;
   let cardsFetched = 0;
   let cardsUpserted = 0;
@@ -483,11 +519,11 @@ async function importExpansionCards({ supabase, credentials, expansion, setYearM
       page_size: String(DEFAULT_PAGE_SIZE),
       include: "prices",
     });
-    const payload = await fetchScrydexJson(`/en/expansions/${encodeURIComponent(expansion.id)}/cards`, params, credentials);
+    const payload = await fetchScrydexJson(`/${languageCode}/expansions/${encodeURIComponent(expansion.id)}/cards`, params, credentials);
     const cards = payload.data ?? [];
     if (cards.length === 0) break;
 
-    const preparedCards = cards.map((card) => toPreparedCard(card, setYearMap));
+    const preparedCards = cards.map((card) => toPreparedCard(card, setYearMap, languageCanonical));
     cardsFetched += cards.length;
 
     if (!dryRun) {
@@ -580,8 +616,8 @@ async function main() {
     },
   );
 
-  console.log("[import-scrydex-direct] Loading expansions...");
-  const expansions = await fetchAllExpansions(credentials);
+  console.log(`[import-scrydex-direct] Loading expansions (language=${args.languageCanonical})...`);
+  const expansions = await fetchAllExpansions(credentials, args.languageCode);
   const setYearMap = new Map(
     expansions.map((row) => [
       row.id,
@@ -589,10 +625,17 @@ async function main() {
     ]),
   );
 
-  const existingSetCodes = await loadExistingPrintingSetCodes(supabase);
+  const existingSetCodes = await loadExistingPrintingSetCodes(supabase, args.languageCanonical);
   const existingScrydexMapCodes = await loadExistingScrydexProviderMapCodes(supabase);
 
-  let targets = expansions.filter((row) => row.id && row.name);
+  // Defensive physical-only filter. Scrydex flags online-only sets via
+  // is_online_only; we never want to import digital-only product into a
+  // catalog meant to track physical card prices. EN already filters this
+  // implicitly because operators have only ever asked for physical sets;
+  // making it explicit ensures the same posture for JP and any future
+  // language onboarding.
+  const onlinePruned = expansions.filter((row) => row.is_online_only === true);
+  let targets = expansions.filter((row) => row.id && row.name && row.is_online_only !== true);
   if (args.onlyMissing) {
     targets = targets.filter((row) => !existingSetCodes.has(String(row.id).trim()));
   }
@@ -605,7 +648,10 @@ async function main() {
   }
 
   console.log(JSON.stringify({
+    languageCode: args.languageCode,
+    languageCanonical: args.languageCanonical,
     totalExpansions: expansions.length,
+    onlineOnlyExcluded: onlinePruned.length,
     existingPrintingSetCodes: existingSetCodes.size,
     targetExpansions: targets.length,
     dryRun: args.dryRun,
@@ -645,6 +691,8 @@ async function main() {
       expansion,
       setYearMap,
       dryRun: args.dryRun,
+      languageCode: args.languageCode,
+      languageCanonical: args.languageCanonical,
     });
     totalCardsFetched += result.cardsFetched;
     totalCardsUpserted += result.cardsUpserted;

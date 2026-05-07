@@ -8,6 +8,48 @@ import {
   type ScrydexNormalizedFinish,
 } from "@/lib/backfill/scrydex-variant-semantics";
 
+/**
+ * Map Scrydex language_code to our canonical two-letter language tag used in
+ * card_printings.language and provider_observation_matches matching keys.
+ * Mirrors normalizeLanguageToCanonical in pokemontcg-normalized-match.ts.
+ * Defaults to "EN" when the field is absent so existing EN-only behavior is
+ * unchanged for sets that don't carry a language_code.
+ */
+function normalizeProviderLanguageToCanonical(value: string | null | undefined): string {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (!normalized || normalized === "unknown") return "EN";
+  if (normalized === "en") return "EN";
+  if (normalized === "jp" || normalized === "ja") return "JP";
+  if (normalized === "kr" || normalized === "ko") return "KR";
+  if (normalized === "fr") return "FR";
+  if (normalized === "de") return "DE";
+  if (normalized === "es") return "ES";
+  if (normalized === "it") return "IT";
+  if (normalized === "pt") return "PT";
+  return normalized.toUpperCase();
+}
+
+/**
+ * Pick the language label used in legacy variant_ref strings. Maps the
+ * canonical two-letter tag back to the long form Scrydex/JustTCG used
+ * historically so legacy variant_refs stay consistent ("English",
+ * "Japanese"). Anything we haven't seen before falls back to the
+ * two-letter tag uppercase.
+ */
+function variantRefLanguageLabel(canonicalLanguage: string): string {
+  switch (canonicalLanguage) {
+    case "EN": return "English";
+    case "JP": return "Japanese";
+    case "KR": return "Korean";
+    case "FR": return "French";
+    case "DE": return "German";
+    case "ES": return "Spanish";
+    case "IT": return "Italian";
+    case "PT": return "Portuguese";
+    default: return canonicalLanguage;
+  }
+}
+
 // Inlined from the retired lib/providers/justtcg.ts. buildLegacyVariantRef
 // is the legacy 6-segment variant_ref format used for rows that predate the
 // printing_id-based identity. Only this file calls it, so there's no value
@@ -465,13 +507,13 @@ function buildObservationRow(params: {
     provider_condition: variant.providerCondition,
     normalized_condition: variant.normalizedCondition,
     provider_language: card.language_code ?? "en",
-    normalized_language: "en",
+    normalized_language: normalizeProviderLanguageToCanonical(card.language_code),
     variant_ref: buildLegacyVariantRef(
       variant.variantName,
       variant.normalizedEdition,
       variant.stampLabel,
       variant.providerCondition ?? (isGraded ? "graded" : "Near Mint"),
-      "English",
+      variantRefLanguageLabel(normalizeProviderLanguageToCanonical(card.language_code)),
       isGraded ? `${variant.gradedProvider}_${variant.gradedBucket}` : "RAW",
     ),
     observed_price: variant.observedPrice,

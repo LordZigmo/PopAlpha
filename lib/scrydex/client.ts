@@ -223,33 +223,72 @@ export async function fetchScrydexJson<T>(
   throw new Error(lastError ?? "Scrydex API request failed");
 }
 
-/** Fetch English expansions (sets) with pagination. Max 100 per page. */
+export type ScrydexLanguageCode = "en" | "ja";
+
+/**
+ * Scrydex partitions its catalog by URL-prefixed language code: /en/...
+ * for English and /ja/... for Japanese. Set IDs in our system carry the
+ * `_ja` suffix when they originate from the JP catalog (e.g., `swsh8a_ja`,
+ * `m4_ja`); EN sets are unsuffixed (e.g., `swsh8a`, `cel25`). Detecting
+ * the suffix lets the existing pipeline route to the right Scrydex
+ * endpoint without threading an explicit `language` field through every
+ * caller.
+ */
+export function scrydexLanguageForSetId(expansionId: string | null | undefined): ScrydexLanguageCode {
+  const trimmed = String(expansionId ?? "").trim();
+  if (/_ja$/i.test(trimmed)) return "ja";
+  return "en";
+}
+
+/** Fetch expansions (sets) for a given language with pagination. Max 100 per page. */
 export async function fetchExpansionsPage(
   page: number,
   pageSize: number,
-  credentials: ScrydexCredentials
+  credentials: ScrydexCredentials,
+  languageCode: ScrydexLanguageCode = "en",
 ): Promise<ScrydexListPayload<ScrydexExpansion>> {
   const params = new URLSearchParams();
   params.set("page", String(page));
   params.set("page_size", String(pageSize));
   const payload = await fetchScrydexJson<ScrydexRawListPayload<ScrydexExpansion>>(
-    "/en/expansions",
+    `/${languageCode}/expansions`,
     params,
     credentials
   );
   return normalizeScrydexListPayload(payload);
 }
 
-/** Fetch English cards with pagination. Max 100 per page. */
+/** Fetch a single expansion's metadata, including is_online_only. */
+export async function fetchExpansionDetail(
+  expansionId: string,
+  credentials: ScrydexCredentials,
+): Promise<ScrydexExpansion | null> {
+  const trimmed = String(expansionId ?? "").trim();
+  if (!trimmed) return null;
+  const language = scrydexLanguageForSetId(trimmed);
+  const payload = await fetchScrydexJson<{ data?: ScrydexExpansion }>(
+    `/${language}/expansions/${encodeURIComponent(trimmed)}`,
+    new URLSearchParams(),
+    credentials,
+  );
+  return payload.data ?? null;
+}
+
+/**
+ * Fetch cards for a given expansion (or whole language catalog) with pagination.
+ * Routes to /en/ or /ja/ based on the expansion ID suffix — JP set IDs end
+ * in `_ja`. Max 100 per page.
+ */
 export async function fetchCardsPage(
   page: number,
   pageSize: number,
   expansionId: string | null,
   credentials: ScrydexCredentials
 ): Promise<ScrydexListPayload<ScrydexCard>> {
+  const language = scrydexLanguageForSetId(expansionId);
   const path = expansionId
-    ? `/en/expansions/${encodeURIComponent(expansionId)}/cards`
-    : "/en/cards";
+    ? `/${language}/expansions/${encodeURIComponent(expansionId)}/cards`
+    : `/${language}/cards`;
   const params = new URLSearchParams();
   params.set("page", String(page));
   params.set("page_size", String(pageSize));
