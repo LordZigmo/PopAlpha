@@ -70,6 +70,7 @@ struct CardDetailView: View {
     @State private var chartPrices: [Double] = []
     @State private var chartTimestamps: [String] = []
     @State private var chartLoading = false
+    @State private var chartError: String?
     @State private var cardProfile: CardProfileResult?
     @State private var cardMetrics: CardMetricsResult?
     @State private var friendActivity: ActivityService.CardActivityResponse?
@@ -647,12 +648,42 @@ struct CardDetailView: View {
                     lineWidth: 2,
                     height: 140
                 )
-                .opacity(chartLoading ? 0.3 : 1)
+                .opacity(chartLoading || (chartError != nil && chartPrices.isEmpty) ? 0.3 : 1)
                 .animation(.easeOut(duration: 0.2), value: chartLoading)
 
                 if chartLoading {
                     ProgressView()
                         .tint(PA.Colors.accent)
+                } else if let error = chartError, chartPrices.isEmpty {
+                    // Chart fetch failed and we have no cached data to
+                    // fall back on. Without this, the chart row would
+                    // render an empty grid with no explanation —
+                    // Apple's airplane-mode test would see infinite
+                    // dim chart + no retry path.
+                    VStack(spacing: 10) {
+                        Image(systemName: "wifi.exclamationmark")
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(PA.Colors.muted)
+                        Text(error)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(PA.Colors.muted)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 24)
+                        Button {
+                            Task { await loadChart() }
+                        } label: {
+                            Text("Retry")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(PA.Colors.accent)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 6)
+                                .overlay(
+                                    Capsule().stroke(PA.Colors.accent.opacity(0.5), lineWidth: 1)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Retry loading chart")
+                    }
                 }
             }
             .padding(.vertical, 4)
@@ -675,6 +706,7 @@ struct CardDetailView: View {
 
     private func loadChart() async {
         chartLoading = true
+        chartError = nil
         do {
             let points: [PricePoint]
             switch selectedPriceMode {
@@ -742,6 +774,10 @@ struct CardDetailView: View {
                 chartPrices = []
                 chartTimestamps = []
                 chartLoading = false
+                // Surface a short, actionable message; the global
+                // OfflineBanner already explains "you're offline" if
+                // that's the cause, so keep this generic.
+                chartError = "Couldn't load price history."
             }
         }
     }
