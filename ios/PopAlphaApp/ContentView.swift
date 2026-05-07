@@ -605,16 +605,59 @@ struct PrimaryAppleSignInButton: View {
     }
 }
 
-/// Convenience: both providers stacked vertically, spaced for thumb use.
+/// Convenience: all providers stacked vertically, spaced for thumb use.
 /// Drop this in wherever we used to render a single Sign In button.
+/// Email is offered alongside the OAuth providers so reviewers (and
+/// users without Apple/Google accounts) have a working entry point.
 struct SignInProviderStack: View {
     var maxWidth: CGFloat = 260
+
+    @State private var showEmailSheet = false
 
     var body: some View {
         VStack(spacing: 10) {
             PrimarySignInButton(maxWidth: maxWidth)
             PrimaryAppleSignInButton(maxWidth: maxWidth)
+            PrimaryEmailSignInButton(maxWidth: maxWidth) {
+                showEmailSheet = true
+            }
         }
+        .sheet(isPresented: $showEmailSheet) {
+            EmailSignInSheet()
+        }
+    }
+}
+
+/// "Continue with Email" CTA, styled as a stroked secondary button so
+/// it reads as a fallback to the two OAuth options above without
+/// competing for visual weight.
+struct PrimaryEmailSignInButton: View {
+    var title: String = "Continue with Email"
+    var maxWidth: CGFloat = 260
+    var action: () -> Void
+
+    private var auth: AuthService { AuthService.shared }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: "envelope")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(PA.Colors.text)
+                Text(title)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(PA.Colors.text)
+            }
+            .frame(maxWidth: maxWidth)
+            .padding(.vertical, 14)
+            .background(PA.Colors.surfaceSoft)
+            .clipShape(Capsule())
+            .overlay(
+                Capsule().stroke(PA.Colors.border, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(auth.isSigningIn)
     }
 }
 
