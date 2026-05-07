@@ -3,14 +3,30 @@
  *
  * Walks canonical_cards in slug-order, selects rows whose Scrydex image
  * has been mirrored into Supabase Storage, and embeds those mirrored
- * URLs with the configured ImageEmbedder (CLIP ViT-L/14 via Replicate
- * for v1). Vectors land in Neon's card_image_embeddings, keyed by
- * canonical_slug. Safe to re-run — rows whose (source_image_url,
- * model_version) hash is unchanged get skipped.
+ * URLs with the active ImageEmbedder (CLIP ViT-L/14 via Replicate by
+ * default; SigLIP-2 via Modal when IMAGE_EMBEDDER_VARIANT=modal-siglip).
+ * Vectors land in card_image_embeddings (Supabase pgvector), keyed by
+ * (canonical_slug, variant_index, crop_type, model_version) so multiple
+ * model generations coexist for the same slug.
+ *
+ * Safe to re-run — rows whose (source_image_url, model_version) hash is
+ * unchanged get skipped, and the model-version-aware claim filter
+ * excludes rows already embedded under the active variant.
  *
  * Backfill path, not user-facing. Rate-limited by the configured batch
  * size per invocation; the Vercel cron schedule drains the queue over
  * many runs.
+ *
+ * Why model-version-aware claiming (added 2026-05-06):
+ *   The previous claim filter was `image_embedded_at IS NULL`. That
+ *   stamped-once flag silently blocked re-claiming after a model
+ *   cutover — once CLIP stamped a row, switching the active variant
+ *   to SigLIP couldn't reclaim it, and the row stayed CLIP-only
+ *   forever. 749 catalog slugs ended up with zero SigLIP rows,
+ *   making them invisible to the SigLIP-filtered kNN in
+ *   /api/scan/identify (and 0/9 on base-set-2 scanner-eval images).
+ *   The new claim filter compares the stamp against the active
+ *   variant; mismatch re-claims.
  */
 
 import { NextResponse } from "next/server";
@@ -22,7 +38,7 @@ import {
   type EmbeddableCardImage,
 } from "@/lib/ai/card-image-embeddings";
 import {
-  getReplicateClipEmbedder,
+  getImageEmbedder,
   hasReplicateConfig,
   ImageEmbedderConfigError,
   ImageEmbedderRuntimeError,
@@ -85,13 +101,19 @@ export async function GET(req: Request) {
 
   let embedder;
   try {
-    embedder = getReplicateClipEmbedder();
+    // Active embedder per IMAGE_EMBEDDER_VARIANT env var. CLIP by
+    // default; switching to SigLIP is a Vercel env-only flip. The
+    // claim filter below uses embedder.modelVersion to know which
+    // catalog rows to (re-)claim.
+    embedder = getImageEmbedder();
   } catch (err) {
     if (err instanceof ImageEmbedderConfigError) {
       return NextResponse.json({ ok: false, error: err.message }, { status: 500 });
     }
     throw err;
   }
+
+  const activeModelVersion = embedder.modelVersion;
 
   const { searchParams } = new URL(req.url);
   const maxCards = parseMaxCards(searchParams.get("maxCards"));
@@ -108,11 +130,18 @@ export async function GET(req: Request) {
     const remaining = maxCards - processed;
     const pageSize = Math.min(FETCH_BATCH_SIZE, remaining);
 
-    // Filter out rows that are already embedded (image_embedded_at is
-    // set) so the per-invocation maxCards budget is spent on new work,
-    // not re-walking the finished catalog. Rows predating the tracking
-    // columns get stamped the first time they hash-skip, after which
-    // this filter excludes them permanently.
+    // Model-version-aware claim filter. The previous version was
+    // `image_embedded_at IS NULL` — model-version-agnostic, which
+    // silently blocked re-claiming after a model cutover. Now the
+    // filter is "stamp is null OR stamp != active variant", which
+    // re-claims rows under any future model swap.
+    //
+    // Per-invocation maxCards budget: we want it spent on rows that
+    // genuinely need work for the active variant. Already-stamped-as-
+    // active rows fall out via the `.or()` clause; CLIP-stamped rows
+    // (or unstamped rows) are claimed; freshly successful rows get
+    // re-stamped with the active variant in recordEmbedOutcomes
+    // below so they fall out on the NEXT cron invocation.
     let query = supabase
       .from("canonical_cards")
       .select(
@@ -120,7 +149,9 @@ export async function GET(req: Request) {
       )
       .not("mirrored_primary_image_url", "is", null)
       .lt("image_embed_attempts", MAX_EMBED_ATTEMPTS)
-      .is("image_embedded_at", null)
+      .or(
+        `image_embedded_model_version.is.null,image_embedded_model_version.neq.${activeModelVersion}`,
+      )
       .order("slug", { ascending: true })
       .limit(pageSize);
 
@@ -163,6 +194,7 @@ export async function GET(req: Request) {
         batchResult.successSlugs,
         batchResult.failureReasons,
         rows,
+        activeModelVersion,
       );
     } catch (err) {
       if (err instanceof ImageEmbedderRuntimeError) {
@@ -203,15 +235,22 @@ export async function GET(req: Request) {
  * Persist per-slug outcomes onto canonical_cards so the next cron pass
  * skips burnt-out URLs and the operator has diagnostics.
  *
- * Successes clear the attempts counter (self-heals transient failures)
- * and stamp image_embedded_at. Failures bump the counter and store the
- * last error message.
+ * Successes clear the attempts counter (self-heals transient failures),
+ * stamp image_embedded_at, AND stamp image_embedded_model_version with
+ * the active variant. The model_version stamp is what makes future
+ * cron passes idempotent under the same active variant — and what
+ * makes a model swap correctly re-claim every row.
+ *
+ * Failures bump the counter and store the last error message; they do
+ * NOT touch image_embedded_model_version (we don't know which variant
+ * the row "belongs to" until an embed succeeds).
  */
 async function recordEmbedOutcomes(
   supabase: ReturnType<typeof dbAdmin>,
   successSlugs: string[],
   failureReasons: Array<{ slug: string; error: string }>,
   rows: CanonicalRow[],
+  activeModelVersion: string,
 ): Promise<void> {
   if (successSlugs.length > 0) {
     const { error } = await supabase
@@ -220,6 +259,7 @@ async function recordEmbedOutcomes(
         image_embed_attempts: 0,
         image_embed_last_error: null,
         image_embedded_at: new Date().toISOString(),
+        image_embedded_model_version: activeModelVersion,
       })
       .in("slug", successSlugs);
 

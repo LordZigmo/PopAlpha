@@ -264,15 +264,46 @@ export async function ensureCardImageEmbeddingsSchema(): Promise<void> {
   `);
 }
 
+/**
+ * Fetch the existing source_hash for each slug at the SAME slot the
+ * main cron writes to: (variant_index = 0, crop_type = 'full',
+ * model_version = active). This makes the hash comparison in
+ * `refreshCardImageEmbeddingBatch` a clean apples-to-apples check —
+ * if the slug has a row at this slot, return its hash; otherwise
+ * the slug is missing and the batch will embed it.
+ *
+ * Why this scope (rather than "any row for this slug"):
+ *   - A slug can have multiple rows: one per (model_version, crop_type,
+ *     variant_index). The unscoped fetch returns one of them at random
+ *     (Map.set overwrite). That made hash comparison unreliable —
+ *     occasionally the function would return an art-crop hash (built
+ *     from the cropped storage URL, not the original mirrored URL),
+ *     causing the main cron to redundantly re-embed full crops on
+ *     every cron run despite the row being correctly present.
+ *   - Scoping to (vi=0, crop='full', active model_version) returns
+ *     EXACTLY the row the main cron is responsible for. If a slug
+ *     has only a different-variant row, the function returns no hash
+ *     for that slug, and the batch embeds it (correct).
+ *   - The art-crop cron has its own dedicated `fetchExistingArtCropHashes`
+ *     scoped to crop_type='art', so this change doesn't affect it.
+ */
 export async function fetchExistingImageEmbeddingHashes(
   slugs: string[],
+  modelVersion: string,
 ): Promise<Map<string, string>> {
   const out = new Map<string, string>();
   if (slugs.length === 0) return out;
 
   const result = await sql.query<ExistingHashRow>(
-    "select canonical_slug, source_hash from card_image_embeddings where canonical_slug = any($1::text[])",
-    [slugs],
+    `
+      select canonical_slug, source_hash
+      from card_image_embeddings
+      where canonical_slug = any($1::text[])
+        and variant_index = 0
+        and crop_type = 'full'
+        and model_version = $2
+    `,
+    [slugs, modelVersion],
   );
 
   for (const row of result.rows) {
@@ -319,6 +350,7 @@ export async function refreshCardImageEmbeddingBatch(
 
   const existingHashes = await fetchExistingImageEmbeddingHashes(
     cards.map((card) => card.slug),
+    embedder.modelVersion,
   );
 
   const changedCards: EmbeddableCardImage[] = [];

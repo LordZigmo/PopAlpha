@@ -33,7 +33,7 @@ import {
   ensureCardImageEmbeddingsSchema,
 } from "@/lib/ai/card-image-embeddings";
 import {
-  getReplicateClipEmbedder,
+  getImageEmbedder,
   hasReplicateConfig,
   ImageEmbedderConfigError,
   ImageEmbedderRuntimeError,
@@ -181,7 +181,12 @@ export async function GET(req: Request) {
 
   let embedder;
   try {
-    embedder = getReplicateClipEmbedder();
+    // Active embedder per IMAGE_EMBEDDER_VARIANT env var. The hash
+    // skip below already includes embedder.modelVersion, so flipping
+    // the variant naturally produces a new SigLIP-tagged art-crop
+    // row without affecting the existing CLIP-tagged row (the upsert
+    // PK includes model_version per the 2026-04-30 migration).
+    embedder = getImageEmbedder();
   } catch (err) {
     if (err instanceof ImageEmbedderConfigError) {
       return NextResponse.json({ ok: false, error: err.message }, { status: 500 });
