@@ -68,6 +68,11 @@ export type HomepageSignalBoardData = {
   // Budget tier ($1 .. mid_min_price): gainers from cards below the mid
   // price floor. Single rail, no window split.
   budget_movers: HomepageCard[];
+  // JP catalog (canonical_cards.language = 'JP'). Discovery rail —
+  // doesn't gate on change_pct or momentum because we're still
+  // onboarding (38 cards as of 2026-05-07). Sorted by snapshot
+  // freshness so the rail leads with cards we have current pricing on.
+  japanese: HomepageCard[];
 };
 
 export type HomepageData = {
@@ -328,6 +333,91 @@ async function loadDailyTopMoversBundle(
   };
 }
 
+/**
+ * Discovery rail for the Japanese catalog. Sorted by snapshot freshness
+ * so the rail leads with cards we have current pricing on. Doesn't try
+ * to compute change_pct/momentum because the JP catalog is still small
+ * and most cards lack the 30+ day snapshot history needed for those
+ * signals. Once the JP catalog grows past ~500 cards we can promote
+ * this to a proper japanese_gainer/japanese_momentum kind on
+ * compute_daily_top_movers and reuse the same UI rail.
+ */
+async function loadJapaneseRail(
+  client: NonNullable<ReturnType<typeof dbPublic>>,
+  limit: number,
+): Promise<HomepageCard[]> {
+  // canonical_cards (language=JP) JOIN public_card_metrics on the
+  // canonical RAW row so we surface the headline price every JP card
+  // has — graded variants light up later as Scrydex pricing flows.
+  const { data, error } = await client
+    .from("canonical_cards")
+    .select(
+      "slug, canonical_name, set_name, year, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url, public_card_metrics!inner(market_price, market_price_as_of, change_pct_24h, change_pct_7d, active_listings_7d, market_confidence_score, snapshot_count_30d, market_low_confidence, printing_id, grade)",
+    )
+    .eq("language", "JP")
+    .eq("public_card_metrics.grade", "RAW")
+    .is("public_card_metrics.printing_id", null)
+    .not("public_card_metrics.market_price", "is", null)
+    .order("market_price_as_of", {
+      foreignTable: "public_card_metrics",
+      ascending: false,
+      nullsFirst: false,
+    })
+    .limit(limit);
+
+  if (error || !data) return [];
+
+  type Joined = CardRow & {
+    public_card_metrics:
+      | Array<{
+        market_price: number | null;
+        market_price_as_of: string | null;
+        change_pct_24h: number | null;
+        change_pct_7d: number | null;
+        active_listings_7d: number | null;
+        market_confidence_score: number | null;
+        snapshot_count_30d: number | null;
+        market_low_confidence: boolean | null;
+      }>
+      | null;
+  };
+  const rows = data as unknown as Joined[];
+  return rows
+    .map<HomepageCard | null>((row) => {
+      const metrics = row.public_card_metrics?.[0] ?? null;
+      if (!metrics || metrics.market_price == null || metrics.market_price <= 0) return null;
+      const changePct = metrics.change_pct_24h ?? metrics.change_pct_7d ?? null;
+      const changeWindow: "24H" | "7D" = metrics.change_pct_24h != null ? "24H" : "7D";
+      const image = resolveCardImage({
+        primary_image_url: row.primary_image_url ?? null,
+        mirrored_primary_image_url: row.mirrored_primary_image_url ?? null,
+        mirrored_primary_thumb_url: row.mirrored_primary_thumb_url ?? null,
+      });
+      const highConfidence = (metrics.active_listings_7d ?? 0) >= HIGH_CONF_LIQUIDITY_MIN;
+      return {
+        slug: row.slug,
+        name: row.canonical_name,
+        set_name: row.set_name ?? null,
+        year: row.year ?? null,
+        market_price: metrics.market_price,
+        change_pct: changePct,
+        change_window: changeWindow,
+        confidence_score: metrics.market_confidence_score ?? null,
+        low_confidence: Boolean(metrics.market_low_confidence),
+        market_strength_score: null,
+        market_direction: null,
+        mover_tier: highConfidence ? "hot" : "warming",
+        image_url: image.full,
+        image_thumb_url: image.thumb,
+        sparkline_7d: [],
+        sales_count_30d: metrics.snapshot_count_30d ?? null,
+        active_listings_7d: metrics.active_listings_7d ?? null,
+        updated_at: metrics.market_price_as_of ?? null,
+      };
+    })
+    .filter((card): card is HomepageCard => card !== null);
+}
+
 function createEmptySignalBoard(): HomepageSignalBoardData {
   return {
     top_movers: createEmptyWindowedCards(),
@@ -337,6 +427,7 @@ function createEmptySignalBoard(): HomepageSignalBoardData {
     breakouts: [],
     mid_movers: [],
     budget_movers: [],
+    japanese: [],
   };
 }
 
@@ -1099,6 +1190,18 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
       }
     }
 
+    let japaneseRail: HomepageCard[] = [];
+    if (!overrides && db) {
+      try {
+        japaneseRail = await loadJapaneseRail(db, SECTION_LIMIT);
+      } catch (err) {
+        logger.error(
+          "[homepage] japanese_rail",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
+
     const liveTopMovers24H = combineHomepageCards([
       positiveMoversByWindow["24H"].highConfidence,
       positiveMoversByWindow["24H"].all,
@@ -1166,6 +1269,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
       breakouts: breakoutsOut,
       mid_movers: dailyMovers.mid_gainers.slice(0, SECTION_LIMIT),
       budget_movers: dailyMovers.budget_gainers.slice(0, SECTION_LIMIT),
+      japanese: japaneseRail,
     } satisfies HomepageSignalBoardData;
 
     // ── Derive as_of ──────────────────────────────────────────────────────

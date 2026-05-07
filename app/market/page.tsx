@@ -63,6 +63,7 @@ const EMPTY_DATA: {
     breakouts: HomepageCard[];
     mid_movers: HomepageCard[];
     budget_movers: HomepageCard[];
+    japanese: HomepageCard[];
   };
   as_of: string | null;
   prices_refreshed_today: number | null;
@@ -81,6 +82,7 @@ const EMPTY_DATA: {
     breakouts: [],
     mid_movers: [],
     budget_movers: [],
+    japanese: [],
   },
   as_of: null,
   prices_refreshed_today: null,
@@ -959,6 +961,7 @@ export default async function Home() {
         momentumByWindow={momentumCardsByWindow}
         midMovers={signalBoard.mid_movers}
         budgetMovers={signalBoard.budget_movers}
+        japanese={signalBoard.japanese}
       />
 
       {/* ── Market Intelligence ─────────────────────────────────────────── */}

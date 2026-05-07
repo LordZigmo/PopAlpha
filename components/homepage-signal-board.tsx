@@ -15,6 +15,7 @@ type HomepageSignalBoardProps = {
   momentumByWindow: HomepageWindowedCards;
   midMovers: HomepageCard[];
   budgetMovers: HomepageCard[];
+  japanese: HomepageCard[];
 };
 
 const SIGNAL_WINDOWS: SignalWindow[] = ["24H", "7D"];
@@ -43,6 +44,7 @@ export default function HomepageSignalBoard({
   momentumByWindow,
   midMovers,
   budgetMovers,
+  japanese,
 }: HomepageSignalBoardProps) {
   const [selectedWindow, setSelectedWindow] = useState<SignalWindow>("24H");
   const momentumTitle = selectedWindow === "24H" ? "Live momentum" : "Sustained momentum";
@@ -103,6 +105,15 @@ export default function HomepageSignalBoard({
         title="Budget movers"
         cards={budgetMovers}
         emptyMessage="No budget movers yet"
+      />
+
+      <SignalRailSection
+        id="japanese"
+        eyebrow="Japan"
+        eyebrowClassName="text-[#F87171]"
+        title="Japanese cards"
+        cards={japanese}
+        emptyMessage="No Japanese cards yet"
       />
     </>
   );
