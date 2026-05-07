@@ -22,6 +22,7 @@ import {
   type ScrydexExpansion,
 } from "@/lib/scrydex/client";
 import { runScrydexCanonicalImport } from "@/lib/admin/scrydex-canonical-import";
+import { enqueuePipelineJob } from "@/lib/backfill/provider-pipeline-job-queue";
 
 const PROVIDER = "SCRYDEX";
 const JOB = "discover_new_sets";
@@ -30,6 +31,13 @@ const MAX_PAGES_PER_SET = 10;
 
 export type DiscoverNewSetsParams = {
   force?: boolean;
+};
+
+export type DiscoverNewSetsBootstrapJob = {
+  providerSetId: string;
+  enqueued: boolean;
+  jobId: number | null;
+  reason: string;
 };
 
 export type DiscoverNewSetsResult = {
@@ -42,6 +50,7 @@ export type DiscoverNewSetsResult = {
   seededSetIds?: string[];
   filteredSetIds?: Array<{ id: string; reason: string }>;
   failedSetIds?: Array<{ id: string; error: string }>;
+  bootstrapJobs?: DiscoverNewSetsBootstrapJob[];
   runId?: string;
   elapsedMs?: number;
   error?: string;
@@ -193,6 +202,7 @@ export async function runDiscoverNewSets(
 
     const seededSetIds: string[] = [];
     const failedSetIds: Array<{ id: string; error: string }> = [];
+    const bootstrapJobs: DiscoverNewSetsBootstrapJob[] = [];
 
     for (const exp of seedableExpansions) {
       const importResult = await runScrydexCanonicalImport({
@@ -223,6 +233,35 @@ export async function runDiscoverNewSets(
           failedSetIds.push({ id: exp.id, error: `provider_set_map: ${mapInsertError.message}` });
         } else {
           seededSetIds.push(exp.id);
+          // Bootstrap a one-shot pipeline job so the daily-capture planner's
+          // matchedCardCount > 0 gate can let this set into normal rotation.
+          // Without this enqueue, a freshly-seeded provisional set sits in
+          // canonical_cards forever — observable in the 2026-04-20 Perfect
+          // Order incident where 124 canonical rows had zero priced
+          // observations weeks later.
+          try {
+            const enqueue = await enqueuePipelineJob({
+              provider: PROVIDER,
+              jobKind: "PIPELINE",
+              params: { providerSetId: exp.id },
+            });
+            bootstrapJobs.push({
+              providerSetId: exp.id,
+              enqueued: enqueue.enqueued,
+              jobId: enqueue.jobId,
+              reason: enqueue.reason,
+            });
+          } catch (enqueueError) {
+            const message = enqueueError instanceof Error
+              ? enqueueError.message
+              : String(enqueueError);
+            bootstrapJobs.push({
+              providerSetId: exp.id,
+              enqueued: false,
+              jobId: null,
+              reason: `enqueue_error: ${message}`,
+            });
+          }
         }
       } else {
         const errMsg = typeof importResult.body.error === "string"
@@ -251,6 +290,7 @@ export async function runDiscoverNewSets(
           seededSetIds,
           filteredSetIds,
           failedSetIds,
+          bootstrapJobs,
         },
       })
       .eq("id", runId);
@@ -263,6 +303,7 @@ export async function runDiscoverNewSets(
       seededSetIds,
       filteredSetIds,
       failedSetIds,
+      bootstrapJobs,
       runId,
       elapsedMs: Date.now() - startedAt,
     };
