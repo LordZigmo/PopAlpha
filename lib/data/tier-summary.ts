@@ -208,29 +208,45 @@ export async function getJapaneseCatalogState(): Promise<JapaneseCatalogState> {
     rawCanonicalMarketPrice: number | null;
   };
   const stateBySlug = new Map<string, SlugState>();
-  for (let i = 0; i < slugs.length; i += 200) {
-    const chunk = slugs.slice(i, i + 200);
-    const { data, error } = await supabase
-      .from("public_card_metrics")
-      .select("canonical_slug, market_price, market_price_as_of, printing_id, grade")
-      .in("canonical_slug", chunk);
-    if (error) throw new Error(`public_card_metrics(JP): ${error.message}`);
-    for (const row of (data ?? []) as RollupRow[]) {
-      if (!row.canonical_slug) continue;
-      let state = stateBySlug.get(row.canonical_slug);
-      if (!state) {
-        state = {
-          hasRollup: false,
-          rawCanonicalAsOf: null,
-          rawCanonicalMarketPrice: null,
-        };
-        stateBySlug.set(row.canonical_slug, state);
+  // Each canonical card produces ~5–10 rollup rows in public_card_metrics
+  // (per-printing × per-grade fan-out). PostgREST caps responses at
+  // 1000 rows by default, so a 200-slug IN-list silently truncates.
+  // Use a smaller chunk size AND paginate via .range() inside each
+  // chunk so we never miss rows. Chunk of 80 × ~10 rows = 800, safely
+  // under the limit, and the inner pagination loop catches any chunk
+  // whose fan-out runs higher (heavy graded cards).
+  const PCM_CHUNK_SIZE = 80;
+  const PCM_PAGE_SIZE = 1000;
+  for (let i = 0; i < slugs.length; i += PCM_CHUNK_SIZE) {
+    const chunk = slugs.slice(i, i + PCM_CHUNK_SIZE);
+    let from = 0;
+    while (true) {
+      const { data, error } = await supabase
+        .from("public_card_metrics")
+        .select("canonical_slug, market_price, market_price_as_of, printing_id, grade")
+        .in("canonical_slug", chunk)
+        .range(from, from + PCM_PAGE_SIZE - 1);
+      if (error) throw new Error(`public_card_metrics(JP): ${error.message}`);
+      const rows = (data ?? []) as RollupRow[];
+      for (const row of rows) {
+        if (!row.canonical_slug) continue;
+        let state = stateBySlug.get(row.canonical_slug);
+        if (!state) {
+          state = {
+            hasRollup: false,
+            rawCanonicalAsOf: null,
+            rawCanonicalMarketPrice: null,
+          };
+          stateBySlug.set(row.canonical_slug, state);
+        }
+        state.hasRollup = true;
+        if (row.printing_id === null && row.grade === "RAW" && row.market_price !== null && row.market_price > 0) {
+          state.rawCanonicalMarketPrice = row.market_price;
+          state.rawCanonicalAsOf = row.market_price_as_of;
+        }
       }
-      state.hasRollup = true;
-      if (row.printing_id === null && row.grade === "RAW" && row.market_price !== null && row.market_price > 0) {
-        state.rawCanonicalMarketPrice = row.market_price;
-        state.rawCanonicalAsOf = row.market_price_as_of;
-      }
+      if (rows.length < PCM_PAGE_SIZE) break;
+      from += PCM_PAGE_SIZE;
     }
   }
 
