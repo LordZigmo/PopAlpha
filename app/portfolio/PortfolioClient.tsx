@@ -7,7 +7,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import posthog from "posthog-js";
 import { CollectorRadar } from "@/components/portfolio/CollectorRadar";
-import type { RadarProfile } from "@/lib/data/portfolio";
+import type { RadarProfile, Badge } from "@/lib/data/portfolio";
 import { PRICING_DISPLAY_V2_ENABLED } from "@/lib/pricing/displayed-market-price";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -85,6 +85,7 @@ function PortfolioInner() {
   const [marketPricesAsOf, setMarketPricesAsOf] = useState<Record<string, string>>({});
   const [expanded, setExpanded] = useState<string | null>(null);
   const [radarProfile, setRadarProfile] = useState<RadarProfile | null>(null);
+  const [badges, setBadges] = useState<Badge[]>([]);
 
   const [addOpen, setAddOpen] = useState(false);
   const [addErr, setAddErr] = useState<string | null>(null);
@@ -278,6 +279,7 @@ function PortfolioInner() {
           }
           const json = await res.json();
           if (!json.minimal && json.radar_profile) setRadarProfile(json.radar_profile);
+          if (!json.minimal && Array.isArray(json.badges)) setBadges(json.badges as Badge[]);
         } catch (err) {
           console.warn("[portfolio/overview] radar fetch error:", err);
         }
@@ -548,12 +550,12 @@ function PortfolioInner() {
             <div className="grid flex-1 grid-cols-2 gap-2 self-center text-xs">
               {(
                 [
-                  ["Vintage", radarProfile.vintage],
-                  ["Graded", radarProfile.graded],
-                  ["Premium", radarProfile.premium],
-                  ["Set Depth", radarProfile.setFinisher],
-                  ["Japanese", radarProfile.japanese],
-                  ["Grail", radarProfile.grailHunter],
+                  ["Nostalgia", radarProfile.nostalgia],
+                  ["Current Era", radarProfile.currentEra],
+                  ["Slab Focus", radarProfile.slabFocus],
+                  ["Market Heat", radarProfile.marketHeat],
+                  ["Taste Profile", radarProfile.tasteProfile],
+                  ["Collection Depth", radarProfile.collectionDepth],
                 ] as [string, number][]
               ).map(([label, value]) => (
                 <div key={label} className="flex items-center justify-between rounded-xl border border-white/[0.06] bg-black/20 px-3 py-2">
@@ -563,6 +565,23 @@ function PortfolioInner() {
               ))}
             </div>
           </div>
+
+          {/* Earned badges — modifiers/labels surfaced below the radar */}
+          {badges.length > 0 && (
+            <div className="mt-5 flex flex-wrap gap-2">
+              {badges.map((badge) => (
+                <div
+                  key={badge.id}
+                  className="flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-xs"
+                  title={badge.description}
+                >
+                  <span className="font-semibold text-white">{badge.label}</span>
+                  <span className="text-[#8A8A8A]">·</span>
+                  <span className="text-[#A8AEBA]">{badge.description}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

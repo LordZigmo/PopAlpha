@@ -11,6 +11,7 @@ import {
   computeInsights,
   computeTopHoldings,
   computeRadarProfile,
+  computeBadges,
   isGraded,
 } from "@/lib/data/portfolio";
 import { normalizeHoldingGrade, type GradeBucket } from "@/lib/holdings/grade-normalize";
@@ -51,6 +52,7 @@ type CardRow = {
   canonical_name: string;
   set_name: string | null;
   year: number | null;
+  subject: string | null;
 };
 
 type ImageRow = {
@@ -104,7 +106,7 @@ export async function GET(req: Request) {
     const [pulseMap, cardsResult, imagesResult, historyResult, printingMetaResult] = await Promise.all([
       getCanonicalMarketPulseMap(pub, slugs),
       pub.from("canonical_cards")
-        .select("slug, canonical_name, set_name, year")
+        .select("slug, canonical_name, set_name, year, subject")
         .in("slug", slugs),
       pub.from("card_printings")
         .select("canonical_slug, image_url, mirrored_image_url, mirrored_thumb_url")
@@ -269,6 +271,12 @@ export async function GET(req: Request) {
     const cardMetaMap = new Map(
       [...cardMap.entries()].map(([k, v]) => [k, { set_name: v.set_name, year: v.year }]),
     );
+    // Radar/badges need the Pokémon `subject` for popular-character
+    // detection (Charizard, Pikachu, Eeveelutions). Built separately so
+    // the slimmer cardMetaMap above keeps powering attributes/composition.
+    const radarCardMap = new Map(
+      [...cardMap.entries()].map(([k, v]) => [k, { set_name: v.set_name, year: v.year, subject: v.subject }]),
+    );
 
     const attrs = computeAttributes(holdings, cardMetaMap, priceMap);
     const identity = computeIdentity(attrs);
@@ -276,7 +284,8 @@ export async function GET(req: Request) {
     const displayAttrs = computeDisplayAttributes(attrs, cardCount);
     const insights = computeInsights(attrs, identity);
     const topHoldings = computeTopHoldings(holdings, cardMap, priceMap, changeMap, imageMap);
-    const radarProfile = computeRadarProfile(holdings, cardMetaMap, printingMetaMap, priceMap);
+    const radarProfile = computeRadarProfile(holdings, radarCardMap, printingMetaMap, priceMap);
+    const badges = computeBadges(holdings, radarCardMap, printingMetaMap, priceMap, radarProfile);
 
     return NextResponse.json({
       ok: true,
@@ -290,6 +299,7 @@ export async function GET(req: Request) {
       attributes: displayAttrs,
       insights,
       radar_profile: radarProfile,
+      badges,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
