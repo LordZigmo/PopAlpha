@@ -359,7 +359,7 @@ export default async function DataPage() {
 
             {japanese ? (
               <>
-                <div className="mt-6 grid gap-3 sm:grid-cols-3">
+                <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   <div className="rounded-2xl border border-white/[0.05] bg-[#0F0808] p-4">
                     <p className="text-[11px] uppercase tracking-[0.14em] text-[#F87171]">Catalog</p>
                     <p className="mt-2 text-[28px] font-semibold leading-none tracking-[-0.04em] text-white">
@@ -370,21 +370,30 @@ export default async function DataPage() {
                     </p>
                   </div>
                   <div className="rounded-2xl border border-white/[0.05] bg-[#0F0808] p-4">
-                    <p className="text-[11px] uppercase tracking-[0.14em] text-[#F87171]">Priced</p>
+                    <p className="text-[11px] uppercase tracking-[0.14em] text-[#F87171]">Pipeline matched</p>
                     <p className="mt-2 text-[28px] font-semibold leading-none tracking-[-0.04em] text-white">
-                      {formatPct(japanese.pricedPct)}
+                      {formatPct(japanese.matchedPct)}
                     </p>
                     <p className="mt-1 text-[12px] text-[#8B8B8B]">
-                      {formatNumber(japanese.pricedCards)} of {formatNumber(japanese.totalCards)} have a market price
+                      {formatNumber(japanese.matchedCards)} of {formatNumber(japanese.totalCards)} matched to Scrydex observations
                     </p>
                   </div>
                   <div className="rounded-2xl border border-white/[0.05] bg-[#0F0808] p-4">
-                    <p className="text-[11px] uppercase tracking-[0.14em] text-[#F87171]">Fresh (7d)</p>
+                    <p className="text-[11px] uppercase tracking-[0.14em] text-[#F87171]">Has RAW price</p>
+                    <p className="mt-2 text-[28px] font-semibold leading-none tracking-[-0.04em] text-white">
+                      {formatPct(japanese.rawPricePct)}
+                    </p>
+                    <p className="mt-1 text-[12px] text-[#8B8B8B]">
+                      {formatNumber(japanese.rawPriceCards)} have an ungraded headline price
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-white/[0.05] bg-[#0F0808] p-4">
+                    <p className="text-[11px] uppercase tracking-[0.14em] text-[#F87171]">Fresh RAW (7d)</p>
                     <p className="mt-2 text-[28px] font-semibold leading-none tracking-[-0.04em] text-white">
                       {formatPct(japanese.freshPct)}
                     </p>
                     <p className="mt-1 text-[12px] text-[#8B8B8B]">
-                      {formatNumber(japanese.freshCards)} priced within the last 7 days
+                      {formatNumber(japanese.freshCards)} RAW prices observed within 7 days
                     </p>
                   </div>
                 </div>
@@ -398,9 +407,10 @@ export default async function DataPage() {
                 {japanese.sets.length > 0 ? (
                   <div className="mt-6 overflow-hidden rounded-2xl border border-white/[0.05] bg-[#0F0808]">
                     <div className="grid grid-cols-12 gap-3 border-b border-white/[0.04] px-4 py-3 text-[11px] uppercase tracking-[0.14em] text-[#6B7280]">
-                      <span className="col-span-5 sm:col-span-6">Set</span>
+                      <span className="col-span-4 sm:col-span-5">Set</span>
                       <span className="col-span-2 text-right tabular-nums">Cards</span>
-                      <span className="col-span-3 sm:col-span-2 text-right tabular-nums">Priced</span>
+                      <span className="col-span-2 text-right tabular-nums">Matched</span>
+                      <span className="col-span-2 text-right tabular-nums">RAW</span>
                       <span className="col-span-2 text-right tabular-nums">Fresh</span>
                     </div>
                     {japanese.sets.map((entry) => (
@@ -408,7 +418,7 @@ export default async function DataPage() {
                         key={entry.setName}
                         className="grid grid-cols-12 gap-3 border-b border-white/[0.04] px-4 py-3 text-[14px] last:border-b-0"
                       >
-                        <div className="col-span-5 sm:col-span-6">
+                        <div className="col-span-4 sm:col-span-5">
                           <p className="text-[14px] font-medium text-white">{entry.setName}</p>
                           <p className="text-[11px] text-[#6B7280]">
                             {entry.year ?? "—"}
@@ -417,14 +427,22 @@ export default async function DataPage() {
                         <div className="col-span-2 self-center text-right tabular-nums text-[#C9CDD3]">
                           {formatNumber(entry.cardCount)}
                         </div>
-                        <div className="col-span-3 self-center text-right tabular-nums sm:col-span-2">
-                          <p className="text-[#E5E7EB]">{formatPct(entry.pricedPct)}</p>
+                        <div className="col-span-2 self-center text-right tabular-nums">
+                          <p className={entry.matchedPct >= 90 ? "text-[#4ADE80]" : entry.matchedPct >= 70 ? "text-[#FBBF24]" : "text-[#F87171]"}>
+                            {formatPct(entry.matchedPct)}
+                          </p>
                           <p className="text-[11px] text-[#6B7280]">
-                            {formatNumber(entry.pricedCount)}/{formatNumber(entry.cardCount)}
+                            {formatNumber(entry.matchedCount)}/{formatNumber(entry.cardCount)}
+                          </p>
+                        </div>
+                        <div className="col-span-2 self-center text-right tabular-nums text-[#C9CDD3]">
+                          <p>{formatPct(entry.rawPricePct)}</p>
+                          <p className="text-[11px] text-[#6B7280]">
+                            {formatNumber(entry.rawPriceCount)}/{formatNumber(entry.cardCount)}
                           </p>
                         </div>
                         <div className="col-span-2 self-center text-right tabular-nums">
-                          <p className={entry.freshPct >= 80 ? "text-[#4ADE80]" : entry.freshPct >= 40 ? "text-[#FBBF24]" : "text-[#F87171]"}>
+                          <p className={entry.freshPct >= 60 ? "text-[#4ADE80]" : entry.freshPct >= 30 ? "text-[#FBBF24]" : "text-[#F87171]"}>
                             {formatPct(entry.freshPct)}
                           </p>
                           <p className="text-[11px] text-[#6B7280]">
@@ -436,9 +454,14 @@ export default async function DataPage() {
                   </div>
                 ) : null}
 
-                <p className="mt-5 text-[13px] leading-6 text-[#8B8B8B]">
-                  <span className="font-semibold text-[#C9CDD3]">What we look for before adding more sets:</span> Priced &gt; 90% means the matching pipeline cleanly attached every Scrydex observation to a canonical card. Fresh &gt; 80% means the daily Scrydex refresh is reaching JP sets, not just EN. When both stay green for a few days on a new set, we know the pipeline is healthy enough to onboard the next batch.
-                </p>
+                <div className="mt-5 space-y-2 text-[13px] leading-6 text-[#8B8B8B]">
+                  <p>
+                    <span className="font-semibold text-[#C9CDD3]">Reading the metrics.</span> "Pipeline matched" is whether Scrydex observations attached to a canonical card — RAW or graded. "Has RAW price" is whether we can show an ungraded headline price; structurally lower for JP than EN because many JP holos primarily trade as PSA/CGC slabs and Scrydex has no RAW NM data on them. "Fresh RAW" is how recent that RAW headline is.
+                  </p>
+                  <p>
+                    <span className="font-semibold text-[#C9CDD3]">Onboarding rule.</span> Pipeline matched &gt; 90% on a new set means our matching logic is working. RAW % is informational — it reflects what JP collectors actually trade, not pipeline health. Add the next batch of JP sets when Pipeline matched stays &gt; 90% for a few days.
+                  </p>
+                </div>
               </>
             ) : (
               <div className="mt-6 rounded-2xl border border-[#78350F] bg-[#1C1917] p-5">

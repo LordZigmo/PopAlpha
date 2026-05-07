@@ -91,8 +91,12 @@ export type JapaneseSetEntry = {
   setName: string;
   year: number | null;
   cardCount: number;
-  pricedCount: number;
-  pricedPct: number;
+  /** Cards with at least one rollup row in public_card_metrics — proxy for "the matching pipeline attached this card to its observations". */
+  matchedCount: number;
+  matchedPct: number;
+  /** Cards with a canonical RAW market_price (the headline price for ungraded singles). */
+  rawPriceCount: number;
+  rawPricePct: number;
   freshCount: number;
   freshPct: number;
   latestPriceAsOf: string | null;
@@ -101,8 +105,13 @@ export type JapaneseSetEntry = {
 export type JapaneseCatalogState = {
   totalCards: number;
   totalSets: number;
-  pricedCards: number;
-  pricedPct: number;
+  /** Cards with at least one rollup row in public_card_metrics. The matching pipeline's success rate. */
+  matchedCards: number;
+  matchedPct: number;
+  /** Cards with a canonical RAW market_price. */
+  rawPriceCards: number;
+  rawPricePct: number;
+  /** RAW-priced cards observed within the last 7 days. */
   freshCards: number;
   freshPct: number;
   latestPriceAsOf: string | null;
@@ -115,17 +124,38 @@ const JAPANESE_FRESH_WINDOW_MS = JAPANESE_FRESH_WINDOW_DAYS * 24 * 60 * 60 * 100
 /**
  * Snapshot of the Japanese catalog state for /data measurement. Looks
  * at canonical_cards (language='JP') joined with public_card_metrics
- * (RAW canonical row) so the page reflects what's actually priced and
- * how recent that price is.
+ * so the page reflects which cards the matching pipeline actually
+ * attached observations to and what fraction has a headline price.
  *
- * Used to answer two questions before scaling up JP onboarding:
- *   1. How big is the JP catalog right now? (totals + per-set)
- *   2. How well are we keeping it priced? (priced + fresh counts)
+ * Three coverage signals — each answers a different question:
  *
- * "Priced" = has a non-null market_price on the canonical RAW row.
- * "Fresh" = priced AND market_price_as_of within the last 7 days
- *           (matches the warm-tier window from the EN /data page so
- *            the metric is comparable across catalogs).
+ *   "Pipeline matched"  Cards with at least one rollup row in
+ *                       public_card_metrics, regardless of grade or
+ *                       whether market_price is populated. This is
+ *                       the matching pipeline's success rate — when
+ *                       Scrydex returns observations for a card, did
+ *                       we cleanly attach them to the canonical row.
+ *                       A card with only graded slab observations
+ *                       counts as matched here even though its RAW
+ *                       headline is empty.
+ *
+ *   "Has RAW price"     Cards with a canonical RAW market_price
+ *                       (printing_id IS NULL, grade='RAW') populated.
+ *                       This is the user-visible headline price on
+ *                       the card-detail page. By design lower than
+ *                       Pipeline matched because public_card_metrics
+ *                       only computes market_price for RAW rows;
+ *                       graded grades carry data on other fields
+ *                       (median_30d etc) but not market_price. Many
+ *                       JP holos primarily trade as PSA/CGC slabs,
+ *                       so RAW % is structurally lower for JP than
+ *                       EN.
+ *
+ *   "Fresh RAW (7d)"    Subset of "Has RAW price" where the RAW
+ *                       canonical row's market_price_as_of is within
+ *                       the last 7 days. Matches the warm-tier window
+ *                       from the EN /data page for cross-catalog
+ *                       comparison.
  */
 export async function getJapaneseCatalogState(): Promise<JapaneseCatalogState> {
   const supabase = publicSupabase();
@@ -146,8 +176,10 @@ export async function getJapaneseCatalogState(): Promise<JapaneseCatalogState> {
     return {
       totalCards: 0,
       totalSets: 0,
-      pricedCards: 0,
-      pricedPct: 0,
+      matchedCards: 0,
+      matchedPct: 0,
+      rawPriceCards: 0,
+      rawPricePct: 0,
       freshCards: 0,
       freshPct: 0,
       latestPriceAsOf: null,
@@ -155,34 +187,58 @@ export async function getJapaneseCatalogState(): Promise<JapaneseCatalogState> {
     };
   }
 
-  // 2. Look up the canonical RAW market price for every JP slug. Price
-  //    rows are keyed by (slug, printing_id, grade); printing_id IS NULL
-  //    + grade='RAW' is the canonical row that feeds card-detail pricing.
+  // 2. Pull every public_card_metrics row for JP slugs. Two things to
+  //    extract per slug:
+  //      (a) does ANY rollup row exist — "matched" (regardless of
+  //          market_price, which is by-design RAW-only across the
+  //          whole catalog)
+  //      (b) does the canonical RAW row (printing_id IS NULL,
+  //          grade='RAW') have a market_price > 0 — "RAW price"
   const slugs = cards.map((row) => row.slug);
-  type PriceRow = {
+  type RollupRow = {
     canonical_slug: string;
     market_price: number | null;
     market_price_as_of: string | null;
+    printing_id: string | null;
+    grade: string | null;
   };
-  const priceMap = new Map<string, PriceRow>();
+  type SlugState = {
+    hasRollup: boolean;
+    rawCanonicalAsOf: string | null;
+    rawCanonicalMarketPrice: number | null;
+  };
+  const stateBySlug = new Map<string, SlugState>();
   for (let i = 0; i < slugs.length; i += 200) {
     const chunk = slugs.slice(i, i + 200);
     const { data, error } = await supabase
       .from("public_card_metrics")
-      .select("canonical_slug, market_price, market_price_as_of")
-      .eq("grade", "RAW")
-      .is("printing_id", null)
+      .select("canonical_slug, market_price, market_price_as_of, printing_id, grade")
       .in("canonical_slug", chunk);
     if (error) throw new Error(`public_card_metrics(JP): ${error.message}`);
-    for (const row of (data ?? []) as PriceRow[]) {
-      if (row.canonical_slug) priceMap.set(row.canonical_slug, row);
+    for (const row of (data ?? []) as RollupRow[]) {
+      if (!row.canonical_slug) continue;
+      let state = stateBySlug.get(row.canonical_slug);
+      if (!state) {
+        state = {
+          hasRollup: false,
+          rawCanonicalAsOf: null,
+          rawCanonicalMarketPrice: null,
+        };
+        stateBySlug.set(row.canonical_slug, state);
+      }
+      state.hasRollup = true;
+      if (row.printing_id === null && row.grade === "RAW" && row.market_price !== null && row.market_price > 0) {
+        state.rawCanonicalMarketPrice = row.market_price;
+        state.rawCanonicalAsOf = row.market_price_as_of;
+      }
     }
   }
 
   // 3. Roll up per-set + global totals.
   const nowMs = Date.now();
   const setMap = new Map<string, JapaneseSetEntry>();
-  let pricedCards = 0;
+  let matchedCards = 0;
+  let rawPriceCards = 0;
   let freshCards = 0;
   let latestPriceAsOfMs = 0;
   let latestPriceAsOf: string | null = null;
@@ -195,8 +251,10 @@ export async function getJapaneseCatalogState(): Promise<JapaneseCatalogState> {
         setName: setKey,
         year: card.year ?? null,
         cardCount: 0,
-        pricedCount: 0,
-        pricedPct: 0,
+        matchedCount: 0,
+        matchedPct: 0,
+        rawPriceCount: 0,
+        rawPricePct: 0,
         freshCount: 0,
         freshPct: 0,
         latestPriceAsOf: null,
@@ -205,25 +263,28 @@ export async function getJapaneseCatalogState(): Promise<JapaneseCatalogState> {
     }
     entry.cardCount += 1;
 
-    const price = priceMap.get(card.slug);
-    if (price?.market_price != null && price.market_price > 0) {
-      pricedCards += 1;
-      entry.pricedCount += 1;
-      const asOf = price.market_price_as_of;
-      if (typeof asOf === "string" && asOf.length > 0) {
-        const asOfMs = Date.parse(asOf);
-        if (Number.isFinite(asOfMs)) {
-          if (asOfMs > nowMs - JAPANESE_FRESH_WINDOW_MS) {
-            freshCards += 1;
-            entry.freshCount += 1;
-          }
-          if (asOfMs > latestPriceAsOfMs) {
-            latestPriceAsOfMs = asOfMs;
-            latestPriceAsOf = asOf;
-          }
-          if (!entry.latestPriceAsOf || asOfMs > Date.parse(entry.latestPriceAsOf)) {
-            entry.latestPriceAsOf = asOf;
-          }
+    const state = stateBySlug.get(card.slug);
+    if (!state) continue;
+
+    if (state.hasRollup) {
+      matchedCards += 1;
+      entry.matchedCount += 1;
+    }
+    if (state.rawCanonicalMarketPrice !== null && state.rawCanonicalMarketPrice > 0) {
+      rawPriceCards += 1;
+      entry.rawPriceCount += 1;
+      const asOfMs = state.rawCanonicalAsOf ? Date.parse(state.rawCanonicalAsOf) : NaN;
+      if (Number.isFinite(asOfMs)) {
+        if (asOfMs > nowMs - JAPANESE_FRESH_WINDOW_MS) {
+          freshCards += 1;
+          entry.freshCount += 1;
+        }
+        if (asOfMs > latestPriceAsOfMs) {
+          latestPriceAsOfMs = asOfMs;
+          latestPriceAsOf = state.rawCanonicalAsOf;
+        }
+        if (!entry.latestPriceAsOf || asOfMs > Date.parse(entry.latestPriceAsOf)) {
+          entry.latestPriceAsOf = state.rawCanonicalAsOf;
         }
       }
     }
@@ -232,7 +293,8 @@ export async function getJapaneseCatalogState(): Promise<JapaneseCatalogState> {
   // 4. Finalize per-set percentages and sort by year desc, then name.
   const sets = [...setMap.values()].map((entry) => ({
     ...entry,
-    pricedPct: entry.cardCount > 0 ? (entry.pricedCount / entry.cardCount) * 100 : 0,
+    matchedPct: entry.cardCount > 0 ? (entry.matchedCount / entry.cardCount) * 100 : 0,
+    rawPricePct: entry.cardCount > 0 ? (entry.rawPriceCount / entry.cardCount) * 100 : 0,
     freshPct: entry.cardCount > 0 ? (entry.freshCount / entry.cardCount) * 100 : 0,
   }));
   sets.sort((a, b) => {
@@ -244,8 +306,10 @@ export async function getJapaneseCatalogState(): Promise<JapaneseCatalogState> {
   return {
     totalCards: cards.length,
     totalSets: sets.length,
-    pricedCards,
-    pricedPct: cards.length > 0 ? (pricedCards / cards.length) * 100 : 0,
+    matchedCards,
+    matchedPct: cards.length > 0 ? (matchedCards / cards.length) * 100 : 0,
+    rawPriceCards,
+    rawPricePct: cards.length > 0 ? (rawPriceCards / cards.length) * 100 : 0,
     freshCards,
     freshPct: cards.length > 0 ? (freshCards / cards.length) * 100 : 0,
     latestPriceAsOf,
