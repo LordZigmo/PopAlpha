@@ -1,10 +1,26 @@
 # Scanner zero-tap sprint plan
 
+> **Sprint closed 2026-05-01.** This doc is now historical. For
+> *current* scanner-accuracy strategy and the active priority
+> queue, see **`scanner-accuracy-playbook.md`**. For the running
+> log of OCR failure modes that drives that priority queue, see
+> **`scanner-ocr-failure-modes.md`**. Sprint history below stays
+> as-written so the day-by-day diary remains intact.
+
 **Sprint started 2026-04-29 → SigLIP-2 cutover landed 2026-05-01.**
 Target was 85-92% top-1 with 95%+ HIGH-confidence precision shipped
 to TestFlight. We exceeded the eval target. TestFlight build still
 pending. This doc is the single source of truth — if context compacts,
 read top-to-bottom and you'll know exactly where we are.
+
+**Post-sprint follow-on (2026-05-07).** Phases 1+2 of the
+post-sprint accuracy work shipped (`93fb290`, `5ce0d3e`,
+`23bb75d`, `2e22986`) — eval re-baseline showed Default mode
+68.1% → 72.1% (+4.0pp), Path A 94.7% → 95.7% (+1.0pp), Path B
+89.5% → 94.4% (+4.9pp), with the Path A ↔ Path B gap collapsing
+from 5.2pp to 1.3pp. The dominant remaining gap is real-device
+OCR card_number robustness (Tier 1 in
+`scanner-accuracy-playbook.md`).
 
 ---
 

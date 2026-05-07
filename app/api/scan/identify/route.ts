@@ -1013,9 +1013,10 @@ export async function POST(req: Request) {
 
   // ── Orphan filter ─────────────────────────────────────────────────
   //
-  // The card_image_embeddings index (Neon) and canonical_cards (Supabase)
-  // can drift: an embedding row may persist after its canonical_cards
-  // parent is deleted (slug rename, dedup, retracted printing). When
+  // The card_image_embeddings index and canonical_cards (both in
+  // Supabase) can drift: an embedding row may persist after its
+  // canonical_cards parent is deleted (slug rename, dedup, retracted
+  // printing). When
   // that happens the kNN happily returns the orphan slug as a top-N
   // result, but the iOS app can't navigate to a /cards/<slug> that
   // doesn't exist. Worse, the orphan crowds out legitimate candidates.

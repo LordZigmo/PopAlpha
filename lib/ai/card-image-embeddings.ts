@@ -1,7 +1,14 @@
 /**
- * card_image_embeddings — Neon pgvector store of CLIP image embeddings
+ * card_image_embeddings — Supabase pgvector store of image embeddings
  * for every canonical card whose provider image we have mirrored into
  * Supabase Storage.
+ *
+ * (Historical note: an earlier architecture put this index on a
+ * separate Neon project. As of 2026-05-07 the active table lives in
+ * Supabase — `sql` from `@vercel/postgres` connects to whatever the
+ * `POSTGRES_URL` env var resolves to, and prod Vercel sets that to
+ * Supabase's pooled connection. The legacy Neon project still exists
+ * but holds dormant CLIP-era residue only.)
  *
  * Flow mirrors lib/ai/card-embeddings.ts (text embeddings):
  *   1. `ensureCardImageEmbeddingsSchema` creates table + indexes lazily.
@@ -364,7 +371,7 @@ export async function refreshCardImageEmbeddingBatch(
   }
 
   if (changedCards.length === 0) {
-    // Every card in this batch is already correctly embedded in Neon.
+    // Every card in this batch is already correctly embedded.
     // They still count as successes from the cron's perspective so
     // canonical_cards.image_embedded_at gets stamped and they fall out
     // of future claim queries.
@@ -461,7 +468,7 @@ export async function refreshCardImageEmbeddingBatch(
       updated += 1;
       successSlugs.push(card.slug);
     } catch (err) {
-      // SQL insert failure is infra-level (Neon hiccup), not a broken
+      // SQL insert failure is infra-level (Supabase hiccup), not a broken
       // source URL. We still surface it so the operator sees something,
       // but the cron route uses a separate code path for non-URL
       // failures that shouldn't burn the attempts budget.
@@ -478,7 +485,7 @@ export async function refreshCardImageEmbeddingBatch(
     updated,
     skipped: hashSkippedSlugs.length,
     failed,
-    // Include both paths to "currently valid in Neon": the ones we just
+    // Include both paths to "currently valid in card_image_embeddings": the ones we just
     // upserted AND the ones whose hash already matched.
     successSlugs: [...successSlugs, ...hashSkippedSlugs],
     failureReasons,
