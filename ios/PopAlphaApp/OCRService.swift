@@ -50,6 +50,138 @@ enum OCRService {
         return (multi.cardNumbers.first, multi.setHint, multi.detectedLanguage)
     }
 
+    /// Multi-frame OCR consensus. Aggregates `extractCardIdentifiersMulti`
+    /// results across N frames captured ~200ms apart from the tap path,
+    /// votes on card_number candidates by frequency, and merges the rest.
+    ///
+    /// Why: a single video frame is fragile under glare / motion blur /
+    /// partial occlusion / hand tremor. Running OCR on 3-5 frames over
+    /// ~400ms gives Vision multiple shots at the card_number row under
+    /// slightly different conditions — and the candidates that appear in
+    /// 2+ frames are the trustworthy ones.
+    ///
+    /// Per-frame OCR runs CONCURRENTLY via `withTaskGroup` because each
+    /// `extractCardIdentifiersMulti` call only does pure pixel work
+    /// (Vision request + post-processing). No shared mutable state, so
+    /// CPU parallelism is safe and meaningful (~5x faster than serial
+    /// for 5 frames).
+    ///
+    /// Card_number ranking — votes first, then first-seen order as
+    /// tiebreak. The orchestrator's `identifyMulti` tries each
+    /// candidate in turn; voting puts the consensus answer first so the
+    /// most-likely-correct read is what hits Path B intersection.
+    ///
+    /// Set hint — most-voted hint wins; ties broken by first-seen.
+    /// Same logic as cardNumbers but separate counter.
+    ///
+    /// Language — any frame seeing CJK glyphs flips the result to JP.
+    /// One frame catching JP is enough; CJK character class has no
+    /// false-positive against Latin.
+    ///
+    /// Caller passes the same image type sequence as the single-frame
+    /// path — typically the embedder-cropped frame, since on-real-device
+    /// data showed Vision text recognition is dramatically better on
+    /// the tight 0.85 center-crop than the full frame (commit 2026-05-05
+    /// Path A baseline).
+    static func extractCardIdentifiersMultiFrame(
+        from frames: [UIImage],
+        maxCandidatesPerObservation: Int = 3,
+    ) async -> (cardNumbers: [String], setHint: String?, detectedLanguage: ScanLanguage) {
+        guard !frames.isEmpty else {
+            return ([], nil, .en)
+        }
+        if frames.count == 1 {
+            // Degenerate case: identical to single-frame path. Skip the
+            // aggregation overhead.
+            return await extractCardIdentifiersMulti(
+                from: frames[0],
+                maxCandidatesPerObservation: maxCandidatesPerObservation,
+            )
+        }
+
+        // Per-frame OCR in parallel. Each task index is preserved as the
+        // first element so we can reconstruct first-seen order across
+        // frames (TaskGroup completion order is non-deterministic).
+        struct PerFrame: Sendable {
+            let index: Int
+            let cardNumbers: [String]
+            let setHint: String?
+            let detectedLanguage: ScanLanguage
+        }
+        let perFrame: [PerFrame] = await withTaskGroup(of: PerFrame.self) { group in
+            for (i, frame) in frames.enumerated() {
+                group.addTask {
+                    let r = await extractCardIdentifiersMulti(
+                        from: frame,
+                        maxCandidatesPerObservation: maxCandidatesPerObservation,
+                    )
+                    return PerFrame(
+                        index: i,
+                        cardNumbers: r.cardNumbers,
+                        setHint: r.setHint,
+                        detectedLanguage: r.detectedLanguage,
+                    )
+                }
+            }
+            var results: [PerFrame] = []
+            for await r in group { results.append(r) }
+            return results.sorted { $0.index < $1.index }
+        }
+
+        var cardVotes: [String: Int] = [:]
+        var cardFirstSeen: [String: Int] = [:]
+        var hintVotes: [String: Int] = [:]
+        var hintFirstSeen: [String: Int] = [:]
+        var sawJP = false
+
+        for result in perFrame {
+            for n in result.cardNumbers {
+                cardVotes[n, default: 0] += 1
+                if cardFirstSeen[n] == nil {
+                    cardFirstSeen[n] = result.index
+                }
+            }
+            if let h = result.setHint {
+                hintVotes[h, default: 0] += 1
+                if hintFirstSeen[h] == nil {
+                    hintFirstSeen[h] = result.index
+                }
+            }
+            if result.detectedLanguage == .jp {
+                sawJP = true
+            }
+        }
+
+        let votedCardNumbers = cardVotes.keys.sorted { a, b in
+            let va = cardVotes[a] ?? 0
+            let vb = cardVotes[b] ?? 0
+            if va != vb { return va > vb }
+            let oa = cardFirstSeen[a] ?? Int.max
+            let ob = cardFirstSeen[b] ?? Int.max
+            return oa < ob
+        }
+        let bestHint = hintVotes.keys.sorted { a, b in
+            let va = hintVotes[a] ?? 0
+            let vb = hintVotes[b] ?? 0
+            if va != vb { return va > vb }
+            let oa = hintFirstSeen[a] ?? Int.max
+            let ob = hintFirstSeen[b] ?? Int.max
+            return oa < ob
+        }.first
+
+        #if DEBUG
+        ocrLogger.debug(
+            "ocr multiframe frames=\(perFrame.count) voted_card_numbers=\(votedCardNumbers, privacy: .public) hint=\(bestHint ?? "nil", privacy: .public) raw_votes=\(cardVotes.map { "\($0.key)x\($0.value)" }.joined(separator: ","), privacy: .public)"
+        )
+        #endif
+
+        return (
+            cardNumbers: votedCardNumbers,
+            setHint: bestHint,
+            detectedLanguage: sawJP ? .jp : .en,
+        )
+    }
+
     /// Multi-candidate OCR. Two innovations over `extractCardIdentifiers`:
     ///
     /// 1. **Vision beam search via `topCandidates(N)`.** Single-candidate

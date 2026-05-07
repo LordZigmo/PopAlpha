@@ -920,7 +920,12 @@ final class ScannerHost: ObservableObject {
     /// (Vision rectangle stable-fire), "tap" (manual tap-to-capture),
     /// or "library" (Photos picker). Surfaces in scan_e2e log lines
     /// so a baseline can compare auto-detect fire rate vs manual.
-    private func runIdentify(image: UIImage, ocrImage: UIImage? = nil, triggerSource: String = "unknown") async {
+    private func runIdentify(
+        image: UIImage,
+        ocrImage: UIImage? = nil,
+        additionalOCRFrames: [UIImage] = [],
+        triggerSource: String = "unknown",
+    ) async {
         // RE-ENTRY GUARD. PopAlphaVisionEngine.reset() clears the
         // current stability candidate but does NOT stop frame
         // analysis. So while we're inside an identify call, Vision
@@ -976,7 +981,26 @@ final class ScannerHost: ObservableObject {
         // never contained that text in the first place.
         let imageForOCR = ocrImage ?? image
         let ocrT0 = Date()
-        let ocrMulti = await OCRService.extractCardIdentifiersMulti(from: imageForOCR)
+        // Multi-frame consensus on the tap path (Phase 2): when the
+        // caller provided additional OCR frames captured ~200ms apart,
+        // run OCR in parallel across all of them and vote on
+        // card_number candidates by frequency. Single-frame callers
+        // (auto-detect, library) pass [] and behave identically to
+        // pre-Phase-2.
+        //
+        // Embedding still uses `image` (the first frame) — the card
+        // hasn't moved in the ~400ms capture window, so first-frame
+        // embedding matches the multi-frame OCR consensus to within
+        // sub-pixel motion. Avoids the embedding-averaging complexity
+        // for v1.
+        let ocrMulti: (cardNumbers: [String], setHint: String?, detectedLanguage: ScanLanguage)
+        if additionalOCRFrames.isEmpty {
+            ocrMulti = await OCRService.extractCardIdentifiersMulti(from: imageForOCR)
+        } else {
+            ocrMulti = await OCRService.extractCardIdentifiersMultiFrame(
+                from: [imageForOCR] + additionalOCRFrames,
+            )
+        }
         // Zero-tap language detection: extractCardIdentifiersMulti
         // always runs Vision with both ja-JP and en-US loaded and
         // detects the card's language by scanning the recognized text
@@ -1157,27 +1181,42 @@ final class ScannerHost: ObservableObject {
     /// stub is in use (no frameCapturer hook installed there).
     func captureFrameAndIdentify() async {
         guard let capturer = viewModel?.frameCapturer,
-              let image = capturer() else {
+              let primaryFrame = capturer() else {
             return
         }
         // Path A (2026-05-05): OCR runs on the same image the embedder
-        // sees (the 0.85 center-crop) — NOT the full uncropped frame
-        // we previously routed via captureFullFrame.
+        // sees (the 0.85 center-crop, via frameCapturer) — NOT the full
+        // uncropped frame previously routed via captureFullFrame.
+        // Real-device data showed Vision text-recognition was
+        // dramatically better on the tight crop (100% card_number hit
+        // rate vs 33% on the full frame), so we never reverted.
+        // captureFullFrame is still installed on the view model but
+        // unused.
         //
-        // Baseline data 2026-05-05 showed OCR finding card_numbers in
-        // 100% (6/6) of Vision-cropped auto-detect captures vs 33%
-        // (1/3) of full uncropped tap captures. Vision text
-        // recognition is dramatically better when the input is tight
-        // to the card — background pixels and sub-card aspect ratio
-        // confuse it more than they help. The earlier theory (full
-        // frame preserves the bottom edge of cards held filling the
-        // viewfinder) wasn't supported by the actual hit rate.
-        //
-        // captureFullFrame stays installed on the view model but is
-        // unused for now. Easy to re-route here if Path A regresses
-        // and we discover the bottom-edge concern was real for some
-        // framing pattern we didn't sample.
-        await runIdentify(image: image, triggerSource: "tap")
+        // Phase 2 multi-frame consensus (2026-05-08): capture
+        // additional frames spaced ~200ms apart so OCR has multiple
+        // shots at the card_number under different motion-blur / glare
+        // conditions. Video pipeline writes a fresh pixelBuffer at
+        // ~60fps, so successive captureCurrentFrame calls return
+        // distinct frames. Vote-based card_number selection across the
+        // bundle is what closes the single-frame-fragility gap that
+        // drove "first-time HIGH felt low" on real device. Auto-detect
+        // path keeps single-frame (already async + low-friction;
+        // multi-frame would slow it past noticeable).
+        let additionalFrameCount = 2  // total = primary + 2 additional = 3
+        let interFrameNanos: UInt64 = 200_000_000
+        var additionalFrames: [UIImage] = []
+        for _ in 0..<additionalFrameCount {
+            try? await Task.sleep(nanoseconds: interFrameNanos)
+            if let f = capturer() {
+                additionalFrames.append(f)
+            }
+        }
+        await runIdentify(
+            image: primaryFrame,
+            additionalOCRFrames: additionalFrames,
+            triggerSource: additionalFrames.isEmpty ? "tap" : "tap_multiframe",
+        )
     }
 
     func resumeScanning() {
