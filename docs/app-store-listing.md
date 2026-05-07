@@ -249,19 +249,36 @@ hours of receipt.
 
 ## 10. App Review Information
 
-This is the freeform field reviewers see. Be specific so they don't have to guess.
+App Store Connect splits this across two fields. Paste each into the matching one:
+
+**Sign-In Information** (separate, secure field — Apple stores this with the build):
+```
+Username:  popalpha.appreview@outlook.com
+Password:  [TODO: paste mailbox password]
+```
+*The username is the inbox the reviewer signs into to fetch the verification code. The password is the **outlook.com mailbox password**, not a PopAlpha password (PopAlpha doesn't have one — sign-in is passwordless email-code via Clerk).*
+
+**Notes / Review Information** (freeform field — visible to the reviewer alongside the build):
 
 ```
-Reviewer notes:
-
 PopAlpha is a market-data and portfolio app for trading-card
-collectors. Most of the app is browsable without an account.
+collectors. Most of the app is browsable without an account; the
+demo creds above unlock the signed-in surface (portfolio + wishlist).
 
-— DEMO ACCOUNT (sign-in required only for portfolio + wishlist):
-   Email:    [TODO: paste reviewer-only credentials]
-   Password: [TODO: paste reviewer-only credentials]
-   This account has a sample portfolio + a wishlist item already
-   loaded so you can immediately see the signed-in experience.
+— HOW TO SIGN IN (passwordless email code):
+   1. On any sign-in CTA in the app, tap "Continue with Email".
+   2. Enter the username from the Sign-In Information field above
+      (popalpha.appreview@outlook.com).
+   3. Tap "Send Code".
+   4. Open Safari → outlook.com → sign in with the same credentials
+      from the Sign-In Information field. There will be a Clerk
+      verification email titled "Your sign-in code" with a 6-digit
+      number.
+   5. Switch back to PopAlpha; type or paste the 6-digit code. The
+      app auto-submits at 6 digits.
+   The demo account is pre-seeded with a sample holding + a wishlist
+   item so the signed-in experience renders meaningfully on first
+   sign-in.
 
 — TO TEST THE PAYWALL: tap the Scan tab, run a few scans to hit
    the free quota, and the paywall sheet will appear. The
@@ -272,7 +289,7 @@ collectors. Most of the app is browsable without an account.
 — TO TEST ACCOUNT DELETION: Settings → Delete My Account →
    Confirm. The account is removed from our auth provider (Clerk)
    AND all data is purged from our database. Re-trying sign-in
-   with the same credentials will fail.
+   with the same email will fail.
 
 — OFFLINE BEHAVIOR: every screen shows a top "You're offline"
    banner when network drops, and each fetch path has a Retry
@@ -306,6 +323,12 @@ Contact for review questions:
    Email: contact@popalpha.app
    Phone: [TODO: your phone]
 ```
+
+**Pre-submission checklist for the demo account itself**:
+- [ ] outlook.com 2FA disabled (otherwise the reviewer can't fetch the code)
+- [ ] Once signed in to PopAlpha with this account, seeded a holding + wishlist item
+- [ ] Verified the Clerk verification email actually arrives at this inbox (Clerk Dashboard → Logs → Emails to confirm delivery, or just send a test code via the iOS UI)
+- [ ] Confirmed Phone identifier is OFF in Clerk Dashboard so sign-up doesn't loop on a phone prompt for the reviewer
 
 ---
 
