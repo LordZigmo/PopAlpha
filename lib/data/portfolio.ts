@@ -331,14 +331,19 @@ export function computeInsights(attrs: PortfolioAttributes, identity: CollectorI
 }
 
 // ── Collector Radar Profile ─────────────────────────────────────────────────
+//
+// Six "what kind of collector am I" axes. Designed to answer profile
+// questions ("you collect like an investor-hunter") rather than to
+// inventory-tag a portfolio. Japanese and Grail moved to badges below
+// the radar — they're modifiers, not universal axes.
 
 export type RadarProfile = {
-  vintage: number;
-  graded: number;
-  premium: number;
-  setFinisher: number;
-  japanese: number;
-  grailHunter: number;
+  nostalgia: number;        // older-era weight (WOTC through XY)
+  currentEra: number;       // SWSH+/SV/current promos
+  slabFocus: number;        // % graded × grade quality
+  marketHeat: number;       // chase cards: grails + secret/hyper rares + popular characters
+  tasteProfile: number;     // art-driven rarities: IR, AA, FA, SIR
+  collectionDepth: number;  // breadth × depth (set-builder behavior)
 };
 
 type PrintingMeta = {
@@ -347,33 +352,70 @@ type PrintingMeta = {
   language: string | null;
 };
 
-const PREMIUM_RARITY_KEYWORDS = [
-  "art rare", "illustration rare", "special illustration", "alt art",
-  "full art", "rainbow", "hyper rare",
+// Rarities that signal aesthetic/art-driven collecting.
+const TASTE_RARITY_KEYWORDS = [
+  "illustration rare", "art rare", "special illustration",
+  "alt art", "alternate art", "full art",
 ];
 
-function isPremiumRarity(rarity: string | null | undefined): boolean {
-  if (!rarity) return false;
-  const lower = rarity.toLowerCase();
-  return PREMIUM_RARITY_KEYWORDS.some((k) => lower.includes(k));
+// Chase rarities — secret/hyper/rainbow tier on top of taste rarities.
+const CHASE_RARITY_KEYWORDS = [
+  "secret rare", "hyper rare", "rainbow rare", "gold star",
+];
+
+// Pokemon names that drive market heat regardless of rarity.
+// Lowercase exact-match against canonical_cards.subject.
+const POPULAR_CHARACTERS = new Set([
+  "charizard", "pikachu",
+  "eevee", "vaporeon", "jolteon", "flareon",
+  "espeon", "umbreon", "leafeon", "glaceon", "sylveon",
+]);
+
+function matchesAny(haystack: string | null | undefined, needles: string[]): boolean {
+  if (!haystack) return false;
+  const lower = haystack.toLowerCase();
+  return needles.some((n) => lower.includes(n));
 }
+
+function isTasteRarity(rarity: string | null | undefined): boolean {
+  return matchesAny(rarity, TASTE_RARITY_KEYWORDS);
+}
+
+function isChaseRarity(rarity: string | null | undefined): boolean {
+  return matchesAny(rarity, CHASE_RARITY_KEYWORDS);
+}
+
+function isPopularCharacter(subject: string | null | undefined): boolean {
+  if (!subject) return false;
+  return POPULAR_CHARACTERS.has(subject.toLowerCase().trim());
+}
+
+type RadarCardMeta = {
+  year: number | null;
+  set_name: string | null;
+  subject: string | null;
+};
 
 export function computeRadarProfile(
   holdings: (HoldingInput & { printing_id?: string | null })[],
-  cardMap: Map<string, { year: number | null; set_name: string | null }>,
+  cardMap: Map<string, RadarCardMeta>,
   printingMetaMap: Map<string, PrintingMeta>,
   priceMap: Map<string, number>,
 ): RadarProfile {
   if (holdings.length === 0) {
-    return { vintage: 0, graded: 0, premium: 0, setFinisher: 0, japanese: 0, grailHunter: 0 };
+    return { nostalgia: 0, currentEra: 0, slabFocus: 0, marketHeat: 0, tasteProfile: 0, collectionDepth: 0 };
   }
 
   let totalQty = 0;
-  let vintageQty = 0;
   let gradedQty = 0;
-  let premiumQty = 0;
-  let jpQty = 0;
+  let gradeNumericSum = 0;
+  let gradeNumericCount = 0;
+  let currentEraQty = 0;
+  let nostalgiaWeighted = 0;       // age-weighted older-era contribution
+  let tasteQty = 0;
+  let chaseRarityQty = 0;
   let grailQty = 0;
+  let popularCharacterQty = 0;
   const sets = new Set<string>();
 
   for (const h of holdings) {
@@ -381,32 +423,240 @@ export function computeRadarProfile(
     totalQty += qty;
 
     const meta = cardMap.get(h.canonical_slug);
-    if (meta?.year != null && meta.year <= 2002) vintageQty += qty;
+    const year = meta?.year ?? null;
+
+    // Nostalgia — weighted by age, capped. WOTC through XY (≤2016) gets
+    // the strongest signal; SUM/SM (2017–2019) is mid; 2020+ contributes 0.
+    if (year != null && year <= 2016) {
+      const age = Math.max(0, 2026 - year);
+      nostalgiaWeighted += Math.min(age / 25, 1) * qty;
+    }
+
+    // Current Era — SWSH onwards.
+    if (year != null && year >= 2020) currentEraQty += qty;
+
     if (meta?.set_name) sets.add(meta.set_name);
 
-    if (isGraded(h.grade)) gradedQty += qty;
+    if (isGraded(h.grade)) {
+      gradedQty += qty;
+      const num = parseGradeNumeric(h.grade);
+      if (num != null) { gradeNumericSum += num * qty; gradeNumericCount += qty; }
+    }
 
     const printMeta = h.printing_id ? printingMetaMap.get(h.printing_id) : null;
-    if (printMeta?.language === "JP") jpQty += qty;
-    if (printMeta?.finish === "ALT_HOLO" || isPremiumRarity(printMeta?.rarity)) premiumQty += qty;
+    if (isTasteRarity(printMeta?.rarity)) tasteQty += qty;
+    if (isChaseRarity(printMeta?.rarity)) chaseRarityQty += qty;
 
     const price = lookupHoldingPrice(priceMap, h.canonical_slug, h.grade) ?? 0;
     if (price >= 500) grailQty += qty;
+
+    if (isPopularCharacter(meta?.subject)) popularCharacterQty += qty;
   }
 
-  // Depth-over-breadth: avg cards per set, 10 = full score
-  const setFinisher = Math.min(totalQty / Math.max(sets.size, 1) / 10, 1);
-  // Scale grail density: 25% of collection at $500+ = full score
-  const grailHunter = Math.min((totalQty > 0 ? grailQty / totalQty : 0) * 4, 1);
+  const totalQtyDenom = Math.max(totalQty, 1);
+  const nostalgia = Math.min(nostalgiaWeighted / totalQtyDenom, 1);
+  const currentEra = currentEraQty / totalQtyDenom;
+
+  // Slab Focus — combine prevalence with quality. 70% weight on % graded,
+  // 30% on average grade (only counts if anything is graded). Pure raw
+  // collection = 0; a portfolio of mostly PSA 10s = ~1.0.
+  const gradedPct = gradedQty / totalQtyDenom;
+  const avgGrade = gradeNumericCount > 0 ? gradeNumericSum / gradeNumericCount : 0;
+  const slabFocus = Math.min(0.7 * gradedPct + 0.3 * (avgGrade / 10), 1);
+
+  // Market Heat — chase signal aggregated across three sources:
+  //   grail density (25%+ of collection at $500+ = full)
+  //   chase rarities (secret/hyper/rainbow, 20%+ = full)
+  //   popular characters (Charizard/Pikachu/Eeveelutions, 30%+ = full)
+  // Take the max so a portfolio that's heavy on any one signal still
+  // reads as Market Heat.
+  const grailScore = Math.min((grailQty / totalQtyDenom) * 4, 1);
+  const chaseRarityScore = Math.min((chaseRarityQty / totalQtyDenom) * 5, 1);
+  const popularScore = Math.min((popularCharacterQty / totalQtyDenom) * 3.33, 1);
+  const marketHeat = Math.max(grailScore, chaseRarityScore, popularScore);
+
+  // Taste Profile — art-driven rarities. 30%+ = full score. Pure
+  // expression of "do they collect for the art".
+  const tasteProfile = Math.min((tasteQty / totalQtyDenom) * 3.33, 1);
+
+  // Collection Depth — set-builder behavior. Combines depth (avg cards
+  // per set) with breadth (number of distinct sets). 60/40 weight, both
+  // capped: 8 cards/set × 10 sets = full score.
+  const setCount = sets.size;
+  const avgCardsPerSet = totalQty / Math.max(setCount, 1);
+  const depthComponent = Math.min(avgCardsPerSet / 8, 1);
+  const breadthComponent = Math.min(setCount / 10, 1);
+  const collectionDepth = 0.6 * depthComponent + 0.4 * breadthComponent;
 
   return {
-    vintage: totalQty > 0 ? vintageQty / totalQty : 0,
-    graded: totalQty > 0 ? gradedQty / totalQty : 0,
-    premium: totalQty > 0 ? premiumQty / totalQty : 0,
-    setFinisher,
-    japanese: totalQty > 0 ? jpQty / totalQty : 0,
-    grailHunter,
+    nostalgia,
+    currentEra,
+    slabFocus,
+    marketHeat,
+    tasteProfile,
+    collectionDepth,
   };
+}
+
+// ── Collector Badges ────────────────────────────────────────────────────────
+//
+// Badges are modifiers/identity labels surfaced below the radar. Unlike
+// the radar (which always renders 6 axes), badges only appear when their
+// thresholds are met — they're earned. This is the home for "Japanese
+// Specialist" and "Grail Hunter", which used to be radar axes but are
+// better expressed as modifiers since a user can hit them across any of
+// the radar dimensions.
+
+export type Badge = {
+  id: BadgeId;
+  label: string;
+  description: string;
+  icon: string; // SF Symbol name (used by iOS, ignored by web)
+};
+
+export type BadgeId =
+  | "japanese_specialist"
+  | "grail_hunter"
+  | "binder_builder"
+  | "slab_collector"
+  | "modern_chase_collector"
+  | "vintage_loyalist"
+  | "art_first_collector"
+  | "set_completionist";
+
+type BadgeContext = {
+  totalQty: number;
+  jpQty: number;
+  grailCount: number;     // count of holdings $500+
+  gradedPct: number;
+  setCount: number;
+  avgCardsPerSet: number;
+  radar: RadarProfile;
+};
+
+function buildBadgeContext(
+  holdings: (HoldingInput & { printing_id?: string | null })[],
+  cardMap: Map<string, RadarCardMeta>,
+  printingMetaMap: Map<string, PrintingMeta>,
+  priceMap: Map<string, number>,
+  radar: RadarProfile,
+): BadgeContext {
+  let totalQty = 0;
+  let jpQty = 0;
+  let grailCount = 0;
+  let gradedQty = 0;
+  const sets = new Set<string>();
+
+  for (const h of holdings) {
+    const qty = h.qty || 1;
+    totalQty += qty;
+
+    const meta = cardMap.get(h.canonical_slug);
+    if (meta?.set_name) sets.add(meta.set_name);
+
+    const printMeta = h.printing_id ? printingMetaMap.get(h.printing_id) : null;
+    if (printMeta?.language === "JP") jpQty += qty;
+
+    if (isGraded(h.grade)) gradedQty += qty;
+
+    const price = lookupHoldingPrice(priceMap, h.canonical_slug, h.grade) ?? 0;
+    if (price >= 500) grailCount += qty;
+  }
+
+  const denom = Math.max(totalQty, 1);
+  return {
+    totalQty,
+    jpQty,
+    grailCount,
+    gradedPct: gradedQty / denom,
+    setCount: sets.size,
+    avgCardsPerSet: totalQty / Math.max(sets.size, 1),
+    radar,
+  };
+}
+
+const BADGE_RULES: Array<{
+  id: BadgeId;
+  label: string;
+  icon: string;
+  qualifies: (ctx: BadgeContext) => boolean;
+  describe: (ctx: BadgeContext) => string;
+}> = [
+  {
+    id: "japanese_specialist",
+    label: "Japanese Specialist",
+    icon: "globe.asia.australia.fill",
+    qualifies: (c) => c.totalQty > 0 && c.jpQty / c.totalQty >= 0.4,
+    describe: (c) => `${pct(c.jpQty / c.totalQty)} of your collection is Japanese`,
+  },
+  {
+    id: "grail_hunter",
+    label: "Grail Hunter",
+    icon: "diamond.fill",
+    qualifies: (c) => c.grailCount >= 3 || (c.totalQty > 0 && c.grailCount / c.totalQty >= 0.15),
+    describe: (c) => `${c.grailCount} cards over $500`,
+  },
+  {
+    id: "binder_builder",
+    label: "Binder Builder",
+    icon: "books.vertical.fill",
+    qualifies: (c) => c.radar.collectionDepth >= 0.6 && c.gradedPct < 0.3,
+    describe: (c) => `${c.setCount} sets, mostly raw`,
+  },
+  {
+    id: "slab_collector",
+    label: "Slab Collector",
+    icon: "rectangle.fill.on.rectangle.fill",
+    qualifies: (c) => c.gradedPct >= 0.5,
+    describe: (c) => `${pct(c.gradedPct)} graded`,
+  },
+  {
+    id: "modern_chase_collector",
+    label: "Modern Chase Collector",
+    icon: "bolt.fill",
+    qualifies: (c) => c.radar.currentEra >= 0.5 && c.radar.marketHeat >= 0.5,
+    describe: () => "Heavy on current-era chase cards",
+  },
+  {
+    id: "vintage_loyalist",
+    label: "Vintage Loyalist",
+    icon: "clock.arrow.circlepath",
+    qualifies: (c) => c.radar.nostalgia >= 0.5 && c.radar.currentEra < 0.3,
+    describe: () => "Strong pull toward older eras",
+  },
+  {
+    id: "art_first_collector",
+    label: "Art-First Collector",
+    icon: "paintpalette.fill",
+    qualifies: (c) => c.radar.tasteProfile >= 0.5,
+    describe: () => "Illustration rares, alt arts, full arts",
+  },
+  {
+    id: "set_completionist",
+    label: "Set Completionist",
+    icon: "checkmark.seal.fill",
+    qualifies: (c) => c.radar.collectionDepth >= 0.7 && c.avgCardsPerSet >= 8,
+    describe: (c) => `~${Math.round(c.avgCardsPerSet)} cards per set`,
+  },
+];
+
+export function computeBadges(
+  holdings: (HoldingInput & { printing_id?: string | null })[],
+  cardMap: Map<string, RadarCardMeta>,
+  printingMetaMap: Map<string, PrintingMeta>,
+  priceMap: Map<string, number>,
+  radar: RadarProfile,
+): Badge[] {
+  if (holdings.length === 0) return [];
+  const ctx = buildBadgeContext(holdings, cardMap, printingMetaMap, priceMap, radar);
+  return BADGE_RULES
+    .filter((rule) => rule.qualifies(ctx))
+    .map((rule) => ({
+      id: rule.id,
+      label: rule.label,
+      description: rule.describe(ctx),
+      icon: rule.icon,
+    }));
 }
 
 // ── Top Holdings ────────────────────────────────────────────────────────────

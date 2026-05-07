@@ -2,13 +2,17 @@
 
 import type { RadarProfile } from "@/lib/data/portfolio";
 
+// Order matters — opposite vertices read as conceptual contrasts:
+//   Nostalgia ↔ Current (old vs new era)
+//   Slab Focus ↔ Taste (technical/condition vs aesthetic)
+//   Market Heat ↔ Depth (chase vs binder-builder)
 const AXES: { key: keyof RadarProfile; label: string }[] = [
-  { key: "vintage",    label: "Vintage" },
-  { key: "graded",     label: "Graded" },
-  { key: "grailHunter", label: "Grail" },
-  { key: "japanese",   label: "Japanese" },
-  { key: "setFinisher", label: "Sets" },
-  { key: "premium",    label: "Premium" },
+  { key: "nostalgia",       label: "Nostalgia" },
+  { key: "slabFocus",       label: "Slab" },
+  { key: "marketHeat",      label: "Heat" },
+  { key: "currentEra",      label: "Current" },
+  { key: "tasteProfile",    label: "Taste" },
+  { key: "collectionDepth", label: "Depth" },
 ];
 
 const N = AXES.length;
@@ -38,9 +42,17 @@ function textAnchor(angleDeg: number): "middle" | "start" | "end" {
   return "middle";
 }
 
+// Sparse profiles (e.g. user with 4 cards) produce tiny raw axis values
+// that read as a near-invisible polygon. A sqrt curve lifts low values
+// disproportionately so the shape feels populated without distorting
+// relative emphasis. Mirrors the iOS CollectorRadarView display() helper.
+function displayValue(raw: number): number {
+  return Math.sqrt(Math.max(0, raw));
+}
+
 export function CollectorRadar({ profile }: { profile: RadarProfile }) {
   const dataPoints = AXES.map(({ key }, i) =>
-    polarToXY((i * 360) / N, profile[key] * R),
+    polarToXY((i * 360) / N, displayValue(profile[key]) * R),
   );
 
   return (
