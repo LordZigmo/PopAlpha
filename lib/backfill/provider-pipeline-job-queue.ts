@@ -32,6 +32,14 @@ export type PipelineJobRow = {
 const DEFAULT_JOB_TIMEOUT_MS = process.env.PIPELINE_JOB_TIMEOUT_MS
   ? Math.max(5000, parseInt(process.env.PIPELINE_JOB_TIMEOUT_MS, 10))
   : 480000;
+// Default ceiling for pipeline-job retries. See enqueuePipelineJob for the
+// rationale on the 6 → 10 bump (2026-05-06). Env override lets us tune
+// without a redeploy if we onboard JP and a class of heavy sets needs
+// more headroom (or, conversely, if we ever need to floor it for an
+// incident).
+const PIPELINE_JOB_DEFAULT_MAX_ATTEMPTS = process.env.PIPELINE_JOB_DEFAULT_MAX_ATTEMPTS
+  ? Math.max(1, parseInt(process.env.PIPELINE_JOB_DEFAULT_MAX_ATTEMPTS, 10))
+  : 10;
 // 2026-04-17: dropped stale-reclaim default from 600s → 300s. The threshold
 // checks `coalesce(locked_at, started_at, updated_at, created_at)`, and
 // locked_at is refreshed every HEARTBEAT_INTERVAL_MS (30s) while a job is
@@ -181,18 +189,25 @@ export async function enqueuePipelineJob(input: {
       job_kind: input.jobKind,
       params_json: safeParams,
       priority: input.priority ?? 100,
-      // Default 6 attempts. The 2026-05-04 reduction to 1 attempt was made on
-      // the theory that big sets retrying 6× was burning compute on
-      // mathematically-impossible jobs. Empirically over 2026-05-04→05-06 it
-      // collapsed catalog freshness: the keyset deploy halved per-job latency
-      // (p50=310s, p90=471s) but ~34% of SCRYDEX jobs still genuinely need
-      // >480s and need cumulative checkpointed progress across attempts to
-      // complete. With max_attempts=1 they failed one-shot per daily run,
-      // fresh_24h dropped from ~16k to 7k, the rails gate kept tripping.
-      // Reverting restores throughput; keyset alone reduced the per-attempt
-      // cost so the steady-state retry compute is roughly half what the
-      // pre-keyset 6-attempt regime cost.
-      max_attempts: input.maxAttempts ?? 6,
+      // Default 10 attempts (env-tunable via PIPELINE_JOB_DEFAULT_MAX_ATTEMPTS).
+      // History:
+      //   - 6 attempts was the original ceiling. Empirically the heaviest
+      //     legacy sets (ex3=1558 cards, sv10=1588, sv6=1402, sma=973, etc.)
+      //     need 5-8 × 480s checkpointed slices to fully process, so 6 was
+      //     tight: post-2026-05-06 perf fix (scan_matched_observations
+      //     keyset row-value) the steady-state failure rate dropped from
+      //     38.7% to 3.4%, and the residual 3.4% is exactly the long tail of
+      //     legacy sets exhausting attempts at 6/6 with PIPELINE_JOB_TIMEOUT.
+      //   - 10 attempts gives 4800s of cumulative compute per job, which
+      //     comfortably fits a 1500-card set at ~2-3s/card. Heavy JP sets
+      //     (anticipated for catalog onboarding) carry the same shape so the
+      //     headroom is forward-compatible.
+      //   - Cost ceiling: a chronically-broken job now burns 4800s of
+      //     compute before failing (vs 2880s prior). Acceptable trade for
+      //     completing the heavy-tail; revisit if a class of jobs starts
+      //     failing all 10 attempts (means architectural sharding is needed,
+      //     not more attempts).
+      max_attempts: input.maxAttempts ?? PIPELINE_JOB_DEFAULT_MAX_ATTEMPTS,
       status: "QUEUED",
     })
     .select("id")
