@@ -253,22 +253,52 @@ rows on the Path B ceiling run.
 correct→wrong flips. Real-device smoke session is the ultimate
 proof of the user-facing lift.
 
-#### 1.2 Multi-frame consensus on tap
+#### 1.2 Multi-frame consensus on tap — ✅ shipped 2026-05-08 (v1)
 
-On a tap-to-scan, capture 3–5 frames over ~600ms instead of 1.
-Average embeddings, vote on OCR card_number candidates across
-frames, return when 2+ frames agree at HIGH confidence. Best for
-cards with single-frame issues (glare, motion blur, partial
-occlusion).
+Tap path captures 3 frames spaced ~200ms apart (total ~400ms wait),
+runs OCR on all of them concurrently via `withTaskGroup`, votes on
+card_number candidates by frequency, and feeds the voted list to the
+orchestrator's `identifyMulti` trial loop. Single-frame fragility
+under motion blur / glare / hand tremor is the primary failure mode
+this addresses — when one frame misreads `068` as `163`, two other
+frames typically read it correctly and the vote wins.
 
-Implement only on the tap path, not on auto-detect. Auto-detect is
-already async + low-friction; multi-frame would slow it to
-noticeable.
+**v1 scope (shipped commits 7b48193).**
+- 3 frames, 200ms inter-frame, sequential capture (the video pipeline
+  writes a fresh pixelBuffer at ~60fps so successive
+  `captureCurrentFrame` calls return distinct frames).
+- Per-frame OCR runs concurrently via `withTaskGroup` — no 3x
+  latency penalty on the OCR cost.
+- Embedding still uses the first frame. The card hasn't moved in
+  400ms; first-frame embedding matches the multi-frame OCR consensus
+  to within sub-pixel motion. Avoids the embedding-averaging
+  complexity for v1.
+- Auto-detect and library paths stay single-frame: auto-detect is
+  already async + low-friction, library has only one image.
 
-**Estimated effort:** 2–3 days.
+**v2 deferred ideas (not blocking).**
+- Average embeddings across frames (technically tighter sim, marginal
+  in practice — first-frame is fine until eval shows otherwise).
+- Early termination: stop after 2 frames agree at HIGH confidence
+  (saves ~200ms when the first capture is already clean; complicates
+  the loop).
+- Sharpness-based frame selection for embedding (Laplacian variance).
 
-**Expected real-device impact:** 3–8pp on tap scans; 0 on
-auto-detect (which doesn't change).
+**Latency:** end-to-end tap goes from ~270ms (single-frame) to
+~670ms (multi-frame). Within the user's "I tapped, give me a result"
+expectation; lift in HIGH-rate is worth the wait.
+
+**Validation.** TestFlight build required — eval harness is
+server-side and can't model multi-frame capture. Phone smoke session
+should compare same-card scans with multiple captures: HIGH-rate on
+first scan should rise meaningfully, and the
+`Logger.scan.debug "ocr multiframe frames=N voted_card_numbers=..."`
+log should show consensus voting in action.
+
+**Expected real-device impact:** +3 to +8pp top-1 on tap scans, plus
+a meaningful HIGH-rate lift via Phase 1's sim-floor refinement
+firing more often (more reliable card_numbers → more
+ocr_intersect_unique HIGH cases).
 
 ### Tier 2 — Medium ROI, weeks
 
