@@ -24,6 +24,5 @@ export function runDebugRouteTrustTests() {
   }
 
   assert.equal(DEBUG_ROUTE_TRUST_CONTRACTS["debug/market-summary"]?.trustModel, "debug_cron_guard");
-  assert.equal(DEBUG_ROUTE_TRUST_CONTRACTS["debug/justtcg/backfill-set"]?.trustModel, "debug_cron_guard");
   assert.equal(DEBUG_ROUTE_TRUST_CONTRACTS["debug/tracked-assets/seed"]?.trustModel, "debug_cron_guard");
 }

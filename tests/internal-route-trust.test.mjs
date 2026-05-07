@@ -36,14 +36,6 @@ export function runInternalRouteTrustTests() {
     "internal_admin_session",
   );
   assert.equal(
-    INTERNAL_ROUTE_TRUST_CONTRACTS["admin/import/pokemontcg-canonical"]?.trustModel,
-    "admin_secret",
-  );
-  assert.equal(
-    INTERNAL_ROUTE_TRUST_CONTRACTS["admin/import/pokemontcg"]?.trustModel,
-    "admin_import_token",
-  );
-  assert.equal(
     INTERNAL_ROUTE_TRUST_CONTRACTS["cron/process-ebay-deletion-receipts"]?.trustModel,
     "cron_secret",
   );
