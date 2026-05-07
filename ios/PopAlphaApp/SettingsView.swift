@@ -26,6 +26,16 @@ struct SettingsView: View {
     @State private var showPaywallSheet = false
     @StateObject private var premiumGate = PremiumGate.shared
 
+    // Appearance — same @AppStorage key as ContentView so the picker
+    // here drives the live `.preferredColorScheme(...)` at the root.
+    @AppStorage(AppearanceMode.storageKey) private var appearanceRaw: String = AppearanceMode.system.rawValue
+    private var appearanceBinding: Binding<AppearanceMode> {
+        Binding(
+            get: { AppearanceMode(rawValue: appearanceRaw) ?? .system },
+            set: { appearanceRaw = $0.rawValue },
+        )
+    }
+
     private var auth: AuthService { AuthService.shared }
 
     var body: some View {
@@ -153,6 +163,22 @@ struct SettingsView: View {
                         .buttonStyle(.plain)
                     }
                     .padding(.vertical, 24)
+                }
+
+                // Appearance — pure UI preference, no auth required so
+                // guest users can flip Light / Dark too. Default
+                // `.system` honours the iOS-level Display & Brightness
+                // setting; pinning Light or Dark overrides it within
+                // PopAlpha. Persisted via @AppStorage so the choice
+                // survives app launches; ContentView reads the same key
+                // and applies `.preferredColorScheme(...)` at the root.
+                settingsSection("Appearance") {
+                    pickerRow(
+                        icon: "paintbrush",
+                        title: "Appearance",
+                        selection: appearanceBinding,
+                        options: AppearanceMode.allCases
+                    ) { /* persisted via @AppStorage; no server sync */ }
                 }
 
                 if auth.isAuthenticated {

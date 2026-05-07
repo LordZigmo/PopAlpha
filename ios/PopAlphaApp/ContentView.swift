@@ -20,6 +20,14 @@ struct ContentView: View {
     // screen triggered the sign-in.
     private var auth: AuthService { AuthService.shared }
 
+    // User-selectable color-scheme override. Default `.system` honours
+    // iOS Settings → Display & Brightness; the picker in Settings →
+    // Appearance lets users pin Light or Dark within PopAlpha.
+    @AppStorage(AppearanceMode.storageKey) private var appearanceRaw: String = AppearanceMode.system.rawValue
+    private var appearance: AppearanceMode {
+        AppearanceMode(rawValue: appearanceRaw) ?? .system
+    }
+
     init() {
         configureTabBarAppearance()
     }
@@ -74,6 +82,7 @@ struct ContentView: View {
                 .tag(AppTab.profile)
         }
         .tint(PA.Colors.accent)
+        .preferredColorScheme(appearance.colorScheme)
         .offlineBanner()
         .sheet(
             isPresented: Binding(

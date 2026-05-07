@@ -168,6 +168,47 @@ enum PA {
     }
 }
 
+// MARK: - Appearance Mode
+//
+// User-selectable override for the system color scheme. Defaults to
+// `.system` so the app honours iOS Settings → Display & Brightness;
+// `.light` / `.dark` let users pin a specific mode in PopAlpha
+// regardless of the system setting (useful for collectors who want a
+// dark hobby app on a light-mode phone, or vice versa). Persisted
+// via `@AppStorage("popalpha.appearance.v1")` and applied at the root
+// via `.preferredColorScheme(appearance.colorScheme)`.
+
+enum AppearanceMode: String, CaseIterable, Identifiable, CustomStringConvertible {
+    case system, light, dark
+
+    /// UserDefaults key. Reusing for any future opt-in appearance
+    /// migrations would bump the suffix.
+    static let storageKey = "popalpha.appearance.v1"
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .system: "System Default"
+        case .light:  "Light"
+        case .dark:   "Dark"
+        }
+    }
+
+    var description: String { label }
+
+    /// Maps to SwiftUI's `.preferredColorScheme(_:)` argument.
+    /// `nil` = inherit system; an explicit value pins the app to that
+    /// scheme regardless of the global setting.
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: nil
+        case .light:  .light
+        case .dark:   .dark
+        }
+    }
+}
+
 // MARK: - Reusable Modifiers
 
 struct GlassSurface: ViewModifier {
