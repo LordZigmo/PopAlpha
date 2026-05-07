@@ -118,13 +118,22 @@ not all.
 - Phase 1.5 (5ce0d3e, 2026-05-07): threshold 0.22 → 0.35.
   Partial fix; closes the looser-grip cases but not the very
   loose ones at midY > 0.35.
-- **Tier 1.1 stage 1 (TBD commit, 2026-05-07): multi-pass
-  fallback.** When the strict-region pass returns
-  `cardNumbers=[]`, re-process the same Vision observations with
-  `restrictToBottomRegion=false`. The plausibility filter
-  (`yInt ∈ [5, 600]`, `xInt ∈ [1, 999]`) is the only defense
-  against the original Chansey case during the fallback —
-  asymmetric risk strongly favors admission (rejected
+- **Tier 1.1 stage 1 (8cad899, 2026-05-07): multi-pass
+  fallback** — VERIFIED WORKING in production. Real-device
+  re-scan of `prismatic-evolutions-68-heatran` at
+  2026-05-07T05:25:59Z shows:
+  ```
+  ocr spatial filter rejected 1 slash-line(s) outside bottom region: 068/131 ₽
+  ocr pass-2 fallback recovered 1 card_number(s) — 68
+  cardNumbers=["68"] setHint=Iron Buster
+  offline winning_path=ocr_intersect_unique confidence=high
+  ```
+  Same card pre-fix (2026-05-07T02:07:43Z) returned
+  `cardNumbers=[]` confidence=medium with a 5-card Heatran sim
+  cluster. Post-fix: HIGH confidence Path B unique match. The
+  plausibility filter (`yInt ∈ [5, 600]`, `xInt ∈ [1, 999]`)
+  is the sole defense during the fallback — adequate because
+  asymmetric risk strongly favors admission (rejected real
   card_number costs HIGH→medium confidence; admitted false
   card_number falls through to Path C harmlessly).
 - Tier 1.1 stage 2 (same commit): strip-pass ratio 0.18 → 0.25
@@ -276,6 +285,68 @@ the second case.
 
 ---
 
+### Mode 6 — Vision sees no slash-bearing text at all (card_number row out of frame or unreadable)
+
+**Symptom.** Real-device 2026-05-07T05:26:05Z (Budew) and
+T05:26:18Z (Tangrowth) scans returned `cardNumbers=[]` AND
+**no `ocr spatial filter rejected …` diagnostic line** at all.
+This means Vision returned zero slash-bearing observations
+across the entire frame — distinct from Modes 1/2 (Vision saw
+the card_number but the spatial filter rejected it). Tier 1.1
+stage 1's pass-2 fallback can't recover anything that Vision
+didn't see in the first place.
+
+**Evidence (raw log).**
+```
+ocr frameSize=978x675 cardNumbers=[] setHint=th noo tum, lhey cant play any kam ms=181.8
+offline winning_path=vision_only confidence=high
+saved: 1. prismatic-evolutions-4-budew (sim=0.970)
+```
+The garbage `setHint` ("th noo tum, lhey cant play any kam")
+shows Vision was reading flavor-text fragments mid-card, not
+the card_number row. The card_number was either out of frame
+entirely or too small/blurry to recognize as text.
+
+**Vision actually saw.** Mid-card text (flavor or attack
+text), not the bottom-row collector number. No "X/Y" pattern
+was returned in any observation.
+
+**Root cause.** Probably one of:
+- Card was framed such that the card_number row was below the
+  captured frame entirely (over-tight crop, finger occluding
+  bottom edge, card extending below viewfinder).
+- Card_number was at very small pixel size (card occupies
+  small portion of frame, so the ~12-15px digits become
+  ~6-8px which is below Vision's accurate-mode threshold).
+- Bottom of card had glare/blur that suppressed Vision's
+  recognition of the digit characters.
+
+These are framing / image-quality problems, not pipeline
+problems.
+
+**Fix or mitigation.**
+- For these specific scans the kNN was strong enough to win
+  on its own: Budew sim 0.970 (rank-2 at 0.872), Tangrowth
+  sim 0.962 (rank-2 at 0.830). HIGH confidence preserved
+  despite missing card_number.
+- OPEN: Tier 1.1 stage 4 (image quality gates). Detect
+  low-luminance / high-blur / small-card-area conditions
+  before OCR runs and bump the user with a "hold steadier
+  / move closer" hint instead of returning a confused
+  result. The TestFlight build emits enough log signal
+  (`scan_e2e total_ms`, `ocr_ms`, frameSize ratios) to
+  retroactively quantify how often Mode 6 fires.
+- OPEN: Tier 1.1 stage 3 (perspective correction) may help
+  marginally — better-cropped images give Vision more pixels
+  on the card_number row.
+
+**Repro.** Real-device 2026-05-07T05:26:05Z (Budew),
+T05:26:18Z (Tangrowth). Same eval slugs as Mode 1; the
+differing OCR result reflects different framing in the scan,
+not different cards.
+
+---
+
 ### Mode 5 — Cards with no printed X/Y collector number
 
 **Symptom.** Some vintage / promo / jumbo cards don't print a
@@ -313,11 +384,12 @@ Update this whenever you have aggregate data to back it up.
 
 | Mode | First seen | Real-device occurrences | Eval-corpus occurrences | Status |
 |---|---|---|---|---|
-| 1 (grip pushes card_number above threshold) | 2026-05-07 | 2 of 5 (40%) sample | TBD | OPEN — Tier 1.1.a |
-| 2 (landscape orientation) | 2026-05-07 | 1 of 5 (20%) sample | TBD | OPEN — Tier 1.1.a same fix |
-| 3 (regex tail garbage) | 2026-05-07 | 1 of 5 sample | TBD | Speculative; unfix until validated |
-| 4 (attack name as set_hint) | 2026-05-07 | 5 of 5 (100%) — dormant | N/A (eval injects setHint) | Closed — won't fix |
+| 1 (grip pushes card_number above threshold) | 2026-05-07 | 2/5 (initial), 1/4 post-fix | TBD | **VERIFIED FIXED** by Tier 1.1 stage 1 (8cad899) — pass-2 fallback recovered card_number=68 on Heatran re-scan 2026-05-07T05:25:59Z |
+| 2 (landscape orientation) | 2026-05-07 | 1/5 sample | TBD | Partial fix from Tier 1.1 stage 1 (OCR side); embedder side still OPEN — Tier 1.1 stage 3 |
+| 3 (regex tail garbage) | 2026-05-07 | 1/5 sample | TBD | Mostly subsumed by Mode 1 fix; unfix until validated otherwise |
+| 4 (attack name as set_hint) | 2026-05-07 | 5/5 — dormant | N/A | Closed — won't fix (set_hint marginal post-Phase-2) |
 | 5 (no card_number printed) | TBD | TBD | TBD | Won't fix; Path C is correct fallback |
+| 6 (Vision didn't see slash-bearing text) | 2026-05-07 | 3/4 post-Tier-1.1 sample | TBD | OPEN — Tier 1.1 stage 4 (image quality gates) — but kNN won anyway in observed cases |
 
 The 5-scan sample on 2026-05-07 is too small to draw conclusions
 about real-device frequency. A meaningful scoreboard requires:
