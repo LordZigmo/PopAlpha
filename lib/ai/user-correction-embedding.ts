@@ -166,6 +166,41 @@ export async function embedAndStoreUserCorrection(args: {
     ],
   );
 
+  // 5. Cap user_correction anchors per slug at MAX_USER_CORRECTION_ANCHORS.
+  //    Without this cap, repeatedly-corrected slugs accumulate 3-6+
+  //    anchors each, occupying disproportionate share of the kNN top-K
+  //    candidate pool. Real-device evidence 2026-05-08: Lugia VSTAR /
+  //    Unown VSTAR / Tyranitar ex / Cinderace V each had 4-5 anchors,
+  //    causing them to appear as top-3/4 candidates in pickers for
+  //    visually-unrelated scans (the user noticed "the picker keeps
+  //    showing my previously-scanned cards").
+  //
+  //    Keep the most recent MAX entries — variant_index is monotonically
+  //    increasing per slug (step 3 takes max+1 each insert), so highest
+  //    indices = newest anchors. DELETE everything outside the top-N by
+  //    variant_index for this slug + model_version.
+  //
+  //    Cap is set conservatively at 2: still 2x the recall benefit a
+  //    catalog-only slug gets (1 reference embedding), still 2x what's
+  //    needed to "win" against a single competing slug, but small enough
+  //    that no slug shadows more than 2 of the top-100 kNN slots.
+  const MAX_USER_CORRECTION_ANCHORS = 2;
+  await sql.query(
+    `delete from card_image_embeddings
+     where canonical_slug = $1
+       and model_version = $2
+       and source = 'user_correction'
+       and variant_index not in (
+         select variant_index from card_image_embeddings
+         where canonical_slug = $1
+           and model_version = $2
+           and source = 'user_correction'
+         order by variant_index desc
+         limit $3
+       )`,
+    [args.canonicalSlug, embedder.modelVersion, MAX_USER_CORRECTION_ANCHORS],
+  );
+
   return {
     skipped: false,
     variantIndex,
