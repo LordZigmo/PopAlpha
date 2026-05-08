@@ -24,6 +24,15 @@ struct ScannerTabView: View {
     @State private var showPaywallSheet = false
     @StateObject private var premiumGate = PremiumGate.shared
     @StateObject private var scanQuota = ScanQuota.shared
+
+    // One-shot quota-approaching warning state. Fires once per day
+    // when the user completes their 4th scan (remaining == 1), as a
+    // soft-friction precursor to the hard wall on scan #5. Suppressed
+    // for the rest of the day after firing — `lastWarnedScansToday`
+    // is the dedupe key, reset when scansToday rolls back to 0
+    // (local-midnight rollover).
+    @State private var quotaWarningVisible = false
+    @State private var lastWarnedScansToday = -1
     #if DEBUG
     @State private var smokeReport: OfflineScannerSmokeReport?
     @State private var smokeRunning = false
@@ -110,6 +119,29 @@ struct ScannerTabView: View {
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
                     .animation(.easeInOut(duration: 0.2), value: scanner.isIdentifying)
                     .animation(.easeInOut(duration: 0.2), value: scanner.identifyError)
+                }
+
+                // Quota-approaching warning toast. Only shows when
+                // scansToday == dailyLimit - 1 (1 left), the user
+                // isn't pro, no identify is in flight, and the
+                // paywall isn't already open. Sits in the same
+                // bottom-center slot as the identify toast — they're
+                // mutually exclusive (the identify toast is up
+                // during scans; this one fires after a scan settles
+                // back to idle).
+                if quotaWarningVisible {
+                    VStack {
+                        Spacer()
+                        ScanQuotaWarningToast(
+                            remaining: scanQuota.remaining,
+                            onTap: handleQuotaWarningTap,
+                        )
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 140)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    .animation(.easeInOut(duration: 0.25), value: quotaWarningVisible)
                 }
 
                 // Top-right corner buttons. Crown is always visible
@@ -227,12 +259,59 @@ struct ScannerTabView: View {
             .onChange(of: scanner.lastMatch) { _, newValue in
                 handleIdentifyResult(newValue)
             }
+            // Quota-warning trigger: evaluate when a scan settles back
+            // to idle (isIdentifying false → false), at which point
+            // remaining will reflect the just-completed scan and the
+            // toast can show without overlapping the identify toast.
+            .onChange(of: scanner.isIdentifying) { _, identifying in
+                if !identifying { evaluateQuotaWarning() }
+            }
+            // Day-rollover reset: when scansToday drops (local-midnight
+            // rollover via ScanQuota.rolloverIfNewDay), reset the
+            // dedupe key so the warning can fire again the next day.
+            .onChange(of: scanQuota.scansToday) { oldValue, newValue in
+                if newValue < oldValue { lastWarnedScansToday = -1 }
+            }
             .onAppear {
                 #if DEBUG
                 runSmokeTestIfRequested()
                 #endif
             }
         }
+    }
+
+    // MARK: - Quota-approaching warning (4th-of-5 scan trigger)
+    //
+    // Fires once per day for free users when remaining hits 1. The
+    // toast is presentation-only (ScanQuotaWarningToast); this method
+    // gates trigger conditions and schedules auto-dismiss after 4s
+    // of being on screen so it doesn't camp.
+
+    private func evaluateQuotaWarning() {
+        guard !premiumGate.isPro,
+              scanQuota.remaining == 1,
+              !showPaywallSheet,
+              !scanner.isIdentifying,
+              lastWarnedScansToday != scanQuota.scansToday
+        else { return }
+
+        lastWarnedScansToday = scanQuota.scansToday
+        withAnimation { quotaWarningVisible = true }
+
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(4))
+            // Re-check: if the user already tapped + opened the
+            // paywall, or navigated away, don't bother animating out.
+            if quotaWarningVisible {
+                withAnimation { quotaWarningVisible = false }
+            }
+        }
+    }
+
+    private func handleQuotaWarningTap() {
+        PAHaptics.tap()
+        quotaWarningVisible = false
+        showPaywallSheet = true
     }
 
     // MARK: - Camera-starting placeholder
