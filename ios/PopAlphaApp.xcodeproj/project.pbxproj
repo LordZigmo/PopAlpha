@@ -45,6 +45,7 @@
 		AA00000100000000000000E5 /* ActivityService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000E8 /* ActivityService.swift */; };
 		AA00000100000000000000E7 /* ActivityEventCell.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000EA /* ActivityEventCell.swift */; };
 		AA00000100000000000000EB /* WishlistService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000EC /* WishlistService.swift */; };
+		B88BC1002AD820253E1200BF /* ProMarketSignalsCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4DA9815D835B026D5920042 /* ProMarketSignalsCardView.swift */; };
 		B8C1012FB0F85B919D4EB1DF /* LockedPreviewOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4B3CD44928B2F1804B2B39E /* LockedPreviewOverlay.swift */; };
 		BB00000100000000000000F1 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00000100000000000000A1 /* APIClient.swift */; };
 		BB00000100000000000000F2 /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00000100000000000000A2 /* AuthService.swift */; };
@@ -170,6 +171,7 @@
 		CC00000100000000000000B1 /* WatchlistButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchlistButton.swift; sourceTree = "<group>"; };
 		CC00000100000000000000B2 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		CC00000100000000000000B3 /* RecentSearchStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentSearchStore.swift; sourceTree = "<group>"; };
+		D4DA9815D835B026D5920042 /* ProMarketSignalsCardView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProMarketSignalsCardView.swift; sourceTree = "<group>"; };
 		DD00000100000000000000A1 /* SignalBoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalBoardView.swift; sourceTree = "<group>"; };
 		DD00000100000000000000A2 /* Haptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Haptics.swift; sourceTree = "<group>"; };
 		DD00000100000000000000A3 /* PersonalizationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalizationService.swift; sourceTree = "<group>"; };
@@ -337,6 +339,7 @@
 				AA00000100000000000000E3 /* Preview Content */,
 				B4B3CD44928B2F1804B2B39E /* LockedPreviewOverlay.swift */,
 				833C1F6DE131209C109EB423 /* CollectorRadarLockedCard.swift */,
+				D4DA9815D835B026D5920042 /* ProMarketSignalsCardView.swift */,
 			);
 			path = PopAlphaApp;
 			sourceTree = "<group>";
@@ -534,6 +537,7 @@
 				1600000100000000000000F1 /* PortfolioDemoView.swift in Sources */,
 				B8C1012FB0F85B919D4EB1DF /* LockedPreviewOverlay.swift in Sources */,
 				9D02350A7D2DDE1FBA2D79A5 /* CollectorRadarLockedCard.swift in Sources */,
+				B88BC1002AD820253E1200BF /* ProMarketSignalsCardView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
