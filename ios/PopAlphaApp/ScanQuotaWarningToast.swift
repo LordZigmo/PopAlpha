@@ -1,19 +1,19 @@
 // ScanQuotaWarningToast.swift
 //
-// One-shot soft-friction toast that fires AFTER a free user's 4th
-// scan of the day, before they hit the hard wall on scan #5. Shown
-// in the same bottom-center slot as the identify status toast (but
-// only when no identify is in flight) for ~4 seconds, with a single
-// tap target that opens the paywall.
+// Soft-friction warning element shown at the bottom of the scanner
+// viewport when a free user's daily quota is running out (remaining
+// <= 1) or fully exhausted (remaining == 0). Despite the "Toast"
+// name, this is now mounted PERSISTENTLY by ScannerTabView — visible
+// for the whole time the conditions hold rather than auto-dismissing
+// after a few seconds. The earlier timed-toast version raced with
+// post-scan navigation: a successful scan immediately pushes
+// CardDetailView, so the toast animated in on a view the user
+// wasn't looking at. Persistent visibility solves that — the user
+// always sees the warning when they're on the scanner near/at the
+// limit.
 //
-// Why before the wall, not after: hard walls convert when users are
-// motivated, but a meaningful tail bounces silently when they hit a
-// wall they didn't see coming. Surfacing the soft warning at scan #4
-// catches users mid-engagement and gives the paywall a chance to
-// land while their intent is still high.
-//
-// Trigger logic + once-per-day suppression live in ScannerTabView;
-// this view is presentational only.
+// Mounting + condition logic lives in ScannerTabView; this view is
+// presentational only.
 
 import SwiftUI
 
@@ -32,7 +32,7 @@ struct ScanQuotaWarningToast: View {
                     Text(headline)
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(.white)
-                    Text("Tap to keep scanning unlimited")
+                    Text(subtitle)
                         .font(.system(size: 11))
                         .foregroundStyle(.white.opacity(0.7))
                 }
@@ -59,7 +59,16 @@ struct ScanQuotaWarningToast: View {
     }
 
     private var headline: String {
-        if remaining == 1 { return "1 scan left today" }
-        return "\(remaining) scans left today"
+        switch remaining {
+        case 0:  return "Daily limit reached"
+        case 1:  return "1 scan left today"
+        default: return "\(remaining) scans left today"
+        }
+    }
+
+    private var subtitle: String {
+        remaining == 0
+            ? "Tap to upgrade and keep scanning"
+            : "Tap to keep scanning unlimited"
     }
 }
