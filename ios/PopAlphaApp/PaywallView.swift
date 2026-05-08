@@ -664,7 +664,10 @@ struct PaywallView: View {
         isPurchasing = true
         defer { isPurchasing = false }
 
-        let isTrialOffer = showsFreeTrialOffer
+        // Whether the user is tapping a trial-flavored CTA ("Start
+        // 7-day free trial" / "Try 7 days free"). Both .eligible and
+        // .unknown surface trial copy; only .noTrial is "Start Pro".
+        let isTrialOffer = showsTrialCopy(forProductID: selectedProductID)
 
         // Top-of-tap analytics — fires regardless of outcome so the
         // funnel can compare "tapped Subscribe" → "Subscribed" /
