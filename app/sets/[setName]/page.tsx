@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { cache } from "react";
 import PageShell from "@/components/layout/PageShell";
 import { getCanonicalMarketPulseMap } from "@/lib/data/market";
-import { getSetSummaryPageData, getSetSummaryHistory } from "@/lib/sets/summary";
+import { getSetSummaryPageData, getSetSummaryHistory, type SetSummaryMover } from "@/lib/sets/summary";
 import ChangeBadge from "@/components/change-badge";
 import EnhancedChart from "@/components/enhanced-chart";
 import { dbPublic } from "@/lib/db";
@@ -94,6 +94,14 @@ function formatChange(value: number | null): string | null {
   return `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
 }
 
+function moverDisplayName(slug: string, cardsBySlug: Map<string, CanonicalRow>): string {
+  return cardsBySlug.get(slug)?.canonical_name ?? slug.replace(/-/g, " ");
+}
+
+function moverImage(slug: string, printingsBySlug: Map<string, PrintingRow[]>): string | null {
+  return chooseBestImage(printingsBySlug.get(slug) ?? []);
+}
+
 function chooseBestImage(printings: PrintingRow[]): string | null {
   if (!printings.length) return null;
   const sorted = [...printings].sort((a, b) => {
@@ -110,6 +118,76 @@ function chooseBestImage(printings: PrintingRow[]): string | null {
     return sb - sa;
   });
   return sorted[0]?.image_url ?? null;
+}
+
+function MoverList({
+  title,
+  subtitle,
+  movers,
+  direction,
+  cardsBySlug,
+  printingsBySlug,
+}: {
+  title: string;
+  subtitle: string;
+  movers: SetSummaryMover[];
+  direction: "up" | "down";
+  cardsBySlug: Map<string, CanonicalRow>;
+  printingsBySlug: Map<string, PrintingRow[]>;
+}) {
+  // The set_summary_snapshots top_movers_json / top_losers_json arrays are
+  // each capped at 5, but for a set with <5 cards in a given direction the
+  // tail rows can leak in with the wrong sign (e.g. a "loser" with +0.9%).
+  // Filter strictly so the rail only shows rows that actually move in the
+  // direction the title promises.
+  const visible = movers
+    .filter((m) => m.change_7d_pct !== null && Number.isFinite(m.change_7d_pct))
+    .filter((m) => (direction === "up" ? (m.change_7d_pct as number) > 0 : (m.change_7d_pct as number) < 0))
+    .slice(0, 5);
+  if (visible.length === 0) return null;
+  return (
+    <div className="rounded-[var(--radius-card)] border-app border bg-surface-soft/30 p-4">
+      <div className="mb-3">
+        <p className="text-muted text-[11px] uppercase tracking-[0.18em]">{title}</p>
+        <p className="text-muted mt-0.5 text-xs">{subtitle}</p>
+      </div>
+      <ul className="space-y-2">
+        {visible.map((mover) => {
+          const name = moverDisplayName(mover.canonical_slug, cardsBySlug);
+          const image = moverImage(mover.canonical_slug, printingsBySlug);
+          const finishLabel = mover.finish ? mover.finish.replaceAll("_", " ") : null;
+          return (
+            <li key={mover.variant_ref}>
+              <Link
+                href={`/c/${encodeURIComponent(mover.canonical_slug)}`}
+                className="hover:bg-surface/30 -mx-2 flex items-center gap-3 rounded-[var(--radius-input)] px-2 py-1.5 transition"
+              >
+                <div className="relative h-12 w-9 flex-shrink-0 overflow-hidden rounded-[var(--radius-input)] border-app border bg-surface-soft/24">
+                  {image ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={image} alt={name} className="h-full w-full object-cover object-center" />
+                  ) : null}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-app truncate text-sm font-semibold">{name}</p>
+                  {finishLabel ? <p className="text-muted truncate text-[11px]">{finishLabel}</p> : null}
+                </div>
+                <div className="flex-shrink-0 text-right">
+                  <p className="text-app text-sm font-semibold tabular-nums">{formatUsd(mover.price)}</p>
+                  <p
+                    className="text-xs font-semibold tabular-nums"
+                    style={{ color: changeTone(mover.change_7d_pct) }}
+                  >
+                    {formatChange(mover.change_7d_pct) ?? "—"}
+                  </p>
+                </div>
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
 }
 
 const getSetPageBaseData = cache(async (setName: string): Promise<SetPageBaseData> => {
@@ -242,6 +320,9 @@ export default async function SetBrowserPage({ params }: { params: Promise<{ set
     cur.push(p);
     printingsBySlug.set(p.canonical_slug, cur);
   }
+
+  const cardsBySlug = new Map<string, CanonicalRow>();
+  for (const c of cards) cardsBySlug.set(c.slug, c);
 
   // Build + sort card entries (price desc, then card number)
   const entries: CardEntry[] = cards.map((card) => ({
@@ -384,6 +465,31 @@ export default async function SetBrowserPage({ params }: { params: Promise<{ set
                   ))}
                 </div>
               </div>
+            ) : null}
+          </section>
+        ) : null}
+
+        {summary.snapshot && (summary.snapshot.topMovers.length > 0 || summary.snapshot.topLosers.length > 0) ? (
+          <section className="mb-6 space-y-4">
+            {summary.snapshot.topMovers.length > 0 ? (
+              <MoverList
+                title="Top Movers"
+                subtitle="Biggest 7D gainers in this set"
+                movers={summary.snapshot.topMovers}
+                direction="up"
+                cardsBySlug={cardsBySlug}
+                printingsBySlug={printingsBySlug}
+              />
+            ) : null}
+            {summary.snapshot.topLosers.length > 0 ? (
+              <MoverList
+                title="Top Losers"
+                subtitle="Biggest 7D losers in this set"
+                movers={summary.snapshot.topLosers}
+                direction="down"
+                cardsBySlug={cardsBySlug}
+                printingsBySlug={printingsBySlug}
+              />
             ) : null}
           </section>
         ) : null}
