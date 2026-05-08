@@ -7,6 +7,7 @@ import {
   statusFromTransaction,
   upsertAppleSubscription,
 } from "@/lib/iap/upsert-subscription";
+import { getPostHogClient } from "@/lib/posthog-server";
 
 export const runtime = "nodejs";
 
@@ -42,6 +43,8 @@ export async function POST(req: Request) {
     );
   }
 
+  const posthog = getPostHogClient();
+
   let payload;
   try {
     payload = await verifyAndDecodeTransaction(jws);
@@ -51,16 +54,31 @@ export async function POST(req: Request) {
         userId: auth.userId,
         status: err.status,
       });
+      posthog.capture({
+        distinctId: auth.userId,
+        event: "subscription_verification_failed",
+        properties: { reason: "jws_verification", apple_status: err.status },
+      });
       return NextResponse.json(
         { ok: false, error: "Receipt verification failed." },
         { status: 400 },
       );
     }
     console.error("[iap/verify] verify error", { userId: auth.userId, err });
+    posthog.capture({
+      distinctId: auth.userId,
+      event: "subscription_verification_failed",
+      properties: { reason: "internal_error" },
+    });
     return NextResponse.json({ ok: false, error: "Internal error." }, { status: 500 });
   }
 
   if (!payload.originalTransactionId || !payload.productId) {
+    posthog.capture({
+      distinctId: auth.userId,
+      event: "subscription_verification_failed",
+      properties: { reason: "missing_fields" },
+    });
     return NextResponse.json(
       { ok: false, error: "Receipt missing required fields." },
       { status: 400 },
@@ -71,6 +89,11 @@ export async function POST(req: Request) {
   try {
     environment = narrowEnvironment(payload.environment as string | undefined);
   } catch {
+    posthog.capture({
+      distinctId: auth.userId,
+      event: "subscription_verification_failed",
+      properties: { reason: "unrecognized_environment", env_raw: String(payload.environment ?? "") },
+    });
     return NextResponse.json(
       { ok: false, error: "Receipt environment unrecognized." },
       { status: 400 },
@@ -95,10 +118,31 @@ export async function POST(req: Request) {
     });
   } catch (err) {
     console.error("[iap/verify] upsert failed", { userId: auth.userId, err });
+    posthog.capture({
+      distinctId: auth.userId,
+      event: "subscription_verification_failed",
+      properties: { reason: "upsert_failed", product_id: payload.productId },
+    });
     return NextResponse.json({ ok: false, error: "Internal error." }, { status: 500 });
   }
 
   const isPro = status === "active" && (expiresAt === null || expiresAt.getTime() > Date.now());
+
+  // Server-authoritative subscription event. Pairs with the iOS-side
+  // paywall_subscribed: a discrepancy (client fires, server doesn't)
+  // signals receipt-tampering or a network failure to be investigated.
+  posthog.capture({
+    distinctId: auth.userId,
+    event: "subscription_verified_server",
+    properties: {
+      product_id: payload.productId,
+      status,
+      environment,
+      is_pro: isPro,
+      expires_at: expiresAt?.toISOString() ?? null,
+      revoked: payload.revocationDate != null,
+    },
+  });
 
   return NextResponse.json({
     ok: true,
