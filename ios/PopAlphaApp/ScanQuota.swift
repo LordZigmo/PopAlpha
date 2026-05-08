@@ -30,6 +30,12 @@ final class ScanQuota: ObservableObject {
 
     private static let countKey = "ai.popalpha.scan.quota.count"
     private static let dayKey = "ai.popalpha.scan.quota.day"
+    /// Tracks the highest `scansToday` value the warning toast has
+    /// already fired for, scoped to the current day. Persisted so the
+    /// warning doesn't re-prompt on every cold launch when the user
+    /// is sitting at remaining == 1. Reset whenever the day rolls
+    /// over (see rolloverIfNewDay).
+    private static let warnedScansTodayKey = "ai.popalpha.scan.quota.warned.scansToday"
 
     private let defaults: UserDefaults
 
@@ -41,11 +47,19 @@ final class ScanQuota: ObservableObject {
     var remaining: Int { max(0, Self.dailyLimit - scansToday) }
     var canScan: Bool { remaining > 0 }
 
+    /// The `scansToday` value the warning was last shown for today,
+    /// or nil if the warning hasn't fired yet today. ScannerTabView
+    /// uses this for cross-launch dedupe so the toast doesn't re-fire
+    /// every time the app re-foregrounds with remaining == 1.
+    var lastWarnedScansToday: Int? {
+        defaults.object(forKey: Self.warnedScansTodayKey) as? Int
+    }
+
     /// Idempotent rollover. Reads today's local-date key; if it
-    /// differs from what's persisted, resets the count. Otherwise
-    /// hydrates `scansToday` from disk (covers the cold-launch case
-    /// where the app re-opens after a quota was set in a prior
-    /// session on the same calendar day).
+    /// differs from what's persisted, resets the count AND the
+    /// warning dedupe key. Otherwise hydrates `scansToday` from disk
+    /// (covers the cold-launch case where the app re-opens after a
+    /// quota was set in a prior session on the same calendar day).
     func rolloverIfNewDay() {
         let today = Self.todayKey
         let stored = defaults.string(forKey: Self.dayKey) ?? ""
@@ -53,6 +67,10 @@ final class ScanQuota: ObservableObject {
             scansToday = 0
             defaults.set(today, forKey: Self.dayKey)
             defaults.set(0, forKey: Self.countKey)
+            // Drop yesterday's warning dedupe — fresh day, the
+            // warning is allowed to fire again when the user hits
+            // scan #4.
+            defaults.removeObject(forKey: Self.warnedScansTodayKey)
         } else {
             scansToday = defaults.integer(forKey: Self.countKey)
         }
@@ -63,6 +81,14 @@ final class ScanQuota: ObservableObject {
         rolloverIfNewDay()
         scansToday += 1
         defaults.set(scansToday, forKey: Self.countKey)
+    }
+
+    /// Mark the warning toast as having fired for the current
+    /// `scansToday` value. Subsequent calls to `lastWarnedScansToday`
+    /// will return this value until the day rolls over.
+    func markWarned() {
+        rolloverIfNewDay()
+        defaults.set(scansToday, forKey: Self.warnedScansTodayKey)
     }
 
     private static var todayKey: String {

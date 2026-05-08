@@ -27,12 +27,13 @@ struct ScannerTabView: View {
 
     // One-shot quota-approaching warning state. Fires once per day
     // when the user completes their 4th scan (remaining == 1), as a
-    // soft-friction precursor to the hard wall on scan #5. Suppressed
-    // for the rest of the day after firing — `lastWarnedScansToday`
-    // is the dedupe key, reset when scansToday rolls back to 0
-    // (local-midnight rollover).
+    // soft-friction precursor to the hard wall on scan #5. Cross-
+    // launch dedupe lives in ScanQuota (UserDefaults-backed via
+    // markWarned / lastWarnedScansToday) so the toast doesn't re-
+    // fire every cold launch when the user is sitting at remaining
+    // == 1. Local @State here is just the in-flight visibility flag
+    // for the slide-in/auto-dismiss animation.
     @State private var quotaWarningVisible = false
-    @State private var lastWarnedScansToday = -1
     #if DEBUG
     @State private var smokeReport: OfflineScannerSmokeReport?
     @State private var smokeRunning = false
@@ -260,17 +261,15 @@ struct ScannerTabView: View {
                 handleIdentifyResult(newValue)
             }
             // Quota-warning trigger: evaluate when a scan settles back
-            // to idle (isIdentifying false → false), at which point
-            // remaining will reflect the just-completed scan and the
+            // to idle (isIdentifying true → false), at which point
+            // remaining reflects the just-completed scan and the
             // toast can show without overlapping the identify toast.
+            // Day-rollover dedupe is handled inside ScanQuota — its
+            // markWarned/lastWarnedScansToday APIs are persisted in
+            // UserDefaults and reset by rolloverIfNewDay, so we don't
+            // need a manual reset here.
             .onChange(of: scanner.isIdentifying) { _, identifying in
                 if !identifying { evaluateQuotaWarning() }
-            }
-            // Day-rollover reset: when scansToday drops (local-midnight
-            // rollover via ScanQuota.rolloverIfNewDay), reset the
-            // dedupe key so the warning can fire again the next day.
-            .onChange(of: scanQuota.scansToday) { oldValue, newValue in
-                if newValue < oldValue { lastWarnedScansToday = -1 }
             }
             .onAppear {
                 #if DEBUG
@@ -292,10 +291,10 @@ struct ScannerTabView: View {
               scanQuota.remaining == 1,
               !showPaywallSheet,
               !scanner.isIdentifying,
-              lastWarnedScansToday != scanQuota.scansToday
+              scanQuota.lastWarnedScansToday != scanQuota.scansToday
         else { return }
 
-        lastWarnedScansToday = scanQuota.scansToday
+        scanQuota.markWarned()
         withAnimation { quotaWarningVisible = true }
 
         Task { @MainActor in
