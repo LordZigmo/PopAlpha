@@ -50,7 +50,7 @@ struct CollectorRadarLockedCard: View {
         .overlay(accentBorder)
         .padding(.horizontal, PA.Layout.sectionPadding)
         .sheet(isPresented: $showPaywall) {
-            PaywallView(context: .collectorProfile)
+            PaywallView(context: .collectorProfile, surface: "portfolio_radar_locked")
         }
     }
 

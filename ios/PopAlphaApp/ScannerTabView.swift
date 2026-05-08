@@ -25,14 +25,23 @@ struct ScannerTabView: View {
     @StateObject private var premiumGate = PremiumGate.shared
     @StateObject private var scanQuota = ScanQuota.shared
 
-    // The quota-approaching warning is rendered as a persistent
-    // banner (not a timed toast) so the user sees it for the whole
-    // time they're on the scanner with remaining <= 1. The previous
-    // toast-with-auto-dismiss approach race-lost to navigation: a
-    // successful scan immediately pushes CardDetailView, so the toast
-    // animated in on a view the user wasn't looking at. The banner
-    // version simply mirrors quota state — it shows whenever the
-    // conditions hold and disappears when they don't.
+    /// Tracks which scanner surface most recently flipped
+    /// `showPaywallSheet`, so the paywall analytics carry the right
+    /// `surface` property. Three triggers feed a single sheet — crown
+    /// tap, scan quota wall (camera tap when at the limit), and the
+    /// quota-approaching warning toast — and we want PostHog funnels
+    /// to break them down separately.
+    @State private var paywallSurface: String = "scanner_crown"
+
+    // One-shot quota-approaching warning state. Fires once per day
+    // when the user completes their 4th scan (remaining == 1), as a
+    // soft-friction precursor to the hard wall on scan #5. Cross-
+    // launch dedupe lives in ScanQuota (UserDefaults-backed via
+    // markWarned / lastWarnedScansToday) so the toast doesn't re-
+    // fire every cold launch when the user is sitting at remaining
+    // == 1. Local @State here is just the in-flight visibility flag
+    // for the slide-in/auto-dismiss animation.
+    @State private var quotaWarningVisible = false
     #if DEBUG
     @State private var smokeReport: OfflineScannerSmokeReport?
     @State private var smokeRunning = false
@@ -88,6 +97,7 @@ struct ScannerTabView: View {
                         if !premiumGate.isPro {
                             scanQuota.rolloverIfNewDay()
                             if !scanQuota.canScan {
+                                paywallSurface = "scanner_quota_wall"
                                 showPaywallSheet = true
                                 return
                             }
@@ -121,35 +131,27 @@ struct ScannerTabView: View {
                     .animation(.easeInOut(duration: 0.2), value: scanner.identifyError)
                 }
 
-                // Persistent quota-warning banner. Shown whenever the
-                // user is free, has <= 1 scans left, and isn't mid-
-                // identify (the identify toast takes the same slot
-                // briefly during scans). Persistent rather than
-                // timed: a successful scan immediately navigates to
-                // Card Detail, so a one-shot toast on the scanner
-                // tab gets missed. The banner reappears the moment
-                // the user pops back to the scanner. Tap routes to
-                // PaywallView via the same showPaywallSheet flag
-                // used by the crown / quota wall.
-                if !premiumGate.isPro
-                    && scanQuota.remaining <= 1
-                    && !scanner.isIdentifying
-                    && !showPaywallSheet {
+                // Quota-approaching warning toast. Only shows when
+                // scansToday == dailyLimit - 1 (1 left), the user
+                // isn't pro, no identify is in flight, and the
+                // paywall isn't already open. Sits in the same
+                // bottom-center slot as the identify toast — they're
+                // mutually exclusive (the identify toast is up
+                // during scans; this one fires after a scan settles
+                // back to idle).
+                if quotaWarningVisible {
                     VStack {
                         Spacer()
                         ScanQuotaWarningToast(
                             remaining: scanQuota.remaining,
-                            onTap: {
-                                PAHaptics.tap()
-                                showPaywallSheet = true
-                            },
+                            onTap: handleQuotaWarningTap,
                         )
                         .padding(.horizontal, 24)
                         .padding(.bottom, 140)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
-                    .animation(.easeInOut(duration: 0.25), value: scanQuota.remaining)
+                    .animation(.easeInOut(duration: 0.25), value: quotaWarningVisible)
                 }
 
                 // Top-right corner buttons. Crown is always visible
@@ -258,14 +260,27 @@ struct ScannerTabView: View {
             }
             #endif
             .sheet(isPresented: $showPaywallSheet) {
-                // Both routes that flip showPaywallSheet from this view
-                // (crown tap + scan-quota exhaustion) are scanner-
-                // contextual frictions, so the paywall hero copy leads
-                // with scanner value rather than the generic copy.
-                PaywallView(context: .scanner)
+                // All three routes that flip showPaywallSheet from this
+                // view (crown tap, scan-quota exhaustion, quota-warning
+                // banner tap) are scanner-contextual frictions, so the
+                // paywall hero copy leads with scanner value. The
+                // specific entry point is captured separately in
+                // `paywallSurface` for PostHog analytics.
+                PaywallView(context: .scanner, surface: paywallSurface)
             }
             .onChange(of: scanner.lastMatch) { _, newValue in
                 handleIdentifyResult(newValue)
+            }
+            // Quota-warning trigger: evaluate when a scan settles back
+            // to idle (isIdentifying true → false), at which point
+            // remaining reflects the just-completed scan and the
+            // toast can show without overlapping the identify toast.
+            // Day-rollover dedupe is handled inside ScanQuota — its
+            // markWarned/lastWarnedScansToday APIs are persisted in
+            // UserDefaults and reset by rolloverIfNewDay, so we don't
+            // need a manual reset here.
+            .onChange(of: scanner.isIdentifying) { _, identifying in
+                if !identifying { evaluateQuotaWarning() }
             }
             .onAppear {
                 #if DEBUG
@@ -275,6 +290,40 @@ struct ScannerTabView: View {
         }
     }
 
+    // MARK: - Quota-approaching warning (4th-of-5 scan trigger)
+    //
+    // Fires once per day for free users when remaining hits 1. The
+    // toast is presentation-only (ScanQuotaWarningToast); this method
+    // gates trigger conditions and schedules auto-dismiss after 4s
+    // of being on screen so it doesn't camp.
+
+    private func evaluateQuotaWarning() {
+        guard !premiumGate.isPro,
+              scanQuota.remaining == 1,
+              !showPaywallSheet,
+              !scanner.isIdentifying,
+              scanQuota.lastWarnedScansToday != scanQuota.scansToday
+        else { return }
+
+        scanQuota.markWarned()
+        withAnimation { quotaWarningVisible = true }
+
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(4))
+            // Re-check: if the user already tapped + opened the
+            // paywall, or navigated away, don't bother animating out.
+            if quotaWarningVisible {
+                withAnimation { quotaWarningVisible = false }
+            }
+        }
+    }
+
+    private func handleQuotaWarningTap() {
+        PAHaptics.tap()
+        quotaWarningVisible = false
+        paywallSurface = "scanner_quota_warning"
+        showPaywallSheet = true
+    }
 
     // MARK: - Camera-starting placeholder
     //
@@ -379,6 +428,7 @@ struct ScannerTabView: View {
     private var crownGesture: some Gesture {
         let tap = TapGesture().onEnded {
             PAHaptics.tap()
+            paywallSurface = "scanner_crown"
             showPaywallSheet = true
         }
         #if DEBUG
@@ -543,8 +593,11 @@ struct ScannerTabView: View {
     }
 
     /// Synthesizes a 384×384 deterministic-noise image for the
-    /// orchestrator end-to-end check.
-    private static func makeOrchestratorTestImage() -> UIImage {
+    /// orchestrator end-to-end check. `nonisolated` because pure
+    /// pixel synthesis touches no actor state — without it, Swift 6
+    /// rejects the call from the smoke-test runner closure (which
+    /// is not @MainActor) even though it's safe.
+    nonisolated private static func makeOrchestratorTestImage() -> UIImage {
         let side = 384
         let bytesPerPixel = 4
         let bytesPerRow = side * bytesPerPixel
@@ -1258,7 +1311,7 @@ final class ScannerHost: ObservableObject {
                 "ocr_frames_used": 1 + additionalOCRFrames.count,
                 "ocr_ms": Int(ocrMs),
                 "scan_total_ms": Int(scanMs),
-                "model_version": response.modelVersion ?? "nil",
+                "model_version": response.modelVersion,
             ])
             #if DEBUG
             // Save the EXACT frame the embedder saw to Photos for EVERY
@@ -1282,7 +1335,27 @@ final class ScannerHost: ObservableObject {
                 source: usedOffline ? .offline : .network,
                 ocrCardNumbers: ocrMulti.cardNumbers,
                 ocrSetHint: ocrMulti.setHint,
+                triggerSource: triggerSource,
+                framesUsed: 1 + additionalOCRFrames.count,
+                pass2FallbackFired: ocrMulti.pass2FallbackFired,
+                spatialFilterRejectedCount: ocrMulti.spatialFilterRejectedCount,
             )
+            // Phase 0d auto-promote: HIGH scans are presumed correct
+            // and silently land in scan_eval_images so the 100-card
+            // ship test grows the eval corpus with real-device frames.
+            // MEDIUM/LOW skipped here — picker-pick path handles
+            // MEDIUM with the actual ground-truth slug. See
+            // ScanDebugCapture.autoPromoteToEval header for full rules.
+            if reranked.confidence == "high",
+               let hash = response.imageHash,
+               let topSlug = reranked.matches.first?.slug {
+                ScanDebugCapture.autoPromoteToEval(
+                    imageHash: hash,
+                    canonicalSlug: topSlug,
+                    capturedSource: .userPhoto,
+                    notesTag: "auto_high_test:\(triggerSource)",
+                )
+            }
             #endif
 
             // Low-confidence → auto-resume so the user can try again
@@ -1318,6 +1391,10 @@ final class ScannerHost: ObservableObject {
                 source: usedOffline ? .offline : .network,
                 ocrCardNumbers: ocrMulti.cardNumbers,
                 ocrSetHint: ocrMulti.setHint,
+                triggerSource: triggerSource,
+                framesUsed: 1 + additionalOCRFrames.count,
+                pass2FallbackFired: ocrMulti.pass2FallbackFired,
+                spatialFilterRejectedCount: ocrMulti.spatialFilterRejectedCount,
             )
             #endif
             self.resumeScanning()

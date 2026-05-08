@@ -72,7 +72,7 @@ struct SettingsView: View {
             Text(deleteError ?? "")
         }
         .sheet(isPresented: $showPaywallSheet) {
-            PaywallView()
+            PaywallView(surface: "settings_upgrade")
         }
     }
 

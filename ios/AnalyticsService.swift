@@ -76,6 +76,28 @@ enum AnalyticsEvent: String {
 
     // Navigation
     case screenViewed = "screen_viewed"
+
+    // Paywall funnel — every event carries `context` (PaywallContext
+    // raw value) + `surface` (string key for the specific entry
+    // point). PostHog dashboards filter/break down by either dim.
+    //
+    //   paywall_viewed             — sheet appeared
+    //     ↓
+    //   paywall_subscribe_tapped   — user committed to the action
+    //     ↓
+    //   paywall_subscribed         — StoreKit returned .success
+    //
+    // Drop-offs at any stage are visible by comparing event volumes.
+    // paywall_dismissed fires when the sheet closes without a
+    // subscribe; paywall_purchase_failed fires for cancelled/pending/
+    // error outcomes; paywall_restore_succeeded covers the alternate
+    // "I already paid" path.
+    case paywallViewed = "paywall_viewed"
+    case paywallSubscribeTapped = "paywall_subscribe_tapped"
+    case paywallSubscribed = "paywall_subscribed"
+    case paywallDismissed = "paywall_dismissed"
+    case paywallRestoreSucceeded = "paywall_restore_succeeded"
+    case paywallPurchaseFailed = "paywall_purchase_failed"
 }
 
 final class AnalyticsService {

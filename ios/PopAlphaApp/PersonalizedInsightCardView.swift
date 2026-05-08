@@ -92,7 +92,7 @@ struct PersonalizedInsightCardView: View {
         .shadow(color: Self.purpleGlow.opacity(0.28), radius: 14, x: 0, y: 0)
         .shadow(color: .black.opacity(0.24), radius: 30, x: 0, y: 18)
         .sheet(isPresented: $showPaywall) {
-            PaywallView(context: .collectorProfile)
+            PaywallView(context: .collectorProfile, surface: "card_detail_insight_teaser")
         }
     }
 

@@ -115,7 +115,7 @@ struct ContentView: View {
         // isEligibleForTrial is accurate) and re-evaluate when any
         // input changes.
         .sheet(isPresented: $showReengagementPaywall) {
-            PaywallView(context: .reengagement)
+            PaywallView(context: .reengagement, surface: "reengagement_auto")
         }
         .onAppear { evaluateReengagement() }
         .onChange(of: premiumStore.productsLoaded) { _, _ in evaluateReengagement() }
