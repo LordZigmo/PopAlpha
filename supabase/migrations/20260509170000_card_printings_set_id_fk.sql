@@ -1,5 +1,21 @@
 -- 20260509170000_card_printings_set_id_fk.sql
 --
+-- supersedes: 20260509150000_sets_refresh_and_sync_trigger.sql
+--   Function bodies updated by this migration:
+--     public.refresh_sets_for_set_ids(text[])
+--     public.card_printings_after_insert_sync_sets()
+--     public.card_printings_after_update_sync_sets()
+--     public.card_printings_after_delete_sync_sets()
+--   Diff vs prior bodies: filter changes from
+--     `where normalize_set_id(cp.set_name) = any(p_set_ids)` (PR 2)
+--   to
+--     `where cp.set_id = any(p_set_ids)` (this PR)
+--   And the AFTER UPDATE function gates on
+--     `n.set_id IS DISTINCT FROM o.set_id` instead of
+--     `n.set_name IS DISTINCT FROM o.set_name`. Both gates are
+--   semantically equivalent because card_printings_set_id_matches_set_name_chk
+--   (added below) enforces set_id = normalize_set_id(set_name) row-by-row.
+--
 -- PR 3 of the sets-table promotion. PR 1 (#34) shipped the catalog,
 -- PR 2 (#35 + #36) shipped the refresh RPCs and AFTER triggers on
 -- card_printings. This PR adds a real `set_id text` FK column on
