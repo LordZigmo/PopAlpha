@@ -289,11 +289,24 @@ create trigger trg_card_printings_after_insert_sync_sets
   for each statement
   execute function public.card_printings_after_insert_sync_sets();
 
--- AFTER UPDATE OF set_name only — UPDATEs that don't touch set_name (price
--- refreshes, image embedding metadata, etc.) shouldn't fire the sync.
+-- AFTER UPDATE on every UPDATE statement. PostgreSQL forbids combining
+-- `update of <column>` with `referencing new/old table` (SQLSTATE 0A000:
+-- "transition tables cannot be specified for triggers with column lists"),
+-- so we can't filter at the trigger declaration. Instead the trigger fires
+-- on every UPDATE and the IS DISTINCT FROM gate inside
+-- card_printings_after_update_sync_sets short-circuits when set_name
+-- didn't actually change.
+--
+-- Performance trade-off: every UPDATE on card_printings now pays the cost
+-- of building transition tables + a small in-memory JOIN. For typical
+-- single-row updates this is negligible; for the large bulk UPDATE in
+-- 20260428200226_dedupe_accent_bug_canonical_slugs.sql (which touches
+-- ~700k rows of canonical_slug only), the JOIN-then-IS-DISTINCT-FROM
+-- filter rejects every row efficiently and the array_agg yields NULL,
+-- so refresh_sets_for_set_ids is never called.
 drop trigger if exists trg_card_printings_after_update_sync_sets on public.card_printings;
 create trigger trg_card_printings_after_update_sync_sets
-  after update of set_name on public.card_printings
+  after update on public.card_printings
   referencing new table as new_rows old table as old_rows
   for each statement
   execute function public.card_printings_after_update_sync_sets();
