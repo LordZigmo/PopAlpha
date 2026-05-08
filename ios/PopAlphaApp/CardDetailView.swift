@@ -491,14 +491,6 @@ struct CardDetailView: View {
                 variantRef: selectedPrintingId.map { "\($0)::RAW" }
             )
 
-            // 8b. Pro Market Signals — variant-level momentum / breakout /
-            // value reads. Free users see a static teaser behind a paywall
-            // gate; Pro users see real /api/pro/signals data.
-            ProMarketSignalsCardView(
-                canonicalSlug: card.id,
-                variantRef: selectedPrintingId.map { "\($0)::RAW" }
-            )
-
             // 9. Details grid — metadata break after the narrative sections.
             detailsGrid
                 .padding(.top, 8)

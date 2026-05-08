@@ -8,7 +8,6 @@
 // Used by:
 //   - PersonalizedInsightCardView (reasons + caveats, free-tier branch)
 //   - CollectorRadarLockedCard (entire radar canvas)
-//   - ProMarketSignalsCardView (mock variant readouts, free-tier branch)
 //
 // Design notes:
 //   - The wrapped content is rendered live — same layout, same height —

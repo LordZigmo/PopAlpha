@@ -232,39 +232,6 @@ extension APIClient {
     }
 }
 
-// MARK: - Pro Market Signals
-
-extension APIClient {
-    /// Pro-gated variant-level signal data for a card. Returns up to
-    /// 10 variants in `variants` (or empty + a `note` for graded buckets
-    /// where data sparsity prevents signal computation). 403s for
-    /// non-pro callers — only call from views that have already
-    /// confirmed PremiumGate.isPro.
-    struct ProSignalsResponse: Decodable {
-        let ok: Bool
-        let slug: String?
-        let grade: String?
-        let variants: [ProVariantSignal]?
-        let note: String?
-        let error: String?
-
-        struct ProVariantSignal: Decodable {
-            let variantRef: String
-            let signalTrend: Double?
-            let signalBreakout: Double?
-            let signalValue: Double?
-            let signalsAsOfTs: String?
-        }
-    }
-
-    static func getProSignals(slug: String, grade: String = "RAW") async throws -> ProSignalsResponse {
-        return try await get(
-            path: "/api/pro/signals",
-            query: [("slug", slug), ("grade", grade)],
-        )
-    }
-}
-
 // MARK: - Error Type
 
 enum APIError: LocalizedError {

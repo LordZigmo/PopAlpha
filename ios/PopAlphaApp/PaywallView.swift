@@ -29,7 +29,6 @@ public enum PaywallContext {
     case generic
     case scanner
     case collectorProfile
-    case proSignals
 }
 
 struct PaywallView: View {
@@ -246,8 +245,6 @@ struct PaywallView: View {
             return "Unlock faster card scanning"
         case .collectorProfile:
             return "Unlock your collector profile"
-        case .proSignals:
-            return "Unlock Pro market signals"
         }
     }
 
@@ -260,8 +257,6 @@ struct PaywallView: View {
             return "Scan quickly, identify cards offline, and turn every scan into a market read."
         case .collectorProfile:
             return "See your collection style, radar chart, and AI insights tuned to the cards you own."
-        case .proSignals:
-            return "See variant-level momentum, breakouts, and value-zone reads before you buy or sell."
         }
     }
 
