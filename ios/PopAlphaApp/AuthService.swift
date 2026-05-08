@@ -22,6 +22,12 @@ final class AuthService {
     private(set) var isSigningIn: Bool = false
     private(set) var signInError: String?
 
+    /// Drives the unified SignInSheet from any "Sign In" CTA. The sheet
+    /// presents the three providers (Google / Apple / Email) and runs
+    /// the appropriate AuthService method when the user picks one. Set
+    /// true by `signIn()`, cleared when the sheet dismisses.
+    var showSignInSheet: Bool = false
+
     private var tokenRefreshTask: Task<Void, Never>?
 
     private init() {}
@@ -40,9 +46,26 @@ final class AuthService {
     // in parallel, and both feed the same signInError surface so the
     // global alert in ContentView works uniformly regardless of provider.
 
-    /// Triggers Google OAuth. Fire-and-forget — spawns its own Task so
-    /// SwiftUI button actions stay synchronous.
+    /// Generic "Sign In" entry point used by every shortcut button in
+    /// the app (Settings, Watchlist empty, Portfolio empty, etc.).
+    /// Opens the SignInSheet which presents Google / Apple / Email so
+    /// users — and App Reviewers — can pick whichever is convenient.
+    /// Direct-to-provider entry is still available via
+    /// `signInWithGoogle()` / `signInWithApple()` (used by
+    /// SignInProviderStack and similar inline 3-button surfaces where
+    /// the user's already implicitly chosen).
+    @MainActor
     func signIn() {
+        guard !isSigningIn else { return }
+        showSignInSheet = true
+    }
+
+    /// Triggers Google OAuth directly, bypassing the chooser. Used by
+    /// PrimarySignInButton inside SignInProviderStack and by the
+    /// chooser phase of SignInSheet itself when the user picks Google.
+    /// Fire-and-forget — spawns its own Task so SwiftUI button actions
+    /// stay synchronous.
+    func signInWithGoogle() {
         guard !isSigningIn else { return }
         Task { @MainActor in
             await performSignIn(
@@ -156,7 +179,7 @@ final class AuthService {
     //
     // Two-phase: caller invokes signInWithEmail(_:) to send the code,
     // then verifyEmailCode(_:) once the user enters the 6-digit code
-    // they received. Errors throw so the EmailSignInSheet can render
+    // they received. Errors throw so the SignInSheet can render
     // them inline next to the field rather than via the global alert.
 
     /// Phase 1: create a sign-in attempt against the given email and

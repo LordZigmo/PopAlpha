@@ -1,24 +1,39 @@
 import SwiftUI
 
-// MARK: - Email Sign-In Sheet
+// MARK: - Sign In Sheet
 //
-// Two-phase email-code sign-in for users without an Apple ID / Google
-// account, plus the App Review demo-account path (reviewer enters the
-// test email + receives a code from Clerk's email service).
+// Unified sign-in surface presented anywhere `AuthService.shared.signIn()`
+// is invoked. Three phases:
 //
-// Phase 1 (.email): user types email → tap "Send Code" → AuthService
-//   asks Clerk to start a sign-in attempt and email a 6-digit code.
-// Phase 2 (.code):  user types the 6-digit code → tap "Verify" → on
-//   success the session is created, AuthService runs the shared
-//   post-session plumbing, and the sheet dismisses (the underlying
-//   guest UI re-renders as authenticated).
+//   .chooser → "Continue with Google / Apple / Email"
+//              Google + Apple delegate to their direct AuthService methods
+//              and dismiss the sheet (Clerk's web/system flow takes over).
+//              Email transitions to .email in-sheet rather than nesting
+//              another sheet.
+//
+//   .email   → email entry. "Send Code" calls
+//              AuthService.signInWithEmail(_:) which kicks off Clerk's
+//              email-code flow, then transitions to .code.
+//
+//   .code    → 6-digit verification code. Auto-submits at 6 digits.
+//              "Resend code" re-runs phase-1 against the same email.
+//              On success, dismisses the sheet and the underlying view
+//              re-renders signed-in.
+//
+// Surfaces that want all three buttons inline (e.g., Profile tab guest
+// state, MarketplaceView SignInPromoCard) use `SignInProviderStack` —
+// not this sheet. Those stack surfaces present this sheet directly into
+// `.email` for the email button so users skip the chooser they already
+// implicitly chose against.
 
-struct EmailSignInSheet: View {
+struct SignInSheet: View {
     @Environment(\.dismiss) private var dismiss
 
-    enum Phase: Equatable { case email, code }
+    enum Phase: Equatable { case chooser, email, code }
 
-    @State private var phase: Phase = .email
+    var startingPhase: Phase
+
+    @State private var phase: Phase
     @State private var email: String = ""
     @State private var code: String = ""
     @State private var isSending: Bool = false
@@ -28,6 +43,11 @@ struct EmailSignInSheet: View {
     @FocusState private var emailFocused: Bool
     @FocusState private var codeFocused: Bool
 
+    init(startingPhase: Phase = .chooser) {
+        self.startingPhase = startingPhase
+        self._phase = State(initialValue: startingPhase)
+    }
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
@@ -36,8 +56,9 @@ struct EmailSignInSheet: View {
                 Spacer()
 
                 switch phase {
-                case .email: emailPhase
-                case .code:  codePhase
+                case .chooser: chooserPhase
+                case .email:   emailPhase
+                case .code:    codePhase
                 }
 
                 if let errorMessage {
@@ -53,22 +74,26 @@ struct EmailSignInSheet: View {
             }
             .padding(.bottom, 24)
             .background(PA.Colors.background.ignoresSafeArea())
-            .navigationTitle(phase == .email ? "Sign In" : "Enter Code")
+            .navigationTitle(navTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
-                if phase == .code {
+                if shouldShowBack {
                     ToolbarItem(placement: .topBarLeading) {
                         Button {
-                            // Roll back to phase 1; clear code + error.
-                            // The Clerk SignIn attempt remains valid until
-                            // resent, which is fine — phase 1 will start
-                            // a fresh one if the user changes the email.
-                            withAnimation { phase = .email }
-                            code = ""
+                            withAnimation { phase = previousPhase }
+                            // Clear transient state for the phase we're
+                            // returning to; the email survives so a user
+                            // coming back from .code can fix a typo.
                             errorMessage = nil
+                            if phase == .chooser {
+                                email = ""
+                                code = ""
+                            } else if phase == .email {
+                                code = ""
+                            }
                         } label: {
                             Image(systemName: "chevron.left")
                             Text("Back")
@@ -77,14 +102,21 @@ struct EmailSignInSheet: View {
                 }
             }
             .onAppear {
-                if phase == .email {
-                    emailFocused = true
-                }
+                if phase == .email { emailFocused = true }
+                if phase == .code { codeFocused = true }
             }
         }
     }
 
     // MARK: - Hero
+
+    private var navTitle: String {
+        switch phase {
+        case .chooser: "Sign In"
+        case .email:   "Sign In"
+        case .code:    "Enter Code"
+        }
+    }
 
     private var heroSection: some View {
         VStack(spacing: 16) {
@@ -92,28 +124,92 @@ struct EmailSignInSheet: View {
                 Circle()
                     .fill(PA.Colors.accent.opacity(0.15))
                     .frame(width: 72, height: 72)
-                Image(systemName: phase == .email ? "envelope.fill" : "number.circle.fill")
+                Image(systemName: heroIcon)
                     .font(.system(size: 30, weight: .semibold))
                     .foregroundStyle(PA.Colors.accent)
             }
 
             VStack(spacing: 8) {
-                Text(phase == .email ? "Sign in with email" : "Check your email")
+                Text(heroTitle)
                     .font(.system(size: 22, weight: .bold))
                     .foregroundStyle(PA.Colors.text)
                     .multilineTextAlignment(.center)
 
-                Text(
-                    phase == .email
-                    ? "We'll email you a 6-digit code. No password required."
-                    : "Enter the 6-digit code we just sent to \(email)."
-                )
-                .font(.system(size: 14))
-                .foregroundStyle(PA.Colors.textSecondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
+                Text(heroSubtitle)
+                    .font(.system(size: 14))
+                    .foregroundStyle(PA.Colors.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
             }
         }
+    }
+
+    private var heroIcon: String {
+        switch phase {
+        case .chooser: "person.crop.circle.badge.checkmark"
+        case .email:   "envelope.fill"
+        case .code:    "number.circle.fill"
+        }
+    }
+
+    private var heroTitle: String {
+        switch phase {
+        case .chooser: "Welcome to PopAlpha"
+        case .email:   "Sign in with email"
+        case .code:    "Check your email"
+        }
+    }
+
+    private var heroSubtitle: String {
+        switch phase {
+        case .chooser:
+            return "Sign in to track your portfolio, build a wishlist, and unlock the daily market brief."
+        case .email:
+            return "We'll email you a 6-digit code. No password required."
+        case .code:
+            return "Enter the 6-digit code we just sent to \(email)."
+        }
+    }
+
+    // MARK: - Toolbar back
+
+    private var shouldShowBack: Bool {
+        // Only offer Back if we DID NOT start at the deeper phase. If
+        // SignInProviderStack opened us directly into .email, going back
+        // to .chooser would be weird — they explicitly picked Email.
+        switch (startingPhase, phase) {
+        case (.chooser, .email), (.chooser, .code), (.email, .code):
+            return true
+        default:
+            return false
+        }
+    }
+
+    private var previousPhase: Phase {
+        switch phase {
+        case .code:    return .email
+        case .email:   return .chooser
+        case .chooser: return .chooser
+        }
+    }
+
+    // MARK: - Phase 0: Chooser
+
+    private var chooserPhase: some View {
+        VStack(spacing: 10) {
+            PrimarySignInButton(maxWidth: 280) {
+                AuthService.shared.signInWithGoogle()
+                dismiss()
+            }
+            PrimaryAppleSignInButton(maxWidth: 280) {
+                AuthService.shared.signInWithApple()
+                dismiss()
+            }
+            PrimaryEmailSignInButton(maxWidth: 280) {
+                withAnimation { phase = .email }
+            }
+        }
+        .padding(.horizontal, 24)
     }
 
     // MARK: - Phase 1: Email
@@ -234,7 +330,6 @@ struct EmailSignInSheet: View {
             .disabled(isSending || isVerifying)
             .accessibilityLabel("Resend code")
         }
-        .onAppear { codeFocused = true }
     }
 
     // MARK: - Validation

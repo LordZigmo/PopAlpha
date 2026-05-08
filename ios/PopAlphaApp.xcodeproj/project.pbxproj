@@ -104,7 +104,7 @@
 		DD000001000000000000F237 /* FeatureFlags.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F236 /* FeatureFlags.swift */; };
 		DD000001000000000000F239 /* ReachabilityMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F238 /* ReachabilityMonitor.swift */; };
 		DD000001000000000000F23B /* PushPermissionPromptSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F23A /* PushPermissionPromptSheet.swift */; };
-		DD000001000000000000F23D /* EmailSignInSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F23C /* EmailSignInSheet.swift */; };
+		DD000001000000000000F23D /* SignInSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F23C /* SignInSheet.swift */; };
 		EE00000100000000000000F1 /* PopAlphaCore in Frameworks */ = {isa = PBXBuildFile; productRef = EE00000100000000000000A2 /* PopAlphaCore */; };
 		EE00000100000000000000F2 /* SetDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE00000100000000000000A3 /* SetDetailView.swift */; };
 		FF00000100000000000000F1 /* ClerkKit in Frameworks */ = {isa = PBXBuildFile; productRef = FF00000100000000000000A2 /* ClerkKit */; };
@@ -205,7 +205,7 @@
 		DD000001000000000000F236 /* FeatureFlags.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureFlags.swift; sourceTree = "<group>"; };
 		DD000001000000000000F238 /* ReachabilityMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReachabilityMonitor.swift; sourceTree = "<group>"; };
 		DD000001000000000000F23A /* PushPermissionPromptSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushPermissionPromptSheet.swift; sourceTree = "<group>"; };
-		DD000001000000000000F23C /* EmailSignInSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailSignInSheet.swift; sourceTree = "<group>"; };
+		DD000001000000000000F23C /* SignInSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInSheet.swift; sourceTree = "<group>"; };
 		DD000001000000000000F300 /* Products.storekit */ = {isa = PBXFileReference; lastKnownFileType = file.storekit; path = Products.storekit; sourceTree = "<group>"; };
 		DD000001000000000000F400 /* ScanDebugCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanDebugCapture.swift; sourceTree = "<group>"; };
 		EE00000100000000000000A3 /* SetDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetDetailView.swift; sourceTree = "<group>"; };
@@ -315,7 +315,7 @@
 				DD000001000000000000F236 /* FeatureFlags.swift */,
 				DD000001000000000000F238 /* ReachabilityMonitor.swift */,
 				DD000001000000000000F23A /* PushPermissionPromptSheet.swift */,
-				DD000001000000000000F23C /* EmailSignInSheet.swift */,
+				DD000001000000000000F23C /* SignInSheet.swift */,
 				DD000001000000000000F300 /* Products.storekit */,
 				DD000001000000000000F400 /* ScanDebugCapture.swift */,
 				EE00000100000000000000A3 /* SetDetailView.swift */,
@@ -518,7 +518,7 @@
 				DD000001000000000000F237 /* FeatureFlags.swift in Sources */,
 				DD000001000000000000F239 /* ReachabilityMonitor.swift in Sources */,
 				DD000001000000000000F23B /* PushPermissionPromptSheet.swift in Sources */,
-				DD000001000000000000F23D /* EmailSignInSheet.swift in Sources */,
+				DD000001000000000000F23D /* SignInSheet.swift in Sources */,
 				EE00000100000000000000F2 /* SetDetailView.swift in Sources */,
 				1100000100000000000000F1 /* PortfolioModels.swift in Sources */,
 				1100000100000000000000F3 /* PortfolioHeroView.swift in Sources */,
