@@ -519,12 +519,29 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
         // (loosened confidence + quadrature thresholds, card aspect
         // ratio bounds) that powers continuous auto-detect, so tuning
         // stays in one place.
+        //
+        // Sanity check on the detected crop (added 2026-05-08 after
+        // real-device evidence of `tap_detect: hit=true` returning
+        // 112×116 sub-card noise regions — Vision's loosened threshold
+        // is generous enough to lock onto card-icon shapes, glare
+        // patches, or rules-text rectangles inside the card art on
+        // full-art / VMax / VSTAR cards). Reject anything smaller than
+        // 300×400 short-side, or with aspect ratio outside the 0.55–
+        // 0.95 portrait card range. Pre-fix, these noise locks degraded
+        // the embedder by feeding it 112×116 sub-images instead of the
+        // full card; post-fix, they fall through to the center-crop
+        // fallback which sees the actual card.
         let detectT0 = Date()
         let detected = engine.detectAndCrop(fullImage)
         let detectMs = Date().timeIntervalSince(detectT0) * 1000
-        Logger.scan.debug("tap_detect: hit=\(detected != nil) ms=\(String(format: "%.1f", detectMs))")
-        if let detected {
+        if let detected, Self.isPlausibleCardCrop(detected) {
+            Logger.scan.debug("tap_detect: hit=true ms=\(String(format: "%.1f", detectMs)) size=\(Int(detected.size.width))x\(Int(detected.size.height))")
             return detected
+        }
+        if let detected {
+            Logger.scan.debug("tap_detect: rejected sub-card crop \(Int(detected.size.width))x\(Int(detected.size.height)) ms=\(String(format: "%.1f", detectMs)) — falling back to center-crop")
+        } else {
+            Logger.scan.debug("tap_detect: hit=false ms=\(String(format: "%.1f", detectMs))")
         }
 
         // Tier 2 — center-crop fallback. Only fires when Vision can't
@@ -548,6 +565,27 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
             return fullImage
         }
         return UIImage(cgImage: cg)
+    }
+
+    /// Sanity check for `engine.detectAndCrop` results: a real Pokémon
+    /// card crop should fill enough of the viewfinder that the short
+    /// side is hundreds of pixels (not 100ish) AND the aspect ratio
+    /// should be portrait-card-like (Pokémon cards are 2.5×3.5 in =
+    /// 0.714, with perspective distortion stretching this to 0.55–0.95).
+    /// Anything outside these bounds is Vision locking onto a
+    /// sub-card feature: a card-icon shape, a glare patch, a
+    /// rules-text rectangle inside the artwork. Returning nil from
+    /// this function makes captureCurrentFrame fall through to the
+    /// center-crop fallback which sees the actual card.
+    static func isPlausibleCardCrop(_ image: UIImage) -> Bool {
+        let w = image.size.width
+        let h = image.size.height
+        let shortSide = min(w, h)
+        let longSide = max(w, h)
+        guard shortSide >= 300 else { return false }
+        let aspect = shortSide / longSide
+        guard aspect >= 0.55 && aspect <= 0.95 else { return false }
+        return true
     }
 
     private func interfaceRotationAngle() -> CGFloat {
