@@ -90,7 +90,7 @@ There's no `region` column distinct from language — there's a `set_code` and `
 - `price_snapshots`, `price_history`, `card_metrics`, `tracked_assets` all use `grade TEXT NOT NULL DEFAULT 'RAW'` with **no CHECK** — drift-prone but in practice writes flow through the same normalizer.
 - `holdings.grade` is the most drift-prone surface — `app/api/holdings/route.ts:49` accepts any trimmed string, and the UI sends `PSA9`/`PSA10` (no underscore) per `app/portfolio/PortfolioClient.tsx:40`.
 
-The PR 1 grade catalog at [supabase/migrations/20260508120000_grade_definitions_catalog.sql](../supabase/migrations/20260508120000_grade_definitions_catalog.sql) enumerates these as canonical codes plus aliases for the G-prefix synonyms.
+The PR 1 grade catalog at [supabase/migrations/20260508180000_grade_definitions_catalog.sql](../supabase/migrations/20260508180000_grade_definitions_catalog.sql) enumerates these as canonical codes plus aliases for the G-prefix synonyms. (Originally timestamped 20260508120000 in PR #31; renamed in the drift-cleanup PR after a Dashboard-applied migration was found to collide with that timestamp in prod.)
 
 **Conditions (raw NM/LP/MP/HP/DMG)**: a **separate table** `card_condition_prices` ([20260415120000_card_condition_prices.sql:8](../supabase/migrations/20260415120000_card_condition_prices.sql)), CHECK-constrained on `condition`. Condition is modeled separately from `grade` — `grade='RAW'` rows in price_snapshots don't carry condition; condition lives in its own table.
 
