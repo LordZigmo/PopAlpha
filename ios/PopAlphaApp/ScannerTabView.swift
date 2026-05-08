@@ -218,7 +218,11 @@ struct ScannerTabView: View {
             }
             #endif
             .sheet(isPresented: $showPaywallSheet) {
-                PaywallView()
+                // Both routes that flip showPaywallSheet from this view
+                // (crown tap + scan-quota exhaustion) are scanner-
+                // contextual frictions, so the paywall hero copy leads
+                // with scanner value rather than the generic copy.
+                PaywallView(context: .scanner)
             }
             .onChange(of: scanner.lastMatch) { _, newValue in
                 handleIdentifyResult(newValue)
