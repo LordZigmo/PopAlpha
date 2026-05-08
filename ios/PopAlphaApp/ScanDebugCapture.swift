@@ -109,6 +109,57 @@ enum ScanDebugCapture {
         case network
     }
 
+    /// Phase 0d follow-up (2026-05-08): auto-promote scans to the
+    /// `scan_eval_images` corpus during the 100-card real-device ship
+    /// test so each scan becomes a permanent eval-corpus row, not just
+    /// a Photos-library frame. Without this the test gives one round
+    /// of feedback; with it we accumulate a real-device-conditions
+    /// corpus we can re-run the eval harness against after every
+    /// future model-version bump.
+    ///
+    /// Routing rules:
+    ///
+    ///   - HIGH-confidence scan path: caller fires this with the
+    ///     auto-navigated top-1 slug (presumed correct, marked
+    ///     `presumed=true` in notes so post-test cleanup can filter
+    ///     out HIGH-wrong cases by reviewing the saved Photos).
+    ///   - Picker pick path: caller fires this with the user-picked
+    ///     slug (definitively correct ground truth).
+    ///   - LOW or no-pick: caller skips — no ground-truth label
+    ///     available, no point polluting the corpus.
+    ///
+    /// Auth: hits `/api/admin/scan-eval/promote` which requires admin
+    /// Clerk role. In DEBUG that's only the dev's account anyway. A
+    /// 401 just means the corpus row didn't land — the saved Photo
+    /// still has the diagnostic banner, so the test isn't blocked.
+    ///
+    /// Fire-and-forget: never blocks the scan flow, never surfaces
+    /// errors to UI. Logs failures to `Logger.scan` for review.
+    static func autoPromoteToEval(
+        imageHash: String,
+        canonicalSlug: String,
+        capturedSource: EvalCaptureSource,
+        notesTag: String,
+    ) {
+        Task.detached(priority: .background) {
+            do {
+                let r = try await ScanService.promoteEvalFromHash(
+                    imageHash: imageHash,
+                    canonicalSlug: canonicalSlug,
+                    source: capturedSource,
+                    notes: notesTag,
+                )
+                if r.ok {
+                    Logger.scan.debug("auto-promoted to eval: hash=\(imageHash.prefix(8)) slug=\(canonicalSlug) tag=\(notesTag)")
+                } else {
+                    Logger.scan.debug("auto-promote rejected: hash=\(imageHash.prefix(8)) error=\(r.error ?? "nil")")
+                }
+            } catch {
+                Logger.scan.debug("auto-promote failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
     // MARK: - Permission
 
     private static func ensurePhotoAddPermission() async -> Bool {
