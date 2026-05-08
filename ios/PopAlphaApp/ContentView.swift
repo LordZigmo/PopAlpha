@@ -20,6 +20,18 @@ struct ContentView: View {
     // screen triggered the sign-in.
     private var auth: AuthService { AuthService.shared }
 
+    // Trial re-engagement plumbing. Auto-presents the paywall once
+    // when we observe a lapsed subscriber (`!isPro &&
+    // !isEligibleForTrial`) — they've used the trial and aren't
+    // currently paid, so the hero copy welcomes them back rather
+    // than pitching cold. Persistent dedupe via UserDefaults; flag
+    // resets the moment they re-upgrade so a second lapse can
+    // trigger again.
+    @StateObject private var premiumStore = PremiumStore.shared
+    @StateObject private var premiumGate = PremiumGate.shared
+    @State private var showReengagementPaywall = false
+    private static let reengagementShownKey = "ai.popalpha.premium.reengagement.shown"
+
     init() {
         configureTabBarAppearance()
     }
@@ -98,6 +110,43 @@ struct ContentView: View {
                 selectedTab = .market
             }
         }
+        // Trial re-engagement — auto-presents once for lapsed
+        // subscribers. Conditions evaluate after products load (so
+        // isEligibleForTrial is accurate) and re-evaluate when any
+        // input changes.
+        .sheet(isPresented: $showReengagementPaywall) {
+            PaywallView(context: .reengagement)
+        }
+        .onAppear { evaluateReengagement() }
+        .onChange(of: premiumStore.productsLoaded) { _, _ in evaluateReengagement() }
+        .onChange(of: premiumStore.isEligibleForTrial) { _, _ in evaluateReengagement() }
+        .onChange(of: premiumGate.isPro) { _, isPro in
+            // When the user upgrades (re-pro), clear the dedupe flag
+            // so a future lapse can trigger the re-engagement again.
+            // Idempotent — setting to false on every pro flip is fine.
+            if isPro {
+                UserDefaults.standard.set(false, forKey: Self.reengagementShownKey)
+            }
+            evaluateReengagement()
+        }
+    }
+
+    /// Decide whether to auto-present the trial re-engagement paywall.
+    /// Idempotent: returns early when any precondition isn't met, when
+    /// the sheet's already up, or when we've already shown it for this
+    /// lapse. Persists the "shown" flag to UserDefaults so cold
+    /// launches don't re-prompt.
+    private func evaluateReengagement() {
+        let alreadyShown = UserDefaults.standard.bool(forKey: Self.reengagementShownKey)
+        guard !alreadyShown,
+              premiumStore.productsLoaded,
+              !premiumGate.isPro,
+              !premiumStore.isEligibleForTrial,
+              !showReengagementPaywall
+        else { return }
+
+        UserDefaults.standard.set(true, forKey: Self.reengagementShownKey)
+        showReengagementPaywall = true
     }
 
     private func configureTabBarAppearance() {

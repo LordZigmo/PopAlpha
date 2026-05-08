@@ -85,6 +85,21 @@ public final class PremiumStore: ObservableObject {
     /// to display ("couldn't reach App Store; try again").
     @Published public private(set) var lastError: String?
 
+    /// Per-Apple-ID intro-offer eligibility for the yearly product.
+    /// Apple flips this to false the moment a user starts the trial
+    /// (or pays through it), so it's a stable "have they used it"
+    /// signal that survives the trial ending. Combined with
+    /// `status.isPro`:
+    ///   - eligible == true                  → never trialed
+    ///   - eligible == false && status.isPro → currently subscribed
+    ///   - eligible == false && !status.isPro → LAPSED (trial ended,
+    ///                                          paid sub canceled, etc.)
+    /// The lapsed case is what drives the trial re-engagement sheet
+    /// in ContentView. Optimistic default of `true` so we never
+    /// surface the re-engagement copy to a fresh-install user before
+    /// StoreKit has reported.
+    @Published public private(set) var isEligibleForTrial: Bool = true
+
     // MARK: - Internal state
 
     private var transactionListenerTask: Task<Void, Never>?
@@ -153,11 +168,26 @@ public final class PremiumStore: ObservableObject {
                 self.productsLoaded = true
                 self.lastError = nil
             }
+            // Refresh trial eligibility now that products are loaded.
+            // Drives the lapsed-subscriber detection used by the
+            // re-engagement paywall in ContentView.
+            await refreshTrialEligibility()
         } catch {
             await MainActor.run {
                 self.lastError = "Couldn't load products: \(error.localizedDescription)"
             }
         }
+    }
+
+    /// Query Apple's per-Apple-ID intro-offer eligibility for the
+    /// yearly product (the one that carries the 7-day trial offer
+    /// in App Store Connect) and publish the result. Cheap (StoreKit
+    /// resolves locally), safe to call multiple times.
+    private func refreshTrialEligibility() async {
+        guard let yearly = products[PremiumProducts.proYearly],
+              let subscription = yearly.subscription else { return }
+        let eligible = await subscription.isEligibleForIntroOffer
+        await MainActor.run { self.isEligibleForTrial = eligible }
     }
 
     /// Initiate a purchase. Returns the outcome so callers can branch

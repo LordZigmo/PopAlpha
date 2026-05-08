@@ -29,6 +29,12 @@ public enum PaywallContext {
     case generic
     case scanner
     case collectorProfile
+    /// Auto-presented at app launch for users who previously had a
+    /// trial (or paid sub) and have lapsed back to free. Higher-
+    /// conversion cohort than fresh free users — they've already
+    /// experienced Pro features, so the hero leads with "welcome
+    /// back" rather than introducing the value.
+    case reengagement
 }
 
 struct PaywallView: View {
@@ -245,6 +251,8 @@ struct PaywallView: View {
             return "Unlock faster card scanning"
         case .collectorProfile:
             return "Unlock your collector profile"
+        case .reengagement:
+            return "Welcome back."
         }
     }
 
@@ -257,6 +265,8 @@ struct PaywallView: View {
             return "Scan quickly, identify cards offline, and turn every scan into a market read."
         case .collectorProfile:
             return "See your collection style, radar chart, and AI insights tuned to the cards you own."
+        case .reengagement:
+            return "Pick up where you left off — your Pro features are one tap away."
         }
     }
 
