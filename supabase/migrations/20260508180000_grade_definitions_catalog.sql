@@ -1,4 +1,12 @@
--- 20260508120000_grade_definitions_catalog.sql
+-- 20260508180000_grade_definitions_catalog.sql
+--
+-- Originally timestamped 20260508120000 in PR #31; renamed to 20260508180000
+-- in the 2026-05-08 drift cleanup after a 20260508120000 collision was
+-- discovered: a Dashboard-applied `canonical_cards_native_names` migration
+-- was already recorded at that version in prod, which caused
+-- `supabase db push` to silently skip this catalog migration entirely.
+-- The rename gives the catalog a fresh version that's not in remote
+-- history yet, so push will actually apply it.
 --
 -- PR 1 of the grade-catalog promotion (see docs/schema-audit-2026-05-08.md §8 item 3).
 --
