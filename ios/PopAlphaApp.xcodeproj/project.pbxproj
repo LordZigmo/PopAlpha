@@ -21,6 +21,7 @@
 		1400000100000000000000F1 /* SwipeRevealRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1400000100000000000000A1 /* SwipeRevealRow.swift */; };
 		1500000100000000000000F1 /* CollectorRadarCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1500000100000000000000A1 /* CollectorRadarCard.swift */; };
 		1600000100000000000000F1 /* PortfolioDemoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1600000100000000000000A1 /* PortfolioDemoView.swift */; };
+		9D02350A7D2DDE1FBA2D79A5 /* CollectorRadarLockedCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 833C1F6DE131209C109EB423 /* CollectorRadarLockedCard.swift */; };
 		9D07CFCE2F982B7B004BF9A7 /* PostHog in Frameworks */ = {isa = PBXBuildFile; productRef = 9D07CFCD2F982B7B004BF9A7 /* PostHog */; };
 		9D07CFD22F982DCD004BF9A7 /* AnalyticsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D07CFD12F982DCD004BF9A7 /* AnalyticsService.swift */; };
 		9DB745292F91E43300AD2083 /* Nuke in Frameworks */ = {isa = PBXBuildFile; productRef = 9DB745282F91E43300AD2083 /* Nuke */; };
@@ -44,6 +45,7 @@
 		AA00000100000000000000E5 /* ActivityService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000E8 /* ActivityService.swift */; };
 		AA00000100000000000000E7 /* ActivityEventCell.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000EA /* ActivityEventCell.swift */; };
 		AA00000100000000000000EB /* WishlistService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000EC /* WishlistService.swift */; };
+		B8C1012FB0F85B919D4EB1DF /* LockedPreviewOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4B3CD44928B2F1804B2B39E /* LockedPreviewOverlay.swift */; };
 		BB00000100000000000000F1 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00000100000000000000A1 /* APIClient.swift */; };
 		BB00000100000000000000F2 /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00000100000000000000A2 /* AuthService.swift */; };
 		BB00000100000000000000F3 /* SearchModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00000100000000000000A3 /* SearchModels.swift */; };
@@ -123,6 +125,7 @@
 		1400000100000000000000A1 /* SwipeRevealRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipeRevealRow.swift; sourceTree = "<group>"; };
 		1500000100000000000000A1 /* CollectorRadarCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollectorRadarCard.swift; sourceTree = "<group>"; };
 		1600000100000000000000A1 /* PortfolioDemoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioDemoView.swift; sourceTree = "<group>"; };
+		833C1F6DE131209C109EB423 /* CollectorRadarLockedCard.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CollectorRadarLockedCard.swift; sourceTree = "<group>"; };
 		9D07CFD12F982DCD004BF9A7 /* AnalyticsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsService.swift; sourceTree = "<group>"; };
 		AA00000100000000000000A1 /* PopAlphaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopAlphaApp.swift; sourceTree = "<group>"; };
 		AA00000100000000000000A2 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -143,6 +146,7 @@
 		AA00000100000000000000E8 /* ActivityService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityService.swift; sourceTree = "<group>"; };
 		AA00000100000000000000EA /* ActivityEventCell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityEventCell.swift; sourceTree = "<group>"; };
 		AA00000100000000000000EC /* WishlistService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WishlistService.swift; sourceTree = "<group>"; };
+		B4B3CD44928B2F1804B2B39E /* LockedPreviewOverlay.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LockedPreviewOverlay.swift; sourceTree = "<group>"; };
 		BB00000100000000000000A1 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		BB00000100000000000000A2 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
 		BB00000100000000000000A3 /* SearchModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchModels.swift; sourceTree = "<group>"; };
@@ -331,6 +335,8 @@
 				AA00000100000000000000B3 /* Info.plist */,
 				EE00000100000000000000B1 /* PrivacyInfo.xcprivacy */,
 				AA00000100000000000000E3 /* Preview Content */,
+				B4B3CD44928B2F1804B2B39E /* LockedPreviewOverlay.swift */,
+				833C1F6DE131209C109EB423 /* CollectorRadarLockedCard.swift */,
 			);
 			path = PopAlphaApp;
 			sourceTree = "<group>";
@@ -526,6 +532,8 @@
 				1400000100000000000000F1 /* SwipeRevealRow.swift in Sources */,
 				1500000100000000000000F1 /* CollectorRadarCard.swift in Sources */,
 				1600000100000000000000F1 /* PortfolioDemoView.swift in Sources */,
+				B8C1012FB0F85B919D4EB1DF /* LockedPreviewOverlay.swift in Sources */,
+				9D02350A7D2DDE1FBA2D79A5 /* CollectorRadarLockedCard.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

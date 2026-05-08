@@ -12,6 +12,8 @@ struct PersonalizedInsightCardView: View {
 
     @State private var loading: Bool = true
     @State private var response: PersonalizedExplanationResponse?
+    @StateObject private var gate = PremiumGate.shared
+    @State private var showPaywall: Bool = false
 
     private static let purpleBorder = Color(red: 0.752, green: 0.517, blue: 0.988)     // #C084FC
     private static let purpleAccent = Color(red: 0.659, green: 0.333, blue: 0.969)     // #A855F7
@@ -51,6 +53,58 @@ struct PersonalizedInsightCardView: View {
             )
             .lineSpacing(3)
 
+            // Reasons + caveats are the "deep" personalization layer.
+            // Free users see the summary above (it's their actual
+            // personalized lead) but the supporting reasoning is
+            // gated behind Pro — tap surfaces the paywall with the
+            // collector-profile context.
+            if hasUnlockableContent {
+                if gate.isPro {
+                    reasonsAndCaveats
+                } else {
+                    LockedPreviewOverlay(
+                        ctaText: "Unlock with Pro",
+                        blurRadius: 5,
+                        onTap: { showPaywall = true },
+                    ) {
+                        reasonsAndCaveats
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Self.purpleAccent.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(alignment: .leading) {
+            // Inset rounded rail — sits inside the rounded corners
+            // rather than trying to trace them.
+            Capsule()
+                .fill(Self.purpleAccent)
+                .frame(width: 3)
+                .padding(.vertical, 10)
+                .padding(.leading, 2)
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Self.purpleBorder.opacity(0.35), lineWidth: 1)
+        )
+        .shadow(color: Self.purpleGlow.opacity(0.28), radius: 14, x: 0, y: 0)
+        .shadow(color: .black.opacity(0.24), radius: 30, x: 0, y: 18)
+        .sheet(isPresented: $showPaywall) {
+            PaywallView(context: .collectorProfile)
+        }
+    }
+
+    private var hasUnlockableContent: Bool {
+        let hasReasons = !(response?.explanation?.reasons ?? []).isEmpty
+        let hasCaveats = !(response?.explanation?.caveats ?? []).isEmpty
+        return hasReasons || hasCaveats
+    }
+
+    @ViewBuilder
+    private var reasonsAndCaveats: some View {
+        VStack(alignment: .leading, spacing: 12) {
             if let reasons = response?.explanation?.reasons, !reasons.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(Array(reasons.enumerated()), id: \.offset) { _, reason in
@@ -76,25 +130,6 @@ struct PersonalizedInsightCardView: View {
                     .foregroundStyle(Self.purpleMuted.opacity(0.65))
             }
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Self.purpleAccent.opacity(0.12))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(alignment: .leading) {
-            // Inset rounded rail — sits inside the rounded corners
-            // rather than trying to trace them.
-            Capsule()
-                .fill(Self.purpleAccent)
-                .frame(width: 3)
-                .padding(.vertical, 10)
-                .padding(.leading, 2)
-        }
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Self.purpleBorder.opacity(0.35), lineWidth: 1)
-        )
-        .shadow(color: Self.purpleGlow.opacity(0.28), radius: 14, x: 0, y: 0)
-        .shadow(color: .black.opacity(0.24), radius: 30, x: 0, y: 18)
     }
 
     private var header: some View {
