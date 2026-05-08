@@ -54,12 +54,24 @@ enum ScanDebugCapture {
     /// trail. Real-device 2026-05-02: a Premium Power Pro scan
     /// auto-navigated to Pawniard at HIGH and we couldn't see the
     /// captured frame because HIGH was being skipped.
+    ///
+    /// Phase 0d (2026-05-08): the banner also surfaces the diagnostic
+    /// fields we already collect during OCR (pass2_fired,
+    /// spatial_rejected, frames_used, trigger_source, image_hash) so
+    /// each saved photo is fully self-describing for 100-card
+    /// triage. Previously the banner showed only the result + OCR
+    /// candidates; failure-mode classification required cross-
+    /// referencing PostHog and the Logger.scan stream.
     static func capture(
         image: UIImage,
         response: ScanIdentifyResponse?,
         source: ScanSource,
         ocrCardNumbers: [String],
         ocrSetHint: String?,
+        triggerSource: String,
+        framesUsed: Int,
+        pass2FallbackFired: Bool,
+        spatialFilterRejectedCount: Int,
     ) {
 
         Task.detached(priority: .background) {
@@ -75,6 +87,10 @@ enum ScanDebugCapture {
                 source: source,
                 ocrCardNumbers: ocrCardNumbers,
                 ocrSetHint: ocrSetHint,
+                triggerSource: triggerSource,
+                framesUsed: framesUsed,
+                pass2FallbackFired: pass2FallbackFired,
+                spatialFilterRejectedCount: spatialFilterRejectedCount,
             )
             let composed = Self.compose(image: image, banner: banner)
             do {
@@ -108,18 +124,29 @@ enum ScanDebugCapture {
     // MARK: - Banner generation
 
     /// Produces a multi-line text banner with the result + OCR signal.
-    /// One slug per line, similarity to 3 decimals.
+    /// One slug per line, similarity to 3 decimals. Last line carries
+    /// the OCR/path diagnostic flags so failure-mode triage on the
+    /// 100-card ship test is fully self-contained per saved photo.
     private static func makeBanner(
         response: ScanIdentifyResponse?,
         source: ScanSource,
         ocrCardNumbers: [String],
         ocrSetHint: String?,
+        triggerSource: String,
+        framesUsed: Int,
+        pass2FallbackFired: Bool,
+        spatialFilterRejectedCount: Int,
     ) -> String {
         let timestamp = ISO8601DateFormatter().string(from: Date())
         var lines: [String] = []
-        lines.append("[\(timestamp)] src=\(source.rawValue)")
+        // Header line: WHEN + WHERE the scan came from.
+        lines.append("[\(timestamp)] src=\(source.rawValue) trig=\(triggerSource) frames=\(framesUsed)")
         if let r = response {
-            lines.append("conf=\(r.confidence) path=\(r.winningPath ?? "nil")")
+            // Result line: confidence + path + image_hash short suffix
+            // (correlates this Photos image to scan_eval_images /
+            // PostHog when promoting or filing a regression).
+            let hashSuffix = (r.imageHash ?? "").prefix(8)
+            lines.append("conf=\(r.confidence) path=\(r.winningPath ?? "nil") hash=\(hashSuffix)")
             for (i, m) in r.matches.prefix(5).enumerated() {
                 lines.append(String(
                     format: "%d. %@ (sim=%.3f, %@ #%@)",
@@ -138,6 +165,13 @@ enum ScanDebugCapture {
         // visible: the right number is often candidate-2 or 3.
         let nums = ocrCardNumbers.isEmpty ? "nil" : ocrCardNumbers.joined(separator: ",")
         lines.append("OCR nums=[\(nums)] set=\(ocrSetHint ?? "nil")")
+        // Diagnostic flags — surface what the OCR pipeline actually
+        // had to do. pass2=true means pass-1 spatial filter failed
+        // and we recovered via the fallback; rejected>0 means Vision
+        // observations were dropped before reaching the parser. Both
+        // strongly inform "is this a Mode 6 / Mode 8 case?" without
+        // needing PostHog or the log stream.
+        lines.append("pass2=\(pass2FallbackFired) rejected=\(spatialFilterRejectedCount)")
         return lines.joined(separator: "\n")
     }
 
