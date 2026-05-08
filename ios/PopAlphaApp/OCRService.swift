@@ -1,3 +1,5 @@
+import CoreImage
+import Metal
 import OSLog
 import UIKit
 @preconcurrency import Vision
@@ -251,11 +253,29 @@ enum OCRService {
         pass2FallbackFired: Bool,
         spatialFilterRejectedCount: Int
     ) {
+        // Per-frame OCR-side preprocessing (added 2026-05-08 for the
+        // zero-tap-with-soft-camera-and-low-light case). NOT applied to
+        // the embedder image — embedder works fine on raw frames and
+        // aggressive preprocessing could amplify noise it doesn't need
+        // to see. OCR alone benefits because:
+        //   - unsharp mask counteracts lens softness / camera-optic
+        //     blur (real-device iPhone 14 Pro Max evidence: capture
+        //     looks like it has slight astigmatism, sharpening recovers
+        //     edge crispness on the small card_number digits)
+        //   - mid-range contrast curve recovers detail from low-light
+        //     captures without blowing out the card-art highlights
+        //
+        // Cost: ~10ms on Apple Silicon for a 656×918 frame. Acceptable
+        // for the per-scan path; would be too expensive to run on every
+        // 60fps video frame. Falls back to original on any filter
+        // failure so OCR never hard-fails on preprocessing alone.
+        let processed = preprocessForOCR(image)
+
         // Run Vision OCR once on each region (full image + bottom strip).
         // Both passes run concurrently — embed and pixel-data work is
         // independent. The post-processing (filtering, multi-pass logic)
         // is pure and runs after both Vision calls return.
-        async let fullObservations = runVisionTextRecognition(in: image)
+        async let fullObservations = runVisionTextRecognition(in: processed)
         async let stripObservations: [VNRecognizedTextObservation] = {
             // Bottom 25% upscaled 3×. Bumped from 0.18 on 2026-05-07
             // (Tier 1.1 stage 2) — real-device evidence showed
@@ -268,8 +288,10 @@ enum OCRService {
             // The strip is independently fed to Vision, so even if
             // the full-pass spatial filter rejects the card_number,
             // the strip pass — which has no spatial filter — should
-            // surface it.
-            guard let strip = upscaledBottomStrip(image, ratio: 0.25, scale: 3.0) else {
+            // surface it. Strip is sourced from the preprocessed image
+            // so the upscaled crop benefits from the same sharpening +
+            // contrast boost.
+            guard let strip = upscaledBottomStrip(processed, ratio: 0.25, scale: 3.0) else {
                 return []
             }
             return await runVisionTextRecognition(in: strip)
@@ -395,6 +417,57 @@ enum OCRService {
     /// Vision is the expensive part (~30-100ms), and the filter
     /// logic is pure data manipulation that should run multiple
     /// times for free.
+    /// Reusable Core Image context. Hardware-backed (Metal), shared
+    /// across calls. Constructing one per filter chain is expensive
+    /// (~5-10ms); reusing keeps preprocessing cost ~10ms total per
+    /// frame instead of dominating it with setup.
+    private static let preprocessContext: CIContext = {
+        if let device = MTLCreateSystemDefaultDevice() {
+            return CIContext(mtlDevice: device, options: [.useSoftwareRenderer: false])
+        }
+        return CIContext(options: [.useSoftwareRenderer: false])
+    }()
+
+    /// OCR-side preprocessing: unsharp mask + mid-range contrast curve.
+    /// Improves Vision's text-recognition accuracy on captures with
+    /// soft optics (lens astigmatism, slight defocus) and low-light
+    /// conditions, without changing the image the embedder sees.
+    ///
+    /// Filter values were chosen conservatively to avoid over-processing:
+    ///   - radius 1.5 / intensity 0.6 sharpens digit edges without
+    ///     producing visible halos that confuse Vision's character
+    ///     segmentation
+    ///   - tone curve boosts contrast in the 0.25-0.75 luminance range
+    ///     where small printed text lives, leaves true blacks/whites
+    ///     alone (don't blow out card-art highlights or crush shadows
+    ///     where holo-foil patterns live)
+    ///
+    /// Returns the original image on any filter failure. Callers must
+    /// treat the result as "OCR-grade only" — do not feed it to the
+    /// embedder.
+    private static func preprocessForOCR(_ image: UIImage) -> UIImage {
+        guard let cgImage = image.cgImage else { return image }
+        let ci = CIImage(cgImage: cgImage)
+
+        let sharpened = ci.applyingFilter("CIUnsharpMask", parameters: [
+            "inputRadius": 1.5,
+            "inputIntensity": 0.6,
+        ])
+
+        let toned = sharpened.applyingFilter("CIToneCurve", parameters: [
+            "inputPoint0": CIVector(x: 0.00, y: 0.00),
+            "inputPoint1": CIVector(x: 0.25, y: 0.20),
+            "inputPoint2": CIVector(x: 0.50, y: 0.55),
+            "inputPoint3": CIVector(x: 0.75, y: 0.80),
+            "inputPoint4": CIVector(x: 1.00, y: 1.00),
+        ])
+
+        guard let outCG = preprocessContext.createCGImage(toned, from: ci.extent) else {
+            return image
+        }
+        return UIImage(cgImage: outCG)
+    }
+
     private static func runVisionTextRecognition(
         in image: UIImage,
     ) async -> [VNRecognizedTextObservation] {
