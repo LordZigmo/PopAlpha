@@ -15,7 +15,6 @@ struct CostBasisGap: Equatable {
 
 struct PortfolioHeroView: View {
     let summary: PortfolioSummary
-    let handle: String?
     @Binding var selectedWindow: TimeWindow
     var costBasisGap: CostBasisGap? = nil
 
@@ -50,13 +49,6 @@ struct PortfolioHeroView: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            // User handle
-            if let handle, !handle.isEmpty {
-                Text("@\(handle)")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(PA.Colors.muted)
-            }
-
             // Value + change
             VStack(spacing: 6) {
                 Text(formatCurrency(displayValue))

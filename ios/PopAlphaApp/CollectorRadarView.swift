@@ -7,17 +7,29 @@ import SwiftUI
 struct CollectorRadarView: View {
     let profile: APIRadarProfile
 
-    private let axes: [(label: String, value: KeyPath<APIRadarProfile, Double>)] = [
-        ("Vintage",  \.vintage),
-        ("Graded",   \.graded),
-        ("Grail",    \.grailHunter),
-        ("Japanese", \.japanese),
-        ("Sets",     \.setFinisher),
-        ("Premium",  \.premium),
+    /// Drives the data polygon expanding from center on first appearance.
+    /// Grid + spokes are unaffected so the frame is always present.
+    @State private var dataProgress: Double = 0
+
+    // Order matters — opposite vertices read as conceptual contrasts:
+    //   Nostalgia ↔ Current (old vs new era)
+    //   Slab ↔ Taste (technical/condition vs aesthetic)
+    //   Heat ↔ Depth (chase vs binder-builder)
+    //
+    // Each axis carries the same color as the badge that maps to it,
+    // so a green Binder Builder pill visually keys into the green Depth
+    // vertex on the chart.
+    private let axes: [(label: String, value: KeyPath<APIRadarProfile, Double>, tint: Color)] = [
+        ("Nostalgia", \.nostalgia,       PA.AxisColors.nostalgia),
+        ("Slab",      \.slabFocus,       PA.AxisColors.slabFocus),
+        ("Heat",      \.marketHeat,      PA.AxisColors.marketHeat),
+        ("Current",   \.currentEra,      PA.AxisColors.currentEra),
+        ("Taste",     \.tasteProfile,    PA.AxisColors.tasteProfile),
+        ("Depth",     \.collectionDepth, PA.AxisColors.collectionDepth),
     ]
 
     private let accentColor = PA.Colors.accent // #00B4D8
-    private let gridColor   = PA.Colors.hairline(0.08)
+    private let gridColor   = Color.white.opacity(0.08)
     private let rings       = 4
 
     var body: some View {
@@ -50,26 +62,45 @@ struct CollectorRadarView: View {
                 ctx.stroke(path, with: .color(gridColor), lineWidth: 1)
             }
 
+            // Sparse profiles (e.g., user has 4 cards) produce tiny
+            // raw axis values that read as a near-invisible polygon.
+            // A sqrt curve lifts low values disproportionately so the
+            // shape feels populated without distorting relative
+            // emphasis (ordering is preserved).
+            //   0.10 -> 0.32, 0.25 -> 0.50, 0.50 -> 0.71, 1.0 -> 1.0
+            func display(_ raw: Double) -> Double {
+                sqrt(max(0, raw)) * dataProgress
+            }
+
             // Data polygon — fill
             var fill = Path()
             for (i, axis) in axes.enumerated() {
-                let pt = point(i, radius: r * profile[keyPath: axis.value])
+                let pt = point(i, radius: r * display(profile[keyPath: axis.value]))
                 i == 0 ? fill.move(to: pt) : fill.addLine(to: pt)
             }
             fill.closeSubpath()
-            ctx.fill(fill, with: .color(accentColor.opacity(0.25)))
+            ctx.fill(fill, with: .color(accentColor.opacity(0.50)))
 
             // Data polygon — stroke
             ctx.stroke(fill, with: .color(accentColor), style: StrokeStyle(lineWidth: 1.5, lineJoin: .round))
 
-            // Data-point dots
+            // Data-point dots — each tinted with its axis color so the
+            // vertices key into their badges. Slightly larger (radius 4)
+            // so the colors register at a glance.
             for (i, axis) in axes.enumerated() {
-                let pt = point(i, radius: r * profile[keyPath: axis.value])
-                let dot = Path(ellipseIn: CGRect(x: pt.x - 3, y: pt.y - 3, width: 6, height: 6))
-                ctx.fill(dot, with: .color(accentColor))
+                let pt = point(i, radius: r * display(profile[keyPath: axis.value]))
+                let dot = Path(ellipseIn: CGRect(x: pt.x - 4, y: pt.y - 4, width: 8, height: 8))
+                ctx.fill(dot, with: .color(axis.tint))
             }
         }
         .overlay(labelsOverlay)
+        .onAppear {
+            // Slight delay so the user sees the polygon "draw in"
+            // rather than catching the tail end while the page settles.
+            withAnimation(.easeOut(duration: 0.9).delay(0.15)) {
+                dataProgress = 1
+            }
+        }
     }
 
     // Labels rendered as SwiftUI Text so they scale with Dynamic Type.
@@ -87,8 +118,8 @@ struct CollectorRadarView: View {
                 let y = cy + lr * sin(angle)
 
                 Text(axis.label)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(PA.Colors.hairline(0.55))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(axis.tint)
                     .position(x: x, y: y)
             }
         }

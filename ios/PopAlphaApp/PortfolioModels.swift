@@ -142,12 +142,21 @@ struct PortfolioActivity: Identifiable {
 // MARK: - API Response Decodable Types
 
 struct APIRadarProfile: Decodable {
-    let vintage: Double
-    let graded: Double
-    let premium: Double
-    let setFinisher: Double
-    let japanese: Double
-    let grailHunter: Double
+    let nostalgia: Double
+    let currentEra: Double
+    let slabFocus: Double
+    let marketHeat: Double
+    let tasteProfile: Double
+    let collectionDepth: Double
+}
+
+/// Earned badges surfaced under the radar. Server only returns badges
+/// the user qualifies for, so an empty array means no badges yet.
+struct APIBadge: Decodable, Identifiable {
+    let id: String
+    let label: String
+    let description: String
+    let icon: String  // SF Symbol name
 }
 
 /// Top-level response from GET /api/portfolio/overview
@@ -163,6 +172,7 @@ struct PortfolioOverviewResponse: Decodable {
     let attributes: [APIAttribute]?
     let insights: [String]?
     let radarProfile: APIRadarProfile?
+    let badges: [APIBadge]?
 }
 
 struct APICardMetadata: Decodable {
