@@ -100,6 +100,18 @@ public final class PremiumStore: ObservableObject {
     /// StoreKit has reported.
     @Published public private(set) var isEligibleForTrial: Bool = true
 
+    /// True when the user is currently inside an active free-trial
+    /// period (Transaction.offerType == .introductory on a verified
+    /// entitlement). Distinct from `status.isPro`, which is also true
+    /// for paid subscribers — we don't want to nag a paying customer
+    /// with the trial-expiring paywall ahead of their first renewal.
+    @Published public private(set) var isOnTrial: Bool = false
+
+    /// Expiration date of the current trial entitlement, when one is
+    /// active. Used by ContentView to decide whether to auto-present
+    /// the trial-expiring paywall (within 48h of expiry).
+    @Published public private(set) var trialExpiresAt: Date? = nil
+
     // MARK: - Internal state
 
     private var transactionListenerTask: Task<Void, Never>?
@@ -139,18 +151,32 @@ public final class PremiumStore: ObservableObject {
     /// (app launch + after explicit user action like Restore).
     public func refreshStatus() async {
         var resolved: PremiumStatus = .free
+        var trialActive = false
+        var trialExpires: Date? = nil
         for await verificationResult in Transaction.currentEntitlements {
             guard let transaction = try? checkVerified(verificationResult) else { continue }
             if PremiumProducts.proEntitlementProductIDs.contains(transaction.productID) {
                 if transaction.revocationDate == nil {
                     let expiration = transaction.expirationDate
                     resolved = .pro(expirationDate: expiration)
+                    // `offerType == .introductory` is the StoreKit 2
+                    // signal that the user is currently consuming an
+                    // intro offer (free trial in our case). It flips
+                    // back to nil on the first paid renewal — exactly
+                    // the moment we DON'T want to show the trial-
+                    // ending paywall.
+                    if transaction.offerType == .introductory {
+                        trialActive = true
+                        trialExpires = expiration
+                    }
                     break
                 }
             }
         }
         await MainActor.run {
             self.status = resolved
+            self.isOnTrial = trialActive
+            self.trialExpiresAt = trialExpires
             self.persistCachedStatus(resolved)
         }
     }

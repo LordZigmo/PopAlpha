@@ -30,7 +30,12 @@ struct ContentView: View {
     @StateObject private var premiumStore = PremiumStore.shared
     @StateObject private var premiumGate = PremiumGate.shared
     @State private var showReengagementPaywall = false
+    @State private var showTrialExpiringPaywall = false
     private static let reengagementShownKey = "ai.popalpha.premium.reengagement.shown"
+    /// Per-trial dedupe for the trial-expiring auto-paywall. Keyed by
+    /// trial expiration date (epoch seconds) so a future trial — if
+    /// Apple ever grants the user another one — gets its own prompt.
+    private static let trialExpiringShownKeyPrefix = "ai.popalpha.premium.trialExpiring.shown."
 
     init() {
         configureTabBarAppearance()
@@ -117,9 +122,24 @@ struct ContentView: View {
         .sheet(isPresented: $showReengagementPaywall) {
             PaywallView(context: .reengagement, surface: "reengagement_auto")
         }
-        .onAppear { evaluateReengagement() }
-        .onChange(of: premiumStore.productsLoaded) { _, _ in evaluateReengagement() }
+        // Trial-expiring auto-paywall — presents once when the user is
+        // inside the final 48h of their free trial. Pairs with the
+        // server-driven push notification 24h before expiry: the push
+        // brings them back into the app, this is the catch.
+        .sheet(isPresented: $showTrialExpiringPaywall) {
+            PaywallView(context: .trialExpiring, surface: "trial_expiring_warning")
+        }
+        .onAppear {
+            evaluateReengagement()
+            evaluateTrialExpiring()
+        }
+        .onChange(of: premiumStore.productsLoaded) { _, _ in
+            evaluateReengagement()
+            evaluateTrialExpiring()
+        }
         .onChange(of: premiumStore.isEligibleForTrial) { _, _ in evaluateReengagement() }
+        .onChange(of: premiumStore.trialExpiresAt) { _, _ in evaluateTrialExpiring() }
+        .onChange(of: premiumStore.isOnTrial) { _, _ in evaluateTrialExpiring() }
         .onChange(of: premiumGate.isPro) { _, isPro in
             // When the user upgrades (re-pro), clear the dedupe flag
             // so a future lapse can trigger the re-engagement again.
@@ -147,6 +167,31 @@ struct ContentView: View {
 
         UserDefaults.standard.set(true, forKey: Self.reengagementShownKey)
         showReengagementPaywall = true
+    }
+
+    /// Decide whether to auto-present the trial-expiring paywall.
+    /// Fires when the user is currently inside an active trial whose
+    /// expiration is within 48h. Dedupes per trial via a UserDefaults
+    /// key keyed on the expiration epoch — a hypothetical future trial
+    /// (different expiration) would get its own prompt. The reengagement
+    /// dedupe is unrelated; both can fire over a user's lifetime, just
+    /// not during the same trial period.
+    private func evaluateTrialExpiring() {
+        guard premiumStore.isOnTrial,
+              let expires = premiumStore.trialExpiresAt,
+              !showTrialExpiringPaywall
+        else { return }
+
+        let secondsUntilExpiry = expires.timeIntervalSinceNow
+        guard secondsUntilExpiry > 0,
+              secondsUntilExpiry <= 48 * 60 * 60
+        else { return }
+
+        let key = "\(Self.trialExpiringShownKeyPrefix)\(Int(expires.timeIntervalSince1970))"
+        if UserDefaults.standard.bool(forKey: key) { return }
+
+        UserDefaults.standard.set(true, forKey: key)
+        showTrialExpiringPaywall = true
     }
 
     private func configureTabBarAppearance() {

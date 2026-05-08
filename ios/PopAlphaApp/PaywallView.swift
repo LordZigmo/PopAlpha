@@ -35,6 +35,11 @@ public enum PaywallContext: String {
     /// experienced Pro features, so the hero leads with "welcome
     /// back" rather than introducing the value.
     case reengagement
+    /// Auto-presented to a user whose free trial expires within 48h.
+    /// Highest-leverage trial→paid surface: paired with a
+    /// server-driven push notification 24h before expiry, this is
+    /// the in-app catch when the user opens the app to convert.
+    case trialExpiring
 }
 
 struct PaywallView: View {
@@ -290,6 +295,8 @@ struct PaywallView: View {
             return "Unlock your collector profile"
         case .reengagement:
             return "Welcome back."
+        case .trialExpiring:
+            return "Your free trial ends soon."
         }
     }
 
@@ -304,6 +311,8 @@ struct PaywallView: View {
             return "See your collection style, radar chart, and AI insights tuned to the cards you own."
         case .reengagement:
             return "Pick up where you left off — your Pro features are one tap away."
+        case .trialExpiring:
+            return "Subscribe today to keep your collector profile, market signals, and unlimited scans."
         }
     }
 

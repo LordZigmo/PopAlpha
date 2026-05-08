@@ -172,6 +172,11 @@ final class PushService {
                     "environment": apnsEnvironment,
                     "device_model": UIDevice.current.model,
                     "os_version": UIDevice.current.systemVersion,
+                    // IANA timezone identifier (e.g. "America/Los_Angeles").
+                    // The server uses this to schedule local-time push
+                    // delivery — e.g. trial-expiring goes at 10am in the
+                    // user's tz, not 10am UTC.
+                    "timezone": TimeZone.current.identifier,
                 ]
             )
             defaults.set(composite, forKey: lastUploadedTokenKey)
