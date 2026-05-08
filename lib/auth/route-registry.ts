@@ -78,6 +78,7 @@ export const CRON_ROUTES = [
   "cron/compute-daily-top-movers",
   "cron/discover-new-sets",
   "cron/recompute-refresh-tier",
+  "cron/notify-trial-expiring",
   "admin/cleanup/delete-thumb-overlay-augs",
 ];
 

@@ -117,6 +117,10 @@
       "schedule": "30 4 * * 0"
     },
     {
+      "path": "/api/cron/notify-trial-expiring",
+      "schedule": "7 * * * *"
+    },
+    {
       "path": "/api/cron/run-scrydex-weekly-dormant",
       "schedule": "0 6 * * 0"
     },
