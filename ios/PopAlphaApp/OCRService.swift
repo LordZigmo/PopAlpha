@@ -108,10 +108,26 @@ enum OCRService {
             )
         }
 
-        // Per-frame OCR in parallel. Each task index is preserved as the
-        // first element so we can reconstruct first-seen order across
-        // frames (TaskGroup completion order is non-deterministic).
-        struct PerFrame: Sendable {
+        // Per-frame OCR runs SEQUENTIALLY (one frame at a time) — NOT
+        // in a TaskGroup. The original parallel design hit a thread-
+        // starvation deadlock on real device: each `extractCardIdentifiersMulti`
+        // call internally fans out 2 Vision calls (full + strip via
+        // `async let`), and Vision's `VNImageRequestHandler.perform`
+        // is SYNCHRONOUS — it blocks the caller's cooperative-executor
+        // thread until the request completes. Wrapping 3 frames in a
+        // TaskGroup produces up to 6 concurrent Vision calls, which on
+        // a 6-performance-core device monopolizes every thread the
+        // cooperative executor has and Vision's own callback threads
+        // can't get scheduled to deliver completions. Result: scan
+        // hangs forever post-OCR.
+        //
+        // Sequential per-frame keeps the per-frame parallelism (full
+        // + strip still concurrent) but bounds total concurrent Vision
+        // calls at 2. Cost: 3× single-frame OCR latency = ~600ms total
+        // instead of ~200ms parallel. Within the user's "I tapped,
+        // give me a result" expectation; the alternative was infinite
+        // hang.
+        struct PerFrame {
             let index: Int
             let cardNumbers: [String]
             let setHint: String?
@@ -119,26 +135,21 @@ enum OCRService {
             let pass2FallbackFired: Bool
             let spatialFilterRejectedCount: Int
         }
-        let perFrame: [PerFrame] = await withTaskGroup(of: PerFrame.self) { group in
-            for (i, frame) in frames.enumerated() {
-                group.addTask {
-                    let r = await extractCardIdentifiersMulti(
-                        from: frame,
-                        maxCandidatesPerObservation: maxCandidatesPerObservation,
-                    )
-                    return PerFrame(
-                        index: i,
-                        cardNumbers: r.cardNumbers,
-                        setHint: r.setHint,
-                        detectedLanguage: r.detectedLanguage,
-                        pass2FallbackFired: r.pass2FallbackFired,
-                        spatialFilterRejectedCount: r.spatialFilterRejectedCount,
-                    )
-                }
-            }
-            var results: [PerFrame] = []
-            for await r in group { results.append(r) }
-            return results.sorted { $0.index < $1.index }
+        var perFrame: [PerFrame] = []
+        perFrame.reserveCapacity(frames.count)
+        for (i, frame) in frames.enumerated() {
+            let r = await extractCardIdentifiersMulti(
+                from: frame,
+                maxCandidatesPerObservation: maxCandidatesPerObservation,
+            )
+            perFrame.append(PerFrame(
+                index: i,
+                cardNumbers: r.cardNumbers,
+                setHint: r.setHint,
+                detectedLanguage: r.detectedLanguage,
+                pass2FallbackFired: r.pass2FallbackFired,
+                spatialFilterRejectedCount: r.spatialFilterRejectedCount,
+            ))
         }
 
         var cardVotes: [String: Int] = [:]
