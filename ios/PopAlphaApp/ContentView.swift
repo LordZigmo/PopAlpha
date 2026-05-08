@@ -20,14 +20,6 @@ struct ContentView: View {
     // screen triggered the sign-in.
     private var auth: AuthService { AuthService.shared }
 
-    // User-selectable color-scheme override. Default `.system` honours
-    // iOS Settings → Display & Brightness; the picker in Settings →
-    // Appearance lets users pin Light or Dark within PopAlpha.
-    @AppStorage(AppearanceMode.storageKey) private var appearanceRaw: String = AppearanceMode.system.rawValue
-    private var appearance: AppearanceMode {
-        AppearanceMode(rawValue: appearanceRaw) ?? .system
-    }
-
     init() {
         configureTabBarAppearance()
     }
@@ -49,19 +41,11 @@ struct ContentView: View {
                 }
                 .tag(AppTab.market)
 
-            // Feed (multi-user activity) is gated by FeatureFlags.isSocialEnabled
-            // because we don't yet have a user-discovery surface — without
-            // followable users the feed would only show your own events,
-            // and exposing the comment/follow/profile entry points behind
-            // it triggers Apple Guideline 1.2 UGC moderation requirements
-            // we'd rather defer until the discovery surface ships.
-            if FeatureFlags.isSocialEnabled {
-                ActivityFeedView()
-                    .tabItem {
-                        Label("Feed", systemImage: "newspaper.fill")
-                    }
-                    .tag(AppTab.activity)
-            }
+            SearchTabView()
+                .tabItem {
+                    Label("Search", systemImage: "magnifyingglass")
+                }
+                .tag(AppTab.search)
 
             ScannerTabView()
                 .tabItem {
@@ -82,16 +66,6 @@ struct ContentView: View {
                 .tag(AppTab.profile)
         }
         .tint(PA.Colors.accent)
-        .preferredColorScheme(appearance.colorScheme)
-        .offlineBanner()
-        .sheet(
-            isPresented: Binding(
-                get: { PushService.shared.showSoftPrompt },
-                set: { newValue in PushService.shared.showSoftPrompt = newValue }
-            )
-        ) {
-            PushPermissionPromptSheet()
-        }
         .alert(
             "Sign-in failed",
             isPresented: Binding(
@@ -324,21 +298,15 @@ struct ProfileTabView: View {
                 }
             }
 
-            // Stats row — Posts/Followers/Following are social metrics that
-            // are meaningless without the social UI surface. With
-            // FeatureFlags.isSocialEnabled off, drop the row entirely
-            // rather than showing 0/0/0 (which reads as "this profile
-            // is dead" instead of "this feature isn't built yet").
-            if FeatureFlags.isSocialEnabled {
-                HStack(spacing: 32) {
-                    profileStat(value: "\(stats?.postCount ?? 0)", label: "Posts")
-                    profileStat(value: "\(stats?.followerCount ?? 0)", label: "Followers")
-                    profileStat(value: "\(stats?.followingCount ?? 0)", label: "Following")
-                }
-                .padding(.vertical, 16)
-                .frame(maxWidth: .infinity)
-                .glassSurface(radius: PA.Layout.panelRadius)
+            // Stats row
+            HStack(spacing: 32) {
+                profileStat(value: "\(stats?.postCount ?? 0)", label: "Posts")
+                profileStat(value: "\(stats?.followerCount ?? 0)", label: "Followers")
+                profileStat(value: "\(stats?.followingCount ?? 0)", label: "Following")
             }
+            .padding(.vertical, 16)
+            .frame(maxWidth: .infinity)
+            .glassSurface(radius: PA.Layout.panelRadius)
 
             // Menu items
             VStack(spacing: 0) {
@@ -349,19 +317,12 @@ struct ProfileTabView: View {
                 }
                 .buttonStyle(.plain)
 
-                // Notifications surface today is exclusively social
-                // (like / comment / follow per the schema CHECK
-                // constraint). With FeatureFlags.isSocialEnabled off,
-                // nothing fires into it, so we hide the row to avoid
-                // showing a permanently-empty list.
-                if FeatureFlags.isSocialEnabled {
-                    NavigationLink {
-                        NotificationView()
-                    } label: {
-                        profileMenuRow(icon: "bell", title: "Notifications")
-                    }
-                    .buttonStyle(.plain)
+                NavigationLink {
+                    NotificationView()
+                } label: {
+                    profileMenuRow(icon: "bell", title: "Notifications")
                 }
+                .buttonStyle(.plain)
 
                 NavigationLink {
                     SettingsView()
@@ -597,7 +558,7 @@ struct PrimaryAppleSignInButton: View {
             .background(Color.black.opacity(auth.isSigningIn ? 0.6 : 1.0))
             .clipShape(Capsule())
             .overlay(
-                Capsule().stroke(PA.Colors.hairline(0.15), lineWidth: 1)
+                Capsule().stroke(Color.white.opacity(0.15), lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
@@ -621,15 +582,17 @@ struct SignInProviderStack: View {
 // MARK: - Tab Enum
 
 enum AppTab {
-    case market, activity, scanner, portfolio, profile
+    case market, search, scanner, portfolio, profile
 }
 
 // MARK: - Previews
 
 #Preview("App") {
     ContentView()
+        .preferredColorScheme(.dark)
 }
 
 #Preview("Profile") {
     ProfileTabView()
+        .preferredColorScheme(.dark)
 }

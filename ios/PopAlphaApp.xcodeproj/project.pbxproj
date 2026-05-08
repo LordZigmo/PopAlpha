@@ -28,6 +28,7 @@
 		9DB7452B2F91E43300AD2083 /* NukeExtensions in Frameworks */ = {isa = PBXBuildFile; productRef = 9DB7452A2F91E43300AD2083 /* NukeExtensions */; };
 		9DB7452D2F91E43300AD2083 /* NukeUI in Frameworks */ = {isa = PBXBuildFile; productRef = 9DB7452C2F91E43300AD2083 /* NukeUI */; };
 		9DB7452F2F91E43300AD2083 /* NukeVideo in Frameworks */ = {isa = PBXBuildFile; productRef = 9DB7452E2F91E43300AD2083 /* NukeVideo */; };
+		A2B6E6279AE398BCDE67F199 /* SearchTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0390B6362A8C2B95081A63EC /* SearchTabView.swift */; };
 		AA000001000000000000000A /* PopAlphaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000A1 /* PopAlphaApp.swift */; };
 		AA000001000000000000000B /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000A2 /* ContentView.swift */; };
 		AA000001000000000000000C /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000A3 /* Theme.swift */; };
@@ -112,6 +113,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		0390B6362A8C2B95081A63EC /* SearchTabView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SearchTabView.swift; sourceTree = "<group>"; };
 		1100000100000000000000A1 /* PortfolioModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioModels.swift; sourceTree = "<group>"; };
 		1100000100000000000000A3 /* PortfolioHeroView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioHeroView.swift; sourceTree = "<group>"; };
 		1100000100000000000000A4 /* CollectorIdentityCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollectorIdentityCard.swift; sourceTree = "<group>"; };
@@ -340,6 +342,7 @@
 				B4B3CD44928B2F1804B2B39E /* LockedPreviewOverlay.swift */,
 				833C1F6DE131209C109EB423 /* CollectorRadarLockedCard.swift */,
 				D4DA9815D835B026D5920042 /* ProMarketSignalsCardView.swift */,
+				0390B6362A8C2B95081A63EC /* SearchTabView.swift */,
 			);
 			path = PopAlphaApp;
 			sourceTree = "<group>";
@@ -538,6 +541,7 @@
 				B8C1012FB0F85B919D4EB1DF /* LockedPreviewOverlay.swift in Sources */,
 				9D02350A7D2DDE1FBA2D79A5 /* CollectorRadarLockedCard.swift in Sources */,
 				B88BC1002AD820253E1200BF /* ProMarketSignalsCardView.swift in Sources */,
+				A2B6E6279AE398BCDE67F199 /* SearchTabView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

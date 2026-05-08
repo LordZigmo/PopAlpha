@@ -2,9 +2,35 @@ import SwiftUI
 
 // MARK: - Search View
 
+/// Cancel-button behavior for the search bar.
+///
+/// Different hosts want different things from a Cancel button:
+/// - A modal sheet wants "always visible, dismisses the sheet."
+/// - A tab root wants "appears only while the user is searching,
+///   clears the query and unfocuses to back out cleanly."
+enum SearchCancelMode {
+    /// Never show the Cancel button.
+    case hidden
+    /// Always show. Tap calls `dismiss()` (sheet/fullScreenCover hosts).
+    case dismiss
+    /// Show only when the field is focused or has text. Tap clears
+    /// the query and unfocuses, returning to the idle state.
+    case clearOnActive
+}
+
 struct SearchView: View {
     var onSelectSlug: ((String) -> Void)?
     var onSelectCard: ((SearchCardResult) -> Void)?
+    // Hosting context flags. Defaults preserve sheet/fullScreenCover
+    // behavior; the Search tab overrides both so the keyboard doesn't
+    // slam up on tab selection / cold launch and the Cancel button
+    // clears-and-unfocuses instead of dismissing.
+    var cancelMode: SearchCancelMode = .dismiss
+    var autofocusOnAppear: Bool = true
+    // When true, fetch the authed user's watchlist movers and surface
+    // them under recents in the idle state. Off by default so the
+    // legacy fullScreenCover entry from Marketplace stays lean.
+    var showsCollectorSuggestions: Bool = false
 
     @Environment(\.dismiss) private var dismiss
 
@@ -13,6 +39,7 @@ struct SearchView: View {
     @State private var isSearching = false
     @State private var searchError: String?
     @State private var hasSearched = false
+    @State private var watchlistCards: [SearchCardResult] = []
     @FocusState private var isTextFieldFocused: Bool
     @ObservedObject private var recents = RecentSearchStore.shared
 
@@ -20,6 +47,32 @@ struct SearchView: View {
     private var isCardNumberQuery: Bool {
         let pattern = #"^\s*#?\d+(/\d+)?\s*$"#
         return query.range(of: pattern, options: .regularExpression) != nil
+    }
+
+    private var shouldShowCancelButton: Bool {
+        switch cancelMode {
+        case .hidden:
+            return false
+        case .dismiss:
+            return true
+        case .clearOnActive:
+            return !query.isEmpty || isTextFieldFocused
+        }
+    }
+
+    private func handleCancelTap() {
+        switch cancelMode {
+        case .hidden:
+            return
+        case .dismiss:
+            dismiss()
+        case .clearOnActive:
+            query = ""
+            results = []
+            hasSearched = false
+            searchError = nil
+            isTextFieldFocused = false
+        }
     }
 
     var body: some View {
@@ -45,6 +98,10 @@ struct SearchView: View {
         }
         .task(id: query) {
             await debouncedSearch()
+        }
+        .task {
+            guard showsCollectorSuggestions else { return }
+            await loadWatchlistSuggestions()
         }
     }
 
@@ -85,16 +142,22 @@ struct SearchView: View {
             .background(PA.Colors.surfaceSoft)
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-            Button("Cancel") {
-                dismiss()
+            if shouldShowCancelButton {
+                Button("Cancel") {
+                    handleCancelTap()
+                }
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(PA.Colors.accent)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
             }
-            .font(.system(size: 15, weight: .medium))
-            .foregroundStyle(PA.Colors.accent)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+        .animation(.easeInOut(duration: 0.18), value: shouldShowCancelButton)
         .onAppear {
-            isTextFieldFocused = true
+            if autofocusOnAppear {
+                isTextFieldFocused = true
+            }
         }
     }
 
@@ -225,48 +288,73 @@ struct SearchView: View {
 
     private var idleState: some View {
         Group {
-            if recents.recents.isEmpty {
+            if recents.recents.isEmpty && watchlistCards.isEmpty {
                 emptyIdleState
             } else {
-                recentsList
+                suggestionsList
             }
         }
     }
 
-    private var recentsList: some View {
+    private var suggestionsList: some View {
         ScrollView {
-            LazyVStack(spacing: 8) {
-                HStack {
-                    Text("Recent")
-                        .font(PA.Typography.sectionTitle)
-                        .foregroundStyle(PA.Colors.text)
-                        .accessibilityAddTraits(.isHeader)
-                    Spacer()
-                    Button("Clear") {
-                        recents.clear()
-                    }
-                    .font(PA.Typography.caption)
-                    .foregroundStyle(PA.Colors.muted)
-                    .accessibilityLabel("Clear recent searches")
+            LazyVStack(spacing: 24) {
+                if !recents.recents.isEmpty {
+                    suggestionSection(
+                        title: "Recent",
+                        cards: recents.recents,
+                        trailing: AnyView(
+                            Button("Clear") {
+                                recents.clear()
+                            }
+                            .font(PA.Typography.caption)
+                            .foregroundStyle(PA.Colors.muted)
+                            .accessibilityLabel("Clear recent searches")
+                        )
+                    )
                 }
-                .padding(.horizontal, 4)
-                .padding(.top, 4)
 
-                ForEach(recents.recents) { card in
-                    Button {
-                        recents.record(card)
-                        onSelectCard?(card)
-                        onSelectSlug?(card.canonicalSlug)
-                        dismiss()
-                    } label: {
-                        SearchResultCell(card: card)
-                    }
-                    .buttonStyle(.plain)
+                if !watchlistCards.isEmpty {
+                    suggestionSection(
+                        title: "From your watchlist",
+                        cards: watchlistCards,
+                        trailing: nil
+                    )
                 }
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
             .padding(.bottom, 32)
+        }
+    }
+
+    private func suggestionSection(
+        title: String,
+        cards: [SearchCardResult],
+        trailing: AnyView?
+    ) -> some View {
+        VStack(spacing: 8) {
+            HStack {
+                Text(title)
+                    .font(PA.Typography.sectionTitle)
+                    .foregroundStyle(PA.Colors.text)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer()
+                trailing
+            }
+            .padding(.horizontal, 4)
+
+            ForEach(cards) { card in
+                Button {
+                    recents.record(card)
+                    onSelectCard?(card)
+                    onSelectSlug?(card.canonicalSlug)
+                    dismiss()
+                } label: {
+                    SearchResultCell(card: card)
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 
@@ -333,6 +421,30 @@ struct SearchView: View {
         }
 
         isSearching = false
+    }
+
+    // Watchlist movers from /api/homepage/me — same payload the Market
+    // tab already loads. fetchHomepageMe returns nil for guests, so the
+    // section just doesn't render in that case. Failures are intentionally
+    // silent: the section is a nice-to-have, the search field still works.
+    private func loadWatchlistSuggestions() async {
+        do {
+            guard let me = try await CardService.shared.fetchHomepageMe() else { return }
+            guard !Task.isCancelled else { return }
+            watchlistCards = me.watchlistMovers.map { mover in
+                SearchCardResult(
+                    canonicalSlug: mover.slug,
+                    canonicalName: mover.name,
+                    setName: mover.setName,
+                    cardNumber: nil,
+                    year: mover.year,
+                    primaryImageUrl: mover.imageUrl,
+                    score: nil
+                )
+            }
+        } catch {
+            // intentional: section just doesn't render on error
+        }
     }
 }
 
