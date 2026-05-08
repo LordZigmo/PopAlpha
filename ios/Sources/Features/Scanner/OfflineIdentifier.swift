@@ -145,6 +145,10 @@ public final class OfflineIdentifier {
     public static let highCosDist: Float = 0.25       // similarity ≥ 0.75
     public static let mediumCosDist: Float = 0.30     // similarity ≥ 0.70
     public static let highMinGap: Float = 0.04
+    /// Phase 1.5 (2026-05-08): trust HIGH on extremely strong absolute
+    /// match even with small gap to rank-2. Mirrors the server constant
+    /// CONFIDENCE_HIGH_ABSOLUTE_FLOOR_COS_DIST.
+    public static let highAbsoluteFloorCosDist: Float = 0.07  // similarity ≥ 0.93
 
     /// Larger pool for Path B intersection. The kNN already computes
     /// dot-products for every row in the catalog (vDSP matrix-vector
@@ -654,6 +658,9 @@ extension OfflineIdentifier {
             }
             // gap-null = uncontested rank-1 → high (route.ts:436).
             if gap == nil { return .high }
+            // Phase 1.5: at very-high absolute sim, trust top-1 even
+            // if gap to rank-2 is small. Mirrors route.ts.
+            if topDistance <= highAbsoluteFloorCosDist { return .high }
             if let g = gap, g >= highMinGap { return .high }
             return .medium
         }

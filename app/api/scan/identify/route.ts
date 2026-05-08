@@ -97,6 +97,17 @@ const MAX_LIMIT = 10;
 const CONFIDENCE_HIGH_COS_DIST = 0.25;
 const CONFIDENCE_MEDIUM_COS_DIST = 0.30;
 const CONFIDENCE_HIGH_MIN_GAP = 0.04;
+// Phase 1.5 (2026-05-08): when top-1 cos_dist is extremely small
+// (= sim ≥ 0.93), trust absolute closeness regardless of gap.
+// Real-device evidence: vision_only scans of dark V/VSTAR cards
+// returned MEDIUM at top-1 sim 0.95+ with rank-2 sim 0.92 (gap
+// just under 0.04). The picker forced unnecessary user
+// confirmation when the model was visually overwhelmed in absolute
+// terms. False-HIGH risk is low: visually-similar reprints would
+// have rank-2 within 0.01 of rank-1 (gap effectively 0), nowhere
+// near the threshold; only genuinely-overwhelming top-1 matches
+// reach this floor.
+const CONFIDENCE_HIGH_ABSOLUTE_FLOOR_COS_DIST = 0.07;
 
 /**
  * Per-crop-type kNN. Run once per crop_type (full and art) at query
@@ -453,7 +464,11 @@ function classifyConfidence(
     if (context.cardNumberFilterApplied && context.ocrChangedTop1 && gap === null) {
       return "medium";
     }
-    if (gap === null || gap >= CONFIDENCE_HIGH_MIN_GAP) return "high";
+    // Phase 1.5: at very-high absolute sim (cos_dist ≤ FLOOR), trust
+    // the top-1 even if gap to rank-2 is small. Mirrors Phase 1's
+    // "only demote when ALSO weak" pattern. See constant comment.
+    const absolutelyOverwhelming = topDistance <= CONFIDENCE_HIGH_ABSOLUTE_FLOOR_COS_DIST;
+    if (gap === null || gap >= CONFIDENCE_HIGH_MIN_GAP || absolutelyOverwhelming) return "high";
     return "medium";
   }
   if (topDistance <= CONFIDENCE_MEDIUM_COS_DIST) return "medium";
