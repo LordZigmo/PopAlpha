@@ -35,6 +35,11 @@ struct SearchTabView: View {
             .navigationDestination(item: $selectedCard) { card in
                 CardDetailView(card: card)
             }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    LanguageTogglePill()
+                }
+            }
         }
     }
 }

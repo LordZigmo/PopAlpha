@@ -45,9 +45,25 @@ enum PA {
             dark:  Color(red: 0.133, green: 0.133, blue: 0.133)     // #222222
         )
 
-        // Brand accent — cyan reads on both white and black, so single value.
-        static let accent = Color(red: 0.0, green: 0.706, blue: 0.847)              // #00B4D8
-        static let accentSoft = Color(red: 0.0, green: 0.706, blue: 0.847).opacity(0.15)
+        // Brand accents. EN mode = cyan (legacy brand). JP mode = red.
+        // Both read on white and black surfaces. The visible accent flips
+        // when the user toggles LanguageMode via the pill — see
+        // `accent` below, which reads from `LanguageStore.shared.mode` at
+        // each access. Use these constants directly only when a color
+        // should NOT flip with language (e.g., always-blue era badges).
+        static let brandBlue = Color(red: 0.0, green: 0.706, blue: 0.847)           // #00B4D8
+        static let brandRed = Color(red: 0.86, green: 0.149, blue: 0.149)           // #DC2626
+
+        /// Live accent — flips between brandBlue (EN) and brandRed (JP)
+        /// whenever the global LanguageStore changes. Computed each
+        /// access so a view that re-evaluates its body picks up the
+        /// active language's accent without any per-call-site rewiring.
+        /// `.tint(PA.Colors.accent)` at the TabView root cascades the
+        /// flip through SwiftUI's tint environment automatically.
+        static var accent: Color {
+            LanguageStore.shared.mode == .jp ? brandRed : brandBlue
+        }
+        static var accentSoft: Color { accent.opacity(0.15) }
 
         // Text
         static let text = Color(
@@ -147,12 +163,17 @@ enum PA {
             endPoint: .bottomTrailing
         )
 
-        static let accentGlow = RadialGradient(
-            colors: [Colors.accent.opacity(0.15), .clear],
-            center: .center,
-            startRadius: 0,
-            endRadius: 120
-        )
+        // Computed so the glow re-resolves when the language flips.
+        // (A `static let` would capture the EN accent at first access
+        // and never update when LanguageStore.mode changes.)
+        static var accentGlow: RadialGradient {
+            RadialGradient(
+                colors: [Colors.accent.opacity(0.15), .clear],
+                center: .center,
+                startRadius: 0,
+                endRadius: 120
+            )
+        }
 
         static let heroOverlay = LinearGradient(
             colors: [.clear, Colors.background.opacity(0.9)],
@@ -256,5 +277,108 @@ extension View {
 
     func premiumShadow() -> some View {
         modifier(PremiumShadow())
+    }
+}
+
+// MARK: - Language Mode
+//
+// App-wide language selection. EN is the cyan-blue theme + English
+// catalog (default), JP is the red theme + Japanese catalog. The
+// scanner tab keeps its own scoped EN/JP pill (auto-detect status
+// indicator) — this LanguageMode is the global control for
+// theme + every API request's `X-PA-Lang` header.
+//
+// The toggle pill (`LanguageTogglePill`) writes to LanguageStore.shared.
+// Views that observe LanguageStore as an @EnvironmentObject — including
+// the App root — re-evaluate when `mode` changes, which makes the
+// `.tint(PA.Colors.accent)` cascade flip the entire UI accent in one
+// frame.
+
+enum LanguageMode: String, CaseIterable, Identifiable, CustomStringConvertible {
+    case en = "EN"
+    case jp = "JP"
+
+    /// UserDefaults key. Bumping the suffix is how a future schema
+    /// migration would force everyone back to the default.
+    static let storageKey = "popalpha.language.v1"
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .en: "English"
+        case .jp: "日本語"
+        }
+    }
+
+    var description: String { label }
+
+    var shortLabel: String { rawValue }
+}
+
+/// Single source of truth for the app-wide language. Mirrored to
+/// UserDefaults so non-SwiftUI code (notably APIClient's header
+/// builder, which can't use @AppStorage) reads from the same key
+/// without round-tripping through the environment.
+final class LanguageStore: ObservableObject {
+    static let shared = LanguageStore()
+
+    @Published var mode: LanguageMode {
+        didSet {
+            guard oldValue != mode else { return }
+            UserDefaults.standard.set(mode.rawValue, forKey: LanguageMode.storageKey)
+        }
+    }
+
+    private init() {
+        let raw = UserDefaults.standard.string(forKey: LanguageMode.storageKey) ?? LanguageMode.en.rawValue
+        self.mode = LanguageMode(rawValue: raw) ?? .en
+    }
+}
+
+// MARK: - Language Toggle Pill
+//
+// Two-button capsule that lives top-right on Market, Search, Portfolio,
+// and Profile tabs. Tapping either side writes to LanguageStore.shared,
+// which (a) flips PA.Colors.accent for the whole app via SwiftUI tint
+// cascade and (b) makes APIClient send `X-PA-Lang: JP` on every
+// subsequent request. The selection is animated so the theme transition
+// reads as deliberate, not as a glitch.
+
+struct LanguageTogglePill: View {
+    @ObservedObject private var store = LanguageStore.shared
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(LanguageMode.allCases) { mode in
+                Button {
+                    PAHaptics.selection()
+                    withAnimation(.easeInOut(duration: 0.28)) {
+                        store.mode = mode
+                    }
+                } label: {
+                    Text(mode.shortLabel)
+                        .font(.system(size: 11, weight: .semibold))
+                        .tracking(0.5)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .foregroundStyle(store.mode == mode ? PA.Colors.text : PA.Colors.muted)
+                        .background(
+                            Capsule()
+                                .fill(store.mode == mode ? PA.Colors.accentSoft : .clear)
+                        )
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(mode.label) mode")
+                .accessibilityAddTraits(store.mode == mode ? [.isSelected] : [])
+            }
+        }
+        .padding(2)
+        .background(Capsule().fill(PA.Colors.surfaceSoft))
+        .overlay(Capsule().stroke(PA.Colors.border, lineWidth: 1))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Language toggle")
+        .accessibilityValue(store.mode.label)
     }
 }

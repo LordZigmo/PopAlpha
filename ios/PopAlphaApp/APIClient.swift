@@ -169,6 +169,15 @@ enum APIClient {
         // distinguishing iOS scanner traffic from web tests). Harmless
         // if the endpoint doesn't care.
         request.setValue("ios", forHTTPHeaderField: "X-PA-Client-Platform")
+        // App-wide language. Read from UserDefaults rather than the
+        // SwiftUI-side LanguageStore so this code path stays callable
+        // from any thread, including off-main background tasks. The
+        // pill writes through to the same key (LanguageMode.storageKey),
+        // so the two stay in sync. Server routes that filter by
+        // `canonical_cards.language` should read this header and
+        // default to "EN" when absent.
+        let lang = UserDefaults.standard.string(forKey: LanguageMode.storageKey) ?? LanguageMode.en.rawValue
+        request.setValue(lang, forHTTPHeaderField: "X-PA-Lang")
         request.cachePolicy = .reloadRevalidatingCacheData
     }
 

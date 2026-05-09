@@ -156,6 +156,12 @@ struct PortfolioView: View {
             .toolbarBackground(PA.Colors.surface, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
+                // Language pill goes leading because the add menu
+                // already owns the trailing slot — putting both on the
+                // right would crowd primary-action affordances.
+                ToolbarItem(placement: .topBarLeading) {
+                    LanguageTogglePill()
+                }
                 if auth.isAuthenticated {
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {

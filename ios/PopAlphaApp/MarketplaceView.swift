@@ -602,6 +602,12 @@ private struct TopBar: View {
 
             Spacer()
 
+            // App-wide language toggle. Lives in the TopBar HStack
+            // because MarketplaceView doesn't render a UINavigationBar
+            // toolbar — the chrome IS this row. Toggling here flips the
+            // accent for every tab via the SwiftUI tint cascade.
+            LanguageTogglePill()
+
             Button {
                 showSearch = true
             } label: {

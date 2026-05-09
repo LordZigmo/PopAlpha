@@ -29,6 +29,11 @@ struct ContentView: View {
     // trigger again.
     @StateObject private var premiumStore = PremiumStore.shared
     @StateObject private var premiumGate = PremiumGate.shared
+    // App-wide language. Observed so the .tint cascade re-evaluates and
+    // configureTabBarAppearance can be re-applied when the toggle pill
+    // writes a new mode. The actual @StateObject lives on the @main App;
+    // here we just receive it so this view rebuilds on changes.
+    @EnvironmentObject private var languageStore: LanguageStore
     @State private var showReengagementPaywall = false
     @State private var showTrialExpiringPaywall = false
     private static let reengagementShownKey = "ai.popalpha.premium.reengagement.shown"
@@ -83,6 +88,10 @@ struct ContentView: View {
                 .tag(AppTab.profile)
         }
         .tint(PA.Colors.accent)
+        // Smooth color cross-fade when language toggles. Without this
+        // the entire chrome flips in a single frame, which reads as a
+        // glitch rather than a deliberate mode change.
+        .animation(.easeInOut(duration: 0.28), value: languageStore.mode)
         .alert(
             "Sign-in failed",
             isPresented: Binding(
@@ -200,11 +209,15 @@ struct ContentView: View {
         appearance.backgroundColor = UIColor(PA.Colors.surface)
         appearance.shadowColor = .clear
 
+        // Only set the *unselected* item colors here. The selected color
+        // is delegated to SwiftUI's `.tint(PA.Colors.accent)` on TabView
+        // so it flips live with LanguageStore.mode — setting selected
+        // colors via UITabBarAppearance would pin them to whatever
+        // accent was active at appearance-config time and ignore later
+        // language changes.
         let itemAppearance = UITabBarItemAppearance()
         itemAppearance.normal.iconColor = UIColor(PA.Colors.muted)
         itemAppearance.normal.titleTextAttributes = [.foregroundColor: UIColor(PA.Colors.muted)]
-        itemAppearance.selected.iconColor = UIColor(PA.Colors.accent)
-        itemAppearance.selected.titleTextAttributes = [.foregroundColor: UIColor(PA.Colors.accent)]
 
         appearance.stackedLayoutAppearance = itemAppearance
         appearance.inlineLayoutAppearance = itemAppearance
@@ -239,6 +252,11 @@ struct ProfileTabView: View {
                     profileContent
                 } else {
                     guestProfileContent
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    LanguageTogglePill()
                 }
             }
         }

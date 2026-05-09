@@ -10,6 +10,11 @@ struct PopAlphaApp: App {
     // silent pushes, tap delegates) fire through
     // PushNotificationAppDelegate → PushService.
     @UIApplicationDelegateAdaptor(PushNotificationAppDelegate.self) private var pushDelegate
+    // App-wide language. Owned at @main so every screen that observes
+    // `@EnvironmentObject var languageStore: LanguageStore` re-renders
+    // when the user toggles the pill, which is what makes the accent
+    // flip propagate everywhere through SwiftUI's tint cascade.
+    @StateObject private var languageStore = LanguageStore.shared
 
     init() {
         // PostHog first so any uncaught exceptions thrown during
@@ -40,6 +45,7 @@ struct PopAlphaApp: App {
         WindowGroup {
             ContentView()
                 .environment(Clerk.shared)
+                .environmentObject(languageStore)
                 .task { await AuthService.shared.restoreSession() }
                 .task {
                     // StoreKit 2: start the transaction listener and
