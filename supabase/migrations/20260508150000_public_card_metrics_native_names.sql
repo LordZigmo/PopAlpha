@@ -1,3 +1,10 @@
+-- Recovered from prod migration history during drift cleanup 2026-05-08.
+-- Originally applied via Supabase Dashboard SQL Editor; not committed to git
+-- at the time, then surfaced when CI's supabase db push errored on
+-- "Remote migration versions not found in local migrations directory".
+-- Body matches what ran in prod, byte-for-byte (joined from
+-- supabase_migrations.schema_migrations.statements).
+
 -- Surface canonical_cards.canonical_name_native + set_name_native through
 -- public_card_metrics so iOS card-detail can render the bilingual hero
 -- (English name on top, Japanese underneath) in a single fetch instead
@@ -19,6 +26,7 @@
 -- All 40 columns from 20260508140000 are preserved.
 
 DROP VIEW IF EXISTS public.public_card_metrics;
+
 CREATE VIEW public.public_card_metrics AS
 SELECT
   cm.id,

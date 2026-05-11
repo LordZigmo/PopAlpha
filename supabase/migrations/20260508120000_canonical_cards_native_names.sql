@@ -1,3 +1,10 @@
+-- Recovered from prod migration history during drift cleanup 2026-05-08.
+-- Originally applied via Supabase Dashboard SQL Editor; not committed to git
+-- at the time, then surfaced when CI's supabase db push errored on
+-- "Remote migration versions not found in local migrations directory".
+-- Body matches what ran in prod, byte-for-byte (joined from
+-- supabase_migrations.schema_migrations.statements).
+
 -- JP catalog ergonomics: store the original Japanese name for every
 -- non-EN canonical_card alongside the existing English-translated name.
 --

@@ -1,3 +1,10 @@
+-- Recovered from prod migration history during drift cleanup 2026-05-08.
+-- Originally applied via Supabase Dashboard SQL Editor; not committed to git
+-- at the time, then surfaced when CI's supabase db push errored on
+-- "Remote migration versions not found in local migrations directory".
+-- Body matches what ran in prod, byte-for-byte (joined from
+-- supabase_migrations.schema_migrations.statements).
+
 -- Yahoo! Auctions JP scraped prices — surfaced through public_card_metrics
 -- via a dedicated companion table.
 --
@@ -66,29 +73,35 @@ COMMENT ON TABLE public.yahoo_jp_card_prices IS
   'scripts/run-yahoo-jp-pipeline.mjs. Independent lifecycle from '
   'card_metrics — not subject to refresh_card_metrics() GC. Joined into '
   'public_card_metrics view so the API contract is unified.';
+
 COMMENT ON COLUMN public.yahoo_jp_card_prices.grade IS
   'Card grade bucket — ''RAW'' for ungraded cards (today''s only-supported '
   'value), or ''PSA10'' / ''CGC10'' / ''BGS9.5'' / etc. once per-grade '
   'extraction ships. The orchestrator currently only writes RAW rows; '
   'graded buckets are a follow-up migration.';
+
 COMMENT ON COLUMN public.yahoo_jp_card_prices.price_usd IS
   'Median raw-condition sold price, USD-converted via fx_rate_used at '
   'write time. Use lib/pricing/fx.ts (env JPY_TO_USD_RATE, default '
   '0.0068) as the canonical rate source.';
+
 COMMENT ON COLUMN public.yahoo_jp_card_prices.price_jpy IS
   'Same as price_usd in native JPY. Preserved so the UI can show the '
   'original sold price without re-converting on the client, AND so a '
   'future re-conversion job can regenerate price_usd if FX rates drift '
   'without re-scraping. fx_rate_used + price_jpy together let any '
   'historical row be reconstructed.';
+
 COMMENT ON COLUMN public.yahoo_jp_card_prices.fx_rate_used IS
   'JPY→USD rate applied at write time (price_usd = price_jpy * '
   'fx_rate_used). Storing this avoids auditability decay when the env '
   'JPY_TO_USD_RATE drifts: a later batch job can re-compute price_usd '
   'from the canonical price_jpy + a fresher rate, without re-scraping.';
+
 COMMENT ON COLUMN public.yahoo_jp_card_prices.sample_count IS
   'Number of distinct sold listings the median was computed from. '
   'Confidence indicator — n<5 is low confidence.';
+
 COMMENT ON COLUMN public.yahoo_jp_card_prices.observed_at IS
   'Source-time of the median calculation — when the orchestrator '
   'scraped + matched listings to produce price_usd/price_jpy. Distinct '
@@ -123,6 +136,7 @@ ALTER TABLE public.yahoo_jp_card_prices ENABLE ROW LEVEL SECURITY;
 -- definitions must be diffed against the latest active body, not the
 -- original creation.
 DROP VIEW IF EXISTS public.public_card_metrics;
+
 CREATE VIEW public.public_card_metrics AS
 SELECT
   cm.id,
