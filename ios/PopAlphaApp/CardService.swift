@@ -361,7 +361,7 @@ actor CardService {
     func fetchCardMetrics(slug: String) async throws -> CardMetricsResult? {
         let data = try await Supabase.query(
             table: "public_card_metrics",
-            select: "canonical_slug,market_price,market_price_as_of,change_pct_24h,change_pct_7d,market_confidence_score,market_low_confidence,median_7d,median_30d,low_30d,high_30d,active_listings_7d,snapshot_count_30d",
+            select: "canonical_slug,market_price,market_price_as_of,change_pct_24h,change_pct_7d,market_confidence_score,market_low_confidence,median_7d,median_30d,low_30d,high_30d,active_listings_7d,snapshot_count_30d,yahoo_jp_price,yahoo_jp_price_jpy,yahoo_jp_sample_count,yahoo_jp_observed_at,canonical_name_native,set_name_native,language",
             filters: [
                 ("canonical_slug", "eq", slug),
                 ("grade", "eq", "RAW"),
@@ -630,6 +630,24 @@ struct CardMetricsResult: Decodable {
     let high30d: Double?
     let activeListings7d: Int?
     let snapshotCount30d: Int?
+    /// Japanese-market scraped price columns. Populated by
+    /// scripts/run-yahoo-jp-pipeline.mjs from Yahoo! Auctions JP
+    /// closed-auction sold listings. Only set on JP-language
+    /// canonical_cards. The USD price is the JPY median converted via
+    /// the env-configured JPY/USD rate (lib/pricing/fx.ts mirror); the
+    /// JPY field is preserved so the UI can display the native price
+    /// without re-converting.
+    let yahooJpPrice: Double?
+    let yahooJpPriceJpy: Double?
+    let yahooJpSampleCount: Int?
+    let yahooJpObservedAt: String?
+    /// Bilingual identity. Populated for JP cards by the Scrydex
+    /// /ja/ catalog backfill. iOS uses these to render the bilingual
+    /// hero (English on top, Japanese smaller below) and to detect
+    /// "this is a JP card" without slug-suffix sniffing.
+    let canonicalNameNative: String?
+    let setNameNative: String?
+    let language: String?
 }
 
 struct GradedVariantMetricRow: Decodable {

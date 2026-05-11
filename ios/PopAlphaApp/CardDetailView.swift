@@ -90,6 +90,74 @@ struct CardDetailView: View {
     /// which is keyed (slug, printing_id, grade) — no provider dimension.
     @State private var gradedCardMetricsByBucket: [String: GradedCardMetricRow] = [:]
 
+    // MARK: - JP card theming
+
+    /// Whether to render this detail view in the JP red-tone theme.
+    /// Detection cascades:
+    ///   1. cardMetrics.language == "JP" — authoritative once fetched.
+    ///   2. card.id ends in "-jp" — the JP slug suffix convention from
+    ///      the Scrydex importer; covers the brief window between
+    ///      navigation and the metrics fetch landing.
+    ///   3. cardMetrics has populated yahoo_jp_price — final fallback
+    ///      for any JP card that somehow slipped past the above.
+    private var isJapaneseCard: Bool {
+        if cardMetrics?.language == "JP" { return true }
+        if card.id.hasSuffix("-jp") { return true }
+        if cardMetrics?.yahooJpPrice != nil { return true }
+        return false
+    }
+
+    /// Accent color for JP cards. PA.AxisColors.marketHeat is the
+    /// project's "hot red" (#EF4444) from the collector-axis palette —
+    /// distinct from PA.Colors.negative (used for negative price
+    /// changes) so the theming doesn't double-meaning with sell
+    /// signals. Lives at PA.AxisColors (sibling of PA.Colors, not
+    /// nested) because it was originally defined for the taste-radar
+    /// "Market Heat" axis; reusing it here keeps a single color source
+    /// of truth instead of inventing a new red.
+    private var detailAccent: Color {
+        isJapaneseCard ? PA.AxisColors.marketHeat : PA.Colors.accent
+    }
+
+    /// JP cards prefer the Yahoo! Auctions JP scraped sold price
+    /// (lib/jp/matcher.mjs median over ~120-day window) over the
+    /// Scrydex-derived US/global price. Scrydex stays as fallback when
+    /// the JP scraper hasn't matched anything yet — at which point the
+    /// EN price is the only signal we have, even if it's a US-market
+    /// price for a Japanese card.
+    private var preferredHeroPrice: Double? {
+        if isJapaneseCard, let usd = cardMetrics?.yahooJpPrice, usd > 0 {
+            return usd
+        }
+        // Non-JP path: existing logic — printing-specific override, then
+        // the MarketCard's headline price (which is Scrydex-derived).
+        if let price = printingHeroPrice, price > 0 {
+            return price
+        }
+        if card.price > 0 { return card.price }
+        return nil
+    }
+
+    /// Source label shown next to the hero price so the user knows
+    /// which provider the number came from. Affects only the inline
+    /// hint, not the top-level pricing structure.
+    private var heroPriceSourceLabel: String? {
+        if isJapaneseCard, let usd = cardMetrics?.yahooJpPrice, usd > 0 {
+            return "Yahoo! Auctions JP"
+        }
+        return nil
+    }
+
+    /// Suppress the change-percent badge when the hero is showing a
+    /// Yahoo! JP price (the change columns track the Scrydex
+    /// market_price, not the Yahoo!-derived median, so showing the
+    /// delta would be misleading). Hoisted to a computed property so
+    /// the SwiftUI ViewBuilder doesn't need a bare `let` inside the
+    /// HStack body.
+    private var suppressHeroChangeBadge: Bool {
+        isJapaneseCard && (cardMetrics?.yahooJpPrice ?? 0) > 0
+    }
+
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(spacing: 0) {
@@ -102,9 +170,11 @@ struct CardDetailView: View {
                 detailContent
             }
             .background(alignment: .top) {
-                // Accent glow — centered on card, bleeds into content below
+                // Accent glow — centered on card, bleeds into content below.
+                // Switches to JP-red for Japanese cards so the entire view
+                // reads as JP-themed at a glance.
                 Ellipse()
-                    .fill(PA.Colors.accent)
+                    .fill(detailAccent)
                     .opacity(0.25)
                     .blur(radius: 120)
                     .frame(width: 380, height: 500)
@@ -351,7 +421,7 @@ struct CardDetailView: View {
             HStack(spacing: 8) {
                 Image(systemName: "questionmark.circle.fill")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(PA.Colors.accent)
+                    .foregroundStyle(detailAccent)
                 Text("Not this card? Tell the scanner what it actually was.")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(PA.Colors.text)
@@ -366,10 +436,10 @@ struct CardDetailView: View {
             .padding(.vertical, 10)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(PA.Colors.accent.opacity(0.08))
+                    .fill(detailAccent.opacity(0.08))
                     .overlay(
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .stroke(PA.Colors.accent.opacity(0.25), lineWidth: 1)
+                            .stroke(detailAccent.opacity(0.25), lineWidth: 1)
                     )
             )
         }
@@ -501,6 +571,9 @@ struct CardDetailView: View {
             }
 
             // 11. Market intelligence — deepest diagnostics last.
+            //     For JP cards this section also surfaces the Yahoo! JP
+            //     observed_at timestamp + sample-count confidence so the
+            //     user can audit the hero price's freshness.
             marketInfoSection
                 .padding(.top, 6)
         }
@@ -515,30 +588,47 @@ struct CardDetailView: View {
                         SetDetailView(setName: card.setName)
                     } label: {
                         HStack(spacing: 4) {
-                            Text(card.setName)
+                            // For JP cards, prefer the native (Japanese) set
+                            // name on the chevron link so a JP-collector
+                            // glance shows 拡張パック; the EN equivalent
+                            // already lives in the bilingual title block.
+                            Text(setNameForLink)
                                 .font(PA.Typography.cardSubtitle)
                             Image(systemName: "chevron.right")
                                 .font(.system(size: 9, weight: .semibold))
                         }
-                        .foregroundStyle(PA.Colors.accent)
+                        .foregroundStyle(detailAccent)
                     }
                     .buttonStyle(.plain)
 
+                    // Bilingual hero name. English on top (familiar to the
+                    // English-speaking operator); Japanese smaller below
+                    // when present. The Japanese name is dimmer + smaller
+                    // so it reads as a secondary identity rather than
+                    // competing with the primary EN text.
                     Text(card.name)
                         .font(.system(size: 26, weight: .bold))
                         .foregroundStyle(PA.Colors.text)
+                    if isJapaneseCard, let nativeName = cardMetrics?.canonicalNameNative, !nativeName.isEmpty {
+                        Text(nativeName)
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(PA.Colors.muted)
+                            .accessibilityLabel("Japanese name: \(nativeName)")
+                    }
                 }
 
                 Spacer()
 
-                // Rarity badge
+                // Rarity badge — JP cards swap the accent tint to the
+                // detailAccent (red); secret rare keeps gold so that
+                // semantic still reads.
                 Text(card.rarity.label.uppercased())
                     .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(card.rarity == .secretRare ? PA.Colors.gold : PA.Colors.accent)
+                    .foregroundStyle(card.rarity == .secretRare ? PA.Colors.gold : detailAccent)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
                     .background(
-                        (card.rarity == .secretRare ? PA.Colors.gold : PA.Colors.accent).opacity(0.12)
+                        (card.rarity == .secretRare ? PA.Colors.gold : detailAccent).opacity(0.12)
                     )
                     .clipShape(Capsule())
             }
@@ -548,7 +638,12 @@ struct CardDetailView: View {
                     .font(PA.Typography.heroPrice)
                     .foregroundStyle(PA.Colors.text)
 
-                if !selectedPriceMode.isGraded {
+                // Suppress the change badge when the hero price is
+                // sourced from Yahoo! JP — change_pct_24h/7d track the
+                // Scrydex market_price, not the Yahoo!-derived median,
+                // so showing a Scrydex delta next to a Yahoo! price
+                // would imply causality that doesn't exist.
+                if !selectedPriceMode.isGraded && !suppressHeroChangeBadge {
                     HStack(spacing: 4) {
                         Image(systemName: heroChange.direction.arrowSymbol)
                             .font(.system(size: 12, weight: .bold))
@@ -566,7 +661,44 @@ struct CardDetailView: View {
                         .foregroundStyle(PA.Colors.muted)
                 }
             }
+
+            // Source attribution + JPY native price for JP cards. Sits
+            // tight below the hero price so the user can see "this is
+            // the Yahoo! JP price, not Scrydex" + the original JPY
+            // amount (which is what JP collectors recognize).
+            if isJapaneseCard, let metrics = cardMetrics, let usd = metrics.yahooJpPrice, usd > 0 {
+                HStack(spacing: 8) {
+                    if let yen = metrics.yahooJpPriceJpy {
+                        Text("¥" + (Int(yen.rounded())).formatted())
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(PA.Colors.textSecondary)
+                    }
+                    if let count = metrics.yahooJpSampleCount, count > 0 {
+                        Text("· n=\(count) sales")
+                            .font(.system(size: 12))
+                            .foregroundStyle(PA.Colors.muted)
+                    }
+                    if let label = heroPriceSourceLabel {
+                        Text("· \(label)")
+                            .font(.system(size: 12))
+                            .foregroundStyle(PA.Colors.muted)
+                    }
+                }
+            }
         }
+    }
+
+    /// Set-link text in the pricingSection. JP cards show the native
+    /// (Japanese) set name (拡張パック) since the EN translation
+    /// ("Expansion Pack") is unfamiliar shorthand, and the EN release
+    /// equivalence ("Base Set") doesn't live in our data model — the
+    /// importer stores only the Scrydex-translated name. Falls back to
+    /// the EN set_name for non-JP cards.
+    private var setNameForLink: String {
+        if isJapaneseCard, let native = cardMetrics?.setNameNative, !native.isEmpty {
+            return native
+        }
+        return card.setName
     }
 
     // MARK: - Chart (live data per timeframe)
@@ -653,7 +785,7 @@ struct CardDetailView: View {
 
                 if chartLoading {
                     ProgressView()
-                        .tint(PA.Colors.accent)
+                        .tint(detailAccent)
                 } else if let error = chartError, chartPrices.isEmpty {
                     // Chart fetch failed and we have no cached data to
                     // fall back on. Without this, the chart row would
@@ -674,11 +806,11 @@ struct CardDetailView: View {
                         } label: {
                             Text("Retry")
                                 .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(PA.Colors.accent)
+                                .foregroundStyle(detailAccent)
                                 .padding(.horizontal, 16)
                                 .padding(.vertical, 6)
                                 .overlay(
-                                    Capsule().stroke(PA.Colors.accent.opacity(0.5), lineWidth: 1)
+                                    Capsule().stroke(detailAccent.opacity(0.5), lineWidth: 1)
                                 )
                         }
                         .buttonStyle(.plain)
@@ -691,7 +823,7 @@ struct CardDetailView: View {
             if !chartPrices.isEmpty {
                 HStack(spacing: 6) {
                     Circle()
-                        .fill(PA.Colors.accent.opacity(0.7))
+                        .fill(detailAccent.opacity(0.7))
                         .frame(width: 4, height: 4)
                     Text("Calibrated on \(chartPrices.count) data point\(chartPrices.count == 1 ? "" : "s") · \(selectedTimeframe.rawValue)")
                         .font(.system(size: 10, weight: .semibold))
@@ -898,9 +1030,9 @@ struct CardDetailView: View {
                 .font(.system(size: 24, weight: .bold))
                 .foregroundStyle(PA.Colors.background)
                 .frame(width: 56, height: 56)
-                .background(PA.Colors.accent)
+                .background(detailAccent)
                 .clipShape(Circle())
-                .shadow(color: PA.Colors.accent.opacity(0.4), radius: 12, x: 0, y: 4)
+                .shadow(color: detailAccent.opacity(0.4), radius: 12, x: 0, y: 4)
                 .shadow(color: .black.opacity(0.25), radius: 6, x: 0, y: 2)
         }
         .buttonStyle(.plain)
@@ -991,10 +1123,10 @@ struct CardDetailView: View {
                 HStack(alignment: .center, spacing: 8) {
                     Image(systemName: "sparkles")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(PA.Colors.accent)
+                        .foregroundStyle(detailAccent)
                     Text("Where this card stands today")
                         .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(PA.Colors.accent)
+                        .foregroundStyle(detailAccent)
                         .kerning(-0.2)
                     Spacer(minLength: 0)
                     if let chip = profile.chip?.trimmingCharacters(in: .whitespacesAndNewlines), !chip.isEmpty {
@@ -1003,11 +1135,11 @@ struct CardDetailView: View {
                             .foregroundStyle(PA.Colors.text)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 5)
-                            .background(PA.Colors.accent.opacity(0.28))
+                            .background(detailAccent.opacity(0.28))
                             .clipShape(Capsule())
                             .overlay(
                                 Capsule()
-                                    .stroke(PA.Colors.accent.opacity(0.45), lineWidth: 1)
+                                    .stroke(detailAccent.opacity(0.45), lineWidth: 1)
                             )
                     }
                 }
@@ -1039,22 +1171,22 @@ struct CardDetailView: View {
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(PA.Colors.accent.opacity(0.12))
+            .background(detailAccent.opacity(0.12))
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(alignment: .leading) {
                 // Inset rounded rail — tucks inside the card's rounded
                 // corners instead of trying to trace them.
                 Capsule()
-                    .fill(PA.Colors.accent)
+                    .fill(detailAccent)
                     .frame(width: 3)
                     .padding(.vertical, 10)
                     .padding(.leading, 2)
             }
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(PA.Colors.accent.opacity(0.35), lineWidth: 1)
+                    .stroke(detailAccent.opacity(0.35), lineWidth: 1)
             )
-            .shadow(color: PA.Colors.accent.opacity(0.22), radius: 14, x: 0, y: 0)
+            .shadow(color: detailAccent.opacity(0.22), radius: 14, x: 0, y: 0)
             .shadow(color: .black.opacity(0.24), radius: 30, x: 0, y: 18)
         }
     }
@@ -1116,14 +1248,76 @@ struct CardDetailView: View {
                 .foregroundStyle(PA.Colors.text)
 
             VStack(spacing: 8) {
-                infoRow(label: "Price Source", value: "Scrydex (primary)")
-                infoRow(label: "Last Updated", value: "2 min ago")
+                // Price source row reflects the actual provider feeding
+                // the hero — Yahoo! JP for JP cards with scraped data,
+                // Scrydex otherwise.
+                infoRow(label: "Price Source", value: priceSourceDescription)
+                if isJapaneseCard, let observedAt = cardMetrics?.yahooJpObservedAt {
+                    infoRow(label: "Last Refreshed", value: formatYahooJpObservedAt(observedAt))
+                } else {
+                    infoRow(label: "Last Updated", value: "2 min ago")
+                }
+                if isJapaneseCard, let count = cardMetrics?.yahooJpSampleCount {
+                    infoRow(label: "Sample Confidence", value: formatYahooJpSampleCount(count))
+                }
                 infoRow(label: "7D Median", value: formatMedian7d(cardMetrics?.median7d))
                 infoRow(label: "Volatility", value: "Low")
             }
             .padding(16)
             .glassSurface()
         }
+    }
+
+    /// Hero-price provenance label shown in Market Intelligence.
+    /// Surfaces JP scraper status explicitly so users on a JP card
+    /// understand whether they're seeing real JP-market data or a US
+    /// fallback. Three states:
+    ///   • JP card + yahoo_jp_price present → "Yahoo! Auctions JP (sold archive)"
+    ///   • JP card + no yahoo_jp_price → "Scrydex (US fallback)" — explains
+    ///     why a JP card might show a US-derived price.
+    ///   • EN card → "Scrydex (primary)" — unchanged from prior copy.
+    private var priceSourceDescription: String {
+        if isJapaneseCard {
+            if (cardMetrics?.yahooJpPrice ?? 0) > 0 {
+                return "Yahoo! Auctions JP (sold archive)"
+            }
+            return "Scrydex (US fallback)"
+        }
+        return "Scrydex (primary)"
+    }
+
+    // MARK: - Yahoo! JP helper formatters
+    //
+    // The standalone "Japanese Market" section was retired in favor of
+    // surfacing JP price data through the hero (preferredHeroPrice +
+    // the JPY/sample-count attribution row in pricingSection) and
+    // through marketInfoSection's "Last Refreshed" / "Sample
+    // Confidence" rows. These two helpers remain because both the
+    // hero attribution and the market-info rows need to format JP
+    // data consistently.
+
+    private func formatYahooJpSampleCount(_ count: Int) -> String {
+        // Confidence indicator. Below 5 sales the median is less stable,
+        // so flag it so the user weighs the price accordingly.
+        let confidence = count >= 10 ? "high" : count >= 5 ? "moderate" : "low"
+        return "n=\(count) sales · \(confidence) confidence"
+    }
+
+    private func formatYahooJpObservedAt(_ iso: String) -> String {
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let date = isoFormatter.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
+        guard let date else { return iso }
+
+        let now = Date()
+        let elapsed = now.timeIntervalSince(date)
+        let hours = elapsed / 3600
+        if hours < 1 { return "Just now" }
+        if hours < 24 { return String(format: "%.0f hour%@ ago", hours, hours < 1.5 ? "" : "s") }
+        let days = hours / 24
+        if days < 30 { return String(format: "%.0f day%@ ago", days, days < 1.5 ? "" : "s") }
+        let months = days / 30
+        return String(format: "%.0f month%@ ago", months, months < 1.5 ? "" : "s")
     }
 
     // MARK: - Friend Activity
@@ -1133,7 +1327,7 @@ struct CardDetailView: View {
             HStack(spacing: 6) {
                 Image(systemName: "person.2.fill")
                     .font(.system(size: 14))
-                    .foregroundStyle(PA.Colors.accent)
+                    .foregroundStyle(detailAccent)
 
                 Text("Friend Activity")
                     .font(PA.Typography.sectionTitle)
@@ -1179,7 +1373,7 @@ struct CardDetailView: View {
                         }
                         Text(formatConditionPrice(row.price))
                             .font(.system(size: 14, weight: .semibold, design: .rounded))
-                            .foregroundStyle(row.condition == "nm" ? PA.Colors.accent : PA.Colors.text)
+                            .foregroundStyle(row.condition == "nm" ? detailAccent : PA.Colors.text)
                     }
                     .padding(.vertical, 10)
                     .padding(.horizontal, 16)
@@ -1227,7 +1421,7 @@ struct CardDetailView: View {
                                 Spacer()
                                 Text(row.value)
                                     .font(.system(size: 14, weight: .semibold, design: .rounded))
-                                    .foregroundStyle(row.emphasized ? PA.Colors.accent : PA.Colors.text)
+                                    .foregroundStyle(row.emphasized ? detailAccent : PA.Colors.text)
                             }
                             .padding(.vertical, 10)
                             .padding(.horizontal, 16)
@@ -1332,7 +1526,7 @@ struct CardDetailView: View {
                             .foregroundStyle(isActive ? PA.Colors.background : PA.Colors.text)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 7)
-                            .background(isActive ? PA.Colors.accent : PA.Colors.surfaceSoft)
+                            .background(isActive ? detailAccent : PA.Colors.surfaceSoft)
                             .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
@@ -1354,7 +1548,7 @@ struct CardDetailView: View {
                                 .padding(.vertical, 6)
                                 .background(isActive ? PA.Colors.surfaceSoft : Color.clear)
                                 .overlay(
-                                    Capsule().stroke(isActive ? PA.Colors.accent.opacity(0.4) : PA.Colors.muted.opacity(0.15), lineWidth: 1)
+                                    Capsule().stroke(isActive ? detailAccent.opacity(0.4) : PA.Colors.muted.opacity(0.15), lineWidth: 1)
                                 )
                                 .clipShape(Capsule())
                         }
@@ -1433,7 +1627,7 @@ struct CardDetailView: View {
                                 .foregroundStyle(selectedGradingAgency == agency ? PA.Colors.background : PA.Colors.text)
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 7)
-                                .background(selectedGradingAgency == agency ? PA.Colors.accent : PA.Colors.surfaceSoft)
+                                .background(selectedGradingAgency == agency ? detailAccent : PA.Colors.surfaceSoft)
                                 .clipShape(Capsule())
                         }
                         .buttonStyle(.plain)
@@ -1515,7 +1709,7 @@ struct CardDetailView: View {
                 .foregroundStyle(selected ? PA.Colors.background : PA.Colors.text)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 10)
-                .background(selected ? PA.Colors.accent : PA.Colors.surfaceSoft)
+                .background(selected ? detailAccent : PA.Colors.surfaceSoft)
                 .clipShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -1526,12 +1720,15 @@ struct CardDetailView: View {
     private var currentHeroPrice: String {
         switch selectedPriceMode {
         case .nearMint:
-            // When a non-default printing is selected, show its latest price
-            if let price = printingHeroPrice, price > 0 {
-                if price >= 1000 { return String(format: "$%.0f", price) }
-                return String(format: "$%.2f", price)
+            // JP cards: prefer the Yahoo! Auctions JP scraped median
+            // (real JP-market sold price) over Scrydex (US-market).
+            // Falls back to printing-specific override → MarketCard's
+            // headline price (Scrydex) when no JP data is present.
+            if let usd = preferredHeroPrice {
+                if usd >= 1000 { return String(format: "$%.0f", usd) }
+                return String(format: "$%.2f", usd)
             }
-            return card.formattedPrice
+            return "—"
         case .graded:
             guard let price = gradedHeroPrice, price > 0 else { return "—" }
             if price >= 1000 { return String(format: "$%.0f", price) }
@@ -1566,6 +1763,11 @@ enum DetailTone {
     var color: Color {
         switch self {
         case .neutral: return PA.Colors.text
+        // .accent maps to the global brand accent — DetailTone is a
+        // generic semantic-tone enum used by helper subviews that don't
+        // know which card they're rendering. JP-aware accent recoloring
+        // is applied directly at the call sites inside CardDetailView
+        // via `detailAccent`, not through this enum.
         case .accent: return PA.Colors.accent
         case .positive: return PA.Colors.positive
         case .negative: return PA.Colors.negative
