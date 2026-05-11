@@ -55,6 +55,7 @@ export const CRON_ROUTES = [
   "cron/backfill-scrydex-price-history",
   "cron/run-scrydex-2024plus-catchup",
   "cron/run-scrydex-retry",
+  "cron/run-yahoo-jp-daily",
   "cron/process-provider-pipeline-jobs",
   "cron/process-ebay-deletion-receipts",
   "cron/refresh-card-metrics",

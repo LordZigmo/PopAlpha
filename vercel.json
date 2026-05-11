@@ -125,6 +125,10 @@
       "schedule": "0 6 * * 0"
     },
     {
+      "path": "/api/cron/run-yahoo-jp-daily",
+      "schedule": "26 * * * *"
+    },
+    {
       "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=1%25&max-slugs=500",
       "schedule": "0 4 * * *"
     },
