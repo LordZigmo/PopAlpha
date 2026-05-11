@@ -275,6 +275,13 @@ export const PRIVILEGED_PACKAGE_SCRIPT_CONTRACTS = {
     requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
     expectedCommandFragments: ["scripts/backfill-set-summaries.mjs"],
   }),
+  "sets:backfill-metadata": packageScriptContract({
+    target: "scripts/backfill-sets-era-release-date.mjs",
+    intendedCaller: "trusted operator backfilling public.sets era + release_date from the Scrydex /expansions API",
+    trustModel: "service_role_backfill_wrapper",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY", "SCRYDEX_API_KEY", "SCRYDEX_TEAM_ID"],
+    expectedCommandFragments: ["scripts/backfill-sets-era-release-date.mjs"],
+  }),
   "import:scrydex-all": packageScriptContract({
     target: "scripts/import-all-scrydex-canonical.mjs",
     intendedCaller: "trusted operator driving the Scrydex admin import route",
@@ -716,6 +723,14 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
     executionMode: "manual_backfill",
     intendedCaller: "trusted operator backfilling set summary snapshots",
     requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+  }),
+  "scripts/backfill-sets-era-release-date.mjs": operationalScript({
+    classification: "service_role_backfill",
+    executionMode: "manual_backfill",
+    intendedCaller: "trusted operator backfilling public.sets era + release_date columns from the Scrydex /expansions API (PR 4 of the sets-table promotion)",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY", "SCRYDEX_API_KEY", "SCRYDEX_TEAM_ID"],
     expectedSignals: ["service_role_client"],
     usesServiceRole: true,
   }),
