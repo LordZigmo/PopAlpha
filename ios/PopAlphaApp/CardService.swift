@@ -358,14 +358,34 @@ actor CardService {
 
     // MARK: - Card Detail (from metrics)
 
-    func fetchCardMetrics(slug: String) async throws -> CardMetricsResult? {
+    /// Fetch the public_card_metrics row for a card.
+    ///
+    /// When `printingId` is nil, returns the canonical-level row
+    /// (`printing_id IS NULL`) — the blended/fallback view. When a
+    /// `printingId` is provided, returns the per-printing row. The view
+    /// itself COALESCEs per-printing yahoo_jp_* over the canonical
+    /// fallback, so a per-printing query that has no per-printing
+    /// yahoo data yet still surfaces the canonical-level blended price
+    /// — no extra fetch needed on the client side.
+    ///
+    /// Why this matters now (2026-05-13): yahoo_jp_card_prices became
+    /// per-printing in migration 20260513120000. Cards with multiple
+    /// printings (HOLO + Reverse Holo, etc.) can have different median
+    /// prices per finish. When the user taps a finish pill on the card
+    /// detail view, we re-fetch metrics with that printingId so the
+    /// hero price reflects the selected finish instead of staying on
+    /// the blended canonical median.
+    func fetchCardMetrics(slug: String, printingId: String? = nil) async throws -> CardMetricsResult? {
+        let printingFilter: (String, String, String) = printingId.map {
+            ("printing_id", "eq", $0)
+        } ?? ("printing_id", "is", "null")
         let data = try await Supabase.query(
             table: "public_card_metrics",
             select: "canonical_slug,market_price,market_price_as_of,change_pct_24h,change_pct_7d,market_confidence_score,market_low_confidence,median_7d,median_30d,low_30d,high_30d,active_listings_7d,snapshot_count_30d,yahoo_jp_price,yahoo_jp_price_jpy,yahoo_jp_sample_count,yahoo_jp_observed_at,canonical_name_native,set_name_native,language",
             filters: [
                 ("canonical_slug", "eq", slug),
                 ("grade", "eq", "RAW"),
-                ("printing_id", "is", "null"),
+                printingFilter,
             ],
             limit: 1
         )
