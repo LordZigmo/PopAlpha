@@ -185,40 +185,77 @@ async function processCard(supabase: ReturnType<typeof dbAdmin>, card: CardRow) 
     };
   }
 
-  const result = selectMatched(scrape.listings, card, { minScore: MIN_MATCH_SCORE });
+  // Load printings so the matcher can split observations per finish.
+  // Failure here is non-fatal — selectMatched falls back to legacy
+  // single-observation-per-grade behavior when printings is empty.
+  let printings: Array<{ id: string; finish: string | null }> = [];
+  try {
+    const { data: pData, error: pErr } = await supabase
+      .from("card_printings")
+      .select("id, finish")
+      .eq("canonical_slug", card.slug);
+    if (!pErr) printings = (pData ?? []) as typeof printings;
+  } catch {
+    // swallow — see comment above
+  }
+
+  const result = selectMatched(scrape.listings, card, {
+    minScore: MIN_MATCH_SCORE,
+    printings,
+  });
   const rawObs = result.priceObservations.find((o: { grade: string }) => o.grade === "RAW");
   if (!rawObs || rawObs.count < MIN_SAMPLE_COUNT) {
     return { slug: card.slug, status: "low-sample" as const, rawCount: rawObs?.count ?? 0 };
   }
 
-  const yenMedian = rawObs.median;
-  const usdMedian = Math.round(yenMedian * JPY_TO_USD * 100) / 100;
   const observedAt = new Date().toISOString();
-  const { error } = await supabase
-    .from("yahoo_jp_card_prices")
-    .upsert(
-      {
-        canonical_slug: card.slug,
-        grade: "RAW",
-        price_usd: usdMedian,
-        price_jpy: yenMedian,
-        fx_rate_used: JPY_TO_USD,
-        sample_count: rawObs.count,
-        observed_at: observedAt,
-        updated_at: observedAt,
-      },
-      { onConflict: "canonical_slug,grade" },
-    );
-  if (error) {
-    return { slug: card.slug, status: "write-failed" as const, reason: error.message };
+  // Write every RAW observation that clears the sample threshold —
+  // both per-printing rows (printing_id set) AND the canonical-level
+  // rollup (printing_id null). The view JOINs both, falling back to
+  // the canonical row when a specific printing has no per-printing
+  // data yet.
+  const writableObs = (result.priceObservations as Array<{
+    grade: string;
+    finish: string | null;
+    printing_id: string | null;
+    count: number;
+    median: number;
+  }>).filter((o) => o.grade === "RAW" && o.count >= MIN_SAMPLE_COUNT);
+
+  let rowsWritten = 0;
+  for (const obs of writableObs) {
+    const obsYen = obs.median;
+    const obsUsd = Math.round(obsYen * JPY_TO_USD * 100) / 100;
+    const { error } = await supabase
+      .from("yahoo_jp_card_prices")
+      .upsert(
+        {
+          canonical_slug: card.slug,
+          printing_id: obs.printing_id,
+          grade: "RAW",
+          price_usd: obsUsd,
+          price_jpy: obsYen,
+          fx_rate_used: JPY_TO_USD,
+          sample_count: obs.count,
+          observed_at: observedAt,
+          updated_at: observedAt,
+        },
+        { onConflict: "canonical_slug,printing_id,grade" },
+      );
+    if (error) {
+      return { slug: card.slug, status: "write-failed" as const, reason: error.message };
+    }
+    rowsWritten += 1;
   }
 
   return {
     slug: card.slug,
     status: "ok" as const,
-    yahoo_jp_price: usdMedian,
-    yahoo_jp_price_jpy: yenMedian,
+    yahoo_jp_price: Math.round(rawObs.median * JPY_TO_USD * 100) / 100,
+    yahoo_jp_price_jpy: rawObs.median,
     rawCount: rawObs.count,
+    rowsWritten,
+    perPrintingRows: writableObs.filter((o) => o.printing_id != null).length,
   };
 }
 
