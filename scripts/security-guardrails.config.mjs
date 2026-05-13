@@ -882,6 +882,15 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
     usesServiceRole: true,
     notes: "Read-only against our DB; uses service role to bypass RLS on canonical_cards. The only writes are to a local tmp/*.jsonl file. Step C of the catalog-mapper sequence reads that JSONL and persists the matches to the DB (separate concern).",
   }),
+  "scripts/persist-snkrdunk-matches.mjs": operationalScript({
+    classification: "service_role_import",
+    executionMode: "manual_import",
+    intendedCaller: "trusted operator importing Step B's match JSONL into snkrdunk_product_map (Step C of the catalog-mapper sequence). UPSERTs on canonical_slug; idempotent on re-runs.",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+    notes: "Writes only to snkrdunk_product_map. Skips status='low-confidence'/'no-tc-results'/'no-query'. Conflicts on snkrdunk_product_code (two canonicals mapping to one Snkrdunk product) are logged and skipped — operator inspects.",
+  }),
   "scripts/perfect-order-coverage.mjs": operationalScript({
     classification: "service_role_diagnostic",
     executionMode: "verification",
