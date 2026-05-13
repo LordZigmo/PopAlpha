@@ -1276,6 +1276,14 @@ export const RLS_REQUIRED_PUBLIC_TABLES = [
   "profile_post_card_mentions",
   "profile_posts",
   "push_subscriptions",
+  // Snkrdunk / Yahoo! JP pricing companions + Snkrdunk catalog mapper.
+  // RLS-on / no-grants — service-role-only writes; consumers read prices
+  // via the public_card_metrics view (which is GRANTed to anon).
+  // snkrdunk_product_map is NOT exposed through any view (it's internal
+  // catalog state for the orchestrator).
+  "snkrdunk_card_prices",
+  "snkrdunk_product_map",
+  "yahoo_jp_card_prices",
   "user_blocks",
   "moderation_reports",
 ];
