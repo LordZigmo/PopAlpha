@@ -285,6 +285,7 @@ async function loadCanonicalCards(supabase, opts) {
 async function writeYahooJpPrice(supabase, slug, payload) {
   const row = {
     canonical_slug: slug,
+    printing_id: payload.printing_id ?? null, // null = canonical-level fallback (legacy / blended)
     grade: "RAW",
     price_usd: payload.yahoo_jp_price,
     price_jpy: payload.yahoo_jp_price_jpy,
@@ -296,13 +297,33 @@ async function writeYahooJpPrice(supabase, slug, payload) {
     observed_at: payload.yahoo_jp_observed_at,
     updated_at: new Date().toISOString(),
   };
-  await withRetry(`yahoo_jp_card_prices upsert ${slug}`, async () => {
+  await withRetry(`yahoo_jp_card_prices upsert ${slug}/${payload.printing_id ?? "canonical"}`, async () => {
     const { error } = await supabase
       .from("yahoo_jp_card_prices")
-      .upsert(row, { onConflict: "canonical_slug,grade" });
+      // PK is (canonical_slug, printing_id, grade) WITH NULLS NOT DISTINCT
+      // so the canonical-level row (printing_id NULL) and per-printing
+      // rows coexist; PostgREST onConflict needs all three columns.
+      .upsert(row, { onConflict: "canonical_slug,printing_id,grade" });
     if (error) throw new Error(error.message);
   });
   return { mode: "upserted" };
+}
+
+/**
+ * Fetch a canonical card's printings (id + finish) so the matcher can
+ * attribute observations per-printing. Returns [] if the card has no
+ * card_printings rows — selectMatched then collapses to legacy
+ * one-observation-per-grade behavior.
+ */
+async function loadPrintings(supabase, slug) {
+  return withRetry(`card_printings load ${slug}`, async () => {
+    const { data, error } = await supabase
+      .from("card_printings")
+      .select("id, finish")
+      .eq("canonical_slug", slug);
+    if (error) throw new Error(error.message);
+    return data ?? [];
+  });
 }
 
 async function processCard(supabase, card, opts) {
@@ -318,7 +339,25 @@ async function processCard(supabase, card, opts) {
     return { slug: card.slug, status: "scrape-failed", reason: err.message };
   }
 
-  const result = selectMatched(scrape.listings, card, { minScore: opts.minScore });
+  // Load printings so the matcher can split observations by detected
+  // finish. For single-printing cards (most JP cards), every observation
+  // is attributed to that one printing. For multi-printing cards, the
+  // matcher splits per-finish via lib/jp/matcher.mjs's extractFinish.
+  // Failures fall back to no-printings behavior (legacy single
+  // observation per grade), so per-printing is best-effort enrichment.
+  let printings = [];
+  try {
+    printings = await loadPrintings(supabase, card.slug);
+  } catch (err) {
+    // Non-fatal — keep going with empty printings; matcher will
+    // collapse to canonical-only behavior.
+    console.warn(`[yahoo-jp-pipeline] loadPrintings(${card.slug}) failed: ${err.message}`);
+  }
+
+  const result = selectMatched(scrape.listings, card, {
+    minScore: opts.minScore,
+    printings,
+  });
   const rawObs = result.priceObservations.find((o) => o.grade === "RAW");
   if (!rawObs || rawObs.count < opts.minSampleCount) {
     return {
@@ -332,9 +371,21 @@ async function processCard(supabase, card, opts) {
     };
   }
 
+  const observedAt = new Date().toISOString();
+
+  // All observations whose count meets the min threshold get written. The
+  // matcher returns:
+  //   • Per-printing observations (printing_id != null) when finish is
+  //     detected with enough samples to disambiguate
+  //   • A canonical-level rollup (printing_id == null) with the blended
+  //     median across all printings, written every time so iOS has a
+  //     fallback when no per-printing row exists yet for a given
+  //     printing
+  const writableObs = result.priceObservations.filter(
+    (o) => o.grade === "RAW" && o.count >= opts.minSampleCount,
+  );
   const yenMedian = rawObs.median;
   const usdMedian = Math.round(yenMedian * JPY_TO_USD * 100) / 100;
-  const observedAt = new Date().toISOString();
 
   if (opts.dryRun) {
     return {
@@ -347,18 +398,31 @@ async function processCard(supabase, card, opts) {
       yahoo_jp_price_jpy: yenMedian,
       yahoo_jp_price: usdMedian,
       yahoo_jp_observed_at: observedAt,
+      observationsToWrite: writableObs.map((o) => ({
+        printing_id: o.printing_id,
+        finish: o.finish,
+        count: o.count,
+        median_jpy: o.median,
+      })),
       sampleListings: rawObs.samples?.slice(0, 3) ?? [],
     };
   }
 
+  let rowsWritten = 0;
   let writeResult;
   try {
-    writeResult = await writeYahooJpPrice(supabase, card.slug, {
-      yahoo_jp_price: usdMedian,
-      yahoo_jp_price_jpy: yenMedian,
-      yahoo_jp_sample_count: rawObs.count,
-      yahoo_jp_observed_at: observedAt,
-    });
+    for (const obs of writableObs) {
+      const obsYen = obs.median;
+      const obsUsd = Math.round(obsYen * JPY_TO_USD * 100) / 100;
+      writeResult = await writeYahooJpPrice(supabase, card.slug, {
+        printing_id: obs.printing_id,
+        yahoo_jp_price: obsUsd,
+        yahoo_jp_price_jpy: obsYen,
+        yahoo_jp_sample_count: obs.count,
+        yahoo_jp_observed_at: observedAt,
+      });
+      rowsWritten += 1;
+    }
   } catch (err) {
     return { slug: card.slug, status: "write-failed", reason: err.message };
   }
@@ -370,9 +434,11 @@ async function processCard(supabase, card, opts) {
     scraped: result.inputCount,
     accepted: result.accepted,
     rawCount: rawObs.count,
+    rowsWritten,
+    perPrintingRows: writableObs.filter((o) => o.printing_id != null).length,
     yahoo_jp_price_jpy: yenMedian,
     yahoo_jp_price: usdMedian,
-    write_mode: writeResult.mode,
+    write_mode: writeResult?.mode ?? "noop",
   };
 }
 
