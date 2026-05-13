@@ -89,16 +89,33 @@ async function pickRefreshCandidates(
   const rows = (data ?? []) as RefreshCandidate[];
 
   // Dedupe by snkrdunk_product_code (one re-fetch covers all grade rows
-  // for that product). Keep the canonical-level (printing_id NULL) row
-  // when both exist so the scrape result populates the rollup row first.
+  // for that product). Prefer the PER-PRINTING row (printing_id != null)
+  // as the candidate when both per-printing AND canonical-rollup rows
+  // exist for the same product.
+  //
+  // Why the per-printing row needs to win (Codex P2 on PR #50):
+  // The matcher in lib/jp/snkrdunk-matcher.mjs emits BOTH a per-printing
+  // observation and a canonical-rollup observation whenever printingId is
+  // set, so picking the per-printing row as the candidate refreshes both
+  // rows in one pass. Picking the canonical row instead would leave the
+  // candidate.printing_id at null, degrade processCard to the
+  // "no printing_id known" path (which for multi-printing cards stays at
+  // null because card_printings has >1 row), and the matcher then writes
+  // only the canonical row — the stale per-printing row remains stale
+  // and gets re-selected every tick.
+  //
+  // This is compounded by the public_card_metrics view's COALESCE order:
+  // it prefers snk_specific (the stale per-printing row) over
+  // snk_canonical (the fresh canonical fallback), so the user sees
+  // stale prices even though we just "refreshed."
   const byProduct = new Map<string, RefreshCandidate>();
   for (const row of rows) {
     if (!row.snkrdunk_product_code) continue;
     const existing = byProduct.get(row.snkrdunk_product_code);
     if (!existing) {
       byProduct.set(row.snkrdunk_product_code, row);
-    } else if (existing.printing_id != null && row.printing_id == null) {
-      // Prefer the canonical-level row as the "primary" candidate
+    } else if (existing.printing_id == null && row.printing_id != null) {
+      // Prefer the per-printing row — see comment above
       byProduct.set(row.snkrdunk_product_code, row);
     }
   }
