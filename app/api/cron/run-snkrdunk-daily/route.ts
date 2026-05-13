@@ -89,16 +89,33 @@ async function pickRefreshCandidates(
   const rows = (data ?? []) as RefreshCandidate[];
 
   // Dedupe by snkrdunk_product_code (one re-fetch covers all grade rows
-  // for that product). Keep the canonical-level (printing_id NULL) row
-  // when both exist so the scrape result populates the rollup row first.
+  // for that product). Prefer the PER-PRINTING row (printing_id != null)
+  // as the candidate when both per-printing AND canonical-rollup rows
+  // exist for the same product.
+  //
+  // Why the per-printing row needs to win (Codex P2 on PR #50):
+  // The matcher in lib/jp/snkrdunk-matcher.mjs emits BOTH a per-printing
+  // observation and a canonical-rollup observation whenever printingId is
+  // set, so picking the per-printing row as the candidate refreshes both
+  // rows in one pass. Picking the canonical row instead would leave the
+  // candidate.printing_id at null, degrade processCard to the
+  // "no printing_id known" path (which for multi-printing cards stays at
+  // null because card_printings has >1 row), and the matcher then writes
+  // only the canonical row — the stale per-printing row remains stale
+  // and gets re-selected every tick.
+  //
+  // This is compounded by the public_card_metrics view's COALESCE order:
+  // it prefers snk_specific (the stale per-printing row) over
+  // snk_canonical (the fresh canonical fallback), so the user sees
+  // stale prices even though we just "refreshed."
   const byProduct = new Map<string, RefreshCandidate>();
   for (const row of rows) {
     if (!row.snkrdunk_product_code) continue;
     const existing = byProduct.get(row.snkrdunk_product_code);
     if (!existing) {
       byProduct.set(row.snkrdunk_product_code, row);
-    } else if (existing.printing_id != null && row.printing_id == null) {
-      // Prefer the canonical-level row as the "primary" candidate
+    } else if (existing.printing_id == null && row.printing_id != null) {
+      // Prefer the per-printing row — see comment above
       byProduct.set(row.snkrdunk_product_code, row);
     }
   }
@@ -118,25 +135,37 @@ async function processCard(
   const { canonical_slug: slug, snkrdunk_product_code: productCode } = candidate;
   const tradingCardId = productCode.startsWith("SW---") ? productCode.slice("SW---".length) : productCode;
 
-  // Resolve printing_id at scrape-time: re-read from card_printings so
-  // a single-printing card gets attributed correctly even if the row was
-  // originally written with printing_id NULL (pre-catalog-mapper era).
-  // We DON'T let a failure here abort the card — printing_id NULL is a
-  // valid fallback. But we DO log the error so a DB outage doesn't
-  // silently degrade every card to canonical-only without a trace.
-  let printingId: string | null = null;
-  try {
-    const { data: printings, error: printingsErr } = await supabase
-      .from("card_printings")
-      .select("id")
-      .eq("canonical_slug", slug);
-    if (printingsErr) {
-      console.warn(`[run-snkrdunk-daily] card_printings lookup failed for ${slug}: ${printingsErr.message} (continuing with printing_id=null)`);
-    } else if (printings && printings.length === 1) {
-      printingId = printings[0].id;
+  // Resolve printing_id at scrape-time. Priority order:
+  //   1. If the stale row we picked already has a printing_id (e.g. a
+  //      catalog mapper or manual seed picked one for this Snkrdunk
+  //      product), preserve it. Without this, a multi-printing card's
+  //      per-printing row gets discarded every refresh and we only
+  //      write the canonical (null) row — the stale per-printing row
+  //      is then re-selected next tick and the view keeps serving
+  //      stale per-printing data. Codex P2 on PR #49.
+  //   2. Otherwise, fall back to the single-printing lookup so a card
+  //      with exactly one printing gets the correct printing_id even
+  //      if the row was originally written with printing_id NULL
+  //      (pre-catalog-mapper era).
+  //   3. Otherwise stay at null (canonical-level rollup only — valid
+  //      fallback for multi-printing cards without a catalog mapping).
+  //
+  // Lookup failures are logged but never abort the card.
+  let printingId: string | null = candidate.printing_id ?? null;
+  if (printingId == null) {
+    try {
+      const { data: printings, error: printingsErr } = await supabase
+        .from("card_printings")
+        .select("id")
+        .eq("canonical_slug", slug);
+      if (printingsErr) {
+        console.warn(`[run-snkrdunk-daily] card_printings lookup failed for ${slug}: ${printingsErr.message} (continuing with printing_id=null)`);
+      } else if (printings && printings.length === 1) {
+        printingId = printings[0].id;
+      }
+    } catch (err) {
+      console.warn(`[run-snkrdunk-daily] card_printings lookup threw for ${slug}: ${err instanceof Error ? err.message : String(err)} (continuing with printing_id=null)`);
     }
-  } catch (err) {
-    console.warn(`[run-snkrdunk-daily] card_printings lookup threw for ${slug}: ${err instanceof Error ? err.message : String(err)} (continuing with printing_id=null)`);
   }
 
   // Scrape — SnkrdunkPushbackError propagates so the caller halts the tick
