@@ -1536,6 +1536,12 @@ export const INTERNAL_NO_GRANT_OBJECTS = [
   "realized_sales_backtest_snapshots",
   "set_finish_summary_latest",
   "set_summary_snapshots",
+  // Snkrdunk pricing companion + catalog map. No anon/authenticated
+  // grants — consumers read prices via the public_card_metrics view
+  // (which IS granted); product_map is internal catalog state. RLS
+  // coverage above in RLS_REQUIRED_PUBLIC_TABLES. Codex P2 on PR #55.
+  "snkrdunk_card_prices",
+  "snkrdunk_product_map",
   "tracked_assets",
   "tracked_refresh_diagnostics",
   "variant_metrics",
@@ -1543,6 +1549,8 @@ export const INTERNAL_NO_GRANT_OBJECTS = [
   "variant_price_latest",
   "variant_sentiment_latest",
   "variant_signals_latest",
+  // Yahoo! JP pricing companion. Same access model as snkrdunk_card_prices.
+  "yahoo_jp_card_prices",
 ];
 
 export const PUBLIC_VIEW_NAMES = [
