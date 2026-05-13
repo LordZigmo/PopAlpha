@@ -129,156 +129,36 @@
       "schedule": "26 * * * *"
     },
     {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=1%25&max-slugs=500",
+      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=1%25,j%25,k%25,o%25,v%25,x%25&max-slugs=2000",
       "schedule": "0 4 * * *"
     },
     {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=a%25&max-slugs=1500",
-      "schedule": "1 4 * * *"
-    },
-    {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=b%25&max-slugs=2000",
-      "schedule": "2 4 * * *"
-    },
-    {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=c%25&max-slugs=2000",
-      "schedule": "3 4 * * *"
-    },
-    {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=d%25&max-slugs=2000",
-      "schedule": "4 4 * * *"
-    },
-    {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=e%25&max-slugs=1500",
+      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=a%25,b%25,c%25&max-slugs=2000",
       "schedule": "5 4 * * *"
     },
     {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=f%25&max-slugs=1500",
-      "schedule": "6 4 * * *"
-    },
-    {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=g%25&max-slugs=1500",
-      "schedule": "7 4 * * *"
-    },
-    {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=h%25&max-slugs=1500",
-      "schedule": "8 4 * * *"
-    },
-    {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=j%25&max-slugs=500",
-      "schedule": "9 4 * * *"
-    },
-    {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=k%25&max-slugs=500",
+      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=d%25,e%25,f%25&max-slugs=2000",
       "schedule": "10 4 * * *"
     },
     {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=l%25&max-slugs=1500",
-      "schedule": "11 4 * * *"
+      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=g%25,h%25,l%25,m%25&max-slugs=2000",
+      "schedule": "15 4 * * *"
     },
     {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=m%25&max-slugs=1500",
-      "schedule": "12 4 * * *"
-    },
-    {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=n%25&max-slugs=1000",
-      "schedule": "13 4 * * *"
-    },
-    {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=o%25&max-slugs=500",
-      "schedule": "14 4 * * *"
-    },
-    {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=r%25&max-slugs=1000",
-      "schedule": "16 4 * * *"
-    },
-    {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=t%25&max-slugs=1500",
-      "schedule": "17 4 * * *"
-    },
-    {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=u%25&max-slugs=1000",
-      "schedule": "18 4 * * *"
-    },
-    {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=v%25&max-slugs=500",
-      "schedule": "19 4 * * *"
-    },
-    {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=w%25&max-slugs=1000",
+      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=n%25,r%25,t%25,u%25,w%25&max-slugs=2000",
       "schedule": "20 4 * * *"
     },
     {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=x%25&max-slugs=500",
-      "schedule": "21 4 * * *"
-    },
-    {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=pa%25&max-slugs=1000",
-      "schedule": "22 4 * * *"
-    },
-    {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=ph%25&max-slugs=500",
-      "schedule": "23 4 * * *"
-    },
-    {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=pl%25&max-slugs=1000",
-      "schedule": "24 4 * * *"
-    },
-    {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=po%25&max-slugs=1000",
+      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=pa%25,ph%25,pl%25,po%25,pr%25&max-slugs=2000",
       "schedule": "25 4 * * *"
     },
     {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=pr%25&max-slugs=1000",
-      "schedule": "26 4 * * *"
+      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=sa%25,sc%25,se%25,sh%25,si%25,sk%25&max-slugs=2000",
+      "schedule": "30 4 * * *"
     },
     {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=sa%25&max-slugs=500",
-      "schedule": "27 4 * * *"
-    },
-    {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=sc%25&max-slugs=1000",
-      "schedule": "28 4 * * *"
-    },
-    {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=se%25&max-slugs=1000",
-      "schedule": "29 4 * * *"
-    },
-    {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=sh%25&max-slugs=1000",
-      "schedule": "31 4 * * *"
-    },
-    {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=si%25&max-slugs=500",
-      "schedule": "32 4 * * *"
-    },
-    {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=sk%25&max-slugs=500",
-      "schedule": "33 4 * * *"
-    },
-    {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=sm%25&max-slugs=500",
-      "schedule": "34 4 * * *"
-    },
-    {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=so%25&max-slugs=500",
+      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=sm%25,so%25,sp%25,st%25,su%25,sw%25&max-slugs=2000",
       "schedule": "35 4 * * *"
-    },
-    {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=sp%25&max-slugs=500",
-      "schedule": "36 4 * * *"
-    },
-    {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=st%25&max-slugs=500",
-      "schedule": "37 4 * * *"
-    },
-    {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=su%25&max-slugs=1000",
-      "schedule": "38 4 * * *"
-    },
-    {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=sw%25&max-slugs=1000",
-      "schedule": "39 4 * * *"
     }
   ]
 }
