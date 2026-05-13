@@ -873,6 +873,15 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
     usesServiceRole: true,
     notes: "Idempotent (24h skip filter + UPSERT keyed on canonical_slug+printing_id+grade). Production daily refresh will run via /api/cron/run-snkrdunk-daily (currently registered but NOT scheduled in vercel.json — 40-cron quota cap); this script is the one-shot bulk + smoke-test driver.",
   }),
+  "scripts/match-snkrdunk-canonical.mjs": operationalScript({
+    classification: "service_role_diagnostic",
+    executionMode: "verification",
+    intendedCaller: "trusted operator finding Snkrdunk product matches for our JP canonical_cards (reads canonical_cards via service role for RLS bypass, hits Snkrdunk's public /en/v1/search endpoint, writes matches to a local JSONL file for later persistence by Step C)",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+    notes: "Read-only against our DB; uses service role to bypass RLS on canonical_cards. The only writes are to a local tmp/*.jsonl file. Step C of the catalog-mapper sequence reads that JSONL and persists the matches to the DB (separate concern).",
+  }),
   "scripts/perfect-order-coverage.mjs": operationalScript({
     classification: "service_role_diagnostic",
     executionMode: "verification",
