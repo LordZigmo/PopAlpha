@@ -381,7 +381,7 @@ actor CardService {
         } ?? ("printing_id", "is", "null")
         let data = try await Supabase.query(
             table: "public_card_metrics",
-            select: "canonical_slug,market_price,market_price_as_of,change_pct_24h,change_pct_7d,market_confidence_score,market_low_confidence,median_7d,median_30d,low_30d,high_30d,active_listings_7d,snapshot_count_30d,yahoo_jp_price,yahoo_jp_price_jpy,yahoo_jp_sample_count,yahoo_jp_observed_at,canonical_name_native,set_name_native,language",
+            select: "canonical_slug,market_price,market_price_as_of,change_pct_24h,change_pct_7d,market_confidence_score,market_low_confidence,median_7d,median_30d,low_30d,high_30d,active_listings_7d,snapshot_count_30d,yahoo_jp_price,yahoo_jp_price_jpy,yahoo_jp_sample_count,yahoo_jp_observed_at,snkrdunk_price,snkrdunk_sample_count,snkrdunk_observed_at,snkrdunk_product_code,canonical_name_native,set_name_native,language",
             filters: [
                 ("canonical_slug", "eq", slug),
                 ("grade", "eq", "RAW"),
@@ -687,6 +687,19 @@ struct CardMetricsResult: Decodable {
     let yahooJpPriceJpy: Double?
     let yahooJpSampleCount: Int?
     let yahooJpObservedAt: String?
+    /// Snkrdunk scraped price columns. Populated by
+    /// scripts/run-snkrdunk-pipeline.mjs from Snkrdunk's English
+    /// /en/v1/products/SW---<id>/used-listings JSON API (only sold
+    /// listings, condition=A/B map to RAW; PSA 10 maps to grade=G10).
+    /// Second JP-native source after Yahoo! — fills the modern-card
+    /// gap where Yahoo!'s vintage strength tapers off. The USD price
+    /// is Snkrdunk's own JPY→USD conversion (they serve USD directly
+    /// on the English site). product_code is the SW---<id> identifier
+    /// used to re-fetch via the cron route.
+    let snkrdunkPrice: Double?
+    let snkrdunkSampleCount: Int?
+    let snkrdunkObservedAt: String?
+    let snkrdunkProductCode: String?
     /// Bilingual identity. Populated for JP cards by the Scrydex
     /// /ja/ catalog backfill. iOS uses these to render the bilingual
     /// hero (English on top, Japanese smaller below) and to detect
