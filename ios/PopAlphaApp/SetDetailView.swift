@@ -13,6 +13,7 @@ struct SetDetailView: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var cards: [MarketCard] = []
+    @State private var metadata: SetMetadataRow?
     @State private var loading = true
     @State private var selectedCard: MarketCard?
 
@@ -86,6 +87,32 @@ struct SetDetailView: View {
                 .font(.system(size: 24, weight: .bold))
                 .foregroundStyle(PA.Colors.text)
 
+            // Era + release date subtitle (when known). Populated by the
+            // scrydex_set_metadata backfill — see scripts/backfill-sets-
+            // era-release-date.mjs. ~99% of sets have at least one field.
+            if !loading, let metadata, hasEraOrReleaseDate(metadata) {
+                HStack(spacing: 6) {
+                    if let era = metadata.era, !era.isEmpty {
+                        Text(era)
+                            .font(PA.Typography.caption)
+                            .foregroundStyle(PA.Colors.text)
+                    }
+                    if metadata.era != nil, !(metadata.era?.isEmpty ?? true),
+                       let formattedDate = formatReleaseDate(metadata.releaseDate) {
+                        Text("·")
+                            .font(PA.Typography.caption)
+                            .foregroundStyle(PA.Colors.muted)
+                        Text(formattedDate)
+                            .font(PA.Typography.caption)
+                            .foregroundStyle(PA.Colors.muted)
+                    } else if let formattedDate = formatReleaseDate(metadata.releaseDate) {
+                        Text(formattedDate)
+                            .font(PA.Typography.caption)
+                            .foregroundStyle(PA.Colors.muted)
+                    }
+                }
+            }
+
             if !loading {
                 Text("\(cards.count) card\(cards.count == 1 ? "" : "s")")
                     .font(PA.Typography.caption)
@@ -93,6 +120,25 @@ struct SetDetailView: View {
             }
         }
         .padding(.top, 4)
+    }
+
+    private func hasEraOrReleaseDate(_ metadata: SetMetadataRow) -> Bool {
+        let hasEra = !(metadata.era?.isEmpty ?? true)
+        let hasDate = !(metadata.releaseDate?.isEmpty ?? true)
+        return hasEra || hasDate
+    }
+
+    /// Format a "YYYY-MM-DD" date string as "MMM d, yyyy" (e.g. "Jan 20, 2023").
+    /// Returns nil if the input is missing or unparseable.
+    private func formatReleaseDate(_ iso: String?) -> String? {
+        guard let iso, !iso.isEmpty else { return nil }
+        let input = DateFormatter()
+        input.dateFormat = "yyyy-MM-dd"
+        input.timeZone = TimeZone(identifier: "UTC")
+        guard let date = input.date(from: iso) else { return nil }
+        let output = DateFormatter()
+        output.dateFormat = "MMM d, yyyy"
+        return output.string(from: date)
     }
 
     // MARK: - States
@@ -126,11 +172,22 @@ struct SetDetailView: View {
 
     private func loadSetCards() async {
         loading = true
+        // Cards and metadata in parallel — metadata is a tiny single-row
+        // lookup and shouldn't gate the main grid render.
+        async let cardsTask = CardService.shared.fetchSetCards(setName: setName)
+        async let metadataTask = CardService.shared.fetchSetMetadata(setName: setName)
         do {
-            cards = try await CardService.shared.fetchSetCards(setName: setName)
+            cards = try await cardsTask
         } catch {
-            Logger.ui.debug("Failed to load set: \(error)")
+            Logger.ui.debug("Failed to load set cards: \(error)")
             cards = []
+        }
+        do {
+            metadata = try await metadataTask
+        } catch {
+            // Metadata is informational only — failure shouldn't block render.
+            Logger.ui.debug("Failed to load set metadata: \(error)")
+            metadata = nil
         }
         loading = false
     }

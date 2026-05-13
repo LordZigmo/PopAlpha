@@ -450,6 +450,21 @@ actor CardService {
 
     // MARK: - Set Browser
 
+    /// Fetch curated metadata for a set (era, release date, etc.) from
+    /// `public.sets`. Returns `nil` if no row exists for the given set_name.
+    /// RLS is public-read on the sets table (PR #34 → 20260509130000), so
+    /// no auth header beyond the anon key is required.
+    func fetchSetMetadata(setName: String) async throws -> SetMetadataRow? {
+        let data = try await Supabase.query(
+            table: "sets",
+            select: "set_name,era,release_date,derived_card_count",
+            filters: [("set_name", "eq", setName)],
+            limit: 1
+        )
+        let rows = try decoder.decode([SetMetadataRow].self, from: data)
+        return rows.first
+    }
+
     /// Fetch all cards in a set with prices and images, sorted by price desc.
     func fetchSetCards(setName: String) async throws -> [MarketCard] {
         // 1. Cards in the set
@@ -595,6 +610,17 @@ struct CardRow: Decodable {
 struct ImageRow: Decodable {
     let canonicalSlug: String
     let imageUrl: String?
+}
+
+/// Row from `public.sets`. Curated metadata: era + release_date are populated
+/// via scripts/backfill-sets-era-release-date.mjs from the Scrydex /expansions
+/// API; both may be `nil` for the small tail of sets Scrydex doesn't return
+/// (3 today: base-set, pokemon-card-151, xy-evolutions).
+struct SetMetadataRow: Decodable {
+    let setName: String
+    let era: String?
+    let releaseDate: String?
+    let derivedCardCount: Int?
 }
 
 struct SparklineRow: Decodable {
