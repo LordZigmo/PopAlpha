@@ -367,6 +367,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   }
 
   scrapeSnkrdunk(opts.tradingCardId, {
+    maxPages: opts.pages,
     includeVariations: opts.includeVariations,
     includeMinPrices: opts.includeMinPrices,
   })
