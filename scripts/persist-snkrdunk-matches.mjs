@@ -156,20 +156,26 @@ async function main() {
       continue;
     }
 
-    // Codex P1 on PR #55: when re-importing, preserve operator decisions.
-    // If the existing row has reviewed_at set, the operator has manually
-    // promoted/rejected this mapping. A blind UPSERT would clobber that
-    // (e.g., a REJECTED row gets reverted to MATCHED from a stale JSONL).
+    // Codex P1+P2 on PR #55: when re-importing, treat operator-reviewed
+    // rows as immutable until --force-status is passed.
     //
-    // Strategy: SELECT first to check reviewed_at; if set AND
-    // --force-status is NOT specified, write metadata fields (score,
-    // reasons, query) but keep the existing mapping_status. Otherwise,
-    // do the full UPSERT.
-    let preserveStatus = false;
+    // History of this guard:
+    //   Initial implementation: blindly upserted; clobbered REJECTED
+    //     decisions back to MATCHED on re-run.
+    //   v2 (P1): preserved mapping_status when reviewed_at was set, but
+    //     still overwrote snkrdunk_id / snkrdunk_product_code / snkrdunk_name
+    //     from the stale JSONL. If the operator had CORRECTED the
+    //     product ID (e.g., id=91103 → id=91104), a re-import would
+    //     revert it while keeping the row MATCHED, and the orchestrator
+    //     would fetch prices for the wrong card.
+    //   v3 (P2, this commit): for reviewed rows, SKIP entirely. The
+    //     operator's row is the source of truth — no partial update is
+    //     safe. Re-running Step B never overwrites a reviewed row
+    //     unless the operator explicitly opts in via --force-status.
     if (!opts.forceStatus) {
       const { data: existing, error: selErr } = await getSupabase()
         .from("snkrdunk_product_map")
-        .select("mapping_status, reviewed_at")
+        .select("reviewed_at")
         .eq("canonical_slug", baseDbRow.canonical_slug)
         .maybeSingle();
       if (selErr) {
@@ -178,14 +184,12 @@ async function main() {
         continue;
       }
       if (existing?.reviewed_at) {
-        preserveStatus = true;
         reviewedPreserved += 1;
+        continue; // operator-reviewed row is immutable; no write
       }
     }
 
-    const dbRow = preserveStatus
-      ? baseDbRow // mapping_status omitted → UPSERT keeps existing value
-      : { ...baseDbRow, mapping_status: dbStatus };
+    const dbRow = { ...baseDbRow, mapping_status: dbStatus };
 
     const { error } = await getSupabase()
       .from("snkrdunk_product_map")
