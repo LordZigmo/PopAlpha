@@ -302,7 +302,35 @@ async function matchOneCanonical(card) {
   candidates.sort((a, b) => b.score - a.score);
 
   const best = candidates[0];
-  const accepted = best && best.score >= MIN_MATCH_SCORE ? best : null;
+
+  // Three-tier status for downstream Step C:
+  //   - "matched"       — score >= threshold AND has set evidence
+  //                       (set-token hit). Safe to auto-import.
+  //   - "needs-review"  — score >= threshold but NO set evidence
+  //                       (name + number alone). Codex P1 on PR #54:
+  //                       two cards can share canonical_name + number
+  //                       across different sets, so name + number
+  //                       alone is not enough to auto-accept. Step C
+  //                       requires operator confirmation for these.
+  //   - "low-confidence" — score < threshold.
+  const hasSetSignal = best
+    ? best.reasons.some((r) => r.startsWith("+") && r.includes("set-tokens"))
+    : false;
+  let status;
+  let accepted = null;
+  if (best && best.score >= MIN_MATCH_SCORE) {
+    if (hasSetSignal) {
+      status = "matched";
+      accepted = best;
+    } else {
+      // No set evidence — cross-set false-positive risk. Surface but
+      // gate at Step C.
+      status = "needs-review";
+      accepted = best;
+    }
+  } else {
+    status = "low-confidence";
+  }
 
   return {
     canonical_slug: card.slug,
@@ -313,7 +341,7 @@ async function matchOneCanonical(card) {
     candidates: candidates.slice(0, 5), // top 5 for debug
     best: accepted,
     bestScore: best?.score ?? 0,
-    status: accepted ? "matched" : "low-confidence",
+    status,
   };
 }
 
@@ -427,9 +455,12 @@ async function main() {
 
   const startedAt = Date.now();
   let matched = 0;
+  let needsReview = 0;
   let lowConfidence = 0;
   let noResults = 0;
   let errors = 0;
+  let halted = false;
+  let haltReason = null;
 
   outer:
   for (let i = 0; i < todo.length; i += opts.concurrency) {
@@ -445,7 +476,9 @@ async function main() {
       }));
     } catch (err) {
       if (err instanceof SnkrdunkPushbackError) {
-        console.error(`[match-snkrdunk] AUTO-HALT: ${err.message}`);
+        halted = true;
+        haltReason = err.message;
+        console.error(`[match-snkrdunk] AUTO-HALT: ${haltReason}`);
         console.error(`[match-snkrdunk] Re-run is idempotent — resume from output JSONL.`);
         break outer;
       }
@@ -457,6 +490,7 @@ async function main() {
 
     for (const r of results) {
       if (r.status === "matched") matched += 1;
+      else if (r.status === "needs-review") needsReview += 1;
       else if (r.status === "low-confidence") lowConfidence += 1;
       else if (r.status === "no-tc-results" || r.status === "no-query") noResults += 1;
       else errors += 1;
@@ -468,7 +502,7 @@ async function main() {
       const rate = processed / Math.max(0.1, sec);
       const remaining = todo.length - processed;
       const etaMin = (remaining / Math.max(0.001, rate)) / 60;
-      console.log(`[match-snkrdunk] ${processed}/${todo.length}  matched=${matched} low-conf=${lowConfidence} no-res=${noResults} err=${errors}  ${rate.toFixed(2)} req/s  ETA ${etaMin.toFixed(1)}min`);
+      console.log(`[match-snkrdunk] ${processed}/${todo.length}  matched=${matched} needs-review=${needsReview} low-conf=${lowConfidence} no-res=${noResults} err=${errors}  ${rate.toFixed(2)} req/s  ETA ${etaMin.toFixed(1)}min`);
     }
 
     if (i + opts.concurrency < todo.length) {
@@ -479,8 +513,16 @@ async function main() {
   const elapsedSec = ((Date.now() - startedAt) / 1000).toFixed(1);
   console.log("");
   console.log(`[match-snkrdunk] DONE in ${elapsedSec}s`);
-  console.log(`[match-snkrdunk] matched=${matched} low-conf=${lowConfidence} no-results=${noResults} errors=${errors}`);
+  console.log(`[match-snkrdunk] matched=${matched} needs-review=${needsReview} low-conf=${lowConfidence} no-results=${noResults} errors=${errors}`);
   console.log(`[match-snkrdunk] output: ${outputPath}`);
+  if (halted) {
+    // Exit non-zero so operator wrappers / CI jobs don't treat a
+    // partial run as a successful complete one. Matches the exit-2
+    // convention used by run-yahoo-jp-pipeline.mjs and
+    // run-snkrdunk-pipeline.mjs. Codex P2 on PR #54.
+    console.error(`[match-snkrdunk] HALTED: ${haltReason}`);
+    process.exit(2);
+  }
 }
 
 main().catch((err) => {
