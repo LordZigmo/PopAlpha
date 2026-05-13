@@ -97,17 +97,33 @@ const MAX_LIMIT = 10;
 const CONFIDENCE_HIGH_COS_DIST = 0.25;
 const CONFIDENCE_MEDIUM_COS_DIST = 0.30;
 const CONFIDENCE_HIGH_MIN_GAP = 0.04;
-// Phase 1.5 (2026-05-08): when top-1 cos_dist is extremely small
-// (= sim ≥ 0.93), trust absolute closeness regardless of gap.
-// Real-device evidence: vision_only scans of dark V/VSTAR cards
-// returned MEDIUM at top-1 sim 0.95+ with rank-2 sim 0.92 (gap
-// just under 0.04). The picker forced unnecessary user
-// confirmation when the model was visually overwhelmed in absolute
-// terms. False-HIGH risk is low: visually-similar reprints would
-// have rank-2 within 0.01 of rank-1 (gap effectively 0), nowhere
-// near the threshold; only genuinely-overwhelming top-1 matches
-// reach this floor.
-const CONFIDENCE_HIGH_ABSOLUTE_FLOOR_COS_DIST = 0.07;
+// Phase 1.5 (2026-05-08): when top-1 cos_dist is small (= sim ≥
+// 0.88), trust absolute closeness regardless of gap. Loosened
+// 2026-05-08 from 0.07 (sim ≥ 0.93) → 0.12 (sim ≥ 0.88) after
+// real-device feedback that the picker still appeared even when
+// CLIP's top-1 was the user's actual card. The original 0.93
+// floor was too conservative for V/VSTAR / texture-heavy clusters
+// where rank-2 is naturally close (a Lugia VSTAR scan can sit at
+// 0.91 with Hisuian Zoroark VSTAR at 0.89 — the gap is small but
+// CLIP is right). False-HIGH risk on a genuine reprint with
+// near-identical art is still bounded: those collide at gap≈0
+// AND share metadata, so the picker disambiguation we'd lose is
+// itself low-signal.
+const CONFIDENCE_HIGH_ABSOLUTE_FLOOR_COS_DIST = 0.12;
+
+// Phase 1.5 narrow-path promotion (2026-05-08): when Path A or
+// Path B narrows to 2-3 candidates BUT the top-1 visually
+// dominates (high absolute sim AND notable gap to rank-2),
+// promote to HIGH so the auto-navigate kicks in. Without this,
+// any narrow-3 result forces the picker even when CLIP basically
+// already knows the answer — common when card_number filter
+// admits two reprints from different sets and the photographed
+// card is visually unmistakable. Stricter than the
+// CONFIDENCE_HIGH_ABSOLUTE_FLOOR pair because narrow paths have
+// already locked in OCR agreement → the gap requirement guards
+// against the OCR-correct-but-wrong-art edge case.
+const NARROW_PROMOTE_TOP_COS_DIST = 0.15;  // similarity ≥ 0.85
+const NARROW_PROMOTE_MIN_GAP = 0.10;
 
 /**
  * Per-crop-type kNN. Run once per crop_type (full and art) at query
@@ -1421,7 +1437,17 @@ export async function POST(req: Request) {
     const pathBVisuallyWeak = pathBWinnerCosDist > CONFIDENCE_HIGH_COS_DIST;
     confidence = pathBChangedTop1 && pathBVisuallyWeak ? "medium" : "high";
   } else if (winningPath === "ocr_direct_narrow" || winningPath === "ocr_intersect_narrow") {
-    confidence = "medium";
+    // Phase 1.5 narrow-path promotion (2026-05-08): default is
+    // MEDIUM (user picks from 2-3), but if CLIP's top-1 is
+    // visually overwhelming AND has a wide gap to rank-2, the
+    // picker is dead weight — promote to HIGH so the
+    // auto-navigate fires. See NARROW_PROMOTE_* constants.
+    const narrowTopCosDist = matches[0]?.cos_dist ?? 1.0;
+    const narrowGap = topGap ?? 0;
+    const narrowTopDominates =
+      narrowTopCosDist <= NARROW_PROMOTE_TOP_COS_DIST &&
+      narrowGap >= NARROW_PROMOTE_MIN_GAP;
+    confidence = narrowTopDominates ? "high" : "medium";
   } else {
     // Detect "OCR overrode CLIP": EITHER OCR filter narrowed
     // candidates AND the surviving top-1 was NOT what CLIP originally
