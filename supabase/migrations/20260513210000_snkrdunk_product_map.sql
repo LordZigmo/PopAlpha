@@ -90,13 +90,12 @@ COMMENT ON COLUMN public.snkrdunk_product_map.snkrdunk_id IS
   'snkrdunk_product_code for convenience.';
 
 COMMENT ON COLUMN public.snkrdunk_product_map.mapping_status IS
-  'Decision tier from Step B''s scorer:\n'
-  '  MATCHED      — auto-accepted (name+number AND distinctive set evidence).\n'
-  '                 Step D ingests these.\n'
-  '  NEEDS_REVIEW — auto-flagged (name+number with only generic set tokens or\n'
-  '                 no set tokens). Operator confirms before promoting to MATCHED.\n'
-  '                 Step D SKIPS these.\n'
-  '  REJECTED     — operator marked as wrong. Step D skips permanently.';
+  'Decision tier from Step B''s scorer. MATCHED = auto-accepted '
+  '(name+number AND distinctive set evidence); Step D ingests these. '
+  'NEEDS_REVIEW = auto-flagged (name+number with only generic set tokens '
+  'or no set tokens); operator confirms before promoting to MATCHED; '
+  'Step D skips. REJECTED = operator marked as wrong; Step D skips '
+  'permanently.';
 
 COMMENT ON COLUMN public.snkrdunk_product_map.match_score IS
   'Score from Step B''s scorer (0..1). Persisted for auditability — '
@@ -105,6 +104,21 @@ COMMENT ON COLUMN public.snkrdunk_product_map.match_score IS
 COMMENT ON COLUMN public.snkrdunk_product_map.match_reasons IS
   'The reasons array Step B''s scorer produced (e.g. ["+0.30 name-prefix", '
   '"+0.30 number-normalized (104)"]). Stored for auditability and review UX.';
+
+COMMENT ON COLUMN public.snkrdunk_product_map.match_query IS
+  'The keyword query Step B sent to /en/v1/search. Persisted so a '
+  'reviewer can reproduce the search context. For v0 this is just '
+  'canonical_name; future versions may add set hints.';
+
+COMMENT ON COLUMN public.snkrdunk_product_map.reviewed_at IS
+  'Timestamp when an operator manually reviewed the row (e.g., '
+  'promoted NEEDS_REVIEW → MATCHED or flipped MATCHED → REJECTED). '
+  'Null when the row was auto-classified and never touched.';
+
+COMMENT ON COLUMN public.snkrdunk_product_map.reviewed_by IS
+  'Operator identifier (email, username, or "auto") who performed the '
+  'manual review. Null when the row was auto-classified and never '
+  'touched. Free-text since the operator pool is small and stable.';
 
 -- =============================================================================
 -- RLS
