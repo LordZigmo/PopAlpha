@@ -172,24 +172,31 @@ struct SetDetailView: View {
 
     private func loadSetCards() async {
         loading = true
-        // Cards and metadata in parallel — metadata is a tiny single-row
-        // lookup and shouldn't gate the main grid render.
+        // Cards and metadata in parallel — both kick off here. We await
+        // cards first and flip `loading` off the moment the grid can
+        // render, so a slow/hanging metadata fetch can't keep the user
+        // staring at a spinner. Metadata is informational only — it
+        // populates the header subtitle when it eventually returns.
         async let cardsTask = CardService.shared.fetchSetCards(setName: setName)
         async let metadataTask = CardService.shared.fetchSetMetadata(setName: setName)
+
         do {
             cards = try await cardsTask
         } catch {
             Logger.ui.debug("Failed to load set cards: \(error)")
             cards = []
         }
+        loading = false
+
+        // Metadata after — failure is non-blocking and never gates render.
+        // If setName changes mid-fetch, structured concurrency cancels
+        // this await along with the rest of the .task(id:) handler.
         do {
             metadata = try await metadataTask
         } catch {
-            // Metadata is informational only — failure shouldn't block render.
             Logger.ui.debug("Failed to load set metadata: \(error)")
             metadata = nil
         }
-        loading = false
     }
 }
 
