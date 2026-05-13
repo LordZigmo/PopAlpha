@@ -211,8 +211,24 @@ function scoreMatch(candidate, card) {
   const psetLong = (parsed.setLongName ?? "").toLowerCase();
   const psetCode = (parsed.setCode ?? "").toLowerCase();
   if (cset && (psetLong || psetCode)) {
-    // Tokenize set name into significant words (>3 chars), check overlap
-    const csetTokens = cset.split(/\s+/).filter((t) => t.length >= 4);
+    // Tokenize set name into significant words (>3 chars), check overlap.
+    // Filter out GENERIC tokens that appear in almost every Pokemon
+    // parenthetical — they don't constitute distinctive set evidence.
+    // Codex P1 on PR #54 (post-fix): "Pokemon" / "Promo" / "Cards" /
+    // "Pack" / "Expansion" overlap on most candidates, so matching on
+    // them alone shouldn't bypass the needs-review gate.
+    const SET_TOKEN_STOPWORDS = new Set([
+      "pokemon", "pokémon",
+      "promo", "promos", "promotional",
+      "cards", "card",
+      "pack", "expansion", "enhanced",
+      "deck", "starter",
+      "single", "singles",
+    ]);
+    const csetTokens = cset
+      .split(/\s+/)
+      .map((t) => t.toLowerCase().replace(/[^a-zà-üœ0-9]/g, ""))
+      .filter((t) => t.length >= 4 && !SET_TOKEN_STOPWORDS.has(t));
     const hits = csetTokens.filter((t) => psetLong.includes(t) || psetCode.includes(t));
     if (hits.length > 0) {
       const bump = Math.min(0.20, 0.10 * hits.length);
