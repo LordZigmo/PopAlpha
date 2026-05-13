@@ -336,6 +336,23 @@ struct CardDetailView: View {
         }
         .onChange(of: selectedPrintingId) {
             Task {
+                // Re-fetch the per-printing metrics row so the hero
+                // price reflects the selected finish. The view-side
+                // COALESCE in public_card_metrics means a per-printing
+                // query that has no yahoo_jp_card_prices row yet for
+                // that printing still falls back to the canonical
+                // blended median — no need for two queries.
+                //
+                // 2026-05-13: this lights up the per-printing UX fix
+                // shipped in PR #44. Cards with multiple printings
+                // (HOLO + Reverse Holo / NON_HOLO) now show different
+                // hero prices when the user taps a different pill.
+                if let metrics = try? await CardService.shared.fetchCardMetrics(
+                    slug: card.id,
+                    printingId: selectedPrintingId
+                ) {
+                    await MainActor.run { cardMetrics = metrics }
+                }
                 if let prices = try? await CardService.shared.fetchConditionPrices(
                     slug: card.id,
                     printingId: selectedPrintingId
