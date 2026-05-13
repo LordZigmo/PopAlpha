@@ -491,6 +491,7 @@ export const INTERNAL_ROUTE_TRUST_CONTRACTS = {
   "cron/run-scrydex-pipeline": cronSecretRoute("cron/internal automation"),
   "cron/run-scrydex-retry": cronSecretRoute("cron/internal automation"),
   "cron/run-yahoo-jp-daily": cronSecretRoute("cron/internal automation"),
+  "cron/run-snkrdunk-daily": cronSecretRoute("cron/internal automation"),
   "cron/snapshot-price-history": cronSecretRoute("cron/internal automation"),
   "cron/prune-old-data": cronSecretRoute("cron/internal automation"),
   "cron/mirror-card-images": cronSecretRoute("cron/internal automation"),
@@ -862,6 +863,15 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
     expectedSignals: ["service_role_client"],
     usesServiceRole: true,
     notes: "Idempotent (24h skip filter + UPSERT keyed on canonical_slug+grade). Production daily refresh runs via /api/cron/run-yahoo-jp-daily; this script is the one-shot bulk-backfill driver.",
+  }),
+  "scripts/run-snkrdunk-pipeline.mjs": operationalScript({
+    classification: "service_role_backfill",
+    executionMode: "manual_backfill",
+    intendedCaller: "trusted operator running the Snkrdunk scraper + matcher pipeline against canonical_cards (fetches /en/v1/products/SW---<id>/used-listings, aggregates sold listings, writes snkrdunk_card_prices)",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+    notes: "Idempotent (24h skip filter + UPSERT keyed on canonical_slug+printing_id+grade). Production daily refresh will run via /api/cron/run-snkrdunk-daily (currently registered but NOT scheduled in vercel.json — 40-cron quota cap); this script is the one-shot bulk + smoke-test driver.",
   }),
   "scripts/perfect-order-coverage.mjs": operationalScript({
     classification: "service_role_diagnostic",
