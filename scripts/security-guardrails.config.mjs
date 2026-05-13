@@ -882,6 +882,15 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
     usesServiceRole: true,
     notes: "Read-only against our DB; uses service role to bypass RLS on canonical_cards. The only writes are to a local tmp/*.jsonl file. Step C of the catalog-mapper sequence reads that JSONL and persists the matches to the DB (separate concern).",
   }),
+  "scripts/persist-snkrdunk-matches.mjs": operationalScript({
+    classification: "service_role_import",
+    executionMode: "manual_import",
+    intendedCaller: "trusted operator importing Step B's match JSONL into snkrdunk_product_map (Step C of the catalog-mapper sequence). UPSERTs on canonical_slug; idempotent on re-runs.",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+    notes: "Writes only to snkrdunk_product_map. Skips status='low-confidence'/'no-tc-results'/'no-query'. Conflicts on snkrdunk_product_code (two canonicals mapping to one Snkrdunk product) are logged and skipped — operator inspects.",
+  }),
   "scripts/perfect-order-coverage.mjs": operationalScript({
     classification: "service_role_diagnostic",
     executionMode: "verification",
@@ -1267,6 +1276,14 @@ export const RLS_REQUIRED_PUBLIC_TABLES = [
   "profile_post_card_mentions",
   "profile_posts",
   "push_subscriptions",
+  // Snkrdunk / Yahoo! JP pricing companions + Snkrdunk catalog mapper.
+  // RLS-on / no-grants — service-role-only writes; consumers read prices
+  // via the public_card_metrics view (which is GRANTed to anon).
+  // snkrdunk_product_map is NOT exposed through any view (it's internal
+  // catalog state for the orchestrator).
+  "snkrdunk_card_prices",
+  "snkrdunk_product_map",
+  "yahoo_jp_card_prices",
   "user_blocks",
   "moderation_reports",
 ];
@@ -1519,6 +1536,12 @@ export const INTERNAL_NO_GRANT_OBJECTS = [
   "realized_sales_backtest_snapshots",
   "set_finish_summary_latest",
   "set_summary_snapshots",
+  // Snkrdunk pricing companion + catalog map. No anon/authenticated
+  // grants — consumers read prices via the public_card_metrics view
+  // (which IS granted); product_map is internal catalog state. RLS
+  // coverage above in RLS_REQUIRED_PUBLIC_TABLES. Codex P2 on PR #55.
+  "snkrdunk_card_prices",
+  "snkrdunk_product_map",
   "tracked_assets",
   "tracked_refresh_diagnostics",
   "variant_metrics",
@@ -1526,6 +1549,8 @@ export const INTERNAL_NO_GRANT_OBJECTS = [
   "variant_price_latest",
   "variant_sentiment_latest",
   "variant_signals_latest",
+  // Yahoo! JP pricing companion. Same access model as snkrdunk_card_prices.
+  "yahoo_jp_card_prices",
 ];
 
 export const PUBLIC_VIEW_NAMES = [
