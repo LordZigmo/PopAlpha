@@ -49,12 +49,14 @@ function parseArgs(argv) {
     input: DEFAULT_INPUT,
     dryRun: false,
     matchedOnly: false,
+    forceStatus: false,
     quiet: false,
   };
   for (const a of args) {
     if (a.startsWith("--input=")) opts.input = a.slice("--input=".length);
     else if (a === "--dry-run") opts.dryRun = true;
     else if (a === "--matched-only") opts.matchedOnly = true;
+    else if (a === "--force-status") opts.forceStatus = true;
     else if (a === "--quiet") opts.quiet = true;
   }
   return opts;
@@ -82,9 +84,21 @@ async function main() {
     process.exit(1);
   }
 
-  const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+  // Defer Supabase client creation until we actually need DB access —
+  // dry-run should work without service-role credentials. Codex P2 on PR #55.
+  let supabase = null;
+  const getSupabase = () => {
+    if (supabase) return supabase;
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      throw new Error(
+        "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY required for real writes (use --dry-run to preview without credentials)",
+      );
+    }
+    supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    return supabase;
+  };
 
   const rows = [];
   for (const line of readFileSync(inputPath, "utf8").split(/\r?\n/)) {
@@ -103,6 +117,7 @@ async function main() {
   let conflicts = 0;
   let writeErrors = 0;
   let written = 0;
+  let reviewedPreserved = 0;
 
   for (const row of rows) {
     const dbStatus = statusToDb(row.status);
@@ -121,12 +136,14 @@ async function main() {
       continue;
     }
 
-    const dbRow = {
+    if (dbStatus === "MATCHED") matched += 1;
+    if (dbStatus === "NEEDS_REVIEW") needsReview += 1;
+
+    const baseDbRow = {
       canonical_slug: row.canonical_slug,
       snkrdunk_id: row.best.snkrdunk_id,
       snkrdunk_product_code: row.best.snkrdunk_product_code,
       snkrdunk_name: row.best.name,
-      mapping_status: dbStatus,
       match_score: row.best.score,
       match_reasons: Array.isArray(row.best.reasons) ? row.best.reasons : null,
       match_query: row.query ?? null,
@@ -134,15 +151,43 @@ async function main() {
       updated_at: new Date().toISOString(),
     };
 
-    if (dbStatus === "MATCHED") matched += 1;
-    if (dbStatus === "NEEDS_REVIEW") needsReview += 1;
-
     if (opts.dryRun) {
-      log(`  [dry] ${dbStatus.padEnd(13)} ${dbRow.canonical_slug.slice(0, 50).padEnd(50)} → ${dbRow.snkrdunk_product_code}  score=${dbRow.match_score?.toFixed(2)}`);
+      log(`  [dry] ${dbStatus.padEnd(13)} ${baseDbRow.canonical_slug.slice(0, 50).padEnd(50)} → ${baseDbRow.snkrdunk_product_code}  score=${baseDbRow.match_score?.toFixed(2)}`);
       continue;
     }
 
-    const { error } = await supabase
+    // Codex P1 on PR #55: when re-importing, preserve operator decisions.
+    // If the existing row has reviewed_at set, the operator has manually
+    // promoted/rejected this mapping. A blind UPSERT would clobber that
+    // (e.g., a REJECTED row gets reverted to MATCHED from a stale JSONL).
+    //
+    // Strategy: SELECT first to check reviewed_at; if set AND
+    // --force-status is NOT specified, write metadata fields (score,
+    // reasons, query) but keep the existing mapping_status. Otherwise,
+    // do the full UPSERT.
+    let preserveStatus = false;
+    if (!opts.forceStatus) {
+      const { data: existing, error: selErr } = await getSupabase()
+        .from("snkrdunk_product_map")
+        .select("mapping_status, reviewed_at")
+        .eq("canonical_slug", baseDbRow.canonical_slug)
+        .maybeSingle();
+      if (selErr) {
+        console.error(`[persist-snkrdunk] SELECT ERROR for ${baseDbRow.canonical_slug}: ${selErr.message}`);
+        writeErrors += 1;
+        continue;
+      }
+      if (existing?.reviewed_at) {
+        preserveStatus = true;
+        reviewedPreserved += 1;
+      }
+    }
+
+    const dbRow = preserveStatus
+      ? baseDbRow // mapping_status omitted → UPSERT keeps existing value
+      : { ...baseDbRow, mapping_status: dbStatus };
+
+    const { error } = await getSupabase()
       .from("snkrdunk_product_map")
       .upsert(dbRow, { onConflict: "canonical_slug" });
     if (error) {
@@ -162,13 +207,14 @@ async function main() {
 
   console.log("");
   console.log("[persist-snkrdunk] DONE");
-  console.log(`  loaded:       ${rows.length}`);
-  console.log(`  matched:      ${matched}${opts.dryRun ? " (dry-run)" : ""}`);
-  console.log(`  needs-review: ${needsReview}${opts.dryRun ? " (dry-run)" : ""}`);
-  console.log(`  written:      ${written}${opts.dryRun ? " (dry-run skipped writes)" : ""}`);
-  console.log(`  conflicts:    ${conflicts}`);
-  console.log(`  write-errors: ${writeErrors}`);
-  console.log(`  skipped:      ${skipped}`);
+  console.log(`  loaded:              ${rows.length}`);
+  console.log(`  matched:             ${matched}${opts.dryRun ? " (dry-run)" : ""}`);
+  console.log(`  needs-review:        ${needsReview}${opts.dryRun ? " (dry-run)" : ""}`);
+  console.log(`  written:             ${written}${opts.dryRun ? " (dry-run skipped writes)" : ""}`);
+  console.log(`  reviewed-preserved:  ${reviewedPreserved}${opts.forceStatus ? " (force-status mode disabled this guard)" : ""}`);
+  console.log(`  conflicts:           ${conflicts}`);
+  console.log(`  write-errors:        ${writeErrors}`);
+  console.log(`  skipped:             ${skipped}`);
 
   if (writeErrors > 0) process.exit(1);
 }
