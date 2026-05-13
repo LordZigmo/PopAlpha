@@ -154,6 +154,24 @@ async function main() {
   }
   console.log(`Built map of ${scrydexMap.size} normalized set_ids from Scrydex.\n`);
 
+  // Second map: Scrydex expansion ID → metadata. Used as fallback for sets
+  // whose set_name doesn't match a Scrydex expansion name — primarily the
+  // JP catalog, where public.sets.set_name is the English-translated form
+  // but Scrydex stores expansions under the original Japanese name. The
+  // bridge is `card_printings.set_code` which the Scrydex importer
+  // populates with the same Scrydex expansion ID we see here on `exp.id`.
+  const expansionIdMap = new Map();
+  for (const exp of [...enExpansions, ...jaExpansions]) {
+    if (!exp?.id) continue;
+    expansionIdMap.set(exp.id, {
+      era: exp?.series ?? null,
+      release_date: normalizeReleaseDate(exp?.release_date ?? exp?.releaseDate ?? null),
+      sourceName: exp?.name ?? null,
+      sourceLang: exp?.language_code ?? null,
+    });
+  }
+  console.log(`Built expansion-ID map of ${expansionIdMap.size} entries (for JP fallback).\n`);
+
   // Read all sets rows (paginated to be safe; 401 today is well under one page).
   const { data: setsRows, error: readErr } = await supabase
     .from("sets")
@@ -161,19 +179,79 @@ async function main() {
     .order("set_id", { ascending: true });
   if (readErr) throw new Error(`sets read: ${readErr.message}`);
 
+  // For sets that DON'T match via set_name, load their card_printings.set_code
+  // (the Scrydex expansion ID) so we can fall back to ID-based matching.
+  // Supabase JS doesn't have DISTINCT ON; instead paginate ordered by set_id
+  // and keep the first non-null set_code we see per set_id. Order matters
+  // because card_printings can grow well past any single-page cap (today ~68k,
+  // growing with each JP import), and an unordered scan with a fixed limit
+  // could silently drop later-positioned set_ids and report them as missing.
+  // Early-exit once every requested set_id has a representative.
+  const setIdsWithoutNameMatch = (setsRows ?? [])
+    .filter((row) => !scrydexMap.has(row.set_id))
+    .map((row) => row.set_id);
+  const setCodeBySetId = new Map();
+  if (setIdsWithoutNameMatch.length > 0) {
+    const PAGE_SIZE = 1000;
+    let from = 0;
+    let pagesRead = 0;
+    while (true) {
+      const { data: page, error: pageErr } = await supabase
+        .from("card_printings")
+        .select("set_id, set_code")
+        .in("set_id", setIdsWithoutNameMatch)
+        .not("set_code", "is", null)
+        .order("set_id", { ascending: true })
+        .range(from, from + PAGE_SIZE - 1);
+      if (pageErr) throw new Error(`card_printings read (page ${pagesRead}): ${pageErr.message}`);
+      const rows = page ?? [];
+      pagesRead += 1;
+      for (const p of rows) {
+        if (!setCodeBySetId.has(p.set_id) && p.set_code) {
+          setCodeBySetId.set(p.set_id, p.set_code);
+        }
+      }
+      // Stop conditions: every requested set_id has a code, or the page is short.
+      if (setCodeBySetId.size === setIdsWithoutNameMatch.length) break;
+      if (rows.length < PAGE_SIZE) break;
+      from += PAGE_SIZE;
+    }
+    console.log(
+      `Resolved ${setCodeBySetId.size} / ${setIdsWithoutNameMatch.length} set_codes from card_printings ` +
+        `(${pagesRead} page${pagesRead === 1 ? "" : "s"}).\n`,
+    );
+  }
+
   let toUpdate = 0;
   let alreadyCorrect = 0;
   let missing = 0;
+  let matchedByName = 0;
+  let matchedByExpansionId = 0;
   const updates = [];
   const missingExamples = [];
 
   for (const row of setsRows ?? []) {
-    const meta = scrydexMap.get(row.set_id);
+    // First pass: match by normalized set_name → Scrydex expansion name.
+    let meta = scrydexMap.get(row.set_id);
+    let matchSource = "name";
+
+    // Second pass: fall back to set_code → Scrydex expansion ID.
+    if (!meta) {
+      const setCode = setCodeBySetId.get(row.set_id);
+      if (setCode) {
+        meta = expansionIdMap.get(setCode);
+        if (meta) matchSource = "expansion_id";
+      }
+    }
+
     if (!meta) {
       missing += 1;
       if (missingExamples.length < 10) missingExamples.push(`${row.set_id} (${row.set_name})`);
       continue;
     }
+    if (matchSource === "name") matchedByName += 1;
+    else matchedByExpansionId += 1;
+
     const eraNew = meta.era ?? null;
     const dateNew = meta.release_date ?? null;
     const eraSame = (row.era ?? null) === eraNew;
@@ -193,9 +271,11 @@ async function main() {
   console.log(`Diff:`);
   console.log(`  ${toUpdate} rows differ from Scrydex (will update)`);
   console.log(`  ${alreadyCorrect} rows already match`);
-  console.log(`  ${missing} rows in public.sets not found in Scrydex map`);
+  console.log(`  ${missing} rows in public.sets not found in either map`);
+  console.log(`  Matched by set_name: ${matchedByName}`);
+  console.log(`  Matched by expansion ID (card_printings.set_code): ${matchedByExpansionId}`);
   if (missingExamples.length > 0) {
-    console.log(`  Examples of missing: ${missingExamples.join(", ")}`);
+    console.log(`  Examples of still-missing: ${missingExamples.join(", ")}`);
   }
 
   if (DRY_RUN) {
