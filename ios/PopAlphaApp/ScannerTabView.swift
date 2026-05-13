@@ -1346,6 +1346,13 @@ final class ScannerHost: ObservableObject {
             // MEDIUM/LOW skipped here — picker-pick path handles
             // MEDIUM with the actual ground-truth slug. See
             // ScanDebugCapture.autoPromoteToEval header for full rules.
+            //
+            // 2026-05-13 (Codex P2 fix): pass `image` so offline scans
+            // route through promoteEvalFromBytes. Without this, every
+            // offline HIGH auto-promote 404'd (no scan-uploads object
+            // exists for offline-computed hashes) and the eval corpus
+            // captured 0 offline cases. Online scans tolerate nil but
+            // we pass the bytes uniformly — re-encode cost is trivial.
             if reranked.confidence == "high",
                let hash = response.imageHash,
                let topSlug = reranked.matches.first?.slug {
@@ -1354,6 +1361,7 @@ final class ScannerHost: ObservableObject {
                     canonicalSlug: topSlug,
                     capturedSource: .userPhoto,
                     notesTag: "auto_high_test:\(triggerSource)",
+                    scanImage: image,
                 )
             }
             #endif

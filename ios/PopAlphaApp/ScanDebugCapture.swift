@@ -128,6 +128,21 @@ enum ScanDebugCapture {
     ///   - LOW or no-pick: caller skips — no ground-truth label
     ///     available, no point polluting the corpus.
     ///
+    /// **Bytes vs hash (2026-05-13, Codex P2 fix):** the
+    /// `scanImage` parameter is the offline-path lifeline. Online scans
+    /// land bytes at `scan-uploads/<hash>.jpg` server-side during
+    /// `/api/scan/identify`, so the cheap hash-only `promoteEvalFromHash`
+    /// suffices — the server `COPY`s the existing object into the eval
+    /// prefix. Offline scans compute the hash locally and NEVER upload,
+    /// so the hash-only route 404s ("source image not found at
+    /// scan-uploads/<hash>.jpg"). Pre-fix, every offline HIGH/picker/
+    /// search auto-promote silently failed and the 100-card eval
+    /// corpus captured 0 offline frames — exactly the population we
+    /// wanted to grow. When `scanImage` is non-nil we route to
+    /// `promoteEvalFromBytes` (base64 multipart) instead. Callers in
+    /// the offline path MUST pass the source UIImage; online callers
+    /// can pass nil to save the re-encode.
+    ///
     /// Auth: hits `/api/admin/scan-eval/promote` which requires admin
     /// Clerk role. In DEBUG that's only the dev's account anyway. A
     /// 401 just means the corpus row didn't land — the saved Photo
@@ -140,17 +155,34 @@ enum ScanDebugCapture {
         canonicalSlug: String,
         capturedSource: EvalCaptureSource,
         notesTag: String,
+        scanImage: UIImage? = nil,
     ) {
         Task.detached(priority: .background) {
             do {
-                let r = try await ScanService.promoteEvalFromHash(
-                    imageHash: imageHash,
-                    canonicalSlug: canonicalSlug,
-                    source: capturedSource,
-                    notes: notesTag,
-                )
+                let r: ScanEvalPromoteResponse
+                if let image = scanImage {
+                    // Offline path (or any caller that has the source
+                    // bytes in memory). Bytes upload bypasses the
+                    // server's hash-copy-from-scan-uploads step.
+                    r = try await ScanService.promoteEvalFromBytes(
+                        image: image,
+                        canonicalSlug: canonicalSlug,
+                        source: capturedSource,
+                        notes: notesTag,
+                    )
+                } else {
+                    // Online path: bytes already at scan-uploads/<hash>.jpg
+                    // from /api/scan/identify, so the server can copy
+                    // server-side without us re-uploading.
+                    r = try await ScanService.promoteEvalFromHash(
+                        imageHash: imageHash,
+                        canonicalSlug: canonicalSlug,
+                        source: capturedSource,
+                        notes: notesTag,
+                    )
+                }
                 if r.ok {
-                    Logger.scan.debug("auto-promoted to eval: hash=\(imageHash.prefix(8)) slug=\(canonicalSlug) tag=\(notesTag)")
+                    Logger.scan.debug("auto-promoted to eval: hash=\(imageHash.prefix(8)) slug=\(canonicalSlug) tag=\(notesTag) via=\(scanImage != nil ? "bytes" : "hash")")
                 } else {
                     Logger.scan.debug("auto-promote rejected: hash=\(imageHash.prefix(8)) error=\(r.error ?? "nil")")
                 }
