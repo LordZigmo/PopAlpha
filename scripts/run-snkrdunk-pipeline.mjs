@@ -25,6 +25,12 @@
  *   # Bulk from CSV — two columns: canonical_slug,snkrdunk_product_code
  *   node scripts/run-snkrdunk-pipeline.mjs --from-csv=./snkrdunk-map.csv
  *
+ *   # NEW (Step D): bulk from the snkrdunk_product_map table — reads all
+ *   # MATCHED rows so the operator doesn't need to maintain a CSV.
+ *   # Populate the table first via scripts/match-snkrdunk-canonical.mjs +
+ *   # scripts/persist-snkrdunk-matches.mjs.
+ *   node scripts/run-snkrdunk-pipeline.mjs --from-map
+ *
  *   # Dry run — show what would be written without persisting
  *   node scripts/run-snkrdunk-pipeline.mjs --slug=X --product-code=SW---Y --dry-run
  *
@@ -68,6 +74,7 @@ function parseArgs(argv) {
     slug: null,
     productCode: null,
     fromCsv: null,
+    fromMap: false, // Step D: read MATCHED rows from snkrdunk_product_map
     // Behavior
     skipIfFresherThanHours: 24,
     pages: 4, // most Snkrdunk products have ≤2 pages; 4 is safe upper bound
@@ -83,6 +90,7 @@ function parseArgs(argv) {
     if (a.startsWith("--slug=")) opts.slug = a.slice("--slug=".length);
     else if (a.startsWith("--product-code=")) opts.productCode = a.slice("--product-code=".length);
     else if (a.startsWith("--from-csv=")) opts.fromCsv = a.slice("--from-csv=".length);
+    else if (a === "--from-map") opts.fromMap = true;
     else if (a.startsWith("--skip-fresher-than-hours=")) opts.skipIfFresherThanHours = Math.max(0, Number.parseFloat(a.slice("--skip-fresher-than-hours=".length)) || 0);
     else if (a.startsWith("--pages=")) opts.pages = Math.max(1, Number.parseInt(a.slice("--pages=".length), 10) || 1);
     else if (a.startsWith("--min-sample=")) opts.minSampleCount = Math.max(1, Number.parseInt(a.slice("--min-sample=".length), 10) || 1);
@@ -127,7 +135,34 @@ function parseCsv(text) {
 async function loadInputList(supabase, opts) {
   // 1. Pull raw input pairs
   let pairs = [];
-  if (opts.fromCsv) {
+  if (opts.fromMap) {
+    // Step D: read MATCHED rows from snkrdunk_product_map. Page through
+    // because there could be tens of thousands of mappings.
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const data = await withRetry(`snkrdunk_product_map page ${from}`, async () => {
+        const { data, error } = await supabase
+          .from("snkrdunk_product_map")
+          .select("canonical_slug, snkrdunk_product_code")
+          .eq("mapping_status", "MATCHED")
+          .order("canonical_slug")
+          .range(from, from + PAGE - 1);
+        if (error) throw new Error(error.message);
+        return data ?? [];
+      });
+      if (data.length === 0) break;
+      for (const r of data) {
+        pairs.push({ slug: r.canonical_slug, productCode: r.snkrdunk_product_code });
+      }
+      if (data.length < PAGE) break;
+    }
+    if (pairs.length === 0) {
+      console.warn("[snkrdunk-pipeline] --from-map produced 0 MATCHED rows from snkrdunk_product_map");
+      console.warn("[snkrdunk-pipeline] Run scripts/match-snkrdunk-canonical.mjs + scripts/persist-snkrdunk-matches.mjs first.");
+      return [];
+    }
+    console.log(`[snkrdunk-pipeline] --from-map loaded ${pairs.length} MATCHED row(s) from snkrdunk_product_map`);
+  } else if (opts.fromCsv) {
     const text = readFileSync(opts.fromCsv, "utf8");
     pairs = parseCsv(text);
     if (pairs.length === 0) {
@@ -136,7 +171,7 @@ async function loadInputList(supabase, opts) {
   } else if (opts.slug && opts.productCode) {
     pairs = [{ slug: opts.slug, productCode: opts.productCode }];
   } else {
-    throw new Error("Specify either --slug + --product-code OR --from-csv=<path>");
+    throw new Error("Specify --slug + --product-code, --from-csv=<path>, or --from-map");
   }
 
   // 2. Skip recently-refreshed slugs for idempotent resume
