@@ -98,12 +98,14 @@ struct CardDetailView: View {
     ///   2. card.id ends in "-jp" — the JP slug suffix convention from
     ///      the Scrydex importer; covers the brief window between
     ///      navigation and the metrics fetch landing.
-    ///   3. cardMetrics has populated yahoo_jp_price — final fallback
-    ///      for any JP card that somehow slipped past the above.
+    ///   3. cardMetrics has populated yahoo_jp_price OR snkrdunk_price —
+    ///      final fallback for any JP card that somehow slipped past
+    ///      the above (both are JP-native sold-price sources).
     private var isJapaneseCard: Bool {
         if cardMetrics?.language == "JP" { return true }
         if card.id.hasSuffix("-jp") { return true }
         if cardMetrics?.yahooJpPrice != nil { return true }
+        if cardMetrics?.snkrdunkPrice != nil { return true }
         return false
     }
 
@@ -119,15 +121,24 @@ struct CardDetailView: View {
         isJapaneseCard ? PA.AxisColors.marketHeat : PA.Colors.accent
     }
 
-    /// JP cards prefer the Yahoo! Auctions JP scraped sold price
-    /// (lib/jp/matcher.mjs median over ~120-day window) over the
-    /// Scrydex-derived US/global price. Scrydex stays as fallback when
-    /// the JP scraper hasn't matched anything yet — at which point the
-    /// EN price is the only signal we have, even if it's a US-market
-    /// price for a Japanese card.
+    /// JP cards prefer JP-native sold prices over the Scrydex-derived
+    /// US/global price. Confidence-pick between Yahoo! Auctions JP and
+    /// Snkrdunk when both are present — the one with more sample sales
+    /// wins (its median is more stable). Scrydex stays as fallback
+    /// when neither JP scraper has data — at which point the EN price
+    /// is the only signal we have, even if it's a US-market price for
+    /// a Japanese card.
     private var preferredHeroPrice: Double? {
-        if isJapaneseCard, let usd = cardMetrics?.yahooJpPrice, usd > 0 {
-            return usd
+        if isJapaneseCard {
+            let yj = cardMetrics?.yahooJpPrice ?? 0
+            let snk = cardMetrics?.snkrdunkPrice ?? 0
+            let yjN = cardMetrics?.yahooJpSampleCount ?? 0
+            let snkN = cardMetrics?.snkrdunkSampleCount ?? 0
+            if yj > 0 && snk > 0 {
+                return snkN > yjN ? snk : yj
+            }
+            if yj > 0 { return yj }
+            if snk > 0 { return snk }
         }
         // Non-JP path: existing logic — printing-specific override, then
         // the MarketCard's headline price (which is Scrydex-derived).
@@ -139,23 +150,33 @@ struct CardDetailView: View {
     }
 
     /// Source label shown next to the hero price so the user knows
-    /// which provider the number came from. Affects only the inline
-    /// hint, not the top-level pricing structure.
+    /// which provider the number came from. Matches the confidence-pick
+    /// winner from preferredHeroPrice. Affects only the inline hint,
+    /// not the top-level pricing structure.
     private var heroPriceSourceLabel: String? {
-        if isJapaneseCard, let usd = cardMetrics?.yahooJpPrice, usd > 0 {
-            return "Yahoo! Auctions JP"
+        if isJapaneseCard {
+            let yj = cardMetrics?.yahooJpPrice ?? 0
+            let snk = cardMetrics?.snkrdunkPrice ?? 0
+            let yjN = cardMetrics?.yahooJpSampleCount ?? 0
+            let snkN = cardMetrics?.snkrdunkSampleCount ?? 0
+            if yj > 0 && snk > 0 {
+                return snkN > yjN ? "Snkrdunk" : "Yahoo! Auctions JP"
+            }
+            if yj > 0 { return "Yahoo! Auctions JP" }
+            if snk > 0 { return "Snkrdunk" }
         }
         return nil
     }
 
     /// Suppress the change-percent badge when the hero is showing a
-    /// Yahoo! JP price (the change columns track the Scrydex
-    /// market_price, not the Yahoo!-derived median, so showing the
-    /// delta would be misleading). Hoisted to a computed property so
-    /// the SwiftUI ViewBuilder doesn't need a bare `let` inside the
-    /// HStack body.
+    /// JP-scraper price (Yahoo! or Snkrdunk). The change columns track
+    /// the Scrydex market_price, not the JP-derived median, so showing
+    /// the delta would be misleading.
     private var suppressHeroChangeBadge: Bool {
-        isJapaneseCard && (cardMetrics?.yahooJpPrice ?? 0) > 0
+        isJapaneseCard && (
+            (cardMetrics?.yahooJpPrice ?? 0) > 0 ||
+            (cardMetrics?.snkrdunkPrice ?? 0) > 0
+        )
     }
 
     var body: some View {
@@ -679,26 +700,34 @@ struct CardDetailView: View {
                 }
             }
 
-            // Source attribution + JPY native price for JP cards. Sits
-            // tight below the hero price so the user can see "this is
-            // the Yahoo! JP price, not Scrydex" + the original JPY
-            // amount (which is what JP collectors recognize).
-            if isJapaneseCard, let metrics = cardMetrics, let usd = metrics.yahooJpPrice, usd > 0 {
-                HStack(spacing: 8) {
-                    if let yen = metrics.yahooJpPriceJpy {
-                        Text("¥" + (Int(yen.rounded())).formatted())
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(PA.Colors.textSecondary)
-                    }
-                    if let count = metrics.yahooJpSampleCount, count > 0 {
-                        Text("· n=\(count) sales")
-                            .font(.system(size: 12))
-                            .foregroundStyle(PA.Colors.muted)
-                    }
-                    if let label = heroPriceSourceLabel {
-                        Text("· \(label)")
-                            .font(.system(size: 12))
-                            .foregroundStyle(PA.Colors.muted)
+            // Source attribution for JP cards. When BOTH Yahoo! JP and
+            // Snkrdunk have data, render each as its own line so the
+            // user can see both signals side-by-side and judge for
+            // themselves (the hero shows the confidence-pick winner;
+            // these lines show the unblended sources). When only one
+            // is present, render just that one — same behavior as
+            // pre-Snkrdunk.
+            if isJapaneseCard {
+                let yj = cardMetrics?.yahooJpPrice ?? 0
+                let snk = cardMetrics?.snkrdunkPrice ?? 0
+                if yj > 0 || snk > 0 {
+                    VStack(alignment: .leading, spacing: 4) {
+                        if yj > 0, let metrics = cardMetrics {
+                            sourceAttributionLine(
+                                source: "Yahoo! Auctions JP",
+                                usd: metrics.yahooJpPrice,
+                                jpy: metrics.yahooJpPriceJpy,
+                                sampleCount: metrics.yahooJpSampleCount
+                            )
+                        }
+                        if snk > 0, let metrics = cardMetrics {
+                            sourceAttributionLine(
+                                source: "Snkrdunk",
+                                usd: metrics.snkrdunkPrice,
+                                jpy: nil, // Snkrdunk's English API serves USD directly
+                                sampleCount: metrics.snkrdunkSampleCount
+                            )
+                        }
                     }
                 }
             }
@@ -1269,12 +1298,18 @@ struct CardDetailView: View {
                 // the hero — Yahoo! JP for JP cards with scraped data,
                 // Scrydex otherwise.
                 infoRow(label: "Price Source", value: priceSourceDescription)
-                if isJapaneseCard, let observedAt = cardMetrics?.yahooJpObservedAt {
+                // Last-refreshed + sample-confidence rows track whichever
+                // JP source the hero is showing (confidence-pick winner
+                // between Yahoo! JP and Snkrdunk). When both have data,
+                // we pick the same winner the hero does — so the user
+                // sees a coherent "Snkrdunk says $X, refreshed Y, with
+                // n samples" story.
+                if isJapaneseCard, let observedAt = primaryJpObservedAt {
                     infoRow(label: "Last Refreshed", value: formatYahooJpObservedAt(observedAt))
                 } else {
                     infoRow(label: "Last Updated", value: "2 min ago")
                 }
-                if isJapaneseCard, let count = cardMetrics?.yahooJpSampleCount {
+                if isJapaneseCard, let count = primaryJpSampleCount {
                     infoRow(label: "Sample Confidence", value: formatYahooJpSampleCount(count))
                 }
                 infoRow(label: "7D Median", value: formatMedian7d(cardMetrics?.median7d))
@@ -1288,19 +1323,59 @@ struct CardDetailView: View {
     /// Hero-price provenance label shown in Market Intelligence.
     /// Surfaces JP scraper status explicitly so users on a JP card
     /// understand whether they're seeing real JP-market data or a US
-    /// fallback. Three states:
-    ///   • JP card + yahoo_jp_price present → "Yahoo! Auctions JP (sold archive)"
-    ///   • JP card + no yahoo_jp_price → "Scrydex (US fallback)" — explains
-    ///     why a JP card might show a US-derived price.
-    ///   • EN card → "Scrydex (primary)" — unchanged from prior copy.
+    /// fallback. States:
+    ///   • JP card + both JP sources → "Yahoo! JP + Snkrdunk (sold archive)"
+    ///   • JP card + only Yahoo! → "Yahoo! Auctions JP (sold archive)"
+    ///   • JP card + only Snkrdunk → "Snkrdunk (sold archive)"
+    ///   • JP card + neither → "Scrydex (US fallback)" — explains why
+    ///     a JP card might show a US-derived price.
+    ///   • EN card → "Scrydex (primary)"
     private var priceSourceDescription: String {
         if isJapaneseCard {
-            if (cardMetrics?.yahooJpPrice ?? 0) > 0 {
-                return "Yahoo! Auctions JP (sold archive)"
-            }
+            let yj = (cardMetrics?.yahooJpPrice ?? 0) > 0
+            let snk = (cardMetrics?.snkrdunkPrice ?? 0) > 0
+            if yj && snk { return "Yahoo! JP + Snkrdunk (sold archive)" }
+            if yj { return "Yahoo! Auctions JP (sold archive)" }
+            if snk { return "Snkrdunk (sold archive)" }
             return "Scrydex (US fallback)"
         }
         return "Scrydex (primary)"
+    }
+
+    /// Single attribution line under the hero — shows the source name,
+    /// optional JPY equivalent, and sample-count. Used twice on JP
+    /// cards that have both Yahoo! and Snkrdunk data (the confidence-
+    /// pick winner is already in the hero; these lines show the
+    /// per-source detail). Inline rather than its own file because
+    /// it's only used inside this view and adding a separate Swift
+    /// file in the xcodeproj has risk (per project memory).
+    @ViewBuilder
+    private func sourceAttributionLine(
+        source: String,
+        usd: Double?,
+        jpy: Double?,
+        sampleCount: Int?
+    ) -> some View {
+        HStack(spacing: 8) {
+            Text(source)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(PA.Colors.textSecondary)
+            if let usd, usd > 0 {
+                Text("· $" + String(format: "%.2f", usd))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(PA.Colors.textSecondary)
+            }
+            if let jpy {
+                Text("· ¥" + (Int(jpy.rounded())).formatted())
+                    .font(.system(size: 12))
+                    .foregroundStyle(PA.Colors.muted)
+            }
+            if let count = sampleCount, count > 0 {
+                Text("· n=\(count)")
+                    .font(.system(size: 12))
+                    .foregroundStyle(PA.Colors.muted)
+            }
+        }
     }
 
     // MARK: - Yahoo! JP helper formatters
@@ -1318,6 +1393,40 @@ struct CardDetailView: View {
         // so flag it so the user weighs the price accordingly.
         let confidence = count >= 10 ? "high" : count >= 5 ? "moderate" : "low"
         return "n=\(count) sales · \(confidence) confidence"
+    }
+
+    /// Whether the confidence-pick winner is Snkrdunk (vs Yahoo! JP).
+    /// True only when both sources have data AND Snkrdunk has more
+    /// sample sales. Same selection logic as preferredHeroPrice +
+    /// heroPriceSourceLabel so the Market Intelligence panel tells a
+    /// coherent per-source story.
+    private var snkrdunkIsPrimaryJpSource: Bool {
+        guard let metrics = cardMetrics else { return false }
+        let yj = metrics.yahooJpPrice ?? 0
+        let snk = metrics.snkrdunkPrice ?? 0
+        if snk <= 0 { return false }
+        if yj <= 0 { return true } // Snkrdunk is the only source
+        return (metrics.snkrdunkSampleCount ?? 0) > (metrics.yahooJpSampleCount ?? 0)
+    }
+
+    /// observed_at from the JP source the hero is using. Nil when
+    /// neither JP source has data.
+    private var primaryJpObservedAt: String? {
+        guard let metrics = cardMetrics else { return nil }
+        if snkrdunkIsPrimaryJpSource { return metrics.snkrdunkObservedAt }
+        if (metrics.yahooJpPrice ?? 0) > 0 { return metrics.yahooJpObservedAt }
+        if (metrics.snkrdunkPrice ?? 0) > 0 { return metrics.snkrdunkObservedAt }
+        return nil
+    }
+
+    /// sample_count from the JP source the hero is using. Nil when
+    /// neither JP source has data.
+    private var primaryJpSampleCount: Int? {
+        guard let metrics = cardMetrics else { return nil }
+        if snkrdunkIsPrimaryJpSource { return metrics.snkrdunkSampleCount }
+        if (metrics.yahooJpPrice ?? 0) > 0 { return metrics.yahooJpSampleCount }
+        if (metrics.snkrdunkPrice ?? 0) > 0 { return metrics.snkrdunkSampleCount }
+        return nil
     }
 
     private func formatYahooJpObservedAt(_ iso: String) -> String {
