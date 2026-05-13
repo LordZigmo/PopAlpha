@@ -181,27 +181,45 @@ async function main() {
 
   // For sets that DON'T match via set_name, load their card_printings.set_code
   // (the Scrydex expansion ID) so we can fall back to ID-based matching.
-  // distinct on (set_id) — one representative set_code per set_id.
+  // Supabase JS doesn't have DISTINCT ON; instead paginate ordered by set_id
+  // and keep the first non-null set_code we see per set_id. Order matters
+  // because card_printings can grow well past any single-page cap (today ~68k,
+  // growing with each JP import), and an unordered scan with a fixed limit
+  // could silently drop later-positioned set_ids and report them as missing.
+  // Early-exit once every requested set_id has a representative.
   const setIdsWithoutNameMatch = (setsRows ?? [])
     .filter((row) => !scrydexMap.has(row.set_id))
     .map((row) => row.set_id);
   const setCodeBySetId = new Map();
   if (setIdsWithoutNameMatch.length > 0) {
-    // Supabase JS doesn't have a direct DISTINCT ON; group by reading raw rows
-    // and keeping the first non-null set_code we see per set_id.
-    const { data: printingsRaw, error: printingsErr } = await supabase
-      .from("card_printings")
-      .select("set_id, set_code")
-      .in("set_id", setIdsWithoutNameMatch)
-      .not("set_code", "is", null)
-      .limit(50000);
-    if (printingsErr) throw new Error(`card_printings read: ${printingsErr.message}`);
-    for (const p of printingsRaw ?? []) {
-      if (!setCodeBySetId.has(p.set_id) && p.set_code) {
-        setCodeBySetId.set(p.set_id, p.set_code);
+    const PAGE_SIZE = 1000;
+    let from = 0;
+    let pagesRead = 0;
+    while (true) {
+      const { data: page, error: pageErr } = await supabase
+        .from("card_printings")
+        .select("set_id, set_code")
+        .in("set_id", setIdsWithoutNameMatch)
+        .not("set_code", "is", null)
+        .order("set_id", { ascending: true })
+        .range(from, from + PAGE_SIZE - 1);
+      if (pageErr) throw new Error(`card_printings read (page ${pagesRead}): ${pageErr.message}`);
+      const rows = page ?? [];
+      pagesRead += 1;
+      for (const p of rows) {
+        if (!setCodeBySetId.has(p.set_id) && p.set_code) {
+          setCodeBySetId.set(p.set_id, p.set_code);
+        }
       }
+      // Stop conditions: every requested set_id has a code, or the page is short.
+      if (setCodeBySetId.size === setIdsWithoutNameMatch.length) break;
+      if (rows.length < PAGE_SIZE) break;
+      from += PAGE_SIZE;
     }
-    console.log(`Resolved ${setCodeBySetId.size} / ${setIdsWithoutNameMatch.length} set_codes from card_printings.\n`);
+    console.log(
+      `Resolved ${setCodeBySetId.size} / ${setIdsWithoutNameMatch.length} set_codes from card_printings ` +
+        `(${pagesRead} page${pagesRead === 1 ? "" : "s"}).\n`,
+    );
   }
 
   let toUpdate = 0;
