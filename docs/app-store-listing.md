@@ -253,10 +253,10 @@ App Store Connect splits this across two fields. Paste each into the matching on
 
 **Sign-In Information** (separate, secure field — Apple stores this with the build):
 ```
-Username:  popalpha.appreview@outlook.com
+Username:  review.popalpha@proton.me
 Password:  [TODO: paste mailbox password]
 ```
-*The username is the inbox the reviewer signs into to fetch the verification code. The password is the **outlook.com mailbox password**, not a PopAlpha password (PopAlpha doesn't have one — sign-in is passwordless email-code via Clerk).*
+*The username is the inbox the reviewer signs into to fetch the verification code. The password is the **Proton Mail mailbox password**, not a PopAlpha password (PopAlpha doesn't have one — sign-in is passwordless email-code via Clerk).*
 
 **Notes / Review Information** (freeform field — visible to the reviewer alongside the build):
 
@@ -268,12 +268,12 @@ demo creds above unlock the signed-in surface (portfolio + wishlist).
 — HOW TO SIGN IN (passwordless email code):
    1. On any sign-in CTA in the app, tap "Continue with Email".
    2. Enter the username from the Sign-In Information field above
-      (popalpha.appreview@outlook.com).
+      (review.popalpha@proton.me).
    3. Tap "Send Code".
-   4. Open Safari → outlook.com → sign in with the same credentials
-      from the Sign-In Information field. There will be a Clerk
-      verification email titled "Your sign-in code" with a 6-digit
-      number.
+   4. Open Safari → mail.proton.me → sign in with the same
+      credentials from the Sign-In Information field. There will be
+      a Clerk verification email titled "Your sign-in code" with a
+      6-digit number.
    5. Switch back to PopAlpha; type or paste the 6-digit code. The
       app auto-submits at 6 digits.
    The demo account is pre-seeded with a sample holding + a wishlist
@@ -325,10 +325,11 @@ Contact for review questions:
 ```
 
 **Pre-submission checklist for the demo account itself**:
-- [ ] outlook.com 2FA disabled (otherwise the reviewer can't fetch the code)
+- [ ] Proton Mail 2FA disabled (otherwise the reviewer can't fetch the code)
 - [ ] Once signed in to PopAlpha with this account, seeded a holding + wishlist item
 - [ ] Verified the Clerk verification email actually arrives at this inbox (Clerk Dashboard → Logs → Emails to confirm delivery, or just send a test code via the iOS UI)
 - [ ] Confirmed Phone identifier is OFF in Clerk Dashboard so sign-up doesn't loop on a phone prompt for the reviewer
+- [ ] Confirmed Password strategy is OFF in Clerk Dashboard (otherwise the signup completes with status .missingRequirements and the reviewer sees "needs another step" error)
 
 ---
 
