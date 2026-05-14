@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { dbAdmin } from "@/lib/db/admin";
 import {
   verifyAndDecodeNotification,
   verifyAndDecodeTransaction,
@@ -9,6 +10,7 @@ import {
   statusFromNotification,
   updateAppleSubscriptionByTxnId,
 } from "@/lib/iap/upsert-subscription";
+import { getPostHogClient } from "@/lib/posthog-server";
 
 export const runtime = "nodejs";
 
@@ -134,6 +136,35 @@ export async function POST(req: Request) {
       status,
       originalTransactionId: txn.originalTransactionId,
     });
+
+    // Subscription lifecycle event — the canonical record of every
+    // ASSN-driven status transition (DID_RENEW / EXPIRED / REVOKE
+    // / REFUND / GRACE_PERIOD_EXPIRED / etc.). These cannot be
+    // tracked client-side. Distinct ID = clerk_user_id from the
+    // updated row so the events join cleanly with iOS-side
+    // paywall_subscribed in PostHog funnels. If the lookup fails
+    // (race against deletion), we fall back to the
+    // original_transaction_id namespace so the event isn't lost.
+    const { data: subRow } = await dbAdmin()
+      .from("apple_subscriptions")
+      .select("clerk_user_id, product_id")
+      .eq("original_transaction_id", txn.originalTransactionId)
+      .maybeSingle();
+
+    getPostHogClient().capture({
+      distinctId: subRow?.clerk_user_id ?? `anonymous:${txn.originalTransactionId}`,
+      event: "subscription_status_changed",
+      properties: {
+        notification_type: notificationType,
+        subtype: subtype ?? null,
+        status,
+        product_id: subRow?.product_id ?? null,
+        original_transaction_id: txn.originalTransactionId,
+        expires_at: expiresAt?.toISOString() ?? null,
+        revoked: revokedAt != null,
+      },
+    });
+
     return NextResponse.json({ ok: true, applied: true });
   } catch (err) {
     console.error("[iap/webhook] update failed", { err });

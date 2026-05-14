@@ -275,6 +275,13 @@ export const PRIVILEGED_PACKAGE_SCRIPT_CONTRACTS = {
     requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
     expectedCommandFragments: ["scripts/backfill-set-summaries.mjs"],
   }),
+  "sets:backfill-metadata": packageScriptContract({
+    target: "scripts/backfill-sets-era-release-date.mjs",
+    intendedCaller: "trusted operator backfilling public.sets era + release_date from the Scrydex /expansions API",
+    trustModel: "service_role_backfill_wrapper",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY", "SCRYDEX_API_KEY", "SCRYDEX_TEAM_ID"],
+    expectedCommandFragments: ["scripts/backfill-sets-era-release-date.mjs"],
+  }),
   "import:scrydex-all": packageScriptContract({
     target: "scripts/import-all-scrydex-canonical.mjs",
     intendedCaller: "trusted operator driving the Scrydex admin import route",
@@ -483,6 +490,8 @@ export const INTERNAL_ROUTE_TRUST_CONTRACTS = {
   "cron/run-scrydex-2024plus-catchup": cronSecretRoute("cron/internal automation"),
   "cron/run-scrydex-pipeline": cronSecretRoute("cron/internal automation"),
   "cron/run-scrydex-retry": cronSecretRoute("cron/internal automation"),
+  "cron/run-yahoo-jp-daily": cronSecretRoute("cron/internal automation"),
+  "cron/run-snkrdunk-daily": cronSecretRoute("cron/internal automation"),
   "cron/snapshot-price-history": cronSecretRoute("cron/internal automation"),
   "cron/prune-old-data": cronSecretRoute("cron/internal automation"),
   "cron/mirror-card-images": cronSecretRoute("cron/internal automation"),
@@ -490,6 +499,7 @@ export const INTERNAL_ROUTE_TRUST_CONTRACTS = {
   "cron/discover-new-sets": cronSecretRoute("cron/internal automation"),
   "cron/recompute-refresh-tier": cronSecretRoute("cron/internal automation"),
   "cron/refresh-graded-variant-metrics": cronSecretRoute("cron/internal automation"),
+  "cron/notify-trial-expiring": cronSecretRoute("cron/internal automation"),
 };
 
 export const DEBUG_ROUTE_TRUST_CONTRACTS = {
@@ -653,6 +663,24 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
     expectedSignals: ["service_role_client"],
     usesServiceRole: true,
   }),
+  "scripts/augment-jp-search-doc.mjs": operationalScript({
+    classification: "service_role_backfill",
+    executionMode: "manual_backfill",
+    intendedCaller: "trusted operator augmenting JP canonical_cards.search_doc_norm with EN-equivalent set names + JP language tags so search like 'Charizard JP base set' resolves",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+    notes: "Idempotent — recomputes search_doc_norm from scratch each run; the JP_SET_EN_EQUIV map is the editable source of truth.",
+  }),
+  "scripts/backfill-scrydex-jp-native-names.mjs": operationalScript({
+    classification: "service_role_backfill",
+    executionMode: "manual_backfill",
+    intendedCaller: "trusted operator backfilling canonical_cards.canonical_name_native + set_name_native for JP cards by re-fetching the Scrydex /ja/ catalog",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY", "SCRYDEX_API_KEY", "SCRYDEX_TEAM_ID"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+    notes: "Idempotent — skips rows where canonical_name_native is already populated.",
+  }),
   "scripts/backfill-card-image-digital-flag.mjs": operationalScript({
     classification: "service_role_backfill",
     executionMode: "manual_backfill",
@@ -715,6 +743,14 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
     executionMode: "manual_backfill",
     intendedCaller: "trusted operator backfilling set summary snapshots",
     requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+  }),
+  "scripts/backfill-sets-era-release-date.mjs": operationalScript({
+    classification: "service_role_backfill",
+    executionMode: "manual_backfill",
+    intendedCaller: "trusted operator backfilling public.sets era + release_date columns from the Scrydex /expansions API (PR 4 of the sets-table promotion)",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY", "SCRYDEX_API_KEY", "SCRYDEX_TEAM_ID"],
     expectedSignals: ["service_role_client"],
     usesServiceRole: true,
   }),
@@ -791,6 +827,78 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
     usesServiceRole: false,
     status: "deprecated",
     notes: "Targets the retired sync-justtcg-prices flow and should be replaced before reuse.",
+  }),
+  "scripts/drain-pending-rollups.mjs": operationalScript({
+    classification: "manual_cron_route_driver",
+    executionMode: "manual_backfill",
+    intendedCaller: "trusted operator hammering /api/cron/batch-refresh-pipeline-rollups until the pending_rollups queue drains (used after large bulk-queue operations like the JP rollup backfill)",
+    requiredTrustInputs: ["CRON_SECRET", "SUPABASE_SERVICE_ROLE_KEY"],
+    expectedSignals: ["cron_secret_route_driver", "service_role_client"],
+    usesServiceRole: true,
+    notes: "Reads pending_rollups count via service role to know when drain is complete; only the cron POSTs are POST-side mutations.",
+  }),
+  "scripts/match-yahoo-jp.mjs": operationalScript({
+    classification: "service_role_backfill",
+    executionMode: "manual_backfill",
+    intendedCaller: "trusted operator running per-canonical-card Yahoo! Auctions JP scrape + matcher CLI for spot-checking match quality (does not write — read-only output)",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+    notes: "Read-only debugging CLI. Production writes go through scripts/run-yahoo-jp-pipeline.mjs and the cron route.",
+  }),
+  "scripts/queue-jp-pending-rollups.mjs": operationalScript({
+    classification: "service_role_backfill",
+    executionMode: "manual_backfill",
+    intendedCaller: "trusted operator bulk-queueing JP rollup keys into pending_rollups (workaround for the orchestrator's targeted_rollups under-queue on bulk loads)",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+    notes: "Idempotent — pending_rollups upsert with onConflict ignoreDuplicates.",
+  }),
+  "scripts/run-yahoo-jp-pipeline.mjs": operationalScript({
+    classification: "service_role_backfill",
+    executionMode: "manual_backfill",
+    intendedCaller: "trusted operator running the YAHOO_JP scraper + matcher pipeline against canonical_cards (scrapes Yahoo! Auctions JP closed-search, writes yahoo_jp_card_prices)",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+    notes: "Idempotent (24h skip filter + UPSERT keyed on canonical_slug+grade). Production daily refresh runs via /api/cron/run-yahoo-jp-daily; this script is the one-shot bulk-backfill driver.",
+  }),
+  "scripts/run-snkrdunk-pipeline.mjs": operationalScript({
+    classification: "service_role_backfill",
+    executionMode: "manual_backfill",
+    intendedCaller: "trusted operator running the Snkrdunk scraper + matcher pipeline against canonical_cards (fetches /en/v1/products/SW---<id>/used-listings, aggregates sold listings, writes snkrdunk_card_prices)",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+    notes: "Idempotent (24h skip filter + UPSERT keyed on canonical_slug+printing_id+grade). Production daily refresh will run via /api/cron/run-snkrdunk-daily (currently registered but NOT scheduled in vercel.json — 40-cron quota cap); this script is the one-shot bulk + smoke-test driver.",
+  }),
+  "scripts/match-snkrdunk-canonical.mjs": operationalScript({
+    classification: "service_role_diagnostic",
+    executionMode: "verification",
+    intendedCaller: "trusted operator finding Snkrdunk product matches for our JP canonical_cards (reads canonical_cards via service role for RLS bypass, hits Snkrdunk's public /en/v1/search endpoint, writes matches to a local JSONL file for later persistence by Step C)",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+    notes: "Read-only against our DB; uses service role to bypass RLS on canonical_cards. The only writes are to a local tmp/*.jsonl file. Step C of the catalog-mapper sequence reads that JSONL and persists the matches to the DB (separate concern).",
+  }),
+  "scripts/persist-snkrdunk-matches.mjs": operationalScript({
+    classification: "service_role_import",
+    executionMode: "manual_import",
+    intendedCaller: "trusted operator importing Step B's match JSONL into snkrdunk_product_map (Step C of the catalog-mapper sequence). UPSERTs on canonical_slug; idempotent on re-runs.",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+    notes: "Writes only to snkrdunk_product_map. Skips status='low-confidence'/'no-tc-results'/'no-query'. Conflicts on snkrdunk_product_code (two canonicals mapping to one Snkrdunk product) are logged and skipped — operator inspects.",
+  }),
+  "scripts/perfect-order-coverage.mjs": operationalScript({
+    classification: "service_role_diagnostic",
+    executionMode: "verification",
+    intendedCaller: "trusted operator inspecting Perfect Order catalog coverage (canonical_cards row counts, image_embeddings, pricing rollups) — read-only; no writes",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+    notes: "Diagnostic-only. Uses service role purely to bypass RLS for an inventory query.",
   }),
   "scripts/import-pokemon-tcg-data-local.mjs": operationalScript({
     classification: "service_role_import",
@@ -1168,6 +1276,14 @@ export const RLS_REQUIRED_PUBLIC_TABLES = [
   "profile_post_card_mentions",
   "profile_posts",
   "push_subscriptions",
+  // Snkrdunk / Yahoo! JP pricing companions + Snkrdunk catalog mapper.
+  // RLS-on / no-grants — service-role-only writes; consumers read prices
+  // via the public_card_metrics view (which is GRANTed to anon).
+  // snkrdunk_product_map is NOT exposed through any view (it's internal
+  // catalog state for the orchestrator).
+  "snkrdunk_card_prices",
+  "snkrdunk_product_map",
+  "yahoo_jp_card_prices",
   "user_blocks",
   "moderation_reports",
 ];
@@ -1420,6 +1536,12 @@ export const INTERNAL_NO_GRANT_OBJECTS = [
   "realized_sales_backtest_snapshots",
   "set_finish_summary_latest",
   "set_summary_snapshots",
+  // Snkrdunk pricing companion + catalog map. No anon/authenticated
+  // grants — consumers read prices via the public_card_metrics view
+  // (which IS granted); product_map is internal catalog state. RLS
+  // coverage above in RLS_REQUIRED_PUBLIC_TABLES. Codex P2 on PR #55.
+  "snkrdunk_card_prices",
+  "snkrdunk_product_map",
   "tracked_assets",
   "tracked_refresh_diagnostics",
   "variant_metrics",
@@ -1427,6 +1549,8 @@ export const INTERNAL_NO_GRANT_OBJECTS = [
   "variant_price_latest",
   "variant_sentiment_latest",
   "variant_signals_latest",
+  // Yahoo! JP pricing companion. Same access model as snkrdunk_card_prices.
+  "yahoo_jp_card_prices",
 ];
 
 export const PUBLIC_VIEW_NAMES = [

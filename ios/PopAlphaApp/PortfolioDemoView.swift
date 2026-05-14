@@ -22,7 +22,6 @@ struct PortfolioDemoView: View {
 
                     PortfolioHeroView(
                         summary: Self.demoSummary,
-                        handle: "you",
                         selectedWindow: .constant(.day),
                         costBasisGap: nil
                     )
@@ -187,12 +186,12 @@ struct PortfolioDemoView: View {
     )
 
     private static let demoRadar = APIRadarProfile(
-        vintage: 0.18,
-        graded: 0.55,
-        premium: 0.62,
-        setFinisher: 0.72,
-        japanese: 0.20,
-        grailHunter: 0.45
+        nostalgia: 0.42,
+        currentEra: 0.55,
+        slabFocus: 0.62,
+        marketHeat: 0.48,
+        tasteProfile: 0.38,
+        collectionDepth: 0.72
     )
 
     private static let demoInsights: [PortfolioInsight] = [

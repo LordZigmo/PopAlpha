@@ -24,6 +24,24 @@ struct ScannerTabView: View {
     @State private var showPaywallSheet = false
     @StateObject private var premiumGate = PremiumGate.shared
     @StateObject private var scanQuota = ScanQuota.shared
+
+    /// Tracks which scanner surface most recently flipped
+    /// `showPaywallSheet`, so the paywall analytics carry the right
+    /// `surface` property. Three triggers feed a single sheet — crown
+    /// tap, scan quota wall (camera tap when at the limit), and the
+    /// quota-approaching warning toast — and we want PostHog funnels
+    /// to break them down separately.
+    @State private var paywallSurface: String = "scanner_crown"
+
+    // One-shot quota-approaching warning state. Fires once per day
+    // when the user completes their 4th scan (remaining == 1), as a
+    // soft-friction precursor to the hard wall on scan #5. Cross-
+    // launch dedupe lives in ScanQuota (UserDefaults-backed via
+    // markWarned / lastWarnedScansToday) so the toast doesn't re-
+    // fire every cold launch when the user is sitting at remaining
+    // == 1. Local @State here is just the in-flight visibility flag
+    // for the slide-in/auto-dismiss animation.
+    @State private var quotaWarningVisible = false
     #if DEBUG
     @State private var smokeReport: OfflineScannerSmokeReport?
     @State private var smokeRunning = false
@@ -79,6 +97,7 @@ struct ScannerTabView: View {
                         if !premiumGate.isPro {
                             scanQuota.rolloverIfNewDay()
                             if !scanQuota.canScan {
+                                paywallSurface = "scanner_quota_wall"
                                 showPaywallSheet = true
                                 return
                             }
@@ -112,6 +131,29 @@ struct ScannerTabView: View {
                     .animation(.easeInOut(duration: 0.2), value: scanner.identifyError)
                 }
 
+                // Quota-approaching warning toast. Only shows when
+                // scansToday == dailyLimit - 1 (1 left), the user
+                // isn't pro, no identify is in flight, and the
+                // paywall isn't already open. Sits in the same
+                // bottom-center slot as the identify toast — they're
+                // mutually exclusive (the identify toast is up
+                // during scans; this one fires after a scan settles
+                // back to idle).
+                if quotaWarningVisible {
+                    VStack {
+                        Spacer()
+                        ScanQuotaWarningToast(
+                            remaining: scanQuota.remaining,
+                            onTap: handleQuotaWarningTap,
+                        )
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 140)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    .animation(.easeInOut(duration: 0.25), value: quotaWarningVisible)
+                }
+
                 // Top-right corner buttons. Crown is always visible
                 // (taps open the paywall, long-press toggles the DEBUG
                 // override). The smoke-test button is DEBUG-only and
@@ -134,6 +176,15 @@ struct ScannerTabView: View {
                     }
                     Spacer()
                 }
+                #if DEBUG
+                // Path-source indicator — sticky display of the last
+                // scan's routing (offline vs network), winning_path,
+                // and confidence. Lets us verify "is this scan hitting
+                // the offline catalog or falling through to the server"
+                // without tailing logs while testing on-phone.
+                // Compile-stripped from release builds.
+                lastScanDebugBanner
+                #endif
             }
             .ignoresSafeArea()
             .navigationBarHidden(true)
@@ -209,10 +260,27 @@ struct ScannerTabView: View {
             }
             #endif
             .sheet(isPresented: $showPaywallSheet) {
-                PaywallView()
+                // All three routes that flip showPaywallSheet from this
+                // view (crown tap, scan-quota exhaustion, quota-warning
+                // banner tap) are scanner-contextual frictions, so the
+                // paywall hero copy leads with scanner value. The
+                // specific entry point is captured separately in
+                // `paywallSurface` for PostHog analytics.
+                PaywallView(context: .scanner, surface: paywallSurface)
             }
             .onChange(of: scanner.lastMatch) { _, newValue in
                 handleIdentifyResult(newValue)
+            }
+            // Quota-warning trigger: evaluate when a scan settles back
+            // to idle (isIdentifying true → false), at which point
+            // remaining reflects the just-completed scan and the
+            // toast can show without overlapping the identify toast.
+            // Day-rollover dedupe is handled inside ScanQuota — its
+            // markWarned/lastWarnedScansToday APIs are persisted in
+            // UserDefaults and reset by rolloverIfNewDay, so we don't
+            // need a manual reset here.
+            .onChange(of: scanner.isIdentifying) { _, identifying in
+                if !identifying { evaluateQuotaWarning() }
             }
             .onAppear {
                 #if DEBUG
@@ -220,6 +288,41 @@ struct ScannerTabView: View {
                 #endif
             }
         }
+    }
+
+    // MARK: - Quota-approaching warning (4th-of-5 scan trigger)
+    //
+    // Fires once per day for free users when remaining hits 1. The
+    // toast is presentation-only (ScanQuotaWarningToast); this method
+    // gates trigger conditions and schedules auto-dismiss after 4s
+    // of being on screen so it doesn't camp.
+
+    private func evaluateQuotaWarning() {
+        guard !premiumGate.isPro,
+              scanQuota.remaining == 1,
+              !showPaywallSheet,
+              !scanner.isIdentifying,
+              scanQuota.lastWarnedScansToday != scanQuota.scansToday
+        else { return }
+
+        scanQuota.markWarned()
+        withAnimation { quotaWarningVisible = true }
+
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(4))
+            // Re-check: if the user already tapped + opened the
+            // paywall, or navigated away, don't bother animating out.
+            if quotaWarningVisible {
+                withAnimation { quotaWarningVisible = false }
+            }
+        }
+    }
+
+    private func handleQuotaWarningTap() {
+        PAHaptics.tap()
+        quotaWarningVisible = false
+        paywallSurface = "scanner_quota_warning"
+        showPaywallSheet = true
     }
 
     // MARK: - Camera-starting placeholder
@@ -325,6 +428,7 @@ struct ScannerTabView: View {
     private var crownGesture: some Gesture {
         let tap = TapGesture().onEnded {
             PAHaptics.tap()
+            paywallSurface = "scanner_crown"
             showPaywallSheet = true
         }
         #if DEBUG
@@ -377,6 +481,51 @@ struct ScannerTabView: View {
             .clipShape(Circle())
         }
         .disabled(smokeRunning)
+    }
+
+    /// DEBUG-only sticky banner showing the last scan's routing.
+    /// Bottom-left of the scanner, small enough not to obscure the
+    /// viewfinder. Goes blank until the first scan completes, then
+    /// stays visible (sticky) until the next scan replaces it. Lets
+    /// the operator verify "this scan went offline / this scan went
+    /// to the server" while iterating on accuracy work without having
+    /// to tail logs from a connected Mac.
+    @ViewBuilder
+    private var lastScanDebugBanner: some View {
+        if let source = scanner.lastSource {
+            VStack {
+                Spacer()
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(source == "offline" ? Color.green : Color.orange)
+                                .frame(width: 6, height: 6)
+                            Text(source.uppercased())
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .foregroundStyle(.white)
+                        }
+                        if let path = scanner.lastWinningPath {
+                            Text("path=\(path)")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.85))
+                        }
+                        if let conf = scanner.lastConfidence {
+                            Text("conf=\(conf)")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.85))
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 6))
+                    Spacer()
+                }
+                .padding(.leading, 16)
+                .padding(.bottom, 100)
+            }
+            .allowsHitTesting(false)
+        }
     }
 
     private func runSmokeTestIfRequested() {
@@ -444,8 +593,11 @@ struct ScannerTabView: View {
     }
 
     /// Synthesizes a 384×384 deterministic-noise image for the
-    /// orchestrator end-to-end check.
-    private static func makeOrchestratorTestImage() -> UIImage {
+    /// orchestrator end-to-end check. `nonisolated` because pure
+    /// pixel synthesis touches no actor state — without it, Swift 6
+    /// rejects the call from the smoke-test runner closure (which
+    /// is not @MainActor) even though it's safe.
+    nonisolated private static func makeOrchestratorTestImage() -> UIImage {
         let side = 384
         let bytesPerPixel = 4
         let bytesPerRow = side * bytesPerPixel
@@ -696,6 +848,14 @@ final class ScannerHost: ObservableObject {
     /// fallback.
     @Published private(set) var lastWinningPath: String?
 
+    /// "offline" (matched against the bundled .papb catalog on-device)
+    /// or "network" (POSTed to /api/scan/identify). DEBUG-only overlay
+    /// surfaces this so the operator can verify routing while iterating
+    /// on scanner accuracy work — without it, an offline-only fix
+    /// could look like it shipped when the scan actually fell through
+    /// to the server.
+    @Published private(set) var lastSource: String?
+
     /// Language hint passed to /api/scan/identify. Defaults to EN; the
     /// scanner UI exposes a pill toggle so the user can flip to JP.
     /// `@Published` so the languagePill in the scanner overlay
@@ -920,7 +1080,12 @@ final class ScannerHost: ObservableObject {
     /// (Vision rectangle stable-fire), "tap" (manual tap-to-capture),
     /// or "library" (Photos picker). Surfaces in scan_e2e log lines
     /// so a baseline can compare auto-detect fire rate vs manual.
-    private func runIdentify(image: UIImage, ocrImage: UIImage? = nil, triggerSource: String = "unknown") async {
+    private func runIdentify(
+        image: UIImage,
+        ocrImage: UIImage? = nil,
+        additionalOCRFrames: [UIImage] = [],
+        triggerSource: String = "unknown",
+    ) async {
         // RE-ENTRY GUARD. PopAlphaVisionEngine.reset() clears the
         // current stability candidate but does NOT stop frame
         // analysis. So while we're inside an identify call, Vision
@@ -976,7 +1141,32 @@ final class ScannerHost: ObservableObject {
         // never contained that text in the first place.
         let imageForOCR = ocrImage ?? image
         let ocrT0 = Date()
-        let ocrMulti = await OCRService.extractCardIdentifiersMulti(from: imageForOCR)
+        // Multi-frame consensus on the tap path (Phase 2): when the
+        // caller provided additional OCR frames captured ~200ms apart,
+        // run OCR in parallel across all of them and vote on
+        // card_number candidates by frequency. Single-frame callers
+        // (auto-detect, library) pass [] and behave identically to
+        // pre-Phase-2.
+        //
+        // Embedding still uses `image` (the first frame) — the card
+        // hasn't moved in the ~400ms capture window, so first-frame
+        // embedding matches the multi-frame OCR consensus to within
+        // sub-pixel motion. Avoids the embedding-averaging complexity
+        // for v1.
+        let ocrMulti: (
+            cardNumbers: [String],
+            setHint: String?,
+            detectedLanguage: ScanLanguage,
+            pass2FallbackFired: Bool,
+            spatialFilterRejectedCount: Int
+        )
+        if additionalOCRFrames.isEmpty {
+            ocrMulti = await OCRService.extractCardIdentifiersMulti(from: imageForOCR)
+        } else {
+            ocrMulti = await OCRService.extractCardIdentifiersMultiFrame(
+                from: [imageForOCR] + additionalOCRFrames,
+            )
+        }
         // Zero-tap language detection: extractCardIdentifiersMulti
         // always runs Vision with both ja-JP and en-US loaded and
         // detects the card's language by scanning the recognized text
@@ -1050,7 +1240,10 @@ final class ScannerHost: ObservableObject {
                     image: image,
                     language: self.scanLanguage,
                     cardNumber: ocr.cardNumber,
-                    setHint: ocr.setHint
+                    setHint: ocr.setHint,
+                    ocrCardNumberExtracted: !ocrMulti.cardNumbers.isEmpty,
+                    ocrPass2FallbackFired: ocrMulti.pass2FallbackFired,
+                    ocrSpatialFilterRejectedCount: ocrMulti.spatialFilterRejectedCount,
                 )
             }
             guard let response else {
@@ -1068,6 +1261,7 @@ final class ScannerHost: ObservableObject {
             self.lastConfidence = reranked.confidence
             self.lastImageHash = response.imageHash
             self.lastWinningPath = response.winningPath
+            self.lastSource = usedOffline ? "offline" : "network"
             // Retain JPEG-source UIImage only for offline scans —
             // online scans already uploaded to scan-uploads/<hash>.jpg
             // so the correction-via-hash path works without it.
@@ -1088,6 +1282,37 @@ final class ScannerHost: ObservableObject {
             // auto-detect fire rate.
             let scanMs = Date().timeIntervalSince(scanT0) * 1000
             Logger.scan.debug("scan_e2e: trigger=\(triggerSource) source=\(usedOffline ? "offline" : "network") confidence=\(reranked.confidence) ocr_ms=\(String(format: "%.1f", ocrMs)) total_ms=\(String(format: "%.1f", scanMs))")
+
+            // Phase 0c — emit card_scanned event with the dimensions
+            // that diagnose real-device first-time HIGH rate. Server-
+            // routed scans also write these to scan_identify_events
+            // via query params (Phase 0b), but offline scans (the
+            // dominant path for premium users) live ONLY here. PostHog
+            // is queryable for "what % of scans returned HIGH on first
+            // try?" + "what fraction had cardNumbers=[]?" within a day
+            // of usage.
+            //
+            // Property naming mirrors scan_identify_events column
+            // names where they overlap so the two surfaces can be
+            // joined in PostHog if/when we ship the warehouse pipe.
+            AnalyticsService.shared.capture(.cardScanned, properties: [
+                "trigger_source": triggerSource,
+                "source": usedOffline ? "offline" : "network",
+                "language": self.scanLanguage.rawValue,
+                "confidence": reranked.confidence,
+                "winning_path": response.winningPath ?? "nil",
+                "top_match_slug": reranked.matches.first?.slug ?? "nil",
+                "top_similarity": reranked.matches.first?.similarity ?? 0,
+                "ocr_card_number_extracted": !ocrMulti.cardNumbers.isEmpty,
+                "ocr_card_numbers_count": ocrMulti.cardNumbers.count,
+                "ocr_pass2_fallback_fired": ocrMulti.pass2FallbackFired,
+                "ocr_spatial_filter_rejected_count": ocrMulti.spatialFilterRejectedCount,
+                "ocr_set_hint_present": ocrMulti.setHint != nil,
+                "ocr_frames_used": 1 + additionalOCRFrames.count,
+                "ocr_ms": Int(ocrMs),
+                "scan_total_ms": Int(scanMs),
+                "model_version": response.modelVersion,
+            ])
             #if DEBUG
             // Save the EXACT frame the embedder saw to Photos for EVERY
             // scan, including HIGH. HIGH-but-wrong is the worst-case
@@ -1110,7 +1335,35 @@ final class ScannerHost: ObservableObject {
                 source: usedOffline ? .offline : .network,
                 ocrCardNumbers: ocrMulti.cardNumbers,
                 ocrSetHint: ocrMulti.setHint,
+                triggerSource: triggerSource,
+                framesUsed: 1 + additionalOCRFrames.count,
+                pass2FallbackFired: ocrMulti.pass2FallbackFired,
+                spatialFilterRejectedCount: ocrMulti.spatialFilterRejectedCount,
             )
+            // Phase 0d auto-promote: HIGH scans are presumed correct
+            // and silently land in scan_eval_images so the 100-card
+            // ship test grows the eval corpus with real-device frames.
+            // MEDIUM/LOW skipped here — picker-pick path handles
+            // MEDIUM with the actual ground-truth slug. See
+            // ScanDebugCapture.autoPromoteToEval header for full rules.
+            //
+            // 2026-05-13 (Codex P2 fix): pass `image` so offline scans
+            // route through promoteEvalFromBytes. Without this, every
+            // offline HIGH auto-promote 404'd (no scan-uploads object
+            // exists for offline-computed hashes) and the eval corpus
+            // captured 0 offline cases. Online scans tolerate nil but
+            // we pass the bytes uniformly — re-encode cost is trivial.
+            if reranked.confidence == "high",
+               let hash = response.imageHash,
+               let topSlug = reranked.matches.first?.slug {
+                ScanDebugCapture.autoPromoteToEval(
+                    imageHash: hash,
+                    canonicalSlug: topSlug,
+                    capturedSource: .userPhoto,
+                    notesTag: "auto_high_test:\(triggerSource)",
+                    scanImage: image,
+                )
+            }
             #endif
 
             // Low-confidence → auto-resume so the user can try again
@@ -1123,6 +1376,22 @@ final class ScannerHost: ObservableObject {
         } catch {
             self.isIdentifying = false
             self.identifyError = error.localizedDescription
+            // Phase 0c — count error scans against the same event so
+            // the HIGH-rate denominator is "all attempted scans" not
+            // "successful scans only." Mirrors server emitScanFailureEvent.
+            AnalyticsService.shared.capture(.cardScanned, properties: [
+                "trigger_source": triggerSource,
+                "source": usedOffline ? "offline" : "network",
+                "language": self.scanLanguage.rawValue,
+                "confidence": "error",
+                "error_message": error.localizedDescription,
+                "ocr_card_number_extracted": !ocrMulti.cardNumbers.isEmpty,
+                "ocr_card_numbers_count": ocrMulti.cardNumbers.count,
+                "ocr_pass2_fallback_fired": ocrMulti.pass2FallbackFired,
+                "ocr_spatial_filter_rejected_count": ocrMulti.spatialFilterRejectedCount,
+                "ocr_set_hint_present": ocrMulti.setHint != nil,
+                "ocr_frames_used": 1 + additionalOCRFrames.count,
+            ])
             #if DEBUG
             ScanDebugCapture.capture(
                 image: image,
@@ -1130,6 +1399,10 @@ final class ScannerHost: ObservableObject {
                 source: usedOffline ? .offline : .network,
                 ocrCardNumbers: ocrMulti.cardNumbers,
                 ocrSetHint: ocrMulti.setHint,
+                triggerSource: triggerSource,
+                framesUsed: 1 + additionalOCRFrames.count,
+                pass2FallbackFired: ocrMulti.pass2FallbackFired,
+                spatialFilterRejectedCount: ocrMulti.spatialFilterRejectedCount,
             )
             #endif
             self.resumeScanning()
@@ -1157,27 +1430,48 @@ final class ScannerHost: ObservableObject {
     /// stub is in use (no frameCapturer hook installed there).
     func captureFrameAndIdentify() async {
         guard let capturer = viewModel?.frameCapturer,
-              let image = capturer() else {
+              let primaryFrame = capturer() else {
             return
         }
         // Path A (2026-05-05): OCR runs on the same image the embedder
-        // sees (the 0.85 center-crop) — NOT the full uncropped frame
-        // we previously routed via captureFullFrame.
+        // sees (the 0.85 center-crop, via frameCapturer) — NOT the full
+        // uncropped frame previously routed via captureFullFrame.
+        // Real-device data showed Vision text-recognition was
+        // dramatically better on the tight crop (100% card_number hit
+        // rate vs 33% on the full frame), so we never reverted.
+        // captureFullFrame is still installed on the view model but
+        // unused.
         //
-        // Baseline data 2026-05-05 showed OCR finding card_numbers in
-        // 100% (6/6) of Vision-cropped auto-detect captures vs 33%
-        // (1/3) of full uncropped tap captures. Vision text
-        // recognition is dramatically better when the input is tight
-        // to the card — background pixels and sub-card aspect ratio
-        // confuse it more than they help. The earlier theory (full
-        // frame preserves the bottom edge of cards held filling the
-        // viewfinder) wasn't supported by the actual hit rate.
-        //
-        // captureFullFrame stays installed on the view model but is
-        // unused for now. Easy to re-route here if Path A regresses
-        // and we discover the bottom-edge concern was real for some
-        // framing pattern we didn't sample.
-        await runIdentify(image: image, triggerSource: "tap")
+        // Phase 2 multi-frame consensus (2026-05-08): capture
+        // additional frames spaced ~200ms apart so OCR has multiple
+        // shots at the card_number under different motion-blur / glare
+        // conditions. Video pipeline writes a fresh pixelBuffer at
+        // ~60fps, so successive captureCurrentFrame calls return
+        // distinct frames. Vote-based card_number selection across the
+        // bundle is what closes the single-frame-fragility gap that
+        // drove "first-time HIGH felt low" on real device. Auto-detect
+        // path keeps single-frame (already async + low-friction;
+        // multi-frame would slow it past noticeable).
+        let additionalFrameCount = 2  // total = primary + 2 additional = 3
+        let interFrameNanos: UInt64 = 200_000_000
+        var additionalFrames: [UIImage] = []
+        Logger.scan.debug("multiframe BEGIN primary=ok target_additional=\(additionalFrameCount)")
+        for i in 0..<additionalFrameCount {
+            try? await Task.sleep(nanoseconds: interFrameNanos)
+            let frame = capturer()
+            if let f = frame {
+                additionalFrames.append(f)
+                Logger.scan.debug("multiframe iter=\(i) capture=ok size=\(Int(f.size.width))x\(Int(f.size.height))")
+            } else {
+                Logger.scan.debug("multiframe iter=\(i) capture=NIL — capturer returned nil after \(interFrameNanos / 1_000_000)ms sleep")
+            }
+        }
+        Logger.scan.debug("multiframe END additional_frames=\(additionalFrames.count) of \(additionalFrameCount)")
+        await runIdentify(
+            image: primaryFrame,
+            additionalOCRFrames: additionalFrames,
+            triggerSource: additionalFrames.isEmpty ? "tap" : "tap_multiframe",
+        )
     }
 
     func resumeScanning() {
@@ -1198,6 +1492,7 @@ final class ScannerHost: ObservableObject {
         lastScanImage = nil
         lastOCR = (nil, nil)
         lastWinningPath = nil
+        lastSource = nil
     }
 }
 

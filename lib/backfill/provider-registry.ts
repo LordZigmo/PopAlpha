@@ -1,10 +1,29 @@
 /**
  * Single source of truth for backend pipeline providers.
  *
- * As of 2026-04-17 only SCRYDEX is active. JUSTTCG, POKETRACE, and
- * POKEMON_TCG_API have been retired. Historical rows in pricing tables
- * still carry those provider strings and are read by SQL rollups, but no
- * code path writes them anymore.
+ * As of 2026-04-17 only SCRYDEX is in the queue-driven pipeline.
+ * JUSTTCG, POKETRACE, and POKEMON_TCG_API have been retired. Historical
+ * rows in pricing tables still carry those provider strings and are
+ * read by SQL rollups, but no code path writes them anymore.
+ *
+ * YAHOO_JP intentionally does NOT live in this registry. It runs
+ * outside the pipeline_jobs queue (cron route at
+ * /api/cron/run-yahoo-jp-daily + standalone backfill at
+ * scripts/run-yahoo-jp-pipeline.mjs) because:
+ *   • Yahoo! listings don't have stable provider_card_ids that map to
+ *     canonical_slug; matching is structural via title parsing in
+ *     lib/jp/matcher.mjs, not via provider_card_map lookup.
+ *   • The raw → normalized → matched → variant_metrics → card_metrics
+ *     rollup path assumes provider_card_id indirection. Forcing
+ *     YAHOO_JP through it would either need fake provider IDs or a
+ *     parallel matcher that duplicates lib/jp/matcher.mjs.
+ *   • YAHOO_JP writes directly to its own table (yahoo_jp_card_prices),
+ *     joined into public_card_metrics via a view. Different table,
+ *     different lifecycle, different code path — not a queue tenant.
+ *
+ * The "YAHOO_JP" string still appears in `provider_normalized_observations`
+ * and a few comments/labels for human-readable provenance, but those
+ * sites don't read this registry.
  *
  * Note: the active Scrydex ingest/normalize/match lib lives in
  * `lib/backfill/pokemontcg-*.ts` for historical reasons — the Scrydex

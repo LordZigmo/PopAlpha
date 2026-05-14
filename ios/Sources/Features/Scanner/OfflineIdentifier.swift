@@ -145,6 +145,20 @@ public final class OfflineIdentifier {
     public static let highCosDist: Float = 0.25       // similarity ≥ 0.75
     public static let mediumCosDist: Float = 0.30     // similarity ≥ 0.70
     public static let highMinGap: Float = 0.04
+    /// Phase 1.5 (2026-05-08): trust HIGH on strong absolute match
+    /// even with small gap to rank-2. Mirrors the server constant
+    /// CONFIDENCE_HIGH_ABSOLUTE_FLOOR_COS_DIST. Loosened 2026-05-08
+    /// from 0.07 (sim ≥ 0.93) → 0.12 (sim ≥ 0.88) after real-device
+    /// feedback that the picker still appeared even when top-1 was
+    /// the user's actual card. See route.ts header for rationale.
+    public static let highAbsoluteFloorCosDist: Float = 0.12  // similarity ≥ 0.88
+
+    /// Phase 1.5 narrow-path promotion (2026-05-08): when Path A or
+    /// Path B narrows to 2-3 candidates BUT top-1 visually dominates
+    /// (high abs sim AND notable gap to rank-2), promote to HIGH so
+    /// auto-navigate kicks in. Mirrors NARROW_PROMOTE_* in route.ts.
+    public static let narrowPromoteTopCosDist: Float = 0.15  // similarity ≥ 0.85
+    public static let narrowPromoteMinGap: Float = 0.10
 
     /// Larger pool for Path B intersection. The kNN already computes
     /// dot-products for every row in the catalog (vDSP matrix-vector
@@ -334,9 +348,21 @@ public final class OfflineIdentifier {
                 }
                 .sorted { $0.similarity > $1.similarity }
                 let limited = Array(ranked.prefix(request.limit))
+                // Phase 1.5 narrow-path promotion (2026-05-08): same
+                // rule as the Path B narrow handler. See comment
+                // there + NARROW_PROMOTE_* constants.
+                let narrowTopCosDist = limited.first?.cosDistance ?? 1.0
+                let narrowGap: Float = limited.count >= 2
+                    ? limited[0].similarity - limited[1].similarity
+                    : 0
+                let narrowTopDominates =
+                    narrowTopCosDist <= Self.narrowPromoteTopCosDist
+                    && narrowGap >= Self.narrowPromoteMinGap
+                let confidence: OfflineScanConfidence =
+                    narrowTopDominates ? .high : .medium
                 return result(
                     matches: limited,
-                    confidence: .medium,
+                    confidence: confidence,
                     winningPath: .ocrDirectNarrow,
                     cardNumberFilterApplied: cardNumberFilterApplied,
                     setHintFilterApplied: setHintFilterApplied,
@@ -409,9 +435,23 @@ public final class OfflineIdentifier {
                         source: .knn,
                     )
                 }
+                // Phase 1.5 narrow-path promotion (2026-05-08):
+                // default narrow → MEDIUM, but if top-1 visually
+                // dominates the 2-3 survivors (small absolute
+                // cos_dist AND notable gap), promote to HIGH so
+                // auto-navigate fires. Mirrors route.ts handler.
+                let narrowTopCosDist = matches.first?.cosDistance ?? 1.0
+                let narrowGap: Float = matches.count >= 2
+                    ? matches[0].similarity - matches[1].similarity
+                    : 0
+                let narrowTopDominates =
+                    narrowTopCosDist <= Self.narrowPromoteTopCosDist
+                    && narrowGap >= Self.narrowPromoteMinGap
+                let confidence: OfflineScanConfidence =
+                    narrowTopDominates ? .high : .medium
                 return result(
                     matches: Array(matches),
-                    confidence: .medium,
+                    confidence: confidence,
                     winningPath: .ocrIntersectNarrow,
                     cardNumberFilterApplied: cardNumberFilterApplied,
                     setHintFilterApplied: setHintFilterApplied,
@@ -654,6 +694,9 @@ extension OfflineIdentifier {
             }
             // gap-null = uncontested rank-1 → high (route.ts:436).
             if gap == nil { return .high }
+            // Phase 1.5: at very-high absolute sim, trust top-1 even
+            // if gap to rank-2 is small. Mirrors route.ts.
+            if topDistance <= highAbsoluteFloorCosDist { return .high }
             if let g = gap, g >= highMinGap { return .high }
             return .medium
         }

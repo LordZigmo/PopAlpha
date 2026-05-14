@@ -358,14 +358,34 @@ actor CardService {
 
     // MARK: - Card Detail (from metrics)
 
-    func fetchCardMetrics(slug: String) async throws -> CardMetricsResult? {
+    /// Fetch the public_card_metrics row for a card.
+    ///
+    /// When `printingId` is nil, returns the canonical-level row
+    /// (`printing_id IS NULL`) — the blended/fallback view. When a
+    /// `printingId` is provided, returns the per-printing row. The view
+    /// itself COALESCEs per-printing yahoo_jp_* over the canonical
+    /// fallback, so a per-printing query that has no per-printing
+    /// yahoo data yet still surfaces the canonical-level blended price
+    /// — no extra fetch needed on the client side.
+    ///
+    /// Why this matters now (2026-05-13): yahoo_jp_card_prices became
+    /// per-printing in migration 20260513120000. Cards with multiple
+    /// printings (HOLO + Reverse Holo, etc.) can have different median
+    /// prices per finish. When the user taps a finish pill on the card
+    /// detail view, we re-fetch metrics with that printingId so the
+    /// hero price reflects the selected finish instead of staying on
+    /// the blended canonical median.
+    func fetchCardMetrics(slug: String, printingId: String? = nil) async throws -> CardMetricsResult? {
+        let printingFilter: (String, String, String) = printingId.map {
+            ("printing_id", "eq", $0)
+        } ?? ("printing_id", "is", "null")
         let data = try await Supabase.query(
             table: "public_card_metrics",
-            select: "canonical_slug,market_price,market_price_as_of,change_pct_24h,change_pct_7d,market_confidence_score,market_low_confidence,median_7d,median_30d,low_30d,high_30d,active_listings_7d,snapshot_count_30d",
+            select: "canonical_slug,market_price,market_price_as_of,change_pct_24h,change_pct_7d,market_confidence_score,market_low_confidence,median_7d,median_30d,low_30d,high_30d,active_listings_7d,snapshot_count_30d,yahoo_jp_price,yahoo_jp_price_jpy,yahoo_jp_sample_count,yahoo_jp_observed_at,snkrdunk_price,snkrdunk_sample_count,snkrdunk_observed_at,snkrdunk_product_code,canonical_name_native,set_name_native,language",
             filters: [
                 ("canonical_slug", "eq", slug),
                 ("grade", "eq", "RAW"),
-                ("printing_id", "is", "null"),
+                printingFilter,
             ],
             limit: 1
         )
@@ -449,6 +469,21 @@ actor CardService {
     }
 
     // MARK: - Set Browser
+
+    /// Fetch curated metadata for a set (era, release date, etc.) from
+    /// `public.sets`. Returns `nil` if no row exists for the given set_name.
+    /// RLS is public-read on the sets table (PR #34 → 20260509130000), so
+    /// no auth header beyond the anon key is required.
+    func fetchSetMetadata(setName: String) async throws -> SetMetadataRow? {
+        let data = try await Supabase.query(
+            table: "sets",
+            select: "set_name,era,release_date,derived_card_count",
+            filters: [("set_name", "eq", setName)],
+            limit: 1
+        )
+        let rows = try decoder.decode([SetMetadataRow].self, from: data)
+        return rows.first
+    }
 
     /// Fetch all cards in a set with prices and images, sorted by price desc.
     func fetchSetCards(setName: String) async throws -> [MarketCard] {
@@ -597,6 +632,17 @@ struct ImageRow: Decodable {
     let imageUrl: String?
 }
 
+/// Row from `public.sets`. Curated metadata: era + release_date are populated
+/// via scripts/backfill-sets-era-release-date.mjs from the Scrydex /expansions
+/// API; both may be `nil` for the small tail of sets Scrydex doesn't return
+/// (3 today: base-set, pokemon-card-151, xy-evolutions).
+struct SetMetadataRow: Decodable {
+    let setName: String
+    let era: String?
+    let releaseDate: String?
+    let derivedCardCount: Int?
+}
+
 struct SparklineRow: Decodable {
     let canonicalSlug: String
     let ts: String
@@ -630,6 +676,37 @@ struct CardMetricsResult: Decodable {
     let high30d: Double?
     let activeListings7d: Int?
     let snapshotCount30d: Int?
+    /// Japanese-market scraped price columns. Populated by
+    /// scripts/run-yahoo-jp-pipeline.mjs from Yahoo! Auctions JP
+    /// closed-auction sold listings. Only set on JP-language
+    /// canonical_cards. The USD price is the JPY median converted via
+    /// the env-configured JPY/USD rate (lib/pricing/fx.ts mirror); the
+    /// JPY field is preserved so the UI can display the native price
+    /// without re-converting.
+    let yahooJpPrice: Double?
+    let yahooJpPriceJpy: Double?
+    let yahooJpSampleCount: Int?
+    let yahooJpObservedAt: String?
+    /// Snkrdunk scraped price columns. Populated by
+    /// scripts/run-snkrdunk-pipeline.mjs from Snkrdunk's English
+    /// /en/v1/products/SW---<id>/used-listings JSON API (only sold
+    /// listings, condition=A/B map to RAW; PSA 10 maps to grade=G10).
+    /// Second JP-native source after Yahoo! — fills the modern-card
+    /// gap where Yahoo!'s vintage strength tapers off. The USD price
+    /// is Snkrdunk's own JPY→USD conversion (they serve USD directly
+    /// on the English site). product_code is the SW---<id> identifier
+    /// used to re-fetch via the cron route.
+    let snkrdunkPrice: Double?
+    let snkrdunkSampleCount: Int?
+    let snkrdunkObservedAt: String?
+    let snkrdunkProductCode: String?
+    /// Bilingual identity. Populated for JP cards by the Scrydex
+    /// /ja/ catalog backfill. iOS uses these to render the bilingual
+    /// hero (English on top, Japanese smaller below) and to detect
+    /// "this is a JP card" without slug-suffix sniffing.
+    let canonicalNameNative: String?
+    let setNameNative: String?
+    let language: String?
 }
 
 struct GradedVariantMetricRow: Decodable {

@@ -22,27 +22,44 @@ Companion to:
 
 ---
 
-## 1. Where we are (post-Tier-1.1, 2026-05-07)
+## 1. Where we are (post-Phase-1, 2026-05-08)
 
 Three-mode eval against `https://popalpha.ai`, 323 labeled images:
 
 | Mode | What it tests | Top-1 |
 |---|---|---|
-| **Default** (no OCR sent) | Pure pgvector kNN on SigLIP-2 + the orphan/digital-only filters | **72.1%** (233/323) |
-| **Path B ceiling** (perfect OCR card_number, no set_hint) | kNN ∩ canonical_cards.card_number narrowing | **94.4%** (305/323) |
-| **Path A ceiling** (perfect OCR card_number + set_hint) | Direct canonical_cards lookup with kNN tiebreak | **95.7%** (309/323) |
+| **Default** (no OCR sent) | Pure pgvector kNN on SigLIP-2 + the orphan/digital-only filters | **79.3%** (256/323) |
+| **Path B ceiling** (perfect OCR card_number, no set_hint) | kNN ∩ canonical_cards.card_number narrowing | **94.7%** (306/323) |
+| **Path A ceiling** (perfect OCR card_number + set_hint) | Direct canonical_cards lookup with kNN tiebreak | **96.0%** (310/323) |
+
+The Default-mode lift from the previous baseline (72.1% → 79.3%) is
+NOT from Phase 1 — it's from the SigLIP embedding backfill that
+landed after the model-version-aware cron filter shipped (commit
+`23bb75d`, 2026-05-07: ~1,486 rows backfilled). Phase 1 itself moved
+the confidence-tier distribution within Path B (more HIGH, fewer
+MEDIUM-but-correct) without changing top-1 ranking — see §3 Tier 1.6
+for the mechanism.
 
 This shape — and *only* this shape — tells us where the gaps are:
 
 | Gap | Size | What closes it |
 |---|---|---|
-| **Default → Path B** | **22.3pp** | Make iOS card_number OCR extract reliably on real-device captures |
+| **Default → Path B** | **15.4pp** | Make iOS card_number OCR extract reliably on real-device captures |
 | Path B → Path A | 1.3pp | Better set_hint extraction (mostly tapped out post-Phase-1) |
-| Path A → 100% | 4.3pp | Better embedder (SigLIP-2 fine-tune or model swap) |
+| Path A → 100% | 4.0pp | Better embedder (SigLIP-2 fine-tune or model swap) |
 
-**The 22.3pp gap is the entire game right now.** When OCR
-card_number fires correctly, we're at 94%+ regardless of
-set_hint. When it doesn't, we're at 72%.
+**The 15.4pp gap is still the dominant lever** — narrower than the
+22.3pp pre-backfill but the OCR-robustness work remains the highest
+real-device ROI. When OCR card_number fires correctly, we're at
+~95% regardless of set_hint. When it doesn't, we're at 79%.
+
+The eval also surfaced the HIGH-confidence-rate signal that drove
+the user's "first-time HIGH feels low" observation: **Path B run
+shows 267/323 = 82.7% HIGH** (with perfect OCR card_number, post
+Phase 1). That's the realistic upper bound on first-try HIGH-rate
+assuming OCR fires. Real-device OCR isn't 100% — Phase 2 (multi-frame
+consensus on tap) is the lever to close the gap between real-device
+OCR and this ceiling.
 
 ### What Tier 1.1 actually shipped (and didn't)
 
@@ -159,39 +176,45 @@ confidence on most of those without the card_number signal.
 Lower priority than originally planned. Revisit if real-device
 top-1 plateau emerges.
 
-#### 1.5 Diagnostic telemetry (NEW, NOW HIGHEST PRIORITY)
+#### 1.5 Diagnostic telemetry — ✅ shipped 2026-05-08 (Phase 0a/b/c)
 
-Promoted from "future polish" to **next active workstream** after
-the stage 3.1 revert. Two reasons:
+Two-surface telemetry foundation complete:
 
-1. **Mode 8 needs empirical instrumentation before any further
-   fix attempt.** Specifically: log the input quadrilateral
-   corners, the perspective-correction output extent, and one
-   sample observation's raw boundingBox values for each scan
-   (or each scan when DEBUG flag is on). Save the
-   post-correction image to scan_uploads with a known prefix
-   so it can be visually inspected. From this data the actual
-   coord-system behavior becomes obvious.
+**Server-routed scans (free-tier + offline-miss fallback)** — DB
+columns added to `scan_identify_events` via migration
+`20260508000000_scan_identify_events_ocr_diagnostics.sql`:
+- `ocr_card_number_extracted: bool`
+- `ocr_pass2_fallback_fired: bool`
+- `ocr_spatial_filter_rejected_count: int`
 
-2. **Real-device aggregate metrics are missing.** We've been
-   reasoning from ~30-scan smoke samples. Add to
-   `scan_identify_events`:
-   - `ocr_card_number_extracted: bool` — did we get any
-     card_number candidates?
-   - `ocr_pass2_fallback_fired: bool` — did pass-1 reject and
-     pass-2 recover?
-   - `ocr_spatial_filter_rejected_count: int` — how many
-     slash-line observations did the spatial filter reject?
-   - `ocr_perspective_corrected_extent: jsonb` — debug-only,
-     the corner points + output extent for one observation per
-     scan.
+iOS sends these as query params on `/api/scan/identify`; the route
+parses and persists them via `logScanEvent` (commit d7f6d30).
 
-   Aggregated weekly, this tells us whether the failure modes
-   we've been chasing are 5% of scans or 50%, and prioritizes
-   accordingly.
+**Offline scans (premium, dominant path)** — PostHog `card_scanned`
+event emitted from `ScannerHost.runIdentify` on every scan
+completion (success AND error paths). Properties cover the full
+diagnostic surface plus winning_path / confidence / top_match_slug /
+top_similarity / ocr_frames_used so we can segment the Phase 2
+multi-frame impact in PostHog without comparing deploys (commit
+60196ff).
 
-**Estimated effort:** ~half-day for the telemetry, ~half-day
-for the saved-image inspection harness. Total ~1 day.
+Aggregate queries now answerable from PostHog within a day of
+real-device usage:
+- "What % of scans returned HIGH on first try, segmented by
+  trigger_source (auto-detect / tap / tap_multiframe)?"
+- "What fraction of medium-confidence scans had cardNumbers=[]?"
+  (the Mode 6 prevalence question)
+- "Does pass2_fallback_fired correlate with confidence outcome?"
+- "What's the spatial_filter_rejected_count distribution and does
+  it predict failure modes?"
+
+**Phase 0d (saved-image inspection harness for Mode 8) deferred.**
+The perspective-correction coord quirk (Mode 8) still needs a
+proper diagnostic-then-fix pass — saving the post-correction CIImage
+to a debug Storage path so we can visually inspect orientation
+before writing the next coord-system transform. Defer until we have
+focused time; pass-2 fallback is handling the OCR side gracefully
+in the meantime.
 
 #### 1.6 Trust-killer sim-floor refinement on `ocr_intersect_unique` — ✅ shipped 2026-05-08
 
@@ -236,22 +259,52 @@ rows on the Path B ceiling run.
 correct→wrong flips. Real-device smoke session is the ultimate
 proof of the user-facing lift.
 
-#### 1.2 Multi-frame consensus on tap
+#### 1.2 Multi-frame consensus on tap — ✅ shipped 2026-05-08 (v1)
 
-On a tap-to-scan, capture 3–5 frames over ~600ms instead of 1.
-Average embeddings, vote on OCR card_number candidates across
-frames, return when 2+ frames agree at HIGH confidence. Best for
-cards with single-frame issues (glare, motion blur, partial
-occlusion).
+Tap path captures 3 frames spaced ~200ms apart (total ~400ms wait),
+runs OCR on all of them concurrently via `withTaskGroup`, votes on
+card_number candidates by frequency, and feeds the voted list to the
+orchestrator's `identifyMulti` trial loop. Single-frame fragility
+under motion blur / glare / hand tremor is the primary failure mode
+this addresses — when one frame misreads `068` as `163`, two other
+frames typically read it correctly and the vote wins.
 
-Implement only on the tap path, not on auto-detect. Auto-detect is
-already async + low-friction; multi-frame would slow it to
-noticeable.
+**v1 scope (shipped commits 7b48193).**
+- 3 frames, 200ms inter-frame, sequential capture (the video pipeline
+  writes a fresh pixelBuffer at ~60fps so successive
+  `captureCurrentFrame` calls return distinct frames).
+- Per-frame OCR runs concurrently via `withTaskGroup` — no 3x
+  latency penalty on the OCR cost.
+- Embedding still uses the first frame. The card hasn't moved in
+  400ms; first-frame embedding matches the multi-frame OCR consensus
+  to within sub-pixel motion. Avoids the embedding-averaging
+  complexity for v1.
+- Auto-detect and library paths stay single-frame: auto-detect is
+  already async + low-friction, library has only one image.
 
-**Estimated effort:** 2–3 days.
+**v2 deferred ideas (not blocking).**
+- Average embeddings across frames (technically tighter sim, marginal
+  in practice — first-frame is fine until eval shows otherwise).
+- Early termination: stop after 2 frames agree at HIGH confidence
+  (saves ~200ms when the first capture is already clean; complicates
+  the loop).
+- Sharpness-based frame selection for embedding (Laplacian variance).
 
-**Expected real-device impact:** 3–8pp on tap scans; 0 on
-auto-detect (which doesn't change).
+**Latency:** end-to-end tap goes from ~270ms (single-frame) to
+~670ms (multi-frame). Within the user's "I tapped, give me a result"
+expectation; lift in HIGH-rate is worth the wait.
+
+**Validation.** TestFlight build required — eval harness is
+server-side and can't model multi-frame capture. Phone smoke session
+should compare same-card scans with multiple captures: HIGH-rate on
+first scan should rise meaningfully, and the
+`Logger.scan.debug "ocr multiframe frames=N voted_card_numbers=..."`
+log should show consensus voting in action.
+
+**Expected real-device impact:** +3 to +8pp top-1 on tap scans, plus
+a meaningful HIGH-rate lift via Phase 1's sim-floor refinement
+firing more often (more reliable card_numbers → more
+ocr_intersect_unique HIGH cases).
 
 ### Tier 2 — Medium ROI, weeks
 

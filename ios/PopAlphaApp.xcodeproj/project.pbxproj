@@ -21,15 +21,16 @@
 		1400000100000000000000F1 /* SwipeRevealRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1400000100000000000000A1 /* SwipeRevealRow.swift */; };
 		1500000100000000000000F1 /* CollectorRadarCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1500000100000000000000A1 /* CollectorRadarCard.swift */; };
 		1600000100000000000000F1 /* PortfolioDemoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1600000100000000000000A1 /* PortfolioDemoView.swift */; };
+		9D02350A7D2DDE1FBA2D79A5 /* CollectorRadarLockedCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 833C1F6DE131209C109EB423 /* CollectorRadarLockedCard.swift */; };
 		9D07CFCE2F982B7B004BF9A7 /* PostHog in Frameworks */ = {isa = PBXBuildFile; productRef = 9D07CFCD2F982B7B004BF9A7 /* PostHog */; };
 		9D07CFD22F982DCD004BF9A7 /* AnalyticsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D07CFD12F982DCD004BF9A7 /* AnalyticsService.swift */; };
 		9DB745292F91E43300AD2083 /* Nuke in Frameworks */ = {isa = PBXBuildFile; productRef = 9DB745282F91E43300AD2083 /* Nuke */; };
 		9DB7452B2F91E43300AD2083 /* NukeExtensions in Frameworks */ = {isa = PBXBuildFile; productRef = 9DB7452A2F91E43300AD2083 /* NukeExtensions */; };
 		9DB7452D2F91E43300AD2083 /* NukeUI in Frameworks */ = {isa = PBXBuildFile; productRef = 9DB7452C2F91E43300AD2083 /* NukeUI */; };
 		9DB7452F2F91E43300AD2083 /* NukeVideo in Frameworks */ = {isa = PBXBuildFile; productRef = 9DB7452E2F91E43300AD2083 /* NukeVideo */; };
+		A2B6E6279AE398BCDE67F199 /* SearchTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0390B6362A8C2B95081A63EC /* SearchTabView.swift */; };
 		AA000001000000000000000A /* PopAlphaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000A1 /* PopAlphaApp.swift */; };
 		AA000001000000000000000B /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000A2 /* ContentView.swift */; };
-		EE00000200000000000000F1 /* DeepLinkRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE00000200000000000000A1 /* DeepLinkRouter.swift */; };
 		AA000001000000000000000C /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000A3 /* Theme.swift */; };
 		AA000001000000000000000D /* AppModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000A4 /* AppModels.swift */; };
 		AA000001000000000000000E /* MarketplaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000A5 /* MarketplaceView.swift */; };
@@ -42,12 +43,10 @@
 		AA00000100000000000000D3 /* CardService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000D5 /* CardService.swift */; };
 		AA00000100000000000000D6 /* InteractiveChartView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000D7 /* InteractiveChartView.swift */; };
 		AA00000100000000000000E0 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000B2 /* Preview Assets.xcassets */; };
-		EE00000100000000000000C1 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = EE00000100000000000000B1 /* PrivacyInfo.xcprivacy */; };
 		AA00000100000000000000E5 /* ActivityService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000E8 /* ActivityService.swift */; };
-		AA00000100000000000000E6 /* ActivityFeedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000E9 /* ActivityFeedView.swift */; };
 		AA00000100000000000000E7 /* ActivityEventCell.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000EA /* ActivityEventCell.swift */; };
 		AA00000100000000000000EB /* WishlistService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000EC /* WishlistService.swift */; };
-		CC00000100000000000000FC /* RecentSearchStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00000100000000000000B3 /* RecentSearchStore.swift */; };
+		B8C1012FB0F85B919D4EB1DF /* LockedPreviewOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4B3CD44928B2F1804B2B39E /* LockedPreviewOverlay.swift */; };
 		BB00000100000000000000F1 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00000100000000000000A1 /* APIClient.swift */; };
 		BB00000100000000000000F2 /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00000100000000000000A2 /* AuthService.swift */; };
 		BB00000100000000000000F3 /* SearchModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00000100000000000000A3 /* SearchModels.swift */; };
@@ -70,6 +69,8 @@
 		CC00000100000000000000F9 /* WatchlistView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00000100000000000000A9 /* WatchlistView.swift */; };
 		CC00000100000000000000FA /* WatchlistButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00000100000000000000B1 /* WatchlistButton.swift */; };
 		CC00000100000000000000FB /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00000100000000000000B2 /* SettingsView.swift */; };
+		CC00000100000000000000FC /* RecentSearchStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00000100000000000000B3 /* RecentSearchStore.swift */; };
+		DD00000100000000000000F0 /* AIBriefCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000B0 /* AIBriefCard.swift */; };
 		DD00000100000000000000F1 /* SignalBoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000A1 /* SignalBoardView.swift */; };
 		DD00000100000000000000F2 /* Haptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000A2 /* Haptics.swift */; };
 		DD00000100000000000000F3 /* PersonalizationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000A3 /* PersonalizationService.swift */; };
@@ -78,7 +79,6 @@
 		DD00000100000000000000F6 /* PersonalPulseSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000A6 /* PersonalPulseSection.swift */; };
 		DD00000100000000000000F7 /* ForYouRail.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000A7 /* ForYouRail.swift */; };
 		DD00000100000000000000F8 /* MarketPulseSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000A8 /* MarketPulseSection.swift */; };
-		DD00000100000000000000F0 /* AIBriefCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000B0 /* AIBriefCard.swift */; };
 		DD00000100000000000000F9 /* MarketHeroCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000B1 /* MarketHeroCard.swift */; };
 		DD00000100000000000000FA /* SignInPromoCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000B2 /* SignInPromoCard.swift */; };
 		DD00000100000000000000FB /* PushService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000AB /* PushService.swift */; };
@@ -93,11 +93,9 @@
 		DD000001000000000000F201 /* PremiumProducts.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F200 /* PremiumProducts.swift */; };
 		DD000001000000000000F203 /* PremiumStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F202 /* PremiumStore.swift */; };
 		DD000001000000000000F205 /* PremiumGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F204 /* PremiumGate.swift */; };
+		DD000001000000000000F207 /* OfflineScanOrchestrator.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F206 /* OfflineScanOrchestrator.swift */; };
 		DD000001000000000000F211 /* PaywallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F210 /* PaywallView.swift */; };
 		DD000001000000000000F221 /* ScanQuota.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F220 /* ScanQuota.swift */; };
-		DD000001000000000000F207 /* OfflineScanOrchestrator.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F206 /* OfflineScanOrchestrator.swift */; };
-		DD000001000000000000F801 /* OfflineScannerWarmup.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F800 /* OfflineScannerWarmup.swift */; };
-		DD000001000000000000F401 /* ScanDebugCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F400 /* ScanDebugCapture.swift */; };
 		DD000001000000000000F231 /* ModerationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F230 /* ModerationService.swift */; };
 		DD000001000000000000F233 /* ReportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F232 /* ReportSheet.swift */; };
 		DD000001000000000000F235 /* BlockedUsersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F234 /* BlockedUsersView.swift */; };
@@ -105,12 +103,18 @@
 		DD000001000000000000F239 /* ReachabilityMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F238 /* ReachabilityMonitor.swift */; };
 		DD000001000000000000F23B /* PushPermissionPromptSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F23A /* PushPermissionPromptSheet.swift */; };
 		DD000001000000000000F23D /* SignInSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F23C /* SignInSheet.swift */; };
+		DD000001000000000000F241 /* ScanQuotaWarningToast.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F240 /* ScanQuotaWarningToast.swift */; };
+		DD000001000000000000F401 /* ScanDebugCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F400 /* ScanDebugCapture.swift */; };
+		DD000001000000000000F801 /* OfflineScannerWarmup.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F800 /* OfflineScannerWarmup.swift */; };
+		EE00000100000000000000C1 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = EE00000100000000000000B1 /* PrivacyInfo.xcprivacy */; };
 		EE00000100000000000000F1 /* PopAlphaCore in Frameworks */ = {isa = PBXBuildFile; productRef = EE00000100000000000000A2 /* PopAlphaCore */; };
 		EE00000100000000000000F2 /* SetDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE00000100000000000000A3 /* SetDetailView.swift */; };
+		EE00000200000000000000F1 /* DeepLinkRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE00000200000000000000A1 /* DeepLinkRouter.swift */; };
 		FF00000100000000000000F1 /* ClerkKit in Frameworks */ = {isa = PBXBuildFile; productRef = FF00000100000000000000A2 /* ClerkKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		0390B6362A8C2B95081A63EC /* SearchTabView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SearchTabView.swift; sourceTree = "<group>"; };
 		1100000100000000000000A1 /* PortfolioModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioModels.swift; sourceTree = "<group>"; };
 		1100000100000000000000A3 /* PortfolioHeroView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioHeroView.swift; sourceTree = "<group>"; };
 		1100000100000000000000A4 /* CollectorIdentityCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollectorIdentityCard.swift; sourceTree = "<group>"; };
@@ -125,10 +129,10 @@
 		1400000100000000000000A1 /* SwipeRevealRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipeRevealRow.swift; sourceTree = "<group>"; };
 		1500000100000000000000A1 /* CollectorRadarCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollectorRadarCard.swift; sourceTree = "<group>"; };
 		1600000100000000000000A1 /* PortfolioDemoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioDemoView.swift; sourceTree = "<group>"; };
+		833C1F6DE131209C109EB423 /* CollectorRadarLockedCard.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CollectorRadarLockedCard.swift; sourceTree = "<group>"; };
 		9D07CFD12F982DCD004BF9A7 /* AnalyticsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsService.swift; sourceTree = "<group>"; };
 		AA00000100000000000000A1 /* PopAlphaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopAlphaApp.swift; sourceTree = "<group>"; };
 		AA00000100000000000000A2 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
-		EE00000200000000000000A1 /* DeepLinkRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepLinkRouter.swift; sourceTree = "<group>"; };
 		AA00000100000000000000A3 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		AA00000100000000000000A4 /* AppModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModels.swift; sourceTree = "<group>"; };
 		AA00000100000000000000A5 /* MarketplaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketplaceView.swift; sourceTree = "<group>"; };
@@ -139,16 +143,14 @@
 		AA00000100000000000000B1 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		AA00000100000000000000B2 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
 		AA00000100000000000000B3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		EE00000100000000000000B1 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		AA00000100000000000000C1 /* PopAlphaApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PopAlphaApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA00000100000000000000D4 /* SupabaseClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupabaseClient.swift; sourceTree = "<group>"; };
 		AA00000100000000000000D5 /* CardService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardService.swift; sourceTree = "<group>"; };
 		AA00000100000000000000D7 /* InteractiveChartView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractiveChartView.swift; sourceTree = "<group>"; };
 		AA00000100000000000000E8 /* ActivityService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityService.swift; sourceTree = "<group>"; };
-		AA00000100000000000000E9 /* ActivityFeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityFeedView.swift; sourceTree = "<group>"; };
 		AA00000100000000000000EA /* ActivityEventCell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityEventCell.swift; sourceTree = "<group>"; };
 		AA00000100000000000000EC /* WishlistService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WishlistService.swift; sourceTree = "<group>"; };
-		CC00000100000000000000B3 /* RecentSearchStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentSearchStore.swift; sourceTree = "<group>"; };
+		B4B3CD44928B2F1804B2B39E /* LockedPreviewOverlay.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LockedPreviewOverlay.swift; sourceTree = "<group>"; };
 		BB00000100000000000000A1 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		BB00000100000000000000A2 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
 		BB00000100000000000000A3 /* SearchModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchModels.swift; sourceTree = "<group>"; };
@@ -171,6 +173,7 @@
 		CC00000100000000000000A9 /* WatchlistView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchlistView.swift; sourceTree = "<group>"; };
 		CC00000100000000000000B1 /* WatchlistButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchlistButton.swift; sourceTree = "<group>"; };
 		CC00000100000000000000B2 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		CC00000100000000000000B3 /* RecentSearchStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentSearchStore.swift; sourceTree = "<group>"; };
 		DD00000100000000000000A1 /* SignalBoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalBoardView.swift; sourceTree = "<group>"; };
 		DD00000100000000000000A2 /* Haptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Haptics.swift; sourceTree = "<group>"; };
 		DD00000100000000000000A3 /* PersonalizationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalizationService.swift; sourceTree = "<group>"; };
@@ -179,15 +182,15 @@
 		DD00000100000000000000A6 /* PersonalPulseSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalPulseSection.swift; sourceTree = "<group>"; };
 		DD00000100000000000000A7 /* ForYouRail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForYouRail.swift; sourceTree = "<group>"; };
 		DD00000100000000000000A8 /* MarketPulseSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketPulseSection.swift; sourceTree = "<group>"; };
-		DD00000100000000000000B0 /* AIBriefCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIBriefCard.swift; sourceTree = "<group>"; };
-		DD00000100000000000000B1 /* MarketHeroCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketHeroCard.swift; sourceTree = "<group>"; };
-		DD00000100000000000000B2 /* SignInPromoCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInPromoCard.swift; sourceTree = "<group>"; };
 		DD00000100000000000000AA /* PopAlphaApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PopAlphaApp.entitlements; sourceTree = "<group>"; };
 		DD00000100000000000000AB /* PushService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushService.swift; sourceTree = "<group>"; };
 		DD00000100000000000000AC /* PushNotificationAppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushNotificationAppDelegate.swift; sourceTree = "<group>"; };
 		DD00000100000000000000AD /* ScanService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanService.swift; sourceTree = "<group>"; };
 		DD00000100000000000000AE /* EditHoldingLotSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditHoldingLotSheet.swift; sourceTree = "<group>"; };
 		DD00000100000000000000AF /* BulkImportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BulkImportSheet.swift; sourceTree = "<group>"; };
+		DD00000100000000000000B0 /* AIBriefCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIBriefCard.swift; sourceTree = "<group>"; };
+		DD00000100000000000000B1 /* MarketHeroCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketHeroCard.swift; sourceTree = "<group>"; };
+		DD00000100000000000000B2 /* SignInPromoCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInPromoCard.swift; sourceTree = "<group>"; };
 		DD000001000000000000E000 /* EvalSeedingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EvalSeedingView.swift; sourceTree = "<group>"; };
 		DD000001000000000000E002 /* ScanPickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanPickerSheet.swift; sourceTree = "<group>"; };
 		DD000001000000000000E004 /* OCRService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OCRService.swift; sourceTree = "<group>"; };
@@ -195,10 +198,9 @@
 		DD000001000000000000F200 /* PremiumProducts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumProducts.swift; sourceTree = "<group>"; };
 		DD000001000000000000F202 /* PremiumStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumStore.swift; sourceTree = "<group>"; };
 		DD000001000000000000F204 /* PremiumGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumGate.swift; sourceTree = "<group>"; };
+		DD000001000000000000F206 /* OfflineScanOrchestrator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineScanOrchestrator.swift; sourceTree = "<group>"; };
 		DD000001000000000000F210 /* PaywallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaywallView.swift; sourceTree = "<group>"; };
 		DD000001000000000000F220 /* ScanQuota.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanQuota.swift; sourceTree = "<group>"; };
-		DD000001000000000000F206 /* OfflineScanOrchestrator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineScanOrchestrator.swift; sourceTree = "<group>"; };
-		DD000001000000000000F800 /* OfflineScannerWarmup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineScannerWarmup.swift; sourceTree = "<group>"; };
 		DD000001000000000000F230 /* ModerationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModerationService.swift; sourceTree = "<group>"; };
 		DD000001000000000000F232 /* ReportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportSheet.swift; sourceTree = "<group>"; };
 		DD000001000000000000F234 /* BlockedUsersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockedUsersView.swift; sourceTree = "<group>"; };
@@ -206,9 +208,13 @@
 		DD000001000000000000F238 /* ReachabilityMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReachabilityMonitor.swift; sourceTree = "<group>"; };
 		DD000001000000000000F23A /* PushPermissionPromptSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushPermissionPromptSheet.swift; sourceTree = "<group>"; };
 		DD000001000000000000F23C /* SignInSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInSheet.swift; sourceTree = "<group>"; };
+		DD000001000000000000F240 /* ScanQuotaWarningToast.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanQuotaWarningToast.swift; sourceTree = "<group>"; };
 		DD000001000000000000F300 /* Products.storekit */ = {isa = PBXFileReference; lastKnownFileType = file.storekit; path = Products.storekit; sourceTree = "<group>"; };
 		DD000001000000000000F400 /* ScanDebugCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanDebugCapture.swift; sourceTree = "<group>"; };
+		DD000001000000000000F800 /* OfflineScannerWarmup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineScannerWarmup.swift; sourceTree = "<group>"; };
 		EE00000100000000000000A3 /* SetDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetDetailView.swift; sourceTree = "<group>"; };
+		EE00000100000000000000B1 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		EE00000200000000000000A1 /* DeepLinkRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepLinkRouter.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -255,7 +261,6 @@
 				AA00000100000000000000D5 /* CardService.swift */,
 				AA00000100000000000000D7 /* InteractiveChartView.swift */,
 				AA00000100000000000000E8 /* ActivityService.swift */,
-				AA00000100000000000000E9 /* ActivityFeedView.swift */,
 				AA00000100000000000000EA /* ActivityEventCell.swift */,
 				AA00000100000000000000EC /* WishlistService.swift */,
 				CC00000100000000000000B3 /* RecentSearchStore.swift */,
@@ -316,6 +321,7 @@
 				DD000001000000000000F238 /* ReachabilityMonitor.swift */,
 				DD000001000000000000F23A /* PushPermissionPromptSheet.swift */,
 				DD000001000000000000F23C /* SignInSheet.swift */,
+				DD000001000000000000F240 /* ScanQuotaWarningToast.swift */,
 				DD000001000000000000F300 /* Products.storekit */,
 				DD000001000000000000F400 /* ScanDebugCapture.swift */,
 				EE00000100000000000000A3 /* SetDetailView.swift */,
@@ -337,6 +343,9 @@
 				AA00000100000000000000B3 /* Info.plist */,
 				EE00000100000000000000B1 /* PrivacyInfo.xcprivacy */,
 				AA00000100000000000000E3 /* Preview Content */,
+				B4B3CD44928B2F1804B2B39E /* LockedPreviewOverlay.swift */,
+				833C1F6DE131209C109EB423 /* CollectorRadarLockedCard.swift */,
+				0390B6362A8C2B95081A63EC /* SearchTabView.swift */,
 			);
 			path = PopAlphaApp;
 			sourceTree = "<group>";
@@ -457,7 +466,6 @@
 				AA00000100000000000000D3 /* CardService.swift in Sources */,
 				AA00000100000000000000D6 /* InteractiveChartView.swift in Sources */,
 				AA00000100000000000000E5 /* ActivityService.swift in Sources */,
-				AA00000100000000000000E6 /* ActivityFeedView.swift in Sources */,
 				AA00000100000000000000E7 /* ActivityEventCell.swift in Sources */,
 				AA00000100000000000000EB /* WishlistService.swift in Sources */,
 				CC00000100000000000000FC /* RecentSearchStore.swift in Sources */,
@@ -519,6 +527,7 @@
 				DD000001000000000000F239 /* ReachabilityMonitor.swift in Sources */,
 				DD000001000000000000F23B /* PushPermissionPromptSheet.swift in Sources */,
 				DD000001000000000000F23D /* SignInSheet.swift in Sources */,
+				DD000001000000000000F241 /* ScanQuotaWarningToast.swift in Sources */,
 				EE00000100000000000000F2 /* SetDetailView.swift in Sources */,
 				1100000100000000000000F1 /* PortfolioModels.swift in Sources */,
 				1100000100000000000000F3 /* PortfolioHeroView.swift in Sources */,
@@ -534,6 +543,9 @@
 				1400000100000000000000F1 /* SwipeRevealRow.swift in Sources */,
 				1500000100000000000000F1 /* CollectorRadarCard.swift in Sources */,
 				1600000100000000000000F1 /* PortfolioDemoView.swift in Sources */,
+				B8C1012FB0F85B919D4EB1DF /* LockedPreviewOverlay.swift in Sources */,
+				9D02350A7D2DDE1FBA2D79A5 /* CollectorRadarLockedCard.swift in Sources */,
+				A2B6E6279AE398BCDE67F199 /* SearchTabView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -678,6 +690,7 @@
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = NO;
+				INFOPLIST_KEY_UIRequiresFullScreen = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -715,6 +728,7 @@
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = NO;
+				INFOPLIST_KEY_UIRequiresFullScreen = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				LD_RUNPATH_SEARCH_PATHS = (

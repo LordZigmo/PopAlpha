@@ -476,6 +476,26 @@ struct ScanPickerSheet: View {
             }
         }
 
+        #if DEBUG
+        // Phase 0d auto-promote: picker pick = ground-truth slug, so
+        // also land this in scan_eval_images for the 100-card test.
+        // Distinct notes prefix from the HIGH-presumed path so we can
+        // filter by intent later.
+        //
+        // 2026-05-13 (Codex P2 fix): pass `scanImage` so offline picker
+        // picks route through promoteEvalFromBytes. See ScanDebugCapture
+        // header for the offline-vs-online dispatch rationale.
+        if let hash = imageHash {
+            ScanDebugCapture.autoPromoteToEval(
+                imageHash: hash,
+                canonicalSlug: match.slug,
+                capturedSource: .userCorrection,
+                notesTag: "auto_picker_test",
+                scanImage: scanImage,
+            )
+        }
+        #endif
+
         onPick(match)
         dismiss()
     }
@@ -509,6 +529,25 @@ struct ScanPickerSheet: View {
                 }
             }
         }
+
+        #if DEBUG
+        // Phase 0d auto-promote: search-pick = ground-truth slug,
+        // distinct notes from picker-list-pick so we can tell
+        // search-driven corrections from top-3 corrections later.
+        //
+        // 2026-05-13 (Codex P2 fix): pass `scanImage` so offline
+        // search-picks route through promoteEvalFromBytes. See
+        // ScanDebugCapture header for offline-vs-online dispatch.
+        if let hash = imageHash {
+            ScanDebugCapture.autoPromoteToEval(
+                imageHash: hash,
+                canonicalSlug: result.canonicalSlug,
+                capturedSource: .userCorrection,
+                notesTag: "auto_search_test",
+                scanImage: scanImage,
+            )
+        }
+        #endif
 
         let synthesized = ScanMatch(
             slug: result.canonicalSlug,

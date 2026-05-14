@@ -61,14 +61,25 @@
 		<string>remote-notification</string>
 	</array>
 	<!--
-		NSPhotoLibraryUsageDescription was previously declared here for
-		the eval-seeding photo-deletion flow. That code path is now
-		#if DEBUG-gated in EvalSeedingView (only the .freshPhoto admin-
-		curation mode reaches PHPhotoLibrary, and it has no production
-		callsite). Release builds neither link Photos.framework nor
-		trigger the permission prompt, so the usage description is no
-		longer required and removing it eliminates a misleading
-		permission string for App Review.
+		NSPhotoLibraryAddUsageDescription is required because
+		ScanDebugCapture (in DEBUG builds) saves each scanned card crop
+		to Photos as a diagnostic artifact — operators review the
+		saved captures alongside Logger.scan output to understand why
+		a particular scan misfired. Without this key, iOS hard-crashes
+		the app the first time PHPhotoLibrary write is attempted (it
+		used to silently fall back to a permission-denied state on
+		older iOS versions, but modern iOS treats missing usage strings
+		for privacy-sensitive APIs as a hard violation).
+		Release builds: ScanDebugCapture is #if DEBUG-gated and the
+		Photos add path is dead code. The key being present doesn't
+		trigger any user-facing prompt unless something on the release
+		surface actually calls PHPhotoLibrary — which today nothing
+		does. Worth re-removing this key if/when the DEBUG capture
+		flow is replaced by something that writes to the app sandbox
+		instead (preferred for App Review since "saves to Photos" is
+		easier to misinterpret than a more bounded scope).
 	-->
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Saves scan-capture diagnostics to Photos so you can review what the scanner actually saw on each scan attempt.</string>
 </dict>
 </plist>

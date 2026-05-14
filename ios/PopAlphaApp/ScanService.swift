@@ -118,6 +118,14 @@ enum ScanService {
         language: ScanLanguage,
         cardNumber: String? = nil,
         setHint: String? = nil,
+        // Phase 0c diagnostic telemetry — defaults nil so older callers
+        // (and existing test fixtures) compile unchanged. When iOS
+        // routes a scan through the server (free-tier or offline-miss
+        // fallback), these populate the new scan_identify_events
+        // columns added in 20260508000000_scan_identify_events_ocr_diagnostics.
+        ocrCardNumberExtracted: Bool? = nil,
+        ocrPass2FallbackFired: Bool? = nil,
+        ocrSpatialFilterRejectedCount: Int? = nil,
         maxEdgePixels: CGFloat = 768,
         compressionQuality: CGFloat = 0.8
     ) async throws -> ScanIdentifyResponse {
@@ -135,6 +143,15 @@ enum ScanService {
         }
         if let setHint, !setHint.isEmpty {
             query.append(("set_hint", setHint))
+        }
+        if let ocrCardNumberExtracted {
+            query.append(("ocr_card_number_extracted", ocrCardNumberExtracted ? "true" : "false"))
+        }
+        if let ocrPass2FallbackFired {
+            query.append(("ocr_pass2_fallback_fired", ocrPass2FallbackFired ? "true" : "false"))
+        }
+        if let ocrSpatialFilterRejectedCount {
+            query.append(("ocr_spatial_filter_rejected_count", String(ocrSpatialFilterRejectedCount)))
         }
 
         return try await APIClient.postRaw(

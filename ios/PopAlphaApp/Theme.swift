@@ -102,6 +102,22 @@ enum PA {
         }
     }
 
+    // MARK: Collector Axis Palette
+    // One color per radar axis. Badges adopt the color of the axis they
+    // express, so a Grail Hunter chip is the same red-orange as Market
+    // Heat, a Vintage Loyalist is the same amber as Nostalgia, etc.
+    // Japanese Specialist gets its own color since it's no longer a
+    // radar axis — it's a modifier badge with its own identity.
+    enum AxisColors {
+        static let nostalgia       = Color(red: 0.961, green: 0.651, blue: 0.137)   // #F5A623 warm amber
+        static let currentEra      = Color(red: 0.039, green: 0.518, blue: 1.0)     // #0A84FF iOS blue
+        static let slabFocus       = Color(red: 0.612, green: 0.639, blue: 0.686)   // #9CA3AF cool silver
+        static let marketHeat      = Color(red: 0.937, green: 0.267, blue: 0.267)   // #EF4444 hot red
+        static let tasteProfile    = Color(red: 0.659, green: 0.333, blue: 0.969)   // #A855F7 royal purple
+        static let collectionDepth = Color(red: 0.133, green: 0.773, blue: 0.369)   // #22C55E forest green
+        static let japanese        = Color(red: 0.925, green: 0.282, blue: 0.600)   // #EC4899 sakura pink
+    }
+
     // MARK: Gradients
     enum Gradients {
         static let cardSurface = LinearGradient(

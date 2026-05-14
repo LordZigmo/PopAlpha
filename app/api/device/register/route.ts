@@ -45,6 +45,7 @@ export async function POST(req: Request) {
     const environmentRaw = sanitizeTrim(body.environment, 32);
     const deviceModel = sanitizeTrim(body.device_model, 128);
     const osVersion = sanitizeTrim(body.os_version, 64);
+    const timezone = sanitizeTrim(body.timezone, 64);
 
     if (!deviceToken || !HEX_TOKEN_REGEX.test(deviceToken)) {
       return NextResponse.json(
@@ -88,6 +89,7 @@ export async function POST(req: Request) {
       environment: environmentRaw,
       device_model: deviceModel,
       os_version: osVersion,
+      timezone,
       enabled: true,
       updated_at: now,
       last_registered_at: now,

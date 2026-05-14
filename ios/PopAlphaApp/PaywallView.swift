@@ -25,11 +25,21 @@ import SwiftUI
 /// presented from the scanner can lead with scanner value, etc. All
 /// existing call sites pass `.generic` (the default) — the contextual
 /// branches are wiring for future variant tests.
-public enum PaywallContext {
+public enum PaywallContext: String {
     case generic
     case scanner
     case collectorProfile
-    case proSignals
+    /// Auto-presented at app launch for users who previously had a
+    /// trial (or paid sub) and have lapsed back to free. Higher-
+    /// conversion cohort than fresh free users — they've already
+    /// experienced Pro features, so the hero leads with "welcome
+    /// back" rather than introducing the value.
+    case reengagement
+    /// Auto-presented to a user whose free trial expires within 48h.
+    /// Highest-leverage trial→paid surface: paired with a
+    /// server-driven push notification 24h before expiry, this is
+    /// the in-app catch when the user opens the app to convert.
+    case trialExpiring
 }
 
 struct PaywallView: View {
@@ -38,11 +48,25 @@ struct PaywallView: View {
     @StateObject private var gate = PremiumGate.shared
 
     var context: PaywallContext = .generic
+    /// Specific entry point that opened the paywall. Used as a
+    /// PostHog `surface` property on every paywall_* event so the
+    /// funnel can be sliced per-source. Default "unknown" so an
+    /// un-instrumented call site is loud in dashboards rather than
+    /// silently masquerading as a known surface.
+    var surface: String = "unknown"
 
     @State private var selectedProductID: String = PremiumProducts.proYearly
     @State private var isPurchasing: Bool = false
     @State private var errorMessage: String? = nil
     @State private var pendingMessage: String? = nil
+    /// Set once when the user successfully subscribes or restores so
+    /// .onDisappear can distinguish "user dismissed" from "sheet
+    /// closed because they upgraded." Without this we'd over-count
+    /// dismissals.
+    @State private var didCompletePurchase: Bool = false
+    /// Once-per-presentation guard for the paywall_viewed event so
+    /// the count reflects sheet presentations, not view re-renders.
+    @State private var didFireViewedEvent: Bool = false
     // Per-product intro-offer eligibility, keyed by product ID. Empty
     // until `.task` resolves; lookup falls back to "true" (optimistic)
     // so the trial copy renders during the brief async window for
@@ -181,6 +205,29 @@ struct PaywallView: View {
             // restore), so they don't have to tap close.
             if isProNow { dismiss() }
         }
+        .onAppear {
+            guard !didFireViewedEvent else { return }
+            didFireViewedEvent = true
+            AnalyticsService.shared.capture(.paywallViewed, properties: paywallEventProps)
+        }
+        .onDisappear {
+            // Distinguish dismissal from purchase-success-auto-close.
+            // didCompletePurchase is set in subscribeTapped/restoreTapped
+            // BEFORE this fires, so we only capture dismissed when the
+            // user actually closed without buying / restoring.
+            guard !didCompletePurchase else { return }
+            AnalyticsService.shared.capture(.paywallDismissed, properties: paywallEventProps)
+        }
+    }
+
+    /// Common properties carried on every paywall_* PostHog event.
+    /// Each call site adds purchase-specific dims (product_id,
+    /// was_trial, etc.) on top.
+    private var paywallEventProps: [String: Any] {
+        [
+            "context": context.rawValue,
+            "surface": surface,
+        ]
     }
 
     // MARK: - Header
@@ -246,8 +293,10 @@ struct PaywallView: View {
             return "Unlock faster card scanning"
         case .collectorProfile:
             return "Unlock your collector profile"
-        case .proSignals:
-            return "Unlock Pro market signals"
+        case .reengagement:
+            return "Welcome back."
+        case .trialExpiring:
+            return "Your free trial ends soon."
         }
     }
 
@@ -260,8 +309,10 @@ struct PaywallView: View {
             return "Scan quickly, identify cards offline, and turn every scan into a market read."
         case .collectorProfile:
             return "See your collection style, radar chart, and AI insights tuned to the cards you own."
-        case .proSignals:
-            return "See variant-level momentum, breakouts, and value-zone reads before you buy or sell."
+        case .reengagement:
+            return "Pick up where you left off — your Pro features are one tap away."
+        case .trialExpiring:
+            return "Subscribe today to keep your collector profile, market signals, and unlimited scans."
         }
     }
 
@@ -622,10 +673,29 @@ struct PaywallView: View {
         isPurchasing = true
         defer { isPurchasing = false }
 
+        // Whether the user is tapping a trial-flavored CTA ("Start
+        // 7-day free trial" / "Try 7 days free"). Both .eligible and
+        // .unknown surface trial copy; only .noTrial is "Start Pro".
+        let isTrialOffer = showsTrialCopy(forProductID: selectedProductID)
+
+        // Top-of-tap analytics — fires regardless of outcome so the
+        // funnel can compare "tapped Subscribe" → "Subscribed" /
+        // "Cancelled" / "Failed".
+        var tapProps = paywallEventProps
+        tapProps["product_id"] = selectedProductID
+        tapProps["is_trial_offer"] = isTrialOffer
+        AnalyticsService.shared.capture(.paywallSubscribeTapped, properties: tapProps)
+
         do {
             let outcome = try await store.purchase(product)
             switch outcome {
             case .success:
+                didCompletePurchase = true
+                var subscribedProps = paywallEventProps
+                subscribedProps["product_id"] = selectedProductID
+                subscribedProps["was_trial"] = isTrialOffer
+                subscribedProps["display_price"] = product.displayPrice
+                AnalyticsService.shared.capture(.paywallSubscribed, properties: subscribedProps)
                 // Dismiss explicitly so the paywall closes immediately
                 // after the system purchase sheet does. The onChange
                 // handler on gate.isPro is a safety net (covers the
@@ -638,12 +708,24 @@ struct PaywallView: View {
                 // that gap.
                 dismiss()
             case .userCancelled:
-                break
+                var failProps = paywallEventProps
+                failProps["product_id"] = selectedProductID
+                failProps["reason"] = "user_cancelled"
+                AnalyticsService.shared.capture(.paywallPurchaseFailed, properties: failProps)
             case .pending:
                 pendingMessage = "Purchase is pending — usually a parental approval. We'll unlock automatically once it goes through."
+                var failProps = paywallEventProps
+                failProps["product_id"] = selectedProductID
+                failProps["reason"] = "pending"
+                AnalyticsService.shared.capture(.paywallPurchaseFailed, properties: failProps)
             }
         } catch {
             errorMessage = "Couldn't complete purchase: \(error.localizedDescription)"
+            var failProps = paywallEventProps
+            failProps["product_id"] = selectedProductID
+            failProps["reason"] = "error"
+            failProps["error"] = error.localizedDescription
+            AnalyticsService.shared.capture(.paywallPurchaseFailed, properties: failProps)
         }
     }
 
@@ -656,6 +738,8 @@ struct PaywallView: View {
         } else if !gate.isPro {
             errorMessage = "No active subscription found for this Apple ID."
         } else {
+            didCompletePurchase = true
+            AnalyticsService.shared.capture(.paywallRestoreSucceeded, properties: paywallEventProps)
             // Same rationale as the purchase success path: dismiss
             // explicitly rather than waiting for the gate.isPro
             // onChange observer to fire.

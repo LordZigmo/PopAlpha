@@ -54,12 +54,24 @@ enum ScanDebugCapture {
     /// trail. Real-device 2026-05-02: a Premium Power Pro scan
     /// auto-navigated to Pawniard at HIGH and we couldn't see the
     /// captured frame because HIGH was being skipped.
+    ///
+    /// Phase 0d (2026-05-08): the banner also surfaces the diagnostic
+    /// fields we already collect during OCR (pass2_fired,
+    /// spatial_rejected, frames_used, trigger_source, image_hash) so
+    /// each saved photo is fully self-describing for 100-card
+    /// triage. Previously the banner showed only the result + OCR
+    /// candidates; failure-mode classification required cross-
+    /// referencing PostHog and the Logger.scan stream.
     static func capture(
         image: UIImage,
         response: ScanIdentifyResponse?,
         source: ScanSource,
         ocrCardNumbers: [String],
         ocrSetHint: String?,
+        triggerSource: String,
+        framesUsed: Int,
+        pass2FallbackFired: Bool,
+        spatialFilterRejectedCount: Int,
     ) {
 
         Task.detached(priority: .background) {
@@ -75,6 +87,10 @@ enum ScanDebugCapture {
                 source: source,
                 ocrCardNumbers: ocrCardNumbers,
                 ocrSetHint: ocrSetHint,
+                triggerSource: triggerSource,
+                framesUsed: framesUsed,
+                pass2FallbackFired: pass2FallbackFired,
+                spatialFilterRejectedCount: spatialFilterRejectedCount,
             )
             let composed = Self.compose(image: image, banner: banner)
             do {
@@ -93,6 +109,89 @@ enum ScanDebugCapture {
         case network
     }
 
+    /// Phase 0d follow-up (2026-05-08): auto-promote scans to the
+    /// `scan_eval_images` corpus during the 100-card real-device ship
+    /// test so each scan becomes a permanent eval-corpus row, not just
+    /// a Photos-library frame. Without this the test gives one round
+    /// of feedback; with it we accumulate a real-device-conditions
+    /// corpus we can re-run the eval harness against after every
+    /// future model-version bump.
+    ///
+    /// Routing rules:
+    ///
+    ///   - HIGH-confidence scan path: caller fires this with the
+    ///     auto-navigated top-1 slug (presumed correct, marked
+    ///     `presumed=true` in notes so post-test cleanup can filter
+    ///     out HIGH-wrong cases by reviewing the saved Photos).
+    ///   - Picker pick path: caller fires this with the user-picked
+    ///     slug (definitively correct ground truth).
+    ///   - LOW or no-pick: caller skips — no ground-truth label
+    ///     available, no point polluting the corpus.
+    ///
+    /// **Bytes vs hash (2026-05-13, Codex P2 fix):** the
+    /// `scanImage` parameter is the offline-path lifeline. Online scans
+    /// land bytes at `scan-uploads/<hash>.jpg` server-side during
+    /// `/api/scan/identify`, so the cheap hash-only `promoteEvalFromHash`
+    /// suffices — the server `COPY`s the existing object into the eval
+    /// prefix. Offline scans compute the hash locally and NEVER upload,
+    /// so the hash-only route 404s ("source image not found at
+    /// scan-uploads/<hash>.jpg"). Pre-fix, every offline HIGH/picker/
+    /// search auto-promote silently failed and the 100-card eval
+    /// corpus captured 0 offline frames — exactly the population we
+    /// wanted to grow. When `scanImage` is non-nil we route to
+    /// `promoteEvalFromBytes` (base64 multipart) instead. Callers in
+    /// the offline path MUST pass the source UIImage; online callers
+    /// can pass nil to save the re-encode.
+    ///
+    /// Auth: hits `/api/admin/scan-eval/promote` which requires admin
+    /// Clerk role. In DEBUG that's only the dev's account anyway. A
+    /// 401 just means the corpus row didn't land — the saved Photo
+    /// still has the diagnostic banner, so the test isn't blocked.
+    ///
+    /// Fire-and-forget: never blocks the scan flow, never surfaces
+    /// errors to UI. Logs failures to `Logger.scan` for review.
+    static func autoPromoteToEval(
+        imageHash: String,
+        canonicalSlug: String,
+        capturedSource: EvalCaptureSource,
+        notesTag: String,
+        scanImage: UIImage? = nil,
+    ) {
+        Task.detached(priority: .background) {
+            do {
+                let r: ScanEvalPromoteResponse
+                if let image = scanImage {
+                    // Offline path (or any caller that has the source
+                    // bytes in memory). Bytes upload bypasses the
+                    // server's hash-copy-from-scan-uploads step.
+                    r = try await ScanService.promoteEvalFromBytes(
+                        image: image,
+                        canonicalSlug: canonicalSlug,
+                        source: capturedSource,
+                        notes: notesTag,
+                    )
+                } else {
+                    // Online path: bytes already at scan-uploads/<hash>.jpg
+                    // from /api/scan/identify, so the server can copy
+                    // server-side without us re-uploading.
+                    r = try await ScanService.promoteEvalFromHash(
+                        imageHash: imageHash,
+                        canonicalSlug: canonicalSlug,
+                        source: capturedSource,
+                        notes: notesTag,
+                    )
+                }
+                if r.ok {
+                    Logger.scan.debug("auto-promoted to eval: hash=\(imageHash.prefix(8)) slug=\(canonicalSlug) tag=\(notesTag) via=\(scanImage != nil ? "bytes" : "hash")")
+                } else {
+                    Logger.scan.debug("auto-promote rejected: hash=\(imageHash.prefix(8)) error=\(r.error ?? "nil")")
+                }
+            } catch {
+                Logger.scan.debug("auto-promote failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
     // MARK: - Permission
 
     private static func ensurePhotoAddPermission() async -> Bool {
@@ -108,18 +207,29 @@ enum ScanDebugCapture {
     // MARK: - Banner generation
 
     /// Produces a multi-line text banner with the result + OCR signal.
-    /// One slug per line, similarity to 3 decimals.
+    /// One slug per line, similarity to 3 decimals. Last line carries
+    /// the OCR/path diagnostic flags so failure-mode triage on the
+    /// 100-card ship test is fully self-contained per saved photo.
     private static func makeBanner(
         response: ScanIdentifyResponse?,
         source: ScanSource,
         ocrCardNumbers: [String],
         ocrSetHint: String?,
+        triggerSource: String,
+        framesUsed: Int,
+        pass2FallbackFired: Bool,
+        spatialFilterRejectedCount: Int,
     ) -> String {
         let timestamp = ISO8601DateFormatter().string(from: Date())
         var lines: [String] = []
-        lines.append("[\(timestamp)] src=\(source.rawValue)")
+        // Header line: WHEN + WHERE the scan came from.
+        lines.append("[\(timestamp)] src=\(source.rawValue) trig=\(triggerSource) frames=\(framesUsed)")
         if let r = response {
-            lines.append("conf=\(r.confidence) path=\(r.winningPath ?? "nil")")
+            // Result line: confidence + path + image_hash short suffix
+            // (correlates this Photos image to scan_eval_images /
+            // PostHog when promoting or filing a regression).
+            let hashSuffix = (r.imageHash ?? "").prefix(8)
+            lines.append("conf=\(r.confidence) path=\(r.winningPath ?? "nil") hash=\(hashSuffix)")
             for (i, m) in r.matches.prefix(5).enumerated() {
                 lines.append(String(
                     format: "%d. %@ (sim=%.3f, %@ #%@)",
@@ -138,6 +248,13 @@ enum ScanDebugCapture {
         // visible: the right number is often candidate-2 or 3.
         let nums = ocrCardNumbers.isEmpty ? "nil" : ocrCardNumbers.joined(separator: ",")
         lines.append("OCR nums=[\(nums)] set=\(ocrSetHint ?? "nil")")
+        // Diagnostic flags — surface what the OCR pipeline actually
+        // had to do. pass2=true means pass-1 spatial filter failed
+        // and we recovered via the fallback; rejected>0 means Vision
+        // observations were dropped before reaching the parser. Both
+        // strongly inform "is this a Mode 6 / Mode 8 case?" without
+        // needing PostHog or the log stream.
+        lines.append("pass2=\(pass2FallbackFired) rejected=\(spatialFilterRejectedCount)")
         return lines.joined(separator: "\n")
     }
 

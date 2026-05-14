@@ -1,3 +1,5 @@
+import CoreImage
+import Metal
 import OSLog
 import UIKit
 @preconcurrency import Vision
@@ -47,7 +49,171 @@ enum OCRService {
         from image: UIImage,
     ) async -> (cardNumber: String?, setHint: String?, detectedLanguage: ScanLanguage) {
         let multi = await extractCardIdentifiersMulti(from: image)
+        // Drops pass2FallbackFired / spatialFilterRejectedCount —
+        // legacy single-result API. New code that needs telemetry
+        // should call extractCardIdentifiersMulti directly.
         return (multi.cardNumbers.first, multi.setHint, multi.detectedLanguage)
+    }
+
+    /// Multi-frame OCR consensus. Aggregates `extractCardIdentifiersMulti`
+    /// results across N frames captured ~200ms apart from the tap path,
+    /// votes on card_number candidates by frequency, and merges the rest.
+    ///
+    /// Why: a single video frame is fragile under glare / motion blur /
+    /// partial occlusion / hand tremor. Running OCR on 3-5 frames over
+    /// ~400ms gives Vision multiple shots at the card_number row under
+    /// slightly different conditions — and the candidates that appear in
+    /// 2+ frames are the trustworthy ones.
+    ///
+    /// Per-frame OCR runs CONCURRENTLY via `withTaskGroup` because each
+    /// `extractCardIdentifiersMulti` call only does pure pixel work
+    /// (Vision request + post-processing). No shared mutable state, so
+    /// CPU parallelism is safe and meaningful (~5x faster than serial
+    /// for 5 frames).
+    ///
+    /// Card_number ranking — votes first, then first-seen order as
+    /// tiebreak. The orchestrator's `identifyMulti` tries each
+    /// candidate in turn; voting puts the consensus answer first so the
+    /// most-likely-correct read is what hits Path B intersection.
+    ///
+    /// Set hint — most-voted hint wins; ties broken by first-seen.
+    /// Same logic as cardNumbers but separate counter.
+    ///
+    /// Language — any frame seeing CJK glyphs flips the result to JP.
+    /// One frame catching JP is enough; CJK character class has no
+    /// false-positive against Latin.
+    ///
+    /// Caller passes the same image type sequence as the single-frame
+    /// path — typically the embedder-cropped frame, since on-real-device
+    /// data showed Vision text recognition is dramatically better on
+    /// the tight 0.85 center-crop than the full frame (commit 2026-05-05
+    /// Path A baseline).
+    static func extractCardIdentifiersMultiFrame(
+        from frames: [UIImage],
+        maxCandidatesPerObservation: Int = 3,
+    ) async -> (
+        cardNumbers: [String],
+        setHint: String?,
+        detectedLanguage: ScanLanguage,
+        pass2FallbackFired: Bool,
+        spatialFilterRejectedCount: Int
+    ) {
+        guard !frames.isEmpty else {
+            return ([], nil, .en, false, 0)
+        }
+        if frames.count == 1 {
+            // Degenerate case: identical to single-frame path. Skip the
+            // aggregation overhead.
+            return await extractCardIdentifiersMulti(
+                from: frames[0],
+                maxCandidatesPerObservation: maxCandidatesPerObservation,
+            )
+        }
+
+        // Per-frame OCR runs SEQUENTIALLY (one frame at a time) — NOT
+        // in a TaskGroup. The original parallel design hit a thread-
+        // starvation deadlock on real device: each `extractCardIdentifiersMulti`
+        // call internally fans out 2 Vision calls (full + strip via
+        // `async let`), and Vision's `VNImageRequestHandler.perform`
+        // is SYNCHRONOUS — it blocks the caller's cooperative-executor
+        // thread until the request completes. Wrapping 3 frames in a
+        // TaskGroup produces up to 6 concurrent Vision calls, which on
+        // a 6-performance-core device monopolizes every thread the
+        // cooperative executor has and Vision's own callback threads
+        // can't get scheduled to deliver completions. Result: scan
+        // hangs forever post-OCR.
+        //
+        // Sequential per-frame keeps the per-frame parallelism (full
+        // + strip still concurrent) but bounds total concurrent Vision
+        // calls at 2. Cost: 3× single-frame OCR latency = ~600ms total
+        // instead of ~200ms parallel. Within the user's "I tapped,
+        // give me a result" expectation; the alternative was infinite
+        // hang.
+        struct PerFrame {
+            let index: Int
+            let cardNumbers: [String]
+            let setHint: String?
+            let detectedLanguage: ScanLanguage
+            let pass2FallbackFired: Bool
+            let spatialFilterRejectedCount: Int
+        }
+        var perFrame: [PerFrame] = []
+        perFrame.reserveCapacity(frames.count)
+        for (i, frame) in frames.enumerated() {
+            let r = await extractCardIdentifiersMulti(
+                from: frame,
+                maxCandidatesPerObservation: maxCandidatesPerObservation,
+            )
+            perFrame.append(PerFrame(
+                index: i,
+                cardNumbers: r.cardNumbers,
+                setHint: r.setHint,
+                detectedLanguage: r.detectedLanguage,
+                pass2FallbackFired: r.pass2FallbackFired,
+                spatialFilterRejectedCount: r.spatialFilterRejectedCount,
+            ))
+        }
+
+        var cardVotes: [String: Int] = [:]
+        var cardFirstSeen: [String: Int] = [:]
+        var hintVotes: [String: Int] = [:]
+        var hintFirstSeen: [String: Int] = [:]
+        var sawJP = false
+        var anyPass2Fired = false
+        var spatialRejectedSum = 0
+
+        for result in perFrame {
+            for n in result.cardNumbers {
+                cardVotes[n, default: 0] += 1
+                if cardFirstSeen[n] == nil {
+                    cardFirstSeen[n] = result.index
+                }
+            }
+            if let h = result.setHint {
+                hintVotes[h, default: 0] += 1
+                if hintFirstSeen[h] == nil {
+                    hintFirstSeen[h] = result.index
+                }
+            }
+            if result.detectedLanguage == .jp {
+                sawJP = true
+            }
+            if result.pass2FallbackFired {
+                anyPass2Fired = true
+            }
+            spatialRejectedSum += result.spatialFilterRejectedCount
+        }
+
+        let votedCardNumbers = cardVotes.keys.sorted { a, b in
+            let va = cardVotes[a] ?? 0
+            let vb = cardVotes[b] ?? 0
+            if va != vb { return va > vb }
+            let oa = cardFirstSeen[a] ?? Int.max
+            let ob = cardFirstSeen[b] ?? Int.max
+            return oa < ob
+        }
+        let bestHint = hintVotes.keys.sorted { a, b in
+            let va = hintVotes[a] ?? 0
+            let vb = hintVotes[b] ?? 0
+            if va != vb { return va > vb }
+            let oa = hintFirstSeen[a] ?? Int.max
+            let ob = hintFirstSeen[b] ?? Int.max
+            return oa < ob
+        }.first
+
+        #if DEBUG
+        ocrLogger.debug(
+            "ocr multiframe frames=\(perFrame.count) voted_card_numbers=\(votedCardNumbers, privacy: .public) hint=\(bestHint ?? "nil", privacy: .public) raw_votes=\(cardVotes.map { "\($0.key)x\($0.value)" }.joined(separator: ","), privacy: .public) pass2_fired_any=\(anyPass2Fired) spatial_rejected_sum=\(spatialRejectedSum)"
+        )
+        #endif
+
+        return (
+            cardNumbers: votedCardNumbers,
+            setHint: bestHint,
+            detectedLanguage: sawJP ? .jp : .en,
+            pass2FallbackFired: anyPass2Fired,
+            spatialFilterRejectedCount: spatialRejectedSum,
+        )
     }
 
     /// Multi-candidate OCR. Two innovations over `extractCardIdentifiers`:
@@ -80,12 +246,36 @@ enum OCRService {
     static func extractCardIdentifiersMulti(
         from image: UIImage,
         maxCandidatesPerObservation: Int = 3,
-    ) async -> (cardNumbers: [String], setHint: String?, detectedLanguage: ScanLanguage) {
+    ) async -> (
+        cardNumbers: [String],
+        setHint: String?,
+        detectedLanguage: ScanLanguage,
+        pass2FallbackFired: Bool,
+        spatialFilterRejectedCount: Int
+    ) {
+        // Per-frame OCR-side preprocessing (added 2026-05-08 for the
+        // zero-tap-with-soft-camera-and-low-light case). NOT applied to
+        // the embedder image — embedder works fine on raw frames and
+        // aggressive preprocessing could amplify noise it doesn't need
+        // to see. OCR alone benefits because:
+        //   - unsharp mask counteracts lens softness / camera-optic
+        //     blur (real-device iPhone 14 Pro Max evidence: capture
+        //     looks like it has slight astigmatism, sharpening recovers
+        //     edge crispness on the small card_number digits)
+        //   - mid-range contrast curve recovers detail from low-light
+        //     captures without blowing out the card-art highlights
+        //
+        // Cost: ~10ms on Apple Silicon for a 656×918 frame. Acceptable
+        // for the per-scan path; would be too expensive to run on every
+        // 60fps video frame. Falls back to original on any filter
+        // failure so OCR never hard-fails on preprocessing alone.
+        let processed = preprocessForOCR(image)
+
         // Run Vision OCR once on each region (full image + bottom strip).
         // Both passes run concurrently — embed and pixel-data work is
         // independent. The post-processing (filtering, multi-pass logic)
         // is pure and runs after both Vision calls return.
-        async let fullObservations = runVisionTextRecognition(in: image)
+        async let fullObservations = runVisionTextRecognition(in: processed)
         async let stripObservations: [VNRecognizedTextObservation] = {
             // Bottom 25% upscaled 3×. Bumped from 0.18 on 2026-05-07
             // (Tier 1.1 stage 2) — real-device evidence showed
@@ -98,13 +288,29 @@ enum OCRService {
             // The strip is independently fed to Vision, so even if
             // the full-pass spatial filter rejects the card_number,
             // the strip pass — which has no spatial filter — should
-            // surface it.
-            guard let strip = upscaledBottomStrip(image, ratio: 0.25, scale: 3.0) else {
+            // surface it. Strip is sourced from the preprocessed image
+            // so the upscaled crop benefits from the same sharpening +
+            // contrast boost.
+            guard let strip = upscaledBottomStrip(processed, ratio: 0.25, scale: 3.0) else {
                 return []
             }
             return await runVisionTextRecognition(in: strip)
         }()
         let (fullObs, stripObs) = await (fullObservations, stripObservations)
+
+        // Telemetry (Phase 0c): count slash-bearing observations the
+        // spatial filter rejected before we even ran the regex/
+        // plausibility filters. High counts indicate Mode 1 (loose
+        // grip pushes card_number above 0.35) or Mode 2 (landscape
+        // capture, card_number on side edge). Aggregated weekly via
+        // scan_identify_events / PostHog this tells us whether
+        // orientation/framing modes are 5% or 50% of real-device
+        // pain.
+        let spatialFilterRejectedCount = fullObs.filter { obs in
+            obs.boundingBox.midY >= 0.35
+        }.filter { obs in
+            obs.topCandidates(maxCandidatesPerObservation).contains { $0.string.contains("/") }
+        }.count
 
         // Pass 1 — strict spatial filter on the full image.
         //
@@ -157,6 +363,7 @@ enum OCRService {
         // Pass 2 only fires when merged is empty — successful Pass 1
         // results always win. No second Vision call: we re-process
         // the same observations with a different filter setting.
+        var pass2FallbackFired = false
         if merged.isEmpty {
             let pass2FullCardNumbers = extractCardNumbers(
                 from: fullObs,
@@ -166,8 +373,14 @@ enum OCRService {
             for n in pass2FullCardNumbers where seen.insert(n).inserted {
                 merged.append(n)
             }
+            // Pass-2 "fired" means we got here AND recovered ≥1
+            // candidate. If pass-2 ran and still produced nothing,
+            // that's Mode 6 (Vision saw no slash text at all) — distinct
+            // from Mode 1/2 (saw it, spatial filter rejected, recovered
+            // by pass-2). Telemetry distinguishes these.
+            pass2FallbackFired = !merged.isEmpty
             #if DEBUG
-            if !merged.isEmpty {
+            if pass2FallbackFired {
                 ocrLogger.debug("ocr pass-2 fallback recovered \(merged.count) card_number(s) — \(merged.joined(separator: ","), privacy: .public)")
             }
             #endif
@@ -183,7 +396,13 @@ enum OCRService {
         let stripLanguage = detectLanguage(from: stripObs)
         let detectedLanguage: ScanLanguage = (fullLanguage == .jp || stripLanguage == .jp) ? .jp : .en
 
-        return (merged, setHint, detectedLanguage)
+        return (
+            cardNumbers: merged,
+            setHint: setHint,
+            detectedLanguage: detectedLanguage,
+            pass2FallbackFired: pass2FallbackFired,
+            spatialFilterRejectedCount: spatialFilterRejectedCount
+        )
     }
 
     /// Run Vision text recognition on a single image and return raw
@@ -198,6 +417,57 @@ enum OCRService {
     /// Vision is the expensive part (~30-100ms), and the filter
     /// logic is pure data manipulation that should run multiple
     /// times for free.
+    /// Reusable Core Image context. Hardware-backed (Metal), shared
+    /// across calls. Constructing one per filter chain is expensive
+    /// (~5-10ms); reusing keeps preprocessing cost ~10ms total per
+    /// frame instead of dominating it with setup.
+    private static let preprocessContext: CIContext = {
+        if let device = MTLCreateSystemDefaultDevice() {
+            return CIContext(mtlDevice: device, options: [.useSoftwareRenderer: false])
+        }
+        return CIContext(options: [.useSoftwareRenderer: false])
+    }()
+
+    /// OCR-side preprocessing: unsharp mask + mid-range contrast curve.
+    /// Improves Vision's text-recognition accuracy on captures with
+    /// soft optics (lens astigmatism, slight defocus) and low-light
+    /// conditions, without changing the image the embedder sees.
+    ///
+    /// Filter values were chosen conservatively to avoid over-processing:
+    ///   - radius 1.5 / intensity 0.6 sharpens digit edges without
+    ///     producing visible halos that confuse Vision's character
+    ///     segmentation
+    ///   - tone curve boosts contrast in the 0.25-0.75 luminance range
+    ///     where small printed text lives, leaves true blacks/whites
+    ///     alone (don't blow out card-art highlights or crush shadows
+    ///     where holo-foil patterns live)
+    ///
+    /// Returns the original image on any filter failure. Callers must
+    /// treat the result as "OCR-grade only" — do not feed it to the
+    /// embedder.
+    private static func preprocessForOCR(_ image: UIImage) -> UIImage {
+        guard let cgImage = image.cgImage else { return image }
+        let ci = CIImage(cgImage: cgImage)
+
+        let sharpened = ci.applyingFilter("CIUnsharpMask", parameters: [
+            "inputRadius": 1.5,
+            "inputIntensity": 0.6,
+        ])
+
+        let toned = sharpened.applyingFilter("CIToneCurve", parameters: [
+            "inputPoint0": CIVector(x: 0.00, y: 0.00),
+            "inputPoint1": CIVector(x: 0.25, y: 0.20),
+            "inputPoint2": CIVector(x: 0.50, y: 0.55),
+            "inputPoint3": CIVector(x: 0.75, y: 0.80),
+            "inputPoint4": CIVector(x: 1.00, y: 1.00),
+        ])
+
+        guard let outCG = preprocessContext.createCGImage(toned, from: ci.extent) else {
+            return image
+        }
+        return UIImage(cgImage: outCG)
+    }
+
     private static func runVisionTextRecognition(
         in image: UIImage,
     ) async -> [VNRecognizedTextObservation] {

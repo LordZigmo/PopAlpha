@@ -3,6 +3,7 @@ import { requireOnboarded } from "@/lib/auth/require";
 import { hasPro } from "@/lib/entitlements";
 import { dbAdmin } from "@/lib/db/admin";
 import { createRateLimiter } from "@/lib/rate-limit";
+import { getPostHogClient } from "@/lib/posthog-server";
 
 export const runtime = "nodejs";
 
@@ -98,6 +99,20 @@ export async function GET(req: Request) {
     console.error("[pro/signals]", slug, error.message);
     return NextResponse.json({ ok: false, error: "Internal error." }, { status: 500 });
   }
+
+  // Engagement metric for the headline Pro feature — measures how
+  // often paying users actually exercise the gated capability they're
+  // paying for. Useful for cross-referencing churn: pro users who
+  // never access signals are higher-risk for non-renewal.
+  getPostHogClient().capture({
+    distinctId: auth.userId,
+    event: "pro_signals_accessed",
+    properties: {
+      canonical_slug: slug,
+      grade: "RAW",
+      variant_count: data?.length ?? 0,
+    },
+  });
 
   return NextResponse.json({ ok: true, slug, grade: "RAW", variants: data });
 }

@@ -144,9 +144,35 @@ function buildAliases(cardName, setName, parsedNumber, rawNumber) {
   return [...new Set(raw.map((entry) => normalizeSearchText(entry)).filter(Boolean))];
 }
 
+// Provider-friendly fallback: when a record has no card_number AND no
+// printed_number (vintage trainer/energy cards from the Base/Neo/Gym era,
+// many promo subsets), the script previously emitted card_printings rows
+// with empty card_number. Every such row in a set then collided on the
+// printing unique index (set_code, "", language, NON_HOLO, UNLIMITED, null,
+// variantName), making whole sets unimportable.
+//
+// The fix: derive a stable synthetic card_number from the trailing numeric
+// segment of the provider's card id. e.g., Scrydex `lp_ja-1000` → `1000`,
+// `gym1_ja-37` → `37`. This is provider-friendly because every catalog
+// provider returns *some* stable per-card identifier — for any future
+// provider we'd apply the same "tail of the id" derivation. No new schema,
+// no provider-specific fields leaking into the canonical layer.
+function deriveCardNumberFromProviderId(providerId) {
+  if (!providerId) return "";
+  const tail = String(providerId).split(/[-_]/).pop() ?? "";
+  // Strip non-alphanumerics, prefer numeric tail; fall back to alpha tail.
+  const numeric = tail.replace(/[^0-9]/g, "");
+  if (numeric) return numeric;
+  const alpha = tail.replace(/[^A-Za-z0-9]/g, "");
+  return alpha || "";
+}
+
 function toPreparedCard(card, setYearMap, languageCanonical) {
   const rawNumber = (card.number ?? card.printed_number ?? "").trim();
-  const parsedNumber = parseCardNumber(rawNumber);
+  let parsedNumber = parseCardNumber(rawNumber);
+  if (!parsedNumber) {
+    parsedNumber = deriveCardNumberFromProviderId(card.id);
+  }
   const isJp = languageCanonical === "JP";
   // JP cards have native-language fields plus a translation.en object.
   // Use the English translation for everything that feeds search,
@@ -413,8 +439,15 @@ async function findExistingPrintingRow(supabase, row) {
 }
 
 function isUniquePrintingConflict(error) {
+  if (!error) return false;
+  // Postgres unique-violation SQLSTATE — most reliable signal across drivers.
+  if (error.code === "23505") return true;
   const message = error instanceof Error ? error.message : String(error);
-  return message.includes("card_printings_unique_printing_idx");
+  return (
+    message.includes("card_printings_unique_printing_idx")
+    || message.includes("duplicate key value")
+    || message.includes("23505")
+  );
 }
 
 async function syncSinglePrintingRow(supabase, row) {
@@ -507,6 +540,125 @@ async function syncPrintingRows(supabase, rows) {
   return sourceIdToPrintingId;
 }
 
+// When two provider records canonicalize to the same slug (e.g. Topsun
+// returns "Charizard-6" with blueBack/greenBack variants AND "Charizard-6pr"
+// with prismHolofoil variants — same physical Pokémon, different print
+// runs), merge them into ONE canonical_card with the union of printings.
+// Without this, the canonical_cards upsert errors with "ON CONFLICT DO
+// UPDATE command cannot affect row a second time" because two prepared
+// rows in the same batch share a slug.
+//
+// Provider-friendly: this merge is keyed only on the canonical slug, which
+// is itself derived from physical-card attributes. Any provider whose
+// catalog has the "two records, one card" shape gets the same collapse.
+function mergePreparedByCanonicalSlug(preparedCards) {
+  const bySlug = new Map();
+  for (const prepared of preparedCards) {
+    const slug = prepared.canonical.slug;
+    if (!slug) continue;
+    const existing = bySlug.get(slug);
+    if (!existing) {
+      bySlug.set(slug, {
+        canonical: prepared.canonical,
+        printings: [...prepared.printings],
+        canonicalAliases: [...prepared.canonicalAliases],
+      });
+    } else {
+      existing.printings.push(...prepared.printings);
+      existing.canonicalAliases = [
+        ...new Set([...existing.canonicalAliases, ...prepared.canonicalAliases]),
+      ];
+      // Prefer a non-null primary_image_url if the first record was missing one.
+      if (!existing.canonical.primary_image_url && prepared.canonical.primary_image_url) {
+        existing.canonical = {
+          ...existing.canonical,
+          primary_image_url: prepared.canonical.primary_image_url,
+        };
+      }
+    }
+  }
+  return [...bySlug.values()];
+}
+
+// Within a merged canonical group, two printings may collide on the
+// card_printings unique index (set_code, card_number, language, finish,
+// edition, stamp, finish_detail). When this happens INSIDE a single
+// canonical card (same physical card returned twice by the provider),
+// collapse to the lowest-sourceId winner so re-runs converge.
+function dedupePrintingsByUniqueKey(printings) {
+  const byKey = new Map();
+  for (const p of printings) {
+    const key = printingUniqueKey(p);
+    const existing = byKey.get(key);
+    if (!existing || String(p.sourceId) < String(existing.sourceId)) {
+      byKey.set(key, p);
+    }
+  }
+  return [...byKey.values()];
+}
+
+function printingUniqueKey(p) {
+  return [
+    p.setCode ?? "",
+    p.cardNumber ?? "",
+    p.language ?? "",
+    p.finish ?? "",
+    p.edition ?? "",
+    "stamp:null",
+    p.finishDetail ?? "",
+  ].join("::");
+}
+
+// Across distinct canonical cards, two printings can collide on the unique
+// index when the provider gives the same card_number to physically distinct
+// cards. Vintage Unown is the canonical case: Scrydex assigns Unown [L],
+// Unown [S], … Unown [Z] all card_number=201 — different cardName, so
+// different canonical slugs, but the printing unique index treats them as
+// duplicates.
+//
+// Provider-friendly disambiguation: when a unique-key has members from
+// multiple canonical slugs, the lowest-sourceId member keeps its number;
+// every later member gets `card_number := card_number + "-" + idTail`,
+// where idTail is derived from the provider's stable card id. A future
+// provider that already gives distinct numbers (like PokemonTCG.io for
+// Unown variants u1..u28) never triggers this branch; the schema and
+// canonical layer stay clean.
+function disambiguatePrintingsAcrossCanonicals(mergedCards) {
+  const keyToMembers = new Map();
+  for (const card of mergedCards) {
+    for (const printing of card.printings) {
+      const key = printingUniqueKey(printing);
+      if (!keyToMembers.has(key)) keyToMembers.set(key, []);
+      keyToMembers.get(key).push({ slug: card.canonical.slug, printing });
+    }
+  }
+
+  let mutations = 0;
+  for (const [, members] of keyToMembers) {
+    if (members.length <= 1) continue;
+    const distinctSlugs = new Set(members.map((m) => m.slug));
+    if (distinctSlugs.size <= 1) continue; // intra-canonical case — handled by dedupePrintingsByUniqueKey
+    members.sort((a, b) => String(a.printing.sourceId).localeCompare(String(b.printing.sourceId)));
+    for (let i = 1; i < members.length; i += 1) {
+      // sourceId looks like "neo4_ja-51:NON_HOLO:normal"; the head before
+      // the first colon is the provider's card.id which contains the
+      // distinguishing tail.
+      const providerCardId = String(members[i].printing.sourceId).split(":")[0] ?? "";
+      const tail = deriveCardNumberFromProviderId(providerCardId);
+      if (!tail) continue;
+      const existing = members[i].printing.cardNumber ?? "";
+      const newNumber = existing.includes(`-${tail}`) ? existing : `${existing}-${tail}`;
+      if (newNumber !== existing) {
+        members[i].printing.cardNumber = newNumber;
+        mutations += 1;
+      }
+    }
+  }
+  if (mutations > 0) {
+    console.log(`[import-scrydex-direct] disambiguated ${mutations} printing(s) across canonicals`);
+  }
+}
+
 async function importExpansionCards({ supabase, credentials, expansion, setYearMap, dryRun, languageCode, languageCanonical }) {
   let page = 1;
   let cardsFetched = 0;
@@ -523,14 +675,24 @@ async function importExpansionCards({ supabase, credentials, expansion, setYearM
     const cards = payload.data ?? [];
     if (cards.length === 0) break;
 
-    const preparedCards = cards.map((card) => toPreparedCard(card, setYearMap, languageCanonical));
+    const rawPrepared = cards.map((card) => toPreparedCard(card, setYearMap, languageCanonical));
     cardsFetched += cards.length;
+    // Merge provider records that canonicalize to the same slug, then
+    // collapse printings that would collide on the unique index. Both
+    // steps run before any DB writes so we never re-discover collisions
+    // mid-batch. After this, every canonical row + every printing row in
+    // `mergedCards` is guaranteed unique within the page.
+    const mergedCards = mergePreparedByCanonicalSlug(rawPrepared).map((entry) => ({
+      ...entry,
+      printings: dedupePrintingsByUniqueKey(entry.printings),
+    }));
+    disambiguatePrintingsAcrossCanonicals(mergedCards);
 
     if (!dryRun) {
-      const canonicalRows = preparedCards.map((row) => row.canonical);
+      const canonicalRows = mergedCards.map((row) => row.canonical);
       cardsUpserted += await upsertBatches(supabase, "canonical_cards", canonicalRows, "slug");
 
-      const canonicalAliasRows = preparedCards.flatMap((row) =>
+      const canonicalAliasRows = mergedCards.flatMap((row) =>
         row.canonicalAliases.map((alias) => ({
           alias,
           alias_norm: normalizeSearchText(alias),
@@ -541,7 +703,7 @@ async function importExpansionCards({ supabase, credentials, expansion, setYearM
         await upsertBatches(supabase, "card_aliases", canonicalAliasRows, "alias,canonical_slug");
       }
 
-      const printingRows = preparedCards.flatMap((row) =>
+      const printingRows = mergedCards.flatMap((row) =>
         row.printings.map((printing) => ({
           canonical_slug: row.canonical.slug,
           set_name: printing.setName,
@@ -565,7 +727,7 @@ async function importExpansionCards({ supabase, credentials, expansion, setYearM
 
       const printingAliasRows = [];
       const seenAliases = new Set();
-      for (const row of preparedCards) {
+      for (const row of mergedCards) {
         for (const printing of row.printings) {
           const printingId = printingIdBySourceId.get(printing.sourceId);
           if (!printingId) continue;
@@ -584,8 +746,8 @@ async function importExpansionCards({ supabase, credentials, expansion, setYearM
         if (error) throw new Error(`printing_aliases(upsert): ${error.message}`);
       }
     } else {
-      cardsUpserted += preparedCards.length;
-      printingRowsUpserted += preparedCards.reduce((sum, row) => sum + row.printings.length, 0);
+      cardsUpserted += mergedCards.length;
+      printingRowsUpserted += mergedCards.reduce((sum, row) => sum + row.printings.length, 0);
     }
 
     if (cards.length < DEFAULT_PAGE_SIZE) break;
@@ -683,22 +845,38 @@ async function main() {
   let totalCardsUpserted = 0;
   let totalPrintingsUpserted = 0;
 
+  const failedSets = [];
   for (const [index, expansion] of targets.entries()) {
     console.log(`[import-scrydex-direct] ${index + 1}/${targets.length} ${expansion.id} ${expansion.name}`);
-    const result = await importExpansionCards({
-      supabase,
-      credentials,
-      expansion,
-      setYearMap,
-      dryRun: args.dryRun,
-      languageCode: args.languageCode,
-      languageCanonical: args.languageCanonical,
-    });
-    totalCardsFetched += result.cardsFetched;
-    totalCardsUpserted += result.cardsUpserted;
-    totalPrintingsUpserted += result.printingRowsUpserted;
-    console.log(JSON.stringify(result));
+    try {
+      const result = await importExpansionCards({
+        supabase,
+        credentials,
+        expansion,
+        setYearMap,
+        dryRun: args.dryRun,
+        languageCode: args.languageCode,
+        languageCanonical: args.languageCanonical,
+      });
+      totalCardsFetched += result.cardsFetched;
+      totalCardsUpserted += result.cardsUpserted;
+      totalPrintingsUpserted += result.printingRowsUpserted;
+      console.log(JSON.stringify(result));
+    } catch (err) {
+      // One bad set shouldn't kill a 100+ set run. Most failures are
+      // transient network blips or unique-index collisions on a single
+      // card_printings row that the script's conflict handling can't
+      // reconcile. Log and move on; the operator can re-run for the
+      // failed set list specifically.
+      const message = err instanceof Error ? err.message : String(err);
+      failedSets.push({ id: expansion.id, name: expansion.name, error: message });
+      console.error(`[import-scrydex-direct] FAILED ${expansion.id}: ${message}`);
+    }
     await sleep(250);
+  }
+  if (failedSets.length > 0) {
+    console.log(`[import-scrydex-direct] ${failedSets.length} set(s) failed:`);
+    for (const f of failedSets) console.log(`  ${f.id}: ${f.error.slice(0, 150)}`);
   }
 
   console.log(JSON.stringify({

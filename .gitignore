@@ -37,6 +37,10 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
+# scratch / generated artifacts not meant to be committed
+# (e.g. scripts/walk-snkrdunk-sitemap.mjs writes 2.7MB of IDs here)
+/tmp/
+
 # env files (can opt-in for committing if needed)
 .env*
 

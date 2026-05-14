@@ -28,6 +28,23 @@ struct ContentView: View {
         AppearanceMode(rawValue: appearanceRaw) ?? .system
     }
 
+    // Trial re-engagement plumbing. Auto-presents the paywall once
+    // when we observe a lapsed subscriber (`!isPro &&
+    // !isEligibleForTrial`) — they've used the trial and aren't
+    // currently paid, so the hero copy welcomes them back rather
+    // than pitching cold. Persistent dedupe via UserDefaults; flag
+    // resets the moment they re-upgrade so a second lapse can
+    // trigger again.
+    @StateObject private var premiumStore = PremiumStore.shared
+    @StateObject private var premiumGate = PremiumGate.shared
+    @State private var showReengagementPaywall = false
+    @State private var showTrialExpiringPaywall = false
+    private static let reengagementShownKey = "ai.popalpha.premium.reengagement.shown"
+    /// Per-trial dedupe for the trial-expiring auto-paywall. Keyed by
+    /// trial expiration date (epoch seconds) so a future trial — if
+    /// Apple ever grants the user another one — gets its own prompt.
+    private static let trialExpiringShownKeyPrefix = "ai.popalpha.premium.trialExpiring.shown."
+
     init() {
         configureTabBarAppearance()
     }
@@ -49,19 +66,11 @@ struct ContentView: View {
                 }
                 .tag(AppTab.market)
 
-            // Feed (multi-user activity) is gated by FeatureFlags.isSocialEnabled
-            // because we don't yet have a user-discovery surface — without
-            // followable users the feed would only show your own events,
-            // and exposing the comment/follow/profile entry points behind
-            // it triggers Apple Guideline 1.2 UGC moderation requirements
-            // we'd rather defer until the discovery surface ships.
-            if FeatureFlags.isSocialEnabled {
-                ActivityFeedView()
-                    .tabItem {
-                        Label("Feed", systemImage: "newspaper.fill")
-                    }
-                    .tag(AppTab.activity)
-            }
+            SearchTabView()
+                .tabItem {
+                    Label("Search", systemImage: "magnifyingglass")
+                }
+                .tag(AppTab.search)
 
             ScannerTabView()
                 .tabItem {
@@ -82,6 +91,10 @@ struct ContentView: View {
                 .tag(AppTab.profile)
         }
         .tint(PA.Colors.accent)
+        // App Review compliance modifiers — these were applied on PR #30
+        // and inadvertently dropped by the SearchTabView extraction
+        // commit (a782f51). Restored here so light/dark, offline banner,
+        // and the push permission soft-prompt all work at the root.
         .preferredColorScheme(appearance.colorScheme)
         .offlineBanner()
         .sheet(
@@ -136,6 +149,83 @@ struct ContentView: View {
                 selectedTab = .market
             }
         }
+        // Trial re-engagement — auto-presents once for lapsed
+        // subscribers. Conditions evaluate after products load (so
+        // isEligibleForTrial is accurate) and re-evaluate when any
+        // input changes.
+        .sheet(isPresented: $showReengagementPaywall) {
+            PaywallView(context: .reengagement, surface: "reengagement_auto")
+        }
+        // Trial-expiring auto-paywall — presents once when the user is
+        // inside the final 48h of their free trial. Pairs with the
+        // server-driven push notification 24h before expiry: the push
+        // brings them back into the app, this is the catch.
+        .sheet(isPresented: $showTrialExpiringPaywall) {
+            PaywallView(context: .trialExpiring, surface: "trial_expiring_warning")
+        }
+        .onAppear {
+            evaluateReengagement()
+            evaluateTrialExpiring()
+        }
+        .onChange(of: premiumStore.productsLoaded) { _, _ in
+            evaluateReengagement()
+            evaluateTrialExpiring()
+        }
+        .onChange(of: premiumStore.isEligibleForTrial) { _, _ in evaluateReengagement() }
+        .onChange(of: premiumStore.trialExpiresAt) { _, _ in evaluateTrialExpiring() }
+        .onChange(of: premiumStore.isOnTrial) { _, _ in evaluateTrialExpiring() }
+        .onChange(of: premiumGate.isPro) { _, isPro in
+            // When the user upgrades (re-pro), clear the dedupe flag
+            // so a future lapse can trigger the re-engagement again.
+            // Idempotent — setting to false on every pro flip is fine.
+            if isPro {
+                UserDefaults.standard.set(false, forKey: Self.reengagementShownKey)
+            }
+            evaluateReengagement()
+        }
+    }
+
+    /// Decide whether to auto-present the trial re-engagement paywall.
+    /// Idempotent: returns early when any precondition isn't met, when
+    /// the sheet's already up, or when we've already shown it for this
+    /// lapse. Persists the "shown" flag to UserDefaults so cold
+    /// launches don't re-prompt.
+    private func evaluateReengagement() {
+        let alreadyShown = UserDefaults.standard.bool(forKey: Self.reengagementShownKey)
+        guard !alreadyShown,
+              premiumStore.productsLoaded,
+              !premiumGate.isPro,
+              !premiumStore.isEligibleForTrial,
+              !showReengagementPaywall
+        else { return }
+
+        UserDefaults.standard.set(true, forKey: Self.reengagementShownKey)
+        showReengagementPaywall = true
+    }
+
+    /// Decide whether to auto-present the trial-expiring paywall.
+    /// Fires when the user is currently inside an active trial whose
+    /// expiration is within 48h. Dedupes per trial via a UserDefaults
+    /// key keyed on the expiration epoch — a hypothetical future trial
+    /// (different expiration) would get its own prompt. The reengagement
+    /// dedupe is unrelated; both can fire over a user's lifetime, just
+    /// not during the same trial period.
+    private func evaluateTrialExpiring() {
+        guard premiumStore.isOnTrial,
+              let expires = premiumStore.trialExpiresAt,
+              !showTrialExpiringPaywall
+        else { return }
+
+        let secondsUntilExpiry = expires.timeIntervalSinceNow
+        guard secondsUntilExpiry > 0,
+              secondsUntilExpiry <= 48 * 60 * 60
+        else { return }
+
+        let key = "\(Self.trialExpiringShownKeyPrefix)\(Int(expires.timeIntervalSince1970))"
+        if UserDefaults.standard.bool(forKey: key) { return }
+
+        UserDefaults.standard.set(true, forKey: key)
+        showTrialExpiringPaywall = true
     }
 
     private func configureTabBarAppearance() {
@@ -336,21 +426,15 @@ struct ProfileTabView: View {
                 }
             }
 
-            // Stats row — Posts/Followers/Following are social metrics that
-            // are meaningless without the social UI surface. With
-            // FeatureFlags.isSocialEnabled off, drop the row entirely
-            // rather than showing 0/0/0 (which reads as "this profile
-            // is dead" instead of "this feature isn't built yet").
-            if FeatureFlags.isSocialEnabled {
-                HStack(spacing: 32) {
-                    profileStat(value: "\(stats?.postCount ?? 0)", label: "Posts")
-                    profileStat(value: "\(stats?.followerCount ?? 0)", label: "Followers")
-                    profileStat(value: "\(stats?.followingCount ?? 0)", label: "Following")
-                }
-                .padding(.vertical, 16)
-                .frame(maxWidth: .infinity)
-                .glassSurface(radius: PA.Layout.panelRadius)
+            // Stats row
+            HStack(spacing: 32) {
+                profileStat(value: "\(stats?.postCount ?? 0)", label: "Posts")
+                profileStat(value: "\(stats?.followerCount ?? 0)", label: "Followers")
+                profileStat(value: "\(stats?.followingCount ?? 0)", label: "Following")
             }
+            .padding(.vertical, 16)
+            .frame(maxWidth: .infinity)
+            .glassSurface(radius: PA.Layout.panelRadius)
 
             // Menu items
             VStack(spacing: 0) {
@@ -361,19 +445,12 @@ struct ProfileTabView: View {
                 }
                 .buttonStyle(.plain)
 
-                // Notifications surface today is exclusively social
-                // (like / comment / follow per the schema CHECK
-                // constraint). With FeatureFlags.isSocialEnabled off,
-                // nothing fires into it, so we hide the row to avoid
-                // showing a permanently-empty list.
-                if FeatureFlags.isSocialEnabled {
-                    NavigationLink {
-                        NotificationView()
-                    } label: {
-                        profileMenuRow(icon: "bell", title: "Notifications")
-                    }
-                    .buttonStyle(.plain)
+                NavigationLink {
+                    NotificationView()
+                } label: {
+                    profileMenuRow(icon: "bell", title: "Notifications")
                 }
+                .buttonStyle(.plain)
 
                 NavigationLink {
                     SettingsView()
@@ -625,7 +702,7 @@ struct PrimaryAppleSignInButton: View {
             .background(Color.black.opacity(auth.isSigningIn ? 0.6 : 1.0))
             .clipShape(Capsule())
             .overlay(
-                Capsule().stroke(PA.Colors.hairline(0.15), lineWidth: 1)
+                Capsule().stroke(Color.white.opacity(0.15), lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
@@ -696,15 +773,17 @@ struct PrimaryEmailSignInButton: View {
 // MARK: - Tab Enum
 
 enum AppTab {
-    case market, activity, scanner, portfolio, profile
+    case market, search, scanner, portfolio, profile
 }
 
 // MARK: - Previews
 
 #Preview("App") {
     ContentView()
+        .preferredColorScheme(.dark)
 }
 
 #Preview("Profile") {
     ProfileTabView()
+        .preferredColorScheme(.dark)
 }

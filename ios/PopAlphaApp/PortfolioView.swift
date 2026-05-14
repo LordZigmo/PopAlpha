@@ -7,10 +7,22 @@ struct PortfolioView: View {
     @State private var holdings: [HoldingRow] = []
     @State private var positions: [Position] = []
     @State private var isLoading = true
+    // Tracks the second-stage enrichment fetch (/api/portfolio/overview).
+    // We keep the skeleton up until this completes so cells don't flash
+    // raw slug names while waiting for the metadata that turns "charizard-
+    // base-set-4" into "Charizard" + image + market price.
+    @State private var isOverviewLoading = false
+    // One-time first-paint gate. Holds the skeleton up for ~400ms after
+    // the view first appears so signed-out users (PortfolioDemoView) and
+    // warm-cached signed-in users get a polished crossfade instead of
+    // text-and-numbers rendering instantly while card images are still
+    // streaming in over the network.
+    @State private var initialReveal = false
     @State private var error: String?
     @State private var showAddSheet = false
     @State private var showImportSheet = false
     @State private var selectedWindow: TimeWindow = .day
+    @StateObject private var premiumGate = PremiumGate.shared
 
     // Enriched data from /api/portfolio/overview
     @State private var overview: PortfolioOverviewResponse?
@@ -120,20 +132,24 @@ struct PortfolioView: View {
             ZStack {
                 PA.Colors.background.ignoresSafeArea()
 
-                if !auth.isAuthenticated {
-                    // Unsigned-in users see a fully-rendered demo
-                    // portfolio with sample data and a sticky sign-up
-                    // CTA. Highest-converting surface in the app.
-                    PortfolioDemoView()
-                } else if isLoading && holdings.isEmpty {
-                    loadingState
-                } else if let error, holdings.isEmpty {
-                    errorState(error)
-                } else if holdings.isEmpty {
-                    PortfolioEmptyStateView(onAddCard: { showAddSheet = true })
-                } else {
-                    portfolioContent
+                Group {
+                    if showLoadingSkeleton {
+                        loadingState
+                    } else if !auth.isAuthenticated {
+                        // Unsigned-in users see a fully-rendered demo
+                        // portfolio with sample data and a sticky sign-up
+                        // CTA. Highest-converting surface in the app.
+                        PortfolioDemoView()
+                    } else if let error, holdings.isEmpty {
+                        errorState(error)
+                    } else if holdings.isEmpty {
+                        PortfolioEmptyStateView(onAddCard: { showAddSheet = true })
+                    } else {
+                        portfolioContent
+                    }
                 }
+                .transition(.opacity)
+                .animation(.easeInOut(duration: 0.25), value: showLoadingSkeleton)
             }
             .navigationTitle("Portfolio")
             .navigationBarTitleDisplayMode(.inline)
@@ -164,6 +180,21 @@ struct PortfolioView: View {
                         .accessibilityLabel("Add to portfolio")
                         .accessibilityHint("Add a card or import from CSV")
                     }
+                }
+            }
+            .onAppear {
+                // Demo-path warm-up. Only runs when signed out — signed-in
+                // users with cached data should see content instantly on
+                // tab switch, not a synthetic skeleton. .onAppear (rather
+                // than .task) so the timer ties to actual tab visibility;
+                // TabView can run .task for inactive tabs at parent layout
+                // time, which would burn the timer before this tab is ever
+                // seen.
+                guard !auth.isAuthenticated else { return }
+                initialReveal = false
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(600))
+                    initialReveal = true
                 }
             }
             .task(id: auth.isAuthenticated) {
@@ -266,45 +297,63 @@ struct PortfolioView: View {
     private var portfolioContent: some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(spacing: 28) {
-                // 1. Your Collector Type — the emotional opener. Lives
-                // above the totals so users see *who they are as a
-                // collector* before dollar figures.
-                if hasFullAnalysis, let identity = overview?.toIdentity() {
-                    CollectorIdentityCard(profile: identity)
-                }
-
-                // 2. Hero — totals, P&L, sparkline.
+                // 1. Hero — totals, P&L, sparkline.
                 PortfolioHeroView(
                     summary: summary,
-                    handle: auth.currentHandle ?? auth.currentFirstName,
                     selectedWindow: $selectedWindow,
                     costBasisGap: costBasisGap
                 )
 
-                // 3. Below-threshold users see the unlock progress
+                // 2. Below-threshold users see the unlock progress
                 // teaser instead of the analytics sections.
                 if !hasFullAnalysis {
                     InsightsUnlockProgress(cardsAdded: positions.count)
                 }
 
-                // 4. Radar (separated from the type card) + AI insights.
+                // 3. Collector identity + radar + AI insights.
                 // Evolution lives at the bottom of the page.
+                //
+                // Gating layers:
+                //   - hasFullAnalysis (>= 3 cards) is the freemium
+                //     progression check. < 3 cards renders
+                //     InsightsUnlockProgress above; this block doesn't.
+                //   - PremiumGate.isPro is the new Pro-tier gate. Free
+                //     users WITH 3+ cards see the locked radar teaser
+                //     (CollectorRadarLockedCard) but not the AI
+                //     insights feed — that's hidden until upgrade.
                 if hasFullAnalysis {
-                    if let radar = overview?.radarProfile {
-                        CollectorRadarCard(profile: radar)
-                    }
+                    if premiumGate.isPro {
+                        // Identity merges into the radar card's header
+                        // for Pro so the type + radar render as a single
+                        // screenshot-friendly surface.
+                        if let radar = overview?.radarProfile {
+                            CollectorRadarCard(
+                                profile: radar,
+                                identity: overview?.toIdentity(),
+                                badges: overview?.badges ?? []
+                            )
+                        }
 
-                    let insights = overview?.toInsights() ?? []
-                    if !insights.isEmpty {
-                        PortfolioInsightView(
-                            insights: insights,
-                            activities: [],
-                            showActivity: false
-                        )
+                        let insights = overview?.toInsights() ?? []
+                        if !insights.isEmpty {
+                            PortfolioInsightView(
+                                insights: insights,
+                                activities: [],
+                                showActivity: false
+                            )
+                        }
+                    } else {
+                        // Free w/ 3+ cards: identity stays as its own
+                        // card above the locked radar teaser. Merging
+                        // into the locked variant is a follow-up.
+                        if let identity = overview?.toIdentity() {
+                            CollectorIdentityCard(profile: identity)
+                        }
+                        CollectorRadarLockedCard()
                     }
                 }
 
-                // 5. Positions list ("Your Cards"), always shown when
+                // 4. Positions list ("Your Cards"), always shown when
                 // there are holdings.
                 if !positions.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
@@ -350,7 +399,7 @@ struct PortfolioView: View {
                     }
                 }
 
-                // 6. Evolution timeline — anchored at the bottom of the
+                // 5. Evolution timeline — anchored at the bottom of the
                 // page so it acts as a "what's been happening" log,
                 // not as primary analytics.
                 if hasFullAnalysis, !activities.isEmpty {
@@ -368,15 +417,121 @@ struct PortfolioView: View {
 
     // MARK: - Loading & Error States
 
+    /// True while content shouldn't yet be revealed. Two cases:
+    /// 1. Authed cold-load: holdings or first overview is in flight —
+    ///    keeps the skeleton up so cells don't flash raw slug names +
+    ///    cost-basis fallbacks while waiting for `/api/portfolio/overview`.
+    /// 2. Unauthed demo path: brief warm-up window each visit so card
+    ///    images have time to populate before the crossfade. Scoped
+    ///    behind `!auth.isAuthenticated` so signed-in users with warm
+    ///    caches never see this gate on subsequent tab visits.
+    private var showLoadingSkeleton: Bool {
+        if isLoading && holdings.isEmpty { return true }
+        if isOverviewLoading && overview == nil { return true }
+        if !auth.isAuthenticated && !initialReveal { return true }
+        return false
+    }
+
     private var loadingState: some View {
-        VStack(spacing: 12) {
-            Spacer()
-            ProgressView().tint(PA.Colors.accent)
-            Text("Loading portfolio...")
-                .font(PA.Typography.caption)
-                .foregroundStyle(PA.Colors.muted)
-            Spacer()
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: 28) {
+                heroSkeleton
+                positionsSkeletonHeader
+                gridSkeleton
+            }
+            .padding(.top, 12)
+            .padding(.bottom, 40)
         }
+        .scrollDisabled(true)
+    }
+
+    // MARK: Skeleton building blocks
+
+    private var heroSkeleton: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Handle/title bar
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(PA.Colors.surfaceSoft)
+                .frame(width: 120, height: 12)
+
+            // Big total value
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(PA.Colors.surfaceSoft)
+                .frame(width: 200, height: 36)
+
+            // Period change pill
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(PA.Colors.surfaceSoft)
+                .frame(width: 140, height: 14)
+
+            // Sparkline area
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(PA.Colors.surfaceSoft.opacity(0.7))
+                .frame(height: 80)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassSurface()
+        .padding(.horizontal, PA.Layout.sectionPadding)
+    }
+
+    private var positionsSkeletonHeader: some View {
+        HStack {
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(PA.Colors.surfaceSoft)
+                .frame(width: 90, height: 16)
+            Spacer()
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(PA.Colors.surfaceSoft)
+                .frame(width: 72, height: 28)
+        }
+        .padding(.horizontal, PA.Layout.sectionPadding)
+    }
+
+    private var gridSkeleton: some View {
+        LazyVGrid(
+            columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
+            spacing: 12
+        ) {
+            ForEach(0..<4, id: \.self) { _ in
+                gridSkeletonCell
+            }
+        }
+        .padding(.horizontal, PA.Layout.sectionPadding)
+    }
+
+    /// Mirrors PortfolioCardGridCell's structure (image + 3-row info
+    /// block, glassSurface wrap) so the crossfade lands cells in the
+    /// same slots they were sketched in.
+    private var gridSkeletonCell: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(PA.Colors.surfaceSoft)
+                .aspectRatio(63.0 / 88.0, contentMode: .fit)
+                .frame(maxWidth: .infinity)
+
+            VStack(alignment: .leading, spacing: 6) {
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .fill(PA.Colors.surfaceSoft)
+                    .frame(height: 13)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 6) {
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(PA.Colors.surfaceSoft)
+                        .frame(width: 70, height: 10)
+                    Spacer()
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(PA.Colors.surfaceSoft)
+                        .frame(width: 28, height: 14)
+                }
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .fill(PA.Colors.surfaceSoft)
+                    .frame(width: 60, height: 14)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassSurface()
     }
 
     private func errorState(_ message: String) -> some View {
@@ -407,6 +562,12 @@ struct PortfolioView: View {
         do {
             holdings = try await HoldingsService.shared.fetchHoldings()
             positions = Position.group(holdings)
+            // Enter the metadata-loading window BEFORE flipping isLoading
+            // off, so the skeleton condition stays true across the
+            // transition with no one-frame gap where neither flag is set.
+            if !holdings.isEmpty && overview == nil {
+                isOverviewLoading = true
+            }
         } catch {
             Logger.ui.debug("Holdings fetch failed: \(error)")
             if let apiErr = error as? APIError, case .httpError(403, _) = apiErr {
@@ -432,6 +593,8 @@ struct PortfolioView: View {
 
         if let ov = fetchedOverview { overview = ov }
         if let act = fetchedActivity { activities = act.toActivities() }
+
+        isOverviewLoading = false
     }
 
     // MARK: - Targeted Holdings Refresh
