@@ -49,6 +49,7 @@ import {
   resizeForUpload,
 } from "@/lib/ai/image-crops";
 import { getPostHogClient } from "@/lib/posthog-server";
+import { enqueueScanForReview } from "@/lib/scan/review-queue";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -1466,6 +1467,16 @@ export async function POST(req: Request) {
     });
   }
 
+  // Tier 1.5 §6 item 2 — failure-case auto-capture. The "we don't
+  // know why this failed" subset is the most valuable for operator
+  // review: medium confidence means the scanner was uncertain, and
+  // OCR returning zero card numbers means we lost our strongest
+  // disambiguating signal. The image gets copied into
+  // scan-uploads/review-queue/<hash>.jpg in parallel; this row gets
+  // stamped so operators can browse the queue via SQL.
+  const reviewQueued =
+    confidence === "medium" && ocrCardNumberExtractedTel === false;
+
   await logScanEvent({
     imageHash,
     imageBytesSize,
@@ -1492,7 +1503,14 @@ export async function POST(req: Request) {
     ocrCardNumberExtracted: ocrCardNumberExtractedTel,
     ocrPass2FallbackFired: ocrPass2FallbackFiredTel,
     ocrSpatialFilterRejectedCount: ocrSpatialFilterRejectedCountTel,
+    reviewQueued,
   });
+
+  if (reviewQueued) {
+    // Fire-and-forget — don't block the scan response on a Storage
+    // round-trip. Helper logs its own failures.
+    void enqueueScanForReview(imageHash);
+  }
 
   return NextResponse.json({
     ok: true,
@@ -1593,6 +1611,12 @@ type ScanEventInput = {
   ocrCardNumberExtracted?: boolean | null;
   ocrPass2FallbackFired?: boolean | null;
   ocrSpatialFilterRejectedCount?: number | null;
+  // Tier 1.5 §6 item 2 — the failure-case auto-capture flag. True
+  // when this scan met the "we don't know why this failed" criteria
+  // (confidence='medium' AND OCR returned no card numbers) and was
+  // queued for operator review. The captured image lives at
+  // card-images/scan-uploads/review-queue/<imageHash>.jpg.
+  reviewQueued?: boolean;
 };
 
 async function logScanEvent(event: ScanEventInput): Promise<void> {
@@ -1623,6 +1647,7 @@ async function logScanEvent(event: ScanEventInput): Promise<void> {
         ocr_card_number_extracted: event.ocrCardNumberExtracted ?? null,
         ocr_pass2_fallback_fired: event.ocrPass2FallbackFired ?? null,
         ocr_spatial_filter_rejected_count: event.ocrSpatialFilterRejectedCount ?? null,
+        review_queued_at: event.reviewQueued ? new Date().toISOString() : null,
       });
 
     if (error) {

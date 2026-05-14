@@ -34,6 +34,7 @@ export const DBADMIN_ALLOWED_FILES = [
   "lib/db/admin.ts",
   "lib/entitlements.ts",
   "lib/iap/upsert-subscription.ts",
+  "lib/scan/review-queue.ts",
 ];
 
 export const DBADMIN_ALLOWED_ROUTE_KEYS = [
