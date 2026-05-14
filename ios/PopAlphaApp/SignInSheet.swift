@@ -155,7 +155,7 @@ struct SignInSheet: View {
     private var heroTitle: String {
         switch phase {
         case .chooser: "Welcome to PopAlpha"
-        case .email:   "Sign in with email"
+        case .email:   "Continue with email"
         case .code:    "Check your email"
         }
     }
@@ -163,9 +163,9 @@ struct SignInSheet: View {
     private var heroSubtitle: String {
         switch phase {
         case .chooser:
-            return "Sign in to track your portfolio, build a wishlist, and unlock the daily market brief."
+            return "Sign in or create an account to track your portfolio, build a wishlist, and unlock the daily market brief."
         case .email:
-            return "We'll email you a 6-digit code. No password required."
+            return "New here or returning, we'll email you a 6-digit code. No password required."
         case .code:
             return "Enter the 6-digit code we just sent to \(email)."
         }
