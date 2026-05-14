@@ -39,6 +39,16 @@ final class AuthService {
     private enum EmailFlow { case signIn, signUp }
     private var lastEmailFlow: EmailFlow?
 
+    /// Email last passed to `signInWithEmail(_:)`. Paired with
+    /// `lastEmailFlow` to decide if a subsequent call is a Resend
+    /// for the same address (→ reuse the existing Clerk SignIn /
+    /// SignUp attempt) or a fresh attempt for a different address
+    /// (→ create new). Codex P2 #4 on PR #62 caught that creating a
+    /// new sign-up for a resend on the same email fails with an
+    /// "attempt in progress" error and leaves the user unable to
+    /// fetch a replacement code.
+    private var lastEmailAddress: String?
+
     private var tokenRefreshTask: Task<Void, Never>?
 
     private init() {}
@@ -184,6 +194,11 @@ final class AuthService {
         // requestAuthorizationIfNeeded() path on subsequent
         // sign-ins / when the user has already responded.
         await PushService.shared.maybeShowSoftPrompt()
+
+        // Session is live — clear any in-flight email-code attempt
+        // state so the next sign-in starts with a clean slate.
+        lastEmailFlow = nil
+        lastEmailAddress = nil
     }
 
     // MARK: - Email code sign-in / sign-up
@@ -217,9 +232,44 @@ final class AuthService {
             )
         }
 
+        // Resend path: same email as the most recently prepared
+        // attempt → reuse the existing Clerk SignIn / SignUp to
+        // send another code on the in-flight attempt rather than
+        // creating a new one. Clerk rejects fresh attempts while one
+        // is in-progress for the same identifier ("attempt in
+        // progress"), so without this branch Resend Code from the
+        // SignInSheet code phase breaks for new users. Codex P2 #4
+        // on PR #62.
+        if lastEmailAddress == trimmed {
+            switch lastEmailFlow {
+            case .signUp:
+                if let signUp = Clerk.shared.auth.currentSignUp {
+                    _ = try await signUp.sendEmailCode()
+                    return
+                }
+            case .signIn:
+                if let signIn = Clerk.shared.auth.currentSignIn {
+                    _ = try await signIn.sendEmailCode()
+                    return
+                }
+            case nil:
+                break
+            }
+            // Fall through to fresh-attempt path if the matching
+            // Clerk attempt has been cleared from the client for
+            // any reason (signOut, session timeout, etc.).
+        }
+
+        // Fresh attempt — different email OR no last attempt yet.
+        // Reset state before trying so a half-completed switch is
+        // never observed.
+        lastEmailFlow = nil
+        lastEmailAddress = nil
+
         do {
             _ = try await Clerk.shared.auth.signInWithEmailCode(emailAddress: trimmed)
             lastEmailFlow = .signIn
+            lastEmailAddress = trimmed
         } catch {
             // Sign-in failed — if Clerk's message looks like "this
             // identifier isn't registered", fall through to sign-up.
@@ -239,16 +289,17 @@ final class AuthService {
             // Community Guidelines links on both the chooser and
             // email-entry phases. The user implicitly accepts by
             // tapping Send Code after the disclaimer is shown —
-            // matches the App Sign In / Google sign-up pattern.
-            // Codex P2 on PR #62 flagged the original implementation
-            // for setting this flag without an inline disclaimer; the
-            // disclaimer addresses that.
+            // matches the Sign in with Apple / Google sign-up
+            // pattern. Codex P2 #1 on PR #62 flagged the original
+            // implementation for setting this flag without an inline
+            // disclaimer; the disclaimer addresses that.
             let signUp = try await Clerk.shared.auth.signUp(
                 emailAddress: trimmed,
                 legalAccepted: true,
             )
             _ = try await signUp.sendEmailCode()
             lastEmailFlow = .signUp
+            lastEmailAddress = trimmed
         }
     }
 
