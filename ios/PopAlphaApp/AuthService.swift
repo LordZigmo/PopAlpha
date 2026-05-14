@@ -257,11 +257,35 @@ final class AuthService {
         // the failed signIn attempt on the client alongside the fresh
         // signUp attempt. Verifying the code against the stale signIn
         // first would fail at verification even though the code is
-        // valid for the signUp. Codex flagged this on PR #62.
+        // valid for the signUp. Codex P1 on PR #62 flagged this order.
+        //
+        // After verify(), we ALSO have to inspect the returned object's
+        // status. Verifying the email satisfies one requirement, but the
+        // Clerk instance may demand more (username, MFA, new password).
+        // If status != .complete we'd otherwise call
+        // onSessionEstablished(...) which would fail with the generic
+        // "no session token" path — leaving the user stuck with no
+        // signal. Codex P2 on PR #62 caught this. Throw a specific
+        // error so the SignInSheet can surface "complete sign-up on
+        // the web" rather than a useless retry.
         if let signUp = Clerk.shared.auth.currentSignUp {
-            _ = try await signUp.verifyEmailCode(code)
+            let result = try await signUp.verifyEmailCode(code)
+            guard result.status == .complete else {
+                throw NSError(
+                    domain: "PopAlpha.Auth",
+                    code: -4,
+                    userInfo: [NSLocalizedDescriptionKey: "Your account needs another step to finish setting up. Please continue on popalpha.ai."]
+                )
+            }
         } else if let signIn = Clerk.shared.auth.currentSignIn {
-            _ = try await signIn.verifyCode(code)
+            let result = try await signIn.verifyCode(code)
+            guard result.status == .complete else {
+                throw NSError(
+                    domain: "PopAlpha.Auth",
+                    code: -4,
+                    userInfo: [NSLocalizedDescriptionKey: "Sign-in needs another step (additional verification). Please continue on popalpha.ai."]
+                )
+            }
         } else {
             throw NSError(
                 domain: "PopAlpha.Auth",
