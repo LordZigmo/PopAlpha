@@ -272,21 +272,46 @@ function pickPairings(enCard, candidates, opts) {
   }
 
   if (accepted.length === 0) return [];
-  // Primary must clear the higher threshold; otherwise everything is alternate.
-  const primary = accepted[0].cosine >= opts.minCosine ? accepted[0] : null;
-  const alts = (primary ? accepted.slice(1) : accepted).slice(0, opts.altRankMax);
-  const rows = [];
-  if (primary) {
-    rows.push({ jp_slug: primary.card.slug, confidence: primary.cosine, rank: 0 });
-  }
+  // Primary must clear the higher threshold. If nothing does, write
+  // NOTHING — sub-threshold candidates would otherwise occupy rank=0
+  // (the detail API only reads rank=0), surfacing a pairing that
+  // explicitly failed our confidence bar as the EN/JP toggle target.
+  // Returning an empty list also keeps the cron candidate set alive
+  // (it filters on NOT EXISTS card_translations WHERE rank=0) so a
+  // future run with a stronger candidate can revisit this EN slug.
+  if (accepted[0].cosine < opts.minCosine) return [];
+  const primary = accepted[0];
+  const alts = accepted.slice(1, 1 + opts.altRankMax);
+  const rows = [
+    { jp_slug: primary.card.slug, confidence: primary.cosine, rank: 0 },
+  ];
   alts.forEach((a, i) => {
-    rows.push({ jp_slug: a.card.slug, confidence: a.cosine, rank: primary ? i + 1 : i });
+    rows.push({ jp_slug: a.card.slug, confidence: a.cosine, rank: i + 1 });
   });
   return rows;
 }
 
 async function upsertPairings({ sql }, enSlug, pairings) {
   if (pairings.length === 0) return 0;
+  // Delete-then-insert pattern. Plain ON CONFLICT (en_slug, jp_slug)
+  // isn't sufficient because a rerun where the rank=0 pairing flips
+  // to a different jp_slug would leave the OLD rank=0 row in place
+  // (ON CONFLICT doesn't fire across different jp_slug values),
+  // producing two rank=0 rows. The detail endpoint reads
+  // .eq("rank", 0).maybeSingle() and would error on the duplicate,
+  // hiding the toggle entirely. Wiping rows for the en_slug first
+  // makes the new pairing set the source of truth.
+  //
+  // Targeted DELETE (where jp_slug not in new set) would preserve
+  // unchanged rows, but DELETE-all is simpler and the immediate
+  // INSERT keeps the gap small. A crash between the two leaves the
+  // EN slug temporarily unpaired; the next cron pass re-pairs it.
+  const newJpSlugs = pairings.map((p) => p.jp_slug);
+  await sql.query(
+    `delete from card_translations where en_slug = $1 and jp_slug <> all($2::text[])`,
+    [enSlug, newJpSlugs],
+  );
+
   // Multi-row insert with positional params. $1 is shared (enSlug);
   // each pairing consumes three sequential params (jp_slug, confidence,
   // rank). Source + updated_at are literal in the VALUES list.

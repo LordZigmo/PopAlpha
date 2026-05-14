@@ -119,13 +119,18 @@ function pickPairings(en: EnRow, candidates: JpCandidate[]): Pairing[] {
     if (accepted.length > ALT_RANK_MAX + 1) break;
   }
   if (accepted.length === 0) return [];
-
-  const primary = accepted[0]!.cosine >= MIN_PRIMARY_COSINE ? accepted[0]! : null;
-  const alts = (primary ? accepted.slice(1) : accepted).slice(0, ALT_RANK_MAX);
-  const rows: Pairing[] = [];
-  if (primary) rows.push({ jp_slug: primary.card!.slug, confidence: primary.cosine, rank: 0 });
+  // Primary must clear the higher threshold. If nothing does, write
+  // NOTHING — sub-threshold candidates would otherwise occupy rank=0
+  // (the detail API only reads rank=0), surfacing a pairing that
+  // explicitly failed our confidence bar as the EN/JP toggle target.
+  if (accepted[0]!.cosine < MIN_PRIMARY_COSINE) return [];
+  const primary = accepted[0]!;
+  const alts = accepted.slice(1, 1 + ALT_RANK_MAX);
+  const rows: Pairing[] = [
+    { jp_slug: primary.card!.slug, confidence: primary.cosine, rank: 0 },
+  ];
   alts.forEach((a, i) => {
-    rows.push({ jp_slug: a.card!.slug, confidence: a.cosine, rank: primary ? i + 1 : i });
+    rows.push({ jp_slug: a.card!.slug, confidence: a.cosine, rank: i + 1 });
   });
   return rows;
 }
@@ -180,6 +185,19 @@ async function findJpCandidates(
 
 async function upsertPairings(enSlug: string, pairings: Pairing[]): Promise<number> {
   if (pairings.length === 0) return 0;
+  // Drop existing rows for this EN slug that AREN'T in the new pairing
+  // set first. Plain ON CONFLICT (en_slug, jp_slug) can't catch a
+  // rank=0 flipping to a different jp_slug — both rows would survive,
+  // and the detail endpoint's .eq("rank", 0).maybeSingle() lookup
+  // errors on the duplicate, hiding the toggle. The DELETE keeps any
+  // jp_slug present in the new set so unchanged rows ride through;
+  // the INSERT below updates their confidence/rank in place.
+  const newJpSlugs = pairings.map((p) => p.jp_slug);
+  await sql.query(
+    `delete from card_translations where en_slug = $1 and jp_slug <> all($2::text[])`,
+    [enSlug, newJpSlugs],
+  );
+
   const valuesSql = pairings
     .map((_, i) => `($1::text, $${i * 3 + 2}::text, $${i * 3 + 3}::real, $${i * 3 + 4}::smallint, 'image_embedding_v1'::text, now())`)
     .join(", ");
@@ -216,78 +234,72 @@ export async function GET(req: Request) {
 
   const { searchParams } = new URL(req.url);
   const maxCards = parseMaxCards(searchParams.get("maxCards"));
-  const cursor = searchParams.get("cursor") ?? null;
   const modelVersion = IMAGE_EMBEDDER_MODEL_VERSION;
   const supabase = dbAdmin();
 
-  // Claim filter: EN cards whose embedding is stamped under the active
-  // model_version AND which either have no card_translations row keyed
-  // by their slug, or whose canonical row updated after the most recent
-  // pairing row was written.
+  // Candidate set: EN cards stamped under the active model_version
+  // that don't yet have a primary (rank=0) pairing.
   //
-  // The "no row" half is the main thing this cron picks up week to
-  // week as the JP catalog grows. We express it as a NOT EXISTS so the
-  // planner can use the card_translations_en_idx for the lookup. The
-  // "row stale" half is rare but catches updates to canonical_name /
-  // card_number that might change which JP candidate wins.
-  let q = supabase
-    .from("canonical_cards")
-    .select("slug, canonical_name, canonical_name_native, card_number, updated_at")
-    .eq("language", "EN")
-    .eq("image_embedded_model_version", modelVersion)
-    .order("slug", { ascending: true })
-    .limit(maxCards);
-  if (cursor) q = q.gt("slug", cursor);
-
-  const { data, error } = await q;
-  if (error) {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  // The NOT EXISTS predicate is what makes the weekly schedule
+  // self-paging — successful runs INSERT rank=0 rows, so those slugs
+  // exit the candidate set and the next run's ORDER BY slug LIMIT
+  // naturally advances to fresh EN cards (or to ones that became
+  // pairable because newly-imported JP rows finally surfaced as
+  // kNN matches). No durable cursor needed.
+  //
+  // Stale-refresh (canonical row updated after pairing) is NOT
+  // covered here on purpose — re-pairing already-paired EN cards
+  // is an operator-driven concern. Wiring it into the same query
+  // would force the cron to re-process the long tail of stable
+  // pairings every week.
+  let candidateRows: EnRow[];
+  try {
+    const candidates = await sql.query(
+      `
+        select cc.slug,
+               cc.canonical_name,
+               cc.canonical_name_native,
+               cc.card_number
+          from canonical_cards cc
+         where cc.language = 'EN'
+           and cc.image_embedded_model_version = $1
+           and not exists (
+             select 1
+               from card_translations ct
+              where ct.en_slug = cc.slug
+                and ct.rank = 0
+           )
+         order by cc.slug asc
+         limit $2
+      `,
+      [modelVersion, maxCards],
+    );
+    candidateRows = (candidates.rows ?? []) as EnRow[];
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ ok: false, error: `candidate query: ${message}` }, { status: 500 });
   }
 
-  const rows = (data ?? []) as Array<EnRow & { updated_at: string | null }>;
-  if (rows.length === 0) {
+  if (candidateRows.length === 0) {
     return NextResponse.json({
       ok: true,
       processed: 0,
       primary: 0,
       alts: 0,
       written: 0,
-      last_slug: cursor,
+      last_slug: null,
       model_version: modelVersion,
       note: "no EN candidates",
     });
   }
 
-  // Skip rows that already have a fresh pairing. One round-trip lookup
-  // per batch — much cheaper than per-row.
-  const slugs = rows.map((r) => r.slug);
-  const { data: existing, error: existingErr } = await supabase
-    .from("card_translations")
-    .select("en_slug, updated_at")
-    .in("en_slug", slugs);
-  if (existingErr) {
-    return NextResponse.json({ ok: false, error: `card_translations lookup: ${existingErr.message}` }, { status: 500 });
-  }
-  const pairingByEn = new Map<string, string | null>();
-  for (const r of existing ?? []) {
-    const prev = pairingByEn.get(r.en_slug as string);
-    const next = r.updated_at as string | null;
-    if (!prev || (next && (!prev || next > prev))) pairingByEn.set(r.en_slug as string, next);
-  }
-  const todo = rows.filter((r) => {
-    const pairedAt = pairingByEn.get(r.slug);
-    if (!pairedAt) return true;
-    if (!r.updated_at) return false;
-    return r.updated_at > pairedAt;
-  });
-
   let processed = 0;
   let withPrimary = 0;
   let withAlts = 0;
   let written = 0;
-  let lastSlug: string | null = cursor;
+  let lastSlug: string | null = null;
 
-  for (const row of todo) {
+  for (const row of candidateRows) {
     processed += 1;
     lastSlug = row.slug;
     try {
@@ -305,15 +317,9 @@ export async function GET(req: Request) {
     }
   }
 
-  // Advance the cursor to the last EN slug we PEEKED at (rows, not todo)
-  // so the next invocation doesn't keep re-claiming the same skipped
-  // batch.
-  if (rows.length > 0) lastSlug = rows[rows.length - 1]!.slug;
-
   return NextResponse.json({
     ok: true,
     processed,
-    skipped: rows.length - todo.length,
     primary: withPrimary,
     alts: withAlts,
     written,
