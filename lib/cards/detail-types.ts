@@ -67,6 +67,8 @@ export type CardDetailResponse = {
     year: number | null;
     cardNumber: string | null;
     language: string | null;
+    pairedSlug: string | null;
+    pairedLanguage: "EN" | "JP" | null;
   };
   defaults: {
     mode: "RAW" | "GRADED";

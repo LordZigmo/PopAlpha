@@ -406,6 +406,31 @@ actor CardService {
         return rows.first
     }
 
+    // MARK: - Cross-language pairing
+    //
+    // Fetches the cross-language partner slug for the CardDetailView
+    // EN/JP toggle. Pulls only what the toggle needs from the much
+    // larger /api/cards/[slug]/detail payload — pairedSlug +
+    // pairedLanguage live under canonical. The full detail endpoint
+    // also carries finish groups, graded matrix, and price compare,
+    // none of which iOS currently reads (CardDetailView still drives
+    // those from direct Supabase queries via fetchPrintings /
+    // fetchCardMetrics). Decoding into the partial DTO ignores the
+    // rest so server-side additions don't break iOS.
+    //
+    // Returns CardPairing(nil, nil) when no pairing exists for the
+    // slug; callers should treat that as "hide the toggle."
+
+    func fetchCardPairing(slug: String) async throws -> CardPairing {
+        let response: CardDetailDTO = try await APIClient.get(
+            path: "/api/cards/\(slug)/detail"
+        )
+        return CardPairing(
+            pairedSlug: response.canonical.pairedSlug,
+            pairedLanguage: response.canonical.pairedLanguage
+        )
+    }
+
     // MARK: - Homepage Signal Board
 
     /// Fetch the same signal board data the web homepage renders.
@@ -660,6 +685,52 @@ struct CardProfileResult: Decodable {
     let chip: String?          // e.g. "🔥 Breakout Alert"
     let summaryShort: String
     let summaryLong: String?
+}
+
+// MARK: - Cross-language pairing DTOs
+//
+// Partial view of /api/cards/[slug]/detail. We only decode the two
+// fields the EN/JP toggle reads; the broader payload (finish groups,
+// graded matrix, pricing) is intentionally ignored so server-side
+// additions don't break iOS. The active CardDetailView still drives
+// finish/grade/price data through the existing Supabase-direct
+// queries (fetchPrintings / fetchCardMetrics / fetchConditionPrices).
+
+struct CardDetailDTO: Decodable {
+    struct Canonical: Decodable {
+        let pairedSlug: String?
+        let pairedLanguage: String?
+    }
+    let canonical: Canonical
+}
+
+struct CardPairing {
+    let pairedSlug: String?
+    let pairedLanguage: String?
+
+    static let none = CardPairing(pairedSlug: nil, pairedLanguage: nil)
+
+    /// The language the paired card represents. JP cards toggle to EN
+    /// and vice versa; nil when no pairing exists.
+    var pairedLang: CardLanguage? {
+        switch (pairedLanguage ?? "").uppercased() {
+        case "EN": return .en
+        case "JP": return .jp
+        default: return nil
+        }
+    }
+}
+
+enum CardLanguage: String {
+    case en = "EN"
+    case jp = "JP"
+
+    var displayLabel: String {
+        switch self {
+        case .en: return "EN"
+        case .jp: return "JP"
+        }
+    }
 }
 
 struct CardMetricsResult: Decodable {

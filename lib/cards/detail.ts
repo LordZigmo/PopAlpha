@@ -31,6 +31,11 @@ type CanonicalCardRow = {
   language: string | null;
 };
 
+type TranslationRow = {
+  en_slug: string;
+  jp_slug: string;
+};
+
 type CardPrintingRow = {
   id: string;
   canonical_slug: string;
@@ -397,7 +402,7 @@ export async function buildCardDetailResponse(inputSlug: string): Promise<CardDe
   const canonicalSlug = await resolveCanonicalSlug(inputSlug);
   if (!canonicalSlug) return null;
 
-  const [canonicalResult, printingsResult, rawMetricsResult, rawSignalsResult, gradedMetricsResult] = await Promise.all([
+  const [canonicalResult, printingsResult, rawMetricsResult, rawSignalsResult, gradedMetricsResult, translationResult] = await Promise.all([
     supabase
       .from("canonical_cards")
       .select("slug, canonical_name, set_name, year, card_number, language")
@@ -429,6 +434,15 @@ export async function buildCardDetailResponse(inputSlug: string): Promise<CardDe
       .not("printing_id", "is", null)
       .in("provider", [...GRADED_PROVIDERS])
       .in("grade", [...GRADE_BUCKETS]),
+    // Cross-language pairing for the CardDetailView EN/JP toggle. Reads
+    // rank=0 (primary) only; .or() searches both sides of the junction
+    // since canonicalSlug may be either the EN or JP partner.
+    supabase
+      .from("card_translations")
+      .select("en_slug, jp_slug")
+      .or(`en_slug.eq.${canonicalSlug},jp_slug.eq.${canonicalSlug}`)
+      .eq("rank", 0)
+      .maybeSingle<TranslationRow>(),
   ]);
 
   if (canonicalResult.error) throw new Error(`canonical_cards: ${canonicalResult.error.message}`);
@@ -436,14 +450,38 @@ export async function buildCardDetailResponse(inputSlug: string): Promise<CardDe
   if (rawMetricsResult.error) throw new Error(`card_metrics: ${rawMetricsResult.error.message}`);
   if (rawSignalsResult.error) throw new Error(`variant_metrics RAW: ${rawSignalsResult.error.message}`);
   if (gradedMetricsResult.error) throw new Error(`variant_metrics: ${gradedMetricsResult.error.message}`);
+  // card_translations is a soft dependency — if the table is missing
+  // (pre-migration) or the query errors transiently, the toggle just
+  // doesn't render. Log and continue rather than blow up the whole
+  // detail response.
+  if (translationResult.error) {
+    console.warn(`[buildCardDetailResponse] card_translations lookup failed: ${translationResult.error.message}`);
+  }
 
   const canonical = canonicalResult.data;
   const printings = printingsResult.data;
   const rawMetrics = rawMetricsResult.data;
   const rawSignals = rawSignalsResult.data;
   const gradedMetrics = gradedMetricsResult.data;
+  const translation = translationResult.error ? null : translationResult.data;
 
   if (!canonical) return null;
+
+  // Resolve the paired side. The canonicalSlug appears as either en_slug
+  // or jp_slug in the junction row; the OTHER side is the pairing.
+  // pairedLanguage is the language of the paired slug — derived from
+  // canonical.language by inversion when known, else looked up.
+  let pairedSlug: string | null = null;
+  let pairedLanguage: "EN" | "JP" | null = null;
+  if (translation) {
+    if (translation.en_slug === canonicalSlug) {
+      pairedSlug = translation.jp_slug;
+      pairedLanguage = "JP";
+    } else if (translation.jp_slug === canonicalSlug) {
+      pairedSlug = translation.en_slug;
+      pairedLanguage = "EN";
+    }
+  }
 
   const printingRows = (printings ?? []) as CardPrintingRow[];
   const rawMetricMap = new Map<string, RawMetricRow>();
@@ -522,6 +560,8 @@ export async function buildCardDetailResponse(inputSlug: string): Promise<CardDe
       year: canonical.year,
       cardNumber: canonical.card_number,
       language: canonical.language,
+      pairedSlug,
+      pairedLanguage,
     },
     defaults: {
       mode: defaultMode,
