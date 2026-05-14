@@ -70,6 +70,7 @@
 		CC00000100000000000000FA /* WatchlistButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00000100000000000000B1 /* WatchlistButton.swift */; };
 		CC00000100000000000000FB /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00000100000000000000B2 /* SettingsView.swift */; };
 		CC00000100000000000000FC /* RecentSearchStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00000100000000000000B3 /* RecentSearchStore.swift */; };
+		CC00000100000000000000FD /* SplashScreenView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00000100000000000000B4 /* SplashScreenView.swift */; };
 		DD00000100000000000000F0 /* AIBriefCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000B0 /* AIBriefCard.swift */; };
 		DD00000100000000000000F1 /* SignalBoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000A1 /* SignalBoardView.swift */; };
 		DD00000100000000000000F2 /* Haptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000000A2 /* Haptics.swift */; };
@@ -174,6 +175,7 @@
 		CC00000100000000000000B1 /* WatchlistButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchlistButton.swift; sourceTree = "<group>"; };
 		CC00000100000000000000B2 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		CC00000100000000000000B3 /* RecentSearchStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentSearchStore.swift; sourceTree = "<group>"; };
+		CC00000100000000000000B4 /* SplashScreenView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplashScreenView.swift; sourceTree = "<group>"; };
 		DD00000100000000000000A1 /* SignalBoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalBoardView.swift; sourceTree = "<group>"; };
 		DD00000100000000000000A2 /* Haptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Haptics.swift; sourceTree = "<group>"; };
 		DD00000100000000000000A3 /* PersonalizationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalizationService.swift; sourceTree = "<group>"; };
@@ -286,6 +288,7 @@
 				CC00000100000000000000A9 /* WatchlistView.swift */,
 				CC00000100000000000000B1 /* WatchlistButton.swift */,
 				CC00000100000000000000B2 /* SettingsView.swift */,
+				CC00000100000000000000B4 /* SplashScreenView.swift */,
 				DD00000100000000000000A1 /* SignalBoardView.swift */,
 				DD00000100000000000000A2 /* Haptics.swift */,
 				DD00000100000000000000A3 /* PersonalizationService.swift */,
@@ -491,6 +494,7 @@
 				CC00000100000000000000F9 /* WatchlistView.swift in Sources */,
 				CC00000100000000000000FA /* WatchlistButton.swift in Sources */,
 				CC00000100000000000000FB /* SettingsView.swift in Sources */,
+				CC00000100000000000000FD /* SplashScreenView.swift in Sources */,
 				DD00000100000000000000F1 /* SignalBoardView.swift in Sources */,
 				DD00000100000000000000F2 /* Haptics.swift in Sources */,
 				DD00000100000000000000F3 /* PersonalizationService.swift in Sources */,
