@@ -6,6 +6,73 @@ Drafts for every App Store Connect text field for the v1.0.0 submission. Paste s
 
 ---
 
+## 0. Submission Status
+
+Where we are on the path to "Submit for Review." Updated 2026-05-14.
+
+### ✅ Done (in-binary work shipped, tested where applicable)
+
+| Item | Status | Notes |
+|---|---|---|
+| UGC moderation infrastructure + gate behind `FeatureFlags.isSocialEnabled` | ✅ | Report/Block UI dormant, server moderation tables in place; Feed tab hidden in v1 |
+| Light + dark mode support + in-app Appearance picker | ✅ | Adaptive `PA.Colors`, Settings → Appearance toggle (System / Light / Dark) |
+| Global offline banner | ✅ | `NWPathMonitor` → `OfflineBanner` overlay on root TabView |
+| Push permission soft pre-prompt | ✅ | `PushPermissionPromptSheet` precedes system dialog; one-shot dedupe |
+| Account deletion (`DELETE /api/me`) | ✅ | Cascades to Clerk + 14 FK-linked tables, explicit cleanups for 4 non-FK tables |
+| Photo library scoping | ✅ | `#if DEBUG`-gated, `NSPhotoLibraryUsageDescription` removed from Info.plist |
+| Chart error state + retry | ✅ | CardDetailView no longer silently clears on fetch failure |
+| Email sign-in (existing users) | ✅ | Clerk's `signInWithEmailCode` flow via `SignInSheet` |
+| Email sign-UP (new users, fallthrough) | ✅ | 5 Codex-hardened iterations: dispatch order, legal disclaimer, `.complete` status guard, stale-attempt protection, resend reuse |
+| Apple Sign In | ✅ | App ID capability + `.p8` key (combined with APNs key for v1, split on next rotation) + Clerk SSO connection — tested on device |
+| Google OAuth | ✅ | Already working from earlier release prep |
+| Version bump → 1.0.0 | ✅ | `MARKETING_VERSION = 1.0.0`, `CURRENT_PROJECT_VERSION = 1` |
+| Demo Apple Review mailbox | ✅ | `review.popalpha@proton.me` (Proton free, 2FA disabled) |
+| Clerk Dashboard: Email identifier + Email-code strategy enabled | ✅ | Production instance |
+| Clerk Dashboard: Phone identifier disabled, Password strategy disabled, Username/Name optional | ✅ | Required to avoid `.missingRequirements` after email verification |
+
+### 🟡 In Progress (you, light lift)
+
+| Item | Owner | Next action |
+|---|---|---|
+| Sign into PopAlpha once with `review.popalpha@proton.me` | You | Seeds the Clerk user record |
+| Seed demo account: 1 holding + 1 wishlist item | You | After step above, while signed in |
+| Clerk Dashboard: confirm Sign-up mode is **Public** | You | Required for fresh-account fallthrough; takes 10s to verify |
+
+### ⏳ Pending — ASC Paperwork (you)
+
+| Item | Source in this doc | Notes |
+|---|---|---|
+| App Information (bundle ID, category, age rating) | §1 + §7 | Age rating 4+ (UGC gated, no objectionable content) |
+| App description | §2 | 4000 char max; long-form copy |
+| Keywords | §3 | 100 char max, comma-separated |
+| Promotional text | §4 | 170 char max; editable post-submission |
+| What's New in v1 | §5 | First version — generic "Welcome to PopAlpha" copy |
+| Marketing/Support/Privacy URLs | §6 | popalpha.ai, /support, /privacy |
+| Privacy nutrition labels | §8 | Most tedious section; copy questionnaire answers from doc |
+| **Pokémon trademark Content Rights answer** | §9 | The one legal-adjacent question — review with whoever owns trade dress risk |
+| App Review Information (Sign-In Information + Notes) | §10 | Now paste-ready with Proton creds |
+| IAP descriptions | §11 | Monthly + Yearly entries + subscription group |
+| Encryption / Export compliance | §12 | Standard "no non-exempt encryption" |
+| Advertising Identifier | §13 | "Not using IDFA" |
+| **Screenshots** | §14 | Currently the biggest remaining blocker — discuss separately |
+| iPad decision: drop or audit | §14 | If keep, need 12.9" iPad Pro screenshots (more work). If drop, change `TARGETED_DEVICE_FAMILY = "1"` |
+
+### ⏳ Pending — Pre-submission Validation
+
+| Item | When | Notes |
+|---|---|---|
+| TestFlight internal 24–48h | After paperwork lands | Catch crashes / regressions on real devices before Apple sees them |
+| Xcode → Product → Archive → Validate App | Right before submit | Apple's pre-flight validation catches most mechanical errors (missing icons, metadata mismatches) |
+| Submit for Review | After Validate passes | Typical review time: 24–48h |
+
+### 🔵 Deferred / Not Applicable for v1
+
+- Web-based Sign in with Apple (Services ID) — iOS-only flow for now
+- Split APNs + Sign-in-with-Apple `.p8` keys — combined for v1, will rotate to separate keys
+- Re-enable UGC surfaces — `FeatureFlags.isSocialEnabled = true` ship will require all the moderation surfaces (Report sheets, Block UI, server moderation pipeline) to be re-tested and the 24h SLA + Community Guidelines URL to be re-surfaced. v2+ work.
+
+---
+
 ## 1. App Information
 
 | Field | Value | Char count |
