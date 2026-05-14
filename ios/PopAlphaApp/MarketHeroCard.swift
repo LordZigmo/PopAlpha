@@ -26,7 +26,11 @@ import SwiftUI
 
 struct MarketHeroCard: View {
     let onScan: () -> Void
-    let onSeeMovers: () -> Void
+    /// Optional secondary "See what's moving" CTA. Pass `nil` to hide
+    /// the button entirely — used by the JP-market sequence where the
+    /// JP rail renders directly below the hero, so an in-page scroll
+    /// CTA would be both a no-op and a redundant nudge.
+    let onSeeMovers: (() -> Void)?
 
     /// Homepage market injected by `MarketplaceView`. The hero is pure
     /// brand identity (eyebrow, primary CTA, accent glow, border) so
@@ -89,20 +93,22 @@ struct MarketHeroCard: View {
                 .buttonStyle(.plain)
                 .accessibilityHint("Opens the scanner so you can identify a card")
 
-                Button {
-                    onSeeMovers()
-                } label: {
-                    HStack(spacing: 4) {
-                        Text("See what's moving")
-                            .font(.system(size: 13, weight: .medium))
-                        Image(systemName: "arrow.down")
-                            .font(.system(size: 10, weight: .semibold))
-                            .accessibilityHidden(true)
+                if let onSeeMovers {
+                    Button {
+                        onSeeMovers()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("See what's moving")
+                                .font(.system(size: 13, weight: .medium))
+                            Image(systemName: "arrow.down")
+                                .font(.system(size: 10, weight: .semibold))
+                                .accessibilityHidden(true)
+                        }
+                        .foregroundStyle(PA.Colors.textSecondary)
                     }
-                    .foregroundStyle(PA.Colors.textSecondary)
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Scrolls down to the market movers section")
                 }
-                .buttonStyle(.plain)
-                .accessibilityHint("Scrolls down to the market movers section")
 
                 Spacer(minLength: 0)
             }

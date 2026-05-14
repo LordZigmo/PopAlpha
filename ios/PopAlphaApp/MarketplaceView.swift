@@ -310,9 +310,12 @@ struct MarketplaceView: View {
             PersonalPulseSection(me: meData, styleLabel: styleLabel)
                 .padding(.horizontal, PA.Layout.sectionPadding)
         } else {
+            // JP rail renders directly below the hero, so the secondary
+            // "See what's moving" CTA is suppressed — its accessibility
+            // hint advertises a scroll that doesn't help in this layout.
             MarketHeroCard(
                 onScan: { handleScanCTA() },
-                onSeeMovers: { /* JP mode has no in-page scroll target yet */ }
+                onSeeMovers: nil
             )
             .padding(.horizontal, PA.Layout.sectionPadding)
         }
