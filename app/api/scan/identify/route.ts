@@ -32,7 +32,7 @@
  */
 
 import crypto from "node:crypto";
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { sql } from "@vercel/postgres";
 import { hasVercelPostgresConfig } from "@/lib/ai/card-embeddings";
 import { dbAdmin } from "@/lib/db/admin";
@@ -1507,9 +1507,16 @@ export async function POST(req: Request) {
   });
 
   if (reviewQueued) {
-    // Fire-and-forget — don't block the scan response on a Storage
-    // round-trip. Helper logs its own failures.
-    void enqueueScanForReview(imageHash);
+    // Run the Storage copy AFTER the response is sent but BEFORE
+    // function termination. `after()` is Next's framework-supported
+    // background hook — guarantees the copy completes (no
+    // freeze-on-return like a bare `void` Promise would risk on
+    // serverless) while still keeping the scan response off the
+    // critical path. Without this, the DB row could end up stamped
+    // with `review_queued_at` while the
+    // `scan-uploads/review-queue/<hash>.jpg` object is never written
+    // (Codex P2 on PR #60).
+    after(() => enqueueScanForReview(imageHash));
   }
 
   return NextResponse.json({
