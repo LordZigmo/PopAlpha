@@ -119,13 +119,16 @@ function pickPairings(en: EnRow, candidates: JpCandidate[]): Pairing[] {
     if (accepted.length > ALT_RANK_MAX + 1) break;
   }
   if (accepted.length === 0) return [];
-  // Primary must clear the higher threshold. If nothing does, write
-  // NOTHING — sub-threshold candidates would otherwise occupy rank=0
-  // (the detail API only reads rank=0), surfacing a pairing that
-  // explicitly failed our confidence bar as the EN/JP toggle target.
-  if (accepted[0]!.cosine < MIN_PRIMARY_COSINE) return [];
-  const primary = accepted[0]!;
-  const alts = accepted.slice(1, 1 + ALT_RANK_MAX);
+  // Primary must clear the cosine floor on its own merits — NOT the
+  // score (cosine + numberBoost). `accepted` is sorted by score so
+  // find() walks in that order; the chosen primary is the
+  // highest-score candidate that also meets the raw cosine bar.
+  // Higher-score-but-lower-cosine candidates fall back into the alts
+  // bucket (they still cleared MIN_ALT_COSINE — that's how they got
+  // into `accepted` to begin with).
+  const primary = accepted.find((c) => c.cosine >= MIN_PRIMARY_COSINE);
+  if (!primary) return [];
+  const alts = accepted.filter((c) => c !== primary).slice(0, ALT_RANK_MAX);
   const rows: Pairing[] = [
     { jp_slug: primary.card!.slug, confidence: primary.cosine, rank: 0 },
   ];
@@ -238,20 +241,26 @@ export async function GET(req: Request) {
   const supabase = dbAdmin();
 
   // Candidate set: EN cards stamped under the active model_version
-  // that don't yet have a primary (rank=0) pairing.
+  // that don't yet have a primary (rank=0) pairing AND haven't been
+  // tried in the last RETRY_INTERVAL_DAYS days.
   //
-  // The NOT EXISTS predicate is what makes the weekly schedule
-  // self-paging — successful runs INSERT rank=0 rows, so those slugs
-  // exit the candidate set and the next run's ORDER BY slug LIMIT
-  // naturally advances to fresh EN cards (or to ones that became
-  // pairable because newly-imported JP rows finally surfaced as
-  // kNN matches). No durable cursor needed.
+  // Two-axis advancement:
+  //   1. NOT EXISTS card_translations WHERE rank=0 — successful
+  //      pairings exit the set permanently.
+  //   2. translation_attempted_at filter — unpairable slugs that
+  //      were attempted recently exit temporarily, so we don't keep
+  //      reprocessing the same first-page leading slugs every week
+  //      while later slugs starve.
+  //
+  // ORDER BY translation_attempted_at asc nulls first prioritizes:
+  //   never-attempted (NULL) → oldest attempts → newer attempts.
+  // Combined with the 14-day filter, untouched slugs always come
+  // first, and old retries cycle back through over time as JP
+  // catalog growth makes new pairings possible.
   //
   // Stale-refresh (canonical row updated after pairing) is NOT
   // covered here on purpose — re-pairing already-paired EN cards
-  // is an operator-driven concern. Wiring it into the same query
-  // would force the cron to re-process the long tail of stable
-  // pairings every week.
+  // is an operator-driven concern.
   let candidateRows: EnRow[];
   try {
     const candidates = await sql.query(
@@ -269,7 +278,11 @@ export async function GET(req: Request) {
               where ct.en_slug = cc.slug
                 and ct.rank = 0
            )
-         order by cc.slug asc
+           and (
+             cc.translation_attempted_at is null
+             or cc.translation_attempted_at < now() - interval '14 days'
+           )
+         order by cc.translation_attempted_at asc nulls first, cc.slug asc
          limit $2
       `,
       [modelVersion, maxCards],
@@ -298,22 +311,46 @@ export async function GET(req: Request) {
   let withAlts = 0;
   let written = 0;
   let lastSlug: string | null = null;
+  // Track every slug we attempt, regardless of outcome. The post-loop
+  // UPDATE stamps translation_attempted_at on all of them so the next
+  // cron pass orders them after the still-untouched (NULL) slugs and
+  // skips them entirely until the 14-day retry window opens. Slugs
+  // that errored mid-flight are also stamped — better to retry them
+  // in two weeks alongside the rest than monopolize next week's run.
+  const attemptedSlugs: string[] = [];
 
   for (const row of candidateRows) {
     processed += 1;
     lastSlug = row.slug;
+    attemptedSlugs.push(row.slug);
     try {
       const candidates = await findJpCandidates(row.slug, modelVersion, supabase);
-      if (candidates.length === 0) continue;
-      const pairings = pickPairings(row, candidates);
-      if (pairings.length === 0) continue;
-      if (pairings.some((p) => p.rank === 0)) withPrimary += 1;
-      if (pairings.some((p) => p.rank > 0)) withAlts += 1;
-      const rowsWritten = await upsertPairings(row.slug, pairings);
-      written += rowsWritten;
+      if (candidates.length > 0) {
+        const pairings = pickPairings(row, candidates);
+        if (pairings.length > 0) {
+          if (pairings.some((p) => p.rank === 0)) withPrimary += 1;
+          if (pairings.some((p) => p.rank > 0)) withAlts += 1;
+          const rowsWritten = await upsertPairings(row.slug, pairings);
+          written += rowsWritten;
+        }
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.warn(`[refresh-card-translations] ${row.slug} failed: ${message}`);
+    }
+  }
+
+  // Batch-stamp the attempt timestamp. Single UPDATE keeps this off
+  // the per-row hot path; passing the slugs as a text[] avoids
+  // building a giant IN list. dbAdmin() uses the service role so the
+  // RLS-protected column is writable.
+  if (attemptedSlugs.length > 0) {
+    const { error: stampErr } = await supabase
+      .from("canonical_cards")
+      .update({ translation_attempted_at: new Date().toISOString() })
+      .in("slug", attemptedSlugs);
+    if (stampErr) {
+      console.warn(`[refresh-card-translations] stamp write-back failed: ${stampErr.message}`);
     }
   }
 

@@ -272,16 +272,20 @@ function pickPairings(enCard, candidates, opts) {
   }
 
   if (accepted.length === 0) return [];
-  // Primary must clear the higher threshold. If nothing does, write
-  // NOTHING — sub-threshold candidates would otherwise occupy rank=0
-  // (the detail API only reads rank=0), surfacing a pairing that
-  // explicitly failed our confidence bar as the EN/JP toggle target.
-  // Returning an empty list also keeps the cron candidate set alive
-  // (it filters on NOT EXISTS card_translations WHERE rank=0) so a
-  // future run with a stronger candidate can revisit this EN slug.
-  if (accepted[0].cosine < opts.minCosine) return [];
-  const primary = accepted[0];
-  const alts = accepted.slice(1, 1 + opts.altRankMax);
+  // Primary must clear the cosine floor on its own merits — NOT the
+  // score (cosine + numberBoost). The boost is a tiebreak for ordering
+  // among candidates that already cleared the cosine bar; promoting a
+  // sub-threshold-cosine candidate to rank=0 just because its
+  // numberBoost lifted its score above a real 0.91 candidate would
+  // surface an unsafe pairing in the EN/JP toggle. `accepted` is
+  // sorted by score; find() walks in that order, so the chosen
+  // primary is the highest-score candidate that ALSO meets the raw
+  // cosine bar. Candidates with higher score but lower cosine drop
+  // into the alts bucket if their cosine still clears altCosine
+  // (they did clear it — they're in `accepted`).
+  const primary = accepted.find((c) => c.cosine >= opts.minCosine);
+  if (!primary) return [];
+  const alts = accepted.filter((c) => c !== primary).slice(0, opts.altRankMax);
   const rows = [
     { jp_slug: primary.card.slug, confidence: primary.cosine, rank: 0 },
   ];
@@ -365,11 +369,18 @@ async function main() {
   let withAlts = 0;
   let writtenRows = 0;
   let lastSlug = null;
+  // Track every slug we attempt so the cron's NOT-NULL-NULLS-FIRST
+  // ordering can move past them in subsequent runs. Stamped in a
+  // batched UPDATE at the end of this run — see the post-loop block.
+  // Skipped in dry-run mode so a smoke-test pass doesn't burn the
+  // 14-day retry window for slugs we never actually wrote.
+  const attemptedSlugs = [];
   const started = Date.now();
 
   for (const enCard of enCards) {
     processed += 1;
     lastSlug = enCard.slug;
+    if (!opts.dryRun) attemptedSlugs.push(enCard.slug);
     try {
       const candidates = await findJpCandidates({ sql, supabase }, enCard.slug, modelVersion, DEFAULTS.topK);
       if (candidates.length === 0) {
@@ -408,6 +419,20 @@ async function main() {
       const eta = remaining / Math.max(0.001, rate);
       console.log(`[backfill-card-translations] ${processed}/${enCards.length}  primary=${withPrimary} alts=${withAlts} wrote=${writtenRows}  ${rate.toFixed(2)} card/s  ETA ${(eta / 60).toFixed(1)}min  last=${lastSlug}`);
     }
+  }
+
+  // Batch-stamp translation_attempted_at on every slug we touched.
+  // Skipped under --dry-run. The cron's candidate selection orders by
+  // (translation_attempted_at ASC NULLS FIRST), so stamping during a
+  // bulk backfill correctly pushes processed slugs to the back of the
+  // line, letting the weekly cron focus on never-tried EN slugs first
+  // and only revisit these once 14 days have elapsed.
+  if (!opts.dryRun && attemptedSlugs.length > 0) {
+    const stamp = await sql.query(
+      `update canonical_cards set translation_attempted_at = now() where slug = any($1::text[])`,
+      [attemptedSlugs],
+    );
+    console.log(`[backfill-card-translations] stamped translation_attempted_at on ${stamp.rowCount ?? 0} canonical_cards row(s)`);
   }
 
   const sec = (Date.now() - started) / 1000;
