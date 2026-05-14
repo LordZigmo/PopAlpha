@@ -359,7 +359,15 @@ struct MarketPulseSection: View {
             // Older server builds (pre 2026-05-07 JP onboarding) won't
             // include the japanese rail; fall back to empty so the tab
             // still renders gracefully.
-            return signalBoard.japanese ?? []
+            //
+            // Each JP card is run through `preferringJpSource()` so the
+            // tile shows the Yahoo!JP or Snkrdunk native price (when a
+            // source qualifies on sample count) instead of Scrydex's
+            // USD reflection. This is what the JP-market toggle
+            // actually promises to the user — without it the JP view
+            // is just a colored shell over the same Scrydex data the
+            // EN view shows.
+            return (signalBoard.japanese ?? []).map { $0.preferringJpSource() }
         }
     }
 
