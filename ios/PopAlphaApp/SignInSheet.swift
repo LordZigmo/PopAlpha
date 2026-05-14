@@ -208,8 +208,27 @@ struct SignInSheet: View {
             PrimaryEmailSignInButton(maxWidth: 280) {
                 withAnimation { phase = .email }
             }
+            legalFooter
         }
         .padding(.horizontal, 24)
+    }
+
+    /// Inline legal disclaimer with tappable Terms / Privacy /
+    /// Community Guidelines links. Shown on the chooser and email
+    /// phases so users see and implicitly accept the terms BEFORE we
+    /// pass `legalAccepted: true` to Clerk on the sign-up fallthrough
+    /// path. Tap-through opens the policy in Safari (SwiftUI Text
+    /// handles markdown link tapping natively when the destination
+    /// is a real URL).
+    private var legalFooter: some View {
+        Text("By continuing, you agree to our [Terms of Service](https://popalpha.ai/terms), [Privacy Policy](https://popalpha.ai/privacy), and [Community Guidelines](https://popalpha.ai/community-guidelines).")
+            .font(.system(size: 11))
+            .foregroundStyle(PA.Colors.muted)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 8)
+            .padding(.top, 16)
+            .tint(PA.Colors.accent)
+            .accessibilityLabel("By continuing, you agree to our Terms of Service, Privacy Policy, and Community Guidelines.")
     }
 
     // MARK: - Phase 1: Email
@@ -259,6 +278,8 @@ struct SignInSheet: View {
             .padding(.horizontal, 24)
             .padding(.top, 4)
             .accessibilityLabel("Send code to email")
+
+            legalFooter
         }
     }
 

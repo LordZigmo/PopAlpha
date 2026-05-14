@@ -221,11 +221,16 @@ final class AuthService {
                 || raw.contains("identifier") && raw.contains("not")
             guard isNotFound else { throw error }
 
-            // Fresh signup. legalAccepted=true because the in-app
-            // Terms / Privacy / Community Guidelines links are
-            // presented in Settings and on the same sign-in surface;
-            // continuing past this screen counts as acceptance per
-            // our Terms §2.
+            // Fresh signup. legalAccepted=true is paired with the
+            // inline legal disclaimer in SignInSheet (`legalFooter`)
+            // that surfaces Terms of Service, Privacy Policy, and
+            // Community Guidelines links on both the chooser and
+            // email-entry phases. The user implicitly accepts by
+            // tapping Send Code after the disclaimer is shown —
+            // matches the App Sign In / Google sign-up pattern.
+            // Codex P2 on PR #62 flagged the original implementation
+            // for setting this flag without an inline disclaimer; the
+            // disclaimer addresses that.
             let signUp = try await Clerk.shared.auth.signUp(
                 emailAddress: trimmed,
                 legalAccepted: true,
