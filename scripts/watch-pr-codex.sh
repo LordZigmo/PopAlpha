@@ -36,41 +36,71 @@ if [ -z "$PR" ]; then
 fi
 REPO="${REPO:-LordZigmo/PopAlpha}"
 POLL_INTERVAL="${POLL_INTERVAL:-30}"
-since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-echo "[watcher] armed for PR #$PR (repo=$REPO, poll=${POLL_INTERVAL}s) since $since (will self-stop on merge/close)"
+# Cursor strategy: track per-endpoint MAX ID (monotonically increasing
+# integers) instead of timestamps. Solves two problems caught by Codex
+# review on PR #61:
+#   - Second-boundary race (P2): GitHub timestamps are second-precision,
+#     so a strict `created_at > $since` filter can miss a comment posted
+#     in the same UTC second as the previous poll's `now`. IDs don't
+#     have boundary issues.
+#   - Duplicate emission on partial failure (P3): per-endpoint cursors
+#     advance independently when each call succeeds. If reviews fails
+#     while comments succeeds, comments emits + advances, reviews stays
+#     pinned. Next iteration re-fetches reviews from its old cursor
+#     without re-emitting the already-printed comments.
+#
+# Bootstrap: capture the current max IDs at startup so the watcher only
+# emits activity that lands AFTER it armed (not the PR's full history).
+
+bootstrap_max_id() {
+  local endpoint="$1" # "comments" or "reviews"
+  gh api "repos/$REPO/pulls/$PR/$endpoint" --paginate --jq \
+    '[.[] | select(.user.login == "chatgpt-codex-connector[bot]") | .id] | max // 0' \
+    2>/dev/null || echo 0
+}
+
+last_comment_id="$(bootstrap_max_id comments)"
+[ -z "$last_comment_id" ] && last_comment_id=0
+last_review_id="$(bootstrap_max_id reviews)"
+[ -z "$last_review_id" ] && last_review_id=0
+
+echo "[watcher] armed for PR #$PR (repo=$REPO, poll=${POLL_INTERVAL}s) — cursor: comments>$last_comment_id reviews>$last_review_id (will self-stop on merge/close)"
 
 while true; do
-  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-
-  # Capture exit codes per-endpoint so the cursor only advances when both
-  # polls succeed. Without this guard, a transient gh / network / rate-
-  # limit failure would silently drop any Codex activity in the failure
-  # window: cursor would advance past the lost comments and the next
-  # successful poll's "created_at > $since" filter would skip them
-  # forever. Codex P2 caught this on PR #61.
-  comments_out=$(
+  # Comments. Each emitted line is `<id>\t<printable>` so we can
+  # advance per-row and never re-emit.
+  comments_raw=$(
     gh api "repos/$REPO/pulls/$PR/comments" --paginate --jq \
-      ".[] | select(.user.login == \"chatgpt-codex-connector[bot]\") | select(.created_at > \"$since\") | \"[Codex inline #\(.id)] \(.path):\(.line // .original_line // 0) (commit \(.commit_id[:10])) — \(.body | split(\"\\n\")[0] | .[:240])\"" \
+      ".[] | select(.user.login == \"chatgpt-codex-connector[bot]\") | select(.id > $last_comment_id) | \"\(.id)\\t[Codex inline #\(.id)] \(.path):\(.line // .original_line // 0) (commit \(.commit_id[:10])) — \(.body | split(\"\\n\")[0] | .[:240])\"" \
       2>/dev/null
   )
   comments_ok=$?
+  if [ $comments_ok -eq 0 ] && [ -n "$comments_raw" ]; then
+    while IFS=$'\t' read -r cid line; do
+      [ -z "$cid" ] && continue
+      echo "$line"
+      if [ "$cid" -gt "$last_comment_id" ]; then last_comment_id="$cid"; fi
+    done <<< "$comments_raw"
+  fi
 
-  # GitHub returns reviews chronologically (oldest first), so --paginate
-  # is required to surface the latest on long-iteration PRs.
-  reviews_out=$(
+  # Reviews. Same per-row id advancement.
+  reviews_raw=$(
     gh api "repos/$REPO/pulls/$PR/reviews" --paginate --jq \
-      ".[] | select(.user.login == \"chatgpt-codex-connector[bot]\") | select(.submitted_at > \"$since\") | \"[Codex review] commit=\(.commit_id[:10]) state=\(.state) submitted=\(.submitted_at)\"" \
+      ".[] | select(.user.login == \"chatgpt-codex-connector[bot]\") | select(.id > $last_review_id) | \"\(.id)\\t[Codex review] commit=\(.commit_id[:10]) state=\(.state) submitted=\(.submitted_at)\"" \
       2>/dev/null
   )
   reviews_ok=$?
+  if [ $reviews_ok -eq 0 ] && [ -n "$reviews_raw" ]; then
+    while IFS=$'\t' read -r rid line; do
+      [ -z "$rid" ] && continue
+      echo "$line"
+      if [ "$rid" -gt "$last_review_id" ]; then last_review_id="$rid"; fi
+    done <<< "$reviews_raw"
+  fi
 
-  # Emit only when the call succeeded AND produced output.
-  if [ $comments_ok -eq 0 ] && [ -n "$comments_out" ]; then echo "$comments_out"; fi
-  if [ $reviews_ok -eq 0 ] && [ -n "$reviews_out" ]; then echo "$reviews_out"; fi
-
-  # Self-stop on merge/close (independent — failure here just means we
-  # keep polling next iteration, which is the right thing).
+  # Self-stop on merge/close. Independent — failure here just means we
+  # skip the check this iteration and try again next time.
   state=$(gh pr view "$PR" -R "$REPO" --json state --jq '.state' 2>/dev/null || echo "")
   case "$state" in
     MERGED)
@@ -82,13 +112,6 @@ while true; do
       exit 0
       ;;
   esac
-
-  # Advance the cursor only after BOTH activity-polls succeeded.
-  # If either failed, leave $since pinned to the earlier timestamp so
-  # the next iteration re-fetches the failure-window range.
-  if [ $comments_ok -eq 0 ] && [ $reviews_ok -eq 0 ]; then
-    since="$now"
-  fi
 
   sleep "$POLL_INTERVAL"
 done
