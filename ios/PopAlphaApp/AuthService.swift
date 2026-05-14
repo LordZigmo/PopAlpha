@@ -22,6 +22,12 @@ final class AuthService {
     private(set) var isSigningIn: Bool = false
     private(set) var signInError: String?
 
+    /// Drives the unified SignInSheet from any "Sign In" CTA. The sheet
+    /// presents the three providers (Google / Apple / Email) and runs
+    /// the appropriate AuthService method when the user picks one. Set
+    /// true by `signIn()`, cleared when the sheet dismisses.
+    var showSignInSheet: Bool = false
+
     private var tokenRefreshTask: Task<Void, Never>?
 
     private init() {}
@@ -40,9 +46,26 @@ final class AuthService {
     // in parallel, and both feed the same signInError surface so the
     // global alert in ContentView works uniformly regardless of provider.
 
-    /// Triggers Google OAuth. Fire-and-forget — spawns its own Task so
-    /// SwiftUI button actions stay synchronous.
+    /// Generic "Sign In" entry point used by every shortcut button in
+    /// the app (Settings, Watchlist empty, Portfolio empty, etc.).
+    /// Opens the SignInSheet which presents Google / Apple / Email so
+    /// users — and App Reviewers — can pick whichever is convenient.
+    /// Direct-to-provider entry is still available via
+    /// `signInWithGoogle()` / `signInWithApple()` (used by
+    /// SignInProviderStack and similar inline 3-button surfaces where
+    /// the user's already implicitly chosen).
+    @MainActor
     func signIn() {
+        guard !isSigningIn else { return }
+        showSignInSheet = true
+    }
+
+    /// Triggers Google OAuth directly, bypassing the chooser. Used by
+    /// PrimarySignInButton inside SignInProviderStack and by the
+    /// chooser phase of SignInSheet itself when the user picks Google.
+    /// Fire-and-forget — spawns its own Task so SwiftUI button actions
+    /// stay synchronous.
+    func signInWithGoogle() {
         guard !isSigningIn else { return }
         Task { @MainActor in
             await performSignIn(
@@ -66,10 +89,11 @@ final class AuthService {
     }
 
     /// Shared post-provider session plumbing: runs the provider-specific
-    /// Clerk call, then extracts the session token + user metadata and
-    /// wires everything into APIClient. Error handling is the same for
-    /// both providers — user-cancel becomes a no-op so the global alert
-    /// doesn't fire for a benign dismissal.
+    /// Clerk call, then hands off to `onSessionEstablished(provider:)` to
+    /// extract the session token + user metadata and wire everything
+    /// into APIClient. Error handling is the same for OAuth providers —
+    /// user-cancel becomes a no-op so the global alert doesn't fire for
+    /// a benign dismissal.
     @MainActor
     private func performSignIn(
         provider: String,
@@ -81,45 +105,7 @@ final class AuthService {
 
         do {
             try await providerCall()
-
-            guard let token = try await Clerk.shared.auth.getToken() else {
-                signInError = "Unable to retrieve session token."
-                return
-            }
-
-            let userId = Clerk.shared.user?.id ?? ""
-            let firstName = Clerk.shared.user?.firstName
-            let email = Clerk.shared.user?.primaryEmailAddress?.emailAddress
-            let imageUrl = Clerk.shared.user?.imageUrl
-            setSession(token: token, userId: userId, handle: nil)
-            currentFirstName = firstName
-            currentImageURL = imageUrl
-            startTokenRefresh()
-
-            // Attribute subsequent PostHog events to this Clerk user so
-            // iOS activity lands on the same person as the user's web
-            // sessions, then capture the sign-in itself.
-            if !userId.isEmpty {
-                AnalyticsService.shared.identify(
-                    userId: userId,
-                    email: email,
-                    firstName: firstName
-                )
-                AnalyticsService.shared.capture(
-                    .userSignedIn,
-                    properties: ["provider": provider]
-                )
-            }
-
-            await loadHandle()
-
-            // Soft pre-prompt before the system permission dialog —
-            // shows our PushPermissionPromptSheet on first sign-in so
-            // the user can say "Not Now" without burning the one-shot
-            // system prompt. PushService falls back to the direct
-            // requestAuthorizationIfNeeded() path on subsequent
-            // sign-ins / when the user has already responded.
-            await PushService.shared.maybeShowSoftPrompt()
+            try await onSessionEstablished(provider: provider)
         } catch {
             // User-cancel is a non-error path for both providers:
             //   • ASWebAuthenticationSession (Google) throws its own
@@ -135,6 +121,107 @@ final class AuthService {
             }
             Logger.auth.debug("Sign-in failed: \(error)")
         }
+    }
+
+    /// Common plumbing run once a session is established by ANY auth
+    /// path (OAuth or email-code). Extracts the Clerk session token +
+    /// user metadata, wires APIClient, kicks off the token-refresh
+    /// loop, attributes subsequent analytics to the Clerk user, loads
+    /// the in-app handle, and surfaces the soft push-permission prompt
+    /// for fresh sign-ins. Throws if no token is available — callers
+    /// should treat that as a hard failure.
+    @MainActor
+    private func onSessionEstablished(provider: String) async throws {
+        guard let token = try await Clerk.shared.auth.getToken() else {
+            throw NSError(
+                domain: "PopAlpha.Auth",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Unable to retrieve session token."]
+            )
+        }
+
+        let userId = Clerk.shared.user?.id ?? ""
+        let firstName = Clerk.shared.user?.firstName
+        let email = Clerk.shared.user?.primaryEmailAddress?.emailAddress
+        let imageUrl = Clerk.shared.user?.imageUrl
+        setSession(token: token, userId: userId, handle: nil)
+        currentFirstName = firstName
+        currentImageURL = imageUrl
+        startTokenRefresh()
+
+        // Attribute subsequent PostHog events to this Clerk user so
+        // iOS activity lands on the same person as the user's web
+        // sessions, then capture the sign-in itself.
+        if !userId.isEmpty {
+            AnalyticsService.shared.identify(
+                userId: userId,
+                email: email,
+                firstName: firstName
+            )
+            AnalyticsService.shared.capture(
+                .userSignedIn,
+                properties: ["provider": provider]
+            )
+        }
+
+        await loadHandle()
+
+        // Soft pre-prompt before the system permission dialog —
+        // shows our PushPermissionPromptSheet on first sign-in so
+        // the user can say "Not Now" without burning the one-shot
+        // system prompt. PushService falls back to the direct
+        // requestAuthorizationIfNeeded() path on subsequent
+        // sign-ins / when the user has already responded.
+        await PushService.shared.maybeShowSoftPrompt()
+    }
+
+    // MARK: - Email code sign-in
+    //
+    // Two-phase: caller invokes signInWithEmail(_:) to send the code,
+    // then verifyEmailCode(_:) once the user enters the 6-digit code
+    // they received. Errors throw so the SignInSheet can render
+    // them inline next to the field rather than via the global alert.
+
+    /// Phase 1: create a sign-in attempt against the given email and
+    /// ask Clerk to send a verification code. Throws if the email is
+    /// not registered or Clerk returns any other error. The in-progress
+    /// SignIn handle lives on `Clerk.shared.client?.signIn` — phase 2
+    /// reads it from there.
+    @MainActor
+    func signInWithEmail(_ email: String) async throws {
+        guard !isSigningIn else { return }
+        let trimmed = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw NSError(
+                domain: "PopAlpha.Auth",
+                code: -2,
+                userInfo: [NSLocalizedDescriptionKey: "Enter an email address."]
+            )
+        }
+        _ = try await Clerk.shared.auth.signInWithEmailCode(emailAddress: trimmed)
+    }
+
+    /// Phase 2: verify the 6-digit code against the in-progress SignIn
+    /// and, on success, run the same post-session plumbing the OAuth
+    /// providers use. Throws on bad code, expired attempt, or session
+    /// retrieval failure.
+    @MainActor
+    func verifyEmailCode(_ code: String) async throws {
+        guard !isSigningIn else { return }
+        guard let signIn = Clerk.shared.auth.currentSignIn else {
+            throw NSError(
+                domain: "PopAlpha.Auth",
+                code: -3,
+                userInfo: [NSLocalizedDescriptionKey: "No sign-in attempt in progress. Resend the code."]
+            )
+        }
+
+        isSigningIn = true
+        signInError = nil
+        defer { isSigningIn = false }
+
+        _ = try await signIn.verifyCode(code)
+        try await onSessionEstablished(provider: "email")
     }
 
     /// Clear a stale sign-in error after the UI has shown it.

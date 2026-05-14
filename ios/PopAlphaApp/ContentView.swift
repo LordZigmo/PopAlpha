@@ -20,6 +20,14 @@ struct ContentView: View {
     // screen triggered the sign-in.
     private var auth: AuthService { AuthService.shared }
 
+    // User-selectable color-scheme override. Default `.system` honours
+    // iOS Settings → Display & Brightness; the picker in Settings →
+    // Appearance lets users pin Light or Dark within PopAlpha.
+    @AppStorage(AppearanceMode.storageKey) private var appearanceRaw: String = AppearanceMode.system.rawValue
+    private var appearance: AppearanceMode {
+        AppearanceMode(rawValue: appearanceRaw) ?? .system
+    }
+
     // Trial re-engagement plumbing. Auto-presents the paywall once
     // when we observe a lapsed subscriber (`!isPro &&
     // !isEligibleForTrial`) — they've used the trial and aren't
@@ -83,6 +91,32 @@ struct ContentView: View {
                 .tag(AppTab.profile)
         }
         .tint(PA.Colors.accent)
+        // App Review compliance modifiers — these were applied on PR #30
+        // and inadvertently dropped by the SearchTabView extraction
+        // commit (a782f51). Restored here so light/dark, offline banner,
+        // and the push permission soft-prompt all work at the root.
+        .preferredColorScheme(appearance.colorScheme)
+        .offlineBanner()
+        .sheet(
+            isPresented: Binding(
+                get: { PushService.shared.showSoftPrompt },
+                set: { newValue in PushService.shared.showSoftPrompt = newValue }
+            )
+        ) {
+            PushPermissionPromptSheet()
+        }
+        .sheet(
+            isPresented: Binding(
+                get: { AuthService.shared.showSignInSheet },
+                set: { newValue in AuthService.shared.showSignInSheet = newValue }
+            )
+        ) {
+            // Generic chooser opened by `AuthService.shared.signIn()` —
+            // the shortcut "Sign In" buttons scattered through the app
+            // (Settings, Watchlist empty, Portfolio empty, alerts, etc.)
+            // all flow through this so email is reachable everywhere.
+            SignInSheet(startingPhase: .chooser)
+        }
         .alert(
             "Sign-in failed",
             isPresented: Binding(
@@ -594,9 +628,19 @@ struct PrimarySignInButton: View {
     var maxWidth: CGFloat = 260
     private var auth: AuthService { AuthService.shared }
 
+    /// Optional override action — used by the SignInSheet chooser phase
+    /// where Google's tap also needs to dismiss the sheet. Default
+    /// (nil) calls AuthService directly so SignInProviderStack and
+    /// other inline call sites keep their one-tap behavior.
+    var action: (() -> Void)? = nil
+
     var body: some View {
         Button {
-            AuthService.shared.signIn()
+            if let action {
+                action()
+            } else {
+                AuthService.shared.signInWithGoogle()
+            }
         } label: {
             HStack(spacing: 8) {
                 if auth.isSigningIn {
@@ -626,11 +670,17 @@ struct PrimarySignInButton: View {
 struct PrimaryAppleSignInButton: View {
     var title: String = "Continue with Apple"
     var maxWidth: CGFloat = 260
+    /// See PrimarySignInButton.action — same pattern.
+    var action: (() -> Void)? = nil
     private var auth: AuthService { AuthService.shared }
 
     var body: some View {
         Button {
-            AuthService.shared.signInWithApple()
+            if let action {
+                action()
+            } else {
+                AuthService.shared.signInWithApple()
+            }
         } label: {
             HStack(spacing: 8) {
                 if auth.isSigningIn {
@@ -660,16 +710,63 @@ struct PrimaryAppleSignInButton: View {
     }
 }
 
-/// Convenience: both providers stacked vertically, spaced for thumb use.
+/// Convenience: all providers stacked vertically, spaced for thumb use.
 /// Drop this in wherever we used to render a single Sign In button.
+/// Each provider button still goes directly to its provider — the user
+/// has visibly chosen by tapping a specific brand. The chooser-style
+/// SignInSheet is used by the generic shortcut "Sign In" buttons
+/// scattered across the app.
 struct SignInProviderStack: View {
     var maxWidth: CGFloat = 260
+
+    @State private var showEmailSheet = false
 
     var body: some View {
         VStack(spacing: 10) {
             PrimarySignInButton(maxWidth: maxWidth)
             PrimaryAppleSignInButton(maxWidth: maxWidth)
+            PrimaryEmailSignInButton(maxWidth: maxWidth) {
+                showEmailSheet = true
+            }
         }
+        .sheet(isPresented: $showEmailSheet) {
+            // User explicitly tapped Email here, so skip the chooser
+            // and drop them straight into the email-entry phase.
+            SignInSheet(startingPhase: .email)
+        }
+    }
+}
+
+/// "Continue with Email" CTA, styled as a stroked secondary button so
+/// it reads as a fallback to the two OAuth options above without
+/// competing for visual weight.
+struct PrimaryEmailSignInButton: View {
+    var title: String = "Continue with Email"
+    var maxWidth: CGFloat = 260
+    var action: () -> Void
+
+    private var auth: AuthService { AuthService.shared }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: "envelope")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(PA.Colors.text)
+                Text(title)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(PA.Colors.text)
+            }
+            .frame(maxWidth: maxWidth)
+            .padding(.vertical, 14)
+            .background(PA.Colors.surfaceSoft)
+            .clipShape(Capsule())
+            .overlay(
+                Capsule().stroke(PA.Colors.border, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(auth.isSigningIn)
     }
 }
 
