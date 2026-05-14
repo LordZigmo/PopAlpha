@@ -49,6 +49,15 @@ export type HomepageCard = {
   sales_count_30d: number | null;
   active_listings_7d: number | null;
   updated_at: string | null;
+  // JP-native price sources surfaced on JP-rail tiles so the user
+  // sees real JP-market data instead of Scrydex's USD reflection
+  // when we have it. Both are nullable — most non-JP cards will be
+  // null here. Tile rendering uses lib/pricing/jp-price-source.ts
+  // to confidence-pick between them.
+  yahoo_jp_price: number | null;
+  yahoo_jp_sample_count: number | null;
+  snkrdunk_price: number | null;
+  snkrdunk_sample_count: number | null;
 };
 
 export type HomepageWindowedCards = Record<HomepageSignalWindow, HomepageCard[]>;
@@ -303,6 +312,14 @@ async function loadDailyTopMoversBundle(
       sales_count_30d: null,
       active_listings_7d: row.active_listings_7d,
       updated_at: row.market_price_as_of,
+      // Signal-board rails (top_movers / biggest_drops / momentum)
+      // source from daily_top_movers which doesn't carry JP-source
+      // prices. Most signal-board cards aren't JP anyway. Default
+      // null — tile-mini falls back to market_price.
+      yahoo_jp_price: null,
+      yahoo_jp_sample_count: null,
+      snkrdunk_price: null,
+      snkrdunk_sample_count: null,
     };
   };
 
@@ -356,7 +373,7 @@ async function loadJapaneseRail(
   const { data, error } = await client
     .from("canonical_cards")
     .select(
-      "slug, canonical_name, set_name, year, card_number, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url, public_card_metrics!inner(market_price, market_price_as_of, change_pct_24h, change_pct_7d, active_listings_7d, market_confidence_score, snapshot_count_30d, market_low_confidence, printing_id, grade)",
+      "slug, canonical_name, set_name, year, card_number, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url, public_card_metrics!inner(market_price, market_price_as_of, change_pct_24h, change_pct_7d, active_listings_7d, market_confidence_score, snapshot_count_30d, market_low_confidence, printing_id, grade, yahoo_jp_price, yahoo_jp_sample_count, snkrdunk_price, snkrdunk_sample_count)",
     )
     .eq("language", "JP")
     .eq("public_card_metrics.grade", "RAW")
@@ -382,6 +399,10 @@ async function loadJapaneseRail(
         market_confidence_score: number | null;
         snapshot_count_30d: number | null;
         market_low_confidence: boolean | null;
+        yahoo_jp_price: number | null;
+        yahoo_jp_sample_count: number | null;
+        snkrdunk_price: number | null;
+        snkrdunk_sample_count: number | null;
       }>
       | null;
   };
@@ -418,6 +439,10 @@ async function loadJapaneseRail(
         sales_count_30d: metrics.snapshot_count_30d ?? null,
         active_listings_7d: metrics.active_listings_7d ?? null,
         updated_at: metrics.market_price_as_of ?? null,
+        yahoo_jp_price: metrics.yahoo_jp_price,
+        yahoo_jp_sample_count: metrics.yahoo_jp_sample_count,
+        snkrdunk_price: metrics.snkrdunk_price,
+        snkrdunk_sample_count: metrics.snkrdunk_sample_count,
       };
     })
     .filter((card): card is HomepageCard => card !== null);
@@ -940,6 +965,13 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
         sales_count_30d: salesCount30d,
         active_listings_7d: activeListings7d,
         updated_at: updatedAt,
+        // marketPulse comes from card_metrics directly (Scrydex
+        // derived); doesn't carry JP-source prices. Tile-mini falls
+        // back to market_price for these rows.
+        yahoo_jp_price: null,
+        yahoo_jp_sample_count: null,
+        snkrdunk_price: null,
+        snkrdunk_sample_count: null,
       };
     }
 
