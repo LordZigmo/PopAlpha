@@ -225,6 +225,70 @@ enum AppearanceMode: String, CaseIterable, Identifiable, CustomStringConvertible
     }
 }
 
+// MARK: - Market
+//
+// User-selectable view of the homepage: English-language catalog (the
+// historical PopAlpha view, branded blue) or Japanese-language catalog
+// (the JP wedge, branded Hinomaru red). Stored per-device via
+// `@AppStorage("popalpha.market.v1")`; injected onto the homepage
+// NavigationStack via the `\.market` environment value so only the
+// homepage subtree reflows in red — settings, card detail, paywall, and
+// every other view that doesn't opt into the environment keep the
+// canonical brand blue (`PA.Colors.accent`).
+
+enum Market: String, CaseIterable, Identifiable, CustomStringConvertible {
+    case en, jp
+
+    static let storageKey = "popalpha.market.v1"
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .en: "EN"
+        case .jp: "JP"
+        }
+    }
+
+    /// Spoken by VoiceOver for the toggle segments.
+    var accessibilityLabel: String {
+        switch self {
+        case .en: "English market"
+        case .jp: "Japanese market"
+        }
+    }
+
+    var description: String { label }
+
+    /// Brand-identity accent. `.en` returns the historical PopAlpha blue
+    /// so existing call sites that opt into `\.market` render identically
+    /// in EN mode. `.jp` returns Hinomaru red.
+    var accent: Color {
+        switch self {
+        case .en: PA.Colors.accent
+        case .jp: Color(red: 0.737, green: 0.0, blue: 0.176) // #BC002D
+        }
+    }
+
+    var accentSoft: Color {
+        accent.opacity(0.15)
+    }
+}
+
+private struct MarketEnvironmentKey: EnvironmentKey {
+    static let defaultValue: Market = .en
+}
+
+extension EnvironmentValues {
+    /// Current homepage market. Default `.en`; injected onto the
+    /// MarketplaceView NavigationStack so only homepage subviews that
+    /// declare `@Environment(\.market)` reflow in the JP brand color.
+    var market: Market {
+        get { self[MarketEnvironmentKey.self] }
+        set { self[MarketEnvironmentKey.self] = newValue }
+    }
+}
+
 // MARK: - Reusable Modifiers
 
 struct GlassSurface: ViewModifier {

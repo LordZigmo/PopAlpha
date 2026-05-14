@@ -25,6 +25,14 @@ struct PersonalPulseSection: View {
 
     private var auth: AuthService { AuthService.shared }
 
+    /// Homepage market injected by `MarketplaceView`. The chip eyebrows
+    /// and the Style chip's secondary tone are brand-identity surfaces
+    /// (they're how the section signals "this is your section in the
+    /// PopAlpha hierarchy"), so they flip with the market. Semantic
+    /// chip tones — positive/negative price colors, muted-empty —
+    /// stay untouched.
+    @Environment(\.market) private var market
+
     var body: some View {
         if auth.isAuthenticated {
             authedCard
@@ -126,7 +134,7 @@ struct PersonalPulseSection: View {
                 icon: "scope",
                 primary: styleLabel,
                 secondary: "Learned from your taps",
-                tone: PA.Colors.accent
+                tone: market.accent
             )
         } else {
             chip(
@@ -156,7 +164,7 @@ struct PersonalPulseSection: View {
                     .font(.system(size: 9, weight: .semibold))
                     .tracking(1.2)
             }
-            .foregroundStyle(PA.Colors.accent)
+            .foregroundStyle(market.accent)
 
             Text(primary)
                 .font(.system(size: 13, weight: .bold, design: .rounded))

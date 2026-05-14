@@ -28,6 +28,12 @@ struct MarketHeroCard: View {
     let onScan: () -> Void
     let onSeeMovers: () -> Void
 
+    /// Homepage market injected by `MarketplaceView`. The hero is pure
+    /// brand identity (eyebrow, primary CTA, accent glow, border) so
+    /// every accent spot reads from `market.accent` to reflow in red
+    /// when the user toggles to JP mode.
+    @Environment(\.market) private var market
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             // Eyebrow: small icon + "PopAlpha" wordmark — orients the
@@ -35,12 +41,12 @@ struct MarketHeroCard: View {
             HStack(spacing: 6) {
                 Image(systemName: "viewfinder")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(PA.Colors.accent)
+                    .foregroundStyle(market.accent)
                     .accessibilityHidden(true)
                 Text("POPALPHA")
                     .font(.system(size: 10, weight: .semibold))
                     .tracking(2.0)
-                    .foregroundStyle(PA.Colors.accent)
+                    .foregroundStyle(market.accent)
                     .accessibilityAddTraits(.isHeader)
             }
 
@@ -77,7 +83,7 @@ struct MarketHeroCard: View {
                     .foregroundStyle(PA.Colors.background)
                     .padding(.horizontal, 18)
                     .padding(.vertical, 11)
-                    .background(PA.Colors.accent)
+                    .background(market.accent)
                     .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
@@ -121,9 +127,11 @@ struct MarketHeroCard: View {
                 PA.Gradients.cardSurface
                 // Accent glow on the trailing edge so the card reads as
                 // the "scanner" anchor (visually paired with the
-                // viewfinder eyebrow on the leading edge).
+                // viewfinder eyebrow on the leading edge). Read lazily
+                // from `market.accent` so the gradient re-evaluates
+                // when the user toggles markets.
                 RadialGradient(
-                    colors: [PA.Colors.accent.opacity(0.16), .clear],
+                    colors: [market.accent.opacity(0.16), .clear],
                     center: .topTrailing,
                     startRadius: 0,
                     endRadius: 260
@@ -133,7 +141,7 @@ struct MarketHeroCard: View {
         .clipShape(RoundedRectangle(cornerRadius: PA.Layout.panelRadius, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: PA.Layout.panelRadius, style: .continuous)
-                .stroke(PA.Colors.accent.opacity(0.35), lineWidth: 1)
+                .stroke(market.accent.opacity(0.35), lineWidth: 1)
         )
         // VoiceOver reads the title + sub + the two button hints in
         // order, but the chips below are decorative — combine them so
@@ -163,17 +171,22 @@ struct MarketScanStrip: View {
     let onScan: () -> Void
     let onSeeMovers: () -> Void
 
+    /// Defensive opt-in: MarketScanStrip is hidden in JP mode today,
+    /// but reading `\.market` here keeps it correct if it's ever
+    /// re-included.
+    @Environment(\.market) private var market
+
     var body: some View {
         HStack(spacing: 10) {
             // Leading icon — viewfinder corner brackets so it reads as
             // "scan" rather than a generic camera glyph.
             ZStack {
                 Circle()
-                    .fill(PA.Colors.accent.opacity(0.14))
+                    .fill(market.accent.opacity(0.14))
                     .frame(width: 30, height: 30)
                 Image(systemName: "viewfinder")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(PA.Colors.accent)
+                    .foregroundStyle(market.accent)
             }
             .accessibilityHidden(true)
 
@@ -196,10 +209,10 @@ struct MarketScanStrip: View {
             } label: {
                 Text("Movers")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(PA.Colors.accent)
+                    .foregroundStyle(market.accent)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
-                    .background(PA.Colors.accent.opacity(0.12))
+                    .background(market.accent.opacity(0.12))
                     .clipShape(Capsule())
             }
             .buttonStyle(.plain)
@@ -217,7 +230,7 @@ struct MarketScanStrip: View {
                 .foregroundStyle(PA.Colors.background)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
-                .background(PA.Colors.accent)
+                .background(market.accent)
                 .clipShape(Capsule())
             }
             .buttonStyle(.plain)

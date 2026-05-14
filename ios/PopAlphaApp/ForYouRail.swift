@@ -42,6 +42,10 @@ struct ForYouRail: View {
     // still get their chip without re-fetching.
     @State private var rationales: [String: String] = [:]
 
+    /// Defensive opt-in: ForYouRail is hidden in JP mode today; this
+    /// keeps the eyebrow brand color correct if it's ever re-included.
+    @Environment(\.market) private var market
+
     private var cards: [HomepageCardDTO] {
         // Prefer windowed momentum when we have a profile — those are
         // the stronger signals. Fallback to top movers so guests see
@@ -97,7 +101,7 @@ struct ForYouRail: View {
             Text(eyebrow)
                 .font(.system(size: 10, weight: .semibold))
                 .tracking(2.0)
-                .foregroundStyle(PA.Colors.accent)
+                .foregroundStyle(market.accent)
             Text(title)
                 .font(.system(size: 18, weight: .bold))
                 .foregroundStyle(PA.Colors.text)
