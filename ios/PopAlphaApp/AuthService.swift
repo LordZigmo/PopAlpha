@@ -28,6 +28,27 @@ final class AuthService {
     /// true by `signIn()`, cleared when the sheet dismisses.
     var showSignInSheet: Bool = false
 
+    /// Which email-code flow was most recently prepared by
+    /// `signInWithEmail(_:)`. The sheet's Back button lets a user
+    /// switch emails between send-code attempts, which can leave both
+    /// `currentSignIn` AND `currentSignUp` populated on Clerk's
+    /// client. Dispatching `verifyEmailCode(_:)` on this local state
+    /// (instead of on whichever Clerk attempt happens to exist)
+    /// guarantees the user's code goes to the flow they last
+    /// triggered, not a stale one. Codex P2 #3 on PR #62.
+    private enum EmailFlow { case signIn, signUp }
+    private var lastEmailFlow: EmailFlow?
+
+    /// Email last passed to `signInWithEmail(_:)`. Paired with
+    /// `lastEmailFlow` to decide if a subsequent call is a Resend
+    /// for the same address (→ reuse the existing Clerk SignIn /
+    /// SignUp attempt) or a fresh attempt for a different address
+    /// (→ create new). Codex P2 #4 on PR #62 caught that creating a
+    /// new sign-up for a resend on the same email fails with an
+    /// "attempt in progress" error and leaves the user unable to
+    /// fetch a replacement code.
+    private var lastEmailAddress: String?
+
     private var tokenRefreshTask: Task<Void, Never>?
 
     private init() {}
@@ -173,20 +194,32 @@ final class AuthService {
         // requestAuthorizationIfNeeded() path on subsequent
         // sign-ins / when the user has already responded.
         await PushService.shared.maybeShowSoftPrompt()
+
+        // Session is live — clear any in-flight email-code attempt
+        // state so the next sign-in starts with a clean slate.
+        lastEmailFlow = nil
+        lastEmailAddress = nil
     }
 
-    // MARK: - Email code sign-in
+    // MARK: - Email code sign-in / sign-up
     //
     // Two-phase: caller invokes signInWithEmail(_:) to send the code,
     // then verifyEmailCode(_:) once the user enters the 6-digit code
     // they received. Errors throw so the SignInSheet can render
     // them inline next to the field rather than via the global alert.
+    //
+    // The flow handles both sign-in AND sign-up transparently — the
+    // user just types their email and gets a code, regardless of
+    // whether they have an existing PopAlpha account. Phase 1 tries
+    // sign-in first; if Clerk reports the email isn't registered, it
+    // falls through to a fresh SignUp so the user can create the
+    // account through the same single-step interaction. Phase 2 then
+    // dispatches the code at whichever flow is in progress.
 
-    /// Phase 1: create a sign-in attempt against the given email and
-    /// ask Clerk to send a verification code. Throws if the email is
-    /// not registered or Clerk returns any other error. The in-progress
-    /// SignIn handle lives on `Clerk.shared.client?.signIn` — phase 2
-    /// reads it from there.
+    /// Phase 1: ask Clerk to send a verification code to `email`.
+    /// Internally tries sign-in first, then sign-up on a not-found
+    /// error. Either way, on success the same code-entry phase opens
+    /// and verifyEmailCode(_:) completes the flow.
     @MainActor
     func signInWithEmail(_ email: String) async throws {
         guard !isSigningIn else { return }
@@ -198,17 +231,140 @@ final class AuthService {
                 userInfo: [NSLocalizedDescriptionKey: "Enter an email address."]
             )
         }
-        _ = try await Clerk.shared.auth.signInWithEmailCode(emailAddress: trimmed)
+
+        // Resend path: same email as the most recently prepared
+        // attempt → reuse the existing Clerk SignIn / SignUp to
+        // send another code on the in-flight attempt rather than
+        // creating a new one. Clerk rejects fresh attempts while one
+        // is in-progress for the same identifier ("attempt in
+        // progress"), so without this branch Resend Code from the
+        // SignInSheet code phase breaks for new users. Codex P2 #4
+        // on PR #62.
+        if lastEmailAddress == trimmed {
+            switch lastEmailFlow {
+            case .signUp:
+                if let signUp = Clerk.shared.auth.currentSignUp {
+                    _ = try await signUp.sendEmailCode()
+                    return
+                }
+            case .signIn:
+                if let signIn = Clerk.shared.auth.currentSignIn {
+                    _ = try await signIn.sendEmailCode()
+                    return
+                }
+            case nil:
+                break
+            }
+            // Fall through to fresh-attempt path if the matching
+            // Clerk attempt has been cleared from the client for
+            // any reason (signOut, session timeout, etc.).
+        }
+
+        // Fresh attempt — different email OR no last attempt yet.
+        // Reset state before trying so a half-completed switch is
+        // never observed.
+        lastEmailFlow = nil
+        lastEmailAddress = nil
+
+        do {
+            _ = try await Clerk.shared.auth.signInWithEmailCode(emailAddress: trimmed)
+            lastEmailFlow = .signIn
+            lastEmailAddress = trimmed
+        } catch {
+            // Sign-in failed — if Clerk's message looks like "this
+            // identifier isn't registered", fall through to sign-up.
+            // Otherwise re-throw so the caller surfaces the real error.
+            let raw = error.localizedDescription.lowercased()
+            let isNotFound =
+                raw.contains("not found")
+                || raw.contains("no account")
+                || raw.contains("couldn't find")
+                || raw.contains("form_identifier_not_found")
+                || raw.contains("identifier") && raw.contains("not")
+            guard isNotFound else { throw error }
+
+            // Fresh signup. legalAccepted=true is paired with the
+            // inline legal disclaimer in SignInSheet (`legalFooter`)
+            // that surfaces Terms of Service, Privacy Policy, and
+            // Community Guidelines links on both the chooser and
+            // email-entry phases. The user implicitly accepts by
+            // tapping Send Code after the disclaimer is shown —
+            // matches the Sign in with Apple / Google sign-up
+            // pattern. Codex P2 #1 on PR #62 flagged the original
+            // implementation for setting this flag without an inline
+            // disclaimer; the disclaimer addresses that.
+            let signUp = try await Clerk.shared.auth.signUp(
+                emailAddress: trimmed,
+                legalAccepted: true,
+            )
+            _ = try await signUp.sendEmailCode()
+            lastEmailFlow = .signUp
+            lastEmailAddress = trimmed
+        }
     }
 
-    /// Phase 2: verify the 6-digit code against the in-progress SignIn
-    /// and, on success, run the same post-session plumbing the OAuth
+    /// Phase 2: verify the 6-digit code. Dispatches to whichever flow
+    /// is in progress (sign-in or sign-up) based on Clerk's client
+    /// state, then runs the same post-session plumbing the OAuth
     /// providers use. Throws on bad code, expired attempt, or session
     /// retrieval failure.
     @MainActor
     func verifyEmailCode(_ code: String) async throws {
         guard !isSigningIn else { return }
-        guard let signIn = Clerk.shared.auth.currentSignIn else {
+
+        isSigningIn = true
+        signInError = nil
+        defer { isSigningIn = false }
+
+        // Dispatch based on `lastEmailFlow` — the flow that was most
+        // recently prepared by signInWithEmail(_:) — NOT on whichever
+        // attempt happens to be on Clerk's client. The sheet's Back
+        // button lets users switch emails between send-code attempts,
+        // which can leave BOTH `currentSignIn` and `currentSignUp`
+        // populated. Picking the wrong one (e.g. a stale signUp from
+        // an aborted typo-corrected flow) makes verification fail
+        // even on a valid code. Codex P2 #3 on PR #62 flagged this.
+        //
+        // After verify(), inspect status. Verifying the email
+        // satisfies one requirement, but the Clerk instance may demand
+        // more (username, MFA, new password). If status != .complete
+        // we'd otherwise call onSessionEstablished(...) which would
+        // fail with the generic "no session token" path — leaving the
+        // user stuck with no signal. Codex P2 #2 caught this.
+        switch lastEmailFlow {
+        case .signUp:
+            guard let signUp = Clerk.shared.auth.currentSignUp else {
+                throw NSError(
+                    domain: "PopAlpha.Auth",
+                    code: -3,
+                    userInfo: [NSLocalizedDescriptionKey: "Sign-up attempt missing. Resend the code."]
+                )
+            }
+            let result = try await signUp.verifyEmailCode(code)
+            guard result.status == .complete else {
+                throw NSError(
+                    domain: "PopAlpha.Auth",
+                    code: -4,
+                    userInfo: [NSLocalizedDescriptionKey: "Your account needs another step to finish setting up. Please continue on popalpha.ai."]
+                )
+            }
+        case .signIn:
+            guard let signIn = Clerk.shared.auth.currentSignIn else {
+                throw NSError(
+                    domain: "PopAlpha.Auth",
+                    code: -3,
+                    userInfo: [NSLocalizedDescriptionKey: "Sign-in attempt missing. Resend the code."]
+                )
+            }
+            let result = try await signIn.verifyCode(code)
+            guard result.status == .complete else {
+                throw NSError(
+                    domain: "PopAlpha.Auth",
+                    code: -4,
+                    userInfo: [NSLocalizedDescriptionKey: "Sign-in needs another step (additional verification). Please continue on popalpha.ai."]
+                )
+            }
+        case nil:
             throw NSError(
                 domain: "PopAlpha.Auth",
                 code: -3,
@@ -216,11 +372,6 @@ final class AuthService {
             )
         }
 
-        isSigningIn = true
-        signInError = nil
-        defer { isSigningIn = false }
-
-        _ = try await signIn.verifyCode(code)
         try await onSessionEstablished(provider: "email")
     }
 

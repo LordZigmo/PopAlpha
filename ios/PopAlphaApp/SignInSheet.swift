@@ -155,7 +155,7 @@ struct SignInSheet: View {
     private var heroTitle: String {
         switch phase {
         case .chooser: "Welcome to PopAlpha"
-        case .email:   "Sign in with email"
+        case .email:   "Continue with email"
         case .code:    "Check your email"
         }
     }
@@ -163,9 +163,9 @@ struct SignInSheet: View {
     private var heroSubtitle: String {
         switch phase {
         case .chooser:
-            return "Sign in to track your portfolio, build a wishlist, and unlock the daily market brief."
+            return "Sign in or create an account to track your portfolio, build a wishlist, and unlock the daily market brief."
         case .email:
-            return "We'll email you a 6-digit code. No password required."
+            return "New here or returning, we'll email you a 6-digit code. No password required."
         case .code:
             return "Enter the 6-digit code we just sent to \(email)."
         }
@@ -208,8 +208,27 @@ struct SignInSheet: View {
             PrimaryEmailSignInButton(maxWidth: 280) {
                 withAnimation { phase = .email }
             }
+            legalFooter
         }
         .padding(.horizontal, 24)
+    }
+
+    /// Inline legal disclaimer with tappable Terms / Privacy /
+    /// Community Guidelines links. Shown on the chooser and email
+    /// phases so users see and implicitly accept the terms BEFORE we
+    /// pass `legalAccepted: true` to Clerk on the sign-up fallthrough
+    /// path. Tap-through opens the policy in Safari (SwiftUI Text
+    /// handles markdown link tapping natively when the destination
+    /// is a real URL).
+    private var legalFooter: some View {
+        Text("By continuing, you agree to our [Terms of Service](https://popalpha.ai/terms), [Privacy Policy](https://popalpha.ai/privacy), and [Community Guidelines](https://popalpha.ai/community-guidelines).")
+            .font(.system(size: 11))
+            .foregroundStyle(PA.Colors.muted)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 8)
+            .padding(.top, 16)
+            .tint(PA.Colors.accent)
+            .accessibilityLabel("By continuing, you agree to our Terms of Service, Privacy Policy, and Community Guidelines.")
     }
 
     // MARK: - Phase 1: Email
@@ -259,6 +278,8 @@ struct SignInSheet: View {
             .padding(.horizontal, 24)
             .padding(.top, 4)
             .accessibilityLabel("Send code to email")
+
+            legalFooter
         }
     }
 
