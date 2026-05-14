@@ -69,6 +69,7 @@ export type CardDetailResponse = {
     language: string | null;
     pairedSlug: string | null;
     pairedLanguage: "EN" | "JP" | null;
+    pairedImageUrl: string | null;
   };
   defaults: {
     mode: "RAW" | "GRADED";

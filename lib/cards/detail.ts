@@ -483,6 +483,26 @@ export async function buildCardDetailResponse(inputSlug: string): Promise<CardDe
     }
   }
 
+  // Paired card's image URL. iOS uses this to populate the toggle's
+  // stub MarketCard so the hero swaps directly from EN art to JP art
+  // (or vice versa) without falling back to heroPlaceholder while
+  // the metrics round-trip lands. Prefer the mirror; fall back to
+  // the raw Scrydex URL when the image-mirror cron hasn't picked
+  // this slug up yet. Issued as a separate query rather than a
+  // PostgREST join because the FK direction depends on which side
+  // of the junction is the paired slug, and the conditional makes
+  // a join awkward to express. One ~30ms hop is cheap; the toggle
+  // UX win is worth it.
+  let pairedImageUrl: string | null = null;
+  if (pairedSlug) {
+    const { data: paired } = await supabase
+      .from("canonical_cards")
+      .select("mirrored_primary_image_url, primary_image_url")
+      .eq("slug", pairedSlug)
+      .maybeSingle<{ mirrored_primary_image_url: string | null; primary_image_url: string | null }>();
+    pairedImageUrl = paired?.mirrored_primary_image_url ?? paired?.primary_image_url ?? null;
+  }
+
   const printingRows = (printings ?? []) as CardPrintingRow[];
   const rawMetricMap = new Map<string, RawMetricRow>();
   let canonicalRawMetric: RawMetricRow | null = null;
@@ -562,6 +582,7 @@ export async function buildCardDetailResponse(inputSlug: string): Promise<CardDe
       language: canonical.language,
       pairedSlug,
       pairedLanguage,
+      pairedImageUrl,
     },
     defaults: {
       mode: defaultMode,

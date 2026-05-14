@@ -427,7 +427,8 @@ actor CardService {
         )
         return CardPairing(
             pairedSlug: response.canonical.pairedSlug,
-            pairedLanguage: response.canonical.pairedLanguage
+            pairedLanguage: response.canonical.pairedLanguage,
+            pairedImageUrl: response.canonical.pairedImageUrl
         )
     }
 
@@ -700,6 +701,7 @@ struct CardDetailDTO: Decodable {
     struct Canonical: Decodable {
         let pairedSlug: String?
         let pairedLanguage: String?
+        let pairedImageUrl: String?
     }
     let canonical: Canonical
 }
@@ -707,8 +709,13 @@ struct CardDetailDTO: Decodable {
 struct CardPairing {
     let pairedSlug: String?
     let pairedLanguage: String?
+    /// Mirrored (or raw fallback) image URL for the paired card. Used
+    /// to populate the toggle's stub MarketCard so the hero swaps art
+    /// directly EN ↔ JP without falling back to heroPlaceholder while
+    /// the metrics fetch lands.
+    let pairedImageUrl: String?
 
-    static let none = CardPairing(pairedSlug: nil, pairedLanguage: nil)
+    static let none = CardPairing(pairedSlug: nil, pairedLanguage: nil, pairedImageUrl: nil)
 
     /// The language the paired card represents. JP cards toggle to EN
     /// and vice versa; nil when no pairing exists.

@@ -111,6 +111,12 @@ struct CardDetailView: View {
     /// pricingSection and tapping it swaps activeCard to the paired slug.
     @State private var pairedSlug: String? = nil
     @State private var pairedLanguage: CardLanguage? = nil
+    /// Mirrored (or raw fallback) image URL for the paired card,
+    /// fetched alongside pairedSlug. Lets swapToPairedLanguage build a
+    /// stub MarketCard with the paired card's art available
+    /// immediately, so the hero swaps directly EN ↔ JP rather than
+    /// falling back to heroPlaceholder during the metrics round-trip.
+    @State private var pairedImageUrl: String? = nil
     /// True for the brief window between the user tapping the toggle and
     /// cardMetrics arriving for the new slug. Fades the hero block to
     /// 60% so the transition reads as deliberate, not janky.
@@ -318,6 +324,7 @@ struct CardDetailView: View {
             await MainActor.run {
                 pairedSlug = pairing?.pairedSlug
                 pairedLanguage = pairing?.pairedLang
+                pairedImageUrl = pairing?.pairedImageUrl
             }
 
             cardProfile = try? await CardService.shared.fetchCardProfile(slug: activeCard.id)
@@ -665,11 +672,17 @@ struct CardDetailView: View {
     /// across EN/JP rows in our schema (the English Pokemon name —
     /// the Japanese rendering lives in canonical_name_native and
     /// renders via the bilingual title path once cardMetrics arrives).
-    /// imageURL is nil because the paired card's art hasn't been
-    /// resolved yet — heroPlaceholder takes over until fetchPrintings
-    /// lands and we rebuild activeCard with the new image.
+    /// imageURL is set from pairedImageUrl when present so the hero
+    /// swaps directly EN <-> JP without falling back to
+    /// heroPlaceholder during the metrics round-trip.
     private func swapToPairedLanguage(targetSlug: String) {
         guard !togglingLanguage else { return }
+        // Capture the paired image URL BEFORE we clear pairedImageUrl
+        // below — once activeCard.id flips and .task(id:) refetches,
+        // this state gets repopulated with the paired card's own
+        // pairing target (i.e., the original slug). For the stub we
+        // want the URL we already have in hand.
+        let stubImageURL = pairedImageUrl.flatMap(URL.init(string:))
         withAnimation(.easeOut(duration: 0.18)) {
             togglingLanguage = true
         }
@@ -690,6 +703,7 @@ struct CardDetailView: View {
         gradedHeroPrice = nil
         pairedSlug = nil
         pairedLanguage = nil
+        pairedImageUrl = nil
 
         activeCard = MarketCard(
             id: targetSlug,
@@ -702,7 +716,7 @@ struct CardDetailView: View {
             rarity: activeCard.rarity,
             sparkline: [],
             imageGradient: activeCard.imageGradient,
-            imageURL: nil,
+            imageURL: stubImageURL,
             confidenceScore: nil
         )
     }
