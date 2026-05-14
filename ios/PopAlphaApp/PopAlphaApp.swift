@@ -4,7 +4,6 @@ import Nuke
 
 @main
 struct PopAlphaApp: App {
-    @Environment(\.scenePhase) private var scenePhase
     // Bridge UIKit's AppDelegate callbacks into this SwiftUI @main so
     // APNs callbacks (didRegisterForRemoteNotificationsWithDeviceToken,
     // silent pushes, tap delegates) fire through
@@ -38,6 +37,35 @@ struct PopAlphaApp: App {
 
     var body: some Scene {
         WindowGroup {
+            RootView()
+        }
+    }
+
+    private func configureGlobalAppearance() {
+        // Navigation bar
+        let navAppearance = UINavigationBarAppearance()
+        navAppearance.configureWithOpaqueBackground()
+        navAppearance.backgroundColor = UIColor(PA.Colors.background)
+        navAppearance.titleTextAttributes = [.foregroundColor: UIColor(PA.Colors.text)]
+        navAppearance.largeTitleTextAttributes = [.foregroundColor: UIColor(PA.Colors.text)]
+        navAppearance.shadowColor = .clear
+
+        UINavigationBar.appearance().standardAppearance = navAppearance
+        UINavigationBar.appearance().scrollEdgeAppearance = navAppearance
+        UINavigationBar.appearance().compactAppearance = navAppearance
+    }
+}
+
+// SplashScreenView sits in a ZStack above ContentView so the app's
+// startup work (Clerk session restore, StoreKit listener, scanner
+// warmup) kicks off at t=0 — the splash just covers the UI for
+// ~2.5s while it happens, never blocks it.
+private struct RootView: View {
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var showSplash = true
+
+    var body: some View {
+        ZStack {
             ContentView()
                 .environment(Clerk.shared)
                 .task { await AuthService.shared.restoreSession() }
@@ -93,20 +121,12 @@ struct PopAlphaApp: App {
                         break
                     }
                 }
+
+            if showSplash {
+                SplashScreenView(isActive: $showSplash)
+                    .transition(.opacity.animation(.easeInOut(duration: 0.35)))
+                    .zIndex(1)
+            }
         }
-    }
-
-    private func configureGlobalAppearance() {
-        // Navigation bar
-        let navAppearance = UINavigationBarAppearance()
-        navAppearance.configureWithOpaqueBackground()
-        navAppearance.backgroundColor = UIColor(PA.Colors.background)
-        navAppearance.titleTextAttributes = [.foregroundColor: UIColor(PA.Colors.text)]
-        navAppearance.largeTitleTextAttributes = [.foregroundColor: UIColor(PA.Colors.text)]
-        navAppearance.shadowColor = .clear
-
-        UINavigationBar.appearance().standardAppearance = navAppearance
-        UINavigationBar.appearance().scrollEdgeAppearance = navAppearance
-        UINavigationBar.appearance().compactAppearance = navAppearance
     }
 }
