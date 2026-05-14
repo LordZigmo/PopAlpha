@@ -172,10 +172,22 @@ struct CardDetailView: View {
             if yj > 0 { return yj }
             if snk > 0 { return snk }
         }
-        // Non-JP path: existing logic — printing-specific override, then
-        // the MarketCard's headline price (which is Scrydex-derived).
+        // Non-JP path (also the JP fallthrough when neither Yahoo!JP
+        // nor Snkrdunk has data): printing-specific override first,
+        // then the freshly-fetched marketPrice from cardMetrics, then
+        // the navigated MarketCard's headline price. The marketPrice
+        // fallback covers two cases the old chain missed:
+        //   1. After an EN/JP toggle, activeCard is a stub with
+        //      price=0 — without this we'd show "—" until either a
+        //      printing was selected or the user hit a chart request.
+        //   2. JP cards without Yahoo!JP / Snkrdunk samples (most of
+        //      the long-tail) — the Scrydex-derived market_price is
+        //      still meaningful even if it isn't a JP-native source.
         if let price = printingHeroPrice, price > 0 {
             return price
+        }
+        if let mp = cardMetrics?.marketPrice, mp > 0 {
+            return mp
         }
         if activeCard.price > 0 { return activeCard.price }
         return nil
@@ -701,6 +713,16 @@ struct CardDetailView: View {
         availableGradedOptions = []
         gradedMetricsLoaded = false
         gradedHeroPrice = nil
+        // Reset the price-mode selection back to Near Mint. Leaving
+        // it on .graded after a swap would strand the paired card in
+        // graded view with no data — fetchGradedVariantMetrics may
+        // return nothing for this slug, and even when it does, the
+        // user's prior PSA/G10 selection probably isn't the right
+        // default for an unrelated paired print. Reset companion
+        // grade selectors to their init defaults too.
+        selectedPriceMode = .nearMint
+        selectedGradingAgency = "PSA"
+        selectedGradeBucket = "G10"
         pairedSlug = nil
         pairedLanguage = nil
         pairedImageUrl = nil
