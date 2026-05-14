@@ -55,9 +55,18 @@ POLL_INTERVAL="${POLL_INTERVAL:-30}"
 
 bootstrap_max_id() {
   local endpoint="$1" # "comments" or "reviews"
+  # NOTE: `gh api --paginate --jq EXPR` runs the jq filter ONCE PER PAGE
+  # and concatenates the outputs as a multi-value stream. A `max // 0`
+  # inside jq would emit one max per page, so on a long-iteration PR
+  # (>1 page of Codex activity) the captured value becomes a multi-line
+  # string like "1234\n5678" — which then breaks the `select(.id > $X)`
+  # filter when interpolated. Codex P2 caught this on PR #61.
+  #
+  # Workaround: emit raw IDs (one per line) and take the max in shell
+  # via `sort -nr | head -1`. Single max regardless of page count.
   gh api "repos/$REPO/pulls/$PR/$endpoint" --paginate --jq \
-    '[.[] | select(.user.login == "chatgpt-codex-connector[bot]") | .id] | max // 0' \
-    2>/dev/null || echo 0
+    '.[] | select(.user.login == "chatgpt-codex-connector[bot]") | .id' \
+    2>/dev/null | sort -nr | head -1
 }
 
 last_comment_id="$(bootstrap_max_id comments)"
