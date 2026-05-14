@@ -409,19 +409,29 @@ struct ChangePill: View {
     var small: Bool = false
 
     var body: some View {
-        let color = ChangeDirection.from(changePct).color
-        HStack(spacing: 3) {
-            Text(formatPct(changePct))
-                .font(.system(size: small ? 10 : 11, weight: .bold, design: .rounded))
-            Text(window)
-                .font(.system(size: small ? 8 : 9, weight: .semibold))
-                .foregroundStyle(color.opacity(0.75))
+        // When there's no change signal, render nothing — a "-- 24H"
+        // placeholder reads as broken/loading next to a real price.
+        // Same philosophy as `SignalBadgeKind.from` (no badge without
+        // a change signal). Important for the JP rail: cards using
+        // a Yahoo!JP / Snkrdunk price clear `changePct` because the
+        // Scrydex-derived delta doesn't describe their new baseline,
+        // and without this guard the row showed "-- 24H" next to the
+        // fresh JP price.
+        if let pct = changePct {
+            let color = ChangeDirection.from(pct).color
+            HStack(spacing: 3) {
+                Text(formatPct(pct))
+                    .font(.system(size: small ? 10 : 11, weight: .bold, design: .rounded))
+                Text(window)
+                    .font(.system(size: small ? 8 : 9, weight: .semibold))
+                    .foregroundStyle(color.opacity(0.75))
+            }
+            .foregroundStyle(color)
+            .padding(.horizontal, small ? 5 : 6)
+            .padding(.vertical, small ? 2 : 3)
+            .background(color.opacity(0.12))
+            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
         }
-        .foregroundStyle(color)
-        .padding(.horizontal, small ? 5 : 6)
-        .padding(.vertical, small ? 2 : 3)
-        .background(color.opacity(0.12))
-        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
     }
 }
 
@@ -536,6 +546,11 @@ struct CommunitySection: View {
     /// rather than a generic community readout.
     let styleLabel: String?
 
+    /// Defensive opt-in: CommunitySection is hidden in JP mode today,
+    /// but the eyebrow brand color reads via `\.market` so a future
+    /// re-inclusion stays consistent with the rest of the homepage.
+    @Environment(\.market) private var market
+
     private var eyebrow: String {
         styleLabel == nil ? "COMMUNITY" : "COLLECTORS LIKE YOU"
     }
@@ -546,7 +561,7 @@ struct CommunitySection: View {
             Text(eyebrow)
                 .font(.system(size: 10, weight: .semibold))
                 .tracking(2.0)
-                .foregroundStyle(PA.Colors.accent)
+                .foregroundStyle(market.accent)
                 .padding(.horizontal, PA.Layout.sectionPadding)
 
             // Trending — horizontal scroll of compact tiles
@@ -605,6 +620,8 @@ struct CommunitySection: View {
 private struct CommunityTrendingTile: View {
     let card: CommunityCardDTO
 
+    @Environment(\.market) private var market
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             // Image
@@ -632,7 +649,7 @@ private struct CommunityTrendingTile: View {
 
             Text(card.metricLabel)
                 .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(PA.Colors.accent)
+                .foregroundStyle(market.accent)
         }
         .frame(width: 100)
     }
@@ -640,6 +657,8 @@ private struct CommunityTrendingTile: View {
 
 private struct CommunityListRow: View {
     let card: CommunityCardDTO
+
+    @Environment(\.market) private var market
 
     var body: some View {
         HStack(spacing: 10) {
@@ -677,7 +696,7 @@ private struct CommunityListRow: View {
 
             Text(card.metricLabel)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(PA.Colors.accent)
+                .foregroundStyle(market.accent)
         }
         .padding(.vertical, 4)
     }
@@ -685,6 +704,8 @@ private struct CommunityListRow: View {
 
 private struct FriendEventRow: View {
     let event: FriendEventDTO
+
+    @Environment(\.market) private var market
 
     var body: some View {
         HStack(spacing: 8) {
@@ -694,7 +715,7 @@ private struct FriendEventRow: View {
                 .overlay(
                     Text(String(event.handle.prefix(1)).uppercased())
                         .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(PA.Colors.accent)
+                        .foregroundStyle(market.accent)
                 )
 
             Text(eventText)

@@ -904,9 +904,15 @@ struct HomepageCardDTO: Decodable, Hashable {
     /// (date) sent HomepageCard without this field; older clients
     /// keep decoding cleanly because the converter falls back to "".
     let cardNumber: String?
-    let marketPrice: Double?
-    let changePct: Double?
-    let changeWindow: String?            // "24H" | "7D"
+    /// Mutable so the JP-rail transform (`preferringJpSource()`) can
+    /// override the Scrydex USD reflection with the Yahoo!JP / Snkrdunk
+    /// native price when a JP source qualifies on sample count.
+    var marketPrice: Double?
+    /// Mutable for the same reason — Scrydex-derived change/window
+    /// percentages don't describe a JP-source price baseline, so the
+    /// JP transform clears them rather than show a misleading delta.
+    var changePct: Double?
+    var changeWindow: String?            // "24H" | "7D"
     let confidenceScore: Int?
     let lowConfidence: Bool?
     let marketStrengthScore: Int?
@@ -922,12 +928,100 @@ struct HomepageCardDTO: Decodable, Hashable {
     let salesCount30D: Int?
     let activeListings7D: Int?
     let updatedAt: String?
+    /// Native JP price sources surfaced on the JP homepage rail. Server
+    /// emits these from `public_card_metrics.yahoo_jp_price` /
+    /// `public_card_metrics.snkrdunk_price` (see lib/data/homepage.ts
+    /// `loadJapaneseRail`). All four nullable — most non-JP cards
+    /// won't carry them. Selection rule mirrors the web's
+    /// `lib/pricing/jp-price-source.ts`: require sample_count ≥ 3, pick
+    /// the source with more samples when both qualify.
+    let yahooJpPrice: Double?
+    let yahooJpSampleCount: Int?
+    let snkrdunkPrice: Double?
+    let snkrdunkSampleCount: Int?
 
     /// Best URL for small card cells — mirrored thumb when present,
     /// otherwise the full image URL.
     var displayThumbUrl: String? {
         imageThumbUrl ?? imageUrl
     }
+
+    /// When this card carries a qualifying Yahoo!JP or Snkrdunk price,
+    /// return a copy whose `marketPrice` is the JP-source price and
+    /// whose Scrydex-derived `changePct` / `changeWindow` are cleared
+    /// (those describe Scrydex's USD reflection, not the Yahoo/Snkrdunk
+    /// baseline we're now showing). Returns `self` unchanged when no
+    /// JP source qualifies — the row then falls back to the Scrydex
+    /// USD reflection it would have shown without the toggle.
+    ///
+    /// Used by the JP-only rail rendering so the JP market view
+    /// actually shows JP-market pricing instead of the global USD
+    /// reflection. Matches the web's `selectJpPriceSource` rule in
+    /// `lib/pricing/jp-price-source.ts`.
+    func preferringJpSource() -> HomepageCardDTO {
+        let pick = selectJpPriceSource(
+            yahooJpPrice: yahooJpPrice,
+            yahooJpSampleCount: yahooJpSampleCount,
+            snkrdunkPrice: snkrdunkPrice,
+            snkrdunkSampleCount: snkrdunkSampleCount
+        )
+        guard let jpPrice = pick.price else { return self }
+        var copy = self
+        copy.marketPrice = jpPrice
+        copy.changePct = nil
+        copy.changeWindow = nil
+        return copy
+    }
+}
+
+/// Source picked for a JP card's tile-level price. Mirrors the web's
+/// `JpPriceSource` type from `lib/pricing/jp-price-source.ts`.
+enum JpPriceSourceKind: String {
+    case snkrdunk
+    case yahooJp
+}
+
+struct JpPriceSourcePick {
+    let source: JpPriceSourceKind?
+    let price: Double?
+    let sampleCount: Int?
+    let label: String
+}
+
+/// Swift port of `selectJpPriceSource` in lib/pricing/jp-price-source.ts.
+/// Keep in lockstep with the web rule so iOS rails and web tiles tell
+/// the same per-source story.
+///
+/// Rule: a source qualifies when price > 0 AND sample_count ≥ 3. If
+/// both qualify, pick the higher sample count. If only one qualifies,
+/// pick that. Otherwise return a nil pick — the caller falls back to
+/// the Scrydex `market_price`.
+func selectJpPriceSource(
+    yahooJpPrice: Double?,
+    yahooJpSampleCount: Int?,
+    snkrdunkPrice: Double?,
+    snkrdunkSampleCount: Int?
+) -> JpPriceSourcePick {
+    let minSamples = 3
+    let yj = (yahooJpPrice ?? 0) > 0 ? (yahooJpPrice ?? 0) : 0
+    let snk = (snkrdunkPrice ?? 0) > 0 ? (snkrdunkPrice ?? 0) : 0
+    let yjN = yahooJpSampleCount ?? 0
+    let snkN = snkrdunkSampleCount ?? 0
+    let yjQualifies = yj > 0 && yjN >= minSamples
+    let snkQualifies = snk > 0 && snkN >= minSamples
+
+    if yjQualifies && snkQualifies {
+        return snkN > yjN
+            ? JpPriceSourcePick(source: .snkrdunk, price: snk, sampleCount: snkN, label: "Snkrdunk")
+            : JpPriceSourcePick(source: .yahooJp, price: yj, sampleCount: yjN, label: "Yahoo! JP")
+    }
+    if snkQualifies {
+        return JpPriceSourcePick(source: .snkrdunk, price: snk, sampleCount: snkN, label: "Snkrdunk")
+    }
+    if yjQualifies {
+        return JpPriceSourcePick(source: .yahooJp, price: yj, sampleCount: yjN, label: "Yahoo! JP")
+    }
+    return JpPriceSourcePick(source: nil, price: nil, sampleCount: nil, label: "")
 }
 
 struct HomepageWindowedCardsDTO: Decodable, Hashable {

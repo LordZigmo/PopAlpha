@@ -100,6 +100,12 @@ struct MarketplaceView: View {
     /// debounce.
     @State private var cancellationSentinelArmed: Bool = false
 
+    /// Persisted EN/JP market selection. Stored as the raw enum value
+    /// so `@AppStorage` can drive a binding directly into the toggle
+    /// strip below TopBar. Computed `market` projects to the enum.
+    @AppStorage(Market.storageKey) private var marketRaw: String = Market.en.rawValue
+    private var market: Market { Market(rawValue: marketRaw) ?? .en }
+
     var body: some View {
         NavigationStack {
             ScrollViewReader { proxy in
@@ -113,7 +119,12 @@ struct MarketplaceView: View {
                             .padding(.horizontal, PA.Layout.sectionPadding)
                             .padding(.top, 8)
 
-                        if AuthService.shared.isAuthenticated {
+                        MarketToggleStrip(selection: $marketRaw)
+                            .padding(.horizontal, PA.Layout.sectionPadding)
+
+                        if market == .jp {
+                            jpSequence(authed: AuthService.shared.isAuthenticated)
+                        } else if AuthService.shared.isAuthenticated {
                             authedSequence(proxy: proxy)
                         } else {
                             guestSequence(proxy: proxy)
@@ -135,6 +146,15 @@ struct MarketplaceView: View {
                     await loadAll()
                 }
             }
+            // Inject the user's selected market into the homepage
+            // NavigationStack so homepage subviews that opt into
+            // `@Environment(\.market)` reflow in red for JP mode. Scope
+            // is deliberate: only this NavigationStack. Settings,
+            // CardDetailView, etc. live outside this tree (or in
+            // fullScreenCover presentations whose subviews don't read
+            // the environment) and remain branded blue.
+            .environment(\.market, market)
+            .animation(.easeInOut(duration: 0.25), value: market)
             .fullScreenCover(isPresented: $showSearch) {
                 NavigationStack {
                     SearchView(onSelectCard: { result in
@@ -266,6 +286,67 @@ struct MarketplaceView: View {
         }
     }
 
+    // MARK: - JP market sequence
+    //
+    // Rendered when the user toggles into JP mode. Intentionally
+    // slimmer than the EN sequence: the JP catalog is small (~38
+    // cards live, 377 slugs total) and the price-momentum lists
+    // (top movers, biggest drops, breakouts) are not yet computed
+    // server-side for JP. So instead of showing seven sparse rails
+    // we curate the JP view to the single Japanese rail plus the
+    // visual chrome that gives users orientation (hero/personal
+    // pulse + footer). AI brief, ForYou, Community, and the scan
+    // strip are deliberately hidden — they're market-wide today
+    // and would leak EN content into a JP view.
+    //
+    // The `\.market` environment value is injected on the outer
+    // NavigationStack (see `body`) so every subview here that
+    // reads `@Environment(\.market)` reflows in the Hinomaru red
+    // brand. Subviews that don't read the environment (e.g.
+    // pushed CardDetailView destinations) stay branded blue.
+    @ViewBuilder
+    private func jpSequence(authed: Bool) -> some View {
+        if authed {
+            PersonalPulseSection(me: meData, styleLabel: styleLabel)
+                .padding(.horizontal, PA.Layout.sectionPadding)
+        } else {
+            // JP rail renders directly below the hero, so the secondary
+            // "See what's moving" CTA is suppressed — its accessibility
+            // hint advertises a scroll that doesn't help in this layout.
+            MarketHeroCard(
+                onScan: { handleScanCTA() },
+                onSeeMovers: nil
+            )
+            .padding(.horizontal, PA.Layout.sectionPadding)
+        }
+
+        if let data {
+            MarketPulseSection(
+                selectedWindow: $selectedWindow,
+                signalBoard: data.signalBoard,
+                highConfidenceMovers: data.highConfidenceMovers,
+                watchlistSlugs: watchlistSlugs,
+                pricesRefreshed24h: pricesRefreshed24h,
+                avgChange24h: avgChange24h,
+                marketCap: marketCap,
+                onSelect: handleSelect,
+                japaneseOnly: true
+            )
+        } else {
+            signalPlaceholder
+        }
+
+        // JP footer reads freshness from the JP rail itself, not
+        // `data.asOf` (which is derived server-side from EN
+        // market-pulse / trending candidates and would overstate how
+        // current the JP snapshots are). Attribution also swaps to the
+        // actual JP data sources. When no JP card carries a usable
+        // `updatedAt`, the footer is omitted rather than fabricated.
+        if let asOf = jpFooterAsOf {
+            footer(asOf: asOf, attribution: "Yahoo Japan & Snkrdunk")
+        }
+    }
+
     // MARK: - Movers section + loading/error placeholder
     //
     // Tagged with `.id("movers")` so the hero / scan-strip "See what's
@@ -306,7 +387,7 @@ struct MarketplaceView: View {
 
     private var loadingState: some View {
         VStack(spacing: 16) {
-            ProgressView().tint(PA.Colors.accent)
+            ProgressView().tint(market.accent)
             Text("Loading market signals...")
                 .font(PA.Typography.cardSubtitle)
                 .foregroundStyle(PA.Colors.muted)
@@ -333,10 +414,10 @@ struct MarketplaceView: View {
             } label: {
                 Text("Retry")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(PA.Colors.accent)
+                    .foregroundStyle(market.accent)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 8)
-                    .background(PA.Colors.accent.opacity(0.12))
+                    .background(market.accent.opacity(0.12))
                     .clipShape(Capsule())
             }
             .buttonStyle(.plain)
@@ -364,12 +445,26 @@ struct MarketplaceView: View {
     }
 
     @ViewBuilder
-    private func footer(asOf: String) -> some View {
-        Text("Data as of \(formatAsOf(asOf)) · Scrydex & PokémonTCG")
+    private func footer(asOf: String, attribution: String = "Scrydex & PokémonTCG") -> some View {
+        Text("Data as of \(formatAsOf(asOf)) · \(attribution)")
             .font(.system(size: 10, weight: .medium))
             .foregroundStyle(PA.Colors.muted)
             .padding(.top, 8)
             .frame(maxWidth: .infinity)
+    }
+
+    /// Latest `updatedAt` across the JP rail, used as the JP footer's
+    /// freshness anchor. Returns nil when the rail is empty or no card
+    /// in it carries an `updatedAt` — in that case `jpSequence` omits
+    /// the footer entirely rather than show a misleading timestamp.
+    /// ISO-8601 strings sort lexicographically the same as
+    /// chronologically (assuming UTC + consistent fractional precision),
+    /// which both yahoo_jp_card_prices and snkrdunk_card_prices ingest
+    /// in.
+    private var jpFooterAsOf: String? {
+        data?.signalBoard.japanese?
+            .compactMap { $0.updatedAt }
+            .max()
     }
 
     private func formatAsOf(_ iso: String) -> String {
@@ -577,6 +672,65 @@ struct MarketplaceView: View {
             avgChange24h = avg
             marketCap = cap
         }
+    }
+}
+
+// MARK: - Market Toggle Strip
+//
+// EN / JP market selector that sits directly below TopBar on the
+// homepage. The active segment fills in its own market's brand color,
+// so the strip doubles as a legend ("blue = EN, red = JP") without
+// needing a separate explainer. Persists via the same @AppStorage
+// binding that drives the `\.market` environment value on the outer
+// NavigationStack — flipping a segment immediately reflows every
+// homepage subview that opted into `@Environment(\.market)`.
+//
+// Defensive on rawValue typing: callers pass `$marketRaw` (a String
+// binding) rather than a Market binding because `@AppStorage` doesn't
+// natively bind enums; this avoids reaching for `optional<Market>`
+// gymnastics at the call site.
+
+private struct MarketToggleStrip: View {
+    @Binding var selection: String
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(Market.allCases) { market in
+                segment(for: market)
+            }
+        }
+        .padding(3)
+        .background(Capsule().fill(PA.Colors.surfaceSoft))
+        .overlay(Capsule().stroke(PA.Colors.hairline(0.08), lineWidth: 1))
+        .frame(height: 34)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Market")
+        .accessibilityHint("Switches the homepage between English and Japanese card markets")
+    }
+
+    private func segment(for market: Market) -> some View {
+        let isActive = selection == market.rawValue
+        return Button {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                selection = market.rawValue
+                PAHaptics.selection()
+            }
+        } label: {
+            Text(market.label)
+                .font(.system(size: 12, weight: .bold))
+                .tracking(0.8)
+                .foregroundStyle(isActive ? .white : PA.Colors.textSecondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+                .background {
+                    if isActive {
+                        Capsule().fill(market.accent)
+                    }
+                }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(market.accessibilityLabel)
+        .accessibilityAddTraits(isActive ? .isSelected : [])
     }
 }
 

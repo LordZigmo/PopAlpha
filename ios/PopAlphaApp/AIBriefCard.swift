@@ -34,6 +34,13 @@ struct AIBriefCard: View {
 
     private var auth: AuthService { AuthService.shared }
 
+    /// Defensive opt-in: AIBriefCard is hidden in JP mode today
+    /// (`MarketplaceView.jpSequence` doesn't render it), but reading
+    /// `\.market` here keeps the brand surfaces correct if it's ever
+    /// re-included or if a scroll anchor briefly flashes it during
+    /// EN-mode navigation.
+    @Environment(\.market) private var market
+
     // Placeholder copy used only when the /api/homepage/ai-brief cache is
     // empty (e.g. fresh deploy, cron hasn't run yet). Real briefs come
     // from Gemini via the hourly cron.
@@ -119,12 +126,12 @@ struct AIBriefCard: View {
                 HStack(spacing: 6) {
                     Image(systemName: "sparkles")
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(PA.Colors.accent)
+                        .foregroundStyle(market.accent)
                         .accessibilityHidden(true)
                     Text("AI BRIEF")
                         .font(.system(size: 10, weight: .semibold))
                         .tracking(2.0)
-                        .foregroundStyle(PA.Colors.accent)
+                        .foregroundStyle(market.accent)
                         .accessibilityAddTraits(.isHeader)
                 }
                 Circle()
@@ -163,11 +170,11 @@ struct AIBriefCard: View {
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
-                .background(PA.Colors.accent.opacity(0.12))
+                .background(market.accent.opacity(0.12))
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .stroke(PA.Colors.accent.opacity(0.2), lineWidth: 0.5)
+                        .stroke(market.accent.opacity(0.2), lineWidth: 0.5)
                 )
 
                 Spacer()
@@ -195,7 +202,7 @@ struct AIBriefCard: View {
                             .rotationEffect(.degrees(isExpanded ? 180 : 0))
                             .accessibilityHidden(true)
                     }
-                    .foregroundStyle(PA.Colors.accent)
+                    .foregroundStyle(market.accent)
                 }
                 .buttonStyle(.plain)
                 .accessibilityHint(isExpanded ? "Collapses the AI brief" : "Expands the full AI brief")
@@ -224,7 +231,7 @@ struct AIBriefCard: View {
                 PA.Gradients.cardSurface
                 // subtle accent glow top-left
                 RadialGradient(
-                    colors: [PA.Colors.accent.opacity(0.12), .clear],
+                    colors: [market.accent.opacity(0.12), .clear],
                     center: .topLeading,
                     startRadius: 0,
                     endRadius: 220
@@ -234,7 +241,7 @@ struct AIBriefCard: View {
         .clipShape(RoundedRectangle(cornerRadius: PA.Layout.panelRadius, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: PA.Layout.panelRadius, style: .continuous)
-                .stroke(PA.Colors.accent.opacity(0.35), lineWidth: 1)
+                .stroke(market.accent.opacity(0.35), lineWidth: 1)
         )
     }
 
@@ -256,12 +263,12 @@ struct AIBriefCard: View {
             HStack(spacing: 6) {
                 Image(systemName: icon)
                     .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(PA.Colors.accent)
+                    .foregroundStyle(market.accent)
                     .accessibilityHidden(true)
                 Text(label.uppercased())
                     .font(.system(size: 10, weight: .bold))
                     .tracking(1.2)
-                    .foregroundStyle(PA.Colors.accent)
+                    .foregroundStyle(market.accent)
             }
             Text(text)
                 .font(.system(size: 14))
@@ -302,7 +309,7 @@ struct AIBriefCard: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(PA.Colors.accent.opacity(0.08))
+        .background(market.accent.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
@@ -315,7 +322,7 @@ struct AIBriefCard: View {
         HStack(spacing: 8) {
             Image(systemName: icon)
                 .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(PA.Colors.accent)
+                .foregroundStyle(market.accent)
                 .frame(width: 10)
                 .accessibilityHidden(true)
             Text(eyebrow.uppercased())

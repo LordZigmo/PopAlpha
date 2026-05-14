@@ -40,6 +40,21 @@ struct MarketPulseSection: View {
 
     let onSelect: (HomepageCardDTO) -> Void
 
+    /// When true, this section is the JP-market homepage's sole
+    /// content surface: the category tab bar is suppressed, the KPI
+    /// microstrip is hidden (those numbers describe the EN catalog),
+    /// the 24H/7D window toggle is hidden, and the body renders the
+    /// `.japanese` rail directly. Defaults to false so every existing
+    /// call site keeps the historical multi-tab behavior.
+    var japaneseOnly: Bool = false
+
+    /// Homepage market injected by `MarketplaceView`. Used only for
+    /// brand-identity color swaps (the "LIVE MARKET" eyebrow on the
+    /// Movers tab in EN; the active tab fill when that tab is also
+    /// the Movers tab). Per-category colors and semantic colors
+    /// (positive/negative/gold) are untouched.
+    @Environment(\.market) private var market
+
     enum Category: String, CaseIterable, Identifiable {
         case movers
         case breakouts
@@ -130,10 +145,39 @@ struct MarketPulseSection: View {
 
     @State private var category: Category = .movers
 
+    /// Categories shown in the tab strip. In JP-only mode the tab
+    /// strip is hidden entirely (the section already knows it's
+    /// rendering `.japanese`). In EN mode the `.japanese` tab is
+    /// hidden — JP is now its own top-level market, so a JP tab
+    /// inside the EN view would be redundant. The case itself stays
+    /// in the enum so JP-only mode reuses all the existing wiring
+    /// (`title`, `eyebrow`, `cards(for:)`, etc.) without duplication.
+    private var visibleCategories: [Category] {
+        japaneseOnly ? [.japanese] : Category.allCases.filter { $0 != .japanese }
+    }
+
+    /// The category whose rail is currently rendered. JP-only mode
+    /// forces `.japanese`; EN mode honours the user's tab selection.
+    private var activeCategory: Category {
+        japaneseOnly ? .japanese : category
+    }
+
+    /// Brand-aware accent for a given category. Only the Movers tab
+    /// uses brand identity (`PA.Colors.accent`); every other category
+    /// keeps its own semantic palette. When the homepage is in JP
+    /// mode, the Movers brand spot flips to Hinomaru red via the
+    /// `\.market` environment — but JP mode never renders the Movers
+    /// tab today, so this swap is currently defensive.
+    private func brandedColor(_ category: Category) -> Color {
+        category == .movers ? market.accent : category.color
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            headerStrip
-            categoryTabs
+            if !japaneseOnly {
+                headerStrip
+                categoryTabs
+            }
             activeSection
         }
     }
@@ -223,7 +267,8 @@ struct MarketPulseSection: View {
     private var categoryTabs: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
-                ForEach(Category.allCases) { cat in
+                ForEach(visibleCategories) { cat in
+                    let tabColor = brandedColor(cat)
                     Button {
                         withAnimation(.easeInOut(duration: 0.18)) {
                             category = cat
@@ -233,21 +278,21 @@ struct MarketPulseSection: View {
                         Text(cat.label)
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(
-                                category == cat ? cat.color : PA.Colors.textSecondary
+                                category == cat ? tabColor : PA.Colors.textSecondary
                             )
                             .padding(.horizontal, 12)
                             .padding(.vertical, 7)
                             .background(
                                 Capsule().fill(
                                     category == cat
-                                        ? cat.color.opacity(0.14)
+                                        ? tabColor.opacity(0.14)
                                         : PA.Colors.hairline(0.03)
                                 )
                             )
                             .overlay(
                                 Capsule().stroke(
                                     category == cat
-                                        ? cat.color.opacity(0.38)
+                                        ? tabColor.opacity(0.38)
                                         : PA.Colors.hairline(0.08),
                                     lineWidth: 1
                                 )
@@ -263,29 +308,31 @@ struct MarketPulseSection: View {
     // MARK: - Active section body
 
     private var activeSection: some View {
-        MoverSection(
-            eyebrow: category.eyebrow,
-            eyebrowColor: category.color,
-            title: category.title,
-            window: category.isWindowed ? selectedWindow : nil,
-            cards: cards(for: category),
-            emptyMessage: emptyMessage(for: category),
+        let cat = activeCategory
+        return MoverSection(
+            eyebrow: cat.eyebrow,
+            eyebrowColor: brandedColor(cat),
+            title: cat.title,
+            window: cat.isWindowed ? selectedWindow : nil,
+            cards: cards(for: cat),
+            emptyMessage: emptyMessage(for: cat),
             onSelect: onSelect,
             watchlistSlugs: watchlistSlugs,
-            sectionRationale: category.sectionRationale,
+            sectionRationale: cat.sectionRationale,
             trailingAccessory: {
                 // Window toggle sits inline with the section title for
                 // windowed categories (Movers, Pullbacks). Non-windowed
-                // tabs (Breakouts, Unusual, Mid, Budget) come from
-                // pre-computed daily lists and ignore the toggle, so we
-                // hide it there to avoid misleading the user.
-                if category.isWindowed {
+                // tabs (Breakouts, Unusual, Mid, Budget, Japanese) come
+                // from pre-computed daily lists and ignore the toggle,
+                // so we hide it there. JP-only mode also suppresses it
+                // implicitly since `.japanese` is non-windowed.
+                if cat.isWindowed && !japaneseOnly {
                     windowToggle
                         .transition(.opacity)
                 }
             }
         )
-        .id(category)   // ensures fresh transition state when swapping
+        .id(cat)   // ensures fresh transition state when swapping
         .transition(.opacity.combined(with: .move(edge: .trailing)))
     }
 
@@ -312,7 +359,15 @@ struct MarketPulseSection: View {
             // Older server builds (pre 2026-05-07 JP onboarding) won't
             // include the japanese rail; fall back to empty so the tab
             // still renders gracefully.
-            return signalBoard.japanese ?? []
+            //
+            // Each JP card is run through `preferringJpSource()` so the
+            // tile shows the Yahoo!JP or Snkrdunk native price (when a
+            // source qualifies on sample count) instead of Scrydex's
+            // USD reflection. This is what the JP-market toggle
+            // actually promises to the user — without it the JP view
+            // is just a colored shell over the same Scrydex data the
+            // EN view shows.
+            return (signalBoard.japanese ?? []).map { $0.preferringJpSource() }
         }
     }
 
