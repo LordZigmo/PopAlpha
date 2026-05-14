@@ -409,19 +409,29 @@ struct ChangePill: View {
     var small: Bool = false
 
     var body: some View {
-        let color = ChangeDirection.from(changePct).color
-        HStack(spacing: 3) {
-            Text(formatPct(changePct))
-                .font(.system(size: small ? 10 : 11, weight: .bold, design: .rounded))
-            Text(window)
-                .font(.system(size: small ? 8 : 9, weight: .semibold))
-                .foregroundStyle(color.opacity(0.75))
+        // When there's no change signal, render nothing — a "-- 24H"
+        // placeholder reads as broken/loading next to a real price.
+        // Same philosophy as `SignalBadgeKind.from` (no badge without
+        // a change signal). Important for the JP rail: cards using
+        // a Yahoo!JP / Snkrdunk price clear `changePct` because the
+        // Scrydex-derived delta doesn't describe their new baseline,
+        // and without this guard the row showed "-- 24H" next to the
+        // fresh JP price.
+        if let pct = changePct {
+            let color = ChangeDirection.from(pct).color
+            HStack(spacing: 3) {
+                Text(formatPct(pct))
+                    .font(.system(size: small ? 10 : 11, weight: .bold, design: .rounded))
+                Text(window)
+                    .font(.system(size: small ? 8 : 9, weight: .semibold))
+                    .foregroundStyle(color.opacity(0.75))
+            }
+            .foregroundStyle(color)
+            .padding(.horizontal, small ? 5 : 6)
+            .padding(.vertical, small ? 2 : 3)
+            .background(color.opacity(0.12))
+            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
         }
-        .foregroundStyle(color)
-        .padding(.horizontal, small ? 5 : 6)
-        .padding(.vertical, small ? 2 : 3)
-        .background(color.opacity(0.12))
-        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
     }
 }
 
