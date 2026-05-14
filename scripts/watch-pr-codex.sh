@@ -48,8 +48,12 @@ while true; do
     ".[] | select(.user.login == \"chatgpt-codex-connector[bot]\") | select(.created_at > \"$since\") | \"[Codex inline #\(.id)] \(.path):\(.line // .original_line // 0) (commit \(.commit_id[:10])) — \(.body | split(\"\\n\")[0] | .[:240])\"" \
     2>/dev/null || true
 
-  # New Codex review submissions
-  gh api "repos/$REPO/pulls/$PR/reviews" --jq \
+  # New Codex review submissions. --paginate is critical: GitHub returns
+  # reviews in chronological order (oldest first), so without pagination
+  # only the first 30 are visible. On long-iteration PRs the latest
+  # Codex review would live on page 2+ and the watcher would go silent.
+  # Codex P2 caught this on PR #61.
+  gh api "repos/$REPO/pulls/$PR/reviews" --paginate --jq \
     ".[] | select(.user.login == \"chatgpt-codex-connector[bot]\") | select(.submitted_at > \"$since\") | \"[Codex review] commit=\(.commit_id[:10]) state=\(.state) submitted=\(.submitted_at)\"" \
     2>/dev/null || true
 
