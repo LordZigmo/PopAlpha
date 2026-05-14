@@ -693,6 +693,13 @@ struct MarketplaceView: View {
 private struct MarketToggleStrip: View {
     @Binding var selection: String
 
+    /// Visual width of the toggle pill. Sized like a standard iOS
+    /// segmented control — wide enough to read both labels without
+    /// crowding, narrow enough that it doesn't dominate the homepage.
+    /// Centered horizontally by the parent VStack's default alignment.
+    private let pillWidth: CGFloat = 220
+    private let pillHeight: CGFloat = 32
+
     var body: some View {
         HStack(spacing: 0) {
             ForEach(Market.allCases) { market in
@@ -700,9 +707,9 @@ private struct MarketToggleStrip: View {
             }
         }
         .padding(3)
+        .frame(width: pillWidth, height: pillHeight)
         .background(Capsule().fill(PA.Colors.surfaceSoft))
         .overlay(Capsule().stroke(PA.Colors.hairline(0.08), lineWidth: 1))
-        .frame(height: 34)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Market")
         .accessibilityHint("Switches the homepage between English and Japanese card markets")
@@ -716,17 +723,27 @@ private struct MarketToggleStrip: View {
                 PAHaptics.selection()
             }
         } label: {
-            Text(market.label)
-                .font(.system(size: 12, weight: .bold))
-                .tracking(0.8)
-                .foregroundStyle(isActive ? .white : PA.Colors.textSecondary)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 6)
-                .background {
-                    if isActive {
-                        Capsule().fill(market.accent)
-                    }
+            ZStack {
+                // Active fill is rendered behind the text. Kept as a
+                // separate layer (rather than `.background { ... }` on
+                // the Text) so the segment's frame is always opaque to
+                // hit-testing — without this, taps that don't land on
+                // the glyphs themselves fall through and the JP
+                // segment registers as unresponsive on inactive state.
+                if isActive {
+                    Capsule().fill(market.accent)
                 }
+                Text(market.label)
+                    .font(.system(size: 12, weight: .bold))
+                    .tracking(0.8)
+                    .foregroundStyle(isActive ? .white : PA.Colors.textSecondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // `contentShape(Rectangle())` makes the full segment frame
+            // tappable regardless of whether the active-fill capsule
+            // is drawn. Required because SwiftUI Buttons only hit-test
+            // opaque label content by default.
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(market.accessibilityLabel)
