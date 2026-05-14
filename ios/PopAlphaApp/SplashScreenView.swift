@@ -16,7 +16,7 @@ struct SplashScreenView: View {
             Color("LaunchBackground")
                 .ignoresSafeArea()
 
-            Image("ModernWhiteLogo")
+            Image("LaunchLogo")
                 .resizable()
                 .scaledToFit()
                 .frame(width: 280)
