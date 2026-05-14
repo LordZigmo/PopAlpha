@@ -247,10 +247,16 @@ final class AuthService {
         signInError = nil
         defer { isSigningIn = false }
 
-        if let signIn = Clerk.shared.auth.currentSignIn {
-            _ = try await signIn.verifyCode(code)
-        } else if let signUp = Clerk.shared.auth.currentSignUp {
+        // Check currentSignUp BEFORE currentSignIn. When the fallthrough
+        // in signInWithEmail(_:) kicks in for a new user, Clerk leaves
+        // the failed signIn attempt on the client alongside the fresh
+        // signUp attempt. Verifying the code against the stale signIn
+        // first would fail at verification even though the code is
+        // valid for the signUp. Codex flagged this on PR #62.
+        if let signUp = Clerk.shared.auth.currentSignUp {
             _ = try await signUp.verifyEmailCode(code)
+        } else if let signIn = Clerk.shared.auth.currentSignIn {
+            _ = try await signIn.verifyCode(code)
         } else {
             throw NSError(
                 domain: "PopAlpha.Auth",
