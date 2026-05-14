@@ -163,6 +163,10 @@ export async function getTopViewedCards(days = 7, limit = 5): Promise<HomepageCa
         sales_count_30d: null,
         active_listings_7d: null,
         updated_at: null,
+        yahoo_jp_price: null,
+        yahoo_jp_sample_count: null,
+        snkrdunk_price: null,
+        snkrdunk_sample_count: null,
       };
       return result;
     })

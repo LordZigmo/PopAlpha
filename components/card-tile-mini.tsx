@@ -6,6 +6,7 @@ import {
   formatPriceDisplay,
   resolveDisplayedMarketPrice,
 } from "@/lib/pricing/displayed-market-price";
+import { selectJpPriceSource } from "@/lib/pricing/jp-price-source";
 
 function formatPrice(n: number | null): string {
   if (n == null || n <= 0) return "--";
@@ -53,11 +54,28 @@ export default function CardTileMini({
 }: {
   card: HomepageCard;
 }) {
+  // JP-source pick: if either Yahoo! JP or Snkrdunk has a price with
+  // >= 3 samples, prefer the JP-native source over Scrydex's USD
+  // reflection. Mirrors the iOS hero logic from PR #51 — confidence-
+  // pick between the two sources (more samples = winner). When neither
+  // qualifies, falls back to card.market_price (Scrydex) below.
+  const jpSource = selectJpPriceSource({
+    yahooJpPrice: card.yahoo_jp_price,
+    yahooJpSampleCount: card.yahoo_jp_sample_count,
+    snkrdunkPrice: card.snkrdunk_price,
+    snkrdunkSampleCount: card.snkrdunk_sample_count,
+  });
+
   // Phase 2 of tiered-refresh plan: classify the price by age so stale
   // cards stop pretending to be live. When the v2 flag is off, fall
   // through to the legacy "always show $X" behavior so we can disable
   // by env without redeploying.
-  const priceDisplay = PRICING_DISPLAY_V2_ENABLED
+  //
+  // When jpSource is non-null we skip the staleness classifier — JP
+  // sources have their own freshness model (sample count is the
+  // confidence signal, not observed_at age) and we don't want the
+  // "Last sold $X · Apr 28" wording on JP-source rows.
+  const priceDisplay = PRICING_DISPLAY_V2_ENABLED && jpSource.source === null
     ? resolveDisplayedMarketPrice({
         marketPrice: card.market_price,
         marketPriceAsOf: card.updated_at,
@@ -116,12 +134,40 @@ export default function CardTileMini({
               className={`block truncate font-bold tabular-nums ${
                 priceMeta?.subdued ? "text-[#9CA3AF]" : "text-[#F0F0F0]"
               } ${priceMeta && priceDisplay?.kind !== "live" ? "text-[12px]" : "text-[14px]"}`}
-              title={priceDisplay?.kind === "stale_old" ? "Sparse market — last sold price shown" : undefined}
+              title={
+                jpSource.source
+                  ? `${jpSource.label} median · n=${jpSource.sampleCount} sales`
+                  : priceDisplay?.kind === "stale_old"
+                    ? "Sparse market — last sold price shown"
+                    : undefined
+              }
             >
-              {priceMeta ? priceMeta.label : formatPrice(card.market_price)}
+              {jpSource.price != null
+                ? formatPrice(jpSource.price)
+                : priceMeta
+                  ? priceMeta.label
+                  : formatPrice(card.market_price)}
             </span>
+            {/*
+              Small source pill for JP-native rows so the user can see
+              at a glance that this isn't Scrydex's USD reflection. Only
+              renders when a JP source was picked.
+            */}
+            {jpSource.source ? (
+              <span
+                className="mt-1 inline-block rounded-full bg-[rgba(239,68,68,0.18)] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-[#FCA5A5]"
+                title={`Price from ${jpSource.label} (sold archive)`}
+              >
+                {jpSource.label}
+              </span>
+            ) : null}
           </div>
-          {(priceMeta?.showChangeBadge ?? true) ? (
+          {/*
+            Change badge tracks Scrydex's change_pct, which isn't
+            comparable to the JP-source median. Hide on JP-source rows
+            (matches iOS suppressHeroChangeBadge logic from PR #51).
+          */}
+          {jpSource.source === null && (priceMeta?.showChangeBadge ?? true) ? (
             <div className="shrink-0 pt-0.5">
               <ChangeBadge pct={card.change_pct} windowLabel={card.change_window} />
             </div>
