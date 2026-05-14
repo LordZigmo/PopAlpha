@@ -336,8 +336,14 @@ struct MarketplaceView: View {
             signalPlaceholder
         }
 
-        if let asOf = data?.asOf {
-            footer(asOf: asOf)
+        // JP footer reads freshness from the JP rail itself, not
+        // `data.asOf` (which is derived server-side from EN
+        // market-pulse / trending candidates and would overstate how
+        // current the JP snapshots are). Attribution also swaps to the
+        // actual JP data sources. When no JP card carries a usable
+        // `updatedAt`, the footer is omitted rather than fabricated.
+        if let asOf = jpFooterAsOf {
+            footer(asOf: asOf, attribution: "Yahoo Japan & Snkrdunk")
         }
     }
 
@@ -439,12 +445,26 @@ struct MarketplaceView: View {
     }
 
     @ViewBuilder
-    private func footer(asOf: String) -> some View {
-        Text("Data as of \(formatAsOf(asOf)) · Scrydex & PokémonTCG")
+    private func footer(asOf: String, attribution: String = "Scrydex & PokémonTCG") -> some View {
+        Text("Data as of \(formatAsOf(asOf)) · \(attribution)")
             .font(.system(size: 10, weight: .medium))
             .foregroundStyle(PA.Colors.muted)
             .padding(.top, 8)
             .frame(maxWidth: .infinity)
+    }
+
+    /// Latest `updatedAt` across the JP rail, used as the JP footer's
+    /// freshness anchor. Returns nil when the rail is empty or no card
+    /// in it carries an `updatedAt` — in that case `jpSequence` omits
+    /// the footer entirely rather than show a misleading timestamp.
+    /// ISO-8601 strings sort lexicographically the same as
+    /// chronologically (assuming UTC + consistent fractional precision),
+    /// which both yahoo_jp_card_prices and snkrdunk_card_prices ingest
+    /// in.
+    private var jpFooterAsOf: String? {
+        data?.signalBoard.japanese?
+            .compactMap { $0.updatedAt }
+            .max()
     }
 
     private func formatAsOf(_ iso: String) -> String {
