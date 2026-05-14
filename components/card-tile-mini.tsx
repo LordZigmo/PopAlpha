@@ -83,7 +83,14 @@ export default function CardTileMini({
     : null;
   const priceMeta = priceDisplay ? formatPriceDisplay(priceDisplay) : null;
 
-  const confidence = getConfidenceVisual(card.confidence_score, card.low_confidence);
+  // Scrydex confidence pill suppressed on JP-source rows. Its underlying
+  // score (market_confidence_score) is computed against the Scrydex
+  // market_price; pairing it with a Snkrdunk/Yahoo price below would tell
+  // a mixed story. The sample-count tooltip on the price label already
+  // conveys JP-source confidence ("n=60 sales"). Codex P2 on PR #57.
+  const confidence = jpSource.source === null
+    ? getConfidenceVisual(card.confidence_score, card.low_confidence)
+    : null;
   const showConfidence = confidence !== null && (priceMeta?.showConfidencePill ?? true);
   const filledSegments = confidence
     ? confidence.score >= 85
