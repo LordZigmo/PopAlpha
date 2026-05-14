@@ -319,7 +319,14 @@ struct CardDetailView: View {
                 )
             }
         }
-        .task(id: "\(selectedTimeframe.rawValue)|\(selectedPriceMode)|\(selectedPrintingId ?? "")") {
+        // activeCard.id is part of the key so an EN/JP toggle reloads
+        // the chart even when the other dimensions (timeframe, price
+        // mode, selected printing) happen to match. Without it,
+        // paired JP cards — which currently get an empty
+        // availablePrintings array from fetchPrintings, so
+        // selectedPrintingId stays nil on both sides — would inherit
+        // the EN card's chart-cleared state and never refetch.
+        .task(id: "\(activeCard.id)|\(selectedTimeframe.rawValue)|\(selectedPriceMode)|\(selectedPrintingId ?? "")") {
             await loadChart()
         }
         // Keyed by activeCard.id so the entire data-load fan-out re-fires

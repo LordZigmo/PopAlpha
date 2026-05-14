@@ -437,12 +437,24 @@ export async function buildCardDetailResponse(inputSlug: string): Promise<CardDe
     // Cross-language pairing for the CardDetailView EN/JP toggle. Reads
     // rank=0 (primary) only; .or() searches both sides of the junction
     // since canonicalSlug may be either the EN or JP partner.
+    //
+    // Why .order().limit(1) instead of .maybeSingle(): the table's
+    // primary key is (en_slug, jp_slug), so two different EN reprints
+    // CAN independently pick the same JP slug as rank=0 — that's
+    // legitimate data, not a backfill bug. When the user opens the
+    // JP card's detail page, the `jp_slug.eq.X AND rank=0` half of
+    // the .or() matches multiple rows and .maybeSingle() would
+    // surface a PGRST116 multi-row error, which my error handler
+    // treats as "no pairing" and hides the toggle. Ordering by
+    // confidence DESC and limiting picks the strongest pairing
+    // deterministically.
     supabase
       .from("card_translations")
       .select("en_slug, jp_slug")
       .or(`en_slug.eq.${canonicalSlug},jp_slug.eq.${canonicalSlug}`)
       .eq("rank", 0)
-      .maybeSingle<TranslationRow>(),
+      .order("confidence", { ascending: false })
+      .limit(1),
   ]);
 
   if (canonicalResult.error) throw new Error(`canonical_cards: ${canonicalResult.error.message}`);
@@ -463,7 +475,12 @@ export async function buildCardDetailResponse(inputSlug: string): Promise<CardDe
   const rawMetrics = rawMetricsResult.data;
   const rawSignals = rawSignalsResult.data;
   const gradedMetrics = gradedMetricsResult.data;
-  const translation = translationResult.error ? null : translationResult.data;
+  // .limit(1) returns an array, not a single object. The query is
+  // already ordered by confidence DESC so [0] is the strongest
+  // pairing — picks deterministically when a JP slug is paired by
+  // multiple EN reprints.
+  const translationRows = translationResult.error ? null : (translationResult.data as TranslationRow[] | null);
+  const translation = translationRows && translationRows.length > 0 ? translationRows[0] : null;
 
   if (!canonical) return null;
 
