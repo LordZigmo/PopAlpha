@@ -36,6 +36,11 @@ export function buildProviderHistoryVariantRef(input: {
   provider: string;
   providerVariantId: string;
 }): string;
+export function extractRawVariantPrintingId(variantRef: string | null | undefined): string | null;
+export function isRawHistoryVariantRefForPrinting(
+  variantRef: string | null | undefined,
+  printingId: string | null | undefined,
+): boolean;
 /**
  * Parses canonical display variant refs only.
  * Provider-history RAW keys are intentionally outside this parser contract.

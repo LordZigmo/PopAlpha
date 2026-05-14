@@ -28,6 +28,7 @@ import CardTileMini from "@/components/card-tile-mini";
 import type { HomepageCard } from "@/lib/data/homepage";
 import { buildEbaySearchQueries, type GradeSelection, type GradedSource } from "@/lib/ebay-query";
 import { buildFinishGroups, buildPrintingPill } from "@/lib/cards/detail";
+import { choosePreferredRawPricingPrinting } from "@/lib/cards/raw-pricing-printing";
 import { getCardViewSnapshot } from "@/lib/data/card-views";
 import { getCommunityPulseSnapshot } from "@/lib/data/community-pulse";
 import { getRelatedCardCarousels } from "@/lib/data/related-cards";
@@ -35,11 +36,13 @@ import { buildGradedVariantRef } from "@/lib/identity/variant-ref";
 import { dbPublic } from "@/lib/db";
 import { createServerSupabaseUserClient } from "@/lib/db/user";
 import { buildAssetViewModel } from "@/lib/data/assets";
+import { filterRawHistoryRowsForPrinting } from "@/lib/pricing/raw-history";
 import { resolveWeightedMarketPrice } from "@/lib/pricing/market-confidence";
 import {
   PRICING_DISPLAY_V2_ENABLED,
   resolveDisplayedMarketPrice,
 } from "@/lib/pricing/displayed-market-price";
+import { resolveSnapshotTrust } from "@/lib/pricing/snapshot-trust";
 import { isPhysicalPokemonSet } from "@/lib/sets/physical";
 
 type CanonicalCardRow = {
@@ -61,6 +64,7 @@ type CardPrintingRow = {
   stamp: string | null;
   image_url: string | null;
   rarity: string | null;
+  updated_at: string | null;
 };
 
 type SnapshotRow = {
@@ -72,6 +76,9 @@ type SnapshotRow = {
   high_30d: number | null;
   market_price: number | null;
   market_price_as_of: string | null;
+  market_confidence_score: number | null;
+  market_low_confidence: boolean | null;
+  market_blend_policy: string | null;
 };
 
 type CardProfileRow = {
@@ -195,7 +202,7 @@ const getCanonicalCardPageBaseData = cache(async (slug: string): Promise<Canonic
       .maybeSingle<CanonicalCardRow>(),
     supabase
       .from("card_printings")
-      .select("id, language, set_code, finish, finish_detail, edition, stamp, image_url, rarity")
+      .select("id, language, set_code, finish, finish_detail, edition, stamp, image_url, rarity, updated_at")
       .eq("canonical_slug", slug),
     supabase
       .from("card_profiles")
@@ -595,6 +602,9 @@ export default async function CanonicalCardPage({
   const viewMode = selectedViewMode(mode, grade);
   const selectedPrinting = printings.find((row) => row.id === printing) ?? chooseDefaultPrinting(printings) ?? null;
   const hasExplicitPrinting = Boolean(printing) && Boolean(printings.find((row) => row.id === printing));
+  const rawPricingPrinting = hasExplicitPrinting
+    ? selectedPrinting
+    : choosePreferredRawPricingPrinting(printings);
   const selectedPrintingLabel = selectedPrinting ? printingOptionLabel(selectedPrinting) : null;
 
   const { data: gradedAvailabilityData } = selectedPrinting
@@ -665,25 +675,26 @@ export default async function CanonicalCardPage({
   // card_metrics rows are keyed by (canonical_slug, printing_id, grade).
   // For singles: printing_id = selected printing UUID. For sealed / no printing: printing_id IS NULL.
   const gradedPrintingIdForQuery = selectedPrinting?.id ?? null;
-  // Default RAW view should read canonical (printing_id IS NULL) unless user explicitly picks a printing.
-  const rawPrintingIdForQuery = hasExplicitPrinting ? selectedPrinting?.id ?? null : null;
-  const rawVariantPrefix = rawPrintingIdForQuery ? `${rawPrintingIdForQuery}::` : null;
+  // RAW price intelligence is scoped to the exact raw printing identity.
+  const rawPrintingIdForHistory = rawPricingPrinting?.id ?? null;
+  const rawMetricsPrintingIdForQuery = hasExplicitPrinting ? rawPrintingIdForHistory : null;
+  const rawVariantPrefix = rawPrintingIdForHistory ? `${rawPrintingIdForHistory}::` : null;
   const [[rawSnap, psa9Snap, psa10Snap], vm, gradedPriceHistoryQuery, rawProviderHistoryQuery, rawParityQuery, viewSnapshot] = await Promise.all([
     Promise.all(
       (["RAW", "PSA9", "PSA10"] as const).map((g) => {
         const q = supabase
           .from("public_card_metrics")
-          .select("active_listings_7d, median_7d, median_30d, trimmed_median_30d, low_30d, high_30d, market_price, market_price_as_of")
+          .select("active_listings_7d, median_7d, median_30d, trimmed_median_30d, low_30d, high_30d, market_price, market_price_as_of, market_confidence_score, market_low_confidence, market_blend_policy")
           .eq("canonical_slug", slug)
           .eq("grade", g);
-        const effectivePrintingId = g === "RAW" ? rawPrintingIdForQuery : gradedPrintingIdForQuery;
+        const effectivePrintingId = g === "RAW" ? rawMetricsPrintingIdForQuery : gradedPrintingIdForQuery;
         return (effectivePrintingId != null
           ? q.eq("printing_id", effectivePrintingId)
           : q.is("printing_id", null)
         ).maybeSingle<SnapshotRow>();
       })
     ),
-    buildAssetViewModel(slug, "RAW", 30, rawPrintingIdForQuery),
+    buildAssetViewModel(slug, "RAW", 30, rawPrintingIdForHistory),
     gradedVariantRefsForActiveBucket.length > 0 && selectedPrinting && activeBucket
       ? supabase
           .from("public_price_history")
@@ -774,7 +785,10 @@ export default async function CanonicalCardPage({
     PSA10: psa10Snap.data,
   } as const;
   const gradedPriceHistoryRows = (gradedPriceHistoryQuery.data ?? []) as GradedPriceHistoryRow[];
-  const rawProviderHistoryRows = (rawProviderHistoryQuery.data ?? []) as RawProviderHistoryRow[];
+  const rawProviderHistoryRows = filterRawHistoryRowsForPrinting(
+    (rawProviderHistoryQuery.data ?? []) as RawProviderHistoryRow[],
+    rawPrintingIdForHistory,
+  );
   const rawParityStatus = rawParityQuery.data?.parity_status ?? "UNKNOWN";
   // Re-key each long-form variant_ref (`<printing>::<provVarId>::GRADED::PROVIDER::BUCKET::RAW`)
   // to the short-form ref buildGradedVariantRef() emits, so the downstream
@@ -891,13 +905,28 @@ export default async function CanonicalCardPage({
       if (provider === "SCRYDEX") rawPointsScrydex7d += 1;
     }
   }
-  const rawPricing = viewMode === "RAW"
+  const rawPricingFallback = viewMode === "RAW"
     ? resolveRawDisplayPrice({
       scrydex: rawSourceScrydex,
       scrydexAsOfTs: rawSourceScrydexTs,
       scrydexPoints7d: rawPointsScrydex7d,
       parityStatus: rawParityStatus,
     })
+    : null;
+  const rawPricingTrust = rawPricingFallback
+    ? resolveSnapshotTrust(rawSnap.data, {
+      blendPolicy: rawPricingFallback.blendPolicy,
+      confidenceScore: rawPricingFallback.confidenceScore,
+      lowConfidence: rawPricingFallback.lowConfidence,
+    })
+    : null;
+  const rawPricing = rawPricingFallback && rawPricingTrust
+    ? {
+      ...rawPricingFallback,
+      blendPolicy: rawPricingTrust.blendPolicy,
+      confidenceScore: rawPricingTrust.confidenceScore,
+      lowConfidence: rawPricingTrust.lowConfidence,
+    }
     : null;
   const currentRawPrice = viewMode === "RAW"
     ? rawPricing?.marketPrice ?? null

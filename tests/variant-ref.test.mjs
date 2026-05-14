@@ -4,6 +4,8 @@ import {
   buildVariantRef,
   buildRawVariantRef,
   buildGradedVariantRef,
+  extractRawVariantPrintingId,
+  isRawHistoryVariantRefForPrinting,
   parseVariantRef,
 } from "../lib/identity/variant-ref.mjs";
 
@@ -51,6 +53,10 @@ export function runVariantRefTests() {
     provider: null,
     gradeBucket: "RAW",
   });
+  assert.equal(extractRawVariantPrintingId(`${printingId}::RAW`), printingId);
+  assert.equal(extractRawVariantPrintingId(`${printingId}::sv3pt5-7:normal::RAW`), printingId);
+  assert.equal(isRawHistoryVariantRefForPrinting(`${printingId}::sv3pt5-7:normal::RAW`, printingId), true);
+  assert.equal(isRawHistoryVariantRefForPrinting(`${printingId}::PSA::9`, printingId), false);
 
   assert.deepEqual(parseVariantRef(`${printingId}::CGC::8`), {
     printingId,
@@ -93,6 +99,8 @@ export function runVariantRefTests() {
     }),
     `${printingId}::variant-456::RAW`,
   );
+  assert.equal(parseVariantRef(`${printingId}::variant-456::RAW`), null);
+  assert.equal(extractRawVariantPrintingId(`${printingId}::PSA::9`), null);
 
   assert.equal(
     buildProviderHistoryVariantRef({
@@ -115,4 +123,9 @@ export function runVariantRefTests() {
   );
 
   assert.equal(parseVariantRef("holofoil:unlimited:none:nm:en:raw"), null);
+}
+
+if (process.argv[1]?.endsWith("variant-ref.test.mjs")) {
+  runVariantRefTests();
+  console.log("variant ref tests passed");
 }

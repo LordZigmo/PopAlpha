@@ -1,12 +1,15 @@
 import { NextResponse } from "next/server";
+import { choosePreferredRawPricingPrinting, type RawPricingPrinting } from "@/lib/cards/raw-pricing-printing";
 import { dbPublic } from "@/lib/db";
 import { measureAsync } from "@/lib/perf";
+import { filterRawHistoryRowsForPrinting } from "@/lib/pricing/raw-history";
 import { buildProviderPriceDisplay } from "@/lib/pricing/provider-price-display";
 import {
   computeConfidenceBand,
   resolveWeightedMarketPrice,
   type ObservationInput,
 } from "@/lib/pricing/market-confidence";
+import { resolveSnapshotTrust } from "@/lib/pricing/snapshot-trust";
 
 export const runtime = "nodejs";
 
@@ -22,10 +25,15 @@ type SnapshotRow = {
   trimmed_median_30d: number | null;
   low_30d: number | null;
   high_30d: number | null;
+  market_confidence_score: number | null;
+  market_low_confidence: boolean | null;
+  market_blend_policy: string | null;
+  market_provenance: Record<string, unknown> | null;
 };
 
 type ProviderHistoryAsOfRow = {
   provider: string;
+  variant_ref: string | null;
   ts: string;
   price: number;
   currency: string | null;
@@ -41,6 +49,23 @@ function normalizeRawProviderName(provider: string | null | undefined): "SCRYDEX
   return null;
 }
 
+async function resolveRawPricingPrintingId(params: {
+  supabase: ReturnType<typeof dbPublic>;
+  slug: string;
+  explicitPrintingId: string | null;
+}): Promise<string | null> {
+  if (params.explicitPrintingId) return params.explicitPrintingId;
+
+  const { data, error } = await params.supabase
+    .from("card_printings")
+    .select("id, language, edition, stamp, finish, updated_at")
+    .eq("canonical_slug", params.slug)
+    .returns<RawPricingPrinting[]>();
+
+  if (error) throw new Error(error.message);
+  return choosePreferredRawPricingPrinting(data ?? [])?.id ?? null;
+}
+
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const slug = url.searchParams.get("slug")?.trim() ?? "";
@@ -51,18 +76,35 @@ export async function GET(req: Request) {
   }
 
   const supabase = dbPublic();
+  let rawPricingPrintingId: string | null = null;
+  try {
+    rawPricingPrintingId = grade === "RAW"
+      ? await resolveRawPricingPrintingId({
+        supabase,
+        slug,
+        explicitPrintingId: printing || null,
+      })
+      : null;
+  } catch (error) {
+    return NextResponse.json(
+      { ok: false, error: error instanceof Error ? error.message : "Failed to resolve RAW pricing printing." },
+      { status: 500 },
+    );
+  }
+
+  const metricsPrintingId = grade === "RAW" ? (printing ? rawPricingPrintingId : null) : (printing || null);
   let query = supabase
     .from("public_card_metrics")
     .select(
-      "canonical_slug, printing_id, grade, market_price, market_price_as_of, active_listings_7d, median_7d, median_30d, trimmed_median_30d, low_30d, high_30d"
+      "canonical_slug, printing_id, grade, market_price, market_price_as_of, active_listings_7d, median_7d, median_30d, trimmed_median_30d, low_30d, high_30d, market_confidence_score, market_low_confidence, market_blend_policy, market_provenance"
     )
     .eq("canonical_slug", slug)
     .eq("grade", grade)
     .limit(1);
 
-  query = printing ? query.eq("printing_id", printing) : query.is("printing_id", null);
+  query = metricsPrintingId ? query.eq("printing_id", metricsPrintingId) : query.is("printing_id", null);
 
-  const result = await measureAsync("market.snapshot.query", { slug, printing: printing || null, grade }, async () => {
+  const result = await measureAsync("market.snapshot.query", { slug, printing: metricsPrintingId, grade }, async () => {
     const metricsResult = await query.maybeSingle<SnapshotRow>();
     return {
       data: metricsResult.data,
@@ -95,7 +137,7 @@ export async function GET(req: Request) {
   if (scrydex.usdPrice !== null) {
     let historyRowsQuery = supabase
       .from("public_price_history")
-      .select("provider, ts, price, currency")
+      .select("provider, variant_ref, ts, price, currency")
       .eq("canonical_slug", slug)
       .in("provider", ["SCRYDEX", "POKEMON_TCG_API"])
       .eq("source_window", "snapshot")
@@ -103,12 +145,11 @@ export async function GET(req: Request) {
       .order("ts", { ascending: false })
       .limit(800);
     if (grade === "RAW") {
-      // RAW chart: exclude graded rows (which use the long-format
-      // <printing>::<providerVariantId>::GRADED::PROVIDER::BUCKET::RAW
-      // variant_ref) to match the public_price_history_canonical
-      // semantics established by commit cbefdec.
-      historyRowsQuery = historyRowsQuery.not("variant_ref", "ilike", "%::GRADED::%");
-      if (printing) historyRowsQuery = historyRowsQuery.ilike("variant_ref", `${printing}::%`);
+      if (rawPricingPrintingId) {
+        historyRowsQuery = historyRowsQuery.ilike("variant_ref", `${rawPricingPrintingId}::%`);
+      } else {
+        historyRowsQuery = historyRowsQuery.not("variant_ref", "ilike", "%::GRADED::%");
+      }
     } else {
       // Graded chart: match the long-format variant_ref tail
       // `::GRADED::%::${bucket}::RAW` — aggregate across providers at
@@ -125,7 +166,10 @@ export async function GET(req: Request) {
     if (historyRowsResult.error) {
       return NextResponse.json({ ok: false, error: historyRowsResult.error.message }, { status: 500 });
     }
-    historyRows = (historyRowsResult.data ?? []) as ProviderHistoryAsOfRow[];
+    const loadedHistoryRows = (historyRowsResult.data ?? []) as ProviderHistoryAsOfRow[];
+    historyRows = grade === "RAW"
+      ? filterRawHistoryRowsForPrinting(loadedHistoryRows, rawPricingPrintingId)
+      : loadedHistoryRows;
     for (const row of historyRows) {
       const provider = normalizeRawProviderName(row.provider);
       const tsMs = new Date(row.ts).getTime();
@@ -167,6 +211,11 @@ export async function GET(req: Request) {
 
   const marketPriceUsd = scrydex.usdPrice ?? null;
   const marketPriceAsOf = marketPriceUsd !== null ? (scrydex.asOf ?? null) : null;
+  const trust = resolveSnapshotTrust(result.data ?? null, {
+    blendPolicy: marketPriceUsd !== null ? "SCRYDEX_PRIMARY" : "NO_PRICE",
+    confidenceScore: marketPriceUsd !== null ? modelConfidence : 0,
+    lowConfidence: marketPriceUsd === null ? true : lowConfidence,
+  });
 
   return NextResponse.json({
     ok: true,
@@ -176,9 +225,9 @@ export async function GET(req: Request) {
     marketPrice: marketPriceUsd,
     marketPriceAsOf,
     parityStatus,
-    blendPolicy: marketPriceUsd !== null ? "SCRYDEX_PRIMARY" : "NO_PRICE",
-    confidenceScore: marketPriceUsd !== null ? modelConfidence : 0,
-    lowConfidence: marketPriceUsd === null ? true : lowConfidence,
+    blendPolicy: trust.blendPolicy,
+    confidenceScore: trust.confidenceScore,
+    lowConfidence: trust.lowConfidence,
     confidenceBand: {
       low: confidenceBand.low,
       fairValue: confidenceBand.fairValue,

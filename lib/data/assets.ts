@@ -16,7 +16,10 @@
  */
 
 import { dbPublic } from "@/lib/db";
-import { parseVariantRef as parseCanonicalVariantRef } from "@/lib/identity/variant-ref";
+import {
+  extractRawVariantPrintingId as extractRawVariantPrintingIdFromIdentity,
+  parseVariantRef as parseCanonicalVariantRef,
+} from "@/lib/identity/variant-ref";
 
 // ── Shared types ────────────────────────────────────────────────────────────
 
@@ -172,11 +175,7 @@ function historyProviderRank(provider: string | null | undefined): number {
 }
 
 export function extractRawVariantPrintingId(variantRef: string): string | null {
-  const rawValue = String(variantRef ?? "").trim();
-  if (!rawValue.endsWith("::RAW")) return null;
-  const [printingId] = rawValue.split("::");
-  const normalized = printingId?.trim() ?? "";
-  return normalized || null;
+  return extractRawVariantPrintingIdFromIdentity(variantRef);
 }
 
 function compareIsoDesc(left: string | null, right: string | null): number {
@@ -244,10 +243,12 @@ async function getRecentVariantStats(
     errorLabel: "[getRecentVariantStats]",
   });
 
+  const rawSinglesOnly = (options.grade ?? "RAW") === "RAW" && !(options.isSealed ?? isSealedSlug(slug));
   const stats = new Map<string, VariantHistoryStat>();
   for (const row of rows) {
     const variantRef = String(row.variant_ref ?? "").trim();
     if (!variantRef) continue;
+    if (rawSinglesOnly && extractRawVariantPrintingId(variantRef) === null) continue;
     const ts = row.ts ?? null;
     const current = stats.get(variantRef) ?? {
       variantRef,

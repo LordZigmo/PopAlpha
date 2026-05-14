@@ -6,6 +6,10 @@ import type {
 } from "@/components/raw-card-variant-types";
 import { computeLiquidity } from "@/lib/cards/liquidity";
 import { dbPublic } from "@/lib/db";
+import {
+  extractRawVariantPrintingId,
+  isRawHistoryVariantRefForPrinting,
+} from "@/lib/identity/variant-ref";
 import { getEurToUsdRate } from "@/lib/pricing/fx";
 import {
   getSharedPrivateSalesForSlug,
@@ -170,12 +174,6 @@ function convertRowToUsd(row: PriceHistoryRow, fxRows: FxRateRow[]): number | nu
   return Number((row.price * fxRate).toFixed(4));
 }
 
-function historyPrintingId(variantRef: string | null | undefined): string | null {
-  const rawValue = String(variantRef ?? "").trim();
-  if (!rawValue.includes("::")) return null;
-  return rawValue.split("::")[0] ?? null;
-}
-
 function historyToken(variantRef: string | null | undefined): string {
   const rawValue = String(variantRef ?? "").trim();
   if (!rawValue) return "";
@@ -319,7 +317,10 @@ function chooseProviderSeries(
 ): ProviderSeries | null {
   const canonicalRef = `${input.printingId}::RAW`;
   const candidates = series
-    .filter((entry) => entry.provider === provider)
+    .filter((entry) => (
+      entry.provider === provider
+      && isRawHistoryVariantRefForPrinting(entry.variantRef, input.printingId)
+    ))
     .map((entry) => ({
       ...entry,
       score:
@@ -362,6 +363,7 @@ export async function loadRawCardMarketVariants(params: {
 }): Promise<RawCardMarketVariant[]> {
   const supabase = dbPublic();
   const printingIds = params.variants.map((variant) => variant.printingId);
+  const visiblePrintingIds = new Set(printingIds);
   if (printingIds.length === 0) return [];
 
   const [allHistoryRows, cardMetricsQuery, variantSignalsQuery] = await Promise.all([
@@ -416,11 +418,10 @@ export async function loadRawCardMarketVariants(params: {
 
   const historyRowsByPrinting = new Map<string, PriceHistoryRow[]>();
   for (const row of allHistoryRows) {
-    // Use the backfilled printing_id column (Phase 2d). Fallback to the
-    // variant_ref prefix parse covers pre-backfill rows and is a no-op
-    // once Phase 2e enforces NOT NULL.
-    const printingId = row.printing_id ?? historyPrintingId(row.variant_ref);
-    if (!printingId) continue;
+    const rawPrintingId = extractRawVariantPrintingId(row.variant_ref);
+    const printingId = rawPrintingId ?? row.printing_id;
+    if (!printingId || !visiblePrintingIds.has(printingId)) continue;
+    if (!rawPrintingId) continue;
     const current = historyRowsByPrinting.get(printingId) ?? [];
     current.push(row);
     historyRowsByPrinting.set(printingId, current);
@@ -430,8 +431,7 @@ export async function loadRawCardMarketVariants(params: {
     const printingHistoryRows = historyRowsByPrinting.get(variant.printingId) ?? [];
     const series = buildProviderSeries(printingHistoryRows, fxRows);
     const scrydexSeries = chooseProviderSeries(series, "SCRYDEX", variant);
-    const preferredSeries = scrydexSeries ?? series[0] ?? null;
-    const preferredHistory = preferredSeries?.points ?? [];
+    const preferredHistory = scrydexSeries?.points ?? [];
     const metrics = cardMetricsByPrinting.get(variant.printingId) ?? null;
     const signalRow = chooseSignalRow(signalRowsByPrinting.get(variant.printingId) ?? []);
     const liveScrydexPrice = metrics?.market_price ?? null;
