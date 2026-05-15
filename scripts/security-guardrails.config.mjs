@@ -883,6 +883,15 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
     usesServiceRole: true,
     notes: "Read-only against our DB; uses service role to bypass RLS on canonical_cards. The only writes are to a local tmp/*.jsonl file. Step C of the catalog-mapper sequence reads that JSONL and persists the matches to the DB (separate concern).",
   }),
+  "scripts/snkrdunk-era-audit-cleanup.mjs": operationalScript({
+    classification: "service_role_import",
+    executionMode: "manual_import",
+    intendedCaller: "trusted operator running a one-off era audit on snkrdunk_product_map after expanding the setCodeEra mapping. Reads MATCHED + NEEDS_REVIEW rows, decides per row whether canonical.year aligns with the Snkrdunk setCode's era window, promotes NEEDS_REVIEW→MATCHED when era_match, marks REJECTED when era_mismatch.",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+    notes: "Idempotent. Dry-run by default (read-only); pass --apply to write. Writes only to snkrdunk_product_map columns mapping_status / reviewed_at / reviewed_by. The era windows for setCodes the matcher's setCodeEra() doesn't cover are hardcoded in EXTENDED_ERA_OVERRIDES — sourced from the Snkrdunk product names themselves (which include the human-readable set name) and Bulbapedia for ambiguous cases.",
+  }),
   "scripts/persist-snkrdunk-matches.mjs": operationalScript({
     classification: "service_role_import",
     executionMode: "manual_import",
