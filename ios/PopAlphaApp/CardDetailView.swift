@@ -640,7 +640,12 @@ struct CardDetailView: View {
             .shadow(color: .black.opacity(0.8), radius: 24, x: 0, y: 16)
             .opacity(isFrontFacing ? 1 : 0)
 
-            Image("PokemonCardBack")
+            // JP cards get the Japanese back; everything else (EN + any
+            // language we don't have a back asset for) falls back to the
+            // English back. isJapaneseCard handles the early-render window
+            // before cardMetrics arrives via the "-jp" slug-suffix check,
+            // so the back stays correct across an EN/JP language toggle.
+            Image(isJapaneseCard ? "PokemonCardBackJP" : "PokemonCardBack")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(maxHeight: 420)
