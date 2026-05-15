@@ -89,11 +89,7 @@
       "schedule": "23 * * * *"
     },
     {
-      "path": "/api/cron/refresh-card-profiles?mode=backfill&maxCards=500",
-      "schedule": "10 */6 * * *"
-    },
-    {
-      "path": "/api/cron/refresh-card-profiles?mode=refresh&maxCards=500",
+      "path": "/api/cron/refresh-card-profiles?mode=auto&maxBackfillCards=100&maxRefreshCards=400",
       "schedule": "45 * * * *"
     },
     {
@@ -131,6 +127,10 @@
     {
       "path": "/api/cron/run-yahoo-jp-daily",
       "schedule": "26 * * * *"
+    },
+    {
+      "path": "/api/cron/run-snkrdunk-daily",
+      "schedule": "36 * * * *"
     },
     {
       "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=1%25,j%25,k%25,o%25,v%25,x%25&max-slugs=2000",

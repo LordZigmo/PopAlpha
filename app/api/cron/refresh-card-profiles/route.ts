@@ -2,17 +2,21 @@
  * Cron: refresh-card-profiles
  *
  * Generates AI-powered per-card summaries and stores them in
- * public.card_profiles. Operates in two modes:
+ * public.card_profiles. Operates in three modes:
  *
  *   backfill  – Fills profiles for cards that have none yet.
- *               Run every 3 hours until the full catalog is covered,
- *               then remove the cron entry.
  *   refresh   – Tiered re-generation, prioritised by the RPC:
  *               1. High-priority (abs(change_pct_7d) >= 5% or liquidity >= 50):
  *                  refreshed every p_stale_days regardless of hash change.
  *               2. Low-priority: refreshed only when the price hash changes.
  *               3. Fallback upgrades: always processed, high-priority first.
- *               Runs daily.
+ *   auto      – Runs backfill first (up to ?maxBackfillCards, default 100)
+ *               then refresh (up to ?maxRefreshCards, default 400) within
+ *               a single tick. Lets one hourly cron entry cover both
+ *               mode responsibilities — the alternative would be two
+ *               separate cron entries chewing up Vercel cron-quota slots.
+ *               Use this from vercel.json; use the explicit backfill /
+ *               refresh modes for manual one-shot operator runs.
  *
  * Each invocation processes up to `maxCards` cards, using `concurrency`
  * parallel Gemini calls. A deadline guard ensures the function exits
@@ -311,8 +315,14 @@ export async function GET(req: Request) {
   const deadline = startedAt + (maxDuration * 1000) - DEADLINE_RESERVE_MS;
 
   const url = new URL(req.url);
-  const mode = url.searchParams.get("mode") === "refresh" ? "refresh" : "backfill";
+  const modeParam = url.searchParams.get("mode");
+  const mode: "backfill" | "refresh" | "auto" =
+    modeParam === "refresh" ? "refresh" : modeParam === "auto" ? "auto" : "backfill";
   const maxCardsParam = parseOptionalInt(url.searchParams.get("maxCards"), 1, 2000, DEFAULT_MAX_CARDS);
+  // Auto-mode split: separate budgets for the backfill and refresh phases
+  // so neither starves the other. Defaults total ~maxCards.
+  const maxBackfillCards = parseOptionalInt(url.searchParams.get("maxBackfillCards"), 1, 2000, 100);
+  const maxRefreshCards = parseOptionalInt(url.searchParams.get("maxRefreshCards"), 1, 2000, 400);
   const concurrency = parseOptionalInt(url.searchParams.get("concurrency"), 1, 10, DEFAULT_CONCURRENCY);
   const batchSize = parseOptionalInt(url.searchParams.get("batchSize"), 10, 200, DEFAULT_BATCH_SIZE);
 
@@ -336,6 +346,41 @@ export async function GET(req: Request) {
   let llmFailureSample: string | null = null;
   const llmFailureBuckets: Record<string, number> = {};
 
+  // Drain a card list through the same deadline-aware chunk loop both
+  // modes use. Updates the per-run totals + truncated flag via the
+  // closure. Returns true if the deadline was hit (caller may decide
+  // not to start a second phase).
+  const drainCards = async (cards: typeof undefined extends never ? CardRow[] : CardRow[]): Promise<boolean> => {
+    for (let i = 0; i < cards.length; i += batchSize) {
+      if (Date.now() >= deadline) return true;
+      const chunkCards = cards.slice(i, i + batchSize);
+      const conditionMap = await fetchConditionPricesForSlugs(supabase, chunkCards.map((c) => c.canonical_slug));
+      const chunk = chunkCards.map((c) => toProfileInput(c, conditionMap.get(c.canonical_slug) ?? null));
+      const stats = await processChunk(supabase, chunk, concurrency, deadline);
+      totalLlm += stats.llm;
+      totalFallbacks += stats.fallbacks;
+      totalErrors += stats.errors;
+      totalInputTokens += stats.inputTokens;
+      totalOutputTokens += stats.outputTokens;
+      totalProcessed += stats.processed;
+      if (!llmFailureSample && stats.firstFailureReason) {
+        llmFailureSample = stats.firstFailureReason;
+      }
+      for (const [bucket, count] of Object.entries(stats.failureReasonCounts)) {
+        llmFailureBuckets[bucket] = (llmFailureBuckets[bucket] ?? 0) + count;
+      }
+      if (stats.hitDeadline) {
+        truncatedAtDeadline = true;
+        return true;
+      }
+    }
+    if (Date.now() >= deadline) truncatedAtDeadline = true;
+    return truncatedAtDeadline;
+  };
+
+  let autoBackfillProcessed = 0;
+  let autoRefreshProcessed = 0;
+
   try {
     if (mode === "backfill") {
       const cards = await fetchBackfillCards(supabase, maxCardsParam);
@@ -349,43 +394,8 @@ export async function GET(req: Request) {
           durationMs: Date.now() - startedAt,
         });
       }
-
-      for (let i = 0; i < cards.length; i += batchSize) {
-        // Outer deadline check: don't START a new chunk past deadline.
-        // The inner check inside processChunk handles "we crossed the
-        // deadline mid-chunk" — together they bound wall-clock time.
-        if (Date.now() >= deadline) break;
-        const chunkCards = cards.slice(i, i + batchSize);
-        const conditionMap = await fetchConditionPricesForSlugs(supabase, chunkCards.map((c) => c.canonical_slug));
-        const chunk = chunkCards.map((c) => toProfileInput(c, conditionMap.get(c.canonical_slug) ?? null));
-        const stats = await processChunk(supabase, chunk, concurrency, deadline);
-        totalLlm += stats.llm;
-        totalFallbacks += stats.fallbacks;
-        totalErrors += stats.errors;
-        totalInputTokens += stats.inputTokens;
-        totalOutputTokens += stats.outputTokens;
-        // Was: chunk.length — over-counted when the inner loop broke
-        // early. Now reflects the cards actually upserted.
-        totalProcessed += stats.processed;
-        if (!llmFailureSample && stats.firstFailureReason) {
-          llmFailureSample = stats.firstFailureReason;
-        }
-        for (const [bucket, count] of Object.entries(stats.failureReasonCounts)) {
-          llmFailureBuckets[bucket] = (llmFailureBuckets[bucket] ?? 0) + count;
-        }
-        // Inner loop broke on deadline → don't schedule another chunk.
-        if (stats.hitDeadline) {
-          truncatedAtDeadline = true;
-          break;
-        }
-      }
-      // If we exited the outer loop because Date.now() >= deadline
-      // BEFORE finishing all chunks, that's also a truncation.
-      if (!truncatedAtDeadline && Date.now() >= deadline) {
-        truncatedAtDeadline = true;
-      }
-    } else {
-      // refresh mode
+      await drainCards(cards);
+    } else if (mode === "refresh") {
       const cards = await fetchRefreshCards(supabase, maxCardsParam);
       if (cards.length === 0) {
         return NextResponse.json({
@@ -397,43 +407,26 @@ export async function GET(req: Request) {
           durationMs: Date.now() - startedAt,
         });
       }
-
-      // No client-side filter needed — the RPC already encodes all three
-      // tiers: high-priority cards (daily), low-priority cards (hash-change
-      // only), and fallback upgrades. ORDER BY in the RPC puts the most
-      // important work first within the p_limit budget.
-      for (let i = 0; i < cards.length; i += batchSize) {
-        // See backfill-mode comment above — outer + inner deadline
-        // checks together bound wall-clock time.
-        if (Date.now() >= deadline) break;
-        const chunkCards = cards.slice(i, i + batchSize);
-        const conditionMap = await fetchConditionPricesForSlugs(supabase, chunkCards.map((c) => c.canonical_slug));
-        const chunk = chunkCards.map((c) => toProfileInput(c, conditionMap.get(c.canonical_slug) ?? null));
-        const stats = await processChunk(supabase, chunk, concurrency, deadline);
-        totalLlm += stats.llm;
-        totalFallbacks += stats.fallbacks;
-        totalErrors += stats.errors;
-        totalInputTokens += stats.inputTokens;
-        totalOutputTokens += stats.outputTokens;
-        // Was: chunk.length — over-counted when the inner loop broke
-        // early. Now reflects the cards actually upserted.
-        totalProcessed += stats.processed;
-        if (!llmFailureSample && stats.firstFailureReason) {
-          llmFailureSample = stats.firstFailureReason;
-        }
-        for (const [bucket, count] of Object.entries(stats.failureReasonCounts)) {
-          llmFailureBuckets[bucket] = (llmFailureBuckets[bucket] ?? 0) + count;
-        }
-        // Inner loop broke on deadline → don't schedule another chunk.
-        if (stats.hitDeadline) {
-          truncatedAtDeadline = true;
-          break;
-        }
+      await drainCards(cards);
+    } else {
+      // auto mode: backfill phase first (capped to maxBackfillCards),
+      // then refresh phase (capped to maxRefreshCards). Either phase
+      // hitting the deadline stops the next one from starting.
+      const backfillCards = await fetchBackfillCards(supabase, maxBackfillCards);
+      const beforeBackfill = totalProcessed;
+      let backfillHitDeadline = false;
+      if (backfillCards.length > 0) {
+        backfillHitDeadline = await drainCards(backfillCards);
       }
-      // If we exited the outer loop because Date.now() >= deadline
-      // BEFORE finishing all chunks, that's also a truncation.
-      if (!truncatedAtDeadline && Date.now() >= deadline) {
-        truncatedAtDeadline = true;
+      autoBackfillProcessed = totalProcessed - beforeBackfill;
+
+      if (!backfillHitDeadline && Date.now() < deadline) {
+        const refreshCards = await fetchRefreshCards(supabase, maxRefreshCards);
+        const beforeRefresh = totalProcessed;
+        if (refreshCards.length > 0) {
+          await drainCards(refreshCards);
+        }
+        autoRefreshProcessed = totalProcessed - beforeRefresh;
       }
     }
   } catch (err) {
@@ -470,6 +463,10 @@ export async function GET(req: Request) {
       // (either between chunks or mid-chunk via the inner check).
       // Operator should rerun the same URL to drain remaining work.
       truncatedAtDeadline,
+      // Auto-mode phase breakdown — null for the explicit backfill/refresh
+      // modes since they only ran one phase.
+      autoBackfillProcessed: mode === "auto" ? autoBackfillProcessed : null,
+      autoRefreshProcessed: mode === "auto" ? autoRefreshProcessed : null,
     },
     { status: ok ? 200 : 500 },
   );
