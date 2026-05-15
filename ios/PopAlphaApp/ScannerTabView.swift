@@ -802,17 +802,22 @@ struct ScannerTabView: View {
         if scanner.multiScanMode {
             switch scanner.lastConfidence {
             case "high", "medium":
-                // Per-scan quota gate (Codex P2 review, PR #83).
-                // Without this, a free-tier user could flip multi-mode
-                // on, point at a binder, and accumulate tray entries
-                // indefinitely past the daily limit. Same wall the tap
-                // path uses (lines ~97-104) so PostHog funnels and the
-                // paywall sheet stay consistent. The free-tier user
-                // gets one over-cap server call (we discover the
-                // breach post-identify) but the tray itself never
-                // grows past the cap, and the paywall surfaces
-                // immediately.
-                if !premiumGate.isPro {
+                // Per-scan quota gate for auto-detect entries only.
+                // (Codex P2 on PR #83 caught this on the first pass —
+                // a second pass narrowed the condition once the
+                // double-charge case was surfaced.) The tap path
+                // already charges quota at the tap handler (lines
+                // ~97-104) before captureFrameAndIdentify runs, and
+                // library imports intentionally bypass quota in both
+                // single and multi mode. Charging again here for
+                // tap/library would double-spend the user's daily
+                // allowance — and for the free-tier user with
+                // remaining=1, it would discard the valid result
+                // their tap just produced (canScan would already be
+                // false by the time we land here). Only newly-charge
+                // auto-detect captures, which have no upstream gate.
+                if !premiumGate.isPro,
+                   scanner.lastTriggerSource == "auto" {
                     scanQuota.rolloverIfNewDay()
                     if !scanQuota.canScan {
                         scanner.clearLastMatch()
@@ -1043,6 +1048,16 @@ final class ScannerHost: ObservableObject {
     /// could look like it shipped when the scan actually fell through
     /// to the server.
     @Published private(set) var lastSource: String?
+
+    /// Entry point the most recent runIdentify call came from —
+    /// "auto" (Vision rectangle stable-fire), "tap" / "tap_multiframe"
+    /// (manual tap-to-capture), or "library" (photo picker). Read by
+    /// the multi-scan quota gate to decide whether to charge quota
+    /// for the result: tap-path scans were already charged at the
+    /// tap handler (lines ~97-104) and library scans bypass quota
+    /// in single mode, so multi-mode should only newly-charge
+    /// auto-detect results to avoid double-spending.
+    @Published private(set) var lastTriggerSource: String?
 
     /// Language hint passed to /api/scan/identify. Defaults to EN; the
     /// scanner UI exposes a pill toggle so the user can flip to JP.
@@ -1462,6 +1477,7 @@ final class ScannerHost: ObservableObject {
             self.lastImageHash = response.imageHash
             self.lastWinningPath = response.winningPath
             self.lastSource = usedOffline ? "offline" : "network"
+            self.lastTriggerSource = triggerSource
             // Retain JPEG-source UIImage only for offline scans —
             // online scans already uploaded to scan-uploads/<hash>.jpg
             // so the correction-via-hash path works without it.
