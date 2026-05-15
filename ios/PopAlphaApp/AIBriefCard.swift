@@ -228,10 +228,16 @@ struct AIBriefCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             ZStack {
-                PA.Gradients.cardSurface
-                // subtle accent glow top-left
+                // Filled accent tint replaces the dark cardSurface base —
+                // mirrors `PersonalizedInsightCardView`'s
+                // `purpleAccent.opacity(0.12)` recipe so AI Brief reads
+                // as the same family of "bubbly" surface on the homepage
+                // as the personalized insight does on card detail.
+                market.accent.opacity(0.12)
+                // Brighter radial bloom on top of the tint so the card
+                // still has top-left lift.
                 RadialGradient(
-                    colors: [market.accent.opacity(0.12), .clear],
+                    colors: [market.accent.opacity(0.18), .clear],
                     center: .topLeading,
                     startRadius: 0,
                     endRadius: 220
@@ -239,10 +245,21 @@ struct AIBriefCard: View {
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: PA.Layout.panelRadius, style: .continuous))
+        .overlay(alignment: .leading) {
+            // Left accent rail — 3pt capsule inset from the corners,
+            // same signature as `PersonalizedInsightCardView`.
+            Capsule()
+                .fill(market.accent)
+                .frame(width: 3)
+                .padding(.vertical, 10)
+                .padding(.leading, 2)
+        }
         .overlay(
             RoundedRectangle(cornerRadius: PA.Layout.panelRadius, style: .continuous)
-                .stroke(market.accent.opacity(0.35), lineWidth: 1)
+                .stroke(market.accent.opacity(0.40), lineWidth: 1)
         )
+        .shadow(color: market.accent.opacity(0.28), radius: 14, x: 0, y: 0)
+        .shadow(color: .black.opacity(0.24), radius: 30, x: 0, y: 18)
     }
 
     // MARK: - Three-step summary (expanded body)
