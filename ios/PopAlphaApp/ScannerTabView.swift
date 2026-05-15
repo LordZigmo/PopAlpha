@@ -321,6 +321,21 @@ struct ScannerTabView: View {
             .onChange(of: scanner.isIdentifying) { _, identifying in
                 if !identifying { evaluateQuotaWarning() }
             }
+            // Pause Vision detection while the review sheet is open.
+            // Otherwise the camera keeps detecting cards behind the
+            // modal and the multi-mode branch in handleIdentifyResult
+            // keeps appending to the tray — racing both the user's
+            // review and submit()'s snapshot/clear cycle. The user is
+            // explicitly reviewing or bulk-adding; that's the
+            // exclusive activity until the sheet dismisses. (Codex
+            // P2 review on PR #83.)
+            .onChange(of: showMultiScanSheet) { _, isPresented in
+                if isPresented {
+                    scanner.viewModel?.pauseForExternalCapture()
+                } else if scanner.multiScanMode {
+                    scanner.resumeScanning()
+                }
+            }
             .onAppear {
                 #if DEBUG
                 runSmokeTestIfRequested()
@@ -787,6 +802,27 @@ struct ScannerTabView: View {
         if scanner.multiScanMode {
             switch scanner.lastConfidence {
             case "high", "medium":
+                // Per-scan quota gate (Codex P2 review, PR #83).
+                // Without this, a free-tier user could flip multi-mode
+                // on, point at a binder, and accumulate tray entries
+                // indefinitely past the daily limit. Same wall the tap
+                // path uses (lines ~97-104) so PostHog funnels and the
+                // paywall sheet stay consistent. The free-tier user
+                // gets one over-cap server call (we discover the
+                // breach post-identify) but the tray itself never
+                // grows past the cap, and the paywall surfaces
+                // immediately.
+                if !premiumGate.isPro {
+                    scanQuota.rolloverIfNewDay()
+                    if !scanQuota.canScan {
+                        scanner.clearLastMatch()
+                        scanner.resumeScanning()
+                        paywallSurface = "scanner_quota_wall_multi"
+                        showPaywallSheet = true
+                        return
+                    }
+                    scanQuota.recordScan()
+                }
                 PAHaptics.tap()
                 multiScanSession.append(
                     match: match,
