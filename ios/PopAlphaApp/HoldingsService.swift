@@ -74,6 +74,20 @@ actor HoldingsService {
     /// server's hard cap. Row indices in returned errors are mapped
     /// back to the caller's tray-absolute index — the caller's tray
     /// rendering doesn't need to know chunks happened.
+    ///
+    /// Partial-failure semantics (Codex P2 review on PR #83, seventh
+    /// pass): when a mid-batch chunk throws after earlier chunks
+    /// already inserted server-side, we DON'T rethrow — that would
+    /// strand the partial progress and the caller would resubmit the
+    /// already-inserted rows on retry, creating duplicate holdings.
+    /// Instead we synthesize errors for the failed chunk + every
+    /// remaining unattempted row, returning the accumulated
+    /// `inserted` count alongside. The caller (MultiScanSession.submit)
+    /// prunes by error-set membership, so the already-inserted rows
+    /// drop out of the tray and only the actually-pending rows
+    /// remain for retry. We only rethrow when the FIRST chunk fails
+    /// (no progress to preserve) so the caller's "Couldn't connect"
+    /// HTTP-error path still fires for the simple offline case.
     func bulkAddFromScans(_ entries: [MultiScanEntry]) async throws -> BulkScanImportSummary {
         try AuthService.shared.requireAuth()
 
@@ -103,22 +117,54 @@ actor HoldingsService {
                 "source": "scanner",
             ]
 
-            let response: BulkScanImportResponse = try await APIClient.post(
-                path: "/api/holdings/bulk-import",
-                body: body,
-                decoder: decoder,
-            )
+            do {
+                let response: BulkScanImportResponse = try await APIClient.post(
+                    path: "/api/holdings/bulk-import",
+                    body: body,
+                    decoder: decoder,
+                )
 
-            totalInserted += response.inserted
-            // Re-index chunk-relative row_index back to tray-absolute
-            // so the caller can correlate per-row errors with the
-            // original MultiScanEntry array offsets.
-            for e in response.errors {
-                allErrors.append(
-                    BulkScanImportError(
-                        rowIndex: e.rowIndex + offsetBase,
-                        message: e.error,
-                    ),
+                totalInserted += response.inserted
+                // Re-index chunk-relative row_index back to tray-
+                // absolute so the caller can correlate per-row
+                // errors with the original MultiScanEntry array.
+                for e in response.errors {
+                    allErrors.append(
+                        BulkScanImportError(
+                            rowIndex: e.rowIndex + offsetBase,
+                            message: e.error,
+                        ),
+                    )
+                }
+            } catch {
+                // First-chunk failure with no progress yet — rethrow
+                // so the caller surfaces a clear connection/auth
+                // error and the tray stays fully intact for retry.
+                if totalInserted == 0 && allErrors.isEmpty {
+                    throw error
+                }
+                // Mid-batch failure with earlier chunks already
+                // inserted server-side. Synthesize errors for the
+                // failed chunk + all remaining unattempted rows so
+                // the caller prunes only the actually-inserted rows
+                // and keeps the rest in the tray for retry. Without
+                // this, the caller would resubmit the already-
+                // inserted rows on the next Add, creating dupes.
+                let chunkErrorMessage = error.localizedDescription
+                for i in cursor..<entries.count {
+                    let isInFailedChunk = i < chunkEnd
+                    allErrors.append(
+                        BulkScanImportError(
+                            rowIndex: i,
+                            message: isInFailedChunk
+                                ? chunkErrorMessage
+                                : "Not attempted after earlier chunk failed",
+                        ),
+                    )
+                }
+                return BulkScanImportSummary(
+                    inserted: totalInserted,
+                    errors: allErrors,
                 )
             }
 
