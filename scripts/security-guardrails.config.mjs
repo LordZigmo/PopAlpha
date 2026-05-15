@@ -479,6 +479,7 @@ export const INTERNAL_ROUTE_TRUST_CONTRACTS = {
   "cron/downsample-price-history": cronSecretRoute("cron/internal automation"),
   "cron/refresh-card-embeddings": cronSecretRoute("cron/internal automation"),
   "cron/refresh-card-image-embeddings": cronSecretRoute("cron/internal automation"),
+  "cron/refresh-card-translations": cronSecretRoute("cron/internal automation"),
   "cron/augment-card-image-embeddings": cronSecretRoute("cron/internal automation"),
   "cron/embed-card-art-crops": cronSecretRoute("cron/internal automation"),
   "cron/keepwarm-image-embedder": cronSecretRoute("cron/internal automation"),
@@ -690,6 +691,15 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
     expectedSignals: ["service_role_client"],
     usesServiceRole: true,
     notes: "Reads digital-only slugs from Supabase (tcgp-* primary_image_url prefix), bulk-updates Neon card_image_embeddings.is_digital_only. Idempotent.",
+  }),
+  "scripts/backfill-card-translations.mjs": operationalScript({
+    classification: "service_role_backfill",
+    executionMode: "manual_backfill",
+    intendedCaller: "trusted operator seeding public.card_translations with EN<->JP pairings from SigLIP image-embedding cosine + JP name glossary gate",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY", "POSTGRES_URL"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+    notes: "Reads canonical_cards + card_image_embeddings via service role, upserts to card_translations with ON CONFLICT DO UPDATE. Idempotent + resumable via --resume-from. Same trust shape as backfill-card-image-digital-flag.",
   }),
   "scripts/backfill-phase2c-printing-columns.mjs": operationalScript({
     classification: "service_role_backfill",

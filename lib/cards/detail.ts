@@ -31,6 +31,11 @@ type CanonicalCardRow = {
   language: string | null;
 };
 
+type TranslationRow = {
+  en_slug: string;
+  jp_slug: string;
+};
+
 type CardPrintingRow = {
   id: string;
   canonical_slug: string;
@@ -397,7 +402,7 @@ export async function buildCardDetailResponse(inputSlug: string): Promise<CardDe
   const canonicalSlug = await resolveCanonicalSlug(inputSlug);
   if (!canonicalSlug) return null;
 
-  const [canonicalResult, printingsResult, rawMetricsResult, rawSignalsResult, gradedMetricsResult] = await Promise.all([
+  const [canonicalResult, printingsResult, rawMetricsResult, rawSignalsResult, gradedMetricsResult, translationResult] = await Promise.all([
     supabase
       .from("canonical_cards")
       .select("slug, canonical_name, set_name, year, card_number, language")
@@ -429,6 +434,27 @@ export async function buildCardDetailResponse(inputSlug: string): Promise<CardDe
       .not("printing_id", "is", null)
       .in("provider", [...GRADED_PROVIDERS])
       .in("grade", [...GRADE_BUCKETS]),
+    // Cross-language pairing for the CardDetailView EN/JP toggle. Reads
+    // rank=0 (primary) only; .or() searches both sides of the junction
+    // since canonicalSlug may be either the EN or JP partner.
+    //
+    // Why .order().limit(1) instead of .maybeSingle(): the table's
+    // primary key is (en_slug, jp_slug), so two different EN reprints
+    // CAN independently pick the same JP slug as rank=0 — that's
+    // legitimate data, not a backfill bug. When the user opens the
+    // JP card's detail page, the `jp_slug.eq.X AND rank=0` half of
+    // the .or() matches multiple rows and .maybeSingle() would
+    // surface a PGRST116 multi-row error, which my error handler
+    // treats as "no pairing" and hides the toggle. Ordering by
+    // confidence DESC and limiting picks the strongest pairing
+    // deterministically.
+    supabase
+      .from("card_translations")
+      .select("en_slug, jp_slug")
+      .or(`en_slug.eq.${canonicalSlug},jp_slug.eq.${canonicalSlug}`)
+      .eq("rank", 0)
+      .order("confidence", { ascending: false })
+      .limit(1),
   ]);
 
   if (canonicalResult.error) throw new Error(`canonical_cards: ${canonicalResult.error.message}`);
@@ -436,14 +462,63 @@ export async function buildCardDetailResponse(inputSlug: string): Promise<CardDe
   if (rawMetricsResult.error) throw new Error(`card_metrics: ${rawMetricsResult.error.message}`);
   if (rawSignalsResult.error) throw new Error(`variant_metrics RAW: ${rawSignalsResult.error.message}`);
   if (gradedMetricsResult.error) throw new Error(`variant_metrics: ${gradedMetricsResult.error.message}`);
+  // card_translations is a soft dependency — if the table is missing
+  // (pre-migration) or the query errors transiently, the toggle just
+  // doesn't render. Log and continue rather than blow up the whole
+  // detail response.
+  if (translationResult.error) {
+    console.warn(`[buildCardDetailResponse] card_translations lookup failed: ${translationResult.error.message}`);
+  }
 
   const canonical = canonicalResult.data;
   const printings = printingsResult.data;
   const rawMetrics = rawMetricsResult.data;
   const rawSignals = rawSignalsResult.data;
   const gradedMetrics = gradedMetricsResult.data;
+  // .limit(1) returns an array, not a single object. The query is
+  // already ordered by confidence DESC so [0] is the strongest
+  // pairing — picks deterministically when a JP slug is paired by
+  // multiple EN reprints.
+  const translationRows = translationResult.error ? null : (translationResult.data as TranslationRow[] | null);
+  const translation = translationRows && translationRows.length > 0 ? translationRows[0] : null;
 
   if (!canonical) return null;
+
+  // Resolve the paired side. The canonicalSlug appears as either en_slug
+  // or jp_slug in the junction row; the OTHER side is the pairing.
+  // pairedLanguage is the language of the paired slug — derived from
+  // canonical.language by inversion when known, else looked up.
+  let pairedSlug: string | null = null;
+  let pairedLanguage: "EN" | "JP" | null = null;
+  if (translation) {
+    if (translation.en_slug === canonicalSlug) {
+      pairedSlug = translation.jp_slug;
+      pairedLanguage = "JP";
+    } else if (translation.jp_slug === canonicalSlug) {
+      pairedSlug = translation.en_slug;
+      pairedLanguage = "EN";
+    }
+  }
+
+  // Paired card's image URL. iOS uses this to populate the toggle's
+  // stub MarketCard so the hero swaps directly from EN art to JP art
+  // (or vice versa) without falling back to heroPlaceholder while
+  // the metrics round-trip lands. Prefer the mirror; fall back to
+  // the raw Scrydex URL when the image-mirror cron hasn't picked
+  // this slug up yet. Issued as a separate query rather than a
+  // PostgREST join because the FK direction depends on which side
+  // of the junction is the paired slug, and the conditional makes
+  // a join awkward to express. One ~30ms hop is cheap; the toggle
+  // UX win is worth it.
+  let pairedImageUrl: string | null = null;
+  if (pairedSlug) {
+    const { data: paired } = await supabase
+      .from("canonical_cards")
+      .select("mirrored_primary_image_url, primary_image_url")
+      .eq("slug", pairedSlug)
+      .maybeSingle<{ mirrored_primary_image_url: string | null; primary_image_url: string | null }>();
+    pairedImageUrl = paired?.mirrored_primary_image_url ?? paired?.primary_image_url ?? null;
+  }
 
   const printingRows = (printings ?? []) as CardPrintingRow[];
   const rawMetricMap = new Map<string, RawMetricRow>();
@@ -522,6 +597,9 @@ export async function buildCardDetailResponse(inputSlug: string): Promise<CardDe
       year: canonical.year,
       cardNumber: canonical.card_number,
       language: canonical.language,
+      pairedSlug,
+      pairedLanguage,
+      pairedImageUrl,
     },
     defaults: {
       mode: defaultMode,

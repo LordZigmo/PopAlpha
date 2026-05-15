@@ -33,6 +33,11 @@ enum PriceMode: Equatable, Hashable {
 }
 
 struct CardDetailView: View {
+    /// The card the user navigated to. Used as the initial value for
+    /// `activeCard`; subsequent EN/JP toggling mutates `activeCard`
+    /// while this field stays put for diagnostics / scan-correction
+    /// flows that need the original slug. Not read directly from the
+    /// body — go through `activeCard`.
     let card: MarketCard
     /// sha256 of the scan image that brought the user to this detail view,
     /// if any. Set only when navigating from the scanner. When non-nil, a
@@ -47,8 +52,18 @@ struct CardDetailView: View {
     /// variant. Nil for online scans (server already has the file).
     let scanImage: UIImage?
 
+    /// The card whose data the view is currently rendering. Mutates
+    /// when the user taps the EN/JP toggle: we synthesize a stub
+    /// MarketCard from the paired slug and let the .task(id:) chain
+    /// re-fire to repopulate cardProfile/cardMetrics/printings/etc.
+    /// The hero accent flips immediately because the `isJapaneseCard`
+    /// cascade reads `activeCard.id.hasSuffix("-jp")` before any
+    /// network round-trip completes.
+    @State private var activeCard: MarketCard
+
     init(card: MarketCard, scanImageHash: String? = nil, scanImage: UIImage? = nil) {
         self.card = card
+        self._activeCard = State(initialValue: card)
         self.scanImageHash = scanImageHash
         self.scanImage = scanImage
     }
@@ -89,13 +104,30 @@ struct CardDetailView: View {
     /// (LE_7, G8, G9, G9_5, G10, G10_PERFECT). Sourced from card_metrics
     /// which is keyed (slug, printing_id, grade) — no provider dimension.
     @State private var gradedCardMetricsByBucket: [String: GradedCardMetricRow] = [:]
+    /// Slug of the cross-language partner card (EN <-> JP). Nil when no
+    /// pairing exists in card_translations, or before the
+    /// /api/cards/[slug]/detail fetch lands. Populated by .task on each
+    /// activeCard.id change. When non-nil, the EN/JP toggle renders in
+    /// pricingSection and tapping it swaps activeCard to the paired slug.
+    @State private var pairedSlug: String? = nil
+    @State private var pairedLanguage: CardLanguage? = nil
+    /// Mirrored (or raw fallback) image URL for the paired card,
+    /// fetched alongside pairedSlug. Lets swapToPairedLanguage build a
+    /// stub MarketCard with the paired card's art available
+    /// immediately, so the hero swaps directly EN ↔ JP rather than
+    /// falling back to heroPlaceholder during the metrics round-trip.
+    @State private var pairedImageUrl: String? = nil
+    /// True for the brief window between the user tapping the toggle and
+    /// cardMetrics arriving for the new slug. Fades the hero block to
+    /// 60% so the transition reads as deliberate, not janky.
+    @State private var togglingLanguage = false
 
     // MARK: - JP card theming
 
     /// Whether to render this detail view in the JP red-tone theme.
     /// Detection cascades:
     ///   1. cardMetrics.language == "JP" — authoritative once fetched.
-    ///   2. card.id ends in "-jp" — the JP slug suffix convention from
+    ///   2. activeCard.id ends in "-jp" — the JP slug suffix convention from
     ///      the Scrydex importer; covers the brief window between
     ///      navigation and the metrics fetch landing.
     ///   3. cardMetrics has populated yahoo_jp_price OR snkrdunk_price —
@@ -103,7 +135,7 @@ struct CardDetailView: View {
     ///      the above (both are JP-native sold-price sources).
     private var isJapaneseCard: Bool {
         if cardMetrics?.language == "JP" { return true }
-        if card.id.hasSuffix("-jp") { return true }
+        if activeCard.id.hasSuffix("-jp") { return true }
         if cardMetrics?.yahooJpPrice != nil { return true }
         if cardMetrics?.snkrdunkPrice != nil { return true }
         return false
@@ -140,12 +172,24 @@ struct CardDetailView: View {
             if yj > 0 { return yj }
             if snk > 0 { return snk }
         }
-        // Non-JP path: existing logic — printing-specific override, then
-        // the MarketCard's headline price (which is Scrydex-derived).
+        // Non-JP path (also the JP fallthrough when neither Yahoo!JP
+        // nor Snkrdunk has data): printing-specific override first,
+        // then the freshly-fetched marketPrice from cardMetrics, then
+        // the navigated MarketCard's headline price. The marketPrice
+        // fallback covers two cases the old chain missed:
+        //   1. After an EN/JP toggle, activeCard is a stub with
+        //      price=0 — without this we'd show "—" until either a
+        //      printing was selected or the user hit a chart request.
+        //   2. JP cards without Yahoo!JP / Snkrdunk samples (most of
+        //      the long-tail) — the Scrydex-derived market_price is
+        //      still meaningful even if it isn't a JP-native source.
         if let price = printingHeroPrice, price > 0 {
             return price
         }
-        if card.price > 0 { return card.price }
+        if let mp = cardMetrics?.marketPrice, mp > 0 {
+            return mp
+        }
+        if activeCard.price > 0 { return activeCard.price }
         return nil
     }
 
@@ -183,6 +227,14 @@ struct CardDetailView: View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(spacing: 0) {
                 heroSection
+                    // Soft fade during EN/JP swap. Animates back to 1.0
+                    // automatically once .task(id:) clears
+                    // togglingLanguage after cardMetrics arrives. The
+                    // duration is shorter than the typical metrics
+                    // round-trip so the user sees the fade finish at
+                    // roughly the same time the new data lands.
+                    .opacity(togglingLanguage ? 0.55 : 1.0)
+                    .animation(.easeInOut(duration: 0.25), value: togglingLanguage)
                 if scanImageHash != nil {
                     correctionPrompt
                         .padding(.horizontal, 20)
@@ -212,9 +264,9 @@ struct CardDetailView: View {
             // primary (Add to Portfolio) → secondary (Wishlist).
             VStack(spacing: 12) {
                 WatchlistButton(
-                    slug: card.id,
-                    cardName: card.name,
-                    setName: card.setName,
+                    slug: activeCard.id,
+                    cardName: activeCard.name,
+                    setName: activeCard.setName,
                     compact: true
                 )
                 addHoldingFAB
@@ -227,7 +279,7 @@ struct CardDetailView: View {
                 addedToPortfolioBanner
             }
         }
-        .alert("Sign in to save \(card.name)?", isPresented: $showSignInPromptForAdd) {
+        .alert("Sign in to save \(activeCard.name)?", isPresented: $showSignInPromptForAdd) {
             Button("Sign In") {
                 AuthService.shared.signIn()
                 // pendingAddAfterSignIn stays true; the .onChange below
@@ -260,6 +312,13 @@ struct CardDetailView: View {
         }
         .sheet(isPresented: $showCorrectionSheet) {
             if let hash = scanImageHash {
+                // predictedSlug records what the SCANNER MODEL guessed,
+                // not what the user is currently viewing. Use card.id
+                // (the immutable navigation input) so toggling EN↔JP
+                // mid-correction doesn't contaminate scan-eval audit
+                // data with the paired slug. This is exactly why
+                // CardDetailView keeps `let card` alongside the
+                // mutable @State activeCard.
                 EvalSeedingView(
                     mode: .correction(imageHash: hash, predictedSlug: card.id),
                     scanImage: scanImage,
@@ -267,26 +326,54 @@ struct CardDetailView: View {
                 )
             }
         }
-        .task(id: "\(selectedTimeframe.rawValue)|\(selectedPriceMode)|\(selectedPrintingId ?? "")") {
+        // activeCard.id is part of the key so an EN/JP toggle reloads
+        // the chart even when the other dimensions (timeframe, price
+        // mode, selected printing) happen to match. Without it,
+        // paired JP cards — which currently get an empty
+        // availablePrintings array from fetchPrintings, so
+        // selectedPrintingId stays nil on both sides — would inherit
+        // the EN card's chart-cleared state and never refetch.
+        .task(id: "\(activeCard.id)|\(selectedTimeframe.rawValue)|\(selectedPriceMode)|\(selectedPrintingId ?? "")") {
             await loadChart()
         }
-        .task {
-            cardProfile = try? await CardService.shared.fetchCardProfile(slug: card.id)
-            cardMetrics = try? await CardService.shared.fetchCardMetrics(slug: card.id)
+        // Keyed by activeCard.id so the entire data-load fan-out re-fires
+        // when the user taps the EN/JP toggle and we swap activeCard.
+        // Without the id, SwiftUI runs the task only on first appearance
+        // and the toggled view would stay frozen on the original slug's
+        // data.
+        .task(id: activeCard.id) {
+            // Cross-language pairing lookup. Hits /api/cards/[slug]/detail
+            // which now carries canonical.pairedSlug + pairedLanguage. A
+            // failed fetch (table missing, network blip) leaves the
+            // toggle hidden — degrades silently.
+            let pairing: CardPairing? = try? await CardService.shared.fetchCardPairing(slug: activeCard.id)
+            await MainActor.run {
+                pairedSlug = pairing?.pairedSlug
+                pairedLanguage = pairing?.pairedLang
+                pairedImageUrl = pairing?.pairedImageUrl
+            }
+
+            cardProfile = try? await CardService.shared.fetchCardProfile(slug: activeCard.id)
+            cardMetrics = try? await CardService.shared.fetchCardMetrics(slug: activeCard.id)
+            // First metrics arrival is the cue to drop the toggle fade.
+            // Cleared here rather than in the toggle tap so the fade
+            // outlasts profile fetch latency (~100–400ms) and reads as
+            // intentional motion instead of a flash.
+            await MainActor.run { togglingLanguage = false }
             if AuthService.shared.isAuthenticated {
-                friendActivity = try? await ActivityService.shared.fetchCardActivity(slug: card.id)
+                friendActivity = try? await ActivityService.shared.fetchCardActivity(slug: activeCard.id)
             }
             // Fire a card_view personalization event once per appearance.
             await PersonalizationService.shared.track(
                 PersonalizedEvent(
                     type: .cardView,
-                    canonicalSlug: card.id,
+                    canonicalSlug: activeCard.id,
                     variantRef: selectedPrintingId.map { "\($0)::RAW" }
                 )
             )
             // Load available finish variants. Ordering is handled downstream
             // by `toFinishGroups()` so the picker controls the visual order.
-            if let printings = try? await CardService.shared.fetchPrintings(slug: card.id) {
+            if let printings = try? await CardService.shared.fetchPrintings(slug: activeCard.id) {
                 let groups = printings.toFinishGroups()
                 let initialId = groups.first?.defaultPrintingId ?? printings.first?.id
                 await MainActor.run {
@@ -296,7 +383,7 @@ struct CardDetailView: View {
             }
             // Load condition-based prices
             if let prices = try? await CardService.shared.fetchConditionPrices(
-                slug: card.id,
+                slug: activeCard.id,
                 printingId: selectedPrintingId
             ) {
                 await MainActor.run { conditionPrices = prices }
@@ -308,7 +395,7 @@ struct CardDetailView: View {
             // printings; fall back to the printing-scoped row with the
             // most snapshot_count_30d data; final fallback to whatever
             // row we have.
-            if let rows = try? await CardService.shared.fetchGradedCardMetrics(slug: card.id) {
+            if let rows = try? await CardService.shared.fetchGradedCardMetrics(slug: activeCard.id) {
                 var grouped: [String: [GradedCardMetricRow]] = [:]
                 for row in rows {
                     grouped[row.grade, default: []].append(row)
@@ -325,7 +412,7 @@ struct CardDetailView: View {
                 await MainActor.run { gradedCardMetricsByBucket = resolved }
             }
             // Load available graded options lazily
-            if let rows = try? await CardService.shared.fetchGradedVariantMetrics(slug: card.id) {
+            if let rows = try? await CardService.shared.fetchGradedVariantMetrics(slug: activeCard.id) {
                 let validProviders: Set<String> = ["PSA", "CGC", "BGS", "TAG"]
                 let validBuckets: Set<String> = ["LE_7", "G8", "G9", "G9_5", "G10", "G10_PERFECT"]
                 let options = rows
@@ -353,7 +440,7 @@ struct CardDetailView: View {
             }
         }
         .sheet(isPresented: $showAddHolding) {
-            AddHoldingSheet(preselectedCard: card.asSearchResult)
+            AddHoldingSheet(preselectedCard: activeCard.asSearchResult)
         }
         .onChange(of: selectedPrintingId) {
             Task {
@@ -369,13 +456,13 @@ struct CardDetailView: View {
                 // (HOLO + Reverse Holo / NON_HOLO) now show different
                 // hero prices when the user taps a different pill.
                 if let metrics = try? await CardService.shared.fetchCardMetrics(
-                    slug: card.id,
+                    slug: activeCard.id,
                     printingId: selectedPrintingId
                 ) {
                     await MainActor.run { cardMetrics = metrics }
                 }
                 if let prices = try? await CardService.shared.fetchConditionPrices(
-                    slug: card.id,
+                    slug: activeCard.id,
                     printingId: selectedPrintingId
                 ) {
                     await MainActor.run { conditionPrices = prices }
@@ -420,10 +507,10 @@ struct CardDetailView: View {
                     // web card detail page. Doubles as a quick way to
                     // self-test the Universal Links pipeline during
                     // TestFlight.
-                    if let shareURL = URL(string: "https://popalpha.ai/c/\(card.id)") {
+                    if let shareURL = URL(string: "https://popalpha.ai/c/\(activeCard.id)") {
                         ShareLink(
                             item: shareURL,
-                            subject: Text(card.name.isEmpty ? "PopAlpha card" : card.name)
+                            subject: Text(activeCard.name.isEmpty ? "PopAlpha card" : activeCard.name)
                         ) {
                             Image(systemName: "square.and.arrow.up")
                                 .font(.system(size: 14, weight: .semibold))
@@ -492,7 +579,7 @@ struct CardDetailView: View {
             ZStack {
                 Color.clear // fill GeometryReader
                 // Freefloating card image
-                if let url = card.imageURL {
+                if let url = activeCard.imageURL {
                     LazyImage(url: url) { state in
                         if let image = state.image {
                             image
@@ -545,11 +632,129 @@ struct CardDetailView: View {
                         .aspectRatio(contentMode: .fit)
                         .frame(width: 48, height: 48)
                         .opacity(0.12)
-                    Text(card.cardNumber)
+                    Text(activeCard.cardNumber)
                         .font(.system(size: 14, weight: .medium, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.3))
                 }
             )
+    }
+
+    // MARK: - Cross-language toggle
+
+    /// Renders the EN | JP segmented control below the title row.
+    /// Caller guards on pairedSlug being non-nil so we always have a
+    /// swap target when this is mounted. The active segment's fill is
+    /// language-specific (EN blue, JP red) so the control reads as
+    /// both a state indicator AND a hint about what the other side
+    /// will look like.
+    private func languageToggleControl(partnerSlug: String) -> some View {
+        let currentLang: CardLanguage = isJapaneseCard ? .jp : .en
+        return HStack(spacing: 0) {
+            languageSegment(.en, isActive: currentLang == .en) {
+                if currentLang != .en { swapToPairedLanguage(targetSlug: partnerSlug) }
+            }
+            languageSegment(.jp, isActive: currentLang == .jp) {
+                if currentLang != .jp { swapToPairedLanguage(targetSlug: partnerSlug) }
+            }
+        }
+        .padding(2)
+        .background(
+            Capsule().fill(PA.Colors.hairline(0.05))
+        )
+        .overlay(
+            Capsule().strokeBorder(PA.Colors.border, lineWidth: 0.5)
+        )
+        .fixedSize()
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Card language")
+    }
+
+    private func languageSegment(
+        _ lang: CardLanguage,
+        isActive: Bool,
+        onTap: @escaping () -> Void
+    ) -> some View {
+        let activeFill: Color = lang == .jp ? PA.AxisColors.marketHeat : PA.Colors.accent
+        return Button(action: onTap) {
+            Text(lang.displayLabel)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(isActive ? .white : PA.Colors.muted)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule().fill(isActive ? activeFill : Color.clear)
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isActive ? .isSelected : [])
+        .accessibilityLabel(lang == .en ? "English" : "Japanese")
+    }
+
+    /// Replaces activeCard with a stub keyed on the paired slug,
+    /// triggering .task(id: activeCard.id) to re-fetch everything for
+    /// the new language. Stub bridges name/setName/rarity/etc. from
+    /// the current activeCard so the title block doesn't go blank
+    /// during the ~300ms metrics fetch; canonical_name is identical
+    /// across EN/JP rows in our schema (the English Pokemon name —
+    /// the Japanese rendering lives in canonical_name_native and
+    /// renders via the bilingual title path once cardMetrics arrives).
+    /// imageURL is set from pairedImageUrl when present so the hero
+    /// swaps directly EN <-> JP without falling back to
+    /// heroPlaceholder during the metrics round-trip.
+    private func swapToPairedLanguage(targetSlug: String) {
+        guard !togglingLanguage else { return }
+        // Capture the paired image URL BEFORE we clear pairedImageUrl
+        // below — once activeCard.id flips and .task(id:) refetches,
+        // this state gets repopulated with the paired card's own
+        // pairing target (i.e., the original slug). For the stub we
+        // want the URL we already have in hand.
+        let stubImageURL = pairedImageUrl.flatMap(URL.init(string:))
+        withAnimation(.easeOut(duration: 0.18)) {
+            togglingLanguage = true
+        }
+        // Wipe per-slug caches so the UI doesn't briefly render stale
+        // data for the new slug while .task(id:) refetches.
+        cardProfile = nil
+        cardMetrics = nil
+        chartPrices = []
+        chartTimestamps = []
+        chartError = nil
+        availablePrintings = []
+        selectedPrintingId = nil
+        printingHeroPrice = nil
+        conditionPrices = []
+        gradedCardMetricsByBucket = [:]
+        availableGradedOptions = []
+        gradedMetricsLoaded = false
+        gradedHeroPrice = nil
+        // Reset the price-mode selection back to Near Mint. Leaving
+        // it on .graded after a swap would strand the paired card in
+        // graded view with no data — fetchGradedVariantMetrics may
+        // return nothing for this slug, and even when it does, the
+        // user's prior PSA/G10 selection probably isn't the right
+        // default for an unrelated paired print. Reset companion
+        // grade selectors to their init defaults too.
+        selectedPriceMode = .nearMint
+        selectedGradingAgency = "PSA"
+        selectedGradeBucket = "G10"
+        pairedSlug = nil
+        pairedLanguage = nil
+        pairedImageUrl = nil
+
+        activeCard = MarketCard(
+            id: targetSlug,
+            name: activeCard.name,
+            setName: activeCard.setName,
+            cardNumber: activeCard.cardNumber,
+            price: 0,
+            changePct: nil,
+            changeWindow: activeCard.changeWindow,
+            rarity: activeCard.rarity,
+            sparkline: [],
+            imageGradient: activeCard.imageGradient,
+            imageURL: stubImageURL,
+            confidenceScore: nil
+        )
     }
 
     // MARK: - Detail Content
@@ -595,7 +800,7 @@ struct CardDetailView: View {
             // 8. Personalized insight ("How this fits your style") — secondary
             // differentiated layer; renders its own fallback when signal is thin.
             PersonalizedInsightCardView(
-                canonicalSlug: card.id,
+                canonicalSlug: activeCard.id,
                 variantRef: selectedPrintingId.map { "\($0)::RAW" }
             )
 
@@ -623,7 +828,7 @@ struct CardDetailView: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
                     NavigationLink {
-                        SetDetailView(setName: card.setName)
+                        SetDetailView(setName: activeCard.setName)
                     } label: {
                         HStack(spacing: 4) {
                             // For JP cards, prefer the native (Japanese) set
@@ -644,7 +849,7 @@ struct CardDetailView: View {
                     // when present. The Japanese name is dimmer + smaller
                     // so it reads as a secondary identity rather than
                     // competing with the primary EN text.
-                    Text(card.name)
+                    Text(activeCard.name)
                         .font(.system(size: 26, weight: .bold))
                         .foregroundStyle(PA.Colors.text)
                     if isJapaneseCard, let nativeName = cardMetrics?.canonicalNameNative, !nativeName.isEmpty {
@@ -660,15 +865,23 @@ struct CardDetailView: View {
                 // Rarity badge — JP cards swap the accent tint to the
                 // detailAccent (red); secret rare keeps gold so that
                 // semantic still reads.
-                Text(card.rarity.label.uppercased())
+                Text(activeCard.rarity.label.uppercased())
                     .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(card.rarity == .secretRare ? PA.Colors.gold : detailAccent)
+                    .foregroundStyle(activeCard.rarity == .secretRare ? PA.Colors.gold : detailAccent)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
                     .background(
-                        (card.rarity == .secretRare ? PA.Colors.gold : detailAccent).opacity(0.12)
+                        (activeCard.rarity == .secretRare ? PA.Colors.gold : detailAccent).opacity(0.12)
                     )
                     .clipShape(Capsule())
+            }
+
+            // EN/JP language toggle. Renders only when card_translations
+            // has a pairing for this card; absent otherwise so the
+            // pricing block doesn't grow a disabled control for the
+            // ~60–80% of cards that lack a JP/EN counterpart.
+            if let partnerSlug = pairedSlug, pairedLanguage != nil {
+                languageToggleControl(partnerSlug: partnerSlug)
             }
 
             HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -744,13 +957,13 @@ struct CardDetailView: View {
         if isJapaneseCard, let native = cardMetrics?.setNameNative, !native.isEmpty {
             return native
         }
-        return card.setName
+        return activeCard.setName
     }
 
     // MARK: - Chart (live data per timeframe)
 
     private var activeChartPrices: [Double] {
-        chartPrices.isEmpty ? card.sparkline : chartPrices
+        chartPrices.isEmpty ? activeCard.sparkline : chartPrices
     }
 
     private var activeChartTimestamps: [String] {
@@ -776,7 +989,7 @@ struct CardDetailView: View {
         } else if let metrics = cardMetrics, let m7 = metrics.changePct7d {
             pct = m7; window = "7D"
         } else {
-            pct = card.changePct; window = card.changeWindow
+            pct = activeCard.changePct; window = activeCard.changeWindow
         }
         let text: String
         if let p = pct {
@@ -898,13 +1111,13 @@ struct CardDetailView: View {
                 // supabase/migrations/20260422200000_canonical_pin_provider_variant.sql.
                 if let printingId = selectedPrintingId, availablePrintings.count > 1 {
                     points = try await CardService.shared.fetchPrintingPriceHistory(
-                        slug: card.id,
+                        slug: activeCard.id,
                         printingId: printingId,
                         timeframe: selectedTimeframe
                     )
                 } else {
                     points = try await CardService.shared.fetchPriceHistory(
-                        slug: card.id,
+                        slug: activeCard.id,
                         timeframe: selectedTimeframe
                     )
                 }
@@ -919,7 +1132,7 @@ struct CardDetailView: View {
                 // price_history_points.
                 if let printingId = selectedPrintingId {
                     points = try await CardService.shared.fetchPrintingGradedPriceHistory(
-                        slug: card.id,
+                        slug: activeCard.id,
                         printingId: printingId,
                         provider: provider,
                         bucket: bucket,
@@ -927,7 +1140,7 @@ struct CardDetailView: View {
                     )
                 } else {
                     points = try await CardService.shared.fetchGradedPriceHistory(
-                        slug: card.id,
+                        slug: activeCard.id,
                         provider: provider,
                         bucket: bucket,
                         timeframe: selectedTimeframe
@@ -975,14 +1188,14 @@ struct CardDetailView: View {
     private var metaTiles: [MetaTile] {
         var tiles: [MetaTile] = []
 
-        let setName = card.setName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let setName = activeCard.setName.trimmingCharacters(in: .whitespacesAndNewlines)
         tiles.append(MetaTile(
             title: "Set",
             value: setName.isEmpty ? "—" : setName,
             tone: setName.isEmpty ? .muted : .neutral
         ))
 
-        let rawNumber = card.cardNumber.trimmingCharacters(in: .whitespaces)
+        let rawNumber = activeCard.cardNumber.trimmingCharacters(in: .whitespaces)
         let hasNumber = !rawNumber.isEmpty
         let displayedNumber: String = {
             guard hasNumber else { return "—" }
@@ -1036,7 +1249,7 @@ struct CardDetailView: View {
     /// attached to the card. Falls back to a muted em-dash when the
     /// signal isn't loaded yet.
     private var confidenceDescriptor: (label: String, tone: DetailTone) {
-        guard let score = card.confidenceScore else { return ("—", .muted) }
+        guard let score = activeCard.confidenceScore else { return ("—", .muted) }
         if score >= 85 { return ("High", .accent) }
         if score >= 70 { return ("Solid", .accent) }
         if score >= 55 { return ("Watch", .neutral) }
@@ -1110,7 +1323,7 @@ struct CardDetailView: View {
     private func autoSavePendingHolding() async {
         do {
             try await HoldingsService.shared.addHolding(
-                canonicalSlug: card.id,
+                canonicalSlug: activeCard.id,
                 grade: "RAW",
                 qty: 1
             )
@@ -1128,7 +1341,7 @@ struct CardDetailView: View {
             }
         } catch {
             await MainActor.run {
-                autoAddError = "Couldn't save \(card.name) — try again from the + button."
+                autoAddError = "Couldn't save \(activeCard.name) — try again from the + button."
             }
         }
     }
@@ -1139,7 +1352,7 @@ struct CardDetailView: View {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(PA.Colors.positive)
-            Text("Added \(card.name) to your portfolio")
+            Text("Added \(activeCard.name) to your portfolio")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(PA.Colors.text)
                 .lineLimit(1)
@@ -1281,7 +1494,7 @@ struct CardDetailView: View {
     /// Only surface the calibration note when we're genuinely working
     /// with thin data — keeps the screen from over-caveating healthy cards.
     private var shouldShowThinDataNote: Bool {
-        let count = chartPrices.isEmpty ? card.sparkline.count : chartPrices.count
+        let count = chartPrices.isEmpty ? activeCard.sparkline.count : chartPrices.count
         return count > 0 && count < 8
     }
 
