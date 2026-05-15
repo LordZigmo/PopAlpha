@@ -44,6 +44,27 @@ struct MultiScanEntry: Identifiable, Equatable {
 final class MultiScanSession: ObservableObject {
     @Published private(set) var entries: [MultiScanEntry] = []
 
+    /// Slug + timestamp of the most recent successful append. The
+    /// scanner's auto-detect path will re-fire identify on the same
+    /// physical card if it lingers in the viewfinder between stable
+    /// windows — without dedupe, the pack/binder flow can append the
+    /// same card multiple times while the user is reaching for the
+    /// next one. The caller (handleIdentifyResult) reads
+    /// `shouldDedupeAutoDetect(slug:)` before charging quota / haptic /
+    /// appending, so duplicates of a still-on-camera card are dropped
+    /// cleanly. Cleared after the dedupe window passes (next non-
+    /// duplicate scan also overwrites it implicitly).
+    private var lastAppendedSlug: String?
+    private var lastAppendedAt: Date?
+
+    /// Window (seconds) within which a repeat scan of the same slug
+    /// from auto-detect is considered a "same card lingering in
+    /// viewfinder" duplicate. 3s comfortably covers the user reaching
+    /// for the next card in a pack flow without blocking deliberate
+    /// re-scans (e.g., the user intentionally scans two copies of the
+    /// same card — they'd naturally take longer than 3s between).
+    private let autoDetectDedupeWindow: TimeInterval = 3.0
+
     /// Sum of (marketPriceUsd × quantity) across entries with a loaded
     /// price. Loading entries contribute 0; the running total fills in
     /// as price fetches resolve.
@@ -53,9 +74,25 @@ final class MultiScanSession: ObservableObject {
         }
     }
 
+    /// Returns true when the caller should skip an auto-detect append
+    /// because the same slug landed in the tray within the dedupe
+    /// window. Only meaningful for auto-detect entries — tap/library
+    /// trigger sources are deliberate user actions and should bypass
+    /// this check.
+    func shouldDedupeAutoDetect(slug: String) -> Bool {
+        guard let lastSlug = lastAppendedSlug,
+              let lastAt = lastAppendedAt,
+              lastSlug == slug else {
+            return false
+        }
+        return Date().timeIntervalSince(lastAt) < autoDetectDedupeWindow
+    }
+
     /// Append a card produced by `runIdentify`. Caller has already
     /// filtered out LOW confidence. Kicks off the price fetch as a
-    /// background Task so the row paints immediately.
+    /// background Task so the row paints immediately. Updates the
+    /// last-appended slug + timestamp so the dedupe window has
+    /// something to compare against on the next auto-detect fire.
     func append(
         match: ScanMatch,
         candidates: [ScanMatch],
@@ -71,6 +108,8 @@ final class MultiScanSession: ObservableObject {
             imageHash: imageHash,
         )
         entries.append(entry)
+        lastAppendedSlug = match.slug
+        lastAppendedAt = entry.scannedAt
         loadPrice(for: entry.id, slug: match.slug)
     }
 

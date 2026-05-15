@@ -819,6 +819,24 @@ struct ScannerTabView: View {
         if scanner.multiScanMode {
             switch scanner.lastConfidence {
             case "high", "medium":
+                // Auto-detect dedupe (Codex P2 review on PR #83,
+                // fourth pass). The Vision engine fires on every new
+                // stable rectangle, but a card lingering in the
+                // viewfinder while the user reaches for the next one
+                // can produce another stable window for the SAME card
+                // and append it again. Drop repeat-slug auto-detect
+                // results inside a short window so the pack/binder
+                // flow doesn't inflate the tray or burn quota for the
+                // same physical card. Tap/library entries are
+                // deliberate user actions — they bypass this guard
+                // (the same user might genuinely want to scan two
+                // copies of the same card via tap).
+                if scanner.lastTriggerSource == "auto",
+                   multiScanSession.shouldDedupeAutoDetect(slug: match.slug) {
+                    scanner.clearLastMatch()
+                    scanner.resumeScanning()
+                    return
+                }
                 // Per-scan quota gate for auto-detect entries only.
                 // (Codex P2 on PR #83 caught this on the first pass —
                 // a second pass narrowed the condition once the
