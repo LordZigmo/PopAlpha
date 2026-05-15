@@ -337,9 +337,10 @@ struct LiquidGlassSurface: ViewModifier {
     var accent: Color
     var radius: CGFloat = PA.Layout.panelRadius
     /// Peak opacity of the scroll-driven specular highlight (0..1).
-    /// Tuned low so the sheen reads as polished glass rather than a
-    /// bright flare — bumping above ~0.18 starts feeling neon.
-    var shineIntensity: Double = 0.12
+    /// Kept very low so the sheen reads as a barely-perceptible
+    /// reflection on glass — anything above ~0.10 starts feeling like
+    /// a competing focal element on top of the rich tint.
+    var shineIntensity: Double = 0.05
 
     /// The accent wash is dialed back in light mode so that small
     /// accent-colored labels (eg. `MarketHeroCard`'s "POPALPHA"
@@ -471,7 +472,7 @@ extension View {
     func liquidGlassSurface(
         accent: Color,
         radius: CGFloat = PA.Layout.panelRadius,
-        shineIntensity: Double = 0.12
+        shineIntensity: Double = 0.05
     ) -> some View {
         modifier(LiquidGlassSurface(accent: accent, radius: radius, shineIntensity: shineIntensity))
     }
