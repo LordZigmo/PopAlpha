@@ -122,6 +122,9 @@ struct CardDetailView: View {
     /// 60% so the transition reads as deliberate, not janky.
     @State private var togglingLanguage = false
 
+    @State private var spinAngle: Double = 0
+    @State private var spinDragStart: Double = 0
+
     // MARK: - JP card theming
 
     /// Whether to render this detail view in the JP red-tone theme.
@@ -578,33 +581,15 @@ struct CardDetailView: View {
 
             ZStack {
                 Color.clear // fill GeometryReader
-                // Freefloating card image
+                // Freefloating, drag-to-spin card
                 if let url = activeCard.imageURL {
-                    LazyImage(url: url) { state in
-                        if let image = state.image {
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(maxHeight: 420)
-                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                        .stroke(.white.opacity(0.1), lineWidth: 0.5)
-                                )
-                        } else if state.error != nil {
-                            heroPlaceholder
-                        } else {
-                            heroPlaceholder
-                                .overlay(ProgressView().tint(PA.Colors.muted))
-                        }
-                    }
-                    .shadow(color: .black.opacity(0.8), radius: 24, x: 0, y: 16)
-                    .scaleEffect(1.0 - CGFloat(progress) * 0.08)
-                    .opacity(1.0 - CGFloat(progress) * 0.6)
-                    .offset(y: CGFloat(-progress) * 40.0)
-                    .padding(.horizontal, 40)
-                    .padding(.top, 12)
-                    .padding(.bottom, 8)
+                    flippableHeroCard(url: url)
+                        .scaleEffect(1.0 - CGFloat(progress) * 0.08)
+                        .opacity(1.0 - CGFloat(progress) * 0.6)
+                        .offset(y: CGFloat(-progress) * 40.0)
+                        .padding(.horizontal, 40)
+                        .padding(.top, 12)
+                        .padding(.bottom, 8)
                 } else {
                     heroPlaceholder
                         .padding(.horizontal, 40)
@@ -614,6 +599,79 @@ struct CardDetailView: View {
             }
         }
         .frame(height: 420)
+    }
+
+    /// Two-faced 3D card. Front is the standard LazyImage hero; back is the
+    /// bundled Pokémon TCG card back asset. Horizontal drag rotates the
+    /// stack around its Y axis; release snaps to the nearest face. Front
+    /// and back swap visibility at the 90°/270° crossings so the user
+    /// never sees the mirrored backside of either face.
+    @ViewBuilder
+    private func flippableHeroCard(url: URL) -> some View {
+        let normalized = ((spinAngle.truncatingRemainder(dividingBy: 360)) + 360)
+            .truncatingRemainder(dividingBy: 360)
+        let isFrontFacing = normalized < 90 || normalized > 270
+
+        ZStack {
+            LazyImage(url: url) { state in
+                if let image = state.image {
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(maxHeight: 420)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .stroke(.white.opacity(0.1), lineWidth: 0.5)
+                        )
+                } else if state.error != nil {
+                    heroPlaceholder
+                } else {
+                    heroPlaceholder
+                        .overlay(ProgressView().tint(PA.Colors.muted))
+                }
+            }
+            .shadow(color: .black.opacity(0.8), radius: 24, x: 0, y: 16)
+            .opacity(isFrontFacing ? 1 : 0)
+
+            Image("PokemonCardBack")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(maxHeight: 420)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(.white.opacity(0.1), lineWidth: 0.5)
+                )
+                .shadow(color: .black.opacity(0.8), radius: 24, x: 0, y: 16)
+                // Pre-rotated 180° so the asset reads un-mirrored when
+                // the outer rotation has flipped the card to face the
+                // camera from behind.
+                .rotation3DEffect(.degrees(180), axis: (x: 0, y: 1, z: 0))
+                .opacity(isFrontFacing ? 0 : 1)
+        }
+        .rotation3DEffect(
+            .degrees(spinAngle),
+            axis: (x: 0, y: 1, z: 0),
+            perspective: 0.5
+        )
+        .gesture(
+            DragGesture(minimumDistance: 4)
+                .onChanged { value in
+                    // 0.6°/pt — ~150pt drag ≈ 90° rotation, tuned for a
+                    // wrist-flick feel without runaway spins.
+                    let delta = Double(value.translation.width) * 0.6
+                    spinAngle = spinDragStart + delta
+                }
+                .onEnded { _ in
+                    let target = (spinAngle / 180.0).rounded() * 180.0
+                    withAnimation(.spring(response: 0.45, dampingFraction: 0.78)) {
+                        spinAngle = target
+                    }
+                    spinDragStart = target
+                    PAHaptics.selection()
+                }
+        )
     }
 
     private var heroPlaceholder: some View {
