@@ -249,6 +249,11 @@ type TrendAnchorPoint = {
 };
 
 
+// Currently unused (extractTrendAnchorPoints is disabled — see its docs).
+// Kept inline as documentation of the windows scrydex publishes; Phase C
+// will re-enable anchor extraction with proper basis separation and will
+// reuse this map.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const SCRYDEX_TREND_WINDOWS: Array<{
   key: string;
   lookbackDays: number;
@@ -286,48 +291,41 @@ function normalizeCardNumber(raw: string | null | undefined): string {
   return trimmed;
 }
 
-function extractTrendAnchorPoints(prices: unknown): TrendAnchorPoint[] {
-  const selected = selectPreferredScrydexPriceEntry(prices);
-  if (!selected) return [];
-
-  const trends = (
-    selected.row.trends
-    && typeof selected.row.trends === "object"
-    && !Array.isArray(selected.row.trends)
-  ) ? selected.row.trends as Record<string, unknown> : null;
-  if (!trends) return [];
-
-  // Trend-anchor basis must stay on `market`. Scrydex's trends.*.price_change
-  // is the day-over-day / period delta of its `market` field, not whichever
-  // field selectPreferredScrydexPriceEntry happens to surface as the
-  // headline. Post 2026-05-15 the headline raw price is sourced from `low`
-  // for raw paths (see scrydex-raw-price-select.ts parseScrydexPriceObject
-  // docs); pairing low_today with a market delta would write mixed-basis
-  // history anchors (e.g. low=¥4,300 - market_delta=¥3,200 = ¥1,100, an
-  // anchor that has no real meaning). Codex P2 on PR #87.
+function extractTrendAnchorPoints(_prices: unknown): TrendAnchorPoint[] {
+  // Disabled 2026-05-15 (Codex P2 on PR #87, second pass): the previous
+  // attempt kept the trend-anchor calculation on `market` basis to stay
+  // aligned with scrydex's trends.<window>.price_change deltas, but those
+  // anchors still get written into `price_history_points` alongside the
+  // new low-based snapshots in the SAME variant_ref series. The chart
+  // then sees a market-basis anchor abruptly drop to a low-basis snapshot
+  // at "now" (Mewtwo VSTAR JP #084: anchor=¥7,500, today's snapshot=¥4,300
+  // → phantom -43% drop on the same day).
   //
-  // If the selected row has no `market` field, we can't compute trend
-  // anchors at all — skip rather than fabricate from the wrong basis.
-  const marketBasis = getNumberField((selected.row as Record<string, unknown>).market);
-  if (marketBasis === null) return [];
-
-  const anchors: TrendAnchorPoint[] = [];
-  for (const window of SCRYDEX_TREND_WINDOWS) {
-    const trendRow = trends[window.key];
-    if (!trendRow || typeof trendRow !== "object" || Array.isArray(trendRow)) continue;
-    const priceChange = getNumberField((trendRow as Record<string, unknown>).price_change);
-    if (priceChange === null) continue;
-    const anchorPrice = Number((marketBasis - priceChange).toFixed(4));
-    if (!Number.isFinite(anchorPrice) || anchorPrice <= 0) continue;
-    anchors.push({
-      lookbackDays: window.lookbackDays,
-      price: anchorPrice,
-      currency: selected.currency,
-      sourceWindow: window.sourceWindow,
-    });
-  }
-
-  return anchors;
+  // Same problem hits derivePriceRelativeTo30dRange in
+  // provider-observation-variant-metrics.ts — it compares observedPrice
+  // (now low) against a historic anchor range (market), producing a
+  // meaningless relative position.
+  //
+  // Recomputing anchors on a low basis is not possible: scrydex doesn't
+  // publish low_change deltas. The today's-ratio approximation
+  // (low_today × market_t/market_today) is only valid when the bid-ask
+  // spread is stable over the lookback window — false for thin-liquidity
+  // cards, which are exactly the cards that motivated the Phase A switch.
+  //
+  // Cost of disabling:
+  //   * Hot-promotion fast-path takes ~10-15 days of real snapshots to
+  //     accumulate 8 price_changes_30d on brand-new cards (vs. instant
+  //     via anchors). Established cards (>30d of real snapshots already)
+  //     are unaffected. Sunday weekly tier-recompute still catches
+  //     everything via direct activity counting.
+  //   * Chart history starts thin on new cards and accumulates daily.
+  //
+  // Phase C follow-up (queued): re-add anchors with proper basis
+  // separation — either a distinct source_window prefix
+  // ("market_anchor_30d") or a series_basis column — so chart and
+  // metrics can filter explicitly. Tracking that as a separate PR rather
+  // than blocking the headline-correction Phase A on a schema change.
+  return [];
 }
 
 function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
