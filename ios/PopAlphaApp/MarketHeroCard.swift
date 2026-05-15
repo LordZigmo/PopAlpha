@@ -128,41 +128,7 @@ struct MarketHeroCard: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            ZStack {
-                // Filled accent tint replaces the dark cardSurface base
-                // so the hero reads as a lit-up "AI surface" family
-                // member alongside AIBriefCard directly below.
-                market.accent.opacity(0.12)
-                // Brighter accent glow on the trailing edge (kept from
-                // the original — visually paired with the viewfinder
-                // eyebrow on the leading edge). Reads lazily from
-                // `market.accent` so it re-evaluates on market toggle.
-                RadialGradient(
-                    colors: [market.accent.opacity(0.22), .clear],
-                    center: .topTrailing,
-                    startRadius: 0,
-                    endRadius: 260
-                )
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: PA.Layout.panelRadius, style: .continuous))
-        .overlay(alignment: .leading) {
-            // Left accent rail — same 3pt signature used on AIBriefCard
-            // and `PersonalizedInsightCardView` so all "AI surface"
-            // family cards share one visual anchor.
-            Capsule()
-                .fill(market.accent)
-                .frame(width: 3)
-                .padding(.vertical, 10)
-                .padding(.leading, 2)
-        }
-        .overlay(
-            RoundedRectangle(cornerRadius: PA.Layout.panelRadius, style: .continuous)
-                .stroke(market.accent.opacity(0.40), lineWidth: 1)
-        )
-        .shadow(color: market.accent.opacity(0.28), radius: 14, x: 0, y: 0)
-        .shadow(color: .black.opacity(0.24), radius: 30, x: 0, y: 18)
+        .liquidGlassSurface(accent: market.accent)
         // VoiceOver reads the title + sub + the two button hints in
         // order, but the chips below are decorative — combine them so
         // they don't read as four separate elements.

@@ -313,6 +313,108 @@ struct PremiumShadow: ViewModifier {
     }
 }
 
+// MARK: - Liquid Glass Surface
+//
+// Multi-layered material card used for the homepage AI surfaces
+// (MarketHeroCard, AIBriefCard). Composes four passes:
+//
+//   1. `.regularMaterial` — actual frosted-glass refraction of the
+//      underlying background.
+//   2. Accent `LinearGradient` wash across the entire container — a
+//      diagonal flow of the brand color (no single solid tint, no
+//      corner-pinned radial bloom).
+//   3. Scroll-driven specular highlight — a soft white band whose
+//      position along the diagonal tracks the card's global Y. As
+//      the user scrolls, the shine sweeps the card like light moving
+//      across glass.
+//   4. Gradient stroke rim — accent + white in a diagonal blend so the
+//      edge reads as a lit bevel rather than a flat hairline.
+//
+// Plus dual shadows: a colored glow (lift) and a dark drop (depth).
+// Deliberately no left accent rail — the gradient + rim carries the
+// brand identity, and the card reads as a single glass plane.
+struct LiquidGlassSurface: ViewModifier {
+    var accent: Color
+    var radius: CGFloat = PA.Layout.panelRadius
+    /// Peak opacity of the scroll-driven specular highlight (0..1).
+    var shineIntensity: Double = 0.30
+
+    func body(content: Content) -> some View {
+        content
+            .background {
+                GeometryReader { proxy in
+                    let progress = shineProgress(proxy.frame(in: .global).minY)
+                    let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    ZStack {
+                        shape.fill(.regularMaterial)
+                        shape.fill(
+                            LinearGradient(
+                                colors: [
+                                    accent.opacity(0.32),
+                                    accent.opacity(0.08),
+                                    accent.opacity(0.22),
+                                    accent.opacity(0.06)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        shape.fill(
+                            LinearGradient(
+                                stops: shineStops(progress: progress),
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .blendMode(.plusLighter)
+                    }
+                    .allowsHitTesting(false)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                accent.opacity(0.55),
+                                .white.opacity(0.30),
+                                accent.opacity(0.20),
+                                .white.opacity(0.45)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
+            }
+            .shadow(color: accent.opacity(0.30), radius: 18, x: 0, y: 6)
+            .shadow(color: .black.opacity(0.20), radius: 24, x: 0, y: 12)
+    }
+
+    /// Maps the card's global vertical position to a 0..1 progress used
+    /// to slide the specular highlight diagonally. minY large positive
+    /// (card below viewport) → 0; minY zero or negative (card at/above
+    /// viewport top) → 1. Viewport height is approximated rather than
+    /// read from the scene because the value is only used to pace the
+    /// shine, not to register events.
+    private func shineProgress(_ minY: CGFloat) -> Double {
+        let viewportH: CGFloat = 850
+        let raw = 1.0 - Double(minY / viewportH)
+        return min(max(raw, 0), 1)
+    }
+
+    private func shineStops(progress: Double) -> [Gradient.Stop] {
+        let center = max(0, min(1, progress))
+        let halfWidth = 0.18
+        return [
+            .init(color: .white.opacity(0), location: max(center - halfWidth, 0)),
+            .init(color: .white.opacity(shineIntensity), location: center),
+            .init(color: .white.opacity(0), location: min(center + halfWidth, 1))
+        ]
+    }
+}
+
 extension View {
     func glassSurface(radius: CGFloat = PA.Layout.cardRadius) -> some View {
         modifier(GlassSurface(radius: radius))
@@ -320,5 +422,13 @@ extension View {
 
     func premiumShadow() -> some View {
         modifier(PremiumShadow())
+    }
+
+    func liquidGlassSurface(
+        accent: Color,
+        radius: CGFloat = PA.Layout.panelRadius,
+        shineIntensity: Double = 0.30
+    ) -> some View {
+        modifier(LiquidGlassSurface(accent: accent, radius: radius, shineIntensity: shineIntensity))
     }
 }
