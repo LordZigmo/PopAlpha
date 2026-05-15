@@ -429,7 +429,7 @@ extension View {
     func liquidGlassSurface(
         accent: Color,
         radius: CGFloat = PA.Layout.panelRadius,
-        shineIntensity: Double = 0.30
+        shineIntensity: Double = 0.12
     ) -> some View {
         modifier(LiquidGlassSurface(accent: accent, radius: radius, shineIntensity: shineIntensity))
     }
