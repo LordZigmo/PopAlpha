@@ -1037,9 +1037,13 @@ final class ScannerHost: ObservableObject {
     /// the duration; SwiftUI listens to `lastMatch` + `lastConfidence`
     /// to auto-navigate on "high" confidence results.
     private func installNetworkIdentifier(_ vm: ScannerViewModel) {
-        vm.onStableCardCaptured = { [weak self] image in
+        vm.onStableCardCaptured = { [weak self] image, perspectiveCorrection in
             guard let self else { return }
-            await self.runIdentify(image: image, triggerSource: "auto")
+            await self.runIdentify(
+                image: image,
+                triggerSource: "auto",
+                perspectiveCorrection: perspectiveCorrection,
+            )
         }
     }
 
@@ -1085,6 +1089,13 @@ final class ScannerHost: ObservableObject {
         ocrImage: UIImage? = nil,
         additionalOCRFrames: [UIImage] = [],
         triggerSource: String = "unknown",
+        // Phase 0d (2026-05-15): perspective-correction geometry captured
+        // during the auto-detect / tap detection step. Nil for library
+        // imports and for tap-detect that fell back to center-crop (no
+        // CIPerspectiveCorrection ran). Flows through to PostHog (offline
+        // path), `/api/scan/identify` query params (server-routed path),
+        // and the DEBUG ScanDebugCapture banner.
+        perspectiveCorrection: PerspectiveCorrectionDiagnostics? = nil,
     ) async {
         // RE-ENTRY GUARD. PopAlphaVisionEngine.reset() clears the
         // current stability candidate but does NOT stop frame
@@ -1244,6 +1255,7 @@ final class ScannerHost: ObservableObject {
                     ocrCardNumberExtracted: !ocrMulti.cardNumbers.isEmpty,
                     ocrPass2FallbackFired: ocrMulti.pass2FallbackFired,
                     ocrSpatialFilterRejectedCount: ocrMulti.spatialFilterRejectedCount,
+                    ocrPerspectiveCorrectedExtent: perspectiveCorrection,
                 )
             }
             guard let response else {
@@ -1295,7 +1307,14 @@ final class ScannerHost: ObservableObject {
             // Property naming mirrors scan_identify_events column
             // names where they overlap so the two surfaces can be
             // joined in PostHog if/when we ship the warehouse pipe.
-            AnalyticsService.shared.capture(.cardScanned, properties: [
+            //
+            // Phase 0d (2026-05-15): perspective-correction geometry
+            // expanded out as flat keys for aggregate queries. The
+            // server-routed surface carries the same data as a nested
+            // jsonb on scan_identify_events; the flat form here makes
+            // it queryable as PostHog properties without nested-key
+            // path expressions.
+            var props: [String: Any] = [
                 "trigger_source": triggerSource,
                 "source": usedOffline ? "offline" : "network",
                 "language": self.scanLanguage.rawValue,
@@ -1312,7 +1331,11 @@ final class ScannerHost: ObservableObject {
                 "ocr_ms": Int(ocrMs),
                 "scan_total_ms": Int(scanMs),
                 "model_version": response.modelVersion,
-            ])
+            ]
+            let perspectivePostHogProps: [String: Any] = perspectiveCorrection?.postHogProperties
+                ?? ["ocr_perspective_corrected": false]
+            for (k, v) in perspectivePostHogProps { props[k] = v }
+            AnalyticsService.shared.capture(.cardScanned, properties: props)
             #if DEBUG
             // Save the EXACT frame the embedder saw to Photos for EVERY
             // scan, including HIGH. HIGH-but-wrong is the worst-case
@@ -1339,6 +1362,7 @@ final class ScannerHost: ObservableObject {
                 framesUsed: 1 + additionalOCRFrames.count,
                 pass2FallbackFired: ocrMulti.pass2FallbackFired,
                 spatialFilterRejectedCount: ocrMulti.spatialFilterRejectedCount,
+                perspectiveCorrection: perspectiveCorrection,
             )
             // Phase 0d auto-promote: HIGH scans are presumed correct
             // and silently land in scan_eval_images so the 100-card
@@ -1379,7 +1403,7 @@ final class ScannerHost: ObservableObject {
             // Phase 0c — count error scans against the same event so
             // the HIGH-rate denominator is "all attempted scans" not
             // "successful scans only." Mirrors server emitScanFailureEvent.
-            AnalyticsService.shared.capture(.cardScanned, properties: [
+            var errorProps: [String: Any] = [
                 "trigger_source": triggerSource,
                 "source": usedOffline ? "offline" : "network",
                 "language": self.scanLanguage.rawValue,
@@ -1391,7 +1415,11 @@ final class ScannerHost: ObservableObject {
                 "ocr_spatial_filter_rejected_count": ocrMulti.spatialFilterRejectedCount,
                 "ocr_set_hint_present": ocrMulti.setHint != nil,
                 "ocr_frames_used": 1 + additionalOCRFrames.count,
-            ])
+            ]
+            let errorPerspectiveProps: [String: Any] = perspectiveCorrection?.postHogProperties
+                ?? ["ocr_perspective_corrected": false]
+            for (k, v) in errorPerspectiveProps { errorProps[k] = v }
+            AnalyticsService.shared.capture(.cardScanned, properties: errorProps)
             #if DEBUG
             ScanDebugCapture.capture(
                 image: image,
@@ -1403,6 +1431,7 @@ final class ScannerHost: ObservableObject {
                 framesUsed: 1 + additionalOCRFrames.count,
                 pass2FallbackFired: ocrMulti.pass2FallbackFired,
                 spatialFilterRejectedCount: ocrMulti.spatialFilterRejectedCount,
+                perspectiveCorrection: perspectiveCorrection,
             )
             #endif
             self.resumeScanning()
@@ -1433,6 +1462,17 @@ final class ScannerHost: ObservableObject {
               let primaryFrame = capturer() else {
             return
         }
+        // Phase 0d (2026-05-15): the primary frame's perspective-
+        // correction geometry is stashed on the engine by
+        // `croppedToCard` as a side effect of `detectAndCrop` (which
+        // `frameCapturer` calls internally). Read immediately after the
+        // primary capturer() call, BEFORE the multi-frame loop below
+        // overwrites it with subsequent frames' diagnostics — only the
+        // primary frame is what reaches the embedder, so only its
+        // perspective geometry is the one we want to attach to this
+        // scan. Nil when tap-detect fell back to center-crop (no
+        // CIPerspectiveCorrection ran).
+        let primaryPerspective = await MainActor.run { self.viewModel?.visionEngine.lastPerspectiveCorrection }
         // Path A (2026-05-05): OCR runs on the same image the embedder
         // sees (the 0.85 center-crop, via frameCapturer) — NOT the full
         // uncropped frame previously routed via captureFullFrame.
@@ -1471,6 +1511,7 @@ final class ScannerHost: ObservableObject {
             image: primaryFrame,
             additionalOCRFrames: additionalFrames,
             triggerSource: additionalFrames.isEmpty ? "tap" : "tap_multiframe",
+            perspectiveCorrection: primaryPerspective,
         )
     }
 

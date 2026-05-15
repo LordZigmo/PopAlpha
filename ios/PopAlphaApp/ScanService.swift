@@ -1,4 +1,5 @@
 import Foundation
+import PopAlphaCore
 import UIKit
 
 // MARK: - Language toggle
@@ -126,6 +127,13 @@ enum ScanService {
         ocrCardNumberExtracted: Bool? = nil,
         ocrPass2FallbackFired: Bool? = nil,
         ocrSpatialFilterRejectedCount: Int? = nil,
+        // Phase 0d (2026-05-15): perspective-correction geometry from
+        // PopAlphaVisionEngine.croppedToCard. JSON-encoded and sent as a
+        // single query param; the server parses and persists into the
+        // new jsonb column scan_identify_events.ocr_perspective_corrected_extent.
+        // Pre-Phase-0d callers (and any tap that fell back to center-crop)
+        // pass nil — the column lands NULL on those rows.
+        ocrPerspectiveCorrectedExtent: PerspectiveCorrectionDiagnostics? = nil,
         maxEdgePixels: CGFloat = 768,
         compressionQuality: CGFloat = 0.8
     ) async throws -> ScanIdentifyResponse {
@@ -152,6 +160,11 @@ enum ScanService {
         }
         if let ocrSpatialFilterRejectedCount {
             query.append(("ocr_spatial_filter_rejected_count", String(ocrSpatialFilterRejectedCount)))
+        }
+        if let ocrPerspectiveCorrectedExtent,
+           let data = try? JSONEncoder().encode(ocrPerspectiveCorrectedExtent),
+           let json = String(data: data, encoding: .utf8) {
+            query.append(("ocr_perspective_corrected_extent", json))
         }
 
         return try await APIClient.postRaw(

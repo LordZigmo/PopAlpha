@@ -74,7 +74,7 @@ public final class ScannerViewModel: ObservableObject, PopAlphaVisionEngineDeleg
     /// ScannerViewModel pauses scanning while the closure runs; the app
     /// must call `resumeScanning()` when it's ready for the next scan
     /// (low-confidence result, user retry, or post-navigation dismiss).
-    public var onStableCardCaptured: (@Sendable (UIImage) async -> Void)?
+    public var onStableCardCaptured: (@Sendable (UIImage, PerspectiveCorrectionDiagnostics?) async -> Void)?
 
     public let visionEngine: PopAlphaVisionEngine
     public var recognizedCardID: String? { recognizedCard?.id }
@@ -145,7 +145,19 @@ public final class ScannerViewModel: ObservableObject, PopAlphaVisionEngineDeleg
         startIdentification(with: nil)
     }
 
+    /// Required by the legacy protocol method but unused — the engine
+    /// invokes the perspective-correction-aware overload below, and
+    /// every code path of interest plumbs through that one. Kept as a
+    /// non-throwing stub so other future conformers can rely on the
+    /// unary method if they don't need the diagnostic surface.
     public nonisolated func didDetectStableCard(image: UIImage) {
+        didDetectStableCard(image: image, perspectiveCorrection: nil)
+    }
+
+    public nonisolated func didDetectStableCard(
+        image: UIImage,
+        perspectiveCorrection: PerspectiveCorrectionDiagnostics?,
+    ) {
         Task { @MainActor [weak self] in
             guard let self else { return }
             if let hook = self.onStableCardCaptured {
@@ -155,7 +167,7 @@ public final class ScannerViewModel: ObservableObject, PopAlphaVisionEngineDeleg
                 // stops re-triggering while the network call is inflight.
                 self.isScanning = false
                 self.visionEngine.reset()
-                await hook(image)
+                await hook(image, perspectiveCorrection)
             } else {
                 self.startIdentification(with: image)
             }

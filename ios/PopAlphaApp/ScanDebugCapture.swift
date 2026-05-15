@@ -35,6 +35,7 @@
 import UIKit
 import Photos
 import OSLog
+import PopAlphaCore
 
 enum ScanDebugCapture {
 
@@ -72,6 +73,15 @@ enum ScanDebugCapture {
         framesUsed: Int,
         pass2FallbackFired: Bool,
         spatialFilterRejectedCount: Int,
+        // Phase 0d (2026-05-15): perspective-correction geometry from
+        // the embedder-side croppedToCard step. Nil when no
+        // CIPerspectiveCorrection ran (library-import path, tap that
+        // fell back to center-crop, or auto-detect that handed back a
+        // failed crop). Surfaces a `persp:` line in the banner so a
+        // Photos-library Mode 8 inspection is self-contained — both
+        // the rendered image AND the corner→extent geometry that
+        // produced it.
+        perspectiveCorrection: PerspectiveCorrectionDiagnostics?,
     ) {
 
         Task.detached(priority: .background) {
@@ -91,6 +101,7 @@ enum ScanDebugCapture {
                 framesUsed: framesUsed,
                 pass2FallbackFired: pass2FallbackFired,
                 spatialFilterRejectedCount: spatialFilterRejectedCount,
+                perspectiveCorrection: perspectiveCorrection,
             )
             let composed = Self.compose(image: image, banner: banner)
             do {
@@ -219,6 +230,7 @@ enum ScanDebugCapture {
         framesUsed: Int,
         pass2FallbackFired: Bool,
         spatialFilterRejectedCount: Int,
+        perspectiveCorrection: PerspectiveCorrectionDiagnostics?,
     ) -> String {
         let timestamp = ISO8601DateFormatter().string(from: Date())
         var lines: [String] = []
@@ -255,6 +267,30 @@ enum ScanDebugCapture {
         // strongly inform "is this a Mode 6 / Mode 8 case?" without
         // needing PostHog or the log stream.
         lines.append("pass2=\(pass2FallbackFired) rejected=\(spatialFilterRejectedCount)")
+        // Phase 0d (2026-05-15) — perspective-correction geometry. The
+        // input quadrilateral corners are normalized to the input
+        // bitmap so they're roughly comparable across cards regardless
+        // of capture resolution. portrait_rot=true means step 4 had to
+        // rotate 90° (the original perspective output was landscape) —
+        // every such case is a candidate for Mode 8's upside-down
+        // ambiguity. out=(WxH) lets you see whether the corrected
+        // rectangle came back portrait-shaped (good) or square-ish
+        // (suspicious — Vision may have locked onto a sub-card region).
+        if let p = perspectiveCorrection {
+            let inW = Int(p.inputSize.width)
+            let inH = Int(p.inputSize.height)
+            let outW = Int(p.outputExtent.width)
+            let outH = Int(p.outputExtent.height)
+            let cornersNorm = p.inputCorners.map { c in
+                String(format: "(%.2f,%.2f)",
+                       inW > 0 ? c.x / Double(inW) : 0,
+                       inH > 0 ? c.y / Double(inH) : 0)
+            }.joined(separator: " ")
+            lines.append("persp: in=\(inW)x\(inH) out=\(outW)x\(outH) portrait_rot=\(p.portraitRotationApplied)")
+            lines.append("persp_corners(tl,tr,bl,br norm): \(cornersNorm)")
+        } else {
+            lines.append("persp: none (center-crop / library / no rectangle)")
+        }
         return lines.joined(separator: "\n")
     }
 

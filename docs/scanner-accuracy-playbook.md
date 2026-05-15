@@ -208,13 +208,31 @@ real-device usage:
 - "What's the spatial_filter_rejected_count distribution and does
   it predict failure modes?"
 
-**Phase 0d (saved-image inspection harness for Mode 8) deferred.**
-The perspective-correction coord quirk (Mode 8) still needs a
-proper diagnostic-then-fix pass — saving the post-correction CIImage
-to a debug Storage path so we can visually inspect orientation
-before writing the next coord-system transform. Defer until we have
-focused time; pass-2 fallback is handling the OCR side gracefully
-in the meantime.
+**Phase 0d (perspective-correction extent telemetry) ✅ shipped 2026-05-15.**
+The saved-image side of "saved-image inspection harness for Mode 8"
+landed earlier across multiple commits — `ScanDebugCapture` saves
+the post-perspective UIImage to Photos with a diagnostic banner
+(DEBUG-only, every scan including HIGH), and the server-routed
+review queue captures the same images to
+`scan-uploads/review-queue/<hash>.jpg`. The missing piece — the
+numeric corner / extent / portrait-rotation geometry that
+`croppedToCard` produces — now lands as a structured
+`PerspectiveCorrectionDiagnostics` value:
+
+- Server-routed scans: JSON query param on `/api/scan/identify` →
+  `scan_identify_events.ocr_perspective_corrected_extent` (jsonb,
+  migration `20260515200000`).
+- Offline scans: flat-keyed properties on PostHog `card_scanned`
+  (`ocr_perspective_corrected`, `ocr_perspective_portrait_rotation_applied`,
+  `ocr_perspective_input_w/h`, `ocr_perspective_output_w/h`).
+- DEBUG builds: an extra `persp:` line on the Photos-library banner
+  showing input size, output size, portrait rotation flag, and
+  normalized input corners.
+
+**Mode 8 proper fix remains deferred** until ~10–20 real-device
+samples land in the new column — the stage-3.1 revert lesson is
+binding here. Don't ship another coord-system transform until the
+empirical orientation/extent distribution justifies the math.
 
 #### 1.6 Trust-killer sim-floor refinement on `ocr_intersect_unique` — ✅ shipped 2026-05-08
 
@@ -551,34 +569,36 @@ improvement:
   examples we have of each mode. Not all modes deserve fixing —
   some are <1% of scans and don't move the needle.
 
-## 7. Roll-up — the one-paragraph version (post 2026-05-07 evening)
+## 7. Roll-up — the one-paragraph version (post 2026-05-15)
 
 Tier 1.1's substantive parts shipped: multi-pass fallback +
-strip-pass tuning + perspective correction. Real-device data on
-~30 scans confirms pass-2 fallback recovers 8 of 9
-spatial-filter rejections, perspective correction puts the card
-in portrait orientation reliably, and end-to-end HIGH-confidence
-top-1 is the norm on cards where the embedder sees them clearly.
-Stage 3.1 (Y-flip) was attempted same-day to "fix" the
+strip-pass tuning + perspective correction. Tier 1.5 ALL phases
+shipped between 2026-05-08 and 2026-05-15: OCR diagnostic
+telemetry (Phase 0a/b/c), failure-case review queue (§6),
+eval-corpus auto-promote (Phase 0d test-loop), and
+perspective-correction extent telemetry (Phase 0d Mode 8
+prerequisite). Tier 1.6 (HIGH-conf trust-killer refinement)
+shipped 2026-05-08. Phase 1.5 HIGH-gate tuning shipped 2026-05-13.
+
+Stage 3.1 (Y-flip) was attempted 2026-05-07 to "fix" the
 spatial-filter quirk on perspective-corrected output, mis-modeled
 the coord-system interaction, broke text rendering immediately
 (mirrored output), and was reverted. **Lesson logged: don't ship
 coord-system fixes before adding diagnostic instrumentation.**
 
-The next priority is no longer "more OCR robustness" — it's
-**Tier 1.5 telemetry** (saved-image inspection harness +
-`scan_identify_events` field augmentation). Without that, we
-keep operating from 30-scan smoke samples and shipping fixes
-that turn out to be misdiagnosed (stage 3.1) or out-of-priority
-(image quality gates that wouldn't have helped because Mode 6
-wasn't actually the dominant failure). After Tier 1.5 lands,
-Mode 8 (perspective coord quirk) gets a proper fix and we
-re-baseline. **In parallel**, Tier 1.6 (HIGH-confidence
-threshold review on `ocr_intersect_unique`) is a half-day
-mechanical fix: when OCR card_number AND kNN top-1 agree on a
-unique slug, it should be HIGH regardless of absolute sim. Real
-device showed 5 of 28 scans were medium-but-correct because the
-threshold was too conservative — easy lift.
+**The next priority is the Mode 8 coord-system fix**, but it's
+gated on ~10–20 real-device samples landing in the new
+`scan_identify_events.ocr_perspective_corrected_extent` column
+and the equivalent PostHog properties on offline scans. Once
+that data is in hand, write the coord transform against
+empirical evidence instead of guessing (stage-3.1 lesson). In
+parallel, the failure-modes scoreboard in
+`scanner-ocr-failure-modes.md` is overdue for a refresh from the
+~7 days of telemetry already in PostHog and `scan_identify_events`
+— that population should also inform which Tier-1 lever is the
+actual dominant remaining lever, vs. whether we've hit the 88–90%
+real-device top-1 threshold that gates Tier 2 (SigLIP-2 fine-tune)
+and multi-scan mode.
 
 **Important triage rule when something looks broken**: §4.5
 catalogs failure patterns where a "scanner bug" report is
