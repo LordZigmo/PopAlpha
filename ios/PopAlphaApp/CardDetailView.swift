@@ -124,7 +124,12 @@ struct CardDetailView: View {
 
     @State private var spinAngle: Double = 0
     @State private var spinDragStart: Double = 0
-    @State private var spinIsEngaged: Bool = false
+    /// Per-drag classification. Once a drag is .rejected (scroll-bound)
+    /// it stays rejected for the rest of the gesture, so a drag that
+    /// starts vertical and drifts horizontal can never retroactively
+    /// engage the spinner mid-flight.
+    private enum SpinDragState { case undecided, engaged, rejected }
+    @State private var spinDragState: SpinDragState = .undecided
 
     // MARK: - JP card theming
 
@@ -657,28 +662,34 @@ struct CardDetailView: View {
             perspective: 0.5
         )
         // simultaneousGesture (not .gesture) so the parent ScrollView keeps
-        // recognizing vertical pans on the hero. We only consume the drag
-        // once horizontal movement clearly dominates, otherwise vertical
-        // scrolls that begin on the card would be eaten by the spinner.
+        // recognizing vertical pans on the hero. The first onChanged sample
+        // (which fires once cumulative movement crosses minimumDistance)
+        // classifies the drag for life: dominantly-horizontal → .engaged,
+        // anything else → .rejected. Subsequent samples never re-classify,
+        // so a drag that starts as a scroll cannot retroactively rotate
+        // the card if the finger drifts sideways.
         .simultaneousGesture(
             DragGesture(minimumDistance: 12)
                 .onChanged { value in
+                    if case .rejected = spinDragState { return }
                     let dx = abs(value.translation.width)
                     let dy = abs(value.translation.height)
-                    if !spinIsEngaged {
-                        // Engage only when the gesture is dominantly
-                        // horizontal. 1.4× ratio leaves diagonals to scroll.
-                        guard dx > dy * 1.4 else { return }
-                        spinIsEngaged = true
+                    if case .undecided = spinDragState {
+                        if dx > dy * 1.4 {
+                            spinDragState = .engaged
+                        } else {
+                            spinDragState = .rejected
+                            return
+                        }
                     }
                     // 0.6°/pt — ~150pt drag ≈ 90° rotation, tuned for a
                     // wrist-flick feel without runaway spins.
-                    let delta = Double(value.translation.width) * 0.6
-                    spinAngle = spinDragStart + delta
+                    spinAngle = spinDragStart + Double(value.translation.width) * 0.6
                 }
                 .onEnded { _ in
-                    guard spinIsEngaged else { return }
-                    spinIsEngaged = false
+                    let wasEngaged = spinDragState == .engaged
+                    spinDragState = .undecided
+                    guard wasEngaged else { return }
                     let target = (spinAngle / 180.0).rounded() * 180.0
                     withAnimation(.spring(response: 0.45, dampingFraction: 0.78)) {
                         spinAngle = target
