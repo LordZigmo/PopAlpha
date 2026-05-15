@@ -60,47 +60,82 @@ actor HoldingsService {
 
     // MARK: - Bulk add (multi-scan)
 
-    /// Submits a multi-scan tray as a single /api/holdings/bulk-import
-    /// call with `source: "scanner"` so holdings.source distinguishes
-    /// scan-derived lots from CSV-imported and manually-added ones.
-    /// The endpoint is per-row best-effort: bad rows surface in
-    /// `errors[]` without blocking the rest. `'scanner'` is already an
-    /// allowed value in the holdings_source_check constraint
+    /// Submits a multi-scan tray to /api/holdings/bulk-import with
+    /// `source: "scanner"` so holdings.source distinguishes scan-
+    /// derived lots from CSV-imported and manually-added ones. The
+    /// endpoint is per-row best-effort: bad rows surface in `errors[]`
+    /// without blocking the rest. `'scanner'` is already an allowed
+    /// value in the holdings_source_check constraint
     /// (supabase/migrations/20260421200152_holdings_source.sql) — no
     /// new migration needed.
+    ///
+    /// Chunked at `Self.bulkImportChunkSize` (= the route's MAX_ROWS
+    /// cap of 500) so a long binder session can't blow past the
+    /// server's hard cap. Row indices in returned errors are mapped
+    /// back to the caller's tray-absolute index — the caller's tray
+    /// rendering doesn't need to know chunks happened.
     func bulkAddFromScans(_ entries: [MultiScanEntry]) async throws -> BulkScanImportSummary {
         try AuthService.shared.requireAuth()
 
-        let rows: [[String: Any]] = entries.map { entry in
-            var row: [String: Any] = [
-                "canonical_slug": entry.match.slug,
-                "grade": entry.grade,
-                "qty": entry.quantity,
-            ]
-            if let printingId = entry.printingId {
-                row["printing_id"] = printingId
+        var totalInserted = 0
+        var allErrors: [BulkScanImportError] = []
+        var cursor = 0
+
+        while cursor < entries.count {
+            let chunkEnd = min(cursor + Self.bulkImportChunkSize, entries.count)
+            let chunk = entries[cursor..<chunkEnd]
+            let offsetBase = cursor
+
+            let rows: [[String: Any]] = chunk.map { entry in
+                var row: [String: Any] = [
+                    "canonical_slug": entry.match.slug,
+                    "grade": entry.grade,
+                    "qty": entry.quantity,
+                ]
+                if let printingId = entry.printingId {
+                    row["printing_id"] = printingId
+                }
+                return row
             }
-            return row
+
+            let body: [String: Any] = [
+                "rows": rows,
+                "source": "scanner",
+            ]
+
+            let response: BulkScanImportResponse = try await APIClient.post(
+                path: "/api/holdings/bulk-import",
+                body: body,
+                decoder: decoder,
+            )
+
+            totalInserted += response.inserted
+            // Re-index chunk-relative row_index back to tray-absolute
+            // so the caller can correlate per-row errors with the
+            // original MultiScanEntry array offsets.
+            for e in response.errors {
+                allErrors.append(
+                    BulkScanImportError(
+                        rowIndex: e.rowIndex + offsetBase,
+                        message: e.error,
+                    ),
+                )
+            }
+
+            cursor = chunkEnd
         }
 
-        let body: [String: Any] = [
-            "rows": rows,
-            "source": "scanner",
-        ]
-
-        let response: BulkScanImportResponse = try await APIClient.post(
-            path: "/api/holdings/bulk-import",
-            body: body,
-            decoder: decoder,
-        )
-
         return BulkScanImportSummary(
-            inserted: response.inserted,
-            errors: response.errors.map { e in
-                BulkScanImportError(rowIndex: e.rowIndex, message: e.error)
-            },
+            inserted: totalInserted,
+            errors: allErrors,
         )
     }
+
+    /// Match the route's hard cap (`MAX_ROWS = 500` in
+    /// `app/api/holdings/bulk-import/route.ts`). Any tray larger than
+    /// this is split into multiple POSTs; smaller trays do a single
+    /// round-trip.
+    private static let bulkImportChunkSize: Int = 500
 
     // MARK: - Delete
 

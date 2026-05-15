@@ -279,19 +279,28 @@ struct MultiScanReviewSheet: View {
                 }
             }
 
-            Stepper(
-                value: Binding(
-                    get: { entry.quantity },
-                    set: { session.updateQuantity(entryId: entry.id, qty: $0) },
-                ),
-                in: 1...99,
-            ) {
+            HStack(spacing: 6) {
+                // Standalone qty label — Stepper's own label is hidden
+                // via `.labelsHidden()` so the row stays compact, but
+                // the user needs to see the current value before
+                // tapping +/- otherwise they're operating blind on
+                // what quantity will actually be submitted. (Codex
+                // P2 review on PR #83.)
                 Text("×\(entry.quantity)")
                     .font(.system(size: 14, weight: .medium))
                     .monospacedDigit()
+                    .frame(minWidth: 30, alignment: .trailing)
+                Stepper(
+                    "",
+                    value: Binding(
+                        get: { entry.quantity },
+                        set: { session.updateQuantity(entryId: entry.id, qty: $0) },
+                    ),
+                    in: 1...99,
+                )
+                .labelsHidden()
+                .fixedSize()
             }
-            .labelsHidden()
-            .fixedSize()
         }
         .contentShape(Rectangle())
     }
