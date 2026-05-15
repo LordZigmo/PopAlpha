@@ -317,13 +317,17 @@ struct MarketplaceView: View {
             .padding(.horizontal, PA.Layout.sectionPadding)
         }
 
-        // Same slot the EN sequences use: card sits between the hero/
-        // pulse and the movers section. AIBriefCard reads `\.market`
-        // and pulls its border + accents from `market.accent`, so the
-        // card automatically reflows in Hinomaru red when the
-        // homepage is in JP mode — no JP-specific styling needed
-        // here.
-        AIBriefCard(brief: aiBrief, fallbackAsOf: data?.asOf, styleLabel: styleLabel)
+        // Same slot the EN sequences use, but pass `nil` instead of
+        // `aiBrief`: the cached brief is generated from EN-only top
+        // movers (refresh-ai-brief cron + lib/ai/homepage-brief.ts
+        // build context from the global signal board with no market
+        // parameter), so showing it here would leak EN cards into a
+        // JP-only page. Passing nil renders AIBriefCard's
+        // market-neutral placeholder instead — visual scaffolding
+        // and the Hinomaru red border (via `\.market`) stay, the EN
+        // content leak doesn't. Swap back to `aiBrief` once a JP
+        // brief generator exists.
+        AIBriefCard(brief: nil, fallbackAsOf: data?.asOf, styleLabel: styleLabel)
             .padding(.horizontal, PA.Layout.sectionPadding)
 
         if let data {
@@ -765,26 +769,32 @@ private struct TopBar: View {
     @ViewBuilder
     private func marketTogglePillSegment(_ market: Market) -> some View {
         let isActive = marketRaw == market.rawValue
-        Text(market.label)
-            .font(.system(size: 11, weight: .semibold))
-            .tracking(0.4)
-            .foregroundStyle(isActive ? .white : PA.Colors.textSecondary)
-            .frame(width: 32, height: 24)
-            .background {
-                if isActive {
-                    Capsule().fill(market.accent)
-                }
+        // Button (not Text + onTapGesture) so VoiceOver gets standard
+        // button control semantics — assistive tech needs to know each
+        // segment is an activatable market switch, not just labeled
+        // selected text.
+        Button {
+            guard marketRaw != market.rawValue else { return }
+            withAnimation(.easeInOut(duration: 0.25)) {
+                marketRaw = market.rawValue
             }
-            .contentShape(Rectangle())
-            .onTapGesture {
-                guard marketRaw != market.rawValue else { return }
-                withAnimation(.easeInOut(duration: 0.25)) {
-                    marketRaw = market.rawValue
+            PAHaptics.selection()
+        } label: {
+            Text(market.label)
+                .font(.system(size: 11, weight: .semibold))
+                .tracking(0.4)
+                .foregroundStyle(isActive ? .white : PA.Colors.textSecondary)
+                .frame(width: 32, height: 24)
+                .background {
+                    if isActive {
+                        Capsule().fill(market.accent)
+                    }
                 }
-                PAHaptics.selection()
-            }
-            .accessibilityLabel(market.accessibilityLabel)
-            .accessibilityAddTraits(isActive ? .isSelected : [])
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(market.accessibilityLabel)
+        .accessibilityAddTraits(isActive ? .isSelected : [])
     }
 }
 
