@@ -337,7 +337,9 @@ struct LiquidGlassSurface: ViewModifier {
     var accent: Color
     var radius: CGFloat = PA.Layout.panelRadius
     /// Peak opacity of the scroll-driven specular highlight (0..1).
-    var shineIntensity: Double = 0.30
+    /// Tuned low so the sheen reads as polished glass rather than a
+    /// bright flare — bumping above ~0.18 starts feeling neon.
+    var shineIntensity: Double = 0.12
 
     func body(content: Content) -> some View {
         content
@@ -377,10 +379,10 @@ struct LiquidGlassSurface: ViewModifier {
                     .strokeBorder(
                         LinearGradient(
                             colors: [
-                                accent.opacity(0.55),
-                                .white.opacity(0.30),
-                                accent.opacity(0.20),
-                                .white.opacity(0.45)
+                                accent.opacity(0.50),
+                                .white.opacity(0.16),
+                                accent.opacity(0.18),
+                                .white.opacity(0.22)
                             ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
