@@ -341,6 +341,14 @@ struct LiquidGlassSurface: ViewModifier {
     /// bright flare — bumping above ~0.18 starts feeling neon.
     var shineIntensity: Double = 0.12
 
+    /// The accent wash is dialed back in light mode so that small
+    /// accent-colored labels (eg. `MarketHeroCard`'s "POPALPHA"
+    /// eyebrow, `AIBriefCard`'s timestamp) keep WCAG-readable contrast
+    /// against the tinted glass. In dark mode the rich stops can run
+    /// hot because the foreground text is light and the material
+    /// renders dark anyway.
+    @Environment(\.colorScheme) private var colorScheme
+
     func body(content: Content) -> some View {
         content
             .background {
@@ -357,14 +365,12 @@ struct LiquidGlassSurface: ViewModifier {
                         // rich tinted glass rather than a desaturated
                         // wash. The shimmer now competes against a
                         // richer chromatic base, so it stands out less.
+                        // Light-mode stops are roughly half the dark
+                        // values to preserve text contrast — see the
+                        // `colorScheme` doc note above.
                         shape.fill(
                             LinearGradient(
-                                colors: [
-                                    accent.opacity(0.55),
-                                    accent.opacity(0.22),
-                                    accent.opacity(0.45),
-                                    accent.opacity(0.18)
-                                ],
+                                colors: accentGradientColors,
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
                             )
@@ -400,6 +406,34 @@ struct LiquidGlassSurface: ViewModifier {
             }
             .shadow(color: accent.opacity(0.30), radius: 18, x: 0, y: 6)
             .shadow(color: .black.opacity(0.20), radius: 24, x: 0, y: 12)
+    }
+
+    /// Accent-wash stops. Dark mode runs hot (rich tinted glass);
+    /// light mode runs cool to preserve small-text contrast.
+    private var accentGradientColors: [Color] {
+        switch colorScheme {
+        case .light:
+            return [
+                accent.opacity(0.28),
+                accent.opacity(0.10),
+                accent.opacity(0.22),
+                accent.opacity(0.08)
+            ]
+        case .dark:
+            return [
+                accent.opacity(0.55),
+                accent.opacity(0.22),
+                accent.opacity(0.45),
+                accent.opacity(0.18)
+            ]
+        @unknown default:
+            return [
+                accent.opacity(0.40),
+                accent.opacity(0.16),
+                accent.opacity(0.32),
+                accent.opacity(0.12)
+            ]
+        }
     }
 
     /// Maps the card's global vertical position to a 0..1 progress used
