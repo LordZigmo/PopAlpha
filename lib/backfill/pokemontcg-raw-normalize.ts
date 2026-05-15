@@ -297,13 +297,27 @@ function extractTrendAnchorPoints(prices: unknown): TrendAnchorPoint[] {
   ) ? selected.row.trends as Record<string, unknown> : null;
   if (!trends) return [];
 
+  // Trend-anchor basis must stay on `market`. Scrydex's trends.*.price_change
+  // is the day-over-day / period delta of its `market` field, not whichever
+  // field selectPreferredScrydexPriceEntry happens to surface as the
+  // headline. Post 2026-05-15 the headline raw price is sourced from `low`
+  // for raw paths (see scrydex-raw-price-select.ts parseScrydexPriceObject
+  // docs); pairing low_today with a market delta would write mixed-basis
+  // history anchors (e.g. low=¥4,300 - market_delta=¥3,200 = ¥1,100, an
+  // anchor that has no real meaning). Codex P2 on PR #87.
+  //
+  // If the selected row has no `market` field, we can't compute trend
+  // anchors at all — skip rather than fabricate from the wrong basis.
+  const marketBasis = getNumberField((selected.row as Record<string, unknown>).market);
+  if (marketBasis === null) return [];
+
   const anchors: TrendAnchorPoint[] = [];
   for (const window of SCRYDEX_TREND_WINDOWS) {
     const trendRow = trends[window.key];
     if (!trendRow || typeof trendRow !== "object" || Array.isArray(trendRow)) continue;
     const priceChange = getNumberField((trendRow as Record<string, unknown>).price_change);
     if (priceChange === null) continue;
-    const anchorPrice = Number((selected.price - priceChange).toFixed(4));
+    const anchorPrice = Number((marketBasis - priceChange).toFixed(4));
     if (!Number.isFinite(anchorPrice) || anchorPrice <= 0) continue;
     anchors.push({
       lookbackDays: window.lookbackDays,
