@@ -107,19 +107,25 @@ function resolvePostgresUrl() {
 }
 
 /**
- * Returns the active SigLIP model version that card_image_embeddings is
- * indexed with. Mirrors lib/ai/image-embedder.ts resolveActiveModelVersion.
+ * Returns the active image-embedder model version that
+ * card_image_embeddings is indexed with. MUST mirror
+ * lib/ai/image-embedder.ts resolveActiveModelVersion exactly — if the
+ * two diverge, the backfill and the cron operate on different
+ * populations of embedding rows and the cron will never reproduce or
+ * refresh whatever the backfill wrote.
  *
- * We hardcode the SigLIP tag here rather than import the TS module so
- * the script stays runnable as a pure ESM mjs without ts-node.
+ * Source-of-truth contract from lib/ai/image-embedder.ts:
+ *   IMAGE_EMBEDDER_VARIANT === "modal-siglip" → SigLIP active
+ *   anything else (or unset)                  → CLIP active (default)
+ *
+ * The tag strings duplicate IMAGE_EMBEDDER_MODEL_VERSION_{CLIP,SIGLIP}
+ * from that file rather than importing them, so this script stays
+ * runnable as plain ESM mjs without ts-node.
  */
 function resolveActiveModelVersion() {
-  const variant = (process.env.IMAGE_EMBEDDER_VARIANT ?? "").toLowerCase();
+  const variant = process.env.IMAGE_EMBEDDER_VARIANT?.trim();
   if (variant === "modal-siglip") return "siglip2-base-patch16-384-v1";
-  // Default flipped to SigLIP on 2026-05-07; check the env first in case
-  // the operator forced CLIP back on.
-  if (variant === "replicate-clip" || variant === "clip") return "replicate-clip-vit-l-14-v1";
-  return "siglip2-base-patch16-384-v1";
+  return "replicate-clip-vit-l-14-v1";
 }
 
 /**
