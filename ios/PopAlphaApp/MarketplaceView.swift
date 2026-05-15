@@ -732,9 +732,9 @@ private struct TopBar: View {
             .buttonStyle(.plain)
 
             NavigationLink {
-                NotificationView()
+                WatchlistView()
             } label: {
-                Image(systemName: "bell.fill")
+                Image(systemName: "heart")
                     .font(.system(size: 13))
                     .foregroundStyle(PA.Colors.textSecondary)
                     .frame(width: 32, height: 32)
@@ -742,6 +742,7 @@ private struct TopBar: View {
                     .clipShape(Circle())
             }
             .hapticTap()
+            .accessibilityLabel("Watchlist")
 
             Circle()
                 .fill(PA.Colors.surfaceSoft)

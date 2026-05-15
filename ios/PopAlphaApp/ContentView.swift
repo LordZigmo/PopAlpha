@@ -448,7 +448,7 @@ struct ProfileTabView: View {
                 NavigationLink {
                     NotificationView()
                 } label: {
-                    profileMenuRow(icon: "bell", title: "Notifications")
+                    profileMenuRow(icon: "bell.badge", title: "Activity")
                 }
                 .buttonStyle(.plain)
 
