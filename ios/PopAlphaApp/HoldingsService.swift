@@ -178,13 +178,18 @@ private struct BulkScanImportResponse: Decodable {
     let errors: [RowError]
     let error: String?
 
+    // Auto-synthesized CodingKeys (i.e., the property names verbatim)
+    // pair correctly with HoldingsService's `.convertFromSnakeCase`
+    // decoder — the strategy already maps JSON `row_index` → Swift
+    // `rowIndex` at decode time. A custom CodingKeys block with
+    // `case rowIndex = "row_index"` would double-map and throw
+    // keyNotFound when the strategy reaches the now-converted key
+    // (Codex P2 review caught this on the initial implementation —
+    // a partial-success response would silently fail to decode, the
+    // batch would look like a full HTTP failure, and a retry could
+    // duplicate the already-inserted rows).
     struct RowError: Decodable {
         let rowIndex: Int
         let error: String
-
-        enum CodingKeys: String, CodingKey {
-            case rowIndex = "row_index"
-            case error
-        }
     }
 }
