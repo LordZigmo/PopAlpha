@@ -75,9 +75,17 @@ function parseMaxCards(raw: string | null): number {
 }
 
 function nameGlossaryGate(en: EnRow, jp: NonNullable<JpCandidate["card"]>): boolean | null {
-  const enBase = (en.canonical_name ?? "").trim().toLowerCase();
-  const enBaseSpecies = enBase.split(/\s+/)[0];
-  const expectedJp = (EN_TO_JP_POKEMON as Record<string, string>)[enBase] ?? (EN_TO_JP_POKEMON as Record<string, string>)[enBaseSpecies] ?? null;
+  // EN_TO_JP_POKEMON is keyed by title-case Pokemon names ("Bulbasaur",
+  // "Charizard"). canonical_cards.canonical_name is also title-case.
+  // Lowercasing before lookup made every glossary check miss and pushed
+  // every kNN candidate through the strict noGlossaryFloorCosine (0.94)
+  // gate, yielding zero pairings on the first prod cron run. Match the
+  // glossary's casing exactly. Suffix stripping (" ex"/"VMAX"/"VSTAR")
+  // happens by taking the first whitespace-delimited token.
+  const enName = (en.canonical_name ?? "").trim();
+  const enBaseSpecies = enName.split(/\s+/)[0]!;
+  const glossary = EN_TO_JP_POKEMON as Record<string, string>;
+  const expectedJp = glossary[enName] ?? glossary[enBaseSpecies] ?? null;
   const jpNative = (jp.canonical_name_native ?? "").trim();
   if (!jpNative || !expectedJp) return null;
   return jpNative.includes(expectedJp);
