@@ -336,6 +336,23 @@ struct ScannerTabView: View {
                     scanner.resumeScanning()
                 }
             }
+            // Pause Vision detection for the paywall's lifetime when
+            // we're in multi-mode. Without this, a quota-wall paywall
+            // triggered by an auto-detect could be re-triggered by
+            // the next auto-detect while the modal is open — burning
+            // server calls and stacking up identify firings the user
+            // can't see. Single-mode paywalls (crown tap, tap-quota
+            // wall) don't need this because auto-detect doesn't add
+            // tray entries there and tap is gated up front. (Codex
+            // P2 review on PR #83.)
+            .onChange(of: showPaywallSheet) { _, isPresented in
+                guard scanner.multiScanMode else { return }
+                if isPresented {
+                    scanner.viewModel?.pauseForExternalCapture()
+                } else {
+                    scanner.resumeScanning()
+                }
+            }
             .onAppear {
                 #if DEBUG
                 runSmokeTestIfRequested()
@@ -821,7 +838,17 @@ struct ScannerTabView: View {
                     scanQuota.rolloverIfNewDay()
                     if !scanQuota.canScan {
                         scanner.clearLastMatch()
-                        scanner.resumeScanning()
+                        // Intentionally do NOT call resumeScanning
+                        // here. runIdentify already paused Vision via
+                        // pauseForExternalCapture, and resuming
+                        // before the paywall opens lets Vision auto-
+                        // detect another card behind the modal —
+                        // which would fire identify, hit the same
+                        // wall, and loop while burning server calls.
+                        // The `.onChange(of: showPaywallSheet)`
+                        // modifier resumes the scanner only when
+                        // the paywall is actually dismissed. (Codex
+                        // P2 review on PR #83.)
                         paywallSurface = "scanner_quota_wall_multi"
                         showPaywallSheet = true
                         return
