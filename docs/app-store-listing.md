@@ -54,8 +54,8 @@ Where we are on the path to "Submit for Review." Updated 2026-05-14.
 | IAP descriptions | §11 | Monthly + Yearly entries + subscription group |
 | Encryption / Export compliance | §12 | Standard "no non-exempt encryption" |
 | Advertising Identifier | §13 | "Not using IDFA" |
-| **Screenshots** | §14 | Currently the biggest remaining blocker — discuss separately |
-| iPad decision: drop or audit | §14 | If keep, need 12.9" iPad Pro screenshots (more work). If drop, change `TARGETED_DEVICE_FAMILY = "1"` |
+| **Screenshots** | §14 | iPhone-only for v1; iPad screenshots are no longer needed |
+| iPad support | §14 | Dropped for v1 via `TARGETED_DEVICE_FAMILY = 1` |
 
 ### ⏳ Pending — Pre-submission Validation
 
@@ -457,14 +457,14 @@ Matches `NSPrivacyTracking = false` in the manifest. We don't request `ATTrackin
 
 ## 14. Screenshots Checklist
 
-Apple needs screenshots for:
+Apple needs screenshots for the iPhone-only v1 target:
 
 | Display class | Required for v1? | Resolution | Notes |
 |---|---|---|---|
 | **6.7" iPhone (iPhone 14 Pro Max class)** | ✅ Required | 1290 × 2796 | Primary screenshot tier — what most reviewers see |
 | **6.5" iPhone** | Optional but auto-scaled from 6.7" | — | Apple usually doesn't reject if missing |
 | **5.5" iPhone (iPhone 8 Plus)** | Apple is deprecating this; only required if you target older devices | 1242 × 2208 | We support iOS 17+, so probably skip |
-| **12.9" iPad Pro** | Required IF the app declares iPad support | 2048 × 2732 | We currently target iPhone + iPad (`TARGETED_DEVICE_FAMILY = "1,2"`). **Decide: take iPad screenshots OR drop iPad to skip the work.** |
+| **12.9" iPad Pro** | No | 2048 × 2732 | v1 targets iPhone only (`TARGETED_DEVICE_FAMILY = 1`), so iPad screenshots are not required. |
 
 **Suggested screenshot lineup** (5–7 screens telling the story top-to-bottom):
 1. **Hero** — Scanner identifying a card mid-scan with the matched card sliding up
@@ -530,8 +530,8 @@ Run through this before tapping **Submit for Review**:
 | ASC privacy labels filled | ⏳ **You** |
 | Screenshots taken in light mode | ⏳ **You** |
 | Pokémon trademark Content Rights answer reviewed by counsel | ⏳ **You** |
-| Support URL `popalpha.ai/support` exists | ⏳ **Verify** |
-| iPad layout audit OR drop iPad support | ⏳ **Decide** |
+| Support URL `popalpha.ai/support` exists | ✅ Route added; verify after deploy |
+| iPad layout audit OR drop iPad support | ✅ Dropped for v1 |
 
 ---
 
