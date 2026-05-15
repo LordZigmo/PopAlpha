@@ -532,7 +532,7 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
         // full card; post-fix, they fall through to the center-crop
         // fallback which sees the actual card.
         let detectT0 = Date()
-        let detected = engine.detectAndCrop(fullImage)
+        let detected = engine.detectAndCrop(fullImage)?.image
         let detectMs = Date().timeIntervalSince(detectT0) * 1000
         if let detected, Self.isPlausibleCardCrop(detected) {
             Logger.scan.debug("tap_detect: hit=true ms=\(String(format: "%.1f", detectMs)) size=\(Int(detected.size.width))x\(Int(detected.size.height))")

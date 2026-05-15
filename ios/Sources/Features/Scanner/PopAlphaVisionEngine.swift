@@ -8,8 +8,80 @@ import UIKit
 import VideoToolbox
 import Vision
 
+/// Phase 0d (2026-05-15): structured diagnostics emitted from
+/// `croppedToCard` so downstream code can correlate a captured frame
+/// with the geometry of its perspective-correction step. The data is the
+/// minimum needed to reverse-engineer the Mode 8 coordinate-system quirk
+/// (`scanner-ocr-failure-modes.md`) from real-device samples: the four
+/// Vision corners in pixel space, the resulting CIImage extent, the
+/// pre-correction bitmap size, and whether step 4's portrait rotation
+/// ran. Serializes to JSON for `scan_identify_events.ocr_perspective_corrected_extent`
+/// (server-routed) and PostHog `card_scanned` properties (offline).
+public struct PerspectiveCorrectionDiagnostics: Codable, Sendable, Equatable {
+    public struct Point: Codable, Sendable, Equatable {
+        public let x: Double
+        public let y: Double
+    }
+    public struct Size: Codable, Sendable, Equatable {
+        public let width: Double
+        public let height: Double
+    }
+    public struct Rect: Codable, Sendable, Equatable {
+        public let x: Double
+        public let y: Double
+        public let width: Double
+        public let height: Double
+    }
+
+    /// Four corners passed to `CIPerspectiveCorrection`, in pixel space,
+    /// ordered `[topLeft, topRight, bottomLeft, bottomRight]` to match the
+    /// filter's input contract.
+    public let inputCorners: [Point]
+    /// CIImage extent of the perspective-corrected output, BEFORE the
+    /// step-4 portrait rotation. Reveals whether the filter produced a
+    /// portrait or landscape rectangle.
+    public let outputExtent: Rect
+    /// Dimensions of the bitmap that was passed into the filter (step-1
+    /// re-rendered up-oriented image). The corner coordinates are in this
+    /// pixel space.
+    public let inputSize: Size
+    /// True when step 4's 90° clockwise rotation ran — i.e., the
+    /// perspective-corrected output was wider than tall and we forced
+    /// portrait. This is where the ~50% upside-down rotation ambiguity
+    /// originates.
+    public let portraitRotationApplied: Bool
+
+    /// Flat-keyed dictionary suitable for PostHog `card_scanned`
+    /// properties (offline path). Server-routed scans send the full
+    /// struct as a JSON query param that lands in
+    /// `scan_identify_events.ocr_perspective_corrected_extent`; PostHog
+    /// gets the aggregate-query-friendly subset here. Caller layers
+    /// in `"ocr_perspective_corrected": false` for the nil case.
+    public var postHogProperties: [String: Any] {
+        return [
+            "ocr_perspective_corrected": true,
+            "ocr_perspective_portrait_rotation_applied": portraitRotationApplied,
+            "ocr_perspective_input_w": Int(inputSize.width),
+            "ocr_perspective_input_h": Int(inputSize.height),
+            "ocr_perspective_output_w": Int(outputExtent.width),
+            "ocr_perspective_output_h": Int(outputExtent.height),
+        ]
+    }
+}
+
 public protocol PopAlphaVisionEngineDelegate: AnyObject {
+    /// Legacy entry point kept for source compatibility. The engine itself
+    /// only invokes `didDetectStableCard(image:perspectiveCorrection:)`;
+    /// existing implementers that only override the unary form receive the
+    /// image via the default-implementation forwarder below.
     func didDetectStableCard(image: UIImage)
+
+    /// Phase 0d (2026-05-15) — receives Mode 8 diagnostic data alongside
+    /// the cropped card. `perspectiveCorrection` is nil only when
+    /// `croppedToCard` failed (caller falls back to the full frame).
+    /// Default implementation forwards to the unary `didDetectStableCard`
+    /// so older implementers compile unchanged.
+    func didDetectStableCard(image: UIImage, perspectiveCorrection: PerspectiveCorrectionDiagnostics?)
 
     /// Fires every frame that the engine has a live candidate rectangle, and
     /// with `nil` when the candidate expires. Bounding box is in Vision's
@@ -19,11 +91,27 @@ public protocol PopAlphaVisionEngineDelegate: AnyObject {
 }
 
 public extension PopAlphaVisionEngineDelegate {
+    func didDetectStableCard(image: UIImage, perspectiveCorrection: PerspectiveCorrectionDiagnostics?) {
+        didDetectStableCard(image: image)
+    }
+
     func didUpdateCandidateBoundingBox(_ normalizedBoundingBox: CGRect?) {}
 }
 
 public final class PopAlphaVisionEngine {
     public weak var delegate: PopAlphaVisionEngineDelegate?
+
+    /// Phase 0d (2026-05-15) — most recent `croppedToCard` diagnostic,
+    /// stashed so the tap path (`detectAndCrop` → `frameCapturer` →
+    /// `captureFrameAndIdentify`) can read it without a closure-return
+    /// signature change. Reset to nil whenever `croppedToCard` is
+    /// invoked, so a successful crop overwrites and a failure (Vision
+    /// found no quadrilateral, or the CI filter chain bailed) leaves
+    /// nil. The auto-detect path receives the same diagnostic via the
+    /// `didDetectStableCard(image:perspectiveCorrection:)` delegate
+    /// method and should prefer that over this property — the property
+    /// is for callers that have no synchronous tuple-return path.
+    public private(set) var lastPerspectiveCorrection: PerspectiveCorrectionDiagnostics?
 
     public let minimumStableDuration: TimeInterval
     public let aspectRatioTolerance: CGFloat
@@ -301,14 +389,19 @@ public final class PopAlphaVisionEngine {
         // similarities near random (~0.19). Cropping to just the card —
         // with a small padding for edge tolerance — brings the query
         // image's visual statistics back in line with the index.
-        let cardImage = croppedToCard(image, observation: stableCandidate.observation) ?? image
+        let cropResult = croppedToCard(image, observation: stableCandidate.observation)
+        let cardImage = cropResult?.image ?? image
+        let perspectiveCorrection = cropResult?.diagnostics
 
         callbackQueue.async { [weak self] in
             guard let self else {
                 return
             }
 
-            self.delegate?.didDetectStableCard(image: cardImage)
+            self.delegate?.didDetectStableCard(
+                image: cardImage,
+                perspectiveCorrection: perspectiveCorrection,
+            )
         }
     }
 
@@ -346,7 +439,14 @@ public final class PopAlphaVisionEngine {
     /// CoreImage filter chain fails (rare). Callers fall back to the
     /// full frame in that case — same contract as the previous
     /// implementation.
-    private func croppedToCard(_ image: UIImage, observation: VNRectangleObservation) -> UIImage? {
+    private func croppedToCard(_ image: UIImage, observation: VNRectangleObservation) -> (image: UIImage, diagnostics: PerspectiveCorrectionDiagnostics)? {
+        // Phase 0d reset — every croppedToCard invocation is a fresh
+        // "this is the most recent perspective correction" claim. If we
+        // bail below, the property stays nil, signaling "no recent
+        // perspective correction" (so tap-path readers don't pick up
+        // a stale diagnostic from a previous frame).
+        self.lastPerspectiveCorrection = nil
+
         // Step 1: render the input to a flat up-oriented bitmap so the
         // CIImage we wrap doesn't carry residual UIImage.imageOrientation
         // metadata that would skew the corner-coordinate math.
@@ -410,27 +510,19 @@ public final class PopAlphaVisionEngine {
         // right-to-left text). The intended fix mis-modeled the
         // CIImage / CGImage Y-axis interaction.
         //
-        // Current behavior of this `croppedToCard` (without the broken
-        // Y-flip): Vision OCR's spatial filter consistently rejects
-        // card_numbers as being at midY > 0.35 — the "Mode 8"
-        // perspective-correction coordinate-system quirk in
-        // scanner-ocr-failure-modes.md. The pass-2 fallback in
-        // OCRService.extractCardIdentifiersMulti handles this
-        // gracefully (re-runs without spatial filter, plausibility
-        // filter recovers the card_number), so end-to-end accuracy is
-        // unaffected — only the internal pass-1-vs-pass-2 distinction
-        // changes. Real-device data 2026-05-07 confirms 8 of 9 pass-2
-        // firings recovered the correct card_number on cards Vision
-        // saw clearly.
-        //
-        // Properly diagnosing the coordinate-system quirk requires
-        // either inspecting saved capture images or adding diagnostic
-        // logging of (input quadrilateral corners, output extent,
-        // sample observation midY) — out of scope for this iteration.
-        // The current behavior is acceptable and shipping.
+        // Phase 0d (2026-05-15): the diagnostic struct returned below
+        // captures input corners, output extent, and the step-4
+        // rotation flag so each real-device scan now writes the
+        // geometry to scan_identify_events.ocr_perspective_corrected_extent
+        // (server-routed) and the offline PostHog card_scanned event.
+        // Once enough samples land, the Mode 8 fix gets an empirical
+        // diagnostic-then-fix pass instead of another mis-modeled
+        // coord transform.
+
+        let outputExtent = outputImage.extent
 
         let context = CIContext(options: nil)
-        guard let outputCG = context.createCGImage(outputImage, from: outputImage.extent) else {
+        guard let outputCG = context.createCGImage(outputImage, from: outputExtent) else {
             return nil
         }
 
@@ -442,10 +534,34 @@ public final class PopAlphaVisionEngine {
         // we need to rotate 90° to make the card upright (or
         // upside-down — see docstring above for the 50/50 rotation
         // ambiguity).
-        if corrected.size.width > corrected.size.height {
-            return rotatedClockwise90(corrected) ?? corrected
-        }
-        return corrected
+        let portraitRotationApplied = corrected.size.width > corrected.size.height
+        let finalImage = portraitRotationApplied
+            ? (rotatedClockwise90(corrected) ?? corrected)
+            : corrected
+
+        let diagnostics = PerspectiveCorrectionDiagnostics(
+            inputCorners: [
+                .init(x: Double(topLeft.x), y: Double(topLeft.y)),
+                .init(x: Double(topRight.x), y: Double(topRight.y)),
+                .init(x: Double(bottomLeft.x), y: Double(bottomLeft.y)),
+                .init(x: Double(bottomRight.x), y: Double(bottomRight.y)),
+            ],
+            outputExtent: .init(
+                x: Double(outputExtent.origin.x),
+                y: Double(outputExtent.origin.y),
+                width: Double(outputExtent.width),
+                height: Double(outputExtent.height),
+            ),
+            inputSize: .init(
+                width: Double(orientedSize.width),
+                height: Double(orientedSize.height),
+            ),
+            portraitRotationApplied: portraitRotationApplied,
+        )
+
+        self.lastPerspectiveCorrection = diagnostics
+
+        return (image: finalImage, diagnostics: diagnostics)
     }
 
     /// Rotate a UIImage 90° clockwise by setting the orientation flag
@@ -497,7 +613,7 @@ public final class PopAlphaVisionEngine {
     /// confidence (caller should fall back to a center-crop or the
     /// full frame). Reuses the same configured request the
     /// continuous detection path uses, so tuning stays in one place.
-    public func detectAndCrop(_ image: UIImage) -> UIImage? {
+    public func detectAndCrop(_ image: UIImage) -> (image: UIImage, perspectiveCorrection: PerspectiveCorrectionDiagnostics)? {
         guard let cg = image.cgImage else { return nil }
 
         // Fresh request per call. Sharing rectangleRequest across the
@@ -529,7 +645,8 @@ public final class PopAlphaVisionEngine {
         }
         guard let observation = best else { return nil }
 
-        return croppedToCard(image, observation: observation)
+        guard let cropped = croppedToCard(image, observation: observation) else { return nil }
+        return (image: cropped.image, perspectiveCorrection: cropped.diagnostics)
     }
 
     private func expireCandidateIfNeeded(at timestamp: TimeInterval) {
