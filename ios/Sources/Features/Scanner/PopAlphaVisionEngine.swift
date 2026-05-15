@@ -101,17 +101,34 @@ public extension PopAlphaVisionEngineDelegate {
 public final class PopAlphaVisionEngine {
     public weak var delegate: PopAlphaVisionEngineDelegate?
 
-    /// Phase 0d (2026-05-15) — most recent `croppedToCard` diagnostic,
-    /// stashed so the tap path (`detectAndCrop` → `frameCapturer` →
-    /// `captureFrameAndIdentify`) can read it without a closure-return
-    /// signature change. Reset to nil whenever `croppedToCard` is
-    /// invoked, so a successful crop overwrites and a failure (Vision
-    /// found no quadrilateral, or the CI filter chain bailed) leaves
-    /// nil. The auto-detect path receives the same diagnostic via the
+    /// Phase 0d (2026-05-15) — most recent perspective-correction
+    /// diagnostic that *the consumer chose to publish*. Writable so
+    /// the tap path can explicitly stash only when the produced crop
+    /// is actually used (i.e., `detectAndCrop` returned a quadrilateral
+    /// AND `ScannerView.isPlausibleCardCrop` accepted it). The engine
+    /// itself does NOT auto-stash from `croppedToCard`, because the
+    /// "auto-detect produced a crop" condition is not equivalent to
+    /// "the crop reaches the embedder": Vision can lock onto a 112×116
+    /// sub-card noise region that the downstream sanity check
+    /// (`isPlausibleCardCrop`) rejects, and we don't want the
+    /// diagnostic from that rejected region attached to the
+    /// center-crop fallback that actually flows downstream.
+    ///
+    /// Tap-path contract:
+    ///   - `ScannerView.captureCurrentFrame` writes nil on entry
+    ///     (clean slate), then on a successful + accepted detection
+    ///     writes the diagnostic. Rejection / no-rectangle paths
+    ///     leave it nil.
+    ///   - `ScannerTabView.captureFrameAndIdentify` reads it
+    ///     immediately after the primary `frameCapturer()` call,
+    ///     BEFORE the multi-frame OCR loop overwrites it with
+    ///     subsequent frames' results.
+    ///
+    /// Auto-detect path does NOT use this property — it receives the
+    /// diagnostic synchronously via the
     /// `didDetectStableCard(image:perspectiveCorrection:)` delegate
-    /// method and should prefer that over this property — the property
-    /// is for callers that have no synchronous tuple-return path.
-    public private(set) var lastPerspectiveCorrection: PerspectiveCorrectionDiagnostics?
+    /// parameter and never reads back from the engine.
+    public var lastPerspectiveCorrection: PerspectiveCorrectionDiagnostics?
 
     public let minimumStableDuration: TimeInterval
     public let aspectRatioTolerance: CGFloat
@@ -440,13 +457,6 @@ public final class PopAlphaVisionEngine {
     /// full frame in that case — same contract as the previous
     /// implementation.
     private func croppedToCard(_ image: UIImage, observation: VNRectangleObservation) -> (image: UIImage, diagnostics: PerspectiveCorrectionDiagnostics)? {
-        // Phase 0d reset — every croppedToCard invocation is a fresh
-        // "this is the most recent perspective correction" claim. If we
-        // bail below, the property stays nil, signaling "no recent
-        // perspective correction" (so tap-path readers don't pick up
-        // a stale diagnostic from a previous frame).
-        self.lastPerspectiveCorrection = nil
-
         // Step 1: render the input to a flat up-oriented bitmap so the
         // CIImage we wrap doesn't carry residual UIImage.imageOrientation
         // metadata that would skew the corner-coordinate math.
@@ -558,8 +568,6 @@ public final class PopAlphaVisionEngine {
             ),
             portraitRotationApplied: portraitRotationApplied,
         )
-
-        self.lastPerspectiveCorrection = diagnostics
 
         return (image: finalImage, diagnostics: diagnostics)
     }
