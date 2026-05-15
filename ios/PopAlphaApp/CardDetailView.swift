@@ -124,6 +124,7 @@ struct CardDetailView: View {
 
     @State private var spinAngle: Double = 0
     @State private var spinDragStart: Double = 0
+    @State private var spinIsEngaged: Bool = false
 
     // MARK: - JP card theming
 
@@ -655,15 +656,29 @@ struct CardDetailView: View {
             axis: (x: 0, y: 1, z: 0),
             perspective: 0.5
         )
-        .gesture(
-            DragGesture(minimumDistance: 4)
+        // simultaneousGesture (not .gesture) so the parent ScrollView keeps
+        // recognizing vertical pans on the hero. We only consume the drag
+        // once horizontal movement clearly dominates, otherwise vertical
+        // scrolls that begin on the card would be eaten by the spinner.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 12)
                 .onChanged { value in
+                    let dx = abs(value.translation.width)
+                    let dy = abs(value.translation.height)
+                    if !spinIsEngaged {
+                        // Engage only when the gesture is dominantly
+                        // horizontal. 1.4× ratio leaves diagonals to scroll.
+                        guard dx > dy * 1.4 else { return }
+                        spinIsEngaged = true
+                    }
                     // 0.6°/pt — ~150pt drag ≈ 90° rotation, tuned for a
                     // wrist-flick feel without runaway spins.
                     let delta = Double(value.translation.width) * 0.6
                     spinAngle = spinDragStart + delta
                 }
                 .onEnded { _ in
+                    guard spinIsEngaged else { return }
+                    spinIsEngaged = false
                     let target = (spinAngle / 180.0).rounded() * 180.0
                     withAnimation(.spring(response: 0.45, dampingFraction: 0.78)) {
                         spinAngle = target
