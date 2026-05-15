@@ -337,10 +337,13 @@ struct LiquidGlassSurface: ViewModifier {
     var accent: Color
     var radius: CGFloat = PA.Layout.panelRadius
     /// Peak opacity of the scroll-driven specular highlight (0..1).
-    /// Kept very low so the sheen reads as a barely-perceptible
-    /// reflection on glass — anything above ~0.10 starts feeling like
-    /// a competing focal element on top of the rich tint.
-    var shineIntensity: Double = 0.05
+    /// The highlight uses the accent color rather than white so the
+    /// sweep reads as a tinted reflection of the card itself — a
+    /// brighter glint of the same chroma — instead of a competing
+    /// white streak. Accent is darker than white, so this value is
+    /// numerically higher than the old `.white` shimmer values; the
+    /// perceptual brightness is much lower.
+    var shineIntensity: Double = 0.20
 
     /// The accent wash is dialed back in light mode so that small
     /// accent-colored labels (eg. `MarketHeroCard`'s "POPALPHA"
@@ -452,10 +455,16 @@ struct LiquidGlassSurface: ViewModifier {
     private func shineStops(progress: Double) -> [Gradient.Stop] {
         let center = max(0, min(1, progress))
         let halfWidth = 0.18
+        // Accent-colored shimmer (not white) so the sweep reads as a
+        // tinted reflection of the card's own color rather than a
+        // bright white streak. With `.plusLighter` blending against
+        // the accent-tinted base below, the highlight area looks like
+        // a brighter glint of the same chroma — exactly how a real
+        // reflection on tinted glass behaves.
         return [
-            .init(color: .white.opacity(0), location: max(center - halfWidth, 0)),
-            .init(color: .white.opacity(shineIntensity), location: center),
-            .init(color: .white.opacity(0), location: min(center + halfWidth, 1))
+            .init(color: accent.opacity(0), location: max(center - halfWidth, 0)),
+            .init(color: accent.opacity(shineIntensity), location: center),
+            .init(color: accent.opacity(0), location: min(center + halfWidth, 1))
         ]
     }
 }
@@ -472,7 +481,7 @@ extension View {
     func liquidGlassSurface(
         accent: Color,
         radius: CGFloat = PA.Layout.panelRadius,
-        shineIntensity: Double = 0.05
+        shineIntensity: Double = 0.20
     ) -> some View {
         modifier(LiquidGlassSurface(accent: accent, radius: radius, shineIntensity: shineIntensity))
     }
