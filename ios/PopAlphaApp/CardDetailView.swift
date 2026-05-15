@@ -496,16 +496,6 @@ struct CardDetailView: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 8) {
-                    Button {} label: {
-                        Image(systemName: "bell")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(PA.Colors.text)
-                            .frame(width: 36, height: 36)
-                            .background(.ultraThinMaterial.opacity(0.5))
-                            .clipShape(Circle())
-                    }
-                    .accessibilityLabel("Notifications")
-
                     // Share — produces the same popalpha.ai/c/<slug> URL
                     // that the AASA file declares as a Universal Link
                     // path. Tapping a shared link from Messages/Mail/etc.

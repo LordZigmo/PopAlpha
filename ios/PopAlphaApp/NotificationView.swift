@@ -1,30 +1,16 @@
 import SwiftUI
-import OSLog
 
 // MARK: - Notification View
 //
-// Profile → Notifications. Split into two stacked sections:
+// Profile → Activity. Activity feed (likes / comments / follows).
 //
-//   1. Delivery-time preferences (wheel-style DatePicker)
-//   2. Activity feed (likes / comments / follows)
-//
-// The preferences section is the first thing a collector sees when
-// they open Notifications, so they can discover and set their
-// preferred delivery time without hunting in Settings. The feed
-// scrolls below it.
+// Delivery-time preferences and notification toggles live in
+// SettingsView → Notifications. This view is the activity stream only.
 
 struct NotificationView: View {
     @State private var notifications: [ActivityService.NotificationItem] = []
     @State private var isLoadingFeed = true
     @State private var feedError: String?
-
-    // Delivery-time preferences — loaded separately from the feed so
-    // the picker can be interactive even if the feed fails to load.
-    @State private var settings: UserSettings?
-    @State private var selectedDeliveryTime: Date = defaultDeliveryDate()
-    @State private var deliveryTimezone: String = TimeZone.current.identifier
-    @State private var isSavingTime = false
-    @State private var saveTask: Task<Void, Never>?
 
     private var auth: AuthService { AuthService.shared }
 
@@ -38,19 +24,19 @@ struct NotificationView: View {
                 authedContent
             }
         }
-        .navigationTitle("Notifications")
+        .navigationTitle("Activity")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(PA.Colors.surface, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         // .task(id:) so we only fetch when auth state flips, not on
         // every view re-appear. Avoids resetting the scroll position of
-        // the activity feed below the delivery-time picker every time
-        // the user pops back to this screen. Manual refresh still works.
+        // the activity feed every time the user pops back to this
+        // screen. Manual refresh still works.
         .task(id: auth.isAuthenticated) {
-            await loadAll()
+            await loadFeed()
         }
         .refreshable {
-            await loadAll()
+            await loadFeed()
         }
     }
 
@@ -59,82 +45,14 @@ struct NotificationView: View {
     private var authedContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                deliveryTimeSection
-                    .padding(.horizontal, PA.Layout.sectionPadding)
-                    .padding(.top, 12)
-
                 activityFeedHeader
                     .padding(.horizontal, PA.Layout.sectionPadding)
-                    .padding(.top, 4)
+                    .padding(.top, 12)
 
                 feedBody
             }
             .padding(.bottom, 24)
         }
-    }
-
-    // MARK: - Delivery time section
-    //
-    // Wheel-style DatePicker scoped to hour + minute. Debounces writes
-    // 500ms after the user stops spinning so we don't hammer the server
-    // on every tick. The IANA timezone is captured on every save so a
-    // user who travels will have their server-side preference move
-    // with them.
-
-    private var deliveryTimeSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Text("DELIVERY TIME")
-                    .font(.system(size: 10, weight: .semibold))
-                    .tracking(2.0)
-                    .foregroundStyle(PA.Colors.accent)
-                if isSavingTime {
-                    ProgressView()
-                        .progressViewStyle(.circular)
-                        .controlSize(.mini)
-                        .tint(PA.Colors.accent)
-                }
-                Spacer()
-            }
-
-            Text("When to get your daily summary")
-                .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(PA.Colors.text)
-
-            Text("Price moves, alerts, and activity are bundled into one push near this time so your phone stays quiet the rest of the day.")
-                .font(.system(size: 12))
-                .foregroundStyle(PA.Colors.textSecondary)
-                .lineSpacing(2)
-                .fixedSize(horizontal: false, vertical: true)
-
-            // Wheel-style picker. `.labelsHidden()` hides the empty
-            // leading label so the wheel centers itself.
-            DatePicker(
-                "",
-                selection: $selectedDeliveryTime,
-                displayedComponents: .hourAndMinute
-            )
-            .datePickerStyle(.wheel)
-            .labelsHidden()
-            .tint(PA.Colors.accent)
-            .colorScheme(.dark)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 4)
-            .onChange(of: selectedDeliveryTime) { _, newValue in
-                scheduleSave(newValue)
-            }
-
-            HStack(spacing: 4) {
-                Image(systemName: "globe")
-                    .font(.system(size: 10, weight: .medium))
-                Text("Using \(TimeZone.current.identifier)")
-                    .font(.system(size: 11, weight: .medium))
-            }
-            .foregroundStyle(PA.Colors.muted)
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .glassSurface(radius: PA.Layout.cardRadius)
     }
 
     private var activityFeedHeader: some View {
@@ -144,8 +62,7 @@ struct NotificationView: View {
             .foregroundStyle(PA.Colors.muted)
     }
 
-    // MARK: - Feed section (replaces the full-screen states with inline
-    // variants so the delivery-time picker stays visible above them).
+    // MARK: - Feed section
 
     @ViewBuilder
     private var feedBody: some View {
@@ -281,11 +198,11 @@ struct NotificationView: View {
                 .font(.system(size: 36))
                 .foregroundStyle(PA.Colors.accent)
 
-            Text("Sign in for notifications")
+            Text("Sign in for activity")
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(PA.Colors.text)
 
-            Text("Set your delivery time and get notified when collectors interact with your activity.")
+            Text("Get notified when collectors interact with your activity.")
                 .font(PA.Typography.cardSubtitle)
                 .foregroundStyle(PA.Colors.muted)
                 .multilineTextAlignment(.center)
@@ -307,31 +224,6 @@ struct NotificationView: View {
 
     // MARK: - Data
 
-    private func loadAll() async {
-        async let settingsTask: Void = loadSettings()
-        async let feedTask: Void = loadFeed()
-        _ = await (settingsTask, feedTask)
-    }
-
-    private func loadSettings() async {
-        guard auth.isAuthenticated else { return }
-        do {
-            let fetched = try await SettingsService.shared.fetchSettings()
-            await MainActor.run {
-                settings = fetched
-                selectedDeliveryTime = dateFrom(
-                    hour: fetched.notificationDeliveryHour,
-                    minute: fetched.notificationDeliveryMinute
-                )
-                deliveryTimezone = fetched.notificationDeliveryTimezone
-            }
-        } catch {
-            // Non-fatal — leave the picker at the default 9am value so
-            // the user can still interact. Next save will still succeed.
-            Logger.push.debug("settings load failed: \(error)")
-        }
-    }
-
     private func loadFeed() async {
         guard auth.isAuthenticated else {
             isLoadingFeed = false
@@ -350,63 +242,7 @@ struct NotificationView: View {
         isLoadingFeed = false
     }
 
-    // MARK: - Save debounce
-    //
-    // DatePicker.onChange fires on every tick as the wheel spins. We
-    // wait 500ms after the last change before actually hitting the
-    // server. Each new change cancels the pending save.
-
-    private func scheduleSave(_ newDate: Date) {
-        saveTask?.cancel()
-        saveTask = Task {
-            try? await Task.sleep(for: .milliseconds(500))
-            guard !Task.isCancelled else { return }
-            await saveDeliveryTime(newDate)
-        }
-    }
-
-    private func saveDeliveryTime(_ newDate: Date) async {
-        let components = Calendar.current.dateComponents([.hour, .minute], from: newDate)
-        guard let hour = components.hour, let minute = components.minute else { return }
-
-        let tz = TimeZone.current.identifier
-        await MainActor.run { isSavingTime = true }
-        do {
-            try await SettingsService.shared.updateSettings(
-                notificationDeliveryHour: hour,
-                notificationDeliveryMinute: minute,
-                notificationDeliveryTimezone: tz
-            )
-            await MainActor.run {
-                deliveryTimezone = tz
-                isSavingTime = false
-            }
-        } catch {
-            Logger.push.debug("save delivery time failed: \(error)")
-            await MainActor.run { isSavingTime = false }
-        }
-    }
-
     // MARK: - Helpers
-
-    /// Produce a Date value "today at HH:MM local" from the stored
-    /// hour/minute integers. DatePicker binds to a Date, not to raw
-    /// components — the date portion is irrelevant since we only read
-    /// hour/minute back out.
-    private func dateFrom(hour: Int, minute: Int) -> Date {
-        var components = DateComponents()
-        components.hour = max(0, min(23, hour))
-        components.minute = max(0, min(59, minute))
-        return Calendar.current.date(from: components) ?? Self.defaultDeliveryDate()
-    }
-
-    /// Default value when settings haven't loaded yet — 9:00 local.
-    private static func defaultDeliveryDate() -> Date {
-        var components = DateComponents()
-        components.hour = 9
-        components.minute = 0
-        return Calendar.current.date(from: components) ?? Date()
-    }
 
     private func timeAgo(_ iso: String) -> String {
         let formatter = ISO8601DateFormatter()

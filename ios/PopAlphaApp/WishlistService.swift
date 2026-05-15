@@ -116,6 +116,32 @@ actor WishlistService {
             body: body,
             decoder: decoder
         )
+
+        // Cache-write so isWishlisted(slug:) reflects the add immediately.
+        // Without this the heart visually reverts the next time the
+        // WatchlistButton mounts — the server has the row, but the local
+        // cache (only populated by fetchWishlist on WatchlistView open)
+        // doesn't, and the button reads from the cache on .task. The stub
+        // gets replaced with hydrated data the next time WatchlistView
+        // calls fetchWishlist().
+        if response.ok {
+            var items = cachedItems()
+            if !items.contains(where: { $0.canonicalSlug == slug }) {
+                items.append(
+                    WishlistItem(
+                        id: 0,
+                        canonicalSlug: slug,
+                        note: note,
+                        createdAt: ISO8601DateFormatter().string(from: Date()),
+                        canonicalName: nil,
+                        setName: nil,
+                        year: nil,
+                        imageUrl: nil
+                    )
+                )
+                cacheItems(items)
+            }
+        }
         return response.ok
     }
 
@@ -128,6 +154,11 @@ actor WishlistService {
             query: [("slug", slug)],
             decoder: decoder
         )
+
+        if response.ok {
+            let items = cachedItems().filter { $0.canonicalSlug != slug }
+            cacheItems(items)
+        }
         return response.ok
     }
 

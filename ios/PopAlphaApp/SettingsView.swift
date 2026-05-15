@@ -13,6 +13,14 @@ struct SettingsView: View {
     @State private var profileVisibility: ProfileVisibility = .publicVisible
     @State private var activityVisibility: ActivityVisibility = .everyone
 
+    // Bundled-notification delivery time (was previously in NotificationView).
+    // DatePicker binds to a Date; we read the hour/minute back out on save
+    // and discard the date portion.
+    @State private var deliveryTime: Date = SettingsView.defaultDeliveryDate()
+    @State private var deliveryTimeLoaded = false
+    @State private var isSavingDeliveryTime = false
+    @State private var deliveryTimeSaveTask: Task<Void, Never>?
+
     // Deletion state
     @State private var showDeleteConfirmation = false
     @State private var isDeleting = false
@@ -184,6 +192,10 @@ struct SettingsView: View {
                 if auth.isAuthenticated {
                 // Notifications
                 settingsSection("Notifications") {
+                    deliveryTimeRow
+
+                    Divider().background(PA.Colors.border).padding(.leading, 44)
+
                     toggleRow(
                         icon: "chart.line.uptrend.xyaxis",
                         title: "Price Alerts",
@@ -401,6 +413,99 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - Delivery Time Row
+    //
+    // Compact DatePicker that fits inline with the other notification rows.
+    // Wheel-style picker (used in the old NotificationView) is too tall.
+    // Debounces saves 500ms so dragging the picker doesn't hammer the API.
+    // Captures the IANA timezone on every save so a traveling user has
+    // their preference move with them.
+
+    private var deliveryTimeRow: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "clock")
+                .font(.system(size: 16))
+                .foregroundStyle(PA.Colors.accent)
+                .frame(width: 24)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Delivery Time")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(PA.Colors.text)
+                Text("When to get your daily summary")
+                    .font(PA.Typography.caption)
+                    .foregroundStyle(PA.Colors.muted)
+            }
+
+            Spacer()
+
+            if isSavingDeliveryTime {
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .controlSize(.mini)
+                    .tint(PA.Colors.accent)
+            }
+
+            DatePicker(
+                "",
+                selection: $deliveryTime,
+                displayedComponents: .hourAndMinute
+            )
+            .datePickerStyle(.compact)
+            .labelsHidden()
+            .tint(PA.Colors.accent)
+            .onChange(of: deliveryTime) { _, newValue in
+                guard deliveryTimeLoaded else { return }
+                scheduleDeliveryTimeSave(newValue)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Daily summary delivery time")
+    }
+
+    private func scheduleDeliveryTimeSave(_ newDate: Date) {
+        deliveryTimeSaveTask?.cancel()
+        deliveryTimeSaveTask = Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            await saveDeliveryTime(newDate)
+        }
+    }
+
+    private func saveDeliveryTime(_ newDate: Date) async {
+        let components = Calendar.current.dateComponents([.hour, .minute], from: newDate)
+        guard let hour = components.hour, let minute = components.minute else { return }
+        let tz = TimeZone.current.identifier
+        await MainActor.run { isSavingDeliveryTime = true }
+        try? await SettingsService.shared.updateSettings(
+            notificationDeliveryHour: hour,
+            notificationDeliveryMinute: minute,
+            notificationDeliveryTimezone: tz
+        )
+        await MainActor.run { isSavingDeliveryTime = false }
+    }
+
+    /// Build a Date with today's date at the given hour/minute, in the
+    /// current calendar. DatePicker binds to Date; the date portion is
+    /// irrelevant since we only read hour/minute back on save.
+    private static func dateFrom(hour: Int, minute: Int) -> Date {
+        var components = DateComponents()
+        components.hour = max(0, min(23, hour))
+        components.minute = max(0, min(59, minute))
+        return Calendar.current.date(from: components) ?? defaultDeliveryDate()
+    }
+
+    /// Default value before settings load — 9:00 local.
+    private static func defaultDeliveryDate() -> Date {
+        var components = DateComponents()
+        components.hour = 9
+        components.minute = 0
+        return Calendar.current.date(from: components) ?? Date()
+    }
+
     // MARK: - Row Builders
 
     private func toggleRow(icon: String, title: String, subtitle: String, isOn: Binding<Bool>, onChange: @escaping () async -> Void) -> some View {
@@ -562,8 +667,17 @@ struct SettingsView: View {
             productUpdates = s.notifyProductUpdates
             profileVisibility = ProfileVisibility(rawValue: s.profileVisibility) ?? .publicVisible
             activityVisibility = ActivityVisibility(rawValue: s.activityVisibility) ?? .everyone
+            // Set deliveryTime before flipping deliveryTimeLoaded so the
+            // hydration assignment doesn't trip the .onChange handler
+            // and schedule a no-op save round-trip.
+            deliveryTime = Self.dateFrom(
+                hour: s.notificationDeliveryHour,
+                minute: s.notificationDeliveryMinute
+            )
+            deliveryTimeLoaded = true
         } catch {
-            // Use defaults
+            // Use defaults; still let user interact with the picker.
+            deliveryTimeLoaded = true
         }
         isLoading = false
     }
