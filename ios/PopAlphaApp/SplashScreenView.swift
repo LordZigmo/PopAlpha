@@ -12,9 +12,17 @@ struct SplashScreenView: View {
     @State private var logoOpacity: Double = 1.0
 
     var body: some View {
+        // `.ignoresSafeArea()` on the ZStack itself — not just on the
+        // background color — so the logo centers in the FULL screen.
+        // The static UILaunchScreen has `UIImageRespectsSafeAreaInsets
+        // = false` in Info.plist and so centers in the full screen
+        // too; if we only ignore safe area on the background, the
+        // ZStack frame stays inset by the safe area and the image
+        // ends up centered ~12pt below the static frame on
+        // Dynamic-Island devices, producing a visible jolt at the
+        // static→SwiftUI handoff.
         ZStack {
             Color("LaunchBackground")
-                .ignoresSafeArea()
 
             Image("LaunchLogo")
                 .resizable()
@@ -23,6 +31,7 @@ struct SplashScreenView: View {
                 .scaleEffect(logoScale)
                 .opacity(logoOpacity)
         }
+        .ignoresSafeArea()
         .task {
             withAnimation(.easeInOut(duration: 0.7).repeatCount(2, autoreverses: true)) {
                 logoScale = 1.04
