@@ -126,6 +126,11 @@ async function main() {
       .from("snkrdunk_product_map")
       .select("id, canonical_slug, snkrdunk_name, mapping_status, match_score")
       .in("mapping_status", ["MATCHED", "NEEDS_REVIEW"])
+      // Stable order across pages. Without .order(), Postgres can return
+      // rows in different physical orders between range() calls, which
+      // causes duplicates or silent skips on a multi-page scan. Codex P2
+      // on PR #75. id is the surrogate PK so it's both unique and stable.
+      .order("id", { ascending: true })
       .range(from, from + PAGE - 1);
     if (error) throw error;
     if (!data || data.length === 0) break;
