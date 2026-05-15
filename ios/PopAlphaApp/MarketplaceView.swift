@@ -317,17 +317,20 @@ struct MarketplaceView: View {
             .padding(.horizontal, PA.Layout.sectionPadding)
         }
 
-        // Same slot the EN sequences use, but pass `nil` instead of
-        // `aiBrief`: the cached brief is generated from EN-only top
-        // movers (refresh-ai-brief cron + lib/ai/homepage-brief.ts
-        // build context from the global signal board with no market
-        // parameter), so showing it here would leak EN cards into a
-        // JP-only page. Passing nil renders AIBriefCard's
-        // market-neutral placeholder instead — visual scaffolding
-        // and the Hinomaru red border (via `\.market`) stay, the EN
-        // content leak doesn't. Swap back to `aiBrief` once a JP
-        // brief generator exists.
-        AIBriefCard(brief: nil, fallbackAsOf: data?.asOf, styleLabel: styleLabel)
+        // Same slot the EN sequences use, but pass `nil` for both
+        // `brief` and `fallbackAsOf`: the cached brief is generated
+        // from EN-only top movers (refresh-ai-brief cron +
+        // lib/ai/homepage-brief.ts build context from the global
+        // signal board with no market parameter), and `data.asOf` is
+        // the EN signal-board timestamp. Showing either under JP
+        // would leak EN content / EN freshness into a JP-only page
+        // (the JP footer below avoids `data.asOf` for the same
+        // reason). Passing nil renders AIBriefCard's market-neutral
+        // placeholder with no "Updated …" stamp — visual
+        // scaffolding and the Hinomaru red border (via `\.market`)
+        // stay, the EN leak doesn't. Swap both back once a JP brief
+        // generator exists with its own freshness signal.
+        AIBriefCard(brief: nil, fallbackAsOf: nil, styleLabel: styleLabel)
             .padding(.horizontal, PA.Layout.sectionPadding)
 
         if let data {
