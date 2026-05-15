@@ -48,16 +48,15 @@ export default function SiteHeader({
         <div className="flex min-w-0 items-center gap-6">
           <div className="flex items-center gap-4">
             {leadingSlot}
-            <Link href="/" className="flex items-center gap-3">
+            <Link href="/" className="flex items-center" aria-label="PopAlpha home">
               <Image
-                src="/brand/popalpha-icon-transparent.svg"
-                alt="PopAlpha logo"
-                width={36}
-                height={36}
-                className="h-9 w-9 shrink-0"
+                src="/brand/popalpha-modern-white.png"
+                alt="PopAlpha"
+                width={840}
+                height={182}
+                className="h-9 w-auto shrink-0"
                 priority={logoPriority}
               />
-              <span className="text-[19px] font-bold tracking-tight text-white">PopAlpha</span>
             </Link>
           </div>
 

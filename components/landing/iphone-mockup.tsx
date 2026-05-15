@@ -2,7 +2,7 @@
 
 import { motion, useReducedMotion } from "framer-motion";
 
-type IphoneScreen = "scanner" | "for-you";
+type IphoneScreen = "scanner" | "for-you" | "brief" | "jp-pricing" | "portfolio";
 
 type IphoneMockupProps = {
   size?: "hero" | "marquee";
@@ -60,15 +60,21 @@ export default function IphoneMockup({ size = "hero", screen = "scanner", classN
 
             {screen === "scanner" ? (
               <ScannerScreen animate={animate} />
-            ) : (
+            ) : screen === "for-you" ? (
               <ForYouScreen animate={animate} />
+            ) : screen === "brief" ? (
+              <BriefScreen animate={animate} />
+            ) : screen === "jp-pricing" ? (
+              <JpPricingScreen animate={animate} />
+            ) : (
+              <PortfolioScreen animate={animate} />
             )}
 
             <div className="mt-3 flex items-center justify-between rounded-2xl border border-white/[0.05] bg-black/35 px-2 py-2 backdrop-blur-sm">
-              <TabIcon icon="market" label="Market" active={screen === "for-you"} />
-              <TabIcon icon="scan" label="Scan" active={screen === "scanner"} />
+              <TabIcon icon="market" label="Market" active={screen === "for-you" || screen === "brief"} />
+              <TabIcon icon="scan" label="Scan" active={screen === "scanner" || screen === "jp-pricing"} />
               <TabIcon icon="feed" label="Feed" />
-              <TabIcon icon="portfolio" label="Portfolio" />
+              <TabIcon icon="portfolio" label="Portfolio" active={screen === "portfolio"} />
               <TabIcon icon="profile" label="Profile" />
             </div>
           </div>
@@ -227,6 +233,254 @@ function ForYouRow({
   );
 }
 
+/* ── Screen: Brief ─────────────────────────────────────────────────────────── */
+
+function BriefScreen({ animate }: { animate: boolean }) {
+  return (
+    <>
+      <div className="mt-3 flex items-center justify-between">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#7DD3FC]">Brief</p>
+          <p className="mt-0.5 text-[15px] font-semibold tracking-tight text-white">Daily read</p>
+        </div>
+        <span className="rounded-full border border-[#34D399]/30 bg-[#0B231C] px-2 py-[3px] text-[9px] font-semibold tracking-[0.14em] text-[#A7F3D0]">
+          BULLISH
+        </span>
+      </div>
+
+      <div className="mt-3 overflow-hidden rounded-[1.2rem] border border-white/[0.06] bg-[linear-gradient(180deg,rgba(0,180,216,0.10),rgba(124,58,237,0.06))] p-3">
+        <p className="text-[11px] font-semibold tracking-tight text-white">Charizard ex · Obsidian Flames</p>
+        <p className="mt-0.5 text-[9.5px] text-[#9FA4AE]">199/197 · SIR</p>
+
+        <div className="mt-2 flex items-end justify-between">
+          <div>
+            <p className="text-[18px] font-semibold tracking-tight text-white">$284</p>
+            <p className="text-[10px] font-medium text-[#34D399]">+4.2% · 24h</p>
+          </div>
+          <BriefSparkline animate={animate} />
+        </div>
+      </div>
+
+      <div className="mt-3 rounded-[1.2rem] border border-white/[0.06] bg-black/40 p-3">
+        <div className="flex items-center gap-1.5">
+          <span className="h-1.5 w-1.5 rounded-full bg-[#7DD3FC]" />
+          <p className="text-[9.5px] font-semibold uppercase tracking-[0.16em] text-[#7DD3FC]">Why it moved</p>
+        </div>
+        <p className="mt-1.5 text-[10.5px] leading-[1.5] text-white/90">
+          Buy pressure jumped after a record sale at <span className="font-semibold">$312</span> two
+          days ago. Watch eBay sold listings — three more comps could pull the floor higher.
+        </p>
+      </div>
+
+      <div className="mt-2 flex-1 space-y-1.5 overflow-hidden">
+        <BriefRow label="Watch next" value="Iono SAR" detail="+8.1% 7d" tone="up" />
+        <BriefRow label="Cooling off" value="Pikachu VMAX" detail="-2.3% 7d" tone="down" />
+      </div>
+    </>
+  );
+}
+
+function BriefSparkline({ animate }: { animate: boolean }) {
+  return (
+    <svg width={70} height={28} viewBox="0 0 70 28" aria-hidden="true">
+      <defs>
+        <linearGradient id="brief-spark" x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0%" stopColor="#34D399" stopOpacity="0.4" />
+          <stop offset="100%" stopColor="#34D399" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d="M0 22 L10 19 L20 21 L30 14 L40 16 L50 10 L60 8 L70 4 L70 28 L0 28 Z" fill="url(#brief-spark)" />
+      <motion.path
+        d="M0 22 L10 19 L20 21 L30 14 L40 16 L50 10 L60 8 L70 4"
+        fill="none"
+        stroke="#34D399"
+        strokeWidth={1.4}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        initial={animate ? { pathLength: 0 } : false}
+        animate={animate ? { pathLength: 1 } : undefined}
+        transition={animate ? { duration: 1.4, ease: "easeOut" } : undefined}
+      />
+    </svg>
+  );
+}
+
+function BriefRow({
+  label,
+  value,
+  detail,
+  tone,
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  tone: "up" | "down";
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-[0.9rem] border border-white/[0.05] bg-black/35 px-2.5 py-1.5">
+      <div className="min-w-0">
+        <p className="text-[8.5px] font-semibold uppercase tracking-[0.14em] text-[#6B7280]">{label}</p>
+        <p className="mt-0.5 truncate text-[11px] font-semibold tracking-tight text-white">{value}</p>
+      </div>
+      <p className={`text-[10px] font-medium ${tone === "up" ? "text-[#34D399]" : "text-[#FB7185]"}`}>{detail}</p>
+    </div>
+  );
+}
+
+/* ── Screen: JP Pricing ────────────────────────────────────────────────────── */
+
+function JpPricingScreen({ animate }: { animate: boolean }) {
+  return (
+    <>
+      <div className="mt-3 flex items-center justify-between">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#F9A8D4]">JP pricing</p>
+          <p className="mt-0.5 text-[15px] font-semibold tracking-tight text-white">リザードン ex</p>
+        </div>
+        <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-[3px] text-[9.5px] font-semibold text-white/90">
+          JP
+        </span>
+      </div>
+
+      <div className="mt-3 overflow-hidden rounded-[1.2rem] border border-white/[0.06] bg-[linear-gradient(180deg,rgba(244,114,182,0.10),rgba(124,58,237,0.06))] p-3">
+        <p className="text-[9.5px] font-semibold uppercase tracking-[0.16em] text-[#F9A8D4]">RAW · ungraded</p>
+        <p className="mt-1 text-[20px] font-semibold tracking-tight text-white">¥38,400</p>
+        <p className="text-[10px] text-[#9FA4AE]">
+          ≈ $246 · refreshed <span className="text-white/80">2h ago</span>
+        </p>
+      </div>
+
+      <div className="mt-3">
+        <p className="text-[9.5px] font-semibold uppercase tracking-[0.16em] text-[#9FA4AE]">Sources</p>
+      </div>
+
+      <div className="mt-2 flex-1 space-y-1.5 overflow-hidden">
+        <JpSourceRow source="Snkrdunk" amount="¥38,400" detail="last sold · 4h" animate={animate} index={0} />
+        <JpSourceRow source="Yahoo! Auctions JP" amount="¥41,200" detail="7-day median · 14 sales" animate={animate} index={1} />
+        <JpSourceRow source="PSA 10 comp" amount="¥184,500" detail="Snkrdunk · 2d" animate={animate} index={2} />
+      </div>
+    </>
+  );
+}
+
+function JpSourceRow({
+  source,
+  amount,
+  detail,
+  animate,
+  index,
+}: {
+  source: string;
+  amount: string;
+  detail: string;
+  animate: boolean;
+  index: number;
+}) {
+  return (
+    <motion.div
+      initial={animate ? { opacity: 0, y: 4 } : false}
+      animate={animate ? { opacity: 1, y: 0 } : undefined}
+      transition={animate ? { duration: 0.32, delay: 0.18 + index * 0.08, ease: "easeOut" } : undefined}
+      className="flex items-center justify-between gap-2 rounded-[0.9rem] border border-white/[0.05] bg-black/40 px-2.5 py-1.5"
+    >
+      <div className="min-w-0">
+        <p className="truncate text-[11px] font-semibold tracking-tight text-white">{source}</p>
+        <p className="mt-0.5 truncate text-[9px] text-[#9FA4AE]">{detail}</p>
+      </div>
+      <p className="text-[11px] font-semibold tracking-tight text-white">{amount}</p>
+    </motion.div>
+  );
+}
+
+/* ── Screen: Portfolio ─────────────────────────────────────────────────────── */
+
+function PortfolioScreen({ animate }: { animate: boolean }) {
+  return (
+    <>
+      <div className="mt-3">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#A78BFA]">Portfolio</p>
+        <p className="mt-0.5 text-[15px] font-semibold tracking-tight text-white">My collection</p>
+      </div>
+
+      <div className="mt-3 overflow-hidden rounded-[1.2rem] border border-white/[0.06] bg-[linear-gradient(180deg,rgba(124,58,237,0.14),rgba(0,180,216,0.06))] p-3">
+        <p className="text-[9.5px] font-semibold uppercase tracking-[0.16em] text-[#C4B5FD]">Total value</p>
+        <p className="mt-1 text-[22px] font-semibold tracking-tight text-white">$12,486</p>
+        <div className="mt-1 flex items-center gap-2 text-[10px]">
+          <span className="font-medium text-[#34D399]">+$528 today</span>
+          <span className="text-[#9FA4AE]">·</span>
+          <span className="text-[#9FA4AE]">217 cards</span>
+        </div>
+        <PortfolioSparkline animate={animate} />
+      </div>
+
+      <div className="mt-3 flex items-center justify-between">
+        <p className="text-[9.5px] font-semibold uppercase tracking-[0.16em] text-[#9FA4AE]">Top movers</p>
+        <p className="text-[9.5px] text-[#6B7280]">24h</p>
+      </div>
+
+      <div className="mt-2 flex-1 space-y-1.5 overflow-hidden">
+        <PortfolioRow name="Umbreon ex" set="Prismatic Evolutions" value="$612" change="+8.4%" tone="up" />
+        <PortfolioRow name="Charizard ex" set="Obsidian Flames" value="$284" change="+4.2%" tone="up" />
+        <PortfolioRow name="Iono SAR" set="Paldean Fates" value="$148" change="-1.6%" tone="down" />
+      </div>
+    </>
+  );
+}
+
+function PortfolioSparkline({ animate }: { animate: boolean }) {
+  return (
+    <svg className="mt-2" width="100%" height={36} viewBox="0 0 200 36" preserveAspectRatio="none" aria-hidden="true">
+      <defs>
+        <linearGradient id="portfolio-spark" x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0%" stopColor="#A78BFA" stopOpacity="0.45" />
+          <stop offset="100%" stopColor="#A78BFA" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d="M0 30 L20 26 L40 28 L60 22 L80 24 L100 18 L120 20 L140 12 L160 14 L180 8 L200 5 L200 36 L0 36 Z" fill="url(#portfolio-spark)" />
+      <motion.path
+        d="M0 30 L20 26 L40 28 L60 22 L80 24 L100 18 L120 20 L140 12 L160 14 L180 8 L200 5"
+        fill="none"
+        stroke="#A78BFA"
+        strokeWidth={1.4}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        initial={animate ? { pathLength: 0 } : false}
+        animate={animate ? { pathLength: 1 } : undefined}
+        transition={animate ? { duration: 1.6, ease: "easeOut" } : undefined}
+      />
+    </svg>
+  );
+}
+
+function PortfolioRow({
+  name,
+  set,
+  value,
+  change,
+  tone,
+}: {
+  name: string;
+  set: string;
+  value: string;
+  change: string;
+  tone: "up" | "down";
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-[0.9rem] border border-white/[0.05] bg-black/40 px-2.5 py-1.5">
+      <div className="min-w-0">
+        <p className="truncate text-[11px] font-semibold tracking-tight text-white">{name}</p>
+        <p className="mt-0.5 truncate text-[9px] text-[#9FA4AE]">{set}</p>
+      </div>
+      <div className="text-right">
+        <p className="text-[11px] font-semibold tracking-tight text-white">{value}</p>
+        <p className={`text-[9.5px] font-medium ${tone === "up" ? "text-[#34D399]" : "text-[#FB7185]"}`}>{change}</p>
+      </div>
+    </div>
+  );
+}
+
+/* ── Shared helpers ────────────────────────────────────────────────────────── */
+
 function Sparkline({ trend }: { trend: "up" | "down" }) {
   const path =
     trend === "up"
@@ -239,8 +493,6 @@ function Sparkline({ trend }: { trend: "up" | "down" }) {
     </svg>
   );
 }
-
-/* ── Shared ────────────────────────────────────────────────────────────────── */
 
 function ScannerBracket({ position, animate }: { position: "tl" | "tr" | "bl" | "br"; animate: boolean }) {
   const corner =

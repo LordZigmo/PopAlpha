@@ -1,10 +1,20 @@
 import Link from "next/link";
+import { unstable_cache } from "next/cache";
 import { redirect } from "next/navigation";
 import { auth } from "@clerk/nextjs/server";
 import SiteHeader from "@/components/site-header";
 import WaitlistForm from "@/components/landing/waitlist-form";
 import IphoneMockup from "@/components/landing/iphone-mockup";
 import { clerkEnabled } from "@/lib/auth/clerk-enabled";
+import { getJapaneseCatalogState, type JapaneseCatalogState } from "@/lib/data/tier-summary";
+
+export const revalidate = 3600;
+
+const getCachedJpCoverage = unstable_cache(
+  () => getJapaneseCatalogState(),
+  ["landing-jp-coverage"],
+  { revalidate: 3600 }
+);
 
 export default async function Home() {
   if (clerkEnabled) {
@@ -18,6 +28,13 @@ export default async function Home() {
     if (userId) redirect("/portfolio");
   }
 
+  let jpCoverage: JapaneseCatalogState | null = null;
+  try {
+    jpCoverage = await getCachedJpCoverage();
+  } catch {
+    jpCoverage = null;
+  }
+
   return (
     <div className="landing-shell min-h-screen bg-[#060608] text-[#F0F0F0]">
       <SiteHeader
@@ -28,8 +45,8 @@ export default async function Home() {
       />
 
       <Hero />
-      <AIMarquee />
-      <FeatureGrid />
+      <DifferentiatorAnchor />
+      <DifferentiatorCards jpCoverage={jpCoverage} />
       <HowItWorks />
       <FinalCta />
       <LandingFooter />
@@ -48,7 +65,7 @@ function Hero() {
       </div>
 
       <div className="relative mx-auto max-w-[1400px] px-5 pb-20 pt-16 sm:px-8 sm:pt-24 lg:pb-28 lg:pt-28">
-        <div className="grid items-center gap-14 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,360px)] lg:gap-16 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,420px)]">
+        <div className="grid items-center gap-14 lg:grid-cols-[minmax(0,1fr)_minmax(0,520px)] lg:gap-16 xl:grid-cols-[minmax(0,1fr)_minmax(0,580px)]">
           <div className="relative z-10 max-w-[720px]">
             <div className="inline-flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-[12px] font-medium text-[#9EB2C2]">
               <span className="relative flex h-2 w-2">
@@ -66,9 +83,8 @@ function Hero() {
             </h1>
 
             <p className="mt-6 max-w-[580px] text-[18px] leading-[1.55] text-[#B5BEC9]">
-              PopAlpha is your AI scout for the Pokémon market. It learns the cards you care about,
-              identifies any new card in a second, and tells you the moment to buy — all from your
-              iPhone.
+              AI market briefs, collector-grade insights, and JP-native pricing — in your pocket.
+              PopAlpha learns the cards you care about and tells you the moment to buy.
             </p>
 
             <div id="waitlist" className="mt-9 scroll-mt-24">
@@ -76,19 +92,39 @@ function Hero() {
             </div>
 
             <div className="mt-10 flex flex-wrap items-center gap-x-6 gap-y-3 text-[12px] text-[#7B8794]">
-              <HeroProof label="Personalized for you" />
-              <HeroProof label="Buy-zone alerts" />
+              <HeroProof label="AI market briefs" />
+              <HeroProof label="Collector insights" />
+              <HeroProof label="JP-native pricing" />
               <HeroProof label="Real-time scanner" />
-              <HeroProof label="Daily AI brief" />
             </div>
           </div>
 
-          <div className="relative hidden lg:flex lg:items-center lg:justify-center">
-            <IphoneMockup size="hero" />
+          <div className="relative hidden lg:block">
+            <PhoneStack />
           </div>
         </div>
       </div>
     </section>
+  );
+}
+
+function PhoneStack() {
+  return (
+    <div className="relative mx-auto h-[640px] w-full max-w-[560px]">
+      <div className="absolute left-[2%] top-[8%] -rotate-[10deg] opacity-90">
+        <div className="scale-[0.72] origin-top">
+          <IphoneMockup size="hero" screen="brief" />
+        </div>
+      </div>
+      <div className="absolute right-[4%] top-[6%] rotate-[8deg] opacity-90">
+        <div className="scale-[0.72] origin-top">
+          <IphoneMockup size="hero" screen="jp-pricing" />
+        </div>
+      </div>
+      <div className="absolute left-1/2 top-0 -translate-x-1/2 z-10">
+        <IphoneMockup size="hero" screen="scanner" />
+      </div>
+    </div>
   );
 }
 
@@ -103,9 +139,9 @@ function HeroProof({ label }: { label: string }) {
   );
 }
 
-/* ── AI Marquee ────────────────────────────────────────────────────────────── */
+/* ── Differentiator Anchor ─────────────────────────────────────────────────── */
 
-function AIMarquee() {
+function DifferentiatorAnchor() {
   return (
     <section className="relative overflow-hidden border-y border-white/[0.05] bg-[linear-gradient(180deg,#06070B_0%,#0A0D14_50%,#06070B_100%)]">
       <div className="pointer-events-none absolute inset-0">
@@ -113,39 +149,60 @@ function AIMarquee() {
         <div className="absolute right-[12%] bottom-0 h-[320px] w-[420px] rounded-full bg-[#7C3AED]/[0.10] blur-[150px]" />
       </div>
 
-      <div className="relative mx-auto max-w-[1200px] px-5 py-24 text-center sm:px-8 lg:py-36">
-        <p className="text-[13px] font-semibold uppercase tracking-[0.2em] text-[#7DD3FC]">Built around you</p>
-        <h2 className="mx-auto mt-5 max-w-[1200px] text-[clamp(3.5rem,8vw,7rem)] font-semibold leading-[0.92] tracking-[-0.05em] text-white">
-          An AI that knows your collection —
-          <span className="block bg-gradient-to-r from-[#9BE7F6] via-[#36D6E7] to-[#00C7B7] bg-clip-text text-transparent">
-            and tells you when to act.
-          </span>
-        </h2>
-        <p className="mx-auto mt-8 max-w-[760px] text-[clamp(17px,1.5vw,21px)] leading-[1.55] text-[#B5BEC9]">
-          PopAlpha tracks what you own, what you watch, and how you move — then pinpoints the
-          cards worth buying and the exact moments they&rsquo;re undervalued.
-        </p>
+      <div className="relative mx-auto grid max-w-[1400px] gap-14 px-5 py-24 sm:px-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)] lg:items-center lg:gap-16 lg:py-32">
+        <div>
+          <p className="text-[12px] font-semibold uppercase tracking-[0.2em] text-[#7DD3FC]">Beyond the scan</p>
+          <h2 className="mt-5 text-[clamp(2.5rem,5vw,4.5rem)] font-semibold leading-[0.95] tracking-[-0.045em] text-white">
+            Every scan comes with a brief,
+            <span className="mt-1 block bg-gradient-to-r from-[#9BE7F6] via-[#36D6E7] to-[#00C7B7] bg-clip-text text-transparent">
+              a buy signal, and JP-native prices.
+            </span>
+          </h2>
+          <p className="mt-6 max-w-[600px] text-[17px] leading-[1.55] text-[#B5BEC9]">
+            Most scanners stop at a price. PopAlpha tells you why it moved, whether to buy, and how
+            it&rsquo;s trading in Japan — for every card, every day.
+          </p>
 
-        <ul className="mx-auto mt-16 grid max-w-[1000px] gap-8 text-left md:grid-cols-3 md:gap-6">
-          <MarqueeBullet
-            title="A signal feed that filters the noise"
-            detail="Movers, breakouts, and unusual observed activity — ranked by relevance to your collection, not the market."
-          />
-          <MarqueeBullet
-            title="Your daily edge"
-            detail="A personalized AI brief on what&rsquo;s moving in your niche — backed by live pricing, not hype."
-          />
-          <MarqueeBullet
-            title="Buy when it actually matters"
-            detail="Get alerted the moment a card drops into a historically strong buy zone — before everyone else catches on."
-          />
-        </ul>
+          <ul className="mt-10 grid gap-6 sm:grid-cols-2">
+            <AnchorBullet
+              title="AI Market Briefs"
+              detail="Why a card moved, in plain English — for every card you watch."
+            />
+            <AnchorBullet
+              title="Collector Insights"
+              detail="Personalized to your collection, not the broader market."
+            />
+            <AnchorBullet
+              title="JP-Native Pricing"
+              detail="Snkrdunk and Yahoo! Auctions JP — pulled direct, refreshed hourly."
+            />
+            <AnchorBullet
+              title="EN + JP Scanning"
+              detail="Apple Vision–powered camera ID, both languages native."
+            />
+          </ul>
+        </div>
+
+        <div className="relative hidden lg:block">
+          <div className="relative mx-auto h-[640px] w-full max-w-[420px]">
+            <div className="absolute left-[8%] top-[12%] -rotate-[8deg] opacity-90">
+              <div className="scale-[0.7] origin-top">
+                <IphoneMockup size="hero" screen="portfolio" />
+              </div>
+            </div>
+            <div className="absolute right-[6%] top-0 rotate-[6deg]">
+              <div className="scale-[0.78] origin-top">
+                <IphoneMockup size="hero" screen="for-you" />
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
   );
 }
 
-function MarqueeBullet({ title, detail }: { title: string; detail: string }) {
+function AnchorBullet({ title, detail }: { title: string; detail: string }) {
   return (
     <li className="flex gap-4">
       <div className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[#00B4D8]/30 bg-[#00B4D8]/10">
@@ -159,58 +216,145 @@ function MarqueeBullet({ title, detail }: { title: string; detail: string }) {
   );
 }
 
-/* ── Feature Grid ──────────────────────────────────────────────────────────── */
+/* ── Differentiator Cards ──────────────────────────────────────────────────── */
 
-function FeatureGrid() {
-  const features = [
-    {
-      eyebrow: "Real-time scanner",
-      title: "Snap any card. Get the price.",
-      detail:
-        "Apple Vision\u2013powered camera ID \u2014 set, number, and variant in under a second. EN and JP prints, both native. The fastest way to price a card.",
-      Icon: ScannerIcon,
-    },
-    {
-      eyebrow: "Buy-zone intelligence",
-      title: "Buy at the right moment.",
-      detail:
-        "PopAlpha tracks where prices have historically lived for the cards you watch. When one dips into its buy zone, a push fires the moment it happens.",
-      Icon: TrendIcon,
-    },
-    {
-      eyebrow: "Portfolio that thinks",
-      title: "The more you track, the smarter it gets.",
-      detail:
-        "Graded and raw, lot-level cost basis, live valuation. Every card you scan or watchlist teaches the AI more about what you actually care about.",
-      Icon: PortfolioIcon,
-    },
-  ];
-
+function DifferentiatorCards({ jpCoverage }: { jpCoverage: JapaneseCatalogState | null }) {
   return (
     <section className="mx-auto max-w-[1400px] px-5 py-20 sm:px-8 lg:py-28">
-      <div className="max-w-[680px]">
-        <p className="text-[12px] font-semibold uppercase tracking-[0.18em] text-[#7DD3FC]">Built for iPhone</p>
+      <div className="max-w-[720px]">
+        <p className="text-[12px] font-semibold uppercase tracking-[0.18em] text-[#7DD3FC]">
+          What makes PopAlpha different
+        </p>
         <h2 className="mt-3 text-[clamp(2rem,3.4vw,3rem)] font-semibold leading-[1.05] tracking-[-0.035em] text-white">
-          Quick prices. Smart timing. A portfolio that learns.
+          Three moats no other scanner has.
         </h2>
       </div>
 
-      <div className="mt-12 grid gap-5 md:grid-cols-3">
-        {features.map((feature) => (
-          <div
-            key={feature.eyebrow}
-            className="group relative overflow-hidden rounded-[1.6rem] border border-white/[0.06] bg-[linear-gradient(180deg,rgba(20,28,38,0.6),rgba(9,12,18,0.85))] p-6 transition hover:border-white/[0.12]"
-          >
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-[#00B4D8]/25 bg-[#00B4D8]/[0.08] text-[#7DD3FC]">
-              <feature.Icon />
-            </div>
-            <p className="mt-5 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#7DD3FC]">{feature.eyebrow}</p>
-            <h3 className="mt-2 text-[22px] font-semibold tracking-[-0.025em] text-white">{feature.title}</h3>
-            <p className="mt-3 text-[14px] leading-[1.6] text-[#9FA4AE]">{feature.detail}</p>
-          </div>
-        ))}
+      <div className="mt-12 grid gap-5 lg:grid-cols-3">
+        <DifferentiatorCard
+          tint="#0A2230"
+          accentColor="#7DD3FC"
+          label="AI Market Briefs"
+          headline="Every card. Every day. Explained."
+          body="PopAlpha writes a market brief for every card you watch — what moved, why, and what to watch next. Powered by live pricing, not vibes."
+          screen="brief"
+        />
+        <DifferentiatorCard
+          tint="#221638"
+          accentColor="#C4B5FD"
+          label="Collector Insights"
+          headline="An AI that learns what you actually collect."
+          body="Watch a card, scan one, log a purchase — every action teaches PopAlpha what matters to you. Then it filters the entire market down to the few signals you actually care about."
+          screen="for-you"
+        />
+        <DifferentiatorCard
+          tint="#2B0F1E"
+          accentColor="#F9A8D4"
+          label="JP-Native Pricing"
+          headline="Real Japanese prices. Not translated listings."
+          body="Direct from Snkrdunk and Yahoo! Auctions JP — refreshed hourly, with full per-set coverage transparency."
+          screen="jp-pricing"
+          footer={<JpCoverageStrip jpCoverage={jpCoverage} />}
+        />
       </div>
     </section>
+  );
+}
+
+function DifferentiatorCard({
+  tint,
+  accentColor,
+  label,
+  headline,
+  body,
+  screen,
+  footer,
+}: {
+  tint: string;
+  accentColor: string;
+  label: string;
+  headline: string;
+  body: string;
+  screen: "brief" | "for-you" | "jp-pricing";
+  footer?: React.ReactNode;
+}) {
+  return (
+    <div
+      className="group relative flex flex-col overflow-hidden rounded-[1.6rem] border border-white/[0.06] p-6 transition hover:border-white/[0.12]"
+      style={{
+        background: `linear-gradient(180deg, ${tint} 0%, rgba(6,7,11,0.95) 100%)`,
+      }}
+    >
+      <p
+        className="text-[11px] font-semibold uppercase tracking-[0.22em]"
+        style={{ color: accentColor }}
+      >
+        {label}
+      </p>
+      <h3 className="mt-3 text-[22px] font-semibold leading-[1.15] tracking-[-0.025em] text-white">
+        {headline}
+      </h3>
+      <p className="mt-3 text-[14px] leading-[1.6] text-[#9FA4AE]">{body}</p>
+
+      <div className="relative mt-8 flex h-[400px] items-end justify-center overflow-hidden">
+        <div className="absolute bottom-[-60px] left-1/2 -translate-x-1/2">
+          <div className="scale-[0.78] origin-bottom">
+            <IphoneMockup size="hero" screen={screen} />
+          </div>
+        </div>
+      </div>
+
+      {footer ? <div className="mt-4">{footer}</div> : null}
+    </div>
+  );
+}
+
+function JpCoverageStrip({ jpCoverage }: { jpCoverage: JapaneseCatalogState | null }) {
+  if (!jpCoverage || jpCoverage.totalCards === 0) {
+    return (
+      <div className="rounded-[1rem] border border-white/[0.06] bg-black/40 px-4 py-3">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#F9A8D4]">
+          Live coverage
+        </p>
+        <p className="mt-1.5 text-[13px] text-[#B5BEC9]">
+          Direct integrations with Snkrdunk and Yahoo! Auctions JP, refreshed hourly.
+        </p>
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] font-medium text-[#9FA4AE]">
+          <span>Snkrdunk</span>
+          <span className="text-[#3D2235]">·</span>
+          <span>Yahoo! Auctions JP</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-[1rem] border border-white/[0.06] bg-black/40 px-4 py-3">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#F9A8D4]">
+        Live coverage
+      </p>
+      <div className="mt-2 grid grid-cols-3 gap-2">
+        <JpStat value={jpCoverage.totalCards.toLocaleString()} label="JP cards" />
+        <JpStat value={jpCoverage.totalSets.toString()} label="sets" />
+        <JpStat value={`${jpCoverage.freshPct.toFixed(1)}%`} label="fresh · 7d" />
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] font-medium text-[#9FA4AE]">
+        <span>Snkrdunk</span>
+        <span className="text-[#3D2235]">·</span>
+        <span>Yahoo! Auctions JP</span>
+      </div>
+    </div>
+  );
+}
+
+function JpStat({ value, label }: { value: string; label: string }) {
+  return (
+    <div>
+      <p className="text-[18px] font-semibold tracking-tight text-white">{value}</p>
+      <p className="mt-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-[#9FA4AE]">
+        {label}
+      </p>
+    </div>
   );
 }
 
@@ -317,35 +461,5 @@ function LandingFooter() {
         </div>
       </div>
     </footer>
-  );
-}
-
-/* ── Inline Icons ──────────────────────────────────────────────────────────── */
-
-function ScannerIcon() {
-  return (
-    <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="3" y="6" width="18" height="13" rx="2.5" />
-      <circle cx="12" cy="12.5" r="3.6" />
-      <path d="M9 6l1.4-2h3.2L15 6" />
-    </svg>
-  );
-}
-
-function TrendIcon() {
-  return (
-    <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M3 17l5-6 4 4 8-9" />
-      <path d="M14 6h6v6" />
-    </svg>
-  );
-}
-
-function PortfolioIcon() {
-  return (
-    <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="3" y="6" width="18" height="14" rx="2" />
-      <path d="M3 10h18M9 6V4h6v2" />
-    </svg>
   );
 }
