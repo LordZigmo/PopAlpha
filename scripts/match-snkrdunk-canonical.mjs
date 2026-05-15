@@ -138,24 +138,72 @@ function buildQuery(card) {
 }
 
 /**
+ * Map Snkrdunk setCode → likely era window [yearMin, yearMax].
+ * Lets the scorer reward year-aligned matches and penalize era
+ * mismatches symmetrically. Expanded post-PR #71 era audit: the
+ * narrow vintage-only check missed both modern→vintage and
+ * inverse-direction misalignments (e.g., a 2017 canonical mapping
+ * to a `L1-S` Legend reprint from 2010-2011).
+ */
+export function setCodeEra(code) {
+  if (!code) return null;
+  const c = code.toUpperCase();
+  if (/^PMCG/.test(c)) return [1996, 2000];
+  if (/^E\d/.test(c) || /^GYM/.test(c) || /^E-P/.test(c)) return [1999, 2003];
+  if (c === "EM") return [2003, 2005];
+  if (c === "M1L") return [2025, 2026];
+  if (c === "CLF") return [2023, 2024];
+  if (/^SV/.test(c)) return [2023, 2026];
+  if (/^S\d/.test(c)) return [2020, 2022];
+  if (/^30TH-P/.test(c)) return [2026, 2026];
+  if (/^SM/.test(c)) return [2017, 2019];
+  if (/^XY/.test(c)) return [2013, 2016];
+  if (/^BW/.test(c)) return [2010, 2013];
+  if (/^DP/.test(c)) return [2007, 2010];
+  if (/^HG/.test(c) || /^SS/.test(c)) return [2010, 2011];
+  if (/^ADV/.test(c) || /^PCG/.test(c)) return [2003, 2007];
+  if (/^L[\d-]/.test(c) || /^LL/.test(c)) return [2010, 2011];
+  if (/^PT/.test(c)) return [2008, 2010];
+  if (/^S-P/.test(c)) return [2020, 2023];
+  if (/^SV-P/.test(c)) return [2023, 2026];
+  if (/^SM-P/.test(c)) return [2017, 2019];
+  if (/^XY-P/.test(c)) return [2013, 2016];
+  if (/^BW-P/.test(c)) return [2010, 2013];
+  if (/^DP-P/.test(c) || /^DPB-P/.test(c)) return [2007, 2010];
+  if (/^HG-P/.test(c) || /^SS-P/.test(c)) return [2010, 2011];
+  if (/^PCG-P/.test(c) || /^ADV-P/.test(c)) return [2003, 2007];
+  if (/^L-P/.test(c)) return [2010, 2011];
+  if (/^PPP/.test(c)) return [2007, 2010];
+  if (/^MEP/.test(c) || /^M[123]/.test(c)) return [2024, 2026];
+  if (/^SMP/.test(c)) return [2017, 2019];
+  if (/^TG/.test(c)) return [2020, 2022];
+  return null;
+}
+
+/**
  * Score a Snkrdunk search result against a canonical card.
  *
  * Signals (positive):
  *   +0.30  Pokemon name token matches (canonical_name appears in parsed.pokemonName)
  *   +0.30  card_number matches (canonical card_number == parsed cardNumber, or
  *          either is a prefix of the other for fractional forms like "074/073")
- *   +0.20  Set hint matches (set name fragment appears in parsed.setLongName)
+ *   +0.20  Set hint matches (distinctive set name fragment appears in parsed.setLongName)
+ *   +0.15  Era-match: canonical.year falls within the Snkrdunk setCode's era window
  *
  * Signals (negative):
  *   -0.20  parsed.pokemonName starts with a DIFFERENT Pokemon name
  *          (catches "Marnie [SC2 020/021](...VMAX Battle Triple Starter
  *          Set...Charizard...)" — the set name mentions Charizard but
  *          the card is Marnie. Tracking the actual card name is critical.)
+ *   -0.30  Era-mismatch: canonical.year falls outside the Snkrdunk setCode's
+ *          era window by more than 3 years (e.g., 1996 canonical mapped to a
+ *          2023 reprint product). Generalized post-PR #71 audit from the
+ *          previous narrow "vintage canonical + modern setCode" rule.
  *
  * Clamped to [0, 1]. Threshold MIN_MATCH_SCORE = 0.55 = at least the
  * name + one strong disambiguator (number or set).
  */
-function scoreMatch(candidate, card) {
+export function scoreMatch(candidate, card) {
   const parsed = candidate.parsed;
   const reasons = [];
   let score = 0;
@@ -224,6 +272,17 @@ function scoreMatch(candidate, card) {
       "pack", "expansion", "enhanced",
       "deck", "starter",
       "single", "singles",
+      // Expanded post-PR #71 era audit: these tokens leak across vintage
+      // parentheticals ("Pokemon Game", "Pokemon Pocket Monsters", "Holon
+      // Phantoms", "Classic Collection") and grant set-token credit to
+      // wildly wrong reprints. Stripping them forces the matcher to lean
+      // on actual distinctive set names (e.g., "Jungle", "Fossil",
+      // "Aquapolis", "Skyridge") + the era/number gates below.
+      "game", "games",
+      "classic", "classics",
+      "set", "sets",
+      "pocket", "monster", "monsters",
+      "holon", "series", "edition",
     ]);
     const csetTokens = cset
       .split(/\s+/)
@@ -247,21 +306,31 @@ function scoreMatch(candidate, card) {
     }
   }
 
-  // Negative: era mismatch.
-  // Vintage canonical_cards (year < 2010) sometimes share card numbers
-  // with modern Snkrdunk reprints — e.g., canonical "Topsun #100 Voltorb"
-  // (1995) accidentally matches Snkrdunk "Voltorb [SV2a 100/165]"
-  // (modern). Number + name both match, but the era doesn't. Snkrdunk's
-  // modern setCodes always start with "S" + digit (Sword & Shield era,
-  // 2020+) or "SV" + digit (Scarlet & Violet era, 2023+). If our
-  // canonical card is vintage and the Snkrdunk setCode looks modern,
-  // they can't be the same card.
+  // Era scoring.
+  //
+  // Generalized post-PR #71 era audit. The previous rule only fired on
+  // vintage→modern mismatches (e.g., 1995 Topsun #100 Voltorb wrongly
+  // matched against SV2a 100/165 Voltorb). That left the inverse case
+  // uncovered: a 2017 canonical occasionally got pulled onto a 2010 L1-S
+  // Legend reprint because name+number both matched. The expanded rule:
+  //   +0.15 if canonical.year falls inside the Snkrdunk setCode's era
+  //         window (with a ±3yr slack for boundary cases like Legendary
+  //         Treasures reprints).
+  //   -0.30 if canonical.year falls outside the era window by more
+  //         than 3yr.
+  // No-op when either side is missing (setCodeEra returns null for
+  // unmapped codes, and canonical.year can be NULL for sealed-product
+  // catalog rows).
   const cyear = typeof card.year === "number" ? card.year : null;
-  if (cyear && cyear < 2010 && psetCode) {
-    const looksModern = /^S\d/i.test(psetCode) || /^SV\d/i.test(psetCode);
-    if (looksModern) {
+  const era = psetCode ? setCodeEra(psetCode.toUpperCase()) : null;
+  if (cyear && era) {
+    const [yMin, yMax] = era;
+    if (cyear >= yMin - 3 && cyear <= yMax + 3) {
+      score += 0.15;
+      reasons.push(`+0.15 era-match (${cyear} in [${yMin}-${yMax}] for ${psetCode})`);
+    } else {
       score -= 0.30;
-      reasons.push(`-0.30 era-mismatch (vintage canonical ${cyear} vs modern setCode ${psetCode})`);
+      reasons.push(`-0.30 era-mismatch (canonical ${cyear} vs setCode ${psetCode} era [${yMin}-${yMax}])`);
     }
   }
 
@@ -541,7 +610,11 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error("[match-snkrdunk] FATAL:", err);
-  process.exit(1);
-});
+// Only auto-run when invoked as a CLI; allow imports for testing.
+import { pathToFileURL } from "node:url";
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => {
+    console.error("[match-snkrdunk] FATAL:", err);
+    process.exit(1);
+  });
+}
