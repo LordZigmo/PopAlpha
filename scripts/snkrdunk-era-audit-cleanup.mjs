@@ -19,7 +19,10 @@
  *
  * Logic:
  *   1. Read each MATCHED + NEEDS_REVIEW row.
- *   2. Extract setCode from snkrdunk_name (regex: \[([^ ]+) [0-9]).
+ *   2. Extract setCode from snkrdunk_name via parseSnkrdunkProductName
+ *      (the same parser the matcher uses, so audit and matcher agree on
+ *      every bracket form — including "No."-prefixed card numbers like
+ *      "[PMCG-P No.009]").
  *   3. Look up era window in EXTENDED_ERA_MAP (the existing setCodeEra
  *      function + the 34 new codes).
  *   4. Pull canonical_cards.year for the canonical_slug.
@@ -38,6 +41,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { setCodeEra as baseSetCodeEra } from "./match-snkrdunk-canonical.mjs";
+import { parseSnkrdunkProductName } from "../lib/jp/snkrdunk-matcher.mjs";
 
 const APPLY = process.argv.includes("--apply");
 const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
@@ -149,8 +153,12 @@ async function main() {
   const toPromote = [];
   const toReject = [];
   for (const r of all) {
-    const m = (r.snkrdunk_name || "").match(/\[([^ ]+) [0-9]/);
-    const code = m ? m[1] : null;
+    // Reuse parseSnkrdunkProductName so this audit handles every bracket
+    // form the matcher itself supports — notably "No.009"-prefixed card
+    // numbers (e.g. "[PMCG-P No.009]") that a naive /\[([^ ]+) [0-9]/
+    // regex would silently miss. Codex P2 on PR #75.
+    const parsed = parseSnkrdunkProductName(r.snkrdunk_name);
+    const code = parsed?.setCode ?? null;
     const era = eraFor(code);
     const year = yearBySlug.get(r.canonical_slug);
     const verdict = classify(year, era);
