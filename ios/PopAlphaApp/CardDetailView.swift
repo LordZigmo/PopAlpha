@@ -312,8 +312,15 @@ struct CardDetailView: View {
         }
         .sheet(isPresented: $showCorrectionSheet) {
             if let hash = scanImageHash {
+                // predictedSlug records what the SCANNER MODEL guessed,
+                // not what the user is currently viewing. Use card.id
+                // (the immutable navigation input) so toggling EN↔JP
+                // mid-correction doesn't contaminate scan-eval audit
+                // data with the paired slug. This is exactly why
+                // CardDetailView keeps `let card` alongside the
+                // mutable @State activeCard.
                 EvalSeedingView(
-                    mode: .correction(imageHash: hash, predictedSlug: activeCard.id),
+                    mode: .correction(imageHash: hash, predictedSlug: card.id),
                     scanImage: scanImage,
                     isPresented: $showCorrectionSheet
                 )
