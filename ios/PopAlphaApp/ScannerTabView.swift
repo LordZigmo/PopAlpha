@@ -877,18 +877,17 @@ struct ScannerTabView: View {
         .accessibilityLabel(scanner.multiScanMode ? "Exit multi-scan mode" : "Enter multi-scan mode")
     }
 
-    /// Submits the current tray to /api/holdings/bulk-import. On full
-    /// success, clears the tray + closes the sheet. On partial failure,
-    /// leaves failing rows in the tray for the user to retry / triage.
-    private func submitMultiScanBatch() async {
+    /// Submits the current tray to /api/holdings/bulk-import. Returns
+    /// nil on full success (sheet closes), or a user-facing error
+    /// string when the network call throws or any rows fail. The
+    /// returned string is rendered inline in the review sheet's
+    /// footer so a tapped Add button never silently no-ops — was a
+    /// Codex P2 bug in the initial version of this PR (returned
+    /// `Void` and only logged failures, leaving the user with a
+    /// visually-unchanged tray and no explanation).
+    private func submitMultiScanBatch() async -> String? {
         do {
             let summary = try await multiScanSession.submit()
-            if summary.hadAnyFailures {
-                PAHaptics.selection()
-            } else {
-                PAHaptics.tap()
-                showMultiScanSheet = false
-            }
             AnalyticsService.shared.captureRaw(
                 "scanner_multi_mode_bulk_added",
                 properties: [
@@ -896,9 +895,18 @@ struct ScannerTabView: View {
                     "errors": summary.errors.count,
                 ],
             )
+            if summary.hadAnyFailures {
+                PAHaptics.selection()
+                let plural = summary.errors.count == 1 ? "row" : "rows"
+                return "Added \(summary.inserted) — \(summary.errors.count) \(plural) failed. Try again or swipe to remove."
+            }
+            PAHaptics.tap()
+            showMultiScanSheet = false
+            return nil
         } catch {
             Logger.scan.debug("multi-scan submit failed: \(error.localizedDescription)")
             PAHaptics.selection()
+            return "Couldn't add — \(error.localizedDescription)"
         }
     }
 

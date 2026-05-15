@@ -181,7 +181,13 @@ struct MultiScanTrayBar: View {
 struct MultiScanReviewSheet: View {
     @ObservedObject var session: MultiScanSession
     let onDismiss: () -> Void
-    let onSubmit: () async -> Void
+    /// Returns nil on full success, or a user-facing error string when
+    /// submission failed (network, auth, partial-row failure). The
+    /// sheet surfaces the string in its footer so a tapped Add button
+    /// never feels like a silent no-op — the original v1 always set
+    /// `submitting = false` without propagating outcome, which Codex
+    /// flagged as a P2 silent-failure case.
+    let onSubmit: () async -> String?
     @State private var submitting: Bool = false
     @State private var lastError: String?
 
@@ -348,8 +354,15 @@ struct MultiScanReviewSheet: View {
                     Task {
                         submitting = true
                         lastError = nil
-                        await onSubmit()
+                        let outcome = await onSubmit()
                         submitting = false
+                        // nil outcome = full success (sheet closes via
+                        // parent on success). Non-nil outcome = HTTP
+                        // failure or partial-row failure; surface in
+                        // the footer so the user knows the tap did
+                        // something (the rows that didn't land are
+                        // still in the tray for retry).
+                        lastError = outcome
                     }
                 } label: {
                     if submitting {
