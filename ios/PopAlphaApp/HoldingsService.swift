@@ -58,6 +58,50 @@ actor HoldingsService {
         )
     }
 
+    // MARK: - Bulk add (multi-scan)
+
+    /// Submits a multi-scan tray as a single /api/holdings/bulk-import
+    /// call with `source: "scanner"` so holdings.source distinguishes
+    /// scan-derived lots from CSV-imported and manually-added ones.
+    /// The endpoint is per-row best-effort: bad rows surface in
+    /// `errors[]` without blocking the rest. `'scanner'` is already an
+    /// allowed value in the holdings_source_check constraint
+    /// (supabase/migrations/20260421200152_holdings_source.sql) — no
+    /// new migration needed.
+    func bulkAddFromScans(_ entries: [MultiScanEntry]) async throws -> BulkScanImportSummary {
+        try AuthService.shared.requireAuth()
+
+        let rows: [[String: Any]] = entries.map { entry in
+            var row: [String: Any] = [
+                "canonical_slug": entry.match.slug,
+                "grade": entry.grade,
+                "qty": entry.quantity,
+            ]
+            if let printingId = entry.printingId {
+                row["printing_id"] = printingId
+            }
+            return row
+        }
+
+        let body: [String: Any] = [
+            "rows": rows,
+            "source": "scanner",
+        ]
+
+        let response: BulkScanImportResponse = try await APIClient.post(
+            path: "/api/holdings/bulk-import",
+            body: body,
+            decoder: decoder,
+        )
+
+        return BulkScanImportSummary(
+            inserted: response.inserted,
+            errors: response.errors.map { e in
+                BulkScanImportError(rowIndex: e.rowIndex, message: e.error)
+            },
+        )
+    }
+
     // MARK: - Delete
 
     /// Remove one or more holding lots by ID. Typically all lots in a
@@ -118,5 +162,29 @@ actor HoldingsService {
             body: body,
             decoder: decoder
         )
+    }
+}
+
+// MARK: - Bulk import decoding
+
+/// Mirror of /api/holdings/bulk-import's response shape. 200 with
+/// `ok: true` on happy path; 400 with `ok: false` + `error` when ALL
+/// rows are rejected. Per-row errors flow through `errors[]` regardless
+/// of HTTP status — the route's contract is "individual rows can fail
+/// without poisoning the batch."
+private struct BulkScanImportResponse: Decodable {
+    let ok: Bool
+    let inserted: Int
+    let errors: [RowError]
+    let error: String?
+
+    struct RowError: Decodable {
+        let rowIndex: Int
+        let error: String
+
+        enum CodingKeys: String, CodingKey {
+            case rowIndex = "row_index"
+            case error
+        }
     }
 }

@@ -15,15 +15,22 @@ import OSLog
 // transient overlay is an "Identifying…" toast. DEBUG builds add
 // two compact corner buttons for the smoke test + premium override.
 //
-// Single-card mode is the only mode. Multi-card collection flow can
-// come back when there's a real product use case for it.
+// Multi-scan mode (2026-05-15): a small toggle at the bottom-right of
+// the viewfinder enters a continuous batch flow — HIGH/MEDIUM scans
+// auto-append to a tray with thumbnail + price, and a single
+// bulk-add commits the batch to portfolio. Use case: scanning a pack
+// or binder. Single mode (auto-navigate to CardDetailView on HIGH)
+// stays the default; the toggle is intentionally tight and out of
+// the way so it doesn't compete with the viewfinder when off.
 
 struct ScannerTabView: View {
     @State private var navigateToCard: MarketCard?
     @State private var showPickerSheet = false
     @State private var showPaywallSheet = false
+    @State private var showMultiScanSheet = false
     @StateObject private var premiumGate = PremiumGate.shared
     @StateObject private var scanQuota = ScanQuota.shared
+    @StateObject private var multiScanSession = MultiScanSession()
 
     /// Tracks which scanner surface most recently flipped
     /// `showPaywallSheet`, so the paywall analytics carry the right
@@ -176,6 +183,31 @@ struct ScannerTabView: View {
                     }
                     Spacer()
                 }
+
+                // Bottom-right multi-scan toggle + tray. Toggle is a
+                // small unobtrusive circle so it doesn't compete with
+                // the viewfinder when off. When multi-mode is on, a
+                // full-width tray bar fills the bottom of the viewport
+                // and the toggle floats just above it; tapping the
+                // tray opens the expanded review sheet for bulk-add.
+                VStack(spacing: 8) {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        multiScanToggle
+                            .padding(.trailing, 16)
+                    }
+                    if scanner.multiScanMode {
+                        MultiScanTrayBar(
+                            session: multiScanSession,
+                            onExpand: { showMultiScanSheet = true },
+                        )
+                        .padding(.bottom, 36)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    } else {
+                        Color.clear.frame(height: 24)
+                    }
+                }
                 #if DEBUG
                 // Path-source indicator — sticky display of the last
                 // scan's routing (offline vs network), winning_path,
@@ -267,6 +299,13 @@ struct ScannerTabView: View {
                 // specific entry point is captured separately in
                 // `paywallSurface` for PostHog analytics.
                 PaywallView(context: .scanner, surface: paywallSurface)
+            }
+            .sheet(isPresented: $showMultiScanSheet) {
+                MultiScanReviewSheet(
+                    session: multiScanSession,
+                    onDismiss: { showMultiScanSheet = false },
+                    onSubmit: submitMultiScanBatch,
+                )
             }
             .onChange(of: scanner.lastMatch) { _, newValue in
                 handleIdentifyResult(newValue)
@@ -739,6 +778,31 @@ struct ScannerTabView: View {
     private func handleIdentifyResult(_ match: ScanMatch?) {
         guard let match else { return }
 
+        // Multi-scan mode short-circuits the single-mode routing for
+        // HIGH/MEDIUM: every confident-enough scan appends to the tray
+        // and the scanner re-arms immediately. LOW continues to re-arm
+        // silently — letting LOW into the tray would dilute the signal
+        // of HIGH/MED rows. The single-mode picker is suppressed; per-
+        // row re-pick from the tray is a future iteration.
+        if scanner.multiScanMode {
+            switch scanner.lastConfidence {
+            case "high", "medium":
+                PAHaptics.tap()
+                multiScanSession.append(
+                    match: match,
+                    candidates: scanner.lastMatches,
+                    confidence: scanner.lastConfidence ?? "medium",
+                    imageHash: scanner.lastImageHash,
+                )
+                scanner.clearLastMatch()
+                scanner.resumeScanning()
+            default:
+                scanner.clearLastMatch()
+                scanner.resumeScanning()
+            }
+            return
+        }
+
         switch scanner.lastConfidence {
         case "high":
             // Zero-tap auto-navigate on high confidence.
@@ -762,6 +826,79 @@ struct ScannerTabView: View {
             // Low confidence (or unknown tier) → silent re-arm.
             scanner.clearLastMatch()
             scanner.resumeScanning()
+        }
+    }
+
+    // MARK: - Multi-scan helpers
+
+    /// Small, unobtrusive bottom-right toggle. Sits alone in single mode
+    /// and re-anchors above the tray bar when multi-mode is on. The
+    /// filled-vs-outlined icon plus an optional count badge gives an
+    /// at-a-glance sense of mode + tray depth without taking up
+    /// viewfinder real estate.
+    private var multiScanToggle: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                scanner.multiScanMode.toggle()
+            }
+            PAHaptics.selection()
+            AnalyticsService.shared.captureRaw(
+                "scanner_multi_mode_toggled",
+                properties: [
+                    "now_active": scanner.multiScanMode,
+                    "tray_count": multiScanSession.entries.count,
+                ],
+            )
+        } label: {
+            let active = scanner.multiScanMode
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: active ? "square.stack.fill" : "square.stack")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(active ? .black : .white)
+                    .frame(width: 32, height: 32)
+                    .background(
+                        Circle().fill(active ? Color.white : Color.black.opacity(0.45)),
+                    )
+                    .overlay(
+                        Circle().stroke(Color.white.opacity(0.15), lineWidth: 0.5),
+                    )
+                if active, multiScanSession.entries.count > 0 {
+                    Text("\(multiScanSession.entries.count)")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(Color.red))
+                        .offset(x: 5, y: -3)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(scanner.multiScanMode ? "Exit multi-scan mode" : "Enter multi-scan mode")
+    }
+
+    /// Submits the current tray to /api/holdings/bulk-import. On full
+    /// success, clears the tray + closes the sheet. On partial failure,
+    /// leaves failing rows in the tray for the user to retry / triage.
+    private func submitMultiScanBatch() async {
+        do {
+            let summary = try await multiScanSession.submit()
+            if summary.hadAnyFailures {
+                PAHaptics.selection()
+            } else {
+                PAHaptics.tap()
+                showMultiScanSheet = false
+            }
+            AnalyticsService.shared.captureRaw(
+                "scanner_multi_mode_bulk_added",
+                properties: [
+                    "inserted": summary.inserted,
+                    "errors": summary.errors.count,
+                ],
+            )
+        } catch {
+            Logger.scan.debug("multi-scan submit failed: \(error.localizedDescription)")
+            PAHaptics.selection()
         }
     }
 
@@ -802,6 +939,13 @@ final class ScannerHost: ObservableObject {
     @Published private(set) var isScanning: Bool = true
     @Published private(set) var initError: String?
     @Published private(set) var candidateBoundingBox: CGRect?
+
+    /// Multi-scan mode toggle. When true, post-identify routing
+    /// appends HIGH/MEDIUM scans to a tray and re-arms instead of
+    /// auto-navigating; LOW continues to silently re-arm. The view
+    /// layer reads this from `handleIdentifyResult` to branch routing.
+    /// Reset on app launch — users opt in to batch mode per session.
+    @Published var multiScanMode: Bool = false
 
     /// Mirrors `ScannerViewModel.firstFrameRendered`. Drives the
     /// "Starting camera…" placeholder in ScannerTabView's body so the
