@@ -117,7 +117,7 @@ Surfaced during the migration drift cleanup. Each deserves its own focused commi
 
 ### 1. `normalize_scrydex_finish` null/empty token behavior
 
-In `phase2a_variant_classifier_and_columns`. Local design doc says null/empty token → `NULL` (caller must source finish from `card_printings`). Prod runs the function with null/empty token → `'NON_HOLO'`. One of two stories is true: (a) doc is aspirational, prod is doing aggressive guessing on JUSTTCG canonical-form rows that may be miscategorizing reverse-holos, or (b) the team learned NULL was wrong and switched to NON_HOLO without updating docs. Decide which is right and write a follow-up migration that aligns doc with prod.
+In `phase2a_variant_classifier_and_columns`. Local design doc says null/empty token → `NULL` (caller must source finish from `card_printings`). Prod runs the function with null/empty token → `'NON_HOLO'`. Current Scrydex ingestion should be treated as the source of truth; this note remains only as historical migration-drift context for older provider-token rows. Decide whether the function body and documentation still need a cleanup migration before editing classifier behavior.
 
 ### 2. `card_profiles_refresh_rpc_tiered` v1→v4 hot-fix iterations
 
@@ -141,7 +141,7 @@ Three migrations owned by the scanner agent's PR: `scan_events_multicrop_telemet
 
 ### 7. Dead-code audit (separate workstream)
 
-The user mentioned wanting to clean up code from supplier experiments (Scrydex / JustTCG / PokemonTCG era). Untouched in this sprint. Real audit — provider tables, ingestion routes, retired ML artifacts (CLIP rows now that SigLIP is canonical), iOS surfaces pointing at deprecated endpoints. Deserves its own focused session with a route-by-route review.
+Closed 2026-05-15 for the active app surface: retired JustTCG, PokeTrace, and PokemonTCG API routes/provider modules were removed, and the route registry/build now exposes Scrydex-side provider ingestion only. Remaining cleanup, if desired, is historical data/docs/scripts only: legacy provider rows in tables, dated incident reports, and retired one-off operator scripts.
 
 ---
 

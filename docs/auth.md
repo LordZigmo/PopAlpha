@@ -8,7 +8,7 @@ PopAlpha uses a 4-kind auth model defined in `lib/auth/context.ts`.
 |---|---|---|---|
 | `public` | Anyone | No credentials | None needed |
 | `user` | Logged-in user | Supabase JWT (cookie or Bearer) | `requireUser()` |
-| `admin` | Admin tooling | `ADMIN_SECRET` (Bearer or x-admin-secret header) or `ADMIN_IMPORT_TOKEN` | `requireAdmin()` |
+| `admin` | Admin tooling | `ADMIN_SECRET` (Bearer or x-admin-secret header); legacy `ADMIN_IMPORT_TOKEN` is still recognized by the resolver but no active route depends on it | `requireAdmin()` |
 | `cron` | Vercel cron / admin | `CRON_SECRET` (Bearer) | `requireCron()` (also accepts admin) |
 
 ## Elevation Is Additive, Never A Kind Swap
@@ -18,7 +18,7 @@ When a user gains *more* access on top of an existing role, model it as a flag (
 Concrete rule for `AuthContext`:
 
 - `kind: "user"` carries identity (`userId`). It is the only kind that does. Anything that has a userId belongs in `user`, with optional flags (`isAdmin?: boolean`, future scopes, etc.) layered on top.
-- `kind: "admin"` and `kind: "cron"` come from shared secrets (`ADMIN_SECRET`, `ADMIN_IMPORT_TOKEN`, `CRON_SECRET`) and are intentionally identity-less — there's no userId to thread through, so they stay as their own kinds.
+- `kind: "admin"` and `kind: "cron"` come from shared secrets (`ADMIN_SECRET`, legacy `ADMIN_IMPORT_TOKEN`, `CRON_SECRET`) and are intentionally identity-less — there's no userId to thread through, so they stay as their own kinds.
 - `requireAdmin()` accepts both `kind: "admin"` and `kind: "user"` with `isAdmin: true`. Admin is a strict superset of user, not a replacement.
 
 Do / don't:
@@ -67,7 +67,7 @@ This was the bug in commit `8439a33` (iOS operator admin elevation via `INTERNAL
 | `INTERNAL_ADMIN_EMAILS` | Fallback/internal convenience allowlist for internal-admin operators | `/internal/admin` operators | `lib/auth/internal-admin-session-core.ts` | Optional; overlaps with Clerk user IDs but is intentionally secondary |
 | `INTERNAL_ADMIN_SESSION_SECRET` | Signs the short-lived internal-admin session cookie | `/internal/admin` page + API session verifier | `lib/auth/internal-admin-session-core.ts` | Recommended and should be dedicated; falls back to `ADMIN_SECRET` only if unset |
 | `ADMIN_SECRET` | Server-to-server auth for true admin/import routes that are not UI-backed | Manual admin tooling, trusted server calls, import scripts | `lib/auth/context.ts`, `requireAdmin()` routes | Still required; no longer the normal auth path for UI-backed admin flows |
-| `ADMIN_IMPORT_TOKEN` | Narrow bearer token for the PokemonTCG import automation surface | `app/api/admin/import/pokemontcg` callers only | `lib/auth/context.ts`, `app/api/admin/import/pokemontcg/route.ts` | Still required; distinct from `ADMIN_SECRET` because it is route-specific and lower-scope |
+| `ADMIN_IMPORT_TOKEN` | Legacy narrow bearer token accepted by the auth resolver | No active route should require it; kept only for backward-compatible secret parsing until `lib/auth/context.ts` is simplified | `lib/auth/context.ts` | Optional legacy residue; prefer `ADMIN_SECRET` for current admin/import routes |
 | `CRON_SECRET` | Cron/internal automation auth bearer | `app/api/cron/**` and debug/repair scripts that intentionally use cron auth | `lib/auth/context.ts`, `requireCron()` routes | Still required; distinct from `ADMIN_SECRET` even though `requireCron()` accepts admin too |
 | `ALLOW_DEBUG_IN_PROD` | Explicit production kill-switch override for `app/api/debug/**` | Internal operators only | `proxy.ts` | Still required; distinct route-surface enable flag, not an auth credential |
 | `ALLOW_PROVIDER_CANONICAL_IMPORT` | Enables the legacy provider-driven canonical importer and related cron path | Admin/cron importer routes only | `lib/admin/scrydex-canonical-import.ts`, `app/api/cron/sync-canonical/route.ts` | Still required while legacy importer exists; distinct feature gate, not an auth credential |
@@ -81,7 +81,7 @@ This was the bug in commit `8439a33` (iOS operator admin elevation via `INTERNAL
 - Role split:
   - `INTERNAL_ADMIN_SESSION_SECRET` signs UI-backed admin sessions.
   - `ADMIN_SECRET` authenticates true server-to-server admin/import routes.
-  - `ADMIN_IMPORT_TOKEN` is a one-route import automation credential.
+  - `ADMIN_IMPORT_TOKEN` is legacy residue; no active route should depend on it.
   - `CRON_SECRET` authenticates cron/debug automation.
 - Recommended production posture:
   - set a dedicated `INTERNAL_ADMIN_SESSION_SECRET` instead of relying on the `ADMIN_SECRET` fallback
@@ -141,7 +141,7 @@ High-trust entrypoints outside `app/api/**` and `scripts/**` now have an explici
   - trust model: explicit route classification, secret-based admin/cron resolution where justified, and Clerk-backed internal-admin revalidation
 - Privileged package-script wrappers:
   - top-level security wrappers: `check:security`, `check:security:doctor`, `check:security:invariants`, `check:security:schema`, `check:security:schema:local`, `verify:rls`, `verify:rls:linked`
-  - operational wrappers: `ebay:deletion-setup`, `env:pull-safe`, `sets:backfill-summaries`, `import:pokemontcg-all`, `import:scrydex-all`, `import:scrydex-missing-printings`, `report:set-efficiency`, `justtcg:repair-sweep`, `justtcg:backfill-live`, `watch:unknown-finishes`, `ai:refresh-embeddings`
+  - operational wrappers: `ebay:deletion-setup`, `env:pull-safe`, `sets:backfill-summaries`, `import:scrydex-all`, `import:scrydex-missing-printings`, `report:set-efficiency`, `watch:unknown-finishes`, `ai:refresh-embeddings`
   - trust model: thin wrappers around classified privileged scripts only; command drift is checked in CI
 - Secret-bearing GitHub workflows:
   - `.github/workflows/ci.yml`
@@ -183,8 +183,8 @@ Use one of these explicit trust models for every `app/api/admin/**`, `app/api/cr
   - for true server-to-server admin/import tooling that is not UI-backed
   - route auth comes from `requireAdmin(req)`
 - `admin_import_token`
-  - for narrow import automation surfaces that use `ADMIN_IMPORT_TOKEN`
-  - these are not operator-session routes and must stay non-UI
+  - legacy trust model for the retired PokemonTCG import automation surface
+  - no current route should use this model; prefer `admin_secret` for current Scrydex import tooling
 - `cron_secret`
   - for cron/internal automation routes guarded by `requireCron(req)`
 - `debug_cron_guard`
@@ -211,7 +211,7 @@ When adding a new internal/admin/debug route:
 
 - Keep a route when it is a real network boundary: operator UI, cron invocation, manual admin tooling, or an external script target.
 - Do not reuse one internal route from another route just to share logic. Extract the shared server work into a module under `lib/` and let each route keep only its own auth, input parsing, and response shaping.
-- The Scrydex canonical importer now follows that pattern: `app/api/admin/import/scrydex-canonical/route.ts`, `app/api/admin/import/pokemontcg-canonical/route.ts`, `app/api/admin/import/pokemontcg/route.ts`, and `app/api/cron/sync-canonical/route.ts` all call `lib/admin/scrydex-canonical-import.ts` instead of treating another route as an internal API.
+- The Scrydex canonical importer follows that pattern: `app/api/admin/import/scrydex-canonical/route.ts` and `app/api/cron/sync-canonical/route.ts` both call `lib/admin/scrydex-canonical-import.ts` instead of treating another route as an internal API. The old PokemonTCG compatibility import routes have been removed.
 
 ## Clerk Integration
 

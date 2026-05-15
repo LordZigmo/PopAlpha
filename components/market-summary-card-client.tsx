@@ -9,6 +9,10 @@ import EnhancedChart from "@/components/enhanced-chart";
 import type { HistoryPointRow } from "@/components/raw-card-variant-types";
 import type { FinishGroup } from "@/lib/cards/detail-types";
 import type { SharedPrivateSale } from "@/lib/data/shared-private-sales";
+import {
+  PRICING_DISPLAY_V2_ENABLED,
+  resolveDisplayedMarketPrice,
+} from "@/lib/pricing/displayed-market-price";
 
 type MarketSummaryCardClientProps = {
   variants: Array<{
@@ -228,11 +232,29 @@ export default function MarketSummaryCardClient({
     history90d,
   });
 
-  const changeValue = effectiveWindow === "7d"
-    ? changePct7d ?? computeChange(chartSeries)
-    : computeChange(chartSeries);
+  const priceDisplay = PRICING_DISPLAY_V2_ENABLED
+    ? resolveDisplayedMarketPrice({
+        marketPrice: currentPrice,
+        marketPriceAsOf: asOfTs,
+      })
+    : null;
+  const hasDisplayablePrice = currentPrice !== null && (!priceDisplay || priceDisplay.kind !== "no_market");
+  const showChange = !priceDisplay || priceDisplay.kind === "live";
+  const changeValue = showChange
+    ? (effectiveWindow === "7d"
+        ? changePct7d ?? computeChange(chartSeries)
+        : computeChange(chartSeries))
+    : null;
+  const marketPriceHeading = priceDisplay?.kind === "stale_recent"
+    ? "Last Observed Price"
+    : priceDisplay?.kind === "stale_old"
+      ? "Sparse Market Price"
+      : "Market Price";
+  const marketPriceTimeLabel = priceDisplay?.kind === "stale_recent" || priceDisplay?.kind === "stale_old"
+    ? priceDisplay.ageLabel
+    : formatRelativeTime(asOfTs) ?? "";
   const { low, high } = computeLowHigh(chartSeries);
-  const sampleCount = currentPrice !== null ? chartSeries.length : 0;
+  const sampleCount = hasDisplayablePrice ? chartSeries.length : 0;
 
   function setWindow(nextWindow: WindowKey) {
     setActiveWindow(nextWindow);
@@ -265,9 +287,9 @@ export default function MarketSummaryCardClient({
           </div>
         }
       >
-        {currentPrice === null ? (
+        {!hasDisplayablePrice ? (
           <div className="rounded-2xl border border-white/[0.06] bg-[#151515] px-4 py-5 text-[16px] text-[#777]">
-            No market data yet.
+            No recent market data yet.
           </div>
         ) : (
           <div className="space-y-4">
@@ -275,13 +297,13 @@ export default function MarketSummaryCardClient({
             <div className="flex items-baseline justify-between gap-2">
               <div>
                 <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#8A8A8A]">
-                  Market Price
+                  {marketPriceHeading}
                 </p>
                 <span className="text-[38px] font-bold leading-none tracking-[-0.03em] tabular-nums text-[#F0F0F0] sm:text-[44px]">
                   {formatUsd(currentPrice)}
                 </span>
               </div>
-              <span className="shrink-0 text-[14px] text-[#6B6B6B]">{formatRelativeTime(asOfTs) ?? ""}</span>
+              <span className="shrink-0 text-[14px] text-[#6B6B6B]">{marketPriceTimeLabel}</span>
             </div>
 
             <div className="grid grid-cols-1 gap-2 rounded-2xl border border-white/[0.06] bg-[#151515] px-3 py-3">
@@ -313,7 +335,7 @@ export default function MarketSummaryCardClient({
                 { label: `${effectiveWindow.toUpperCase()} Low`, value: formatUsd(low) },
                 { label: `${effectiveWindow.toUpperCase()} High`, value: formatUsd(high) },
                 { label: "Price points", value: sampleCount > 0 ? String(sampleCount) : "—" },
-                { label: `${effectiveWindow.toUpperCase()} Change`, value: formatPercent(changeValue), tone: changeTone(changeValue) },
+                { label: `${effectiveWindow.toUpperCase()} Change`, value: showChange ? formatPercent(changeValue) : "Stale", tone: showChange ? changeTone(changeValue) : "neutral" },
               ]}
             />
 

@@ -4,10 +4,12 @@ import { hasPro } from "@/lib/entitlements";
 import { dbAdmin } from "@/lib/db/admin";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { getPostHogClient } from "@/lib/posthog-server";
+import { ANALYTICS_PIPELINE_PROVIDERS } from "@/lib/backfill/provider-registry";
 
 export const runtime = "nodejs";
 
 const rateLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 60 });
+const ACTIVE_SIGNAL_PROVIDER = ANALYTICS_PIPELINE_PROVIDERS[0];
 
 const GRADED_BUCKETS = new Set([
   "LE_7",
@@ -89,7 +91,7 @@ export async function GET(req: Request) {
     .from("pro_variant_metrics")
     .select("variant_ref, signal_trend, signal_breakout, signal_value, signals_as_of_ts")
     .eq("canonical_slug", slug)
-    .eq("provider", "JUSTTCG")
+    .eq("provider", ACTIVE_SIGNAL_PROVIDER)
     .eq("grade", "RAW")
     .not("signal_trend", "is", null)
     .order("history_points_30d", { ascending: false })
@@ -110,9 +112,10 @@ export async function GET(req: Request) {
     properties: {
       canonical_slug: slug,
       grade: "RAW",
+      provider: ACTIVE_SIGNAL_PROVIDER,
       variant_count: data?.length ?? 0,
     },
   });
 
-  return NextResponse.json({ ok: true, slug, grade: "RAW", variants: data });
+  return NextResponse.json({ ok: true, slug, grade: "RAW", provider: ACTIVE_SIGNAL_PROVIDER, variants: data });
 }

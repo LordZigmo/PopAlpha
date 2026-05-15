@@ -342,6 +342,15 @@ export async function resolveCanonicalSlug(input: string): Promise<string | null
     .eq("slug", slug)
     .maybeSingle<{ slug: string }>();
   if (canonical?.slug) return canonical.slug;
+
+  const { data: aliased } = await supabase
+    .from("card_aliases")
+    .select("canonical_slug")
+    .eq("alias", slug)
+    .limit(1)
+    .maybeSingle<{ canonical_slug: string }>();
+  if (aliased?.canonical_slug) return aliased.canonical_slug;
+
   return null;
 }
 

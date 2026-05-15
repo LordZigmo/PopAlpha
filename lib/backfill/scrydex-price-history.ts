@@ -1,4 +1,9 @@
 import { dbAdmin } from "@/lib/db/admin";
+import {
+  queryAdminPostgres,
+  withAdminPostgresFallback,
+} from "@/lib/db/postgres-admin";
+import { resolveScrydexPinnedHotSetIds } from "@/lib/backfill/scrydex-hot-set-targets";
 import { refreshPipelineRollupsForVariantKeys } from "@/lib/backfill/provider-pipeline-rollups";
 import {
   PIPELINE_TIER_SKIP_ENABLED,
@@ -8,6 +13,8 @@ import {
   loadCoverageGapSetPriority,
   loadHighValueStaleSetPriority,
   loadRecentSetConsistencyPriority,
+  loadStaleExtremeMoverSetPriority,
+  loadStaleExtremeMoverSlugScores,
 } from "@/lib/backfill/set-priority";
 import {
   isRetryableSupabaseWriteErrorMessage,
@@ -56,16 +63,19 @@ const DEFAULT_DAILY_REQUEST_BUDGET_LOOKBACK_HOURS = process.env.SCRYDEX_DAILY_RE
   ? Math.max(1, parseInt(process.env.SCRYDEX_DAILY_REQUEST_BUDGET_LOOKBACK_HOURS, 10))
   : 24;
 const WRITE_CHUNK_SIZE = 500;
+const PROVIDER_CARD_MAP_PAGE_SIZE = 1000;
 // Supabase REST GET queries for variant_ref IN-lists become unstable around 200 refs for large sets.
 const QUERY_CHUNK_SIZE = 100;
-const PINNED_HOT_SET_IDS = (() => {
-  const defaults = ["sv3pt5"];
-  const configured = String(process.env.SCRYDEX_PINNED_HOT_SET_IDS ?? "")
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean);
-  return [...new Set([...defaults, ...configured])];
-})();
+const PINNED_HOT_SET_IDS = resolveScrydexPinnedHotSetIds(process.env.SCRYDEX_PINNED_HOT_SET_IDS);
+
+const PROVIDER_CARD_MAP_SELECT_COLUMNS = [
+  "provider_set_id",
+  "provider_card_id",
+  "mapping_status",
+  "canonical_slug",
+  "printing_id",
+  "provider_variant_id",
+] as const;
 
 type SetPriorityTarget = {
   setCode: string | null;
@@ -81,6 +91,8 @@ type ProviderCardMapSummaryRow = {
   printing_id: string | null;
   provider_variant_id: string | null;
 };
+
+type ProviderCardMapSelectColumn = typeof PROVIDER_CARD_MAP_SELECT_COLUMNS[number];
 
 type ProviderSetMapRow = {
   canonical_set_code: string | null;
@@ -227,6 +239,21 @@ export type ScrydexDailyCapturePlanChunk = {
  */
 export type DormantHeavyMode = "exclude" | "only" | "all";
 
+export type ScrydexDailyHistoryReadiness = {
+  recentHistoryDays: number;
+  totalSets: number;
+  matchedSets: number;
+  fullyCoveredSets: number;
+  incompleteSets: number;
+  matchedCards: number;
+  cardsWithRecentSnapshot: number;
+  cardsMissingRecentSnapshot: number;
+  cardsMissingMappings: number;
+  dailyRequestsReady: number;
+  dailyRequestsBlocked: number;
+  creditsToFullCoverage: number;
+};
+
 export type ScrydexDailyCapturePlan = {
   ok: true;
   generatedAt: string;
@@ -237,6 +264,9 @@ export type ScrydexDailyCapturePlan = {
   dormantHeavyMode: DormantHeavyMode;
   dormantSkippedSetCount: number;
   dormantSkippedCardCount: number;
+  requiresFullRecentHistory: boolean;
+  historyDays: number | null;
+  historyReadiness: ScrydexDailyHistoryReadiness | null;
   selectedSets: ScrydexDailyCapturePlanRow[];
   skippedSets: ScrydexDailyCapturePlanRow[];
   chunks: ScrydexDailyCapturePlanChunk[];
@@ -345,6 +375,40 @@ export function summarizeScrydexRecentHistoryCoverage(input: {
     cardsMissingMappings,
     needsHistoryCatchup: cardsMissingRecentSnapshot > 0,
   };
+}
+
+export function summarizeScrydexDailyHistoryReadiness(
+  audits: ScrydexRecentHistoryCoverageAudit[],
+): ScrydexDailyHistoryReadiness | null {
+  if (audits.length === 0) return null;
+
+  return audits.reduce<ScrydexDailyHistoryReadiness>((summary, audit) => {
+    summary.totalSets += 1;
+    if (audit.matchedCardCount > 0) summary.matchedSets += 1;
+    if (audit.matchedCardCount > 0 && audit.cardsMissingRecentSnapshot === 0) summary.fullyCoveredSets += 1;
+    if (audit.cardsMissingRecentSnapshot > 0) summary.incompleteSets += 1;
+    summary.matchedCards += audit.matchedCardCount;
+    summary.cardsWithRecentSnapshot += audit.cardsWithRecentSnapshot;
+    summary.cardsMissingRecentSnapshot += audit.cardsMissingRecentSnapshot;
+    summary.cardsMissingMappings += audit.cardsMissingMappings;
+    if (audit.cardsMissingRecentSnapshot === 0) summary.dailyRequestsReady += audit.dailyCaptureRequests;
+    else summary.dailyRequestsBlocked += audit.dailyCaptureRequests;
+    summary.creditsToFullCoverage += calculateScrydexHistoryBackfillCredits(audit.cardsMissingRecentSnapshot);
+    return summary;
+  }, {
+    recentHistoryDays: audits[0]?.recentHistoryDays ?? DEFAULT_HISTORY_DAYS,
+    totalSets: 0,
+    matchedSets: 0,
+    fullyCoveredSets: 0,
+    incompleteSets: 0,
+    matchedCards: 0,
+    cardsWithRecentSnapshot: 0,
+    cardsMissingRecentSnapshot: 0,
+    cardsMissingMappings: 0,
+    dailyRequestsReady: 0,
+    dailyRequestsBlocked: 0,
+    creditsToFullCoverage: 0,
+  });
 }
 export const isRetryableHistoryWriteErrorMessage = isRetryableSupabaseWriteErrorMessage;
 export const retryHistoryWriteOperation = retrySupabaseWriteOperation;
@@ -494,31 +558,20 @@ export function selectScrydexRawHistoryPrice(
 }
 
 async function fetchAllProviderCardMapRows(
-  select: string,
+  selectColumns: readonly ProviderCardMapSelectColumn[],
   providerSetIds?: string[],
 ): Promise<ProviderCardMapSummaryRow[]> {
-  const supabase = dbAdmin();
-  const normalizedProviderSetIds = normalizeStringList(providerSetIds ?? []);
-  const rows: ProviderCardMapSummaryRow[] = [];
-  for (let from = 0; ; from += 1000) {
-    let query = supabase
-      .from("provider_card_map")
-      .select(select)
-      .eq("provider", PROVIDER)
-      .order("provider_set_id", { ascending: true })
-      .order("provider_card_id", { ascending: true });
-    if (normalizedProviderSetIds.length > 0) {
-      query = query.in("provider_set_id", normalizedProviderSetIds);
-    }
-    const { data, error } = await query
-      .range(from, from + 999)
-      .returns<ProviderCardMapSummaryRow[]>();
-    if (error) throw new Error(`provider_card_map(load): ${error.message}`);
-    const batch = data ?? [];
-    rows.push(...batch);
-    if (batch.length < 1000) break;
-  }
-  return rows;
+  return withAdminPostgresFallback({
+    label: "provider_card_map(load)",
+    loadPrimary: async () => loadProviderCardMapRowsViaSupabase({
+      selectColumns,
+      providerSetIds,
+    }),
+    loadFallback: async () => loadProviderCardMapRowsViaPostgres({
+      selectColumns,
+      providerSetIds,
+    }),
+  });
 }
 
 async function loadScrydexCanonicalSetCardCounts(setNames: string[]): Promise<Map<string, number>> {
@@ -577,35 +630,22 @@ function buildScrydexCardHistoryTargets(rows: ProviderCardMapSummaryRow[]): Scry
 }
 
 async function loadMatchedProviderCardMapRows(providerSetIds?: string[]): Promise<ProviderCardMapSummaryRow[]> {
-  const supabase = dbAdmin();
-  const normalizedProviderSetIds = normalizeStringList(providerSetIds ?? []);
-  const rows: ProviderCardMapSummaryRow[] = [];
-  for (let from = 0; ; from += 1000) {
-    let query = supabase
-      .from("provider_card_map")
-      .select("provider_set_id, provider_card_id, provider_variant_id, canonical_slug, printing_id, mapping_status")
-      .eq("provider", PROVIDER)
-      .eq("mapping_status", "MATCHED")
-      .order("provider_set_id", { ascending: true })
-      .order("provider_card_id", { ascending: true })
-      .order("provider_variant_id", { ascending: true });
-
-    if (normalizedProviderSetIds.length > 0) {
-      query = query.in("provider_set_id", normalizedProviderSetIds);
-    }
-
-    const { data, error } = await query
-      .range(from, from + 999)
-      .returns<ProviderCardMapSummaryRow[]>();
-    if (error) throw new Error(`provider_card_map(load matched targets): ${error.message}`);
-    const batch = data ?? [];
-    rows.push(...batch);
-    if (batch.length < 1000) break;
-  }
-  return rows;
+  return withAdminPostgresFallback({
+    label: "provider_card_map(load matched targets)",
+    loadPrimary: async () => loadProviderCardMapRowsViaSupabase({
+      selectColumns: PROVIDER_CARD_MAP_SELECT_COLUMNS,
+      providerSetIds,
+      mappingStatus: "MATCHED",
+    }),
+    loadFallback: async () => loadProviderCardMapRowsViaPostgres({
+      selectColumns: PROVIDER_CARD_MAP_SELECT_COLUMNS,
+      providerSetIds,
+      mappingStatus: "MATCHED",
+    }),
+  });
 }
 
-async function loadExistingSnapshotHistoryState(
+async function loadExistingSnapshotHistoryStateViaSupabase(
   variantRefs: string[],
   sinceIso: string,
 ): Promise<ExistingSnapshotHistoryState> {
@@ -638,13 +678,59 @@ async function loadExistingSnapshotHistoryState(
   };
 }
 
+async function loadExistingSnapshotHistoryStateViaPostgres(
+  variantRefs: string[],
+  sinceIso: string,
+): Promise<ExistingSnapshotHistoryState> {
+  const dayKeys = new Set<string>();
+  const seenVariantRefs = new Set<string>();
+
+  for (const chunk of chunkValues(variantRefs, QUERY_CHUNK_SIZE)) {
+    const rows = await queryAdminPostgres<PriceHistoryStateRow>(
+      `
+        select variant_ref, ts::text as ts
+        from public.price_history_points
+        where provider = $1
+          and source_window = $2
+          and variant_ref = any($3::text[])
+          and ts >= $4::timestamptz
+        order by variant_ref asc, ts asc
+      `,
+      [PROVIDER, "snapshot", chunk, sinceIso],
+    );
+    for (const row of rows) {
+      const variantRef = normalizeText(row.variant_ref);
+      const dayKey = extractDayKey(row.ts);
+      if (!variantRef || !dayKey) continue;
+      seenVariantRefs.add(variantRef);
+      dayKeys.add(`${variantRef}::${dayKey}`);
+    }
+  }
+
+  return {
+    dayKeys,
+    variantRefs: seenVariantRefs,
+  };
+}
+
+async function loadExistingSnapshotHistoryState(
+  variantRefs: string[],
+  sinceIso: string,
+): Promise<ExistingSnapshotHistoryState> {
+  return withAdminPostgresFallback({
+    label: "price_history_points(load existing history days)",
+    loadPrimary: async () => loadExistingSnapshotHistoryStateViaSupabase(variantRefs, sinceIso),
+    loadFallback: async () => loadExistingSnapshotHistoryStateViaPostgres(variantRefs, sinceIso),
+  });
+}
+
 export async function loadScrydexSetFootprints(opts: {
   providerSetIds?: string[];
 } = {}): Promise<ScrydexSetFootprint[]> {
   const supabase = dbAdmin();
   const normalizedProviderSetIds = normalizeStringList(opts.providerSetIds ?? []);
   const [providerCardMapRows, providerSetMapRows] = await Promise.all([
-    fetchAllProviderCardMapRows("provider_set_id, provider_card_id, mapping_status", normalizedProviderSetIds),
+    fetchAllProviderCardMapRows(["provider_set_id", "provider_card_id", "mapping_status"], normalizedProviderSetIds),
     (async () => {
       const rows: ProviderSetMapRow[] = [];
       for (let from = 0; ; from += 1000) {
@@ -826,6 +912,33 @@ function appendPriorityReason(
   };
 }
 
+export function partitionScrydexDailyCapturePlanRowsByHistoryReadiness(params: {
+  rows: ScrydexDailyCapturePlanRow[];
+  audits: ScrydexRecentHistoryCoverageAudit[];
+}) {
+  const blockedSetIds = new Set(
+    params.audits
+      .filter((audit) => audit.matchedCardCount > 0 && audit.cardsMissingRecentSnapshot > 0)
+      .map((audit) => audit.providerSetId),
+  );
+
+  const readyRows: ScrydexDailyCapturePlanRow[] = [];
+  const blockedRows: ScrydexDailyCapturePlanRow[] = [];
+  for (const row of params.rows) {
+    if (blockedSetIds.has(row.providerSetId)) {
+      blockedRows.push(appendPriorityReason(row, "history-incomplete"));
+      continue;
+    }
+    readyRows.push(row);
+  }
+
+  return {
+    readyRows,
+    blockedRows,
+    blockedSetIds,
+  };
+}
+
 async function loadRecentSuccessfulScrydexRequests(opts: {
   providerSetIds?: string[];
   lookbackHours?: number;
@@ -901,16 +1014,18 @@ export function resolveScrydexDailyRequestBudget(params: {
   return Math.min(totalAvailableRequests, Math.max(learnedBudget, sweepFloor));
 }
 
-function buildScrydexDailyCapturePlanRows(params: {
+export function buildScrydexDailyCapturePlanRows(params: {
   footprints: ScrydexSetFootprint[];
   recentConsistencySetIds: string[];
   highValuePrioritySetIds: string[];
+  staleExtremeMoverSetIds: string[];
   coveragePrioritySetIds: string[];
   explicitSetIds?: string[];
 }): ScrydexDailyCapturePlanRow[] {
   const pinnedSetIds = new Set(PINNED_HOT_SET_IDS);
   const explicitRankMap = buildPriorityRankMap(params.explicitSetIds ?? []);
   const recentRankMap = buildPriorityRankMap(params.recentConsistencySetIds);
+  const staleExtremeMoverRankMap = buildPriorityRankMap(params.staleExtremeMoverSetIds);
   const highValueRankMap = buildPriorityRankMap(params.highValuePrioritySetIds);
   const coverageRankMap = buildPriorityRankMap(params.coveragePrioritySetIds);
 
@@ -925,6 +1040,7 @@ function buildScrydexDailyCapturePlanRows(params: {
 
       if (explicitRankMap.has(footprint.providerSetId)) priorityReasons.push("explicit");
       if (pinnedSetIds.has(footprint.providerSetId)) priorityReasons.push("pinned");
+      if (staleExtremeMoverRankMap.has(footprint.providerSetId)) priorityReasons.push("stale-extreme-mover");
       if (recentRankMap.has(footprint.providerSetId)) priorityReasons.push("recent-consistency");
       if (highValueRankMap.has(footprint.providerSetId)) priorityReasons.push("high-value-stale");
       if (coverageRankMap.has(footprint.providerSetId)) priorityReasons.push("coverage-gap");
@@ -937,6 +1053,7 @@ function buildScrydexDailyCapturePlanRows(params: {
         priorityWeight += (explicitRankMap.get(footprint.providerSetId) ?? 0) * 400000;
       }
       if (pinnedSetIds.has(footprint.providerSetId)) priorityWeight += 20000000;
+      priorityWeight += (staleExtremeMoverRankMap.get(footprint.providerSetId) ?? 0) * 240000;
       priorityWeight += (recentRankMap.get(footprint.providerSetId) ?? 0) * 200000;
       priorityWeight += (highValueRankMap.get(footprint.providerSetId) ?? 0) * 120000;
       priorityWeight += (coverageRankMap.get(footprint.providerSetId) ?? 0) * 60000;
@@ -1066,6 +1183,43 @@ export function buildBalancedScrydexDailyCapturePlanChunks(params: {
   });
 }
 
+export function prioritizeScrydexCardHistoryTargets(params: {
+  targets: ScrydexCardHistoryTarget[];
+  existingVariantRefs?: Set<string>;
+  slugRiskScores?: Map<string, number>;
+}): ScrydexCardHistoryTarget[] {
+  const existingVariantRefs = params.existingVariantRefs ?? new Set<string>();
+  const slugRiskScores = params.slugRiskScores ?? new Map<string, number>();
+  const rankTarget = (target: ScrydexCardHistoryTarget) => {
+    const missingVariants = target.variants.reduce((count, variant) => {
+      return existingVariantRefs.has(variant.historyVariantRef) ? count : count + 1;
+    }, 0);
+    const maxSlugRisk = target.variants.reduce((best, variant) => {
+      return Math.max(best, slugRiskScores.get(normalizeText(variant.canonicalSlug)) ?? 0);
+    }, 0);
+    return {
+      missingVariants,
+      maxSlugRisk,
+      variantCount: target.variants.length,
+    };
+  };
+
+  return [...params.targets].sort((left, right) => {
+    const leftRank = rankTarget(left);
+    const rightRank = rankTarget(right);
+    if (rightRank.missingVariants !== leftRank.missingVariants) {
+      return rightRank.missingVariants - leftRank.missingVariants;
+    }
+    if (rightRank.maxSlugRisk !== leftRank.maxSlugRisk) {
+      return rightRank.maxSlugRisk - leftRank.maxSlugRisk;
+    }
+    if (rightRank.variantCount !== leftRank.variantCount) {
+      return rightRank.variantCount - leftRank.variantCount;
+    }
+    return left.providerCardId.localeCompare(right.providerCardId);
+  });
+}
+
 export async function planScrydexDailyCapture(opts: {
   providerSetIds?: string[];
   chunkCount?: number;
@@ -1074,11 +1228,17 @@ export async function planScrydexDailyCapture(opts: {
   requestBudgetHeadroom?: number;
   requestBudgetMinSweepPct?: number;
   dormantHeavyMode?: DormantHeavyMode;
+  requireFullRecentHistory?: boolean;
+  includeHistoryReadiness?: boolean;
+  historyDays?: number;
 } = {}): Promise<ScrydexDailyCapturePlan> {
   const explicitSetIds = normalizeStringList(opts.providerSetIds ?? []);
   const chunkCount = Math.max(1, Math.floor(opts.chunkCount ?? 8));
   const lookbackHours = Math.max(1, Math.floor(opts.lookbackHours ?? DEFAULT_DAILY_REQUEST_BUDGET_LOOKBACK_HOURS));
   const dormantHeavyMode: DormantHeavyMode = opts.dormantHeavyMode ?? "exclude";
+  const requireFullRecentHistory = opts.requireFullRecentHistory === true;
+  const includeHistoryReadiness = opts.includeHistoryReadiness === true;
+  const historyDays = Math.max(1, Math.floor(opts.historyDays ?? DEFAULT_HISTORY_DAYS));
   const footprints = await loadScrydexSetFootprints({ providerSetIds: explicitSetIds });
   const initialCandidateFootprints = footprints.filter((footprint) => (
     footprint.matchedCardCount > 0 && footprint.dailyCaptureRequests > 0
@@ -1108,20 +1268,6 @@ export async function planScrydexDailyCapture(opts: {
       return keep;
     });
   }
-  const totalAvailableRequests = candidateFootprints.reduce((sum, footprint) => (
-    sum + Math.max(0, footprint.dailyCaptureRequests)
-  ), 0);
-  const recentSuccessfulRequests = await loadRecentSuccessfulScrydexRequests({
-    providerSetIds: explicitSetIds,
-    lookbackHours,
-  });
-  const maxRequests = resolveScrydexDailyRequestBudget({
-    totalAvailableRequests,
-    recentSuccessfulRequests,
-    maxRequests: opts.maxRequests,
-    headroom: opts.requestBudgetHeadroom,
-    minSweepPct: opts.requestBudgetMinSweepPct,
-  });
 
   let orderedRows: ScrydexDailyCapturePlanRow[];
   if (explicitSetIds.length > 0) {
@@ -1129,6 +1275,7 @@ export async function planScrydexDailyCapture(opts: {
       footprints: candidateFootprints,
       recentConsistencySetIds: [],
       highValuePrioritySetIds: [],
+      staleExtremeMoverSetIds: [],
       coveragePrioritySetIds: [],
       explicitSetIds,
     });
@@ -1139,12 +1286,20 @@ export async function planScrydexDailyCapture(opts: {
         providerSetId: footprint.providerSetId,
       }));
 
-    const [recentConsistencySetIds, highValuePrioritySetIds, coveragePrioritySetIds] = await Promise.all([
+    const [recentConsistencySetIds, staleExtremeMoverSetIds, highValuePrioritySetIds, coveragePrioritySetIds] = await Promise.all([
       loadRecentSetConsistencyPriority({
         provider: PROVIDER,
         targets,
         yearFrom: 2024,
         freshWindowHours: 24,
+        maxProviderSetIds: 300,
+      }),
+      loadStaleExtremeMoverSetPriority({
+        provider: PROVIDER,
+        targets,
+        staleWindowHours: 12,
+        extremeMovePct: 100,
+        freshVerifyMovePct: 400,
         maxProviderSetIds: 300,
       }),
       loadHighValueStaleSetPriority({
@@ -1164,14 +1319,49 @@ export async function planScrydexDailyCapture(opts: {
       footprints: candidateFootprints,
       recentConsistencySetIds,
       highValuePrioritySetIds,
+      staleExtremeMoverSetIds,
       coveragePrioritySetIds,
     });
   }
 
+  let historyReadiness: ScrydexDailyHistoryReadiness | null = null;
+  let blockedHistoryRows: ScrydexDailyCapturePlanRow[] = [];
+  let selectableRows = orderedRows;
+  if (requireFullRecentHistory || includeHistoryReadiness) {
+    const audits = await loadScrydexRecentHistoryCoverageAudits({
+      providerSetIds: explicitSetIds,
+      days: historyDays,
+    });
+    historyReadiness = summarizeScrydexDailyHistoryReadiness(audits);
+    const partitioned = partitionScrydexDailyCapturePlanRowsByHistoryReadiness({
+      rows: orderedRows,
+      audits,
+    });
+    blockedHistoryRows = partitioned.blockedRows;
+    if (requireFullRecentHistory) selectableRows = partitioned.readyRows;
+  }
+
+  const totalAvailableRequests = selectableRows.reduce((sum, row) => (
+    sum + Math.max(0, row.dailyCaptureRequests)
+  ), 0);
+  const recentSuccessfulRequests = await loadRecentSuccessfulScrydexRequests({
+    providerSetIds: explicitSetIds,
+    lookbackHours,
+  });
+  const maxRequests = resolveScrydexDailyRequestBudget({
+    totalAvailableRequests,
+    recentSuccessfulRequests,
+    maxRequests: opts.maxRequests,
+    headroom: opts.requestBudgetHeadroom,
+    minSweepPct: opts.requestBudgetMinSweepPct,
+  });
+
   const selectedSets: ScrydexDailyCapturePlanRow[] = [];
-  const skippedSets: ScrydexDailyCapturePlanRow[] = [];
+  const skippedSets: ScrydexDailyCapturePlanRow[] = requireFullRecentHistory
+    ? [...blockedHistoryRows]
+    : [];
   let plannedRequests = 0;
-  for (const row of orderedRows) {
+  for (const row of selectableRows) {
     const nextPlannedRequests = plannedRequests + row.dailyCaptureRequests;
     if (nextPlannedRequests <= maxRequests) {
       selectedSets.push(row);
@@ -1196,6 +1386,9 @@ export async function planScrydexDailyCapture(opts: {
     dormantHeavyMode,
     dormantSkippedSetCount,
     dormantSkippedCardCount,
+    requiresFullRecentHistory: requireFullRecentHistory,
+    historyDays: requireFullRecentHistory || includeHistoryReadiness ? historyDays : null,
+    historyReadiness,
     selectedSets,
     skippedSets,
     chunks,
@@ -1302,6 +1495,7 @@ export async function loadScrydexRecentHistoryCoverageAudits(opts: {
 function buildHotProviderSetIds(params: {
   targets: SetPriorityTarget[];
   recentConsistencySetIds: string[];
+  staleExtremeMoverSetIds: string[];
   highValuePrioritySetIds: string[];
   coveragePrioritySetIds: string[];
 }): string[] {
@@ -1316,6 +1510,7 @@ function buildHotProviderSetIds(params: {
   };
 
   for (const providerSetId of PINNED_HOT_SET_IDS) add(providerSetId);
+  for (const providerSetId of params.staleExtremeMoverSetIds) add(providerSetId);
   for (const providerSetId of params.recentConsistencySetIds) add(providerSetId);
   for (const providerSetId of params.highValuePrioritySetIds) add(providerSetId);
   for (const providerSetId of params.coveragePrioritySetIds) add(providerSetId);
@@ -1373,12 +1568,20 @@ export async function planScrydexHistoricalBackfillSets(opts: {
       providerSetId: footprint.providerSetId,
     }));
 
-  const [recentConsistencySetIds, highValuePrioritySetIds, coveragePrioritySetIds] = await Promise.all([
+  const [recentConsistencySetIds, staleExtremeMoverSetIds, highValuePrioritySetIds, coveragePrioritySetIds] = await Promise.all([
     loadRecentSetConsistencyPriority({
       provider: PROVIDER,
       targets,
       yearFrom: 2024,
       freshWindowHours: 24,
+      maxProviderSetIds: 300,
+    }),
+    loadStaleExtremeMoverSetPriority({
+      provider: PROVIDER,
+      targets,
+      staleWindowHours: 12,
+      extremeMovePct: 100,
+      freshVerifyMovePct: 400,
       maxProviderSetIds: 300,
     }),
     loadHighValueStaleSetPriority({
@@ -1397,6 +1600,7 @@ export async function planScrydexHistoricalBackfillSets(opts: {
   const hotProviderSetIds = buildHotProviderSetIds({
     targets,
     recentConsistencySetIds,
+    staleExtremeMoverSetIds,
     highValuePrioritySetIds,
     coveragePrioritySetIds,
   });
@@ -1408,6 +1612,7 @@ export async function planScrydexHistoricalBackfillSets(opts: {
     reasonBySet.set(providerSetId, bucket);
   };
   for (const providerSetId of PINNED_HOT_SET_IDS) addReason(providerSetId, "pinned");
+  for (const providerSetId of staleExtremeMoverSetIds) addReason(providerSetId, "stale-extreme-mover");
   for (const providerSetId of recentConsistencySetIds) addReason(providerSetId, "recent-consistency");
   for (const providerSetId of highValuePrioritySetIds) addReason(providerSetId, "high-value-stale");
   for (const providerSetId of coveragePrioritySetIds) addReason(providerSetId, "coverage-gap");
@@ -1524,17 +1729,34 @@ export async function backfillScrydexPriceHistoryForSet(opts: {
   const variantRefs = normalizeStringList(
     allTargets.flatMap((target) => target.variants.map((variant) => variant.historyVariantRef)),
   );
+  const canonicalSlugs = normalizeStringList(
+    allTargets.flatMap((target) => target.variants.map((variant) => variant.canonicalSlug)),
+  );
   const sinceIso = new Date(Date.now() - (days * 24 * 60 * 60 * 1000)).toISOString();
   const existingSnapshotState = await loadExistingSnapshotHistoryState(variantRefs, sinceIso);
+  const slugRiskScores = canonicalSlugs.length > 0
+    ? await loadStaleExtremeMoverSlugScores({
+      canonicalSlugs,
+      staleWindowHours: 12,
+      extremeMovePct: 100,
+      freshVerifyMovePct: 400,
+      maxCanonicalSlugs: canonicalSlugs.length,
+    })
+    : new Map<string, number>();
   const eligibleTargets = onlyMissingRecentHistory
     ? allTargets.filter((target) => target.variants.some((variant) => !existingSnapshotState.variantRefs.has(variant.historyVariantRef)))
     : allTargets;
+  const prioritizedTargets = prioritizeScrydexCardHistoryTargets({
+    targets: eligibleTargets,
+    existingVariantRefs: existingSnapshotState.variantRefs,
+    slugRiskScores,
+  });
   cardsSkippedAlreadyCovered = onlyMissingRecentHistory ? Math.max(0, allTargets.length - eligibleTargets.length) : 0;
   const maxCards = opts.maxCards ?? DEFAULT_HISTORY_MAX_CARDS_PER_RUN;
   const targets = typeof maxCards === "number" && Number.isFinite(maxCards) && maxCards > 0
-    ? eligibleTargets.slice(0, Math.floor(maxCards))
-    : eligibleTargets;
-  cardsSkippedBudget = Math.max(0, eligibleTargets.length - targets.length);
+    ? prioritizedTargets.slice(0, Math.floor(maxCards))
+    : prioritizedTargets;
+  cardsSkippedBudget = Math.max(0, prioritizedTargets.length - targets.length);
   const preparedRows: HistoryWriteRow[] = [];
 
   try {
@@ -1695,21 +1917,25 @@ export async function backfillScrydexPriceHistoryForSet(opts: {
     for (let chunkIndex = 0; chunkIndex < writeChunks.length; chunkIndex += 1) {
       const chunk = writeChunks[chunkIndex];
       try {
-        const data = await retryHistoryWriteOperation(
-          `price_history_points(upsert history backfill chunk ${chunkIndex + 1}/${writeChunks.length})`,
-          async () => {
-            const { data, error } = await supabase
-              .from("price_history_points")
-              .upsert(chunk, { onConflict: "provider,variant_ref,ts,source_window" })
-              .select("id");
-            if (error) throw new Error(error.message);
-            return (data ?? []) as Array<{ id: string }>;
-          },
-          {
-            maxAttempts: DEFAULT_HISTORY_WRITE_RETRY_ATTEMPTS,
-            baseBackoffMs: DEFAULT_HISTORY_WRITE_RETRY_BACKOFF_MS,
-          },
-        );
+        const data = await withAdminPostgresFallback({
+          label: `price_history_points(upsert history backfill chunk ${chunkIndex + 1}/${writeChunks.length})`,
+          loadPrimary: async () => retryHistoryWriteOperation(
+            `price_history_points(upsert history backfill chunk ${chunkIndex + 1}/${writeChunks.length})`,
+            async () => {
+              const { data, error } = await supabase
+                .from("price_history_points")
+                .upsert(chunk, { onConflict: "provider,variant_ref,ts,source_window" })
+                .select("id");
+              if (error) throw new Error(error.message);
+              return (data ?? []) as Array<{ id: string }>;
+            },
+            {
+              maxAttempts: DEFAULT_HISTORY_WRITE_RETRY_ATTEMPTS,
+              baseBackoffMs: DEFAULT_HISTORY_WRITE_RETRY_BACKOFF_MS,
+            },
+          ),
+          loadFallback: async () => upsertHistoryWriteRowsViaPostgres(chunk),
+        });
         historyRowsUpserted += data.length;
       } catch (error) {
         firstError = error instanceof Error ? error.message : String(error);
@@ -1760,4 +1986,139 @@ export async function backfillScrydexPriceHistoryForSet(opts: {
     touchedVariantKeys,
     firstError,
   };
+}
+
+async function loadProviderCardMapRowsViaSupabase(params: {
+  selectColumns: readonly ProviderCardMapSelectColumn[];
+  providerSetIds?: string[];
+  mappingStatus?: "MATCHED";
+}): Promise<ProviderCardMapSummaryRow[]> {
+  const supabase = dbAdmin();
+  const normalizedProviderSetIds = normalizeStringList(params.providerSetIds ?? []);
+  const rows: ProviderCardMapSummaryRow[] = [];
+  for (let from = 0; ; from += PROVIDER_CARD_MAP_PAGE_SIZE) {
+    let query = supabase
+      .from("provider_card_map")
+      .select(params.selectColumns.join(", "))
+      .eq("provider", PROVIDER)
+      .order("provider_set_id", { ascending: true })
+      .order("provider_card_id", { ascending: true });
+    if (params.mappingStatus) {
+      query = query
+        .eq("mapping_status", params.mappingStatus)
+        .order("provider_variant_id", { ascending: true });
+    }
+    if (normalizedProviderSetIds.length > 0) {
+      query = query.in("provider_set_id", normalizedProviderSetIds);
+    }
+    const { data, error } = await query
+      .range(from, from + PROVIDER_CARD_MAP_PAGE_SIZE - 1)
+      .returns<ProviderCardMapSummaryRow[]>();
+    if (error) {
+      throw new Error(
+        params.mappingStatus
+          ? `provider_card_map(load matched targets): ${error.message}`
+          : `provider_card_map(load): ${error.message}`,
+      );
+    }
+    const batch = data ?? [];
+    rows.push(...batch);
+    if (batch.length < PROVIDER_CARD_MAP_PAGE_SIZE) break;
+  }
+  return rows;
+}
+
+async function loadProviderCardMapRowsViaPostgres(params: {
+  selectColumns: readonly ProviderCardMapSelectColumn[];
+  providerSetIds?: string[];
+  mappingStatus?: "MATCHED";
+}): Promise<ProviderCardMapSummaryRow[]> {
+  const normalizedProviderSetIds = normalizeStringList(params.providerSetIds ?? []);
+  const rows: ProviderCardMapSummaryRow[] = [];
+
+  for (let offset = 0; ; offset += PROVIDER_CARD_MAP_PAGE_SIZE) {
+    const values: unknown[] = [PROVIDER];
+    let nextParam = 2;
+    let queryText = `
+      select ${params.selectColumns.join(", ")}
+      from public.provider_card_map
+      where provider = $1
+    `;
+
+    if (params.mappingStatus) {
+      queryText += ` and mapping_status = $${nextParam}`;
+      values.push(params.mappingStatus);
+      nextParam += 1;
+    }
+
+    if (normalizedProviderSetIds.length > 0) {
+      queryText += ` and provider_set_id = any($${nextParam}::text[])`;
+      values.push(normalizedProviderSetIds);
+      nextParam += 1;
+    }
+
+    queryText += `
+      order by provider_set_id asc, provider_card_id asc, provider_variant_id asc
+      offset $${nextParam}
+      limit $${nextParam + 1}
+    `;
+    values.push(offset, PROVIDER_CARD_MAP_PAGE_SIZE);
+
+    const batch = await queryAdminPostgres<ProviderCardMapSummaryRow>(queryText, values);
+    rows.push(...batch);
+    if (batch.length < PROVIDER_CARD_MAP_PAGE_SIZE) break;
+  }
+
+  return rows;
+}
+
+async function upsertHistoryWriteRowsViaPostgres(
+  rows: HistoryWriteRow[],
+): Promise<Array<{ id: string }>> {
+  return queryAdminPostgres<{ id: string }>(
+    `
+      insert into public.price_history_points (
+        canonical_slug,
+        variant_ref,
+        provider,
+        ts,
+        price,
+        currency,
+        source_window
+      )
+      select *
+      from unnest(
+        $1::text[],
+        $2::text[],
+        $3::text[],
+        $4::timestamptz[],
+        $5::double precision[],
+        $6::text[],
+        $7::text[]
+      ) as rows(
+        canonical_slug,
+        variant_ref,
+        provider,
+        ts,
+        price,
+        currency,
+        source_window
+      )
+      on conflict (provider, variant_ref, ts, source_window)
+      do update set
+        canonical_slug = excluded.canonical_slug,
+        price = excluded.price,
+        currency = excluded.currency
+      returning id::text as id
+    `,
+    [
+      rows.map((row) => row.canonical_slug),
+      rows.map((row) => row.variant_ref),
+      rows.map((row) => row.provider),
+      rows.map((row) => row.ts),
+      rows.map((row) => row.price),
+      rows.map((row) => row.currency),
+      rows.map((row) => row.source_window),
+    ],
+  );
 }

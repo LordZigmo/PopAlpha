@@ -128,6 +128,95 @@ function runScrydexSpecialVariantTests() {
   });
   assert.equal(reverseDecision.matched, true);
   assert.equal(reverseDecision.matchType, "PRINTING_EXACT");
+
+  const dreamBallNormalDecision = chooseSinglePrinting({
+    observation: makeObservation({
+      provider_set_id: "swsh7",
+      provider_card_id: "swsh7-146",
+      provider_variant_id: "swsh7-146:normal",
+      normalized_card_number: "146",
+    }),
+    canonicalSetCode: "swsh7",
+    printingRows: [
+      makePrinting({
+        id: "dream-ball-nonholo",
+        canonical_slug: "evolving-skies-146-dream-ball",
+        set_code: "swsh7",
+        card_number: "146",
+        stamp: "DREAM_BALL_PATTERN",
+      }),
+      makePrinting({
+        id: "dream-ball-reverse",
+        canonical_slug: "evolving-skies-146-dream-ball",
+        set_code: "swsh7",
+        card_number: "146",
+        finish: "REVERSE_HOLO",
+        stamp: "DREAM_BALL_PATTERN",
+      }),
+    ],
+  });
+  assert.equal(dreamBallNormalDecision.matched, true);
+  assert.equal(dreamBallNormalDecision.matchType, "PRINTING_FINISH_EDITION_CANONICAL_STAMP");
+
+  const dreamBallReverseDecision = chooseSinglePrinting({
+    observation: makeObservation({
+      provider_set_id: "swsh7",
+      provider_card_id: "swsh7-146",
+      provider_variant_id: "swsh7-146:reverseholofoil",
+      normalized_card_number: "146",
+      normalized_finish: "REVERSE_HOLO",
+    }),
+    canonicalSetCode: "swsh7",
+    printingRows: [
+      makePrinting({
+        id: "dream-ball-nonholo",
+        canonical_slug: "evolving-skies-146-dream-ball",
+        set_code: "swsh7",
+        card_number: "146",
+        stamp: "DREAM_BALL_PATTERN",
+      }),
+      makePrinting({
+        id: "dream-ball-reverse",
+        canonical_slug: "evolving-skies-146-dream-ball",
+        set_code: "swsh7",
+        card_number: "146",
+        finish: "REVERSE_HOLO",
+        stamp: "DREAM_BALL_PATTERN",
+      }),
+    ],
+  });
+  assert.equal(dreamBallReverseDecision.matched, true);
+  assert.equal(dreamBallReverseDecision.matchType, "PRINTING_FINISH_EDITION_CANONICAL_STAMP");
+
+  const dreamBallPlayPokemonDecision = chooseSinglePrinting({
+    observation: makeObservation({
+      provider_set_id: "swsh7",
+      provider_card_id: "swsh7-146",
+      provider_variant_id: "swsh7-146:playpokemonstamp",
+      normalized_card_number: "146",
+      normalized_finish: "UNKNOWN",
+    }),
+    canonicalSetCode: "swsh7",
+    printingRows: [
+      makePrinting({
+        id: "dream-ball-nonholo",
+        canonical_slug: "evolving-skies-146-dream-ball",
+        set_code: "swsh7",
+        card_number: "146",
+        stamp: "DREAM_BALL_PATTERN",
+      }),
+      makePrinting({
+        id: "dream-ball-reverse",
+        canonical_slug: "evolving-skies-146-dream-ball",
+        set_code: "swsh7",
+        card_number: "146",
+        finish: "REVERSE_HOLO",
+        stamp: "DREAM_BALL_PATTERN",
+      }),
+    ],
+  });
+  assert.equal(dreamBallPlayPokemonDecision.matched, false);
+  assert.equal(dreamBallPlayPokemonDecision.reason, "AMBIGUOUS_NUMBER_ONLY_MATCH");
 }
 
 runScrydexSpecialVariantTests();

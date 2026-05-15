@@ -24,22 +24,10 @@ function parseStringArg(argv, name, fallback = "") {
 function providerConfig() {
   return [
     {
-      provider: "JUSTTCG",
-      endpoint: "/cards",
-      importPath: "../lib/backfill/justtcg-raw-normalize.ts",
-      exportName: "runJustTcgRawNormalize",
-    },
-    {
       provider: "SCRYDEX",
       endpoint: "/en/expansions/{id}/cards",
       importPath: "../lib/backfill/pokemontcg-raw-normalize.ts",
       exportName: "runScrydexRawNormalize",
-    },
-    {
-      provider: "POKETRACE",
-      endpoint: "/cards",
-      importPath: "../lib/backfill/poketrace-raw-normalize.ts",
-      exportName: "runPokeTraceRawNormalize",
     },
   ];
 }

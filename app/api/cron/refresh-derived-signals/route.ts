@@ -15,10 +15,12 @@ import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/auth/require";
 import { computeVariantSignals } from "@/lib/signals/scoring";
 import { dbAdmin } from "@/lib/db/admin";
+import { ANALYTICS_PIPELINE_PROVIDERS } from "@/lib/backfill/provider-registry";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 const SIGNAL_BATCH_SIZE = 150;
+const ACTIVE_SIGNAL_PROVIDER = ANALYTICS_PIPELINE_PROVIDERS[0];
 
 type VariantMetricRow = {
   id: string;
@@ -68,7 +70,7 @@ export async function GET(req: Request) {
           "provider_price_relative_to_30d_range",
           "provider_price_changes_count_30d",
         ].join(", "))
-        .eq("provider", "JUSTTCG")
+        .eq("provider", ACTIVE_SIGNAL_PROVIDER)
         .eq("grade", "RAW")
         .order("canonical_slug", { ascending: true })
         .order("variant_ref", { ascending: true })
@@ -83,7 +85,7 @@ export async function GET(req: Request) {
       const rpcKeys = typedRows.map((row) => ({
         canonical_slug: row.canonical_slug,
         variant_ref: row.variant_ref,
-        provider: "JUSTTCG",
+        provider: ACTIVE_SIGNAL_PROVIDER,
         grade: row.grade,
       }));
       const { data: batchRpcData, error: batchRpcError } = await supabase.rpc("refresh_derived_signals_for_variants", {
@@ -101,7 +103,7 @@ export async function GET(req: Request) {
       const { data: priceRows, error: priceError } = await supabase
         .from("variant_price_latest")
         .select("variant_ref, grade, price_value")
-        .eq("provider", "JUSTTCG")
+        .eq("provider", ACTIVE_SIGNAL_PROVIDER)
         .in("variant_ref", variantRefs)
         .in("grade", grades);
 

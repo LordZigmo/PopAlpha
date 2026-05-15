@@ -1,4 +1,8 @@
 import { dbAdmin } from "@/lib/db/admin";
+import {
+  queryAdminPostgres,
+  withAdminPostgresFallback,
+} from "@/lib/db/postgres-admin";
 import { buildSetId } from "@/lib/sets/summary-core.mjs";
 import type { BackendPipelineProvider } from "@/lib/backfill/provider-registry";
 
@@ -29,9 +33,43 @@ type RecentSetCoverageState = {
 };
 
 const CANONICAL_SET_LOOKUP_BATCH_SIZE = 100;
+const MAX_PRIORITY_METRIC_ROWS = 30000;
+const DEFAULT_STALE_EXTREME_MOVER_STALE_WINDOW_HOURS = 12;
+const DEFAULT_STALE_EXTREME_MOVER_MOVE_PCT = 100;
+const DEFAULT_STALE_EXTREME_MOVER_FRESH_VERIFY_MOVE_PCT = 400;
+
+type RawMarketMetricRow = {
+  canonical_slug: string;
+  market_price: number | null;
+  market_price_as_of: string | null;
+  justtcg_price: number | null;
+  scrydex_price: number | null;
+  change_pct_24h: number | null;
+  change_pct_7d: number | null;
+  provider_price_changes_count_30d: number | null;
+  active_listings_7d: number | null;
+};
+
+type StaleExtremeMoverPriorityCard = {
+  canonicalSlug: string;
+  setName: string;
+  score: number;
+};
 
 function normalizeText(value: string | null | undefined): string {
   return String(value ?? "").trim().toLowerCase();
+}
+
+function normalizeStringList(values: Array<string | null | undefined>): string[] {
+  const seen = new Set<string>();
+  const output: string[] = [];
+  for (const value of values) {
+    const normalized = normalizeText(value);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    output.push(normalized);
+  }
+  return output;
 }
 
 function hoursSince(value: string | null | undefined): number | null {
@@ -46,6 +84,272 @@ function calcRatio(numerator: number, denominator: number): number | null {
   return numerator / denominator;
 }
 
+function finiteNumber(value: number | null | undefined): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+async function loadRawMarketMetricRows(
+  supabase: ReturnType<typeof dbAdmin>,
+): Promise<RawMarketMetricRow[]> {
+  return withAdminPostgresFallback({
+    label: "set-priority(metrics)",
+    loadPrimary: async () => {
+      const { data: metricsRows, error: metricsError } = await supabase
+        .from("public_card_metrics")
+        .select([
+          "canonical_slug",
+          "market_price",
+          "market_price_as_of",
+          "justtcg_price",
+          "scrydex_price",
+          "change_pct_24h",
+          "change_pct_7d",
+          "provider_price_changes_count_30d",
+          "active_listings_7d",
+        ].join(","))
+        .eq("grade", "RAW")
+        .is("printing_id", null)
+        .not("market_price", "is", null)
+        .limit(MAX_PRIORITY_METRIC_ROWS)
+        .returns<RawMarketMetricRow[]>();
+      if (metricsError) throw new Error(`set-priority(metrics): ${metricsError.message}`);
+      return (metricsRows ?? []) as RawMarketMetricRow[];
+    },
+    loadFallback: async () => queryAdminPostgres<RawMarketMetricRow>(
+      `
+        select
+          canonical_slug,
+          market_price,
+          market_price_as_of::text as market_price_as_of,
+          justtcg_price,
+          scrydex_price,
+          change_pct_24h,
+          change_pct_7d,
+          provider_price_changes_count_30d,
+          active_listings_7d
+        from public.public_card_metrics
+        where grade = $1
+          and printing_id is null
+          and market_price is not null
+        limit $2
+      `,
+      ["RAW", MAX_PRIORITY_METRIC_ROWS],
+    ),
+  });
+}
+
+async function loadCanonicalSetNameLookup(
+  supabase: ReturnType<typeof dbAdmin>,
+  slugs: string[],
+): Promise<Map<string, string>> {
+  const slugSetName = new Map<string, string>();
+
+  const loadRowsViaSupabase = async (): Promise<Array<{ slug: string; set_name: string | null }>> => {
+    const rows: Array<{ slug: string; set_name: string | null }> = [];
+    for (let i = 0; i < slugs.length; i += CANONICAL_SET_LOOKUP_BATCH_SIZE) {
+      const batch = slugs.slice(i, i + CANONICAL_SET_LOOKUP_BATCH_SIZE);
+      const { data, error } = await supabase
+        .from("canonical_cards")
+        .select("slug, set_name")
+        .in("slug", batch);
+      if (error) throw new Error(`set-priority(canonical_cards): ${error.message}`);
+      rows.push(...((data ?? []) as Array<{ slug: string; set_name: string | null }>));
+    }
+    return rows;
+  };
+
+  const loadRowsViaPostgres = async (): Promise<Array<{ slug: string; set_name: string | null }>> => {
+    const rows: Array<{ slug: string; set_name: string | null }> = [];
+    for (let i = 0; i < slugs.length; i += CANONICAL_SET_LOOKUP_BATCH_SIZE) {
+      const batch = slugs.slice(i, i + CANONICAL_SET_LOOKUP_BATCH_SIZE);
+      rows.push(...await queryAdminPostgres<{ slug: string; set_name: string | null }>(
+        `
+          select slug, set_name
+          from public.canonical_cards
+          where slug = any($1::text[])
+        `,
+        [batch],
+      ));
+    }
+    return rows;
+  };
+
+  const rows = await withAdminPostgresFallback({
+    label: "set-priority(canonical_cards)",
+    loadPrimary: loadRowsViaSupabase,
+    loadFallback: loadRowsViaPostgres,
+  });
+
+  for (const row of rows) {
+    const slug = normalizeText(row.slug);
+    const setName = String(row.set_name ?? "").trim();
+    if (!slug || !setName) continue;
+    slugSetName.set(slug, setName);
+  }
+  return slugSetName;
+}
+
+async function loadStaleExtremeMoverPriorityCards(params: {
+  canonicalSlugs?: string[];
+  staleWindowHours?: number;
+  extremeMovePct?: number;
+  freshVerifyMovePct?: number;
+  maxCards?: number;
+} = {}): Promise<StaleExtremeMoverPriorityCard[]> {
+  const staleWindowHours = Math.max(
+    1,
+    Math.floor(params.staleWindowHours ?? DEFAULT_STALE_EXTREME_MOVER_STALE_WINDOW_HOURS),
+  );
+  const extremeMovePct = Math.max(1, Math.floor(params.extremeMovePct ?? DEFAULT_STALE_EXTREME_MOVER_MOVE_PCT));
+  const freshVerifyMovePct = Math.max(
+    extremeMovePct,
+    Math.floor(params.freshVerifyMovePct ?? DEFAULT_STALE_EXTREME_MOVER_FRESH_VERIFY_MOVE_PCT),
+  );
+  const maxCards = Math.max(1, Math.floor(params.maxCards ?? 500));
+  const canonicalSlugFilter = new Set(normalizeStringList(params.canonicalSlugs ?? []));
+
+  const supabase = dbAdmin();
+  const metricRows = await loadRawMarketMetricRows(supabase);
+  const filteredRows = metricRows.filter((row) => {
+    const slug = normalizeText(row.canonical_slug);
+    return canonicalSlugFilter.size === 0 || canonicalSlugFilter.has(slug);
+  });
+  const slugSetName = await loadCanonicalSetNameLookup(
+    supabase,
+    filteredRows.map((row) => row.canonical_slug).filter(Boolean),
+  );
+
+  const scored: StaleExtremeMoverPriorityCard[] = [];
+  const staleCutoffMs = Date.now() - staleWindowHours * 60 * 60 * 1000;
+  for (const row of filteredRows) {
+    const canonicalSlug = normalizeText(row.canonical_slug);
+    const setName = slugSetName.get(canonicalSlug) ?? "";
+    const marketPrice = finiteNumber(row.market_price);
+    if (!canonicalSlug || !setName || marketPrice === null || marketPrice <= 0) continue;
+
+    const movePct = Math.max(
+      Math.abs(finiteNumber(row.change_pct_24h) ?? 0),
+      Math.abs(finiteNumber(row.change_pct_7d) ?? 0),
+    );
+    if (movePct < extremeMovePct) continue;
+
+    const asOfMs = row.market_price_as_of ? new Date(row.market_price_as_of).getTime() : Number.NaN;
+    const hoursSinceAsOf = Number.isFinite(asOfMs)
+      ? Math.max(0, (Date.now() - asOfMs) / (1000 * 60 * 60))
+      : null;
+    const isStale = !Number.isFinite(asOfMs) || asOfMs < staleCutoffMs;
+    if (!isStale && movePct < freshVerifyMovePct) continue;
+
+    const staleWeight = isStale
+      ? 1.5 + Math.min(4, (hoursSinceAsOf ?? staleWindowHours * 2) / staleWindowHours)
+      : 0.75;
+    const providerGapWeight = row.justtcg_price == null || row.scrydex_price == null ? 1.2 : 1;
+    const priceChangesCount = Math.max(0, Math.floor(finiteNumber(row.provider_price_changes_count_30d) ?? 0));
+    const thinHistoryWeight = priceChangesCount <= 3
+      ? 1.25
+      : priceChangesCount <= 8
+        ? 1.1
+        : 1;
+    const activeListings = Math.max(0, Math.floor(finiteNumber(row.active_listings_7d) ?? 0));
+    const liquidityWeight = 1 + Math.min(0.25, activeListings / 20);
+    const priceWeight = 1 + Math.min(4, Math.log10(Math.max(marketPrice, 1)));
+    const score = movePct * staleWeight * providerGapWeight * thinHistoryWeight * liquidityWeight * priceWeight;
+    if (!(score > 0)) continue;
+
+    scored.push({
+      canonicalSlug,
+      setName,
+      score,
+    });
+  }
+
+  scored.sort((left, right) => right.score - left.score || left.canonicalSlug.localeCompare(right.canonicalSlug));
+  return scored.slice(0, maxCards);
+}
+
+export async function loadStaleExtremeMoverSlugScores(params: {
+  canonicalSlugs?: string[];
+  staleWindowHours?: number;
+  extremeMovePct?: number;
+  freshVerifyMovePct?: number;
+  maxCanonicalSlugs?: number;
+} = {}): Promise<Map<string, number>> {
+  const scoredCards = await loadStaleExtremeMoverPriorityCards({
+    canonicalSlugs: params.canonicalSlugs,
+    staleWindowHours: params.staleWindowHours,
+    extremeMovePct: params.extremeMovePct,
+    freshVerifyMovePct: params.freshVerifyMovePct,
+    maxCards: params.maxCanonicalSlugs ?? Math.max(200, (params.canonicalSlugs ?? []).length || 500),
+  });
+  const scoreBySlug = new Map<string, number>();
+  for (const row of scoredCards) {
+    const existing = scoreBySlug.get(row.canonicalSlug) ?? 0;
+    if (row.score > existing) scoreBySlug.set(row.canonicalSlug, row.score);
+  }
+  return scoreBySlug;
+}
+
+export async function loadStaleExtremeMoverSetPriority(params: {
+  provider: PriorityProvider;
+  targets: IngestTarget[];
+  staleWindowHours?: number;
+  extremeMovePct?: number;
+  freshVerifyMovePct?: number;
+  maxProviderSetIds?: number;
+}): Promise<string[]> {
+  void params.provider;
+  const maxProviderSetIds = Math.max(1, Math.floor(params.maxProviderSetIds ?? 120));
+  if (params.targets.length === 0) return [];
+
+  const scoredCards = await loadStaleExtremeMoverPriorityCards({
+    staleWindowHours: params.staleWindowHours,
+    extremeMovePct: params.extremeMovePct,
+    freshVerifyMovePct: params.freshVerifyMovePct,
+  });
+  if (scoredCards.length === 0) return [];
+
+  const scoresBySetName = new Map<string, number[]>();
+  for (const row of scoredCards) {
+    const key = normalizeText(row.setName);
+    if (!key) continue;
+    const bucket = scoresBySetName.get(key) ?? [];
+    bucket.push(row.score);
+    scoresBySetName.set(key, bucket);
+  }
+
+  const setScoreByName = new Map<string, number>();
+  for (const [setName, scores] of scoresBySetName.entries()) {
+    const topScores = [...scores].sort((left, right) => right - left).slice(0, 5);
+    const score = topScores.reduce((sum, value) => sum + value, 0);
+    if (score > 0) setScoreByName.set(setName, score);
+  }
+
+  const targetBySetName = new Map<string, IngestTarget[]>();
+  for (const target of params.targets) {
+    const key = normalizeText(target.setName);
+    if (!key) continue;
+    const list = targetBySetName.get(key) ?? [];
+    list.push(target);
+    targetBySetName.set(key, list);
+  }
+
+  const prioritizedTargets = [...setScoreByName.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .flatMap(([setName]) => targetBySetName.get(setName) ?? [])
+    .map((target) => target.providerSetId)
+    .filter(Boolean);
+
+  const unique = new Set<string>();
+  const output: string[] = [];
+  for (const providerSetId of prioritizedTargets) {
+    if (unique.has(providerSetId)) continue;
+    unique.add(providerSetId);
+    output.push(providerSetId);
+    if (output.length >= maxProviderSetIds) break;
+  }
+  return output;
+}
+
 export async function loadHighValueStaleSetPriority(params: {
   provider: PriorityProvider;
   targets: IngestTarget[];
@@ -57,39 +361,13 @@ export async function loadHighValueStaleSetPriority(params: {
   if (params.targets.length === 0) return [];
 
   const supabase = dbAdmin();
-  const { data: metricsRows, error: metricsError } = await supabase
-    .from("public_card_metrics")
-    .select("canonical_slug, market_price, market_price_as_of, justtcg_price, scrydex_price")
-    .eq("grade", "RAW")
-    .is("printing_id", null)
-    .not("market_price", "is", null)
-    .limit(30000);
-  if (metricsError) throw new Error(`set-priority(metrics): ${metricsError.message}`);
-
-  const metricRows = (metricsRows ?? []) as Array<{
-    canonical_slug: string;
-    market_price: number | null;
-    market_price_as_of: string | null;
-    justtcg_price: number | null;
-    scrydex_price: number | null;
-  }>;
+  const metricRows = await loadRawMarketMetricRows(supabase);
   const slugs = metricRows
     .map((row) => row.canonical_slug)
     .filter(Boolean);
   if (slugs.length === 0) return [];
 
-  const slugSetName = new Map<string, string>();
-  for (let i = 0; i < slugs.length; i += CANONICAL_SET_LOOKUP_BATCH_SIZE) {
-    const batch = slugs.slice(i, i + CANONICAL_SET_LOOKUP_BATCH_SIZE);
-    const { data, error } = await supabase
-      .from("canonical_cards")
-      .select("slug, set_name")
-      .in("slug", batch);
-    if (error) throw new Error(`set-priority(canonical_cards): ${error.message}`);
-    for (const row of (data ?? []) as Array<{ slug: string; set_name: string | null }>) {
-      if (row.slug && row.set_name) slugSetName.set(row.slug, row.set_name);
-    }
-  }
+  const slugSetName = await loadCanonicalSetNameLookup(supabase, slugs);
 
   const setBuckets = new Map<string, Array<{
     marketPrice: number;
@@ -98,7 +376,7 @@ export async function loadHighValueStaleSetPriority(params: {
     scrydexPrice: number | null;
   }>>();
   for (const row of metricRows) {
-    const setName = slugSetName.get(row.canonical_slug);
+    const setName = slugSetName.get(normalizeText(row.canonical_slug));
     if (!setName) continue;
     const marketPrice = typeof row.market_price === "number" && Number.isFinite(row.market_price)
       ? row.market_price

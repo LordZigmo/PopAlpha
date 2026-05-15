@@ -1,21 +1,45 @@
 import assert from "node:assert/strict";
+import { isRetryableSupabaseEdgeErrorMessage } from "../lib/db/postgres-admin.ts";
+import {
+  DEFAULT_SCRYDEX_PINNED_HOT_SET_IDS,
+  resolveScrydexPinnedHotSetIds,
+} from "../lib/backfill/scrydex-hot-set-targets.ts";
 import {
   buildBalancedScrydexDailyCapturePlanChunks,
+  buildScrydexDailyCapturePlanRows,
   buildScrydexRecentHistoryCatchupPlan,
   calculateScrydexDailyCaptureRequests,
   calculateScrydexHistoryBackfillCredits,
   historyDateToSnapshotTs,
   isMissingScrydexCardHistoryErrorMessage,
   isRetryableHistoryWriteErrorMessage,
+  partitionScrydexDailyCapturePlanRowsByHistoryReadiness,
+  prioritizeScrydexCardHistoryTargets,
   providerVariantIdToScrydexToken,
   resolveScrydexDailyRequestBudget,
   resolveScrydexRawHistoryDays,
   retryHistoryWriteOperation,
   selectScrydexRawHistoryPrice,
+  summarizeScrydexDailyHistoryReadiness,
   summarizeScrydexRecentHistoryCoverage,
 } from "../lib/backfill/scrydex-price-history.ts";
 
 async function runScrydexPriceHistoryTests() {
+  assert.equal(
+    isRetryableSupabaseEdgeErrorMessage("provider_card_map(load): Error code 522 Connection timed out from Cloudflare"),
+    true,
+  );
+  assert.equal(
+    isRetryableSupabaseEdgeErrorMessage("provider_card_map(load): {\"code\":\"PGRST116\",\"message\":\"not found\"}"),
+    false,
+  );
+
+  assert.deepEqual([...DEFAULT_SCRYDEX_PINNED_HOT_SET_IDS], ["sv3pt5", "swsh7"]);
+  assert.deepEqual(
+    resolveScrydexPinnedHotSetIds("swsh7,sv10, SV3PT5 "),
+    ["sv3pt5", "swsh7", "sv10"],
+  );
+
   assert.equal(calculateScrydexDailyCaptureRequests(0), 1);
   assert.equal(calculateScrydexDailyCaptureRequests(245), 3);
   assert.equal(calculateScrydexHistoryBackfillCredits(5), 15);
@@ -123,6 +147,59 @@ async function runScrydexPriceHistoryTests() {
     },
   );
 
+  assert.deepEqual(
+    summarizeScrydexDailyHistoryReadiness([
+      {
+        providerSetId: "sv10",
+        setCode: "sv10",
+        setName: "Destined Rivals",
+        expectedCardCount: 244,
+        providerCardCount: 244,
+        matchedCardCount: 244,
+        dailyCaptureRequests: 3,
+        historyBackfillRequests: 244,
+        historyBackfillCredits: 732,
+        priorityReasons: [],
+        recentHistoryDays: 90,
+        cardsWithRecentSnapshot: 44,
+        cardsMissingRecentSnapshot: 200,
+        cardsMissingMappings: 0,
+        needsHistoryCatchup: true,
+      },
+      {
+        providerSetId: "swsh7",
+        setCode: "swsh7",
+        setName: "Evolving Skies",
+        expectedCardCount: 237,
+        providerCardCount: 237,
+        matchedCardCount: 237,
+        dailyCaptureRequests: 3,
+        historyBackfillRequests: 237,
+        historyBackfillCredits: 711,
+        priorityReasons: [],
+        recentHistoryDays: 90,
+        cardsWithRecentSnapshot: 237,
+        cardsMissingRecentSnapshot: 0,
+        cardsMissingMappings: 0,
+        needsHistoryCatchup: false,
+      },
+    ]),
+    {
+      recentHistoryDays: 90,
+      totalSets: 2,
+      matchedSets: 2,
+      fullyCoveredSets: 1,
+      incompleteSets: 1,
+      matchedCards: 481,
+      cardsWithRecentSnapshot: 281,
+      cardsMissingRecentSnapshot: 200,
+      cardsMissingMappings: 0,
+      dailyRequestsReady: 3,
+      dailyRequestsBlocked: 3,
+      creditsToFullCoverage: 600,
+    },
+  );
+
   const recentPlan = buildScrydexRecentHistoryCatchupPlan({
     audits: [
       {
@@ -167,6 +244,129 @@ async function runScrydexPriceHistoryTests() {
   assert.equal(recentPlan.selectedSets.length, 1);
   assert.equal(recentPlan.selectedSets[0].providerSetId, "sv10");
   assert.equal(recentPlan.selectedSets[0].plannedCardCount, 150);
+
+  const prioritizedCaptureRows = buildScrydexDailyCapturePlanRows({
+    footprints: [
+      {
+        providerSetId: "safe-set",
+        setCode: "safe-set",
+        setName: "Safe Set",
+        expectedCardCount: 200,
+        providerCardCount: 200,
+        matchedCardCount: 200,
+        dailyCaptureRequests: 2,
+        historyBackfillRequests: 200,
+        historyBackfillCredits: 600,
+        priorityReasons: [],
+      },
+      {
+        providerSetId: "risk-set",
+        setCode: "risk-set",
+        setName: "Risk Set",
+        expectedCardCount: 200,
+        providerCardCount: 200,
+        matchedCardCount: 200,
+        dailyCaptureRequests: 2,
+        historyBackfillRequests: 200,
+        historyBackfillCredits: 600,
+        priorityReasons: [],
+      },
+    ],
+    recentConsistencySetIds: [],
+    staleExtremeMoverSetIds: ["risk-set"],
+    highValuePrioritySetIds: [],
+    coveragePrioritySetIds: [],
+  });
+  assert.equal(prioritizedCaptureRows[0].providerSetId, "risk-set");
+  assert.equal(prioritizedCaptureRows[0].priorityReasons.includes("stale-extreme-mover"), true);
+
+  const partitionedCaptureRows = partitionScrydexDailyCapturePlanRowsByHistoryReadiness({
+    rows: prioritizedCaptureRows,
+    audits: [
+      {
+        providerSetId: "safe-set",
+        setCode: "safe-set",
+        setName: "Safe Set",
+        expectedCardCount: 200,
+        providerCardCount: 200,
+        matchedCardCount: 200,
+        dailyCaptureRequests: 2,
+        historyBackfillRequests: 200,
+        historyBackfillCredits: 600,
+        priorityReasons: [],
+        recentHistoryDays: 90,
+        cardsWithRecentSnapshot: 200,
+        cardsMissingRecentSnapshot: 0,
+        cardsMissingMappings: 0,
+        needsHistoryCatchup: false,
+      },
+      {
+        providerSetId: "risk-set",
+        setCode: "risk-set",
+        setName: "Risk Set",
+        expectedCardCount: 200,
+        providerCardCount: 200,
+        matchedCardCount: 200,
+        dailyCaptureRequests: 2,
+        historyBackfillRequests: 200,
+        historyBackfillCredits: 600,
+        priorityReasons: [],
+        recentHistoryDays: 90,
+        cardsWithRecentSnapshot: 20,
+        cardsMissingRecentSnapshot: 180,
+        cardsMissingMappings: 0,
+        needsHistoryCatchup: true,
+      },
+    ],
+  });
+  assert.deepEqual(
+    partitionedCaptureRows.readyRows.map((row) => row.providerSetId),
+    ["safe-set"],
+  );
+  assert.deepEqual(
+    partitionedCaptureRows.blockedRows.map((row) => row.providerSetId),
+    ["risk-set"],
+  );
+  assert.equal(partitionedCaptureRows.blockedRows[0].priorityReasons.includes("history-incomplete"), true);
+
+  const prioritizedHistoryTargets = prioritizeScrydexCardHistoryTargets({
+    targets: [
+      {
+        providerSetId: "swsh7",
+        providerCardId: "rayquaza",
+        variants: [
+          {
+            providerCardId: "rayquaza",
+            providerVariantId: "rayquaza-vmax:normal",
+            providerVariantToken: "normal",
+            canonicalSlug: "evolving-skies-218-rayquaza-vmax",
+            printingId: "printing-ray",
+            historyVariantRef: "printing-ray::rayquaza-vmax:normal::RAW",
+          },
+        ],
+      },
+      {
+        providerSetId: "swsh7",
+        providerCardId: "common",
+        variants: [
+          {
+            providerCardId: "common",
+            providerVariantId: "common-card:normal",
+            providerVariantToken: "normal",
+            canonicalSlug: "evolving-skies-001-common-card",
+            printingId: "printing-common",
+            historyVariantRef: "printing-common::common-card:normal::RAW",
+          },
+        ],
+      },
+    ],
+    existingVariantRefs: new Set(["printing-common::common-card:normal::RAW"]),
+    slugRiskScores: new Map([["evolving-skies-218-rayquaza-vmax", 9999]]),
+  });
+  assert.deepEqual(
+    prioritizedHistoryTargets.map((target) => target.providerCardId),
+    ["rayquaza", "common"],
+  );
 
   assert.equal(historyDateToSnapshotTs("2026-03-17"), "2026-03-17T12:00:00.000Z");
   assert.equal(historyDateToSnapshotTs("2026/03/17"), "2026-03-17T12:00:00.000Z");

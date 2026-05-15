@@ -42,7 +42,7 @@ function formatExactCount(value: number | null): string {
   return new Intl.NumberFormat("en-US").format(value);
 }
 
-function getChangeWindowBadge(cards: HomepageCard[], fallback = "Live"): string {
+function getChangeWindowBadge(cards: HomepageCard[], fallback = "Recent"): string {
   const windows = [...new Set(cards.map((card) => card.change_window).filter((value): value is "24H" | "7D" => value === "24H" || value === "7D"))];
   if (windows.length === 0) return fallback;
   if (windows.length === 1) return windows[0];
@@ -651,9 +651,9 @@ export default async function Home() {
       dotClass: "bg-[#5CE07D]",
     },
     {
-      value: asOf ? asOf : "Live now",
+      value: asOf ? asOf : "Awaiting update",
       label: "Latest market tick",
-      detail: "Most recent timestamp currently flowing through PopAlpha's live price rails.",
+      detail: "Most recent timestamp currently flowing through PopAlpha's price rails.",
       accentClass: "border-[#25303B] bg-[linear-gradient(180deg,rgba(17,22,28,0.9),rgba(11,14,18,0.94))]",
       dotClass: "bg-[#A5B4FC]",
     },
@@ -661,7 +661,7 @@ export default async function Home() {
   const strongMoversBadge = getChangeWindowBadge([
     ...topMoverCardsByWindow["24H"],
     ...topMoverCardsByWindow["7D"],
-  ], "Live");
+  ], "Recent");
   const communityVoteTotals = communityPulse.cards.reduce((totals, card) => ({
     bullish: totals.bullish + card.bullishVotes,
     total: totals.total + card.bullishVotes + card.bearishVotes,
@@ -672,7 +672,7 @@ export default async function Home() {
   const discoveryCards = [
     {
       eyebrow: "Daily brief",
-      value: "Live market read",
+      value: "Recent market read",
       detail: heroBrief.lead,
       href: "#market-intelligence",
       linkLabel: "Read the brief",
@@ -685,9 +685,9 @@ export default async function Home() {
       detail: highConfidenceCount > 0
         ? highConfidenceCount >= strongMoverRailCards.length
           ? `${strongMoversBadge} movers are already clearing the confidence threshold.`
-          : `${highConfidenceCount} high-confidence movers are leading a broader live mover board.`
+          : `${highConfidenceCount} high-confidence movers are leading a broader recent mover board.`
         : strongMoverRailCards.length > 0
-          ? "Live movers are active even while the high-confidence group is still forming."
+          ? "Recent movers are active even while the high-confidence group is still forming."
           : "The board is still waiting for a deeper group of high-confidence breakouts.",
       href: "#top-movers",
       linkLabel: "See top movers",
@@ -700,7 +700,7 @@ export default async function Home() {
       detail: heroLeadingSet.name
         ? `${heroLeadingSet.count} hero cards from this set are leading the market right now.`
         : communityBullishPct != null
-          ? `Community Pulse is running ${communityBullishPct}% bullish on the live board.`
+          ? `Community Pulse is running ${communityBullishPct}% bullish on the recent board.`
           : "Watch where prices and collector votes start lining up.",
       href: heroLeadingSet.name ? "#momentum-rail" : "#market-intelligence",
       linkLabel: heroLeadingSet.name ? "See the move" : "See community votes",
@@ -709,9 +709,9 @@ export default async function Home() {
     },
   ] as const;
   const heroStats = [
-    { value: livePriceCount, label: "Live card prices", href: "/search" },
+    { value: livePriceCount, label: "Current card prices", href: "/search" },
     { value: refreshedCount, label: "Refreshed 24h", href: "/data" },
-    { value: asOf ? `Live ${asOf}` : "Live", label: "Last market update", href: "/data" },
+    { value: asOf ? `Updated ${asOf}` : "Awaiting update", label: "Last market update", href: "/data" },
     { value: "Open", label: "Public data monitor", href: "/data" },
   ] as const;
 
@@ -744,7 +744,7 @@ export default async function Home() {
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#00DC5A] opacity-75" />
                   <span className="relative inline-flex h-2 w-2 rounded-full bg-[#00DC5A]" />
                 </span>
-                <span>{asOf ? `Live ${asOf}` : "Live now"}</span>
+                <span>{asOf ? `Updated ${asOf}` : "Awaiting update"}</span>
               </div>
 
               <h1 className="relative z-40 mt-7 text-[clamp(3.45rem,5.95vw,5rem)] font-semibold leading-[0.86] tracking-[-0.058em] text-white">
@@ -904,7 +904,7 @@ export default async function Home() {
                       </div>
                     </div>
                     <span className="text-[11px] text-[#8D97A2]">
-                      {asOf ? `Updated ${asOf}` : "Live"}
+                      {asOf ? `Updated ${asOf}` : "Awaiting update"}
                     </span>
                   </div>
 
@@ -980,7 +980,7 @@ export default async function Home() {
                     </div>
                     <div>
                       <span className="text-[15px] font-bold text-white">PopAlpha Scout</span>
-                      <p className="text-[11px] font-medium text-[#00B4D8]">Live market brief</p>
+                      <p className="text-[11px] font-medium text-[#00B4D8]">Recent market brief</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5">
@@ -988,7 +988,7 @@ export default async function Home() {
                       <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#FF3B30] opacity-60" />
                       <span className="relative inline-flex h-2 w-2 rounded-full bg-[#FF3B30]" />
                     </span>
-                    <span className="text-[11px] font-semibold text-[#FF6B6B]">LIVE</span>
+                    <span className="text-[11px] font-semibold text-[#FF6B6B]">UPDATED</span>
                   </div>
                 </div>
 
@@ -1073,7 +1073,7 @@ export default async function Home() {
               Beyond price: see why a card is moving and what to watch next
             </h2>
             <p className="mx-auto mt-4 max-w-xl text-[15px] leading-relaxed text-[#666]">
-              PopAlpha combines live pricing, confidence reads, what's moving, and an AI market brief — built for Pokémon collectors, not Wall Street analysts.
+              PopAlpha combines recent pricing, confidence reads, what&apos;s moving, and an AI market brief — built for Pokémon collectors, not Wall Street analysts.
             </p>
           </div>
 

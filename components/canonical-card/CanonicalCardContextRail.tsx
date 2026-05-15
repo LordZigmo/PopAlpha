@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowRight, BookOpen, Eye, Layers3, Radar, Rows3 } from "lucide-react";
 import { Pill } from "@/components/ios-grouped-ui";
 import type { HomepageCard } from "@/lib/data/homepage";
+import { priceObservationDensityLabel } from "@/lib/pricing/price-observation-density";
 
 type ActionLink = {
   href: string;
@@ -38,9 +39,7 @@ function formatCount(value: number | null | undefined): string {
 // Bucket thresholds match lib/ai/card-profile-summary.ts priceTrackingBucket.
 function formatPriceTracking(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return "—";
-  if (value <= 4) return "Thin";
-  if (value < 30) return "Steady";
-  return "Dense";
+  return priceObservationDensityLabel(value).label.replace(" Tracking", "");
 }
 
 function RelatedCardLink({

@@ -3,8 +3,10 @@ import { requireOnboarded } from "@/lib/auth/require";
 import { getCommunityVoteWeekStart } from "@/lib/data/community-pulse";
 import { createServerSupabaseUserClient } from "@/lib/db/user";
 import { normalizeHoldingGrade, type GradeBucket } from "@/lib/holdings/grade-normalize";
+import { ANALYTICS_PIPELINE_PROVIDERS } from "@/lib/backfill/provider-registry";
 
 export const runtime = "nodejs";
+const ACTIVE_SIGNAL_PROVIDER = ANALYTICS_PIPELINE_PROVIDERS[0];
 
 type HoldingRow = {
   canonical_slug: string | null;
@@ -123,7 +125,7 @@ export async function GET(req: Request) {
       .from("public_variant_movers_priced")
       .select("canonical_slug")
       .in("canonical_slug", uniqueSlugs)
-      .eq("provider", "JUSTTCG")
+      .eq("provider", ACTIVE_SIGNAL_PROVIDER)
       .eq("grade", "RAW")
       .eq("mover_tier", "hot");
 

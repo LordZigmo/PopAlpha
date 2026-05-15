@@ -27,7 +27,7 @@ import type { RawCardMarketVariantInput } from "@/components/raw-card-variant-ty
 import CardTileMini from "@/components/card-tile-mini";
 import type { HomepageCard } from "@/lib/data/homepage";
 import { buildEbaySearchQueries, type GradeSelection, type GradedSource } from "@/lib/ebay-query";
-import { buildFinishGroups, buildPrintingPill } from "@/lib/cards/detail";
+import { buildFinishGroups } from "@/lib/cards/detail";
 import { choosePreferredRawPricingPrinting } from "@/lib/cards/raw-pricing-printing";
 import { getCardViewSnapshot } from "@/lib/data/card-views";
 import { getCommunityPulseSnapshot } from "@/lib/data/community-pulse";
@@ -42,6 +42,10 @@ import {
   PRICING_DISPLAY_V2_ENABLED,
   resolveDisplayedMarketPrice,
 } from "@/lib/pricing/displayed-market-price";
+import {
+  priceObservationActivityLabel,
+  priceObservationDensityLabel,
+} from "@/lib/pricing/price-observation-density";
 import { resolveSnapshotTrust } from "@/lib/pricing/snapshot-trust";
 import { isPhysicalPokemonSet } from "@/lib/sets/physical";
 
@@ -84,6 +88,7 @@ type SnapshotRow = {
 type CardProfileRow = {
   summary_short: string;
   summary_long: string | null;
+  updated_at: string | null;
 };
 
 type HoldingQtyRow = {
@@ -206,7 +211,7 @@ const getCanonicalCardPageBaseData = cache(async (slug: string): Promise<Canonic
       .eq("canonical_slug", slug),
     supabase
       .from("card_profiles")
-      .select("summary_short, summary_long")
+      .select("summary_short, summary_long, updated_at")
       .eq("canonical_slug", slug)
       .maybeSingle<CardProfileRow>(),
   ]);
@@ -468,9 +473,7 @@ function rarityColor(rarity: string | null): { label: string; color: string; bor
 function marketStatusSignal(
   active7d: number | null,
 ): { label: string; tone: "positive" | "warning" | "neutral" } {
-  if (active7d === null || active7d === undefined) return { label: "Market Forming", tone: "neutral" };
-  if (active7d <= 4) return { label: "Scarce", tone: "positive" };
-  return { label: "Abundant", tone: "neutral" };
+  return priceObservationDensityLabel(active7d);
 }
 
 function formatUsdCompact(value: number | null | undefined): string {
@@ -634,12 +637,7 @@ export default async function CanonicalCardPage({
   const availableProviders = GRADED_SOURCES.filter((source) =>
     gradedAvailability.some((row) => row.provider === source)
   );
-  const scoutUpdatedAt =
-    [...gradedAvailability]
-      .map((row) => row.provider_as_of_ts)
-      .filter((value): value is string => typeof value === "string" && value.length > 0)
-      .sort()
-      .reverse()[0] ?? null;
+  const scoutUpdatedAt = cardProfile?.updated_at ?? null;
   const requestedProvider = selectedProvider(provider);
   const activeProvider = (requestedProvider && availableProviders.includes(requestedProvider)
     ? requestedProvider
@@ -931,11 +929,13 @@ export default async function CanonicalCardPage({
   const currentRawPrice = viewMode === "RAW"
     ? rawPricing?.marketPrice ?? null
     : null;
-  const displayPrimaryPrice = viewMode === "RAW"
+  const displayPrimaryPriceCandidate = viewMode === "RAW"
     ? currentRawPrice
     : (snapshotData?.median_7d ?? null);
+  const showPrimaryPrice = viewMode !== "RAW" || !rawPriceDisplay || rawPriceDisplay.kind !== "no_market";
+  const displayPrimaryPrice = showPrimaryPrice ? displayPrimaryPriceCandidate : null;
   const primaryPrice = displayPrimaryPrice != null ? formatUsdCompact(displayPrimaryPrice) : null;
-  const primaryPriceLabel = currentRawPrice != null
+  const primaryPriceLabel = viewMode === "RAW" && currentRawPrice != null
     ? (() => {
       if (rawPriceDisplay && rawPriceDisplay.kind === "stale_recent") {
         return `Last sold · ${rawPriceDisplay.ageLabel}`;
@@ -956,14 +956,15 @@ export default async function CanonicalCardPage({
       : activeProvider && activeBucket
         ? `${providerLabel(activeProvider)} ${gradeBucketLabel(activeBucket)}`
         : "Graded market"
-    } · 7-day median ask`;
+    } · 7-day median observed price`;
 
   const priceChangePct = vm?.change_7d_pct ?? null;
-  const displayPriceChangePct = typeof priceChangePct === "number" && Number.isFinite(priceChangePct)
+  const showPriceChange = viewMode === "RAW" && (!rawPriceDisplay || rawPriceDisplay.kind === "live");
+  const displayPriceChangePct = showPriceChange && typeof priceChangePct === "number" && Number.isFinite(priceChangePct)
     ? priceChangePct
-    : 0;
-  const priceChangeLabel = vm?.change_7d_pct != null ? "7d" : null;
-  const priceChangeColor = displayPriceChangePct !== 0
+    : null;
+  const priceChangeLabel = displayPriceChangePct != null ? "7d" : null;
+  const priceChangeColor = displayPriceChangePct !== null && displayPriceChangePct !== 0
     ? displayPriceChangePct > 0 ? "#00DC5A" : "#FF3B30"
     : "#6B6B6B";
 
@@ -1000,14 +1001,9 @@ export default async function CanonicalCardPage({
       value: latestRow?.price != null ? formatUsdCompact(latestRow.price) : "Forming",
     };
   });
-  const trendMetricValue = formatSignalScore(priceChangePct);
-  const breakoutMetricValue = snapshotData?.active_listings_7d != null
-    ? snapshotData.active_listings_7d <= 4
-      ? "Tight Supply"
-      : snapshotData.active_listings_7d <= 10
-        ? "Building"
-        : "Crowded"
-    : "Forming";
+  const trendMetricValue = showPriceChange ? formatSignalScore(priceChangePct) : "Stale";
+  const activityMetric = priceObservationActivityLabel(snapshotData?.active_listings_7d ?? null);
+  const scoutMarketPrice = viewMode === "RAW" && !showPriceChange ? null : displayPrimaryPrice;
   const valueMetricValue = edgeLabel && edgeFormatted
     ? `${edgeFormatted} ${edgeLabel}`
     : fairValue != null
@@ -1143,12 +1139,14 @@ export default async function CanonicalCardPage({
                     <span className="text-[46px] font-bold leading-none tracking-[-0.04em] tabular-nums text-[#F0F0F0] sm:text-[56px]">
                       {primaryPrice}
                     </span>
-                    <span
-                      className="text-[20px] font-bold tabular-nums tracking-[-0.02em] sm:text-[24px]"
-                      style={{ color: priceChangeColor }}
-                    >
-                      {displayPriceChangePct > 0 ? "+" : ""}{Math.abs(displayPriceChangePct) >= 10 ? displayPriceChangePct.toFixed(0) : displayPriceChangePct.toFixed(1)}%
-                    </span>
+                    {displayPriceChangePct !== null ? (
+                      <span
+                        className="text-[20px] font-bold tabular-nums tracking-[-0.02em] sm:text-[24px]"
+                        style={{ color: priceChangeColor }}
+                      >
+                        {displayPriceChangePct > 0 ? "+" : ""}{Math.abs(displayPriceChangePct) >= 10 ? displayPriceChangePct.toFixed(0) : displayPriceChangePct.toFixed(1)}%
+                      </span>
+                    ) : null}
                     </div>
                     {fairValue != null && (
                       <div className="mt-1.5 flex flex-wrap items-baseline gap-2">
@@ -1251,9 +1249,9 @@ export default async function CanonicalCardPage({
 
         <PopAlphaScoutPreview
           cardName={canonical.canonical_name}
-          marketPrice={displayPrimaryPrice ?? null}
+          marketPrice={scoutMarketPrice ?? null}
           fairValue={fairValue}
-          changePct={priceChangePct}
+          changePct={displayPriceChangePct}
           changeLabel={priceChangeLabel}
           activeListings7d={snapshotData?.active_listings_7d ?? null}
           summaryText={cardProfile?.summary_long ?? cardProfile?.summary_short ?? null}
@@ -1264,12 +1262,12 @@ export default async function CanonicalCardPage({
           <DerivedMetricTile
             label="Trend"
             value={trendMetricValue}
-            tone={priceChangePct != null ? (priceChangePct > 0 ? "positive" : priceChangePct < 0 ? "negative" : "neutral") : "neutral"}
+            tone={displayPriceChangePct != null ? (displayPriceChangePct > 0 ? "positive" : displayPriceChangePct < 0 ? "negative" : "neutral") : "neutral"}
           />
           <DerivedMetricTile
-            label="Breakout"
-            value={breakoutMetricValue}
-            tone={snapshotData?.active_listings_7d != null && snapshotData.active_listings_7d <= 4 ? "positive" : "neutral"}
+            label="Activity"
+            value={activityMetric.label}
+            tone={activityMetric.tone === "warning" ? "neutral" : activityMetric.tone}
           />
           <DerivedMetricTile
             label="Value"

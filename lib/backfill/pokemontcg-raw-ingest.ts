@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { dbAdmin } from "@/lib/db/admin";
+import { resolveScrydexPinnedHotSetIds } from "@/lib/backfill/scrydex-hot-set-targets";
 import { fetchCardsPage, getScrydexCredentials, type ScrydexCard } from "@/lib/scrydex/client";
 import {
   loadCoverageGapSetPriority,
@@ -41,14 +42,7 @@ const HOT_SLOT_INTERVAL = process.env.SCRYDEX_HOT_SLOT_INTERVAL
 const HOT_SET_LIMIT = process.env.SCRYDEX_HOT_SET_LIMIT
   ? Math.max(1, parseInt(process.env.SCRYDEX_HOT_SET_LIMIT, 10))
   : 10;
-const PINNED_HOT_SET_IDS = (() => {
-  const defaults = ["sv3pt5"];
-  const configured = String(process.env.SCRYDEX_PINNED_HOT_SET_IDS ?? "")
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean);
-  return normalizeStringList([...defaults, ...configured]);
-})();
+const PINNED_HOT_SET_IDS = resolveScrydexPinnedHotSetIds(process.env.SCRYDEX_PINNED_HOT_SET_IDS);
 const MAX_SETS_PER_RUN_CAP = process.env.SCRYDEX_RAW_SETS_PER_RUN_CAP
   ? parseInt(process.env.SCRYDEX_RAW_SETS_PER_RUN_CAP, 10)
   : 6;

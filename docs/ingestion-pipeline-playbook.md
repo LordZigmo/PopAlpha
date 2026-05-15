@@ -2,7 +2,7 @@
 
 **Audience:** Future Claude (or any engineer) debugging, tuning, or extending the Scrydex ingestion pipeline.
 
-**Last updated:** 2026-04-16 after a compound day: LIKE-OR fallback burning 70% of DB CPU, two cascade failures it had been masking, and a silent structural bug in `refresh_card_metrics_for_variants` that had been aborting every call since 2026-04-07 and was the real cause of user-visible stale prices.
+**Last updated:** 2026-05-15 to make the active provider policy explicit: Scrydex is the only active English pricing ingest provider; JustTCG, PokeTrace, and PokemonTCG compatibility routes are retired from live ingestion.
 
 ---
 
@@ -17,6 +17,16 @@ Three hard constraints, ranked by priority:
 3. **Supabase compute + disk IO** — these get exhausted by runaway pipelines. On medium compute, **CPU is the first constraint** (not disk IO). The `price_history_points` table is the #1 CPU consumer — its SELECT and DELETE queries must include `ts` bounds to avoid full-table scans. Disk IO burst budget is the second thing to burn.
 
 When in doubt: **correctness > freshness > credit thrift > DB load > latency**. Never sacrifice a higher-priority item for a lower one.
+
+---
+
+## Active provider policy
+
+Scrydex is the only active English pricing ingest provider. It is the source that backs provider-independent `market_price` for English RAW pricing today.
+
+JustTCG, PokeTrace, and PokemonTCG compatibility routes are retired from live ingestion. Historical rows can still exist in legacy tables, migration history, diagnostic scripts, and old incident notes, but no production cron or queue-driven provider path should write new non-Scrydex English pricing observations. Do not add retired providers back to `pipeline_jobs`, cron schedules, route registries, or market-price rollups without a deliberate provider reactivation plan.
+
+The canonical source of truth for queue-driven provider eligibility is `lib/backfill/provider-registry.ts`; as of this note it contains only `SCRYDEX`.
 
 ---
 
@@ -364,7 +374,7 @@ After gating 14a, three problems surfaced that had been silently failing inside 
 
 **Cascade 1: PostgREST URL overflow on the happy-path lookup.** Line 510-514 of `provider-observation-timeseries.ts` did `.in("provider_ref", providerRefs)` with 200+ items unchunked. That overflows PostgREST's URL limit and returns HTTP 400 "Bad Request". Previously, the LIKE-OR was timing out before this code ran, so the 400 never surfaced. Fixed in commit `11de000` by chunking via the existing `chunkValues(..., STALE_DELETE_PROVIDER_REF_CHUNK_SIZE)` pattern already used elsewhere in the file.
 
-**Cascade 2: `variant_metrics_printing_key_variant_ref_chk` constraint violation.** Migration 20260416 tightened the constraint so `variant_ref` shape must match `grade` (RAW shape for RAW grade, graded shape for graded grades). `runProviderObservationVariantMetrics` in [lib/backfill/provider-observation-variant-metrics.ts](../lib/backfill/provider-observation-variant-metrics.ts) unconditionally built `variant_ref = buildRawVariantRef(printingId)` (always RAW shape), but `shouldWriteObservation` at line 143 let graded observations through. Result: graded rows with RAW-shaped `variant_ref` → constraint violation. Fixed in commit `33cc91b` by inverting the guard to skip non-RAW observations. The analytics providers (SCRYDEX/JUSTTCG/POKETRACE) have no path for graded writes through this function anyway — graded data flows through `app/api/ingest/psa` separately.
+**Cascade 2: `variant_metrics_printing_key_variant_ref_chk` constraint violation.** Migration 20260416 tightened the constraint so `variant_ref` shape must match `grade` (RAW shape for RAW grade, graded shape for graded grades). `runProviderObservationVariantMetrics` in [lib/backfill/provider-observation-variant-metrics.ts](../lib/backfill/provider-observation-variant-metrics.ts) unconditionally built `variant_ref = buildRawVariantRef(printingId)` (always RAW shape), but `shouldWriteObservation` at line 143 let graded observations through. Result: graded rows with RAW-shaped `variant_ref` → constraint violation. Fixed in commit `33cc91b` by inverting the guard to skip non-RAW observations. The active English analytics provider is now Scrydex only and has no graded writes through this function — graded data flows through `app/api/ingest/psa` separately.
 
 **Cascade 2b: empty-string / case-sensitivity fallthrough.** First pass used `if (grade && grade !== "RAW")`. That's false when `grade === ""` (empty string is falsy), so empty-grade observations still got written with `grade=""` and violated the constraint. It would also incorrectly reject lowercase `"raw"`. Fixed in commit `e5a3386`: uppercase-normalize before comparing with strict `grade !== "RAW"`, and force literal `"RAW"` on the write side instead of trusting the observation's passed-through grade.
 
@@ -551,6 +561,7 @@ The `total_with_market_price` is the true ceiling. Currently ~18,564.
 SELECT COUNT(DISTINCT canonical_slug) as slugs_with_recent_scrydex_snapshot
 FROM price_snapshots
 WHERE observed_at >= NOW() - INTERVAL '30 days'
+  -- POKEMON_TCG_API is a historical Scrydex-compatible provider label.
   AND provider IN ('SCRYDEX', 'POKEMON_TCG_API')
   AND grade = 'RAW';
 ```

@@ -1,6 +1,6 @@
-# Scrydex API setup (Pokemon TCG import)
+# Scrydex API setup
 
-Scrydex is the evolution of the Pokemon TCG API (pokemontcg.io). Use it for the canonical import when the official API is slow or flaky.
+Scrydex is PopAlpha's active English Pokemon pricing and canonical-card provider. JustTCG, PokeTrace, and the old PokemonTCG compatibility routes are retired from live ingestion; new operator work should use the Scrydex routes and scripts only.
 
 ## Required credentials
 
@@ -14,7 +14,7 @@ Scrydex needs **two** values (from your [Scrydex dashboard](https://scrydex.com/
 Add these two lines to **`.env.local`** (replace the placeholders with your real values):
 
 ```env
-# Scrydex (Pokemon TCG import) — get both from https://scrydex.com/ dashboard
+# Scrydex — get both from https://scrydex.com/ dashboard
 SCRYDEX_API_KEY=<paste your Scrydex API key>
 SCRYDEX_TEAM_ID=<paste your Scrydex Team ID>
 ```
@@ -39,4 +39,5 @@ Replace `<paste your Scrydex API key>` and `<paste your Scrydex Team ID>` with y
 
 Card object includes `id`, `name`, `number`, `rarity`, `expansion` (id, name, release_date), `images`, `variants` (for pricing). Use `expansion.id` and `expansion.release_date` for set info.
 
-- **Import all English cards:** With dev server running, run `npm run import:scrydex-all` in another terminal.
+- **Import all English cards:** With the dev server running, run `npm run import:scrydex-all` in another terminal.
+- **Import a specific expansion:** `POST /api/admin/import/scrydex-canonical?expansionId=<scrydex-expansion-id>&pageStart=1&maxPages=1`

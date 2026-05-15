@@ -129,7 +129,7 @@ function AIMarquee() {
         <ul className="mx-auto mt-16 grid max-w-[1000px] gap-8 text-left md:grid-cols-3 md:gap-6">
           <MarqueeBullet
             title="A signal feed that filters the noise"
-            detail="Movers, breakouts, and unusual activity — ranked by relevance to your collection, not the market."
+            detail="Movers, breakouts, and unusual observed activity — ranked by relevance to your collection, not the market."
           />
           <MarqueeBullet
             title="Your daily edge"

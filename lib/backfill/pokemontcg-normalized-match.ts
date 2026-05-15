@@ -772,6 +772,36 @@ export function chooseSinglePrinting(params: {
     "reverseholofoil",
   ]).has(providerVariantToken);
 
+  const finishEditionRows = setRows.filter((row) =>
+    row.finish === observation.normalized_finish
+    && row.edition === observation.normalized_edition
+  );
+
+  if (finishEditionRows.length === 1 && targetStamp === "NONE") {
+    const onlyFinishEdition = finishEditionRows[0];
+    const localStamp = normalizeScrydexStampToken(onlyFinishEdition.stamp);
+    if (localStamp !== "NONE") {
+      return {
+        matched: true,
+        printing: onlyFinishEdition,
+        matchType: "PRINTING_FINISH_EDITION_CANONICAL_STAMP",
+        confidence: 0.92,
+        metadata: {
+          canonicalSetCode,
+          cardNumber,
+          language,
+          providerVariantToken,
+          targetFinish: observation.normalized_finish,
+          localFinish: onlyFinishEdition.finish,
+          targetEdition: observation.normalized_edition,
+          localEdition: onlyFinishEdition.edition,
+          targetStamp,
+          localStamp,
+        },
+      };
+    }
+  }
+
   if (setRows.length === 1) {
     const onlyPrinting = setRows[0];
     if (onlyPrinting.finish === "UNKNOWN" && isBasicProviderVariant) {

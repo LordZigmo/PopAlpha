@@ -174,7 +174,7 @@ export default function CardMarketIntelClient({
           {/* Sample size */}
           {activeHistoryPoints > 0 && (
             <span className="text-[13px] tabular-nums text-[#555]">
-              {activeHistoryPoints} live price points ({activeWindow.toUpperCase()})
+              {activeHistoryPoints} observed price points ({activeWindow.toUpperCase()})
             </span>
           )}
 

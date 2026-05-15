@@ -7,6 +7,11 @@ import type {
   HomepageSignalWindow,
   HomepageWindowedCards,
 } from "@/lib/data/homepage";
+import {
+  PRICING_DISPLAY_V2_ENABLED,
+  formatPriceDisplay,
+  resolveDisplayedMarketPrice,
+} from "@/lib/pricing/displayed-market-price";
 
 type SignalWindow = HomepageSignalWindow;
 type HomepageSignalBoardProps = {
@@ -47,7 +52,7 @@ export default function HomepageSignalBoard({
   japanese,
 }: HomepageSignalBoardProps) {
   const [selectedWindow, setSelectedWindow] = useState<SignalWindow>("24H");
-  const momentumTitle = selectedWindow === "24H" ? "Live momentum" : "Sustained momentum";
+  const momentumTitle = selectedWindow === "24H" ? "Recent momentum" : "Sustained momentum";
   const momentumEmptyMessage = selectedWindow === "24H"
     ? "No 24H momentum cards yet"
     : "No 7D momentum cards yet";
@@ -56,7 +61,7 @@ export default function HomepageSignalBoard({
     <>
       <SignalRailSection
         id="top-movers"
-        eyebrow="Live Market"
+        eyebrow="Recent Market"
         eyebrowClassName="text-[#00B4D8]"
         title="Top movers"
         cards={topMoversByWindow[selectedWindow]}
@@ -205,6 +210,14 @@ function SignalRailSection({
 }
 
 function SignalCard({ card }: { card: HomepageCard }) {
+  const priceDisplay = PRICING_DISPLAY_V2_ENABLED
+    ? resolveDisplayedMarketPrice({
+        marketPrice: card.market_price,
+        marketPriceAsOf: card.updated_at,
+      })
+    : null;
+  const priceMeta = priceDisplay ? formatPriceDisplay(priceDisplay) : null;
+
   return (
     <Link
       href={`/c/${encodeURIComponent(card.slug)}`}
@@ -228,10 +241,19 @@ function SignalCard({ card }: { card: HomepageCard }) {
         <p className="truncate text-[14px] font-semibold text-[#E4E4E7] group-hover:text-white">{card.name}</p>
         <p className="mt-0.5 truncate text-[11px] text-[#555]">{card.set_name}</p>
         <div className="mt-2 flex items-center justify-between border-t border-white/[0.04] pt-2">
-          <span className="text-[15px] font-bold tabular-nums text-white">{formatPrice(card.market_price)}</span>
-          <span className={`rounded-md px-1.5 py-0.5 text-[12px] font-bold tabular-nums ${pillClasses(card.change_pct)}`}>
-            {formatPct(card.change_pct)}
+          <span
+            className={`min-w-0 truncate font-bold tabular-nums ${
+              priceMeta?.subdued ? "text-[12px] text-[#9CA3AF]" : "text-[15px] text-white"
+            }`}
+            title={priceDisplay?.kind === "stale_old" ? "Sparse market — last sold price shown" : undefined}
+          >
+            {priceMeta ? priceMeta.label : formatPrice(card.market_price)}
           </span>
+          {(priceMeta?.showChangeBadge ?? true) ? (
+            <span className={`shrink-0 rounded-md px-1.5 py-0.5 text-[12px] font-bold tabular-nums ${pillClasses(card.change_pct)}`}>
+              {formatPct(card.change_pct)}
+            </span>
+          ) : null}
         </div>
       </div>
     </Link>

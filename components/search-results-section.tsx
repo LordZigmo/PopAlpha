@@ -36,10 +36,10 @@ function formatSearchHref(basePath: string, params: URLSearchParams) {
 function getSetDescription(setName: string | null | undefined) {
   const normalized = String(setName ?? "").trim().toLowerCase();
   if (normalized === "ascended heroes") {
-    return "Ascended Heroes is a character-focused set that got a lot of attention at launch. The top chase cards rose fast in the first few weeks — especially the rare and alternate art versions.\n\nAfter that early spike, most cards pulled back as more copies hit the market. Right now, the highest-rarity cards still hold most of the value. Mid-tier cards are starting to settle.\n\nA few alt-arts are getting fresh attention, and some have dipped into a good buying range after recent price drops.\n\nWatch for fresh breakouts and changes in graded supply to see if this is the start of a longer move.";
+    return "Ascended Heroes is a character-focused set that got a lot of attention at launch. The top chase cards rose fast in the first few weeks — especially the rare and alternate art versions.\n\nAfter that early spike, most cards pulled back as more market observations came in. Right now, the highest-rarity cards still hold most of the value. Mid-tier cards are starting to settle.\n\nA few alt-arts are getting fresh attention, and some have dipped into a good buying range after recent price drops.\n\nWatch for fresh breakouts and changes in graded availability to see if this is the start of a longer move.";
   }
 
-  return "All tracked cards from this set. Prices update every day from multiple marketplaces, so you can spot what is moving and what is in a good buying range.";
+  return "All tracked cards from this set. RAW prices are sourced from Scrydex market observations, so you can spot what is moving and what is in a good buying range.";
 }
 
 function ExpandableSetDescription({ text }: { text: string }) {

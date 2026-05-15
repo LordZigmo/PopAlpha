@@ -106,7 +106,7 @@ Metric definitions:
 - `sentiment_up_pct`: weighted average of `variant_sentiment_latest.sentiment_up_pct` by vote count when available.
 
 Refresh cadence:
-- `sync-justtcg-prices` incrementally refreshes set summary artifacts for changed variants after ingest writes.
+- Scrydex is the only active English pricing ingest provider. The pipeline writes provider-normalized observations, price snapshots, history points, and rollup keys from Scrydex.
 - `GET /api/cron/refresh-set-summaries` runs daily at `09:00 UTC` via `vercel.json` for a full rebuild.
 
 Backfill:
@@ -119,8 +119,8 @@ Optional flags:
 - `--refreshPipeline=0` skips the initial full latest-table refresh.
 
 Wiring a set into the pipeline (generalized across all sets):
-1. **Canonical cards + card_printings** – Ensure the set exists with EN printings (via Scrydex canonical import or provider-specific import).
-2. **Provider ingest + match** – Run JustTCG + Scrydex ingest and normalized match so `variant_metrics` and `price_history_points` get populated for that set’s printings.
+1. **Canonical cards + card_printings** – Ensure the set exists with EN printings via the Scrydex canonical import.
+2. **Provider ingest + match** – Run Scrydex ingest and normalized match so `variant_metrics` and `price_history_points` get populated for that set’s printings. JustTCG is retired and must not be used for live pricing ingestion.
 3. **Backfill** – Run `npm run sets:backfill-summaries` so `set_finish_summary_latest` and `set_summary_snapshots` are refreshed for all sets (including the new one). Cron does this daily; the script chunks by set and by variant keys to avoid timeouts.
 4. **Validate** – `python3 -m pytest -q tests_py/test_set_pipeline_wired.py` asserts every set with card_printings has at least one row in the set-summary views. Sets that have printings but no provider ingest/match yet will appear in the failure message; run ingest and match for those sets, then backfill again.
 
@@ -132,11 +132,12 @@ Extending to new providers:
 - Keep provider-specific ingestion logic writing into `price_history_points` and `variant_metrics`.
 - Reuse the same canonical `variant_ref` / `printing_id` identity.
 - The set summary SQL reads provider-agnostic latest/daily tables, so adding a provider should not require rewriting the set snapshot pipeline.
+- Do not re-enable JustTCG as a live provider. Historical JustTCG rows may remain for legacy analysis, but Scrydex is the current English market-price source of truth.
 
 ## Scrydex canonical importer (chunked, production-safe)
 
 Primary route: `POST /api/admin/import/scrydex-canonical`  
-Compatibility route: `POST /api/admin/import/pokemontcg-canonical` (shim to Scrydex)
+Retired PokemonTCG compatibility import routes have been removed; new import work should call the Scrydex route directly.
 
 Query params:
 - `pageStart` (default `1`)

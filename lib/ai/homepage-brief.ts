@@ -189,7 +189,7 @@ function stringifyContextForPrompt(ctx: BriefContext): string {
     lines.push(`Top pullback avg change 24H: ${ctx.topPullbackAvgPct}%`);
   }
   lines.push(`Breakout signals: ${ctx.breakoutCount}${ctx.breakoutSets[0] ? ` (lead: ${ctx.breakoutSets[0].name})` : ""}`);
-  lines.push(`Unusual volume signals: ${ctx.unusualCount}${ctx.unusualSets[0] ? ` (lead: ${ctx.unusualSets[0].name})` : ""}`);
+  lines.push(`Unusual observed activity signals: ${ctx.unusualCount}${ctx.unusualSets[0] ? ` (lead: ${ctx.unusualSets[0].name})` : ""}`);
   return lines.join("\n");
 }
 

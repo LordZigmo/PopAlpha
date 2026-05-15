@@ -10,7 +10,7 @@ The user's intent: "graded should be priced under another section, with its own 
 
 **The actual gap, in order of user impact:**
 
-1. **API routes hard-code `grade='RAW'`** (`/api/holdings/summary`, `/api/pro/signals`, `/api/market/snapshot` history confidence, `/api/portfolio/overview`'s `marketPulseMap`, daily top movers). The first graded user holding will be valued at the RAW market price.
+1. **Some API routes still treat graded as a separate/limited surface.** `/api/holdings/summary` now loads per-holding grade prices, but `/api/pro/signals`, `/api/market/snapshot` history confidence, `/api/portfolio/overview`'s `marketPulseMap`, and daily top movers remain RAW-first or RAW-only.
 2. **No richer market-summary panel** beyond the chart + provider tiles. We have median 7d/30d, low/high 30d, sample size already computed in `card_metrics` for graded — they're just not exposed in a dedicated graded summary view.
 3. **Signals (`signal_trend`, `signal_breakout`, `signal_value`) are 0 of 58,586 for graded** because the existing calculator requires `history_points_30d >= 10` per (slug, variant_ref, provider, grade) and graded variants typically have 1–2 points.
 
@@ -88,20 +88,17 @@ Each phase is self-contained and shippable. **Do not start phase N+1 until phase
 
 ---
 
-### Phase 2 — Holdings valuation correctness (latent bug fix)
+### Phase 2 — Holdings valuation correctness
 
 **Goal:** When a user has a graded holding, value it at the **graded** market price, not RAW.
 
-**Today:** [`/api/holdings/summary:97,106`](../app/api/holdings/summary/route.ts) hard-codes `eq("grade", "RAW")` for the `public_card_metrics` lookup that drives `marketPriceMap`. Same pattern in [`/api/portfolio/overview`](../app/api/portfolio/overview/route.ts) via its `marketPulseMap`. Currently 0 graded holdings exist in production, so impact is theoretical — but the first graded entry will be mis-valued.
+**Current state:** [`/api/holdings/summary`](../app/api/holdings/summary/route.ts) now builds the needed grade buckets from the user's holdings and loads `public_card_metrics` by `(canonical_slug, grade)`, so the holdings summary no longer forces RAW for valuation. [`/api/portfolio/overview`](../app/api/portfolio/overview/route.ts) still deserves a follow-up audit because its `marketPulseMap` path is card-level and RAW-first.
 
 **Tasks:**
-1. In `/api/holdings/summary`, change the `public_card_metrics` query from a single grade='RAW' filter to a per-holding-grade lookup. Strategy:
-   - Build `slug_grade_pairs = [(slug, normalizedGrade(holding.grade))]` from the holdings list, dedupe.
-   - Issue ONE query: `.in('canonical_slug', slugs).in('grade', uniqueGrades)`, then index by `(canonical_slug, grade)` client-side.
-   - Same pattern for the `public_variant_movers_priced` hot-mover lookup, but defer until Phase 4 (signals) — for now, hot-mover detection stays RAW-only since signals are RAW-only.
-2. Same change in `/api/portfolio/overview` for `marketPulseMap`. The `marketPulse` data shape will need a grade dimension.
-3. Add a unit test: a fixture with one PSA 10 holding + one RAW holding asserts the PSA 10 value is the graded market price, not RAW.
-4. Add a `holding.grade → bucket` normalizer in `lib/holdings/grade-normalize.ts`. Reuse the same logic as the script's `normalizeHoldingGrade` ([report-graded-pricing-coverage.mjs](../scripts/report-graded-pricing-coverage.mjs)).
+1. ✓ `/api/holdings/summary` uses `normalizeHoldingGrade()` and a single `.in('canonical_slug', slugs).in('grade', uniqueGrades)` query, then indexes prices by `(canonical_slug, grade)` client-side.
+2. ✓ `lib/holdings/grade-normalize.ts` is the shared holding-grade normalizer.
+3. ✓ Holdings tests cover the normalized valuation path.
+4. Remaining: audit `/api/portfolio/overview` for any RAW-only valuation or `marketPulseMap` assumptions.
 
 **Risk:** Low — read-side change, no new writes.
 - Adds at most one extra `.in('grade', ...)` filter to existing queries. Same indexed access pattern.
@@ -125,7 +122,7 @@ Each phase is self-contained and shippable. **Do not start phase N+1 until phase
    - Fetch graded history with the same `variant_ref ilike '%::PROVIDER::BUCKET%'` pattern iOS uses.
    - Compute the confidence band over graded points only — never mix.
    - Return the same response shape but filled in for graded.
-2. **`/api/pro/signals`**: Currently hard-codes `eq("grade", "RAW")` ([pro/signals/route.ts:60](../app/api/pro/signals/route.ts)) AND `eq("provider", "JUSTTCG")`. Decision needed: do we want graded signals at all?
+2. **`/api/pro/signals`**: Currently hard-codes `eq("grade", "RAW")` and uses the active Scrydex analytics provider. Decision needed: do we want graded signals at all?
    - Per Phase 4 below, graded signals don't compute today (sparsity).
    - Recommended: accept a `?grade=` query param; if `grade!='RAW'` and signals are null for graded, return `{ ok: true, slug, variants: [], note: "Graded signals require ≥10 history points per variant, currently unavailable" }`. Don't 500 or 404 — explain the data gap.
 

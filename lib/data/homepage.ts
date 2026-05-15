@@ -185,9 +185,20 @@ const EMERGING_LIQUIDITY_MAX = 5;
 const MOVER_LOOKBACK_DAYS = 30;
 const MIN_MOVER_COVERAGE_RATIO = 0.9;
 const MIN_MOVER_SNAPSHOT_COUNT_30D = Math.ceil(MOVER_LOOKBACK_DAYS * MIN_MOVER_COVERAGE_RATIO);
+const MAX_DAILY_MOVER_AGE_DAYS = 1;
 
 function createEmptyWindowedCards(): HomepageWindowedCards {
   return { "24H": [], "7D": [] };
+}
+
+function computedDateAgeDays(value: string, nowMs: number): number | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return null;
+  const computedMs = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  if (!Number.isFinite(computedMs)) return null;
+  const now = new Date(nowMs);
+  const todayMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  return Math.max(0, Math.floor((todayMs - computedMs) / (24 * 60 * 60 * 1000)));
 }
 
 // ── Daily-computed top movers override ──────────────────────────────────────
@@ -250,6 +261,7 @@ const EMPTY_DAILY_MOVER_BUNDLE: DailyMoverBundle = {
 
 async function loadDailyTopMoversBundle(
   client: NonNullable<ReturnType<typeof dbPublic>>,
+  nowMs = Date.now(),
 ): Promise<DailyMoverBundle> {
   // Take the most recent date that has any rows. Preferring today, fall
   // back to yesterday or older if the cron hasn't run yet today.
@@ -265,6 +277,11 @@ async function loadDailyTopMoversBundle(
   }
 
   const computedDate = latestDateRow.computed_at_date;
+  const ageDays = computedDateAgeDays(computedDate, nowMs);
+  if (ageDays === null || ageDays > MAX_DAILY_MOVER_AGE_DAYS) {
+    return { ...EMPTY_DAILY_MOVER_BUNDLE, computed_at_date: computedDate };
+  }
+
   const { data, error } = await client
     .from("daily_top_movers")
     .select(
@@ -1179,9 +1196,9 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
     // canonical market direction. This is the intersection of "price is
     // moving" and "the book agrees". Strict filter — may be empty.
     //
-    // Unusual volume: cards (any direction) whose active_listings_7d is
-    // notably above the pool median. These are conviction signals
-    // regardless of whether the price moved yet.
+    // Unusual observed activity: cards (any direction) whose 7d price
+    // observation count is notably above the pool median. This is not
+    // marketplace supply or active listing count.
     const breakoutPool = dedupeHomepageCards([
       ...mixedPositiveMovers.highConfidence,
       ...mixedPositiveMovers.all,
@@ -1219,7 +1236,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
     let dailyMovers: DailyMoverBundle = { ...EMPTY_DAILY_MOVER_BUNDLE };
     if (!overrides && db) {
       try {
-        dailyMovers = await loadDailyTopMoversBundle(db);
+        dailyMovers = await loadDailyTopMoversBundle(db, nowMs);
       } catch (err) {
         logger.error(
           "[homepage] daily_top_movers",

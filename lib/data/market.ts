@@ -97,7 +97,6 @@ function compareIsoDesc(left: string | null | undefined, right: string | null | 
 function providerRank(provider: string | null | undefined): number {
   if (provider === "SCRYDEX") return 0;
   if (provider === "POKEMON_TCG_API") return 1;
-  if (provider === "JUSTTCG") return 2;
   return 3;
 }
 
@@ -248,6 +247,7 @@ export async function getCanonicalMarketPulseMap(
     .select("canonical_slug, provider, provider_trend_slope_7d, provider_cov_price_30d, provider_price_relative_to_30d_range, provider_price_changes_count_30d, history_points_30d, provider_as_of_ts, updated_at")
     .in("canonical_slug", slugs)
     .eq("grade", "RAW")
+    .in("provider", ["SCRYDEX", "POKEMON_TCG_API"])
     .order("updated_at", { ascending: false });
 
   if (error) {

@@ -104,7 +104,6 @@ const CHART_POINT_LIMIT = 2000;
 const CHART_MIN_POINTS = 5;    // warn below this, but still return
 const SIGNAL_MIN_POINTS = 10;  // minimum history points to show signals
 const RAW_HISTORY_PROVIDERS = ["SCRYDEX", "POKEMON_TCG_API"] as const;
-const LEGACY_HISTORY_PROVIDERS = ["JUSTTCG"] as const;
 
 // ── Internal helpers ────────────────────────────────────────────────────────
 
@@ -154,24 +153,21 @@ function getHistoryQueryProfiles(params: {
   if (params.grade === "RAW" && !params.isSealed) {
     return [
       { providers: RAW_HISTORY_PROVIDERS, sourceWindow: "snapshot" },
-      { providers: LEGACY_HISTORY_PROVIDERS, sourceWindow: "30d" },
     ];
   }
-  return [{ providers: LEGACY_HISTORY_PROVIDERS, sourceWindow: "30d" }];
+  return [{ providers: RAW_HISTORY_PROVIDERS, sourceWindow: "snapshot" }];
 }
 
-function normalizeHistoryProviderName(provider: string | null | undefined): "SCRYDEX" | "JUSTTCG" | null {
+function normalizeHistoryProviderName(provider: string | null | undefined): "SCRYDEX" | null {
   const normalized = String(provider ?? "").trim().toUpperCase();
   if (normalized === "SCRYDEX" || normalized === "POKEMON_TCG_API") return "SCRYDEX";
-  if (normalized === "JUSTTCG") return "JUSTTCG";
   return null;
 }
 
 function historyProviderRank(provider: string | null | undefined): number {
   const normalized = normalizeHistoryProviderName(provider);
   if (normalized === "SCRYDEX") return 0;
-  if (normalized === "JUSTTCG") return 1;
-  return 2;
+  return 1;
 }
 
 export function extractRawVariantPrintingId(variantRef: string): string | null {
@@ -498,7 +494,7 @@ export async function listMovers(opts: {
   let query = supabase
     .from("public_variant_movers")
     .select("canonical_slug, mover_tier, tier_priority")
-    .eq("provider", "JUSTTCG")
+    .eq("provider", "SCRYDEX")
     .eq("grade", "RAW")
     .order("tier_priority", { ascending: direction === "up" })
     .order("updated_at", { ascending: false })
@@ -754,9 +750,9 @@ export async function buildAssetViewModel(
   const change_7d_pct  = metricsRow?.change_pct_7d ?? null;
 
   // 5. Load the exact variant_metrics row for the selected variant.
-  let signals: AssetViewModel["signals"] = null;
+  const signals: AssetViewModel["signals"] = null;
   let provider_as_of_ts: string | null = null;
-  let signals_as_of_ts: string | null = null;
+  const signals_as_of_ts: string | null = null;
   let signals_history_points_30d: number | null = null;
   let reason: AssetViewModel["reason"] = null;
 

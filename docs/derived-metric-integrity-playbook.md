@@ -21,7 +21,7 @@ WHERE rp.ts <= cutoff_24h
 ORDER BY rp.ts DESC LIMIT 1
 ```
 
-i.e. **"the most recent observation at-or-before now-24h"** — with no requirement that the chosen baseline be *near* 24h ago. For sparse cards (1–3 JustTCG observations in 30 days), the chosen baseline was often weeks old. The function then computed `((today − 3-weeks-ago) / 3-weeks-ago) × 100` and wrote the result into a column **named** `change_pct_24h`.
+i.e. **"the most recent observation at-or-before now-24h"** — with no requirement that the chosen baseline be *near* 24h ago. For sparse cards (then often 1–3 historical JustTCG observations in 30 days; today the same risk applies to sparse Scrydex observations), the chosen baseline was often weeks old. The function then computed `((today − 3-weeks-ago) / 3-weeks-ago) × 100` and wrote the result into a column **named** `change_pct_24h`.
 
 The math was correct. The label was a lie.
 

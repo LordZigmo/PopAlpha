@@ -44,7 +44,7 @@ Both columns predate the Phase-2 split, but the Phase-2 split absorbed only the 
 - `edition` (CHECK constraint, 3 values): `UNLIMITED | FIRST_EDITION | UNKNOWN` — [20260227190000_card_printings.sql:11](../supabase/migrations/20260227190000_card_printings.sql)
 - `stamp` (nullable text, **unconstrained** — 40+ observed values): `SHADOWLESS`, `STAFF_STAMP`, `PRERELEASE`, `LEAGUE_1ST_PLACE`, ball-pattern stamps, etc. Phase 3a classifier in [20260423040000_phase3a_stamp_classifier_and_remap.sql](../supabase/migrations/20260423040000_phase3a_stamp_classifier_and_remap.sql).
 - `finish_detail` (nullable text) — an additional axis added during Phase 2/3 to hold sub-variants of `finish` (e.g. specific holo patterns) without exploding the `finish` enum.
-- Provider tokens are mapped via `label_normalization_rules` ([20260227203000_pokemontcg_cards_variants.sql:81](../supabase/migrations/20260227203000_pokemontcg_cards_variants.sql)) — priority-based regex matching from raw provider strings to the (finish, edition, stamp) tuple.
+- Provider tokens are mapped via `label_normalization_rules` ([20260227203000_pokemontcg_cards_variants.sql:81](../supabase/migrations/20260227203000_pokemontcg_cards_variants.sql)) — priority-based regex matching from raw provider strings to the (finish, edition, stamp) tuple. The migration filename is historical; current live English ingestion is Scrydex-only.
 
 **Hardcoded business logic**: minimal. The slug-extension pattern `canonical_slug:finish:edition:stamp` ([20260423050000_phase3b_edition_classifier_and_remap.sql:268](../supabase/migrations/20260423050000_phase3b_edition_classifier_and_remap.sql)) is the closest to encoded variant identity, but it's a derived form, not the source of truth.
 

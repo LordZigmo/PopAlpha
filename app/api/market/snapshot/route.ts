@@ -45,6 +45,9 @@ type ParityRow = {
 
 function normalizeRawProviderName(provider: string | null | undefined): "SCRYDEX" | null {
   const normalized = String(provider ?? "").trim().toUpperCase();
+  // POKEMON_TCG_API is a historical Scrydex-compatible provider label in
+  // older history rows. Public provenance still reports the active source
+  // as Scrydex so clients do not see a mixed-provider story.
   if (normalized === "SCRYDEX" || normalized === "POKEMON_TCG_API") return "SCRYDEX";
   return null;
 }
@@ -219,6 +222,9 @@ export async function GET(req: Request) {
 
   return NextResponse.json({
     ok: true,
+    providerPolicy: "SCRYDEX_ONLY_RAW",
+    priceObservationCount7d: result.data?.active_listings_7d ?? 0,
+    deprecatedProviderFields: ["justtcgPrice", "pokemontcgPrice", "active7d"],
     justtcgPrice: null,
     scrydexPrice: marketPriceUsd,
     pokemontcgPrice: null,
@@ -238,6 +244,9 @@ export async function GET(req: Request) {
       excludedSample: confidenceBand.excluded.slice(0, 20),
     },
     provenance: {
+      primaryProvider: "SCRYDEX",
+      providerPolicy: "SCRYDEX_ONLY_RAW",
+      historicalAliases: ["POKEMON_TCG_API"],
       sourceMix: {
         justtcgWeight: 0,
         scrydexWeight: marketPriceUsd !== null ? 1 : 0,
@@ -252,6 +261,8 @@ export async function GET(req: Request) {
       sampleSizeFiltered: marketPriceUsd !== null ? confidenceBand.sampleSize : 0,
     },
     providers: marketPriceUsd !== null ? [scrydex] : [],
+    // Deprecated name retained for API compatibility. This is a count of
+    // recent price observations, not live marketplace listings.
     active7d: result.data?.active_listings_7d ?? 0,
     median7d: result.data?.median_7d ?? null,
     median30d: result.data?.median_30d ?? null,

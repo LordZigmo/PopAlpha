@@ -39,6 +39,8 @@ export async function GET(
     const timeseriesObservations = parseOptionalInt(url.searchParams.get("timeseriesObservations")) ?? matchObservations;
     const metricsObservations = parseOptionalInt(url.searchParams.get("metricsObservations")) ?? timeseriesObservations;
     const maxRequests = parseOptionalInt(url.searchParams.get("maxRequests"));
+    const historyDays = parseOptionalInt(url.searchParams.get("historyDays"));
+    const requireFullRecentHistory = url.searchParams.get("requireFullRecentHistory") === "1";
     const force = url.searchParams.get("force") === "1";
 
     const providerCooldown = await getProviderCooldownState("SCRYDEX");
@@ -66,6 +68,9 @@ export async function GET(
     const plan = await planScrydexDailyCapture({
       chunkCount: 1,
       maxRequests,
+      historyDays,
+      requireFullRecentHistory,
+      includeHistoryReadiness: requireFullRecentHistory,
     });
     const providerSetIds = plan.selectedSets.map((s) => s.providerSetId);
 
@@ -138,6 +143,9 @@ export async function GET(
       dormantHeavyMode: plan.dormantHeavyMode,
       dormantSkippedSetCount: plan.dormantSkippedSetCount,
       dormantSkippedCardCount: plan.dormantSkippedCardCount,
+      requiresFullRecentHistory: plan.requiresFullRecentHistory,
+      historyDays: plan.historyDays,
+      historyReadiness: plan.historyReadiness,
       providerSetIds,
       plannedRequests,
       selectedSets: plan.selectedSets.length,

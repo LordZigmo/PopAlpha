@@ -112,7 +112,7 @@ export async function generateCardAnalysis(
     card.notes ? `Additional notes: ${card.notes}` : "Additional notes: none",
   ].join("\n");
 
-  const instructions = "Look at supply (how many copies are listed), whether the card is heating up or cooling off, and whether graded copies trade for much more than raw (and what that means in plain words). Short sentences. No jargon unless you explain it in the same line.";
+  const instructions = "Look at price-observation density, whether the card is heating up or cooling off, and whether graded copies trade for much more than raw (and what that means in plain words). Do not claim supply, live listings, or copies for sale unless those exact inputs are provided. Short sentences. No jargon unless you explain it in the same line.";
 
   const { text } = await generateText({
     model: getPopAlphaModel(),

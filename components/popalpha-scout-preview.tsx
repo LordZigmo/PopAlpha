@@ -16,9 +16,9 @@ type PopAlphaScoutPreviewProps = {
 };
 
 function formatUpdatedAgo(value: string | null | undefined): string {
-  if (!value) return "just now";
+  if (!value) return "Timestamp unavailable";
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "just now";
+  if (Number.isNaN(date.getTime())) return "Timestamp unavailable";
   const diffMs = Math.max(0, Date.now() - date.getTime());
   const minutes = Math.floor(diffMs / 60000);
   if (minutes < 1) return "just now";
@@ -58,12 +58,11 @@ export default function PopAlphaScoutPreview(props: PopAlphaScoutPreviewProps) {
           </p>
         </div>
         <div className="flex shrink-0 flex-col items-end">
-          <span className="inline-flex h-[2.25rem] items-center gap-2 self-start rounded-full border border-red-500/20 bg-red-500/10 px-3 text-[14px] font-semibold leading-none tracking-[-0.01em] text-red-100">
+          <span className="inline-flex h-[2.25rem] items-center gap-2 self-start rounded-full border border-[#00B4D8]/25 bg-[#00B4D8]/10 px-3 text-[14px] font-semibold leading-none tracking-[-0.01em] text-[#CFF7FF]">
             <span className="relative flex h-3.5 w-3.5 items-center justify-center">
-              <span className="absolute inline-flex h-3.5 w-3.5 rounded-full bg-red-500 opacity-75 animate-ping" />
-              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-red-400 shadow-[0_0_10px_rgba(239,68,68,0.9)]" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#00B4D8] shadow-[0_0_10px_rgba(0,180,216,0.75)]" />
             </span>
-            Live
+            Snapshot
           </span>
           <span className="mt-1 pr-1 text-[11px] font-medium tracking-[0.04em] text-[rgba(165,228,242,0.75)]">
             {updatedAgo}

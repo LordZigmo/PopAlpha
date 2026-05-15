@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import Link from "next/link";
 
 import CanonicalCardFloatingHero from "@/components/canonical-card-floating-hero";
@@ -15,6 +15,10 @@ import {
   PRICING_DISPLAY_V2_ENABLED,
   resolveDisplayedMarketPrice,
 } from "@/lib/pricing/displayed-market-price";
+import {
+  priceObservationActivityLabel,
+  priceObservationDensityLabel,
+} from "@/lib/pricing/price-observation-density";
 
 type RawCardMarketSurfaceProps = {
   canonicalSlug: string;
@@ -84,9 +88,7 @@ function rarityColor(rarity: string | null): { label: string; color: string; bor
 }
 
 function marketStatusSignal(active7d: number | null): { label: string; tone: "positive" | "warning" | "neutral" } {
-  if (active7d === null || active7d === undefined) return { label: "Market Forming", tone: "neutral" };
-  if (active7d <= 4) return { label: "Scarce", tone: "positive" };
-  return { label: "Abundant", tone: "neutral" };
+  return priceObservationDensityLabel(active7d);
 }
 
 function updatePrintingParam(nextPrintingId: string) {
@@ -147,11 +149,11 @@ export default function RawCardMarketSurface({
   currentCardPulse,
   children,
 }: RawCardMarketSurfaceProps) {
-  const [activePrintingId, setActivePrintingId] = useState<string | null>(selectedPrintingId ?? variants[0]?.printingId ?? null);
-
-  useEffect(() => {
-    setActivePrintingId(selectedPrintingId ?? variants[0]?.printingId ?? null);
-  }, [selectedPrintingId, variants]);
+  const [userPrintingId, setUserPrintingId] = useState<string | null>(null);
+  const userSelectedVariant = userPrintingId
+    ? variants.find((variant) => variant.printingId === userPrintingId) ?? null
+    : null;
+  const activePrintingId = userSelectedVariant?.printingId ?? selectedPrintingId ?? variants[0]?.printingId ?? null;
 
   const activeVariant =
     variants.find((variant) => variant.printingId === activePrintingId)
@@ -162,7 +164,6 @@ export default function RawCardMarketSurface({
   const fairValue = activeVariant?.marketBalancePrice ?? null;
   const priceChangePct = activeVariant?.changePct7d ?? null;
   const displayPrimaryPrice = currentPrice;
-  const primaryPrice = displayPrimaryPrice != null ? formatUsdCompact(displayPrimaryPrice) : null;
   const formattedAsOf = formatAsOf(activeVariant?.asOfTs ?? null);
   // Phase 2 of tiered-refresh: classify the price by age. Stale cards
   // get a "Last sold · {date}" label instead of "Near-mint market price".
@@ -172,6 +173,11 @@ export default function RawCardMarketSurface({
         marketPriceAsOf: activeVariant?.asOfTs ?? null,
       })
     : null;
+  const showPrimaryPrice = !heroPriceDisplay || heroPriceDisplay.kind !== "no_market";
+  const primaryPrice = displayPrimaryPrice != null && showPrimaryPrice ? formatUsdCompact(displayPrimaryPrice) : null;
+  const showPriceChange = !heroPriceDisplay || heroPriceDisplay.kind === "live";
+  const scoutMarketPrice = showPriceChange ? currentPrice : null;
+  const displayedPriceChangePct = showPriceChange ? priceChangePct : null;
   const heroPriceLabel = (() => {
     if (heroPriceDisplay?.kind === "stale_recent") {
       return `Last sold · ${heroPriceDisplay.ageLabel}`;
@@ -186,11 +192,11 @@ export default function RawCardMarketSurface({
       ? `Near-mint market price · Updated ${formattedAsOf}`
       : "Near-mint market price";
   })();
-  const priceChangeColor = priceChangePct == null
+  const priceChangeColor = displayedPriceChangePct == null
     ? "#6B6B6B"
-    : priceChangePct > 0
+    : displayedPriceChangePct > 0
       ? "#00DC5A"
-      : priceChangePct < 0
+      : displayedPriceChangePct < 0
         ? "#FF3B30"
         : "#6B6B6B";
   const edgePercent = currentPrice != null && fairValue != null && fairValue > 0
@@ -208,14 +214,8 @@ export default function RawCardMarketSurface({
     : "#6B6B6B";
   const rarityInfo = rarityColor(activeVariant?.rarity ?? null);
   const marketStatus = marketStatusSignal(activeVariant?.activeListings7d ?? null);
-  const trendMetricValue = formatSignalScore(priceChangePct);
-  const breakoutMetricValue = activeVariant?.activeListings7d != null
-    ? activeVariant.activeListings7d <= 4
-      ? "Tight Supply"
-      : activeVariant.activeListings7d <= 10
-        ? "Building"
-        : "Crowded"
-    : "Forming";
+  const trendMetricValue = showPriceChange ? formatSignalScore(priceChangePct) : "Stale";
+  const activityMetric = priceObservationActivityLabel(activeVariant?.activeListings7d ?? null);
   const valueMetricValue = edgeLabel && edgeFormatted
     ? `${edgeFormatted} ${edgeLabel}`
     : fairValue != null
@@ -223,7 +223,7 @@ export default function RawCardMarketSurface({
       : "Forming";
 
   function handleVariantChange(nextPrintingId: string) {
-    setActivePrintingId(nextPrintingId);
+    setUserPrintingId(nextPrintingId);
     updatePrintingParam(nextPrintingId);
   }
 
@@ -251,13 +251,13 @@ export default function RawCardMarketSurface({
                       <span className="text-[46px] font-bold leading-none tracking-[-0.04em] tabular-nums text-[#F0F0F0] sm:text-[56px]">
                         {primaryPrice}
                       </span>
-                      {priceChangePct != null ? (
+                      {displayedPriceChangePct != null ? (
                         <span
                           className="text-[20px] font-bold tabular-nums tracking-[-0.02em] sm:text-[24px]"
                           style={{ color: priceChangeColor }}
                         >
-                          {priceChangePct > 0 ? "+" : ""}
-                          {Math.abs(priceChangePct) >= 10 ? priceChangePct.toFixed(0) : priceChangePct.toFixed(1)}%
+                          {displayedPriceChangePct > 0 ? "+" : ""}
+                          {Math.abs(displayedPriceChangePct) >= 10 ? displayedPriceChangePct.toFixed(0) : displayedPriceChangePct.toFixed(1)}%
                         </span>
                       ) : null}
                     </div>
@@ -341,10 +341,10 @@ export default function RawCardMarketSurface({
 
           <PopAlphaScoutPreview
             cardName={canonicalName}
-            marketPrice={currentPrice}
+            marketPrice={scoutMarketPrice}
             fairValue={fairValue}
-            changePct={priceChangePct}
-            changeLabel={priceChangePct != null ? "7d" : null}
+            changePct={displayedPriceChangePct}
+            changeLabel={displayedPriceChangePct != null ? "7d" : null}
             activeListings7d={activeVariant?.activeListings7d ?? null}
             summaryText={scoutSummaryText}
             updatedAt={scoutUpdatedAt}
@@ -354,12 +354,12 @@ export default function RawCardMarketSurface({
             <DerivedMetricTile
               label="Trend"
               value={trendMetricValue}
-              tone={priceChangePct != null ? (priceChangePct > 0 ? "positive" : priceChangePct < 0 ? "negative" : "neutral") : "neutral"}
+              tone={displayedPriceChangePct != null ? (displayedPriceChangePct > 0 ? "positive" : displayedPriceChangePct < 0 ? "negative" : "neutral") : "neutral"}
             />
             <DerivedMetricTile
-              label="Breakout"
-              value={breakoutMetricValue}
-              tone={activeVariant?.activeListings7d != null && activeVariant.activeListings7d <= 4 ? "positive" : "neutral"}
+              label="Activity"
+              value={activityMetric.label}
+              tone={activityMetric.tone === "warning" ? "neutral" : activityMetric.tone}
             />
             <DerivedMetricTile
               label="Value"
@@ -382,7 +382,7 @@ export default function RawCardMarketSurface({
               cardName={canonicalName}
               setName={setName}
               imageUrl={activeVariant?.imageUrl ?? null}
-              changePct={priceChangePct}
+              changePct={displayedPriceChangePct}
               bullishVotes={currentCardPulse.bullishVotes}
               bearishVotes={currentCardPulse.bearishVotes}
               userVote={currentCardPulse.userVote}

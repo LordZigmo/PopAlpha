@@ -1,6 +1,8 @@
 # Graded Pricing Coverage Report
 _Generated 2026-05-05T05:45:34.482Z. Run via `node --env-file=.env.local scripts/report-graded-pricing-coverage.mjs`. Auto-generated; **for narrative findings + interpretation see [graded-surfacing-plan.md](graded-surfacing-plan.md) Phase 0**. This file is pure data._
 
+_Historical snapshot note: provider names in this report reflect rows that existed on 2026-05-05. JustTCG rows are archived/legacy data; current English pricing ingestion is Scrydex-only._
+
 ## Headline
 
 | Metric | Value |
