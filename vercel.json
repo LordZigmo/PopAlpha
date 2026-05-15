@@ -137,12 +137,8 @@
       "schedule": "0 4 * * *"
     },
     {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=a%25,b%25,c%25&max-slugs=2000",
+      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=a%25,b%25,c%25,d%25,e%25,f%25&max-slugs=2000",
       "schedule": "5 4 * * *"
-    },
-    {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=d%25,e%25,f%25&max-slugs=2000",
-      "schedule": "10 4 * * *"
     },
     {
       "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=g%25,h%25,l%25,m%25&max-slugs=2000",
