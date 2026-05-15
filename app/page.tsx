@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { unstable_cache } from "next/cache";
 import { redirect } from "next/navigation";
 import { auth } from "@clerk/nextjs/server";
 import SiteHeader from "@/components/site-header";
@@ -8,6 +9,12 @@ import { clerkEnabled } from "@/lib/auth/clerk-enabled";
 import { getJapaneseCatalogState, type JapaneseCatalogState } from "@/lib/data/tier-summary";
 
 export const revalidate = 3600;
+
+const getCachedJpCoverage = unstable_cache(
+  () => getJapaneseCatalogState(),
+  ["landing-jp-coverage"],
+  { revalidate: 3600 }
+);
 
 export default async function Home() {
   if (clerkEnabled) {
@@ -23,7 +30,7 @@ export default async function Home() {
 
   let jpCoverage: JapaneseCatalogState | null = null;
   try {
-    jpCoverage = await getJapaneseCatalogState();
+    jpCoverage = await getCachedJpCoverage();
   } catch {
     jpCoverage = null;
   }
