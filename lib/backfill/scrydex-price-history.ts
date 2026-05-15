@@ -506,7 +506,13 @@ export function providerVariantIdToScrydexToken(providerVariantId: string): stri
 }
 
 function getPositivePrice(entry: ScrydexPriceHistoryEntry): number | null {
-  const candidates = [entry.market, entry.low, entry.mid, entry.high];
+  // Raw-history price selection. Prefer `low` over `market` to match
+  // TCGplayer's published "Market Price" label (sold-anchored). See
+  // parseScrydexPriceObject docs in scrydex-raw-price-select.ts. Used
+  // only by selectScrydexRawHistoryPrice (raw-only path); graded
+  // history goes through selectScrydexGradedEntries which keeps
+  // `market` as the headline by design.
+  const candidates = [entry.low, entry.market, entry.mid, entry.high];
   for (const candidate of candidates) {
     if (typeof candidate === "number" && Number.isFinite(candidate) && candidate > 0) {
       return candidate;
@@ -541,8 +547,11 @@ export function selectScrydexRawHistoryPrice(
     let score = 0;
     if (normalizedCondition === "nm") score += 100;
     if (normalizedCondition === "mint") score += 90;
-    if (typeof row.market === "number" && Number.isFinite(row.market) && row.market > 0) score += 20;
-    if (typeof row.low === "number" && Number.isFinite(row.low) && row.low > 0) score += 10;
+    // Raw-row tiebreak: weight `low` higher than `market` so rows with `low`
+    // populated win when multiple raw NM rows are present. Mirrors the
+    // preferLow=true ordering in parseScrydexPriceObject for raw paths.
+    if (typeof row.low === "number" && Number.isFinite(row.low) && row.low > 0) score += 20;
+    if (typeof row.market === "number" && Number.isFinite(row.market) && row.market > 0) score += 10;
 
     const selected: SelectedRawHistoryPrice = {
       price,

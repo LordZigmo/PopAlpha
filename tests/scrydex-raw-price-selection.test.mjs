@@ -11,7 +11,12 @@ import { selectPreferredScrydexPriceEntry, selectScrydexGradedEntries } from "..
 //   4. Return null when no qualifying raw NM/Mint row exists
 
 function runScrydexRawPriceSelectionTests() {
-  // 1. Mixed array — raw NM must win over graded and raw LP.
+  // 1. Mixed array — raw NM must win over graded and raw LP. With the
+  //    2026-05-15 switch to preferLow=true for raw paths, headline price is
+  //    drawn from `low` (matches TCGplayer's published Market Price label,
+  //    which is sold-anchored) rather than scrydex's `market` field (which
+  //    is asking-anchored and inflates on thin-liquidity cards). See
+  //    parseScrydexPriceObject docs for the empirical evidence.
   const mixed = [
     { type: "graded", condition: "Gem Mint", grade: "10", company: "PSA", market: 157.0 },
     { type: "graded", condition: "Mint", grade: "9", company: "PSA", market: 20.5 },
@@ -20,7 +25,7 @@ function runScrydexRawPriceSelectionTests() {
   ];
   const mixedPick = selectPreferredScrydexPriceEntry(mixed);
   assert.ok(mixedPick, "mixed array must produce a selection");
-  assert.equal(mixedPick.price, 3.06, "must pick raw NM market, not graded");
+  assert.equal(mixedPick.price, 2.8, "must pick raw NM low (TCGplayer Market Price tracking), not graded");
   assert.equal(mixedPick.normalizedCondition, "nm");
 
   // 2. Only graded rows — must return null, never substitute $157.
@@ -109,7 +114,36 @@ function runScrydexRawPriceSelectionTests() {
   );
   const singleRaw = selectPreferredScrydexPriceEntry({ type: "raw", condition: "Near Mint", market: 3.06 });
   assert.ok(singleRaw);
-  assert.equal(singleRaw.price, 3.06);
+  assert.equal(singleRaw.price, 3.06, "raw NM with only `market` (no `low`) falls back to `market`");
+
+  // 11. preferLow contract for raw: when `low` exists, use it; when only
+  //     `market` exists, fall back to `market`. Locks in the 2026-05-15
+  //     change so a future refactor doesn't silently regress to the
+  //     asking-anchored value.
+  const wideSpread = [
+    { type: "raw", condition: "Near Mint", low: 4300, mid: 5900, high: 7500, market: 7500, currency: "JPY" },
+  ];
+  const wideSpreadPick = selectPreferredScrydexPriceEntry(wideSpread);
+  assert.ok(wideSpreadPick);
+  assert.equal(
+    wideSpreadPick.price,
+    4300,
+    "wide-spread raw NM must surface `low` (¥4,300), not `market`/`high` (¥7,500). " +
+      "This is the canonical fixture from the 2026-05-15 audit on Mewtwo VSTAR JP " +
+      "where scrydex `market` diverged from TCGplayer Market Price by 42%.",
+  );
+  assert.equal(wideSpreadPick.currency, "JPY");
+
+  // 12. Tiebreak via low vs market presence: a raw NM row with `low` should
+  //     outscore a raw NM row without `low` (assuming both qualify on
+  //     condition). Mirrors the scoring weights in selectPreferredScrydexPriceEntry.
+  const tiebreak = [
+    { type: "raw", condition: "Near Mint", market: 3.0 },          // market only
+    { type: "raw", condition: "Near Mint", market: 3.5, low: 2.5 }, // market + low
+  ];
+  const tiebreakPick = selectPreferredScrydexPriceEntry(tiebreak);
+  assert.ok(tiebreakPick);
+  assert.equal(tiebreakPick.price, 2.5, "raw NM with low+market wins over market-only; picks low");
 }
 
 runScrydexRawPriceSelectionTests();
