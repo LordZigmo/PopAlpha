@@ -354,6 +354,16 @@ struct ScannerTabView: View {
                 }
             }
             .onAppear {
+                // Wire the auto-detect quota-blocked callback so
+                // ScannerHost's installNetworkIdentifier can surface
+                // the paywall sheet without direct access to our
+                // @State. Idempotent — re-assignment on tab-switch
+                // / view-reappear is fine. (Codex P2 review on PR
+                // #83: pre-identify quota gate.)
+                scanner.onAutoDetectQuotaBlocked = {
+                    paywallSurface = "scanner_quota_wall_multi"
+                    showPaywallSheet = true
+                }
                 #if DEBUG
                 runSmokeTestIfRequested()
                 #endif
@@ -837,42 +847,14 @@ struct ScannerTabView: View {
                     scanner.resumeScanning()
                     return
                 }
-                // Per-scan quota gate for auto-detect entries only.
-                // (Codex P2 on PR #83 caught this on the first pass —
-                // a second pass narrowed the condition once the
-                // double-charge case was surfaced.) The tap path
-                // already charges quota at the tap handler (lines
-                // ~97-104) before captureFrameAndIdentify runs, and
-                // library imports intentionally bypass quota in both
-                // single and multi mode. Charging again here for
-                // tap/library would double-spend the user's daily
-                // allowance — and for the free-tier user with
-                // remaining=1, it would discard the valid result
-                // their tap just produced (canScan would already be
-                // false by the time we land here). Only newly-charge
-                // auto-detect captures, which have no upstream gate.
-                if !premiumGate.isPro,
-                   scanner.lastTriggerSource == "auto" {
-                    scanQuota.rolloverIfNewDay()
-                    if !scanQuota.canScan {
-                        scanner.clearLastMatch()
-                        // Intentionally do NOT call resumeScanning
-                        // here. runIdentify already paused Vision via
-                        // pauseForExternalCapture, and resuming
-                        // before the paywall opens lets Vision auto-
-                        // detect another card behind the modal —
-                        // which would fire identify, hit the same
-                        // wall, and loop while burning server calls.
-                        // The `.onChange(of: showPaywallSheet)`
-                        // modifier resumes the scanner only when
-                        // the paywall is actually dismissed. (Codex
-                        // P2 review on PR #83.)
-                        paywallSurface = "scanner_quota_wall_multi"
-                        showPaywallSheet = true
-                        return
-                    }
-                    scanQuota.recordScan()
-                }
+                // Quota gating is now upstream of runIdentify (in
+                // ScannerHost.installNetworkIdentifier) so a free-
+                // tier user past their daily limit never hits the
+                // server. Tap-path quota is enforced at the tap
+                // handler before captureFrameAndIdentify; library
+                // imports intentionally bypass quota in both modes.
+                // By the time this branch runs, the scan has been
+                // accounted for at the right layer — just append.
                 PAHaptics.tap()
                 multiScanSession.append(
                     match: match,
@@ -1040,6 +1022,14 @@ final class ScannerHost: ObservableObject {
     /// layer reads this from `handleIdentifyResult` to branch routing.
     /// Reset on app launch — users opt in to batch mode per session.
     @Published var multiScanMode: Bool = false
+
+    /// Called from the auto-detect hook when a free-tier user in
+    /// multi-scan mode runs out of daily quota. Lets ScannerTabView
+    /// surface the paywall sheet without ScannerHost needing direct
+    /// access to its @State. Wired in `.onAppear`. Pre-runIdentify
+    /// quota gate (Codex P2 review on PR #83) — replaces the earlier
+    /// post-identify gate in handleIdentifyResult.
+    var onAutoDetectQuotaBlocked: (@MainActor () -> Void)?
 
     /// Mirrors `ScannerViewModel.firstFrameRendered`. Drives the
     /// "Starting camera…" placeholder in ScannerTabView's body so the
@@ -1287,6 +1277,32 @@ final class ScannerHost: ObservableObject {
     private func installNetworkIdentifier(_ vm: ScannerViewModel) {
         vm.onStableCardCaptured = { [weak self] image, perspectiveCorrection in
             guard let self else { return }
+
+            // Pre-identify quota gate for multi-scan auto-detect
+            // (Codex P2 review on PR #83). Without this, a free-tier
+            // user with no scans left still uploads the JPEG and
+            // hits /api/scan/identify on every stable auto-capture —
+            // the server-side cost is wasted, and dismissing the
+            // paywall lets the loop continue. Gating here intercepts
+            // before runIdentify ever fires. Single-mode auto-detect
+            // doesn't gate here (existing back-compat behavior); the
+            // tap path has its own quota check before
+            // captureFrameAndIdentify, and library imports bypass
+            // intentionally.
+            let blocked = await MainActor.run {
+                guard self.multiScanMode, !PremiumGate.shared.isPro else {
+                    return false
+                }
+                ScanQuota.shared.rolloverIfNewDay()
+                if !ScanQuota.shared.canScan {
+                    self.onAutoDetectQuotaBlocked?()
+                    return true
+                }
+                ScanQuota.shared.recordScan()
+                return false
+            }
+            if blocked { return }
+
             await self.runIdentify(
                 image: image,
                 triggerSource: "auto",
