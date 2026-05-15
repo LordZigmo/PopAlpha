@@ -348,14 +348,22 @@ struct LiquidGlassSurface: ViewModifier {
                     let progress = shineProgress(proxy.frame(in: .global).minY)
                     let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
                     ZStack {
-                        shape.fill(.regularMaterial)
+                        // `.ultraThinMaterial` preserves more of the
+                        // colored wash below than `.regularMaterial` —
+                        // less neutral-gray frost, more chroma.
+                        shape.fill(.ultraThinMaterial)
+                        // Accent gradient runs much hotter than the
+                        // PR #84 originals so the surface reads as a
+                        // rich tinted glass rather than a desaturated
+                        // wash. The shimmer now competes against a
+                        // richer chromatic base, so it stands out less.
                         shape.fill(
                             LinearGradient(
                                 colors: [
-                                    accent.opacity(0.32),
-                                    accent.opacity(0.08),
+                                    accent.opacity(0.55),
                                     accent.opacity(0.22),
-                                    accent.opacity(0.06)
+                                    accent.opacity(0.45),
+                                    accent.opacity(0.18)
                                 ],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
