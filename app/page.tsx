@@ -221,13 +221,18 @@ function AnchorBullet({ title, detail }: { title: string; detail: string }) {
 function DifferentiatorCards({ jpCoverage }: { jpCoverage: JapaneseCatalogState | null }) {
   return (
     <section className="mx-auto max-w-[1400px] px-5 py-20 sm:px-8 lg:py-28">
-      <div className="max-w-[720px]">
+      <div className="max-w-[820px]">
         <p className="text-[12px] font-semibold uppercase tracking-[0.18em] text-[#7DD3FC]">
-          What makes PopAlpha different
+          Built for collectors who want the market edge
         </p>
         <h2 className="mt-3 text-[clamp(2rem,3.4vw,3rem)] font-semibold leading-[1.05] tracking-[-0.035em] text-white">
-          Three moats no other scanner has.
+          Scan the card. Understand the market. Know what matters next.
         </h2>
+        <p className="mt-5 max-w-[680px] text-[17px] leading-[1.55] text-[#B5BEC9]">
+          PopAlpha combines fast card recognition with AI market analysis, collector
+          personalization, and native Japanese pricing — so you&rsquo;re not just checking prices,
+          you&rsquo;re building conviction.
+        </p>
       </div>
 
       <div className="mt-12 grid gap-5 lg:grid-cols-3">
@@ -235,24 +240,24 @@ function DifferentiatorCards({ jpCoverage }: { jpCoverage: JapaneseCatalogState 
           tint="#0A2230"
           accentColor="#7DD3FC"
           label="AI Market Briefs"
-          headline="Every card. Every day. Explained."
-          body="PopAlpha writes a market brief for every card you watch — what moved, why, and what to watch next. Powered by live pricing, not vibes."
+          headline="A daily market read for every card you follow."
+          body="See what moved, why it matters, and what to watch next — written in plain English and grounded in live pricing."
           screen="brief"
         />
         <DifferentiatorCard
           tint="#221638"
           accentColor="#C4B5FD"
           label="Collector Insights"
-          headline="An AI that learns what you actually collect."
-          body="Watch a card, scan one, log a purchase — every action teaches PopAlpha what matters to you. Then it filters the entire market down to the few signals you actually care about."
+          headline="Signals built around your taste."
+          body="PopAlpha learns from the cards you scan, watch, and own. Over time, it understands your collector style and surfaces the market moves most relevant to you."
           screen="for-you"
         />
         <DifferentiatorCard
           tint="#2B0F1E"
           accentColor="#F9A8D4"
           label="JP-Native Pricing"
-          headline="Real Japanese prices. Not translated listings."
-          body="Direct from Snkrdunk and Yahoo! Auctions JP — refreshed hourly, with full per-set coverage transparency."
+          headline="Real JP market context."
+          body="Track Japanese cards using native Japanese marketplace data, with transparency around set coverage and freshness — not just translated listings or English-market proxies."
           screen="jp-pricing"
           footer={<JpCoverageStrip jpCoverage={jpCoverage} />}
         />
