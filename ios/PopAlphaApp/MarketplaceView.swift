@@ -115,12 +115,9 @@ struct MarketplaceView: View {
                     // typical iPhones — the live-market proof should
                     // come into view shortly after the hero / brief.
                     VStack(spacing: 14) {
-                        TopBar(showSearch: $showSearch)
+                        TopBar(showSearch: $showSearch, marketRaw: $marketRaw)
                             .padding(.horizontal, PA.Layout.sectionPadding)
                             .padding(.top, 8)
-
-                        MarketToggleStrip(selection: $marketRaw)
-                            .padding(.horizontal, PA.Layout.sectionPadding)
 
                         if market == .jp {
                             jpSequence(authed: AuthService.shared.isAuthenticated)
@@ -319,6 +316,22 @@ struct MarketplaceView: View {
             )
             .padding(.horizontal, PA.Layout.sectionPadding)
         }
+
+        // Same slot the EN sequences use, but pass `nil` for both
+        // `brief` and `fallbackAsOf`: the cached brief is generated
+        // from EN-only top movers (refresh-ai-brief cron +
+        // lib/ai/homepage-brief.ts build context from the global
+        // signal board with no market parameter), and `data.asOf` is
+        // the EN signal-board timestamp. Showing either under JP
+        // would leak EN content / EN freshness into a JP-only page
+        // (the JP footer below avoids `data.asOf` for the same
+        // reason). Passing nil renders AIBriefCard's market-neutral
+        // placeholder with no "Updated …" stamp — visual
+        // scaffolding and the Hinomaru red border (via `\.market`)
+        // stay, the EN leak doesn't. Swap both back once a JP brief
+        // generator exists with its own freshness signal.
+        AIBriefCard(brief: nil, fallbackAsOf: nil, styleLabel: styleLabel)
+            .padding(.horizontal, PA.Layout.sectionPadding)
 
         if let data {
             MarketPulseSection(
@@ -675,86 +688,11 @@ struct MarketplaceView: View {
     }
 }
 
-// MARK: - Market Toggle Strip
-//
-// EN / JP market selector that sits directly below TopBar on the
-// homepage. The active segment fills in its own market's brand color,
-// so the strip doubles as a legend ("blue = EN, red = JP") without
-// needing a separate explainer. Persists via the same @AppStorage
-// binding that drives the `\.market` environment value on the outer
-// NavigationStack — flipping a segment immediately reflows every
-// homepage subview that opted into `@Environment(\.market)`.
-//
-// Defensive on rawValue typing: callers pass `$marketRaw` (a String
-// binding) rather than a Market binding because `@AppStorage` doesn't
-// natively bind enums; this avoids reaching for `optional<Market>`
-// gymnastics at the call site.
-
-private struct MarketToggleStrip: View {
-    @Binding var selection: String
-
-    /// Visual width of the toggle pill. Sized like a standard iOS
-    /// segmented control — wide enough to read both labels without
-    /// crowding, narrow enough that it doesn't dominate the homepage.
-    /// Centered horizontally by the parent VStack's default alignment.
-    private let pillWidth: CGFloat = 220
-    private let pillHeight: CGFloat = 32
-
-    var body: some View {
-        HStack(spacing: 0) {
-            ForEach(Market.allCases) { market in
-                segment(for: market)
-            }
-        }
-        .padding(3)
-        .frame(width: pillWidth, height: pillHeight)
-        .background(Capsule().fill(PA.Colors.surfaceSoft))
-        .overlay(Capsule().stroke(PA.Colors.hairline(0.08), lineWidth: 1))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Market")
-        .accessibilityHint("Switches the homepage between English and Japanese card markets")
-    }
-
-    private func segment(for market: Market) -> some View {
-        let isActive = selection == market.rawValue
-        return Button {
-            withAnimation(.easeInOut(duration: 0.25)) {
-                selection = market.rawValue
-                PAHaptics.selection()
-            }
-        } label: {
-            ZStack {
-                // Active fill is rendered behind the text. Kept as a
-                // separate layer (rather than `.background { ... }` on
-                // the Text) so the segment's frame is always opaque to
-                // hit-testing — without this, taps that don't land on
-                // the glyphs themselves fall through and the JP
-                // segment registers as unresponsive on inactive state.
-                if isActive {
-                    Capsule().fill(market.accent)
-                }
-                Text(market.label)
-                    .font(.system(size: 12, weight: .bold))
-                    .tracking(0.8)
-                    .foregroundStyle(isActive ? .white : PA.Colors.textSecondary)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            // `contentShape(Rectangle())` makes the full segment frame
-            // tappable regardless of whether the active-fill capsule
-            // is drawn. Required because SwiftUI Buttons only hit-test
-            // opaque label content by default.
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(market.accessibilityLabel)
-        .accessibilityAddTraits(isActive ? .isSelected : [])
-    }
-}
-
 // MARK: - Top Bar (44pt)
 
 private struct TopBar: View {
     @Binding var showSearch: Bool
+    @Binding var marketRaw: String
 
     var body: some View {
         HStack(spacing: 10) {
@@ -767,9 +705,17 @@ private struct TopBar: View {
                 .aspectRatio(contentMode: .fit)
                 .frame(width: 30, height: 30)
 
-            Text("PopAlpha")
-                .font(.system(size: 17, weight: .semibold, design: .rounded))
-                .foregroundStyle(PA.Colors.text)
+            // EN / JP market toggle. Replaces the wide
+            // MarketToggleStrip that used to sit in its own row below
+            // TopBar — the split row chewed up vertical space that's
+            // better spent on hero/brief content. Geometry mimics the
+            // Scanner's language pill (28×22 segments, Capsule, 11pt
+            // semibold) but uses adaptive surface colors so it reads
+            // on the homepage's light/dark background instead of the
+            // camera viewfinder's hard black. Active segment fills
+            // with `market.accent` — cyan on EN, Hinomaru red on JP —
+            // so the pill doubles as a legend.
+            marketTogglePill
 
             Spacer()
 
@@ -807,6 +753,51 @@ private struct TopBar: View {
                 )
         }
         .frame(height: 44)
+    }
+
+    @ViewBuilder
+    private var marketTogglePill: some View {
+        HStack(spacing: 0) {
+            marketTogglePillSegment(.en)
+            marketTogglePillSegment(.jp)
+        }
+        .background(PA.Colors.surfaceSoft)
+        .clipShape(Capsule())
+        .overlay(Capsule().strokeBorder(PA.Colors.borderLight, lineWidth: 0.5))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Market")
+        .accessibilityHint("Switches the homepage between English and Japanese card markets")
+    }
+
+    @ViewBuilder
+    private func marketTogglePillSegment(_ market: Market) -> some View {
+        let isActive = marketRaw == market.rawValue
+        // Button (not Text + onTapGesture) so VoiceOver gets standard
+        // button control semantics — assistive tech needs to know each
+        // segment is an activatable market switch, not just labeled
+        // selected text.
+        Button {
+            guard marketRaw != market.rawValue else { return }
+            withAnimation(.easeInOut(duration: 0.25)) {
+                marketRaw = market.rawValue
+            }
+            PAHaptics.selection()
+        } label: {
+            Text(market.label)
+                .font(.system(size: 11, weight: .semibold))
+                .tracking(0.4)
+                .foregroundStyle(isActive ? .white : PA.Colors.textSecondary)
+                .frame(width: 32, height: 24)
+                .background {
+                    if isActive {
+                        Capsule().fill(market.accent)
+                    }
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(market.accessibilityLabel)
+        .accessibilityAddTraits(isActive ? .isSelected : [])
     }
 }
 
