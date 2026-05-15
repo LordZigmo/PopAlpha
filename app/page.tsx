@@ -336,7 +336,7 @@ function JpCoverageStrip({ jpCoverage }: { jpCoverage: JapaneseCatalogState | nu
       <div className="mt-2 grid grid-cols-3 gap-2">
         <JpStat value={jpCoverage.totalCards.toLocaleString()} label="JP cards" />
         <JpStat value={jpCoverage.totalSets.toString()} label="sets" />
-        <JpStat value={`${jpCoverage.freshPct}%`} label="fresh · 7d" />
+        <JpStat value={`${jpCoverage.freshPct.toFixed(1)}%`} label="fresh · 7d" />
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] font-medium text-[#9FA4AE]">
         <span>Snkrdunk</span>
