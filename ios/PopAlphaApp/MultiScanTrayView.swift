@@ -204,7 +204,18 @@ struct MultiScanReviewSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
+                    // Disable while a submit is in flight. submit()
+                    // captured a snapshot of `entries` before the
+                    // await; if the user dismisses the sheet during
+                    // that window, scanner.resumeScanning() fires
+                    // (via the parent's onChange), the camera
+                    // accepts new auto-detect appends, and the
+                    // in-flight resolution then clears/replaces
+                    // entries based on the stale snapshot — silently
+                    // dropping the rows scanned during the await.
+                    // (Codex P2 review on PR #83.)
                     Button("Done", action: onDismiss)
+                        .disabled(submitting)
                 }
             }
             .safeAreaInset(edge: .bottom) {
@@ -212,6 +223,10 @@ struct MultiScanReviewSheet: View {
                     footer
                 }
             }
+            // Pair with the disabled Done button to block swipe-down
+            // dismissal during submit — same race protection applies
+            // to gesture-driven sheet dismissal.
+            .interactiveDismissDisabled(submitting)
         }
     }
 
