@@ -44,21 +44,60 @@ export function normalizeScrydexCurrency(raw: unknown): ScrydexCurrency {
   return "USD";
 }
 
+/**
+ * Parse a Scrydex `prices[]` row to a single (price, currency) tuple.
+ *
+ * `preferLow` (default false): when true, prefer the row's `low` field
+ * over `market` for the price value. This matters because scrydex's
+ * `market` field is asking-anchored — it weights recent high listings —
+ * while TCGplayer's published "Market Price" label is sold-anchored
+ * (recent-sold median), and the two diverge significantly on
+ * thin-liquidity cards (e.g. Pokemon GO Japan #084 Mewtwo VSTAR: scrydex
+ * `market` ¥7,500 = $50 USD, but TCGplayer shows $29.77; scrydex `low`
+ * ¥4,300 ≈ $28.67 matches the TCGplayer label). When users compare our
+ * displayed price to TCGplayer's page, `low` is the field that aligns
+ * with what TCGplayer publishes.
+ *
+ * Raw NM/Mint pricing should pass `preferLow: true` so the headline
+ * tracks TCGplayer's published number. Graded pricing should leave it
+ * false — for graded, scrydex's `market` is the conventional "value"
+ * estimate the market uses (median of recent sales of that specific
+ * graded SKU), and switching to `low` would silently surface the
+ * cheapest current asking of that slab.
+ *
+ * Discovered via 5-card spot-check 2026-05-15 (Mewtwo VSTAR, Grusha,
+ * Manaphy, Darkrai, Quaquaval ex). 2 of 4 testable cards diverged
+ * meaningfully (-39% Grusha, -42% Mewtwo VSTAR); Manaphy was within
+ * $3. Pattern: divergence proportional to scrydex's high/low spread.
+ */
 export function parseScrydexPriceObject(
   record: Record<string, unknown>,
+  options: { preferLow?: boolean } = {},
 ): { price: number | null; currency: ScrydexCurrency } {
   const directCurrency = normalizeScrydexCurrency(record.currency);
-  const directCandidates = [
-    record.marketPrice,
-    record.market,
-    record.lowest_near_mint,
-    record.low,
-    record.mid,
-    record.average,
-    record.avg,
-    record.price,
-    record.value,
-  ];
+  const directCandidates = options.preferLow
+    ? [
+        record.low,
+        record.marketPrice,
+        record.market,
+        record.lowest_near_mint,
+        record.mid,
+        record.average,
+        record.avg,
+        record.price,
+        record.value,
+      ]
+    : [
+        record.marketPrice,
+        record.market,
+        record.lowest_near_mint,
+        record.low,
+        record.mid,
+        record.average,
+        record.avg,
+        record.price,
+        record.value,
+      ];
   for (const candidate of directCandidates) {
     const value = getNumberField(candidate);
     if (value !== null) {
@@ -123,14 +162,16 @@ export function selectPreferredScrydexPriceEntry(prices: unknown): SelectedScryd
     const condition = normalizeScrydexCondition(row.condition);
     if (condition.normalizedCondition !== "nm" && condition.normalizedCondition !== "mint") continue;
 
-    const parsed = parseScrydexPriceObject(row);
+    // Raw NM/Mint headline price tracks scrydex's `low` to match TCGplayer's
+    // published "Market Price" label (sold-anchored). See parseScrydexPriceObject docs.
+    const parsed = parseScrydexPriceObject(row, { preferLow: true });
     if (parsed.price === null) continue;
 
     let score = 0;
     if (condition.normalizedCondition === "nm") score += 100;
     if (condition.normalizedCondition === "mint") score += 90;
-    if (getNumberField(row.market) !== null) score += 20;
-    if (getNumberField(row.low) !== null) score += 10;
+    if (getNumberField(row.low) !== null) score += 20;
+    if (getNumberField(row.market) !== null) score += 10;
 
     const selected: SelectedScrydexPriceEntry = {
       price: parsed.price,
@@ -236,6 +277,11 @@ export function selectScrydexGradedEntries(prices: unknown): SelectedScrydexGrad
     }
     if (!gradeBucket) continue;
 
+    // Graded SKUs intentionally keep scrydex's `market` as the headline
+    // (no preferLow): for graded, `market` is the conventional "value"
+    // estimate the market uses (median of recent sales of that specific
+    // slab). `low` would surface the cheapest current asking, which is
+    // useful as a floor signal but not as the headline value.
     const parsed = parseScrydexPriceObject(row);
     if (parsed.price === null) continue;
 

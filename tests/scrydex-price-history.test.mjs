@@ -420,8 +420,11 @@ async function runScrydexPriceHistoryTests() {
       currency: "USD",
     },
   ], "pokemoncenterstamp");
+  // Post 2026-05-15: raw history now prefers `low` over `market` to track
+  // TCGplayer's published Market Price label. See scrydex-raw-price-select.ts
+  // parseScrydexPriceObject docs. For this fixture, low=180 wins over market=145.53.
   assert.deepEqual(stamped, {
-    price: 145.53,
+    price: 180,
     currency: "USD",
     condition: "nm",
   });

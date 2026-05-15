@@ -54,13 +54,16 @@ export function selectAllScrydexConditionPrices(
     const condition = normalizeScrydexCondition(row.condition);
     if (!RECOGNIZED_RAW_CONDITIONS.has(condition.normalizedCondition)) continue;
 
-    const parsed = parseScrydexPriceObject(row);
+    // All-conditions raw price extraction also tracks TCGplayer's published
+    // "Market Price" label by preferring `low`. See parseScrydexPriceObject
+    // docs in scrydex-raw-price-select.ts.
+    const parsed = parseScrydexPriceObject(row, { preferLow: true });
     if (parsed.price === null) continue;
 
     // Scoring: prefer rows with more price fields available
     let score = 0;
-    if (getNumberField(row.market) !== null) score += 20;
-    if (getNumberField(row.low) !== null) score += 10;
+    if (getNumberField(row.low) !== null) score += 20;
+    if (getNumberField(row.market) !== null) score += 10;
     if (getNumberField(row.high) !== null) score += 5;
 
     // Normalize "mint" into "nm" bucket (nm wins on score tie)
