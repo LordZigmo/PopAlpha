@@ -89,11 +89,7 @@
       "schedule": "23 * * * *"
     },
     {
-      "path": "/api/cron/refresh-card-profiles?mode=backfill&maxCards=500",
-      "schedule": "10 */6 * * *"
-    },
-    {
-      "path": "/api/cron/refresh-card-profiles?mode=refresh&maxCards=500",
+      "path": "/api/cron/refresh-card-profiles?mode=auto&maxBackfillCards=100&maxRefreshCards=400",
       "schedule": "45 * * * *"
     },
     {
@@ -133,16 +129,16 @@
       "schedule": "26 * * * *"
     },
     {
+      "path": "/api/cron/run-snkrdunk-daily",
+      "schedule": "36 * * * *"
+    },
+    {
       "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=1%25,j%25,k%25,o%25,v%25,x%25&max-slugs=2000",
       "schedule": "0 4 * * *"
     },
     {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=a%25,b%25,c%25&max-slugs=2000",
+      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=a%25,b%25,c%25,d%25,e%25,f%25&max-slugs=2000",
       "schedule": "5 4 * * *"
-    },
-    {
-      "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=d%25,e%25,f%25&max-slugs=2000",
-      "schedule": "10 4 * * *"
     },
     {
       "path": "/api/cron/refresh-graded-variant-metrics?slug-pattern=g%25,h%25,l%25,m%25&max-slugs=2000",
