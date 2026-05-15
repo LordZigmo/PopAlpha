@@ -31,8 +31,10 @@
  *      - year in [yMin-3, yMax+3] → if NEEDS_REVIEW, promote to MATCHED
  *      - year outside → mark REJECTED (with reviewed_by='era-audit-2026-05-15-followup')
  *
- * Idempotent: a second run sees the new statuses and skips no-op rows.
- * Read-only by default; pass --apply to write changes.
+ * Idempotent: skips rows where reviewed_at is non-null (i.e. an
+ * operator OR a prior audit run already made a decision). Read-only
+ * by default; pass --apply to write changes. To intentionally
+ * re-audit previously-touched rows, clear reviewed_at on them first.
  *
  * Usage:
  *   node --env-file=.env.local scripts/snkrdunk-era-audit-cleanup.mjs
@@ -126,6 +128,16 @@ async function main() {
       .from("snkrdunk_product_map")
       .select("id, canonical_slug, snkrdunk_name, mapping_status, match_score")
       .in("mapping_status", ["MATCHED", "NEEDS_REVIEW"])
+      // Skip rows that have already been reviewed (by an operator OR a
+      // prior audit run). reviewed_at non-null means "someone has made
+      // a deliberate decision about this row"; the era heuristic
+      // shouldn't second-guess it. Mirrors persist-snkrdunk-matches.mjs
+      // which treats reviewed_at as the immutability signal. Codex P2
+      // on PR #75. Side-effect: the script is now idempotent across
+      // re-runs — once a row is touched (promote/reject), the next
+      // run skips it. To intentionally re-audit, clear reviewed_at on
+      // the targeted rows first.
+      .is("reviewed_at", null)
       // Stable order across pages. Without .order(), Postgres can return
       // rows in different physical orders between range() calls, which
       // causes duplicates or silent skips on a multi-page scan. Codex P2
