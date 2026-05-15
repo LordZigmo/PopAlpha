@@ -135,11 +135,19 @@ function resolveActiveModelVersion() {
  * has no native name to compare — caller decides the policy.
  */
 function nameGlossaryGate(enCard, jpCard) {
-  const enBase = (enCard.canonical_name ?? "").trim().toLowerCase();
-  // Some EN cards have prefixes/suffixes ("Radiant Charizard", "Charizard ex").
-  // Try the full name first, then split off the base species.
-  const enBaseSpecies = enBase.split(/\s+/)[0];
-  const expectedJp = EN_TO_JP_POKEMON[enBase] ?? EN_TO_JP_POKEMON[enBaseSpecies] ?? null;
+  // EN_TO_JP_POKEMON in lib/jp/matcher.mjs is built from POKEMON_NAMES
+  // keyed by title-case Pokemon names ("Bulbasaur", "Charizard").
+  // canonical_cards.canonical_name is also stored title-case. Lowercasing
+  // before lookup made every glossary check miss, which sent every kNN
+  // candidate through the strict noGlossaryFloorCosine (0.94) gate and
+  // yielded zero pairings on the first manual cron run against prod.
+  // Match the glossary's casing exactly.
+  const enName = (enCard.canonical_name ?? "").trim();
+  // Strip suffixes like " ex" / " VMAX" / " VSTAR" by splitting on
+  // whitespace and trying the species token. Glossary keys are species
+  // only — "Charizard", not "Charizard ex".
+  const enBaseSpecies = enName.split(/\s+/)[0];
+  const expectedJp = EN_TO_JP_POKEMON[enName] ?? EN_TO_JP_POKEMON[enBaseSpecies] ?? null;
   const jpNative = (jpCard.canonical_name_native ?? "").trim();
   if (!jpNative) return null;          // JP side lacks native — caller decides
   if (!expectedJp) return null;        // No glossary entry — caller decides
