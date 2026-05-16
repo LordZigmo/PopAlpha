@@ -26,6 +26,14 @@ struct MultiScanEntry: Identifiable, Equatable {
     /// SHA256 of the scanned JPEG, when known. Threaded through so the
     /// user-correction flow can post bytes-by-hash without re-uploading.
     let imageHash: String?
+    /// Scanner language at the time of this scan ("EN" / "JP"). Pinned
+    /// per-row so a later correction attributes to the row's original
+    /// language, not the scanner's CURRENT language. Codex P2 on PR
+    /// #101: ScannerHost.scanLanguage updates on every scan (manual
+    /// pill toggle, CJK auto-flip), so correcting an earlier EN row
+    /// after a later JP scan would otherwise record the user_correction
+    /// anchor under the wrong language.
+    let scanLanguage: ScanLanguage
     var quantity: Int = 1
     var grade: String = "RAW"
     var printingId: String? = nil
@@ -108,6 +116,7 @@ final class MultiScanSession: ObservableObject {
         candidates: [ScanMatch],
         confidence: String,
         imageHash: String?,
+        scanLanguage: ScanLanguage,
         scanImage: UIImage? = nil,
     ) {
         var entry = MultiScanEntry(
@@ -117,6 +126,7 @@ final class MultiScanSession: ObservableObject {
             confidence: confidence,
             scannedAt: Date(),
             imageHash: imageHash,
+            scanLanguage: scanLanguage,
         )
         entry.scanImage = scanImage
         entries.append(entry)

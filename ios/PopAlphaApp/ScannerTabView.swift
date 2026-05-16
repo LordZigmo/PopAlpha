@@ -939,6 +939,12 @@ struct ScannerTabView: View {
                     candidates: scanner.lastMatches,
                     confidence: scanner.lastConfidence ?? "medium",
                     imageHash: scanner.lastImageHash,
+                    // Pin scanLanguage per-row so a later correction
+                    // submits under the row's ORIGINAL language, not
+                    // the scanner's current pill state (which auto-
+                    // flips on CJK and updates on every new scan).
+                    // Codex P2 on PR #101.
+                    scanLanguage: scanner.scanLanguage,
                     // Retain the source JPEG (offline OR network-
                     // routed) so per-row correction can submit a
                     // server-side user_correction anchor via
@@ -1131,7 +1137,11 @@ struct ScannerTabView: View {
                 matches: entry.candidates,
                 imageHash: entry.imageHash,
                 scanImage: entry.scanImage,
-                scanLanguage: scanner.scanLanguage,
+                // Use the row's pinned language (set at append time)
+                // not scanner.scanLanguage (which would reflect the
+                // CURRENT pill state, possibly flipped by a later
+                // scan or manual toggle). Codex P2 on PR #101.
+                scanLanguage: entry.scanLanguage,
                 ocrCardNumber: nil,
                 ocrSetHint: nil,
                 winningPath: nil,
