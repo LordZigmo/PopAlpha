@@ -46,6 +46,12 @@ struct ScannerTabView: View {
     // schedule without leaving stale fade-out animations running.
     @State private var flashEntryId: UUID?
     @State private var flashPriceVisible: Bool = false
+    /// Currently-correcting tray entry. Set when the user taps a row
+    /// in the review sheet; drives a nested ScanPickerSheet that lets
+    /// them swap the entry's matched card to a different candidate
+    /// from the original top-K (or search the catalog for a custom
+    /// pick). Cleared on dismiss or successful pick.
+    @State private var correctingEntry: CorrectingMultiScanEntry?
     /// When true, the flash card animates toward the bottom-right
     /// toggle (offset + shrink + fade) instead of fading in place.
     /// Gives the user a visual cue that the scan is going INTO the
@@ -341,7 +347,19 @@ struct ScannerTabView: View {
                     session: multiScanSession,
                     onDismiss: { showMultiScanSheet = false },
                     onSubmit: submitMultiScanBatch,
+                    onCorrect: { entryId in
+                        correctingEntry = CorrectingMultiScanEntry(id: entryId)
+                    },
                 )
+                // Nested correction picker. Reuses the single-mode
+                // ScanPickerSheet so the disambiguation UX is
+                // consistent across modes. The picker is sheeted off
+                // the review sheet (not the scanner) so dismissing it
+                // returns to the review list rather than jumping all
+                // the way back to the viewfinder.
+                .sheet(item: $correctingEntry) { ref in
+                    correctionPickerSheet(for: ref.id)
+                }
             }
             .onChange(of: scanner.lastMatch) { _, newValue in
                 handleIdentifyResult(newValue)
@@ -921,6 +939,22 @@ struct ScannerTabView: View {
                     candidates: scanner.lastMatches,
                     confidence: scanner.lastConfidence ?? "medium",
                     imageHash: scanner.lastImageHash,
+                    // Pin scanLanguage per-row so a later correction
+                    // submits under the row's ORIGINAL language, not
+                    // the scanner's current pill state (which auto-
+                    // flips on CJK and updates on every new scan).
+                    // Codex P2 on PR #101.
+                    scanLanguage: scanner.scanLanguage,
+                    // Retain the source JPEG (offline OR network-
+                    // routed) so per-row correction can submit a
+                    // server-side user_correction anchor via
+                    // ScanPickerSheet's bytes-gated promote path.
+                    // Uses `lastSourceImage` (multi-mode-only,
+                    // always-set) rather than `lastScanImage`
+                    // (offline-only) so network-routed corrections
+                    // also fire. Codex P2 on PR #101 flagged the
+                    // network-routed gap.
+                    scanImage: scanner.lastSourceImage,
                 )
                 scanner.clearLastMatch()
                 scanner.resumeScanning()
@@ -1080,6 +1114,58 @@ struct ScannerTabView: View {
     /// Submits the current tray to /api/holdings/bulk-import. Returns
     /// nil on full success (sheet closes), or a user-facing error
     /// string when the network call throws or any rows fail. The
+    /// Builds the ScanPickerSheet used for per-row correction inside
+    /// the review sheet. Reuses the single-mode picker UI (top-K
+    /// candidates + "None of these" catalog search) so the
+    /// disambiguation UX is consistent across single and multi modes.
+    /// On pick: re-assigns the entry's match via session.reassign
+    /// (which also re-fetches price for the new slug) and triggers
+    /// the same anchor-sync the single-mode picker uses.
+    ///
+    /// `scanImage` is the offline-scan source JPEG retained on
+    /// MultiScanEntry. Server-routed scans (where lastScanImage was
+    /// nil at append time) pass nil here — for those, the existing
+    /// scan-uploads/<hash>.jpg path is the eval-promote target.
+    /// Without retaining bytes here, ScanPickerSheet's correction-
+    /// promote path (gated on `if let bytes = scanImage`) would
+    /// silently skip the user_correction anchor submission. Codex
+    /// P2 on PR #101 flagged that miss.
+    @ViewBuilder
+    private func correctionPickerSheet(for entryId: UUID) -> some View {
+        if let entry = multiScanSession.entries.first(where: { $0.id == entryId }) {
+            ScanPickerSheet(
+                matches: entry.candidates,
+                imageHash: entry.imageHash,
+                scanImage: entry.scanImage,
+                // Use the row's pinned language (set at append time)
+                // not scanner.scanLanguage (which would reflect the
+                // CURRENT pill state, possibly flipped by a later
+                // scan or manual toggle). Codex P2 on PR #101.
+                scanLanguage: entry.scanLanguage,
+                ocrCardNumber: nil,
+                ocrSetHint: nil,
+                winningPath: nil,
+                onPick: { picked in
+                    multiScanSession.reassign(entryId: entryId, to: picked)
+                    correctingEntry = nil
+                    AnalyticsService.shared.captureRaw(
+                        "scanner_multi_mode_row_corrected",
+                        properties: [
+                            "from_slug": entry.match.slug,
+                            "to_slug": picked.slug,
+                            "confidence": entry.confidence,
+                            "tray_count": multiScanSession.entries.count,
+                        ],
+                    )
+                },
+                onDismiss: { correctingEntry = nil },
+                onCorrectionSubmitted: {
+                    scanner.syncOfflineAnchorsInBackground()
+                },
+            )
+        }
+    }
+
     /// Schedule the multi-scan flash overlay's three-stage exit for
     /// the just-appended entry. Cancels any in-flight schedule from a
     /// prior scan so consecutive captures replace cleanly without
@@ -1184,6 +1270,17 @@ struct ScannerTabView: View {
     }
 }
 
+// MARK: - Correcting-entry wrapper
+//
+// `.sheet(item:)` requires Identifiable; UUID doesn't conform on its
+// own. This thin wrapper makes the "currently-correcting entry" state
+// presentable via item-driven sheet, where the `id` field doubles as
+// both the SwiftUI-identity key AND the MultiScanEntry lookup key.
+
+struct CorrectingMultiScanEntry: Identifiable {
+    let id: UUID
+}
+
 // MARK: - Scanner Host
 // Wraps PopAlphaCore's ScannerViewModel in an @ObservableObject the SwiftUI view can bind to.
 // Keeps init-error handling + simulator fallback in one place.
@@ -1239,6 +1336,18 @@ final class ScannerHost: ObservableObject {
     /// already uploaded the JPEG to scan-uploads/<hash>.jpg and the
     /// existing hash-based promote flow can find it server-side.
     @Published private(set) var lastScanImage: UIImage?
+
+    /// Always-retained source UIImage during multi-scan mode
+    /// (regardless of online/offline). `lastScanImage` deliberately
+    /// drops bytes for online scans to save memory — fine for the
+    /// single-shot picker, but the multi-scan correction picker
+    /// needs bytes on EVERY entry because ScanPickerSheet's
+    /// correction-promote path is gated on
+    /// `if let bytes = scanImage`. Set only when `multiScanMode`
+    /// is true so single-mode's memory profile is unchanged. Codex
+    /// P2 on PR #101 flagged the missing network-routed correction
+    /// submission.
+    @Published private(set) var lastSourceImage: UIImage?
 
     /// What on-device OCR pulled from the last captured frame
     /// (collector number and/or set-name hint). Surfaced so the
@@ -1749,6 +1858,14 @@ final class ScannerHost: ObservableObject {
             // online scans already uploaded to scan-uploads/<hash>.jpg
             // so the correction-via-hash path works without it.
             self.lastScanImage = usedOffline ? image : nil
+            // Multi-scan correction needs bytes for every row (the
+            // picker's correction-promote path is gated on
+            // `if let bytes = scanImage`). Retain regardless of
+            // online/offline when multi-mode is active so the next
+            // multiScanSession.append captures them. Cleared back to
+            // nil when not in multi-mode so single-mode memory
+            // profile stays unchanged.
+            self.lastSourceImage = self.multiScanMode ? image : nil
             self.isIdentifying = false
 
             Logger.scan.debug("path source=\(usedOffline ? "offline" : "network") winning_path=\(response.winningPath ?? "nil") confidence=\(reranked.confidence)")
