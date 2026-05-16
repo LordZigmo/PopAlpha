@@ -48,6 +48,19 @@ export const maxDuration = 300; // Vercel pro tick ceiling
 
 const DEFAULT_BATCH_SIZE = 30; // smaller than yahoo (50) — robots.txt softness
 const INTER_CARD_DELAY_MS = 4000;
+
+// Mirror of scripts/run-snkrdunk-pipeline.mjs — derive price_jpy at write
+// time so the JPY value stamped on each row matches the FX rate at
+// observation time. Without this, the cron path would only write
+// price_usd, leaving price_jpy at the migration-backfilled value
+// indefinitely (or NULL on newly inserted per-printing rows). Codex P2
+// on PR #94. Phase C-1b 2026-05-16.
+const DEFAULT_JPY_TO_USD_RATE = 0.0068;
+const JPY_TO_USD = (() => {
+  const raw = process.env.JPY_TO_USD_RATE;
+  const parsed = raw != null ? Number.parseFloat(raw) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_JPY_TO_USD_RATE;
+})();
 const MIN_SAMPLE_COUNT = 3;
 const REFRESH_AFTER_HOURS = 24 * 7; // 7 days
 const DEADLINE_RESERVE_MS = 30_000;
@@ -202,12 +215,21 @@ async function processCard(
     median: number;
     currency: string | null;
   }>) {
+    const priceUsd = obs.median;
+    // Derive JPY at write time from the same env-driven rate the pipeline
+    // uses. Skip when price is missing/non-positive so the row's JPY
+    // doesn't carry a misleading value. See JPY_TO_USD constant above.
+    const priceJpy = typeof priceUsd === "number" && Number.isFinite(priceUsd) && priceUsd > 0
+      ? Math.round(priceUsd / JPY_TO_USD)
+      : null;
     const { error } = await supabase.from("snkrdunk_card_prices").upsert(
       {
         canonical_slug: slug,
         printing_id: obs.printing_id,
         grade: obs.grade,
-        price_usd: obs.median,
+        price_usd: priceUsd,
+        price_jpy: priceJpy,
+        fx_rate_used: priceJpy != null ? JPY_TO_USD : null,
         currency: obs.currency ?? "USD",
         sample_count: obs.count,
         snkrdunk_product_code: productCode,
