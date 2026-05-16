@@ -6,6 +6,15 @@ import type {
 } from "@/components/raw-card-variant-types";
 import { computeLiquidity } from "@/lib/cards/liquidity";
 import { dbPublic } from "@/lib/db";
+// Phase C-2 (2026-05-16): asking-price lookup reads from
+// provider_observation_matches + provider_normalized_observations,
+// which are RLS-locked to internal-only (migration
+// 20260319161000_phase2_provider_and_mapping_tables_rls.sql). The
+// public anon client returns no rows, so we use a service-role
+// fetch in a server component scope. Trust contract added to
+// scripts/security-guardrails.config.mjs DBADMIN_ALLOWED_FILES.
+// Codex P2 on PR #99.
+import { dbAdmin } from "@/lib/db/admin";
 import {
   extractRawVariantPrintingId,
   isRawHistoryVariantRefForPrinting,
@@ -366,7 +375,7 @@ export async function loadRawCardMarketVariants(params: {
   const visiblePrintingIds = new Set(printingIds);
   if (printingIds.length === 0) return [];
 
-  const [allHistoryRows, cardMetricsQuery, variantSignalsQuery] = await Promise.all([
+  const [allHistoryRows, cardMetricsQuery, variantSignalsQuery, askingPriceQuery] = await Promise.all([
     loadAllHistoryRows({ supabase, canonicalSlug: params.canonicalSlug }),
     supabase
       .from("public_card_metrics")
@@ -393,6 +402,49 @@ export async function loadRawCardMarketVariants(params: {
       .eq("grade", "RAW")
       .in("provider", ["SCRYDEX", "POKEMON_TCG_API"])
       .in("printing_id", printingIds),
+    // Phase C-2 (2026-05-16): asking-anchored value per printing,
+    // pulled from the latest scrydex observation's metadata. The
+    // normalizer (lib/backfill/pokemontcg-raw-normalize.ts) writes
+    // metadata.scrydexAskingPriceUsd at observation time.
+    //
+    // Per-printing parallel queries so each printing gets a fair shot
+    // at finding its latest observation. A single global query with
+    // limit (the earlier approach) was unfair: if one printing had
+    // many recent observations they could crowd out other printings
+    // within the global cap, leaving their asking metadata invisible.
+    // Codex P2 #3 on PR #99.
+    //
+    // Uses dbAdmin() because provider_observation_matches +
+    // provider_normalized_observations are RLS-locked to internal-only
+    // (migration 20260319161000). The anon client would return zero
+    // rows silently and the asking line would never appear. The
+    // service-role read is safe here — only metadata.scrydexAskingPriceUsd
+    // is extracted from the response (already non-sensitive pricing
+    // data that we surface to the user). Codex P2 #1 on PR #99.
+    //
+    // Each query asks for the 2 latest non-graded observations on a
+    // single printing. 2 covers per-finish splits (holofoil vs
+    // reverseHolofoil get distinct provider_variant_id values) without
+    // over-fetching.
+    Promise.all(
+      printingIds.map((printingId) =>
+        dbAdmin()
+          .from("provider_observation_matches")
+          .select("printing_id, updated_at, provider_variant_id, provider_normalized_observations(metadata, observed_at)")
+          .eq("canonical_slug", params.canonicalSlug)
+          .eq("provider", "SCRYDEX")
+          .eq("printing_id", printingId)
+          // Filter out graded observations at the query level. Graded
+          // observations get suffix "::GRADED::<PROVIDER>::<BUCKET>"
+          // on provider_variant_id (see pokemontcg-raw-normalize.ts
+          // line 327's comment). Without this filter, cards with
+          // multiple graded SKUs can crowd out the RAW observation
+          // even with the per-printing limit. Codex P2 #2 on PR #99.
+          .not("provider_variant_id", "ilike", "%::GRADED::%")
+          .order("updated_at", { ascending: false })
+          .limit(2),
+      ),
+    ),
   ]);
 
   const maxHistoryDate = allHistoryRows
@@ -427,6 +479,31 @@ export async function loadRawCardMarketVariants(params: {
     historyRowsByPrinting.set(printingId, current);
   }
 
+  // Phase C-2 (2026-05-16): per-printing asking-anchored USD value
+  // map. `askingPriceQuery` is an array of query results (one per
+  // printing — see the Promise.all in the fetch block). Each per-
+  // printing result is already ordered by updated_at desc, so the
+  // first row with a non-null scrydexAskingPriceUsd in that printing's
+  // result is the latest valid match.
+  type AskingPriceJoinRow = {
+    printing_id: string | null;
+    provider_normalized_observations:
+      | { metadata: Record<string, unknown> | null; observed_at: string | null }
+      | null;
+  };
+  const askingPriceByPrinting = new Map<string, number>();
+  for (const printingResult of askingPriceQuery) {
+    for (const row of (printingResult.data ?? []) as unknown as AskingPriceJoinRow[]) {
+      if (!row.printing_id) continue;
+      if (askingPriceByPrinting.has(row.printing_id)) continue;
+      const meta = row.provider_normalized_observations?.metadata ?? null;
+      const value = meta && typeof meta === "object" ? meta["scrydexAskingPriceUsd"] : null;
+      if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+        askingPriceByPrinting.set(row.printing_id, value);
+      }
+    }
+  }
+
   return params.variants.map((variant) => {
     const printingHistoryRows = historyRowsByPrinting.get(variant.printingId) ?? [];
     const series = buildProviderSeries(printingHistoryRows, fxRows);
@@ -458,6 +535,12 @@ export async function loadRawCardMarketVariants(params: {
       justtcgAsOfTs: null,
       scrydexPrice: liveScrydexPrice,
       scrydexAsOfTs: liveScrydexAsOfTs,
+      // Phase C-2 (2026-05-16): asking-anchored auxiliary value. Only
+      // surface when distinguishably above the headline (≥10% gap) so
+      // the line doesn't add noise on cards where low ≈ market. UI
+      // hides the line when this is null OR when the spread is
+      // negligible. See raw-card-market-surface render.
+      scrydexAskingHighUsd: hasLivePrice ? (askingPriceByPrinting.get(variant.printingId) ?? null) : null,
       marketBalancePrice: metrics?.trimmed_median_30d ?? metrics?.median_30d ?? null,
       asOfTs: liveScrydexAsOfTs,
       trendSlope7d: signalRow?.provider_trend_slope_7d ?? null,

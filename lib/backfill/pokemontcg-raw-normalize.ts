@@ -108,6 +108,7 @@ import {
   selectPreferredScrydexPriceEntry,
   selectScrydexGradedEntries,
 } from "@/lib/backfill/scrydex-raw-price-select";
+import { convertToUsd } from "@/lib/pricing/fx";
 // TODO: re-enable after debugging pipeline failures
 // import {
 //   selectAllScrydexConditionPrices,
@@ -222,6 +223,15 @@ type VariantObservation = {
   variantId: string;
   observedPrice: number | null;
   currency: "USD" | "EUR" | "JPY";
+  // Phase C-2 (2026-05-16): Scrydex's `market` field, USD-converted.
+  // Headline `observedPrice` after Phase A is scrydex's `low` (matches
+  // TCGplayer's published Market Price label, which is sold-anchored).
+  // `askingPriceUsd` preserves the asking-anchored value so the card
+  // detail page can render "Asking: $X" alongside the headline. This is
+  // the spread on thin-liquidity cards (Mewtwo VSTAR JP: low ~$29 vs
+  // market ~$50). NULL on graded observations or when scrydex's row
+  // lacks a `market` value.
+  askingPriceUsd: number | null;
   providerFinish: string | null;
   normalizedFinish: ScrydexNormalizedFinish;
   normalizedEdition: ScrydexNormalizedEdition;
@@ -329,6 +339,31 @@ function extractTrendAnchorPoints(_prices: unknown): TrendAnchorPoint[] {
   return [];
 }
 
+/**
+ * Compute the asking-anchored USD value for a raw pricing selection.
+ * Pulls scrydex's `market` field (asking-weighted) off the selected row
+ * and converts to USD via the same FX path the headline observation
+ * uses. Returns null when `market` is absent or non-positive — graded
+ * paths and rows without a market value just don't get an asking line
+ * on the card detail surface.
+ *
+ * Phase C-2 (2026-05-16): introduces "Asking: $X" auxiliary line on
+ * card detail. The headline price (after Phase A) tracks scrydex `low`
+ * to match TCGplayer's published Market Price label; this helper
+ * preserves the asking value scrydex's `market` field carries so we
+ * can surface both numbers and the spread.
+ */
+function extractAskingPriceUsd(
+  selection: ReturnType<typeof selectPreferredScrydexPriceEntry>,
+): number | null {
+  if (!selection) return null;
+  const market = getNumberField((selection.row as Record<string, unknown>).market);
+  if (market === null) return null;
+  const usd = convertToUsd(market, selection.currency);
+  if (!Number.isFinite(usd) || usd <= 0) return null;
+  return Number(usd.toFixed(4));
+}
+
 function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
   // Price is selected ONLY from per-variant Scrydex `prices` arrays. We no longer
   // substitute the card-level `prices` as a fallback — on commons where Scrydex
@@ -363,6 +398,7 @@ function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
         variantId: "unknown",
         observedPrice: pricingSelection.price,
         currency: pricingSelection.currency,
+        askingPriceUsd: extractAskingPriceUsd(pricingSelection),
         providerFinish: semantics.providerFinish,
         normalizedFinish: semantics.normalizedFinish,
         normalizedEdition: semantics.normalizedEdition,
@@ -384,6 +420,11 @@ function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
         variantId: "unknown",
         observedPrice: graded.price,
         currency: graded.currency,
+        // Graded SKUs intentionally don't carry asking-anchored value:
+        // the headline (selectScrydexGradedEntries) keeps scrydex's
+        // `market` as the conventional value. See parseScrydexPriceObject
+        // docs in scrydex-raw-price-select.ts.
+        askingPriceUsd: null,
         providerFinish: semantics.providerFinish,
         normalizedFinish: semantics.normalizedFinish,
         normalizedEdition: semantics.normalizedEdition,
@@ -418,6 +459,7 @@ function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
         variantId,
         observedPrice: pricingSelection.price,
         currency: pricingSelection.currency,
+        askingPriceUsd: extractAskingPriceUsd(pricingSelection),
         providerFinish: semantics.providerFinish,
         normalizedFinish: semantics.normalizedFinish,
         normalizedEdition: semantics.normalizedEdition,
@@ -440,6 +482,10 @@ function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
         variantId,
         observedPrice: graded.price,
         currency: graded.currency,
+        // See note above: graded paths intentionally don't carry an
+        // asking-anchored auxiliary value (their headline is already
+        // scrydex's `market`).
+        askingPriceUsd: null,
         providerFinish: semantics.providerFinish,
         normalizedFinish: semantics.normalizedFinish,
         normalizedEdition: semantics.normalizedEdition,
@@ -562,6 +608,12 @@ function buildObservationRow(params: {
       isPerfect: variant.isPerfect,
       lowPrice: variant.lowPrice,
       highPrice: variant.highPrice,
+      // Phase C-2 (2026-05-16): asking-anchored value (USD) preserved
+      // separately so the card detail page can render "Asking: $X"
+      // alongside the headline (which after Phase A tracks scrydex
+      // `low`). Read by app/c/[slug]/page.tsx via the latest scrydex
+      // observation. Null on graded observations.
+      scrydexAskingPriceUsd: variant.askingPriceUsd,
     },
     updated_at: normalizedAt,
   };

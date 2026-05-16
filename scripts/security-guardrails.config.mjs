@@ -30,6 +30,16 @@ export const DBADMIN_ALLOWED_FILES = [
   "app/api/pro/signals/route.ts",
   "app/api/scan/identify/route.ts",
   "app/api/webhooks/apple/notifications/route.ts",
+  // 2026-05-16 (Phase C-2): card detail's market-summary surface queries
+  // the latest scrydex observation's metadata.scrydexAskingPriceUsd to
+  // render the "Asking: $X" auxiliary line. The source tables
+  // (provider_observation_matches + provider_normalized_observations)
+  // are RLS-locked to internal-only via migration 20260319161000, so the
+  // anon client returns no rows; service-role read is required to surface
+  // the field. Read-only single query, extracts only the asking-price
+  // number from observation metadata — non-sensitive pricing data we
+  // already render to users. Codex P2 on PR #99.
+  "components/market-summary-card.tsx",
   "lib/data/canonical-card-match.ts",
   "lib/db/admin.ts",
   "lib/entitlements.ts",
