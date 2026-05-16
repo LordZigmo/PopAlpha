@@ -847,14 +847,24 @@ struct ScannerTabView: View {
                     scanner.resumeScanning()
                     return
                 }
-                // Quota gating is now upstream of runIdentify (in
-                // ScannerHost.installNetworkIdentifier) so a free-
-                // tier user past their daily limit never hits the
-                // server. Tap-path quota is enforced at the tap
-                // handler before captureFrameAndIdentify; library
-                // imports intentionally bypass quota in both modes.
-                // By the time this branch runs, the scan has been
-                // accounted for at the right layer — just append.
+                // Two-stage quota accounting (Codex P2, ninth +
+                // tenth pass):
+                //   1. ScannerHost.installNetworkIdentifier did the
+                //      pre-identify canScan check upstream — a user
+                //      at the wall never reaches handleIdentifyResult.
+                //   2. The recordScan increment lives HERE, after
+                //      the dedupe check has had a chance to drop a
+                //      same-card re-fire. Charging upstream would
+                //      burn a quota unit on duplicates the user
+                //      doesn't see in the tray.
+                // Tap-path quota is enforced at the tap handler
+                // before captureFrameAndIdentify; library imports
+                // intentionally bypass quota in both modes. Only
+                // auto-detect needs the deferred charge.
+                if scanner.lastTriggerSource == "auto",
+                   !premiumGate.isPro {
+                    scanQuota.recordScan()
+                }
                 PAHaptics.tap()
                 multiScanSession.append(
                     match: match,
@@ -1298,7 +1308,18 @@ final class ScannerHost: ObservableObject {
                     self.onAutoDetectQuotaBlocked?()
                     return true
                 }
-                ScanQuota.shared.recordScan()
+                // Don't record the scan here — defer the counter
+                // increment to handleIdentifyResult, AFTER the
+                // dedupe check has had a chance to drop a same-card
+                // re-fire. Charging upstream would burn quota on
+                // duplicates that never actually reach the tray.
+                // The canScan check above still prevents the over-
+                // quota server call from being made; this just
+                // controls when the increment lands. The runIdentify
+                // re-entry guard (isIdentifying / lastMatch) serializes
+                // auto-captures, so a race between two pending
+                // auto-detects sharing the same remaining slot is
+                // not possible. (Codex P2 review on PR #83.)
                 return false
             }
             if blocked { return }
