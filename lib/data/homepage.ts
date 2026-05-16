@@ -534,26 +534,14 @@ async function loadJapaneseSignalRails(
     budgetMovers: [],
   };
 
-  // Fetch up to 1000 JP cards with any usable change_pct. PostgREST's
-  // .or() against a foreign table requires the joined column name with
-  // the table prefix and the syntax (.not.is.null). Filter to RAW
-  // canonical rows and confidence floors here; granular per-rail
-  // filtering happens in memory below.
-  const { data, error } = await client
-    .from("canonical_cards")
-    .select(
-      "slug, canonical_name, set_name, year, card_number, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url, public_card_metrics!inner(market_price, market_price_as_of, change_pct_24h, change_pct_7d, active_listings_7d, market_confidence_score, snapshot_count_30d, market_low_confidence, printing_id, grade, yahoo_jp_price, yahoo_jp_price_jpy, yahoo_jp_sample_count, snkrdunk_price, snkrdunk_price_jpy, snkrdunk_sample_count)",
-    )
-    .eq("language", "JP")
-    .eq("public_card_metrics.grade", "RAW")
-    .is("public_card_metrics.printing_id", null)
-    .not("public_card_metrics.market_price", "is", null)
-    .gte("public_card_metrics.market_price", JP_BUDGET_MIN_PRICE)
-    .gte("public_card_metrics.market_confidence_score", MIN_CONFIDENCE_SCORE)
-    .limit(1000);
-
-  if (error || !data) return empty;
-
+  // Fetch every JP card with usable RAW pricing — paginate via .range()
+  // because PostgREST caps each response at 1000 rows. The JP catalog's
+  // priced cohort is climbing (~3-5k today, growing as Snkrdunk and
+  // Yahoo! JP matches expand) and the in-memory ranking below needs to
+  // see every candidate, otherwise a top mover further down the page
+  // can never reach the rail. Same pattern getJapaneseCatalogState uses
+  // in lib/data/tier-summary.ts. Hard cap at 20k as a safety valve so a
+  // pipeline bug can never balloon this loader unbounded.
   type Joined = CardRow & {
     public_card_metrics:
       | Array<{
@@ -574,7 +562,36 @@ async function loadJapaneseSignalRails(
       }>
       | null;
   };
-  const rows = data as unknown as Joined[];
+
+  const PAGE_SIZE = 1000;
+  const MAX_ROWS = 20_000;
+  const rows: Joined[] = [];
+  let from = 0;
+  while (rows.length < MAX_ROWS) {
+    const { data, error } = await client
+      .from("canonical_cards")
+      .select(
+        "slug, canonical_name, set_name, year, card_number, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url, public_card_metrics!inner(market_price, market_price_as_of, change_pct_24h, change_pct_7d, active_listings_7d, market_confidence_score, snapshot_count_30d, market_low_confidence, printing_id, grade, yahoo_jp_price, yahoo_jp_price_jpy, yahoo_jp_sample_count, snkrdunk_price, snkrdunk_price_jpy, snkrdunk_sample_count)",
+      )
+      .eq("language", "JP")
+      .eq("public_card_metrics.grade", "RAW")
+      .is("public_card_metrics.printing_id", null)
+      .not("public_card_metrics.market_price", "is", null)
+      .gte("public_card_metrics.market_price", JP_BUDGET_MIN_PRICE)
+      .gte("public_card_metrics.market_confidence_score", MIN_CONFIDENCE_SCORE)
+      .range(from, from + PAGE_SIZE - 1);
+    if (error || !data) {
+      // First-page error → return empty so the JP rails just render
+      // their empty states. Mid-walk error → break and rank from the
+      // partial set rather than throw away the work we already did.
+      if (rows.length === 0) return empty;
+      break;
+    }
+    const page = data as unknown as Joined[];
+    rows.push(...page);
+    if (page.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
 
   // ── Build per-window candidate maps. Each window holds {card, changePct}.
   //   We materialize per (slug, window) so a card with both change_pct_24h

@@ -12,6 +12,7 @@ import {
   formatPriceDisplay,
   resolveDisplayedMarketPrice,
 } from "@/lib/pricing/displayed-market-price";
+import { formatJpSourcePriceLabel, selectJpPriceSource } from "@/lib/pricing/jp-price-source";
 import { useMarket } from "@/lib/market-context";
 
 type SignalWindow = HomepageSignalWindow;
@@ -186,6 +187,12 @@ function JapaneseSignalBoard({
     ? "No 24H JP momentum yet"
     : "No 7D JP momentum yet";
 
+  // Every JP rail links its "View all" to the JP-scoped search and uses
+  // the rail's red accent, so clicking through never drops the user
+  // into the unfiltered EN search board.
+  const jpViewAllHref = "/search?language=JP";
+  const jpViewAllClass = "text-[#F87171]";
+
   return (
     <>
       <SignalRailSection
@@ -195,10 +202,13 @@ function JapaneseSignalBoard({
         title="Top movers"
         cards={topMoversByWindow[selectedWindow]}
         emptyMessage={`No ${selectedWindow} JP movers yet`}
+        useJpSource
+        viewAllHref={jpViewAllHref}
+        viewAllClassName={jpViewAllClass}
         headerSlot={(
           <div className="flex items-center gap-2.5">
             <WindowTabs selectedWindow={selectedWindow} onChange={setSelectedWindow} />
-            <Link href="/search?language=JP" className="text-[13px] font-medium text-[#F87171] transition-colors hover:text-white">
+            <Link href={jpViewAllHref} className={`text-[13px] font-medium transition-colors hover:text-white ${jpViewAllClass}`}>
               View all →
             </Link>
           </div>
@@ -212,6 +222,9 @@ function JapaneseSignalBoard({
         title="Biggest drops"
         cards={biggestDropsByWindow[selectedWindow]}
         emptyMessage={`No ${selectedWindow} JP pullbacks yet`}
+        useJpSource
+        viewAllHref={jpViewAllHref}
+        viewAllClassName={jpViewAllClass}
       />
 
       <SignalRailSection
@@ -221,6 +234,9 @@ function JapaneseSignalBoard({
         title={momentumTitle}
         cards={momentumByWindow[selectedWindow]}
         emptyMessage={momentumEmptyMessage}
+        useJpSource
+        viewAllHref={jpViewAllHref}
+        viewAllClassName={jpViewAllClass}
       />
 
       <SignalRailSection
@@ -230,6 +246,9 @@ function JapaneseSignalBoard({
         title="Mid-tier movers"
         cards={midMovers}
         emptyMessage="No mid-tier JP movers yet"
+        useJpSource
+        viewAllHref={jpViewAllHref}
+        viewAllClassName={jpViewAllClass}
       />
 
       <SignalRailSection
@@ -239,6 +258,9 @@ function JapaneseSignalBoard({
         title="Budget movers"
         cards={budgetMovers}
         emptyMessage="No budget JP movers yet"
+        useJpSource
+        viewAllHref={jpViewAllHref}
+        viewAllClassName={jpViewAllClass}
       />
 
       <SignalRailSection
@@ -248,6 +270,9 @@ function JapaneseSignalBoard({
         title="Japanese cards"
         cards={discovery}
         emptyMessage="No Japanese cards yet"
+        useJpSource
+        viewAllHref={jpViewAllHref}
+        viewAllClassName={jpViewAllClass}
       />
     </>
   );
@@ -290,6 +315,9 @@ function SignalRailSection({
   emptyMessage,
   headerSlot,
   spacingClassName,
+  useJpSource = false,
+  viewAllHref = "/search",
+  viewAllClassName = "text-[#00B4D8]",
 }: {
   id: string;
   eyebrow: string;
@@ -299,6 +327,9 @@ function SignalRailSection({
   emptyMessage: string;
   headerSlot?: ReactNode;
   spacingClassName?: string;
+  useJpSource?: boolean;
+  viewAllHref?: string;
+  viewAllClassName?: string;
 }) {
   return (
     <section id={id} className={`border-t border-white/[0.04] ${spacingClassName ?? "py-5 sm:py-6"}`}>
@@ -311,7 +342,7 @@ function SignalRailSection({
             </div>
           </div>
           {headerSlot ?? (
-            <Link href="/search" className="text-[13px] font-medium text-[#00B4D8] transition-colors hover:text-white">
+            <Link href={viewAllHref} className={`text-[13px] font-medium transition-colors hover:text-white ${viewAllClassName}`}>
               View all →
             </Link>
           )}
@@ -325,6 +356,7 @@ function SignalRailSection({
             <SignalCard
               key={`${id}-${card.slug}`}
               card={card}
+              useJpSource={useJpSource}
             />
           ))}
           {cards.length === 0 && (
@@ -338,8 +370,28 @@ function SignalRailSection({
   );
 }
 
-function SignalCard({ card }: { card: HomepageCard }) {
-  const priceDisplay = PRICING_DISPLAY_V2_ENABLED
+function SignalCard({ card, useJpSource = false }: { card: HomepageCard; useJpSource?: boolean }) {
+  // JP rails: pick Yahoo!JP / Snkrdunk when a source qualifies on sample
+  // count (see lib/pricing/jp-price-source.ts). When a JP source is
+  // picked we render its ¥-native label ("¥3,200 ($21.00)") and tag the
+  // tile with the source name. The change-pct badge is hidden in that
+  // case because today's change_pct comes from Scrydex's USD reflection
+  // and doesn't describe a JP-source price baseline — mirrors the iOS
+  // `preferringJpSource()` transform.
+  const jpPick = useJpSource
+    ? selectJpPriceSource({
+        yahooJpPrice: card.yahoo_jp_price,
+        yahooJpPriceJpy: card.yahoo_jp_price_jpy,
+        yahooJpSampleCount: card.yahoo_jp_sample_count,
+        snkrdunkPrice: card.snkrdunk_price,
+        snkrdunkPriceJpy: card.snkrdunk_price_jpy,
+        snkrdunkSampleCount: card.snkrdunk_sample_count,
+      })
+    : null;
+  const jpLabel = jpPick && jpPick.source ? formatJpSourcePriceLabel(jpPick) : null;
+  const showJp = jpLabel != null;
+
+  const priceDisplay = !showJp && PRICING_DISPLAY_V2_ENABLED
     ? resolveDisplayedMarketPrice({
         marketPrice: card.market_price,
         marketPriceAsOf: card.updated_at,
@@ -369,16 +421,21 @@ function SignalCard({ card }: { card: HomepageCard }) {
       <div className="px-3 pb-3">
         <p className="truncate text-[14px] font-semibold text-[#E4E4E7] group-hover:text-white">{card.name}</p>
         <p className="mt-0.5 truncate text-[11px] text-[#555]">{card.set_name}</p>
+        {showJp && jpPick?.label ? (
+          <p className="mt-0.5 truncate text-[10px] font-medium uppercase tracking-[0.12em] text-[#F87171]">
+            {jpPick.label}
+          </p>
+        ) : null}
         <div className="mt-2 flex items-center justify-between border-t border-white/[0.04] pt-2">
           <span
             className={`min-w-0 truncate font-bold tabular-nums ${
-              priceMeta?.subdued ? "text-[12px] text-[#9CA3AF]" : "text-[15px] text-white"
+              !showJp && priceMeta?.subdued ? "text-[12px] text-[#9CA3AF]" : "text-[15px] text-white"
             }`}
-            title={priceDisplay?.kind === "stale_old" ? "Sparse market — last sold price shown" : undefined}
+            title={!showJp && priceDisplay?.kind === "stale_old" ? "Sparse market — last sold price shown" : undefined}
           >
-            {priceMeta ? priceMeta.label : formatPrice(card.market_price)}
+            {showJp ? jpLabel : (priceMeta ? priceMeta.label : formatPrice(card.market_price))}
           </span>
-          {(priceMeta?.showChangeBadge ?? true) ? (
+          {showJp ? null : (priceMeta?.showChangeBadge ?? true) ? (
             <span className={`shrink-0 rounded-md px-1.5 py-0.5 text-[12px] font-bold tabular-nums ${pillClasses(card.change_pct)}`}>
               {formatPct(card.change_pct)}
             </span>
