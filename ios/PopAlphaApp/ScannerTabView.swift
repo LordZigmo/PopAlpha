@@ -46,6 +46,12 @@ struct ScannerTabView: View {
     // schedule without leaving stale fade-out animations running.
     @State private var flashEntryId: UUID?
     @State private var flashPriceVisible: Bool = false
+    /// Currently-correcting tray entry. Set when the user taps a row
+    /// in the review sheet; drives a nested ScanPickerSheet that lets
+    /// them swap the entry's matched card to a different candidate
+    /// from the original top-K (or search the catalog for a custom
+    /// pick). Cleared on dismiss or successful pick.
+    @State private var correctingEntry: CorrectingMultiScanEntry?
     /// When true, the flash card animates toward the bottom-right
     /// toggle (offset + shrink + fade) instead of fading in place.
     /// Gives the user a visual cue that the scan is going INTO the
@@ -341,7 +347,19 @@ struct ScannerTabView: View {
                     session: multiScanSession,
                     onDismiss: { showMultiScanSheet = false },
                     onSubmit: submitMultiScanBatch,
+                    onCorrect: { entryId in
+                        correctingEntry = CorrectingMultiScanEntry(id: entryId)
+                    },
                 )
+                // Nested correction picker. Reuses the single-mode
+                // ScanPickerSheet so the disambiguation UX is
+                // consistent across modes. The picker is sheeted off
+                // the review sheet (not the scanner) so dismissing it
+                // returns to the review list rather than jumping all
+                // the way back to the viewfinder.
+                .sheet(item: $correctingEntry) { ref in
+                    correctionPickerSheet(for: ref.id)
+                }
             }
             .onChange(of: scanner.lastMatch) { _, newValue in
                 handleIdentifyResult(newValue)
@@ -1080,6 +1098,54 @@ struct ScannerTabView: View {
     /// Submits the current tray to /api/holdings/bulk-import. Returns
     /// nil on full success (sheet closes), or a user-facing error
     /// string when the network call throws or any rows fail. The
+    /// Builds the ScanPickerSheet used for per-row correction inside
+    /// the review sheet. Reuses the single-mode picker UI (top-K
+    /// candidates + "None of these" catalog search) so the
+    /// disambiguation UX is consistent across single and multi modes.
+    /// On pick: re-assigns the entry's match via session.reassign
+    /// (which also re-fetches price for the new slug) and triggers
+    /// the same anchor-sync the single-mode picker uses.
+    ///
+    /// `scanImage` is nil because MultiScanEntry doesn't retain the
+    /// source UIImage. For offline scans that means the
+    /// `promoteEvalFromBytes` path inside the picker can't fire; the
+    /// hash-based `promoteEvalFromHash` path is the fallback, and
+    /// offline scans whose hash isn't in scan-uploads/<hash>.jpg will
+    /// silently skip the eval-corpus promote step. Acceptable for v1
+    /// — the user's primary intent is fixing the holding, not seeding
+    /// the eval corpus.
+    @ViewBuilder
+    private func correctionPickerSheet(for entryId: UUID) -> some View {
+        if let entry = multiScanSession.entries.first(where: { $0.id == entryId }) {
+            ScanPickerSheet(
+                matches: entry.candidates,
+                imageHash: entry.imageHash,
+                scanImage: nil,
+                scanLanguage: scanner.scanLanguage,
+                ocrCardNumber: nil,
+                ocrSetHint: nil,
+                winningPath: nil,
+                onPick: { picked in
+                    multiScanSession.reassign(entryId: entryId, to: picked)
+                    correctingEntry = nil
+                    AnalyticsService.shared.captureRaw(
+                        "scanner_multi_mode_row_corrected",
+                        properties: [
+                            "from_slug": entry.match.slug,
+                            "to_slug": picked.slug,
+                            "confidence": entry.confidence,
+                            "tray_count": multiScanSession.entries.count,
+                        ],
+                    )
+                },
+                onDismiss: { correctingEntry = nil },
+                onCorrectionSubmitted: {
+                    scanner.syncOfflineAnchorsInBackground()
+                },
+            )
+        }
+    }
+
     /// Schedule the multi-scan flash overlay's three-stage exit for
     /// the just-appended entry. Cancels any in-flight schedule from a
     /// prior scan so consecutive captures replace cleanly without
@@ -1182,6 +1248,17 @@ struct ScannerTabView: View {
         scanner.clearLastMatch()
         scanner.resumeScanning()
     }
+}
+
+// MARK: - Correcting-entry wrapper
+//
+// `.sheet(item:)` requires Identifiable; UUID doesn't conform on its
+// own. This thin wrapper makes the "currently-correcting entry" state
+// presentable via item-driven sheet, where the `id` field doubles as
+// both the SwiftUI-identity key AND the MultiScanEntry lookup key.
+
+struct CorrectingMultiScanEntry: Identifiable {
+    let id: UUID
 }
 
 // MARK: - Scanner Host

@@ -199,6 +199,11 @@ struct MultiScanReviewSheet: View {
     /// `submitting = false` without propagating outcome, which Codex
     /// flagged as a P2 silent-failure case.
     let onSubmit: () async -> String?
+    /// Fires when the user taps a row to correct its match. Parent
+    /// presents a `ScanPickerSheet` (re-using the single-mode picker
+    /// UI) so the user can pick a different candidate from the
+    /// original top-K, or search the catalog if none match.
+    let onCorrect: (UUID) -> Void
     @State private var submitting: Bool = false
     @State private var lastError: String?
 
@@ -291,9 +296,18 @@ struct MultiScanReviewSheet: View {
             .clipShape(RoundedRectangle(cornerRadius: 4))
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(entry.match.canonicalName)
-                    .font(.system(size: 15, weight: .semibold))
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(entry.match.canonicalName)
+                        .font(.system(size: 15, weight: .semibold))
+                        .lineLimit(1)
+                    // Chevron telegraphs that the row is tappable for
+                    // correction. Without it the row reads as static
+                    // metadata and users wouldn't think to tap when
+                    // the scanner picked the wrong card.
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
                 Text(setLine(for: entry))
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
@@ -329,6 +343,15 @@ struct MultiScanReviewSheet: View {
             }
         }
         .contentShape(Rectangle())
+        // Row tap → open correction picker for this entry. The
+        // Stepper retains its own hit-testing for +/-, so this
+        // gesture doesn't hijack the qty controls — taps within the
+        // stepper's button bounds go to the stepper, taps everywhere
+        // else (image, name, badge area) fire the correction
+        // callback.
+        .onTapGesture {
+            onCorrect(entry.id)
+        }
     }
 
     private func setLine(for entry: MultiScanEntry) -> String {
