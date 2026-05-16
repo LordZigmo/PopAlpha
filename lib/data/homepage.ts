@@ -58,12 +58,17 @@ export type HomepageCard = {
   // Native JPY value (Yahoo! JP captures price_jpy directly at observation
   // time; this is the seller's listed yen price, not USD * current FX).
   // Surfaced on JP-source tiles as "¥X,XXX ($X)" so the user reads
-  // a JP price as a JP price, not as our USD reflection. Snkrdunk
-  // doesn't have a native JPY analog yet (its English API returns USD);
-  // when that follow-up lands, mirror this with snkrdunk_price_jpy.
+  // a JP price as a JP price, not as our USD reflection.
   yahoo_jp_price_jpy: number | null;
   yahoo_jp_sample_count: number | null;
   snkrdunk_price: number | null;
+  // FX-derived JPY (price_usd / JPY_TO_USD_RATE at observation time).
+  // Snkrdunk's English API returns USD only, so this is an
+  // approximation — not the seller's listed yen value. Added 2026-05-16
+  // (Phase C-1b) so Snkrdunk-sourced tiles render "¥X,XXX ($X)" matching
+  // the Yahoo! JP path. Stored as a column on snkrdunk_card_prices and
+  // exposed by the public_card_metrics view.
+  snkrdunk_price_jpy: number | null;
   snkrdunk_sample_count: number | null;
 };
 
@@ -344,6 +349,7 @@ async function loadDailyTopMoversBundle(
       yahoo_jp_price_jpy: null,
       yahoo_jp_sample_count: null,
       snkrdunk_price: null,
+      snkrdunk_price_jpy: null,
       snkrdunk_sample_count: null,
     };
   };
@@ -398,7 +404,7 @@ async function loadJapaneseRail(
   const { data, error } = await client
     .from("canonical_cards")
     .select(
-      "slug, canonical_name, set_name, year, card_number, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url, public_card_metrics!inner(market_price, market_price_as_of, change_pct_24h, change_pct_7d, active_listings_7d, market_confidence_score, snapshot_count_30d, market_low_confidence, printing_id, grade, yahoo_jp_price, yahoo_jp_price_jpy, yahoo_jp_sample_count, snkrdunk_price, snkrdunk_sample_count)",
+      "slug, canonical_name, set_name, year, card_number, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url, public_card_metrics!inner(market_price, market_price_as_of, change_pct_24h, change_pct_7d, active_listings_7d, market_confidence_score, snapshot_count_30d, market_low_confidence, printing_id, grade, yahoo_jp_price, yahoo_jp_price_jpy, yahoo_jp_sample_count, snkrdunk_price, snkrdunk_price_jpy, snkrdunk_sample_count)",
     )
     .eq("language", "JP")
     .eq("public_card_metrics.grade", "RAW")
@@ -428,6 +434,7 @@ async function loadJapaneseRail(
         yahoo_jp_price_jpy: number | null;
         yahoo_jp_sample_count: number | null;
         snkrdunk_price: number | null;
+        snkrdunk_price_jpy: number | null;
         snkrdunk_sample_count: number | null;
       }>
       | null;
@@ -469,6 +476,7 @@ async function loadJapaneseRail(
         yahoo_jp_price_jpy: metrics.yahoo_jp_price_jpy,
         yahoo_jp_sample_count: metrics.yahoo_jp_sample_count,
         snkrdunk_price: metrics.snkrdunk_price,
+        snkrdunk_price_jpy: metrics.snkrdunk_price_jpy,
         snkrdunk_sample_count: metrics.snkrdunk_sample_count,
       };
     })
@@ -999,6 +1007,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
         yahoo_jp_price_jpy: null,
         yahoo_jp_sample_count: null,
         snkrdunk_price: null,
+        snkrdunk_price_jpy: null,
         snkrdunk_sample_count: null,
       };
     }

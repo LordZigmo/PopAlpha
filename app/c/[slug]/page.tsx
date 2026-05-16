@@ -767,6 +767,7 @@ export default async function CanonicalCardPage({
         yahoo_jp_price_jpy: null,
         yahoo_jp_sample_count: null,
         snkrdunk_price: null,
+        snkrdunk_price_jpy: null,
         snkrdunk_sample_count: null,
       }],
       user?.id ?? null,
