@@ -42,6 +42,17 @@ struct MultiScanEntry: Identifiable, Equatable {
     /// footprint is one decoded image per tray entry — well under
     /// 1MB each at the URL's typical resolution.
     var cachedImage: UIImage? = nil
+    /// Source JPEG the user actually scanned, retained so the per-row
+    /// correction picker can submit a server-side `user_correction`
+    /// anchor via `ScanPickerSheet`'s existing bytes-based promote
+    /// path (the picker only fires correction inside its `if let
+    /// bytes = scanImage` branch). Nil for server-routed scans
+    /// (the bytes are already at `scan-uploads/<hash>.jpg`, but the
+    /// picker doesn't currently support hash-only correction in this
+    /// PR — server-routed corrections silently skip the anchor
+    /// submission). Memory: ~400KB per entry; ~20MB for a typical
+    /// 50-row session.
+    var scanImage: UIImage? = nil
 }
 
 // MARK: - MultiScanSession
@@ -97,8 +108,9 @@ final class MultiScanSession: ObservableObject {
         candidates: [ScanMatch],
         confidence: String,
         imageHash: String?,
+        scanImage: UIImage? = nil,
     ) {
-        let entry = MultiScanEntry(
+        var entry = MultiScanEntry(
             id: UUID(),
             match: match,
             candidates: candidates,
@@ -106,6 +118,7 @@ final class MultiScanSession: ObservableObject {
             scannedAt: Date(),
             imageHash: imageHash,
         )
+        entry.scanImage = scanImage
         entries.append(entry)
         loadPrice(for: entry.id, slug: match.slug)
         loadImage(for: entry.id, urlString: match.mirroredPrimaryImageUrl)
@@ -176,6 +189,14 @@ final class MultiScanSession: ObservableObject {
                 guard let idx = self.entries.firstIndex(where: { $0.id == entryId }) else {
                     return
                 }
+                // Stale-fetch guard (Codex P2 on PR #101): if the
+                // entry was reassigned after this request started,
+                // the entry's current match.slug will diverge from
+                // the slug we fetched. Drop the result so the new
+                // match's correct price (loaded by the reassign-
+                // triggered fetch) isn't overwritten by the
+                // late-arriving old fetch.
+                guard self.entries[idx].match.slug == slug else { return }
                 self.entries[idx].marketPriceUsd = price
             }
         }
@@ -197,6 +218,15 @@ final class MultiScanSession: ObservableObject {
                 await MainActor.run {
                     guard let self else { return }
                     guard let idx = self.entries.firstIndex(where: { $0.id == entryId }) else {
+                        return
+                    }
+                    // Stale-fetch guard (Codex P2 on PR #101): drop
+                    // the result if the entry was reassigned to a
+                    // different match (different image URL) after
+                    // the fetch was kicked off. Same reasoning as
+                    // loadPrice — late old fetches would clobber the
+                    // new match's correct image.
+                    guard self.entries[idx].match.mirroredPrimaryImageUrl == urlString else {
                         return
                     }
                     self.entries[idx].cachedImage = image

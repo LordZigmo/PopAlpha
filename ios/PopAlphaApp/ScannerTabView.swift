@@ -939,6 +939,15 @@ struct ScannerTabView: View {
                     candidates: scanner.lastMatches,
                     confidence: scanner.lastConfidence ?? "medium",
                     imageHash: scanner.lastImageHash,
+                    // Retain the offline-scan source JPEG so per-row
+                    // correction can submit a server-side
+                    // user_correction anchor via ScanPickerSheet's
+                    // bytes-based promote path. Nil for server-routed
+                    // scans (lastScanImage is nil — bytes already at
+                    // scan-uploads/<hash>.jpg). Codex P2 on PR #101
+                    // flagged the missing anchor submission for
+                    // multi-mode corrections.
+                    scanImage: scanner.lastScanImage,
                 )
                 scanner.clearLastMatch()
                 scanner.resumeScanning()
@@ -1106,21 +1115,21 @@ struct ScannerTabView: View {
     /// (which also re-fetches price for the new slug) and triggers
     /// the same anchor-sync the single-mode picker uses.
     ///
-    /// `scanImage` is nil because MultiScanEntry doesn't retain the
-    /// source UIImage. For offline scans that means the
-    /// `promoteEvalFromBytes` path inside the picker can't fire; the
-    /// hash-based `promoteEvalFromHash` path is the fallback, and
-    /// offline scans whose hash isn't in scan-uploads/<hash>.jpg will
-    /// silently skip the eval-corpus promote step. Acceptable for v1
-    /// — the user's primary intent is fixing the holding, not seeding
-    /// the eval corpus.
+    /// `scanImage` is the offline-scan source JPEG retained on
+    /// MultiScanEntry. Server-routed scans (where lastScanImage was
+    /// nil at append time) pass nil here — for those, the existing
+    /// scan-uploads/<hash>.jpg path is the eval-promote target.
+    /// Without retaining bytes here, ScanPickerSheet's correction-
+    /// promote path (gated on `if let bytes = scanImage`) would
+    /// silently skip the user_correction anchor submission. Codex
+    /// P2 on PR #101 flagged that miss.
     @ViewBuilder
     private func correctionPickerSheet(for entryId: UUID) -> some View {
         if let entry = multiScanSession.entries.first(where: { $0.id == entryId }) {
             ScanPickerSheet(
                 matches: entry.candidates,
                 imageHash: entry.imageHash,
-                scanImage: nil,
+                scanImage: entry.scanImage,
                 scanLanguage: scanner.scanLanguage,
                 ocrCardNumber: nil,
                 ocrSetHint: nil,
