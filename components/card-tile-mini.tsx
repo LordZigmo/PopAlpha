@@ -6,7 +6,7 @@ import {
   formatPriceDisplay,
   resolveDisplayedMarketPrice,
 } from "@/lib/pricing/displayed-market-price";
-import { selectJpPriceSource } from "@/lib/pricing/jp-price-source";
+import { selectJpPriceSource, formatJpSourcePriceLabel } from "@/lib/pricing/jp-price-source";
 
 function formatPrice(n: number | null): string {
   if (n == null || n <= 0) return "--";
@@ -61,8 +61,13 @@ export default function CardTileMini({
   // qualifies, falls back to card.market_price (Scrydex) below.
   const jpSource = selectJpPriceSource({
     yahooJpPrice: card.yahoo_jp_price,
+    yahooJpPriceJpy: card.yahoo_jp_price_jpy,
     yahooJpSampleCount: card.yahoo_jp_sample_count,
     snkrdunkPrice: card.snkrdunk_price,
+    // Snkrdunk's English API returns USD only — no native JPY available
+    // until a follow-up PR adds either a native scrape or a view-time
+    // FX computation. Pass undefined so the source picker leaves
+    // priceJpy null on snkrdunk-sourced rows.
     snkrdunkSampleCount: card.snkrdunk_sample_count,
   });
 
@@ -150,7 +155,7 @@ export default function CardTileMini({
               }
             >
               {jpSource.price != null
-                ? formatPrice(jpSource.price)
+                ? formatJpSourcePriceLabel(jpSource)
                 : priceMeta
                   ? priceMeta.label
                   : formatPrice(card.market_price)}

@@ -55,6 +55,13 @@ export type HomepageCard = {
   // null here. Tile rendering uses lib/pricing/jp-price-source.ts
   // to confidence-pick between them.
   yahoo_jp_price: number | null;
+  // Native JPY value (Yahoo! JP captures price_jpy directly at observation
+  // time; this is the seller's listed yen price, not USD * current FX).
+  // Surfaced on JP-source tiles as "¥X,XXX ($X)" so the user reads
+  // a JP price as a JP price, not as our USD reflection. Snkrdunk
+  // doesn't have a native JPY analog yet (its English API returns USD);
+  // when that follow-up lands, mirror this with snkrdunk_price_jpy.
+  yahoo_jp_price_jpy: number | null;
   yahoo_jp_sample_count: number | null;
   snkrdunk_price: number | null;
   snkrdunk_sample_count: number | null;
@@ -334,6 +341,7 @@ async function loadDailyTopMoversBundle(
       // prices. Most signal-board cards aren't JP anyway. Default
       // null — tile-mini falls back to market_price.
       yahoo_jp_price: null,
+      yahoo_jp_price_jpy: null,
       yahoo_jp_sample_count: null,
       snkrdunk_price: null,
       snkrdunk_sample_count: null,
@@ -390,7 +398,7 @@ async function loadJapaneseRail(
   const { data, error } = await client
     .from("canonical_cards")
     .select(
-      "slug, canonical_name, set_name, year, card_number, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url, public_card_metrics!inner(market_price, market_price_as_of, change_pct_24h, change_pct_7d, active_listings_7d, market_confidence_score, snapshot_count_30d, market_low_confidence, printing_id, grade, yahoo_jp_price, yahoo_jp_sample_count, snkrdunk_price, snkrdunk_sample_count)",
+      "slug, canonical_name, set_name, year, card_number, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url, public_card_metrics!inner(market_price, market_price_as_of, change_pct_24h, change_pct_7d, active_listings_7d, market_confidence_score, snapshot_count_30d, market_low_confidence, printing_id, grade, yahoo_jp_price, yahoo_jp_price_jpy, yahoo_jp_sample_count, snkrdunk_price, snkrdunk_sample_count)",
     )
     .eq("language", "JP")
     .eq("public_card_metrics.grade", "RAW")
@@ -417,6 +425,7 @@ async function loadJapaneseRail(
         snapshot_count_30d: number | null;
         market_low_confidence: boolean | null;
         yahoo_jp_price: number | null;
+        yahoo_jp_price_jpy: number | null;
         yahoo_jp_sample_count: number | null;
         snkrdunk_price: number | null;
         snkrdunk_sample_count: number | null;
@@ -457,6 +466,7 @@ async function loadJapaneseRail(
         active_listings_7d: metrics.active_listings_7d ?? null,
         updated_at: metrics.market_price_as_of ?? null,
         yahoo_jp_price: metrics.yahoo_jp_price,
+        yahoo_jp_price_jpy: metrics.yahoo_jp_price_jpy,
         yahoo_jp_sample_count: metrics.yahoo_jp_sample_count,
         snkrdunk_price: metrics.snkrdunk_price,
         snkrdunk_sample_count: metrics.snkrdunk_sample_count,
@@ -986,6 +996,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
         // derived); doesn't carry JP-source prices. Tile-mini falls
         // back to market_price for these rows.
         yahoo_jp_price: null,
+        yahoo_jp_price_jpy: null,
         yahoo_jp_sample_count: null,
         snkrdunk_price: null,
         snkrdunk_sample_count: null,
