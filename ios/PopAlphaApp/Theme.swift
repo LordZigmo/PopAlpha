@@ -423,11 +423,17 @@ struct LiquidGlassSurface: ViewModifier {
                 accent.opacity(0.08)
             ]
         case .dark:
+            // The original PR #86 values (0.55 / 0.22 / 0.45 / 0.18)
+            // formed a wave with two bright stops, the first sitting at
+            // `topLeading` — so every card showed a fixed bright cyan
+            // hotspot in the upper-left corner that no shimmer tweak
+            // could mask. These flatter, monotonic-ish stops keep the
+            // rich tinted-glass feel while smoothing out the two peaks.
             return [
-                accent.opacity(0.55),
-                accent.opacity(0.22),
-                accent.opacity(0.45),
-                accent.opacity(0.18)
+                accent.opacity(0.38),
+                accent.opacity(0.30),
+                accent.opacity(0.32),
+                accent.opacity(0.22)
             ]
         @unknown default:
             return [
