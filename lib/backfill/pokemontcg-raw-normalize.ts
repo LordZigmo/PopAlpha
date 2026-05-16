@@ -298,61 +298,35 @@ function normalizeCardNumber(raw: string | null | undefined): string {
   return trimmed;
 }
 
-function extractTrendAnchorPoints(prices: unknown): TrendAnchorPoint[] {
-  // Re-enabled 2026-05-16 (Phase C-3) with explicit basis tagging:
-  // anchors are emitted with `sourceWindow = "market_anchor_30d"` /
-  // `"market_anchor_180d"`, distinct from the low-basis snapshot's
-  // `"snapshot"` source_window. Chart consumers that render the
-  // headline price line filter to `source_window = 'snapshot'` so the
-  // chart no longer sees a market-basis anchor abruptly drop to today's
-  // low-basis snapshot (the phantom-drop bug Phase A's disable patched
-  // around).
+function extractTrendAnchorPoints(_prices: unknown): TrendAnchorPoint[] {
+  // Stays disabled, even with the basis tagging proposed in the first
+  // pass of Phase C-3 (Codex P1 on PR #100).
   //
-  // Trend math stays on `market` basis because scrydex's
-  // trends.<window>.price_change deltas are computed against its
-  // `market` series. Pairing today's `low` with a market delta would
-  // produce mixed-basis anchors (Mewtwo VSTAR JP: low=¥4,300 -
-  // market_delta=¥3,200 = ¥1,100, an anchor that has no real meaning).
-  // We read `selected.row.market` directly as the basis. If the row
-  // lacks a `market` value we skip entirely — can't fabricate an
-  // anchor without the basis the deltas are computed against.
+  // First pass attempted: tag anchors with sourceWindow =
+  // "market_anchor_30d" / "market_anchor_180d" so the chart view could
+  // filter them out from the headline (low-basis) series while metrics
+  // still consumed them via observation.history_points_30d.
   //
-  // Restoration also re-arms two downstream signals that Phase A lost:
-  //   * hot-promotion fast-path on new cards (variant_metrics gets
-  //     real history_points_30d again, can hit the 8-change threshold)
-  //   * chart history backfill for brand-new sets (30d/180d points
-  //     show immediately on first fetch instead of waiting for 30d of
-  //     real snapshots)
-  const selected = selectPreferredScrydexPriceEntry(prices);
-  if (!selected) return [];
-
-  const trends = (
-    selected.row.trends
-    && typeof selected.row.trends === "object"
-    && !Array.isArray(selected.row.trends)
-  ) ? selected.row.trends as Record<string, unknown> : null;
-  if (!trends) return [];
-
-  const marketBasis = getNumberField((selected.row as Record<string, unknown>).market);
-  if (marketBasis === null) return [];
-
-  const anchors: TrendAnchorPoint[] = [];
-  for (const window of SCRYDEX_TREND_WINDOWS) {
-    const trendRow = trends[window.key];
-    if (!trendRow || typeof trendRow !== "object" || Array.isArray(trendRow)) continue;
-    const priceChange = getNumberField((trendRow as Record<string, unknown>).price_change);
-    if (priceChange === null) continue;
-    const anchorPrice = Number((marketBasis - priceChange).toFixed(4));
-    if (!Number.isFinite(anchorPrice) || anchorPrice <= 0) continue;
-    anchors.push({
-      lookbackDays: window.lookbackDays,
-      price: anchorPrice,
-      currency: selected.currency,
-      sourceWindow: window.sourceWindow,
-    });
-  }
-
-  return anchors;
+  // Codex correctly pointed out that the metrics path is also basis-
+  // sensitive: derivePriceRelativeTo30dRange compares observedPrice
+  // (low) against the historic range computed from anchors (market) —
+  // mixed basis, meaningless. The other metrics distorted similarly.
+  // Writing anchors that no consumer can correctly use is pure waste.
+  //
+  // What this PR DOES still ship: the public_price_history_by_printing
+  // view tightens to `source_window = 'snapshot'` only, which removes
+  // leftover pre-Phase-A '30d' anchor rows from the chart. Those rows
+  // were the source of the original phantom-drop bug Phase A's
+  // disable patched around. With the view narrowing they're filtered
+  // at read time even though they still exist in price_history_points
+  // until 90-day retention prunes them.
+  //
+  // Future PR could re-add anchors if/when there's a consumer wired
+  // up that wants the market-basis series explicitly (e.g., a separate
+  // "historical asking pressure" chart panel with its own scale). Until
+  // then, anchors stay off. AnchorSourceWindow / SCRYDEX_TREND_WINDOWS
+  // remain in the file as documentation for that future consumer.
+  return [];
 }
 
 function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
@@ -518,20 +492,18 @@ function buildObservationRow(params: {
       }))
       .filter((point) => point.price > 0 && point.ts < rawPayload.fetched_at)
     : [];
-  // Metrics-side history_points_30d is populated from market-basis
-  // anchors tagged "market_anchor_30d" (Phase C-3). The metrics path
-  // (provider-observation-variant-metrics.ts) consumes these via the
-  // observation row's history_points_30d JSONB column — separate from
-  // the price_history_points snapshot writes the chart reads. Mixed
-  // basis here is acceptable because metrics derive change counts and
-  // trend slopes (units-free), not absolute-value comparisons.
-  const historyPoints30d = providerTrendAnchorPoints
-    .filter((point) => point.sourceWindow === "market_anchor_30d")
-    .map((point) => ({
-      ts: point.ts,
-      price: point.price,
-      currency: point.currency,
-    }));
+  // historyPoints30d is empty while extractTrendAnchorPoints stays
+  // disabled (see its docs for why). When a future PR adds a metrics
+  // consumer that can correctly handle market-basis anchors, populate
+  // this array from the basis-tagged trend anchor points.
+  const historyPoints30d: Array<{ ts: string; price: number; currency: "USD" | "EUR" | "JPY" }> =
+    providerTrendAnchorPoints
+      .filter((point) => point.sourceWindow === "market_anchor_30d")
+      .map((point) => ({
+        ts: point.ts,
+        price: point.price,
+        currency: point.currency,
+      }));
 
   return {
     provider_raw_payload_id: rawPayload.id,
