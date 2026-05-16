@@ -405,12 +405,14 @@ export async function loadRawCardMarketVariants(params: {
     // Phase C-2 (2026-05-16): asking-anchored value per printing,
     // pulled from the latest scrydex observation's metadata. The
     // normalizer (lib/backfill/pokemontcg-raw-normalize.ts) writes
-    // metadata.scrydexAskingPriceUsd at observation time. Fetched in
-    // the same Promise.all so it's free relative to the existing
-    // metrics query latency. Returns at most one row per printing
-    // (most-recent observation wins via order+limit semantics
-    // applied in JS below — Supabase doesn't have a single-query
-    // GROUP BY argmax pattern).
+    // metadata.scrydexAskingPriceUsd at observation time.
+    //
+    // Per-printing parallel queries so each printing gets a fair shot
+    // at finding its latest observation. A single global query with
+    // limit (the earlier approach) was unfair: if one printing had
+    // many recent observations they could crowd out other printings
+    // within the global cap, leaving their asking metadata invisible.
+    // Codex P2 #3 on PR #99.
     //
     // Uses dbAdmin() because provider_observation_matches +
     // provider_normalized_observations are RLS-locked to internal-only
@@ -418,27 +420,31 @@ export async function loadRawCardMarketVariants(params: {
     // rows silently and the asking line would never appear. The
     // service-role read is safe here — only metadata.scrydexAskingPriceUsd
     // is extracted from the response (already non-sensitive pricing
-    // data that we surface to the user). Codex P2 on PR #99.
-    dbAdmin()
-      .from("provider_observation_matches")
-      .select("printing_id, updated_at, provider_variant_id, provider_normalized_observations(metadata, observed_at)")
-      .eq("canonical_slug", params.canonicalSlug)
-      .eq("provider", "SCRYDEX")
-      .in("printing_id", printingIds)
-      // Filter out graded observations at the query level. Graded
-      // observations get suffix "::GRADED::<PROVIDER>::<BUCKET>" on
-      // provider_variant_id (see pokemontcg-raw-normalize.ts comment
-      // on line 327). Without this filter, cards with multiple graded
-      // SKUs (e.g. a PSA-10 / PSA-9 / CGC-10 spread) can crowd out
-      // the single RAW observation within the per-printing limit and
-      // the asking-price line never appears. Codex P2 #2 on PR #99.
-      .not("provider_variant_id", "ilike", "%::GRADED::%")
-      .order("updated_at", { ascending: false })
-      // Two rows per printing — RAW + safety margin for any per-finish
-      // splits (e.g. holofoil vs reverseHolofoil on the same printing
-      // get distinct provider_variant_id values). The first non-null
-      // asking metadata per printing wins in the JS loop below.
-      .limit(printingIds.length * 2),
+    // data that we surface to the user). Codex P2 #1 on PR #99.
+    //
+    // Each query asks for the 2 latest non-graded observations on a
+    // single printing. 2 covers per-finish splits (holofoil vs
+    // reverseHolofoil get distinct provider_variant_id values) without
+    // over-fetching.
+    Promise.all(
+      printingIds.map((printingId) =>
+        dbAdmin()
+          .from("provider_observation_matches")
+          .select("printing_id, updated_at, provider_variant_id, provider_normalized_observations(metadata, observed_at)")
+          .eq("canonical_slug", params.canonicalSlug)
+          .eq("provider", "SCRYDEX")
+          .eq("printing_id", printingId)
+          // Filter out graded observations at the query level. Graded
+          // observations get suffix "::GRADED::<PROVIDER>::<BUCKET>"
+          // on provider_variant_id (see pokemontcg-raw-normalize.ts
+          // line 327's comment). Without this filter, cards with
+          // multiple graded SKUs can crowd out the RAW observation
+          // even with the per-printing limit. Codex P2 #2 on PR #99.
+          .not("provider_variant_id", "ilike", "%::GRADED::%")
+          .order("updated_at", { ascending: false })
+          .limit(2),
+      ),
+    ),
   ]);
 
   const maxHistoryDate = allHistoryRows
@@ -473,13 +479,12 @@ export async function loadRawCardMarketVariants(params: {
     historyRowsByPrinting.set(printingId, current);
   }
 
-  // Phase C-2 (2026-05-16): build a per-printing map of asking-anchored
-  // USD value pulled from the most-recent SCRYDEX raw observation's
-  // metadata.scrydexAskingPriceUsd. Filtered to RAW (non-graded) rows
-  // — the normalizer writes `null` for graded paths, so checking
-  // metadata.scrydexAskingPriceUsd presence is sufficient. The query
-  // already orders by updated_at desc, so the first match per printing
-  // wins.
+  // Phase C-2 (2026-05-16): per-printing asking-anchored USD value
+  // map. `askingPriceQuery` is an array of query results (one per
+  // printing — see the Promise.all in the fetch block). Each per-
+  // printing result is already ordered by updated_at desc, so the
+  // first row with a non-null scrydexAskingPriceUsd in that printing's
+  // result is the latest valid match.
   type AskingPriceJoinRow = {
     printing_id: string | null;
     provider_normalized_observations:
@@ -487,12 +492,15 @@ export async function loadRawCardMarketVariants(params: {
       | null;
   };
   const askingPriceByPrinting = new Map<string, number>();
-  for (const row of (askingPriceQuery.data ?? []) as unknown as AskingPriceJoinRow[]) {
-    if (!row.printing_id || askingPriceByPrinting.has(row.printing_id)) continue;
-    const meta = row.provider_normalized_observations?.metadata ?? null;
-    const value = meta && typeof meta === "object" ? meta["scrydexAskingPriceUsd"] : null;
-    if (typeof value === "number" && Number.isFinite(value) && value > 0) {
-      askingPriceByPrinting.set(row.printing_id, value);
+  for (const printingResult of askingPriceQuery) {
+    for (const row of (printingResult.data ?? []) as unknown as AskingPriceJoinRow[]) {
+      if (!row.printing_id) continue;
+      if (askingPriceByPrinting.has(row.printing_id)) continue;
+      const meta = row.provider_normalized_observations?.metadata ?? null;
+      const value = meta && typeof meta === "object" ? meta["scrydexAskingPriceUsd"] : null;
+      if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+        askingPriceByPrinting.set(row.printing_id, value);
+      }
     }
   }
 
