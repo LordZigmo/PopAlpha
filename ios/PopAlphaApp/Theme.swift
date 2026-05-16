@@ -337,13 +337,12 @@ struct LiquidGlassSurface: ViewModifier {
     var accent: Color
     var radius: CGFloat = PA.Layout.panelRadius
     /// Peak opacity of the scroll-driven specular highlight (0..1).
-    /// The highlight uses the accent color rather than white so the
-    /// sweep reads as a tinted reflection of the card itself — a
-    /// brighter glint of the same chroma — instead of a competing
-    /// white streak. Accent is darker than white, so this value is
-    /// numerically higher than the old `.white` shimmer values; the
-    /// perceptual brightness is much lower.
-    var shineIntensity: Double = 0.20
+    /// The highlight uses the accent color (not white) so it reads
+    /// as a tinted reflection of the card itself — a brighter glint
+    /// of the same chroma. With this peak paired against `halfWidth`
+    /// (in `shineStops`) the highlight feels like a slow gentle wash
+    /// rather than a defined corner hotspot.
+    var shineIntensity: Double = 0.08
 
     /// The accent wash is dialed back in light mode so that small
     /// accent-colored labels (eg. `MarketHeroCard`'s "POPALPHA"
@@ -454,7 +453,10 @@ struct LiquidGlassSurface: ViewModifier {
 
     private func shineStops(progress: Double) -> [Gradient.Stop] {
         let center = max(0, min(1, progress))
-        let halfWidth = 0.18
+        // Wider band → the highlight diffuses across the card instead
+        // of forming a defined hotspot. Combined with the lower peak
+        // intensity this reads as a slow wash, not a lit corner.
+        let halfWidth = 0.28
         // Accent-colored shimmer (not white) so the sweep reads as a
         // tinted reflection of the card's own color rather than a
         // bright white streak. With `.plusLighter` blending against
@@ -481,7 +483,7 @@ extension View {
     func liquidGlassSurface(
         accent: Color,
         radius: CGFloat = PA.Layout.panelRadius,
-        shineIntensity: Double = 0.20
+        shineIntensity: Double = 0.08
     ) -> some View {
         modifier(LiquidGlassSurface(accent: accent, radius: radius, shineIntensity: shineIntensity))
     }
