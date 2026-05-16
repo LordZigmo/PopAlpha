@@ -2131,7 +2131,11 @@ final class ScannerHost: ObservableObject {
 // the canonical slug so the zero-tap flow reaches full detail
 // fidelity without extra iOS-side work.
 
-private extension ScanMatch {
+// Visibility note: dropped `private` so MultiScanReviewSheet can push
+// the same MarketCard-bridged CardDetailView when the user taps a
+// tray row. Toplevel extension on a file-scope ScanMatch keeps the
+// helper out of the public PopAlphaCore module's surface.
+extension ScanMatch {
     func toMarketCard() -> MarketCard {
         MarketCard(
             id: slug,

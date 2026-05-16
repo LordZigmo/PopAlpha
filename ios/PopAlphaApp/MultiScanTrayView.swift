@@ -199,13 +199,23 @@ struct MultiScanReviewSheet: View {
     /// `submitting = false` without propagating outcome, which Codex
     /// flagged as a P2 silent-failure case.
     let onSubmit: () async -> String?
-    /// Fires when the user taps a row to correct its match. Parent
+    /// Fires when the user swipes a row left and taps "Edit". Parent
     /// presents a `ScanPickerSheet` (re-using the single-mode picker
     /// UI) so the user can pick a different candidate from the
     /// original top-K, or search the catalog if none match.
+    /// (2026-05-16 UX revision: previously triggered by a row tap;
+    /// row tap now opens CardDetailView via the internal nav stack
+    /// instead.)
     let onCorrect: (UUID) -> Void
     @State private var submitting: Bool = false
     @State private var lastError: String?
+    /// Row tap → push CardDetailView onto the sheet's NavigationStack.
+    /// Keyed on UUID (Hashable) so SwiftUI's `.navigationDestination(item:)`
+    /// can present without requiring MultiScanEntry to be Hashable.
+    /// The destination builder looks up the live entry from the
+    /// session so price / image updates propagate while detail is
+    /// onscreen.
+    @State private var detailEntryId: UUID?
 
     var body: some View {
         NavigationStack {
@@ -274,12 +284,42 @@ struct MultiScanReviewSheet: View {
             ForEach(session.entries) { entry in
                 row(for: entry)
                     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-            }
-            .onDelete { offsets in
-                session.remove(at: offsets)
+                    // Swipe-left actions (2026-05-16): Delete (red,
+                    // destructive) + Edit (orange, opens correction
+                    // picker via parent's onCorrect callback). Row
+                    // tap is reserved for "view details" — the
+                    // primary action — and Edit is the secondary
+                    // destructive-adjacent action behind a swipe.
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) {
+                            session.remove(entryId: entry.id)
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                        Button {
+                            onCorrect(entry.id)
+                        } label: {
+                            Label("Edit", systemImage: "pencil")
+                        }
+                        .tint(.orange)
+                    }
             }
         }
         .listStyle(.plain)
+        // Push CardDetailView for the tapped row. Lives on the
+        // sheet's internal NavigationStack so dismissing the detail
+        // pops back to the review list (preserving tray state),
+        // and the user can then dismiss the sheet to return to the
+        // scanner with multi-mode + tray still intact.
+        .navigationDestination(item: $detailEntryId) { entryId in
+            if let entry = session.entries.first(where: { $0.id == entryId }) {
+                CardDetailView(
+                    card: entry.match.toMarketCard(),
+                    scanImageHash: entry.imageHash,
+                    scanImage: entry.scanImage,
+                )
+            }
+        }
     }
 
     private func row(for entry: MultiScanEntry) -> some View {
@@ -343,14 +383,15 @@ struct MultiScanReviewSheet: View {
             }
         }
         .contentShape(Rectangle())
-        // Row tap → open correction picker for this entry. The
+        // Row tap → push CardDetailView. (2026-05-16 UX revision:
+        // tap is now the primary "view details" action; correction
+        // moved to a swipe-left Edit button on the row.) The
         // Stepper retains its own hit-testing for +/-, so this
         // gesture doesn't hijack the qty controls — taps within the
         // stepper's button bounds go to the stepper, taps everywhere
-        // else (image, name, badge area) fire the correction
-        // callback.
+        // else (image, name, badge area) navigate to detail.
         .onTapGesture {
-            onCorrect(entry.id)
+            detailEntryId = entry.id
         }
     }
 
