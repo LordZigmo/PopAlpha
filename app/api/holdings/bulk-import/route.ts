@@ -33,6 +33,8 @@ type InputRow = {
 };
 
 type RowError = { row_index: number; error: string };
+type HoldingsSource = "csv_import" | "scanner";
+
 type InsertPayload = {
   owner_clerk_id: string;
   canonical_slug: string;
@@ -43,8 +45,23 @@ type InsertPayload = {
   acquired_on: string | null;
   venue: string | null;
   cert_number: string | null;
-  source: "csv_import";
+  source: HoldingsSource;
 };
+
+// Mirrors the holdings.source CHECK constraint from
+// supabase/migrations/20260421200152_holdings_source.sql which allows
+// ('manual', 'csv_import', 'scanner'). 'manual' is reserved for the
+// single-row POST /api/holdings path; this route only emits the two
+// non-manual values. Unknown / missing source falls back to csv_import
+// for back-compat with the original CSV preview client.
+const ALLOWED_SOURCES: ReadonlyArray<HoldingsSource> = ["csv_import", "scanner"];
+
+function parseSource(raw: unknown): HoldingsSource {
+  if (typeof raw !== "string") return "csv_import";
+  return (ALLOWED_SOURCES as ReadonlyArray<string>).includes(raw)
+    ? (raw as HoldingsSource)
+    : "csv_import";
+}
 
 function toStringOrNull(value: unknown, maxLength: number): string | null {
   if (typeof value !== "string") return null;
@@ -70,6 +87,12 @@ export async function POST(req: Request) {
       { status: 400 },
     );
   }
+  // Multi-scan tray submits with `source: "scanner"` so holdings.source
+  // tags scan-derived lots distinctly from CSV imports. Unknown values
+  // fall back to csv_import (back-compat for the original preview
+  // client) — strictness lives at the parser so a future client bug
+  // can't poison the DB CHECK constraint.
+  const source: HoldingsSource = parseSource(body.source);
   if (rawRows.length === 0) {
     return NextResponse.json(
       { ok: false, error: "No rows provided." },
@@ -131,9 +154,12 @@ export async function POST(req: Request) {
       acquired_on: toStringOrNull(row.acquired_on, 32),
       venue: toStringOrNull(row.venue, 128),
       cert_number: toStringOrNull(row.cert_number, 64),
-      // Every row inserted through this endpoint is flagged so the iOS
-      // client can surface a subtle "Imported" chip on those lots.
-      source: "csv_import",
+      // Sourced from the request body — falls back to "csv_import"
+      // when the client omits source (legacy CSV preview) or sends an
+      // unrecognized value. Every row in a given submission shares the
+      // same source: the bulk-import endpoint is intended for one
+      // homogeneous import at a time.
+      source,
     });
   });
 

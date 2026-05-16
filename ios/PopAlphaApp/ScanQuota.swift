@@ -83,6 +83,24 @@ final class ScanQuota: ObservableObject {
         defaults.set(scansToday, forKey: Self.countKey)
     }
 
+    /// Refund the most recent recordScan() by decrementing the day's
+    /// scan count and re-persisting. Used by multi-scan auto-detect
+    /// when a same-card lingering re-fire is dropped post-identify —
+    /// the upstream pre-identify gate already charged a quota unit so
+    /// the server call could be safely made (and was made — Vision
+    /// produced a stable rectangle, runIdentify ran), but the result
+    /// was identical to the previously-appended row and never reached
+    /// the tray. Without a refund, free-tier users could hit the
+    /// paywall while their stack appeared unchanged. Clamped to 0 so
+    /// a stray refund without a matching record can't make the
+    /// counter negative.
+    func refundScan() {
+        rolloverIfNewDay()
+        guard scansToday > 0 else { return }
+        scansToday -= 1
+        defaults.set(scansToday, forKey: Self.countKey)
+    }
+
     /// Mark the warning toast as having fired for the current
     /// `scansToday` value. Subsequent calls to `lastWarnedScansToday`
     /// will return this value until the day rolls over.

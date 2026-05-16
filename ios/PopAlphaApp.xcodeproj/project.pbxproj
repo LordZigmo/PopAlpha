@@ -106,6 +106,8 @@
 		DD000001000000000000F23D /* SignInSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F23C /* SignInSheet.swift */; };
 		DD000001000000000000F241 /* ScanQuotaWarningToast.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F240 /* ScanQuotaWarningToast.swift */; };
 		DD000001000000000000F401 /* ScanDebugCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F400 /* ScanDebugCapture.swift */; };
+		DD00000100000000000FF001 /* MultiScanSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000FF000 /* MultiScanSession.swift */; };
+		DD00000100000000000FF101 /* MultiScanTrayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000FF100 /* MultiScanTrayView.swift */; };
 		DD000001000000000000F801 /* OfflineScannerWarmup.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F800 /* OfflineScannerWarmup.swift */; };
 		EE00000100000000000000C1 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = EE00000100000000000000B1 /* PrivacyInfo.xcprivacy */; };
 		EE00000100000000000000F1 /* PopAlphaCore in Frameworks */ = {isa = PBXBuildFile; productRef = EE00000100000000000000A2 /* PopAlphaCore */; };
@@ -213,6 +215,8 @@
 		DD000001000000000000F240 /* ScanQuotaWarningToast.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanQuotaWarningToast.swift; sourceTree = "<group>"; };
 		DD000001000000000000F300 /* Products.storekit */ = {isa = PBXFileReference; lastKnownFileType = file.storekit; path = Products.storekit; sourceTree = "<group>"; };
 		DD000001000000000000F400 /* ScanDebugCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanDebugCapture.swift; sourceTree = "<group>"; };
+		DD00000100000000000FF000 /* MultiScanSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiScanSession.swift; sourceTree = "<group>"; };
+		DD00000100000000000FF100 /* MultiScanTrayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiScanTrayView.swift; sourceTree = "<group>"; };
 		DD000001000000000000F800 /* OfflineScannerWarmup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineScannerWarmup.swift; sourceTree = "<group>"; };
 		EE00000100000000000000A3 /* SetDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetDetailView.swift; sourceTree = "<group>"; };
 		EE00000100000000000000B1 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
@@ -327,6 +331,8 @@
 				DD000001000000000000F240 /* ScanQuotaWarningToast.swift */,
 				DD000001000000000000F300 /* Products.storekit */,
 				DD000001000000000000F400 /* ScanDebugCapture.swift */,
+				DD00000100000000000FF000 /* MultiScanSession.swift */,
+				DD00000100000000000FF100 /* MultiScanTrayView.swift */,
 				EE00000100000000000000A3 /* SetDetailView.swift */,
 				1100000100000000000000A1 /* PortfolioModels.swift */,
 				1100000100000000000000A3 /* PortfolioHeroView.swift */,
@@ -524,6 +530,8 @@
 				DD000001000000000000F207 /* OfflineScanOrchestrator.swift in Sources */,
 				DD000001000000000000F801 /* OfflineScannerWarmup.swift in Sources */,
 				DD000001000000000000F401 /* ScanDebugCapture.swift in Sources */,
+				DD00000100000000000FF001 /* MultiScanSession.swift in Sources */,
+				DD00000100000000000FF101 /* MultiScanTrayView.swift in Sources */,
 				DD000001000000000000F231 /* ModerationService.swift in Sources */,
 				DD000001000000000000F233 /* ReportSheet.swift in Sources */,
 				DD000001000000000000F235 /* BlockedUsersView.swift in Sources */,

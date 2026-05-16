@@ -15,15 +15,22 @@ import OSLog
 // transient overlay is an "Identifying…" toast. DEBUG builds add
 // two compact corner buttons for the smoke test + premium override.
 //
-// Single-card mode is the only mode. Multi-card collection flow can
-// come back when there's a real product use case for it.
+// Multi-scan mode (2026-05-15): a small toggle at the bottom-right of
+// the viewfinder enters a continuous batch flow — HIGH/MEDIUM scans
+// auto-append to a tray with thumbnail + price, and a single
+// bulk-add commits the batch to portfolio. Use case: scanning a pack
+// or binder. Single mode (auto-navigate to CardDetailView on HIGH)
+// stays the default; the toggle is intentionally tight and out of
+// the way so it doesn't compete with the viewfinder when off.
 
 struct ScannerTabView: View {
     @State private var navigateToCard: MarketCard?
     @State private var showPickerSheet = false
     @State private var showPaywallSheet = false
+    @State private var showMultiScanSheet = false
     @StateObject private var premiumGate = PremiumGate.shared
     @StateObject private var scanQuota = ScanQuota.shared
+    @StateObject private var multiScanSession = MultiScanSession()
 
     /// Tracks which scanner surface most recently flipped
     /// `showPaywallSheet`, so the paywall analytics carry the right
@@ -176,6 +183,31 @@ struct ScannerTabView: View {
                     }
                     Spacer()
                 }
+
+                // Bottom-right multi-scan toggle + tray. Toggle is a
+                // small unobtrusive circle so it doesn't compete with
+                // the viewfinder when off. When multi-mode is on, a
+                // full-width tray bar fills the bottom of the viewport
+                // and the toggle floats just above it; tapping the
+                // tray opens the expanded review sheet for bulk-add.
+                VStack(spacing: 8) {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        multiScanToggle
+                            .padding(.trailing, 16)
+                    }
+                    if scanner.multiScanMode {
+                        MultiScanTrayBar(
+                            session: multiScanSession,
+                            onExpand: { showMultiScanSheet = true },
+                        )
+                        .padding(.bottom, 36)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    } else {
+                        Color.clear.frame(height: 24)
+                    }
+                }
                 #if DEBUG
                 // Path-source indicator — sticky display of the last
                 // scan's routing (offline vs network), winning_path,
@@ -268,6 +300,13 @@ struct ScannerTabView: View {
                 // `paywallSurface` for PostHog analytics.
                 PaywallView(context: .scanner, surface: paywallSurface)
             }
+            .sheet(isPresented: $showMultiScanSheet) {
+                MultiScanReviewSheet(
+                    session: multiScanSession,
+                    onDismiss: { showMultiScanSheet = false },
+                    onSubmit: submitMultiScanBatch,
+                )
+            }
             .onChange(of: scanner.lastMatch) { _, newValue in
                 handleIdentifyResult(newValue)
             }
@@ -282,7 +321,49 @@ struct ScannerTabView: View {
             .onChange(of: scanner.isIdentifying) { _, identifying in
                 if !identifying { evaluateQuotaWarning() }
             }
+            // Pause Vision detection while the review sheet is open.
+            // Otherwise the camera keeps detecting cards behind the
+            // modal and the multi-mode branch in handleIdentifyResult
+            // keeps appending to the tray — racing both the user's
+            // review and submit()'s snapshot/clear cycle. The user is
+            // explicitly reviewing or bulk-adding; that's the
+            // exclusive activity until the sheet dismisses. (Codex
+            // P2 review on PR #83.)
+            .onChange(of: showMultiScanSheet) { _, isPresented in
+                if isPresented {
+                    scanner.viewModel?.pauseForExternalCapture()
+                } else if scanner.multiScanMode {
+                    scanner.resumeScanning()
+                }
+            }
+            // Pause Vision detection for the paywall's lifetime when
+            // we're in multi-mode. Without this, a quota-wall paywall
+            // triggered by an auto-detect could be re-triggered by
+            // the next auto-detect while the modal is open — burning
+            // server calls and stacking up identify firings the user
+            // can't see. Single-mode paywalls (crown tap, tap-quota
+            // wall) don't need this because auto-detect doesn't add
+            // tray entries there and tap is gated up front. (Codex
+            // P2 review on PR #83.)
+            .onChange(of: showPaywallSheet) { _, isPresented in
+                guard scanner.multiScanMode else { return }
+                if isPresented {
+                    scanner.viewModel?.pauseForExternalCapture()
+                } else {
+                    scanner.resumeScanning()
+                }
+            }
             .onAppear {
+                // Wire the auto-detect quota-blocked callback so
+                // ScannerHost's installNetworkIdentifier can surface
+                // the paywall sheet without direct access to our
+                // @State. Idempotent — re-assignment on tab-switch
+                // / view-reappear is fine. (Codex P2 review on PR
+                // #83: pre-identify quota gate.)
+                scanner.onAutoDetectQuotaBlocked = {
+                    paywallSurface = "scanner_quota_wall_multi"
+                    showPaywallSheet = true
+                }
                 #if DEBUG
                 runSmokeTestIfRequested()
                 #endif
@@ -739,6 +820,69 @@ struct ScannerTabView: View {
     private func handleIdentifyResult(_ match: ScanMatch?) {
         guard let match else { return }
 
+        // Multi-scan mode short-circuits the single-mode routing for
+        // HIGH/MEDIUM: every confident-enough scan appends to the tray
+        // and the scanner re-arms immediately. LOW continues to re-arm
+        // silently — letting LOW into the tray would dilute the signal
+        // of HIGH/MED rows. The single-mode picker is suppressed; per-
+        // row re-pick from the tray is a future iteration.
+        if scanner.multiScanMode {
+            switch scanner.lastConfidence {
+            case "high", "medium":
+                // Auto-detect dedupe (Codex P2 review on PR #83,
+                // fourth pass). The Vision engine fires on every new
+                // stable rectangle, but a card lingering in the
+                // viewfinder while the user reaches for the next one
+                // can produce another stable window for the SAME card
+                // and append it again. Drop repeat-slug auto-detect
+                // results inside a short window so the pack/binder
+                // flow doesn't inflate the tray or burn quota for the
+                // same physical card. Tap/library entries are
+                // deliberate user actions — they bypass this guard
+                // (the same user might genuinely want to scan two
+                // copies of the same card via tap).
+                if scanner.lastTriggerSource == "auto",
+                   multiScanSession.shouldDedupeAutoDetect(slug: match.slug) {
+                    // The upstream gate charged a quota unit before
+                    // this server call; refund it now since the
+                    // duplicate is being dropped from the tray.
+                    // Without this refund a card lingering in the
+                    // viewfinder eats quota on every re-fire even
+                    // though the stack doesn't grow. Premium users
+                    // didn't charge upstream, so don't refund.
+                    if !premiumGate.isPro {
+                        scanQuota.refundScan()
+                    }
+                    scanner.clearLastMatch()
+                    scanner.resumeScanning()
+                    return
+                }
+                // Quota was already charged upstream in
+                // ScannerHost.installNetworkIdentifier — every server
+                // call deserves a quota tick regardless of result
+                // tier. LOW/error results land in the default branch
+                // below and don't append, but the charge stays
+                // (consistent with "you used a server call"). Only
+                // same-slug auto-detect duplicates are refunded
+                // (block above). Tap and library are charged at
+                // their own entry points. (Codex P2 review on PR
+                // #83, eleventh pass.)
+                PAHaptics.tap()
+                multiScanSession.append(
+                    match: match,
+                    candidates: scanner.lastMatches,
+                    confidence: scanner.lastConfidence ?? "medium",
+                    imageHash: scanner.lastImageHash,
+                )
+                scanner.clearLastMatch()
+                scanner.resumeScanning()
+            default:
+                scanner.clearLastMatch()
+                scanner.resumeScanning()
+            }
+            return
+        }
+
         switch scanner.lastConfidence {
         case "high":
             // Zero-tap auto-navigate on high confidence.
@@ -762,6 +906,87 @@ struct ScannerTabView: View {
             // Low confidence (or unknown tier) → silent re-arm.
             scanner.clearLastMatch()
             scanner.resumeScanning()
+        }
+    }
+
+    // MARK: - Multi-scan helpers
+
+    /// Small, unobtrusive bottom-right toggle. Sits alone in single mode
+    /// and re-anchors above the tray bar when multi-mode is on. The
+    /// filled-vs-outlined icon plus an optional count badge gives an
+    /// at-a-glance sense of mode + tray depth without taking up
+    /// viewfinder real estate.
+    private var multiScanToggle: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                scanner.multiScanMode.toggle()
+            }
+            PAHaptics.selection()
+            AnalyticsService.shared.captureRaw(
+                "scanner_multi_mode_toggled",
+                properties: [
+                    "now_active": scanner.multiScanMode,
+                    "tray_count": multiScanSession.entries.count,
+                ],
+            )
+        } label: {
+            let active = scanner.multiScanMode
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: active ? "square.stack.fill" : "square.stack")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(active ? .black : .white)
+                    .frame(width: 32, height: 32)
+                    .background(
+                        Circle().fill(active ? Color.white : Color.black.opacity(0.45)),
+                    )
+                    .overlay(
+                        Circle().stroke(Color.white.opacity(0.15), lineWidth: 0.5),
+                    )
+                if active, multiScanSession.entries.count > 0 {
+                    Text("\(multiScanSession.entries.count)")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(Color.red))
+                        .offset(x: 5, y: -3)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(scanner.multiScanMode ? "Exit multi-scan mode" : "Enter multi-scan mode")
+    }
+
+    /// Submits the current tray to /api/holdings/bulk-import. Returns
+    /// nil on full success (sheet closes), or a user-facing error
+    /// string when the network call throws or any rows fail. The
+    /// returned string is rendered inline in the review sheet's
+    /// footer so a tapped Add button never silently no-ops — was a
+    /// Codex P2 bug in the initial version of this PR (returned
+    /// `Void` and only logged failures, leaving the user with a
+    /// visually-unchanged tray and no explanation).
+    private func submitMultiScanBatch() async -> String? {
+        do {
+            let summary = try await multiScanSession.submit()
+            AnalyticsService.shared.captureRaw(
+                "scanner_multi_mode_bulk_added",
+                properties: [
+                    "inserted": summary.inserted,
+                    "errors": summary.errors.count,
+                ],
+            )
+            if summary.hadAnyFailures {
+                PAHaptics.selection()
+                let plural = summary.errors.count == 1 ? "row" : "rows"
+                return "Added \(summary.inserted) — \(summary.errors.count) \(plural) failed. Try again or swipe to remove."
+            }
+            PAHaptics.tap()
+            showMultiScanSheet = false
+            return nil
+        } catch {
+            Logger.scan.debug("multi-scan submit failed: \(error.localizedDescription)")
+            PAHaptics.selection()
+            return "Couldn't add — \(error.localizedDescription)"
         }
     }
 
@@ -802,6 +1027,21 @@ final class ScannerHost: ObservableObject {
     @Published private(set) var isScanning: Bool = true
     @Published private(set) var initError: String?
     @Published private(set) var candidateBoundingBox: CGRect?
+
+    /// Multi-scan mode toggle. When true, post-identify routing
+    /// appends HIGH/MEDIUM scans to a tray and re-arms instead of
+    /// auto-navigating; LOW continues to silently re-arm. The view
+    /// layer reads this from `handleIdentifyResult` to branch routing.
+    /// Reset on app launch — users opt in to batch mode per session.
+    @Published var multiScanMode: Bool = false
+
+    /// Called from the auto-detect hook when a free-tier user in
+    /// multi-scan mode runs out of daily quota. Lets ScannerTabView
+    /// surface the paywall sheet without ScannerHost needing direct
+    /// access to its @State. Wired in `.onAppear`. Pre-runIdentify
+    /// quota gate (Codex P2 review on PR #83) — replaces the earlier
+    /// post-identify gate in handleIdentifyResult.
+    var onAutoDetectQuotaBlocked: (@MainActor () -> Void)?
 
     /// Mirrors `ScannerViewModel.firstFrameRendered`. Drives the
     /// "Starting camera…" placeholder in ScannerTabView's body so the
@@ -855,6 +1095,16 @@ final class ScannerHost: ObservableObject {
     /// could look like it shipped when the scan actually fell through
     /// to the server.
     @Published private(set) var lastSource: String?
+
+    /// Entry point the most recent runIdentify call came from —
+    /// "auto" (Vision rectangle stable-fire), "tap" / "tap_multiframe"
+    /// (manual tap-to-capture), or "library" (photo picker). Read by
+    /// the multi-scan quota gate to decide whether to charge quota
+    /// for the result: tap-path scans were already charged at the
+    /// tap handler (lines ~97-104) and library scans bypass quota
+    /// in single mode, so multi-mode should only newly-charge
+    /// auto-detect results to avoid double-spending.
+    @Published private(set) var lastTriggerSource: String?
 
     /// Language hint passed to /api/scan/identify. Defaults to EN; the
     /// scanner UI exposes a pill toggle so the user can flip to JP.
@@ -1039,6 +1289,41 @@ final class ScannerHost: ObservableObject {
     private func installNetworkIdentifier(_ vm: ScannerViewModel) {
         vm.onStableCardCaptured = { [weak self] image, perspectiveCorrection in
             guard let self else { return }
+
+            // Pre-identify quota gate for multi-scan auto-detect
+            // (Codex P2 review on PR #83). Without this, a free-tier
+            // user with no scans left still uploads the JPEG and
+            // hits /api/scan/identify on every stable auto-capture —
+            // the server-side cost is wasted, and dismissing the
+            // paywall lets the loop continue. Gating here intercepts
+            // before runIdentify ever fires. Single-mode auto-detect
+            // doesn't gate here (existing back-compat behavior); the
+            // tap path has its own quota check before
+            // captureFrameAndIdentify, and library imports bypass
+            // intentionally.
+            let blocked = await MainActor.run {
+                guard self.multiScanMode, !PremiumGate.shared.isPro else {
+                    return false
+                }
+                ScanQuota.shared.rolloverIfNewDay()
+                if !ScanQuota.shared.canScan {
+                    self.onAutoDetectQuotaBlocked?()
+                    return true
+                }
+                // canScan check happens here (pre-identify) so a user
+                // at the wall never makes a server call. recordScan
+                // does NOT happen here — it lives inside runIdentify,
+                // AFTER the re-entry guard, so the daily counter
+                // doesn't tick for callbacks that the guard drops
+                // (in-flight identify, result waiting on screen).
+                // Codex P2 on PR #83 (twelfth pass) caught the over-
+                // charge from charging at this layer. The dedupe-
+                // drop branch in handleIdentifyResult still refunds
+                // for same-card auto-re-fires.
+                return false
+            }
+            if blocked { return }
+
             await self.runIdentify(
                 image: image,
                 triggerSource: "auto",
@@ -1119,6 +1404,24 @@ final class ScannerHost: ObservableObject {
         }
         self.isIdentifying = true
         self.identifyError = nil
+
+        // Multi-scan auto-detect quota charge (Codex P2 review on PR
+        // #83, twelfth pass). Lives BEHIND the re-entry guard above
+        // because the upstream onStableCardCaptured hook can fire
+        // for frames that this guard then drops (a previous identify
+        // is in flight or a result is waiting on screen). Charging
+        // before the guard would tick the daily counter for those
+        // suppressed callbacks even though no server call ran.
+        // Scoped to triggerSource=="auto" — tap is charged at the
+        // tap handler, library bypasses by convention. Premium
+        // skips. The dedupe-drop branch in handleIdentifyResult
+        // refunds same-card auto-re-fires; LOW results stay charged
+        // because the server call actually ran.
+        if triggerSource == "auto",
+           self.multiScanMode,
+           !PremiumGate.shared.isPro {
+            ScanQuota.shared.recordScan()
+        }
         // Belt-and-braces: clear Vision's stability buffer so the
         // next post-arm re-detection requires a fresh stable window.
         self.viewModel?.pauseForExternalCapture()
@@ -1274,6 +1577,7 @@ final class ScannerHost: ObservableObject {
             self.lastImageHash = response.imageHash
             self.lastWinningPath = response.winningPath
             self.lastSource = usedOffline ? "offline" : "network"
+            self.lastTriggerSource = triggerSource
             // Retain JPEG-source UIImage only for offline scans —
             // online scans already uploaded to scan-uploads/<hash>.jpg
             // so the correction-via-hash path works without it.
