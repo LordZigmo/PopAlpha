@@ -366,7 +366,7 @@ export async function loadRawCardMarketVariants(params: {
   const visiblePrintingIds = new Set(printingIds);
   if (printingIds.length === 0) return [];
 
-  const [allHistoryRows, cardMetricsQuery, variantSignalsQuery] = await Promise.all([
+  const [allHistoryRows, cardMetricsQuery, variantSignalsQuery, askingPriceQuery] = await Promise.all([
     loadAllHistoryRows({ supabase, canonicalSlug: params.canonicalSlug }),
     supabase
       .from("public_card_metrics")
@@ -393,6 +393,23 @@ export async function loadRawCardMarketVariants(params: {
       .eq("grade", "RAW")
       .in("provider", ["SCRYDEX", "POKEMON_TCG_API"])
       .in("printing_id", printingIds),
+    // Phase C-2 (2026-05-16): asking-anchored value per printing,
+    // pulled from the latest scrydex observation's metadata. The
+    // normalizer (lib/backfill/pokemontcg-raw-normalize.ts) writes
+    // metadata.scrydexAskingPriceUsd at observation time. Fetched in
+    // the same Promise.all so it's free relative to the existing
+    // metrics query latency. Returns at most one row per printing
+    // (most-recent observation wins via order+limit semantics
+    // applied in JS below — Supabase doesn't have a single-query
+    // GROUP BY argmax pattern).
+    supabase
+      .from("provider_observation_matches")
+      .select("printing_id, updated_at, provider_normalized_observations(metadata, observed_at)")
+      .eq("canonical_slug", params.canonicalSlug)
+      .eq("provider", "SCRYDEX")
+      .in("printing_id", printingIds)
+      .order("updated_at", { ascending: false })
+      .limit(printingIds.length * 6),
   ]);
 
   const maxHistoryDate = allHistoryRows
@@ -427,6 +444,29 @@ export async function loadRawCardMarketVariants(params: {
     historyRowsByPrinting.set(printingId, current);
   }
 
+  // Phase C-2 (2026-05-16): build a per-printing map of asking-anchored
+  // USD value pulled from the most-recent SCRYDEX raw observation's
+  // metadata.scrydexAskingPriceUsd. Filtered to RAW (non-graded) rows
+  // — the normalizer writes `null` for graded paths, so checking
+  // metadata.scrydexAskingPriceUsd presence is sufficient. The query
+  // already orders by updated_at desc, so the first match per printing
+  // wins.
+  type AskingPriceJoinRow = {
+    printing_id: string | null;
+    provider_normalized_observations:
+      | { metadata: Record<string, unknown> | null; observed_at: string | null }
+      | null;
+  };
+  const askingPriceByPrinting = new Map<string, number>();
+  for (const row of (askingPriceQuery.data ?? []) as unknown as AskingPriceJoinRow[]) {
+    if (!row.printing_id || askingPriceByPrinting.has(row.printing_id)) continue;
+    const meta = row.provider_normalized_observations?.metadata ?? null;
+    const value = meta && typeof meta === "object" ? meta["scrydexAskingPriceUsd"] : null;
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+      askingPriceByPrinting.set(row.printing_id, value);
+    }
+  }
+
   return params.variants.map((variant) => {
     const printingHistoryRows = historyRowsByPrinting.get(variant.printingId) ?? [];
     const series = buildProviderSeries(printingHistoryRows, fxRows);
@@ -458,6 +498,12 @@ export async function loadRawCardMarketVariants(params: {
       justtcgAsOfTs: null,
       scrydexPrice: liveScrydexPrice,
       scrydexAsOfTs: liveScrydexAsOfTs,
+      // Phase C-2 (2026-05-16): asking-anchored auxiliary value. Only
+      // surface when distinguishably above the headline (≥10% gap) so
+      // the line doesn't add noise on cards where low ≈ market. UI
+      // hides the line when this is null OR when the spread is
+      // negligible. See raw-card-market-surface render.
+      scrydexAskingHighUsd: hasLivePrice ? (askingPriceByPrinting.get(variant.printingId) ?? null) : null,
       marketBalancePrice: metrics?.trimmed_median_30d ?? metrics?.median_30d ?? null,
       asOfTs: liveScrydexAsOfTs,
       trendSlope7d: signalRow?.provider_trend_slope_7d ?? null,
