@@ -145,21 +145,31 @@ struct MarketPulseSection: View {
 
     @State private var category: Category = .movers
 
-    /// Categories shown in the tab strip. In JP-only mode the tab
-    /// strip is hidden entirely (the section already knows it's
-    /// rendering `.japanese`). In EN mode the `.japanese` tab is
-    /// hidden — JP is now its own top-level market, so a JP tab
-    /// inside the EN view would be redundant. The case itself stays
-    /// in the enum so JP-only mode reuses all the existing wiring
-    /// (`title`, `eyebrow`, `cards(for:)`, etc.) without duplication.
+    /// Categories shown in the tab strip. JP-only mode exposes the
+    /// same mover board as EN — Movers / Pullbacks / Mid / Budget /
+    /// Japan (discovery) — sourced from the JP fields on
+    /// `HomepageSignalBoardDTO`. Breakouts + Unusual are EN-only
+    /// today because the server doesn't yet ship JP equivalents for
+    /// those signals; we add them when those rails light up.
+    /// In EN mode the `.japanese` tab is hidden — JP is its own
+    /// top-level market so a JP tab inside the EN view would be
+    /// redundant.
     private var visibleCategories: [Category] {
-        japaneseOnly ? [.japanese] : Category.allCases.filter { $0 != .japanese }
+        if japaneseOnly {
+            return [.movers, .pullbacks, .mid, .budget, .japanese]
+        }
+        return Category.allCases.filter { $0 != .japanese }
     }
 
     /// The category whose rail is currently rendered. JP-only mode
-    /// forces `.japanese`; EN mode honours the user's tab selection.
+    /// honours the user's tab selection within the JP tab strip;
+    /// fall back to `.movers` if the persisted EN selection is one
+    /// of the categories we don't expose in JP (breakouts/unusual).
     private var activeCategory: Category {
-        japaneseOnly ? .japanese : category
+        if japaneseOnly && !visibleCategories.contains(category) {
+            return .movers
+        }
+        return category
     }
 
     /// Brand-aware accent for a given category. Only the Movers tab
@@ -174,10 +184,14 @@ struct MarketPulseSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
+            // KPI microstrip stays EN-only: the numbers describe the
+            // whole catalog freshness and EN-tilted market cap, not the
+            // JP slice. The category tab strip shows in both modes —
+            // JP-only mode renders a JP-flavored set of tabs.
             if !japaneseOnly {
                 headerStrip
-                categoryTabs
             }
+            categoryTabs
             activeSection
         }
     }
@@ -324,9 +338,10 @@ struct MarketPulseSection: View {
                 // windowed categories (Movers, Pullbacks). Non-windowed
                 // tabs (Breakouts, Unusual, Mid, Budget, Japanese) come
                 // from pre-computed daily lists and ignore the toggle,
-                // so we hide it there. JP-only mode also suppresses it
-                // implicitly since `.japanese` is non-windowed.
-                if cat.isWindowed && !japaneseOnly {
+                // so we hide it there. The toggle is exposed in both EN
+                // and JP modes — JP-mode Movers/Pullbacks honour the
+                // window selection the same way EN does.
+                if cat.isWindowed {
                     windowToggle
                         .transition(.opacity)
                 }
@@ -337,6 +352,35 @@ struct MarketPulseSection: View {
     }
 
     private func cards(for category: Category) -> [HomepageCardDTO] {
+        // In JP-only mode the mover/pullback/mid/budget tabs read from
+        // the JP-specific signal-board fields rather than the EN ones,
+        // and every card runs through `preferringJpSource()` so the
+        // tile shows the Yahoo!JP or Snkrdunk native price (when a
+        // source qualifies on sample count) instead of Scrydex's USD
+        // reflection. Falls back to empty when the server hasn't
+        // shipped the JP fields yet — the tab still renders an empty
+        // state rather than leaking EN data into the JP view.
+        if japaneseOnly {
+            switch category {
+            case .movers:
+                let windowed = signalBoard.japaneseTopMovers
+                let cards = windowed?.forWindow(selectedWindow) ?? []
+                return cards.map { $0.preferringJpSource() }
+            case .pullbacks:
+                let windowed = signalBoard.japaneseBiggestDrops
+                let cards = windowed?.forWindow(selectedWindow) ?? []
+                return cards.map { $0.preferringJpSource() }
+            case .mid:
+                return (signalBoard.japaneseMidMovers ?? []).map { $0.preferringJpSource() }
+            case .budget:
+                return (signalBoard.japaneseBudgetMovers ?? []).map { $0.preferringJpSource() }
+            case .japanese:
+                return (signalBoard.japanese ?? []).map { $0.preferringJpSource() }
+            case .breakouts, .unusual:
+                // Not exposed in JP-mode tab strip; defensive fallback.
+                return []
+            }
+        }
         switch category {
         case .movers:
             return signalBoard.topMovers.forWindow(selectedWindow)

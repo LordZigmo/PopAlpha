@@ -90,10 +90,19 @@ export type HomepageSignalBoardData = {
   // Budget tier ($1 .. mid_min_price): gainers from cards below the mid
   // price floor. Single rail, no window split.
   budget_movers: HomepageCard[];
-  // JP catalog (canonical_cards.language = 'JP'). Discovery rail —
-  // doesn't gate on change_pct or momentum because we're still
-  // onboarding (38 cards as of 2026-05-07). Sorted by snapshot
-  // freshness so the rail leads with cards we have current pricing on.
+  // JP catalog rails (canonical_cards.language = 'JP'). Mirror the EN
+  // structure 1:1 so the JP market view feels as busy as EN. Sourced
+  // from public_card_metrics' Scrydex change_pct columns filtered to
+  // language='JP'; once the JP-native delta pipeline (jp_card_metrics)
+  // ships these loaders swap to it without changing the wire shape.
+  japanese_top_movers: HomepageWindowedCards;
+  japanese_biggest_drops: HomepageWindowedCards;
+  japanese_momentum: HomepageWindowedCards;
+  japanese_mid_movers: HomepageCard[];
+  japanese_budget_movers: HomepageCard[];
+  // Discovery rail — sorted by snapshot freshness so the JP view always
+  // shows at least one rail of recently-priced JP cards even when the
+  // mover gates yield nothing.
   japanese: HomepageCard[];
 };
 
@@ -483,6 +492,240 @@ async function loadJapaneseRail(
     .filter((card): card is HomepageCard => card !== null);
 }
 
+/**
+ * JP-market signal-board rails (top movers, biggest drops, momentum, mid,
+ * budget). Mirrors the EN signal-board structure so JP feels as busy as EN.
+ *
+ * Implementation note: one query fetches every JP card with usable metrics,
+ * then we sort/filter in memory to produce the five rails. The JP catalog
+ * is small enough (~3k cards) that this beats five round-trips. Once the
+ * JP-native delta pipeline ships (jp_card_metrics), these rails will read
+ * from `daily_top_movers` filtered by jp_* kinds instead — same wire shape,
+ * so the homepage component is unchanged.
+ *
+ * Gates vs EN: keep market_confidence_score / low_confidence quality
+ * floors. Drop snapshot_count_30d gate (EN tuning, kills JP cards whose
+ * Scrydex history is shallow). Use a 7d freshness window since JP cards
+ * are less likely to have 24h snapshots than EN.
+ */
+type JpRailBundle = {
+  topMovers: HomepageWindowedCards;
+  biggestDrops: HomepageWindowedCards;
+  momentum: HomepageWindowedCards;
+  midMovers: HomepageCard[];
+  budgetMovers: HomepageCard[];
+};
+
+const JP_PREMIUM_MIN_PRICE = 50;
+const JP_MID_MIN_PRICE = 8;
+const JP_BUDGET_MIN_PRICE = 1;
+const JP_FRESHNESS_MAX_AGE_HOURS = 7 * 24;
+const JP_MAX_CHANGE_PCT = 75;
+
+async function loadJapaneseSignalRails(
+  client: NonNullable<ReturnType<typeof dbPublic>>,
+  limit: number,
+): Promise<JpRailBundle> {
+  const empty: JpRailBundle = {
+    topMovers: createEmptyWindowedCards(),
+    biggestDrops: createEmptyWindowedCards(),
+    momentum: createEmptyWindowedCards(),
+    midMovers: [],
+    budgetMovers: [],
+  };
+
+  // Fetch up to 1000 JP cards with any usable change_pct. PostgREST's
+  // .or() against a foreign table requires the joined column name with
+  // the table prefix and the syntax (.not.is.null). Filter to RAW
+  // canonical rows and confidence floors here; granular per-rail
+  // filtering happens in memory below.
+  const { data, error } = await client
+    .from("canonical_cards")
+    .select(
+      "slug, canonical_name, set_name, year, card_number, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url, public_card_metrics!inner(market_price, market_price_as_of, change_pct_24h, change_pct_7d, active_listings_7d, market_confidence_score, snapshot_count_30d, market_low_confidence, printing_id, grade, yahoo_jp_price, yahoo_jp_price_jpy, yahoo_jp_sample_count, snkrdunk_price, snkrdunk_price_jpy, snkrdunk_sample_count)",
+    )
+    .eq("language", "JP")
+    .eq("public_card_metrics.grade", "RAW")
+    .is("public_card_metrics.printing_id", null)
+    .not("public_card_metrics.market_price", "is", null)
+    .gte("public_card_metrics.market_price", JP_BUDGET_MIN_PRICE)
+    .gte("public_card_metrics.market_confidence_score", MIN_CONFIDENCE_SCORE)
+    .limit(1000);
+
+  if (error || !data) return empty;
+
+  type Joined = CardRow & {
+    public_card_metrics:
+      | Array<{
+        market_price: number | null;
+        market_price_as_of: string | null;
+        change_pct_24h: number | null;
+        change_pct_7d: number | null;
+        active_listings_7d: number | null;
+        market_confidence_score: number | null;
+        snapshot_count_30d: number | null;
+        market_low_confidence: boolean | null;
+        yahoo_jp_price: number | null;
+        yahoo_jp_price_jpy: number | null;
+        yahoo_jp_sample_count: number | null;
+        snkrdunk_price: number | null;
+        snkrdunk_price_jpy: number | null;
+        snkrdunk_sample_count: number | null;
+      }>
+      | null;
+  };
+  const rows = data as unknown as Joined[];
+
+  // ── Build per-window candidate maps. Each window holds {card, changePct}.
+  //   We materialize per (slug, window) so a card with both change_pct_24h
+  //   and change_pct_7d can appear in both windows ranked by that window's
+  //   value — same shape as the EN rails.
+  type Candidate = {
+    card: HomepageCard;
+    changePct: number;
+    marketPrice: number;
+  };
+  const candidates24h: Candidate[] = [];
+  const candidates7d: Candidate[] = [];
+  const nowMs = Date.now();
+
+  for (const row of rows) {
+    const metrics = row.public_card_metrics?.[0] ?? null;
+    if (!metrics || metrics.market_price == null || metrics.market_price <= 0) continue;
+    if (metrics.market_low_confidence === true) continue;
+
+    const asOfMs = metrics.market_price_as_of ? Date.parse(metrics.market_price_as_of) : NaN;
+    if (!Number.isFinite(asOfMs)) continue;
+    const ageHours = (nowMs - asOfMs) / (60 * 60 * 1000);
+    if (ageHours > JP_FRESHNESS_MAX_AGE_HOURS) continue;
+
+    const image = resolveCardImage({
+      primary_image_url: row.primary_image_url ?? null,
+      mirrored_primary_image_url: row.mirrored_primary_image_url ?? null,
+      mirrored_primary_thumb_url: row.mirrored_primary_thumb_url ?? null,
+    });
+    const highConfidence = (metrics.active_listings_7d ?? 0) >= HIGH_CONF_LIQUIDITY_MIN;
+    const baseCard = (changePct: number, window: HomepageSignalWindow): HomepageCard => ({
+      slug: row.slug,
+      name: row.canonical_name,
+      set_name: row.set_name ?? null,
+      year: row.year ?? null,
+      card_number: row.card_number ?? null,
+      market_price: metrics.market_price,
+      change_pct: changePct,
+      change_window: window,
+      confidence_score: metrics.market_confidence_score ?? null,
+      low_confidence: Boolean(metrics.market_low_confidence),
+      market_strength_score: null,
+      market_direction: null,
+      mover_tier: highConfidence ? "hot" : "warming",
+      image_url: image.full,
+      image_thumb_url: image.thumb,
+      sparkline_7d: [],
+      sales_count_30d: metrics.snapshot_count_30d ?? null,
+      active_listings_7d: metrics.active_listings_7d ?? null,
+      updated_at: metrics.market_price_as_of ?? null,
+      yahoo_jp_price: metrics.yahoo_jp_price,
+      yahoo_jp_price_jpy: metrics.yahoo_jp_price_jpy,
+      yahoo_jp_sample_count: metrics.yahoo_jp_sample_count,
+      snkrdunk_price: metrics.snkrdunk_price,
+      snkrdunk_price_jpy: metrics.snkrdunk_price_jpy,
+      snkrdunk_sample_count: metrics.snkrdunk_sample_count,
+    });
+
+    if (metrics.change_pct_24h != null && Math.abs(metrics.change_pct_24h) <= JP_MAX_CHANGE_PCT) {
+      candidates24h.push({
+        card: baseCard(metrics.change_pct_24h, "24H"),
+        changePct: metrics.change_pct_24h,
+        marketPrice: metrics.market_price,
+      });
+    }
+    if (metrics.change_pct_7d != null && Math.abs(metrics.change_pct_7d) <= JP_MAX_CHANGE_PCT) {
+      candidates7d.push({
+        card: baseCard(metrics.change_pct_7d, "7D"),
+        changePct: metrics.change_pct_7d,
+        marketPrice: metrics.market_price,
+      });
+    }
+  }
+
+  // Set-diversity guard: cap each set to 2 hits per rail. Same rule the
+  // EN compute_daily_top_movers function enforces so a single hot set
+  // doesn't crowd the entire rail.
+  const SET_CAP = 2;
+  const pickWithSetCap = (
+    candidates: Candidate[],
+    predicate: (c: Candidate) => boolean,
+    sort: (a: Candidate, b: Candidate) => number,
+  ): HomepageCard[] => {
+    const sorted = candidates.filter(predicate).sort(sort);
+    const setCounts = new Map<string, number>();
+    const picked: HomepageCard[] = [];
+    for (const c of sorted) {
+      const key = c.card.set_name?.toLowerCase() ?? "__unknown_set__";
+      const taken = setCounts.get(key) ?? 0;
+      if (taken >= SET_CAP) continue;
+      setCounts.set(key, taken + 1);
+      picked.push(c.card);
+      if (picked.length >= limit) break;
+    }
+    return picked;
+  };
+
+  const byChangeDesc = (a: Candidate, b: Candidate) => b.changePct - a.changePct;
+  const byChangeAsc = (a: Candidate, b: Candidate) => a.changePct - b.changePct;
+
+  const topMovers: HomepageWindowedCards = {
+    "24H": pickWithSetCap(candidates24h, (c) => c.changePct >= MIN_MOVER_CHANGE_PCT, byChangeDesc),
+    "7D": pickWithSetCap(candidates7d, (c) => c.changePct >= MIN_MOVER_CHANGE_PCT, byChangeDesc),
+  };
+  const biggestDrops: HomepageWindowedCards = {
+    "24H": pickWithSetCap(candidates24h, (c) => c.changePct <= -MIN_MOVER_CHANGE_PCT, byChangeAsc),
+    "7D": pickWithSetCap(candidates7d, (c) => c.changePct <= -MIN_MOVER_CHANGE_PCT, byChangeAsc),
+  };
+  const momentum: HomepageWindowedCards = {
+    "24H": pickWithSetCap(
+      candidates24h,
+      (c) => c.changePct > 0 && c.marketPrice >= JP_PREMIUM_MIN_PRICE,
+      byChangeDesc,
+    ),
+    "7D": pickWithSetCap(
+      candidates7d,
+      (c) => c.changePct > 0 && c.marketPrice >= JP_PREMIUM_MIN_PRICE,
+      byChangeDesc,
+    ),
+  };
+
+  // Mid + budget rails take the best 24H signal when present, falling
+  // back to 7D so a card whose 24H is null still surfaces as a mid/budget
+  // gainer. Build a per-slug "best window" set and rank from there.
+  const bestByslug = new Map<string, Candidate>();
+  for (const c of candidates24h) bestByslug.set(c.card.slug, c);
+  for (const c of candidates7d) {
+    if (!bestByslug.has(c.card.slug)) bestByslug.set(c.card.slug, c);
+  }
+  const bestCandidates = [...bestByslug.values()];
+
+  const midMovers = pickWithSetCap(
+    bestCandidates,
+    (c) =>
+      c.changePct >= MIN_MOVER_CHANGE_PCT
+      && c.marketPrice >= JP_MID_MIN_PRICE
+      && c.marketPrice < JP_PREMIUM_MIN_PRICE,
+    byChangeDesc,
+  );
+  const budgetMovers = pickWithSetCap(
+    bestCandidates,
+    (c) =>
+      c.changePct >= MIN_MOVER_CHANGE_PCT
+      && c.marketPrice >= JP_BUDGET_MIN_PRICE
+      && c.marketPrice < JP_MID_MIN_PRICE,
+    byChangeDesc,
+  );
+
+  return { topMovers, biggestDrops, momentum, midMovers, budgetMovers };
+}
+
 function createEmptySignalBoard(): HomepageSignalBoardData {
   return {
     top_movers: createEmptyWindowedCards(),
@@ -492,6 +735,11 @@ function createEmptySignalBoard(): HomepageSignalBoardData {
     breakouts: [],
     mid_movers: [],
     budget_movers: [],
+    japanese_top_movers: createEmptyWindowedCards(),
+    japanese_biggest_drops: createEmptyWindowedCards(),
+    japanese_momentum: createEmptyWindowedCards(),
+    japanese_mid_movers: [],
+    japanese_budget_movers: [],
     japanese: [],
   };
 }
@@ -1266,9 +1514,19 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
     }
 
     let japaneseRail: HomepageCard[] = [];
+    let japaneseRails: JpRailBundle = {
+      topMovers: createEmptyWindowedCards(),
+      biggestDrops: createEmptyWindowedCards(),
+      momentum: createEmptyWindowedCards(),
+      midMovers: [],
+      budgetMovers: [],
+    };
     if (!overrides && db) {
       try {
-        japaneseRail = await loadJapaneseRail(db, SECTION_LIMIT);
+        [japaneseRail, japaneseRails] = await Promise.all([
+          loadJapaneseRail(db, SECTION_LIMIT),
+          loadJapaneseSignalRails(db, SECTION_LIMIT),
+        ]);
       } catch (err) {
         logger.error(
           "[homepage] japanese_rail",
@@ -1344,6 +1602,11 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
       breakouts: breakoutsOut,
       mid_movers: dailyMovers.mid_gainers.slice(0, SECTION_LIMIT),
       budget_movers: dailyMovers.budget_gainers.slice(0, SECTION_LIMIT),
+      japanese_top_movers: japaneseRails.topMovers,
+      japanese_biggest_drops: japaneseRails.biggestDrops,
+      japanese_momentum: japaneseRails.momentum,
+      japanese_mid_movers: japaneseRails.midMovers,
+      japanese_budget_movers: japaneseRails.budgetMovers,
       japanese: japaneseRail,
     } satisfies HomepageSignalBoardData;
 

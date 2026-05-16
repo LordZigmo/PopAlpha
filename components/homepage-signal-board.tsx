@@ -12,6 +12,7 @@ import {
   formatPriceDisplay,
   resolveDisplayedMarketPrice,
 } from "@/lib/pricing/displayed-market-price";
+import { useMarket } from "@/lib/market-context";
 
 type SignalWindow = HomepageSignalWindow;
 type HomepageSignalBoardProps = {
@@ -20,6 +21,11 @@ type HomepageSignalBoardProps = {
   momentumByWindow: HomepageWindowedCards;
   midMovers: HomepageCard[];
   budgetMovers: HomepageCard[];
+  japaneseTopMoversByWindow: HomepageWindowedCards;
+  japaneseBiggestDropsByWindow: HomepageWindowedCards;
+  japaneseMomentumByWindow: HomepageWindowedCards;
+  japaneseMidMovers: HomepageCard[];
+  japaneseBudgetMovers: HomepageCard[];
   japanese: HomepageCard[];
 };
 
@@ -49,8 +55,52 @@ export default function HomepageSignalBoard({
   momentumByWindow,
   midMovers,
   budgetMovers,
+  japaneseTopMoversByWindow,
+  japaneseBiggestDropsByWindow,
+  japaneseMomentumByWindow,
+  japaneseMidMovers,
+  japaneseBudgetMovers,
   japanese,
 }: HomepageSignalBoardProps) {
+  const { market } = useMarket();
+
+  if (market === "JP") {
+    return (
+      <JapaneseSignalBoard
+        topMoversByWindow={japaneseTopMoversByWindow}
+        biggestDropsByWindow={japaneseBiggestDropsByWindow}
+        momentumByWindow={japaneseMomentumByWindow}
+        midMovers={japaneseMidMovers}
+        budgetMovers={japaneseBudgetMovers}
+        discovery={japanese}
+      />
+    );
+  }
+
+  return (
+    <EnglishSignalBoard
+      topMoversByWindow={topMoversByWindow}
+      biggestDropsByWindow={biggestDropsByWindow}
+      momentumByWindow={momentumByWindow}
+      midMovers={midMovers}
+      budgetMovers={budgetMovers}
+    />
+  );
+}
+
+function EnglishSignalBoard({
+  topMoversByWindow,
+  biggestDropsByWindow,
+  momentumByWindow,
+  midMovers,
+  budgetMovers,
+}: {
+  topMoversByWindow: HomepageWindowedCards;
+  biggestDropsByWindow: HomepageWindowedCards;
+  momentumByWindow: HomepageWindowedCards;
+  midMovers: HomepageCard[];
+  budgetMovers: HomepageCard[];
+}) {
   const [selectedWindow, setSelectedWindow] = useState<SignalWindow>("24H");
   const momentumTitle = selectedWindow === "24H" ? "Recent momentum" : "Sustained momentum";
   const momentumEmptyMessage = selectedWindow === "24H"
@@ -111,13 +161,92 @@ export default function HomepageSignalBoard({
         cards={budgetMovers}
         emptyMessage="No budget movers yet"
       />
+    </>
+  );
+}
+
+function JapaneseSignalBoard({
+  topMoversByWindow,
+  biggestDropsByWindow,
+  momentumByWindow,
+  midMovers,
+  budgetMovers,
+  discovery,
+}: {
+  topMoversByWindow: HomepageWindowedCards;
+  biggestDropsByWindow: HomepageWindowedCards;
+  momentumByWindow: HomepageWindowedCards;
+  midMovers: HomepageCard[];
+  budgetMovers: HomepageCard[];
+  discovery: HomepageCard[];
+}) {
+  const [selectedWindow, setSelectedWindow] = useState<SignalWindow>("24H");
+  const momentumTitle = selectedWindow === "24H" ? "Recent JP momentum" : "Sustained JP momentum";
+  const momentumEmptyMessage = selectedWindow === "24H"
+    ? "No 24H JP momentum yet"
+    : "No 7D JP momentum yet";
+
+  return (
+    <>
+      <SignalRailSection
+        id="jp-top-movers"
+        eyebrow="JP · Recent Market"
+        eyebrowClassName="text-[#F87171]"
+        title="Top movers"
+        cards={topMoversByWindow[selectedWindow]}
+        emptyMessage={`No ${selectedWindow} JP movers yet`}
+        headerSlot={(
+          <div className="flex items-center gap-2.5">
+            <WindowTabs selectedWindow={selectedWindow} onChange={setSelectedWindow} />
+            <Link href="/search?language=JP" className="text-[13px] font-medium text-[#F87171] transition-colors hover:text-white">
+              View all →
+            </Link>
+          </div>
+        )}
+      />
 
       <SignalRailSection
-        id="japanese"
-        eyebrow="Japan"
+        id="jp-biggest-drops"
+        eyebrow="JP · Pullbacks"
+        eyebrowClassName="text-[#FCA5A5]"
+        title="Biggest drops"
+        cards={biggestDropsByWindow[selectedWindow]}
+        emptyMessage={`No ${selectedWindow} JP pullbacks yet`}
+      />
+
+      <SignalRailSection
+        id="jp-momentum"
+        eyebrow="JP · Momentum"
+        eyebrowClassName="text-[#F472B6]"
+        title={momentumTitle}
+        cards={momentumByWindow[selectedWindow]}
+        emptyMessage={momentumEmptyMessage}
+      />
+
+      <SignalRailSection
+        id="jp-mid-movers"
+        eyebrow="JP · $8 – $50"
+        eyebrowClassName="text-[#FB923C]"
+        title="Mid-tier movers"
+        cards={midMovers}
+        emptyMessage="No mid-tier JP movers yet"
+      />
+
+      <SignalRailSection
+        id="jp-budget-movers"
+        eyebrow="JP · Under $8"
+        eyebrowClassName="text-[#FBBF24]"
+        title="Budget movers"
+        cards={budgetMovers}
+        emptyMessage="No budget JP movers yet"
+      />
+
+      <SignalRailSection
+        id="jp-discovery"
+        eyebrow="JP · Fresh in the catalog"
         eyebrowClassName="text-[#F87171]"
         title="Japanese cards"
-        cards={japanese}
+        cards={discovery}
         emptyMessage="No Japanese cards yet"
       />
     </>
