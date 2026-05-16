@@ -939,15 +939,16 @@ struct ScannerTabView: View {
                     candidates: scanner.lastMatches,
                     confidence: scanner.lastConfidence ?? "medium",
                     imageHash: scanner.lastImageHash,
-                    // Retain the offline-scan source JPEG so per-row
-                    // correction can submit a server-side
-                    // user_correction anchor via ScanPickerSheet's
-                    // bytes-based promote path. Nil for server-routed
-                    // scans (lastScanImage is nil — bytes already at
-                    // scan-uploads/<hash>.jpg). Codex P2 on PR #101
-                    // flagged the missing anchor submission for
-                    // multi-mode corrections.
-                    scanImage: scanner.lastScanImage,
+                    // Retain the source JPEG (offline OR network-
+                    // routed) so per-row correction can submit a
+                    // server-side user_correction anchor via
+                    // ScanPickerSheet's bytes-gated promote path.
+                    // Uses `lastSourceImage` (multi-mode-only,
+                    // always-set) rather than `lastScanImage`
+                    // (offline-only) so network-routed corrections
+                    // also fire. Codex P2 on PR #101 flagged the
+                    // network-routed gap.
+                    scanImage: scanner.lastSourceImage,
                 )
                 scanner.clearLastMatch()
                 scanner.resumeScanning()
@@ -1325,6 +1326,18 @@ final class ScannerHost: ObservableObject {
     /// already uploaded the JPEG to scan-uploads/<hash>.jpg and the
     /// existing hash-based promote flow can find it server-side.
     @Published private(set) var lastScanImage: UIImage?
+
+    /// Always-retained source UIImage during multi-scan mode
+    /// (regardless of online/offline). `lastScanImage` deliberately
+    /// drops bytes for online scans to save memory — fine for the
+    /// single-shot picker, but the multi-scan correction picker
+    /// needs bytes on EVERY entry because ScanPickerSheet's
+    /// correction-promote path is gated on
+    /// `if let bytes = scanImage`. Set only when `multiScanMode`
+    /// is true so single-mode's memory profile is unchanged. Codex
+    /// P2 on PR #101 flagged the missing network-routed correction
+    /// submission.
+    @Published private(set) var lastSourceImage: UIImage?
 
     /// What on-device OCR pulled from the last captured frame
     /// (collector number and/or set-name hint). Surfaced so the
@@ -1835,6 +1848,14 @@ final class ScannerHost: ObservableObject {
             // online scans already uploaded to scan-uploads/<hash>.jpg
             // so the correction-via-hash path works without it.
             self.lastScanImage = usedOffline ? image : nil
+            // Multi-scan correction needs bytes for every row (the
+            // picker's correction-promote path is gated on
+            // `if let bytes = scanImage`). Retain regardless of
+            // online/offline when multi-mode is active so the next
+            // multiScanSession.append captures them. Cleared back to
+            // nil when not in multi-mode so single-mode memory
+            // profile stays unchanged.
+            self.lastSourceImage = self.multiScanMode ? image : nil
             self.isIdentifying = false
 
             Logger.scan.debug("path source=\(usedOffline ? "offline" : "network") winning_path=\(response.winningPath ?? "nil") confidence=\(reranked.confidence)")
