@@ -957,19 +957,7 @@ struct ScannerTabView: View {
     /// at-a-glance sense of mode + tray depth without taking up
     /// viewfinder real estate.
     private var multiScanToggle: some View {
-        Button {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                scanner.multiScanMode.toggle()
-            }
-            PAHaptics.selection()
-            AnalyticsService.shared.captureRaw(
-                "scanner_multi_mode_toggled",
-                properties: [
-                    "now_active": scanner.multiScanMode,
-                    "tray_count": multiScanSession.entries.count,
-                ],
-            )
-        } label: {
+        Button(action: handleMultiScanToggleTap) {
             let active = scanner.multiScanMode
             ZStack(alignment: .topTrailing) {
                 Image(systemName: active ? "square.stack.fill" : "square.stack")
@@ -994,7 +982,91 @@ struct ScannerTabView: View {
             }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(scanner.multiScanMode ? "Exit multi-scan mode" : "Enter multi-scan mode")
+        .contextMenu {
+            // Long-press / right-click menu so the user can ALWAYS
+            // explicitly exit multi-mode regardless of stack state.
+            // Direct tap is context-sensitive (see
+            // handleMultiScanToggleTap) — when the stack has entries,
+            // tap opens the review sheet; the menu is the unambiguous
+            // way to leave the mode without first emptying or
+            // bulk-adding.
+            if scanner.multiScanMode {
+                Button(role: .destructive) {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        scanner.multiScanMode = false
+                    }
+                    AnalyticsService.shared.captureRaw(
+                        "scanner_multi_mode_toggled",
+                        properties: [
+                            "now_active": false,
+                            "tray_count": multiScanSession.entries.count,
+                            "source": "context_menu_exit",
+                        ],
+                    )
+                } label: {
+                    Label("Exit batch mode", systemImage: "xmark.circle")
+                }
+            }
+        }
+        .accessibilityLabel(toggleAccessibilityLabel)
+    }
+
+    /// Three-state tap behavior on the multi-scan toggle (Codex P1 on
+    /// PR #97 made this necessary — with the bottom tray bar removed,
+    /// the flash overlay was the only entry point to the review
+    /// sheet, leaving the user stuck if the flash faded with a
+    /// non-empty stack):
+    ///   - Off              → enter multi-scan mode
+    ///   - On, 0 entries    → exit multi-scan mode
+    ///   - On, ≥ 1 entries  → open the review sheet (mode stays on)
+    /// To exit mode while the stack is non-empty, long-press the
+    /// toggle for the contextual "Exit batch mode" menu item.
+    private func handleMultiScanToggleTap() {
+        PAHaptics.selection()
+        if !scanner.multiScanMode {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                scanner.multiScanMode = true
+            }
+            AnalyticsService.shared.captureRaw(
+                "scanner_multi_mode_toggled",
+                properties: [
+                    "now_active": true,
+                    "tray_count": multiScanSession.entries.count,
+                    "source": "toggle",
+                ],
+            )
+        } else if multiScanSession.entries.isEmpty {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                scanner.multiScanMode = false
+            }
+            AnalyticsService.shared.captureRaw(
+                "scanner_multi_mode_toggled",
+                properties: [
+                    "now_active": false,
+                    "tray_count": 0,
+                    "source": "toggle",
+                ],
+            )
+        } else {
+            // Non-empty stack — opening the review sheet is the most
+            // useful action. Keep multi-mode on.
+            flashTask?.cancel()
+            flashEntryId = nil
+            showMultiScanSheet = true
+            AnalyticsService.shared.captureRaw(
+                "scanner_multi_mode_review_opened",
+                properties: [
+                    "tray_count": multiScanSession.entries.count,
+                    "source": "toggle",
+                ],
+            )
+        }
+    }
+
+    private var toggleAccessibilityLabel: String {
+        if !scanner.multiScanMode { return "Enter multi-scan mode" }
+        if multiScanSession.entries.isEmpty { return "Exit multi-scan mode" }
+        return "Open multi-scan stack (\(multiScanSession.entries.count))"
     }
 
     /// Submits the current tray to /api/holdings/bulk-import. Returns
