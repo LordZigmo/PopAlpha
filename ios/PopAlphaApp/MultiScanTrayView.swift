@@ -1,142 +1,114 @@
 import SwiftUI
 
-// MARK: - MultiScanTrayBar
+// MARK: - MultiScanFlashCard
 //
-// The collapsed strip pinned to the bottom of the scanner viewport when
-// multi-mode is active. Shows the most-recent thumbnails as horizontal
-// chips with the card's name and price stacked below each chip — the
-// pack-or-binder use case: "I just slapped a card down, what is it and
-// what's it worth?". Tap the whole strip to expand into the review
-// sheet.
+// Transient overlay shown immediately after a multi-scan auto-append.
+// The matched card's primary image pops into the lower-middle of the
+// viewport with the market price floating in front of it. The price
+// fades after ~1s; the card itself fades shortly after. Tapping the
+// overlay (any time it's visible) opens the review sheet so the user
+// can view + bulk-add their stack.
+//
+// Replaces the earlier bottom tray-bar UX (2026-05-16 redesign): the
+// per-card flash is more "scan and forget" — match Eyevo's pattern —
+// and reclaims the bottom strip for the scanner viewport. The toggle
+// at bottom-right is unchanged; tap toggles multi-mode, badge shows
+// running count.
 
-struct MultiScanTrayBar: View {
+struct MultiScanFlashCard: View {
     @ObservedObject var session: MultiScanSession
-    let onExpand: () -> Void
+    let entryId: UUID
+    let priceVisible: Bool
+    let onTap: () -> Void
 
-    private let chipHeight: CGFloat = 64
-    private let maxVisibleChips = 4
+    private let cardWidth: CGFloat = 200
+    /// 2.5 × 3.5 aspect — standard Pokemon card.
+    private let cardAspect: CGFloat = 2.5 / 3.5
 
     var body: some View {
-        HStack(spacing: 12) {
-            chipsRow
-            Spacer(minLength: 0)
-            countAndTotal
+        // Live lookup from the session so a still-loading price fills in
+        // mid-flash without the view needing its own observation. If the
+        // entry got removed (clear, swipe-delete, submit success) while
+        // the flash was still animating, the overlay collapses to empty.
+        if let entry = session.entries.first(where: { $0.id == entryId }) {
+            content(entry: entry)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(.black.opacity(0.55))
-                .background(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(.ultraThinMaterial),
-                ),
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 0.5),
-        )
+    }
+
+    private func content(entry: MultiScanEntry) -> some View {
+        VStack(spacing: 0) {
+            Spacer()
+            ZStack(alignment: .center) {
+                AsyncImage(url: URL(string: entry.match.mirroredPrimaryImageUrl ?? "")) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .aspectRatio(cardAspect, contentMode: .fit)
+                    default:
+                        // Pre-load placeholder: a card-shaped silhouette so
+                        // the flash's vertical anchor doesn't jump when the
+                        // image arrives a frame later.
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color.black.opacity(0.35))
+                            .overlay(
+                                Image(systemName: "rectangle.portrait")
+                                    .font(.system(size: 32))
+                                    .foregroundStyle(.white.opacity(0.3)),
+                            )
+                    }
+                }
+                .frame(width: cardWidth, height: cardWidth / cardAspect)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(confidenceColor(entry.confidence), lineWidth: 2),
+                )
+                .shadow(color: .black.opacity(0.45), radius: 18, x: 0, y: 8)
+
+                if priceVisible {
+                    priceLabel(entry)
+                        .transition(.opacity)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            Spacer().frame(height: 140) // sit above the tab bar
+        }
         .contentShape(Rectangle())
         .onTapGesture {
             PAHaptics.selection()
-            onExpand()
-        }
-        .padding(.horizontal, 12)
-    }
-
-    // MARK: - Subviews
-
-    @ViewBuilder
-    private var chipsRow: some View {
-        if session.entries.isEmpty {
-            // Empty-state guides the user toward the action that populates
-            // the tray — without this, a bare bar reads as "is the
-            // scanner broken?" because the viewfinder offers no immediate
-            // feedback during the first scan attempt.
-            HStack(spacing: 8) {
-                Image(systemName: "square.stack")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.6))
-                Text("Scan a card to start your stack")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.7))
-            }
-        } else {
-            HStack(spacing: 8) {
-                ForEach(visibleChips) { entry in
-                    chipColumn(for: entry)
-                }
-            }
-        }
-    }
-
-    private var visibleChips: [MultiScanEntry] {
-        Array(session.entries.suffix(maxVisibleChips))
-    }
-
-    private func chipColumn(for entry: MultiScanEntry) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            AsyncImage(url: URL(string: entry.match.mirroredPrimaryImageUrl ?? "")) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .aspectRatio(2.5 / 3.5, contentMode: .fill)
-                default:
-                    Color.white.opacity(0.06)
-                        .overlay(
-                            Image(systemName: "rectangle.portrait")
-                                .foregroundStyle(.white.opacity(0.3)),
-                        )
-                }
-            }
-            .frame(width: chipHeight * (2.5 / 3.5), height: chipHeight)
-            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .stroke(confidenceColor(entry.confidence), lineWidth: 1.5),
-            )
-
-            priceLabel(entry)
+            onTap()
         }
     }
 
     @ViewBuilder
     private func priceLabel(_ entry: MultiScanEntry) -> some View {
-        if let price = entry.marketPriceUsd {
-            Text(formatPriceCompact(price))
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.white)
-                .monospacedDigit()
-                .frame(width: chipHeight * (2.5 / 3.5))
-        } else {
-            Text("—")
-                .font(.system(size: 10))
-                .foregroundStyle(.white.opacity(0.5))
-                .frame(width: chipHeight * (2.5 / 3.5))
-        }
-    }
-
-    private var countAndTotal: some View {
-        VStack(alignment: .trailing, spacing: 2) {
-            Text("\(session.entries.count)")
-                .font(.system(size: 18, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-                .monospacedDigit()
-            if session.totalUsd > 0 {
-                Text(formatPrice(session.totalUsd))
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.85))
+        Group {
+            if let price = entry.marketPriceUsd {
+                Text(formatPrice(price))
+                    .font(.system(size: 30, weight: .bold, design: .rounded))
                     .monospacedDigit()
-            } else if session.entries.isEmpty {
-                EmptyView()
             } else {
-                Text("loading…")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.white.opacity(0.5))
+                // Price still loading — show ellipsis so the user sees
+                // SOMETHING in the price slot during the ~200ms gap
+                // between the scan landing and CardService returning.
+                Text("…")
+                    .font(.system(size: 26, weight: .semibold))
             }
         }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 8)
+        .background(
+            Capsule()
+                .fill(.black.opacity(0.6))
+                .background(
+                    Capsule().fill(.ultraThinMaterial),
+                ),
+        )
+        .overlay(
+            Capsule().stroke(Color.white.opacity(0.15), lineWidth: 0.5),
+        )
     }
 
     private func confidenceColor(_ confidence: String) -> Color {
@@ -153,19 +125,6 @@ struct MultiScanTrayBar: View {
         f.currencyCode = "USD"
         f.maximumFractionDigits = 2
         return f.string(from: NSNumber(value: value)) ?? "$\(value)"
-    }
-
-    /// Compact dollar formatting for the per-chip label — drops the
-    /// trailing ".00" on whole dollars so a row of $5 / $12 / $4 / $9
-    /// reads cleanly at the chip's narrow width.
-    private func formatPriceCompact(_ value: Double) -> String {
-        if value >= 100 {
-            return String(format: "$%.0f", value)
-        }
-        if value == value.rounded() {
-            return String(format: "$%.0f", value)
-        }
-        return String(format: "$%.2f", value)
     }
 }
 
