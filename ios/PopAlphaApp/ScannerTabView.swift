@@ -46,6 +46,12 @@ struct ScannerTabView: View {
     // schedule without leaving stale fade-out animations running.
     @State private var flashEntryId: UUID?
     @State private var flashPriceVisible: Bool = false
+    /// When true, the flash card animates toward the bottom-right
+    /// toggle (offset + shrink + fade) instead of fading in place.
+    /// Gives the user a visual cue that the scan is going INTO the
+    /// stack at the toggle's location. Flipped in
+    /// `triggerMultiScanFlash` near the end of the flash window.
+    @State private var flashFlying: Bool = false
     @State private var flashTask: Task<Void, Never>?
 
     /// Tracks which scanner surface most recently flipped
@@ -225,10 +231,12 @@ struct ScannerTabView: View {
                         session: multiScanSession,
                         entryId: flashId,
                         priceVisible: flashPriceVisible,
+                        flying: flashFlying,
                         onTap: {
                             flashTask?.cancel()
                             withAnimation(.easeOut(duration: 0.2)) {
                                 flashEntryId = nil
+                                flashFlying = false
                             }
                             showMultiScanSheet = true
                         },
@@ -961,9 +969,9 @@ struct ScannerTabView: View {
             let active = scanner.multiScanMode
             ZStack(alignment: .topTrailing) {
                 Image(systemName: active ? "square.stack.fill" : "square.stack")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(active ? .black : .white)
-                    .frame(width: 32, height: 32)
+                    .frame(width: 44, height: 44)
                     .background(
                         Circle().fill(active ? Color.white : Color.black.opacity(0.45)),
                     )
@@ -972,12 +980,12 @@ struct ScannerTabView: View {
                     )
                 if active, multiScanSession.entries.count > 0 {
                     Text("\(multiScanSession.entries.count)")
-                        .font(.system(size: 9, weight: .bold))
+                        .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(.white)
-                        .padding(.horizontal, 4)
+                        .padding(.horizontal, 5)
                         .padding(.vertical, 1)
                         .background(Capsule().fill(Color.red))
-                        .offset(x: 5, y: -3)
+                        .offset(x: 6, y: -4)
                 }
             }
         }
@@ -1072,17 +1080,25 @@ struct ScannerTabView: View {
     /// Submits the current tray to /api/holdings/bulk-import. Returns
     /// nil on full success (sheet closes), or a user-facing error
     /// string when the network call throws or any rows fail. The
-    /// Schedule the multi-scan flash overlay's two-stage fade for the
-    /// just-appended entry. Cancels any in-flight fade from a prior
-    /// scan so consecutive captures replace cleanly without leaving
-    /// stale animations running. Timings:
-    ///   - t = 0:     overlay appears (price visible)
-    ///   - t = 1.0s:  price fades (price label opacity → 0 over 0.25s)
-    ///   - t = 1.8s:  card fades (whole overlay opacity → 0 over 0.3s)
-    /// Net visible window ~2.1s; a tap any time during the window
-    /// opens the review sheet via the overlay's onTap.
+    /// Schedule the multi-scan flash overlay's three-stage exit for
+    /// the just-appended entry. Cancels any in-flight schedule from a
+    /// prior scan so consecutive captures replace cleanly without
+    /// leaving stale animations running. Timings:
+    ///   - t = 0:     overlay appears (spring pop, price visible)
+    ///   - t = 1.0s:  price label fades over 250ms
+    ///   - t = 1.4s:  card flies toward bottom-right toggle (offset +
+    ///                shrink + opacity → 0 over 500ms)
+    ///   - t = 1.9s:  overlay removed; flying state reset
+    /// A tap any time during the window opens the review sheet via the
+    /// overlay's onTap (cancels the remaining schedule).
     private func triggerMultiScanFlash(for entryId: UUID) {
         flashTask?.cancel()
+        // Reset flying instantly so the entering card doesn't inherit
+        // the "flown" position from a previous scan that didn't fully
+        // clean up. The reset has to happen WITHOUT an enclosing
+        // withAnimation, otherwise the card would animate from the
+        // toggle position back to center on the way in.
+        flashFlying = false
         withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
             flashEntryId = entryId
             flashPriceVisible = true
@@ -1093,11 +1109,21 @@ struct ScannerTabView: View {
             withAnimation(.easeOut(duration: 0.25)) {
                 flashPriceVisible = false
             }
-            try? await Task.sleep(nanoseconds: 800_000_000)
+            // t=1.4s: start the fly-to-toggle animation. .easeIn
+            // gives a "sucked toward the stack" feel — slow start,
+            // accelerating into the toggle position.
+            try? await Task.sleep(nanoseconds: 400_000_000)
             guard !Task.isCancelled, flashEntryId == entryId else { return }
-            withAnimation(.easeOut(duration: 0.3)) {
-                flashEntryId = nil
+            withAnimation(.easeIn(duration: 0.5)) {
+                flashFlying = true
             }
+            // t=1.9s: remove the overlay entirely. Flying state
+            // cleared so the next scan's enter animation starts from
+            // origin instead of the flown-out offset.
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            guard !Task.isCancelled, flashEntryId == entryId else { return }
+            flashEntryId = nil
+            flashFlying = false
         }
     }
 

@@ -33,6 +33,15 @@ struct MultiScanEntry: Identifiable, Equatable {
     /// loading or unknown. Drives the per-row price label and the
     /// running tray total.
     var marketPriceUsd: Double? = nil
+    /// Pre-fetched card image bytes, populated alongside the price
+    /// fetch in `MultiScanSession.append`. The flash overlay renders
+    /// from this cached UIImage when available, falling back to
+    /// AsyncImage from the URL otherwise. Skipping AsyncImage's
+    /// network round-trip + default fade-in makes the flash feel
+    /// instantaneous instead of a ~300-500ms delayed pop. Memory
+    /// footprint is one decoded image per tray entry — well under
+    /// 1MB each at the URL's typical resolution.
+    var cachedImage: UIImage? = nil
 }
 
 // MARK: - MultiScanSession
@@ -99,6 +108,7 @@ final class MultiScanSession: ObservableObject {
         )
         entries.append(entry)
         loadPrice(for: entry.id, slug: match.slug)
+        loadImage(for: entry.id, urlString: match.mirroredPrimaryImageUrl)
     }
 
     func remove(at offsets: IndexSet) {
@@ -147,6 +157,32 @@ final class MultiScanSession: ObservableObject {
                     return
                 }
                 self.entries[idx].marketPriceUsd = price
+            }
+        }
+    }
+
+    /// Pre-fetch the card's primary image bytes on append so the
+    /// flash overlay can render from an in-memory UIImage instead of
+    /// kicking off an AsyncImage network round-trip when it's about
+    /// to be shown. Silent on failure — the overlay falls back to
+    /// AsyncImage's own URL load in that case, so the user sees the
+    /// same placeholder + delayed pop as before.
+    private func loadImage(for entryId: UUID, urlString: String?) {
+        guard let urlString,
+              let url = URL(string: urlString) else { return }
+        Task { [weak self] in
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                guard let image = UIImage(data: data) else { return }
+                await MainActor.run {
+                    guard let self else { return }
+                    guard let idx = self.entries.firstIndex(where: { $0.id == entryId }) else {
+                        return
+                    }
+                    self.entries[idx].cachedImage = image
+                }
+            } catch {
+                // Silent. Flash falls back to AsyncImage with the URL.
             }
         }
     }

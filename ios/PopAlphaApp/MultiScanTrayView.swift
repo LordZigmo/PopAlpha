@@ -19,11 +19,24 @@ struct MultiScanFlashCard: View {
     @ObservedObject var session: MultiScanSession
     let entryId: UUID
     let priceVisible: Bool
+    /// When true, the card animates toward the bottom-right toggle
+    /// (offset + scale-down + fade) instead of fading in place. Gives
+    /// the user a visual cue that the scanned card is going INTO the
+    /// stack at the toggle's location. Parent toggles this near the
+    /// end of the flash window (~1.5s into a ~2s total).
+    let flying: Bool
     let onTap: () -> Void
 
     private let cardWidth: CGFloat = 200
     /// 2.5 × 3.5 aspect — standard Pokemon card.
     private let cardAspect: CGFloat = 2.5 / 3.5
+
+    /// Offset applied to the card when `flying` is true. Roughly
+    /// targets the bottom-right toggle's position relative to the
+    /// card's centered start. Exact pixel-match isn't necessary; the
+    /// direction + scale-down reads clearly as "the card is going
+    /// over there."
+    private let flyOffset: CGSize = CGSize(width: 140, height: 200)
 
     var body: some View {
         // Live lookup from the session so a still-loading price fills in
@@ -39,6 +52,9 @@ struct MultiScanFlashCard: View {
         VStack(spacing: 0) {
             Spacer()
             cardBox(entry: entry)
+                .offset(flying ? flyOffset : .zero)
+                .scaleEffect(flying ? 0.18 : 1.0)
+                .opacity(flying ? 0 : 1.0)
             Spacer().frame(height: 140) // sit above the tab bar
         }
         .frame(maxWidth: .infinity)
@@ -52,7 +68,50 @@ struct MultiScanFlashCard: View {
 
     private func cardBox(entry: MultiScanEntry) -> some View {
         ZStack(alignment: .center) {
-            AsyncImage(url: URL(string: entry.match.mirroredPrimaryImageUrl ?? "")) { phase in
+            cardImage(entry: entry)
+                .frame(width: cardWidth, height: cardWidth / cardAspect)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(confidenceColor(entry.confidence), lineWidth: 2),
+                )
+                .shadow(color: .black.opacity(0.45), radius: 18, x: 0, y: 8)
+
+            if priceVisible {
+                priceLabel(entry)
+                    .transition(.opacity)
+            }
+        }
+        // Constrain the hit target to the card-sized frame so taps on
+        // the surrounding viewport (the scanner tap-to-capture area,
+        // the bottom-right toggle) pass through to those handlers
+        // instead of being swallowed by the flash overlay.
+        .frame(width: cardWidth, height: cardWidth / cardAspect)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            PAHaptics.selection()
+            onTap()
+        }
+    }
+
+    /// Renders the card art. Prefers the pre-fetched `cachedImage`
+    /// (populated by `MultiScanSession.loadImage` on append) so the
+    /// flash is instantaneous when the image bytes arrived before the
+    /// overlay was shown. Falls back to AsyncImage with the default
+    /// fade-in disabled — without that override, AsyncImage's built-in
+    /// crossfade adds another ~300ms of perceived load even after the
+    /// bytes are in hand.
+    @ViewBuilder
+    private func cardImage(entry: MultiScanEntry) -> some View {
+        if let cached = entry.cachedImage {
+            Image(uiImage: cached)
+                .resizable()
+                .aspectRatio(cardAspect, contentMode: .fit)
+        } else {
+            AsyncImage(
+                url: URL(string: entry.match.mirroredPrimaryImageUrl ?? ""),
+                transaction: Transaction(animation: nil),
+            ) { phase in
                 switch phase {
                 case .success(let image):
                     image
@@ -71,28 +130,6 @@ struct MultiScanFlashCard: View {
                         )
                 }
             }
-            .frame(width: cardWidth, height: cardWidth / cardAspect)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(confidenceColor(entry.confidence), lineWidth: 2),
-            )
-            .shadow(color: .black.opacity(0.45), radius: 18, x: 0, y: 8)
-
-            if priceVisible {
-                priceLabel(entry)
-                    .transition(.opacity)
-            }
-        }
-        // Constrain the hit target to the card-sized frame so taps on
-        // the surrounding viewport (the scanner tap-to-capture area,
-        // the bottom-right toggle) pass through to those handlers
-        // instead of being swallowed by the flash overlay.
-        .frame(width: cardWidth, height: cardWidth / cardAspect)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            PAHaptics.selection()
-            onTap()
         }
     }
 
