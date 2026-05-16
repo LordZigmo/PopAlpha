@@ -190,6 +190,17 @@ struct ScannerTabView: View {
                 // full-width tray bar fills the bottom of the viewport
                 // and the toggle floats just above it; tapping the
                 // tray opens the expanded review sheet for bulk-add.
+                //
+                // Bottom inset (2026-05-16): the scanner ZStack uses
+                // `.ignoresSafeArea()` for the camera fill, so the
+                // tray/toggle would naturally sit under the SwiftUI
+                // TabView's bar — and on iOS 26's liquid-glass tab
+                // bar the visual extent is taller than pre-26 tabs,
+                // so the toggle disappeared entirely behind it. The
+                // 92pt single-mode and 96pt multi-mode bottom inset
+                // clear both the home indicator (~34pt) and the
+                // liquid-glass tab bar (~58pt) with a small margin
+                // for visual breathing room.
                 VStack(spacing: 8) {
                     Spacer()
                     HStack {
@@ -202,10 +213,10 @@ struct ScannerTabView: View {
                             session: multiScanSession,
                             onExpand: { showMultiScanSheet = true },
                         )
-                        .padding(.bottom, 36)
+                        .padding(.bottom, 96)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                     } else {
-                        Color.clear.frame(height: 24)
+                        Color.clear.frame(height: 92)
                     }
                 }
                 #if DEBUG
