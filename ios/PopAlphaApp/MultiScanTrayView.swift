@@ -38,42 +38,57 @@ struct MultiScanFlashCard: View {
     private func content(entry: MultiScanEntry) -> some View {
         VStack(spacing: 0) {
             Spacer()
-            ZStack(alignment: .center) {
-                AsyncImage(url: URL(string: entry.match.mirroredPrimaryImageUrl ?? "")) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .aspectRatio(cardAspect, contentMode: .fit)
-                    default:
-                        // Pre-load placeholder: a card-shaped silhouette so
-                        // the flash's vertical anchor doesn't jump when the
-                        // image arrives a frame later.
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(Color.black.opacity(0.35))
-                            .overlay(
-                                Image(systemName: "rectangle.portrait")
-                                    .font(.system(size: 32))
-                                    .foregroundStyle(.white.opacity(0.3)),
-                            )
-                    }
-                }
-                .frame(width: cardWidth, height: cardWidth / cardAspect)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(confidenceColor(entry.confidence), lineWidth: 2),
-                )
-                .shadow(color: .black.opacity(0.45), radius: 18, x: 0, y: 8)
-
-                if priceVisible {
-                    priceLabel(entry)
-                        .transition(.opacity)
-                }
-            }
-            .frame(maxWidth: .infinity)
+            cardBox(entry: entry)
             Spacer().frame(height: 140) // sit above the tab bar
         }
+        .frame(maxWidth: .infinity)
+        // No tap gesture on the outer VStack — Spacers would extend the
+        // hit target across the entire viewport and swallow the
+        // scanner's tap-to-capture / multi-scan toggle taps while the
+        // flash is visible. (Codex P2 review on PR #97.) The tap lives
+        // on `cardBox` so only the visible card frame opens the review
+        // sheet; the rest of the viewport stays interactive.
+    }
+
+    private func cardBox(entry: MultiScanEntry) -> some View {
+        ZStack(alignment: .center) {
+            AsyncImage(url: URL(string: entry.match.mirroredPrimaryImageUrl ?? "")) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .aspectRatio(cardAspect, contentMode: .fit)
+                default:
+                    // Pre-load placeholder: a card-shaped silhouette so
+                    // the flash's vertical anchor doesn't jump when the
+                    // image arrives a frame later.
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.black.opacity(0.35))
+                        .overlay(
+                            Image(systemName: "rectangle.portrait")
+                                .font(.system(size: 32))
+                                .foregroundStyle(.white.opacity(0.3)),
+                        )
+                }
+            }
+            .frame(width: cardWidth, height: cardWidth / cardAspect)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(confidenceColor(entry.confidence), lineWidth: 2),
+            )
+            .shadow(color: .black.opacity(0.45), radius: 18, x: 0, y: 8)
+
+            if priceVisible {
+                priceLabel(entry)
+                    .transition(.opacity)
+            }
+        }
+        // Constrain the hit target to the card-sized frame so taps on
+        // the surrounding viewport (the scanner tap-to-capture area,
+        // the bottom-right toggle) pass through to those handlers
+        // instead of being swallowed by the flash overlay.
+        .frame(width: cardWidth, height: cardWidth / cardAspect)
         .contentShape(Rectangle())
         .onTapGesture {
             PAHaptics.selection()
