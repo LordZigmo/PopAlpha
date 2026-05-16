@@ -236,12 +236,32 @@ async function resolvePrintingId(supabase, slug) {
   return null;
 }
 
+// Mirror of run-yahoo-jp-daily/route.ts: parse JPY_TO_USD_RATE from env
+// with a 0.0068 fallback (~147 JPY/USD). Used at write time to derive
+// price_jpy for the "¥X,XXX ($X)" tile display added in Phase C-1b
+// (2026-05-16). Snkrdunk's English API serves USD only, so this is an
+// FX-derived approximation, not the seller's listed yen value.
+const DEFAULT_JPY_TO_USD_RATE = 0.0068;
+const JPY_TO_USD = (() => {
+  const raw = process.env.JPY_TO_USD_RATE;
+  const parsed = raw != null ? Number.parseFloat(raw) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_JPY_TO_USD_RATE;
+})();
+
 async function writeSnkrdunkPrice(supabase, slug, payload) {
+  const priceUsd = payload.price_usd;
+  // Derive JPY from USD at write time. ROUND to integer yen (yen has no
+  // subunit in everyday use). Skip when price_usd is missing.
+  const priceJpy = typeof priceUsd === "number" && Number.isFinite(priceUsd) && priceUsd > 0
+    ? Math.round(priceUsd / JPY_TO_USD)
+    : null;
   const row = {
     canonical_slug: slug,
     printing_id: payload.printing_id ?? null,
     grade: payload.grade ?? "RAW",
-    price_usd: payload.price_usd,
+    price_usd: priceUsd,
+    price_jpy: priceJpy,
+    fx_rate_used: priceJpy != null ? JPY_TO_USD : null,
     currency: payload.currency ?? "USD",
     sample_count: payload.sample_count,
     snkrdunk_product_code: payload.snkrdunk_product_code,

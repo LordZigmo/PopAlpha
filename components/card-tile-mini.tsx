@@ -64,10 +64,10 @@ export default function CardTileMini({
     yahooJpPriceJpy: card.yahoo_jp_price_jpy,
     yahooJpSampleCount: card.yahoo_jp_sample_count,
     snkrdunkPrice: card.snkrdunk_price,
-    // Snkrdunk's English API returns USD only — no native JPY available
-    // until a follow-up PR adds either a native scrape or a view-time
-    // FX computation. Pass undefined so the source picker leaves
-    // priceJpy null on snkrdunk-sourced rows.
+    // Snkrdunk JPY is FX-derived (price_usd / JPY_TO_USD_RATE at write
+    // time), not the seller's listed yen value — Snkrdunk's English API
+    // returns USD only. Phase C-1b 2026-05-16.
+    snkrdunkPriceJpy: card.snkrdunk_price_jpy,
     snkrdunkSampleCount: card.snkrdunk_sample_count,
   });
 
