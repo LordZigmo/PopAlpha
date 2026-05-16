@@ -67,6 +67,13 @@ struct WatchlistButton: View {
     /// a frosted-glass background so it reads as secondary to the
     /// accent-filled primary "+" FAB without disappearing into the
     /// content beneath it.
+    ///
+    /// Hit-test note: `.background(.ultraThinMaterial)` followed by
+    /// `.clipShape(Circle())` was silently eating taps on iOS 26 (real-
+    /// device repro 2026-05-15). Switching to the `.background(_:in:)`
+    /// overload (which clips the material to the circle in one step)
+    /// plus an explicit `.contentShape(Circle())` makes the Button's
+    /// hit region match the visible circle and restores tap delivery.
     private var compactLabel: some View {
         Group {
             if isLoading {
@@ -80,12 +87,12 @@ struct WatchlistButton: View {
             }
         }
         .frame(width: 44, height: 44)
-        .background(.ultraThinMaterial)
-        .clipShape(Circle())
+        .background(.ultraThinMaterial, in: Circle())
         .overlay(
             Circle()
                 .stroke(PA.Colors.hairline(0.08), lineWidth: 1)
         )
+        .contentShape(Circle())
         .shadow(color: .black.opacity(0.25), radius: 6, x: 0, y: 2)
     }
 
