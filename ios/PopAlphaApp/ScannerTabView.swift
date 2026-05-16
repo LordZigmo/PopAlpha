@@ -1310,21 +1310,16 @@ final class ScannerHost: ObservableObject {
                     self.onAutoDetectQuotaBlocked?()
                     return true
                 }
-                // Record upstream — every server call deserves a
-                // quota tick, regardless of whether the identify
-                // result ends up HIGH/MEDIUM (appended), LOW
-                // (dropped at handleIdentifyResult default branch),
-                // or HIGH/MEDIUM-but-duplicate (dropped at the
-                // dedupe gate). For the duplicate case the
-                // dedupe-drop path calls ScanQuota.refundScan() to
-                // back out the charge so a lingering card doesn't
-                // burn quota on every re-fire. Codex flagged the
-                // alternative (defer until append) in pass 10 as
-                // letting LOW-confidence scans bypass quota
-                // entirely — picking up a free-tier user with bad
-                // lighting on infinite server calls (Codex P2 on PR
-                // #83, eleventh pass).
-                ScanQuota.shared.recordScan()
+                // canScan check happens here (pre-identify) so a user
+                // at the wall never makes a server call. recordScan
+                // does NOT happen here — it lives inside runIdentify,
+                // AFTER the re-entry guard, so the daily counter
+                // doesn't tick for callbacks that the guard drops
+                // (in-flight identify, result waiting on screen).
+                // Codex P2 on PR #83 (twelfth pass) caught the over-
+                // charge from charging at this layer. The dedupe-
+                // drop branch in handleIdentifyResult still refunds
+                // for same-card auto-re-fires.
                 return false
             }
             if blocked { return }
@@ -1409,6 +1404,24 @@ final class ScannerHost: ObservableObject {
         }
         self.isIdentifying = true
         self.identifyError = nil
+
+        // Multi-scan auto-detect quota charge (Codex P2 review on PR
+        // #83, twelfth pass). Lives BEHIND the re-entry guard above
+        // because the upstream onStableCardCaptured hook can fire
+        // for frames that this guard then drops (a previous identify
+        // is in flight or a result is waiting on screen). Charging
+        // before the guard would tick the daily counter for those
+        // suppressed callbacks even though no server call ran.
+        // Scoped to triggerSource=="auto" — tap is charged at the
+        // tap handler, library bypasses by convention. Premium
+        // skips. The dedupe-drop branch in handleIdentifyResult
+        // refunds same-card auto-re-fires; LOW results stay charged
+        // because the server call actually ran.
+        if triggerSource == "auto",
+           self.multiScanMode,
+           !PremiumGate.shared.isPro {
+            ScanQuota.shared.recordScan()
+        }
         // Belt-and-braces: clear Vision's stability buffer so the
         // next post-arm re-detection requires a fresh stable window.
         self.viewModel?.pauseForExternalCapture()
