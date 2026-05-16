@@ -32,6 +32,22 @@ struct ScannerTabView: View {
     @StateObject private var scanQuota = ScanQuota.shared
     @StateObject private var multiScanSession = MultiScanSession()
 
+    // MARK: - Multi-scan flash overlay state
+    //
+    // 2026-05-16 redesign: replaced the persistent bottom tray bar
+    // with a transient card-flash overlay. On each multi-mode append
+    // the most-recent entry's image pops into the lower viewport with
+    // its price floating in front; price fades at 1s, card at 1.8s.
+    // Tap during the visible window opens the review sheet.
+    //
+    // `flashEntryId` drives the overlay's presence; `flashPriceVisible`
+    // controls the price label's separate fade. `flashTask` owns the
+    // staged-fade timer so consecutive scans can cancel the previous
+    // schedule without leaving stale fade-out animations running.
+    @State private var flashEntryId: UUID?
+    @State private var flashPriceVisible: Bool = false
+    @State private var flashTask: Task<Void, Never>?
+
     /// Tracks which scanner surface most recently flipped
     /// `showPaywallSheet`, so the paywall analytics carry the right
     /// `surface` property. Three triggers feed a single sheet — crown
@@ -184,40 +200,41 @@ struct ScannerTabView: View {
                     Spacer()
                 }
 
-                // Bottom-right multi-scan toggle + tray. Toggle is a
-                // small unobtrusive circle so it doesn't compete with
-                // the viewfinder when off. When multi-mode is on, a
-                // full-width tray bar fills the bottom of the viewport
-                // and the toggle floats just above it; tapping the
-                // tray opens the expanded review sheet for bulk-add.
-                //
-                // Bottom inset (2026-05-16): the scanner ZStack uses
-                // `.ignoresSafeArea()` for the camera fill, so the
-                // tray/toggle would naturally sit under the SwiftUI
-                // TabView's bar — and on iOS 26's liquid-glass tab
-                // bar the visual extent is taller than pre-26 tabs,
-                // so the toggle disappeared entirely behind it. The
-                // 92pt single-mode and 96pt multi-mode bottom inset
-                // clear both the home indicator (~34pt) and the
-                // liquid-glass tab bar (~58pt) with a small margin
-                // for visual breathing room.
-                VStack(spacing: 8) {
+                // Bottom-right multi-scan toggle. Pinned 92pt above
+                // the absolute viewport bottom so it clears the home
+                // indicator AND the iOS 26 liquid-glass tab bar with
+                // visual margin. The scanner ZStack uses
+                // `.ignoresSafeArea()` so we manually inset here —
+                // there's no safeAreaInset doing it for us.
+                VStack {
                     Spacer()
                     HStack {
                         Spacer()
                         multiScanToggle
                             .padding(.trailing, 16)
                     }
-                    if scanner.multiScanMode {
-                        MultiScanTrayBar(
-                            session: multiScanSession,
-                            onExpand: { showMultiScanSheet = true },
-                        )
-                        .padding(.bottom, 96)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                    } else {
-                        Color.clear.frame(height: 92)
-                    }
+                    .padding(.bottom, 92)
+                }
+
+                // Multi-scan flash overlay (2026-05-16 redesign).
+                // Renders the most-recent appended card's image with
+                // its price overlaid — pops in on append, price fades
+                // at ~1s, card fades at ~1.8s. Tap → review sheet.
+                if scanner.multiScanMode, let flashId = flashEntryId {
+                    MultiScanFlashCard(
+                        session: multiScanSession,
+                        entryId: flashId,
+                        priceVisible: flashPriceVisible,
+                        onTap: {
+                            flashTask?.cancel()
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                flashEntryId = nil
+                            }
+                            showMultiScanSheet = true
+                        },
+                    )
+                    .transition(.scale(scale: 0.85).combined(with: .opacity))
+                    .allowsHitTesting(true)
                 }
                 #if DEBUG
                 // Path-source indicator — sticky display of the last
@@ -363,6 +380,18 @@ struct ScannerTabView: View {
                 } else {
                     scanner.resumeScanning()
                 }
+            }
+            // Multi-scan flash trigger. Watches the session's entries
+            // array via its identifier (last entry's id) — fires on
+            // every append, including consecutive scans of different
+            // cards. Same-id repeats won't trigger (dedupe-drop
+            // doesn't append). Uses the entry-id rather than count to
+            // re-flash correctly when a submit clears the tray and
+            // the user immediately scans another card (count goes 0
+            // → 1 just like the very first scan, but the id is new).
+            .onChange(of: multiScanSession.entries.last?.id) { _, newId in
+                guard scanner.multiScanMode, let id = newId else { return }
+                triggerMultiScanFlash(for: id)
             }
             .onAppear {
                 // Wire the auto-detect quota-blocked callback so
@@ -928,19 +957,7 @@ struct ScannerTabView: View {
     /// at-a-glance sense of mode + tray depth without taking up
     /// viewfinder real estate.
     private var multiScanToggle: some View {
-        Button {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                scanner.multiScanMode.toggle()
-            }
-            PAHaptics.selection()
-            AnalyticsService.shared.captureRaw(
-                "scanner_multi_mode_toggled",
-                properties: [
-                    "now_active": scanner.multiScanMode,
-                    "tray_count": multiScanSession.entries.count,
-                ],
-            )
-        } label: {
+        Button(action: handleMultiScanToggleTap) {
             let active = scanner.multiScanMode
             ZStack(alignment: .topTrailing) {
                 Image(systemName: active ? "square.stack.fill" : "square.stack")
@@ -965,12 +982,125 @@ struct ScannerTabView: View {
             }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(scanner.multiScanMode ? "Exit multi-scan mode" : "Enter multi-scan mode")
+        .contextMenu {
+            // Long-press / right-click menu so the user can ALWAYS
+            // explicitly exit multi-mode regardless of stack state.
+            // Direct tap is context-sensitive (see
+            // handleMultiScanToggleTap) — when the stack has entries,
+            // tap opens the review sheet; the menu is the unambiguous
+            // way to leave the mode without first emptying or
+            // bulk-adding.
+            if scanner.multiScanMode {
+                Button(role: .destructive) {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        scanner.multiScanMode = false
+                    }
+                    AnalyticsService.shared.captureRaw(
+                        "scanner_multi_mode_toggled",
+                        properties: [
+                            "now_active": false,
+                            "tray_count": multiScanSession.entries.count,
+                            "source": "context_menu_exit",
+                        ],
+                    )
+                } label: {
+                    Label("Exit batch mode", systemImage: "xmark.circle")
+                }
+            }
+        }
+        .accessibilityLabel(toggleAccessibilityLabel)
+    }
+
+    /// Three-state tap behavior on the multi-scan toggle (Codex P1 on
+    /// PR #97 made this necessary — with the bottom tray bar removed,
+    /// the flash overlay was the only entry point to the review
+    /// sheet, leaving the user stuck if the flash faded with a
+    /// non-empty stack):
+    ///   - Off              → enter multi-scan mode
+    ///   - On, 0 entries    → exit multi-scan mode
+    ///   - On, ≥ 1 entries  → open the review sheet (mode stays on)
+    /// To exit mode while the stack is non-empty, long-press the
+    /// toggle for the contextual "Exit batch mode" menu item.
+    private func handleMultiScanToggleTap() {
+        PAHaptics.selection()
+        if !scanner.multiScanMode {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                scanner.multiScanMode = true
+            }
+            AnalyticsService.shared.captureRaw(
+                "scanner_multi_mode_toggled",
+                properties: [
+                    "now_active": true,
+                    "tray_count": multiScanSession.entries.count,
+                    "source": "toggle",
+                ],
+            )
+        } else if multiScanSession.entries.isEmpty {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                scanner.multiScanMode = false
+            }
+            AnalyticsService.shared.captureRaw(
+                "scanner_multi_mode_toggled",
+                properties: [
+                    "now_active": false,
+                    "tray_count": 0,
+                    "source": "toggle",
+                ],
+            )
+        } else {
+            // Non-empty stack — opening the review sheet is the most
+            // useful action. Keep multi-mode on.
+            flashTask?.cancel()
+            flashEntryId = nil
+            showMultiScanSheet = true
+            AnalyticsService.shared.captureRaw(
+                "scanner_multi_mode_review_opened",
+                properties: [
+                    "tray_count": multiScanSession.entries.count,
+                    "source": "toggle",
+                ],
+            )
+        }
+    }
+
+    private var toggleAccessibilityLabel: String {
+        if !scanner.multiScanMode { return "Enter multi-scan mode" }
+        if multiScanSession.entries.isEmpty { return "Exit multi-scan mode" }
+        return "Open multi-scan stack (\(multiScanSession.entries.count))"
     }
 
     /// Submits the current tray to /api/holdings/bulk-import. Returns
     /// nil on full success (sheet closes), or a user-facing error
     /// string when the network call throws or any rows fail. The
+    /// Schedule the multi-scan flash overlay's two-stage fade for the
+    /// just-appended entry. Cancels any in-flight fade from a prior
+    /// scan so consecutive captures replace cleanly without leaving
+    /// stale animations running. Timings:
+    ///   - t = 0:     overlay appears (price visible)
+    ///   - t = 1.0s:  price fades (price label opacity → 0 over 0.25s)
+    ///   - t = 1.8s:  card fades (whole overlay opacity → 0 over 0.3s)
+    /// Net visible window ~2.1s; a tap any time during the window
+    /// opens the review sheet via the overlay's onTap.
+    private func triggerMultiScanFlash(for entryId: UUID) {
+        flashTask?.cancel()
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+            flashEntryId = entryId
+            flashPriceVisible = true
+        }
+        flashTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard !Task.isCancelled, flashEntryId == entryId else { return }
+            withAnimation(.easeOut(duration: 0.25)) {
+                flashPriceVisible = false
+            }
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            guard !Task.isCancelled, flashEntryId == entryId else { return }
+            withAnimation(.easeOut(duration: 0.3)) {
+                flashEntryId = nil
+            }
+        }
+    }
+
     /// returned string is rendered inline in the review sheet's
     /// footer so a tapped Add button never silently no-ops — was a
     /// Codex P2 bug in the initial version of this PR (returned
