@@ -124,6 +124,26 @@ final class MultiScanSession: ObservableObject {
         entries[idx].quantity = max(1, min(99, qty))
     }
 
+    /// Replace the matched card on an existing entry (per-row
+    /// correction from the review sheet). Clears the cached price +
+    /// image because both are slug-specific and stale for the new
+    /// match, then kicks off fresh fetches in the same pattern as
+    /// append. The bulk-add submission for this entry will use the
+    /// new match's canonical_slug.
+    ///
+    /// Caller (ScannerTabView.correctionPickerSheet) is responsible
+    /// for invoking the server-side correction-promote endpoint via
+    /// ScanPickerSheet's existing flow; this method only handles the
+    /// client-side tray-state swap.
+    func reassign(entryId: UUID, to newMatch: ScanMatch) {
+        guard let idx = entries.firstIndex(where: { $0.id == entryId }) else { return }
+        entries[idx].match = newMatch
+        entries[idx].marketPriceUsd = nil
+        entries[idx].cachedImage = nil
+        loadPrice(for: entryId, slug: newMatch.slug)
+        loadImage(for: entryId, urlString: newMatch.mirroredPrimaryImageUrl)
+    }
+
     func clear() {
         entries.removeAll()
     }
