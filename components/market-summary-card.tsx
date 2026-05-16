@@ -421,12 +421,24 @@ export async function loadRawCardMarketVariants(params: {
     // data that we surface to the user). Codex P2 on PR #99.
     dbAdmin()
       .from("provider_observation_matches")
-      .select("printing_id, updated_at, provider_normalized_observations(metadata, observed_at)")
+      .select("printing_id, updated_at, provider_variant_id, provider_normalized_observations(metadata, observed_at)")
       .eq("canonical_slug", params.canonicalSlug)
       .eq("provider", "SCRYDEX")
       .in("printing_id", printingIds)
+      // Filter out graded observations at the query level. Graded
+      // observations get suffix "::GRADED::<PROVIDER>::<BUCKET>" on
+      // provider_variant_id (see pokemontcg-raw-normalize.ts comment
+      // on line 327). Without this filter, cards with multiple graded
+      // SKUs (e.g. a PSA-10 / PSA-9 / CGC-10 spread) can crowd out
+      // the single RAW observation within the per-printing limit and
+      // the asking-price line never appears. Codex P2 #2 on PR #99.
+      .not("provider_variant_id", "ilike", "%::GRADED::%")
       .order("updated_at", { ascending: false })
-      .limit(printingIds.length * 6),
+      // Two rows per printing — RAW + safety margin for any per-finish
+      // splits (e.g. holofoil vs reverseHolofoil on the same printing
+      // get distinct provider_variant_id values). The first non-null
+      // asking metadata per printing wins in the JS loop below.
+      .limit(printingIds.length * 2),
   ]);
 
   const maxHistoryDate = allHistoryRows
