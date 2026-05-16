@@ -241,30 +241,37 @@ type VariantObservation = {
   highPrice: number | null;
 };
 
+// Anchor-tagged source_window values. Phase C-3 (2026-05-16) re-enables
+// trend anchors with explicit basis tagging so chart consumers can
+// distinguish them from low-basis snapshots:
+//   * "snapshot"           — written by the timeseries snapshot path,
+//                            uses scrydex's `low` (Phase A headline).
+//   * "market_anchor_30d"  — synthetic 30d-window anchor derived from
+//                            scrydex's market-basis trend deltas.
+//   * "market_anchor_180d" — same, 180d window.
+// The chart should filter `source_window = 'snapshot'` for the headline
+// price line. Metrics paths read from observation `history_points_30d`
+// directly (separate column) and don't need to filter.
+type AnchorSourceWindow = "market_anchor_30d" | "market_anchor_180d";
+
 type TrendAnchorPoint = {
   lookbackDays: number;
   price: number;
   currency: "USD" | "EUR" | "JPY";
-  sourceWindow: "30d" | "180d";
+  sourceWindow: AnchorSourceWindow;
 };
 
-
-// Currently unused (extractTrendAnchorPoints is disabled — see its docs).
-// Kept inline as documentation of the windows scrydex publishes; Phase C
-// will re-enable anchor extraction with proper basis separation and will
-// reuse this map.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const SCRYDEX_TREND_WINDOWS: Array<{
   key: string;
   lookbackDays: number;
-  sourceWindow: "30d" | "180d";
+  sourceWindow: AnchorSourceWindow;
 }> = [
-  { key: "days_1", lookbackDays: 1, sourceWindow: "30d" },
-  { key: "days_7", lookbackDays: 7, sourceWindow: "30d" },
-  { key: "days_14", lookbackDays: 14, sourceWindow: "30d" },
-  { key: "days_30", lookbackDays: 30, sourceWindow: "30d" },
-  { key: "days_90", lookbackDays: 90, sourceWindow: "180d" },
-  { key: "days_180", lookbackDays: 180, sourceWindow: "180d" },
+  { key: "days_1", lookbackDays: 1, sourceWindow: "market_anchor_30d" },
+  { key: "days_7", lookbackDays: 7, sourceWindow: "market_anchor_30d" },
+  { key: "days_14", lookbackDays: 14, sourceWindow: "market_anchor_30d" },
+  { key: "days_30", lookbackDays: 30, sourceWindow: "market_anchor_30d" },
+  { key: "days_90", lookbackDays: 90, sourceWindow: "market_anchor_180d" },
+  { key: "days_180", lookbackDays: 180, sourceWindow: "market_anchor_180d" },
 ];
 
 function parsePositiveInt(value: number | undefined, fallback: number): number {
@@ -291,41 +298,61 @@ function normalizeCardNumber(raw: string | null | undefined): string {
   return trimmed;
 }
 
-function extractTrendAnchorPoints(_prices: unknown): TrendAnchorPoint[] {
-  // Disabled 2026-05-15 (Codex P2 on PR #87, second pass): the previous
-  // attempt kept the trend-anchor calculation on `market` basis to stay
-  // aligned with scrydex's trends.<window>.price_change deltas, but those
-  // anchors still get written into `price_history_points` alongside the
-  // new low-based snapshots in the SAME variant_ref series. The chart
-  // then sees a market-basis anchor abruptly drop to a low-basis snapshot
-  // at "now" (Mewtwo VSTAR JP #084: anchor=¥7,500, today's snapshot=¥4,300
-  // → phantom -43% drop on the same day).
+function extractTrendAnchorPoints(prices: unknown): TrendAnchorPoint[] {
+  // Re-enabled 2026-05-16 (Phase C-3) with explicit basis tagging:
+  // anchors are emitted with `sourceWindow = "market_anchor_30d"` /
+  // `"market_anchor_180d"`, distinct from the low-basis snapshot's
+  // `"snapshot"` source_window. Chart consumers that render the
+  // headline price line filter to `source_window = 'snapshot'` so the
+  // chart no longer sees a market-basis anchor abruptly drop to today's
+  // low-basis snapshot (the phantom-drop bug Phase A's disable patched
+  // around).
   //
-  // Same problem hits derivePriceRelativeTo30dRange in
-  // provider-observation-variant-metrics.ts — it compares observedPrice
-  // (now low) against a historic anchor range (market), producing a
-  // meaningless relative position.
+  // Trend math stays on `market` basis because scrydex's
+  // trends.<window>.price_change deltas are computed against its
+  // `market` series. Pairing today's `low` with a market delta would
+  // produce mixed-basis anchors (Mewtwo VSTAR JP: low=¥4,300 -
+  // market_delta=¥3,200 = ¥1,100, an anchor that has no real meaning).
+  // We read `selected.row.market` directly as the basis. If the row
+  // lacks a `market` value we skip entirely — can't fabricate an
+  // anchor without the basis the deltas are computed against.
   //
-  // Recomputing anchors on a low basis is not possible: scrydex doesn't
-  // publish low_change deltas. The today's-ratio approximation
-  // (low_today × market_t/market_today) is only valid when the bid-ask
-  // spread is stable over the lookback window — false for thin-liquidity
-  // cards, which are exactly the cards that motivated the Phase A switch.
-  //
-  // Cost of disabling:
-  //   * Hot-promotion fast-path takes ~10-15 days of real snapshots to
-  //     accumulate 8 price_changes_30d on brand-new cards (vs. instant
-  //     via anchors). Established cards (>30d of real snapshots already)
-  //     are unaffected. Sunday weekly tier-recompute still catches
-  //     everything via direct activity counting.
-  //   * Chart history starts thin on new cards and accumulates daily.
-  //
-  // Phase C follow-up (queued): re-add anchors with proper basis
-  // separation — either a distinct source_window prefix
-  // ("market_anchor_30d") or a series_basis column — so chart and
-  // metrics can filter explicitly. Tracking that as a separate PR rather
-  // than blocking the headline-correction Phase A on a schema change.
-  return [];
+  // Restoration also re-arms two downstream signals that Phase A lost:
+  //   * hot-promotion fast-path on new cards (variant_metrics gets
+  //     real history_points_30d again, can hit the 8-change threshold)
+  //   * chart history backfill for brand-new sets (30d/180d points
+  //     show immediately on first fetch instead of waiting for 30d of
+  //     real snapshots)
+  const selected = selectPreferredScrydexPriceEntry(prices);
+  if (!selected) return [];
+
+  const trends = (
+    selected.row.trends
+    && typeof selected.row.trends === "object"
+    && !Array.isArray(selected.row.trends)
+  ) ? selected.row.trends as Record<string, unknown> : null;
+  if (!trends) return [];
+
+  const marketBasis = getNumberField((selected.row as Record<string, unknown>).market);
+  if (marketBasis === null) return [];
+
+  const anchors: TrendAnchorPoint[] = [];
+  for (const window of SCRYDEX_TREND_WINDOWS) {
+    const trendRow = trends[window.key];
+    if (!trendRow || typeof trendRow !== "object" || Array.isArray(trendRow)) continue;
+    const priceChange = getNumberField((trendRow as Record<string, unknown>).price_change);
+    if (priceChange === null) continue;
+    const anchorPrice = Number((marketBasis - priceChange).toFixed(4));
+    if (!Number.isFinite(anchorPrice) || anchorPrice <= 0) continue;
+    anchors.push({
+      lookbackDays: window.lookbackDays,
+      price: anchorPrice,
+      currency: selected.currency,
+      sourceWindow: window.sourceWindow,
+    });
+  }
+
+  return anchors;
 }
 
 function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
@@ -491,8 +518,15 @@ function buildObservationRow(params: {
       }))
       .filter((point) => point.price > 0 && point.ts < rawPayload.fetched_at)
     : [];
+  // Metrics-side history_points_30d is populated from market-basis
+  // anchors tagged "market_anchor_30d" (Phase C-3). The metrics path
+  // (provider-observation-variant-metrics.ts) consumes these via the
+  // observation row's history_points_30d JSONB column — separate from
+  // the price_history_points snapshot writes the chart reads. Mixed
+  // basis here is acceptable because metrics derive change counts and
+  // trend slopes (units-free), not absolute-value comparisons.
   const historyPoints30d = providerTrendAnchorPoints
-    .filter((point) => point.sourceWindow === "30d")
+    .filter((point) => point.sourceWindow === "market_anchor_30d")
     .map((point) => ({
       ts: point.ts,
       price: point.price,
