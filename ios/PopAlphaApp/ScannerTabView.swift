@@ -843,28 +843,30 @@ struct ScannerTabView: View {
                 // copies of the same card via tap).
                 if scanner.lastTriggerSource == "auto",
                    multiScanSession.shouldDedupeAutoDetect(slug: match.slug) {
+                    // The upstream gate charged a quota unit before
+                    // this server call; refund it now since the
+                    // duplicate is being dropped from the tray.
+                    // Without this refund a card lingering in the
+                    // viewfinder eats quota on every re-fire even
+                    // though the stack doesn't grow. Premium users
+                    // didn't charge upstream, so don't refund.
+                    if !premiumGate.isPro {
+                        scanQuota.refundScan()
+                    }
                     scanner.clearLastMatch()
                     scanner.resumeScanning()
                     return
                 }
-                // Two-stage quota accounting (Codex P2, ninth +
-                // tenth pass):
-                //   1. ScannerHost.installNetworkIdentifier did the
-                //      pre-identify canScan check upstream — a user
-                //      at the wall never reaches handleIdentifyResult.
-                //   2. The recordScan increment lives HERE, after
-                //      the dedupe check has had a chance to drop a
-                //      same-card re-fire. Charging upstream would
-                //      burn a quota unit on duplicates the user
-                //      doesn't see in the tray.
-                // Tap-path quota is enforced at the tap handler
-                // before captureFrameAndIdentify; library imports
-                // intentionally bypass quota in both modes. Only
-                // auto-detect needs the deferred charge.
-                if scanner.lastTriggerSource == "auto",
-                   !premiumGate.isPro {
-                    scanQuota.recordScan()
-                }
+                // Quota was already charged upstream in
+                // ScannerHost.installNetworkIdentifier — every server
+                // call deserves a quota tick regardless of result
+                // tier. LOW/error results land in the default branch
+                // below and don't append, but the charge stays
+                // (consistent with "you used a server call"). Only
+                // same-slug auto-detect duplicates are refunded
+                // (block above). Tap and library are charged at
+                // their own entry points. (Codex P2 review on PR
+                // #83, eleventh pass.)
                 PAHaptics.tap()
                 multiScanSession.append(
                     match: match,
@@ -1308,18 +1310,21 @@ final class ScannerHost: ObservableObject {
                     self.onAutoDetectQuotaBlocked?()
                     return true
                 }
-                // Don't record the scan here — defer the counter
-                // increment to handleIdentifyResult, AFTER the
-                // dedupe check has had a chance to drop a same-card
-                // re-fire. Charging upstream would burn quota on
-                // duplicates that never actually reach the tray.
-                // The canScan check above still prevents the over-
-                // quota server call from being made; this just
-                // controls when the increment lands. The runIdentify
-                // re-entry guard (isIdentifying / lastMatch) serializes
-                // auto-captures, so a race between two pending
-                // auto-detects sharing the same remaining slot is
-                // not possible. (Codex P2 review on PR #83.)
+                // Record upstream — every server call deserves a
+                // quota tick, regardless of whether the identify
+                // result ends up HIGH/MEDIUM (appended), LOW
+                // (dropped at handleIdentifyResult default branch),
+                // or HIGH/MEDIUM-but-duplicate (dropped at the
+                // dedupe gate). For the duplicate case the
+                // dedupe-drop path calls ScanQuota.refundScan() to
+                // back out the charge so a lingering card doesn't
+                // burn quota on every re-fire. Codex flagged the
+                // alternative (defer until append) in pass 10 as
+                // letting LOW-confidence scans bypass quota
+                // entirely — picking up a free-tier user with bad
+                // lighting on infinite server calls (Codex P2 on PR
+                // #83, eleventh pass).
+                ScanQuota.shared.recordScan()
                 return false
             }
             if blocked { return }
