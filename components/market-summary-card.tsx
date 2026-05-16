@@ -6,6 +6,15 @@ import type {
 } from "@/components/raw-card-variant-types";
 import { computeLiquidity } from "@/lib/cards/liquidity";
 import { dbPublic } from "@/lib/db";
+// Phase C-2 (2026-05-16): asking-price lookup reads from
+// provider_observation_matches + provider_normalized_observations,
+// which are RLS-locked to internal-only (migration
+// 20260319161000_phase2_provider_and_mapping_tables_rls.sql). The
+// public anon client returns no rows, so we use a service-role
+// fetch in a server component scope. Trust contract added to
+// scripts/security-guardrails.config.mjs DBADMIN_ALLOWED_FILES.
+// Codex P2 on PR #99.
+import { dbAdmin } from "@/lib/db/admin";
 import {
   extractRawVariantPrintingId,
   isRawHistoryVariantRefForPrinting,
@@ -402,7 +411,15 @@ export async function loadRawCardMarketVariants(params: {
     // (most-recent observation wins via order+limit semantics
     // applied in JS below — Supabase doesn't have a single-query
     // GROUP BY argmax pattern).
-    supabase
+    //
+    // Uses dbAdmin() because provider_observation_matches +
+    // provider_normalized_observations are RLS-locked to internal-only
+    // (migration 20260319161000). The anon client would return zero
+    // rows silently and the asking line would never appear. The
+    // service-role read is safe here — only metadata.scrydexAskingPriceUsd
+    // is extracted from the response (already non-sensitive pricing
+    // data that we surface to the user). Codex P2 on PR #99.
+    dbAdmin()
       .from("provider_observation_matches")
       .select("printing_id, updated_at, provider_normalized_observations(metadata, observed_at)")
       .eq("canonical_slug", params.canonicalSlug)
