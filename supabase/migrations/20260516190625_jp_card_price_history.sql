@@ -120,8 +120,10 @@ COMMENT ON COLUMN public.jp_card_price_history.recorded_at IS
   'compute_jp_card_price_changes can order by recorded_at to find the '
   'nearest 24h-ago / 7d-ago snapshot.';
 
--- Anon read grant for the public API surface. RLS stays disabled on
--- this table (matching yahoo_jp_card_prices / snkrdunk_card_prices) —
--- price observations are non-PII and the homepage reads them through
--- anon.
-GRANT SELECT ON public.jp_card_price_history TO anon, authenticated;
+-- RLS enabled with no public policies — matches yahoo_jp_card_prices
+-- (migration 20260508140000) and snkrdunk_card_prices (20260513150000).
+-- The pipeline writers run under the service role (which bypasses RLS),
+-- and the homepage reads aggregate deltas through public_card_metrics
+-- once compute_jp_card_price_changes() ships in Phase 2b. Direct anon
+-- SELECT on raw historical observations is intentionally blocked.
+ALTER TABLE public.jp_card_price_history ENABLE ROW LEVEL SECURITY;
