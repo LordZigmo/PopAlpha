@@ -161,12 +161,15 @@ struct MarketPulseSection: View {
         return Category.allCases.filter { $0 != .japanese }
     }
 
-    /// The category whose rail is currently rendered. JP-only mode
-    /// honours the user's tab selection within the JP tab strip;
-    /// fall back to `.movers` if the persisted EN selection is one
-    /// of the categories we don't expose in JP (breakouts/unusual).
+    /// The category whose rail is currently rendered. Once `category`
+    /// is normalized to `visibleCategories` on every market flip (see
+    /// `.onChange(of: japaneseOnly)` in `body`) this is just a passthrough,
+    /// but the contains-check stays as a defensive fallback for the
+    /// initial-mount edge case where the parent constructs this view
+    /// with `japaneseOnly: true` AND `category` happens to hold a
+    /// non-JP value (e.g. SwiftUI state restoration).
     private var activeCategory: Category {
-        if japaneseOnly && !visibleCategories.contains(category) {
+        if !visibleCategories.contains(category) {
             return .movers
         }
         return category
@@ -193,6 +196,22 @@ struct MarketPulseSection: View {
             }
             categoryTabs
             activeSection
+        }
+        // Keep `category` in sync with the current market's
+        // visibleCategories. Without this, toggling EN→JP while on
+        // .breakouts (an EN-only tab) leaves `category = .breakouts`
+        // even though `activeCategory` falls back to .movers — the tab
+        // strip then highlights nothing because the strip compares
+        // against `category`, not `activeCategory`. Symmetric problem
+        // on JP→EN when the user had picked .japanese. Normalizing
+        // `category` on every market flip aligns the tab-strip
+        // selection with the rendered rail.
+        .onChange(of: japaneseOnly) { _, _ in
+            if !visibleCategories.contains(category) {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    category = .movers
+                }
+            }
         }
     }
 
