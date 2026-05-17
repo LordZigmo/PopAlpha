@@ -311,12 +311,24 @@ struct MultiScanReviewSheet: View {
         // pops back to the review list (preserving tray state),
         // and the user can then dismiss the sheet to return to the
         // scanner with multi-mode + tray still intact.
+        //
+        // scanImageHash + scanImage are intentionally nil for tray-
+        // launched detail. CardDetailView gates its "Not this card?"
+        // correction prompt on `scanImageHash != nil`, and that
+        // correction flow submits via EvalSeedingView WITHOUT calling
+        // back to MultiScanSession.reassign — so a user who corrects
+        // from the detail prompt would land back at a tray still
+        // holding the original (wrong) match, then bulk-add the
+        // wrong card despite the successful correction. The swipe-
+        // left "Edit" action on the row is the tray-aware correction
+        // path; suppressing the detail-view affordance here avoids
+        // the divergence. (Codex P2 review on PR #104.)
         .navigationDestination(item: $detailEntryId) { entryId in
             if let entry = session.entries.first(where: { $0.id == entryId }) {
                 CardDetailView(
                     card: entry.match.toMarketCard(),
-                    scanImageHash: entry.imageHash,
-                    scanImage: entry.scanImage,
+                    scanImageHash: nil,
+                    scanImage: nil,
                 )
             }
         }
