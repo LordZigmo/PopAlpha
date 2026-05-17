@@ -980,7 +980,6 @@ export default async function Home() {
         japaneseMomentumByWindow={signalBoard.japanese_momentum}
         japaneseMidMovers={signalBoard.japanese_mid_movers}
         japaneseBudgetMovers={signalBoard.japanese_budget_movers}
-        japanese={signalBoard.japanese}
       />
 
       {/* ── Market Intelligence ─────────────────────────────────────────── */}

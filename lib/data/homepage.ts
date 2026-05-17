@@ -517,6 +517,13 @@ type JpRailBundle = {
 };
 
 const JP_PREMIUM_MIN_PRICE = 50;
+// JP rail thresholds intentionally looser than EN's MIN_MOVER_CHANGE_PCT
+// (2.5%). The EN floor noise-filters across ~25k priced rows; the JP
+// catalog has a much smaller denominator (~3-5k priced rows), so few
+// JP cards clear ±2.5% in a 24h/7d window — the pullbacks rail in
+// particular would render empty on most days. 1% lets enough JP
+// candidates through to feel busy without surfacing flat noise.
+const JP_MIN_MOVER_CHANGE_PCT = 1;
 const JP_MID_MIN_PRICE = 8;
 const JP_BUDGET_MIN_PRICE = 1;
 const JP_FRESHNESS_MAX_AGE_HOURS = 7 * 24;
@@ -699,12 +706,12 @@ async function loadJapaneseSignalRails(
   const byChangeAsc = (a: Candidate, b: Candidate) => a.changePct - b.changePct;
 
   const topMovers: HomepageWindowedCards = {
-    "24H": pickWithSetCap(candidates24h, (c) => c.changePct >= MIN_MOVER_CHANGE_PCT, byChangeDesc),
-    "7D": pickWithSetCap(candidates7d, (c) => c.changePct >= MIN_MOVER_CHANGE_PCT, byChangeDesc),
+    "24H": pickWithSetCap(candidates24h, (c) => c.changePct >= JP_MIN_MOVER_CHANGE_PCT, byChangeDesc),
+    "7D": pickWithSetCap(candidates7d, (c) => c.changePct >= JP_MIN_MOVER_CHANGE_PCT, byChangeDesc),
   };
   const biggestDrops: HomepageWindowedCards = {
-    "24H": pickWithSetCap(candidates24h, (c) => c.changePct <= -MIN_MOVER_CHANGE_PCT, byChangeAsc),
-    "7D": pickWithSetCap(candidates7d, (c) => c.changePct <= -MIN_MOVER_CHANGE_PCT, byChangeAsc),
+    "24H": pickWithSetCap(candidates24h, (c) => c.changePct <= -JP_MIN_MOVER_CHANGE_PCT, byChangeAsc),
+    "7D": pickWithSetCap(candidates7d, (c) => c.changePct <= -JP_MIN_MOVER_CHANGE_PCT, byChangeAsc),
   };
   const momentum: HomepageWindowedCards = {
     "24H": pickWithSetCap(
@@ -732,7 +739,7 @@ async function loadJapaneseSignalRails(
   const midMovers = pickWithSetCap(
     bestCandidates,
     (c) =>
-      c.changePct >= MIN_MOVER_CHANGE_PCT
+      c.changePct >= JP_MIN_MOVER_CHANGE_PCT
       && c.marketPrice >= JP_MID_MIN_PRICE
       && c.marketPrice < JP_PREMIUM_MIN_PRICE,
     byChangeDesc,
@@ -740,7 +747,7 @@ async function loadJapaneseSignalRails(
   const budgetMovers = pickWithSetCap(
     bestCandidates,
     (c) =>
-      c.changePct >= MIN_MOVER_CHANGE_PCT
+      c.changePct >= JP_MIN_MOVER_CHANGE_PCT
       && c.marketPrice >= JP_BUDGET_MIN_PRICE
       && c.marketPrice < JP_MID_MIN_PRICE,
     byChangeDesc,

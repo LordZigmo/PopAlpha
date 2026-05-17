@@ -165,11 +165,14 @@ struct MarketPulseSection: View {
     private var visibleCategories: [Category] {
         if japaneseOnly {
             // Mirror the web JP board ordering: Movers, Pullbacks,
-            // Momentum (windowed, reads japaneseMomentum), Mid, Budget,
-            // then the Japan discovery tab last. Breakouts / Unusual
-            // stay EN-only because the server hasn't shipped JP
-            // equivalents for those signals yet.
-            return [.movers, .pullbacks, .momentum, .mid, .budget, .japanese]
+            // Momentum (windowed, reads japaneseMomentum), Mid, Budget.
+            // The legacy `.japanese` discovery tab is hidden — it was
+            // a holdover from when JP mode only had one rail, and now
+            // duplicates the signal already surfaced through Movers /
+            // Pullbacks / Momentum. Breakouts / Unusual stay EN-only
+            // because the server hasn't shipped JP equivalents for
+            // those signals yet.
+            return [.movers, .pullbacks, .momentum, .mid, .budget]
         }
         // EN mode currently hides `.momentum` because the EN .breakouts
         // tab already falls back to momentum data when breakouts is
