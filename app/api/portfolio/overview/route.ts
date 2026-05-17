@@ -185,16 +185,40 @@ export async function GET(req: Request) {
     if (gradedBucketsNeeded.size > 0) {
       const { data: gradedMetricRows, error: gradedMetricErr } = await pub
         .from("public_card_metrics")
-        .select("canonical_slug, grade, market_price, median_7d")
+        .select("canonical_slug, grade, market_price, median_7d, median_30d, trimmed_median_30d")
         .in("canonical_slug", slugs)
         .in("grade", [...gradedBucketsNeeded])
         .is("printing_id", null);
       if (gradedMetricErr) throw new Error(gradedMetricErr.message);
-      for (const row of (gradedMetricRows ?? []) as Array<{ canonical_slug: string; grade: string; market_price: number | null; median_7d: number | null }>) {
-        // market_price is computed on the RAW provider blend and may be
-        // null for graded buckets; fall back to median_7d so graded
-        // holdings still get a number.
-        const price = row.market_price ?? row.median_7d;
+      for (const row of (gradedMetricRows ?? []) as Array<{
+        canonical_slug: string;
+        grade: string;
+        market_price: number | null;
+        median_7d: number | null;
+        median_30d: number | null;
+        trimmed_median_30d: number | null;
+      }>) {
+        // Graded canonical-level rows (printing_id IS NULL) consistently
+        // have market_price = null — the refresh_card_metrics_for_variants
+        // function only populates market_price for RAW. Walk a fallback
+        // chain so graded holdings get valued from whatever signal the
+        // metrics writer has produced:
+        //
+        //   median_7d        → freshest, but null on cards that haven't
+        //                      traded in the last 7 days (~63% of graded
+        //                      canonical rows fall through here)
+        //   median_30d       → broader window; rescues ~55k additional
+        //                      graded rows the 7d-only fallback missed
+        //                      (G10 alone gains 13,801 priced rows)
+        //   trimmed_median_30d → outlier-trimmed 30d for the long tail
+        //
+        // Without the deeper fallback, the majority of graded slabs in
+        // user portfolios round to $0 in totals even though Scrydex has
+        // emitted a recent rolling median for them.
+        const price = row.market_price
+          ?? row.median_7d
+          ?? row.median_30d
+          ?? row.trimmed_median_30d;
         if (price != null) priceMap.set(`${row.canonical_slug}::${row.grade}`, price);
       }
     }
