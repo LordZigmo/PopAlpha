@@ -52,6 +52,36 @@ function normalizeRawProviderName(provider: string | null | undefined): "SCRYDEX
   return null;
 }
 
+const GRADED_GRADES = new Set(["LE_7", "G8", "G9", "G9_5", "G10", "G10_PERFECT"]);
+
+/**
+ * Pick the headline price for the snapshot based on grade.
+ *
+ * RAW headline uses card_metrics.market_price (Phase A: that's scrydex's
+ * `low` field, aligned with TCGplayer's published Market Price label).
+ *
+ * Graded card_metrics rows have market_price = NULL — the refresh
+ * function doesn't compute a "market price" for graded SKUs because the
+ * (provider × bucket) fan-out lives in variant_metrics. card_metrics
+ * does carry `median_30d` / `trimmed_median_30d` for graded though,
+ * computed from the same chart-feeding snapshots. Fall back to those
+ * for the graded headline so the snapshot route stops returning a null
+ * price for cards that obviously have one (Celebrations Claydol G10
+ * shows trimmed_median_30d = $53.54 with 12 active listings, but the
+ * old code returned price=null because market_price was empty).
+ *
+ * Phase 3 of docs/graded-surfacing-plan.md (shipped 2026-05-16).
+ */
+function pickHeadlineSourcePrice(
+  grade: string,
+  snapshot: SnapshotRow | null,
+): number | null {
+  if (!snapshot) return null;
+  if (grade === "RAW") return snapshot.market_price ?? null;
+  if (!GRADED_GRADES.has(grade)) return snapshot.market_price ?? null;
+  return snapshot.trimmed_median_30d ?? snapshot.median_30d ?? null;
+}
+
 async function resolveRawPricingPrintingId(params: {
   supabase: ReturnType<typeof dbPublic>;
   slug: string;
@@ -119,8 +149,21 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: result.error }, { status: 500 });
   }
 
-  const scrydexSourcePrice = result.data?.market_price ?? null;
-  const scrydexAsOf = scrydexSourcePrice !== null ? (result.data?.market_price_as_of ?? null) : null;
+  // Phase 3 of graded-surfacing-plan: pickHeadlineSourcePrice falls
+  // back to median_30d for graded grades where card_metrics.market_price
+  // is null (graded SKUs don't have a single "market price" because the
+  // provider × bucket fan-out lives in variant_metrics). Without this
+  // fall-back the route returned null for every graded request even
+  // though the chart shows real prices.
+  const scrydexSourcePrice = pickHeadlineSourcePrice(grade, result.data ?? null);
+  // RAW carries a real as_of from market_price_as_of. Graded medians are
+  // a rolling 30-day computation with no clean "as of" stamp — defer
+  // marketPriceAsOf to after the history fetch so we can use the most
+  // recent history row's ts instead. Until then, hold the RAW value.
+  const scrydexAsOf =
+    grade === "RAW" && scrydexSourcePrice !== null
+      ? (result.data?.market_price_as_of ?? null)
+      : null;
   const scrydex = await buildProviderPriceDisplay({
     supabase,
     provider: "SCRYDEX",
@@ -213,9 +256,48 @@ export async function GET(req: Request) {
   const lowConfidence = weighted.lowConfidence || confidenceBand.lowConfidence;
 
   const marketPriceUsd = scrydex.usdPrice ?? null;
-  const marketPriceAsOf = marketPriceUsd !== null ? (scrydex.asOf ?? null) : null;
-  const trust = resolveSnapshotTrust(result.data ?? null, {
-    blendPolicy: marketPriceUsd !== null ? "SCRYDEX_PRIMARY" : "NO_PRICE",
+  // Compute marketPriceAsOf:
+  //   - RAW: use the existing market_price_as_of stamp (real "last sold").
+  //   - Graded: median_30d has no clean as_of, so use the most recent
+  //     history row's ts as a "last refreshed" proxy. Falls back to
+  //     null if no history rows landed.
+  let marketPriceAsOf: string | null = marketPriceUsd !== null ? (scrydex.asOf ?? null) : null;
+  if (marketPriceUsd !== null && marketPriceAsOf === null && historyRows.length > 0) {
+    let latestMs = -Infinity;
+    let latestIso: string | null = null;
+    for (const row of historyRows) {
+      const ms = new Date(row.ts).getTime();
+      if (Number.isFinite(ms) && ms > latestMs) {
+        latestMs = ms;
+        latestIso = row.ts;
+      }
+    }
+    marketPriceAsOf = latestIso;
+  }
+  // Synthesize a trust row keyed to the chosen headline price.
+  // resolveSnapshotTrust reads row.market_price internally and short-
+  // circuits to NO_PRICE/0/lowConfidence=true when null. For graded
+  // requests `result.data.market_price` is always null (the refresh
+  // function doesn't compute a single "market price" for graded SKUs),
+  // but we've computed a real headline from the median fall-back. Pass
+  // the resolved headline as market_price on the synth row so the
+  // trust resolver takes the non-null branch and uses our fallback
+  // confidenceScore / lowConfidence / blendPolicy instead of the
+  // NO_PRICE short-circuit. Codex P2 on PR #105.
+  const trustRow = result.data
+    ? { ...result.data, market_price: marketPriceUsd }
+    : marketPriceUsd !== null
+      ? {
+          market_price: marketPriceUsd,
+          market_confidence_score: null,
+          market_low_confidence: null,
+          market_blend_policy: null,
+        }
+      : null;
+  const trust = resolveSnapshotTrust(trustRow, {
+    blendPolicy: marketPriceUsd !== null
+      ? (grade === "RAW" ? "SCRYDEX_PRIMARY" : "SCRYDEX_GRADED_MEDIAN")
+      : "NO_PRICE",
     confidenceScore: marketPriceUsd !== null ? modelConfidence : 0,
     lowConfidence: marketPriceUsd === null ? true : lowConfidence,
   });
