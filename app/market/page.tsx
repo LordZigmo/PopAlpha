@@ -8,8 +8,10 @@ import { getCommunityPulseSnapshot } from "@/lib/data/community-pulse";
 import { getPopAlphaModel } from "@/lib/ai/models";
 import HomepageSignalBoard from "@/components/homepage-signal-board";
 import HomepageSearch from "@/components/homepage-search";
+import MarketTogglePill from "@/components/market-toggle-pill";
 import SiteHeader from "@/components/site-header";
 import TypewriterText from "@/components/typewriter-text";
+import { MarketProvider } from "@/lib/market-context";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -63,6 +65,11 @@ const EMPTY_DATA: {
     breakouts: HomepageCard[];
     mid_movers: HomepageCard[];
     budget_movers: HomepageCard[];
+    japanese_top_movers: { "24H": HomepageCard[]; "7D": HomepageCard[] };
+    japanese_biggest_drops: { "24H": HomepageCard[]; "7D": HomepageCard[] };
+    japanese_momentum: { "24H": HomepageCard[]; "7D": HomepageCard[] };
+    japanese_mid_movers: HomepageCard[];
+    japanese_budget_movers: HomepageCard[];
     japanese: HomepageCard[];
   };
   as_of: string | null;
@@ -82,6 +89,11 @@ const EMPTY_DATA: {
     breakouts: [],
     mid_movers: [],
     budget_movers: [],
+    japanese_top_movers: { "24H": [], "7D": [] },
+    japanese_biggest_drops: { "24H": [], "7D": [] },
+    japanese_momentum: { "24H": [], "7D": [] },
+    japanese_mid_movers: [],
+    japanese_budget_movers: [],
     japanese: [],
   },
   as_of: null,
@@ -716,10 +728,12 @@ export default async function Home() {
   ] as const;
 
   return (
+    <MarketProvider>
     <div className="landing-shell min-h-screen bg-[#060608] text-[#F0F0F0]">
       <SiteHeader
         showSignIn={!user}
         primaryCta={user ? { label: "Profile", href: "/profile" } : { label: "Start free", href: "/sign-up" }}
+        leadingSlot={<MarketTogglePill />}
         centerSlot={(
           <Suspense fallback={<div className="h-9 w-full rounded-full bg-white/[0.04]" />}>
             <HomepageSearch size="nav" autoFocus={false} className="w-full" />
@@ -961,6 +975,11 @@ export default async function Home() {
         momentumByWindow={momentumCardsByWindow}
         midMovers={signalBoard.mid_movers}
         budgetMovers={signalBoard.budget_movers}
+        japaneseTopMoversByWindow={signalBoard.japanese_top_movers}
+        japaneseBiggestDropsByWindow={signalBoard.japanese_biggest_drops}
+        japaneseMomentumByWindow={signalBoard.japanese_momentum}
+        japaneseMidMovers={signalBoard.japanese_mid_movers}
+        japaneseBudgetMovers={signalBoard.japanese_budget_movers}
         japanese={signalBoard.japanese}
       />
 
@@ -1292,6 +1311,7 @@ export default async function Home() {
         </div>
       </footer>
     </div>
+    </MarketProvider>
   );
 }
 

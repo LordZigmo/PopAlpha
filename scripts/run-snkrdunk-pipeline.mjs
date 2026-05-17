@@ -274,6 +274,35 @@ async function writeSnkrdunkPrice(supabase, slug, payload) {
       .upsert(row, { onConflict: "canonical_slug,printing_id,grade" });
     if (error) throw new Error(error.message);
   });
+  // Append a time-series row to jp_card_price_history so a future
+  // compute_jp_card_price_changes() can derive change_pct from Snkrdunk
+  // observations. printing_id is mirrored from the latest-price row so
+  // per-printing time series stay separated — mixing canonical-level
+  // and per-printing observations into the same series would make the
+  // eventual delta math compare unrelated prices. See migration
+  // 20260516190625_jp_card_price_history.sql for the design rationale.
+  // Failure is non-fatal — the current-price upsert above already
+  // succeeded and we don't want a history-append hiccup to fail the
+  // whole pipeline.
+  try {
+    const { error: historyError } = await supabase
+      .from("jp_card_price_history")
+      .insert({
+        canonical_slug: slug,
+        printing_id: row.printing_id,
+        grade: row.grade,
+        source: "snkrdunk",
+        price_jpy: row.price_jpy,
+        price_usd: row.price_usd,
+        sample_count: row.sample_count,
+        observed_at: row.observed_at,
+      });
+    if (historyError) {
+      console.warn(`[snkrdunk] jp_card_price_history append failed for ${slug}: ${historyError.message}`);
+    }
+  } catch (err) {
+    console.warn(`[snkrdunk] jp_card_price_history append threw for ${slug}:`, err instanceof Error ? err.message : err);
+  }
   return { mode: "upserted" };
 }
 
