@@ -60,6 +60,7 @@ struct MarketPulseSection: View {
         case breakouts
         case unusual
         case pullbacks
+        case momentum
         case mid
         case budget
         case japanese
@@ -72,6 +73,7 @@ struct MarketPulseSection: View {
             case .breakouts: return "Breakouts"
             case .unusual: return "Unusual"
             case .pullbacks: return "Pullbacks"
+            case .momentum: return "Momentum"
             case .mid: return "Mid"
             case .budget: return "Budget"
             case .japanese: return "Japan"
@@ -86,6 +88,7 @@ struct MarketPulseSection: View {
             case .breakouts: return "BREAKOUTS"
             case .unusual: return "UNUSUAL"
             case .pullbacks: return "PULLBACKS"
+            case .momentum: return "MOMENTUM"
             case .mid: return "$8–$50"
             case .budget: return "UNDER $8"
             case .japanese: return "JAPAN"
@@ -98,6 +101,7 @@ struct MarketPulseSection: View {
             case .breakouts: return "Breakouts"
             case .unusual: return "Unusual Volume"
             case .pullbacks: return "Pullbacks"
+            case .momentum: return "Momentum"
             case .mid: return "Mid Movers"
             case .budget: return "Budget Movers"
             case .japanese: return "Japanese Cards"
@@ -110,6 +114,7 @@ struct MarketPulseSection: View {
             case .breakouts: return Color(red: 0.486, green: 0.227, blue: 0.929)
             case .unusual: return PA.Colors.gold
             case .pullbacks: return Color(red: 1.0, green: 0.42, blue: 0.42)
+            case .momentum: return Color(red: 0.957, green: 0.447, blue: 0.714) // pink-400, matches web JP #F472B6
             case .mid: return Color(red: 0.063, green: 0.725, blue: 0.506) // emerald-500
             case .budget: return Color(red: 0.961, green: 0.620, blue: 0.043) // amber-500
             case .japanese: return Color(red: 0.973, green: 0.443, blue: 0.443) // matches web rail #F87171
@@ -125,6 +130,7 @@ struct MarketPulseSection: View {
             case .breakouts: return "Thin supply move"
             case .unusual: return "Unusual volume"
             case .pullbacks: return nil
+            case .momentum: return nil
             case .mid: return nil
             case .budget: return nil
             case .japanese: return nil
@@ -134,10 +140,12 @@ struct MarketPulseSection: View {
         /// Whether this category respects the global 24H / 7D window.
         /// Breakouts, Unusual, Mid, Budget, and Japanese come from
         /// non-windowed daily-computed (or discovery-sorted) lists
-        /// server-side, so the toggle is ignored there.
+        /// server-side, so the toggle is ignored there. Momentum is
+        /// windowed for parity with the web JP board's 24H / 7D
+        /// momentum toggle.
         var isWindowed: Bool {
             switch self {
-            case .movers, .pullbacks: return true
+            case .movers, .pullbacks, .momentum: return true
             case .breakouts, .unusual, .mid, .budget, .japanese: return false
             }
         }
@@ -156,9 +164,19 @@ struct MarketPulseSection: View {
     /// redundant.
     private var visibleCategories: [Category] {
         if japaneseOnly {
-            return [.movers, .pullbacks, .mid, .budget, .japanese]
+            // Mirror the web JP board ordering: Movers, Pullbacks,
+            // Momentum (windowed, reads japaneseMomentum), Mid, Budget,
+            // then the Japan discovery tab last. Breakouts / Unusual
+            // stay EN-only because the server hasn't shipped JP
+            // equivalents for those signals yet.
+            return [.movers, .pullbacks, .momentum, .mid, .budget, .japanese]
         }
-        return Category.allCases.filter { $0 != .japanese }
+        // EN mode currently hides `.momentum` because the EN .breakouts
+        // tab already falls back to momentum data when breakouts is
+        // empty; promoting momentum to its own EN tab would duplicate
+        // it. JP has a dedicated japaneseMomentum field that's
+        // independent from japaneseTopMovers, so the tab is JP-only.
+        return Category.allCases.filter { $0 != .japanese && $0 != .momentum }
     }
 
     /// The category whose rail is currently rendered. Once `category`
@@ -389,6 +407,10 @@ struct MarketPulseSection: View {
                 let windowed = signalBoard.japaneseBiggestDrops
                 let cards = windowed?.forWindow(selectedWindow) ?? []
                 return cards.map { $0.preferringJpSource() }
+            case .momentum:
+                let windowed = signalBoard.japaneseMomentum
+                let cards = windowed?.forWindow(selectedWindow) ?? []
+                return cards.map { $0.preferringJpSource() }
             case .mid:
                 return (signalBoard.japaneseMidMovers ?? []).map { $0.preferringJpSource() }
             case .budget:
@@ -412,6 +434,10 @@ struct MarketPulseSection: View {
             return signalBoard.unusualVolume ?? highConfidenceMovers
         case .pullbacks:
             return signalBoard.biggestDrops.forWindow(selectedWindow)
+        case .momentum:
+            // EN mode never exposes `.momentum` in visibleCategories
+            // (breakouts already falls back to it). Defensive only.
+            return signalBoard.momentum.forWindow(selectedWindow)
         case .mid:
             // Older server builds (pre 20260504230000_compute_daily_top_movers_mid_tier)
             // may not include midMovers; fall back to empty (renders the empty state).
@@ -440,6 +466,7 @@ struct MarketPulseSection: View {
         case .breakouts: return "No breakouts yet"
         case .unusual: return "No unusual activity"
         case .pullbacks: return "No \(selectedWindow.label) pullbacks"
+        case .momentum: return "No \(selectedWindow.label) momentum yet"
         case .mid: return "No mid movers yet"
         case .budget: return "No budget movers yet"
         case .japanese: return "No Japanese cards yet"

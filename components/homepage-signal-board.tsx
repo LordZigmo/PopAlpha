@@ -195,8 +195,14 @@ function JapaneseSignalBoard({
 
   return (
     <>
+      {/* JP rails reuse the canonical EN anchor IDs (top-movers,
+          biggest-drops, momentum-rail, mid-movers, budget-movers) so
+          the hero's "See top movers" / "See the move" anchors in
+          app/market/page.tsx scroll-target correctly in JP mode too.
+          Only one signal board (EN OR JP) renders at a time, so the
+          shared IDs are unique within the DOM. */}
       <SignalRailSection
-        id="jp-top-movers"
+        id="top-movers"
         eyebrow="JP · Recent Market"
         eyebrowClassName="text-[#F87171]"
         title="Top movers"
@@ -216,7 +222,7 @@ function JapaneseSignalBoard({
       />
 
       <SignalRailSection
-        id="jp-biggest-drops"
+        id="biggest-drops"
         eyebrow="JP · Pullbacks"
         eyebrowClassName="text-[#FCA5A5]"
         title="Biggest drops"
@@ -228,7 +234,7 @@ function JapaneseSignalBoard({
       />
 
       <SignalRailSection
-        id="jp-momentum"
+        id="momentum-rail"
         eyebrow="JP · Momentum"
         eyebrowClassName="text-[#F472B6]"
         title={momentumTitle}
@@ -240,7 +246,7 @@ function JapaneseSignalBoard({
       />
 
       <SignalRailSection
-        id="jp-mid-movers"
+        id="mid-movers"
         eyebrow="JP · $8 – $50"
         eyebrowClassName="text-[#FB923C]"
         title="Mid-tier movers"
@@ -252,7 +258,7 @@ function JapaneseSignalBoard({
       />
 
       <SignalRailSection
-        id="jp-budget-movers"
+        id="budget-movers"
         eyebrow="JP · Under $8"
         eyebrowClassName="text-[#FBBF24]"
         title="Budget movers"
@@ -264,7 +270,7 @@ function JapaneseSignalBoard({
       />
 
       <SignalRailSection
-        id="jp-discovery"
+        id="japanese-discovery"
         eyebrow="JP · Fresh in the catalog"
         eyebrowClassName="text-[#F87171]"
         title="Japanese cards"
