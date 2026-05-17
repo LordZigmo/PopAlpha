@@ -190,7 +190,7 @@ function JapaneseSignalBoard({
   // Every JP rail links its "View all" to the JP-scoped search and uses
   // the rail's red accent, so clicking through never drops the user
   // into the unfiltered EN search board.
-  const jpViewAllHref = "/search?language=JP";
+  const jpViewAllHref = "/search?lang=JP";
   const jpViewAllClass = "text-[#F87171]";
 
   return (
