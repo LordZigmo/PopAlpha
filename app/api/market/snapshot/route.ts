@@ -274,8 +274,30 @@ export async function GET(req: Request) {
     }
     marketPriceAsOf = latestIso;
   }
-  const trust = resolveSnapshotTrust(result.data ?? null, {
-    blendPolicy: marketPriceUsd !== null ? "SCRYDEX_PRIMARY" : "NO_PRICE",
+  // Synthesize a trust row keyed to the chosen headline price.
+  // resolveSnapshotTrust reads row.market_price internally and short-
+  // circuits to NO_PRICE/0/lowConfidence=true when null. For graded
+  // requests `result.data.market_price` is always null (the refresh
+  // function doesn't compute a single "market price" for graded SKUs),
+  // but we've computed a real headline from the median fall-back. Pass
+  // the resolved headline as market_price on the synth row so the
+  // trust resolver takes the non-null branch and uses our fallback
+  // confidenceScore / lowConfidence / blendPolicy instead of the
+  // NO_PRICE short-circuit. Codex P2 on PR #105.
+  const trustRow = result.data
+    ? { ...result.data, market_price: marketPriceUsd }
+    : marketPriceUsd !== null
+      ? {
+          market_price: marketPriceUsd,
+          market_confidence_score: null,
+          market_low_confidence: null,
+          market_blend_policy: null,
+        }
+      : null;
+  const trust = resolveSnapshotTrust(trustRow, {
+    blendPolicy: marketPriceUsd !== null
+      ? (grade === "RAW" ? "SCRYDEX_PRIMARY" : "SCRYDEX_GRADED_MEDIAN")
+      : "NO_PRICE",
     confidenceScore: marketPriceUsd !== null ? modelConfidence : 0,
     lowConfidence: marketPriceUsd === null ? true : lowConfidence,
   });
