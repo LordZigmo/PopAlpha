@@ -308,17 +308,21 @@ async function writeYahooJpPrice(supabase, slug, payload) {
   });
   // Append a time-series row to jp_card_price_history so
   // compute_jp_card_price_changes (a follow-on migration) can derive
-  // 24h/7d change_pct from JP-native observations. The history table is
-  // append-only — every pipeline run leaves a new (recorded_at) row even
-  // when the price hasn't changed, which is what the delta math needs.
-  // Failure here is non-fatal: the current-price upsert above already
-  // succeeded and we don't want to fail the pipeline over the history
-  // append.
+  // 24h/7d change_pct from JP-native observations. printing_id is
+  // mirrored from the latest-price row so per-printing time series
+  // (HOLO / Reverse Holo / etc.) stay separated; mixing them would
+  // make the eventual delta math compare unrelated prices. The history
+  // table is append-only — every pipeline run leaves a new
+  // (recorded_at) row even when the price hasn't changed, which is
+  // what the delta math needs. Failure here is non-fatal: the
+  // current-price upsert above already succeeded and we don't want to
+  // fail the pipeline over the history append.
   try {
     const { error: historyError } = await supabase
       .from("jp_card_price_history")
       .insert({
         canonical_slug: slug,
+        printing_id: row.printing_id,
         grade: row.grade,
         source: "yahoo_jp",
         price_jpy: row.price_jpy,

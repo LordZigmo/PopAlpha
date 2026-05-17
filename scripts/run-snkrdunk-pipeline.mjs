@@ -276,15 +276,20 @@ async function writeSnkrdunkPrice(supabase, slug, payload) {
   });
   // Append a time-series row to jp_card_price_history so a future
   // compute_jp_card_price_changes() can derive change_pct from Snkrdunk
-  // observations. See migration 20260516190625_jp_card_price_history.sql
-  // for the design rationale. Failure is non-fatal — the current-price
-  // upsert above already succeeded and we don't want a history-append
-  // hiccup to fail the whole pipeline.
+  // observations. printing_id is mirrored from the latest-price row so
+  // per-printing time series stay separated — mixing canonical-level
+  // and per-printing observations into the same series would make the
+  // eventual delta math compare unrelated prices. See migration
+  // 20260516190625_jp_card_price_history.sql for the design rationale.
+  // Failure is non-fatal — the current-price upsert above already
+  // succeeded and we don't want a history-append hiccup to fail the
+  // whole pipeline.
   try {
     const { error: historyError } = await supabase
       .from("jp_card_price_history")
       .insert({
         canonical_slug: slug,
+        printing_id: row.printing_id,
         grade: row.grade,
         source: "snkrdunk",
         price_jpy: row.price_jpy,
