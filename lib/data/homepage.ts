@@ -579,6 +579,12 @@ async function loadJapaneseSignalRails(
       .not("public_card_metrics.market_price", "is", null)
       .gte("public_card_metrics.market_price", JP_BUDGET_MIN_PRICE)
       .gte("public_card_metrics.market_confidence_score", MIN_CONFIDENCE_SCORE)
+      // Deterministic ordering required for stable .range() pagination:
+      // without an explicit order, PostgreSQL can return rows in any
+      // sequence across requests, so later pages would skip or
+      // duplicate candidates. `slug` is the canonical_cards PK
+      // (unique + indexed), making it the cheapest stable key.
+      .order("slug", { ascending: true })
       .range(from, from + PAGE_SIZE - 1);
     if (error || !data) {
       // First-page error → return empty so the JP rails just render
