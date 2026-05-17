@@ -1070,11 +1070,53 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
     for (const r of negativeChangeRows) allSlugs.add(r.canonical_slug);
     for (const r of trendingVariants) allSlugs.add(r.canonical_slug);
 
+    // JP rails are sourced independently from the EN mover queries —
+    // they read canonical_cards JOIN public_card_metrics filtered to
+    // language='JP'. Load them BEFORE the EN-only early-return guard
+    // below so JP-mode users still see populated rails when EN has no
+    // mover candidates (which would otherwise short-circuit the rest
+    // of this function and return empty rails for both markets).
+    let japaneseRail: HomepageCard[] = [];
+    let japaneseRails: JpRailBundle = {
+      topMovers: createEmptyWindowedCards(),
+      biggestDrops: createEmptyWindowedCards(),
+      momentum: createEmptyWindowedCards(),
+      midMovers: [],
+      budgetMovers: [],
+    };
+    if (!overrides && db) {
+      try {
+        [japaneseRail, japaneseRails] = await Promise.all([
+          loadJapaneseRail(db, SECTION_LIMIT),
+          loadJapaneseSignalRails(db, SECTION_LIMIT),
+        ]);
+      } catch (err) {
+        logger.error(
+          "[homepage] japanese_rail",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
+
     if (allSlugs.size === 0) {
+      // EN-only early return path. Hand back the (potentially populated)
+      // JP rails so a market-toggle flip still surfaces JP cards even
+      // when the EN mover candidate set is empty. The EN signal-board
+      // fields stay empty since their underlying queries returned no
+      // candidates.
       return {
         ...EMPTY,
         prices_refreshed_today: pricesRefreshedToday,
         tracked_cards_with_live_price: trackedCardsWithLivePrice,
+        signal_board: {
+          ...EMPTY.signal_board,
+          japanese: japaneseRail,
+          japanese_top_movers: japaneseRails.topMovers,
+          japanese_biggest_drops: japaneseRails.biggestDrops,
+          japanese_momentum: japaneseRails.momentum,
+          japanese_mid_movers: japaneseRails.midMovers,
+          japanese_budget_movers: japaneseRails.budgetMovers,
+        },
       };
     }
 
@@ -1530,27 +1572,9 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
       }
     }
 
-    let japaneseRail: HomepageCard[] = [];
-    let japaneseRails: JpRailBundle = {
-      topMovers: createEmptyWindowedCards(),
-      biggestDrops: createEmptyWindowedCards(),
-      momentum: createEmptyWindowedCards(),
-      midMovers: [],
-      budgetMovers: [],
-    };
-    if (!overrides && db) {
-      try {
-        [japaneseRail, japaneseRails] = await Promise.all([
-          loadJapaneseRail(db, SECTION_LIMIT),
-          loadJapaneseSignalRails(db, SECTION_LIMIT),
-        ]);
-      } catch (err) {
-        logger.error(
-          "[homepage] japanese_rail",
-          err instanceof Error ? err.message : String(err),
-        );
-      }
-    }
+    // JP rails were hoisted above the EN-only early-return guard so
+    // the data is already loaded by this point. See the load block
+    // earlier in this function (just before `if (allSlugs.size === 0)`).
 
     const liveTopMovers24H = combineHomepageCards([
       positiveMoversByWindow["24H"].highConfidence,
