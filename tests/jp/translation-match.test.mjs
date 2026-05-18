@@ -51,22 +51,48 @@ function jpCand({ slug, cosine, card_number = "133" }) {
 
 export function runTranslationMatchTests() {
   // ── normalizeForStrictMatch ──────────────────────────────────────────────
+  // trim + lowercase ONLY. Suffix-stripping removed per Codex P2 on PR #109:
+  // collapsing "Mew ex" → "mew" would link a Mew-ex EN card to a plain Mew
+  // JP card when card numbers happen to align, writing rank=0 at cosine 0.75.
   assert.equal(normalizeForStrictMatch("Eevee"), "eevee");
-  assert.equal(normalizeForStrictMatch("  Charizard ex "), "charizard");
-  assert.equal(normalizeForStrictMatch("Charizard EX"), "charizard");
-  assert.equal(normalizeForStrictMatch("Pikachu V"), "pikachu");
-  assert.equal(normalizeForStrictMatch("Pikachu VMAX"), "pikachu");
-  assert.equal(normalizeForStrictMatch("Pikachu VSTAR"), "pikachu");
-  // Mid-word "ex" must NOT be stripped (e.g., "Mexico" or "Extra")
+  assert.equal(normalizeForStrictMatch("  Charizard ex "), "charizard ex");
+  assert.equal(normalizeForStrictMatch("Charizard EX"), "charizard ex");
+  assert.equal(normalizeForStrictMatch("Pikachu V"), "pikachu v");
+  assert.equal(normalizeForStrictMatch("Pikachu VMAX"), "pikachu vmax");
   assert.equal(normalizeForStrictMatch("Hex Maniac"), "hex maniac");
   // null/undefined safe
   assert.equal(normalizeForStrictMatch(null), "");
   assert.equal(normalizeForStrictMatch(undefined), "");
 
-  // ── nameGate: STRICT_MATCH ──────────────────────────────────────────────
+  // ── nameGate: STRICT_MATCH (case-insensitive equality only) ─────────────
   assert.equal(nameGate({ canonical_name: "Eevee" }, { canonical_name: "Eevee" }), "STRICT_MATCH");
+  // Case-difference is tolerated; the suffix itself must appear on BOTH sides
   assert.equal(nameGate({ canonical_name: "Charizard ex" }, { canonical_name: "Charizard EX" }), "STRICT_MATCH");
   assert.equal(nameGate({ canonical_name: "Pikachu V" }, { canonical_name: "Pikachu V" }), "STRICT_MATCH");
+
+  // ── nameGate: variant-suffix asymmetry must NOT STRICT_MATCH ────────────
+  // Codex P2 on PR #109. "Mew ex" and "Mew" are different cards. Without
+  // a STRICT match here, the fallback is GLOSSARY_MATCH at the 0.90 floor
+  // (since Mew → ミュウ is in EN_TO_JP_POKEMON) — much harder to clear at
+  // cross-language cosine for visually distinct ex-vs-base art.
+  // The mocked JP candidate carries a different EN-form canonical_name AND
+  // no native name, so GLOSSARY_MATCH falls back to null. Either way the
+  // gate must NOT return STRICT_MATCH.
+  assert.notEqual(
+    nameGate({ canonical_name: "Mew ex" }, { canonical_name: "Mew", canonical_name_native: null }),
+    "STRICT_MATCH",
+    "Mew ex EN must not STRICT_MATCH plain Mew JP — suffix asymmetry",
+  );
+  assert.notEqual(
+    nameGate({ canonical_name: "Charizard V" }, { canonical_name: "Charizard", canonical_name_native: null }),
+    "STRICT_MATCH",
+    "Charizard V EN must not STRICT_MATCH plain Charizard JP — suffix asymmetry",
+  );
+  assert.notEqual(
+    nameGate({ canonical_name: "Pikachu" }, { canonical_name: "Pikachu VMAX", canonical_name_native: null }),
+    "STRICT_MATCH",
+    "Plain Pikachu EN must not STRICT_MATCH Pikachu VMAX JP — suffix asymmetry",
+  );
 
   // ── nameGate: GLOSSARY_MATCH fallback (en canonical_name diverges, JP native populated) ──
   // The static glossary maps "Pikachu" → "ピカチュウ"; the JP candidate's
