@@ -4,23 +4,21 @@
  * Weekly maintenance pass over the EN <-> JP card pairing junction
  * table (public.card_translations). Each invocation walks a bounded
  * slice of EN canonical_cards that have an active-variant image
- * embedding and either (a) no card_translations row keyed under
- * their slug, or (b) a row older than their canonical_cards.updated_at.
+ * embedding and no rank=0 row in card_translations, ordered by
+ * (translation_attempted_at ASC NULLS FIRST) with a 14-day retry
+ * window for previously-attempted-but-unpaired slugs.
  *
  * The pairing signal is identical to scripts/backfill-card-translations.mjs:
- *
- *   1. SigLIP top-K kNN against JP rows in card_image_embeddings.
- *   2. JP-name glossary gate (EN_TO_JP_POKEMON) — when both sides
- *      have native names, demand a glossary hit; otherwise raise the
- *      cosine floor.
- *   3. card_number string equality bumps the score as a tiebreak.
- *   4. Primary writes at cosine >= MIN_PRIMARY_COSINE, alternates at
- *      cosine >= MIN_ALT_COSINE.
+ * both consumers import the gate logic, threshold matrix, and picker
+ * from lib/jp/translation-match.mjs. See that module's header for the
+ * STRICT_MATCH / GLOSSARY_MATCH / MISS / null tier definitions and the
+ * cosine floors used per tier.
  *
  * The script does the initial heavy backfill; this cron's job is to
  * absorb (a) newly-imported JP catalog rows (the import is ongoing,
- * per memory: 14.8k matched today, ~23k target) and (b) any EN cards
- * whose embeddings rotated under a model swap.
+ * per memory: 14.8k matched today, ~23k target), (b) any EN cards
+ * whose embeddings rotated under a model swap, and (c) previously-
+ * unpairable slugs that have new JP counterparts after 14 days.
  *
  * Schedule: weekly Sunday 03:00 UTC. Long cadence is intentional —
  * pairings are stable once established, and the new-JP-catalog
@@ -35,18 +33,14 @@ import { hasVercelPostgresConfig } from "@/lib/ai/card-embeddings";
 import {
   IMAGE_EMBEDDER_MODEL_VERSION,
 } from "@/lib/ai/image-embedder";
-import { EN_TO_JP_POKEMON } from "@/lib/jp/matcher.mjs";
+import { pickPairings, THRESHOLDS } from "@/lib/jp/translation-match.mjs";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
 const DEFAULT_MAX_CARDS = 200;
 const MAX_CARDS_LIMIT = 1000;
-const TOP_K = 8;
-const MIN_PRIMARY_COSINE = 0.90;
-const MIN_ALT_COSINE = 0.85;
-const NO_GLOSSARY_FLOOR_COSINE = 0.94;
-const ALT_RANK_MAX = 2;
+const TOP_K = THRESHOLDS.TOP_K;
 
 type EnRow = {
   slug: string;
@@ -68,82 +62,12 @@ type JpCandidate = {
   } | null;
 };
 
+type Pairing = { jp_slug: string; confidence: number; rank: number };
+
 function parseMaxCards(raw: string | null): number {
   const parsed = Number.parseInt(raw ?? "", 10);
   if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_MAX_CARDS;
   return Math.min(parsed, MAX_CARDS_LIMIT);
-}
-
-function nameGlossaryGate(en: EnRow, jp: NonNullable<JpCandidate["card"]>): boolean | null {
-  // EN_TO_JP_POKEMON is keyed by title-case Pokemon names ("Bulbasaur",
-  // "Charizard"). canonical_cards.canonical_name is also title-case.
-  // Lowercasing before lookup made every glossary check miss and pushed
-  // every kNN candidate through the strict noGlossaryFloorCosine (0.94)
-  // gate, yielding zero pairings on the first prod cron run. Match the
-  // glossary's casing exactly. Suffix stripping (" ex"/"VMAX"/"VSTAR")
-  // happens by taking the first whitespace-delimited token.
-  const enName = (en.canonical_name ?? "").trim();
-  const enBaseSpecies = enName.split(/\s+/)[0]!;
-  const glossary = EN_TO_JP_POKEMON as Record<string, string>;
-  const expectedJp = glossary[enName] ?? glossary[enBaseSpecies] ?? null;
-  const jpNative = (jp.canonical_name_native ?? "").trim();
-  if (!jpNative || !expectedJp) return null;
-  return jpNative.includes(expectedJp);
-}
-
-function cardNumberMatch(en: EnRow, jp: NonNullable<JpCandidate["card"]>): boolean {
-  const a = String(en.card_number ?? "").trim();
-  const b = String(jp.card_number ?? "").trim();
-  if (!a || !b) return false;
-  if (a === b) return true;
-  const norm = (s: string) => s.split("/")[0].replace(/^0+(?=\d)/, "").trim();
-  return norm(a) === norm(b);
-}
-
-type Pairing = { jp_slug: string; confidence: number; rank: number };
-
-function pickPairings(en: EnRow, candidates: JpCandidate[]): Pairing[] {
-  const scored = candidates
-    .filter((c): c is JpCandidate & { card: NonNullable<JpCandidate["card"]> } => !!c.card)
-    .map((c) => {
-      const numberBoost = cardNumberMatch(en, c.card) ? 0.02 : 0;
-      return { ...c, score: c.cosine + numberBoost };
-    })
-    .sort((a, b) => b.score - a.score);
-
-  const accepted: typeof scored = [];
-  for (const cand of scored) {
-    const gate = nameGlossaryGate(en, cand.card);
-    let qualifies: boolean;
-    if (gate === true) {
-      qualifies = cand.cosine >= MIN_ALT_COSINE;
-    } else if (gate === false) {
-      continue;
-    } else {
-      qualifies = cand.cosine >= NO_GLOSSARY_FLOOR_COSINE;
-    }
-    if (!qualifies) continue;
-    accepted.push(cand);
-    if (accepted.length > ALT_RANK_MAX + 1) break;
-  }
-  if (accepted.length === 0) return [];
-  // Primary must clear the cosine floor on its own merits — NOT the
-  // score (cosine + numberBoost). `accepted` is sorted by score so
-  // find() walks in that order; the chosen primary is the
-  // highest-score candidate that also meets the raw cosine bar.
-  // Higher-score-but-lower-cosine candidates fall back into the alts
-  // bucket (they still cleared MIN_ALT_COSINE — that's how they got
-  // into `accepted` to begin with).
-  const primary = accepted.find((c) => c.cosine >= MIN_PRIMARY_COSINE);
-  if (!primary) return [];
-  const alts = accepted.filter((c) => c !== primary).slice(0, ALT_RANK_MAX);
-  const rows: Pairing[] = [
-    { jp_slug: primary.card!.slug, confidence: primary.cosine, rank: 0 },
-  ];
-  alts.forEach((a, i) => {
-    rows.push({ jp_slug: a.card!.slug, confidence: a.cosine, rank: i + 1 });
-  });
-  return rows;
 }
 
 async function findJpCandidates(
