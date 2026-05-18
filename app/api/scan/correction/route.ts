@@ -63,7 +63,15 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require";
 import { resizeForUpload } from "@/lib/ai/image-crops";
 import { embedAndStoreUserCorrection } from "@/lib/ai/user-correction-embedding";
+import { dbAdmin } from "@/lib/db/admin";
 import { sql } from "@vercel/postgres";
+
+// Storage location for the eval corpus mirror of this scan. Matches
+// the prefix used by /api/admin/scan-eval/promote so the eval harness
+// and downstream fine-tune tooling read both admin-curated and user-
+// correction rows out of the same bucket prefix.
+const IMAGE_BUCKET = "card-images";
+const SCAN_EVAL_PREFIX = "scan-eval";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -247,6 +255,70 @@ export async function POST(req: Request) {
         `lang=${language}` +
         (notes ? ` notes=${JSON.stringify(notes)}` : ""),
     );
+
+    // 2026-05-18: dual-write into scan_eval_images so every confirmed
+    // user correction also feeds the curated training corpus, not
+    // just the kNN anchor. Before this, only admin-curated promotes
+    // (via /api/admin/scan-eval/promote) contributed eval-corpus rows;
+    // production-user multi-scan corrections improved the per-user
+    // kNN anchor but didn't accumulate ground-truth for future
+    // SigLIP fine-tunes or the eval harness's accuracy measurements.
+    //
+    // captured_source = "user_correction" tags these distinctly from
+    // admin "user_photo" rows, so eval runs can filter or down-weight
+    // by source if the user-confirmed signal proves too noisy in
+    // practice.
+    //
+    // Failure is non-fatal: the anchor row already landed (the
+    // immediate-fix path), so a corpus-write hiccup just logs and
+    // returns ok=true. The caller's UX (toast / sync trigger) doesn't
+    // need to know.
+    const evalStoragePath = `${SCAN_EVAL_PREFIX}/${imageHash}.jpg`;
+    try {
+      const supabase = dbAdmin();
+      const upload = await supabase.storage
+        .from(IMAGE_BUCKET)
+        .upload(evalStoragePath, processedBytes, {
+          upsert: true,
+          contentType: "image/jpeg",
+          cacheControl: "31536000, immutable",
+        });
+      if (upload.error) {
+        throw new Error(`storage upload: ${upload.error.message}`);
+      }
+      const upsert = await supabase
+        .from("scan_eval_images")
+        .upsert(
+          {
+            canonical_slug: canonicalSlug,
+            image_storage_path: evalStoragePath,
+            image_hash: imageHash,
+            image_bytes_size: processedBytes.length,
+            captured_source: "user_correction",
+            captured_language: language,
+            notes: notes ?? "scan-correction-picker",
+            created_by: userId,
+          },
+          { onConflict: "image_storage_path" },
+        );
+      if (upsert.error) {
+        throw new Error(`scan_eval_images upsert: ${upsert.error.message}`);
+      }
+      console.log(
+        `[scan/correction] eval-corpus seeded ` +
+          `slug=${canonicalSlug} ` +
+          `hash=${imageHash.slice(0, 12)} ` +
+          `user=${userId}`,
+      );
+    } catch (corpusErr) {
+      // Anchor succeeded; corpus seeding is best-effort. Log + carry on.
+      console.warn(
+        `[scan/correction] eval-corpus seed FAILED ` +
+          `slug=${canonicalSlug} hash=${imageHash.slice(0, 12)}: ` +
+          `${corpusErr instanceof Error ? corpusErr.message : String(corpusErr)}`,
+      );
+    }
+
     return NextResponse.json({
       ok: true,
       image_hash: imageHash,
