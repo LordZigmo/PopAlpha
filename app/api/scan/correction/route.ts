@@ -276,40 +276,68 @@ export async function POST(req: Request) {
     const evalStoragePath = `${SCAN_EVAL_PREFIX}/${imageHash}.jpg`;
     try {
       const supabase = dbAdmin();
-      const upload = await supabase.storage
-        .from(IMAGE_BUCKET)
-        .upload(evalStoragePath, processedBytes, {
-          upsert: true,
-          contentType: "image/jpeg",
-          cacheControl: "31536000, immutable",
-        });
-      if (upload.error) {
-        throw new Error(`storage upload: ${upload.error.message}`);
-      }
-      const upsert = await supabase
+
+      // Pre-read guard so we never clobber an admin-curated row.
+      // image_storage_path is the unique key on scan_eval_images, so
+      // a raw upsert would silently overwrite a curated row's
+      // canonical_slug / captured_source / notes / created_by if a
+      // user's processed-byte hash happened to match an existing
+      // curated image. (Same-bytes collisions across capture sources
+      // are rare but not impossible — same JPEG quality, same resize
+      // path, same source image bytes.) If the existing row's source
+      // is anything other than user_correction (e.g., "user_photo"
+      // from admin curation), we treat the eval-corpus seed as a
+      // no-op: the admin label wins. (Codex P2 review on PR #110.)
+      const existing = await supabase
         .from("scan_eval_images")
-        .upsert(
-          {
-            canonical_slug: canonicalSlug,
-            image_storage_path: evalStoragePath,
-            image_hash: imageHash,
-            image_bytes_size: processedBytes.length,
-            captured_source: "user_correction",
-            captured_language: language,
-            notes: notes ?? "scan-correction-picker",
-            created_by: userId,
-          },
-          { onConflict: "image_storage_path" },
-        );
-      if (upsert.error) {
-        throw new Error(`scan_eval_images upsert: ${upsert.error.message}`);
+        .select("captured_source")
+        .eq("image_storage_path", evalStoragePath)
+        .maybeSingle();
+      if (existing.error) {
+        throw new Error(`scan_eval_images pre-read: ${existing.error.message}`);
       }
-      console.log(
-        `[scan/correction] eval-corpus seeded ` +
-          `slug=${canonicalSlug} ` +
-          `hash=${imageHash.slice(0, 12)} ` +
-          `user=${userId}`,
-      );
+      if (existing.data && existing.data.captured_source !== "user_correction") {
+        console.log(
+          `[scan/correction] curated eval row exists ` +
+            `(source=${existing.data.captured_source}), skip user-correction overwrite ` +
+            `slug=${canonicalSlug} hash=${imageHash.slice(0, 12)}`,
+        );
+      } else {
+        const upload = await supabase.storage
+          .from(IMAGE_BUCKET)
+          .upload(evalStoragePath, processedBytes, {
+            upsert: true,
+            contentType: "image/jpeg",
+            cacheControl: "31536000, immutable",
+          });
+        if (upload.error) {
+          throw new Error(`storage upload: ${upload.error.message}`);
+        }
+        const upsert = await supabase
+          .from("scan_eval_images")
+          .upsert(
+            {
+              canonical_slug: canonicalSlug,
+              image_storage_path: evalStoragePath,
+              image_hash: imageHash,
+              image_bytes_size: processedBytes.length,
+              captured_source: "user_correction",
+              captured_language: language,
+              notes: notes ?? "scan-correction-picker",
+              created_by: userId,
+            },
+            { onConflict: "image_storage_path" },
+          );
+        if (upsert.error) {
+          throw new Error(`scan_eval_images upsert: ${upsert.error.message}`);
+        }
+        console.log(
+          `[scan/correction] eval-corpus seeded ` +
+            `slug=${canonicalSlug} ` +
+            `hash=${imageHash.slice(0, 12)} ` +
+            `user=${userId}`,
+        );
+      }
     } catch (corpusErr) {
       // Anchor succeeded; corpus seeding is best-effort. Log + carry on.
       console.warn(
