@@ -245,6 +245,34 @@ export function runTranslationMatchTests() {
     assert.equal(primary.numbersMatch, true);
     assert.match(primary.reason, /STRICT_MATCH\+number cos=0\.9100/);
   }
+
+  // ── pickPairings: no early break — STRICT+number candidate sorted below
+  //    a cluster of STRICT-no-number candidates is still considered as primary.
+  //    Codex P2 on PR #109. Scenario:
+  //      A/B/C/D: STRICT_MATCH, numbers DIFFER, cosine 0.80-0.84
+  //               → clear alt 0.80, FAIL primary 0.85
+  //      E:       STRICT_MATCH + number match, cosine 0.75
+  //               → clears alt 0.70, CLEARS primary 0.75
+  //    With the old `accepted.length > altRankMax + 1 break`, A-D would
+  //    fill `accepted` (4 items > 3 → break) and E never seen; the primary
+  //    search would fail and the function would return []. After the fix,
+  //    E lands in accepted and becomes rank=0.
+  {
+    const en = eevee();
+    const cands = [
+      jpCand({ slug: "noNum1", cosine: 0.84, card_number: "201" }),
+      jpCand({ slug: "noNum2", cosine: 0.83, card_number: "202" }),
+      jpCand({ slug: "noNum3", cosine: 0.82, card_number: "203" }),
+      jpCand({ slug: "noNum4", cosine: 0.80, card_number: "204" }),
+      // STRICT+number candidate — score 0.77, sorts 5th, but is a valid primary.
+      jpCand({ slug: "rescue", cosine: 0.75, card_number: "75" }),
+    ];
+    const pairings = pickPairings(en, cands);
+    assert.equal(pairings.length, 3, "should return rescue as primary + 2 alts");
+    assert.equal(pairings[0].rank, 0);
+    assert.equal(pairings[0].jp_slug, "rescue", "lower-cosine STRICT+number must be promoted to primary");
+    assert.equal(pairings[0].numbersMatch, true);
+  }
 }
 
 // Auto-execute when invoked directly: `node tests/jp/translation-match.test.mjs`
