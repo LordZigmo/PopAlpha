@@ -3,21 +3,21 @@
  * backfill-card-translations
  *
  * Populates public.card_translations with EN <-> JP pairings derived
- * from SigLIP image-embedding cosine similarity, gated by the
- * EN_TO_JP_POKEMON name glossary from lib/jp/matcher.mjs.
+ * from SigLIP image-embedding cosine similarity, gated by the shared
+ * name+number matrix in lib/jp/translation-match.mjs.
  *
  * Algorithm per EN canonical card with an active-variant embedding:
  *   1. Pull its full-crop embedding vector from card_image_embeddings.
  *   2. kNN top-8 against card_image_embeddings rows where language='JP'
  *      and model_version matches the active SigLIP variant.
- *   3. For each candidate, apply the JP-name glossary gate (loose
- *      contains on canonical_cards.canonical_name_native) when both
- *      sides have native names. If neither side has native names, fall
- *      back to a higher cosine threshold so we don't pair on art alone.
- *   4. card_number string equality bumps the score as a tiebreak.
- *   5. Top candidate with cosine ≥ MIN_PRIMARY_COSINE writes rank=0;
- *      next 1–2 alternates with cosine ≥ MIN_ALT_COSINE write rank≥1.
- *   6. ON CONFLICT (en_slug, jp_slug) DO UPDATE — idempotent re-runs.
+ *   3. Pass each candidate through `pickPairings` (translation-match.mjs).
+ *      The shared module decides the gate tier — STRICT_MATCH on
+ *      canonical_name equality, GLOSSARY_MATCH via EN_TO_JP_POKEMON,
+ *      MISS, or null — and resolves the cosine floor from a matrix
+ *      keyed on (gateResult, card_number agreement).
+ *   4. Top candidate that clears its tier's PRIMARY floor writes
+ *      rank=0; remaining candidates that cleared ALT write rank>=1.
+ *   5. ON CONFLICT (en_slug, jp_slug) DO UPDATE — idempotent re-runs.
  *
  * The card_image_embeddings table lives in Supabase (NOT Neon — the
  * /Users/popalpha/.../scanner-runbook.md memory captures the
@@ -37,25 +37,23 @@
  *   # Resume from a known watermark slug (next run picks up at slug > X):
  *   node scripts/backfill-card-translations.mjs --resume-from=base-set-2-charizard
  *
- *   # Tune thresholds (defaults: 0.90 / 0.85):
- *   node scripts/backfill-card-translations.mjs --min-cosine=0.92 --alt-cosine=0.87
+ * Cosine thresholds are tiered by gate quality and live in
+ * lib/jp/translation-match.mjs (THRESHOLDS). The legacy
+ * --min-cosine / --alt-cosine flags were removed when the gate moved
+ * to a name-first matrix; if you need to tune for a one-off run,
+ * edit THRESHOLDS in that module and revert before merging.
  */
 
 import dotenv from "dotenv";
 import { createClient } from "@supabase/supabase-js";
-import { EN_TO_JP_POKEMON } from "../lib/jp/matcher.mjs";
+import { pickPairings, THRESHOLDS } from "../lib/jp/translation-match.mjs";
 
 dotenv.config({ path: ".env.local" });
 
 const DEFAULTS = {
-  minPrimaryCosine: 0.90,
-  minAltCosine: 0.85,
-  // Used when neither side has canonical_name_native — name-glossary
-  // gate can't apply, so demand stronger visual agreement.
-  noGlossaryFloorCosine: 0.94,
-  topK: 8,
+  topK: THRESHOLDS.TOP_K,
   batchSize: 200,
-  altRankMax: 2,
+  altRankMax: THRESHOLDS.ALT_RANK_MAX,
 };
 
 function parseArgs(argv) {
@@ -63,8 +61,6 @@ function parseArgs(argv) {
     slug: null,
     limit: null,
     resumeFrom: null,
-    minCosine: DEFAULTS.minPrimaryCosine,
-    altCosine: DEFAULTS.minAltCosine,
     dryRun: false,
     verbose: false,
   };
@@ -72,12 +68,10 @@ function parseArgs(argv) {
     if (arg.startsWith("--slug=")) opts.slug = arg.slice("--slug=".length);
     else if (arg.startsWith("--limit=")) opts.limit = Math.max(1, Number.parseInt(arg.slice("--limit=".length), 10) || 1);
     else if (arg.startsWith("--resume-from=")) opts.resumeFrom = arg.slice("--resume-from=".length);
-    else if (arg.startsWith("--min-cosine=")) opts.minCosine = Number.parseFloat(arg.slice("--min-cosine=".length)) || DEFAULTS.minPrimaryCosine;
-    else if (arg.startsWith("--alt-cosine=")) opts.altCosine = Number.parseFloat(arg.slice("--alt-cosine=".length)) || DEFAULTS.minAltCosine;
     else if (arg === "--dry-run") opts.dryRun = true;
     else if (arg === "--verbose" || arg === "-v") opts.verbose = true;
     else if (arg === "--help" || arg === "-h") {
-      console.log("Usage: backfill-card-translations.mjs [--slug=X] [--limit=N] [--resume-from=SLUG] [--min-cosine=0.90] [--alt-cosine=0.85] [--dry-run]");
+      console.log("Usage: backfill-card-translations.mjs [--slug=X] [--limit=N] [--resume-from=SLUG] [--dry-run] [--verbose]");
       process.exit(0);
     }
   }
@@ -126,42 +120,6 @@ function resolveActiveModelVersion() {
   const variant = process.env.IMAGE_EMBEDDER_VARIANT?.trim();
   if (variant === "modal-siglip") return "siglip2-base-patch16-384-v1";
   return "replicate-clip-vit-l-14-v1";
-}
-
-/**
- * Loose JP-name match: returns true when the EN card's expected JP
- * rendering (from EN_TO_JP_POKEMON) appears anywhere in the JP
- * candidate's canonical_name_native. Returns null when either side
- * has no native name to compare — caller decides the policy.
- */
-function nameGlossaryGate(enCard, jpCard) {
-  // EN_TO_JP_POKEMON in lib/jp/matcher.mjs is built from POKEMON_NAMES
-  // keyed by title-case Pokemon names ("Bulbasaur", "Charizard").
-  // canonical_cards.canonical_name is also stored title-case. Lowercasing
-  // before lookup made every glossary check miss, which sent every kNN
-  // candidate through the strict noGlossaryFloorCosine (0.94) gate and
-  // yielded zero pairings on the first manual cron run against prod.
-  // Match the glossary's casing exactly.
-  const enName = (enCard.canonical_name ?? "").trim();
-  // Strip suffixes like " ex" / " VMAX" / " VSTAR" by splitting on
-  // whitespace and trying the species token. Glossary keys are species
-  // only — "Charizard", not "Charizard ex".
-  const enBaseSpecies = enName.split(/\s+/)[0];
-  const expectedJp = EN_TO_JP_POKEMON[enName] ?? EN_TO_JP_POKEMON[enBaseSpecies] ?? null;
-  const jpNative = (jpCard.canonical_name_native ?? "").trim();
-  if (!jpNative) return null;          // JP side lacks native — caller decides
-  if (!expectedJp) return null;        // No glossary entry — caller decides
-  return jpNative.includes(expectedJp);
-}
-
-function cardNumberMatch(enCard, jpCard) {
-  const a = String(enCard.card_number ?? "").trim();
-  const b = String(jpCard.card_number ?? "").trim();
-  if (!a || !b) return false;
-  if (a === b) return true;
-  // Strip leading zeros and any "/total" suffix.
-  const norm = (s) => s.split("/")[0].replace(/^0+(?=\d)/, "").trim();
-  return norm(a) === norm(b);
 }
 
 async function loadEnCandidates(supabase, opts, modelVersion) {
@@ -256,59 +214,6 @@ async function findJpCandidates({ sql, supabase }, enSlug, modelVersion, topK) {
     .filter((c) => c.card && c.card.language === "JP");
 }
 
-function pickPairings(enCard, candidates, opts) {
-  // Score each candidate. Cosine is the dominant signal; number match
-  // adds a small bump that breaks near-ties.
-  const scored = candidates
-    .map((c) => {
-      const numberBoost = cardNumberMatch(enCard, c.card) ? 0.02 : 0;
-      return { ...c, score: c.cosine + numberBoost };
-    })
-    .sort((a, b) => b.score - a.score);
-
-  const accepted = [];
-  for (const cand of scored) {
-    const gate = nameGlossaryGate(enCard, cand.card);
-    const cosine = cand.cosine;
-    let qualifies;
-    if (gate === true) {
-      qualifies = cosine >= opts.altCosine;
-    } else if (gate === false) {
-      // Glossary says these aren't the same Pokemon — skip even if cosine is high.
-      continue;
-    } else {
-      // gate === null: no glossary signal. Require stronger visual match.
-      qualifies = cosine >= DEFAULTS.noGlossaryFloorCosine;
-    }
-    if (!qualifies) continue;
-    accepted.push(cand);
-    if (accepted.length > opts.altRankMax + 1) break;
-  }
-
-  if (accepted.length === 0) return [];
-  // Primary must clear the cosine floor on its own merits — NOT the
-  // score (cosine + numberBoost). The boost is a tiebreak for ordering
-  // among candidates that already cleared the cosine bar; promoting a
-  // sub-threshold-cosine candidate to rank=0 just because its
-  // numberBoost lifted its score above a real 0.91 candidate would
-  // surface an unsafe pairing in the EN/JP toggle. `accepted` is
-  // sorted by score; find() walks in that order, so the chosen
-  // primary is the highest-score candidate that ALSO meets the raw
-  // cosine bar. Candidates with higher score but lower cosine drop
-  // into the alts bucket if their cosine still clears altCosine
-  // (they did clear it — they're in `accepted`).
-  const primary = accepted.find((c) => c.cosine >= opts.minCosine);
-  if (!primary) return [];
-  const alts = accepted.filter((c) => c !== primary).slice(0, opts.altRankMax);
-  const rows = [
-    { jp_slug: primary.card.slug, confidence: primary.cosine, rank: 0 },
-  ];
-  alts.forEach((a, i) => {
-    rows.push({ jp_slug: a.card.slug, confidence: a.cosine, rank: i + 1 });
-  });
-  return rows;
-}
-
 async function upsertPairings({ sql }, enSlug, pairings) {
   if (pairings.length === 0) return 0;
   // Delete-then-insert pattern. Plain ON CONFLICT (en_slug, jp_slug)
@@ -368,7 +273,13 @@ async function main() {
 
   const modelVersion = resolveActiveModelVersion();
   console.log(`[backfill-card-translations] active model_version: ${modelVersion}`);
-  console.log(`[backfill-card-translations] thresholds: primary>=${opts.minCosine} alt>=${opts.altCosine} no-glossary-floor=${DEFAULTS.noGlossaryFloorCosine}`);
+  console.log(
+    `[backfill-card-translations] thresholds: ` +
+      `STRICT+# primary>=${THRESHOLDS.STRICT_PRIMARY_COSINE_WITH_NUMBER} alt>=${THRESHOLDS.STRICT_ALT_COSINE_WITH_NUMBER} | ` +
+      `STRICT primary>=${THRESHOLDS.STRICT_PRIMARY_COSINE_NO_NUMBER} alt>=${THRESHOLDS.STRICT_ALT_COSINE_NO_NUMBER} | ` +
+      `GLOSSARY primary>=${THRESHOLDS.GLOSSARY_PRIMARY_COSINE} alt>=${THRESHOLDS.GLOSSARY_ALT_COSINE} | ` +
+      `no-gate floor=${THRESHOLDS.NO_GATE_FLOOR_COSINE}`,
+  );
   if (opts.dryRun) console.log(`[backfill-card-translations] DRY RUN — no writes`);
 
   const enCards = await loadEnCandidates(supabase, opts, modelVersion);
@@ -401,7 +312,7 @@ async function main() {
         if (opts.verbose) console.log(`[${processed}] ${enCard.slug} — no JP candidates`);
         continue;
       }
-      const pairings = pickPairings(enCard, candidates, opts);
+      const pairings = pickPairings(enCard, candidates, { altRankMax: DEFAULTS.altRankMax });
       if (pairings.length === 0) {
         if (opts.verbose) {
           const top = candidates[0];
@@ -414,7 +325,7 @@ async function main() {
       if (pairings.some((p) => p.rank > 0)) withAlts += 1;
       if (opts.verbose || opts.dryRun) {
         const preview = pairings
-          .map((p) => `rank=${p.rank} jp=${p.jp_slug} cos=${p.confidence.toFixed(4)}`)
+          .map((p) => `rank=${p.rank} jp=${p.jp_slug} ${p.reason}`)
           .join(" | ");
         console.log(`[${processed}] ${enCard.slug} -> ${preview}`);
       }

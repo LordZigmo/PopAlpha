@@ -14,6 +14,7 @@
     "test:personalization": "node --experimental-strip-types --loader ./scripts/ts-root-loader.mjs tests/run-personalization-tests.mjs",
     "test:card-profile": "node --experimental-strip-types --loader ./scripts/ts-root-loader.mjs tests/run-card-profile-tests.ts",
     "test:holdings": "node --experimental-strip-types --loader ./scripts/ts-root-loader.mjs tests/run-holdings-tests.mjs",
+    "test:jp-translation-match": "node tests/jp/translation-match.test.mjs",
     "guard:no-cards-axis": "node scripts/check-no-cards-axis.mjs",
     "check:route-coverage": "node scripts/check-route-coverage.mjs",
     "check:internal-admin": "node scripts/check-internal-admin-pages.mjs",
