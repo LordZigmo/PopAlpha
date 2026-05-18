@@ -27,7 +27,6 @@ type HomepageSignalBoardProps = {
   japaneseMomentumByWindow: HomepageWindowedCards;
   japaneseMidMovers: HomepageCard[];
   japaneseBudgetMovers: HomepageCard[];
-  japanese: HomepageCard[];
 };
 
 const SIGNAL_WINDOWS: SignalWindow[] = ["24H", "7D"];
@@ -61,7 +60,6 @@ export default function HomepageSignalBoard({
   japaneseMomentumByWindow,
   japaneseMidMovers,
   japaneseBudgetMovers,
-  japanese,
 }: HomepageSignalBoardProps) {
   const { market } = useMarket();
 
@@ -73,7 +71,6 @@ export default function HomepageSignalBoard({
         momentumByWindow={japaneseMomentumByWindow}
         midMovers={japaneseMidMovers}
         budgetMovers={japaneseBudgetMovers}
-        discovery={japanese}
       />
     );
   }
@@ -172,14 +169,12 @@ function JapaneseSignalBoard({
   momentumByWindow,
   midMovers,
   budgetMovers,
-  discovery,
 }: {
   topMoversByWindow: HomepageWindowedCards;
   biggestDropsByWindow: HomepageWindowedCards;
   momentumByWindow: HomepageWindowedCards;
   midMovers: HomepageCard[];
   budgetMovers: HomepageCard[];
-  discovery: HomepageCard[];
 }) {
   const [selectedWindow, setSelectedWindow] = useState<SignalWindow>("24H");
   const momentumTitle = selectedWindow === "24H" ? "Recent JP momentum" : "Sustained JP momentum";
@@ -264,18 +259,6 @@ function JapaneseSignalBoard({
         title="Budget movers"
         cards={budgetMovers}
         emptyMessage="No budget JP movers yet"
-        useJpSource
-        viewAllHref={jpViewAllHref}
-        viewAllClassName={jpViewAllClass}
-      />
-
-      <SignalRailSection
-        id="japanese-discovery"
-        eyebrow="JP · Fresh in the catalog"
-        eyebrowClassName="text-[#F87171]"
-        title="Japanese cards"
-        cards={discovery}
-        emptyMessage="No Japanese cards yet"
         useJpSource
         viewAllHref={jpViewAllHref}
         viewAllClassName={jpViewAllClass}
