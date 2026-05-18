@@ -29,6 +29,13 @@ export const DBADMIN_ALLOWED_FILES = [
   "app/api/portfolio/activity/route.ts",
   "app/api/pro/signals/route.ts",
   "app/api/scan/identify/route.ts",
+  // 2026-05-18: extended to dual-write user_correction → scan_eval_images
+  // alongside the kNN anchor embed, so every confirmed pick from the
+  // scanner picker (single-mode AND multi-scan) feeds the training
+  // corpus. scan_eval_images is RLS-locked to service-role writes —
+  // dbAdmin is required for the Storage upload + corpus upsert. Anchor
+  // stays the primary success path; corpus seeding is best-effort.
+  "app/api/scan/correction/route.ts",
   "app/api/webhooks/apple/notifications/route.ts",
   // 2026-05-16 (Phase C-2): card detail's market-summary surface queries
   // the latest scrydex observation's metadata.scrydexAskingPriceUsd to
@@ -60,6 +67,12 @@ export const DBADMIN_ALLOWED_ROUTE_KEYS = [
   "portfolio/activity",
   "pro/signals",
   "scan/identify",
+  // 2026-05-18: extended to dual-write the user_correction into
+  // scan_eval_images alongside the anchor embed, so every confirmed
+  // pick from the scanner picker feeds the training corpus instead
+  // of staying limited to admin-curated seeding. scan_eval_images is
+  // RLS-locked to service-role writes — needs dbAdmin to upsert.
+  "scan/correction",
   "webhooks/apple/notifications",
 ];
 
