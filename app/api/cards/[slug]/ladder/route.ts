@@ -171,10 +171,6 @@ type LadderResponse = {
   };
 };
 
-function isGradeKey(value: string | null | undefined): value is GradeKey {
-  return value != null && (GRADE_ORDER as readonly string[]).includes(value);
-}
-
 // Walks the fallback chain. PR #106 established this pattern for
 // portfolio valuation; reused here so the ladder rung matches portfolio
 // row valuation exactly for the same (slug, grade).
@@ -191,19 +187,17 @@ function resolveHeadline(row: MetricsRow): {
   return { price: null, source: null };
 }
 
-// Picks the row for a given grade. card_metrics has one row per
-// (slug, printing_id, grade) — when multiple printings exist we pick
-// the row with the highest snapshot_count_30d (= most reliable) so the
-// ladder rung reflects the most-traded printing for that grade.
+// Picks the canonical (printing_id IS NULL) row for a given grade.
+// card_metrics writes both per-printing rows AND a canonical aggregate
+// row per (slug, grade) — the canonical row is what /api/market/snapshot
+// and /api/portfolio/overview both query for the slug-level rollup. We
+// query with `.is("printing_id", null)` so this filter is normally a
+// no-op (each grade has exactly one canonical row), but we keep the
+// .filter() guard so a stray per-printing row never leaks into a
+// ladder rung — that would cause headline_price_usd / premium_vs_raw
+// to mix printings (e.g. RAW from printing A vs G10 from printing B).
 function pickGradeRow(rows: MetricsRow[], grade: GradeKey): MetricsRow | null {
-  const candidates = rows.filter((r) => r.grade === grade);
-  if (candidates.length === 0) return null;
-  if (candidates.length === 1) return candidates[0];
-  return candidates.reduce((best, current) => {
-    const bestCount = best.snapshot_count_30d ?? -1;
-    const currentCount = current.snapshot_count_30d ?? -1;
-    return currentCount > bestCount ? current : best;
-  });
+  return rows.find((r) => r.grade === grade && r.printing_id == null) ?? null;
 }
 
 function pickJpSource(rows: MetricsRow[]): MetricsRow | null {
@@ -275,6 +269,12 @@ export async function GET(
       .select("slug, canonical_name, set_name, year, card_number, language")
       .eq("slug", slug)
       .maybeSingle<CanonicalRow>(),
+    // canonical rollup rows only (printing_id IS NULL). Matches the
+    // slug-level query in /api/market/snapshot and the canonical valuation
+    // path in /api/portfolio/overview so ladder rungs are consistent.
+    // Without this, multi-printing slugs would mix headlines from
+    // different printings across grades (RAW from printing A vs G10
+    // from printing B), corrupting premium_vs_raw.
     supabase
       .from("public_card_metrics")
       .select(
@@ -304,7 +304,15 @@ export async function GET(
         ].join(", "),
       )
       .eq("canonical_slug", slug)
+      .is("printing_id", null)
       .in("grade", [...GRADE_ORDER]),
+    // Asymmetry vs the card_metrics query above: variant_metrics is
+    // written per-printing only (no canonical rollup row — see
+    // lib/backfill/provider-observation-variant-metrics.ts line ~616).
+    // We deliberately DON'T filter `.is("printing_id", null)` here or
+    // the per-grader rail would always be empty. groupGraders() dedupes
+    // by provider across printings so the rung surfaces "is anyone
+    // trading PSA10 of <slug>" rather than tying to one printing.
     supabase
       .from("public_variant_metrics")
       .select(
