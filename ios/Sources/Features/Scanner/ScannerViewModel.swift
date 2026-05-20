@@ -74,7 +74,13 @@ public final class ScannerViewModel: ObservableObject, PopAlphaVisionEngineDeleg
     /// ScannerViewModel pauses scanning while the closure runs; the app
     /// must call `resumeScanning()` when it's ready for the next scan
     /// (low-confidence result, user retry, or post-navigation dismiss).
-    public var onStableCardCaptured: (@Sendable (UIImage, PerspectiveCorrectionDiagnostics?) async -> Void)?
+    ///
+    /// Third arg `triggerKind` is `"auto"` for the rectangle stability-
+    /// gate path or `"auto_saliency"` for the full-art fallback path
+    /// (2026-05-16). The app surfaces this as the `triggerSource`
+    /// field on the scan telemetry so we can segment hit-rate by
+    /// trigger.
+    public var onStableCardCaptured: (@Sendable (UIImage, PerspectiveCorrectionDiagnostics?, String) async -> Void)?
 
     public let visionEngine: PopAlphaVisionEngine
     public var recognizedCardID: String? { recognizedCard?.id }
@@ -146,17 +152,33 @@ public final class ScannerViewModel: ObservableObject, PopAlphaVisionEngineDeleg
     }
 
     /// Required by the legacy protocol method but unused — the engine
-    /// invokes the perspective-correction-aware overload below, and
-    /// every code path of interest plumbs through that one. Kept as a
-    /// non-throwing stub so other future conformers can rely on the
+    /// invokes the triggerKind-aware overload below, and every code
+    /// path of interest plumbs through that one. Kept as a non-
+    /// throwing stub so other future conformers can rely on the
     /// unary method if they don't need the diagnostic surface.
     public nonisolated func didDetectStableCard(image: UIImage) {
-        didDetectStableCard(image: image, perspectiveCorrection: nil)
+        didDetectStableCard(image: image, perspectiveCorrection: nil, triggerKind: "auto")
+    }
+
+    /// Two-arg overload retained for source compatibility — forwards
+    /// to the three-arg method with a default `triggerKind` so any
+    /// caller still hitting the older API receives sane telemetry
+    /// tagging.
+    public nonisolated func didDetectStableCard(
+        image: UIImage,
+        perspectiveCorrection: PerspectiveCorrectionDiagnostics?,
+    ) {
+        didDetectStableCard(
+            image: image,
+            perspectiveCorrection: perspectiveCorrection,
+            triggerKind: "auto",
+        )
     }
 
     public nonisolated func didDetectStableCard(
         image: UIImage,
         perspectiveCorrection: PerspectiveCorrectionDiagnostics?,
+        triggerKind: String,
     ) {
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -167,7 +189,7 @@ public final class ScannerViewModel: ObservableObject, PopAlphaVisionEngineDeleg
                 // stops re-triggering while the network call is inflight.
                 self.isScanning = false
                 self.visionEngine.reset()
-                await hook(image, perspectiveCorrection)
+                await hook(image, perspectiveCorrection, triggerKind)
             } else {
                 self.startIdentification(with: image)
             }

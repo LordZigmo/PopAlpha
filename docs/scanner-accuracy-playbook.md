@@ -277,6 +277,57 @@ rows on the Path B ceiling run.
 correct→wrong flips. Real-device smoke session is the ultimate
 proof of the user-facing lift.
 
+#### 1.7 Full-art auto-capture trigger via saliency fallback — ✅ shipped 2026-05-16
+
+**The gap this closes.** Not visible in the eval scoreboard at
+all — the eval harness feeds the identify route directly and
+never tests the iOS capture trigger. User-facing problem: full-
+art / VMax / VSTAR / ex cards never auto-fire because
+`VNDetectRectanglesRequest` needs an edge gradient between card
+and background, and the artwork on these cards bleeds to the
+border. Tap-to-capture worked as an escape hatch, but the
+auto-capture experience was "scanner doesn't recognize the card"
+from the user's perspective.
+
+**Mechanism (shipped 2026-05-16).** When the rectangle detector
+has produced no observation for `saliencyFallbackDelay` (1.5s),
+the engine runs `VNGenerateAttentionBasedSaliencyImageRequest`
+on the same pixel buffer. The largest salient region — sanity-
+gated on aspect ratio (∈ [0.45, 0.95]) and short side (≥ 25%
+of frame) — accumulates stability the same way a rectangle
+candidate does, and fires the existing `didDetectStableCard`
+delegate with `triggerKind: "auto_saliency"`. Implementation in
+`PopAlphaVisionEngine.analyzeSaliency`.
+
+Containment against false-fires on clean surfaces:
+1. Aspect/size sanity rejects most non-card salient regions
+   before any network call.
+2. Existing server confidence threshold → LOW on non-cards →
+   silent re-arm. No user disruption.
+3. 8s wall-clock cooldown after each saliency fire. NOT cleared
+   by `reset()` (which runs on LOW silent re-arm), so the
+   phone-on-desk loop runs at most every 8s instead of every
+   2s. Mode 9 in `scanner-ocr-failure-modes.md` carries the
+   full diagnosis.
+
+**Telemetry.** `triggerSource: "auto_saliency"` flows through
+PostHog `card_scanned` and `scan_identify_events.trigger_source`
+unchanged. Segment hit-rate / HIGH-rate vs. `"auto"` baseline
+once a few days of real-device traffic accrues.
+
+**Validation.** Real-device smoke is the binding signal:
+- Normal cards: time-to-trigger unchanged (target ≤1s, same
+  rectangle-stability gate as before).
+- Full-art / VMax / VSTAR / ex / Illustration Rare: auto-fire
+  within ~2.5s, top-1 correct at the rate the embedder already
+  achieves on these (~80% from Default-mode eval).
+- Empty scenes (desk, hand, ceiling): no auto-fire (sanity gate).
+- Mid-scan motion: trigger does not fire during motion (stability
+  gate).
+
+Eval harness numbers should NOT change — re-running it after this
+PR is a regression-guard, not a lift measurement.
+
 #### 1.2 Multi-frame consensus on tap — ✅ shipped 2026-05-08 (v1)
 
 Tap path captures 3 frames spaced ~200ms apart (total ~400ms wait),
