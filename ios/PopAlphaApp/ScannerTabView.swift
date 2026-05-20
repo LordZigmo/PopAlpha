@@ -1317,7 +1317,7 @@ final class ScannerHost: ObservableObject {
     /// systemic post-identify sim floor on `auto_saliency` triggers.
     @Published var multiScanMode: Bool = false {
         didSet {
-            viewModel?.visionEngine.isSaliencyEnabled = !multiScanMode
+            viewModel?.visionEngine.setSaliencyEnabled(!multiScanMode)
         }
     }
 
