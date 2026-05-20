@@ -27,6 +27,17 @@ type HomepageSignalBoardProps = {
   japaneseMomentumByWindow: HomepageWindowedCards;
   japaneseMidMovers: HomepageCard[];
   japaneseBudgetMovers: HomepageCard[];
+  // Legacy JP discovery rail. Re-added 2026-05-18 after commit
+  // beb649b hid it from JP mode on the assumption that the five JP
+  // signal rails (top movers / pullbacks / momentum / mid / budget)
+  // would carry the load. They don't: change_pct_24h and
+  // change_pct_7d are never populated on the JP path (only the EN
+  // pricing pipeline writes those columns), so the rails are starved
+  // at the source and JP mode renders five empty tab states. This
+  // discovery rail still loads (sourced from refresh-tier hot/warm
+  // JP cards) and is the only thing keeping JP cards visible on the
+  // homepage until the durable JP change_pct populator ships.
+  japanese: HomepageCard[];
 };
 
 const SIGNAL_WINDOWS: SignalWindow[] = ["24H", "7D"];
@@ -60,6 +71,7 @@ export default function HomepageSignalBoard({
   japaneseMomentumByWindow,
   japaneseMidMovers,
   japaneseBudgetMovers,
+  japanese,
 }: HomepageSignalBoardProps) {
   const { market } = useMarket();
 
@@ -71,6 +83,7 @@ export default function HomepageSignalBoard({
         momentumByWindow={japaneseMomentumByWindow}
         midMovers={japaneseMidMovers}
         budgetMovers={japaneseBudgetMovers}
+        discovery={japanese}
       />
     );
   }
@@ -169,12 +182,14 @@ function JapaneseSignalBoard({
   momentumByWindow,
   midMovers,
   budgetMovers,
+  discovery,
 }: {
   topMoversByWindow: HomepageWindowedCards;
   biggestDropsByWindow: HomepageWindowedCards;
   momentumByWindow: HomepageWindowedCards;
   midMovers: HomepageCard[];
   budgetMovers: HomepageCard[];
+  discovery: HomepageCard[];
 }) {
   const [selectedWindow, setSelectedWindow] = useState<SignalWindow>("24H");
   const momentumTitle = selectedWindow === "24H" ? "Recent JP momentum" : "Sustained JP momentum";
@@ -259,6 +274,26 @@ function JapaneseSignalBoard({
         title="Budget movers"
         cards={budgetMovers}
         emptyMessage="No budget JP movers yet"
+        useJpSource
+        viewAllHref={jpViewAllHref}
+        viewAllClassName={jpViewAllClass}
+      />
+
+      {/* JP discovery rail. Re-added 2026-05-18 after the five JP
+          movers rails above were found starved at the source: the JP
+          pricing path (yahoo_jp + snkrdunk → card_metrics) never
+          populates change_pct_24h / change_pct_7d, so the loader's
+          `change_pct_!= null` gate (lib/data/homepage.ts:~666) keeps
+          every windowed JP rail empty. This discovery rail uses the
+          refresh-tier hot/warm pool instead of a change-pct gate, so
+          it's the only one that actually shows JP cards today. */}
+      <SignalRailSection
+        id="japanese-discovery"
+        eyebrow="JP · Recent activity"
+        eyebrowClassName="text-[#F87171]"
+        title="Japanese cards"
+        cards={discovery}
+        emptyMessage="No Japanese cards yet"
         useJpSource
         viewAllHref={jpViewAllHref}
         viewAllClassName={jpViewAllClass}

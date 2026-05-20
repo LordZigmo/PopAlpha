@@ -165,14 +165,25 @@ struct MarketPulseSection: View {
     private var visibleCategories: [Category] {
         if japaneseOnly {
             // Mirror the web JP board ordering: Movers, Pullbacks,
-            // Momentum (windowed, reads japaneseMomentum), Mid, Budget.
-            // The legacy `.japanese` discovery tab is hidden — it was
-            // a holdover from when JP mode only had one rail, and now
-            // duplicates the signal already surfaced through Movers /
-            // Pullbacks / Momentum. Breakouts / Unusual stay EN-only
-            // because the server hasn't shipped JP equivalents for
-            // those signals yet.
-            return [.movers, .pullbacks, .momentum, .mid, .budget]
+            // Momentum (windowed, reads japaneseMomentum), Mid, Budget,
+            // then `.japanese` discovery last. Breakouts / Unusual
+            // stay EN-only because the server hasn't shipped JP
+            // equivalents for those signals yet.
+            //
+            // .japanese was hidden in commit beb649b on the assumption
+            // the five JP movers rails would carry the load. They
+            // don't: the JP pricing path (yahoo_jp + snkrdunk →
+            // card_metrics) never populates change_pct_24h /
+            // change_pct_7d, so the loader's `change_pct_!= null`
+            // gate in lib/data/homepage.ts:~666 keeps every JP movers
+            // rail empty. The .japanese discovery rail uses the
+            // refresh-tier hot/warm pool instead and is the only one
+            // that actually surfaces JP cards today.
+            //
+            // Restored 2026-05-18 as the same-day rescue. The durable
+            // fix is a JP change_pct populator; until that ships, this
+            // tab is the only thing keeping JP cards on the homepage.
+            return [.movers, .pullbacks, .momentum, .mid, .budget, .japanese]
         }
         // EN mode currently hides `.momentum` because the EN .breakouts
         // tab already falls back to momentum data when breakouts is
