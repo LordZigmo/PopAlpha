@@ -1306,7 +1306,20 @@ final class ScannerHost: ObservableObject {
     /// auto-navigating; LOW continues to silently re-arm. The view
     /// layer reads this from `handleIdentifyResult` to branch routing.
     /// Reset on app launch — users opt in to batch mode per session.
-    @Published var multiScanMode: Bool = false
+    ///
+    /// didSet also disables the engine's saliency fallback while
+    /// multi-scan is active. Saliency was added (2026-05-16) for full-
+    /// art card recall but its `isPlausibleSalientBox` aspect gate is
+    /// permissive enough to admit books, phones, food packages, etc.
+    /// In single-scan mode a false trigger merely shows the picker
+    /// once; in multi-scan it silently accumulates non-card rows into
+    /// the tray. Targeted unblock while we collect telemetry for a
+    /// systemic post-identify sim floor on `auto_saliency` triggers.
+    @Published var multiScanMode: Bool = false {
+        didSet {
+            viewModel?.visionEngine.isSaliencyEnabled = !multiScanMode
+        }
+    }
 
     /// Called from the auto-detect hook when a free-tier user in
     /// multi-scan mode runs out of daily quota. Lets ScannerTabView

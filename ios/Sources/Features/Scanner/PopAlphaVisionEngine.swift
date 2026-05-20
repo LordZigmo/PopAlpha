@@ -238,6 +238,27 @@ public final class PopAlphaVisionEngine {
     /// scanning the next card without noticeable delay.
     private let saliencyCooldown: TimeInterval = 8.0
 
+    /// When false, the saliency fallback path is fully disabled — the
+    /// engine acts as if `VNGenerateAttentionBasedSaliencyImageRequest`
+    /// doesn't exist. Multi-scan mode flips this off because saliency's
+    /// `isPlausibleSalientBox` aspect gate is loose enough that books,
+    /// phones, and food packages also pass — and once they pass, the
+    /// SigLIP kNN admits them as MEDIUM/HIGH matches that silently
+    /// accumulate into the review tray. Single-scan mode keeps it on
+    /// so full-arts (the original motivation for the fallback) still
+    /// auto-trigger. Targeted fix landing while we collect telemetry
+    /// to inform a systemic post-identify sim floor for `auto_saliency`
+    /// triggers; see `scanner-ocr-failure-modes.md` 2026-05-20 entry.
+    public var isSaliencyEnabled: Bool = true {
+        didSet {
+            guard !isSaliencyEnabled else { return }
+            analysisQueue.async { [weak self] in
+                self?.firstNoObservationAt = nil
+                self?.salientCandidate = nil
+            }
+        }
+    }
+
     public init(
         delegate: PopAlphaVisionEngineDelegate? = nil,
         callbackQueue: DispatchQueue = .main,
@@ -357,7 +378,11 @@ public final class PopAlphaVisionEngine {
         // fires." Streak is reset on any successful rectangle obs.
         // Reuses the existing `requestHandler` so we don't pay the
         // cost of building a second one over the same pixel buffer.
-        if observation != nil {
+        //
+        // Also reset (and skip the analyzer) when `isSaliencyEnabled`
+        // is false — multi-scan mode flips it off to avoid false-
+        // positive triggers on non-card objects polluting the tray.
+        if observation != nil || !isSaliencyEnabled {
             firstNoObservationAt = nil
             salientCandidate = nil
         } else {
