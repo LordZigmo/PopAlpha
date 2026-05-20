@@ -530,6 +530,83 @@ runtime can short-circuit Path B trial-loops on those slugs and
 go straight to Path C with adjusted confidence rules. Estimated
 effort: ~1 day, defer until we see how many slugs are affected.
 
+### Mode 9 — Full-art / VMax / VSTAR / ex cards never auto-trigger (no edge gradient for rectangle detector)
+
+**First seen**: 2026-05-16 — user-reported. "It works pretty good
+with normal cards but it doesn't even recognize full arts."
+
+**Symptom**: pointing the scanner at a full-art / VMax / VSTAR / ex
+card produces zero auto-capture firings. The viewfinder shows the
+card live but never displays a bounding box, never fires the
+identify pipeline, never reaches the server. From the user's
+perspective the scanner is "broken" on those cards.
+
+**Diagnosis** (verified by reading the iOS code, not guessing):
+
+- The auto-capture trigger is gated on
+  `VNDetectRectanglesRequest`, which requires an **edge gradient**
+  between the card and its background to produce an observation.
+- Full-art / VMax / VSTAR / ex cards have artwork that bleeds to
+  the card border. Vision sees no contrast gradient between card
+  and background → returns zero observations → the rectangle
+  candidate is never populated → `onStableCardCaptured` never
+  fires.
+- The matching side is fine — when these images reach
+  `/api/scan/identify`, SigLIP-2 kNN identifies them correctly
+  (eval Default-mode top-1 = 79.3% on the embedder-only path,
+  many of which are full-art).
+- Threshold loosening cannot help: Vision returns *zero*
+  observations, there is nothing to score. `minimumConfidence` is
+  already at 0.70 (down from 0.85 historically) for hand-occlusion
+  cases.
+- `VNDetectDocumentSegmentationRequest` would have the same
+  failure for the same reason (also edge-gradient-based) and was
+  explicitly deferred in the accuracy playbook §4.
+
+**Fix or mitigation** (2026-05-16):
+
+Saliency-based fallback trigger. When the rectangle detector has
+produced no observation for `saliencyFallbackDelay` (1.5s), the
+engine runs `VNGenerateAttentionBasedSaliencyImageRequest` on the
+same pixel buffer and treats the largest salient region (sanity-
+gated on aspect ratio + size) as a card candidate. Same
+`minimumStableDuration` (0.5s) stability gate as the rectangle
+path. Fires the existing `didDetectStableCard` delegate with
+`triggerKind: "auto_saliency"`.
+
+Containment:
+1. Aspect-ratio + size sanity (`isPlausibleSalientBox`): short
+   side ≥ 25% of frame, aspect ∈ [0.45, 0.95]. Rejects clean-desk
+   loops in the engine before any network call.
+2. Existing server confidence threshold returns LOW on non-card
+   images → silent re-arm.
+3. Post-fire wall-clock cooldown of `saliencyCooldown` = 8s.
+   Capped re-fire rate prevents the phone-on-desk LOW loop from
+   burning quota at the `saliencyFallbackDelay` cadence. NOT
+   cleared by `reset()` (which runs on LOW silent re-arm).
+
+Telemetry:
+- `triggerSource: "auto_saliency"` flows through to PostHog
+  `card_scanned` events (offline path) and
+  `scan_identify_events.trigger_source` (server-routed path).
+- Compare hit-rate / HIGH-confidence rate vs. `"auto"` baseline.
+- If LOW-rate is much higher than `"auto"`, revisit aspect
+  bounds or escalate to `VNGenerateForegroundInstanceMaskRequest`
+  (iOS 17+, heavier).
+
+**Code references**:
+- iOS engine — `analyze()` and `analyzeSaliency(...)` in
+  `ios/Sources/Features/Scanner/PopAlphaVisionEngine.swift`.
+- Hook plumbing — `installNetworkIdentifier` in
+  `ios/PopAlphaApp/ScannerTabView.swift` reads `triggerKind`
+  from the delegate args and forwards it as `triggerSource`.
+
+**Repro**: any full-art / VMax / VSTAR / ex card (e.g., Charizard
+ex 199/197 from Mega Evolution). On a build pre-fix, holding the
+card in front of the viewfinder produces no auto-capture; the
+user must tap the viewport to fire. Post-fix, auto-capture fires
+within ~2s (1.5s fallback delay + 0.5s stability).
+
 ---
 
 ## Scoreboard — how often does each mode actually fire?
@@ -546,6 +623,7 @@ Update this whenever you have aggregate data to back it up.
 | 6 (Vision didn't see slash-bearing text) | 2026-05-07 | ~12/28 (~43%) pre-stage-3 sample | TBD | OPEN — Tier 1.1 stage 4 (image quality gates) — but kNN won HIGH on most observed cases |
 | 7 (OCR misread digits, e.g. 068→163) | 2026-05-07 | 1/9 pass-2 firings (~11%) | TBD | OPEN — Tier 1.1 stage 5 (multi-candidate digit ranking). Failure mode is graceful: wrong card_number → Path B no-match → vision_only fallback. End-to-end result still correct in observed case. |
 | 8 (Stage-3 perspective-correction coord quirk — card_number rejected by spatial filter) | 2026-05-07 | 25/25 (100%) post-stage-3 sample | TBD | **DIAGNOSTIC HARNESS LIVE 2026-05-15; coord fix still deferred.** Stage 3.1 attempted Y-flip mis-modeled the CIImage coord interaction and produced mirrored text — reverted same day. Pass-2 fallback recovers card_number gracefully (8/9 success on real device), so this is internal-pass-distinction only, NOT a user-facing accuracy issue. Phase 0d (2026-05-15) added the empirical surface: `scan_identify_events.ocr_perspective_corrected_extent` (jsonb, server-routed) + PostHog `ocr_perspective_*` properties (offline) + a `persp:` line on the DEBUG ScanDebugCapture Photos banner. Re-attempt the coord-system fix only AFTER ~10–20 real-device samples land and the orientation/extent distribution justifies the math. |
+| 9 (full-art auto-capture never fires — no edge gradient) | 2026-05-16 | user-reported, unmeasured | TBD | **MITIGATED 2026-05-16.** Saliency-based fallback in `PopAlphaVisionEngine.analyzeSaliency` runs `VNGenerateAttentionBasedSaliencyImageRequest` after 1.5s of no rectangle observation, fires `didDetectStableCard` with `triggerKind: "auto_saliency"`. Aspect/size sanity gate + 8s post-fire cooldown + existing server confidence threshold contain false-fires. Real-device verification + PostHog segment-by-`triggerSource` pending. |
 
 The 5-scan sample on 2026-05-07 is too small to draw conclusions
 about real-device frequency. A meaningful scoreboard requires:

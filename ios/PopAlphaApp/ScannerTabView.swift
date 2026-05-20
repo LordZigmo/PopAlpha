@@ -1563,7 +1563,7 @@ final class ScannerHost: ObservableObject {
     /// the duration; SwiftUI listens to `lastMatch` + `lastConfidence`
     /// to auto-navigate on "high" confidence results.
     private func installNetworkIdentifier(_ vm: ScannerViewModel) {
-        vm.onStableCardCaptured = { [weak self] image, perspectiveCorrection in
+        vm.onStableCardCaptured = { [weak self] image, perspectiveCorrection, triggerKind in
             guard let self else { return }
 
             // Pre-identify quota gate for multi-scan auto-detect
@@ -1600,9 +1600,14 @@ final class ScannerHost: ObservableObject {
             }
             if blocked { return }
 
+            // triggerKind plumbed through from the engine: "auto" for
+            // the rectangle stability-gate path, "auto_saliency" for
+            // the full-art fallback path (2026-05-16). Forwarded as
+            // triggerSource so we can segment hit-rate in PostHog and
+            // scan_identify_events.
             await self.runIdentify(
                 image: image,
-                triggerSource: "auto",
+                triggerSource: triggerKind,
                 perspectiveCorrection: perspectiveCorrection,
             )
         }
@@ -1688,12 +1693,13 @@ final class ScannerHost: ObservableObject {
         // is in flight or a result is waiting on screen). Charging
         // before the guard would tick the daily counter for those
         // suppressed callbacks even though no server call ran.
-        // Scoped to triggerSource=="auto" — tap is charged at the
-        // tap handler, library bypasses by convention. Premium
-        // skips. The dedupe-drop branch in handleIdentifyResult
+        // Scoped to auto-detect triggers ("auto" or "auto_saliency" —
+        // the latter is the 2026-05-16 full-art fallback) — tap is
+        // charged at the tap handler, library bypasses by convention.
+        // Premium skips. The dedupe-drop branch in handleIdentifyResult
         // refunds same-card auto-re-fires; LOW results stay charged
         // because the server call actually ran.
-        if triggerSource == "auto",
+        if (triggerSource == "auto" || triggerSource == "auto_saliency"),
            self.multiScanMode,
            !PremiumGate.shared.isPro {
             ScanQuota.shared.recordScan()

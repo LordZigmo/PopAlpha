@@ -71,9 +71,9 @@ public struct PerspectiveCorrectionDiagnostics: Codable, Sendable, Equatable {
 
 public protocol PopAlphaVisionEngineDelegate: AnyObject {
     /// Legacy entry point kept for source compatibility. The engine itself
-    /// only invokes `didDetectStableCard(image:perspectiveCorrection:)`;
+    /// only invokes `didDetectStableCard(image:perspectiveCorrection:triggerKind:)`;
     /// existing implementers that only override the unary form receive the
-    /// image via the default-implementation forwarder below.
+    /// image via the default-implementation forwarders below.
     func didDetectStableCard(image: UIImage)
 
     /// Phase 0d (2026-05-15) — receives Mode 8 diagnostic data alongside
@@ -82,6 +82,19 @@ public protocol PopAlphaVisionEngineDelegate: AnyObject {
     /// Default implementation forwards to the unary `didDetectStableCard`
     /// so older implementers compile unchanged.
     func didDetectStableCard(image: UIImage, perspectiveCorrection: PerspectiveCorrectionDiagnostics?)
+
+    /// 2026-05-16 — receives the trigger kind alongside the cropped card.
+    /// `"auto"` for the rectangle stability-gate path; `"auto_saliency"`
+    /// for the full-art fallback path that runs
+    /// `VNGenerateAttentionBasedSaliencyImageRequest` when the rectangle
+    /// detector hasn't produced an observation for a sustained window.
+    /// Default implementation forwards to the two-arg method so older
+    /// implementers compile unchanged.
+    func didDetectStableCard(
+        image: UIImage,
+        perspectiveCorrection: PerspectiveCorrectionDiagnostics?,
+        triggerKind: String,
+    )
 
     /// Fires every frame that the engine has a live candidate rectangle, and
     /// with `nil` when the candidate expires. Bounding box is in Vision's
@@ -93,6 +106,14 @@ public protocol PopAlphaVisionEngineDelegate: AnyObject {
 public extension PopAlphaVisionEngineDelegate {
     func didDetectStableCard(image: UIImage, perspectiveCorrection: PerspectiveCorrectionDiagnostics?) {
         didDetectStableCard(image: image)
+    }
+
+    func didDetectStableCard(
+        image: UIImage,
+        perspectiveCorrection: PerspectiveCorrectionDiagnostics?,
+        triggerKind: String,
+    ) {
+        didDetectStableCard(image: image, perspectiveCorrection: perspectiveCorrection)
     }
 
     func didUpdateCandidateBoundingBox(_ normalizedBoundingBox: CGRect?) {}
@@ -159,6 +180,64 @@ public final class PopAlphaVisionEngine {
     /// Cleared when the candidate expires or resets.
     private var smoothedPublishedBox: CGRect?
 
+    // MARK: - Saliency fallback (2026-05-16)
+    //
+    // Full-art / VMax / VSTAR / ex cards have artwork that bleeds to
+    // the card border. `VNDetectRectanglesRequest` requires an edge
+    // gradient between card and background to fire — those cards
+    // present zero gradient, so the rectangle detector silently never
+    // produces an observation and auto-capture never fires. Users
+    // discover the manual-tap escape hatch (`captureFrameAndIdentify`),
+    // but the user-facing complaint is that the scanner "doesn't even
+    // recognize" full-arts. The matching side (SigLIP-2 kNN at
+    // `/api/scan/identify`) already handles full-arts correctly when
+    // they reach it — the gap is purely the trigger.
+    //
+    // Fallback strategy: when the rectangle detector hasn't produced
+    // an observation for `saliencyFallbackDelay` seconds, run
+    // `VNGenerateAttentionBasedSaliencyImageRequest` on the same
+    // pixel buffer. It returns a list of salient objects (a card held
+    // in front of any background is a strong salient object regardless
+    // of how the art reaches the edges) — apply the same stability
+    // gate as the rectangle path, then fire the existing delegate with
+    // `triggerKind: "auto_saliency"` so telemetry can segment hit rate
+    // vs. the rectangle path. Saliency runs on Neural Engine, ~10ms
+    // per frame; only invoked when the streak threshold is reached, so
+    // negligible cost on the common path.
+
+    private lazy var saliencyRequest: VNGenerateAttentionBasedSaliencyImageRequest =
+        makeSaliencyRequest()
+    private var salientCandidate: SalientCandidate?
+
+    /// Wall-clock timestamp when the most recent run of consecutive
+    /// rect-detector misses began. Reset to `nil` on any frame that
+    /// produces a rectangle observation. Saliency runs only when
+    /// `timestamp - firstNoObservationAt >= saliencyFallbackDelay`.
+    private var firstNoObservationAt: TimeInterval?
+
+    /// Wall-clock timestamp of the most recent saliency-path delegate
+    /// fire. Used for post-fire cooldown. NOT cleared by `reset()` —
+    /// `reset()` runs on LOW silent re-arm, and clearing it there would
+    /// re-permit immediate re-fire on a static scene (e.g., phone-on-
+    /// desk loop). Set to `0` initially so the first saliency fire is
+    /// always permitted.
+    private var lastSaliencyFireAt: TimeInterval = 0
+
+    /// Seconds the rectangle detector must produce no observations
+    /// before saliency takes over. Loose enough that handheld jitter
+    /// can briefly miss frames without triggering saliency, tight
+    /// enough that the user perceives "scanner is trying" on full-art
+    /// cards.
+    private let saliencyFallbackDelay: TimeInterval = 1.5
+
+    /// Minimum wall-clock seconds between saliency-path fires. Prevents
+    /// the phone-on-desk loop: saliency would otherwise re-trigger
+    /// every `saliencyFallbackDelay` + `minimumStableDuration` after
+    /// every LOW silent re-arm. 8s is empirically chosen to cover a
+    /// typical "user reviewing result" pause while still allowing
+    /// scanning the next card without noticeable delay.
+    private let saliencyCooldown: TimeInterval = 8.0
+
     public init(
         delegate: PopAlphaVisionEngineDelegate? = nil,
         callbackQueue: DispatchQueue = .main,
@@ -207,6 +286,12 @@ public final class PopAlphaVisionEngine {
             self.candidate = nil
             self.smoothedPublishedBox = nil
             self.rectangleRequest.regionOfInterest = Self.fullFrameROI
+            // Short-term saliency state — same scope as `candidate`.
+            // `lastSaliencyFireAt` is intentionally NOT reset: `reset()`
+            // fires on LOW silent re-arm, and a cleared cooldown there
+            // would re-permit immediate re-fire on a static scene.
+            self.salientCandidate = nil
+            self.firstNoObservationAt = nil
             self.notifyCandidateUpdated(nil)
         }
     }
@@ -244,16 +329,16 @@ public final class PopAlphaVisionEngine {
         let timestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
         rectangleRequest.regionOfInterest = regionOfInterestForCurrentCandidate()
 
+        let requestHandler = VNImageRequestHandler(
+            cvPixelBuffer: pixelBuffer,
+            orientation: orientation,
+            options: [:]
+        )
+
+        var observation: VNRectangleObservation?
         do {
-            let requestHandler = VNImageRequestHandler(
-                cvPixelBuffer: pixelBuffer,
-                orientation: orientation,
-                options: [:]
-            )
-
             try requestHandler.perform([rectangleRequest])
-
-            let observation = bestCardObservation(from: rectangleRequest.results ?? [])
+            observation = bestCardObservation(from: rectangleRequest.results ?? [])
             updateCandidate(
                 with: observation,
                 at: timestamp,
@@ -262,6 +347,33 @@ public final class PopAlphaVisionEngine {
             )
         } catch {
             expireCandidateIfNeeded(at: timestamp)
+        }
+
+        // Saliency fallback — runs ONLY when the rectangle detector
+        // has been failing for `saliencyFallbackDelay` seconds. See
+        // the "Saliency fallback" section at the top of the type for
+        // the full motivation; the short version is "full-art cards
+        // have no edge gradient, so the rectangle detector never
+        // fires." Streak is reset on any successful rectangle obs.
+        // Reuses the existing `requestHandler` so we don't pay the
+        // cost of building a second one over the same pixel buffer.
+        if observation != nil {
+            firstNoObservationAt = nil
+            salientCandidate = nil
+        } else {
+            if firstNoObservationAt == nil {
+                firstNoObservationAt = timestamp
+            }
+            let streak = timestamp - (firstNoObservationAt ?? timestamp)
+            let cooldownElapsed = timestamp - lastSaliencyFireAt >= saliencyCooldown
+            if streak >= saliencyFallbackDelay, cooldownElapsed {
+                analyzeSaliency(
+                    handler: requestHandler,
+                    at: timestamp,
+                    pixelBuffer: pixelBuffer,
+                    orientation: orientation
+                )
+            }
         }
     }
 
@@ -296,39 +408,6 @@ public final class PopAlphaVisionEngine {
         return request
     }
 
-    private func configurePreferredComputeDevices(for request: VNDetectRectanglesRequest) {
-        guard #available(iOS 17.0, *) else {
-            return
-        }
-
-        guard let supportedDevices = try? request.supportedComputeStageDevices else {
-            return
-        }
-
-        for (stage, devices) in supportedDevices {
-            if let neuralEngine = devices.first(where: {
-                if case .neuralEngine = $0 {
-                    return true
-                }
-
-                return false
-            }) {
-                request.setComputeDevice(neuralEngine, for: stage)
-                continue
-            }
-
-            if let gpu = devices.first(where: {
-                if case .gpu = $0 {
-                    return true
-                }
-
-                return false
-            }) {
-                request.setComputeDevice(gpu, for: stage)
-            }
-        }
-    }
-
     private func bestCardObservation(
         from observations: [VNRectangleObservation]
     ) -> VNRectangleObservation? {
@@ -341,6 +420,219 @@ public final class PopAlphaVisionEngine {
             .max { lhs, rhs in
                 observationScore(lhs) < observationScore(rhs)
             }
+    }
+
+    // MARK: - Saliency fallback helpers
+
+    private func makeSaliencyRequest() -> VNGenerateAttentionBasedSaliencyImageRequest {
+        let request = VNGenerateAttentionBasedSaliencyImageRequest()
+        configurePreferredComputeDevices(for: request)
+        return request
+    }
+
+    /// Generic Neural Engine / GPU placement for any VNImageBasedRequest.
+    /// Mirrors the rectangle-request configuration but accepts the broader
+    /// protocol so the saliency request (a non-rectangle request) can
+    /// share the same logic.
+    private func configurePreferredComputeDevices(for request: VNImageBasedRequest) {
+        guard #available(iOS 17.0, *) else { return }
+        guard let supportedDevices = try? request.supportedComputeStageDevices else {
+            return
+        }
+        for (stage, devices) in supportedDevices {
+            if let neuralEngine = devices.first(where: {
+                if case .neuralEngine = $0 { return true }
+                return false
+            }) {
+                request.setComputeDevice(neuralEngine, for: stage)
+                continue
+            }
+            if let gpu = devices.first(where: {
+                if case .gpu = $0 { return true }
+                return false
+            }) {
+                request.setComputeDevice(gpu, for: stage)
+            }
+        }
+    }
+
+    /// Runs `VNGenerateAttentionBasedSaliencyImageRequest` on the current
+    /// frame and threads any salient observation through the same
+    /// stability-gate-then-deliver flow the rectangle path uses. Called
+    /// only when `analyze()` determines the rectangle path has been
+    /// silent for `saliencyFallbackDelay` seconds AND cooldown has
+    /// elapsed.
+    private func analyzeSaliency(
+        handler: VNImageRequestHandler,
+        at timestamp: TimeInterval,
+        pixelBuffer: CVPixelBuffer,
+        orientation: CGImagePropertyOrientation,
+    ) {
+        do {
+            try handler.perform([saliencyRequest])
+        } catch {
+            return
+        }
+        guard let salientObjects = (saliencyRequest.results as? [VNSaliencyImageObservation])?
+                .first?.salientObjects, !salientObjects.isEmpty else {
+            salientCandidate = nil
+            return
+        }
+        let best = bestSalientObservation(from: salientObjects)
+        updateSalientCandidate(
+            with: best,
+            at: timestamp,
+            pixelBuffer: pixelBuffer,
+            orientation: orientation,
+        )
+    }
+
+    /// Of the salient-object observations from the saliency request,
+    /// pick the one that looks most card-like. The saliency detector
+    /// always produces *some* observation given non-uniform content —
+    /// uniform surface like a clean desk → rectangles distributed
+    /// across the frame. The aspect/size sanity check (§
+    /// `isPlausibleSalientBox`) filters those out so a phone pointed
+    /// at the desk doesn't fire the auto-trigger.
+    ///
+    /// Returns nil when no observation passes sanity. The caller leaves
+    /// `salientCandidate` cleared, which keeps the stability counter
+    /// from advancing across un-related frames.
+    private func bestSalientObservation(
+        from observations: [VNRectangleObservation]
+    ) -> VNRectangleObservation? {
+        observations
+            .filter { Self.isPlausibleSalientBox($0.boundingBox) }
+            .max { lhs, rhs in
+                (lhs.boundingBox.width * lhs.boundingBox.height) <
+                (rhs.boundingBox.width * rhs.boundingBox.height)
+            }
+    }
+
+    /// Stability gate for the saliency path. Mirrors `updateCandidate`'s
+    /// behavior for the rectangle path: a salient observation must
+    /// persist for `minimumStableDuration` seconds in roughly the same
+    /// position before we promote it to a delegate fire. Uses IoU >=
+    /// 0.7 as the "same region" predicate, which is looser than the
+    /// rectangle path's `matches()` (saliency observations can jitter
+    /// more frame-to-frame because they're not corner-locked).
+    private func updateSalientCandidate(
+        with observation: VNRectangleObservation?,
+        at timestamp: TimeInterval,
+        pixelBuffer: CVPixelBuffer,
+        orientation: CGImagePropertyOrientation,
+    ) {
+        guard let observation else {
+            salientCandidate = nil
+            return
+        }
+
+        if var existing = salientCandidate,
+           intersectionOverUnion(existing.boundingBox, observation.boundingBox) >= 0.7 {
+            existing.boundingBox = observation.boundingBox
+            existing.lastSeenAt = timestamp
+            salientCandidate = existing
+        } else {
+            salientCandidate = SalientCandidate(
+                boundingBox: observation.boundingBox,
+                firstSeenAt: timestamp,
+                lastSeenAt: timestamp,
+                hasTriggered: false,
+            )
+        }
+
+        guard var stableSalient = salientCandidate else { return }
+        guard !stableSalient.hasTriggered else { return }
+        guard timestamp - stableSalient.firstSeenAt >= minimumStableDuration else { return }
+
+        stableSalient.hasTriggered = true
+        salientCandidate = stableSalient
+
+        guard let frame = makeImage(from: pixelBuffer, orientation: orientation) else {
+            return
+        }
+        let cropped = cropToSalient(frame, boundingBox: stableSalient.boundingBox) ?? frame
+
+        // Stamp the fire time BEFORE dispatching so concurrent frames
+        // entering analyze() observe an active cooldown immediately.
+        lastSaliencyFireAt = timestamp
+
+        callbackQueue.async { [weak self] in
+            guard let self else { return }
+            self.delegate?.didDetectStableCard(
+                image: cropped,
+                perspectiveCorrection: nil,
+                triggerKind: "auto_saliency",
+            )
+        }
+    }
+
+    /// Crop the frame to the salient bounding box with ~4% edge
+    /// padding. Vision's saliency boxes can sit slightly inside the
+    /// card boundary; the padding restores a margin so the embedder
+    /// sees the full card art the same way it would on a clean
+    /// rectangle-detected crop. Returns nil only when the frame has
+    /// no CGImage or zero size — caller falls back to the full frame.
+    private func cropToSalient(_ image: UIImage, boundingBox: CGRect) -> UIImage? {
+        let size = image.size
+        guard size.width > 0, size.height > 0 else { return nil }
+
+        // Re-render to bake any UIImage.imageOrientation flag into the
+        // pixel buffer — `CGImage.cropping(to:)` operates in raw pixel
+        // space and would otherwise crop relative to the unrotated
+        // bitmap, not the visually-correct frame.
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        format.opaque = true
+        let renderer = UIGraphicsImageRenderer(size: size, format: format)
+        let flat = renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: size))
+        }
+        guard let cgImage = flat.cgImage else { return nil }
+
+        let padX = boundingBox.width * 0.04
+        let padY = boundingBox.height * 0.04
+        let paddedMinX = max(0, boundingBox.minX - padX)
+        let paddedMinY = max(0, boundingBox.minY - padY)
+        let paddedMaxX = min(1, boundingBox.maxX + padX)
+        let paddedMaxY = min(1, boundingBox.maxY + padY)
+        let paddedW = paddedMaxX - paddedMinX
+        let paddedH = paddedMaxY - paddedMinY
+        guard paddedW > 0, paddedH > 0 else { return nil }
+
+        // Vision's normalized bounding box uses a bottom-left origin;
+        // CGImage uses top-left. Flip the Y axis when projecting into
+        // pixel space.
+        let cropRect = CGRect(
+            x: paddedMinX * size.width,
+            y: (1 - paddedMaxY) * size.height,
+            width: paddedW * size.width,
+            height: paddedH * size.height,
+        )
+        guard let cropped = cgImage.cropping(to: cropRect) else { return nil }
+        return UIImage(cgImage: cropped, scale: 1, orientation: .up)
+    }
+
+    /// Reject salient regions that aren't shaped like a Pokemon TCG
+    /// card. The detector always finds *something* in the frame —
+    /// without this gate, a phone pointed at a clean desk would lock
+    /// onto whatever low-contrast feature ranked highest and fire
+    /// the auto-trigger, burning the user's daily scan quota.
+    ///
+    /// Constraints:
+    ///   - Short side ≥ 25% of frame (rejects tiny salient patches).
+    ///   - Aspect ratio in [0.45, 0.95] — looser than the rectangle
+    ///     path's [0.604, 0.804] because saliency can include some
+    ///     surrounding context around the card.
+    private static func isPlausibleSalientBox(_ box: CGRect) -> Bool {
+        let w = box.width
+        let h = box.height
+        let shortSide = min(w, h)
+        let longSide = max(w, h)
+        guard shortSide >= 0.25 else { return false }
+        guard longSide > 0 else { return false }
+        let aspect = shortSide / longSide
+        return aspect >= 0.45 && aspect <= 0.95
     }
 
     private func updateCandidate(
@@ -418,6 +710,7 @@ public final class PopAlphaVisionEngine {
             self.delegate?.didDetectStableCard(
                 image: cardImage,
                 perspectiveCorrection: perspectiveCorrection,
+                triggerKind: "auto",
             )
         }
     }
@@ -785,6 +1078,18 @@ public final class PopAlphaVisionEngine {
 
 private struct StableCandidate {
     var observation: VNRectangleObservation
+    var firstSeenAt: TimeInterval
+    var lastSeenAt: TimeInterval
+    var hasTriggered: Bool
+}
+
+/// In-progress saliency observation accumulating stability across
+/// frames. Distinct from `StableCandidate` because the saliency
+/// detector returns axis-aligned `boundingBox`-only observations
+/// (no corner points), and the stability predicate uses IoU rather
+/// than the rectangle path's corner-distance check.
+private struct SalientCandidate {
+    var boundingBox: CGRect
     var firstSeenAt: TimeInterval
     var lastSeenAt: TimeInterval
     var hasTriggered: Bool
