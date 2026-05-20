@@ -907,7 +907,16 @@ struct ScannerTabView: View {
                 // deliberate user actions — they bypass this guard
                 // (the same user might genuinely want to scan two
                 // copies of the same card via tap).
-                if scanner.lastTriggerSource == "auto",
+                //
+                // 2026-05-17 — also includes "auto_saliency", the
+                // 2026-05-16 full-art fallback trigger. Without it
+                // here a full-art lingering in frame would re-fire
+                // every `saliencyCooldown` (8s) and append + charge
+                // each time, defeating both the dedupe-tray and
+                // refund logic the rectangle path already has.
+                // (Codex P2 review on PR #111.)
+                if (scanner.lastTriggerSource == "auto"
+                    || scanner.lastTriggerSource == "auto_saliency"),
                    multiScanSession.shouldDedupeAutoDetect(slug: match.slug) {
                     // The upstream gate charged a quota unit before
                     // this server call; refund it now since the
