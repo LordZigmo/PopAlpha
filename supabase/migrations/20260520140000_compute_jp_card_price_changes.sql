@@ -42,17 +42,39 @@
 -- Mirrors refresh_price_changes() (the EN baseline at migration
 -- 20260501010000) wherever the schemas line up:
 --
---   * Time-anchored baselines: 24h baseline must fall in
---     [now-30h, now-18h]; 7d baseline must fall in [now-8d, now-6d].
---     Stops "today vs three-weeks-ago" being labeled as 24h change.
+--   * Time-anchored baselines (windows widened for JP cadence — see
+--     "Window cadence" note below).
 --   * Outlier cap: |change_pct| <= 200%. Suppresses to NULL rather
 --     than letting an implausible value through.
---   * Recency gate: the latest observation must itself be within
---     24h (for change_pct_24h) or 7d (for change_pct_7d) of now,
---     otherwise the delta would compare a stale "current" against
---     an even staler baseline.
+--   * Recency gate on the latest observation, so a stale "current"
+--     can't be paired with an even staler baseline.
 --   * IS DISTINCT FROM guard on the UPDATE so unchanged rows don't
 --     churn updated_at.
+--   * NULL branch wipes stale change_pct values for JP rows whose
+--     history has gone cold (>14d since last append).
+--
+-- Window cadence (P1 from Codex review on PR #113):
+--   The JP cron writers refresh a slug only when its observed_at is
+--   older than REFRESH_AFTER_HOURS = 7d (see run-yahoo-jp-daily.ts
+--   and run-snkrdunk-daily.ts). Per-slug history append cadence is
+--   therefore weekly-ish, not daily, so EN's tight ±6h / ±1d windows
+--   would almost never match a JP slug's history rows.
+--
+--   The JP windows below are widened to fit the actual cadence:
+--     change_pct_24h: baseline in [now-72h, now-12h], latest within
+--                     72h. Catches "yesterday-ish" even if a write
+--                     was skipped, but bounds the span at 3 days so
+--                     the "24h" label stays roughly honest.
+--     change_pct_7d:  baseline in [now-14d, now-4d], latest within
+--                     14d. Catches the typical weekly write even if
+--                     it lands a few days off the ideal anchor.
+--
+--   Trade-off: change_pct_24h will still be sparse on JP (only slugs
+--   refreshed within the past ~3 days qualify). That's acceptable —
+--   the JP rail's 24H tabs filling thinly is much better than the
+--   current 0/5 rails populated state. The mid/budget rails already
+--   fall back to 7D when a card lacks a 24H value (see
+--   lib/data/homepage.ts JpRailBundle).
 --
 -- JP-specific design choices:
 --
@@ -74,13 +96,15 @@
 --     printing rows in jp_card_price_history exist for HOLO / Reverse
 --     Holo etc. but the homepage rail reads canonical-level metrics,
 --     so per-printing deltas would never reach the UI.
---   * No NULL branch. The EN populator NULLs change_pct on slugs that
---     lose their JustTCG history (defensive against stale inflated
---     values lingering on the homepage). The JP rail loader has its
---     own freshness gate (JP_FRESHNESS_MAX_AGE_HOURS = 7d on
---     market_price_as_of) that already filters cards whose pricing
---     went cold, so the loader-side gate is sufficient without
---     proactively wiping change_pct from card_metrics.
+--   * NULL branch (P2 from Codex review on PR #113). Both JP cron
+--     writers treat jp_card_price_history insert failures as non-
+--     fatal warnings — so a sustained history-write outage would
+--     leave market_price/market_price_as_of fresh (via the latest-
+--     price tables) while old change_pct values rot indefinitely.
+--     The wipe branch below clears change_pct_24h and change_pct_7d
+--     when no qualifying history row exists in the last 14 days.
+--     Scoped to JP rows that actually have change_pct set so we
+--     don't churn ~20k JP card_metrics rows every tick.
 --
 -- Freshness rollout
 -- -----------------
@@ -88,10 +112,11 @@
 -- ships:
 --
 --   T0       cron writers start appending history rows hourly
---   T0+18h   the 24h baseline window [now-30h, now-18h] starts
+--   T0+12h   the 24h baseline window [now-72h, now-12h] starts
 --            containing rows → change_pct_24h begins populating on
---            the next refresh-card-metrics tick (every 12h)
---   T0+6d    the 7d baseline window [now-8d, now-6d] starts
+--            the next refresh-card-metrics tick (every 12h) for
+--            slugs that get touched
+--   T0+4d    the 7d baseline window [now-14d, now-4d] starts
 --            containing rows → change_pct_7d begins populating
 --
 -- In the meantime the same-day rescue (PR #112) keeps the legacy
@@ -115,17 +140,29 @@ set lock_timeout = 0
 as $$
 declare
   updated_count int := 0;
-  cutoff_8d            timestamptz := now() - interval '8 days';
-  cutoff_24h_recent    timestamptz := now() - interval '24 hours';
-  cutoff_7d_recent     timestamptz := now() - interval '7 days';
-  -- Time-anchored baseline windows. The baseline must fall inside
-  -- these, not just "before the cutoff" — mirrors EN refresh_price_changes
-  -- (migration 20260501010000) so "today vs three-weeks-ago" can never
-  -- be labeled as 24h change for JP cards either.
-  baseline_24h_lo      timestamptz := now() - interval '30 hours';
-  baseline_24h_hi      timestamptz := now() - interval '18 hours';
-  baseline_7d_lo       timestamptz := now() - interval '8 days';
-  baseline_7d_hi       timestamptz := now() - interval '6 days';
+  nulled_count  int := 0;
+  -- Lookback window. Must extend past the 7d baseline upper bound
+  -- (now-4d) and ideally past the 7d baseline lower bound (now-14d)
+  -- so a slug whose only baseline candidate is ~10d old still
+  -- qualifies. 21 days is enough headroom plus a buffer for cron lag.
+  cutoff_lookback      timestamptz := now() - interval '21 days';
+  -- Recency gates on the latest observation, separate per window:
+  -- a 24h delta only makes sense if "now" really is recent (≤3d);
+  -- a 7d delta is meaningful as long as the card is in-rail (≤14d,
+  -- looser than the rail's 7d freshness threshold so we don't drop
+  -- cards that the rail would still display).
+  cutoff_24h_latest    timestamptz := now() - interval '72 hours';
+  cutoff_7d_latest     timestamptz := now() - interval '14 days';
+  -- Stale-wipe threshold for the NULL branch — see the design comment
+  -- above. 14d is the same window the 7d baseline upper bound implies
+  -- (no history newer than 14d → no 7d baseline is computable either).
+  cutoff_stale_wipe    timestamptz := now() - interval '14 days';
+  -- Time-anchored baseline windows, widened for JP write cadence.
+  -- See the "Window cadence" design note above.
+  baseline_24h_lo      timestamptz := now() - interval '72 hours';
+  baseline_24h_hi      timestamptz := now() - interval '12 hours';
+  baseline_7d_lo       timestamptz := now() - interval '14 days';
+  baseline_7d_hi       timestamptz := now() - interval '4 days';
   outlier_cap_pct      numeric     := 200;
 begin
   with recent_history as (
@@ -143,7 +180,7 @@ begin
     where cc.language = 'JP'
       and h.grade = 'RAW'
       and h.printing_id is null
-      and h.recorded_at >= cutoff_8d
+      and h.recorded_at >= cutoff_lookback
       and h.price_jpy is not null
       and h.price_jpy > 0
   ),
@@ -205,7 +242,7 @@ begin
       case
         when p24.price_24h is not null
          and p24.price_24h > 0
-         and lp.latest_ts > cutoff_24h_recent
+         and lp.latest_ts > cutoff_24h_latest
          and abs(((lp.price_now - p24.price_24h) / p24.price_24h) * 100) <= outlier_cap_pct
         then ((lp.price_now - p24.price_24h) / p24.price_24h) * 100
         else null
@@ -213,7 +250,7 @@ begin
       case
         when p7.price_7d is not null
          and p7.price_7d > 0
-         and lp.latest_ts > cutoff_7d_recent
+         and lp.latest_ts > cutoff_7d_latest
          and abs(((lp.price_now - p7.price_7d) / p7.price_7d) * 100) <= outlier_cap_pct
         then ((lp.price_now - p7.price_7d) / p7.price_7d) * 100
         else null
@@ -239,10 +276,55 @@ begin
   )
   select count(*) into updated_count from do_update;
 
+  -- NULL branch — see the "JP-specific design choices" comment block
+  -- above. Wipe change_pct values for JP rows where no qualifying
+  -- history row exists in the last 14 days. Guards against a sustained
+  -- history-write outage stranding stale momentum data while the rail's
+  -- market_price stays fresh via the latest-price tables.
+  --
+  -- The do_update set above and this do_null set are disjoint by
+  -- construction: a slug with no history in the last 14d cannot have
+  -- produced a row in `changes` (the lookback already requires
+  -- recorded_at >= now-21d, but more importantly, the baseline windows
+  -- and recency gates above don't accept anything older than 14d).
+  with stale_jp as (
+    select cm.id
+    from public.card_metrics cm
+    join public.canonical_cards cc on cc.slug = cm.canonical_slug
+    where cc.language = 'JP'
+      and cm.printing_id is null
+      and cm.grade = 'RAW'
+      and (cm.change_pct_24h is not null or cm.change_pct_7d is not null)
+      and not exists (
+        select 1
+        from public.jp_card_price_history h
+        where h.canonical_slug = cm.canonical_slug
+          and h.grade = 'RAW'
+          and h.printing_id is null
+          and h.price_jpy is not null
+          and h.price_jpy > 0
+          and h.recorded_at >= cutoff_stale_wipe
+      )
+  ),
+  do_null as (
+    update public.card_metrics cm
+    set
+      change_pct_24h = null,
+      change_pct_7d  = null
+    from stale_jp s
+    where cm.id = s.id
+    returning cm.id
+  )
+  select count(*) into nulled_count from do_null;
+
   return jsonb_build_object(
     'updated', updated_count,
+    'nulled',  nulled_count,
     'baseline_24h_window', jsonb_build_array(baseline_24h_lo, baseline_24h_hi),
     'baseline_7d_window', jsonb_build_array(baseline_7d_lo, baseline_7d_hi),
+    'cutoff_24h_latest', cutoff_24h_latest,
+    'cutoff_7d_latest', cutoff_7d_latest,
+    'cutoff_stale_wipe', cutoff_stale_wipe,
     'outlier_cap_pct', outlier_cap_pct
   );
 end;
@@ -251,11 +333,15 @@ $$;
 comment on function public.compute_jp_card_price_changes() is
   'Populates card_metrics.change_pct_24h / change_pct_7d for JP-language '
   'canonical-level RAW rows by reading jp_card_price_history. Mirrors '
-  'refresh_price_changes() (migration 20260501010000) — time-anchored '
-  'baselines (±6h on 24h, ±1d on 7d), ±200% outlier cap, recency gate '
-  'on the latest observation. Per-slug source selection prefers the '
-  'source with the most history points in the lookback window so the '
-  'delta math stays within a single source.';
+  'refresh_price_changes() (migration 20260501010000) with windows '
+  'widened for the JP cron cadence (weekly per-slug refresh): 24h '
+  'baseline in [now-72h, now-12h], 7d baseline in [now-14d, now-4d]. '
+  '±200% outlier cap, recency gates on the latest observation, NULL '
+  'branch wipes change_pct when no qualifying history exists in the '
+  'last 14 days (guards against history-write outages). Per-slug '
+  'source selection prefers the source with the most history points '
+  'in the lookback window so the delta math stays within a single '
+  'source.';
 
 -- One-shot run so any rows already present in jp_card_price_history
 -- (from manual .mjs orchestrator runs prior to this PR) produce
