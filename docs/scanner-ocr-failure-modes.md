@@ -609,6 +609,67 @@ within ~2s (1.5s fallback delay + 0.5s stability).
 
 ---
 
+### Mode 10 — Saliency fallback fires on non-cards, polluting multi-scan tray
+
+**Symptom.** First multi-scan smoke session 2026-05-20: user
+reported "the multi scanner was going crazy, scanning things that
+weren't even cards." Non-card objects (books on a desk, the user's
+phone, food packaging, etc.) appended to the review tray as
+MEDIUM/HIGH-confidence rows.
+
+**Evidence.** User report, no structured PostHog query yet — the
+`trigger_source` property on `card_scanned` carries `auto` vs.
+`tap_multiframe` but doesn't separate saliency-triggered `auto`
+fires from rectangle-triggered ones. Follow-up: thread
+`auto_saliency` through to PostHog so a sim-distribution histogram
+filterable by `trigger_source=auto_saliency` becomes the source of
+truth for tuning a systemic sim floor.
+
+**Vision actually saw.** Salient observations from
+`VNGenerateAttentionBasedSaliencyImageRequest` — the request's
+job is to surface "what's attention-grabbing in this frame", not
+"what's a card-shaped object". Anything visually prominent and
+roughly rectangular gets returned: books, phones, food packages,
+posters, magazines. The cropped salient region went through SigLIP
+kNN which always returns *some* nearest neighbor; Phase 1.5's
+relaxed confidence gate admitted the false match.
+
+**Root cause.** `isPlausibleSalientBox` (PopAlphaVisionEngine.swift
+§627-636) gates only on short-side ≥ 25% of frame and aspect ∈
+[0.45, 0.95]. That window is generous around Pokemon TCG's 0.714
+aspect but accepts almost any photographable rectangular object.
+Without a downstream "is this even card-like" sim floor on the
+kNN result, every salient observation funnels straight into the
+embedder + match pipeline. In single-scan mode a false trigger
+merely shows the picker once (annoying but recoverable). In
+multi-scan mode it silently accumulates a non-card row into the
+tray that the user then has to swipe-delete.
+
+**Fix or mitigation.**
+- **2026-05-20 (this PR, targeted): disable saliency in
+  multi-scan mode.** `PopAlphaVisionEngine.isSaliencyEnabled`
+  property gates the saliency invocation; `ScannerHost.multiScanMode`
+  didSet flips it off when multi-scan turns on. Single-scan keeps
+  saliency on so full-art card recall is preserved. Cleanest
+  unblock for the first real baseline session.
+- **OPEN — systemic follow-up.** Post-identify sim floor on
+  `trigger_source = auto_saliency` results: require sim ≥ ~0.85
+  to admit the match into ANY downstream flow (tray or picker).
+  Doesn't disable saliency — just rejects low-sim matches. Tunable
+  from telemetry once `auto_saliency` is broken out as a distinct
+  trigger_source value in `card_scanned`. Once shipped, the
+  multi-scan saliency gate above becomes redundant and can be
+  reverted.
+
+**Repro.** Toggle multi-scan ON, point phone at a desk/book/phone
+screen/food package for 2-3 seconds (let the rectangle detector
+miss for ≥1.5s so saliency would have fired). Pre-fix: each
+non-card scene appends a row. Post-fix: tray stays empty regardless
+of non-card content; only deliberate card placements trigger
+appends.
+
+---
+
 ## Scoreboard — how often does each mode actually fire?
 
 Update this whenever you have aggregate data to back it up.
@@ -624,6 +685,7 @@ Update this whenever you have aggregate data to back it up.
 | 7 (OCR misread digits, e.g. 068→163) | 2026-05-07 | 1/9 pass-2 firings (~11%) | TBD | OPEN — Tier 1.1 stage 5 (multi-candidate digit ranking). Failure mode is graceful: wrong card_number → Path B no-match → vision_only fallback. End-to-end result still correct in observed case. |
 | 8 (Stage-3 perspective-correction coord quirk — card_number rejected by spatial filter) | 2026-05-07 | 25/25 (100%) post-stage-3 sample | TBD | **DIAGNOSTIC HARNESS LIVE 2026-05-15; coord fix still deferred.** Stage 3.1 attempted Y-flip mis-modeled the CIImage coord interaction and produced mirrored text — reverted same day. Pass-2 fallback recovers card_number gracefully (8/9 success on real device), so this is internal-pass-distinction only, NOT a user-facing accuracy issue. Phase 0d (2026-05-15) added the empirical surface: `scan_identify_events.ocr_perspective_corrected_extent` (jsonb, server-routed) + PostHog `ocr_perspective_*` properties (offline) + a `persp:` line on the DEBUG ScanDebugCapture Photos banner. Re-attempt the coord-system fix only AFTER ~10–20 real-device samples land and the orientation/extent distribution justifies the math. |
 | 9 (full-art auto-capture never fires — no edge gradient) | 2026-05-16 | user-reported, unmeasured | TBD | **MITIGATED 2026-05-16.** Saliency-based fallback in `PopAlphaVisionEngine.analyzeSaliency` runs `VNGenerateAttentionBasedSaliencyImageRequest` after 1.5s of no rectangle observation, fires `didDetectStableCard` with `triggerKind: "auto_saliency"`. Aspect/size sanity gate + 8s post-fire cooldown + existing server confidence threshold contain false-fires. Real-device verification + PostHog segment-by-`triggerSource` pending. |
+| 10 (saliency fires on non-cards, polluting multi-scan tray) | 2026-05-20 | user-reported on first multi-scan smoke session | TBD | **MITIGATED 2026-05-20 (targeted).** `PopAlphaVisionEngine.isSaliencyEnabled` flag, flipped off by `ScannerHost.multiScanMode` didSet. Single-scan keeps saliency on (Mode 9 recall preserved); multi-scan reverts to rectangle-only auto-detect. **OPEN — systemic follow-up**: post-identify sim floor on `trigger_source=auto_saliency` results (require sim ≥ ~0.85 to admit) once `auto_saliency` is broken out as a distinct PostHog trigger_source value for sim-distribution tuning. |
 
 The 5-scan sample on 2026-05-07 is too small to draw conclusions
 about real-device frequency. A meaningful scoreboard requires:

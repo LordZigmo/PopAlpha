@@ -238,6 +238,25 @@ public final class PopAlphaVisionEngine {
     /// scanning the next card without noticeable delay.
     private let saliencyCooldown: TimeInterval = 8.0
 
+    /// When false, the saliency fallback path is fully disabled — the
+    /// engine acts as if `VNGenerateAttentionBasedSaliencyImageRequest`
+    /// doesn't exist. Multi-scan mode flips this off because saliency's
+    /// `isPlausibleSalientBox` aspect gate is loose enough that books,
+    /// phones, and food packages also pass — and once they pass, the
+    /// SigLIP kNN admits them as MEDIUM/HIGH matches that silently
+    /// accumulate into the review tray. Single-scan mode keeps it on
+    /// so full-arts (the original motivation for the fallback) still
+    /// auto-trigger. Targeted fix landing while we collect telemetry
+    /// to inform a systemic post-identify sim floor for `auto_saliency`
+    /// triggers; see `scanner-ocr-failure-modes.md` 2026-05-20 entry.
+    ///
+    /// All access goes through `analysisQueue` so the flag read in
+    /// `analyze()` and the state-clear on disable are serialized with
+    /// frame processing — no torn reads, no Mode 9 fires racing a
+    /// just-toggled-on multi-scan session. Callers use
+    /// `setSaliencyEnabled(_:)` from any thread.
+    private var _isSaliencyEnabled: Bool = true
+
     public init(
         delegate: PopAlphaVisionEngineDelegate? = nil,
         callbackQueue: DispatchQueue = .main,
@@ -277,6 +296,23 @@ public final class PopAlphaVisionEngine {
 
             autoreleasepool {
                 self.analyze(sampleBuffer: sampleBuffer, orientation: orientation)
+            }
+        }
+    }
+
+    /// Toggle the saliency fallback path on or off. Safe to call from
+    /// any thread — the write and the dependent state-clear both
+    /// dispatch onto `analysisQueue`, so a subsequent `analyze()` (also
+    /// on that serial queue) is guaranteed to see the new value and
+    /// the cleared `firstNoObservationAt` / `salientCandidate`. See
+    /// `_isSaliencyEnabled` for the motivation behind the gate.
+    public func setSaliencyEnabled(_ enabled: Bool) {
+        analysisQueue.async { [weak self] in
+            guard let self else { return }
+            self._isSaliencyEnabled = enabled
+            if !enabled {
+                self.firstNoObservationAt = nil
+                self.salientCandidate = nil
             }
         }
     }
@@ -357,7 +393,15 @@ public final class PopAlphaVisionEngine {
         // fires." Streak is reset on any successful rectangle obs.
         // Reuses the existing `requestHandler` so we don't pay the
         // cost of building a second one over the same pixel buffer.
-        if observation != nil {
+        //
+        // Also reset (and skip the analyzer) when `_isSaliencyEnabled`
+        // is false — multi-scan mode flips it off to avoid false-
+        // positive triggers on non-card objects polluting the tray.
+        // `_isSaliencyEnabled` is mutated exclusively via
+        // `setSaliencyEnabled(_:)` which dispatches onto this same
+        // serial queue, so this read sees a consistent value within
+        // each `analyze()` invocation.
+        if observation != nil || !_isSaliencyEnabled {
             firstNoObservationAt = nil
             salientCandidate = nil
         } else {
