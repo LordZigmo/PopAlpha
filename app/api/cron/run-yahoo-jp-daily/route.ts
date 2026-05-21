@@ -246,6 +246,39 @@ async function processCard(supabase: ReturnType<typeof dbAdmin>, card: CardRow) 
       return { slug: card.slug, status: "write-failed" as const, reason: error.message };
     }
     rowsWritten += 1;
+
+    // Append the same observation to jp_card_price_history so
+    // compute_jp_card_price_changes() (migration 20260520140000) can
+    // derive 24h/7d deltas for the JP homepage rails. Mirrors the
+    // pipeline-script writer in scripts/run-yahoo-jp-pipeline.mjs.
+    // Failure here is non-fatal: the latest-price upsert above is the
+    // source of truth for the homepage; the history append only
+    // matters for delta math, and a missed row just means a slightly
+    // staler baseline next tick.
+    try {
+      const { error: historyError } = await supabase
+        .from("jp_card_price_history")
+        .insert({
+          canonical_slug: card.slug,
+          printing_id: obs.printing_id,
+          grade: "RAW",
+          source: "yahoo_jp",
+          price_jpy: obsYen,
+          price_usd: obsUsd,
+          sample_count: obs.count,
+          observed_at: observedAt,
+        });
+      if (historyError) {
+        console.warn(
+          `[run-yahoo-jp-daily] jp_card_price_history append failed for ${card.slug}/${obs.printing_id ?? "canonical"}: ${historyError.message}`,
+        );
+      }
+    } catch (err) {
+      console.warn(
+        `[run-yahoo-jp-daily] jp_card_price_history append threw for ${card.slug}/${obs.printing_id ?? "canonical"}:`,
+        err instanceof Error ? err.message : err,
+      );
+    }
   }
 
   return {

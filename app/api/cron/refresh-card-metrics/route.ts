@@ -59,6 +59,23 @@ export async function GET(req: Request) {
     priceChangesError = err instanceof Error ? err.message : String(err);
   }
 
+  // compute_jp_card_price_changes() — JP-native 24h/7d deltas from
+  // jp_card_price_history for JP-language canonical-level RAW rows.
+  // Mirrors the refresh_price_changes() shape. See migration
+  // 20260520140000 for the design and freshness rollout timeline.
+  let jpPriceChangesResult: unknown = null;
+  let jpPriceChangesError: string | null = null;
+  try {
+    const { data: jpData, error: jpError } = await supabase.rpc("compute_jp_card_price_changes");
+    if (jpError) {
+      jpPriceChangesError = jpError.message;
+    } else {
+      jpPriceChangesResult = jpData;
+    }
+  } catch (err) {
+    jpPriceChangesError = err instanceof Error ? err.message : String(err);
+  }
+
   return NextResponse.json({
     ok: true,
     result: data,
@@ -68,5 +85,7 @@ export async function GET(req: Request) {
     realizedBacktestError,
     priceChanges: priceChangesResult,
     priceChangesError,
+    jpPriceChanges: jpPriceChangesResult,
+    jpPriceChangesError,
   });
 }
