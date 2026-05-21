@@ -165,14 +165,25 @@ struct MarketPulseSection: View {
     private var visibleCategories: [Category] {
         if japaneseOnly {
             // Mirror the web JP board ordering: Movers, Pullbacks,
-            // Momentum (windowed, reads japaneseMomentum), Mid, Budget.
-            // The legacy `.japanese` discovery tab is hidden — it was
-            // a holdover from when JP mode only had one rail, and now
-            // duplicates the signal already surfaced through Movers /
-            // Pullbacks / Momentum. Breakouts / Unusual stay EN-only
-            // because the server hasn't shipped JP equivalents for
-            // those signals yet.
-            return [.movers, .pullbacks, .momentum, .mid, .budget]
+            // Momentum (windowed, reads japaneseMomentum), Mid, Budget,
+            // then `.japanese` discovery last. Breakouts / Unusual
+            // stay EN-only because the server hasn't shipped JP
+            // equivalents for those signals yet.
+            //
+            // .japanese was hidden in commit beb649b on the assumption
+            // the five JP movers rails would carry the load. They
+            // don't: the JP pricing path (yahoo_jp + snkrdunk →
+            // card_metrics) never populates change_pct_24h /
+            // change_pct_7d, so the loader's `change_pct_!= null`
+            // gate in lib/data/homepage.ts:~666 keeps every JP movers
+            // rail empty. The .japanese discovery rail uses the
+            // refresh-tier hot/warm pool instead and is the only one
+            // that actually surfaces JP cards today.
+            //
+            // Restored 2026-05-18 as the same-day rescue. The durable
+            // fix is a JP change_pct populator; until that ships, this
+            // tab is the only thing keeping JP cards on the homepage.
+            return [.movers, .pullbacks, .momentum, .mid, .budget, .japanese]
         }
         // EN mode currently hides `.momentum` because the EN .breakouts
         // tab already falls back to momentum data when breakouts is
@@ -194,6 +205,34 @@ struct MarketPulseSection: View {
             return .movers
         }
         return category
+    }
+
+    /// Pick the first visible category whose rail actually has cards.
+    /// Used on initial mount and on EN↔JP flips so we never render an
+    /// empty state when a populated rail exists in another visible
+    /// tab.
+    ///
+    /// Motivating case (2026-05-18 rescue): JP mode lists
+    /// `[.movers, .pullbacks, .momentum, .mid, .budget, .japanese]`
+    /// but the first five are starved at the source (the JP pricing
+    /// path doesn't write `change_pct_*`, so the rail loader's gate
+    /// in `lib/data/homepage.ts:~666` filters every JP card out of
+    /// the windowed rails). The `.japanese` discovery rail is the
+    /// only one with data today. Defaulting `category = .movers`
+    /// renders an empty state on first JP open. This helper resolves
+    /// the user to `.japanese` automatically until the durable JP
+    /// change_pct populator ships.
+    ///
+    /// Falls back to `.movers` only when every visible rail is empty,
+    /// which is a legitimate "nothing to show" state worth showing
+    /// honestly.
+    private func firstNonEmptyVisibleCategory() -> Category {
+        for candidate in visibleCategories {
+            if !cards(for: candidate).isEmpty {
+                return candidate
+            }
+        }
+        return .movers
     }
 
     /// Brand-aware accent for a given category. Only the Movers tab
@@ -218,6 +257,23 @@ struct MarketPulseSection: View {
             categoryTabs
             activeSection
         }
+        // Initial-mount safeguard for the JP-mode empty-rail problem
+        // documented on `firstNonEmptyVisibleCategory()`. `@State`
+        // initializes `category = .movers`, but in JP mode `.movers`
+        // renders empty today. Resolve to the first populated rail
+        // on first appearance so the user sees cards immediately
+        // rather than tapping through five empty tabs to find
+        // `.japanese`. No-op when the default is already populated
+        // (the EN case, and the eventual JP case once the change_pct
+        // populator ships).
+        .onAppear {
+            if cards(for: category).isEmpty {
+                let next = firstNonEmptyVisibleCategory()
+                if next != category {
+                    category = next
+                }
+            }
+        }
         // Keep `category` in sync with the current market's
         // visibleCategories. Without this, toggling EN→JP while on
         // .breakouts (an EN-only tab) leaves `category = .breakouts`
@@ -227,10 +283,20 @@ struct MarketPulseSection: View {
         // on JP→EN when the user had picked .japanese. Normalizing
         // `category` on every market flip aligns the tab-strip
         // selection with the rendered rail.
+        //
+        // Additionally retarget when the current rail is empty so a
+        // JP flip never strands the user on an empty Movers tab
+        // (same JP-mode rationale as `.onAppear` above).
         .onChange(of: japaneseOnly) { _, _ in
-            if !visibleCategories.contains(category) {
-                withAnimation(.easeInOut(duration: 0.18)) {
-                    category = .movers
+            let needsRetarget =
+                !visibleCategories.contains(category)
+                || cards(for: category).isEmpty
+            if needsRetarget {
+                let next = firstNonEmptyVisibleCategory()
+                if next != category {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        category = next
+                    }
                 }
             }
         }
