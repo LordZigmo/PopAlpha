@@ -9,13 +9,15 @@
 
 import crypto from "node:crypto";
 
+import { getPopAlphaGatewayModelId } from "@/lib/ai/model-config";
+
 // ── Constants ───────────────────────────────────────────────────────────────
 
-// Keep in sync with getPopAlphaModel("Ace"). Stored alongside every
+// Stored alongside every
 // card_profiles row so historical data can be traced back to the
-// model that produced it. Lives here (not in the LLM-call file) so the
-// fallback path can stamp it without depending on server-only code.
-export const CARD_PROFILE_MODEL_LABEL = "gemini-2.5-flash";
+// Gateway model that produced it. Lives here (not in the LLM-call file)
+// so the fallback path can stamp it without depending on server-only code.
+export const CARD_PROFILE_MODEL_LABEL = getPopAlphaGatewayModelId();
 
 export const SIGNAL_LABELS = [
   "BREAKOUT",

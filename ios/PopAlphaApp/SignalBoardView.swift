@@ -201,6 +201,7 @@ struct FeaturedMoverCard: View {
                             .foregroundStyle(PA.Colors.text)
                         ChangePill(changePct: card.changePct, window: windowLabel)
                     }
+                    .fixedSize(horizontal: true, vertical: false)
 
                     Spacer()
 
@@ -269,7 +270,7 @@ struct FeaturedMoverCard: View {
     }
 
     private var subtitleText: String {
-        [card.setName, card.year.map(String.init)]
+        [card.setName, card.displayCardNumberLabel, card.year.map(String.init)]
             .compactMap { $0 }
             .joined(separator: " · ")
     }
@@ -281,6 +282,9 @@ struct FeaturedMoverCard: View {
 
     private var metaLine: String? {
         var parts: [String] = []
+        if let priceContext = card.priceContextLabel {
+            parts.append(priceContext)
+        }
         if let listings = card.activeListings7D, listings > 0 {
             parts.append("\(listings) listings")
         }
@@ -385,7 +389,12 @@ struct CompactMoverRow: View {
     private var compactSubtitle: String {
         var parts: [String] = []
         if let set = card.setName, !set.isEmpty { parts.append(set) }
-        if let listings = card.activeListings7D, listings > 0 {
+        if let number = card.displayCardNumberLabel {
+            parts.append(number)
+        }
+        if let priceContext = card.priceContextLabel {
+            parts.append(priceContext)
+        } else if let listings = card.activeListings7D, listings > 0 {
             parts.append("\(listings) listings")
         } else if let sales = card.salesCount30D, sales > 0 {
             parts.append("\(sales) trades")
@@ -422,10 +431,14 @@ struct ChangePill: View {
             HStack(spacing: 3) {
                 Text(formatPct(pct))
                     .font(.system(size: small ? 10 : 11, weight: .bold, design: .rounded))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
                 Text(window)
                     .font(.system(size: small ? 8 : 9, weight: .semibold))
                     .foregroundStyle(color.opacity(0.75))
+                    .lineLimit(1)
             }
+            .fixedSize(horizontal: true, vertical: false)
             .foregroundStyle(color)
             .padding(.horizontal, small ? 5 : 6)
             .padding(.vertical, small ? 2 : 3)

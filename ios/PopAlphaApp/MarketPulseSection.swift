@@ -341,6 +341,8 @@ struct MarketPulseSection: View {
             Text(value)
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                 .foregroundStyle(tone)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
         }
     }
 

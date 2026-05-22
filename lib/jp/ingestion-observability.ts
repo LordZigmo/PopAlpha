@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-export type JpIngestionProvider = "YAHOO_JP";
+export type JpIngestionProvider = "YAHOO_JP" | "SNKRDUNK";
 
 export type JpIngestionAttemptStatus =
   | "ok"

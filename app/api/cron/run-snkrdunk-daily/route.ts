@@ -42,6 +42,13 @@ import { requireCron } from "@/lib/auth/require";
 import { dbAdmin } from "@/lib/db/admin";
 import { scrapeSnkrdunk, SnkrdunkPushbackError } from "@/scripts/scrape-snkrdunk.mjs";
 import { aggregateSnkrdunkListings } from "@/lib/jp/snkrdunk-matcher.mjs";
+import {
+  completeJpIngestionRun,
+  createJpIngestionRun,
+  loadRecentJpIngestionSuppression,
+  recordJpIngestionAttempt,
+  type JpIngestionRunCounters,
+} from "@/lib/jp/ingestion-observability";
 
 export const runtime = "nodejs";
 export const maxDuration = 300; // Vercel pro tick ceiling
@@ -65,6 +72,11 @@ const MIN_SAMPLE_COUNT = 3;
 const REFRESH_AFTER_HOURS = 24 * 7; // 7 days
 const DEADLINE_RESERVE_MS = 30_000;
 const SCRAPE_PAGES = 4; // most cards have ≤2 pages; 4 is safe upper bound
+const NONPRODUCTIVE_RETRY_HOURS = 24 * 7;
+const TRANSIENT_RETRY_HOURS = 6;
+const CANDIDATE_SCAN_PAGE_SIZE = 1000;
+const MAX_STALE_PRICE_SCAN_ROWS = 5000;
+const SNKRDUNK_ROUTE = "/api/cron/run-snkrdunk-daily";
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -74,6 +86,12 @@ type RefreshCandidate = {
   snkrdunk_product_code: string;
   observed_at: string | null;
 };
+
+type SnkrdunkProcessResult =
+  | { slug: string; status: "ok"; rowsWritten: number; price: number | null; sampleCount: number }
+  | { slug: string; status: "low-sample"; rawCount: number }
+  | { slug: string; status: "scrape-failed"; reason: string }
+  | { slug: string; status: "write-failed"; reason: string };
 
 /**
  * Pick the N Snkrdunk-tracked cards most in need of refresh: existing
@@ -87,19 +105,24 @@ async function pickRefreshCandidates(
   limit: number,
 ): Promise<RefreshCandidate[]> {
   const cutoffIso = new Date(Date.now() - REFRESH_AFTER_HOURS * 60 * 60 * 1000).toISOString();
-
-  // Fetch stale rows ordered by observed_at ASC (oldest first, NULLs first).
-  // Pull more than `limit` because we'll deduplicate by product code.
-  const { data, error } = await supabase
-    .from("snkrdunk_card_prices")
-    .select("canonical_slug, printing_id, snkrdunk_product_code, observed_at")
-    .or(`observed_at.is.null,observed_at.lt.${cutoffIso}`)
-    .not("snkrdunk_product_code", "is", null)
-    .order("observed_at", { ascending: true, nullsFirst: true })
-    .limit(limit * 3);
-  if (error) throw new Error(`stale-snkrdunk scan: ${error.message}`);
-
-  const rows = (data ?? []) as RefreshCandidate[];
+  const nonproductiveCutoffIso = new Date(Date.now() - NONPRODUCTIVE_RETRY_HOURS * 60 * 60 * 1000).toISOString();
+  const transientCutoffIso = new Date(Date.now() - TRANSIENT_RETRY_HOURS * 60 * 60 * 1000).toISOString();
+  const [recentNonproductive, recentTransient] = await Promise.all([
+    loadRecentJpIngestionSuppression(supabase, {
+      provider: "SNKRDUNK",
+      statuses: ["low-sample"],
+      sinceIso: nonproductiveCutoffIso,
+    }),
+    loadRecentJpIngestionSuppression(supabase, {
+      provider: "SNKRDUNK",
+      statuses: ["scrape-failed", "write-failed"],
+      sinceIso: transientCutoffIso,
+    }),
+  ]);
+  const suppressedSourceKeys = new Set([
+    ...recentNonproductive.sourceKeys,
+    ...recentTransient.sourceKeys,
+  ]);
 
   // Dedupe by snkrdunk_product_code (one re-fetch covers all grade rows
   // for that product). Prefer the PER-PRINTING row (printing_id != null)
@@ -122,14 +145,35 @@ async function pickRefreshCandidates(
   // snk_canonical (the fresh canonical fallback), so the user sees
   // stale prices even though we just "refreshed."
   const byProduct = new Map<string, RefreshCandidate>();
-  for (const row of rows) {
-    if (!row.snkrdunk_product_code) continue;
-    const existing = byProduct.get(row.snkrdunk_product_code);
-    if (!existing) {
-      byProduct.set(row.snkrdunk_product_code, row);
-    } else if (existing.printing_id == null && row.printing_id != null) {
-      // Prefer the per-printing row — see comment above
-      byProduct.set(row.snkrdunk_product_code, row);
+  for (
+    let from = 0;
+    byProduct.size < limit && from < MAX_STALE_PRICE_SCAN_ROWS;
+    from += CANDIDATE_SCAN_PAGE_SIZE
+  ) {
+    const { data, error } = await supabase
+      .from("snkrdunk_card_prices")
+      .select("canonical_slug, printing_id, snkrdunk_product_code, observed_at")
+      .or(`observed_at.is.null,observed_at.lt.${cutoffIso}`)
+      .not("snkrdunk_product_code", "is", null)
+      .order("observed_at", { ascending: true, nullsFirst: true })
+      .range(from, from + CANDIDATE_SCAN_PAGE_SIZE - 1);
+    if (error) throw new Error(`stale-snkrdunk scan: ${error.message}`);
+
+    const rows = (data ?? []) as RefreshCandidate[];
+    for (const row of rows) {
+      if (!row.snkrdunk_product_code) continue;
+      if (suppressedSourceKeys.has(row.snkrdunk_product_code)) continue;
+      const existing = byProduct.get(row.snkrdunk_product_code);
+      if (!existing) {
+        byProduct.set(row.snkrdunk_product_code, row);
+      } else if (existing.printing_id == null && row.printing_id != null) {
+        // Prefer the per-printing row — see comment above
+        byProduct.set(row.snkrdunk_product_code, row);
+      }
+    }
+
+    if (rows.length < CANDIDATE_SCAN_PAGE_SIZE) {
+      break;
     }
   }
 
@@ -140,10 +184,7 @@ async function processCard(
   supabase: ReturnType<typeof dbAdmin>,
   candidate: RefreshCandidate,
 ): Promise<
-  | { slug: string; status: "ok"; rowsWritten: number; price: number | null; sampleCount: number }
-  | { slug: string; status: "low-sample"; rawCount: number }
-  | { slug: string; status: "scrape-failed"; reason: string }
-  | { slug: string; status: "write-failed"; reason: string }
+  SnkrdunkProcessResult
 > {
   const { canonical_slug: slug, snkrdunk_product_code: productCode } = candidate;
   const tradingCardId = productCode.startsWith("SW---") ? productCode.slice("SW---".length) : productCode;
@@ -302,28 +343,69 @@ export async function GET(req: Request) {
   );
 
   const supabase = dbAdmin();
+  const runId = await createJpIngestionRun(supabase, {
+    provider: "SNKRDUNK",
+    route: SNKRDUNK_ROUTE,
+    batchSize,
+    startedAtIso: new Date(startedAt).toISOString(),
+  });
 
   let candidates: RefreshCandidate[];
   try {
     candidates = await pickRefreshCandidates(supabase, batchSize);
   } catch (err) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: err instanceof Error ? err.message : String(err),
-        stage: "pick",
+    const elapsedMs = Date.now() - startedAt;
+    const response = {
+      ok: false,
+      runId,
+      error: err instanceof Error ? err.message : String(err),
+      stage: "pick",
+      elapsedMs,
+    };
+    await completeJpIngestionRun(supabase, runId, {
+      status: "failed",
+      mode: "failed",
+      counters: {
+        candidatesAvailable: 0,
+        processed: 0,
+        written: 0,
+        lowSample: 0,
+        scrapeFailed: 0,
+        writeFailed: 0,
+        noQuery: 0,
       },
-      { status: 500 },
-    );
+      error: err instanceof Error ? err.message : String(err),
+      elapsedMs,
+    });
+    console.error("[run-snkrdunk-daily] summary", JSON.stringify(response));
+    return NextResponse.json(response, { status: 500 });
   }
 
   if (candidates.length === 0) {
-    return NextResponse.json({
+    const elapsedMs = Date.now() - startedAt;
+    const response = {
       ok: true,
+      runId,
       mode: "no-work",
       reason: `no snkrdunk_card_prices rows stale (>${REFRESH_AFTER_HOURS}h)`,
-      elapsedMs: Date.now() - startedAt,
+      elapsedMs,
+    };
+    await completeJpIngestionRun(supabase, runId, {
+      status: "succeeded",
+      mode: "no-work",
+      counters: {
+        candidatesAvailable: 0,
+        processed: 0,
+        written: 0,
+        lowSample: 0,
+        scrapeFailed: 0,
+        writeFailed: 0,
+        noQuery: 0,
+      },
+      elapsedMs,
     });
+    console.info("[run-snkrdunk-daily] summary", JSON.stringify(response));
+    return NextResponse.json(response);
   }
 
   let okCount = 0;
@@ -340,13 +422,42 @@ export async function GET(req: Request) {
     }
 
     let result: Awaited<ReturnType<typeof processCard>>;
+    const attemptStartedAt = Date.now();
     try {
       result = await processCard(supabase, candidate);
     } catch (err) {
       if (err instanceof SnkrdunkPushbackError) {
         haltReason = `snkrdunk-pushback: ${err.message}`;
+        processed += 1;
+        scrapeFailedCount += 1;
+        await recordJpIngestionAttempt(supabase, {
+          runId,
+          provider: "SNKRDUNK",
+          canonicalSlug: candidate.canonical_slug,
+          sourceKey: candidate.snkrdunk_product_code,
+          printingId: candidate.printing_id,
+          status: "scrape-failed",
+          reason: haltReason,
+          elapsedMs: Date.now() - attemptStartedAt,
+        });
         break;
       }
+      const elapsedMs = Date.now() - startedAt;
+      await completeJpIngestionRun(supabase, runId, {
+        status: "failed",
+        mode: "failed",
+        counters: {
+          candidatesAvailable: candidates.length,
+          processed,
+          written: okCount,
+          lowSample: lowSampleCount,
+          scrapeFailed: scrapeFailedCount,
+          writeFailed: writeFailedCount,
+          noQuery: 0,
+        },
+        error: err instanceof Error ? err.message : String(err),
+        elapsedMs,
+      });
       throw err;
     }
 
@@ -355,6 +466,20 @@ export async function GET(req: Request) {
     else if (result.status === "low-sample") lowSampleCount += 1;
     else if (result.status === "scrape-failed") scrapeFailedCount += 1;
     else if (result.status === "write-failed") writeFailedCount += 1;
+    await recordJpIngestionAttempt(supabase, {
+      runId,
+      provider: "SNKRDUNK",
+      canonicalSlug: candidate.canonical_slug,
+      sourceKey: candidate.snkrdunk_product_code,
+      printingId: candidate.printing_id,
+      status: result.status,
+      rawCount: "rawCount" in result ? result.rawCount : null,
+      rowsWritten: "rowsWritten" in result ? result.rowsWritten : 0,
+      priceUsd: "price" in result ? result.price : null,
+      sampleCount: "sampleCount" in result ? result.sampleCount : "rawCount" in result ? result.rawCount : null,
+      reason: "reason" in result ? result.reason : null,
+      elapsedMs: Date.now() - attemptStartedAt,
+    });
 
     if (processed < candidates.length && Date.now() + INTER_CARD_DELAY_MS < deadline) {
       await sleep(INTER_CARD_DELAY_MS);
@@ -362,8 +487,25 @@ export async function GET(req: Request) {
   }
 
   const elapsedMs = Date.now() - startedAt;
-  return NextResponse.json({
+  const counters: JpIngestionRunCounters = {
+    candidatesAvailable: candidates.length,
+    processed,
+    written: okCount,
+    lowSample: lowSampleCount,
+    scrapeFailed: scrapeFailedCount,
+    writeFailed: writeFailedCount,
+    noQuery: 0,
+  };
+  await completeJpIngestionRun(supabase, runId, {
+    status: "succeeded",
+    mode: haltReason ? "halted" : "processed",
+    counters,
+    haltReason,
+    elapsedMs,
+  });
+  const response = {
     ok: scrapeFailedCount === 0 || haltReason !== null,
+    runId,
     mode: haltReason ? "halted" : "processed",
     processed,
     candidatesAvailable: candidates.length,
@@ -374,5 +516,7 @@ export async function GET(req: Request) {
     haltReason,
     elapsedMs,
     elapsedSec: Math.round(elapsedMs / 1000),
-  });
+  };
+  console.info("[run-snkrdunk-daily] summary", JSON.stringify(response));
+  return NextResponse.json(response);
 }

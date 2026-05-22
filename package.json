@@ -51,7 +51,6 @@
     "verify:rls:linked": "node scripts/verify-phase1-rls.mjs"
   },
   "dependencies": {
-    "@ai-sdk/google": "^3.0.36",
     "@apple/app-store-server-library": "^3.0.0",
     "@clerk/nextjs": "^6.39.0",
     "@neondatabase/serverless": "^1.0.2",

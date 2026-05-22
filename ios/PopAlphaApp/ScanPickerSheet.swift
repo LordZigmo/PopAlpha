@@ -451,8 +451,10 @@ struct ScanPickerSheet: View {
     private var correctionMetadata: ScanCorrectionPredictedMetadata {
         let top = matches.first
         let rank2 = matches.dropFirst().first
-        let topGap = top?.similarity.flatMap { topSimilarity in
-            rank2?.similarity.map { topSimilarity - $0 }
+        let topSimilarity = top?.similarity
+        let rank2Similarity = rank2?.similarity
+        let topGap = topSimilarity.flatMap { top in
+            rank2Similarity.map { top - $0 }
         }
         return ScanCorrectionPredictedMetadata(
             fromSlug: top?.slug,
@@ -461,10 +463,10 @@ struct ScanPickerSheet: View {
             triggerSource: triggerSource,
             source: scanSource,
             modelVersion: modelVersion,
-            topSimilarity: top?.similarity,
+            topSimilarity: topSimilarity,
             topGap: topGap,
             rank2Slug: rank2?.slug,
-            rank2Similarity: rank2?.similarity,
+            rank2Similarity: rank2Similarity,
             ocrCardNumber: ocrCardNumber,
             ocrSetHint: ocrSetHint,
             ocrCardNumberExtracted: ocrCardNumbersCount.map { $0 > 0 },

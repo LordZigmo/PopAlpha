@@ -21,7 +21,7 @@ const TABS: NavTab[] = [
   },
   {
     href: "/search",
-    label: "Community",
+    label: "Activity",
     icon: Users,
     match: (pathname) => pathname === "/search" || pathname.startsWith("/search/"),
   },

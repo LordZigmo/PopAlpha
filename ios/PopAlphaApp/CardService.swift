@@ -982,6 +982,14 @@ struct HomepageCardDTO: Decodable, Hashable {
     /// (date) sent HomepageCard without this field; older clients
     /// keep decoding cleanly because the converter falls back to "".
     let cardNumber: String?
+    /// Homepage display number. When the server has provider collector
+    /// metadata this carries the full form (for example "003/017")
+    /// while `cardNumber` remains the canonical leading number fallback.
+    let displayCardNumber: String?
+    /// Compact price identity cue for homepage tiles, e.g.
+    /// "Raw market · Holo" or "Raw market · Regular".
+    let priceIdentityLabel: String?
+    let priceFinishLabel: String?
     /// Mutable so the JP-rail transform (`preferringJpSource()`) can
     /// override the Scrydex USD reflection with the Yahoo!JP / Snkrdunk
     /// native price when a JP source qualifies on sample count.
@@ -1022,6 +1030,34 @@ struct HomepageCardDTO: Decodable, Hashable {
     /// otherwise the full image URL.
     var displayThumbUrl: String? {
         imageThumbUrl ?? imageUrl
+    }
+
+    var displayCardNumberLabel: String? {
+        let raw = (displayCardNumber ?? cardNumber)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let raw, !raw.isEmpty else { return nil }
+        return raw.hasPrefix("#") ? raw : "#\(raw)"
+    }
+
+    var priceContextLabel: String? {
+        let finish = priceFinishLabel?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let identity = priceIdentityLabel?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let pick = selectJpPriceSource(
+            yahooJpPrice: yahooJpPrice,
+            yahooJpSampleCount: yahooJpSampleCount,
+            snkrdunkPrice: snkrdunkPrice,
+            snkrdunkSampleCount: snkrdunkSampleCount
+        )
+        if pick.price != nil {
+            if let finish, !finish.isEmpty {
+                return "\(pick.label) · \(finish)"
+            }
+            return pick.label
+        }
+        guard let identity, !identity.isEmpty else { return nil }
+        return identity
     }
 
     /// When this card carries a qualifying Yahoo!JP or Snkrdunk price,
@@ -1278,7 +1314,7 @@ extension HomepageCardDTO {
         // before handing the row to CardDetailView). Empty string when
         // the API response is missing the field (older server builds).
         let displayCardNumber: String = {
-            guard let raw = cardNumber?.trimmingCharacters(in: .whitespaces),
+            guard let raw = (self.displayCardNumber ?? cardNumber)?.trimmingCharacters(in: .whitespaces),
                   !raw.isEmpty else { return "" }
             return raw.hasPrefix("#") ? raw : "#\(raw)"
         }()
