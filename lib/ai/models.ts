@@ -1,25 +1,30 @@
-import { google } from "@ai-sdk/google";
+import { gateway } from "ai";
 
-// Single Gemini model for all PopAlpha LLM call sites.
+import {
+  getPopAlphaGatewayEmbeddingModelId,
+  getPopAlphaGatewayModelId,
+} from "@/lib/ai/model-config";
+
+export {
+  DEFAULT_POPALPHA_AI_GATEWAY_EMBEDDING_MODEL,
+  DEFAULT_POPALPHA_AI_GATEWAY_MODEL,
+  getPopAlphaGatewayEmbeddingModelId,
+  getPopAlphaGatewayModelId,
+} from "@/lib/ai/model-config";
+
+// Single Vercel AI Gateway model for all PopAlpha LLM call sites.
 //
-// Keep this on a currently-supported Google model — they deprecate
-// aggressively. As of 2026-04-24 Google retired gemini-2.0-flash and
-// gemini-1.5-flash for new users ("This model ... is no longer
-// available to new users"), which silently bricked every LLM path
-// wired through this function. The card-profile cron was returning
-// ok:true with 100% fallbacks because the blanket catch in
-// generateCardProfile was swallowing the deprecation error. See
-// docs/project_silent_rpc_fallbacks.md for the generalized lesson.
+// Gateway keeps provider auth, budgets, observability, and model
+// switching in Vercel instead of scattering direct provider clients
+// across the app. Locally, set AI_GATEWAY_API_KEY. Override model IDs
+// with POPALPHA_AI_GATEWAY_MODEL / POPALPHA_AI_GATEWAY_EMBEDDING_MODEL.
 //
-// When Google sunsets the 2.5 line, update in one place here. The
-// MODEL_LABEL constants in call sites (card-profile-summary,
-// homepage-brief) are cosmetic fingerprints stored alongside generated
-// rows — bump them when the underlying model changes so stored rows
-// accurately reflect which model produced them.
+// When a model sunsets or we want to compare options, change the env var
+// in one place and the stored model labels will follow the Gateway id.
 export function getPopAlphaModel() {
-  return google("gemini-2.5-flash");
+  return gateway(getPopAlphaGatewayModelId());
 }
 
 export function getPopAlphaEmbeddingModel() {
-  return google.textEmbeddingModel("gemini-embedding-001");
+  return gateway.embeddingModel(getPopAlphaGatewayEmbeddingModelId());
 }

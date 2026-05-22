@@ -53,12 +53,31 @@ const DEFAULT_MAX_CARDS = 500;
 const DEFAULT_CONCURRENCY = 10;
 const DEFAULT_BATCH_SIZE = 50;
 const STALE_DAYS = 1;
+const BATCH_HALTING_LLM_FAILURE_MARKERS = [
+  "api key",
+  "billing",
+  "current quota",
+  "forbidden",
+  "not available",
+  "not found",
+  "permission",
+  "quota",
+  "rate limit",
+  "resource_exhausted",
+  "unauthorized",
+];
 
 function parseOptionalInt(value: string | null, min: number, max: number, fallback: number): number {
   if (!value) return fallback;
   const parsed = parseInt(value, 10);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.max(min, Math.min(parsed, max));
+}
+
+function shouldHaltBatchForLlmFailure(reason: string | null | undefined): boolean {
+  const normalized = reason?.toLowerCase() ?? "";
+  if (!normalized.startsWith("llm-threw:")) return false;
+  return BATCH_HALTING_LLM_FAILURE_MARKERS.some((marker) => normalized.includes(marker));
 }
 
 type CardRow = {
@@ -230,6 +249,8 @@ async function processChunk(
   // failure into a fallback and returning ok:true.
   firstFailureReason: string | null;
   failureReasonCounts: Record<string, number>;
+  haltedForLlmProviderFailure: boolean;
+  llmProviderFailureHaltReason: string | null;
 }> {
   let llm = 0;
   let fallbacks = 0;
@@ -239,6 +260,7 @@ async function processChunk(
   let processed = 0;
   let hitDeadline = false;
   let firstFailureReason: string | null = null;
+  let llmProviderFailureHaltReason: string | null = null;
   const failureReasonCounts: Record<string, number> = {};
 
   // Process in sliding windows of `concurrency`. The deadline is
@@ -281,6 +303,9 @@ async function processChunk(
           fallbacks++;
           if (profile.failureReason) {
             if (!firstFailureReason) firstFailureReason = profile.failureReason;
+            if (!llmProviderFailureHaltReason && shouldHaltBatchForLlmFailure(profile.failureReason)) {
+              llmProviderFailureHaltReason = profile.failureReason;
+            }
             // Bucket by the class prefix (llm-threw:<Name>, parse-miss,
             // rejected:…) so the summary stays compact — full messages
             // go to Vercel logs.
@@ -291,6 +316,10 @@ async function processChunk(
       } catch {
         errors++;
       }
+    }
+
+    if (llmProviderFailureHaltReason) {
+      break;
     }
   }
 
@@ -304,6 +333,8 @@ async function processChunk(
     hitDeadline,
     firstFailureReason,
     failureReasonCounts,
+    haltedForLlmProviderFailure: llmProviderFailureHaltReason !== null,
+    llmProviderFailureHaltReason,
   };
 }
 
@@ -345,6 +376,8 @@ export async function GET(req: Request) {
   // response tells you "all 498 were AI_APICallError" vs. a mixed bag.
   let llmFailureSample: string | null = null;
   const llmFailureBuckets: Record<string, number> = {};
+  let haltedForLlmProviderFailure = false;
+  let llmProviderFailureHaltReason: string | null = null;
 
   // Drain a card list through the same deadline-aware chunk loop both
   // modes use. Updates the per-run totals + truncated flag via the
@@ -368,6 +401,11 @@ export async function GET(req: Request) {
       }
       for (const [bucket, count] of Object.entries(stats.failureReasonCounts)) {
         llmFailureBuckets[bucket] = (llmFailureBuckets[bucket] ?? 0) + count;
+      }
+      if (stats.haltedForLlmProviderFailure) {
+        haltedForLlmProviderFailure = true;
+        llmProviderFailureHaltReason = stats.llmProviderFailureHaltReason;
+        return true;
       }
       if (stats.hitDeadline) {
         truncatedAtDeadline = true;
@@ -439,7 +477,7 @@ export async function GET(req: Request) {
   // the caller (or a future scheduled cron) can alert instead of
   // shrugging.
   const llmPathDegraded = totalProcessed > 0 && totalLlm === 0;
-  const ok = firstError === null && !llmPathDegraded;
+  const ok = firstError === null && !llmPathDegraded && !haltedForLlmProviderFailure;
   return NextResponse.json(
     {
       ok,
@@ -459,6 +497,8 @@ export async function GET(req: Request) {
       llmFailureSample,
       llmFailureBuckets: Object.keys(llmFailureBuckets).length ? llmFailureBuckets : null,
       llmPathDegraded,
+      haltedForLlmProviderFailure,
+      llmProviderFailureHaltReason,
       // True when this invocation exited early on the deadline guard
       // (either between chunks or mid-chunk via the inner check).
       // Operator should rerun the same URL to drain remaining work.

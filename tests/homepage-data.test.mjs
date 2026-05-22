@@ -252,6 +252,16 @@ export async function runHomepageDataTests() {
         { canonical_slug: "alpha-high", price: 1.01 },
         { canonical_slug: "alpha-high", price: 1.12 },
       ],
+      displayIdentities: [
+        {
+          slug: "alpha-high",
+          display_card_number: "003/017",
+          price_finish: "HOLO",
+          price_edition: "UNLIMITED",
+          price_stamp: null,
+          has_multiple_finishes: true,
+        },
+      ],
       pricesRefreshedToday: 8126,
       trackedCardsWithLivePrice: 10444,
     },
@@ -307,6 +317,9 @@ export async function runHomepageDataTests() {
   assert.equal(data.as_of, freshIso);
   assert.equal(data.prices_refreshed_today, 8126);
   assert.equal(data.tracked_cards_with_live_price, 10444);
+  assert.equal(data.movers[0].display_card_number, "003/017");
+  assert.equal(data.movers[0].price_identity_label, "Raw market · Holo");
+  assert.equal(data.movers[0].price_finish_label, "Holo");
 
   const fallbackData = await getHomepageData({
     now: () => FIXED_NOW,

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import {
   buildFallbackProfile,
+  CARD_PROFILE_MODEL_LABEL,
   identifyFallbackTier,
   type CardProfileInput,
 } from "../lib/ai/card-profile-fallback";
@@ -200,7 +201,7 @@ export async function runCardProfileFallbackTests() {
   {
     const result = buildFallbackProfile(makeInput());
     assert.equal(result.source, "fallback");
-    assert.equal(result.modelLabel, "gemini-2.5-flash");
+    assert.equal(result.modelLabel, CARD_PROFILE_MODEL_LABEL);
     assert.equal(result.inputTokens, null);
     assert.equal(result.outputTokens, null);
     assert.equal(typeof result.metricsHash, "string");

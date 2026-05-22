@@ -1,8 +1,7 @@
 import crypto from "node:crypto";
 import { config as loadEnv } from "dotenv";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
-import { embedMany } from "ai";
-import { google } from "@ai-sdk/google";
+import { embedMany, gateway } from "ai";
 import { sql } from "@vercel/postgres";
 
 loadEnv({ path: ".env.local" });
@@ -43,7 +42,10 @@ const maxCardsRaw = Number.parseInt(process.argv[2] ?? "512", 10);
 const maxCards = Number.isFinite(maxCardsRaw) && maxCardsRaw > 0 ? maxCardsRaw : 512;
 const fetchBatchSize = 128;
 const embeddingBatchSize = 100;
-const embeddingModel = google.textEmbeddingModel("gemini-embedding-001");
+const embeddingModel = gateway.embeddingModel(
+  process.env.POPALPHA_AI_GATEWAY_EMBEDDING_MODEL?.trim() ||
+    "google/gemini-embedding-001",
+);
 
 const supabase = createSupabaseClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 

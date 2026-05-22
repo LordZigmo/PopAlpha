@@ -152,6 +152,13 @@ private struct ForYouTile: View {
                 .foregroundStyle(PA.Colors.text)
                 .lineLimit(1)
 
+            if let identityLine {
+                Text(identityLine)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(PA.Colors.muted)
+                    .lineLimit(1)
+            }
+
             HStack(spacing: 6) {
                 Text(priceLabel)
                     .font(.system(size: 12, weight: .bold, design: .rounded))
@@ -162,6 +169,7 @@ private struct ForYouTile: View {
                     small: true
                 )
             }
+            .fixedSize(horizontal: true, vertical: false)
 
             // Rationale chip — fades in when the explanation lands.
             // Reserves a single chip-height row so cards don't reflow.
@@ -205,5 +213,14 @@ private struct ForYouTile: View {
 
     private var priceLabel: String {
         formatPrice(card.marketPrice)
+    }
+
+    private var identityLine: String? {
+        let parts = [card.displayCardNumberLabel, card.priceContextLabel]
+            .compactMap { value -> String? in
+                guard let value, !value.isEmpty else { return nil }
+                return value
+            }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }

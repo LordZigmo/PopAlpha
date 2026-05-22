@@ -45,6 +45,10 @@ export const CARD_PROFILE_VERSION = "card-profile-v2";
 // 15s / concurrency=5 = ~25 min worst case vs. 300s maxDuration on
 // Vercel, which is why we also have the deadline guard in the route).
 export const CARD_PROFILE_TIMEOUT_MS = 15_000;
+// The hourly profile cron can process hundreds of cards. AI SDK defaults to
+// two retries, which turns a provider-wide outage/quota issue into 3x API
+// attempts and 3x telemetry spans for every card in the batch.
+export const CARD_PROFILE_MAX_RETRIES = 0;
 
 // ── Prompt ───────────────────────────────────────────────────────────────────
 
@@ -226,8 +230,11 @@ export async function generateCardProfile(
       system: SYSTEM_PROMPT,
       prompt: buildUserPrompt(input),
       abortSignal: abortController.signal,
+      maxRetries: CARD_PROFILE_MAX_RETRIES,
       experimental_telemetry: {
         isEnabled: true,
+        recordInputs: false,
+        recordOutputs: false,
         functionId: "card-profile-summary",
         metadata: { canonical_slug: input.canonicalSlug },
       },

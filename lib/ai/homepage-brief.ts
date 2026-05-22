@@ -2,6 +2,7 @@ import "server-only";
 
 import { generateText } from "ai";
 
+import { getPopAlphaGatewayModelId } from "@/lib/ai/model-config";
 import { getPopAlphaModel } from "@/lib/ai/models";
 import type { HomepageCard, HomepageData } from "@/lib/data/homepage";
 
@@ -32,8 +33,8 @@ import type { HomepageCard, HomepageData } from "@/lib/data/homepage";
  */
 
 export const HOMEPAGE_BRIEF_VERSION = "homepage-brief-v1";
-// Stored on generated brief rows so each entry carries its producing model.
-export const HOMEPAGE_BRIEF_MODEL_LABEL = "gemini-2.5-flash";
+// Stored on generated brief rows so each entry carries its producing Gateway model.
+export const HOMEPAGE_BRIEF_MODEL_LABEL = getPopAlphaGatewayModelId();
 // Bumped from 8_000 to 15_000 in the same wave as card-profile-summary
 // (commit 564ce8c) and personalization/llm. Gemini 2.5-flash p95 sits in
 // the 5-10s range; 8s aborted enough briefs to be worth fixing

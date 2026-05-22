@@ -34,7 +34,14 @@ export type HomepageCard = {
   set_name: string | null;
   year: number | null;
   card_number: string | null;
+  display_card_number?: string | null;
   market_price: number | null;
+  price_identity_label?: string | null;
+  price_finish_label?: string | null;
+  price_finish?: string | null;
+  price_edition?: string | null;
+  price_stamp?: string | null;
+  price_has_multiple_finishes?: boolean | null;
   change_pct: number | null;
   change_window: HomepageSignalWindow | null;
   confidence_score: number | null;
@@ -160,6 +167,15 @@ type SparklineRow = {
   price: number | null;
 };
 
+type CardDisplayIdentityRow = {
+  slug: string;
+  display_card_number: string | null;
+  price_finish: string | null;
+  price_edition: string | null;
+  price_stamp: string | null;
+  has_multiple_finishes: boolean | null;
+};
+
 type HomepageLogger = Pick<Console, "error" | "info">;
 
 type HomepageDataOverrides = {
@@ -170,6 +186,7 @@ type HomepageDataOverrides = {
   marketPulseMap?: Map<string, CanonicalMarketPulse>;
   images?: ImageRow[];
   sparklineRows?: SparklineRow[];
+  displayIdentities?: CardDisplayIdentityRow[];
   pricesRefreshedToday?: number | null;
   trackedCardsWithLivePrice?: number | null;
 };
@@ -902,6 +919,176 @@ function chunkValues<T>(values: T[], size: number): T[][] {
   return out;
 }
 
+function normalizeDisplayText(value: string | null | undefined): string | null {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function homepageFinishLabel(value: string | null | undefined): string | null {
+  switch (value) {
+    case "NON_HOLO": return "Regular";
+    case "HOLO": return "Holo";
+    case "REVERSE_HOLO": return "Reverse Holo";
+    case "ALT_HOLO": return "Alt Art";
+    default: return null;
+  }
+}
+
+function homepageStampLabel(value: string | null | undefined): string | null {
+  const stamp = normalizeDisplayText(value);
+  if (!stamp) return null;
+  switch (stamp.toUpperCase()) {
+    case "POKE_BALL_PATTERN": return "Poke Ball";
+    case "MASTER_BALL_PATTERN": return "Master Ball";
+    case "SHADOWLESS": return "Shadowless";
+    default:
+      return stamp
+        .split("_")
+        .filter(Boolean)
+        .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1).toLowerCase()}`)
+        .join(" ");
+  }
+}
+
+function priceIdentityLabels(identity: CardDisplayIdentityRow | undefined): {
+  priceIdentityLabel: string | null;
+  priceFinishLabel: string | null;
+} {
+  if (!identity) {
+    return { priceIdentityLabel: "Raw market", priceFinishLabel: null };
+  }
+
+  const finish = homepageFinishLabel(identity.price_finish);
+  const edition = identity.price_edition === "FIRST_EDITION" ? "1st Ed" : null;
+  const stamp = homepageStampLabel(identity.price_stamp);
+  const finishParts = [finish, edition, stamp].filter((part): part is string => Boolean(part));
+  const finishLabel = finishParts.join(" · ") || (identity.has_multiple_finishes ? "finish varies" : null);
+  return {
+    priceIdentityLabel: finishLabel ? `Raw market · ${finishLabel}` : "Raw market",
+    priceFinishLabel: finishLabel,
+  };
+}
+
+function applyDisplayIdentityToCard(
+  card: HomepageCard,
+  identityBySlug: Map<string, CardDisplayIdentityRow>,
+): HomepageCard {
+  const identity = identityBySlug.get(card.slug);
+  const { priceIdentityLabel, priceFinishLabel } = priceIdentityLabels(identity);
+  return {
+    ...card,
+    display_card_number:
+      normalizeDisplayText(identity?.display_card_number)
+      ?? normalizeDisplayText(card.display_card_number)
+      ?? normalizeDisplayText(card.card_number),
+    price_identity_label: priceIdentityLabel,
+    price_finish_label: priceFinishLabel,
+    price_finish: identity?.price_finish ?? null,
+    price_edition: identity?.price_edition ?? null,
+    price_stamp: identity?.price_stamp ?? null,
+    price_has_multiple_finishes: identity?.has_multiple_finishes ?? null,
+  };
+}
+
+function applyDisplayIdentityToWindowedCards(
+  cards: HomepageWindowedCards,
+  identityBySlug: Map<string, CardDisplayIdentityRow>,
+): HomepageWindowedCards {
+  return {
+    "24H": cards["24H"].map((card) => applyDisplayIdentityToCard(card, identityBySlug)),
+    "7D": cards["7D"].map((card) => applyDisplayIdentityToCard(card, identityBySlug)),
+  };
+}
+
+function collectHomepageDataSlugs(data: HomepageData): string[] {
+  const slugs = new Set<string>();
+  const addCards = (cards: HomepageCard[]) => {
+    for (const card of cards) slugs.add(card.slug);
+  };
+  const addWindowed = (cards: HomepageWindowedCards) => {
+    addCards(cards["24H"]);
+    addCards(cards["7D"]);
+  };
+
+  addCards(data.movers);
+  addCards(data.high_confidence_movers);
+  addCards(data.emerging_movers);
+  addCards(data.losers);
+  addCards(data.trending);
+  addWindowed(data.signal_board.top_movers);
+  addWindowed(data.signal_board.biggest_drops);
+  addWindowed(data.signal_board.momentum);
+  addCards(data.signal_board.unusual_volume);
+  addCards(data.signal_board.breakouts);
+  addCards(data.signal_board.mid_movers);
+  addCards(data.signal_board.budget_movers);
+  addWindowed(data.signal_board.japanese_top_movers);
+  addWindowed(data.signal_board.japanese_biggest_drops);
+  addWindowed(data.signal_board.japanese_momentum);
+  addCards(data.signal_board.japanese_mid_movers);
+  addCards(data.signal_board.japanese_budget_movers);
+  addCards(data.signal_board.japanese);
+
+  return [...slugs];
+}
+
+function applyDisplayIdentityToHomepageData(
+  data: HomepageData,
+  identityBySlug: Map<string, CardDisplayIdentityRow>,
+): HomepageData {
+  return {
+    ...data,
+    movers: data.movers.map((card) => applyDisplayIdentityToCard(card, identityBySlug)),
+    high_confidence_movers: data.high_confidence_movers.map((card) => applyDisplayIdentityToCard(card, identityBySlug)),
+    emerging_movers: data.emerging_movers.map((card) => applyDisplayIdentityToCard(card, identityBySlug)),
+    losers: data.losers.map((card) => applyDisplayIdentityToCard(card, identityBySlug)),
+    trending: data.trending.map((card) => applyDisplayIdentityToCard(card, identityBySlug)),
+    signal_board: {
+      ...data.signal_board,
+      top_movers: applyDisplayIdentityToWindowedCards(data.signal_board.top_movers, identityBySlug),
+      biggest_drops: applyDisplayIdentityToWindowedCards(data.signal_board.biggest_drops, identityBySlug),
+      momentum: applyDisplayIdentityToWindowedCards(data.signal_board.momentum, identityBySlug),
+      unusual_volume: data.signal_board.unusual_volume.map((card) => applyDisplayIdentityToCard(card, identityBySlug)),
+      breakouts: data.signal_board.breakouts.map((card) => applyDisplayIdentityToCard(card, identityBySlug)),
+      mid_movers: data.signal_board.mid_movers.map((card) => applyDisplayIdentityToCard(card, identityBySlug)),
+      budget_movers: data.signal_board.budget_movers.map((card) => applyDisplayIdentityToCard(card, identityBySlug)),
+      japanese_top_movers: applyDisplayIdentityToWindowedCards(data.signal_board.japanese_top_movers, identityBySlug),
+      japanese_biggest_drops: applyDisplayIdentityToWindowedCards(data.signal_board.japanese_biggest_drops, identityBySlug),
+      japanese_momentum: applyDisplayIdentityToWindowedCards(data.signal_board.japanese_momentum, identityBySlug),
+      japanese_mid_movers: data.signal_board.japanese_mid_movers.map((card) => applyDisplayIdentityToCard(card, identityBySlug)),
+      japanese_budget_movers: data.signal_board.japanese_budget_movers.map((card) => applyDisplayIdentityToCard(card, identityBySlug)),
+      japanese: data.signal_board.japanese.map((card) => applyDisplayIdentityToCard(card, identityBySlug)),
+    },
+  };
+}
+
+async function loadCardDisplayIdentityMap(
+  client: NonNullable<ReturnType<typeof dbPublic>>,
+  slugs: string[],
+  logger: HomepageLogger,
+): Promise<Map<string, CardDisplayIdentityRow>> {
+  const identityBySlug = new Map<string, CardDisplayIdentityRow>();
+  if (slugs.length === 0) return identityBySlug;
+
+  const slugBatches = chunkValues(slugs, BATCH_LOOKUP_SLUG_LIMIT);
+  const results = await Promise.all(slugBatches.map((batch) => client
+    .from("public_card_display_identity")
+    .select("slug, display_card_number, price_finish, price_edition, price_stamp, has_multiple_finishes")
+    .in("slug", batch)));
+
+  for (const result of results) {
+    if (result.error) {
+      logger.error("[homepage] card_display_identity", result.error.message);
+      continue;
+    }
+    for (const row of (result.data ?? []) as CardDisplayIdentityRow[]) {
+      if (!identityBySlug.has(row.slug)) identityBySlug.set(row.slug, row);
+    }
+  }
+
+  return identityBySlug;
+}
+
 type DirectionalChange = {
   value: number;
   window: HomepageSignalWindow;
@@ -1111,13 +1298,23 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
       }
     }
 
+    const enrichDisplayIdentity = async (data: HomepageData): Promise<HomepageData> => {
+      const slugs = collectHomepageDataSlugs(data);
+      const identityBySlug = overrides
+        ? new Map((overrides.displayIdentities ?? []).map((row) => [row.slug, row] as const))
+        : db
+          ? await loadCardDisplayIdentityMap(db, slugs, logger)
+          : new Map<string, CardDisplayIdentityRow>();
+      return applyDisplayIdentityToHomepageData(data, identityBySlug);
+    };
+
     if (allSlugs.size === 0) {
       // EN-only early return path. Hand back the (potentially populated)
       // JP rails so a market-toggle flip still surfaces JP cards even
       // when the EN mover candidate set is empty. The EN signal-board
       // fields stay empty since their underlying queries returned no
       // candidates.
-      return {
+      return await enrichDisplayIdentity({
         ...EMPTY,
         prices_refreshed_today: pricesRefreshedToday,
         tracked_cards_with_live_price: trackedCardsWithLivePrice,
@@ -1130,7 +1327,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
           japanese_mid_movers: japaneseRails.midMovers,
           japanese_budget_movers: japaneseRails.budgetMovers,
         },
-      };
+      });
     }
 
     const slugArray = [...allSlugs];
@@ -1685,7 +1882,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
       coverage,
     }));
 
-    return {
+    const output: HomepageData = {
       movers: moversOut,
       high_confidence_movers: highConfidenceMoversOut,
       emerging_movers: emergingMoversOut,
@@ -1696,6 +1893,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
       prices_refreshed_today: pricesRefreshedToday,
       tracked_cards_with_live_price: trackedCardsWithLivePrice,
     };
+    return await enrichDisplayIdentity(output);
 
   } catch (err) {
     logger.error("[homepage] getHomepageData failed:", err);
