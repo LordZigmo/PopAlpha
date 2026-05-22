@@ -587,10 +587,25 @@ export const PUBLIC_WRITE_ROUTE_CONTRACTS = {
 };
 
 export const PUBLIC_CALLABLE_FUNCTION_CONTRACTS = {
+  "get_canonical_raw_daily_freshness_monitors(integer[])": {
+    roles: ["anon", "authenticated"],
+    writeType: "read_only_monitor_lookup",
+    recommendedAction: "keep public execute narrow and read-only because homepage freshness uses the anon client",
+  },
   "is_handle_available(text)": {
     roles: ["anon", "authenticated"],
     writeType: "read_only_lookup",
     recommendedAction: "keep public execute narrow and read-only",
+  },
+  "preferred_canonical_raw_printing(text)": {
+    roles: ["anon", "authenticated"],
+    writeType: "read_only_lookup",
+    recommendedAction: "keep public execute narrow because public price/display views depend on it",
+  },
+  "resolve_grade_id(text)": {
+    roles: ["authenticated"],
+    writeType: "reference_lookup_for_user_writes",
+    recommendedAction: "keep authenticated-only because grade triggers need it for user-owned writes; never expose to anon",
   },
   "requesting_clerk_user_id()": {
     roles: ["authenticated"],
@@ -1292,7 +1307,18 @@ export const PHASE3_VIEW_AND_PAYWALLED_OBJECTS = [
 ];
 
 export const RLS_REQUIRED_PUBLIC_TABLES = [
+  "activity_comments",
+  "activity_events",
+  "activity_likes",
+  "ai_brief_cache",
   "app_users",
+  "apple_subscriptions",
+  "card_condition_prices",
+  "card_image_embeddings",
+  "card_translations",
+  "daily_top_movers",
+  "grade_aliases",
+  "grade_definitions",
   ...PHASE3_EXISTING_PUBLIC_READ_INTERNAL_WRITE_TABLES,
   ...PHASE2_INTERNAL_OPERATIONAL_TABLES,
   ...PHASE2_PROVIDER_AND_MAPPING_TABLES,
@@ -1306,17 +1332,24 @@ export const RLS_REQUIRED_PUBLIC_TABLES = [
   "ebay_deletion_manual_review_tasks",
   "ebay_deletion_notification_receipts",
   "holdings",
+  "jp_card_price_history",
   "market_snapshots",
+  "notifications",
   "personalization_actor_claims",
   "personalization_behavior_events",
   "personalization_explanation_cache",
   "personalization_profiles",
+  "pending_rollups",
   "pricing_transparency_snapshots",
   "private_sales",
   "profile_follows",
   "profile_post_card_mentions",
   "profile_posts",
   "push_subscriptions",
+  "scan_eval_images",
+  "scan_eval_runs",
+  "scan_identify_events",
+  "sets",
   // Snkrdunk / Yahoo! JP pricing companions + Snkrdunk catalog mapper.
   // RLS-on / no-grants — service-role-only writes; consumers read prices
   // via the public_card_metrics view (which is GRANTed to anon).
@@ -1325,6 +1358,8 @@ export const RLS_REQUIRED_PUBLIC_TABLES = [
   "snkrdunk_card_prices",
   "snkrdunk_product_map",
   "yahoo_jp_card_prices",
+  "variant_token_registry",
+  "wishlist_items",
   "user_blocks",
   "moderation_reports",
 ];
@@ -1408,10 +1443,14 @@ export const RLS_ROLLOUT_BATCHES = [
 ];
 
 export const AUTHENTICATED_DML_OBJECT_GRANTS = {
+  activity_comments: ["DELETE", "INSERT", "SELECT"],
+  activity_events: ["INSERT", "SELECT"],
+  activity_likes: ["DELETE", "INSERT", "SELECT"],
   apns_device_tokens: ["DELETE", "INSERT", "SELECT", "UPDATE"],
   app_users: ["INSERT", "SELECT", "UPDATE"],
   community_card_votes: ["INSERT", "SELECT"],
   holdings: ["DELETE", "INSERT", "SELECT", "UPDATE"],
+  notifications: ["INSERT", "SELECT", "UPDATE"],
   personalization_profiles: ["SELECT"],
   private_sales: ["DELETE", "INSERT", "SELECT"],
   profile_follows: ["DELETE", "INSERT", "SELECT"],
@@ -1420,6 +1459,7 @@ export const AUTHENTICATED_DML_OBJECT_GRANTS = {
   push_subscriptions: ["DELETE", "INSERT", "SELECT", "UPDATE"],
   user_blocks: ["DELETE", "INSERT", "SELECT"],
   moderation_reports: ["INSERT", "SELECT"],
+  wishlist_items: ["DELETE", "INSERT", "SELECT"],
 };
 
 export const AUTHENTICATED_SELECT_ONLY_OBJECTS = [
@@ -1434,27 +1474,40 @@ export const PUBLIC_SELECT_ONLY_OBJECTS = [
   "card_aliases",
   "card_printings",
   "card_profiles",
+  "card_translations",
+  "daily_top_movers",
   "deck_cards",
   "fx_rates",
+  "grade_aliases",
+  "grade_definitions",
   "market_snapshots",
   "pricing_transparency_snapshots",
   "printing_aliases",
+  "public_ai_brief_latest",
+  "public_card_condition_prices",
+  "public_card_display_identity",
   "public_card_metrics",
   "public_card_page_view_daily",
   "public_card_page_view_totals",
+  "public_community_most_saved_7d",
+  "public_community_trending_7d",
   "public_community_vote_totals",
   "public_market_latest",
   "public_price_history",
+  "public_price_history_by_printing",
+  "public_price_history_canonical",
   "public_profile_post_mentions",
   "public_profile_posts",
   "public_profile_social_stats",
   "public_psa_snapshots",
   "public_set_finish_summary",
   "public_set_summaries",
+  "public_stamp_display_labels",
   "public_user_profiles",
   "public_variant_metrics",
   "public_variant_movers",
   "public_variant_movers_priced",
+  "sets",
 ];
 
 export const WRITE_ONLY_PUBLIC_OBJECT_GRANTS = {
@@ -1462,6 +1515,18 @@ export const WRITE_ONLY_PUBLIC_OBJECT_GRANTS = {
 };
 
 export const SEQUENCE_GRANT_CONTRACTS = {
+  activity_comments_id_seq: {
+    anon: [],
+    authenticated: ["USAGE"],
+  },
+  activity_events_id_seq: {
+    anon: [],
+    authenticated: ["USAGE"],
+  },
+  ai_brief_cache_id_seq: {
+    anon: [],
+    authenticated: [],
+  },
   card_page_views_id_seq: {
     anon: [],
     authenticated: [],
@@ -1473,6 +1538,10 @@ export const SEQUENCE_GRANT_CONTRACTS = {
   matching_quality_audits_id_seq: {
     anon: [],
     authenticated: [],
+  },
+  notifications_id_seq: {
+    anon: [],
+    authenticated: ["USAGE"],
   },
   outlier_excluded_points_id_seq: {
     anon: [],
@@ -1530,11 +1599,21 @@ export const SEQUENCE_GRANT_CONTRACTS = {
     anon: ["USAGE"],
     authenticated: ["USAGE"],
   },
+  wishlist_items_id_seq: {
+    anon: [],
+    authenticated: ["USAGE"],
+  },
 };
 
 export const INTERNAL_NO_GRANT_OBJECTS = [
+  "ai_brief_cache",
+  "apple_subscriptions",
+  "card_condition_prices",
   "card_embeddings",
   "card_external_mappings",
+  "card_image_embeddings",
+  "card_profile_coverage",
+  "card_profile_failure_buckets",
   "card_metrics",
   "card_page_views",
   "ebay_deletion_manual_review_events",
@@ -1545,6 +1624,7 @@ export const INTERNAL_NO_GRANT_OBJECTS = [
   "ingest_runs",
   "jp_ingestion_attempts",
   "jp_ingestion_runs",
+  "jp_card_price_history",
   "label_normalization_rules",
   "listing_observations",
   "market_events",
@@ -1553,9 +1633,11 @@ export const INTERNAL_NO_GRANT_OBJECTS = [
   "market_snapshot_rollups",
   "matching_quality_audits",
   "outlier_excluded_points",
+  "ops_pipeline_health",
   "personalization_actor_claims",
   "personalization_behavior_events",
   "personalization_explanation_cache",
+  "pending_rollups",
   "pipeline_jobs",
   "price_history",
   "price_history_points",
@@ -1577,6 +1659,10 @@ export const INTERNAL_NO_GRANT_OBJECTS = [
   "psa_certificates",
   "psa_seed_certs",
   "realized_sales_backtest_snapshots",
+  "scan_correction_pairs",
+  "scan_eval_images",
+  "scan_eval_runs",
+  "scan_identify_events",
   "set_finish_summary_latest",
   "set_summary_snapshots",
   // Snkrdunk pricing companion + catalog map. No anon/authenticated
@@ -1592,29 +1678,41 @@ export const INTERNAL_NO_GRANT_OBJECTS = [
   "variant_price_latest",
   "variant_sentiment_latest",
   "variant_signals_latest",
+  "variant_token_registry",
   // Yahoo! JP pricing companion. Same access model as snkrdunk_card_prices.
   "yahoo_jp_card_prices",
 ];
 
 export const PUBLIC_VIEW_NAMES = [
+  "card_profile_coverage",
+  "card_profile_failure_buckets",
   "canonical_set_catalog",
   "community_user_vote_weeks",
   "community_vote_feed_events",
   "market_snapshot_rollups",
+  "ops_pipeline_health",
   "pro_card_metrics",
   "pro_variant_metrics",
+  "public_ai_brief_latest",
+  "public_card_condition_prices",
+  "public_card_display_identity",
   "public_card_metrics",
   "public_card_page_view_daily",
   "public_card_page_view_totals",
+  "public_community_most_saved_7d",
+  "public_community_trending_7d",
   "public_community_vote_totals",
   "public_market_latest",
   "public_price_history",
+  "public_price_history_by_printing",
+  "public_price_history_canonical",
   "public_profile_post_mentions",
   "public_profile_posts",
   "public_profile_social_stats",
   "public_psa_snapshots",
   "public_set_finish_summary",
   "public_set_summaries",
+  "public_stamp_display_labels",
   "public_user_profiles",
   "public_variant_metrics",
   "public_variant_movers",

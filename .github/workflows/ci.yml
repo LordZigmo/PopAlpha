@@ -15,7 +15,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           cache: npm
 
       - name: Install dependencies
@@ -37,34 +37,76 @@ jobs:
         run: npm run build
 
   schema-guardrails:
-    if: ${{ secrets.SUPABASE_PROJECT_REF != '' && secrets.SUPABASE_ACCESS_TOKEN != '' && secrets.SUPABASE_DB_PASSWORD != '' }}
     runs-on: ubuntu-latest
-    env:
-      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
     steps:
+      - name: Check Supabase secrets
+        id: supabase-secrets
+        shell: bash
+        env:
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || secrets.SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY || secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          if [[ -n "${SUPABASE_PROJECT_REF}" && -n "${SUPABASE_ACCESS_TOKEN}" && -n "${SUPABASE_DB_PASSWORD}" ]]; then
+            echo "available=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "available=false" >> "${GITHUB_OUTPUT}"
+            echo "Supabase secrets are not configured; skipping schema guardrails."
+          fi
+
+          if [[ -n "${SUPABASE_PROJECT_REF}" && -n "${SUPABASE_ACCESS_TOKEN}" && -n "${SUPABASE_DB_PASSWORD}" && -n "${NEXT_PUBLIC_SUPABASE_URL}" && -n "${NEXT_PUBLIC_SUPABASE_ANON_KEY}" && -n "${SUPABASE_SERVICE_ROLE_KEY}" ]]; then
+            echo "rls_available=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "rls_available=false" >> "${GITHUB_OUTPUT}"
+            echo "Supabase client/service-role secrets are not configured; skipping RLS integration verification."
+          fi
+
       - name: Checkout
+        if: steps.supabase-secrets.outputs.available == 'true'
         uses: actions/checkout@v4
 
       - name: Setup Node
+        if: steps.supabase-secrets.outputs.available == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           cache: npm
 
       - name: Install dependencies
+        if: steps.supabase-secrets.outputs.available == 'true'
         run: npm ci
 
       - name: Setup Supabase CLI
+        if: steps.supabase-secrets.outputs.available == 'true'
         uses: supabase/setup-cli@v1
         with:
-          version: 2.82.0
+          version: 2.101.0
 
       - name: Link Supabase project
-        run: supabase link --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
+        if: steps.supabase-secrets.outputs.available == 'true'
+        env:
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: supabase link --project-ref "${SUPABASE_PROJECT_REF}"
 
       - name: Check security invariants
+        if: steps.supabase-secrets.outputs.available == 'true'
+        env:
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: npm run check:security:invariants
 
       - name: Verify RLS integration
+        if: steps.supabase-secrets.outputs.rls_available == 'true'
+        env:
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || secrets.SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY || secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: npm run verify:rls:linked
