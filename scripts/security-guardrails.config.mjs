@@ -1252,9 +1252,17 @@ export const PHASE2_DIRECT_PUBLIC_READ_TABLES = [
   "card_aliases",
   "card_printings",
   "card_profiles",
+  // EN <-> JP card-pairing junction (PR #67) — RLS on, anon/auth SELECT
+  // via USING (true), no anon/auth write grants; service-role only
+  // writes via the cron + backfill script.
+  "card_translations",
   "deck_cards",
   "fx_rates",
   "printing_aliases",
+  // EN <-> JP set-code pairing lookup that gates card_translations
+  // (PR #119). Same RLS shape as card_translations — anon/auth read,
+  // service-role write.
+  "set_pair_map",
 ];
 
 export const PHASE2_INTERNAL_BASE_VIEW_TABLES = [
@@ -1483,6 +1491,9 @@ export const PUBLIC_SELECT_ONLY_OBJECTS = [
   "card_aliases",
   "card_printings",
   "card_profiles",
+  // EN <-> JP card-pairing junction (PR #67) and the set-code lookup
+  // that gates it (PR #119). Both: anon/auth SELECT only;
+  // service-role-only writes from the cron + backfill script.
   "card_translations",
   "daily_top_movers",
   "deck_cards",
@@ -1492,6 +1503,7 @@ export const PUBLIC_SELECT_ONLY_OBJECTS = [
   "market_snapshots",
   "pricing_transparency_snapshots",
   "printing_aliases",
+  "set_pair_map",
   "public_ai_brief_latest",
   "public_card_condition_prices",
   "public_card_display_identity",
