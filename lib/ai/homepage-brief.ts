@@ -73,6 +73,13 @@ export type HomepageBrief = {
 // ── Data context ─────────────────────────────────────────────────────────────
 
 type RankedSet = { name: string; count: number };
+type BriefCardSnapshot = {
+  name: string;
+  setName: string | null;
+  changePct: number | null;
+  marketPrice: number | null;
+  activeListings7d: number | null;
+};
 
 function rankSetCounts(setNames: Array<string | null | undefined>): RankedSet[] {
   const counts = new Map<string, number>();
@@ -108,10 +115,24 @@ function topByChange(cards: HomepageCard[], n: number, ascending = false): Homep
     .slice(0, n);
 }
 
+function toBriefCardSnapshot(card: HomepageCard): BriefCardSnapshot {
+  return {
+    name: card.name,
+    setName: card.set_name,
+    changePct: card.change_pct,
+    marketPrice: card.market_price,
+    activeListings7d: card.active_listings_7d,
+  };
+}
+
 type BriefContext = {
   asOf: string | null;
   moverSets: RankedSet[];
   pullbackSets: RankedSet[];
+  topMovers: BriefCardSnapshot[];
+  topPullbacks: BriefCardSnapshot[];
+  topBreakouts: BriefCardSnapshot[];
+  unusualCards: BriefCardSnapshot[];
   topMoverAvgPct: number | null;
   topPullbackAvgPct: number | null;
   breakoutCount: number;
@@ -120,6 +141,8 @@ type BriefContext = {
   unusualSets: RankedSet[];
   dominantSet: string | null;
   tone: "concentrated" | "broad" | "mixed" | "selective";
+  pricesRefreshedToday: number | null;
+  trackedCardsWithLivePrice: number | null;
 };
 
 export function buildHomepageBriefContext(data: HomepageData): BriefContext {
@@ -160,6 +183,10 @@ export function buildHomepageBriefContext(data: HomepageData): BriefContext {
     asOf: data.as_of,
     moverSets,
     pullbackSets,
+    topMovers: moverSample.map(toBriefCardSnapshot),
+    topPullbacks: pullbackSample.map(toBriefCardSnapshot),
+    topBreakouts: breakouts.slice(0, 3).map(toBriefCardSnapshot),
+    unusualCards: unusual.slice(0, 3).map(toBriefCardSnapshot),
     topMoverAvgPct,
     topPullbackAvgPct,
     breakoutCount: breakouts.length,
@@ -168,11 +195,54 @@ export function buildHomepageBriefContext(data: HomepageData): BriefContext {
     unusualSets,
     dominantSet,
     tone,
+    pricesRefreshedToday: data.prices_refreshed_today,
+    trackedCardsWithLivePrice: data.tracked_cards_with_live_price,
   };
+}
+
+function formatPct(value: number | null): string | null {
+  if (value == null || !Number.isFinite(value)) return null;
+  return `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`;
+}
+
+function formatUsd(value: number | null): string | null {
+  if (value == null || !Number.isFinite(value)) return null;
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: value >= 100 ? 0 : 2,
+  }).format(value);
+}
+
+function formatCount(value: number | null): string | null {
+  if (value == null || !Number.isFinite(value)) return null;
+  return Math.round(value).toLocaleString();
+}
+
+function formatCardSnapshot(card: BriefCardSnapshot): string {
+  const label = card.setName ? `${card.name} (${card.setName})` : card.name;
+  const observations = formatCount(card.activeListings7d);
+  const metrics = [
+    formatPct(card.changePct),
+    formatUsd(card.marketPrice),
+    observations ? `${observations} tracked observations` : null,
+  ].filter(Boolean);
+  return metrics.length > 0 ? `${label} (${metrics.join(", ")})` : label;
+}
+
+function formatCardList(cards: BriefCardSnapshot[], limit: number): string {
+  return cards.slice(0, limit).map(formatCardSnapshot).join("; ");
 }
 
 function stringifyContextForPrompt(ctx: BriefContext): string {
   const lines: string[] = [];
+  const tracked = formatCount(ctx.trackedCardsWithLivePrice);
+  const refreshed = formatCount(ctx.pricesRefreshedToday);
+  if (tracked || refreshed) {
+    lines.push(
+      `Coverage: ${tracked ?? "unknown"} cards with live prices; ${refreshed ?? "unknown"} refreshed in the last day.`,
+    );
+  }
   lines.push(`Tone: ${ctx.tone}`);
   if (ctx.moverSets.length > 0) {
     const topSets = ctx.moverSets.slice(0, 3).map((s) => `${s.name} (${s.count})`).join(", ");
@@ -183,14 +253,26 @@ function stringifyContextForPrompt(ctx: BriefContext): string {
   if (ctx.topMoverAvgPct != null) {
     lines.push(`Top mover avg change 24H: ${ctx.topMoverAvgPct >= 0 ? "+" : ""}${ctx.topMoverAvgPct}%`);
   }
+  if (ctx.topMovers.length > 0) {
+    lines.push(`Top mover cards: ${formatCardList(ctx.topMovers, 5)}`);
+  }
   if (ctx.pullbackSets.length > 0) {
     lines.push(`Pullback sets: ${ctx.pullbackSets.slice(0, 3).map((s) => s.name).join(", ")}`);
   }
   if (ctx.topPullbackAvgPct != null) {
     lines.push(`Top pullback avg change 24H: ${ctx.topPullbackAvgPct}%`);
   }
+  if (ctx.topPullbacks.length > 0) {
+    lines.push(`Top pullback cards: ${formatCardList(ctx.topPullbacks, 3)}`);
+  }
   lines.push(`Breakout signals: ${ctx.breakoutCount}${ctx.breakoutSets[0] ? ` (lead: ${ctx.breakoutSets[0].name})` : ""}`);
+  if (ctx.topBreakouts.length > 0) {
+    lines.push(`Breakout cards: ${formatCardList(ctx.topBreakouts, 3)}`);
+  }
   lines.push(`Unusual observed activity signals: ${ctx.unusualCount}${ctx.unusualSets[0] ? ` (lead: ${ctx.unusualSets[0].name})` : ""}`);
+  if (ctx.unusualCards.length > 0) {
+    lines.push(`Unusual activity cards: ${formatCardList(ctx.unusualCards, 3)}`);
+  }
   return lines.join("\n");
 }
 
@@ -198,12 +280,13 @@ function stringifyContextForPrompt(ctx: BriefContext): string {
 
 const SYSTEM_PROMPT = [
   "You are PopAlpha's market guide for Pokémon TCG collectors.",
-  "Write a short, useful brief that helps a collector make a decision today.",
+  "Write a useful market brief that helps a collector understand what is happening today and where to look next.",
   "",
   "Style:",
   "- 8th-grade reading level. Short, decisive sentences.",
-  "- SPECIFIC. Name the actual sets driving today's action whenever possible.",
-  "- Useful. The brief should help the reader pick what to look at next.",
+  "- SPECIFIC. Name the actual sets and cards driving today's action whenever possible.",
+  "- Useful. Explain the market pattern, not just which sets are moving.",
+  "- Include concrete facts from the data: changes, card names, set concentration, pullbacks, activity, or coverage.",
   "- No hedging or filler. Skip vague phrasing.",
   "- No finance jargon, no hype, no slang.",
   "- Do not mention being an AI. Do not invent sets or numbers not in the data.",
@@ -222,23 +305,23 @@ const SYSTEM_PROMPT = [
   "  - Instead of \"various cards\" → name the specific set that's leading.",
   "",
   "The brief follows this exact 3-step pattern:",
-  "  1. WHAT'S HAPPENING — one decisive sentence naming the specific sets driving demand.",
-  "     Example: \"151 and Astral Radiance are attracting the strongest focused demand today.\"",
-  "  2. WHY IT MATTERS — one sentence explaining what the action pattern tells the reader.",
-  "     Example: \"Momentum is selective, so the best opportunities are clustering in a few sets.\"",
-  "  3. WHAT TO WATCH — one specific, action-oriented sentence pointing at the next step.",
-  "     Example: \"Modern-focused collectors should watch breakout cards in 151 first.\"",
+  "  1. WHAT'S HAPPENING — 2 short sentences naming the leading sets/cards and the size of the move.",
+  "     Example: \"151 is carrying today's board, led by Charizard ex and Mew ex. The top mover group is averaging +8.4%, while most other sets are quieter.\"",
+  "  2. WHY IT MATTERS — 2 short sentences explaining what the action pattern tells the reader.",
+  "     Example: \"This is a narrow move, not a full market rally. When one set owns most top movers, chasing weaker cards in other sets is riskier.\"",
+  "  3. WHAT TO WATCH — 2 short, action-oriented sentences pointing at the next step.",
+  "     Example: \"Watch whether 151 keeps its gains while pullback cards stop sliding. If unusual activity spreads to another set, tomorrow's leader may change.\"",
   "",
   "Output ONLY a single JSON object matching this exact shape:",
   '  {"summary":"...","whatsHappening":"...","whyItMatters":"...","whatToWatch":"...","takeaway":"...","focusSet":"..." | null}',
   "",
   "Field rules:",
-  "- summary: a 2-sentence condensed version (30–55 words total) shown on the home screen.",
-  "    Combines the most important parts of WHAT'S HAPPENING and WHAT TO WATCH for a fast read.",
-  "    Example: \"151 and Astral Radiance are seeing the strongest focused demand today. Momentum is selective, so watch the cards holding gains instead of chasing every spike.\"",
-  "- whatsHappening: one sentence (12–22 words) for pattern step 1.",
-  "- whyItMatters:   one sentence (12–22 words) for pattern step 2.",
-  "- whatToWatch:    one sentence (12–22 words) for pattern step 3.",
+  "- summary: 2-3 sentences (45-85 words total) shown collapsed on the home screen.",
+  "    It should include the leading set/card pattern, one concrete number, and one useful next step.",
+  "    Example: \"151 is doing most of the work today, led by Charizard ex and Mew ex while the top mover group averages +8.4%. That makes this a narrow rally, not a full market turn. Watch whether those gains hold while pullbacks stabilize.\"",
+  "- whatsHappening: 2 short sentences (28-60 words total) for pattern step 1.",
+  "- whyItMatters:   2 short sentences (28-60 words total) for pattern step 2.",
+  "- whatToWatch:    2 short sentences (28-60 words total) for pattern step 3.",
   "- takeaway: 2–4 words. A decisive headline naming today's pattern. No trailing period.",
   "    Examples: \"Selective momentum\", \"151 leading\", \"Few sets pulling away\", \"Quiet day, watch breakouts\".",
   "- focusSet: the single most important set name from the data, or null if no set stands out.",
@@ -264,6 +347,18 @@ export function buildFallbackHomepageBrief(
   const leader  = ctx.dominantSet;
   const second  = ctx.moverSets[1]?.name ?? null;
   const leaderCount = ctx.moverSets[0]?.count ?? 0;
+  const moverAvg = formatPct(ctx.topMoverAvgPct);
+  const pullbackAvg = formatPct(ctx.topPullbackAvgPct);
+  const topMover = ctx.topMovers[0] ? formatCardSnapshot(ctx.topMovers[0]) : null;
+  const topMoverPair = ctx.topMovers.length >= 2 ? formatCardList(ctx.topMovers, 2) : topMover;
+  const pullbackLeader = ctx.topPullbacks[0] ? formatCardSnapshot(ctx.topPullbacks[0]) : null;
+  const breakoutLeader = ctx.topBreakouts[0] ? formatCardSnapshot(ctx.topBreakouts[0]) : null;
+  const unusualLeader = ctx.unusualCards[0] ? formatCardSnapshot(ctx.unusualCards[0]) : null;
+  const tracked = formatCount(ctx.trackedCardsWithLivePrice);
+  const refreshed = formatCount(ctx.pricesRefreshedToday);
+  const coverageLine = tracked || refreshed
+    ? `Coverage is based on ${tracked ?? "the tracked"} live-priced cards${refreshed ? `, with ${refreshed} refreshed in the last day` : ""}.`
+    : null;
 
   let whatsHappening: string;
   let whyItMatters:   string;
@@ -273,38 +368,38 @@ export function buildFallbackHomepageBrief(
 
   if (leader && leaderCount >= 3) {
     // Single set running the show. Specific and decisive.
-    whatsHappening = `${leader} is attracting the strongest focused demand today, with most of the biggest movers from this single set.`;
-    whyItMatters   = "When one set carries the day, momentum is selective and the best opportunities cluster in a few cards.";
-    whatToWatch    = `Watch whether ${leader} holds gains through the afternoon — that confirms today's leader.`;
-    summary        = `${leader} is attracting the strongest focused demand today. Watch whether the gains hold through the afternoon to confirm today's leader.`;
+    whatsHappening = `${leader} is carrying today's board, with ${leaderCount} of the top five movers from this set. ${topMover ? `${topMover} is the lead signal` : moverAvg ? `The top mover group is averaging ${moverAvg}` : "The move is concentrated rather than market-wide"}.`;
+    whyItMatters   = `This is a focused run, not a full-market rally. ${pullbackLeader ? `Pullbacks are still showing up, led by ${pullbackLeader}, so weak cards outside ${leader} need confirmation.` : "When one set owns most movers, weaker cards outside that set need confirmation before they matter."}`;
+    whatToWatch    = `Watch whether ${leader} keeps adding movers and holds today's gains. ${unusualLeader ? `Also watch unusual activity in ${unusualLeader}, because that can show where demand spreads next.` : breakoutLeader ? `Also watch ${breakoutLeader}, because breakout cards show whether the move is widening.` : "If the move spreads beyond the first few cards, the run gets more durable."}`;
+    summary        = `${leader} is carrying today's board, with ${leaderCount} of the top five movers from this set${moverAvg ? ` and the top group averaging ${moverAvg}` : ""}. This is a focused run, not a full-market rally. Watch whether gains hold and whether unusual activity spreads beyond the first few cards.`;
     takeaway       = `${leader} leading`;
   } else if (leader && second) {
     // Two-set lead. Name both — that's what makes it specific.
-    whatsHappening = `${leader} and ${second} are sharing today's biggest moves, with the rest of the market quieter.`;
-    whyItMatters   = "Demand is split across two sets, so opportunities exist in both — but neither has fully taken over.";
-    whatToWatch    = `Watch which of ${leader} or ${second} holds gains by the end of the day — that becomes tomorrow's leader.`;
-    summary        = `${leader} and ${second} are sharing today's strongest demand. Watch which one holds gains into the afternoon to spot tomorrow's leader.`;
+    whatsHappening = `${leader} and ${second} are sharing today's biggest moves, while the rest of the market is quieter. ${topMoverPair ? `The leaders are ${topMoverPair}.` : moverAvg ? `The top mover group is averaging ${moverAvg}.` : ""}`;
+    whyItMatters   = `Demand is split across two sets, so there are opportunities in both but no clear market-wide leader. ${pullbackAvg ? `The pullback group is averaging ${pullbackAvg}, which means downside is still active too.` : "That makes confirmation more important than chasing the first spike."}`;
+    whatToWatch    = `Watch which of ${leader} or ${second} keeps more cards green by the end of the day. ${breakoutLeader ? `${breakoutLeader} is the breakout signal to compare against the top movers.` : "The set that holds gains while pullbacks cool becomes the better next read."}`;
+    summary        = `${leader} and ${second} are sharing today's strongest demand${moverAvg ? `, with top movers averaging ${moverAvg}` : ""}. The move is useful, but it is not broad enough to call a market-wide rally. Watch which set holds gains while pullbacks cool.`;
     takeaway       = "Two sets pulling ahead";
   } else if (leader) {
     // One set, but thin participation. Still specific.
-    whatsHappening = `${leader} is the strongest set right now, but only a few cards are doing the work.`;
-    whyItMatters   = "Thin participation means a small group of cards is responsible for most of today's gains.";
-    whatToWatch    = `Watch for more ${leader} cards to join in before treating this as a real run.`;
-    summary        = `${leader} is leading today, but only a few cards are carrying the move. Watch for broader participation before chasing.`;
+    whatsHappening = `${leader} is the strongest set right now, but only a few cards are doing the work. ${topMover ? `${topMover} is the clearest signal.` : moverAvg ? `The top mover group is averaging ${moverAvg}.` : ""}`;
+    whyItMatters   = `Thin participation means a small group of cards is responsible for most of today's gains. ${coverageLine ?? "That can fade quickly unless more cards from the same set join the move."}`;
+    whatToWatch    = `Watch for more ${leader} cards to join before treating this as a real run. ${pullbackLeader ? `If pullbacks like ${pullbackLeader} keep falling, keep position sizes small.` : "If the next update still shows only one or two movers, treat it as narrow demand."}`;
+    summary        = `${leader} is leading today, but only a few cards are carrying the move${topMover ? `, led by ${topMover}` : ""}. Thin participation can fade quickly. Watch for more ${leader} cards to join before chasing.`;
     takeaway       = `${leader} carrying the day`;
   } else if ((ctx.topPullbackAvgPct ?? 0) < 0) {
     // Cool day. Still actionable.
-    whatsHappening = "Most cards are slipping today, with very few bids holding firm.";
-    whyItMatters   = "When pullbacks outweigh gains, the market is digesting recent moves rather than starting new ones.";
-    whatToWatch    = "Watch for the first set that finds a floor and bounces — that signals where buyers return.";
-    summary        = "Most cards are slipping today as the market digests recent moves. Watch for the first set that finds a floor and bounces.";
+    whatsHappening = `Pullbacks are louder than breakouts today${pullbackAvg ? `, with the pullback group averaging ${pullbackAvg}` : ""}. ${pullbackLeader ? `${pullbackLeader} is the clearest weak spot.` : "No single set is absorbing the whole move."}`;
+    whyItMatters   = `When pullbacks outweigh gains, the market is digesting recent moves instead of starting new ones. ${coverageLine ?? "That makes fresh highs less reliable until buyers return."}`;
+    whatToWatch    = `Watch for the first set that finds a floor and bounces. ${unusualLeader ? `Unusual activity in ${unusualLeader} is worth checking because it may show where buyers return first.` : "The first bounce with real activity is more useful than another one-card spike."}`;
+    summary        = `Pullbacks are louder than breakouts today${pullbackAvg ? `, with the pullback group averaging ${pullbackAvg}` : ""}. The market is digesting recent moves instead of starting new ones. Watch for the first set that finds a floor and bounces with real activity.`;
     takeaway       = "Cool day, watch floors";
   } else {
     // Quiet day. Make the action useful anyway.
-    whatsHappening = "The market is quiet today, with no set pulling clearly ahead.";
-    whyItMatters   = "Quiet days are when watchlists do their work — they highlight the next breakout before everyone else.";
-    whatToWatch    = "Watch for the first card or set that breaks out and gets confirmation through the afternoon.";
-    summary        = "The market is quiet today, with no clear leader. Watch for the first card or set that breaks out and gets confirmation.";
+    whatsHappening = `The market is quiet today, with no set pulling clearly ahead. ${coverageLine ?? "The signal board has enough data to watch, but not enough urgency to force a move."}`;
+    whyItMatters   = "Quiet days are useful because they separate real follow-through from one-card noise. A set needs multiple cards moving together before it deserves attention.";
+    whatToWatch    = `Watch for the first card or set that breaks out and gets confirmation through the afternoon. ${breakoutLeader ? `${breakoutLeader} is the first name to check.` : "If volume stays quiet, use today to build a watchlist instead of chasing."}`;
+    summary        = "The market is quiet today, with no clear leader or broad demand signal. That makes watchlists more useful than chasing. Watch for the first card or set that breaks out and gets confirmation through the afternoon.";
     takeaway       = "Quiet day, watch breakouts";
   }
 
@@ -392,9 +487,9 @@ function parseLlmBrief(raw: string): ParsedLlmBrief | null {
       .filter(Boolean)
       .join(" ");
   }
-  if (!summary || summary.length > 600) return null;
+  if (!summary || summary.length > 900) return null;
   for (const part of [whatsHappening, whyItMatters, whatToWatch]) {
-    if (part.length > 220) return null;
+    if (part.length > 420) return null;
   }
 
   const focusSet = typeof obj.focusSet === "string" && obj.focusSet.trim().length > 0
