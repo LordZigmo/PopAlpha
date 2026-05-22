@@ -22,6 +22,73 @@ Companion to:
 
 ---
 
+## 0. First real-device verified-correctness baseline (2026-05-21)
+
+First session where the multi-scan correction loop ran end-to-end
+with deliberate per-row review by a single user. Methodology lets
+us treat uncorrected-tray rows as user-accepted = ground truth
+(solo-user-deliberate-review only; unsafe to extrapolate to
+production — see `scanner-ocr-failure-modes.md` Caveats).
+
+| Metric | Value |
+|---|---|
+| Top-1 correctness | **40/53 = 75.5%** |
+| HIGH precision | 21/24 = 87.5% |
+| MEDIUM precision | 19/29 = 65.5% |
+| HIGH-wrong rate | 3/53 = 5.7% |
+| OCR extraction rate | 35/53 = 66.0% |
+
+Session was 100% Journey Together — modern, well-printed, fully
+SigLIP-embedded, fully priced. The 75.5% number is **set-specific
+and probably optimistic vs. a heterogeneous real-world mix** (older
+cards, holos, JP cards, finger-occluded captures). First priority
+is to repeat on 1–2 different sets to triangulate.
+
+**Dominant remaining error mode: cross-set confusion (11/13 errors,
+85%).** The system's top-1 picked a card from a *different* set
+than the scanned card in 11 of 13 wrongs. Two specific slugs act
+as repeated false-attractors across unrelated Journey Together
+scans:
+
+- `perfect-order-84-rosa's-encouragement` (false-attractor on 2 scans)
+- `prismatic-evolutions-53-hippowdon` (false-attractor on 2 scans)
+
+This is exactly the lever Tier 2 SigLIP-2 fine-tune addresses
+(see §2.1). The 13 corrections from this session are the seed
+labeled-negative pairs.
+
+**HIGH-wrong cases (most user-facing-dangerous, all 3 are
+`vision_only` winning_path):**
+- destined-rivals-166-granite-cave → jt-152-n's-castle
+- silver-tempest-139-lugia-vstar → jt-24-blaziken-ex
+- mega-evolution-19-vulpix → jt-119-furret
+
+All three share layout/style with the user-correct slug (stadium
+cards, full-art ex/VSTAR, small mammals on similar background).
+Trust-killer demote only fires when Path-B's promoted slug ≠ kNN
+top-1, but `vision_only` means no Path-B narrowing → demote
+doesn't engage. **Open question for Tier 1.7: should `vision_only`
+HIGH require a wider sim-gap-to-rank-2 than the current Phase 1.5
+floor?**
+
+**Saliency-in-multi-scan fix (PR #114) verified working in
+practice.** 1/53 = 1.9% `auto_saliency` events; zero non-card
+pollution. Mode 10 closed.
+
+**Phase 0d perspective-extent sample gate met.** 51 corrected
+samples this session (vs. 27 cumulative prior). Mode 8 coord-system
+fix is unblocked from the data side — diagnostic-then-fix rule
+still binds.
+
+**Pre-session thesis update.** The dominant accuracy lever has
+shifted. Cross-set confusion now drives ≥85% of measured errors;
+OCR card_number robustness (the old §1 thesis) is necessary but no
+longer sufficient. The next phase is embedder-side: either a
+SigLIP-2 fine-tune (Tier 2) or a sim-gap-aware HIGH gate for
+`vision_only` (Tier 1.7).
+
+---
+
 ## 1. Where we are (post-Phase-1, 2026-05-08)
 
 Three-mode eval against `https://popalpha.ai`, 323 labeled images:
@@ -388,9 +455,22 @@ Cost: $50–200 compute, 1–2 weeks of work, plus deployment plumbing
 for the new model_version. See `scanner-finetune-runbook.md` for
 the procedure.
 
-**Only fire this once Tier 1 lands and real-device top-1 is at
-~88-90%.** Fine-tune lifts 2–4pp, which is meaningful at 90% but
-a rounding error at 75%.
+**Gating criteria updated post-2026-05-21 baseline:**
+- Original rule was "fire only at ~88-90% real-device top-1".
+- We're at 75.5% real-device top-1 (set-specific to Journey
+  Together) — still below the threshold.
+- BUT the §0 baseline shows **the remaining error mode is now
+  cross-set confusion, not OCR robustness.** Tier 1's OCR work
+  cannot lift Default→Path B further on the 11 cross-set wrongs
+  because the OCR was either right or absent; the embedder picked
+  the wrong set.
+- **Revised rule**: fire the fine-tune once we have ≥150-200
+  user-correction pairs covering ≥3 sets, even if real-device top-1
+  is still in the high 70s / low 80s. The targeted lift on
+  cross-set false-attractors should be larger than the historical
+  2–4pp because we'd be training directly on the measured failure
+  mode. **Each set-specific baseline session adds ~10-20 high-
+  quality pairs** — Journey Together's 13 are the first batch.
 
 #### 2.2 Real-device eval harness (process improvement)
 

@@ -674,6 +674,78 @@ appends.
 
 Update this whenever you have aggregate data to back it up.
 
+### 2026-05-21 — first verified-correctness baseline (N=53, Journey Together)
+
+First real-device session where the multi-scan correction loop ran
+end-to-end with deliberate per-row review. Methodology: solo user
+(zach@popalpha.ai) deliberately checked every tray row before
+submit; uncorrected scans treated as user-accepted = ground truth
+(see Caveats above for why this rule is safe in the solo case but
+unsafe in production).
+
+Session: 2026-05-21T22:41–22:50 UTC, 53 `card_scanned` events,
+13 `scanner_multi_mode_row_corrected` events, single TestFlight
+build on the SigLIP-2 + saliency-disabled-in-multi-scan code path
+(PR #114 merged ~30 min before).
+
+**Verified-correctness numbers (cap: Journey Together only):**
+
+| Metric | Value |
+|---|---|
+| Top-1 correctness | **40/53 = 75.5%** |
+| HIGH precision (HIGH-right / HIGH-claimed) | 21/24 = 87.5% |
+| MEDIUM precision (MEDIUM-right / MEDIUM-claimed) | 19/29 = 65.5% |
+| HIGH-wrong rate (confidently wrong) | 3/53 = 5.7% |
+| OCR extraction rate | 35/53 = 66.0% (up from 50.8% cumulative) |
+| Mode 6 prevalence | 15/53 = 28.3% (down from 38.5% cumulative) |
+| Mode 7 prevalence | 3/53 = 5.7% (down from 11.5% cumulative) |
+| Mode 8 (pass-2 universal) | 35/35 extractions via pass-2 (unchanged) |
+
+The mode-prevalence drops are most likely set-distribution effects
+— Journey Together is modern + well-printed and the user held
+cards consistently. Re-test on a vintage or holo-heavy set to see
+if Mode 6 climbs back up.
+
+**Cross-set confusion is the dominant error mode (11/13 errors).**
+The 13 corrections show the system's top-1 came from a *different*
+set than Journey Together in 11/13 cases — only 2 were intra-set
+slug confusions. Two specific cards act as repeated false-attractors:
+
+- `perfect-order-84-rosa's-encouragement` → false-positive top-1 on
+  2 different Journey Together cards
+- `prismatic-evolutions-53-hippowdon` → false-positive top-1 on
+  2 different Journey Together cards
+
+This pattern is precisely what the Tier 2 SigLIP-2 fine-tune is
+designed to address (see playbook §2.1). The 13 corrections from
+this session are the seed labeled-negative pairs for the fine-tune.
+
+**HIGH-wrong cases (most user-facing-dangerous, N=3):**
+- destined-rivals-166-granite-cave → jt-152-n's-castle (both stadium-card layout)
+- silver-tempest-139-lugia-vstar → jt-24-blaziken-ex (both etched/full-art treatment)
+- mega-evolution-19-vulpix → jt-119-furret (both small mammals on similar background)
+
+All 3 HIGH-wrong cases are vision_only winning_path (no OCR
+card_number to disambiguate). Phase 1.5 sim-gate would only catch
+these if the sim gap is narrow — worth pulling top_similarity for
+these three events to see whether the trust-killer demote would
+fire on a tightened threshold.
+
+**Saliency-in-multi-scan fix (PR #114) verified working in
+practice.** Only 1 `auto_saliency` event in 53 scans (1.9%) —
+likely a one-frame race or brief single-scan-mode toggle. Zero
+non-card tray pollution reported. Mode 10 status updated.
+
+**Phase 0d perspective-extent gate met.** 51 fresh corrected
+samples in this session (up from 27 cumulative). Distribution is
+uniform: 1920×1080 input → ~880×615 output (range 767-1017 ×
+524-707) → portrait_rotation_applied=true on all 51. The Mode 8
+coord-system fix can now be designed against empirical data — but
+diagnostic-then-fix rule still binds (visual inspection of a
+saved corrected image before writing the transform).
+
+### Cumulative mode table
+
 | Mode | First seen | Real-device occurrences | Eval-corpus occurrences | Status |
 |---|---|---|---|---|
 | 1 (grip pushes card_number above threshold) | 2026-05-07 | 2/5 (initial), 1/4 post-fix | TBD | **VERIFIED FIXED** by Tier 1.1 stage 1 (8cad899) — pass-2 fallback recovered card_number=68 on Heatran re-scan 2026-05-07T05:25:59Z |
@@ -683,9 +755,9 @@ Update this whenever you have aggregate data to back it up.
 | 5 (no card_number printed) | TBD | TBD | TBD | Won't fix; Path C is correct fallback |
 | 6 (Vision didn't see slash-bearing text) | 2026-05-07 | ~12/28 (~43%) pre-stage-3 sample | TBD | OPEN — Tier 1.1 stage 4 (image quality gates) — but kNN won HIGH on most observed cases |
 | 7 (OCR misread digits, e.g. 068→163) | 2026-05-07 | 1/9 pass-2 firings (~11%) | TBD | OPEN — Tier 1.1 stage 5 (multi-candidate digit ranking). Failure mode is graceful: wrong card_number → Path B no-match → vision_only fallback. End-to-end result still correct in observed case. |
-| 8 (Stage-3 perspective-correction coord quirk — card_number rejected by spatial filter) | 2026-05-07 | 25/25 (100%) post-stage-3 sample | TBD | **DIAGNOSTIC HARNESS LIVE 2026-05-15; coord fix still deferred.** Stage 3.1 attempted Y-flip mis-modeled the CIImage coord interaction and produced mirrored text — reverted same day. Pass-2 fallback recovers card_number gracefully (8/9 success on real device), so this is internal-pass-distinction only, NOT a user-facing accuracy issue. Phase 0d (2026-05-15) added the empirical surface: `scan_identify_events.ocr_perspective_corrected_extent` (jsonb, server-routed) + PostHog `ocr_perspective_*` properties (offline) + a `persp:` line on the DEBUG ScanDebugCapture Photos banner. Re-attempt the coord-system fix only AFTER ~10–20 real-device samples land and the orientation/extent distribution justifies the math. |
+| 8 (Stage-3 perspective-correction coord quirk — card_number rejected by spatial filter) | 2026-05-07 | 25/25 (100%) post-stage-3 + 35/35 in 2026-05-21 session = 100% of extractions still via pass-2 | TBD | **SAMPLE GATE MET 2026-05-21 (51 corrected samples; orientation uniform).** Stage 3.1 attempted Y-flip mis-modeled the CIImage coord interaction and produced mirrored text — reverted same day. Pass-2 fallback recovers card_number gracefully so this is internal-pass-distinction only, NOT a user-facing accuracy issue. Distribution: 1920×1080 input → ~880×615 output → portrait_rotation_applied=true uniform across all 51 samples. **Diagnostic-then-fix rule still binds**: capture a saved post-perspective UIImage on DEBUG build, visually confirm orientation before writing the transform. Stage-3.1 lesson is the binding precedent. |
 | 9 (full-art auto-capture never fires — no edge gradient) | 2026-05-16 | user-reported, unmeasured | TBD | **MITIGATED 2026-05-16.** Saliency-based fallback in `PopAlphaVisionEngine.analyzeSaliency` runs `VNGenerateAttentionBasedSaliencyImageRequest` after 1.5s of no rectangle observation, fires `didDetectStableCard` with `triggerKind: "auto_saliency"`. Aspect/size sanity gate + 8s post-fire cooldown + existing server confidence threshold contain false-fires. Real-device verification + PostHog segment-by-`triggerSource` pending. |
-| 10 (saliency fires on non-cards, polluting multi-scan tray) | 2026-05-20 | user-reported on first multi-scan smoke session | TBD | **MITIGATED 2026-05-20 (targeted).** `PopAlphaVisionEngine.isSaliencyEnabled` flag, flipped off by `ScannerHost.multiScanMode` didSet. Single-scan keeps saliency on (Mode 9 recall preserved); multi-scan reverts to rectangle-only auto-detect. **OPEN — systemic follow-up**: post-identify sim floor on `trigger_source=auto_saliency` results (require sim ≥ ~0.85 to admit) once `auto_saliency` is broken out as a distinct PostHog trigger_source value for sim-distribution tuning. |
+| 10 (saliency fires on non-cards, polluting multi-scan tray) | 2026-05-20 | user-reported then **VERIFIED WORKING 2026-05-21** (1/53 = 1.9% auto_saliency in baseline session, zero non-card pollution) | TBD | **VERIFIED WORKING IN PRACTICE 2026-05-21.** `PopAlphaVisionEngine.isSaliencyEnabled` flag, flipped off by `ScannerHost.multiScanMode` didSet. Single-scan keeps saliency on (Mode 9 recall preserved); multi-scan reverts to rectangle-only auto-detect. The 1 residual saliency event was HIGH/vision_only (real card scan), not a non-card false positive — likely a one-frame race or brief single-scan toggle. **OPEN — systemic follow-up**: post-identify sim floor on `trigger_source=auto_saliency` results (require sim ≥ ~0.85 to admit) once `auto_saliency` is broken out for sim-distribution tuning. Once shipped, the multi-scan gate becomes redundant and can be reverted. |
 
 The 5-scan sample on 2026-05-07 is too small to draw conclusions
 about real-device frequency. A meaningful scoreboard requires:
