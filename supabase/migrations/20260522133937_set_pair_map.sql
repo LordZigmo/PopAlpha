@@ -81,7 +81,39 @@ comment on column public.set_pair_map.name_match_pct is
   'Fraction of EN cards in this set whose canonical_name also appears on a JP card in the paired JP set. Auto-computed by scripts/build-set-pair-map.mjs. NULL for manual rows where overlap wasn''t measured.';
 
 comment on column public.set_pair_map.verified is
-  'True when this pair is safe to use in card_translations. Auto pairs require name_match_pct >= 0.50; manual pairs are auto-verified.';
+  'True when this pair is safe to use in card_translations. Auto pairs require name_match_pct >= 0.50; manual pairs are auto-verified by the set_pair_map_verify_manual trigger so the documented "INSERT a manual override" workflow doesn''t silently no-op.';
 
 comment on column public.set_pair_map.source is
   'How this row was created: auto (overlap-scan script) or manual (operator override, e.g. EN Base Set 2 → JP base1 because EN reprinted the 1996 JP art).';
+
+-- Manual overrides are auto-verified.
+--
+-- The picker (lib/jp/translation-match.mjs findPairBySetCode) only reads
+-- rows with verified=true. The column default is false because that's
+-- the right default for auto rows (the build script writes verified
+-- explicitly based on overlap). But the documented operator workflow
+-- for manual rows says "just INSERT one and the picker will pick it
+-- up." Without this trigger, that workflow silently no-ops because the
+-- inserted row inherits verified=false. Codex P1 on the original PR.
+--
+-- Operators who genuinely want to record an UNVERIFIED candidate
+-- manually (e.g. a hypothesis they're not ready to commit to) can do
+-- so by setting source='auto' (it just won't appear in build-script
+-- output until they re-run and the row sticks).
+create or replace function public.set_pair_map_verify_manual()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.source = 'manual' and new.verified is not true then
+    new.verified := true;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists set_pair_map_verify_manual_trigger on public.set_pair_map;
+create trigger set_pair_map_verify_manual_trigger
+  before insert or update on public.set_pair_map
+  for each row
+  execute function public.set_pair_map_verify_manual();
