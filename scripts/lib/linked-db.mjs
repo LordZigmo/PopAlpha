@@ -141,6 +141,18 @@ function linkCommandHint(projectRef) {
   return `supabase link --project-ref ${ref}`;
 }
 
+function rowsFromJsonOutput(parsed) {
+  if (Array.isArray(parsed)) {
+    return parsed;
+  }
+
+  if (parsed && typeof parsed === "object" && Array.isArray(parsed.rows)) {
+    return parsed.rows;
+  }
+
+  return null;
+}
+
 export function getLinkedDbStatus({ access = "db-url" } = {}) {
   const cli = resolveSupabaseCli();
   const linkedProjectRef = readLinkedProjectRef();
@@ -293,7 +305,12 @@ export function runLinkedDbCommand(
     );
   }
 
-  return parsed.rows ?? [];
+  const rows = rowsFromJsonOutput(parsed);
+  if (!rows) {
+    throw new Error(`${label} returned JSON without a result row array.\n${output}`);
+  }
+
+  return rows;
 }
 
 export function runLinkedDbQuery(sql, options = {}) {
