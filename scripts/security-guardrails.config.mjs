@@ -722,11 +722,20 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
   "scripts/backfill-card-translations.mjs": operationalScript({
     classification: "service_role_backfill",
     executionMode: "manual_backfill",
-    intendedCaller: "trusted operator seeding public.card_translations with EN<->JP pairings from SigLIP image-embedding cosine + JP name glossary gate",
+    intendedCaller: "trusted operator seeding public.card_translations with EN<->JP pairings via the rule-based set_pair_map + canonical_name picker",
     requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY", "POSTGRES_URL"],
     expectedSignals: ["service_role_client"],
     usesServiceRole: true,
-    notes: "Reads canonical_cards + card_image_embeddings via service role, upserts to card_translations with ON CONFLICT DO UPDATE. Idempotent + resumable via --resume-from. Same trust shape as backfill-card-image-digital-flag.",
+    notes: "Reads canonical_cards + card_printings + set_pair_map via service role, upserts to card_translations with ON CONFLICT DO UPDATE. Idempotent + resumable via --resume-from. Prereq: scripts/build-set-pair-map.mjs.",
+  }),
+  "scripts/probe-art-crop-cosines.mjs": operationalScript({
+    classification: "diagnostic_probe",
+    executionMode: "manual_probe",
+    intendedCaller: "trusted operator measuring cross-language SigLIP cosine on art-crop embeddings — one-off calibration tool for the scanner accuracy thread; retained for future tuning",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY", "MODAL_SIGLIP_ENDPOINT_URL", "MODAL_SIGLIP_TOKEN"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+    notes: "Read-only on canonical_cards (mirrored_primary_image_url); no DB writes; embeds via Modal endpoint. Falls back to anon/publishable key if service role is empty in env. Calibrated the rule-based picker design (see plans/we-need-to-work-cozy-shannon.md).",
   }),
   "scripts/backfill-phase2c-printing-columns.mjs": operationalScript({
     classification: "service_role_backfill",
@@ -1243,9 +1252,20 @@ export const PHASE2_DIRECT_PUBLIC_READ_TABLES = [
   "card_aliases",
   "card_printings",
   "card_profiles",
+  // EN <-> JP card-pairing junction (PR #67) — RLS on, anon/auth SELECT
+  // via USING (true), no anon/auth write grants; service-role only
+  // writes via the cron + backfill script.
+  "card_translations",
   "deck_cards",
   "fx_rates",
   "printing_aliases",
+  // NOTE: set_pair_map (added in this PR's migration) is intentionally
+  // NOT yet listed here. The schema-guardrails job validates contract
+  // entries against the LIVE prod DB *before* the supabase-migrations
+  // workflow runs (post-merge), so a contract entry would fail CI on
+  // PRs that introduce a new table. Follow-up PR adds set_pair_map to
+  // both this list and PUBLIC_SELECT_ONLY_OBJECTS once the migration
+  // has applied to prod.
 ];
 
 export const PHASE2_INTERNAL_BASE_VIEW_TABLES = [
@@ -1474,6 +1494,9 @@ export const PUBLIC_SELECT_ONLY_OBJECTS = [
   "card_aliases",
   "card_printings",
   "card_profiles",
+  // EN <-> JP card-pairing junction (PR #67) and the set-code lookup
+  // that gates it (PR #119). Both: anon/auth SELECT only;
+  // service-role-only writes from the cron + backfill script.
   "card_translations",
   "daily_top_movers",
   "deck_cards",
@@ -1483,6 +1506,9 @@ export const PUBLIC_SELECT_ONLY_OBJECTS = [
   "market_snapshots",
   "pricing_transparency_snapshots",
   "printing_aliases",
+  // NOTE: set_pair_map intentionally NOT listed here — see the matching
+  // note in PHASE2_DIRECT_PUBLIC_READ_TABLES. Follow-up PR adds it once
+  // the migration in this PR has applied to prod.
   "public_ai_brief_latest",
   "public_card_condition_prices",
   "public_card_display_identity",
