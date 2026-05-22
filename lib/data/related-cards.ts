@@ -50,8 +50,10 @@ function toHomepageCard(
     active_listings_7d: null,
     updated_at: null,
     yahoo_jp_price: null,
+    yahoo_jp_price_jpy: null,
     yahoo_jp_sample_count: null,
     snkrdunk_price: null,
+    snkrdunk_price_jpy: null,
     snkrdunk_sample_count: null,
   };
 }

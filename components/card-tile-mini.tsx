@@ -6,7 +6,7 @@ import {
   formatPriceDisplay,
   resolveDisplayedMarketPrice,
 } from "@/lib/pricing/displayed-market-price";
-import { selectJpPriceSource } from "@/lib/pricing/jp-price-source";
+import { selectJpPriceSource, formatJpSourcePriceLabel } from "@/lib/pricing/jp-price-source";
 
 function formatPrice(n: number | null): string {
   if (n == null || n <= 0) return "--";
@@ -61,8 +61,13 @@ export default function CardTileMini({
   // qualifies, falls back to card.market_price (Scrydex) below.
   const jpSource = selectJpPriceSource({
     yahooJpPrice: card.yahoo_jp_price,
+    yahooJpPriceJpy: card.yahoo_jp_price_jpy,
     yahooJpSampleCount: card.yahoo_jp_sample_count,
     snkrdunkPrice: card.snkrdunk_price,
+    // Snkrdunk JPY is FX-derived (price_usd / JPY_TO_USD_RATE at write
+    // time), not the seller's listed yen value — Snkrdunk's English API
+    // returns USD only. Phase C-1b 2026-05-16.
+    snkrdunkPriceJpy: card.snkrdunk_price_jpy,
     snkrdunkSampleCount: card.snkrdunk_sample_count,
   });
 
@@ -150,7 +155,7 @@ export default function CardTileMini({
               }
             >
               {jpSource.price != null
-                ? formatPrice(jpSource.price)
+                ? formatJpSourcePriceLabel(jpSource)
                 : priceMeta
                   ? priceMeta.label
                   : formatPrice(card.market_price)}

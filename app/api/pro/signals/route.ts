@@ -4,14 +4,18 @@ import { hasPro } from "@/lib/entitlements";
 import { dbAdmin } from "@/lib/db/admin";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { getPostHogClient } from "@/lib/posthog-server";
-import { ANALYTICS_PIPELINE_PROVIDERS } from "@/lib/backfill/provider-registry";
 
 export const runtime = "nodejs";
 
 const rateLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 60 });
-const ACTIVE_SIGNAL_PROVIDER = ANALYTICS_PIPELINE_PROVIDERS[0];
 
-const GRADED_BUCKETS = new Set([
+// Accepted grade values. Mirrors the bucket vocabulary used by
+// pro_variant_metrics and refresh_card_metrics_for_variants. Any other
+// value returns 400 — never default-to-RAW on an unrecognized grade
+// (same anti-default principle as the scrydex normalizer's
+// normalizeScrydexCondition).
+const ACCEPTED_GRADES = new Set([
+  "RAW",
   "LE_7",
   "G8",
   "G9",
@@ -26,11 +30,25 @@ const GRADED_BUCKETS = new Set([
  * Returns 403 if the user does not have a pro entitlement.
  *
  * Usage: GET /api/pro/signals?slug=<canonical_slug>&grade=<bucket>
- *   - grade defaults to RAW
- *   - graded buckets currently always return an empty variants array
- *     with a `note` explaining the data-sparsity gap; this is the
- *     intentional Phase 3 behavior. See docs/graded-surfacing-plan.md
- *     Phase 4 for the eventual graded-signals work.
+ *   - grade defaults to RAW; accepts RAW, LE_7, G8, G9, G9_5, G10, G10_PERFECT
+ *   - graded grades return one row per (provider × grade) pair — variant_ref
+ *     carries the grader (e.g. `<printing>::PSA::10`, `<printing>::CGC::10`).
+ *     UI is responsible for parsing variant_ref to attribute signals to
+ *     specific graders.
+ *
+ * Provider handling: signals are computed under the provider responsible
+ * for the price series (JUSTTCG for RAW; PSA/CGC/BGS/TAG for graded).
+ * The route doesn't filter by provider — `signal_trend IS NOT NULL`
+ * already restricts to rows the calculator has emitted, regardless of
+ * which provider produced the underlying snapshots. Response includes
+ * the distinct providers in `providers` so the client can attribute.
+ *
+ * Phase 4 of docs/graded-surfacing-plan.md (shipped 2026-05-16): the
+ * prior short-circuit returning empty for graded grades was based on a
+ * stale Phase 0 finding. The same change also fixed a long-standing
+ * RAW bug — the route had been filtering `provider = 'SCRYDEX'` since
+ * inception, but signals for RAW live under `JUSTTCG`, so the RAW path
+ * also returned zero rows. Codex P1 on PR #102.
  */
 export async function GET(req: Request) {
   // 1. Auth (cheap) → 2. Entitlement (cheap) → 3. Rate limit
@@ -69,38 +87,47 @@ export async function GET(req: Request) {
       { status: 400 },
     );
   }
-
-  // Graded short-circuit: variant_metrics graded rows have signal_trend
-  // null across the board because the signal calculator gates on
-  // history_points_30d >= 10 and graded variants typically carry 1–2
-  // points each (Phase 0 finding: 0 of 58,586 graded rows have a
-  // non-null signal_trend). Returning the same shape with a `note`
-  // lets callers render an empty state rather than 500ing.
-  if (GRADED_BUCKETS.has(grade)) {
-    return NextResponse.json({
-      ok: true,
-      slug,
-      grade,
-      variants: [],
-      note: "Graded signals require >=10 history points per variant; graded variants typically carry 1-2 points and so currently produce no signal_trend. See docs/graded-surfacing-plan.md Phase 4.",
-    });
+  if (!ACCEPTED_GRADES.has(grade)) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: `Unsupported grade '${grade}'. Accepted: ${[...ACCEPTED_GRADES].join(", ")}.`,
+      },
+      { status: 400 },
+    );
   }
 
   const supabase = dbAdmin();
   const { data, error } = await supabase
     .from("pro_variant_metrics")
-    .select("variant_ref, signal_trend, signal_breakout, signal_value, signals_as_of_ts")
+    .select("variant_ref, provider, signal_trend, signal_breakout, signal_value, signals_as_of_ts")
     .eq("canonical_slug", slug)
-    .eq("provider", ACTIVE_SIGNAL_PROVIDER)
-    .eq("grade", "RAW")
+    .eq("grade", grade)
     .not("signal_trend", "is", null)
     .order("history_points_30d", { ascending: false })
     .limit(10);
 
   if (error) {
-    console.error("[pro/signals]", slug, error.message);
+    console.error("[pro/signals]", slug, grade, error.message);
     return NextResponse.json({ ok: false, error: "Internal error." }, { status: 500 });
   }
+
+  type VariantRow = {
+    variant_ref: string | null;
+    provider: string | null;
+    signal_trend: string | number | null;
+    signal_breakout: string | number | null;
+    signal_value: string | number | null;
+    signals_as_of_ts: string | null;
+  };
+  const variants = (data ?? []) as VariantRow[];
+  const providers = [
+    ...new Set(
+      variants
+        .map((row) => row.provider)
+        .filter((provider): provider is string => Boolean(provider)),
+    ),
+  ];
 
   // Engagement metric for the headline Pro feature — measures how
   // often paying users actually exercise the gated capability they're
@@ -111,11 +138,11 @@ export async function GET(req: Request) {
     event: "pro_signals_accessed",
     properties: {
       canonical_slug: slug,
-      grade: "RAW",
-      provider: ACTIVE_SIGNAL_PROVIDER,
-      variant_count: data?.length ?? 0,
+      grade,
+      providers,
+      variant_count: variants.length,
     },
   });
 
-  return NextResponse.json({ ok: true, slug, grade: "RAW", provider: ACTIVE_SIGNAL_PROVIDER, variants: data });
+  return NextResponse.json({ ok: true, slug, grade, providers, variants });
 }

@@ -531,15 +531,25 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
         // the embedder by feeding it 112×116 sub-images instead of the
         // full card; post-fix, they fall through to the center-crop
         // fallback which sees the actual card.
+        // Phase 0d (2026-05-15): publish the perspective-correction
+        // diagnostic to the engine's stash ONLY when the detected crop
+        // is actually accepted and returned downstream. Vision can
+        // produce a quadrilateral here that `isPlausibleCardCrop`
+        // rejects as sub-card noise (e.g., 112×116 inside a full-art
+        // card); attaching that rejected region's geometry to the
+        // center-crop fallback would corrupt Mode 8 data. Clear up
+        // front, then write the diagnostic only on the accepted path.
+        engine.lastPerspectiveCorrection = nil
         let detectT0 = Date()
-        let detected = engine.detectAndCrop(fullImage)
+        let detection = engine.detectAndCrop(fullImage)
         let detectMs = Date().timeIntervalSince(detectT0) * 1000
-        if let detected, Self.isPlausibleCardCrop(detected) {
-            Logger.scan.debug("tap_detect: hit=true ms=\(String(format: "%.1f", detectMs)) size=\(Int(detected.size.width))x\(Int(detected.size.height))")
-            return detected
+        if let detection, Self.isPlausibleCardCrop(detection.image) {
+            engine.lastPerspectiveCorrection = detection.perspectiveCorrection
+            Logger.scan.debug("tap_detect: hit=true ms=\(String(format: "%.1f", detectMs)) size=\(Int(detection.image.size.width))x\(Int(detection.image.size.height))")
+            return detection.image
         }
-        if let detected {
-            Logger.scan.debug("tap_detect: rejected sub-card crop \(Int(detected.size.width))x\(Int(detected.size.height)) ms=\(String(format: "%.1f", detectMs)) — falling back to center-crop")
+        if let detection {
+            Logger.scan.debug("tap_detect: rejected sub-card crop \(Int(detection.image.size.width))x\(Int(detection.image.size.height)) ms=\(String(format: "%.1f", detectMs)) — falling back to center-crop")
         } else {
             Logger.scan.debug("tap_detect: hit=false ms=\(String(format: "%.1f", detectMs))")
         }

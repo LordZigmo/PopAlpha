@@ -1,0 +1,262 @@
+import Foundation
+import Combine
+import SwiftUI
+import UIKit
+
+// MARK: - MultiScanEntry
+//
+// One card scanned into the multi-scan tray. Holds the rendering data
+// (name, set/number, thumbnail), the disambiguation surface (full
+// candidate list — kept for a future re-pick flow), and the bulk-add
+// payload (canonical_slug + grade=RAW + qty=1 by default). Price loads
+// async after append so the row appears immediately and the dollar
+// figure fills in within ~200ms.
+
+struct MultiScanEntry: Identifiable, Equatable {
+    let id: UUID
+    var match: ScanMatch
+    /// Full top-K from the identify call. Kept so a future per-row
+    /// re-pick can swap to a different candidate without re-scanning.
+    let candidates: [ScanMatch]
+    /// "high" or "medium" — drives a colored ring on the chip and
+    /// (eventually) a "Review" CTA on the expanded row. LOW never
+    /// reaches the tray.
+    let confidence: String
+    let scannedAt: Date
+    /// SHA256 of the scanned JPEG, when known. Threaded through so the
+    /// user-correction flow can post bytes-by-hash without re-uploading.
+    let imageHash: String?
+    /// Scanner language at the time of this scan ("EN" / "JP"). Pinned
+    /// per-row so a later correction attributes to the row's original
+    /// language, not the scanner's CURRENT language. Codex P2 on PR
+    /// #101: ScannerHost.scanLanguage updates on every scan (manual
+    /// pill toggle, CJK auto-flip), so correcting an earlier EN row
+    /// after a later JP scan would otherwise record the user_correction
+    /// anchor under the wrong language.
+    let scanLanguage: ScanLanguage
+    var quantity: Int = 1
+    var grade: String = "RAW"
+    var printingId: String? = nil
+    /// Loaded async via CardService.fetchCardMetrics. Nil = still
+    /// loading or unknown. Drives the per-row price label and the
+    /// running tray total.
+    var marketPriceUsd: Double? = nil
+    /// Pre-fetched card image bytes, populated alongside the price
+    /// fetch in `MultiScanSession.append`. The flash overlay renders
+    /// from this cached UIImage when available, falling back to
+    /// AsyncImage from the URL otherwise. Skipping AsyncImage's
+    /// network round-trip + default fade-in makes the flash feel
+    /// instantaneous instead of a ~300-500ms delayed pop. Memory
+    /// footprint is one decoded image per tray entry — well under
+    /// 1MB each at the URL's typical resolution.
+    var cachedImage: UIImage? = nil
+    /// Source JPEG the user actually scanned, retained so the per-row
+    /// correction picker can submit a server-side `user_correction`
+    /// anchor via `ScanPickerSheet`'s existing bytes-based promote
+    /// path (the picker only fires correction inside its `if let
+    /// bytes = scanImage` branch). Nil for server-routed scans
+    /// (the bytes are already at `scan-uploads/<hash>.jpg`, but the
+    /// picker doesn't currently support hash-only correction in this
+    /// PR — server-routed corrections silently skip the anchor
+    /// submission). Memory: ~400KB per entry; ~20MB for a typical
+    /// 50-row session.
+    var scanImage: UIImage? = nil
+}
+
+// MARK: - MultiScanSession
+//
+// MainActor-bound so SwiftUI views can observe `entries` directly.
+// Owned by the ScannerTabView via @StateObject so the tray persists
+// across the tab life. Cross-launch persistence is out of scope.
+
+@MainActor
+final class MultiScanSession: ObservableObject {
+    @Published private(set) var entries: [MultiScanEntry] = []
+
+    /// Window (seconds) within which a repeat scan of the same slug
+    /// from auto-detect is considered a "same card lingering in
+    /// viewfinder" duplicate. 3s comfortably covers the user reaching
+    /// for the next card in a pack flow without blocking deliberate
+    /// re-scans (e.g., the user intentionally scans two copies of the
+    /// same card — they'd naturally take longer than 3s between).
+    private let autoDetectDedupeWindow: TimeInterval = 3.0
+
+    /// Sum of (marketPriceUsd × quantity) across entries with a loaded
+    /// price. Loading entries contribute 0; the running total fills in
+    /// as price fetches resolve.
+    var totalUsd: Double {
+        entries.reduce(0.0) { acc, e in
+            acc + (e.marketPriceUsd.map { $0 * Double(e.quantity) } ?? 0.0)
+        }
+    }
+
+    /// Returns true when the caller should skip an auto-detect append
+    /// because the same slug already landed in the tray within the
+    /// dedupe window. Derived from `entries.last` (rather than
+    /// separately-tracked state) so any path that removes the most-
+    /// recent entry — clear, swipe-delete, submit success — naturally
+    /// invalidates the dedupe and lets the user re-scan the same card
+    /// immediately. Only meaningful for auto-detect entries; tap/
+    /// library are deliberate user actions and bypass this check.
+    func shouldDedupeAutoDetect(slug: String) -> Bool {
+        guard let last = entries.last,
+              last.match.slug == slug else {
+            return false
+        }
+        return Date().timeIntervalSince(last.scannedAt) < autoDetectDedupeWindow
+    }
+
+    /// Append a card produced by `runIdentify`. Caller has already
+    /// filtered out LOW confidence. Kicks off the price fetch as a
+    /// background Task so the row paints immediately. The dedupe
+    /// state for the next auto-detect fire comes from `entries.last`
+    /// (set here by the append itself) — no separate tracking needed.
+    func append(
+        match: ScanMatch,
+        candidates: [ScanMatch],
+        confidence: String,
+        imageHash: String?,
+        scanLanguage: ScanLanguage,
+        scanImage: UIImage? = nil,
+    ) {
+        var entry = MultiScanEntry(
+            id: UUID(),
+            match: match,
+            candidates: candidates,
+            confidence: confidence,
+            scannedAt: Date(),
+            imageHash: imageHash,
+            scanLanguage: scanLanguage,
+        )
+        entry.scanImage = scanImage
+        entries.append(entry)
+        loadPrice(for: entry.id, slug: match.slug)
+        loadImage(for: entry.id, urlString: match.mirroredPrimaryImageUrl)
+    }
+
+    func remove(at offsets: IndexSet) {
+        entries.remove(atOffsets: offsets)
+    }
+
+    func remove(entryId: UUID) {
+        entries.removeAll { $0.id == entryId }
+    }
+
+    func updateQuantity(entryId: UUID, qty: Int) {
+        guard let idx = entries.firstIndex(where: { $0.id == entryId }) else { return }
+        entries[idx].quantity = max(1, min(99, qty))
+    }
+
+    /// Replace the matched card on an existing entry (per-row
+    /// correction from the review sheet). Clears the cached price +
+    /// image because both are slug-specific and stale for the new
+    /// match, then kicks off fresh fetches in the same pattern as
+    /// append. The bulk-add submission for this entry will use the
+    /// new match's canonical_slug.
+    ///
+    /// Caller (ScannerTabView.correctionPickerSheet) is responsible
+    /// for invoking the server-side correction-promote endpoint via
+    /// ScanPickerSheet's existing flow; this method only handles the
+    /// client-side tray-state swap.
+    func reassign(entryId: UUID, to newMatch: ScanMatch) {
+        guard let idx = entries.firstIndex(where: { $0.id == entryId }) else { return }
+        entries[idx].match = newMatch
+        entries[idx].marketPriceUsd = nil
+        entries[idx].cachedImage = nil
+        loadPrice(for: entryId, slug: newMatch.slug)
+        loadImage(for: entryId, urlString: newMatch.mirroredPrimaryImageUrl)
+    }
+
+    func clear() {
+        entries.removeAll()
+    }
+
+    /// Submit the tray to /api/holdings/bulk-import. On full success,
+    /// clears the tray. On partial failure, keeps the failing rows so
+    /// the user can retry / triage. Throws only on HTTP failure.
+    func submit() async throws -> BulkScanImportSummary {
+        let snapshot = entries
+        let result = try await HoldingsService.shared.bulkAddFromScans(snapshot)
+        if result.errors.isEmpty {
+            entries.removeAll()
+        } else {
+            let failedIndices = Set(result.errors.map { $0.rowIndex })
+            entries = snapshot.enumerated().compactMap { (i, e) in
+                failedIndices.contains(i) ? e : nil
+            }
+        }
+        return result
+    }
+
+    // MARK: - Internal
+
+    private func loadPrice(for entryId: UUID, slug: String) {
+        Task { [weak self] in
+            let metrics = try? await CardService.shared.fetchCardMetrics(slug: slug)
+            let price = metrics?.marketPrice
+            await MainActor.run {
+                guard let self else { return }
+                guard let idx = self.entries.firstIndex(where: { $0.id == entryId }) else {
+                    return
+                }
+                // Stale-fetch guard (Codex P2 on PR #101): if the
+                // entry was reassigned after this request started,
+                // the entry's current match.slug will diverge from
+                // the slug we fetched. Drop the result so the new
+                // match's correct price (loaded by the reassign-
+                // triggered fetch) isn't overwritten by the
+                // late-arriving old fetch.
+                guard self.entries[idx].match.slug == slug else { return }
+                self.entries[idx].marketPriceUsd = price
+            }
+        }
+    }
+
+    /// Pre-fetch the card's primary image bytes on append so the
+    /// flash overlay can render from an in-memory UIImage instead of
+    /// kicking off an AsyncImage network round-trip when it's about
+    /// to be shown. Silent on failure — the overlay falls back to
+    /// AsyncImage's own URL load in that case, so the user sees the
+    /// same placeholder + delayed pop as before.
+    private func loadImage(for entryId: UUID, urlString: String?) {
+        guard let urlString,
+              let url = URL(string: urlString) else { return }
+        Task { [weak self] in
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                guard let image = UIImage(data: data) else { return }
+                await MainActor.run {
+                    guard let self else { return }
+                    guard let idx = self.entries.firstIndex(where: { $0.id == entryId }) else {
+                        return
+                    }
+                    // Stale-fetch guard (Codex P2 on PR #101): drop
+                    // the result if the entry was reassigned to a
+                    // different match (different image URL) after
+                    // the fetch was kicked off. Same reasoning as
+                    // loadPrice — late old fetches would clobber the
+                    // new match's correct image.
+                    guard self.entries[idx].match.mirroredPrimaryImageUrl == urlString else {
+                        return
+                    }
+                    self.entries[idx].cachedImage = image
+                }
+            } catch {
+                // Silent. Flash falls back to AsyncImage with the URL.
+            }
+        }
+    }
+}
+
+// MARK: - Bulk-import DTOs
+
+struct BulkScanImportSummary {
+    let inserted: Int
+    let errors: [BulkScanImportError]
+    var hadAnyFailures: Bool { !errors.isEmpty }
+}
+
+struct BulkScanImportError {
+    let rowIndex: Int
+    let message: String
+}

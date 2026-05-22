@@ -129,6 +129,15 @@ struct CardDetailView: View {
     /// 60% so the transition reads as deliberate, not janky.
     @State private var togglingLanguage = false
 
+    @State private var spinAngle: Double = 0
+    @State private var spinDragStart: Double = 0
+    /// Per-drag classification. Once a drag is .rejected (scroll-bound)
+    /// it stays rejected for the rest of the gesture, so a drag that
+    /// starts vertical and drifts horizontal can never retroactively
+    /// engage the spinner mid-flight.
+    private enum SpinDragState { case undecided, engaged, rejected }
+    @State private var spinDragState: SpinDragState = .undecided
+
     // MARK: - JP card theming
 
     /// Whether to render this detail view in the JP red-tone theme.
@@ -495,16 +504,6 @@ struct CardDetailView: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 8) {
-                    Button {} label: {
-                        Image(systemName: "bell")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(PA.Colors.text)
-                            .frame(width: 36, height: 36)
-                            .background(.ultraThinMaterial.opacity(0.5))
-                            .clipShape(Circle())
-                    }
-                    .accessibilityLabel("Notifications")
-
                     // Share — produces the same popalpha.ai/c/<slug> URL
                     // that the AASA file declares as a Universal Link
                     // path. Tapping a shared link from Messages/Mail/etc.
@@ -586,33 +585,15 @@ struct CardDetailView: View {
 
             ZStack {
                 Color.clear // fill GeometryReader
-                // Freefloating card image
+                // Freefloating, drag-to-spin card
                 if let url = activeCard.imageURL {
-                    LazyImage(url: url) { state in
-                        if let image = state.image {
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(maxHeight: 420)
-                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                        .stroke(.white.opacity(0.1), lineWidth: 0.5)
-                                )
-                        } else if state.error != nil {
-                            heroPlaceholder
-                        } else {
-                            heroPlaceholder
-                                .overlay(ProgressView().tint(PA.Colors.muted))
-                        }
-                    }
-                    .shadow(color: .black.opacity(0.8), radius: 24, x: 0, y: 16)
-                    .scaleEffect(1.0 - CGFloat(progress) * 0.08)
-                    .opacity(1.0 - CGFloat(progress) * 0.6)
-                    .offset(y: CGFloat(-progress) * 40.0)
-                    .padding(.horizontal, 40)
-                    .padding(.top, 12)
-                    .padding(.bottom, 8)
+                    flippableHeroCard(url: url)
+                        .scaleEffect(1.0 - CGFloat(progress) * 0.08)
+                        .opacity(1.0 - CGFloat(progress) * 0.6)
+                        .offset(y: CGFloat(-progress) * 40.0)
+                        .padding(.horizontal, 40)
+                        .padding(.top, 12)
+                        .padding(.bottom, 8)
                 } else {
                     heroPlaceholder
                         .padding(.horizontal, 40)
@@ -622,6 +603,104 @@ struct CardDetailView: View {
             }
         }
         .frame(height: 420)
+    }
+
+    /// Two-faced 3D card. Front is the standard LazyImage hero; back is the
+    /// bundled Pokémon TCG card back asset. Horizontal drag rotates the
+    /// stack around its Y axis; release snaps to the nearest face. Front
+    /// and back swap visibility at the 90°/270° crossings so the user
+    /// never sees the mirrored backside of either face.
+    @ViewBuilder
+    private func flippableHeroCard(url: URL) -> some View {
+        let normalized = ((spinAngle.truncatingRemainder(dividingBy: 360)) + 360)
+            .truncatingRemainder(dividingBy: 360)
+        let isFrontFacing = normalized < 90 || normalized > 270
+
+        ZStack {
+            LazyImage(url: url) { state in
+                if let image = state.image {
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(maxHeight: 420)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .stroke(.white.opacity(0.1), lineWidth: 0.5)
+                        )
+                } else if state.error != nil {
+                    heroPlaceholder
+                } else {
+                    heroPlaceholder
+                        .overlay(ProgressView().tint(PA.Colors.muted))
+                }
+            }
+            .shadow(color: .black.opacity(0.8), radius: 24, x: 0, y: 16)
+            .opacity(isFrontFacing ? 1 : 0)
+
+            // JP cards get the Japanese back; everything else (EN + any
+            // language we don't have a back asset for) falls back to the
+            // English back. isJapaneseCard handles the early-render window
+            // before cardMetrics arrives via the "-jp" slug-suffix check,
+            // so the back stays correct across an EN/JP language toggle.
+            Image(isJapaneseCard ? "PokemonCardBackJP" : "PokemonCardBack")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(maxHeight: 420)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(.white.opacity(0.1), lineWidth: 0.5)
+                )
+                .shadow(color: .black.opacity(0.8), radius: 24, x: 0, y: 16)
+                // Pre-rotated 180° so the asset reads un-mirrored when
+                // the outer rotation has flipped the card to face the
+                // camera from behind.
+                .rotation3DEffect(.degrees(180), axis: (x: 0, y: 1, z: 0))
+                .opacity(isFrontFacing ? 0 : 1)
+        }
+        .rotation3DEffect(
+            .degrees(spinAngle),
+            axis: (x: 0, y: 1, z: 0),
+            perspective: 0.5
+        )
+        // simultaneousGesture (not .gesture) so the parent ScrollView keeps
+        // recognizing vertical pans on the hero. The first onChanged sample
+        // (which fires once cumulative movement crosses minimumDistance)
+        // classifies the drag for life: dominantly-horizontal → .engaged,
+        // anything else → .rejected. Subsequent samples never re-classify,
+        // so a drag that starts as a scroll cannot retroactively rotate
+        // the card if the finger drifts sideways.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 12)
+                .onChanged { value in
+                    if case .rejected = spinDragState { return }
+                    let dx = abs(value.translation.width)
+                    let dy = abs(value.translation.height)
+                    if case .undecided = spinDragState {
+                        if dx > dy * 1.4 {
+                            spinDragState = .engaged
+                        } else {
+                            spinDragState = .rejected
+                            return
+                        }
+                    }
+                    // 0.6°/pt — ~150pt drag ≈ 90° rotation, tuned for a
+                    // wrist-flick feel without runaway spins.
+                    spinAngle = spinDragStart + Double(value.translation.width) * 0.6
+                }
+                .onEnded { _ in
+                    let wasEngaged = spinDragState == .engaged
+                    spinDragState = .undecided
+                    guard wasEngaged else { return }
+                    let target = (spinAngle / 180.0).rounded() * 180.0
+                    withAnimation(.spring(response: 0.45, dampingFraction: 0.78)) {
+                        spinAngle = target
+                    }
+                    spinDragStart = target
+                    PAHaptics.selection()
+                }
+        )
     }
 
     private var heroPlaceholder: some View {

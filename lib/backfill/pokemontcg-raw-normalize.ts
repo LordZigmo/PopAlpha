@@ -108,6 +108,7 @@ import {
   selectPreferredScrydexPriceEntry,
   selectScrydexGradedEntries,
 } from "@/lib/backfill/scrydex-raw-price-select";
+import { convertToUsd } from "@/lib/pricing/fx";
 // TODO: re-enable after debugging pipeline failures
 // import {
 //   selectAllScrydexConditionPrices,
@@ -222,6 +223,15 @@ type VariantObservation = {
   variantId: string;
   observedPrice: number | null;
   currency: "USD" | "EUR" | "JPY";
+  // Phase C-2 (2026-05-16): Scrydex's `market` field, USD-converted.
+  // Headline `observedPrice` after Phase A is scrydex's `low` (matches
+  // TCGplayer's published Market Price label, which is sold-anchored).
+  // `askingPriceUsd` preserves the asking-anchored value so the card
+  // detail page can render "Asking: $X" alongside the headline. This is
+  // the spread on thin-liquidity cards (Mewtwo VSTAR JP: low ~$29 vs
+  // market ~$50). NULL on graded observations or when scrydex's row
+  // lacks a `market` value.
+  askingPriceUsd: number | null;
   providerFinish: string | null;
   normalizedFinish: ScrydexNormalizedFinish;
   normalizedEdition: ScrydexNormalizedEdition;
@@ -241,25 +251,37 @@ type VariantObservation = {
   highPrice: number | null;
 };
 
+// Anchor-tagged source_window values. Phase C-3 (2026-05-16) re-enables
+// trend anchors with explicit basis tagging so chart consumers can
+// distinguish them from low-basis snapshots:
+//   * "snapshot"           — written by the timeseries snapshot path,
+//                            uses scrydex's `low` (Phase A headline).
+//   * "market_anchor_30d"  — synthetic 30d-window anchor derived from
+//                            scrydex's market-basis trend deltas.
+//   * "market_anchor_180d" — same, 180d window.
+// The chart should filter `source_window = 'snapshot'` for the headline
+// price line. Metrics paths read from observation `history_points_30d`
+// directly (separate column) and don't need to filter.
+type AnchorSourceWindow = "market_anchor_30d" | "market_anchor_180d";
+
 type TrendAnchorPoint = {
   lookbackDays: number;
   price: number;
   currency: "USD" | "EUR" | "JPY";
-  sourceWindow: "30d" | "180d";
+  sourceWindow: AnchorSourceWindow;
 };
-
 
 const SCRYDEX_TREND_WINDOWS: Array<{
   key: string;
   lookbackDays: number;
-  sourceWindow: "30d" | "180d";
+  sourceWindow: AnchorSourceWindow;
 }> = [
-  { key: "days_1", lookbackDays: 1, sourceWindow: "30d" },
-  { key: "days_7", lookbackDays: 7, sourceWindow: "30d" },
-  { key: "days_14", lookbackDays: 14, sourceWindow: "30d" },
-  { key: "days_30", lookbackDays: 30, sourceWindow: "30d" },
-  { key: "days_90", lookbackDays: 90, sourceWindow: "180d" },
-  { key: "days_180", lookbackDays: 180, sourceWindow: "180d" },
+  { key: "days_1", lookbackDays: 1, sourceWindow: "market_anchor_30d" },
+  { key: "days_7", lookbackDays: 7, sourceWindow: "market_anchor_30d" },
+  { key: "days_14", lookbackDays: 14, sourceWindow: "market_anchor_30d" },
+  { key: "days_30", lookbackDays: 30, sourceWindow: "market_anchor_30d" },
+  { key: "days_90", lookbackDays: 90, sourceWindow: "market_anchor_180d" },
+  { key: "days_180", lookbackDays: 180, sourceWindow: "market_anchor_180d" },
 ];
 
 function parsePositiveInt(value: number | undefined, fallback: number): number {
@@ -286,34 +308,60 @@ function normalizeCardNumber(raw: string | null | undefined): string {
   return trimmed;
 }
 
-function extractTrendAnchorPoints(prices: unknown): TrendAnchorPoint[] {
-  const selected = selectPreferredScrydexPriceEntry(prices);
-  if (!selected) return [];
+function extractTrendAnchorPoints(_prices: unknown): TrendAnchorPoint[] {
+  // Stays disabled, even with the basis tagging proposed in the first
+  // pass of Phase C-3 (Codex P1 on PR #100).
+  //
+  // First pass attempted: tag anchors with sourceWindow =
+  // "market_anchor_30d" / "market_anchor_180d" so the chart view could
+  // filter them out from the headline (low-basis) series while metrics
+  // still consumed them via observation.history_points_30d.
+  //
+  // Codex correctly pointed out that the metrics path is also basis-
+  // sensitive: derivePriceRelativeTo30dRange compares observedPrice
+  // (low) against the historic range computed from anchors (market) —
+  // mixed basis, meaningless. The other metrics distorted similarly.
+  // Writing anchors that no consumer can correctly use is pure waste.
+  //
+  // What this PR DOES still ship: the public_price_history_by_printing
+  // view tightens to `source_window = 'snapshot'` only, which removes
+  // leftover pre-Phase-A '30d' anchor rows from the chart. Those rows
+  // were the source of the original phantom-drop bug Phase A's
+  // disable patched around. With the view narrowing they're filtered
+  // at read time even though they still exist in price_history_points
+  // until 90-day retention prunes them.
+  //
+  // Future PR could re-add anchors if/when there's a consumer wired
+  // up that wants the market-basis series explicitly (e.g., a separate
+  // "historical asking pressure" chart panel with its own scale). Until
+  // then, anchors stay off. AnchorSourceWindow / SCRYDEX_TREND_WINDOWS
+  // remain in the file as documentation for that future consumer.
+  return [];
+}
 
-  const trends = (
-    selected.row.trends
-    && typeof selected.row.trends === "object"
-    && !Array.isArray(selected.row.trends)
-  ) ? selected.row.trends as Record<string, unknown> : null;
-  if (!trends) return [];
-
-  const anchors: TrendAnchorPoint[] = [];
-  for (const window of SCRYDEX_TREND_WINDOWS) {
-    const trendRow = trends[window.key];
-    if (!trendRow || typeof trendRow !== "object" || Array.isArray(trendRow)) continue;
-    const priceChange = getNumberField((trendRow as Record<string, unknown>).price_change);
-    if (priceChange === null) continue;
-    const anchorPrice = Number((selected.price - priceChange).toFixed(4));
-    if (!Number.isFinite(anchorPrice) || anchorPrice <= 0) continue;
-    anchors.push({
-      lookbackDays: window.lookbackDays,
-      price: anchorPrice,
-      currency: selected.currency,
-      sourceWindow: window.sourceWindow,
-    });
-  }
-
-  return anchors;
+/**
+ * Compute the asking-anchored USD value for a raw pricing selection.
+ * Pulls scrydex's `market` field (asking-weighted) off the selected row
+ * and converts to USD via the same FX path the headline observation
+ * uses. Returns null when `market` is absent or non-positive — graded
+ * paths and rows without a market value just don't get an asking line
+ * on the card detail surface.
+ *
+ * Phase C-2 (2026-05-16): introduces "Asking: $X" auxiliary line on
+ * card detail. The headline price (after Phase A) tracks scrydex `low`
+ * to match TCGplayer's published Market Price label; this helper
+ * preserves the asking value scrydex's `market` field carries so we
+ * can surface both numbers and the spread.
+ */
+function extractAskingPriceUsd(
+  selection: ReturnType<typeof selectPreferredScrydexPriceEntry>,
+): number | null {
+  if (!selection) return null;
+  const market = getNumberField((selection.row as Record<string, unknown>).market);
+  if (market === null) return null;
+  const usd = convertToUsd(market, selection.currency);
+  if (!Number.isFinite(usd) || usd <= 0) return null;
+  return Number(usd.toFixed(4));
 }
 
 function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
@@ -350,6 +398,7 @@ function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
         variantId: "unknown",
         observedPrice: pricingSelection.price,
         currency: pricingSelection.currency,
+        askingPriceUsd: extractAskingPriceUsd(pricingSelection),
         providerFinish: semantics.providerFinish,
         normalizedFinish: semantics.normalizedFinish,
         normalizedEdition: semantics.normalizedEdition,
@@ -371,6 +420,11 @@ function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
         variantId: "unknown",
         observedPrice: graded.price,
         currency: graded.currency,
+        // Graded SKUs intentionally don't carry asking-anchored value:
+        // the headline (selectScrydexGradedEntries) keeps scrydex's
+        // `market` as the conventional value. See parseScrydexPriceObject
+        // docs in scrydex-raw-price-select.ts.
+        askingPriceUsd: null,
         providerFinish: semantics.providerFinish,
         normalizedFinish: semantics.normalizedFinish,
         normalizedEdition: semantics.normalizedEdition,
@@ -405,6 +459,7 @@ function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
         variantId,
         observedPrice: pricingSelection.price,
         currency: pricingSelection.currency,
+        askingPriceUsd: extractAskingPriceUsd(pricingSelection),
         providerFinish: semantics.providerFinish,
         normalizedFinish: semantics.normalizedFinish,
         normalizedEdition: semantics.normalizedEdition,
@@ -427,6 +482,10 @@ function buildVariantObservations(card: ScrydexCard): VariantObservation[] {
         variantId,
         observedPrice: graded.price,
         currency: graded.currency,
+        // See note above: graded paths intentionally don't carry an
+        // asking-anchored auxiliary value (their headline is already
+        // scrydex's `market`).
+        askingPriceUsd: null,
         providerFinish: semantics.providerFinish,
         normalizedFinish: semantics.normalizedFinish,
         normalizedEdition: semantics.normalizedEdition,
@@ -479,13 +538,18 @@ function buildObservationRow(params: {
       }))
       .filter((point) => point.price > 0 && point.ts < rawPayload.fetched_at)
     : [];
-  const historyPoints30d = providerTrendAnchorPoints
-    .filter((point) => point.sourceWindow === "30d")
-    .map((point) => ({
-      ts: point.ts,
-      price: point.price,
-      currency: point.currency,
-    }));
+  // historyPoints30d is empty while extractTrendAnchorPoints stays
+  // disabled (see its docs for why). When a future PR adds a metrics
+  // consumer that can correctly handle market-basis anchors, populate
+  // this array from the basis-tagged trend anchor points.
+  const historyPoints30d: Array<{ ts: string; price: number; currency: "USD" | "EUR" | "JPY" }> =
+    providerTrendAnchorPoints
+      .filter((point) => point.sourceWindow === "market_anchor_30d")
+      .map((point) => ({
+        ts: point.ts,
+        price: point.price,
+        currency: point.currency,
+      }));
 
   return {
     provider_raw_payload_id: rawPayload.id,
@@ -544,6 +608,12 @@ function buildObservationRow(params: {
       isPerfect: variant.isPerfect,
       lowPrice: variant.lowPrice,
       highPrice: variant.highPrice,
+      // Phase C-2 (2026-05-16): asking-anchored value (USD) preserved
+      // separately so the card detail page can render "Asking: $X"
+      // alongside the headline (which after Phase A tracks scrydex
+      // `low`). Read by app/c/[slug]/page.tsx via the latest scrydex
+      // observation. Null on graded observations.
+      scrydexAskingPriceUsd: variant.askingPriceUsd,
     },
     updated_at: normalizedAt,
   };

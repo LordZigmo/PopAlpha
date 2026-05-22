@@ -22,6 +22,73 @@ Companion to:
 
 ---
 
+## 0. First real-device verified-correctness baseline (2026-05-21)
+
+First session where the multi-scan correction loop ran end-to-end
+with deliberate per-row review by a single user. Methodology lets
+us treat uncorrected-tray rows as user-accepted = ground truth
+(solo-user-deliberate-review only; unsafe to extrapolate to
+production — see `scanner-ocr-failure-modes.md` Caveats).
+
+| Metric | Value |
+|---|---|
+| Top-1 correctness | **40/53 = 75.5%** |
+| HIGH precision | 21/24 = 87.5% |
+| MEDIUM precision | 19/29 = 65.5% |
+| HIGH-wrong rate | 3/53 = 5.7% |
+| OCR extraction rate | 35/53 = 66.0% |
+
+Session was 100% Journey Together — modern, well-printed, fully
+SigLIP-embedded, fully priced. The 75.5% number is **set-specific
+and probably optimistic vs. a heterogeneous real-world mix** (older
+cards, holos, JP cards, finger-occluded captures). First priority
+is to repeat on 1–2 different sets to triangulate.
+
+**Dominant remaining error mode: cross-set confusion (11/13 errors,
+85%).** The system's top-1 picked a card from a *different* set
+than the scanned card in 11 of 13 wrongs. Two specific slugs act
+as repeated false-attractors across unrelated Journey Together
+scans:
+
+- `perfect-order-84-rosa's-encouragement` (false-attractor on 2 scans)
+- `prismatic-evolutions-53-hippowdon` (false-attractor on 2 scans)
+
+This is exactly the lever Tier 2 SigLIP-2 fine-tune addresses
+(see §2.1). The 13 corrections from this session are the seed
+labeled-negative pairs.
+
+**HIGH-wrong cases (most user-facing-dangerous, all 3 are
+`vision_only` winning_path):**
+- destined-rivals-166-granite-cave → jt-152-n's-castle
+- silver-tempest-139-lugia-vstar → jt-24-blaziken-ex
+- mega-evolution-19-vulpix → jt-119-furret
+
+All three share layout/style with the user-correct slug (stadium
+cards, full-art ex/VSTAR, small mammals on similar background).
+Trust-killer demote only fires when Path-B's promoted slug ≠ kNN
+top-1, but `vision_only` means no Path-B narrowing → demote
+doesn't engage. **Open question for Tier 1.7: should `vision_only`
+HIGH require a wider sim-gap-to-rank-2 than the current Phase 1.5
+floor?**
+
+**Saliency-in-multi-scan fix (PR #114) verified working in
+practice.** 1/53 = 1.9% `auto_saliency` events; zero non-card
+pollution. Mode 10 closed.
+
+**Phase 0d perspective-extent sample gate met.** 51 corrected
+samples this session (vs. 27 cumulative prior). Mode 8 coord-system
+fix is unblocked from the data side — diagnostic-then-fix rule
+still binds.
+
+**Pre-session thesis update.** The dominant accuracy lever has
+shifted. Cross-set confusion now drives ≥85% of measured errors;
+OCR card_number robustness (the old §1 thesis) is necessary but no
+longer sufficient. The next phase is embedder-side: either a
+SigLIP-2 fine-tune (Tier 2) or a sim-gap-aware HIGH gate for
+`vision_only` (Tier 1.7).
+
+---
+
 ## 1. Where we are (post-Phase-1, 2026-05-08)
 
 Three-mode eval against `https://popalpha.ai`, 323 labeled images:
@@ -208,13 +275,31 @@ real-device usage:
 - "What's the spatial_filter_rejected_count distribution and does
   it predict failure modes?"
 
-**Phase 0d (saved-image inspection harness for Mode 8) deferred.**
-The perspective-correction coord quirk (Mode 8) still needs a
-proper diagnostic-then-fix pass — saving the post-correction CIImage
-to a debug Storage path so we can visually inspect orientation
-before writing the next coord-system transform. Defer until we have
-focused time; pass-2 fallback is handling the OCR side gracefully
-in the meantime.
+**Phase 0d (perspective-correction extent telemetry) ✅ shipped 2026-05-15.**
+The saved-image side of "saved-image inspection harness for Mode 8"
+landed earlier across multiple commits — `ScanDebugCapture` saves
+the post-perspective UIImage to Photos with a diagnostic banner
+(DEBUG-only, every scan including HIGH), and the server-routed
+review queue captures the same images to
+`scan-uploads/review-queue/<hash>.jpg`. The missing piece — the
+numeric corner / extent / portrait-rotation geometry that
+`croppedToCard` produces — now lands as a structured
+`PerspectiveCorrectionDiagnostics` value:
+
+- Server-routed scans: JSON query param on `/api/scan/identify` →
+  `scan_identify_events.ocr_perspective_corrected_extent` (jsonb,
+  migration `20260515200000`).
+- Offline scans: flat-keyed properties on PostHog `card_scanned`
+  (`ocr_perspective_corrected`, `ocr_perspective_portrait_rotation_applied`,
+  `ocr_perspective_input_w/h`, `ocr_perspective_output_w/h`).
+- DEBUG builds: an extra `persp:` line on the Photos-library banner
+  showing input size, output size, portrait rotation flag, and
+  normalized input corners.
+
+**Mode 8 proper fix remains deferred** until ~10–20 real-device
+samples land in the new column — the stage-3.1 revert lesson is
+binding here. Don't ship another coord-system transform until the
+empirical orientation/extent distribution justifies the math.
 
 #### 1.6 Trust-killer sim-floor refinement on `ocr_intersect_unique` — ✅ shipped 2026-05-08
 
@@ -258,6 +343,57 @@ rows on the Path B ceiling run.
 `scan_eval_runs.detailed_results` for any per-image
 correct→wrong flips. Real-device smoke session is the ultimate
 proof of the user-facing lift.
+
+#### 1.7 Full-art auto-capture trigger via saliency fallback — ✅ shipped 2026-05-16
+
+**The gap this closes.** Not visible in the eval scoreboard at
+all — the eval harness feeds the identify route directly and
+never tests the iOS capture trigger. User-facing problem: full-
+art / VMax / VSTAR / ex cards never auto-fire because
+`VNDetectRectanglesRequest` needs an edge gradient between card
+and background, and the artwork on these cards bleeds to the
+border. Tap-to-capture worked as an escape hatch, but the
+auto-capture experience was "scanner doesn't recognize the card"
+from the user's perspective.
+
+**Mechanism (shipped 2026-05-16).** When the rectangle detector
+has produced no observation for `saliencyFallbackDelay` (1.5s),
+the engine runs `VNGenerateAttentionBasedSaliencyImageRequest`
+on the same pixel buffer. The largest salient region — sanity-
+gated on aspect ratio (∈ [0.45, 0.95]) and short side (≥ 25%
+of frame) — accumulates stability the same way a rectangle
+candidate does, and fires the existing `didDetectStableCard`
+delegate with `triggerKind: "auto_saliency"`. Implementation in
+`PopAlphaVisionEngine.analyzeSaliency`.
+
+Containment against false-fires on clean surfaces:
+1. Aspect/size sanity rejects most non-card salient regions
+   before any network call.
+2. Existing server confidence threshold → LOW on non-cards →
+   silent re-arm. No user disruption.
+3. 8s wall-clock cooldown after each saliency fire. NOT cleared
+   by `reset()` (which runs on LOW silent re-arm), so the
+   phone-on-desk loop runs at most every 8s instead of every
+   2s. Mode 9 in `scanner-ocr-failure-modes.md` carries the
+   full diagnosis.
+
+**Telemetry.** `triggerSource: "auto_saliency"` flows through
+PostHog `card_scanned` and `scan_identify_events.trigger_source`
+unchanged. Segment hit-rate / HIGH-rate vs. `"auto"` baseline
+once a few days of real-device traffic accrues.
+
+**Validation.** Real-device smoke is the binding signal:
+- Normal cards: time-to-trigger unchanged (target ≤1s, same
+  rectangle-stability gate as before).
+- Full-art / VMax / VSTAR / ex / Illustration Rare: auto-fire
+  within ~2.5s, top-1 correct at the rate the embedder already
+  achieves on these (~80% from Default-mode eval).
+- Empty scenes (desk, hand, ceiling): no auto-fire (sanity gate).
+- Mid-scan motion: trigger does not fire during motion (stability
+  gate).
+
+Eval harness numbers should NOT change — re-running it after this
+PR is a regression-guard, not a lift measurement.
 
 #### 1.2 Multi-frame consensus on tap — ✅ shipped 2026-05-08 (v1)
 
@@ -319,9 +455,22 @@ Cost: $50–200 compute, 1–2 weeks of work, plus deployment plumbing
 for the new model_version. See `scanner-finetune-runbook.md` for
 the procedure.
 
-**Only fire this once Tier 1 lands and real-device top-1 is at
-~88-90%.** Fine-tune lifts 2–4pp, which is meaningful at 90% but
-a rounding error at 75%.
+**Gating criteria updated post-2026-05-21 baseline:**
+- Original rule was "fire only at ~88-90% real-device top-1".
+- We're at 75.5% real-device top-1 (set-specific to Journey
+  Together) — still below the threshold.
+- BUT the §0 baseline shows **the remaining error mode is now
+  cross-set confusion, not OCR robustness.** Tier 1's OCR work
+  cannot lift Default→Path B further on the 11 cross-set wrongs
+  because the OCR was either right or absent; the embedder picked
+  the wrong set.
+- **Revised rule**: fire the fine-tune once we have ≥150-200
+  user-correction pairs covering ≥3 sets, even if real-device top-1
+  is still in the high 70s / low 80s. The targeted lift on
+  cross-set false-attractors should be larger than the historical
+  2–4pp because we'd be training directly on the measured failure
+  mode. **Each set-specific baseline session adds ~10-20 high-
+  quality pairs** — Journey Together's 13 are the first batch.
 
 #### 2.2 Real-device eval harness (process improvement)
 
@@ -551,34 +700,36 @@ improvement:
   examples we have of each mode. Not all modes deserve fixing —
   some are <1% of scans and don't move the needle.
 
-## 7. Roll-up — the one-paragraph version (post 2026-05-07 evening)
+## 7. Roll-up — the one-paragraph version (post 2026-05-15)
 
 Tier 1.1's substantive parts shipped: multi-pass fallback +
-strip-pass tuning + perspective correction. Real-device data on
-~30 scans confirms pass-2 fallback recovers 8 of 9
-spatial-filter rejections, perspective correction puts the card
-in portrait orientation reliably, and end-to-end HIGH-confidence
-top-1 is the norm on cards where the embedder sees them clearly.
-Stage 3.1 (Y-flip) was attempted same-day to "fix" the
+strip-pass tuning + perspective correction. Tier 1.5 ALL phases
+shipped between 2026-05-08 and 2026-05-15: OCR diagnostic
+telemetry (Phase 0a/b/c), failure-case review queue (§6),
+eval-corpus auto-promote (Phase 0d test-loop), and
+perspective-correction extent telemetry (Phase 0d Mode 8
+prerequisite). Tier 1.6 (HIGH-conf trust-killer refinement)
+shipped 2026-05-08. Phase 1.5 HIGH-gate tuning shipped 2026-05-13.
+
+Stage 3.1 (Y-flip) was attempted 2026-05-07 to "fix" the
 spatial-filter quirk on perspective-corrected output, mis-modeled
 the coord-system interaction, broke text rendering immediately
 (mirrored output), and was reverted. **Lesson logged: don't ship
 coord-system fixes before adding diagnostic instrumentation.**
 
-The next priority is no longer "more OCR robustness" — it's
-**Tier 1.5 telemetry** (saved-image inspection harness +
-`scan_identify_events` field augmentation). Without that, we
-keep operating from 30-scan smoke samples and shipping fixes
-that turn out to be misdiagnosed (stage 3.1) or out-of-priority
-(image quality gates that wouldn't have helped because Mode 6
-wasn't actually the dominant failure). After Tier 1.5 lands,
-Mode 8 (perspective coord quirk) gets a proper fix and we
-re-baseline. **In parallel**, Tier 1.6 (HIGH-confidence
-threshold review on `ocr_intersect_unique`) is a half-day
-mechanical fix: when OCR card_number AND kNN top-1 agree on a
-unique slug, it should be HIGH regardless of absolute sim. Real
-device showed 5 of 28 scans were medium-but-correct because the
-threshold was too conservative — easy lift.
+**The next priority is the Mode 8 coord-system fix**, but it's
+gated on ~10–20 real-device samples landing in the new
+`scan_identify_events.ocr_perspective_corrected_extent` column
+and the equivalent PostHog properties on offline scans. Once
+that data is in hand, write the coord transform against
+empirical evidence instead of guessing (stage-3.1 lesson). In
+parallel, the failure-modes scoreboard in
+`scanner-ocr-failure-modes.md` is overdue for a refresh from the
+~7 days of telemetry already in PostHog and `scan_identify_events`
+— that population should also inform which Tier-1 lever is the
+actual dominant remaining lever, vs. whether we've hit the 88–90%
+real-device top-1 threshold that gates Tier 2 (SigLIP-2 fine-tune)
+and multi-scan mode.
 
 **Important triage rule when something looks broken**: §4.5
 catalogs failure patterns where a "scanner bug" report is

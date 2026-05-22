@@ -17,6 +17,7 @@ export const PUBLIC_ROUTES = [
   "community-pulse/crowd",
   "market-signals",
   "cards/[slug]/detail",
+  "cards/[slug]/ladder",
   "cards/[slug]/view",
   "scan/identify",
   // Anchor delta sync for the offline scanner. Returns user_correction

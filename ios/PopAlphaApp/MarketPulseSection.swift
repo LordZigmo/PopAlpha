@@ -60,6 +60,7 @@ struct MarketPulseSection: View {
         case breakouts
         case unusual
         case pullbacks
+        case momentum
         case mid
         case budget
         case japanese
@@ -72,6 +73,7 @@ struct MarketPulseSection: View {
             case .breakouts: return "Breakouts"
             case .unusual: return "Unusual"
             case .pullbacks: return "Pullbacks"
+            case .momentum: return "Momentum"
             case .mid: return "Mid"
             case .budget: return "Budget"
             case .japanese: return "Japan"
@@ -86,6 +88,7 @@ struct MarketPulseSection: View {
             case .breakouts: return "BREAKOUTS"
             case .unusual: return "UNUSUAL"
             case .pullbacks: return "PULLBACKS"
+            case .momentum: return "MOMENTUM"
             case .mid: return "$8–$50"
             case .budget: return "UNDER $8"
             case .japanese: return "JAPAN"
@@ -98,6 +101,7 @@ struct MarketPulseSection: View {
             case .breakouts: return "Breakouts"
             case .unusual: return "Unusual Volume"
             case .pullbacks: return "Pullbacks"
+            case .momentum: return "Momentum"
             case .mid: return "Mid Movers"
             case .budget: return "Budget Movers"
             case .japanese: return "Japanese Cards"
@@ -110,6 +114,7 @@ struct MarketPulseSection: View {
             case .breakouts: return Color(red: 0.486, green: 0.227, blue: 0.929)
             case .unusual: return PA.Colors.gold
             case .pullbacks: return Color(red: 1.0, green: 0.42, blue: 0.42)
+            case .momentum: return Color(red: 0.957, green: 0.447, blue: 0.714) // pink-400, matches web JP #F472B6
             case .mid: return Color(red: 0.063, green: 0.725, blue: 0.506) // emerald-500
             case .budget: return Color(red: 0.961, green: 0.620, blue: 0.043) // amber-500
             case .japanese: return Color(red: 0.973, green: 0.443, blue: 0.443) // matches web rail #F87171
@@ -125,6 +130,7 @@ struct MarketPulseSection: View {
             case .breakouts: return "Thin supply move"
             case .unusual: return "Unusual volume"
             case .pullbacks: return nil
+            case .momentum: return nil
             case .mid: return nil
             case .budget: return nil
             case .japanese: return nil
@@ -134,10 +140,12 @@ struct MarketPulseSection: View {
         /// Whether this category respects the global 24H / 7D window.
         /// Breakouts, Unusual, Mid, Budget, and Japanese come from
         /// non-windowed daily-computed (or discovery-sorted) lists
-        /// server-side, so the toggle is ignored there.
+        /// server-side, so the toggle is ignored there. Momentum is
+        /// windowed for parity with the web JP board's 24H / 7D
+        /// momentum toggle.
         var isWindowed: Bool {
             switch self {
-            case .movers, .pullbacks: return true
+            case .movers, .pullbacks, .momentum: return true
             case .breakouts, .unusual, .mid, .budget, .japanese: return false
             }
         }
@@ -145,21 +153,86 @@ struct MarketPulseSection: View {
 
     @State private var category: Category = .movers
 
-    /// Categories shown in the tab strip. In JP-only mode the tab
-    /// strip is hidden entirely (the section already knows it's
-    /// rendering `.japanese`). In EN mode the `.japanese` tab is
-    /// hidden — JP is now its own top-level market, so a JP tab
-    /// inside the EN view would be redundant. The case itself stays
-    /// in the enum so JP-only mode reuses all the existing wiring
-    /// (`title`, `eyebrow`, `cards(for:)`, etc.) without duplication.
+    /// Categories shown in the tab strip. JP-only mode exposes the
+    /// same mover board as EN — Movers / Pullbacks / Mid / Budget /
+    /// Japan (discovery) — sourced from the JP fields on
+    /// `HomepageSignalBoardDTO`. Breakouts + Unusual are EN-only
+    /// today because the server doesn't yet ship JP equivalents for
+    /// those signals; we add them when those rails light up.
+    /// In EN mode the `.japanese` tab is hidden — JP is its own
+    /// top-level market so a JP tab inside the EN view would be
+    /// redundant.
     private var visibleCategories: [Category] {
-        japaneseOnly ? [.japanese] : Category.allCases.filter { $0 != .japanese }
+        if japaneseOnly {
+            // Mirror the web JP board ordering: Movers, Pullbacks,
+            // Momentum (windowed, reads japaneseMomentum), Mid, Budget,
+            // then `.japanese` discovery last. Breakouts / Unusual
+            // stay EN-only because the server hasn't shipped JP
+            // equivalents for those signals yet.
+            //
+            // .japanese was hidden in commit beb649b on the assumption
+            // the five JP movers rails would carry the load. They
+            // don't: the JP pricing path (yahoo_jp + snkrdunk →
+            // card_metrics) never populates change_pct_24h /
+            // change_pct_7d, so the loader's `change_pct_!= null`
+            // gate in lib/data/homepage.ts:~666 keeps every JP movers
+            // rail empty. The .japanese discovery rail uses the
+            // refresh-tier hot/warm pool instead and is the only one
+            // that actually surfaces JP cards today.
+            //
+            // Restored 2026-05-18 as the same-day rescue. The durable
+            // fix is a JP change_pct populator; until that ships, this
+            // tab is the only thing keeping JP cards on the homepage.
+            return [.movers, .pullbacks, .momentum, .mid, .budget, .japanese]
+        }
+        // EN mode currently hides `.momentum` because the EN .breakouts
+        // tab already falls back to momentum data when breakouts is
+        // empty; promoting momentum to its own EN tab would duplicate
+        // it. JP has a dedicated japaneseMomentum field that's
+        // independent from japaneseTopMovers, so the tab is JP-only.
+        return Category.allCases.filter { $0 != .japanese && $0 != .momentum }
     }
 
-    /// The category whose rail is currently rendered. JP-only mode
-    /// forces `.japanese`; EN mode honours the user's tab selection.
+    /// The category whose rail is currently rendered. Once `category`
+    /// is normalized to `visibleCategories` on every market flip (see
+    /// `.onChange(of: japaneseOnly)` in `body`) this is just a passthrough,
+    /// but the contains-check stays as a defensive fallback for the
+    /// initial-mount edge case where the parent constructs this view
+    /// with `japaneseOnly: true` AND `category` happens to hold a
+    /// non-JP value (e.g. SwiftUI state restoration).
     private var activeCategory: Category {
-        japaneseOnly ? .japanese : category
+        if !visibleCategories.contains(category) {
+            return .movers
+        }
+        return category
+    }
+
+    /// Pick the first visible category whose rail actually has cards.
+    /// Used on initial mount and on EN↔JP flips so we never render an
+    /// empty state when a populated rail exists in another visible
+    /// tab.
+    ///
+    /// Motivating case (2026-05-18 rescue): JP mode lists
+    /// `[.movers, .pullbacks, .momentum, .mid, .budget, .japanese]`
+    /// but the first five are starved at the source (the JP pricing
+    /// path doesn't write `change_pct_*`, so the rail loader's gate
+    /// in `lib/data/homepage.ts:~666` filters every JP card out of
+    /// the windowed rails). The `.japanese` discovery rail is the
+    /// only one with data today. Defaulting `category = .movers`
+    /// renders an empty state on first JP open. This helper resolves
+    /// the user to `.japanese` automatically until the durable JP
+    /// change_pct populator ships.
+    ///
+    /// Falls back to `.movers` only when every visible rail is empty,
+    /// which is a legitimate "nothing to show" state worth showing
+    /// honestly.
+    private func firstNonEmptyVisibleCategory() -> Category {
+        for candidate in visibleCategories {
+            if !cards(for: candidate).isEmpty {
+                return candidate
+            }
+        }
+        return .movers
     }
 
     /// Brand-aware accent for a given category. Only the Movers tab
@@ -174,11 +247,58 @@ struct MarketPulseSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
+            // KPI microstrip stays EN-only: the numbers describe the
+            // whole catalog freshness and EN-tilted market cap, not the
+            // JP slice. The category tab strip shows in both modes —
+            // JP-only mode renders a JP-flavored set of tabs.
             if !japaneseOnly {
                 headerStrip
-                categoryTabs
             }
+            categoryTabs
             activeSection
+        }
+        // Initial-mount safeguard for the JP-mode empty-rail problem
+        // documented on `firstNonEmptyVisibleCategory()`. `@State`
+        // initializes `category = .movers`, but in JP mode `.movers`
+        // renders empty today. Resolve to the first populated rail
+        // on first appearance so the user sees cards immediately
+        // rather than tapping through five empty tabs to find
+        // `.japanese`. No-op when the default is already populated
+        // (the EN case, and the eventual JP case once the change_pct
+        // populator ships).
+        .onAppear {
+            if cards(for: category).isEmpty {
+                let next = firstNonEmptyVisibleCategory()
+                if next != category {
+                    category = next
+                }
+            }
+        }
+        // Keep `category` in sync with the current market's
+        // visibleCategories. Without this, toggling EN→JP while on
+        // .breakouts (an EN-only tab) leaves `category = .breakouts`
+        // even though `activeCategory` falls back to .movers — the tab
+        // strip then highlights nothing because the strip compares
+        // against `category`, not `activeCategory`. Symmetric problem
+        // on JP→EN when the user had picked .japanese. Normalizing
+        // `category` on every market flip aligns the tab-strip
+        // selection with the rendered rail.
+        //
+        // Additionally retarget when the current rail is empty so a
+        // JP flip never strands the user on an empty Movers tab
+        // (same JP-mode rationale as `.onAppear` above).
+        .onChange(of: japaneseOnly) { _, _ in
+            let needsRetarget =
+                !visibleCategories.contains(category)
+                || cards(for: category).isEmpty
+            if needsRetarget {
+                let next = firstNonEmptyVisibleCategory()
+                if next != category {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        category = next
+                    }
+                }
+            }
         }
     }
 
@@ -324,9 +444,10 @@ struct MarketPulseSection: View {
                 // windowed categories (Movers, Pullbacks). Non-windowed
                 // tabs (Breakouts, Unusual, Mid, Budget, Japanese) come
                 // from pre-computed daily lists and ignore the toggle,
-                // so we hide it there. JP-only mode also suppresses it
-                // implicitly since `.japanese` is non-windowed.
-                if cat.isWindowed && !japaneseOnly {
+                // so we hide it there. The toggle is exposed in both EN
+                // and JP modes — JP-mode Movers/Pullbacks honour the
+                // window selection the same way EN does.
+                if cat.isWindowed {
                     windowToggle
                         .transition(.opacity)
                 }
@@ -337,6 +458,39 @@ struct MarketPulseSection: View {
     }
 
     private func cards(for category: Category) -> [HomepageCardDTO] {
+        // In JP-only mode the mover/pullback/mid/budget tabs read from
+        // the JP-specific signal-board fields rather than the EN ones,
+        // and every card runs through `preferringJpSource()` so the
+        // tile shows the Yahoo!JP or Snkrdunk native price (when a
+        // source qualifies on sample count) instead of Scrydex's USD
+        // reflection. Falls back to empty when the server hasn't
+        // shipped the JP fields yet — the tab still renders an empty
+        // state rather than leaking EN data into the JP view.
+        if japaneseOnly {
+            switch category {
+            case .movers:
+                let windowed = signalBoard.japaneseTopMovers
+                let cards = windowed?.forWindow(selectedWindow) ?? []
+                return cards.map { $0.preferringJpSource() }
+            case .pullbacks:
+                let windowed = signalBoard.japaneseBiggestDrops
+                let cards = windowed?.forWindow(selectedWindow) ?? []
+                return cards.map { $0.preferringJpSource() }
+            case .momentum:
+                let windowed = signalBoard.japaneseMomentum
+                let cards = windowed?.forWindow(selectedWindow) ?? []
+                return cards.map { $0.preferringJpSource() }
+            case .mid:
+                return (signalBoard.japaneseMidMovers ?? []).map { $0.preferringJpSource() }
+            case .budget:
+                return (signalBoard.japaneseBudgetMovers ?? []).map { $0.preferringJpSource() }
+            case .japanese:
+                return (signalBoard.japanese ?? []).map { $0.preferringJpSource() }
+            case .breakouts, .unusual:
+                // Not exposed in JP-mode tab strip; defensive fallback.
+                return []
+            }
+        }
         switch category {
         case .movers:
             return signalBoard.topMovers.forWindow(selectedWindow)
@@ -349,6 +503,10 @@ struct MarketPulseSection: View {
             return signalBoard.unusualVolume ?? highConfidenceMovers
         case .pullbacks:
             return signalBoard.biggestDrops.forWindow(selectedWindow)
+        case .momentum:
+            // EN mode never exposes `.momentum` in visibleCategories
+            // (breakouts already falls back to it). Defensive only.
+            return signalBoard.momentum.forWindow(selectedWindow)
         case .mid:
             // Older server builds (pre 20260504230000_compute_daily_top_movers_mid_tier)
             // may not include midMovers; fall back to empty (renders the empty state).
@@ -377,6 +535,7 @@ struct MarketPulseSection: View {
         case .breakouts: return "No breakouts yet"
         case .unusual: return "No unusual activity"
         case .pullbacks: return "No \(selectedWindow.label) pullbacks"
+        case .momentum: return "No \(selectedWindow.label) momentum yet"
         case .mid: return "No mid movers yet"
         case .budget: return "No budget movers yet"
         case .japanese: return "No Japanese cards yet"

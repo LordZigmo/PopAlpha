@@ -128,27 +128,7 @@ struct MarketHeroCard: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            ZStack {
-                PA.Gradients.cardSurface
-                // Accent glow on the trailing edge so the card reads as
-                // the "scanner" anchor (visually paired with the
-                // viewfinder eyebrow on the leading edge). Read lazily
-                // from `market.accent` so the gradient re-evaluates
-                // when the user toggles markets.
-                RadialGradient(
-                    colors: [market.accent.opacity(0.16), .clear],
-                    center: .topTrailing,
-                    startRadius: 0,
-                    endRadius: 260
-                )
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: PA.Layout.panelRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: PA.Layout.panelRadius, style: .continuous)
-                .stroke(market.accent.opacity(0.35), lineWidth: 1)
-        )
+        .liquidGlassSurface(accent: market.accent)
         // VoiceOver reads the title + sub + the two button hints in
         // order, but the chips below are decorative — combine them so
         // they don't read as four separate elements.

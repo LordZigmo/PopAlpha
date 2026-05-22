@@ -1,0 +1,48 @@
+-- 20260515200000_scan_identify_events_perspective_extent.sql
+--
+-- Adds `ocr_perspective_corrected_extent` to scan_identify_events.
+-- Captures the geometry of the on-device CIPerspectiveCorrection step
+-- that runs inside PopAlphaVisionEngine.croppedToCard before the
+-- captured frame reaches the embedder + OCR pipeline.
+--
+-- Tier 1.5 Phase 0d of the scanner accuracy playbook. The previous
+-- ocr_* telemetry columns (20260508000000) and the review-queue
+-- capture (20260513220000) tell us the *rate* of failures and let us
+-- inspect the *image* — this column lets us inspect the *coordinate
+-- transform* that produced the image. Specifically, this unblocks
+-- the Mode 8 (`scanner-ocr-failure-modes.md`) diagnostic-then-fix
+-- pass: portraitRotationApplied + outputExtent together reveal which
+-- captures triggered the step-4 90° rotation that introduces the
+-- upside-down ambiguity, so the eventual coord-system fix can be
+-- written against empirical evidence instead of guessed.
+--
+-- Shape (per ios/Sources/Features/Scanner/PopAlphaVisionEngine.swift
+-- PerspectiveCorrectionDiagnostics):
+--   {
+--     "inputCorners": [ { "x": float, "y": float }, ... 4 items ],
+--     "outputExtent": { "x": float, "y": float, "width": float, "height": float },
+--     "inputSize":    { "width": float, "height": float },
+--     "portraitRotationApplied": bool
+--   }
+--
+-- Browsing query (operator-facing):
+--   SELECT image_hash, top_match_slug,
+--          ocr_perspective_corrected_extent->>'portraitRotationApplied' AS portrait_rotated,
+--          (ocr_perspective_corrected_extent->'outputExtent'->>'width')::float AS out_w,
+--          (ocr_perspective_corrected_extent->'outputExtent'->>'height')::float AS out_h
+--     FROM public.scan_identify_events
+--    WHERE ocr_perspective_corrected_extent IS NOT NULL
+--    ORDER BY created_at DESC
+--    LIMIT 50;
+--
+-- Then view the paired image at:
+--   card-images/scan-uploads/<image_hash>.jpg
+-- (or, for the failure-case subset, scan-uploads/review-queue/<image_hash>.jpg)
+--
+-- No index: querying is ad-hoc human inspection at low volume. The
+-- partial index on review_queued_at (20260513220000) already covers
+-- the high-volume "filter to interesting subset" case; this column
+-- piggybacks via the same row, no separate index needed.
+
+ALTER TABLE public.scan_identify_events
+  ADD COLUMN IF NOT EXISTS ocr_perspective_corrected_extent jsonb;

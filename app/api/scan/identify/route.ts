@@ -390,6 +390,30 @@ function parseNonNegativeInt(raw: string | null): number | null {
   return n;
 }
 
+// Phase 0d (2026-05-15): the iOS app JSON-encodes
+// PerspectiveCorrectionDiagnostics into a single query param and we
+// persist it to scan_identify_events.ocr_perspective_corrected_extent
+// (jsonb). Defensive parse — bounded length (the canonical shape is
+// ~300 bytes; cap higher in case future fields land), valid JSON, and
+// object-typed. On any failure return null so a malformed client query
+// can't poison the column. Defensive against malicious inputs too:
+// jsonb columns reject arbitrary blobs, but we'd rather drop them at
+// the parser than let the DB driver carry an attacker-controlled
+// payload.
+function parseJsonObjectParam(raw: string | null, maxBytes: number = 4096): unknown {
+  if (raw === null || raw === "") return null;
+  if (raw.length > maxBytes) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 function normalizeSetNameForCompare(raw: string | null | undefined): string {
   if (!raw) return "";
   return raw
@@ -529,6 +553,14 @@ export async function POST(req: Request) {
   );
   const ocrSpatialFilterRejectedCountTel = parseNonNegativeInt(
     searchParams.get("ocr_spatial_filter_rejected_count"),
+  );
+  // Phase 0d (Tier 1.5): perspective-correction geometry from
+  // PopAlphaVisionEngine.croppedToCard. Lands as a JSON object on
+  // scan_identify_events.ocr_perspective_corrected_extent — the
+  // diagnostic surface that unblocks the Mode 8 coord-system fix.
+  // Older builds omit → null.
+  const ocrPerspectiveCorrectedExtentTel = parseJsonObjectParam(
+    searchParams.get("ocr_perspective_corrected_extent"),
   );
 
   if (!hasVercelPostgresConfig()) {
@@ -1503,6 +1535,7 @@ export async function POST(req: Request) {
     ocrCardNumberExtracted: ocrCardNumberExtractedTel,
     ocrPass2FallbackFired: ocrPass2FallbackFiredTel,
     ocrSpatialFilterRejectedCount: ocrSpatialFilterRejectedCountTel,
+    ocrPerspectiveCorrectedExtent: ocrPerspectiveCorrectedExtentTel,
     reviewQueued,
   });
 
@@ -1618,6 +1651,11 @@ type ScanEventInput = {
   ocrCardNumberExtracted?: boolean | null;
   ocrPass2FallbackFired?: boolean | null;
   ocrSpatialFilterRejectedCount?: number | null;
+  // Phase 0d (Tier 1.5) — perspective-correction geometry from the
+  // on-device CIPerspectiveCorrection step. Object shape mirrors
+  // PerspectiveCorrectionDiagnostics in iOS PopAlphaVisionEngine.swift.
+  // Persisted as jsonb on scan_identify_events; nullable column.
+  ocrPerspectiveCorrectedExtent?: unknown | null;
   // Tier 1.5 §6 item 2 — the failure-case auto-capture flag. True
   // when this scan met the "we don't know why this failed" criteria
   // (confidence='medium' AND OCR returned no card numbers) and was
@@ -1654,6 +1692,7 @@ async function logScanEvent(event: ScanEventInput): Promise<void> {
         ocr_card_number_extracted: event.ocrCardNumberExtracted ?? null,
         ocr_pass2_fallback_fired: event.ocrPass2FallbackFired ?? null,
         ocr_spatial_filter_rejected_count: event.ocrSpatialFilterRejectedCount ?? null,
+        ocr_perspective_corrected_extent: event.ocrPerspectiveCorrectedExtent ?? null,
         review_queued_at: event.reviewQueued ? new Date().toISOString() : null,
       });
 

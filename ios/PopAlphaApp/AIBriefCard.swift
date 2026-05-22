@@ -226,23 +226,7 @@ struct AIBriefCard: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            ZStack {
-                PA.Gradients.cardSurface
-                // subtle accent glow top-left
-                RadialGradient(
-                    colors: [market.accent.opacity(0.12), .clear],
-                    center: .topLeading,
-                    startRadius: 0,
-                    endRadius: 220
-                )
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: PA.Layout.panelRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: PA.Layout.panelRadius, style: .continuous)
-                .stroke(market.accent.opacity(0.35), lineWidth: 1)
-        )
+        .liquidGlassSurface(accent: market.accent)
     }
 
     // MARK: - Three-step summary (expanded body)

@@ -8,8 +8,10 @@ import { getCommunityPulseSnapshot } from "@/lib/data/community-pulse";
 import { getPopAlphaModel } from "@/lib/ai/models";
 import HomepageSignalBoard from "@/components/homepage-signal-board";
 import HomepageSearch from "@/components/homepage-search";
+import MarketTogglePill from "@/components/market-toggle-pill";
 import SiteHeader from "@/components/site-header";
 import TypewriterText from "@/components/typewriter-text";
+import { MarketProvider } from "@/lib/market-context";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -63,6 +65,11 @@ const EMPTY_DATA: {
     breakouts: HomepageCard[];
     mid_movers: HomepageCard[];
     budget_movers: HomepageCard[];
+    japanese_top_movers: { "24H": HomepageCard[]; "7D": HomepageCard[] };
+    japanese_biggest_drops: { "24H": HomepageCard[]; "7D": HomepageCard[] };
+    japanese_momentum: { "24H": HomepageCard[]; "7D": HomepageCard[] };
+    japanese_mid_movers: HomepageCard[];
+    japanese_budget_movers: HomepageCard[];
     japanese: HomepageCard[];
   };
   as_of: string | null;
@@ -82,6 +89,11 @@ const EMPTY_DATA: {
     breakouts: [],
     mid_movers: [],
     budget_movers: [],
+    japanese_top_movers: { "24H": [], "7D": [] },
+    japanese_biggest_drops: { "24H": [], "7D": [] },
+    japanese_momentum: { "24H": [], "7D": [] },
+    japanese_mid_movers: [],
+    japanese_budget_movers: [],
     japanese: [],
   },
   as_of: null,
@@ -716,10 +728,12 @@ export default async function Home() {
   ] as const;
 
   return (
+    <MarketProvider>
     <div className="landing-shell min-h-screen bg-[#060608] text-[#F0F0F0]">
       <SiteHeader
         showSignIn={!user}
         primaryCta={user ? { label: "Profile", href: "/profile" } : { label: "Start free", href: "/sign-up" }}
+        leadingSlot={<MarketTogglePill />}
         centerSlot={(
           <Suspense fallback={<div className="h-9 w-full rounded-full bg-white/[0.04]" />}>
             <HomepageSearch size="nav" autoFocus={false} className="w-full" />
@@ -887,7 +901,7 @@ export default async function Home() {
               <div className="pointer-events-none absolute left-4 top-2 h-[280px] w-[280px] rounded-full bg-[#2FD0E3]/[0.15] blur-[120px]" />
               <div className="pointer-events-none absolute bottom-6 right-8 h-[220px] w-[220px] rounded-full bg-[#0F766E]/[0.1] blur-[110px]" />
 
-              <div className="relative z-20 max-w-[540px] overflow-hidden rounded-[34px] bg-[linear-gradient(145deg,rgba(20,32,42,0.98),rgba(8,13,18,0.98)_72%)] px-6 py-6 shadow-[0_34px_90px_rgba(0,0,0,0.48)] ring-1 ring-white/[0.08] backdrop-blur-2xl sm:px-7 sm:py-7">
+              <div className="relative z-20 max-w-[540px] overflow-hidden rounded-[34px] border border-[rgba(0,180,216,0.30)] border-l-4 border-l-[#00B4D8] bg-[linear-gradient(145deg,rgba(0,180,216,0.18),rgba(15,118,110,0.10)_55%,rgba(8,13,18,0.85))] px-6 py-6 shadow-[0_0_44px_rgba(0,180,216,0.22),0_34px_90px_rgba(0,0,0,0.48)] backdrop-blur-2xl sm:px-7 sm:py-7">
                 <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-[linear-gradient(180deg,rgba(84,216,232,0.12),transparent)]" />
                 <div className="relative">
                   <div className="flex items-center justify-between gap-4">
@@ -908,7 +922,7 @@ export default async function Home() {
                     </span>
                   </div>
 
-                  <div className="mt-6 rounded-xl border border-white/[0.04] bg-white/[0.02] p-4">
+                  <div className="mt-6 rounded-xl border border-white/[0.08] bg-white/[0.02] p-4">
                     <div className="flex items-center justify-between gap-3">
                       <span className="text-[10px] font-semibold uppercase tracking-widest text-[#5F6A76]">Today&apos;s Read</span>
                       <Link
@@ -961,6 +975,11 @@ export default async function Home() {
         momentumByWindow={momentumCardsByWindow}
         midMovers={signalBoard.mid_movers}
         budgetMovers={signalBoard.budget_movers}
+        japaneseTopMoversByWindow={signalBoard.japanese_top_movers}
+        japaneseBiggestDropsByWindow={signalBoard.japanese_biggest_drops}
+        japaneseMomentumByWindow={signalBoard.japanese_momentum}
+        japaneseMidMovers={signalBoard.japanese_mid_movers}
+        japaneseBudgetMovers={signalBoard.japanese_budget_movers}
         japanese={signalBoard.japanese}
       />
 
@@ -969,7 +988,7 @@ export default async function Home() {
         <div className="mx-auto max-w-[1400px] px-5 sm:px-8">
           <div className="grid gap-8 lg:grid-cols-2">
             {/* Scout Brief */}
-            <div className="relative overflow-hidden rounded-2xl border border-[#00B4D8]/10 bg-gradient-to-br from-[#0C1015] to-[#0A0A0E] p-6 sm:p-8">
+            <div className="relative overflow-hidden rounded-2xl border border-[rgba(0,180,216,0.32)] border-l-4 border-l-[#00B4D8] bg-[linear-gradient(135deg,rgba(0,180,216,0.14),rgba(0,180,216,0.04)_55%,rgba(10,10,14,0.70))] p-6 shadow-[0_0_32px_rgba(0,180,216,0.20),0_18px_50px_rgba(0,0,0,0.32)] backdrop-blur-md sm:p-8">
               <div className="pointer-events-none absolute -right-20 -top-20 h-40 w-40 rounded-full bg-[#00B4D8]/[0.04] blur-[60px]" />
 
               <div className="relative">
@@ -992,7 +1011,7 @@ export default async function Home() {
                   </div>
                 </div>
 
-                <div className="mt-5 rounded-xl border border-white/[0.04] bg-white/[0.02] p-4">
+                <div className="mt-5 rounded-xl border border-white/[0.08] bg-white/[0.02] p-4">
                   <span className="text-[10px] font-semibold uppercase tracking-widest text-[#555]">Today&apos;s Read</span>
                   <p className="mt-1.5 text-[15px] font-medium leading-relaxed text-[#D4D4D8]">
                     {heroCards[0] ? `${heroCards[0].name} is setting the pace today at ${formatPct(heroCards[0].change_pct)}.` : "The market is still taking shape."}
@@ -1008,7 +1027,7 @@ export default async function Home() {
 
                 <div className="mt-4 flex flex-wrap gap-2">
                   {["Few cards moving", "Votes climbing", "Chase cards leading"].map((tag) => (
-                    <span key={tag} className="rounded-full border border-white/[0.06] px-2.5 py-1 text-[11px] font-medium text-[#666]">
+                    <span key={tag} className="rounded-full border border-white/[0.12] px-2.5 py-1 text-[11px] font-medium text-[#666]">
                       {tag}
                     </span>
                   ))}
@@ -1017,7 +1036,7 @@ export default async function Home() {
             </div>
 
             {/* Ace Intelligence Preview */}
-            <div className="relative overflow-hidden rounded-2xl border border-[#7C3AED]/10 bg-gradient-to-br from-[#0E0C15] to-[#0A0A0E] p-6 sm:p-8">
+            <div className="relative overflow-hidden rounded-2xl border border-[rgba(168,85,247,0.35)] border-l-4 border-l-[#A855F7] bg-[linear-gradient(135deg,rgba(168,85,247,0.16),rgba(124,58,237,0.04)_55%,rgba(14,12,21,0.70))] p-6 shadow-[0_0_32px_rgba(168,85,247,0.22),0_18px_50px_rgba(0,0,0,0.32)] backdrop-blur-md sm:p-8">
               <div className="pointer-events-none absolute -right-20 -top-20 h-40 w-40 rounded-full bg-[#7C3AED]/[0.04] blur-[60px]" />
 
               <div className="relative">
@@ -1043,7 +1062,7 @@ export default async function Home() {
                       <p className="text-[14px] leading-relaxed text-[#999] blur-[4px] select-none">
                         {acePreview.remainder}
                       </p>
-                      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-[#0E0C15] to-transparent" />
+                      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-[rgba(20,14,30,0.95)] to-transparent" />
                       <div className="absolute inset-0 flex items-center justify-center">
                         <span className="rounded-full bg-gradient-to-r from-[#7C3AED] to-[#6366F1] px-4 py-2 text-[12px] font-bold text-white shadow-[0_8px_20px_rgba(124,58,237,0.3)]">
                           Unlock Ace
@@ -1053,7 +1072,7 @@ export default async function Home() {
                   )}
                 </div>
 
-                <div className="mt-4 rounded-xl border border-white/[0.04] bg-white/[0.02] p-3">
+                <div className="mt-4 rounded-xl border border-white/[0.08] bg-white/[0.02] p-3">
                   <p className="text-[12px] text-[#666]">
                     Ace goes deeper. It tells you how many cards are moving, which sets are leading, where collector votes line up, and which moves look risky. Updated live.
                   </p>
@@ -1292,6 +1311,7 @@ export default async function Home() {
         </div>
       </footer>
     </div>
+    </MarketProvider>
   );
 }
 

@@ -30,7 +30,24 @@ export const DBADMIN_ALLOWED_FILES = [
   "app/api/pro/signals/route.ts",
   "app/api/scan/correction/route.ts",
   "app/api/scan/identify/route.ts",
+  // 2026-05-18: extended to dual-write user_correction → scan_eval_images
+  // alongside the kNN anchor embed, so every confirmed pick from the
+  // scanner picker (single-mode AND multi-scan) feeds the training
+  // corpus. scan_eval_images is RLS-locked to service-role writes —
+  // dbAdmin is required for the Storage upload + corpus upsert. Anchor
+  // stays the primary success path; corpus seeding is best-effort.
+  "app/api/scan/correction/route.ts",
   "app/api/webhooks/apple/notifications/route.ts",
+  // 2026-05-16 (Phase C-2): card detail's market-summary surface queries
+  // the latest scrydex observation's metadata.scrydexAskingPriceUsd to
+  // render the "Asking: $X" auxiliary line. The source tables
+  // (provider_observation_matches + provider_normalized_observations)
+  // are RLS-locked to internal-only via migration 20260319161000, so the
+  // anon client returns no rows; service-role read is required to surface
+  // the field. Read-only single query, extracts only the asking-price
+  // number from observation metadata — non-sensitive pricing data we
+  // already render to users. Codex P2 on PR #99.
+  "components/market-summary-card.tsx",
   "lib/data/canonical-card-match.ts",
   "lib/db/admin.ts",
   "lib/entitlements.ts",
@@ -52,6 +69,12 @@ export const DBADMIN_ALLOWED_ROUTE_KEYS = [
   "pro/signals",
   "scan/correction",
   "scan/identify",
+  // 2026-05-18: extended to dual-write the user_correction into
+  // scan_eval_images alongside the anchor embed, so every confirmed
+  // pick from the scanner picker feeds the training corpus instead
+  // of staying limited to admin-curated seeding. scan_eval_images is
+  // RLS-locked to service-role writes — needs dbAdmin to upsert.
+  "scan/correction",
   "webhooks/apple/notifications",
 ];
 
@@ -885,6 +908,15 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
     usesServiceRole: true,
     notes: "Read-only against our DB; uses service role to bypass RLS on canonical_cards. The only writes are to a local tmp/*.jsonl file. Step C of the catalog-mapper sequence reads that JSONL and persists the matches to the DB (separate concern).",
   }),
+  "scripts/snkrdunk-era-audit-cleanup.mjs": operationalScript({
+    classification: "service_role_import",
+    executionMode: "manual_import",
+    intendedCaller: "trusted operator running a one-off era audit on snkrdunk_product_map after expanding the setCodeEra mapping. Reads MATCHED + NEEDS_REVIEW rows, decides per row whether canonical.year aligns with the Snkrdunk setCode's era window, promotes NEEDS_REVIEW→MATCHED when era_match, marks REJECTED when era_mismatch.",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+    notes: "Idempotent. Dry-run by default (read-only); pass --apply to write. Writes only to snkrdunk_product_map columns mapping_status / reviewed_at / reviewed_by. The era windows for setCodes the matcher's setCodeEra() doesn't cover are hardcoded in EXTENDED_ERA_OVERRIDES — sourced from the Snkrdunk product names themselves (which include the human-readable set name) and Bulbapedia for ambiguous cases.",
+  }),
   "scripts/persist-snkrdunk-matches.mjs": operationalScript({
     classification: "service_role_import",
     executionMode: "manual_import",
@@ -1151,6 +1183,8 @@ export const PHASE2_INTERNAL_OPERATIONAL_TABLES = [
   "deck_aliases",
   "decks",
   "ingest_runs",
+  "jp_ingestion_attempts",
+  "jp_ingestion_runs",
   "listing_observations",
   "market_events",
   "market_observations",
@@ -1509,6 +1543,8 @@ export const INTERNAL_NO_GRANT_OBJECTS = [
   "deck_aliases",
   "decks",
   "ingest_runs",
+  "jp_ingestion_attempts",
+  "jp_ingestion_runs",
   "label_normalization_rules",
   "listing_observations",
   "market_events",

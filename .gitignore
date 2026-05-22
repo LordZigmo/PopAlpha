@@ -108,3 +108,4 @@ ios/fastlane/screenshots/**/*.png
 # ── Misc local artifacts ─────────────────────────────────────────────────────
 *.png
 !ios/PopAlphaApp/Assets.xcassets/**/*.png
+!public/brand/*.png

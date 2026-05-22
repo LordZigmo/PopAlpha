@@ -289,6 +289,36 @@ export default function RawCardMarketSurface({
                           Scrydex: {activeVariant?.scrydexPrice != null ? formatUsdCompact(activeVariant.scrydexPrice) : "—"}{" "}
                           <span className="text-[#5E5E5E]">Updated: {formatAsOf(activeVariant?.scrydexAsOfTs ?? null) ?? "--"}</span>
                         </p>
+                        {/*
+                          Phase C-2 (2026-05-16): surface scrydex's
+                          asking-anchored value when it diverges
+                          meaningfully from the headline. The headline
+                          (after Phase A) tracks scrydex `low` to match
+                          TCGplayer's published Market Price label. The
+                          asking value (`market`/`high`) reflects current
+                          listing-side pressure. We only render this
+                          line when the gap is ≥10% so it adds signal
+                          rather than noise on cards where the two
+                          align tightly.
+                        */}
+                        {(() => {
+                          const headline = activeVariant?.scrydexPrice ?? null;
+                          const asking = activeVariant?.scrydexAskingHighUsd ?? null;
+                          if (headline == null || asking == null) return null;
+                          if (headline <= 0) return null;
+                          const gapPct = ((asking - headline) / headline) * 100;
+                          if (!Number.isFinite(gapPct) || gapPct < 10) return null;
+                          return (
+                            <p
+                              title="Recent listing-side asking value. The headline price tracks recent-sold medians (TCGplayer's Market Price label); this 'Asking' value reflects current asks, which often sit above sold prices on thin-liquidity cards."
+                            >
+                              Asking: {formatUsdCompact(asking)}{" "}
+                              <span className="text-[#5E5E5E]">
+                                +{gapPct.toFixed(0)}% over recent sales
+                              </span>
+                            </p>
+                          );
+                        })()}
                       </div>
                     ) : null}
                   </>

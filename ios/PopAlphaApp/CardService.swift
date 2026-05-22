@@ -1137,6 +1137,17 @@ struct HomepageSignalBoardDTO: Decodable, Hashable {
     // windowed, sorted server-side by snapshot freshness. Optional
     // so older server builds without /ja/ ingestion still decode.
     let japanese: [HomepageCardDTO]?
+    // JP signal-board rails. Mirror the EN topMovers/biggestDrops/
+    // momentum/midMovers/budgetMovers shape so JP mode can render
+    // the full mover board instead of just the discovery rail.
+    // All optional so older server responses (pre 2026-05-16) still
+    // decode cleanly — MarketPulseSection falls back to empty lists
+    // and the JP-mode tab strip just shows empty states.
+    let japaneseTopMovers: HomepageWindowedCardsDTO?
+    let japaneseBiggestDrops: HomepageWindowedCardsDTO?
+    let japaneseMomentum: HomepageWindowedCardsDTO?
+    let japaneseMidMovers: [HomepageCardDTO]?
+    let japaneseBudgetMovers: [HomepageCardDTO]?
 }
 
 struct HomepageDataDTO: Decodable, Hashable {

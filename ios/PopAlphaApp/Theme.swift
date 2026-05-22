@@ -313,6 +313,170 @@ struct PremiumShadow: ViewModifier {
     }
 }
 
+// MARK: - Liquid Glass Surface
+//
+// Multi-layered material card used for the homepage AI surfaces
+// (MarketHeroCard, AIBriefCard). Composes four passes:
+//
+//   1. `.regularMaterial` — actual frosted-glass refraction of the
+//      underlying background.
+//   2. Accent `LinearGradient` wash across the entire container — a
+//      diagonal flow of the brand color (no single solid tint, no
+//      corner-pinned radial bloom).
+//   3. Scroll-driven specular highlight — a soft white band whose
+//      position along the diagonal tracks the card's global Y. As
+//      the user scrolls, the shine sweeps the card like light moving
+//      across glass.
+//   4. Gradient stroke rim — accent + white in a diagonal blend so the
+//      edge reads as a lit bevel rather than a flat hairline.
+//
+// Plus dual shadows: a colored glow (lift) and a dark drop (depth).
+// Deliberately no left accent rail — the gradient + rim carries the
+// brand identity, and the card reads as a single glass plane.
+struct LiquidGlassSurface: ViewModifier {
+    var accent: Color
+    var radius: CGFloat = PA.Layout.panelRadius
+    /// Peak opacity of the scroll-driven specular highlight (0..1).
+    /// The highlight uses the accent color (not white) so it reads
+    /// as a tinted reflection of the card itself — a brighter glint
+    /// of the same chroma. With this peak paired against `halfWidth`
+    /// (in `shineStops`) the highlight feels like a slow gentle wash
+    /// rather than a defined corner hotspot.
+    var shineIntensity: Double = 0.08
+
+    /// The accent wash is dialed back in light mode so that small
+    /// accent-colored labels (eg. `MarketHeroCard`'s "POPALPHA"
+    /// eyebrow, `AIBriefCard`'s timestamp) keep WCAG-readable contrast
+    /// against the tinted glass. In dark mode the rich stops can run
+    /// hot because the foreground text is light and the material
+    /// renders dark anyway.
+    @Environment(\.colorScheme) private var colorScheme
+
+    func body(content: Content) -> some View {
+        content
+            .background {
+                GeometryReader { proxy in
+                    let progress = shineProgress(proxy.frame(in: .global).minY)
+                    let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    ZStack {
+                        // `.ultraThinMaterial` preserves more of the
+                        // colored wash below than `.regularMaterial` —
+                        // less neutral-gray frost, more chroma.
+                        shape.fill(.ultraThinMaterial)
+                        // Accent gradient runs much hotter than the
+                        // PR #84 originals so the surface reads as a
+                        // rich tinted glass rather than a desaturated
+                        // wash. The shimmer now competes against a
+                        // richer chromatic base, so it stands out less.
+                        // Light-mode stops are roughly half the dark
+                        // values to preserve text contrast — see the
+                        // `colorScheme` doc note above.
+                        shape.fill(
+                            LinearGradient(
+                                colors: accentGradientColors,
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        shape.fill(
+                            LinearGradient(
+                                stops: shineStops(progress: progress),
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .blendMode(.plusLighter)
+                    }
+                    .allowsHitTesting(false)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                accent.opacity(0.50),
+                                .white.opacity(0.16),
+                                accent.opacity(0.18),
+                                .white.opacity(0.22)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
+            }
+            .shadow(color: accent.opacity(0.30), radius: 18, x: 0, y: 6)
+            .shadow(color: .black.opacity(0.20), radius: 24, x: 0, y: 12)
+    }
+
+    /// Accent-wash stops. Dark mode runs hot (rich tinted glass);
+    /// light mode runs cool to preserve small-text contrast.
+    private var accentGradientColors: [Color] {
+        switch colorScheme {
+        case .light:
+            return [
+                accent.opacity(0.28),
+                accent.opacity(0.10),
+                accent.opacity(0.22),
+                accent.opacity(0.08)
+            ]
+        case .dark:
+            // The original PR #86 values (0.55 / 0.22 / 0.45 / 0.18)
+            // formed a wave with two bright stops, the first sitting at
+            // `topLeading` — so every card showed a fixed bright cyan
+            // hotspot in the upper-left corner that no shimmer tweak
+            // could mask. These flatter, monotonic-ish stops keep the
+            // rich tinted-glass feel while smoothing out the two peaks.
+            return [
+                accent.opacity(0.38),
+                accent.opacity(0.30),
+                accent.opacity(0.32),
+                accent.opacity(0.22)
+            ]
+        @unknown default:
+            return [
+                accent.opacity(0.40),
+                accent.opacity(0.16),
+                accent.opacity(0.32),
+                accent.opacity(0.12)
+            ]
+        }
+    }
+
+    /// Maps the card's global vertical position to a 0..1 progress used
+    /// to slide the specular highlight diagonally. minY large positive
+    /// (card below viewport) → 0; minY zero or negative (card at/above
+    /// viewport top) → 1. Viewport height is approximated rather than
+    /// read from the scene because the value is only used to pace the
+    /// shine, not to register events.
+    private func shineProgress(_ minY: CGFloat) -> Double {
+        let viewportH: CGFloat = 850
+        let raw = 1.0 - Double(minY / viewportH)
+        return min(max(raw, 0), 1)
+    }
+
+    private func shineStops(progress: Double) -> [Gradient.Stop] {
+        let center = max(0, min(1, progress))
+        // Wider band → the highlight diffuses across the card instead
+        // of forming a defined hotspot. Combined with the lower peak
+        // intensity this reads as a slow wash, not a lit corner.
+        let halfWidth = 0.28
+        // Accent-colored shimmer (not white) so the sweep reads as a
+        // tinted reflection of the card's own color rather than a
+        // bright white streak. With `.plusLighter` blending against
+        // the accent-tinted base below, the highlight area looks like
+        // a brighter glint of the same chroma — exactly how a real
+        // reflection on tinted glass behaves.
+        return [
+            .init(color: accent.opacity(0), location: max(center - halfWidth, 0)),
+            .init(color: accent.opacity(shineIntensity), location: center),
+            .init(color: accent.opacity(0), location: min(center + halfWidth, 1))
+        ]
+    }
+}
+
 extension View {
     func glassSurface(radius: CGFloat = PA.Layout.cardRadius) -> some View {
         modifier(GlassSurface(radius: radius))
@@ -320,5 +484,13 @@ extension View {
 
     func premiumShadow() -> some View {
         modifier(PremiumShadow())
+    }
+
+    func liquidGlassSurface(
+        accent: Color,
+        radius: CGFloat = PA.Layout.panelRadius,
+        shineIntensity: Double = 0.08
+    ) -> some View {
+        modifier(LiquidGlassSurface(accent: accent, radius: radius, shineIntensity: shineIntensity))
     }
 }
