@@ -722,11 +722,20 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
   "scripts/backfill-card-translations.mjs": operationalScript({
     classification: "service_role_backfill",
     executionMode: "manual_backfill",
-    intendedCaller: "trusted operator seeding public.card_translations with EN<->JP pairings from SigLIP image-embedding cosine + JP name glossary gate",
+    intendedCaller: "trusted operator seeding public.card_translations with EN<->JP pairings via the rule-based set_pair_map + canonical_name picker",
     requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY", "POSTGRES_URL"],
     expectedSignals: ["service_role_client"],
     usesServiceRole: true,
-    notes: "Reads canonical_cards + card_image_embeddings via service role, upserts to card_translations with ON CONFLICT DO UPDATE. Idempotent + resumable via --resume-from. Same trust shape as backfill-card-image-digital-flag.",
+    notes: "Reads canonical_cards + card_printings + set_pair_map via service role, upserts to card_translations with ON CONFLICT DO UPDATE. Idempotent + resumable via --resume-from. Prereq: scripts/build-set-pair-map.mjs.",
+  }),
+  "scripts/probe-art-crop-cosines.mjs": operationalScript({
+    classification: "diagnostic_probe",
+    executionMode: "manual_probe",
+    intendedCaller: "trusted operator measuring cross-language SigLIP cosine on art-crop embeddings — one-off calibration tool for the scanner accuracy thread; retained for future tuning",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY", "MODAL_SIGLIP_ENDPOINT_URL", "MODAL_SIGLIP_TOKEN"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+    notes: "Read-only on canonical_cards (mirrored_primary_image_url); no DB writes; embeds via Modal endpoint. Falls back to anon/publishable key if service role is empty in env. Calibrated the rule-based picker design (see plans/we-need-to-work-cozy-shannon.md).",
   }),
   "scripts/backfill-phase2c-printing-columns.mjs": operationalScript({
     classification: "service_role_backfill",
