@@ -57,8 +57,8 @@ public final class PremiumGate: ObservableObject {
 
     /// Convenience: is the offline scanner unlocked? Keep the
     /// conjunction here so feature flips don't sprawl across the
-    /// codebase. Today this is just `isPro`; later we might add
-    /// a remote feature flag check (e.g., GrowthBook gradual rollout).
+    /// codebase. During the scanner-accuracy sprint this stays false
+    /// so scans route through the centrally trained server/model path.
     @Published public private(set) var offlineScannerEnabled: Bool = false
 
     public init(store: PremiumStore = .shared) {
@@ -112,8 +112,7 @@ public final class PremiumGate: ObservableObject {
         let effectivePro = realPro
         #endif
         if isPro != effectivePro { isPro = effectivePro }
-        // Future expansion: && featureFlag("offline_scanner") here.
-        let offlineFlag = effectivePro
+        let offlineFlag = effectivePro && FeatureFlags.isOfflineScannerEnabled
         if offlineScannerEnabled != offlineFlag {
             offlineScannerEnabled = offlineFlag
         }

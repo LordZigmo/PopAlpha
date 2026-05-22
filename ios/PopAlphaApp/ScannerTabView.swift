@@ -271,6 +271,7 @@ struct ScannerTabView: View {
                     card: card,
                     scanImageHash: scanner.lastImageHash,
                     scanImage: scanner.lastScanImage,
+                    scanCorrectionMetadata: scanner.lastCorrectionMetadata,
                 )
                     .onDisappear {
                         // Belt: re-arm scanner when CardDetailView
@@ -315,7 +316,12 @@ struct ScannerTabView: View {
                     scanLanguage: scanner.scanLanguage,
                     ocrCardNumber: scanner.lastOCR.cardNumber,
                     ocrSetHint: scanner.lastOCR.setHint,
+                    ocrCardNumbersCount: scanner.lastOCRCardNumbersCount,
                     winningPath: scanner.lastWinningPath,
+                    scanConfidence: scanner.lastConfidence,
+                    scanSource: scanner.lastSource,
+                    triggerSource: scanner.lastTriggerSource,
+                    modelVersion: scanner.lastCorrectionMetadata?.modelVersion,
                     onPick: handlePickerSelection,
                     onDismiss: handlePickerDismiss,
                     onCorrectionSubmitted: {
@@ -1378,6 +1384,7 @@ final class ScannerHost: ObservableObject {
     /// OCR fail or did the route ignore my hints?" during sprint
     /// real-device testing. Compile-stripped in release builds.
     @Published private(set) var lastOCR: (cardNumber: String?, setHint: String?) = (nil, nil)
+    @Published private(set) var lastOCRCardNumbersCount: Int = 0
 
     /// Which Day 2 retrieval path resolved the most recent scan
     /// (`ocr_direct_unique`, `ocr_intersect_unique`, etc.). Surfaced
@@ -1403,6 +1410,7 @@ final class ScannerHost: ObservableObject {
     /// in single mode, so multi-mode should only newly-charge
     /// auto-detect results to avoid double-spending.
     @Published private(set) var lastTriggerSource: String?
+    @Published private(set) var lastCorrectionMetadata: ScanCorrectionPredictedMetadata?
 
     /// Language hint passed to /api/scan/identify. Defaults to EN; the
     /// scanner UI exposes a pill toggle so the user can flip to JP.
@@ -1803,6 +1811,7 @@ final class ScannerHost: ObservableObject {
         let ocrMs = Date().timeIntervalSince(ocrT0) * 1000
         let ocr = (cardNumber: ocrMulti.cardNumbers.first, setHint: ocrMulti.setHint)
         self.lastOCR = ocr
+        self.lastOCRCardNumbersCount = ocrMulti.cardNumbers.count
         Logger.scan.debug("ocr frameSize=\(Int(imageForOCR.size.width))x\(Int(imageForOCR.size.height)) cardNumbers=\(ocrMulti.cardNumbers) setHint=\(ocrMulti.setHint ?? "nil") ms=\(String(format: "%.1f", ocrMs))")
 
         // Offline-first when premium gate is open. On any offline
@@ -1874,6 +1883,28 @@ final class ScannerHost: ObservableObject {
                 originalConfidence: response.confidence,
                 ocrCardNumber: ocr.cardNumber
             )
+            let rank2 = reranked.matches.dropFirst().first
+            let topSimilarity = reranked.matches.first?.similarity
+            let rank2Similarity = rank2?.similarity
+            let topGap = topSimilarity.flatMap { top in
+                rank2Similarity.map { top - $0 }
+            }
+            let correctionMetadata = ScanCorrectionPredictedMetadata(
+                fromSlug: reranked.matches.first?.slug,
+                confidence: reranked.confidence,
+                winningPath: response.winningPath,
+                triggerSource: triggerSource,
+                source: usedOffline ? "offline" : "network",
+                modelVersion: response.modelVersion,
+                topSimilarity: topSimilarity,
+                topGap: topGap,
+                rank2Slug: rank2?.slug,
+                rank2Similarity: rank2Similarity,
+                ocrCardNumber: ocr.cardNumber,
+                ocrSetHint: ocr.setHint,
+                ocrCardNumberExtracted: !ocrMulti.cardNumbers.isEmpty,
+                ocrCardNumbersCount: ocrMulti.cardNumbers.count
+            )
 
             self.lastMatch = reranked.matches.first
             self.lastMatches = reranked.matches
@@ -1882,6 +1913,7 @@ final class ScannerHost: ObservableObject {
             self.lastWinningPath = response.winningPath
             self.lastSource = usedOffline ? "offline" : "network"
             self.lastTriggerSource = triggerSource
+            self.lastCorrectionMetadata = correctionMetadata
             // Retain JPEG-source UIImage only for offline scans —
             // online scans already uploaded to scan-uploads/<hash>.jpg
             // so the correction-via-hash path works without it.
@@ -1948,6 +1980,11 @@ final class ScannerHost: ObservableObject {
                 "scan_total_ms": Int(scanMs),
                 "model_version": response.modelVersion,
             ]
+            if let topGap { props["top_gap"] = topGap }
+            if let rank2 {
+                props["rank2_slug"] = rank2.slug
+                props["rank2_similarity"] = rank2.similarity
+            }
             let perspectivePostHogProps: [String: Any] = perspectiveCorrection?.postHogProperties
                 ?? ["ocr_perspective_corrected": false]
             for (k, v) in perspectivePostHogProps { props[k] = v }
@@ -2148,8 +2185,11 @@ final class ScannerHost: ObservableObject {
         lastImageHash = nil
         lastScanImage = nil
         lastOCR = (nil, nil)
+        lastOCRCardNumbersCount = 0
         lastWinningPath = nil
         lastSource = nil
+        lastTriggerSource = nil
+        lastCorrectionMetadata = nil
     }
 }
 

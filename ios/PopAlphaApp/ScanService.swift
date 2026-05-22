@@ -85,7 +85,26 @@ struct ScanCorrectionResponse: Decodable, Sendable {
     let modelVersion: String?
     let variantIndex: Int?
     let skipped: Bool?
+    let correctionPairId: String?
+    let correctionPairLogged: Bool?
     let error: String?
+}
+
+struct ScanCorrectionPredictedMetadata: Sendable {
+    let fromSlug: String?
+    let confidence: String?
+    let winningPath: String?
+    let triggerSource: String?
+    let source: String?
+    let modelVersion: String?
+    let topSimilarity: Double?
+    let topGap: Double?
+    let rank2Slug: String?
+    let rank2Similarity: Double?
+    let ocrCardNumber: String?
+    let ocrSetHint: String?
+    let ocrCardNumberExtracted: Bool?
+    let ocrCardNumbersCount: Int?
 }
 
 /// Which seeding path the user took. Feeds into scan_eval_images.captured_source
@@ -221,6 +240,7 @@ enum ScanService {
         canonicalSlug: String,
         language: ScanLanguage = .en,
         notes: String? = nil,
+        predicted: ScanCorrectionPredictedMetadata? = nil,
         maxEdgePixels: CGFloat = 1024,
         compressionQuality: CGFloat = 0.85,
     ) async throws -> ScanCorrectionResponse {
@@ -237,6 +257,22 @@ enum ScanService {
             "language": language.rawValue,
         ]
         if let notes, !notes.isEmpty { body["notes"] = notes }
+        if let predicted {
+            if let value = predicted.fromSlug { body["from_slug"] = value }
+            if let value = predicted.confidence { body["confidence"] = value }
+            if let value = predicted.winningPath { body["winning_path"] = value }
+            if let value = predicted.triggerSource { body["trigger_source"] = value }
+            if let value = predicted.source { body["source"] = value }
+            if let value = predicted.modelVersion { body["model_version"] = value }
+            if let value = predicted.topSimilarity { body["top_similarity"] = value }
+            if let value = predicted.topGap { body["top_gap"] = value }
+            if let value = predicted.rank2Slug { body["rank2_slug"] = value }
+            if let value = predicted.rank2Similarity { body["rank2_similarity"] = value }
+            if let value = predicted.ocrCardNumber { body["ocr_card_number"] = value }
+            if let value = predicted.ocrSetHint { body["ocr_set_hint"] = value }
+            if let value = predicted.ocrCardNumberExtracted { body["ocr_card_number_extracted"] = value }
+            if let value = predicted.ocrCardNumbersCount { body["ocr_card_numbers_count"] = value }
+        }
         return try await APIClient.post(
             path: "/api/scan/correction",
             body: body,

@@ -460,11 +460,27 @@ final class OfflineScanOrchestrator: ObservableObject {
             }
         }
         if tokens.isEmpty {
-            return slug
-                .split(separator: "-").map(String.init).map { $0.capitalized }
-                .joined(separator: " ")
+            return titleCaseNameTokens(slug.split(separator: "-").map(String.init))
         }
-        return tokens.map { $0.capitalized }.joined(separator: " ")
+        return titleCaseNameTokens(tokens)
+    }
+
+    private static func titleCaseNameTokens(_ tokens: [String]) -> String {
+        var parts: [String] = []
+        for (index, token) in tokens.enumerated() {
+            if token == "s", index < tokens.count - 1, !parts.isEmpty {
+                parts[parts.count - 1] += "'s"
+                continue
+            }
+            parts.append(titleCaseSlugToken(token))
+        }
+        return parts.joined(separator: " ")
+    }
+
+    private static func titleCaseSlugToken(_ token: String) -> String {
+        if token.count == 1 { return token.uppercased() }
+        guard let first = token.first else { return token }
+        return first.uppercased() + String(token.dropFirst())
     }
 
     /// Strip the `/total` printed suffix for display (server

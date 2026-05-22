@@ -5,7 +5,9 @@ import { runSearchBackfillPaginationTests } from "./search-backfill-pagination.t
 import { runSearchSortTests } from "./search-sort.test.mjs";
 import { runVariantRefTests } from "./variant-ref.test.mjs";
 import { runSetSummaryPipelineTests } from "./set-summary-pipeline.test.mjs";
+import { runCardDisplayTests } from "./card-display.test.mjs";
 
+runCardDisplayTests();
 runSearchNormalizeTests();
 runSearchCardsTests();
 runSearchHighlightTests();

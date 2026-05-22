@@ -7,6 +7,7 @@ import { getCanonicalMarketPulseMap } from "@/lib/data/market";
 import { getSetSummaryPageData, getSetSummaryHistory, type SetSummaryMover } from "@/lib/sets/summary";
 import ChangeBadge from "@/components/change-badge";
 import EnhancedChart from "@/components/enhanced-chart";
+import { displayNameFromCanonicalSlug } from "@/lib/card-display.mjs";
 import { dbPublic } from "@/lib/db";
 import {
   PRICING_DISPLAY_V2_ENABLED,
@@ -95,7 +96,10 @@ function formatChange(value: number | null): string | null {
 }
 
 function moverDisplayName(slug: string, cardsBySlug: Map<string, CanonicalRow>): string {
-  return cardsBySlug.get(slug)?.canonical_name ?? slug.replace(/-/g, " ");
+  const card = cardsBySlug.get(slug);
+  return card?.canonical_name ?? displayNameFromCanonicalSlug(slug, {
+    cardNumber: card?.card_number,
+  });
 }
 
 function moverImage(slug: string, printingsBySlug: Map<string, PrintingRow[]>): string | null {

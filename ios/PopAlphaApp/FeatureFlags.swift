@@ -16,4 +16,7 @@ import Foundation
 
 enum FeatureFlags {
     static let isSocialEnabled = false
+    // Accuracy sprint mode: keep scanner identification server/model-first
+    // until the centrally trained model hits the target first-try rate.
+    static let isOfflineScannerEnabled = false
 }
