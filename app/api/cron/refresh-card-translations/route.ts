@@ -41,6 +41,7 @@ import { dbAdmin } from "@/lib/db/admin";
 import { hasVercelPostgresConfig } from "@/lib/ai/card-embeddings";
 import {
   findPairBySetCode,
+  deletePairingsForEnSlug,
   PAIRING_SOURCE,
   PAIRING_CONFIDENCE,
   PAIRING_RANK,
@@ -104,14 +105,15 @@ export async function GET(req: Request) {
   const maxCards = parseMaxCards(searchParams.get("maxCards"));
   const supabase = dbAdmin();
 
-  // Candidate set: EN canonical_cards that don't yet have a primary
-  // (rank=0) row in card_translations, AND haven't been attempted in
-  // the last 14 days. Order by attempted_at ASC NULLS FIRST so
-  // never-tried slugs come first.
-  //
-  // Note: we no longer filter by image_embedded_model_version — the
-  // rule-based picker doesn't need embeddings. Any EN canonical_card
-  // is a valid candidate.
+  // Candidate set: EN canonical_cards that haven't been attempted in
+  // the last 14 days, ordered NULLS FIRST so never-tried slugs come
+  // first. We process ALREADY-PAIRED slugs too — Codex P1 on
+  // commit 4def09bc34 flagged that without re-validation, a stale
+  // row from a prior matcher run (or from a since-changed catalog)
+  // would outlive any picker verdict because the old candidate
+  // filter `NOT EXISTS rank=0` skipped paired slugs forever. The
+  // picker is idempotent + cheap, so re-running it on paired slugs
+  // is safe and cleanups happen via deletePairingsForEnSlug below.
   let candidateRows: EnRow[];
   try {
     const candidates = await sql.query(
@@ -119,10 +121,6 @@ export async function GET(req: Request) {
         select cc.slug
           from canonical_cards cc
          where cc.language = 'EN'
-           and not exists (
-             select 1 from card_translations ct
-              where ct.en_slug = cc.slug and ct.rank = 0
-           )
            and (
              cc.translation_attempted_at is null
              or cc.translation_attempted_at < now() - interval '14 days'
@@ -158,6 +156,7 @@ export async function GET(req: Request) {
   let noMatch = 0;
   let ambiguous = 0;
   let written = 0;
+  let staleDeleted = 0;
   let lastSlug: string | null = null;
   const attemptedSlugs: string[] = [];
 
@@ -171,12 +170,20 @@ export async function GET(req: Request) {
         const rowsWritten = await upsertPairing(row.slug, result.jp_slug);
         written += rowsWritten;
         paired += 1;
-      } else if (result.kind === "unpaired" && result.reason === "no_verified_set_pair") {
-        noPair += 1;
-      } else if (result.kind === "unpaired" && result.reason === "no_name_match") {
-        noMatch += 1;
-      } else if (result.kind === "ambiguous") {
-        ambiguous += 1;
+      } else {
+        // Non-paired verdict (unpaired or ambiguous) — drop any
+        // existing rows for this EN slug so stale pairs from prior
+        // matcher runs / catalog drift don't outlive the new verdict.
+        // Codex P1 on commit 4def09bc34.
+        const deleted = await deletePairingsForEnSlug(sql, row.slug);
+        staleDeleted += deleted;
+        if (result.kind === "unpaired" && result.reason === "no_verified_set_pair") {
+          noPair += 1;
+        } else if (result.kind === "unpaired" && result.reason === "no_name_match") {
+          noMatch += 1;
+        } else if (result.kind === "ambiguous") {
+          ambiguous += 1;
+        }
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -204,6 +211,7 @@ export async function GET(req: Request) {
     no_name_match: noMatch,
     ambiguous,
     written,
+    stale_deleted: staleDeleted,
     last_slug: lastSlug,
     max_cards: maxCards,
   });

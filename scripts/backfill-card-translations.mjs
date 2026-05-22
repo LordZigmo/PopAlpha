@@ -23,6 +23,7 @@ import dotenv from "dotenv";
 import { createClient } from "@supabase/supabase-js";
 import {
   findPairBySetCode,
+  deletePairingsForEnSlug,
   PAIRING_SOURCE,
   PAIRING_CONFIDENCE,
   PAIRING_RANK,
@@ -150,6 +151,7 @@ async function main() {
   let noMatch = 0;
   let ambiguous = 0;
   let writtenRows = 0;
+  let staleDeleted = 0;
   let lastSlug = null;
   const attemptedSlugs = [];
   const started = Date.now();
@@ -169,15 +171,27 @@ async function main() {
           const rows = await upsertPairing({ sql }, enCard.slug, result.jp_slug);
           writtenRows += rows;
         }
-      } else if (result.kind === "unpaired" && result.reason === "no_verified_set_pair") {
-        noPair += 1;
-        if (opts.verbose) console.log(`[${processed}] ${enCard.slug} — no verified set pair (en_set=${result.en_set_code ?? "?"})`);
-      } else if (result.kind === "unpaired" && result.reason === "no_name_match") {
-        noMatch += 1;
-        if (opts.verbose) console.log(`[${processed}] ${enCard.slug} — paired set has no name match (${result.en_set_code} ↔ ${result.jp_set_code})`);
-      } else if (result.kind === "ambiguous") {
-        ambiguous += 1;
-        if (opts.verbose) console.log(`[${processed}] ${enCard.slug} — AMBIGUOUS: ${result.jp_slugs.length} same-name JP candidates in ${result.jp_set_code}`);
+      } else {
+        // Non-paired verdict — drop any existing rows so stale pairs
+        // from prior matcher runs or catalog drift don't outlive it.
+        // Codex P1 on commit 4def09bc34.
+        if (!opts.dryRun) {
+          const deleted = await deletePairingsForEnSlug(sql, enCard.slug);
+          staleDeleted += deleted;
+        }
+        if (result.kind === "unpaired" && result.reason === "no_verified_set_pair") {
+          noPair += 1;
+          if (opts.verbose) console.log(`[${processed}] ${enCard.slug} — no verified set pair (en_set=${result.en_set_code ?? "?"})`);
+        } else if (result.kind === "unpaired" && result.reason === "no_name_match") {
+          noMatch += 1;
+          if (opts.verbose) console.log(`[${processed}] ${enCard.slug} — paired set has no name match (${result.en_set_code} ↔ ${result.jp_set_code})`);
+        } else if (result.kind === "ambiguous" && result.reason === "multiple_en_set_codes") {
+          ambiguous += 1;
+          if (opts.verbose) console.log(`[${processed}] ${enCard.slug} — AMBIGUOUS: canonical_slug spans multiple set_codes ${JSON.stringify(result.en_set_codes)}`);
+        } else if (result.kind === "ambiguous") {
+          ambiguous += 1;
+          if (opts.verbose) console.log(`[${processed}] ${enCard.slug} — AMBIGUOUS: ${result.jp_slugs?.length ?? 0} same-name JP candidates in ${result.jp_set_code}`);
+        }
       }
     } catch (err) {
       console.error(`[${processed}] ${enCard.slug} — ERROR: ${err?.message ?? err}`);
@@ -186,7 +200,7 @@ async function main() {
     if (processed % 200 === 0) {
       const sec = (Date.now() - started) / 1000;
       const rate = processed / Math.max(0.1, sec);
-      console.log(`[backfill-card-translations] ${processed}/${enCards.length}  paired=${paired} no_pair=${noPair} no_match=${noMatch} ambig=${ambiguous} wrote=${writtenRows}  ${rate.toFixed(1)} card/s`);
+      console.log(`[backfill-card-translations] ${processed}/${enCards.length}  paired=${paired} no_pair=${noPair} no_match=${noMatch} ambig=${ambiguous} wrote=${writtenRows} stale_deleted=${staleDeleted}  ${rate.toFixed(1)} card/s`);
     }
   }
 
@@ -203,7 +217,7 @@ async function main() {
   const sec = (Date.now() - started) / 1000;
   console.log("");
   console.log(`[backfill-card-translations] DONE in ${sec.toFixed(1)}s`);
-  console.log(`[backfill-card-translations] processed=${processed}  paired=${paired}  no_verified_set_pair=${noPair}  no_name_match=${noMatch}  ambiguous=${ambiguous}  rows_written=${writtenRows}`);
+  console.log(`[backfill-card-translations] processed=${processed}  paired=${paired}  no_verified_set_pair=${noPair}  no_name_match=${noMatch}  ambiguous=${ambiguous}  rows_written=${writtenRows}  stale_deleted=${staleDeleted}`);
   console.log(`[backfill-card-translations] last_slug=${lastSlug}`);
 }
 

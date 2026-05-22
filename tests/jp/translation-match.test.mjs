@@ -13,6 +13,7 @@
 import assert from "node:assert/strict";
 import {
   findPairBySetCode,
+  deletePairingsForEnSlug,
   PAIRING_SOURCE,
   PAIRING_CONFIDENCE,
   PAIRING_RANK,
@@ -20,11 +21,14 @@ import {
 
 // Build a stub sql client that returns the given row for a single
 // .query() call. The shape mirrors @vercel/postgres's `sql.query`.
-function stubSqlReturning(row) {
+function stubSqlReturning(row, options = {}) {
   const calls = [];
   return {
     async query(text, params) {
       calls.push({ text, params });
+      if (typeof options.rowCount === "number") {
+        return { rows: row ? [row] : [], rowCount: options.rowCount };
+      }
       return { rows: row ? [row] : [] };
     },
     calls,
@@ -40,6 +44,8 @@ export async function runTranslationMatchTests() {
   // ── PAIRED: exactly one JP match in the verified set ────────────────────
   {
     const sqlStub = stubSqlReturning({
+      set_code_count: 1,
+      set_codes: ["base1"],
       en_set_code: "base1",
       jp_set_code: "base1_ja",
       en_set_name: "Base",
@@ -64,6 +70,8 @@ export async function runTranslationMatchTests() {
   // (Common case for EN-exclusive sets like Celebrations.)
   {
     const sqlStub = stubSqlReturning({
+      set_code_count: 1,
+      set_codes: ["cel25c"],
       en_set_code: "cel25c",
       jp_set_code: null,
       en_set_name: null,
@@ -82,6 +90,8 @@ export async function runTranslationMatchTests() {
   // (E.g., Wizards-added EN-only card inside an otherwise-paired vintage set.)
   {
     const sqlStub = stubSqlReturning({
+      set_code_count: 1,
+      set_codes: ["base1"],
       en_set_code: "base1",
       jp_set_code: "base1_ja",
       en_set_name: "Base",
@@ -101,6 +111,8 @@ export async function runTranslationMatchTests() {
   // (Rare but happens with promos / multi-printings inside one set code.)
   {
     const sqlStub = stubSqlReturning({
+      set_code_count: 1,
+      set_codes: ["swshp"],
       en_set_code: "swshp",
       jp_set_code: "swshp_ja",
       en_set_name: "SWSH Black Star Promos",
@@ -115,9 +127,32 @@ export async function runTranslationMatchTests() {
     });
     const result = await findPairBySetCode(sqlStub, "swsh-promo-25-pikachu");
     assert.equal(result.kind, "ambiguous");
+    assert.equal(result.reason, "multiple_jp_matches");
     assert.equal(result.jp_slugs.length, 3);
     assert.equal(result.en_set_code, "swshp");
     assert.equal(result.jp_set_code, "swshp_ja");
+  }
+
+  // ── AMBIGUOUS: canonical_slug spans multiple distinct set_codes ─────────
+  // Codex P2 on commit 4def09bc34. Picker must NOT silently pick the
+  // lexicographic first set_code when a canonical_card has printings
+  // across two or more sets.
+  {
+    const sqlStub = stubSqlReturning({
+      set_code_count: 2,
+      set_codes: ["base1", "base4"],
+      en_set_code: null,
+      jp_set_code: null,
+      en_set_name: null,
+      jp_set_name: null,
+      pair_count: 0,
+      match_count: 0,
+      jp_slugs: null,
+    });
+    const result = await findPairBySetCode(sqlStub, "weird-multi-set-card");
+    assert.equal(result.kind, "ambiguous");
+    assert.equal(result.reason, "multiple_en_set_codes");
+    assert.deepEqual(result.en_set_codes, ["base1", "base4"]);
   }
 
   // ── EMPTY result row (EN slug not found at all) ─────────────────────────
@@ -127,6 +162,16 @@ export async function runTranslationMatchTests() {
     assert.equal(result.kind, "unpaired");
     assert.equal(result.reason, "no_verified_set_pair");
     assert.equal(result.en_set_code, null);
+  }
+
+  // ── deletePairingsForEnSlug delegates to a single DELETE ────────────────
+  {
+    const sqlStub = stubSqlReturning(null, { rowCount: 1 });
+    const deleted = await deletePairingsForEnSlug(sqlStub, "base-set-some-slug");
+    assert.equal(deleted, 1);
+    assert.equal(sqlStub.calls.length, 1);
+    assert.deepEqual(sqlStub.calls[0].params, ["base-set-some-slug"]);
+    assert.match(sqlStub.calls[0].text, /delete from card_translations where en_slug = \$1/i);
   }
 }
 
