@@ -37,6 +37,7 @@ struct ScanPickerSheet: View {
     /// initializer source-compatible with existing callers.
     var ocrCardNumber: String? = nil
     var ocrSetHint: String? = nil
+    var ocrCardNumbersCount: Int? = nil
     /// Day 2 retrieval path that resolved this scan
     /// (`vision_only`, `ocr_direct_unique`, `ocr_direct_narrow`,
     /// `ocr_intersect_unique`, `ocr_intersect_narrow`). Surfaced in the
@@ -45,6 +46,10 @@ struct ScanPickerSheet: View {
     /// intersection vs. CLIP-only fallback. Default-nil keeps the
     /// initializer source-compatible with existing callers.
     var winningPath: String? = nil
+    var scanConfidence: String? = nil
+    var scanSource: String? = nil
+    var triggerSource: String? = nil
+    var modelVersion: String? = nil
     let onPick: (ScanMatch) -> Void
     let onDismiss: () -> Void
     /// Called after a correction successfully posts to the server.
@@ -443,6 +448,30 @@ struct ScanPickerSheet: View {
 
     // MARK: - Actions
 
+    private var correctionMetadata: ScanCorrectionPredictedMetadata {
+        let top = matches.first
+        let rank2 = matches.dropFirst().first
+        let topGap = top?.similarity.flatMap { topSimilarity in
+            rank2?.similarity.map { topSimilarity - $0 }
+        }
+        return ScanCorrectionPredictedMetadata(
+            fromSlug: top?.slug,
+            confidence: scanConfidence,
+            winningPath: winningPath,
+            triggerSource: triggerSource,
+            source: scanSource,
+            modelVersion: modelVersion,
+            topSimilarity: top?.similarity,
+            topGap: topGap,
+            rank2Slug: rank2?.slug,
+            rank2Similarity: rank2?.similarity,
+            ocrCardNumber: ocrCardNumber,
+            ocrSetHint: ocrSetHint,
+            ocrCardNumberExtracted: ocrCardNumbersCount.map { $0 > 0 },
+            ocrCardNumbersCount: ocrCardNumbersCount
+        )
+    }
+
     /// User picked one of the top-3 server-suggested matches.
     private func handlePickerPick(_ match: ScanMatch) {
         guard !promoting else { return }
@@ -466,6 +495,7 @@ struct ScanPickerSheet: View {
                     canonicalSlug: slug,
                     language: lang,
                     notes: "picker-sheet-select",
+                    predicted: correctionMetadata,
                 )
                 if result?.ok == true {
                     // Trigger an anchor sync so the next scan can
@@ -523,6 +553,7 @@ struct ScanPickerSheet: View {
                     canonicalSlug: slug,
                     language: lang,
                     notes: "picker-sheet-search-select",
+                    predicted: correctionMetadata,
                 )
                 if r?.ok == true {
                     await MainActor.run { store?() }

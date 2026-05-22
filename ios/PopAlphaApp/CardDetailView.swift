@@ -51,6 +51,7 @@ struct CardDetailView: View {
     /// correction-promote flow must re-upload bytes via the multipart
     /// variant. Nil for online scans (server already has the file).
     let scanImage: UIImage?
+    let scanCorrectionMetadata: ScanCorrectionPredictedMetadata?
 
     /// The card whose data the view is currently rendering. Mutates
     /// when the user taps the EN/JP toggle: we synthesize a stub
@@ -61,11 +62,17 @@ struct CardDetailView: View {
     /// network round-trip completes.
     @State private var activeCard: MarketCard
 
-    init(card: MarketCard, scanImageHash: String? = nil, scanImage: UIImage? = nil) {
+    init(
+        card: MarketCard,
+        scanImageHash: String? = nil,
+        scanImage: UIImage? = nil,
+        scanCorrectionMetadata: ScanCorrectionPredictedMetadata? = nil
+    ) {
         self.card = card
         self._activeCard = State(initialValue: card)
         self.scanImageHash = scanImageHash
         self.scanImage = scanImage
+        self.scanCorrectionMetadata = scanCorrectionMetadata
     }
 
     @Environment(\.dismiss) private var dismiss
@@ -322,6 +329,7 @@ struct CardDetailView: View {
                 EvalSeedingView(
                     mode: .correction(imageHash: hash, predictedSlug: card.id),
                     scanImage: scanImage,
+                    correctionMetadata: scanCorrectionMetadata,
                     isPresented: $showCorrectionSheet
                 )
             }

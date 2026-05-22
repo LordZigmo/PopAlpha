@@ -1680,6 +1680,9 @@ async function logScanEvent(event: ScanEventInput): Promise<void> {
     matchCount: event.matchCount ?? null,
     topMatchSlug: event.topMatchSlug ?? null,
     topSimilarity: event.topSimilarity ?? null,
+    topGapToRank2: event.topGapToRank2 ?? null,
+    rank2Slug: event.rank2Slug ?? null,
+    rank2Similarity: event.rank2Similarity ?? null,
     modelVersion: event.modelVersion,
   });
 }
@@ -1708,6 +1711,9 @@ function emitScanFailureEvent(args: {
     matchCount: null,
     topMatchSlug: null,
     topSimilarity: null,
+    topGapToRank2: null,
+    rank2Slug: null,
+    rank2Similarity: null,
     modelVersion: null,
   });
 }
@@ -1728,6 +1734,9 @@ function emitScanPostHog(input: {
   matchCount: number | null;
   topMatchSlug: string | null;
   topSimilarity: number | null;
+  topGapToRank2: number | null;
+  rank2Slug: string | null;
+  rank2Similarity: number | null;
   modelVersion: string | null;
 }): void {
   // No actor key = probe / curl traffic without iOS ActorStore.
@@ -1768,6 +1777,10 @@ function emitScanPostHog(input: {
       top_match_slug: input.topMatchSlug,
       top_match_cos_dist:
         input.topSimilarity !== null ? 1 - input.topSimilarity : null,
+      top_gap_to_rank_2: input.topGapToRank2,
+      top_gap: input.topGapToRank2,
+      rank2_slug: input.rank2Slug,
+      rank2_similarity: input.rank2Similarity,
       model_version: input.modelVersion,
     };
   }

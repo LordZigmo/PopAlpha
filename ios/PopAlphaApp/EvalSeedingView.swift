@@ -54,6 +54,7 @@ struct EvalSeedingView: View {
     /// scan-uploads doesn't have the file — the offline-scan case).
     /// Nil for fresh-photo seeding and for online-scan corrections.
     var scanImage: UIImage? = nil
+    var correctionMetadata: ScanCorrectionPredictedMetadata? = nil
     @Binding var isPresented: Bool
 
     @State private var pickerItem: PhotosPickerItem?
@@ -496,6 +497,24 @@ struct EvalSeedingView: View {
                 responseSlug = r.canonicalSlug
                 responseError = r.error
             case .correction(let imageHash, let predictedSlug):
+                let predicted = correctionMetadata ?? predictedSlug.map {
+                    ScanCorrectionPredictedMetadata(
+                        fromSlug: $0,
+                        confidence: nil,
+                        winningPath: nil,
+                        triggerSource: nil,
+                        source: nil,
+                        modelVersion: nil,
+                        topSimilarity: nil,
+                        topGap: nil,
+                        rank2Slug: nil,
+                        rank2Similarity: nil,
+                        ocrCardNumber: nil,
+                        ocrSetHint: nil,
+                        ocrCardNumberExtracted: nil,
+                        ocrCardNumbersCount: nil
+                    )
+                }
                 let augmentedNotes = [
                     notes.isEmpty ? nil : notes,
                     predictedSlug.map { "model predicted \($0)" }
@@ -513,6 +532,7 @@ struct EvalSeedingView: View {
                         image: bytes,
                         canonicalSlug: card.canonicalSlug,
                         notes: notesValue,
+                        predicted: predicted,
                     )
                     responseOK = r.ok
                     responseError = r.error

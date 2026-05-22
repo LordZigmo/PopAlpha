@@ -28,6 +28,7 @@ export const DBADMIN_ALLOWED_FILES = [
   "app/api/portfolio/overview/route.ts",
   "app/api/portfolio/activity/route.ts",
   "app/api/pro/signals/route.ts",
+  "app/api/scan/correction/route.ts",
   "app/api/scan/identify/route.ts",
   "app/api/webhooks/apple/notifications/route.ts",
   "lib/data/canonical-card-match.ts",
@@ -49,6 +50,7 @@ export const DBADMIN_ALLOWED_ROUTE_KEYS = [
   "portfolio/overview",
   "portfolio/activity",
   "pro/signals",
+  "scan/correction",
   "scan/identify",
   "webhooks/apple/notifications",
 ];
@@ -1157,6 +1159,7 @@ export const PHASE2_INTERNAL_OPERATIONAL_TABLES = [
   "pipeline_jobs",
   "price_snapshots",
   "pricing_alert_events",
+  "scan_correction_pairs",
   "tracked_assets",
   "tracked_refresh_diagnostics",
 ];

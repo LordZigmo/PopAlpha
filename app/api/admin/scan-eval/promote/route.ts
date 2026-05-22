@@ -330,6 +330,19 @@ export async function POST(req: Request) {
     );
   }
 
+  if (upsert.data?.id) {
+    const linkCorrection = await supabase
+      .from("scan_correction_pairs")
+      .update({ eval_image_id: upsert.data.id })
+      .eq("image_hash", imageHash)
+      .is("eval_image_id", null);
+    if (linkCorrection.error) {
+      console.warn(
+        `[scan-eval/promote] correction-pair link failed hash=${imageHash.slice(0, 12)}: ${linkCorrection.error.message}`,
+      );
+    }
+  }
+
   // ── v1.1 auto-learning ──────────────────────────────────────────────
   // Fire embedAndStoreUserCorrection so the user's actual scan image
   // becomes a kNN anchor for `canonicalSlug`. The next scan of a
