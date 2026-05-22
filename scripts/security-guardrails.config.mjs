@@ -602,6 +602,11 @@ export const PUBLIC_CALLABLE_FUNCTION_CONTRACTS = {
     writeType: "read_only_lookup",
     recommendedAction: "keep public execute narrow because public price/display views depend on it",
   },
+  "resolve_grade_id(text)": {
+    roles: ["authenticated"],
+    writeType: "reference_lookup_for_user_writes",
+    recommendedAction: "keep authenticated-only because grade triggers need it for user-owned writes; never expose to anon",
+  },
   "requesting_clerk_user_id()": {
     roles: ["authenticated"],
     writeType: "identity_helper",
