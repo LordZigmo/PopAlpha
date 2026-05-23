@@ -476,7 +476,7 @@ export function buildFallbackHomepageBrief(
   const tracked = formatCount(ctx.trackedCardsWithLivePrice);
   const refreshed = formatCount(ctx.pricesRefreshedToday);
   const coverageLine = tracked || refreshed
-    ? `Coverage is based on ${tracked ?? "the tracked"} live-priced cards${refreshed ? `, with ${refreshed} refreshed in the last day` : ""}.`
+    ? `Coverage is based on ${tracked ?? "the tracked"} ${ctx.market === "JP" ? "JP " : ""}live-priced cards${refreshed ? `, with ${refreshed} refreshed in the last day` : ""}.`
     : null;
   const marketNoun = ctx.market === "JP" ? "JP market" : "market";
   const fullMarketNoun = ctx.market === "JP" ? "full JP market" : "full market";
@@ -503,7 +503,12 @@ export function buildFallbackHomepageBrief(
     takeaway       = "Two sets pulling ahead";
   } else if (leader) {
     // One set, but thin participation. Still specific.
-    whatsHappening = `${leader} is the strongest set right now, but only a few cards are doing the work. ${topMover ? `${topMover} is the clearest signal.` : moverAvg ? `The top mover group is averaging ${moverAvg}.` : ""}`;
+    const thinSignalDetail = topMover
+      ? `${topMover} is the clearest signal.`
+      : moverAvg
+        ? `The top mover group is averaging ${moverAvg}.`
+        : "The signal is narrow for now.";
+    whatsHappening = `${leader} is the strongest set right now, but only a few cards are doing the work. ${thinSignalDetail}`;
     whyItMatters   = `Thin participation means a small group of cards is responsible for most of today's gains. ${coverageLine ?? "That can fade quickly unless more cards from the same set join the move."}`;
     whatToWatch    = `Watch for more ${leader} cards to join before treating this as a real run. ${pullbackLeader ? `If pullbacks like ${pullbackLeader} keep falling, keep position sizes small.` : "If the next update still shows only one or two movers, treat it as narrow demand."}`;
     summary        = `${leader} is leading today, but only a few cards are carrying the move${topMover ? `, led by ${topMover}` : ""}. Thin participation can fade quickly. Watch for more ${leader} cards to join before chasing.`;
