@@ -26,9 +26,7 @@ CREATE INDEX IF NOT EXISTS ai_brief_cache_market_generated_at_desc_idx
 
 DROP VIEW IF EXISTS public.public_ai_brief_latest;
 
-CREATE VIEW public.public_ai_brief_latest
-WITH (security_invoker = true)
-AS
+CREATE VIEW public.public_ai_brief_latest AS
 SELECT DISTINCT ON (market)
   market,
   version,
