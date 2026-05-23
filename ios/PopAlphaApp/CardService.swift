@@ -443,8 +443,10 @@ actor CardService {
     /// Fetch the cached LLM-generated market brief served by
     /// /api/homepage/ai-brief. Returns nil when the cache is empty
     /// (e.g. first deploy, before the cron has populated it).
-    func fetchAIBrief() async throws -> HomepageAIBriefDTO? {
-        let response: HomepageAIBriefResponseDTO = try await APIClient.get(path: "/api/homepage/ai-brief")
+    func fetchAIBrief(market: Market = .en) async throws -> HomepageAIBriefDTO? {
+        let response: HomepageAIBriefResponseDTO = try await APIClient.get(
+            path: "/api/homepage/ai-brief?market=\(market.label)"
+        )
         return response.brief
     }
 
@@ -1208,6 +1210,7 @@ enum SignalWindow: String, CaseIterable, Hashable {
 // MARK: - Homepage AI Brief DTOs (/api/homepage/ai-brief)
 
 struct HomepageAIBriefDTO: Decodable, Hashable {
+    let market: String?
     let version: String
     let summary: String
     let takeaway: String

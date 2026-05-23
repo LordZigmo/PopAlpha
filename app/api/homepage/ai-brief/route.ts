@@ -1,14 +1,16 @@
 import { NextResponse } from "next/server";
 
+import type { HomepageBriefMarket } from "@/lib/ai/homepage-brief";
 import { dbPublic } from "@/lib/db";
 
 /**
- * Public endpoint: returns the single most recent cached AI Brief.
+ * Public endpoint: returns the most recent cached AI Brief for one market.
  *
  * The brief is regenerated on a schedule by /api/cron/refresh-ai-brief
  * and stored in public.ai_brief_cache. This route reads from the public
  * view public.public_ai_brief_latest (granted to anon + authenticated)
- * so iOS and web both hit the same cached payload.
+ * so iOS and web both hit the same cached payload. Pass ?market=JP for
+ * the Japanese-market brief; EN is the default.
  *
  * Cache headers mirror /api/homepage (60s ISR + 5min SWR) so the brief
  * stays aligned with the mover data it summarizes.
@@ -24,6 +26,7 @@ import { dbPublic } from "@/lib/db";
 export const dynamic = "force-dynamic";
 
 type AiBriefRow = {
+  market: HomepageBriefMarket;
   version: string;
   summary: string;
   takeaway: string;
@@ -37,14 +40,21 @@ type AiBriefRow = {
   generated_at: string;
 };
 
-export async function GET() {
+function parseBriefMarket(req: Request): HomepageBriefMarket {
+  const raw = new URL(req.url).searchParams.get("market")?.trim().toUpperCase();
+  return raw === "JP" ? "JP" : "EN";
+}
+
+export async function GET(req: Request) {
   try {
+    const market = parseBriefMarket(req);
     const supabase = dbPublic();
     const { data, error } = await supabase
       .from("public_ai_brief_latest")
       .select(
-        "version, summary, takeaway, whats_happening, why_it_matters, what_to_watch, focus_set, model_label, source, data_as_of, generated_at",
+        "market, version, summary, takeaway, whats_happening, why_it_matters, what_to_watch, focus_set, model_label, source, data_as_of, generated_at",
       )
+      .eq("market", market)
       .maybeSingle<AiBriefRow>();
 
     if (error) {
@@ -71,6 +81,7 @@ export async function GET() {
         ok: true,
         brief: {
           version: data.version,
+          market: data.market,
           summary: data.summary,
           takeaway: data.takeaway,
           whats_happening: data.whats_happening,

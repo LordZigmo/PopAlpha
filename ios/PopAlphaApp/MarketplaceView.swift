@@ -60,6 +60,7 @@ struct MarketplaceView: View {
     // MARK: Signal board data (hoisted from the old SignalBoardView)
     @State private var data: HomepageDataDTO?
     @State private var aiBrief: HomepageAIBriefDTO?
+    @State private var jpAIBrief: HomepageAIBriefDTO?
     @State private var community: HomepageCommunityDTO?
     @State private var isLoading = true
     @State private var loadError: String?
@@ -317,20 +318,10 @@ struct MarketplaceView: View {
             .padding(.horizontal, PA.Layout.sectionPadding)
         }
 
-        // Same slot the EN sequences use, but pass `nil` for both
-        // `brief` and `fallbackAsOf`: the cached brief is generated
-        // from EN-only top movers (refresh-ai-brief cron +
-        // lib/ai/homepage-brief.ts build context from the global
-        // signal board with no market parameter), and `data.asOf` is
-        // the EN signal-board timestamp. Showing either under JP
-        // would leak EN content / EN freshness into a JP-only page
-        // (the JP footer below avoids `data.asOf` for the same
-        // reason). Passing nil renders AIBriefCard's market-neutral
-        // placeholder with no "Updated …" stamp — visual
-        // scaffolding and the Hinomaru red border (via `\.market`)
-        // stay, the EN leak doesn't. Swap both back once a JP brief
-        // generator exists with its own freshness signal.
-        AIBriefCard(brief: nil, fallbackAsOf: nil, styleLabel: styleLabel)
+        // Same slot the EN sequences use, backed by the JP AI Brief
+        // cache (/api/homepage/ai-brief?market=JP). Freshness comes
+        // from the JP rail itself, not EN's signal-board timestamp.
+        AIBriefCard(brief: jpAIBrief, fallbackAsOf: jpFooterAsOf, styleLabel: styleLabel)
             .padding(.horizontal, PA.Layout.sectionPadding)
 
         if let data {
@@ -576,8 +567,12 @@ struct MarketplaceView: View {
         // failure as "brief is just empty" before. (See
         // docs/external-api-failure-modes.md.)
         async let briefTask: HomepageAIBriefDTO? = {
-            do { return try await CardService.shared.fetchAIBrief() }
+            do { return try await CardService.shared.fetchAIBrief(market: .en) }
             catch { Logger.ui.debug("ai-brief load error: \(error)"); return nil }
+        }()
+        async let jpBriefTask: HomepageAIBriefDTO? = {
+            do { return try await CardService.shared.fetchAIBrief(market: .jp) }
+            catch { Logger.ui.debug("jp ai-brief load error: \(error)"); return nil }
         }()
         async let communityTask: HomepageCommunityDTO? = {
             do { return try await CardService.shared.fetchHomepageCommunity() }
@@ -588,6 +583,7 @@ struct MarketplaceView: View {
         let me = await meTask
         let profile = await profileTask
         let brief = await briefTask
+        let jpBrief = await jpBriefTask
         let comm = await communityTask
 
         do {
@@ -595,6 +591,7 @@ struct MarketplaceView: View {
             await MainActor.run {
                 self.data = signalBoard
                 self.aiBrief = brief
+                self.jpAIBrief = jpBrief
                 self.community = comm
                 self.meData = me
                 self.styleLabel = profile?.profile?.dominantStyleLabel
@@ -628,6 +625,7 @@ struct MarketplaceView: View {
             // CTA for the movers section.
             await MainActor.run {
                 self.aiBrief = brief
+                self.jpAIBrief = jpBrief
                 self.community = comm
                 self.meData = me
                 self.styleLabel = profile?.profile?.dominantStyleLabel

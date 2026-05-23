@@ -34,11 +34,10 @@ struct AIBriefCard: View {
 
     private var auth: AuthService { AuthService.shared }
 
-    /// Defensive opt-in: AIBriefCard is hidden in JP mode today
-    /// (`MarketplaceView.jpSequence` doesn't render it), but reading
-    /// `\.market` here keeps the brand surfaces correct if it's ever
-    /// re-included or if a scroll anchor briefly flashes it during
-    /// EN-mode navigation.
+    /// Defensive opt-in: AIBriefCard renders in both EN and JP mode.
+    /// Reading `\.market` keeps the border/accent aligned with the
+    /// active market while the API payload provides the market-specific
+    /// copy.
     @Environment(\.market) private var market
 
     // Placeholder copy used only when the /api/homepage/ai-brief cache is

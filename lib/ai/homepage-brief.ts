@@ -42,8 +42,10 @@ export const HOMEPAGE_BRIEF_MODEL_LABEL = getPopAlphaGatewayModelId();
 export const HOMEPAGE_BRIEF_TIMEOUT_MS = 15_000;
 
 export type HomepageBriefSource = "llm" | "fallback";
+export type HomepageBriefMarket = "EN" | "JP";
 
 export type HomepageBrief = {
+  market: HomepageBriefMarket;
   version: string;
   summary: string;
   takeaway: string;
@@ -79,6 +81,12 @@ type BriefCardSnapshot = {
   changePct: number | null;
   marketPrice: number | null;
   activeListings7d: number | null;
+  yahooJpPrice: number | null;
+  yahooJpPriceJpy: number | null;
+  yahooJpSampleCount: number | null;
+  snkrdunkPrice: number | null;
+  snkrdunkPriceJpy: number | null;
+  snkrdunkSampleCount: number | null;
 };
 
 function rankSetCounts(setNames: Array<string | null | undefined>): RankedSet[] {
@@ -122,10 +130,19 @@ function toBriefCardSnapshot(card: HomepageCard): BriefCardSnapshot {
     changePct: card.change_pct,
     marketPrice: card.market_price,
     activeListings7d: card.active_listings_7d,
+    yahooJpPrice: card.yahoo_jp_price,
+    yahooJpPriceJpy: card.yahoo_jp_price_jpy,
+    yahooJpSampleCount: card.yahoo_jp_sample_count,
+    snkrdunkPrice: card.snkrdunk_price,
+    snkrdunkPriceJpy: card.snkrdunk_price_jpy,
+    snkrdunkSampleCount: card.snkrdunk_sample_count,
   };
 }
 
 type BriefContext = {
+  market: HomepageBriefMarket;
+  marketLabel: string;
+  dataSourceLabel: string;
   asOf: string | null;
   moverSets: RankedSet[];
   pullbackSets: RankedSet[];
@@ -143,13 +160,53 @@ type BriefContext = {
   tone: "concentrated" | "broad" | "mixed" | "selective";
   pricesRefreshedToday: number | null;
   trackedCardsWithLivePrice: number | null;
+  coverageLabel: string | null;
 };
 
-export function buildHomepageBriefContext(data: HomepageData): BriefContext {
-  const movers24 = data.signal_board.top_movers["24H"];
-  const drops24 = data.signal_board.biggest_drops["24H"];
-  const breakouts = data.signal_board.breakouts;
-  const unusual = data.signal_board.unusual_volume;
+function latestUpdatedAt(cards: HomepageCard[]): string | null {
+  let latestMs: number | null = null;
+  for (const card of cards) {
+    if (!card.updated_at) continue;
+    const ms = Date.parse(card.updated_at);
+    if (!Number.isFinite(ms)) continue;
+    latestMs = latestMs == null ? ms : Math.max(latestMs, ms);
+  }
+  return latestMs == null ? null : new Date(latestMs).toISOString();
+}
+
+function uniqueCardCount(cards: HomepageCard[]): number {
+  return new Set(cards.map((card) => card.slug)).size;
+}
+
+export function buildHomepageBriefContext(
+  data: HomepageData,
+  options: { market?: HomepageBriefMarket } = {},
+): BriefContext {
+  const market = options.market ?? "EN";
+  const isJp = market === "JP";
+  const signalBoard = data.signal_board;
+  const movers24 = isJp
+    ? signalBoard.japanese_top_movers["24H"]
+    : signalBoard.top_movers["24H"];
+  const drops24 = isJp
+    ? signalBoard.japanese_biggest_drops["24H"]
+    : signalBoard.biggest_drops["24H"];
+  const breakouts = isJp
+    ? signalBoard.japanese_momentum["24H"]
+    : signalBoard.breakouts;
+  const unusual = isJp
+    ? [...signalBoard.japanese_mid_movers, ...signalBoard.japanese_budget_movers]
+    : signalBoard.unusual_volume;
+  const marketCards = isJp
+    ? [
+        ...signalBoard.japanese_top_movers["24H"],
+        ...signalBoard.japanese_biggest_drops["24H"],
+        ...signalBoard.japanese_momentum["24H"],
+        ...signalBoard.japanese_mid_movers,
+        ...signalBoard.japanese_budget_movers,
+        ...signalBoard.japanese,
+      ]
+    : [];
 
   const moverSample = topByChange(movers24, 5);
   const pullbackSample = topByChange(drops24, 3, true);
@@ -180,7 +237,10 @@ export function buildHomepageBriefContext(data: HomepageData): BriefContext {
   }
 
   return {
-    asOf: data.as_of,
+    market,
+    marketLabel: isJp ? "Japanese market" : "English market",
+    dataSourceLabel: isJp ? "Yahoo Japan and Snkrdunk" : "PopAlpha market feeds",
+    asOf: isJp ? latestUpdatedAt(marketCards) : data.as_of,
     moverSets,
     pullbackSets,
     topMovers: moverSample.map(toBriefCardSnapshot),
@@ -195,8 +255,11 @@ export function buildHomepageBriefContext(data: HomepageData): BriefContext {
     unusualSets,
     dominantSet,
     tone,
-    pricesRefreshedToday: data.prices_refreshed_today,
-    trackedCardsWithLivePrice: data.tracked_cards_with_live_price,
+    pricesRefreshedToday: isJp ? null : data.prices_refreshed_today,
+    trackedCardsWithLivePrice: isJp ? uniqueCardCount(marketCards) : data.tracked_cards_with_live_price,
+    coverageLabel: isJp
+      ? `${uniqueCardCount(marketCards).toLocaleString()} JP cards surfaced in live rails from Yahoo Japan and Snkrdunk.`
+      : null,
   };
 }
 
@@ -214,31 +277,82 @@ function formatUsd(value: number | null): string | null {
   }).format(value);
 }
 
+function formatJpy(value: number | null): string | null {
+  if (value == null || !Number.isFinite(value)) return null;
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "JPY",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
 function formatCount(value: number | null): string | null {
   if (value == null || !Number.isFinite(value)) return null;
   return Math.round(value).toLocaleString();
 }
 
-function formatCardSnapshot(card: BriefCardSnapshot): string {
+function formatJpSourcePrice(card: BriefCardSnapshot): string | null {
+  const sources = [
+    {
+      label: "Snkrdunk",
+      usd: card.snkrdunkPrice,
+      jpy: card.snkrdunkPriceJpy,
+      sampleCount: card.snkrdunkSampleCount ?? 0,
+    },
+    {
+      label: "Yahoo JP",
+      usd: card.yahooJpPrice,
+      jpy: card.yahooJpPriceJpy,
+      sampleCount: card.yahooJpSampleCount ?? 0,
+    },
+  ].filter((source) =>
+    (source.usd != null && Number.isFinite(source.usd))
+    || (source.jpy != null && Number.isFinite(source.jpy))
+  );
+  sources.sort((left, right) => right.sampleCount - left.sampleCount);
+
+  const source = sources[0];
+  if (!source) return formatUsd(card.marketPrice);
+
+  const jpy = formatJpy(source.jpy);
+  const usd = formatUsd(source.usd);
+  const sampleCount = formatCount(source.sampleCount > 0 ? source.sampleCount : null);
+  const price = jpy && usd ? `${jpy} (${usd})` : jpy ?? usd;
+  return `${source.label} ${price}${sampleCount ? `, ${sampleCount} samples` : ""}`;
+}
+
+function formatCardSnapshot(
+  card: BriefCardSnapshot,
+  market: HomepageBriefMarket = "EN",
+): string {
   const label = card.setName ? `${card.name} (${card.setName})` : card.name;
   const observations = formatCount(card.activeListings7d);
   const metrics = [
     formatPct(card.changePct),
-    formatUsd(card.marketPrice),
+    market === "JP" ? formatJpSourcePrice(card) : formatUsd(card.marketPrice),
     observations ? `${observations} tracked observations` : null,
   ].filter(Boolean);
   return metrics.length > 0 ? `${label} (${metrics.join(", ")})` : label;
 }
 
-function formatCardList(cards: BriefCardSnapshot[], limit: number): string {
-  return cards.slice(0, limit).map(formatCardSnapshot).join("; ");
+function formatCardList(
+  cards: BriefCardSnapshot[],
+  limit: number,
+  market: HomepageBriefMarket = "EN",
+): string {
+  return cards.slice(0, limit).map((card) => formatCardSnapshot(card, market)).join("; ");
 }
 
 function stringifyContextForPrompt(ctx: BriefContext): string {
   const lines: string[] = [];
+  lines.push(`Market: ${ctx.marketLabel}`);
+  lines.push(`Data sources: ${ctx.dataSourceLabel}`);
+  if (ctx.coverageLabel) {
+    lines.push(`Coverage: ${ctx.coverageLabel}`);
+  }
   const tracked = formatCount(ctx.trackedCardsWithLivePrice);
   const refreshed = formatCount(ctx.pricesRefreshedToday);
-  if (tracked || refreshed) {
+  if (!ctx.coverageLabel && (tracked || refreshed)) {
     lines.push(
       `Coverage: ${tracked ?? "unknown"} cards with live prices; ${refreshed ?? "unknown"} refreshed in the last day.`,
     );
@@ -254,7 +368,7 @@ function stringifyContextForPrompt(ctx: BriefContext): string {
     lines.push(`Top mover avg change 24H: ${ctx.topMoverAvgPct >= 0 ? "+" : ""}${ctx.topMoverAvgPct}%`);
   }
   if (ctx.topMovers.length > 0) {
-    lines.push(`Top mover cards: ${formatCardList(ctx.topMovers, 5)}`);
+    lines.push(`Top mover cards: ${formatCardList(ctx.topMovers, 5, ctx.market)}`);
   }
   if (ctx.pullbackSets.length > 0) {
     lines.push(`Pullback sets: ${ctx.pullbackSets.slice(0, 3).map((s) => s.name).join(", ")}`);
@@ -263,15 +377,19 @@ function stringifyContextForPrompt(ctx: BriefContext): string {
     lines.push(`Top pullback avg change 24H: ${ctx.topPullbackAvgPct}%`);
   }
   if (ctx.topPullbacks.length > 0) {
-    lines.push(`Top pullback cards: ${formatCardList(ctx.topPullbacks, 3)}`);
+    lines.push(`Top pullback cards: ${formatCardList(ctx.topPullbacks, 3, ctx.market)}`);
   }
-  lines.push(`Breakout signals: ${ctx.breakoutCount}${ctx.breakoutSets[0] ? ` (lead: ${ctx.breakoutSets[0].name})` : ""}`);
+  const breakoutLabel = ctx.market === "JP" ? "JP momentum signals" : "Breakout signals";
+  lines.push(`${breakoutLabel}: ${ctx.breakoutCount}${ctx.breakoutSets[0] ? ` (lead: ${ctx.breakoutSets[0].name})` : ""}`);
   if (ctx.topBreakouts.length > 0) {
-    lines.push(`Breakout cards: ${formatCardList(ctx.topBreakouts, 3)}`);
+    lines.push(`${ctx.market === "JP" ? "JP momentum cards" : "Breakout cards"}: ${formatCardList(ctx.topBreakouts, 3, ctx.market)}`);
   }
-  lines.push(`Unusual observed activity signals: ${ctx.unusualCount}${ctx.unusualSets[0] ? ` (lead: ${ctx.unusualSets[0].name})` : ""}`);
+  const unusualLabel = ctx.market === "JP"
+    ? "JP mid/budget mover signals"
+    : "Unusual observed activity signals";
+  lines.push(`${unusualLabel}: ${ctx.unusualCount}${ctx.unusualSets[0] ? ` (lead: ${ctx.unusualSets[0].name})` : ""}`);
   if (ctx.unusualCards.length > 0) {
-    lines.push(`Unusual activity cards: ${formatCardList(ctx.unusualCards, 3)}`);
+    lines.push(`Unusual activity cards: ${formatCardList(ctx.unusualCards, 3, ctx.market)}`);
   }
   return lines.join("\n");
 }
@@ -287,6 +405,7 @@ const SYSTEM_PROMPT = [
   "- SPECIFIC. Name the actual sets and cards driving today's action whenever possible.",
   "- Useful. Explain the market pattern, not just which sets are moving.",
   "- Include concrete facts from the data: changes, card names, set concentration, pullbacks, activity, or coverage.",
+  "- Respect the market in the input. For Japanese market briefs, discuss JP-source pricing and do not leak English-market conclusions.",
   "- No hedging or filler. Skip vague phrasing.",
   "- No finance jargon, no hype, no slang.",
   "- Do not mention being an AI. Do not invent sets or numbers not in the data.",
@@ -330,7 +449,7 @@ const SYSTEM_PROMPT = [
 
 function buildUserPrompt(ctx: BriefContext): string {
   return [
-    "Write today's PopAlpha homepage AI Brief using only this data:",
+    `Write today's PopAlpha ${ctx.marketLabel} AI Brief using only this data:`,
     "",
     stringifyContextForPrompt(ctx),
     "",
@@ -349,16 +468,18 @@ export function buildFallbackHomepageBrief(
   const leaderCount = ctx.moverSets[0]?.count ?? 0;
   const moverAvg = formatPct(ctx.topMoverAvgPct);
   const pullbackAvg = formatPct(ctx.topPullbackAvgPct);
-  const topMover = ctx.topMovers[0] ? formatCardSnapshot(ctx.topMovers[0]) : null;
-  const topMoverPair = ctx.topMovers.length >= 2 ? formatCardList(ctx.topMovers, 2) : topMover;
-  const pullbackLeader = ctx.topPullbacks[0] ? formatCardSnapshot(ctx.topPullbacks[0]) : null;
-  const breakoutLeader = ctx.topBreakouts[0] ? formatCardSnapshot(ctx.topBreakouts[0]) : null;
-  const unusualLeader = ctx.unusualCards[0] ? formatCardSnapshot(ctx.unusualCards[0]) : null;
+  const topMover = ctx.topMovers[0] ? formatCardSnapshot(ctx.topMovers[0], ctx.market) : null;
+  const topMoverPair = ctx.topMovers.length >= 2 ? formatCardList(ctx.topMovers, 2, ctx.market) : topMover;
+  const pullbackLeader = ctx.topPullbacks[0] ? formatCardSnapshot(ctx.topPullbacks[0], ctx.market) : null;
+  const breakoutLeader = ctx.topBreakouts[0] ? formatCardSnapshot(ctx.topBreakouts[0], ctx.market) : null;
+  const unusualLeader = ctx.unusualCards[0] ? formatCardSnapshot(ctx.unusualCards[0], ctx.market) : null;
   const tracked = formatCount(ctx.trackedCardsWithLivePrice);
   const refreshed = formatCount(ctx.pricesRefreshedToday);
   const coverageLine = tracked || refreshed
     ? `Coverage is based on ${tracked ?? "the tracked"} live-priced cards${refreshed ? `, with ${refreshed} refreshed in the last day` : ""}.`
     : null;
+  const marketNoun = ctx.market === "JP" ? "JP market" : "market";
+  const fullMarketNoun = ctx.market === "JP" ? "full JP market" : "full market";
 
   let whatsHappening: string;
   let whyItMatters:   string;
@@ -368,17 +489,17 @@ export function buildFallbackHomepageBrief(
 
   if (leader && leaderCount >= 3) {
     // Single set running the show. Specific and decisive.
-    whatsHappening = `${leader} is carrying today's board, with ${leaderCount} of the top five movers from this set. ${topMover ? `${topMover} is the lead signal` : moverAvg ? `The top mover group is averaging ${moverAvg}` : "The move is concentrated rather than market-wide"}.`;
-    whyItMatters   = `This is a focused run, not a full-market rally. ${pullbackLeader ? `Pullbacks are still showing up, led by ${pullbackLeader}, so weak cards outside ${leader} need confirmation.` : "When one set owns most movers, weaker cards outside that set need confirmation before they matter."}`;
+    whatsHappening = `${leader} is carrying today's board, with ${leaderCount} of the top five movers from this set. ${topMover ? `${topMover} is the lead signal` : moverAvg ? `The top mover group is averaging ${moverAvg}` : `The move is concentrated rather than ${marketNoun}-wide`}.`;
+    whyItMatters   = `This is a focused run, not a rally across the ${fullMarketNoun}. ${pullbackLeader ? `Pullbacks are still showing up, led by ${pullbackLeader}, so weak cards outside ${leader} need confirmation.` : "When one set owns most movers, weaker cards outside that set need confirmation before they matter."}`;
     whatToWatch    = `Watch whether ${leader} keeps adding movers and holds today's gains. ${unusualLeader ? `Also watch unusual activity in ${unusualLeader}, because that can show where demand spreads next.` : breakoutLeader ? `Also watch ${breakoutLeader}, because breakout cards show whether the move is widening.` : "If the move spreads beyond the first few cards, the run gets more durable."}`;
-    summary        = `${leader} is carrying today's board, with ${leaderCount} of the top five movers from this set${moverAvg ? ` and the top group averaging ${moverAvg}` : ""}. This is a focused run, not a full-market rally. Watch whether gains hold and whether unusual activity spreads beyond the first few cards.`;
+    summary        = `${leader} is carrying today's board, with ${leaderCount} of the top five movers from this set${moverAvg ? ` and the top group averaging ${moverAvg}` : ""}. This is a focused run, not a rally across the ${fullMarketNoun}. Watch whether gains hold and whether unusual activity spreads beyond the first few cards.`;
     takeaway       = `${leader} leading`;
   } else if (leader && second) {
     // Two-set lead. Name both — that's what makes it specific.
     whatsHappening = `${leader} and ${second} are sharing today's biggest moves, while the rest of the market is quieter. ${topMoverPair ? `The leaders are ${topMoverPair}.` : moverAvg ? `The top mover group is averaging ${moverAvg}.` : ""}`;
-    whyItMatters   = `Demand is split across two sets, so there are opportunities in both but no clear market-wide leader. ${pullbackAvg ? `The pullback group is averaging ${pullbackAvg}, which means downside is still active too.` : "That makes confirmation more important than chasing the first spike."}`;
+    whyItMatters   = `Demand is split across two sets, so there are opportunities in both but no clear leader across the ${marketNoun}. ${pullbackAvg ? `The pullback group is averaging ${pullbackAvg}, which means downside is still active too.` : "That makes confirmation more important than chasing the first spike."}`;
     whatToWatch    = `Watch which of ${leader} or ${second} keeps more cards green by the end of the day. ${breakoutLeader ? `${breakoutLeader} is the breakout signal to compare against the top movers.` : "The set that holds gains while pullbacks cool becomes the better next read."}`;
-    summary        = `${leader} and ${second} are sharing today's strongest demand${moverAvg ? `, with top movers averaging ${moverAvg}` : ""}. The move is useful, but it is not broad enough to call a market-wide rally. Watch which set holds gains while pullbacks cool.`;
+    summary        = `${leader} and ${second} are sharing today's strongest demand${moverAvg ? `, with top movers averaging ${moverAvg}` : ""}. The move is useful, but it is not broad enough to call a rally across the ${fullMarketNoun}. Watch which set holds gains while pullbacks cool.`;
     takeaway       = "Two sets pulling ahead";
   } else if (leader) {
     // One set, but thin participation. Still specific.
@@ -390,20 +511,21 @@ export function buildFallbackHomepageBrief(
   } else if ((ctx.topPullbackAvgPct ?? 0) < 0) {
     // Cool day. Still actionable.
     whatsHappening = `Pullbacks are louder than breakouts today${pullbackAvg ? `, with the pullback group averaging ${pullbackAvg}` : ""}. ${pullbackLeader ? `${pullbackLeader} is the clearest weak spot.` : "No single set is absorbing the whole move."}`;
-    whyItMatters   = `When pullbacks outweigh gains, the market is digesting recent moves instead of starting new ones. ${coverageLine ?? "That makes fresh highs less reliable until buyers return."}`;
+    whyItMatters   = `When pullbacks outweigh gains, the ${marketNoun} is digesting recent moves instead of starting new ones. ${coverageLine ?? "That makes fresh highs less reliable until buyers return."}`;
     whatToWatch    = `Watch for the first set that finds a floor and bounces. ${unusualLeader ? `Unusual activity in ${unusualLeader} is worth checking because it may show where buyers return first.` : "The first bounce with real activity is more useful than another one-card spike."}`;
-    summary        = `Pullbacks are louder than breakouts today${pullbackAvg ? `, with the pullback group averaging ${pullbackAvg}` : ""}. The market is digesting recent moves instead of starting new ones. Watch for the first set that finds a floor and bounces with real activity.`;
+    summary        = `Pullbacks are louder than breakouts today${pullbackAvg ? `, with the pullback group averaging ${pullbackAvg}` : ""}. The ${marketNoun} is digesting recent moves instead of starting new ones. Watch for the first set that finds a floor and bounces with real activity.`;
     takeaway       = "Cool day, watch floors";
   } else {
     // Quiet day. Make the action useful anyway.
-    whatsHappening = `The market is quiet today, with no set pulling clearly ahead. ${coverageLine ?? "The signal board has enough data to watch, but not enough urgency to force a move."}`;
+    whatsHappening = `The ${marketNoun} is quiet today, with no set pulling clearly ahead. ${coverageLine ?? "The signal board has enough data to watch, but not enough urgency to force a move."}`;
     whyItMatters   = "Quiet days are useful because they separate real follow-through from one-card noise. A set needs multiple cards moving together before it deserves attention.";
     whatToWatch    = `Watch for the first card or set that breaks out and gets confirmation through the afternoon. ${breakoutLeader ? `${breakoutLeader} is the first name to check.` : "If volume stays quiet, use today to build a watchlist instead of chasing."}`;
-    summary        = "The market is quiet today, with no clear leader or broad demand signal. That makes watchlists more useful than chasing. Watch for the first card or set that breaks out and gets confirmation through the afternoon.";
+    summary        = `The ${marketNoun} is quiet today, with no clear leader or broad demand signal. That makes watchlists more useful than chasing. Watch for the first card or set that breaks out and gets confirmation through the afternoon.`;
     takeaway       = "Quiet day, watch breakouts";
   }
 
   return {
+    market: ctx.market,
     version: HOMEPAGE_BRIEF_VERSION,
     summary,
     takeaway,
@@ -512,10 +634,10 @@ export type GenerateBriefLogger = Pick<Console, "error" | "info" | "warn">;
 
 export async function generateHomepageBrief(
   data: HomepageData,
-  options: { logger?: GenerateBriefLogger } = {},
+  options: { logger?: GenerateBriefLogger; market?: HomepageBriefMarket } = {},
 ): Promise<HomepageBrief> {
   const logger = options.logger ?? console;
-  const ctx = buildHomepageBriefContext(data);
+  const ctx = buildHomepageBriefContext(data, { market: options.market });
   const startMs = Date.now();
 
   // Short-circuit the LLM when the homepage has no mover data. A fresh
@@ -523,7 +645,7 @@ export async function generateHomepageBrief(
   // produce a useless brief.
   if (ctx.moverSets.length === 0 && ctx.breakoutCount === 0 && ctx.unusualCount === 0) {
     logger.info("[homepage-brief] no mover data, using fallback");
-    return buildFallbackHomepageBrief(ctx, data.as_of);
+    return buildFallbackHomepageBrief(ctx, ctx.asOf);
   }
 
   const system = SYSTEM_PROMPT;
@@ -541,6 +663,7 @@ export async function generateHomepageBrief(
         isEnabled: true,
         functionId: "homepage-brief",
         metadata: {
+          market: ctx.market,
           tone: ctx.tone,
           ...(ctx.dominantSet ? { dominant_set: ctx.dominantSet } : {}),
         },
@@ -552,7 +675,7 @@ export async function generateHomepageBrief(
         rawPreview: (result.text ?? "").slice(0, 200),
       });
       return {
-        ...buildFallbackHomepageBrief(ctx, data.as_of),
+        ...buildFallbackHomepageBrief(ctx, ctx.asOf),
         failureReason: "parse-miss",
       };
     }
@@ -562,6 +685,7 @@ export async function generateHomepageBrief(
       outputTokens: undefined,
     };
     const brief: HomepageBrief = {
+      market: ctx.market,
       version: HOMEPAGE_BRIEF_VERSION,
       summary: parsed.summary,
       takeaway: parsed.takeaway,
@@ -575,7 +699,7 @@ export async function generateHomepageBrief(
       inputTokens: typeof usage.inputTokens === "number" ? usage.inputTokens : null,
       outputTokens: typeof usage.outputTokens === "number" ? usage.outputTokens : null,
       durationMs: Date.now() - startMs,
-      dataAsOf: data.as_of,
+      dataAsOf: ctx.asOf,
     };
     logger.info("[homepage-brief] generated", {
       durationMs: brief.durationMs,
@@ -598,7 +722,7 @@ export async function generateHomepageBrief(
       reason: `${errName}: ${errMsg}`,
     });
     return {
-      ...buildFallbackHomepageBrief(ctx, data.as_of),
+      ...buildFallbackHomepageBrief(ctx, ctx.asOf),
       failureReason: `llm-threw:${errName}:${errMsg.slice(0, 160)}`,
     };
   } finally {

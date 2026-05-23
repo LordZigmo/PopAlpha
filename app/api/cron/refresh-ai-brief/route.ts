@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 
-import { generateHomepageBrief } from "@/lib/ai/homepage-brief";
+import {
+  generateHomepageBrief,
+  type HomepageBrief,
+  type HomepageBriefMarket,
+} from "@/lib/ai/homepage-brief";
 import { requireCron } from "@/lib/auth/require";
 import { getHomepageData } from "@/lib/data/homepage";
 import { dbAdmin } from "@/lib/db/admin";
@@ -13,21 +17,22 @@ import { dbAdmin } from "@/lib/db/admin";
  *
  * Flow:
  *   1. Load the same HomepageData the public /api/homepage route serves.
- *   2. Ask Gemini for a structured brief (summary + takeaway + focusSet).
+ *   2. Ask the Gateway model for structured EN and JP briefs.
  *      If the LLM fails or returns malformed output, a deterministic
  *      fallback is used so the cache is never empty.
  *   3. Insert the new row into public.ai_brief_cache.
  *   4. Prune rows older than 7 days to keep the table small.
  *
- * Reads go through public.public_ai_brief_latest (the single most recent
- * row), so iOS and web always see the newest brief without knowing about
- * the retention window.
+ * Reads go through public.public_ai_brief_latest (newest row per market),
+ * so iOS and web always see the newest brief without knowing about the
+ * retention window.
  */
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const PRUNE_BEFORE_DAYS = 7;
+const MARKETS: HomepageBriefMarket[] = ["EN", "JP"];
 
 export async function GET(req: Request) {
   const auth = await requireCron(req);
@@ -37,34 +42,40 @@ export async function GET(req: Request) {
 
   try {
     const data = await getHomepageData();
-    const brief = await generateHomepageBrief(data);
-
     const supabase = dbAdmin();
+    const briefs: HomepageBrief[] = [];
 
-    const { error: insertError } = await supabase
-      .from("ai_brief_cache")
-      .insert({
-        version: brief.version,
-        summary: brief.summary,
-        takeaway: brief.takeaway,
-        whats_happening: brief.whatsHappening,
-        why_it_matters:  brief.whyItMatters,
-        what_to_watch:   brief.whatToWatch,
-        focus_set: brief.focusSet,
-        model_label: brief.modelLabel,
-        input_tokens: brief.inputTokens,
-        output_tokens: brief.outputTokens,
-        duration_ms: brief.durationMs,
-        source: brief.source,
-        data_as_of: brief.dataAsOf,
-      });
+    for (const market of MARKETS) {
+      const brief = await generateHomepageBrief(data, { market });
 
-    if (insertError) {
-      console.error("[cron/refresh-ai-brief] insert failed:", insertError.message);
-      return NextResponse.json(
-        { ok: false, error: insertError.message },
-        { status: 500 },
-      );
+      const { error: insertError } = await supabase
+        .from("ai_brief_cache")
+        .insert({
+          market: brief.market,
+          version: brief.version,
+          summary: brief.summary,
+          takeaway: brief.takeaway,
+          whats_happening: brief.whatsHappening,
+          why_it_matters:  brief.whyItMatters,
+          what_to_watch:   brief.whatToWatch,
+          focus_set: brief.focusSet,
+          model_label: brief.modelLabel,
+          input_tokens: brief.inputTokens,
+          output_tokens: brief.outputTokens,
+          duration_ms: brief.durationMs,
+          source: brief.source,
+          data_as_of: brief.dataAsOf,
+        });
+
+      if (insertError) {
+        console.error("[cron/refresh-ai-brief] insert failed:", insertError.message);
+        return NextResponse.json(
+          { ok: false, market, error: insertError.message },
+          { status: 500 },
+        );
+      }
+
+      briefs.push(brief);
     }
 
     // Prune old rows. Non-fatal if it fails — the insert already succeeded
@@ -85,8 +96,11 @@ export async function GET(req: Request) {
     // returned junk → fallback with failureReason → ok:false so this
     // can't silently look like a successful cron). See
     // docs/external-api-failure-modes.md for the rule.
-    const llmPathDegraded =
-      brief.source !== "llm" && typeof brief.failureReason === "string";
+    const degradedBriefs = briefs.filter(
+      (brief) => brief.source !== "llm" && typeof brief.failureReason === "string",
+    );
+    const llmPathDegraded = degradedBriefs.length > 0;
+    const englishBrief = briefs.find((brief) => brief.market === "EN") ?? briefs[0] ?? null;
 
     return NextResponse.json(
       {
@@ -94,8 +108,25 @@ export async function GET(req: Request) {
         durationMs: Date.now() - startMs,
         llmPathDegraded,
         // Populated only on a degraded run.
-        llmFailureReason: brief.failureReason ?? null,
-        brief: {
+        llmFailureReason: degradedBriefs[0]?.failureReason ?? null,
+        // Backward-compatible single-brief field for existing monitors.
+        brief: englishBrief ? {
+          market: englishBrief.market,
+          source: englishBrief.source,
+          summary: englishBrief.summary,
+          takeaway: englishBrief.takeaway,
+          whatsHappening: englishBrief.whatsHappening,
+          whyItMatters:   englishBrief.whyItMatters,
+          whatToWatch:    englishBrief.whatToWatch,
+          focusSet: englishBrief.focusSet,
+          modelLabel: englishBrief.modelLabel,
+          inputTokens: englishBrief.inputTokens,
+          outputTokens: englishBrief.outputTokens,
+          generationMs: englishBrief.durationMs,
+          failureReason: englishBrief.failureReason ?? null,
+        } : null,
+        briefs: briefs.map((brief) => ({
+          market: brief.market,
           source: brief.source,
           summary: brief.summary,
           takeaway: brief.takeaway,
@@ -107,7 +138,8 @@ export async function GET(req: Request) {
           inputTokens: brief.inputTokens,
           outputTokens: brief.outputTokens,
           generationMs: brief.durationMs,
-        },
+          failureReason: brief.failureReason ?? null,
+        })),
       },
       { status: llmPathDegraded ? 500 : 200 },
     );
