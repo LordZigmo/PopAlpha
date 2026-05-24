@@ -69,7 +69,6 @@ const MAX_STALE_PRICE_SCAN_ROWS = 5000;
 const MAX_INITIAL_FETCH_SCAN_ROWS = 25_000;
 const YAHOO_ROUTE = "/api/cron/run-yahoo-jp-daily";
 const BASE_CARD_SELECT = "slug,canonical_name,canonical_name_native,set_name,set_name_native,card_number,year,language";
-const MATCHED_JP_CARD_SELECT = "slug,canonical_name,canonical_name_native,set_name,set_name_native,card_number,year,language,provider_card_map!inner(mapping_status)";
 
 // Mirror the JPY/USD rate used by the orchestrator + lib/pricing/fx.ts
 // so the column matches what the rest of the app produces.
@@ -99,54 +98,6 @@ type YahooProcessResult =
   | { slug: string; status: "scrape-failed"; reason: string }
   | { slug: string; status: "write-failed"; reason: string }
   | { slug: string; status: "no-query"; reason: string };
-
-async function loadYahooScrapedSlugs(
-  supabase: ReturnType<typeof dbAdmin>,
-  slugs: string[],
-): Promise<Set<string>> {
-  const scraped = new Set<string>();
-  const chunkSize = 100;
-
-  for (let i = 0; i < slugs.length; i += chunkSize) {
-    const chunk = slugs.slice(i, i + chunkSize);
-    const { data, error } = await supabase
-      .from("yahoo_jp_card_prices")
-      .select("canonical_slug")
-      .eq("grade", "RAW")
-      .in("canonical_slug", chunk);
-    if (error) throw new Error(`yahoo_jp_card_prices(scraped slugs): ${error.message}`);
-
-    for (const row of data ?? []) {
-      if (row.canonical_slug) scraped.add(row.canonical_slug);
-    }
-  }
-
-  return scraped;
-}
-
-async function loadYahooAttemptedSlugs(
-  supabase: ReturnType<typeof dbAdmin>,
-  slugs: string[],
-): Promise<Set<string>> {
-  const attempted = new Set<string>();
-  const chunkSize = 100;
-
-  for (let i = 0; i < slugs.length; i += chunkSize) {
-    const chunk = slugs.slice(i, i + chunkSize);
-    const { data, error } = await supabase
-      .from("jp_ingestion_attempts")
-      .select("canonical_slug")
-      .eq("provider", "YAHOO_JP")
-      .in("canonical_slug", chunk);
-    if (error) throw new Error(`jp_ingestion_attempts(yahoo attempted slugs): ${error.message}`);
-
-    for (const row of data ?? []) {
-      if (row.canonical_slug) attempted.add(row.canonical_slug);
-    }
-  }
-
-  return attempted;
-}
 
 async function loadStaleYahooSlugs(
   supabase: ReturnType<typeof dbAdmin>,
@@ -188,6 +139,93 @@ async function loadStaleYahooSlugs(
   return staleSlugs;
 }
 
+async function loadNeverAttemptedYahooSlugs(
+  supabase: ReturnType<typeof dbAdmin>,
+  input: {
+    limit: number;
+  },
+): Promise<string[]> {
+  if (input.limit <= 0) return [];
+
+  const slugs: string[] = [];
+  const seen = new Set<string>();
+
+  for (
+    let from = 0;
+    slugs.length < input.limit && from < MAX_INITIAL_FETCH_SCAN_ROWS;
+    from += CANDIDATE_SCAN_PAGE_SIZE
+  ) {
+    const { data, error } = await supabase
+      .from("canonical_cards")
+      .select("slug,provider_card_map!inner(mapping_status),yjp:yahoo_jp_card_prices!left(canonical_slug,grade),attempt:jp_ingestion_attempts!left(canonical_slug,provider)")
+      .eq("language", "JP")
+      .eq("provider_card_map.mapping_status", "MATCHED")
+      .eq("yjp.grade", "RAW")
+      .eq("attempt.provider", "YAHOO_JP")
+      .is("yjp.canonical_slug", null)
+      .is("attempt.canonical_slug", null)
+      .order("created_at", { ascending: false })
+      .range(from, from + CANDIDATE_SCAN_PAGE_SIZE - 1);
+    if (error) throw new Error(`matched-jp never-attempted scan: ${error.message}`);
+
+    const rows = (data ?? []) as Array<{ slug: string | null }>;
+    for (const row of rows) {
+      if (!row.slug || seen.has(row.slug)) continue;
+      seen.add(row.slug);
+      slugs.push(row.slug);
+      if (slugs.length >= input.limit) break;
+    }
+
+    if (rows.length < CANDIDATE_SCAN_PAGE_SIZE) break;
+  }
+
+  return slugs;
+}
+
+async function loadRetryNoPriceYahooSlugs(
+  supabase: ReturnType<typeof dbAdmin>,
+  input: {
+    suppressedSlugs: Set<string>;
+    limit: number;
+  },
+): Promise<string[]> {
+  if (input.limit <= 0) return [];
+
+  const retryNoPriceSlugs: string[] = [];
+  const seen = new Set<string>();
+
+  for (
+    let from = 0;
+    retryNoPriceSlugs.length < input.limit && from < MAX_INITIAL_FETCH_SCAN_ROWS;
+    from += CANDIDATE_SCAN_PAGE_SIZE
+  ) {
+    const { data, error } = await supabase
+      .from("canonical_cards")
+      .select("slug,provider_card_map!inner(mapping_status),yjp:yahoo_jp_card_prices!left(canonical_slug,grade),attempt:jp_ingestion_attempts!inner(canonical_slug,provider)")
+      .eq("language", "JP")
+      .eq("provider_card_map.mapping_status", "MATCHED")
+      .eq("yjp.grade", "RAW")
+      .eq("attempt.provider", "YAHOO_JP")
+      .is("yjp.canonical_slug", null)
+      .order("created_at", { ascending: false })
+      .range(from, from + CANDIDATE_SCAN_PAGE_SIZE - 1);
+    if (error) throw new Error(`matched-jp retry-no-price scan: ${error.message}`);
+
+    const rows = (data ?? []) as Array<{ slug: string | null }>;
+    for (const row of rows) {
+      const slug = row.slug;
+      if (!slug || seen.has(slug) || input.suppressedSlugs.has(slug)) continue;
+      seen.add(slug);
+      retryNoPriceSlugs.push(slug);
+      if (retryNoPriceSlugs.length >= input.limit) break;
+    }
+
+    if (rows.length < CANDIDATE_SCAN_PAGE_SIZE) break;
+  }
+
+  return retryNoPriceSlugs;
+}
+
 async function loadInitialYahooSlugs(
   supabase: ReturnType<typeof dbAdmin>,
   input: {
@@ -195,51 +233,16 @@ async function loadInitialYahooSlugs(
     limit: number;
   },
 ): Promise<string[]> {
-  const neverAttemptedSlugs: string[] = [];
-  const retryNoPriceSlugs: string[] = [];
-  const seen = new Set<string>();
-  const candidatePoolSize = () => neverAttemptedSlugs.length + retryNoPriceSlugs.length;
+  const neverAttemptedSlugs = await loadNeverAttemptedYahooSlugs(supabase, {
+    limit: input.limit,
+  });
+  const remainingLimit = input.limit - neverAttemptedSlugs.length;
+  const retryNoPriceSlugs = await loadRetryNoPriceYahooSlugs(supabase, {
+    suppressedSlugs: input.suppressedSlugs,
+    limit: remainingLimit,
+  });
 
-  for (
-    let from = 0;
-    candidatePoolSize() < input.limit && from < MAX_INITIAL_FETCH_SCAN_ROWS;
-    from += CANDIDATE_SCAN_PAGE_SIZE
-  ) {
-    const { data, error } = await supabase
-      .from("canonical_cards")
-      .select(MATCHED_JP_CARD_SELECT)
-      .eq("language", "JP")
-      .eq("provider_card_map.mapping_status", "MATCHED")
-      .order("created_at", { ascending: false })
-      .range(from, from + CANDIDATE_SCAN_PAGE_SIZE - 1);
-    if (error) throw new Error(`matched-jp scan: ${error.message}`);
-
-    const rows = (data ?? []) as CardRow[];
-    const pageSlugs: string[] = [];
-    for (const row of rows) {
-      if (seen.has(row.slug) || input.suppressedSlugs.has(row.slug)) continue;
-      seen.add(row.slug);
-      pageSlugs.push(row.slug);
-    }
-
-    const [everScraped, everAttempted] = await Promise.all([
-      loadYahooScrapedSlugs(supabase, pageSlugs),
-      loadYahooAttemptedSlugs(supabase, pageSlugs),
-    ]);
-    for (const slug of pageSlugs) {
-      if (everScraped.has(slug)) continue;
-      if (everAttempted.has(slug)) {
-        retryNoPriceSlugs.push(slug);
-      } else {
-        neverAttemptedSlugs.push(slug);
-      }
-      if (candidatePoolSize() >= input.limit) break;
-    }
-
-    if (rows.length < CANDIDATE_SCAN_PAGE_SIZE) break;
-  }
-
-  return [...neverAttemptedSlugs, ...retryNoPriceSlugs].slice(0, input.limit);
+  return [...neverAttemptedSlugs, ...retryNoPriceSlugs];
 }
 
 /**
