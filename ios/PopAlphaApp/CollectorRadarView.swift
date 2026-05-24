@@ -94,10 +94,16 @@ struct CollectorRadarView: View {
             }
         }
         .overlay(labelsOverlay)
-        .onAppear {
+        .task {
+            // .task runs reliably even when the parent applies
+            // .disabled / .allowsHitTesting modifiers that can
+            // disrupt SwiftUI .onAppear timing for embedded Canvas
+            // views (the radar was rendering with dataProgress
+            // stuck at 0 inside PortfolioDemoView before this).
             // Slight delay so the user sees the polygon "draw in"
             // rather than catching the tail end while the page settles.
-            withAnimation(.easeOut(duration: 0.9).delay(0.15)) {
+            try? await Task.sleep(for: .milliseconds(150))
+            withAnimation(.easeOut(duration: 0.9)) {
                 dataProgress = 1
             }
         }

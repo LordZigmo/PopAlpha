@@ -23,6 +23,7 @@ import SwiftUI
 //   - `onScan`       → MarketplaceView switches `selectedTab = .scanner`.
 //   - `onSeeMovers`  → MarketplaceView scrolls to the MarketPulseSection
 //                       anchor via ScrollViewReader.
+//   - `onDismiss`    → optional parent-owned dismissal of the full hero.
 
 struct MarketHeroCard: View {
     let onScan: () -> Void
@@ -31,6 +32,7 @@ struct MarketHeroCard: View {
     /// JP rail renders directly below the hero, so an in-page scroll
     /// CTA would be both a no-op and a redundant nudge.
     let onSeeMovers: (() -> Void)?
+    let onDismiss: (() -> Void)?
 
     /// Homepage market injected by `MarketplaceView`. The hero is pure
     /// brand identity (eyebrow, primary CTA, accent glow, border) so
@@ -38,8 +40,19 @@ struct MarketHeroCard: View {
     /// when the user toggles to JP mode.
     @Environment(\.market) private var market
 
+    init(
+        onScan: @escaping () -> Void,
+        onSeeMovers: (() -> Void)?,
+        onDismiss: (() -> Void)? = nil
+    ) {
+        self.onScan = onScan
+        self.onSeeMovers = onSeeMovers
+        self.onDismiss = onDismiss
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        ZStack(alignment: .topTrailing) {
+            VStack(alignment: .leading, spacing: 14) {
             // Eyebrow: small icon + "PopAlpha" wordmark — orients the
             // card as the app's primary value prop without shouting.
             HStack(spacing: 6) {
@@ -125,8 +138,26 @@ struct MarketHeroCard: View {
             }
             .font(.system(size: 11, weight: .medium))
             .foregroundStyle(PA.Colors.muted)
+            }
+            .padding(16)
+            .padding(.trailing, onDismiss == nil ? 0 : 28)
+
+            if let onDismiss {
+                Button {
+                    onDismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(PA.Colors.textSecondary)
+                        .frame(width: 28, height: 28)
+                        .background(PA.Colors.surfaceSoft)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .padding(10)
+                .accessibilityLabel("Dismiss intro card")
+            }
         }
-        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .liquidGlassSurface(accent: market.accent)
         // VoiceOver reads the title + sub + the two button hints in

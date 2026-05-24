@@ -69,6 +69,7 @@ struct MarketplaceView: View {
     @State private var showSearch = false
     @State private var selectedWindow: SignalWindow = .h24
     @State private var searchSelectedCard: MarketCard?
+    @AppStorage("popalpha.market.hero.dismissed.v1") private var isMarketHeroDismissed = false
     /// Card pushed by tapping a row in ForYou / MarketPulse / Community.
     /// Kept separate from `searchSelectedCard` so the two pipelines
     /// don't fight over the same NavigationStack destination state.
@@ -194,11 +195,14 @@ struct MarketplaceView: View {
     @ViewBuilder
     private func guestSequence(proxy: ScrollViewProxy) -> some View {
         // 1. Hero — answers "what is this?" in 3 seconds.
-        MarketHeroCard(
-            onScan: { handleScanCTA() },
-            onSeeMovers: { handleSeeMoversCTA(proxy: proxy) }
-        )
-        .padding(.horizontal, PA.Layout.sectionPadding)
+        if !isMarketHeroDismissed {
+            MarketHeroCard(
+                onScan: { handleScanCTA() },
+                onSeeMovers: { handleSeeMoversCTA(proxy: proxy) },
+                onDismiss: { dismissMarketHero() }
+            )
+            .padding(.horizontal, PA.Layout.sectionPadding)
+        }
 
         // 2. AI Brief — handles its own placeholder when brief is nil.
         AIBriefCard(brief: aiBrief, fallbackAsOf: data?.asOf, styleLabel: styleLabel)
@@ -311,11 +315,14 @@ struct MarketplaceView: View {
             // JP rail renders directly below the hero, so the secondary
             // "See what's moving" CTA is suppressed — its accessibility
             // hint advertises a scroll that doesn't help in this layout.
-            MarketHeroCard(
-                onScan: { handleScanCTA() },
-                onSeeMovers: nil
-            )
-            .padding(.horizontal, PA.Layout.sectionPadding)
+            if !isMarketHeroDismissed {
+                MarketHeroCard(
+                    onScan: { handleScanCTA() },
+                    onSeeMovers: nil,
+                    onDismiss: { dismissMarketHero() }
+                )
+                .padding(.horizontal, PA.Layout.sectionPadding)
+            }
         }
 
         // Same slot the EN sequences use, backed by the JP AI Brief
@@ -499,6 +506,12 @@ struct MarketplaceView: View {
         PAHaptics.tap()
         withAnimation(.easeInOut(duration: 0.4)) {
             proxy.scrollTo("movers", anchor: .top)
+        }
+    }
+
+    private func dismissMarketHero() {
+        withAnimation(.easeInOut(duration: 0.25)) {
+            isMarketHeroDismissed = true
         }
     }
 
@@ -694,26 +707,25 @@ private struct TopBar: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            // Transparent character (no dark tile background) so the
-            // mark blends into the homepage chrome instead of looking
-            // like a separate floating icon. Slightly larger frame to
-            // compensate for the lack of a tile to anchor it visually.
-            Image("PopAlphaLogoTransparent")
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 30, height: 30)
-
             // EN / JP market toggle. Replaces the wide
             // MarketToggleStrip that used to sit in its own row below
             // TopBar — the split row chewed up vertical space that's
             // better spent on hero/brief content. Geometry mimics the
             // Scanner's language pill (28×22 segments, Capsule, 11pt
-            // semibold) but uses adaptive surface colors so it reads
-            // on the homepage's light/dark background instead of the
-            // camera viewfinder's hard black. Active segment fills
-            // with `market.accent` — cyan on EN, Hinomaru red on JP —
-            // so the pill doubles as a legend.
+            // semibold). Active segment fills with `market.accent` —
+            // cyan on EN, Hinomaru red on JP — so the pill doubles as
+            // a legend.
             marketTogglePill
+
+            // Full modern wordmark (same asset the launch screen uses)
+            // so the top of the app reads as PopAlpha at a glance.
+            // Rendered raw (no template tint) so it matches the splash
+            // exactly — native white on the homepage's dark chrome.
+            Image("LaunchLogo")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(height: 26)
+                .accessibilityLabel("PopAlpha")
 
             Spacer()
 
