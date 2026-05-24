@@ -147,25 +147,36 @@ async function loadNeverAttemptedYahooSlugs(
 ): Promise<string[]> {
   if (input.limit <= 0) return [];
 
-  const { data, error } = await supabase
-    .from("canonical_cards")
-    .select("slug,provider_card_map!inner(mapping_status),yjp:yahoo_jp_card_prices!left(canonical_slug,grade),attempt:jp_ingestion_attempts!left(canonical_slug,provider)")
-    .eq("language", "JP")
-    .eq("provider_card_map.mapping_status", "MATCHED")
-    .eq("yjp.grade", "RAW")
-    .eq("attempt.provider", "YAHOO_JP")
-    .is("yjp.canonical_slug", null)
-    .is("attempt.canonical_slug", null)
-    .order("created_at", { ascending: false })
-    .range(0, input.limit - 1);
-  if (error) throw new Error(`matched-jp never-attempted scan: ${error.message}`);
-
   const slugs: string[] = [];
   const seen = new Set<string>();
-  for (const row of (data ?? []) as Array<{ slug: string | null }>) {
-    if (!row.slug || seen.has(row.slug)) continue;
-    seen.add(row.slug);
-    slugs.push(row.slug);
+
+  for (
+    let from = 0;
+    slugs.length < input.limit && from < MAX_INITIAL_FETCH_SCAN_ROWS;
+    from += CANDIDATE_SCAN_PAGE_SIZE
+  ) {
+    const { data, error } = await supabase
+      .from("canonical_cards")
+      .select("slug,provider_card_map!inner(mapping_status),yjp:yahoo_jp_card_prices!left(canonical_slug,grade),attempt:jp_ingestion_attempts!left(canonical_slug,provider)")
+      .eq("language", "JP")
+      .eq("provider_card_map.mapping_status", "MATCHED")
+      .eq("yjp.grade", "RAW")
+      .eq("attempt.provider", "YAHOO_JP")
+      .is("yjp.canonical_slug", null)
+      .is("attempt.canonical_slug", null)
+      .order("created_at", { ascending: false })
+      .range(from, from + CANDIDATE_SCAN_PAGE_SIZE - 1);
+    if (error) throw new Error(`matched-jp never-attempted scan: ${error.message}`);
+
+    const rows = (data ?? []) as Array<{ slug: string | null }>;
+    for (const row of rows) {
+      if (!row.slug || seen.has(row.slug)) continue;
+      seen.add(row.slug);
+      slugs.push(row.slug);
+      if (slugs.length >= input.limit) break;
+    }
+
+    if (rows.length < CANDIDATE_SCAN_PAGE_SIZE) break;
   }
 
   return slugs;
