@@ -92,51 +92,89 @@ type SnkrdunkProcessResult =
   | { slug: string; status: "scrape-failed"; reason: string }
   | { slug: string; status: "write-failed"; reason: string };
 
-async function loadSnkrdunkPricedProductCodes(
-  supabase: ReturnType<typeof dbAdmin>,
-  productCodes: string[],
-): Promise<Set<string>> {
-  const priced = new Set<string>();
-  const chunkSize = 100;
-
-  for (let i = 0; i < productCodes.length; i += chunkSize) {
-    const chunk = productCodes.slice(i, i + chunkSize);
-    const { data, error } = await supabase
-      .from("snkrdunk_card_prices")
-      .select("snkrdunk_product_code")
-      .in("snkrdunk_product_code", chunk);
-    if (error) throw new Error(`snkrdunk_card_prices(priced product codes): ${error.message}`);
-
-    for (const row of data ?? []) {
-      if (row.snkrdunk_product_code) priced.add(row.snkrdunk_product_code);
-    }
-  }
-
-  return priced;
+function toSnkrdunkRefreshCandidate(row: SnkrdunkProductMapRow): RefreshCandidate | null {
+  if (!row.snkrdunk_product_code) return null;
+  return {
+    canonical_slug: row.canonical_slug,
+    printing_id: null,
+    snkrdunk_product_code: row.snkrdunk_product_code,
+    observed_at: null,
+  };
 }
 
-async function loadSnkrdunkAttemptedSourceKeys(
+async function loadNeverAttemptedSnkrdunkCandidates(
   supabase: ReturnType<typeof dbAdmin>,
-  productCodes: string[],
-): Promise<Set<string>> {
-  const attempted = new Set<string>();
-  const chunkSize = 100;
+  input: {
+    limit: number;
+  },
+): Promise<RefreshCandidate[]> {
+  if (input.limit <= 0) return [];
 
-  for (let i = 0; i < productCodes.length; i += chunkSize) {
-    const chunk = productCodes.slice(i, i + chunkSize);
-    const { data, error } = await supabase
-      .from("jp_ingestion_attempts")
-      .select("source_key")
-      .eq("provider", "SNKRDUNK")
-      .in("source_key", chunk);
-    if (error) throw new Error(`jp_ingestion_attempts(snkrdunk attempted source keys): ${error.message}`);
+  const { data, error } = await supabase
+    .from("snkrdunk_product_map")
+    .select("canonical_slug,snkrdunk_product_code,canonical_cards!inner(snk:snkrdunk_card_prices!left(snkrdunk_product_code),attempt:jp_ingestion_attempts!left(source_key,provider))")
+    .eq("mapping_status", "MATCHED")
+    .eq("canonical_cards.attempt.provider", "SNKRDUNK")
+    .is("canonical_cards.snk.snkrdunk_product_code", null)
+    .is("canonical_cards.attempt.source_key", null)
+    .order("canonical_slug", { ascending: true })
+    .range(0, input.limit - 1);
+  if (error) throw new Error(`snkrdunk_product_map(never-attempted scan): ${error.message}`);
 
-    for (const row of data ?? []) {
-      if (row.source_key) attempted.add(row.source_key);
-    }
+  const candidates: RefreshCandidate[] = [];
+  const seenProductCodes = new Set<string>();
+  for (const row of (data ?? []) as SnkrdunkProductMapRow[]) {
+    const candidate = toSnkrdunkRefreshCandidate(row);
+    if (!candidate || seenProductCodes.has(candidate.snkrdunk_product_code)) continue;
+    seenProductCodes.add(candidate.snkrdunk_product_code);
+    candidates.push(candidate);
   }
 
-  return attempted;
+  return candidates;
+}
+
+async function loadRetryNoPriceSnkrdunkCandidates(
+  supabase: ReturnType<typeof dbAdmin>,
+  input: {
+    suppressedSourceKeys: Set<string>;
+    limit: number;
+  },
+): Promise<RefreshCandidate[]> {
+  if (input.limit <= 0) return [];
+
+  const retryNoPriceCandidates: RefreshCandidate[] = [];
+  const seenProductCodes = new Set<string>();
+
+  for (
+    let from = 0;
+    retryNoPriceCandidates.length < input.limit && from < MAX_INITIAL_FETCH_SCAN_ROWS;
+    from += CANDIDATE_SCAN_PAGE_SIZE
+  ) {
+    const { data, error } = await supabase
+      .from("snkrdunk_product_map")
+      .select("canonical_slug,snkrdunk_product_code,canonical_cards!inner(snk:snkrdunk_card_prices!left(snkrdunk_product_code),attempt:jp_ingestion_attempts!inner(source_key,provider))")
+      .eq("mapping_status", "MATCHED")
+      .eq("canonical_cards.attempt.provider", "SNKRDUNK")
+      .is("canonical_cards.snk.snkrdunk_product_code", null)
+      .order("canonical_slug", { ascending: true })
+      .range(from, from + CANDIDATE_SCAN_PAGE_SIZE - 1);
+    if (error) throw new Error(`snkrdunk_product_map(retry-no-price scan): ${error.message}`);
+
+    const rows = (data ?? []) as SnkrdunkProductMapRow[];
+    for (const row of rows) {
+      const candidate = toSnkrdunkRefreshCandidate(row);
+      if (!candidate) continue;
+      const productCode = candidate.snkrdunk_product_code;
+      if (seenProductCodes.has(productCode) || input.suppressedSourceKeys.has(productCode)) continue;
+      seenProductCodes.add(productCode);
+      retryNoPriceCandidates.push(candidate);
+      if (retryNoPriceCandidates.length >= input.limit) break;
+    }
+
+    if (rows.length < CANDIDATE_SCAN_PAGE_SIZE) break;
+  }
+
+  return retryNoPriceCandidates;
 }
 
 async function loadInitialSnkrdunkCandidates(
@@ -146,61 +184,16 @@ async function loadInitialSnkrdunkCandidates(
     limit: number;
   },
 ): Promise<RefreshCandidate[]> {
-  const neverAttemptedCandidates: RefreshCandidate[] = [];
-  const retryNoPriceCandidates: RefreshCandidate[] = [];
-  const seenProductCodes = new Set<string>();
-  const candidatePoolSize = () => neverAttemptedCandidates.length + retryNoPriceCandidates.length;
+  const neverAttemptedCandidates = await loadNeverAttemptedSnkrdunkCandidates(supabase, {
+    limit: input.limit,
+  });
+  const remainingLimit = input.limit - neverAttemptedCandidates.length;
+  const retryNoPriceCandidates = await loadRetryNoPriceSnkrdunkCandidates(supabase, {
+    suppressedSourceKeys: input.suppressedSourceKeys,
+    limit: remainingLimit,
+  });
 
-  for (
-    let from = 0;
-    candidatePoolSize() < input.limit && from < MAX_INITIAL_FETCH_SCAN_ROWS;
-    from += CANDIDATE_SCAN_PAGE_SIZE
-  ) {
-    const { data, error } = await supabase
-      .from("snkrdunk_product_map")
-      .select("canonical_slug, snkrdunk_product_code")
-      .eq("mapping_status", "MATCHED")
-      .order("canonical_slug", { ascending: true })
-      .range(from, from + CANDIDATE_SCAN_PAGE_SIZE - 1);
-    if (error) throw new Error(`snkrdunk_product_map(initial scan): ${error.message}`);
-
-    const rows = (data ?? []) as SnkrdunkProductMapRow[];
-    const pageRows: SnkrdunkProductMapRow[] = [];
-    for (const row of rows) {
-      const productCode = row.snkrdunk_product_code;
-      if (!productCode) continue;
-      if (seenProductCodes.has(productCode) || input.suppressedSourceKeys.has(productCode)) continue;
-      seenProductCodes.add(productCode);
-      pageRows.push(row);
-    }
-
-    const productCodes = pageRows.map((row) => row.snkrdunk_product_code);
-    const [pricedProductCodes, attemptedSourceKeys] = await Promise.all([
-      loadSnkrdunkPricedProductCodes(supabase, productCodes),
-      loadSnkrdunkAttemptedSourceKeys(supabase, productCodes),
-    ]);
-
-    for (const row of pageRows) {
-      const productCode = row.snkrdunk_product_code;
-      if (pricedProductCodes.has(productCode)) continue;
-      const candidate: RefreshCandidate = {
-        canonical_slug: row.canonical_slug,
-        printing_id: null,
-        snkrdunk_product_code: productCode,
-        observed_at: null,
-      };
-      if (attemptedSourceKeys.has(productCode)) {
-        retryNoPriceCandidates.push(candidate);
-      } else {
-        neverAttemptedCandidates.push(candidate);
-      }
-      if (candidatePoolSize() >= input.limit) break;
-    }
-
-    if (rows.length < CANDIDATE_SCAN_PAGE_SIZE) break;
-  }
-
-  return [...neverAttemptedCandidates, ...retryNoPriceCandidates].slice(0, input.limit);
+  return [...neverAttemptedCandidates, ...retryNoPriceCandidates];
 }
 
 /**
