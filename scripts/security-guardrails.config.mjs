@@ -617,6 +617,12 @@ export const PUBLIC_CALLABLE_FUNCTION_CONTRACTS = {
     writeType: "read_only_lookup",
     recommendedAction: "keep authenticated-only because it backs user-scoped profile follow flows",
   },
+  "set_pair_map_verify_manual()": {
+    roles: ["anon", "authenticated"],
+    writeType: "trigger_only_helper",
+    recommendedAction:
+      "trigger-only helper for set_pair_map manual overrides; direct table access remains governed by set_pair_map RLS/grants",
+  },
 };
 
 function operationalScript({

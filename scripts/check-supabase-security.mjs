@@ -400,10 +400,14 @@ for (const row of publicFunctions) {
 for (const [signature, contract] of actualFunctionContracts) {
   const expectedRoles = normalizePrivileges(PUBLIC_FUNCTION_EXECUTE_ALLOWLIST[signature] ?? []);
 
+  const hasExplicitFunctionContract = Object.hasOwn(PUBLIC_FUNCTION_EXECUTE_ALLOWLIST, signature);
   // Trigger functions are not public RPC surfaces: PostgreSQL only lets
   // them run from table triggers, so access is governed by the table's
-  // RLS/grant contract instead of function EXECUTE visibility.
-  if (!contract.returnsTrigger && !sameValues(contract.exposedRoles, expectedRoles)) {
+  // RLS/grant contract unless we intentionally add an explicit contract.
+  if (
+    (!contract.returnsTrigger || hasExplicitFunctionContract) &&
+    !sameValues(contract.exposedRoles, expectedRoles)
+  ) {
     addFailure(
       "function-execute",
       `${signature} exposes [${formatList(contract.exposedRoles)}] but expected [${formatList(expectedRoles)}].`,
