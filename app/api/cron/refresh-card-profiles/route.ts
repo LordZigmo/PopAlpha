@@ -10,8 +10,8 @@
  *                  refreshed every p_stale_days regardless of hash change.
  *               2. Low-priority: refreshed only when the price hash changes.
  *               3. Fallback upgrades: always processed, high-priority first.
- *   auto      – Runs backfill first (up to ?maxBackfillCards, default 100)
- *               then refresh (up to ?maxRefreshCards, default 400) within
+ *   auto      – Runs backfill first (up to ?maxBackfillCards, default 2)
+ *               then refresh (up to ?maxRefreshCards, default 8) within
  *               a single tick. Lets one hourly cron entry cover both
  *               mode responsibilities — the alternative would be two
  *               separate cron entries chewing up Vercel cron-quota slots.
@@ -35,35 +35,31 @@ import {
 } from "@/lib/ai/card-profile-summary";
 
 export const runtime = "nodejs";
-// Was 300s (Vercel Hobby cap). Bumped to 800s on Pro to chew through more
-// cards per invocation while we drain the ~17k fallback backlog. Each
-// run still bails early via the deadline guard at maxDuration -
-// DEADLINE_RESERVE_MS, so this is a ceiling not a floor — short batches
-// still exit fast.
-export const maxDuration = 800;
+export const maxDuration = 180;
 
-const DEADLINE_RESERVE_MS = 30_000;
-const DEFAULT_MAX_CARDS = 500;
-// Was 5. Each window of N cards waits on the slowest of N before moving
-// on, so doubling concurrency processes 2× cards in roughly the same
-// wall time. Bumped to 10 (also the upper bound on the ?concurrency=
-// query param) to drain backlog faster. If Gemini starts returning
-// RESOURCE_EXHAUSTED instead of AbortError under sustained load, drop
-// back to 8.
-const DEFAULT_CONCURRENCY = 10;
-const DEFAULT_BATCH_SIZE = 50;
-const STALE_DAYS = 1;
+const DEADLINE_RESERVE_MS = 20_000;
+const DEFAULT_MAX_CARDS = 25;
+const DEFAULT_MAX_BACKFILL_CARDS = 2;
+const DEFAULT_MAX_REFRESH_CARDS = 8;
+const MAX_OPERATOR_BATCH_CARDS = 250;
+const DEFAULT_CONCURRENCY = 2;
+const DEFAULT_BATCH_SIZE = 10;
+const STALE_DAYS = 7;
 const BATCH_HALTING_LLM_FAILURE_MARKERS = [
   "api key",
   "billing",
+  "credits",
   "current quota",
   "forbidden",
+  "insufficient funds",
+  "monthly spending cap",
   "not available",
   "not found",
   "permission",
   "quota",
   "rate limit",
   "resource_exhausted",
+  "spending cap",
   "unauthorized",
 ];
 
@@ -136,6 +132,7 @@ function toProfileInput(
     rarity: row.rarity ?? null,
     year: row.year ?? null,
     isDigital: row.is_digital ?? null,
+    isHighPriority: row.is_high_priority ?? null,
   };
 }
 
@@ -349,11 +346,27 @@ export async function GET(req: Request) {
   const modeParam = url.searchParams.get("mode");
   const mode: "backfill" | "refresh" | "auto" =
     modeParam === "refresh" ? "refresh" : modeParam === "auto" ? "auto" : "backfill";
-  const maxCardsParam = parseOptionalInt(url.searchParams.get("maxCards"), 1, 2000, DEFAULT_MAX_CARDS);
+  const maxCardsParam = parseOptionalInt(
+    url.searchParams.get("maxCards"),
+    1,
+    MAX_OPERATOR_BATCH_CARDS,
+    DEFAULT_MAX_CARDS,
+  );
   // Auto-mode split: separate budgets for the backfill and refresh phases
-  // so neither starves the other. Defaults total ~maxCards.
-  const maxBackfillCards = parseOptionalInt(url.searchParams.get("maxBackfillCards"), 1, 2000, 100);
-  const maxRefreshCards = parseOptionalInt(url.searchParams.get("maxRefreshCards"), 1, 2000, 400);
+  // so neither starves the other. Defaults are intentionally below
+  // maxCards because this cron runs hourly.
+  const maxBackfillCards = parseOptionalInt(
+    url.searchParams.get("maxBackfillCards"),
+    1,
+    MAX_OPERATOR_BATCH_CARDS,
+    DEFAULT_MAX_BACKFILL_CARDS,
+  );
+  const maxRefreshCards = parseOptionalInt(
+    url.searchParams.get("maxRefreshCards"),
+    1,
+    MAX_OPERATOR_BATCH_CARDS,
+    DEFAULT_MAX_REFRESH_CARDS,
+  );
   const concurrency = parseOptionalInt(url.searchParams.get("concurrency"), 1, 10, DEFAULT_CONCURRENCY);
   const batchSize = parseOptionalInt(url.searchParams.get("batchSize"), 10, 200, DEFAULT_BATCH_SIZE);
 

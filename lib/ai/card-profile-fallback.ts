@@ -9,15 +9,14 @@
 
 import crypto from "node:crypto";
 
-import { getPopAlphaGatewayModelId } from "@/lib/ai/model-config";
+import { getPopAlphaCardProfileModelId } from "@/lib/ai/model-config";
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
-// Stored alongside every
-// card_profiles row so historical data can be traced back to the
-// Gateway model that produced it. Lives here (not in the LLM-call file)
-// so the fallback path can stamp it without depending on server-only code.
-export const CARD_PROFILE_MODEL_LABEL = getPopAlphaGatewayModelId();
+// Default bulk profile model label. The server-only LLM path can override
+// this for featured/high-priority cards while the pure fallback remains
+// cheap and dependency-light.
+export const CARD_PROFILE_MODEL_LABEL = getPopAlphaCardProfileModelId();
 
 export const SIGNAL_LABELS = [
   "BREAKOUT",
@@ -74,6 +73,10 @@ export type CardProfileInput = {
   rarity: string | null;
   year: number | null;
   isDigital: boolean | null;
+  // Selection metadata from get_cards_needing_profile_refresh(). The
+  // fallback copy does not use this, but the server-only LLM path uses
+  // it to route featured/homepage-worthy cards to a stronger model.
+  isHighPriority?: boolean | null;
 };
 
 export type CardProfileResult = {

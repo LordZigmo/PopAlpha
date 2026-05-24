@@ -2,8 +2,8 @@ import "server-only";
 
 import { generateText } from "ai";
 
-import { getPopAlphaGatewayModelId } from "@/lib/ai/model-config";
-import { getPopAlphaModel } from "@/lib/ai/models";
+import { getPopAlphaHomepageBriefModelId } from "@/lib/ai/model-config";
+import { getPopAlphaHomepageBriefModel } from "@/lib/ai/models";
 import type { HomepageCard, HomepageData } from "@/lib/data/homepage";
 
 /**
@@ -34,7 +34,7 @@ import type { HomepageCard, HomepageData } from "@/lib/data/homepage";
 
 export const HOMEPAGE_BRIEF_VERSION = "homepage-brief-v1";
 // Stored on generated brief rows so each entry carries its producing Gateway model.
-export const HOMEPAGE_BRIEF_MODEL_LABEL = getPopAlphaGatewayModelId();
+export const HOMEPAGE_BRIEF_MODEL_LABEL = getPopAlphaHomepageBriefModelId();
 // Bumped from 8_000 to 15_000 in the same wave as card-profile-summary
 // (commit 564ce8c) and personalization/llm. Gemini 2.5-flash p95 sits in
 // the 5-10s range; 8s aborted enough briefs to be worth fixing
@@ -660,10 +660,11 @@ export async function generateHomepageBrief(
 
   try {
     const result = await generateText({
-      model: getPopAlphaModel(),
+      model: getPopAlphaHomepageBriefModel(),
       system,
       prompt,
       abortSignal: abortController.signal,
+      maxOutputTokens: 520,
       experimental_telemetry: {
         isEnabled: true,
         functionId: "homepage-brief",

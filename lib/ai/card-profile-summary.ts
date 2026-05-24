@@ -2,12 +2,15 @@ import "server-only";
 
 import { generateText } from "ai";
 
-import { getPopAlphaModel } from "@/lib/ai/models";
+import {
+  getPopAlphaCardProfileModel,
+  getPopAlphaFeaturedCardProfileModel,
+  getPopAlphaFeaturedCardProfileModelId,
+} from "@/lib/ai/models";
 import {
   buildFallbackProfile,
   buildMetricsHash,
   CARD_PROFILE_MODEL_LABEL,
-  pickSignal,
   priceTrackingBucket,
   SIGNAL_LABELS,
   VERDICTS,
@@ -52,107 +55,97 @@ export const CARD_PROFILE_MAX_RETRIES = 0;
 
 // ── Prompt ───────────────────────────────────────────────────────────────────
 
-// SYSTEM_PROMPT: deliberately compact (~30 lines / ~500 tokens).
-// Larger versions of this prompt pushed Gemini past first-token latency
-// budgets and the cron's 15s timeout, driving AbortError rates up to
-// 60% in prod. Each line here earns its keep — additions should be
-// weighed against the per-card cost (every card pays this prompt).
+// Keep this tiny: the card-profile cron can call it hundreds of times.
+// Deterministic code now picks signal/verdict/chip, so the model only
+// spends tokens on the two user-facing sentences/paragraph.
 const SYSTEM_PROMPT = [
-  "You are PopAlpha's market guide for Pokémon TCG collectors.",
-  "Read one card's market data and write a clear, useful brief.",
-  "",
-  "Voice:",
-  "- 8th-grade reading level. Short sentences. Plain English. Everyday words.",
-  "- Smart friend, not Wall Street analyst. No jargon, hype, or slang.",
-  "- Lead with the move. Don't open with 'Okay', 'So', 'Currently'.",
-  "- Never say buy / sell / hold. Use 'worth watching', 'cooling off', 'good buying range', 'running hot'.",
-  "- Don't mention being an AI. Don't invent numbers.",
-  "",
-  "Price tracking field:",
-  "- 'Price tracking (7d)': thin (sparse data), steady (reliable), dense (very well-tracked).",
-  "- This is NOT marketplace listings, supply, or copies for sale.",
-  "- NEVER cite the raw 'Price observations' count. Never write 'X listings' or 'supply is thin'. Use the bucket.",
-  "",
-  "Pattern for every summary: lead with the move → why it matters → what to watch next.",
-  "",
-  "Signal labels (pick one):",
-  "- BREAKOUT — strong move higher over last 7 days.",
-  "- COOLING — pulling back from recent highs.",
-  "- VALUE_ZONE — good buying range vs. last 30 days, with real supply.",
-  "- STEADY — flat, no clear move.",
-  "- OVERHEATED — bigger swings than usual; priced high vs. recent range.",
-  "",
-  "Verdicts (pick one): UNDERVALUED, FAIR, OVERHEATED, INSUFFICIENT_DATA.",
-  "",
-  "Output ONLY a JSON object matching:",
-  '  {"signal_label":"...","verdict":"...","chip":"...","summary_short":"...","summary_long":"..."}',
-  "",
-  "Rules:",
-  "- chip: 2–4 word badge starting with one emoji matching the signal.",
-  "    BREAKOUT → 🔥, COOLING → 📉, VALUE_ZONE → 💎, STEADY → 🔁, OVERHEATED → ⚠️",
-  "    e.g. \"🔥 Breakout\", \"💎 Good Buying Range\", \"🔁 Holding Steady\".",
-  "- summary_short: 2 sentences, 18–32 words. Lead with the move, not the price.",
-  "- summary_long: 3 sentences, 30–55 words. Move → why it matters → what to watch.",
-  "    If condition prices show a clear gap (NM much higher than LP), say so.",
+  "You write PopAlpha card notes for Pokemon TCG collectors.",
+  "Use only the supplied facts. Do not invent prices, listings, supply, or advice.",
+  "Plain English, short sentences, smart friend tone. No jargon, hype, or slang.",
+  "Do not say buy, sell, hold, investment, or being an AI.",
+  'Return only JSON: {"summary_short":"...","summary_long":"..."}.',
+  "summary_short: 2 sentences, 18-32 words. Lead with the market move.",
+  "summary_long: 3 sentences, 30-55 words. Move, why it matters, what to watch.",
   "- No prose, no code fences, no markdown outside the JSON.",
 ].join("\n");
 
-function buildUserPrompt(input: CardProfileInput): string {
-  const lines: string[] = [];
-  lines.push(`Card: ${input.canonicalName}`);
-  if (input.setName) lines.push(`Set: ${input.setName}`);
-  if (input.cardNumber) lines.push(`Number: ${input.cardNumber}`);
+function formatUsd(value: number | null): string | null {
+  if (value == null || !Number.isFinite(value)) return null;
+  return `$${value.toFixed(value >= 100 ? 0 : 2)}`;
+}
 
-  if (input.marketPrice != null) lines.push(`Market price: $${input.marketPrice.toFixed(2)}`);
-  if (input.median7d != null) lines.push(`7-day median: $${input.median7d.toFixed(2)}`);
-  if (input.median30d != null) lines.push(`30-day median: $${input.median30d.toFixed(2)}`);
-  if (input.changePct7d != null) {
-    lines.push(`7-day change: ${input.changePct7d > 0 ? "+" : ""}${input.changePct7d.toFixed(1)}%`);
-  }
+function formatSignedPct(value: number | null): string | null {
+  if (value == null || !Number.isFinite(value)) return null;
+  return `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
+}
+
+function formatConditionPrices(
+  conditionPrices: CardProfileInput["conditionPrices"],
+): string | null {
+  if (!conditionPrices || conditionPrices.length === 0) return null;
+  const rank: Record<string, number> = { nm: 0, lp: 1, mp: 2, hp: 3, dmg: 4 };
+  const labels: Record<string, string> = {
+    nm: "NM",
+    lp: "LP",
+    mp: "MP",
+    hp: "HP",
+    dmg: "DMG",
+  };
+  const parts = [...conditionPrices]
+    .filter((cp) => Number.isFinite(cp.price))
+    .sort((left, right) => (rank[left.condition] ?? 99) - (rank[right.condition] ?? 99))
+    .slice(0, 4)
+    .map((cp) => `${labels[cp.condition] ?? cp.condition.toUpperCase()} ${formatUsd(cp.price)}`);
+  return parts.length > 0 ? parts.join(", ") : null;
+}
+
+function buildUserPrompt(
+  input: CardProfileInput,
+  baseline: Pick<CardProfileResult, "signalLabel" | "verdict">,
+): string {
+  const lines: string[] = [];
+  lines.push(
+    `Card: ${input.canonicalName}${input.setName ? ` (${input.setName})` : ""}${input.cardNumber ? ` #${input.cardNumber}` : ""}`,
+  );
+  lines.push(`Fixed signal: ${baseline.signalLabel}; verdict: ${baseline.verdict}`);
+
+  const priceFacts = [
+    formatUsd(input.marketPrice) ? `market ${formatUsd(input.marketPrice)}` : null,
+    formatUsd(input.median7d) ? `7d median ${formatUsd(input.median7d)}` : null,
+    formatUsd(input.median30d) ? `30d median ${formatUsd(input.median30d)}` : null,
+    formatSignedPct(input.changePct7d) ? `7d move ${formatSignedPct(input.changePct7d)}` : null,
+  ].filter(Boolean);
+  if (priceFacts.length > 0) lines.push(`Price facts: ${priceFacts.join("; ")}`);
   if (input.low30d != null && input.high30d != null) {
-    lines.push(`30-day range: $${input.low30d.toFixed(2)} – $${input.high30d.toFixed(2)}`);
+    lines.push(`30d range: ${formatUsd(input.low30d)} to ${formatUsd(input.high30d)}`);
   }
   if (input.priceObservations7d != null) {
-    // The bucket (thin/steady/dense) is what the model should reference;
-    // the raw count is included only for tie-breaking between cards. The
-    // "do NOT cite the raw count" rule lives in SYSTEM_PROMPT — kept
-    // there once, not restated per card, to keep prompts compact.
     const bucket = priceTrackingBucket(input.priceObservations7d);
-    if (bucket) lines.push(`Price tracking (7d): ${bucket}`);
-    lines.push(`Price observations raw count (7d): ${input.priceObservations7d}`);
+    if (bucket) lines.push(`Price tracking reliability: ${bucket}`);
   }
   if (input.volatility30d != null) lines.push(`Volatility (30d): ${input.volatility30d.toFixed(1)}`);
   if (input.liquidityScore != null) lines.push(`Liquidity score: ${input.liquidityScore.toFixed(0)}/100`);
-
-  if (input.conditionPrices && input.conditionPrices.length > 0) {
-    lines.push("");
-    lines.push("Condition pricing:");
-    const conditionLabels: Record<string, string> = {
-      nm: "Near Mint", lp: "Lightly Played", mp: "Moderately Played",
-      hp: "Heavily Played", dmg: "Damaged",
-    };
-    for (const cp of input.conditionPrices) {
-      const label = conditionLabels[cp.condition] ?? cp.condition.toUpperCase();
-      lines.push(`  ${label}: $${cp.price.toFixed(2)}`);
-    }
-  }
-
-  // Anchor the LLM with a deterministic suggested signal so it doesn't
-  // freelance into BREAKOUT on a flat card. Phrased as a hint, not a
-  // command — the model can override when the broader picture warrants it.
-  const suggested = pickSignal(input);
-  lines.push("");
-  lines.push(`Suggested signal from raw metrics: ${suggested}`);
+  const conditionPrices = formatConditionPrices(input.conditionPrices);
+  if (conditionPrices) lines.push(`Condition prices: ${conditionPrices}`);
 
   return lines.join("\n");
+}
+
+function getCardProfileModelForInput(input: CardProfileInput) {
+  return input.isHighPriority
+    ? getPopAlphaFeaturedCardProfileModel()
+    : getPopAlphaCardProfileModel();
+}
+
+function getCardProfileModelLabelForInput(input: CardProfileInput): string {
+  return input.isHighPriority
+    ? getPopAlphaFeaturedCardProfileModelId()
+    : CARD_PROFILE_MODEL_LABEL;
 }
 
 // ── JSON parsing ────────────────────────────────────────────────────────────
 
 type ParsedProfile = {
-  signal_label: SignalLabel;
-  verdict: Verdict;
-  chip: string;
   summary_short: string;
   summary_long: string;
 };
@@ -175,14 +168,6 @@ function extractJsonObject(raw: string): string | null {
   return null;
 }
 
-function isSignalLabel(v: unknown): v is SignalLabel {
-  return typeof v === "string" && (SIGNAL_LABELS as readonly string[]).includes(v);
-}
-
-function isVerdict(v: unknown): v is Verdict {
-  return typeof v === "string" && (VERDICTS as readonly string[]).includes(v);
-}
-
 function parseLlmProfile(raw: string): ParsedProfile | null {
   const json = extractJsonObject(raw);
   if (!json) return null;
@@ -196,20 +181,12 @@ function parseLlmProfile(raw: string): ParsedProfile | null {
   const obj = parsed as Record<string, unknown>;
   const summaryShort = typeof obj.summary_short === "string" ? obj.summary_short.trim() : "";
   const summaryLong = typeof obj.summary_long === "string" ? obj.summary_long.trim() : "";
-  const chip = typeof obj.chip === "string" ? obj.chip.trim() : "";
-  const signalLabel = obj.signal_label;
-  const verdict = obj.verdict;
 
-  if (!summaryShort || !summaryLong || !chip) return null;
-  if (!isSignalLabel(signalLabel) || !isVerdict(verdict)) return null;
+  if (!summaryShort || !summaryLong) return null;
   if (summaryShort.length > 500 || summaryLong.length > 1000) return null;
   if (summaryShort.length < 15) return null;
-  if (chip.length > 60) return null;
 
   return {
-    signal_label: signalLabel,
-    verdict,
-    chip,
     summary_short: summaryShort,
     summary_long: summaryLong,
   };
@@ -220,16 +197,19 @@ function parseLlmProfile(raw: string): ParsedProfile | null {
 export async function generateCardProfile(
   input: CardProfileInput,
 ): Promise<CardProfileResult> {
-  const metricsHash = buildMetricsHash(input);
+  const modelLabel = getCardProfileModelLabelForInput(input);
+  const fallbackProfile = { ...buildFallbackProfile(input), modelLabel };
+  const metricsHash = fallbackProfile.metricsHash;
   const abortController = new AbortController();
   const timeoutId = setTimeout(() => abortController.abort(), CARD_PROFILE_TIMEOUT_MS);
 
   try {
     const result = await generateText({
-      model: getPopAlphaModel(),
+      model: getCardProfileModelForInput(input),
       system: SYSTEM_PROMPT,
-      prompt: buildUserPrompt(input),
+      prompt: buildUserPrompt(input, fallbackProfile),
       abortSignal: abortController.signal,
+      maxOutputTokens: 220,
       maxRetries: CARD_PROFILE_MAX_RETRIES,
       experimental_telemetry: {
         isEnabled: true,
@@ -249,18 +229,16 @@ export async function generateCardProfile(
       console.warn(
         `[card-profile] parse miss slug=${input.canonicalSlug} sample="${sample}"`,
       );
-      return { ...buildFallbackProfile(input), failureReason: "parse-miss" };
+      return { ...fallbackProfile, failureReason: "parse-miss" };
     }
 
     const usage = result.totalUsage ?? { inputTokens: undefined, outputTokens: undefined };
     return {
-      signalLabel: parsed.signal_label,
-      verdict: parsed.verdict,
-      chip: parsed.chip,
+      ...fallbackProfile,
       summaryShort: parsed.summary_short,
       summaryLong: parsed.summary_long,
       source: "llm",
-      modelLabel: CARD_PROFILE_MODEL_LABEL,
+      modelLabel,
       inputTokens: typeof usage.inputTokens === "number" ? usage.inputTokens : null,
       outputTokens: typeof usage.outputTokens === "number" ? usage.outputTokens : null,
       metricsHash,
@@ -279,7 +257,7 @@ export async function generateCardProfile(
       `[card-profile] generateText threw slug=${input.canonicalSlug} ${errName}: ${errMsg}`,
     );
     return {
-      ...buildFallbackProfile(input),
+      ...fallbackProfile,
       failureReason: `llm-threw:${errName}:${errMsg.slice(0, 160)}`,
     };
   } finally {

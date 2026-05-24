@@ -5,7 +5,10 @@ import { currentUser } from "@clerk/nextjs/server";
 import { generateText } from "ai";
 import { getHomepageData, type HomepageCard } from "@/lib/data/homepage";
 import { getCommunityPulseSnapshot } from "@/lib/data/community-pulse";
-import { getPopAlphaModel } from "@/lib/ai/models";
+import {
+  getPopAlphaHomepageBriefModel,
+  getPopAlphaHomepageBriefModelId,
+} from "@/lib/ai/models";
 import HomepageSignalBoard from "@/components/homepage-signal-board";
 import HomepageSearch from "@/components/homepage-search";
 import MarketTogglePill from "@/components/market-toggle-pill";
@@ -140,7 +143,7 @@ type HomepageSummaryConfig = {
   pricingUsdPerMillionTokens: {
     input: number;
     output: number;
-  };
+  } | null;
   system: {
     role: string;
     style: readonly string[];
@@ -155,7 +158,7 @@ type HomepageSummaryConfig = {
 
 const HOMEPAGE_SUMMARY_CONFIG = {
   version: "homepage-summary-v2",
-  modelLabel: "gemini-2.0-flash",
+  modelLabel: getPopAlphaHomepageBriefModelId(),
   timeoutMs: AI_TIMEOUT_MS,
   logKey: "[homepage.ai-summary]",
   sourceLimits: {
@@ -164,10 +167,7 @@ const HOMEPAGE_SUMMARY_CONFIG = {
     losers: 1,
     communityPulse: 3,
   },
-  pricingUsdPerMillionTokens: {
-    input: 0.1,
-    output: 0.4,
-  },
+  pricingUsdPerMillionTokens: null,
   system: {
     role: "You are PopAlpha Ace Summary, a premium market note for the homepage.",
     style: [
@@ -368,6 +368,7 @@ function estimateHomepageSummaryCostUsd(
   const outputTokens = usage.outputTokens;
 
   if (inputTokens == null && outputTokens == null) return null;
+  if (!config.pricingUsdPerMillionTokens) return null;
 
   const inputCost = ((inputTokens ?? 0) / 1_000_000) * config.pricingUsdPerMillionTokens.input;
   const outputCost = ((outputTokens ?? 0) / 1_000_000) * config.pricingUsdPerMillionTokens.output;
@@ -551,10 +552,11 @@ async function generateAceSummary(
 
   try {
     const result = await generateText({
-      model: getPopAlphaModel(),
+      model: getPopAlphaHomepageBriefModel(),
       abortSignal: abortController.signal,
       system,
       prompt,
+      maxOutputTokens: 520,
     });
     clearTimeout(timeoutId);
     logHomepageSummaryUsage(HOMEPAGE_SUMMARY_CONFIG, result.totalUsage, {
