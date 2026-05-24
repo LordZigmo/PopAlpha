@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { dbPublic } from "@/lib/db";
+import { loadJpPriceCoverageMap } from "@/lib/data/jp-price-coverage";
 import { buildSearchCardResults } from "@/lib/search/cards.mjs";
 import { normalizeSearchInput } from "@/lib/search/normalize.mjs";
 import { isPhysicalPokemonSet } from "@/lib/sets/physical";
@@ -176,6 +177,10 @@ export async function GET(req: Request) {
   }
 
   const canonicalRows = dedupeBySlug([...directRows, ...aliasCanonicalRows]);
+  const jpPriceCoverageBySlug = await loadJpPriceCoverageMap(
+    supabase,
+    canonicalRows.map((row) => row.canonical_slug),
+  );
 
   const cards = buildSearchCardResults({
     canonicalRows,
@@ -186,7 +191,7 @@ export async function GET(req: Request) {
     id: card.canonical_slug,
     name: card.canonical_name,
     set: card.set_name,
-    price: null,
+    price: jpPriceCoverageBySlug.get(card.canonical_slug)?.displayPriceUsd ?? null,
     ...card,
   }));
 

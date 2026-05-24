@@ -1,23 +1,16 @@
 /**
  * Cron: run-snkrdunk-daily
  *
- * Steady-state refresh of Snkrdunk scraped prices. Picks the N
+ * Steady-state refresh of Snkrdunk scraped prices. Picks mapped
+ * Snkrdunk products that do not have a price row yet first, then the N
  * oldest-observed_at rows already in snkrdunk_card_prices and re-fetches
- * each card via its persisted `snkrdunk_product_code` column, updating
- * the row with the latest median.
+ * each card via its persisted `snkrdunk_product_code` column.
  *
- * Initial-fetch differs from Yahoo!: this cron only REFRESHES existing
- * rows. Adding a new card requires running scripts/run-snkrdunk-pipeline.mjs
- * (or the future automated catalog mapper) which sets up the
- * (canonical_slug, snkrdunk_product_code) mapping. The cron then keeps
- * those rows fresh on the cadence below.
+ * Initial-fetch differs from Yahoo!: first-time coverage depends on
+ * snkrdunk_product_map. The matcher/mapper owns the risky catalog
+ * decision; this cron only ingests rows already marked MATCHED.
  *
- * Schedule: NOT yet scheduled in vercel.json. We're at the 40-cron Vercel
- * Pro quota cap (see PR #42's consolidation work) — adding one more
- * entry pushes us over quota, where Vercel silently throttles to ~daily.
- * For v0 the route is registered + invokable manually; once a slot opens
- * (further consolidation or quota bump), schedule hourly: "26 * * * *"
- * matching run-yahoo-jp-daily's offset.
+ * Schedule: hourly (configured in vercel.json).
  *
  * Conservative batch size since Snkrdunk's robots.txt asks us not to
  * crawl /en/v1/ — keeping each tick small reduces the spirit-of-the-norm
@@ -76,6 +69,7 @@ const NONPRODUCTIVE_RETRY_HOURS = 24 * 7;
 const TRANSIENT_RETRY_HOURS = 6;
 const CANDIDATE_SCAN_PAGE_SIZE = 1000;
 const MAX_STALE_PRICE_SCAN_ROWS = 5000;
+const MAX_INITIAL_FETCH_SCAN_ROWS = 25_000;
 const SNKRDUNK_ROUTE = "/api/cron/run-snkrdunk-daily";
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -87,18 +81,133 @@ type RefreshCandidate = {
   observed_at: string | null;
 };
 
+type SnkrdunkProductMapRow = {
+  canonical_slug: string;
+  snkrdunk_product_code: string;
+};
+
 type SnkrdunkProcessResult =
   | { slug: string; status: "ok"; rowsWritten: number; price: number | null; sampleCount: number }
   | { slug: string; status: "low-sample"; rawCount: number }
   | { slug: string; status: "scrape-failed"; reason: string }
   | { slug: string; status: "write-failed"; reason: string };
 
+async function loadSnkrdunkPricedProductCodes(
+  supabase: ReturnType<typeof dbAdmin>,
+  productCodes: string[],
+): Promise<Set<string>> {
+  const priced = new Set<string>();
+  const chunkSize = 100;
+
+  for (let i = 0; i < productCodes.length; i += chunkSize) {
+    const chunk = productCodes.slice(i, i + chunkSize);
+    const { data, error } = await supabase
+      .from("snkrdunk_card_prices")
+      .select("snkrdunk_product_code")
+      .in("snkrdunk_product_code", chunk);
+    if (error) throw new Error(`snkrdunk_card_prices(priced product codes): ${error.message}`);
+
+    for (const row of data ?? []) {
+      if (row.snkrdunk_product_code) priced.add(row.snkrdunk_product_code);
+    }
+  }
+
+  return priced;
+}
+
+async function loadSnkrdunkAttemptedSourceKeys(
+  supabase: ReturnType<typeof dbAdmin>,
+  productCodes: string[],
+): Promise<Set<string>> {
+  const attempted = new Set<string>();
+  const chunkSize = 100;
+
+  for (let i = 0; i < productCodes.length; i += chunkSize) {
+    const chunk = productCodes.slice(i, i + chunkSize);
+    const { data, error } = await supabase
+      .from("jp_ingestion_attempts")
+      .select("source_key")
+      .eq("provider", "SNKRDUNK")
+      .in("source_key", chunk);
+    if (error) throw new Error(`jp_ingestion_attempts(snkrdunk attempted source keys): ${error.message}`);
+
+    for (const row of data ?? []) {
+      if (row.source_key) attempted.add(row.source_key);
+    }
+  }
+
+  return attempted;
+}
+
+async function loadInitialSnkrdunkCandidates(
+  supabase: ReturnType<typeof dbAdmin>,
+  input: {
+    suppressedSourceKeys: Set<string>;
+    limit: number;
+  },
+): Promise<RefreshCandidate[]> {
+  const neverAttemptedCandidates: RefreshCandidate[] = [];
+  const retryNoPriceCandidates: RefreshCandidate[] = [];
+  const seenProductCodes = new Set<string>();
+
+  for (
+    let from = 0;
+    neverAttemptedCandidates.length < input.limit && from < MAX_INITIAL_FETCH_SCAN_ROWS;
+    from += CANDIDATE_SCAN_PAGE_SIZE
+  ) {
+    const { data, error } = await supabase
+      .from("snkrdunk_product_map")
+      .select("canonical_slug, snkrdunk_product_code")
+      .eq("mapping_status", "MATCHED")
+      .order("canonical_slug", { ascending: true })
+      .range(from, from + CANDIDATE_SCAN_PAGE_SIZE - 1);
+    if (error) throw new Error(`snkrdunk_product_map(initial scan): ${error.message}`);
+
+    const rows = (data ?? []) as SnkrdunkProductMapRow[];
+    const pageRows: SnkrdunkProductMapRow[] = [];
+    for (const row of rows) {
+      const productCode = row.snkrdunk_product_code;
+      if (!productCode) continue;
+      if (seenProductCodes.has(productCode) || input.suppressedSourceKeys.has(productCode)) continue;
+      seenProductCodes.add(productCode);
+      pageRows.push(row);
+    }
+
+    const productCodes = pageRows.map((row) => row.snkrdunk_product_code);
+    const [pricedProductCodes, attemptedSourceKeys] = await Promise.all([
+      loadSnkrdunkPricedProductCodes(supabase, productCodes),
+      loadSnkrdunkAttemptedSourceKeys(supabase, productCodes),
+    ]);
+
+    for (const row of pageRows) {
+      const productCode = row.snkrdunk_product_code;
+      if (pricedProductCodes.has(productCode)) continue;
+      const candidate: RefreshCandidate = {
+        canonical_slug: row.canonical_slug,
+        printing_id: null,
+        snkrdunk_product_code: productCode,
+        observed_at: null,
+      };
+      if (attemptedSourceKeys.has(productCode)) {
+        retryNoPriceCandidates.push(candidate);
+      } else {
+        neverAttemptedCandidates.push(candidate);
+      }
+      if (neverAttemptedCandidates.length >= input.limit) break;
+    }
+
+    if (rows.length < CANDIDATE_SCAN_PAGE_SIZE) break;
+  }
+
+  return [...neverAttemptedCandidates, ...retryNoPriceCandidates].slice(0, input.limit);
+}
+
 /**
- * Pick the N Snkrdunk-tracked cards most in need of refresh: existing
+ * Pick the N Snkrdunk-tracked cards most in need of refresh: mapped
+ * products with no successful price row first, then existing
  * snkrdunk_card_prices rows whose observed_at is null OR older than
- * REFRESH_AFTER_HOURS. Group by (canonical_slug, snkrdunk_product_code)
- * so we re-fetch each Snkrdunk product at most once per tick even if it
- * has multiple grade rows.
+ * REFRESH_AFTER_HOURS. Group by snkrdunk_product_code so we re-fetch
+ * each product at most once per tick even if it has multiple grade rows.
  */
 async function pickRefreshCandidates(
   supabase: ReturnType<typeof dbAdmin>,
@@ -124,6 +233,11 @@ async function pickRefreshCandidates(
     ...recentTransient.sourceKeys,
   ]);
 
+  const initialCandidates = await loadInitialSnkrdunkCandidates(supabase, {
+    suppressedSourceKeys,
+    limit,
+  });
+
   // Dedupe by snkrdunk_product_code (one re-fetch covers all grade rows
   // for that product). Prefer the PER-PRINTING row (printing_id != null)
   // as the candidate when both per-printing AND canonical-rollup rows
@@ -145,6 +259,9 @@ async function pickRefreshCandidates(
   // snk_canonical (the fresh canonical fallback), so the user sees
   // stale prices even though we just "refreshed."
   const byProduct = new Map<string, RefreshCandidate>();
+  for (const candidate of initialCandidates) {
+    byProduct.set(candidate.snkrdunk_product_code, candidate);
+  }
   for (
     let from = 0;
     byProduct.size < limit && from < MAX_STALE_PRICE_SCAN_ROWS;

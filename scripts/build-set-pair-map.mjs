@@ -7,21 +7,8 @@
  * `<id>_ja` candidate JP set has enough content overlap to count as
  * a real cross-language pair, and insert / update the row.
  *
- * Content overlap = fraction of EN cards in the set whose
- * canonical_name (case-insensitive) appears on a JP card in the
- * candidate JP set. Pairs >= AUTO_VERIFY_PCT (0.50) get marked
- * verified; everything else is logged for ops review and left
- * unverified so the picker won't trust it.
- *
- * Manual overrides (source='manual') are skipped by this script —
+ * Manual overrides (source='manual') are skipped by this script;
  * they're operator-curated and shouldn't be clobbered.
- *
- * Why a build step instead of computing overlap in the picker:
- *   - Overlap is a set-level property; per-card recomputation would
- *     redo the same scan ~thousand times per backfill run.
- *   - Operators can review the table directly and add overrides
- *     where the auto scan failed (Base Set 2 → Base Set, modern
- *     bundled-set cases).
  *
  * Usage:
  *   node scripts/build-set-pair-map.mjs              # full rebuild
@@ -30,10 +17,20 @@
  */
 
 import dotenv from "dotenv";
+import { createClient } from "@supabase/supabase-js";
+import {
+  loadCanonicalCardsForPairing,
+  loadCardPrintingsForPairing,
+  loadSetPairMapForPairing,
+} from "../lib/jp/pairing-catalog.mjs";
+import {
+  AUTO_VERIFY_PCT,
+  buildSetPairMapRows,
+} from "../lib/jp/set-pair-map.mjs";
 
-dotenv.config({ path: ".env.local", override: true });
+dotenv.config({ path: ".env.local" });
 
-const AUTO_VERIFY_PCT = 0.50;
+const UPSERT_CHUNK_SIZE = 500;
 
 function parseArgs(argv) {
   const opts = { dryRun: false, verbose: false };
@@ -48,75 +45,42 @@ function parseArgs(argv) {
   return opts;
 }
 
-function resolvePostgresUrl() {
-  for (const n of ["POSTGRES_URL", "PopAlpha_POSTGRES_URL", "POPALPHA_POSTGRES_URL", "POSTGRES_URL_NON_POOLING"]) {
-    const raw = process.env[n]?.trim().replace(/^["']|["']$/g, "");
-    if (raw) { process.env.POSTGRES_URL = raw; return raw; }
+function requireEnv(name) {
+  const v = process.env[name]?.trim();
+  if (!v) {
+    console.error(`Missing ${name}`);
+    process.exit(2);
   }
-  console.error("No Postgres URL found in env");
-  process.exit(2);
+  return v;
+}
+
+function createSupabaseServiceClient() {
+  return createClient(requireEnv("SUPABASE_URL"), requireEnv("SUPABASE_SERVICE_ROLE_KEY"), {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
+
+function chunkRows(rows, size) {
+  const chunks = [];
+  for (let i = 0; i < rows.length; i += size) chunks.push(rows.slice(i, i + size));
+  return chunks;
 }
 
 async function main() {
   const opts = parseArgs(process.argv);
-  resolvePostgresUrl();
-  const { sql } = await import("@vercel/postgres");
+  const supabase = createSupabaseServiceClient();
 
   console.log(`[build-set-pair-map] auto-verify threshold: name_match_pct >= ${AUTO_VERIFY_PCT}`);
-  if (opts.dryRun) console.log("[build-set-pair-map] DRY RUN — no writes");
+  if (opts.dryRun) console.log("[build-set-pair-map] DRY RUN - no writes");
 
-  // Single SQL query that returns, for every EN set_code with a candidate
-  // <set>_ja JP counterpart, the counts we need to insert. Postgres is
-  // happy to do this in one shot; doing it per-set in a JS loop would
-  // round-trip the network ~50 times for no benefit.
-  const { rows: pairs } = await sql.query(`
-    with en_sets as (
-      select distinct cp.set_code, cc.set_name
-        from card_printings cp
-        join canonical_cards cc on cc.slug = cp.canonical_slug
-       where cc.language = 'EN'
-         and cp.set_code is not null
-    ),
-    jp_sets as (
-      select distinct cp.set_code, cc.set_name
-        from card_printings cp
-        join canonical_cards cc on cc.slug = cp.canonical_slug
-       where cc.language = 'JP'
-         and cp.set_code is not null
-    ),
-    candidates as (
-      select e.set_code as en_set_code,
-             e.set_name as en_set_name,
-             e.set_code || '_ja' as jp_set_code,
-             j.set_name as jp_set_name
-        from en_sets e
-        join jp_sets j on j.set_code = e.set_code || '_ja'
-    )
-    select c.en_set_code,
-           c.en_set_name,
-           c.jp_set_code,
-           c.jp_set_name,
-           (select count(distinct cc.slug)
-              from canonical_cards cc
-              join card_printings cp on cp.canonical_slug = cc.slug
-             where cc.language = 'EN' and cp.set_code = c.en_set_code) as en_card_count,
-           (select count(distinct cc.slug)
-              from canonical_cards cc
-              join card_printings cp on cp.canonical_slug = cc.slug
-             where cc.language = 'JP' and cp.set_code = c.jp_set_code) as jp_card_count,
-           (select count(distinct cc1.slug)
-              from canonical_cards cc1
-              join card_printings cp1 on cp1.canonical_slug = cc1.slug
-             where cc1.language = 'EN' and cp1.set_code = c.en_set_code
-               and exists (
-                 select 1 from canonical_cards cc2
-                 join card_printings cp2 on cp2.canonical_slug = cc2.slug
-                 where cc2.language = 'JP' and cp2.set_code = c.jp_set_code
-                   and lower(trim(cc2.canonical_name)) = lower(trim(cc1.canonical_name))
-               )) as name_match_count
-      from candidates c
-     order by c.en_set_code
-  `);
+  const [canonicalCards, cardPrintings, existingPairs] = await Promise.all([
+    loadCanonicalCardsForPairing(supabase),
+    loadCardPrintingsForPairing(supabase),
+    loadSetPairMapForPairing(supabase),
+  ]);
+
+  const existingByEnSetCode = new Map(existingPairs.map((row) => [row.en_set_code, row]));
+  const pairs = buildSetPairMapRows({ canonicalCards, cardPrintings });
 
   console.log(`[build-set-pair-map] inspected ${pairs.length} candidate pair(s)`);
 
@@ -125,72 +89,41 @@ async function main() {
   let inserted = 0;
   let updated = 0;
   let skippedManual = 0;
+  const writes = [];
+  const now = new Date().toISOString();
 
   for (const row of pairs) {
-    const enCardCount = Number(row.en_card_count ?? 0);
-    const nameMatchCount = Number(row.name_match_count ?? 0);
-    const pct = enCardCount > 0 ? nameMatchCount / enCardCount : 0;
-    const isVerified = pct >= AUTO_VERIFY_PCT;
-    if (isVerified) verifiedCount += 1; else rejectedCount += 1;
+    if (row.verified) verifiedCount += 1;
+    else rejectedCount += 1;
 
-    const tag = isVerified ? "OK " : "lo ";
-    if (opts.verbose || !isVerified) {
+    const tag = row.verified ? "OK " : "lo ";
+    if (opts.verbose || !row.verified) {
       console.log(
         `  [${tag}] ${row.en_set_code.padEnd(12)} -> ${row.jp_set_code.padEnd(15)} ` +
-        `pct=${pct.toFixed(2)} (${nameMatchCount}/${enCardCount})  ` +
+        `pct=${row.name_match_pct.toFixed(2)} (${row.name_match_count}/${row.en_card_count})  ` +
         `${row.en_set_name ?? ""} / ${row.jp_set_name ?? ""}`,
       );
     }
 
     if (opts.dryRun) continue;
 
-    // Don't clobber manual overrides — operators have curated those.
-    const existing = await sql.query(
-      `select source from set_pair_map where en_set_code = $1`,
-      [row.en_set_code],
-    );
-    if (existing.rows[0]?.source === "manual") {
+    const existing = existingByEnSetCode.get(row.en_set_code);
+    if (existing?.source === "manual") {
       skippedManual += 1;
-      if (opts.verbose) console.log(`        skipped: existing row has source=manual`);
+      if (opts.verbose) console.log("        skipped: existing row has source=manual");
       continue;
     }
 
-    const result = await sql.query(
-      `
-        insert into set_pair_map
-          (en_set_code, jp_set_code, en_set_name, jp_set_name,
-           en_card_count, jp_card_count, name_match_count, name_match_pct,
-           verified, source, updated_at)
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'auto', now())
-        on conflict (en_set_code) do update
-          set jp_set_code      = excluded.jp_set_code,
-              en_set_name      = excluded.en_set_name,
-              jp_set_name      = excluded.jp_set_name,
-              en_card_count    = excluded.en_card_count,
-              jp_card_count    = excluded.jp_card_count,
-              name_match_count = excluded.name_match_count,
-              name_match_pct   = excluded.name_match_pct,
-              verified         = excluded.verified,
-              -- Preserve source/override_reason — manual rows already
-              -- short-circuit above; this branch is only reached for
-              -- existing auto rows being refreshed.
-              source           = 'auto',
-              updated_at       = now()
-        returning xmax = 0 as inserted
-      `,
-      [
-        row.en_set_code,
-        row.jp_set_code,
-        row.en_set_name,
-        row.jp_set_name,
-        enCardCount,
-        Number(row.jp_card_count ?? 0),
-        nameMatchCount,
-        pct,
-        isVerified,
-      ],
-    );
-    if (result.rows[0]?.inserted) inserted += 1; else updated += 1;
+    if (existing) updated += 1;
+    else inserted += 1;
+    writes.push({ ...row, updated_at: now });
+  }
+
+  for (const chunk of chunkRows(writes, UPSERT_CHUNK_SIZE)) {
+    const { error } = await supabase
+      .from("set_pair_map")
+      .upsert(chunk, { onConflict: "en_set_code" });
+    if (error) throw new Error(`set_pair_map upsert: ${error.message}`);
   }
 
   console.log("");

@@ -124,6 +124,30 @@ async function loadYahooScrapedSlugs(
   return scraped;
 }
 
+async function loadYahooAttemptedSlugs(
+  supabase: ReturnType<typeof dbAdmin>,
+  slugs: string[],
+): Promise<Set<string>> {
+  const attempted = new Set<string>();
+  const chunkSize = 100;
+
+  for (let i = 0; i < slugs.length; i += chunkSize) {
+    const chunk = slugs.slice(i, i + chunkSize);
+    const { data, error } = await supabase
+      .from("jp_ingestion_attempts")
+      .select("canonical_slug")
+      .eq("provider", "YAHOO_JP")
+      .in("canonical_slug", chunk);
+    if (error) throw new Error(`jp_ingestion_attempts(yahoo attempted slugs): ${error.message}`);
+
+    for (const row of data ?? []) {
+      if (row.canonical_slug) attempted.add(row.canonical_slug);
+    }
+  }
+
+  return attempted;
+}
+
 async function loadStaleYahooSlugs(
   supabase: ReturnType<typeof dbAdmin>,
   input: {
@@ -171,12 +195,13 @@ async function loadInitialYahooSlugs(
     limit: number;
   },
 ): Promise<string[]> {
-  const initialSlugs: string[] = [];
+  const neverAttemptedSlugs: string[] = [];
+  const retryNoPriceSlugs: string[] = [];
   const seen = new Set<string>();
 
   for (
     let from = 0;
-    initialSlugs.length < input.limit && from < MAX_INITIAL_FETCH_SCAN_ROWS;
+    neverAttemptedSlugs.length < input.limit && from < MAX_INITIAL_FETCH_SCAN_ROWS;
     from += CANDIDATE_SCAN_PAGE_SIZE
   ) {
     const { data, error } = await supabase
@@ -196,23 +221,32 @@ async function loadInitialYahooSlugs(
       pageSlugs.push(row.slug);
     }
 
-    const everScraped = await loadYahooScrapedSlugs(supabase, pageSlugs);
+    const [everScraped, everAttempted] = await Promise.all([
+      loadYahooScrapedSlugs(supabase, pageSlugs),
+      loadYahooAttemptedSlugs(supabase, pageSlugs),
+    ]);
     for (const slug of pageSlugs) {
       if (everScraped.has(slug)) continue;
-      initialSlugs.push(slug);
-      if (initialSlugs.length >= input.limit) break;
+      if (everAttempted.has(slug)) {
+        retryNoPriceSlugs.push(slug);
+      } else {
+        neverAttemptedSlugs.push(slug);
+      }
+      if (neverAttemptedSlugs.length >= input.limit) break;
     }
 
     if (rows.length < CANDIDATE_SCAN_PAGE_SIZE) break;
   }
 
-  return initialSlugs;
+  return [...neverAttemptedSlugs, ...retryNoPriceSlugs].slice(0, input.limit);
 }
 
 /**
  * Pick the N JP cards most in need of refresh. The query unions:
  *   • Cards with no yahoo_jp_card_prices row at all (NULL observed_at) —
- *     never been scraped, highest priority.
+ *     never been attempted, highest priority.
+ *   • Cards with no price row but an older non-productive attempt —
+ *     retried only after untouched cards have first pass coverage.
  *   • Cards with observed_at > REFRESH_AFTER_HOURS old.
  * Both filtered to JP-language + at least one MATCHED provider_card_map
  * (so we don't burn requests on cards Scrydex has zero observations

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { loadJpPriceCoverageMap } from "@/lib/data/jp-price-coverage";
 import { dbPublic } from "@/lib/db";
 
 export const runtime = "nodejs";
@@ -263,7 +264,7 @@ export async function GET(
 
   const supabase = dbPublic();
 
-  const [canonicalResult, metricsResult, variantResult] = await Promise.all([
+  const [canonicalResult, metricsResult, variantResult, jpCoverageResult] = await Promise.all([
     supabase
       .from("canonical_cards")
       .select("slug, canonical_name, set_name, year, card_number, language")
@@ -330,6 +331,12 @@ export async function GET(
       .eq("canonical_slug", slug)
       .in("provider", [...GRADED_PROVIDERS])
       .in("grade", [...GRADE_ORDER]),
+    loadJpPriceCoverageMap(supabase, [slug])
+      .then((data) => ({ data, error: null as Error | null }))
+      .catch((error: unknown) => ({
+        data: new Map(),
+        error: error instanceof Error ? error : new Error(String(error)),
+      })),
   ]);
 
   if (canonicalResult.error) {
@@ -342,6 +349,10 @@ export async function GET(
   }
   if (variantResult.error) {
     console.error("[cards/ladder] public_variant_metrics", slug, variantResult.error.message);
+    return NextResponse.json({ ok: false, error: "Internal error." }, { status: 500 });
+  }
+  if (jpCoverageResult.error) {
+    console.error("[cards/ladder] public_jp_price_coverage", slug, jpCoverageResult.error.message);
     return NextResponse.json({ ok: false, error: "Internal error." }, { status: 500 });
   }
 
@@ -413,16 +424,17 @@ export async function GET(
     };
   });
 
-  const jpRow = pickJpSource(metricRows);
+  const jpCoverage = jpCoverageResult.data.get(slug) ?? null;
+  const jpRow = jpCoverage ? null : pickJpSource(metricRows);
   const jpSource: LadderResponse["jp_source"] = {
-    snkrdunk_price_usd: jpRow?.snkrdunk_price ?? null,
-    snkrdunk_price_jpy: jpRow?.snkrdunk_price_jpy ?? null,
-    snkrdunk_sample_count: jpRow?.snkrdunk_sample_count ?? null,
-    snkrdunk_observed_at: jpRow?.snkrdunk_observed_at ?? null,
-    yahoo_jp_price_usd: jpRow?.yahoo_jp_price ?? null,
-    yahoo_jp_price_jpy: jpRow?.yahoo_jp_price_jpy ?? null,
-    yahoo_jp_sample_count: jpRow?.yahoo_jp_sample_count ?? null,
-    yahoo_jp_observed_at: jpRow?.yahoo_jp_observed_at ?? null,
+    snkrdunk_price_usd: jpCoverage?.snkrdunkPriceUsd ?? jpRow?.snkrdunk_price ?? null,
+    snkrdunk_price_jpy: jpCoverage?.snkrdunkPriceJpy ?? jpRow?.snkrdunk_price_jpy ?? null,
+    snkrdunk_sample_count: jpCoverage?.snkrdunkSampleCount ?? jpRow?.snkrdunk_sample_count ?? null,
+    snkrdunk_observed_at: jpCoverage?.snkrdunkObservedAt ?? jpRow?.snkrdunk_observed_at ?? null,
+    yahoo_jp_price_usd: jpCoverage?.yahooJpPriceUsd ?? jpRow?.yahoo_jp_price ?? null,
+    yahoo_jp_price_jpy: jpCoverage?.yahooJpPriceJpy ?? jpRow?.yahoo_jp_price_jpy ?? null,
+    yahoo_jp_sample_count: jpCoverage?.yahooJpSampleCount ?? jpRow?.yahoo_jp_sample_count ?? null,
+    yahoo_jp_observed_at: jpCoverage?.yahooJpObservedAt ?? jpRow?.yahoo_jp_observed_at ?? null,
     note:
       "JP-source prices keyed to THIS slug (canonical_slug join). EN↔JP " +
       "equivalence (the JP printing of an EN card) is in card_translations, " +

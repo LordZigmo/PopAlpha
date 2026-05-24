@@ -31,6 +31,53 @@ function buildPulse(overrides = {}) {
   };
 }
 
+function buildHomepageCard(overrides = {}) {
+  return {
+    slug: "card",
+    name: "Card",
+    set_name: "Set",
+    year: 2026,
+    card_number: null,
+    market_price: null,
+    change_pct: null,
+    change_window: null,
+    confidence_score: null,
+    low_confidence: false,
+    market_strength_score: null,
+    market_direction: null,
+    mover_tier: null,
+    image_url: null,
+    image_thumb_url: null,
+    sparkline_7d: [],
+    sales_count_30d: null,
+    active_listings_7d: null,
+    updated_at: null,
+    yahoo_jp_price: null,
+    yahoo_jp_price_jpy: null,
+    yahoo_jp_sample_count: null,
+    snkrdunk_price: null,
+    snkrdunk_price_jpy: null,
+    snkrdunk_sample_count: null,
+    ...overrides,
+  };
+}
+
+function buildDailyMoverBundle(overrides = {}) {
+  return {
+    gainers: [],
+    losers: [],
+    momentum_24h: [],
+    momentum_7d: [],
+    budget_gainers: [],
+    mid_gainers: [],
+    mid_losers: [],
+    mid_momentum_24h: [],
+    mid_momentum_7d: [],
+    computed_at_date: null,
+    ...overrides,
+  };
+}
+
 export async function runHomepageDataTests() {
   const freshIso = "2026-03-10T11:30:00.000Z";
   const earlierIso = "2026-03-10T10:15:00.000Z";
@@ -867,5 +914,70 @@ export async function runHomepageDataTests() {
       "live-7d-beta",
       "live-7d-gamma",
     ],
+  );
+
+  const dailySignalData = await getHomepageData({
+    now: () => FIXED_NOW,
+    logger: NOOP_LOGGER,
+    dataOverrides: {
+      positiveChangeRows: [],
+      negativeChangeRows: [],
+      trendingVariants: [],
+      cards: [
+        { slug: "daily-stale-snapshot", canonical_name: "Daily Stale Snapshot", set_name: "Daily Set", year: 2026 },
+      ],
+      dailyMovers: buildDailyMoverBundle({
+        gainers: [
+          buildHomepageCard({
+            slug: "daily-stale-snapshot",
+            name: "Daily Stale Snapshot",
+            set_name: "Daily Set",
+            market_price: 999.99,
+            updated_at: "2026-03-01T00:00:00.000Z",
+            change_pct: 18.7,
+            change_window: "24H",
+            mover_tier: "hot",
+          }),
+        ],
+      }),
+      marketPulseMap: new Map([
+        [
+          "daily-stale-snapshot",
+          buildPulse({
+            marketPrice: 42.5,
+            marketPriceAsOf: freshIso,
+            activeListings7d: 9,
+            snapshotCount30d: 31,
+            changePct24h: 4.2,
+            changePct7d: 6.1,
+            changePct: 4.2,
+            changeWindow: "24H",
+            confidenceScore: 88,
+            lowConfidence: false,
+          }),
+        ],
+      ]),
+    },
+  });
+
+  assert.deepEqual(
+    dailySignalData.signal_board.top_movers["24H"].map((card) => ({
+      slug: card.slug,
+      market_price: card.market_price,
+      updated_at: card.updated_at,
+      change_pct: card.change_pct,
+      change_window: card.change_window,
+      active_listings_7d: card.active_listings_7d,
+      confidence_score: card.confidence_score,
+    })),
+    [{
+      slug: "daily-stale-snapshot",
+      market_price: 42.5,
+      updated_at: freshIso,
+      change_pct: 18.7,
+      change_window: "24H",
+      active_listings_7d: 9,
+      confidence_score: 88,
+    }],
   );
 }

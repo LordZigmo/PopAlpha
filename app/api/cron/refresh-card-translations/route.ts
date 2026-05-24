@@ -35,16 +35,14 @@
  */
 
 import { NextResponse } from "next/server";
-import { sql } from "@vercel/postgres";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireCron } from "@/lib/auth/require";
 import { dbAdmin } from "@/lib/db/admin";
-import { hasVercelPostgresConfig } from "@/lib/ai/card-embeddings";
 import {
-  findPairBySetCode,
+  findPairBySetCodeInCatalog,
+  loadTranslationMatchCatalog,
   deletePairingsForEnSlug,
-  PAIRING_SOURCE,
-  PAIRING_CONFIDENCE,
-  PAIRING_RANK,
+  upsertPrimaryPairing,
 } from "@/lib/jp/translation-match.mjs";
 
 export const runtime = "nodejs";
@@ -52,6 +50,8 @@ export const maxDuration = 300;
 
 const DEFAULT_MAX_CARDS = 500;
 const MAX_CARDS_LIMIT = 5000;
+const PAGE_SIZE = 1000;
+const STAMP_CHUNK_SIZE = 500;
 
 type EnRow = {
   slug: string;
@@ -63,43 +63,57 @@ function parseMaxCards(raw: string | null): number {
   return Math.min(parsed, MAX_CARDS_LIMIT);
 }
 
-async function upsertPairing(enSlug: string, jpSlug: string): Promise<number> {
-  // Drop any existing rows for this EN slug whose JP target differs
-  // from the freshly-computed pair — same idempotency dance the
-  // cosine matcher used. A rank=0 row flipping to a new jp_slug
-  // would leave the old row behind on plain ON CONFLICT, breaking
-  // the detail endpoint's .eq("rank", 0).maybeSingle() lookup.
-  await sql.query(
-    `delete from card_translations where en_slug = $1 and jp_slug <> $2`,
-    [enSlug, jpSlug],
-  );
+async function loadCandidateRows(supabase: SupabaseClient, maxCards: number): Promise<EnRow[]> {
+  const rows: EnRow[] = [];
+  const cutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+  let from = 0;
 
-  const result = await sql.query(
-    `
-      insert into card_translations
-        (en_slug, jp_slug, confidence, rank, source, updated_at)
-      values ($1, $2, $3, $4, $5, now())
-      on conflict (en_slug, jp_slug) do update
-        set confidence = excluded.confidence,
-            rank       = excluded.rank,
-            source     = excluded.source,
-            updated_at = now()
-    `,
-    [enSlug, jpSlug, PAIRING_CONFIDENCE, PAIRING_RANK, PAIRING_SOURCE],
-  );
-  return result.rowCount ?? 0;
+  while (rows.length < maxCards) {
+    const pageSize = Math.min(PAGE_SIZE, maxCards - rows.length);
+    const to = from + pageSize - 1;
+    const { data, error } = await supabase
+      .from("canonical_cards")
+      .select("slug")
+      .eq("language", "EN")
+      .or(`translation_attempted_at.is.null,translation_attempted_at.lt.${cutoff}`)
+      .order("translation_attempted_at", { ascending: true, nullsFirst: true })
+      .order("slug", { ascending: true })
+      .range(from, to)
+      .returns<EnRow[]>();
+
+    if (error) throw new Error(`candidate query: ${error.message}`);
+    const page = data ?? [];
+    rows.push(...page);
+    if (page.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
+}
+
+function chunks<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+async function stampAttempted(supabase: SupabaseClient, attemptedSlugs: string[]): Promise<number> {
+  const attemptedAt = new Date().toISOString();
+  let stamped = 0;
+  for (const chunk of chunks(attemptedSlugs, STAMP_CHUNK_SIZE)) {
+    const { count, error } = await supabase
+      .from("canonical_cards")
+      .update({ translation_attempted_at: attemptedAt }, { count: "exact" })
+      .in("slug", chunk);
+    if (error) throw new Error(`canonical_cards stamp: ${error.message}`);
+    stamped += count ?? 0;
+  }
+  return stamped;
 }
 
 export async function GET(req: Request) {
   const auth = await requireCron(req);
   if (!auth.ok) return auth.response;
-
-  if (!hasVercelPostgresConfig()) {
-    return NextResponse.json(
-      { ok: false, error: "Missing Vercel Postgres connection string. Set POSTGRES_URL." },
-      { status: 500 },
-    );
-  }
 
   const { searchParams } = new URL(req.url);
   const maxCards = parseMaxCards(searchParams.get("maxCards"));
@@ -115,25 +129,15 @@ export async function GET(req: Request) {
   // picker is idempotent + cheap, so re-running it on paired slugs
   // is safe and cleanups happen via deletePairingsForEnSlug below.
   let candidateRows: EnRow[];
+  let catalog;
   try {
-    const candidates = await sql.query(
-      `
-        select cc.slug
-          from canonical_cards cc
-         where cc.language = 'EN'
-           and (
-             cc.translation_attempted_at is null
-             or cc.translation_attempted_at < now() - interval '14 days'
-           )
-         order by cc.translation_attempted_at asc nulls first, cc.slug asc
-         limit $1
-      `,
-      [maxCards],
-    );
-    candidateRows = (candidates.rows ?? []) as EnRow[];
+    [candidateRows, catalog] = await Promise.all([
+      loadCandidateRows(supabase, maxCards),
+      loadTranslationMatchCatalog(supabase),
+    ]);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ ok: false, error: `candidate query: ${message}` }, { status: 500 });
+    return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 
   if (candidateRows.length === 0) {
@@ -165,9 +169,9 @@ export async function GET(req: Request) {
     lastSlug = row.slug;
     attemptedSlugs.push(row.slug);
     try {
-      const result = await findPairBySetCode(sql, row.slug);
+      const result = findPairBySetCodeInCatalog(catalog, row.slug);
       if (result.kind === "paired") {
-        const rowsWritten = await upsertPairing(row.slug, result.jp_slug);
+        const rowsWritten = await upsertPrimaryPairing(supabase, row.slug, result.jp_slug);
         written += rowsWritten;
         paired += 1;
       } else {
@@ -175,7 +179,7 @@ export async function GET(req: Request) {
         // existing rows for this EN slug so stale pairs from prior
         // matcher runs / catalog drift don't outlive the new verdict.
         // Codex P1 on commit 4def09bc34.
-        const deleted = await deletePairingsForEnSlug(sql, row.slug);
+        const deleted = await deletePairingsForEnSlug(supabase, row.slug);
         staleDeleted += deleted;
         if (result.kind === "unpaired" && result.reason === "no_verified_set_pair") {
           noPair += 1;
@@ -194,12 +198,11 @@ export async function GET(req: Request) {
   // Stamp translation_attempted_at on every slug we processed so the
   // 14-day filter pushes them to the back of the queue next week.
   if (attemptedSlugs.length > 0) {
-    const { error: stampErr } = await supabase
-      .from("canonical_cards")
-      .update({ translation_attempted_at: new Date().toISOString() })
-      .in("slug", attemptedSlugs);
-    if (stampErr) {
-      console.warn(`[refresh-card-translations] stamp write-back failed: ${stampErr.message}`);
+    try {
+      await stampAttempted(supabase, attemptedSlugs);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`[refresh-card-translations] stamp write-back failed: ${message}`);
     }
   }
 
