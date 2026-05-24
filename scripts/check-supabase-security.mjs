@@ -51,6 +51,10 @@ function normalizeTextArray(value) {
   return [];
 }
 
+function isDatabaseTrue(value) {
+  return value === true || value === 1 || value === "true" || value === "t" || value === "1";
+}
+
 function buildGrantContracts() {
   const contracts = new Map();
 
@@ -185,6 +189,8 @@ const publicFunctions = runLinkedDbQuery(
       p.oid,
       p.oid::regprocedure::text as signature,
       p.proname as function_name,
+      p.prorettype = 'pg_catalog.trigger'::regtype as returns_trigger,
+      pg_get_function_result(p.oid) as result_type,
       p.prosecdef as security_definer,
       coalesce(p.proconfig, '{}'::text[]) as proconfig
     from pg_proc p
@@ -385,7 +391,8 @@ for (const row of publicFunctions) {
   const exposedRoles = Object.keys(row.exposed_roles ?? {}).sort();
   actualFunctionContracts.set(signature, {
     exposedRoles,
-    securityDefiner: row.security_definer === true,
+    returnsTrigger: isDatabaseTrue(row.returns_trigger) || row.result_type === "trigger",
+    securityDefiner: isDatabaseTrue(row.security_definer),
     proconfig: normalizeTextArray(row.proconfig),
   });
 }
@@ -393,7 +400,14 @@ for (const row of publicFunctions) {
 for (const [signature, contract] of actualFunctionContracts) {
   const expectedRoles = normalizePrivileges(PUBLIC_FUNCTION_EXECUTE_ALLOWLIST[signature] ?? []);
 
-  if (!sameValues(contract.exposedRoles, expectedRoles)) {
+  const hasExplicitFunctionContract = Object.hasOwn(PUBLIC_FUNCTION_EXECUTE_ALLOWLIST, signature);
+  // Trigger functions are not public RPC surfaces: PostgreSQL only lets
+  // them run from table triggers, so access is governed by the table's
+  // RLS/grant contract unless we intentionally add an explicit contract.
+  if (
+    (!contract.returnsTrigger || hasExplicitFunctionContract) &&
+    !sameValues(contract.exposedRoles, expectedRoles)
+  ) {
     addFailure(
       "function-execute",
       `${signature} exposes [${formatList(contract.exposedRoles)}] but expected [${formatList(expectedRoles)}].`,

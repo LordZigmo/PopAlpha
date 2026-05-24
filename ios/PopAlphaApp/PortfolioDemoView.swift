@@ -37,21 +37,28 @@ struct PortfolioDemoView: View {
                     yourCardsSection
                 }
                 .padding(.bottom, 160) // room for sticky CTA
+                // Neutralize Button-based interactions inside the
+                // preview cells (hero window picker, identity
+                // disclosure, etc.) so the demo can't navigate or
+                // mutate state. `.disabled(true)` instead of
+                // `.allowsHitTesting(false)`: the latter sometimes
+                // also breaks scroll on the parent ScrollView, while
+                // .disabled() leaves the ScrollView's pan gesture
+                // intact and only neutralises Buttons/links inside.
+                // The radar's `.task`-based animation (not .onAppear)
+                // is resilient to both — see CollectorRadarView.
+                .disabled(true)
             }
-            // Block all interactions in the preview — every tap funnels
-            // into the sign-up CTA below instead.
-            .allowsHitTesting(false)
-
-            // Top-level tap layer that turns any preview interaction
-            // into a sign-up prompt. Sits above the disabled scroll
-            // content but below the sticky CTA.
-            Color.clear
-                .contentShape(Rectangle())
-                .onTapGesture {
+            // Tap anywhere in the demo → sign-in prompt. Simultaneous
+            // gesture so the ScrollView's own pan/drag gesture for
+            // scrolling still wins on actual scroll motions; a clean
+            // tap (no drag) routes to sign-in.
+            .simultaneousGesture(
+                TapGesture().onEnded {
                     PAHaptics.tap()
                     AuthService.shared.signIn()
                 }
-                .padding(.bottom, 140)
+            )
 
             stickyCTA
         }
@@ -163,154 +170,273 @@ struct PortfolioDemoView: View {
 
     // MARK: - Demo Data
 
+    // Demo intentionally uses Nostalgia Curator — visually opposite of
+    // the most common signed-in collector type (Modern Momentum) — so
+    // the sample doesn't read as a clone of the user's real portfolio
+    // and the radar shape immediately shows off the variety the
+    // classifier can recognise. The 10 supported types are defined in
+    // CollectorType (PortfolioModels.swift).
     private static let demoIdentity = CollectorIdentityProfile(
-        primaryType: .modernMomentum,
-        confidence: 0.78,
-        explanation: "Your collection skews toward recent sets and high-grade modern cards. You're chasing momentum in today's hottest releases — and your portfolio reflects it.",
+        primaryType: .nostalgiaCurator,
+        confidence: 0.82,
+        explanation: "Your collection leans heavily on WOTC-era chase cards — Base Set holos, Neo trophies, and graded vintage staples. You're preserving the cards that built the hobby.",
         traits: [
-            CollectorTrait(type: .setFinisher, strength: 0.65),
-            CollectorTrait(type: .gradedPurist, strength: 0.42),
+            CollectorTrait(type: .gradedPurist, strength: 0.78),
+            CollectorTrait(type: .setFinisher, strength: 0.48),
         ]
     )
 
     private static let demoSummary = PortfolioSummary(
-        totalValue: 2487.50,
-        totalCostBasis: 1942.20,
-        changes: [.day: PortfolioChange(amount: 545.30, percent: 28.1)],
-        cardCount: 24,
-        rawCount: 17,
-        gradedCount: 7,
+        totalValue: 9540.00,
+        totalCostBasis: 6820.00,
+        changes: [.day: PortfolioChange(amount: 148.00, percent: 1.6)],
+        cardCount: 38,
+        rawCount: 8,
+        gradedCount: 30,
         sealedCount: 0,
-        sparkline: [1700, 1740, 1820, 1790, 1880, 1920, 1960, 2030, 2100, 2160, 2220, 2310, 2400, 2487],
+        sparkline: [6850, 7020, 7180, 7140, 7320, 7450, 7680, 7820, 8050, 8240, 8580, 8920, 9230, 9540],
         aiSummary: ""
     )
 
+    // Tuned to read as "Nostalgia Curator" — peaks on nostalgia + slab,
+    // valleys on currentEra + marketHeat. Produces a radar polygon
+    // skewed toward the left/top side, visually opposite of the
+    // Modern-Momentum-shaped chart most signed-in users see. Values
+    // also line up with demoPositions below: heavy on Base / Neo / WOTC
+    // graded chase cards.
     private static let demoRadar = APIRadarProfile(
-        nostalgia: 0.42,
-        currentEra: 0.55,
-        slabFocus: 0.62,
-        marketHeat: 0.48,
-        tasteProfile: 0.38,
-        collectionDepth: 0.72
+        nostalgia: 0.92,
+        currentEra: 0.15,
+        slabFocus: 0.78,
+        marketHeat: 0.42,
+        tasteProfile: 0.74,
+        collectionDepth: 0.78
     )
 
     private static let demoInsights: [PortfolioInsight] = [
-        PortfolioInsight(text: "Your portfolio outperformed the modern market by +14.2% over the last 30 days."),
-        PortfolioInsight(text: "Your Charizard ex 199 is the strongest performer — up 38% since acquisition."),
-        PortfolioInsight(text: "You're 2 cards away from completing the Obsidian Flames master set."),
+        PortfolioInsight(text: "Your WOTC-era holdings outperformed the modern market by +18.4% over the last 30 days."),
+        PortfolioInsight(text: "Your PSA 9 Lugia (Neo Genesis) is your strongest position — up 24% since acquisition."),
+        PortfolioInsight(text: "92% of your collection is pre-2003 era. Graded vintage tends to outperform raw modern over long horizons."),
     ]
 
-    // Demo positions. canonicalSlug is the display fallback when no
-    // metadata image is available, so we set it to the card name.
+    // Demo positions. canonicalSlugs are real canonical_cards.slug
+    // values so the mirrored card-image CDN URLs in demoMetadata below
+    // render actual card art. The visible list is a "highlights" view
+    // of the 38-card vintage collection summarised in demoSummary —
+    // spans Base, Team Rocket, Neo Genesis, Neo Destiny, and a WOTC
+    // promo so the mix reads as a focused pre-2003 portfolio.
     private static let demoPositions: [Position] = [
         Position(
-            key: "charizard-ex-obsidian-flames-199::PSA 10",
-            canonicalSlug: "charizard-ex",
-            grade: "PSA 10",
+            key: "neo-genesis-9-lugia::PSA 9",
+            canonicalSlug: "neo-genesis-9-lugia",
+            grade: "PSA 9",
             lots: [
                 HoldingRow(
                     id: "demo-1",
-                    canonicalSlug: "charizard-ex",
+                    canonicalSlug: "neo-genesis-9-lugia",
                     printingId: nil,
-                    grade: "PSA 10",
+                    grade: "PSA 9",
                     qty: 1,
-                    pricePaidUsd: 380.00,
-                    acquiredOn: "2025-09-12",
-                    venue: "eBay",
-                    certNumber: "82145671"
+                    pricePaidUsd: 1450.00,
+                    acquiredOn: "2024-11-08",
+                    venue: "PWCC",
+                    certNumber: "61124882"
                 )
             ]
         ),
         Position(
-            key: "pikachu-illustrator-promo::RAW",
-            canonicalSlug: "moonbreon",
-            grade: "RAW",
+            key: "base-4-charizard::PSA 7",
+            canonicalSlug: "base-4-charizard",
+            grade: "PSA 7",
             lots: [
                 HoldingRow(
                     id: "demo-2",
-                    canonicalSlug: "moonbreon",
+                    canonicalSlug: "base-4-charizard",
                     printingId: nil,
-                    grade: "RAW",
-                    qty: 2,
-                    pricePaidUsd: 220.00,
-                    acquiredOn: "2025-11-04",
-                    venue: "TCGplayer",
-                    certNumber: nil
+                    grade: "PSA 7",
+                    qty: 1,
+                    pricePaidUsd: 1100.00,
+                    acquiredOn: "2024-08-14",
+                    venue: "eBay",
+                    certNumber: "59218043"
                 )
             ]
         ),
         Position(
-            key: "iono-svp::PSA 9",
-            canonicalSlug: "iono-special-illustration",
+            key: "neo-destiny-107-shining-charizard::PSA 9",
+            canonicalSlug: "neo-destiny-107-shining-charizard",
             grade: "PSA 9",
             lots: [
                 HoldingRow(
                     id: "demo-3",
-                    canonicalSlug: "iono-special-illustration",
+                    canonicalSlug: "neo-destiny-107-shining-charizard",
                     printingId: nil,
                     grade: "PSA 9",
                     qty: 1,
-                    pricePaidUsd: 95.00,
-                    acquiredOn: "2026-01-22",
-                    venue: "LGS",
-                    certNumber: "78443210"
+                    pricePaidUsd: 1280.00,
+                    acquiredOn: "2025-03-21",
+                    venue: "Goldin",
+                    certNumber: "62488019"
                 )
             ]
         ),
         Position(
-            key: "umbreon-vmax-evs::RAW",
-            canonicalSlug: "umbreon-vmax",
-            grade: "RAW",
+            key: "base-2-blastoise::PSA 9",
+            canonicalSlug: "base-2-blastoise",
+            grade: "PSA 9",
             lots: [
                 HoldingRow(
                     id: "demo-4",
-                    canonicalSlug: "umbreon-vmax",
+                    canonicalSlug: "base-2-blastoise",
                     printingId: nil,
-                    grade: "RAW",
-                    qty: 3,
-                    pricePaidUsd: 60.00,
-                    acquiredOn: "2025-08-30",
-                    venue: nil,
-                    certNumber: nil
+                    grade: "PSA 9",
+                    qty: 1,
+                    pricePaidUsd: 590.00,
+                    acquiredOn: "2025-01-10",
+                    venue: "PWCC",
+                    certNumber: "60291743"
+                )
+            ]
+        ),
+        Position(
+            key: "base-15-venusaur::PSA 9",
+            canonicalSlug: "base-15-venusaur",
+            grade: "PSA 9",
+            lots: [
+                HoldingRow(
+                    id: "demo-5",
+                    canonicalSlug: "base-15-venusaur",
+                    printingId: nil,
+                    grade: "PSA 9",
+                    qty: 1,
+                    pricePaidUsd: 480.00,
+                    acquiredOn: "2025-01-10",
+                    venue: "PWCC",
+                    certNumber: "60291744"
+                )
+            ]
+        ),
+        Position(
+            key: "base-10-mewtwo::PSA 10",
+            canonicalSlug: "base-10-mewtwo",
+            grade: "PSA 10",
+            lots: [
+                HoldingRow(
+                    id: "demo-6",
+                    canonicalSlug: "base-10-mewtwo",
+                    printingId: nil,
+                    grade: "PSA 10",
+                    qty: 1,
+                    pricePaidUsd: 540.00,
+                    acquiredOn: "2025-05-02",
+                    venue: "eBay",
+                    certNumber: "63110928"
+                )
+            ]
+        ),
+        Position(
+            key: "wizards-black-star-promos-8-mew::PSA 9",
+            canonicalSlug: "wizards-black-star-promos-8-mew",
+            grade: "PSA 9",
+            lots: [
+                HoldingRow(
+                    id: "demo-7",
+                    canonicalSlug: "wizards-black-star-promos-8-mew",
+                    printingId: nil,
+                    grade: "PSA 9",
+                    qty: 1,
+                    pricePaidUsd: 360.00,
+                    acquiredOn: "2025-06-17",
+                    venue: "LGS",
+                    certNumber: "63884211"
+                )
+            ]
+        ),
+        Position(
+            key: "team-rocket-4-dark-charizard::PSA 8",
+            canonicalSlug: "team-rocket-4-dark-charizard",
+            grade: "PSA 8",
+            lots: [
+                HoldingRow(
+                    id: "demo-8",
+                    canonicalSlug: "team-rocket-4-dark-charizard",
+                    printingId: nil,
+                    grade: "PSA 8",
+                    qty: 1,
+                    pricePaidUsd: 280.00,
+                    acquiredOn: "2025-09-25",
+                    venue: "eBay",
+                    certNumber: "65812907"
                 )
             ]
         ),
     ]
 
+    // Mirrored CDN URLs (public storage bucket) — same scheme the
+    // signed-in overview API returns, so the demo renders identical
+    // card thumbnails to the real portfolio.
     private static let demoMetadata: [String: APICardMetadata] = [
-        "charizard-ex": APICardMetadata(
-            name: "Charizard ex 199",
-            setName: "Obsidian Flames",
-            imageUrl: nil,
-            marketPrice: 525.00,
-            changePct: 38.2
+        "neo-genesis-9-lugia": APICardMetadata(
+            name: "Lugia 9 (Holo)",
+            setName: "Neo Genesis",
+            imageUrl: "https://nbveknrnvcgeyysqrtkl.supabase.co/storage/v1/object/public/card-images/canonical/neo-genesis-9-lugia/full.png",
+            marketPrice: 1820.00,
+            changePct: 24.1
         ),
-        "moonbreon": APICardMetadata(
-            name: "Umbreon VMAX (Alt Art)",
-            setName: "Evolving Skies",
-            imageUrl: nil,
-            marketPrice: 285.00,
-            changePct: 14.5
+        "base-4-charizard": APICardMetadata(
+            name: "Charizard 4 (Base Set Holo)",
+            setName: "Base",
+            imageUrl: "https://nbveknrnvcgeyysqrtkl.supabase.co/storage/v1/object/public/card-images/canonical/base-4-charizard/full.png",
+            marketPrice: 1400.00,
+            changePct: 15.8
         ),
-        "iono-special-illustration": APICardMetadata(
-            name: "Iono SIR 254",
-            setName: "Paldean Fates",
-            imageUrl: nil,
-            marketPrice: 110.00,
-            changePct: 6.8
+        "neo-destiny-107-shining-charizard": APICardMetadata(
+            name: "Shining Charizard 107",
+            setName: "Neo Destiny",
+            imageUrl: "https://nbveknrnvcgeyysqrtkl.supabase.co/storage/v1/object/public/card-images/canonical/neo-destiny-107-shining-charizard/full.png",
+            marketPrice: 1480.00,
+            changePct: 12.6
         ),
-        "umbreon-vmax": APICardMetadata(
-            name: "Umbreon VMAX 95",
-            setName: "Evolving Skies",
-            imageUrl: nil,
-            marketPrice: 72.00,
-            changePct: 2.1
+        "base-2-blastoise": APICardMetadata(
+            name: "Blastoise 2 (Holo)",
+            setName: "Base",
+            imageUrl: "https://nbveknrnvcgeyysqrtkl.supabase.co/storage/v1/object/public/card-images/canonical/base-2-blastoise/full.png",
+            marketPrice: 720.00,
+            changePct: 8.4
+        ),
+        "base-15-venusaur": APICardMetadata(
+            name: "Venusaur 15 (Holo)",
+            setName: "Base",
+            imageUrl: "https://nbveknrnvcgeyysqrtkl.supabase.co/storage/v1/object/public/card-images/canonical/base-15-venusaur/full.png",
+            marketPrice: 580.00,
+            changePct: 6.9
+        ),
+        "base-10-mewtwo": APICardMetadata(
+            name: "Mewtwo 10 (Holo)",
+            setName: "Base",
+            imageUrl: "https://nbveknrnvcgeyysqrtkl.supabase.co/storage/v1/object/public/card-images/canonical/base-10-mewtwo/full.png",
+            marketPrice: 620.00,
+            changePct: 4.2
+        ),
+        "wizards-black-star-promos-8-mew": APICardMetadata(
+            name: "Mew 8 (WOTC Promo)",
+            setName: "Wizards Black Star Promos",
+            imageUrl: "https://nbveknrnvcgeyysqrtkl.supabase.co/storage/v1/object/public/card-images/canonical/wizards-black-star-promos-8-mew/full.png",
+            marketPrice: 430.00,
+            changePct: 9.1
+        ),
+        "team-rocket-4-dark-charizard": APICardMetadata(
+            name: "Dark Charizard 4 (Holo)",
+            setName: "Team Rocket",
+            imageUrl: "https://nbveknrnvcgeyysqrtkl.supabase.co/storage/v1/object/public/card-images/canonical/team-rocket-4-dark-charizard/full.png",
+            marketPrice: 340.00,
+            changePct: 11.2
         ),
     ]
 
     private static let demoDescriptors: [String: String] = [
-        "charizard-ex-obsidian-flames-199::PSA 10": "Largest holding",
-        "iono-svp::PSA 9": "Best performer",
+        "neo-genesis-9-lugia::PSA 9": "Largest holding",
+        "neo-destiny-107-shining-charizard::PSA 9": "Best performer",
     ]
 }
 
