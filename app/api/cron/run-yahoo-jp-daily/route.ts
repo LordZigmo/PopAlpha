@@ -198,10 +198,11 @@ async function loadInitialYahooSlugs(
   const neverAttemptedSlugs: string[] = [];
   const retryNoPriceSlugs: string[] = [];
   const seen = new Set<string>();
+  const candidatePoolSize = () => neverAttemptedSlugs.length + retryNoPriceSlugs.length;
 
   for (
     let from = 0;
-    neverAttemptedSlugs.length < input.limit && from < MAX_INITIAL_FETCH_SCAN_ROWS;
+    candidatePoolSize() < input.limit && from < MAX_INITIAL_FETCH_SCAN_ROWS;
     from += CANDIDATE_SCAN_PAGE_SIZE
   ) {
     const { data, error } = await supabase
@@ -232,7 +233,7 @@ async function loadInitialYahooSlugs(
       } else {
         neverAttemptedSlugs.push(slug);
       }
-      if (neverAttemptedSlugs.length >= input.limit) break;
+      if (candidatePoolSize() >= input.limit) break;
     }
 
     if (rows.length < CANDIDATE_SCAN_PAGE_SIZE) break;
