@@ -149,10 +149,11 @@ async function loadInitialSnkrdunkCandidates(
   const neverAttemptedCandidates: RefreshCandidate[] = [];
   const retryNoPriceCandidates: RefreshCandidate[] = [];
   const seenProductCodes = new Set<string>();
+  const candidatePoolSize = () => neverAttemptedCandidates.length + retryNoPriceCandidates.length;
 
   for (
     let from = 0;
-    neverAttemptedCandidates.length < input.limit && from < MAX_INITIAL_FETCH_SCAN_ROWS;
+    candidatePoolSize() < input.limit && from < MAX_INITIAL_FETCH_SCAN_ROWS;
     from += CANDIDATE_SCAN_PAGE_SIZE
   ) {
     const { data, error } = await supabase
@@ -193,7 +194,7 @@ async function loadInitialSnkrdunkCandidates(
       } else {
         neverAttemptedCandidates.push(candidate);
       }
-      if (neverAttemptedCandidates.length >= input.limit) break;
+      if (candidatePoolSize() >= input.limit) break;
     }
 
     if (rows.length < CANDIDATE_SCAN_PAGE_SIZE) break;
