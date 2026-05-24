@@ -122,7 +122,7 @@ export async function getRelatedCardCarousels(input: {
     return { fromSet: [], fromPokemon: [] };
   }
 
-  const marketMap = await getCanonicalMarketPulseMap(db, allSlugs);
+  const marketMap = await getCanonicalMarketPulseMap(db, allSlugs, { includeJpPriceCoverage: true });
 
   const fromSet = sortCards(
     fromSetRows.map((row) => toHomepageCard(row, marketMap.get(row.slug))),

@@ -13,6 +13,10 @@ TestFlight build with a trivial sanity check.
   case count sentinel).
 - **MarketCardTests** — `MarketCard.stub(slug:)` factory. Critical
   because both search and deep-link navigation funnel through it.
+- **CardDetailPriceTrustTests** — detail hero price precedence.
+  Verifies authoritative metrics beat chart fallbacks, including the
+  2420-style failure mode, and that thin JP samples do not override
+  trusted metrics.
 
 ## One-time Xcode setup
 
@@ -38,6 +42,7 @@ seconds:
    Project navigator, **right-click `PopAlphaAppTests` group → Add
    Files to "PopAlphaApp"…** and select the three real test files
    already on disk in `ios/PopAlphaAppTests/`:
+   - `CardDetailPriceTrustTests.swift`
    - `DeepLinkRouterTests.swift`
    - `ScanLanguageTests.swift`
    - `MarketCardTests.swift`

@@ -6,6 +6,13 @@ import {
   computeCanonicalMarketStrength,
   type MarketDirection,
 } from "@/lib/data/market-strength";
+import {
+  computeJpNativeConfidence,
+  isJpNativeCoverageSource,
+  loadJpPriceCoverageMap,
+  type JpPriceCoverage,
+  type JpPriceCoverageSource,
+} from "@/lib/data/jp-price-coverage";
 
 export type MarketChangeWindow = "24H" | "7D";
 
@@ -26,7 +33,7 @@ type CanonicalMarketMetricRow = {
   provider_price_changes_count_30d?: number | null;
   market_confidence_score?: number | null;
   market_low_confidence?: boolean | null;
-  market_blend_policy?: "NO_PRICE" | "SCRYDEX_PRIMARY" | null;
+  market_blend_policy?: "NO_PRICE" | "SCRYDEX_PRIMARY" | "YAHOO_JP_PRIMARY" | "SNKRDUNK_PRIMARY" | null;
   market_provenance?: {
     sourceMix?: {
       justtcgWeight?: number;
@@ -35,6 +42,10 @@ type CanonicalMarketMetricRow = {
   } | null;
   change_pct_24h: number | null;
   change_pct_7d: number | null;
+  display_price_source?: JpPriceCoverageSource | null;
+  display_price_usd?: number | null;
+  display_price_as_of?: string | null;
+  display_price_sample_count?: number | null;
 };
 
 type CanonicalParityRow = {
@@ -68,18 +79,21 @@ export type CanonicalMarketPulse = {
   changePct: number | null;
   changeWindow: MarketChangeWindow | null;
   parityStatus: RawParityStatus;
-  blendPolicy?: "NO_PRICE" | "SCRYDEX_PRIMARY";
+  blendPolicy?: "NO_PRICE" | "SCRYDEX_PRIMARY" | "YAHOO_JP_PRIMARY" | "SNKRDUNK_PRIMARY";
   confidenceScore?: number;
   lowConfidence?: boolean;
   marketStrengthScore?: number | null;
   marketDirection?: MarketDirection | null;
+  priceSource?: "market" | "yahoo_jp" | "snkrdunk" | null;
   sourceMix?: {
     justtcgWeight: number;
     scrydexWeight: number;
+    jpNativeWeight?: number;
   };
   sampleCounts7d?: {
     justtcg: number;
     scrydex: number;
+    jpNative?: number;
     total: number;
   };
 };
@@ -135,67 +149,124 @@ function chooseBestVariantSignalRow(rows: CanonicalVariantSignalRow[]): Canonica
   })[0] ?? null;
 }
 
+function metricRowFromJpCoverage(
+  baseRow: CanonicalMarketMetricRow | null,
+  coverage: JpPriceCoverage,
+): CanonicalMarketMetricRow {
+  return {
+    canonical_slug: coverage.canonicalSlug,
+    justtcg_price: baseRow?.justtcg_price ?? null,
+    scrydex_price: baseRow?.scrydex_price ?? baseRow?.market_price ?? coverage.marketPrice,
+    pokemontcg_price: baseRow?.pokemontcg_price ?? null,
+    market_price: baseRow?.market_price ?? coverage.marketPrice,
+    market_price_as_of: baseRow?.market_price_as_of ?? coverage.marketPriceAsOf,
+    liquidity_score: baseRow?.liquidity_score ?? null,
+    active_listings_7d: baseRow?.active_listings_7d ?? coverage.activeListings7d,
+    snapshot_count_30d: baseRow?.snapshot_count_30d ?? coverage.snapshotCount30d,
+    median_7d: baseRow?.median_7d ?? null,
+    provider_trend_slope_7d: baseRow?.provider_trend_slope_7d ?? null,
+    provider_cov_price_30d: baseRow?.provider_cov_price_30d ?? null,
+    provider_price_relative_to_30d_range: baseRow?.provider_price_relative_to_30d_range ?? null,
+    provider_price_changes_count_30d: baseRow?.provider_price_changes_count_30d ?? null,
+    market_confidence_score: baseRow?.market_confidence_score ?? coverage.marketConfidenceScore,
+    market_low_confidence: baseRow?.market_low_confidence ?? coverage.marketLowConfidence,
+    market_blend_policy: baseRow?.market_blend_policy ?? null,
+    market_provenance: baseRow?.market_provenance ?? null,
+    change_pct_24h: baseRow?.change_pct_24h ?? coverage.changePct24h,
+    change_pct_7d: baseRow?.change_pct_7d ?? coverage.changePct7d,
+    display_price_source: coverage.displayPriceSource,
+    display_price_usd: coverage.displayPriceUsd,
+    display_price_as_of: coverage.displayPriceAsOf,
+    display_price_sample_count: coverage.displayPriceSampleCount,
+  };
+}
+
 export function resolveCanonicalMarketPulse(
   row: Partial<Omit<CanonicalMarketMetricRow, "canonical_slug">> | null | undefined,
   parityStatus: RawParityStatus = "UNKNOWN",
   variantSignals: CanonicalVariantSignalRow | null = null,
 ): CanonicalMarketPulse {
-  const marketPrice = toFiniteNumber(row?.market_price);
-  const scrydexPrice = marketPrice;
+  const displaySource = row?.display_price_source ?? null;
+  const jpNativeSource = isJpNativeCoverageSource(displaySource);
+  const displayPrice = toFiniteNumber(row?.display_price_usd);
+  const rawMarketPrice = toFiniteNumber(row?.market_price);
+  const marketPrice = displayPrice ?? rawMarketPrice;
+  const scrydexPrice = jpNativeSource ? rawMarketPrice : marketPrice;
   const scrydexOnlySampleCounts = (row?.market_provenance as {
     sampleCounts7d?: { scrydex?: number };
   } | null)?.sampleCounts7d;
-  const scrydexPoints7d = marketPrice !== null
+  const scrydexPoints7d = rawMarketPrice !== null
     ? Math.max(0, toFiniteNumber(scrydexOnlySampleCounts?.scrydex) ?? 0)
+    : 0;
+  const jpNativeSampleCount = jpNativeSource
+    ? Math.max(0, Math.floor(toFiniteNumber(row?.display_price_sample_count) ?? 0))
     : 0;
   const change24h = marketPrice !== null ? toFiniteNumber(row?.change_pct_24h) : null;
   const change7d = marketPrice !== null ? toFiniteNumber(row?.change_pct_7d) : null;
   const confidenceScore = marketPrice !== null
-    ? (toFiniteNumber(row?.market_confidence_score) ?? undefined)
+    ? (jpNativeSource ? computeJpNativeConfidence(jpNativeSampleCount) : toFiniteNumber(row?.market_confidence_score) ?? undefined)
     : undefined;
   const lowConfidence = marketPrice === null
     ? true
-    : (typeof row?.market_low_confidence === "boolean" ? row.market_low_confidence : false);
+    : jpNativeSource
+      ? jpNativeSampleCount < 5
+      : (typeof row?.market_low_confidence === "boolean" ? row.market_low_confidence : false);
+  const activeListings7d = marketPrice !== null
+    ? (jpNativeSource ? jpNativeSampleCount : toFiniteNumber(row?.active_listings_7d))
+    : null;
+  const snapshotCount30d = marketPrice !== null
+    ? (jpNativeSource ? jpNativeSampleCount : toFiniteNumber(row?.snapshot_count_30d))
+    : null;
   const marketStrength = computeCanonicalMarketStrength({
     trendSlope7d: row?.provider_trend_slope_7d ?? variantSignals?.provider_trend_slope_7d,
     covPrice30d: row?.provider_cov_price_30d ?? variantSignals?.provider_cov_price_30d,
     priceRelativeTo30dRange: row?.provider_price_relative_to_30d_range ?? variantSignals?.provider_price_relative_to_30d_range,
     priceChangesCount30d: row?.provider_price_changes_count_30d ?? variantSignals?.provider_price_changes_count_30d,
     latestPrice: marketPrice,
-    snapshotCount30d: row?.snapshot_count_30d ?? variantSignals?.history_points_30d,
+    snapshotCount30d: snapshotCount30d ?? variantSignals?.history_points_30d,
     confidenceScore,
     lowConfidence,
     liquidityScore: row?.liquidity_score,
-    activeListings7d: row?.active_listings_7d,
+    activeListings7d,
     changePct24h: change24h,
     changePct7d: change7d,
   });
+  const blendPolicy = marketPrice === null
+    ? "NO_PRICE"
+    : displaySource === "yahoo_jp"
+      ? "YAHOO_JP_PRIMARY"
+      : displaySource === "snkrdunk"
+        ? "SNKRDUNK_PRIMARY"
+        : "SCRYDEX_PRIMARY";
 
   const basePayload = {
     justtcgPrice: null,
     scrydexPrice,
     pokemontcgPrice: null,
     marketPrice,
-    marketPriceAsOf: marketPrice !== null ? row?.market_price_as_of ?? null : null,
-    liquidityScore: marketPrice !== null ? toFiniteNumber(row?.liquidity_score) : null,
-    activeListings7d: marketPrice !== null ? toFiniteNumber(row?.active_listings_7d) : null,
-    snapshotCount30d: marketPrice !== null ? toFiniteNumber(row?.snapshot_count_30d) : null,
+    marketPriceAsOf: marketPrice !== null ? (row?.display_price_as_of ?? row?.market_price_as_of ?? null) : null,
+    liquidityScore: marketPrice !== null && !jpNativeSource ? toFiniteNumber(row?.liquidity_score) : null,
+    activeListings7d,
+    snapshotCount30d,
     changePct24h: change24h,
     changePct7d: change7d,
     parityStatus,
-    blendPolicy: marketPrice !== null ? "SCRYDEX_PRIMARY" : "NO_PRICE",
+    blendPolicy,
     confidenceScore,
     lowConfidence,
     marketStrengthScore: marketStrength.marketStrengthScore,
     marketDirection: marketStrength.marketDirection,
+    priceSource: displaySource ?? (marketPrice !== null ? "market" : null),
     sourceMix: {
       justtcgWeight: 0,
-      scrydexWeight: marketPrice !== null ? 1 : 0,
+      scrydexWeight: marketPrice !== null && !jpNativeSource ? 1 : 0,
+      ...(jpNativeSource ? { jpNativeWeight: 1 } : {}),
     },
     sampleCounts7d: {
       justtcg: 0,
       scrydex: scrydexPoints7d,
-      total: scrydexPoints7d,
+      ...(jpNativeSource ? { jpNative: jpNativeSampleCount } : {}),
+      total: jpNativeSource ? jpNativeSampleCount : scrydexPoints7d,
     },
   } satisfies Omit<CanonicalMarketPulse, "changePct" | "changeWindow">;
 
@@ -225,30 +296,52 @@ export function resolveCanonicalMarketPulse(
 export async function getCanonicalMarketPulseMap(
   supabase: SupabaseClient,
   slugs: string[],
+  options: { includeJpPriceCoverage?: boolean } = {},
 ): Promise<Map<string, CanonicalMarketPulse>> {
   const pulseMap = new Map<string, CanonicalMarketPulse>();
   if (slugs.length === 0) return pulseMap;
 
-  const { data, error } = await supabase
-    .from("public_card_metrics")
-    .select("canonical_slug, justtcg_price, scrydex_price, pokemontcg_price, market_price, market_price_as_of, liquidity_score, active_listings_7d, snapshot_count_30d, median_7d, provider_trend_slope_7d, provider_cov_price_30d, provider_price_relative_to_30d_range, provider_price_changes_count_30d, market_confidence_score, market_low_confidence, market_blend_policy, market_provenance, change_pct_24h, change_pct_7d")
-    .in("canonical_slug", slugs)
-    .is("printing_id", null)
-    .eq("grade", "RAW")
-    .order("updated_at", { ascending: false });
+  const [
+    metricsResult,
+    parityResult,
+    variantSignalResult,
+    jpCoverageResult,
+  ] = await Promise.all([
+    supabase
+      .from("public_card_metrics")
+      .select("canonical_slug, justtcg_price, scrydex_price, pokemontcg_price, market_price, market_price_as_of, liquidity_score, active_listings_7d, snapshot_count_30d, median_7d, provider_trend_slope_7d, provider_cov_price_30d, provider_price_relative_to_30d_range, provider_price_changes_count_30d, market_confidence_score, market_low_confidence, market_blend_policy, market_provenance, change_pct_24h, change_pct_7d")
+      .in("canonical_slug", slugs)
+      .is("printing_id", null)
+      .eq("grade", "RAW")
+      .order("updated_at", { ascending: false }),
+    supabase
+      .from("canonical_raw_provider_parity")
+      .select("canonical_slug, parity_status")
+      .in("canonical_slug", slugs),
+    supabase
+      .from("public_variant_metrics")
+      .select("canonical_slug, provider, provider_trend_slope_7d, provider_cov_price_30d, provider_price_relative_to_30d_range, provider_price_changes_count_30d, history_points_30d, provider_as_of_ts, updated_at")
+      .in("canonical_slug", slugs)
+      .eq("grade", "RAW")
+      .in("provider", ["SCRYDEX", "POKEMON_TCG_API"])
+      .order("updated_at", { ascending: false }),
+    options.includeJpPriceCoverage
+      ? loadJpPriceCoverageMap(supabase, slugs)
+          .then((data) => ({ data, error: null as Error | null }))
+          .catch((error: unknown) => ({
+            data: new Map<string, JpPriceCoverage>(),
+            error: error instanceof Error ? error : new Error(String(error)),
+          }))
+      : Promise.resolve({
+          data: new Map<string, JpPriceCoverage>(),
+          error: null as Error | null,
+        }),
+  ]);
 
-  const { data: parityData, error: parityError } = await supabase
-    .from("canonical_raw_provider_parity")
-    .select("canonical_slug, parity_status")
-    .in("canonical_slug", slugs);
-
-  const { data: variantSignalData, error: variantSignalError } = await supabase
-    .from("public_variant_metrics")
-    .select("canonical_slug, provider, provider_trend_slope_7d, provider_cov_price_30d, provider_price_relative_to_30d_range, provider_price_changes_count_30d, history_points_30d, provider_as_of_ts, updated_at")
-    .in("canonical_slug", slugs)
-    .eq("grade", "RAW")
-    .in("provider", ["SCRYDEX", "POKEMON_TCG_API"])
-    .order("updated_at", { ascending: false });
+  const { data, error } = metricsResult;
+  const { data: parityData, error: parityError } = parityResult;
+  const { data: variantSignalData, error: variantSignalError } = variantSignalResult;
+  const { data: jpCoverageBySlug, error: jpCoverageError } = jpCoverageResult;
 
   if (error) {
     console.error("[getCanonicalMarketPulseMap]", error.message);
@@ -259,6 +352,16 @@ export async function getCanonicalMarketPulseMap(
   }
   if (variantSignalError) {
     console.error("[getCanonicalMarketPulseMap:variant_signals]", variantSignalError.message);
+  }
+  if (jpCoverageError) {
+    console.error("[getCanonicalMarketPulseMap:jp_price_coverage]", jpCoverageError.message);
+  }
+
+  const metricRowsBySlug = new Map<string, CanonicalMarketMetricRow>();
+  for (const row of (data ?? []) as CanonicalMarketMetricRow[]) {
+    if (!metricRowsBySlug.has(row.canonical_slug)) {
+      metricRowsBySlug.set(row.canonical_slug, row);
+    }
   }
 
   const parityBySlug = new Map<string, CanonicalParityRow["parity_status"]>();
@@ -279,17 +382,22 @@ export async function getCanonicalMarketPulseMap(
     if (bestRow) bestVariantSignalsBySlug.set(slug, bestRow);
   }
 
-  for (const row of (data ?? []) as CanonicalMarketMetricRow[]) {
-    if (pulseMap.has(row.canonical_slug)) continue;
+  for (const slug of slugs) {
+    if (pulseMap.has(slug)) continue;
+    const metricRow = metricRowsBySlug.get(slug) ?? null;
+    const jpCoverage = jpCoverageBySlug.get(slug) ?? null;
+    const row = jpCoverage ? metricRowFromJpCoverage(metricRow, jpCoverage) : metricRow;
+    if (!row) continue;
     const resolved = resolveCanonicalMarketPulse(
       row,
       parityBySlug.get(row.canonical_slug) ?? "UNKNOWN",
       bestVariantSignalsBySlug.get(row.canonical_slug) ?? null,
     );
-    if (row.market_confidence_score !== null && row.market_confidence_score !== undefined) {
+    const jpNativeSource = isJpNativeCoverageSource(row.display_price_source);
+    if (!jpNativeSource && row.market_confidence_score !== null && row.market_confidence_score !== undefined) {
       resolved.confidenceScore = Math.round(row.market_confidence_score);
     }
-    if (typeof row.market_low_confidence === "boolean") {
+    if (!jpNativeSource && typeof row.market_low_confidence === "boolean") {
       resolved.lowConfidence = row.market_low_confidence;
     }
     pulseMap.set(row.canonical_slug, resolved);

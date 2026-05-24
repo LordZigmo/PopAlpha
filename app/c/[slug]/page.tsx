@@ -39,6 +39,10 @@ import { buildAssetViewModel } from "@/lib/data/assets";
 import { filterRawHistoryRowsForPrinting } from "@/lib/pricing/raw-history";
 import { resolveWeightedMarketPrice } from "@/lib/pricing/market-confidence";
 import {
+  convertPriceHistoryRowToUsd,
+  loadPriceHistoryFxRows,
+} from "@/lib/pricing/price-history-currency";
+import {
   PRICING_DISPLAY_V2_ENABLED,
   resolveDisplayedMarketPrice,
 } from "@/lib/pricing/displayed-market-price";
@@ -785,6 +789,15 @@ export default async function CanonicalCardPage({
     PSA10: psa10Snap.data,
   } as const;
   const gradedPriceHistoryRows = (gradedPriceHistoryQuery.data ?? []) as GradedPriceHistoryRow[];
+  const gradedHistoryMaxDate = gradedPriceHistoryRows
+    .map((row) => {
+      const date = new Date(row.ts);
+      return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
+    })
+    .filter((value): value is string => Boolean(value))
+    .sort()
+    .at(-1) ?? null;
+  const gradedHistoryFxRows = await loadPriceHistoryFxRows(supabase, gradedHistoryMaxDate);
   const rawProviderHistoryRows = filterRawHistoryRowsForPrinting(
     (rawProviderHistoryQuery.data ?? []) as RawProviderHistoryRow[],
     rawPrintingIdForHistory,
@@ -796,7 +809,7 @@ export default async function CanonicalCardPage({
   // don't parse (legacy / non-graded ones) are skipped. ts-desc ordering
   // means the first match per provider is the latest.
   const GRADED_LONG_REF_RE = /^([0-9a-f-]{36})::.*::GRADED::(PSA|CGC|BGS|TAG)::(LE_7|G8|G9|G9_5|G10|G10_PERFECT)::RAW$/;
-  const latestGradedPriceByVariantRef = new Map<string, GradedPriceHistoryRow>();
+  const latestGradedPriceUsdByVariantRef = new Map<string, number>();
   for (const row of gradedPriceHistoryRows) {
     if (!row.variant_ref) continue;
     const match = row.variant_ref.match(GRADED_LONG_REF_RE);
@@ -804,8 +817,10 @@ export default async function CanonicalCardPage({
     const provider = match[2] as "PSA" | "CGC" | "BGS" | "TAG";
     const bucket = match[3] as GradeBucket;
     const shortRef = buildGradedVariantRef(match[1], provider, bucket);
-    if (latestGradedPriceByVariantRef.has(shortRef)) continue;
-    latestGradedPriceByVariantRef.set(shortRef, row);
+    if (latestGradedPriceUsdByVariantRef.has(shortRef)) continue;
+    const usdPrice = convertPriceHistoryRowToUsd(row, gradedHistoryFxRows);
+    if (usdPrice === null) continue;
+    latestGradedPriceUsdByVariantRef.set(shortRef, usdPrice);
   }
 
   const snapshotData = selectedSnapshotGrade ? gradeSnapMap[selectedSnapshotGrade] : null;
@@ -996,11 +1011,11 @@ export default async function CanonicalCardPage({
     ? ((selectedGradedReference - rawReference) / rawReference) * 100
     : null;
   const gradedProviderCards = gradedVariantRefsForActiveBucket.map((entry) => {
-    const latestRow = latestGradedPriceByVariantRef.get(entry.variantRef);
+    const latestUsd = latestGradedPriceUsdByVariantRef.get(entry.variantRef);
     return {
       key: entry.provider,
       label: providerLabel(entry.provider),
-      value: latestRow?.price != null ? formatUsdCompact(latestRow.price) : "Forming",
+      value: latestUsd != null ? formatUsdCompact(latestUsd) : "Forming",
     };
   });
   const trendMetricValue = showPriceChange ? formatSignalScore(priceChangePct) : "Stale";

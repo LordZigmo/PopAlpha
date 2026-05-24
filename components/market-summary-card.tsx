@@ -19,7 +19,11 @@ import {
   extractRawVariantPrintingId,
   isRawHistoryVariantRefForPrinting,
 } from "@/lib/identity/variant-ref";
-import { getEurToUsdRate } from "@/lib/pricing/fx";
+import {
+  convertPriceHistoryRowToUsd,
+  loadPriceHistoryFxRows,
+  type PriceHistoryFxRateRow,
+} from "@/lib/pricing/price-history-currency";
 import {
   getSharedPrivateSalesForSlug,
   type SharedPrivateSale,
@@ -41,11 +45,6 @@ type PriceHistoryRow = {
   currency: string | null;
   ts: string;
   price: number;
-};
-
-type FxRateRow = {
-  rate: number;
-  rate_date: string;
 };
 
 type CardMetricRow = {
@@ -138,49 +137,8 @@ async function loadAllHistoryRows(params: {
   return allRows;
 }
 
-async function loadFxRates(params: {
-  supabase: ReturnType<typeof dbPublic>;
-  asOfDate: string | null;
-}): Promise<FxRateRow[]> {
-  if (!params.asOfDate) return [];
-  const { data, error } = await params.supabase
-    .from("fx_rates")
-    .select("rate, rate_date")
-    .eq("pair", "EURUSD")
-    .lte("rate_date", params.asOfDate)
-    .order("rate_date", { ascending: true });
-  if (error) return [];
-  return (data ?? []) as FxRateRow[];
-}
-
-function findRateForDate(fxRows: FxRateRow[], isoDate: string): number | null {
-  if (fxRows.length === 0) return null;
-  let lo = 0;
-  let hi = fxRows.length - 1;
-  let best: number | null = null;
-  while (lo <= hi) {
-    const mid = Math.floor((lo + hi) / 2);
-    const rowDate = fxRows[mid]?.rate_date ?? "";
-    if (rowDate <= isoDate) {
-      best = fxRows[mid]?.rate ?? null;
-      lo = mid + 1;
-    } else {
-      hi = mid - 1;
-    }
-  }
-  return best;
-}
-
-function convertRowToUsd(row: PriceHistoryRow, fxRows: FxRateRow[]): number | null {
-  if (!Number.isFinite(row.price) || row.price <= 0) return null;
-  const currency = String(row.currency ?? "USD").trim().toUpperCase();
-  if (currency === "USD") return row.price;
-  if (currency !== "EUR") return row.price;
-
-  const isoDate = toIsoDate(row.ts);
-  const fxRate = (isoDate ? findRateForDate(fxRows, isoDate) : null) ?? getEurToUsdRate();
-  if (!Number.isFinite(fxRate) || fxRate <= 0) return null;
-  return Number((row.price * fxRate).toFixed(4));
+function convertRowToUsd(row: PriceHistoryRow, fxRows: PriceHistoryFxRateRow[]): number | null {
+  return convertPriceHistoryRowToUsd(row, fxRows);
 }
 
 function historyToken(variantRef: string | null | undefined): string {
@@ -283,7 +241,7 @@ function providerVariantMatchScore(
   return score;
 }
 
-function buildProviderSeries(rows: PriceHistoryRow[], fxRows: FxRateRow[]): ProviderSeries[] {
+function buildProviderSeries(rows: PriceHistoryRow[], fxRows: PriceHistoryFxRateRow[]): ProviderSeries[] {
   const seriesByKey = new Map<string, ProviderSeries>();
 
   for (const row of rows) {
@@ -452,7 +410,7 @@ export async function loadRawCardMarketVariants(params: {
     .filter((value): value is string => Boolean(value))
     .sort()
     .at(-1) ?? null;
-  const fxRows = await loadFxRates({ supabase, asOfDate: maxHistoryDate });
+  const fxRows = await loadPriceHistoryFxRows(supabase, maxHistoryDate);
 
   const cardMetricsByPrinting = new Map<string, CardMetricRow>();
   for (const row of (cardMetricsQuery.data ?? []) as unknown as CardMetricRow[]) {

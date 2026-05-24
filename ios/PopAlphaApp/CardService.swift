@@ -75,7 +75,9 @@ actor CardService {
             select: "canonical_slug,ts,price",
             filters: [
                 ("canonical_slug", "in", slugFilter),
+                ("variant_ref", "not.ilike", "%::GRADED::%"),
                 ("source_window", "eq", "snapshot"),
+                ("currency", "eq", "USD"),
                 ("ts", "gte", cutoff7d),
             ],
             order: "ts.desc",
@@ -130,17 +132,19 @@ actor CardService {
 
         let data = try await Supabase.query(
             table: "public_price_history_canonical",
-            select: "ts,price",
+            select: "ts,price,currency",
             filters: [
                 ("canonical_slug", "eq", slug),
+                ("variant_ref", "not.ilike", "%::GRADED::%"),
                 ("source_window", "eq", "snapshot"),
+                ("currency", "eq", "USD"),
                 ("ts", "gte", cutoff),
             ],
             order: "ts.asc",
             limit: timeframe.maxPoints
         )
 
-        return try decoder.decode([PricePoint].self, from: data)
+        return try decoder.decode([PricePoint].self, from: data).filter(\.isUSD)
     }
 
     /// Fetch graded price history for a (provider, bucket) cohort across
@@ -158,18 +162,19 @@ actor CardService {
 
         let data = try await Supabase.query(
             table: "public_price_history",
-            select: "ts,price",
+            select: "ts,price,currency",
             filters: [
                 ("canonical_slug", "eq", slug),
                 ("variant_ref", "ilike", "%::GRADED::\(provider)::\(bucket)::RAW"),
                 ("source_window", "eq", "snapshot"),
+                ("currency", "eq", "USD"),
                 ("ts", "gte", cutoff),
             ],
             order: "ts.asc",
             limit: timeframe.maxPoints
         )
 
-        return try decoder.decode([PricePoint].self, from: data)
+        return try decoder.decode([PricePoint].self, from: data).filter(\.isUSD)
     }
 
     /// Fetch graded variant metrics from public_variant_metrics for a card.
@@ -260,17 +265,19 @@ actor CardService {
         let cutoff = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-timeframe.seconds))
         let data = try await Supabase.query(
             table: "public_price_history_by_printing",
-            select: "ts,price",
+            select: "ts,price,currency",
             filters: [
                 ("canonical_slug", "eq", slug),
                 ("printing_id", "eq", printingId),
+                ("variant_ref", "not.ilike", "%::GRADED::%"),
                 ("source_window", "eq", "snapshot"),
+                ("currency", "eq", "USD"),
                 ("ts", "gte", cutoff),
             ],
             order: "ts.asc",
             limit: timeframe.maxPoints
         )
-        return try decoder.decode([PricePoint].self, from: data)
+        return try decoder.decode([PricePoint].self, from: data).filter(\.isUSD)
     }
 
     /// Fetch graded price history for a specific printing + provider + bucket.
@@ -285,17 +292,18 @@ actor CardService {
         let pattern = "\(printingId)::%::GRADED::\(provider)::\(bucket)::RAW"
         let data = try await Supabase.query(
             table: "public_price_history",
-            select: "ts,price",
+            select: "ts,price,currency",
             filters: [
                 ("canonical_slug", "eq", slug),
                 ("variant_ref", "ilike", pattern),
                 ("source_window", "eq", "snapshot"),
+                ("currency", "eq", "USD"),
                 ("ts", "gte", cutoff),
             ],
             order: "ts.asc",
             limit: timeframe.maxPoints
         )
-        return try decoder.decode([PricePoint].self, from: data)
+        return try decoder.decode([PricePoint].self, from: data).filter(\.isUSD)
     }
 
     // MARK: - Prices Refreshed (24h count, matches homepage)
@@ -513,6 +521,52 @@ actor CardService {
         return rows.first
     }
 
+    /// Fetch the latest trusted set-level market rollup shown on the web
+    /// set page. The underlying pipeline chooses one primary raw variant per
+    /// card before summing, so this is safer than summing every finish on the
+    /// device and accidentally double-counting reverse/holo variants.
+    func fetchSetSummarySnapshot(setName: String) async throws -> SetSummarySnapshotRow? {
+        let data = try await Supabase.query(
+            table: "public_set_summaries",
+            select: [
+                "set_name",
+                "as_of_date",
+                "market_cap",
+                "market_cap_all_variants",
+                "change_7d_pct",
+                "change_30d_pct",
+                "heat_score",
+                "breakout_count",
+                "value_zone_count",
+                "trend_bullish_count",
+                "sentiment_up_pct",
+                "vote_count",
+                "top_movers_json",
+                "top_losers_json",
+                "updated_at",
+            ].joined(separator: ","),
+            filters: [("set_name", "eq", setName)],
+            order: "as_of_date.desc",
+            limit: 1
+        )
+        let rows = try decoder.decode([SetSummarySnapshotRow].self, from: data)
+        return rows.first
+    }
+
+    /// Fetch tracked finish distribution. The view also carries all-variant
+    /// market cap, but the iOS set page uses card counts for this section so
+    /// finish mix cannot be confused with primary RAW set value.
+    func fetchSetFinishSummary(setName: String) async throws -> [SetFinishSummaryRow] {
+        let data = try await Supabase.query(
+            table: "public_set_finish_summary",
+            select: "set_name,finish,market_cap,card_count,change_7d_pct,change_30d_pct,updated_at",
+            filters: [("set_name", "eq", setName)],
+            order: "market_cap.desc",
+            limit: 12
+        )
+        return try decoder.decode([SetFinishSummaryRow].self, from: data)
+    }
+
     /// Fetch all cards in a set with prices and images, sorted by price desc.
     func fetchSetCards(setName: String) async throws -> [MarketCard] {
         // 1. Cards in the set
@@ -671,6 +725,46 @@ struct SetMetadataRow: Decodable {
     let derivedCardCount: Int?
 }
 
+struct SetSummarySnapshotRow: Decodable {
+    let setName: String
+    let asOfDate: String
+    let marketCap: Double?
+    let marketCapAllVariants: Double?
+    let change7dPct: Double?
+    let change30dPct: Double?
+    let heatScore: Double?
+    let breakoutCount: Int?
+    let valueZoneCount: Int?
+    let trendBullishCount: Int?
+    let sentimentUpPct: Double?
+    let voteCount: Int?
+    let topMoversJson: [SetSummaryMoverRow]?
+    let topLosersJson: [SetSummaryMoverRow]?
+    let updatedAt: String?
+}
+
+struct SetSummaryMoverRow: Decodable, Identifiable, Hashable {
+    let canonicalSlug: String
+    let variantRef: String?
+    let price: Double?
+    let change7dPct: Double?
+    let finish: String?
+
+    var id: String { variantRef ?? canonicalSlug }
+}
+
+struct SetFinishSummaryRow: Decodable, Identifiable, Hashable {
+    let setName: String
+    let finish: String
+    let marketCap: Double?
+    let cardCount: Int?
+    let change7dPct: Double?
+    let change30dPct: Double?
+    let updatedAt: String?
+
+    var id: String { finish }
+}
+
 struct SparklineRow: Decodable {
     let canonicalSlug: String
     let ts: String
@@ -680,6 +774,11 @@ struct SparklineRow: Decodable {
 struct PricePoint: Decodable {
     let ts: String
     let price: Double
+    let currency: String?
+
+    var isUSD: Bool {
+        currency?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == "USD"
+    }
 }
 
 struct CardProfileResult: Decodable {

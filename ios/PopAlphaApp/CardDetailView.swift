@@ -32,6 +32,33 @@ enum PriceMode: Equatable, Hashable {
     }
 }
 
+func selectNearMintHeroPrice(
+    isJapaneseCard: Bool,
+    marketPrice: Double?,
+    activeCardPrice: Double,
+    chartFallbackPrice: Double?,
+    yahooJpPrice: Double?,
+    yahooJpSampleCount: Int?,
+    snkrdunkPrice: Double?,
+    snkrdunkSampleCount: Int?
+) -> Double? {
+    if isJapaneseCard {
+        let pick = selectJpPriceSource(
+            yahooJpPrice: yahooJpPrice,
+            yahooJpSampleCount: yahooJpSampleCount,
+            snkrdunkPrice: snkrdunkPrice,
+            snkrdunkSampleCount: snkrdunkSampleCount
+        )
+        if let price = pick.price, price > 0 {
+            return price
+        }
+    }
+    if let marketPrice, marketPrice > 0 { return marketPrice }
+    if activeCardPrice > 0 { return activeCardPrice }
+    if let chartFallbackPrice, chartFallbackPrice > 0 { return chartFallbackPrice }
+    return nil
+}
+
 struct CardDetailView: View {
     /// The card the user navigated to. Used as the initial value for
     /// `activeCard`; subsequent EN/JP toggling mutates `activeCard`
@@ -177,36 +204,16 @@ struct CardDetailView: View {
     /// is the only signal we have, even if it's a US-market price for
     /// a Japanese card.
     private var preferredHeroPrice: Double? {
-        if isJapaneseCard {
-            let yj = cardMetrics?.yahooJpPrice ?? 0
-            let snk = cardMetrics?.snkrdunkPrice ?? 0
-            let yjN = cardMetrics?.yahooJpSampleCount ?? 0
-            let snkN = cardMetrics?.snkrdunkSampleCount ?? 0
-            if yj > 0 && snk > 0 {
-                return snkN > yjN ? snk : yj
-            }
-            if yj > 0 { return yj }
-            if snk > 0 { return snk }
-        }
-        // Non-JP path (also the JP fallthrough when neither Yahoo!JP
-        // nor Snkrdunk has data): printing-specific override first,
-        // then the freshly-fetched marketPrice from cardMetrics, then
-        // the navigated MarketCard's headline price. The marketPrice
-        // fallback covers two cases the old chain missed:
-        //   1. After an EN/JP toggle, activeCard is a stub with
-        //      price=0 — without this we'd show "—" until either a
-        //      printing was selected or the user hit a chart request.
-        //   2. JP cards without Yahoo!JP / Snkrdunk samples (most of
-        //      the long-tail) — the Scrydex-derived market_price is
-        //      still meaningful even if it isn't a JP-native source.
-        if let price = printingHeroPrice, price > 0 {
-            return price
-        }
-        if let mp = cardMetrics?.marketPrice, mp > 0 {
-            return mp
-        }
-        if activeCard.price > 0 { return activeCard.price }
-        return nil
+        selectNearMintHeroPrice(
+            isJapaneseCard: isJapaneseCard,
+            marketPrice: cardMetrics?.marketPrice,
+            activeCardPrice: cardMetrics == nil ? activeCard.price : 0,
+            chartFallbackPrice: printingHeroPrice,
+            yahooJpPrice: cardMetrics?.yahooJpPrice,
+            yahooJpSampleCount: cardMetrics?.yahooJpSampleCount,
+            snkrdunkPrice: cardMetrics?.snkrdunkPrice,
+            snkrdunkSampleCount: cardMetrics?.snkrdunkSampleCount
+        )
     }
 
     /// Source label shown next to the hero price so the user knows
@@ -215,15 +222,14 @@ struct CardDetailView: View {
     /// not the top-level pricing structure.
     private var heroPriceSourceLabel: String? {
         if isJapaneseCard {
-            let yj = cardMetrics?.yahooJpPrice ?? 0
-            let snk = cardMetrics?.snkrdunkPrice ?? 0
-            let yjN = cardMetrics?.yahooJpSampleCount ?? 0
-            let snkN = cardMetrics?.snkrdunkSampleCount ?? 0
-            if yj > 0 && snk > 0 {
-                return snkN > yjN ? "Snkrdunk" : "Yahoo! Auctions JP"
-            }
-            if yj > 0 { return "Yahoo! Auctions JP" }
-            if snk > 0 { return "Snkrdunk" }
+            let pick = selectJpPriceSource(
+                yahooJpPrice: cardMetrics?.yahooJpPrice,
+                yahooJpSampleCount: cardMetrics?.yahooJpSampleCount,
+                snkrdunkPrice: cardMetrics?.snkrdunkPrice,
+                snkrdunkSampleCount: cardMetrics?.snkrdunkSampleCount
+            )
+            if pick.source == .yahooJp { return "Yahoo! Auctions JP" }
+            if pick.source == .snkrdunk { return "Snkrdunk" }
         }
         return nil
     }
@@ -233,10 +239,12 @@ struct CardDetailView: View {
     /// the Scrydex market_price, not the JP-derived median, so showing
     /// the delta would be misleading.
     private var suppressHeroChangeBadge: Bool {
-        isJapaneseCard && (
-            (cardMetrics?.yahooJpPrice ?? 0) > 0 ||
-            (cardMetrics?.snkrdunkPrice ?? 0) > 0
-        )
+        isJapaneseCard && selectJpPriceSource(
+            yahooJpPrice: cardMetrics?.yahooJpPrice,
+            yahooJpSampleCount: cardMetrics?.yahooJpSampleCount,
+            snkrdunkPrice: cardMetrics?.snkrdunkPrice,
+            snkrdunkSampleCount: cardMetrics?.snkrdunkSampleCount
+        ).price != nil
     }
 
     var body: some View {
@@ -1185,9 +1193,14 @@ struct CardDetailView: View {
     private func loadChart() async {
         chartLoading = true
         chartError = nil
+        let requestSlug = activeCard.id
+        let requestMode = selectedPriceMode
+        let requestPrintingId = selectedPrintingId
+        let requestTimeframe = selectedTimeframe
+
         do {
             let points: [PricePoint]
-            switch selectedPriceMode {
+            switch requestMode {
             case .nearMint:
                 // Only use printing-specific history when the user can
                 // actually choose a finish. For single-printing cards, the
@@ -1196,16 +1209,16 @@ struct CardDetailView: View {
                 // the canonical view resolves that to a single dominant
                 // cohort via preferred_canonical_raw_variant_ref. See
                 // supabase/migrations/20260422200000_canonical_pin_provider_variant.sql.
-                if let printingId = selectedPrintingId, availablePrintings.count > 1 {
+                if let printingId = requestPrintingId, availablePrintings.count > 1 {
                     points = try await CardService.shared.fetchPrintingPriceHistory(
-                        slug: activeCard.id,
+                        slug: requestSlug,
                         printingId: printingId,
-                        timeframe: selectedTimeframe
+                        timeframe: requestTimeframe
                     )
                 } else {
                     points = try await CardService.shared.fetchPriceHistory(
-                        slug: activeCard.id,
-                        timeframe: selectedTimeframe
+                        slug: requestSlug,
+                        timeframe: requestTimeframe
                     )
                 }
             case .graded(let provider, let bucket):
@@ -1217,38 +1230,46 @@ struct CardDetailView: View {
                 // iOS queried variant_metrics short-form refs and is wrong
                 // after commit 96d89bb moved the chart query to
                 // price_history_points.
-                if let printingId = selectedPrintingId {
+                if let printingId = requestPrintingId {
                     points = try await CardService.shared.fetchPrintingGradedPriceHistory(
-                        slug: activeCard.id,
+                        slug: requestSlug,
                         printingId: printingId,
                         provider: provider,
                         bucket: bucket,
-                        timeframe: selectedTimeframe
+                        timeframe: requestTimeframe
                     )
                 } else {
                     points = try await CardService.shared.fetchGradedPriceHistory(
-                        slug: activeCard.id,
+                        slug: requestSlug,
                         provider: provider,
                         bucket: bucket,
-                        timeframe: selectedTimeframe
+                        timeframe: requestTimeframe
                     )
                 }
             }
             await MainActor.run {
+                guard activeCard.id == requestSlug,
+                      selectedPriceMode == requestMode,
+                      selectedPrintingId == requestPrintingId,
+                      selectedTimeframe == requestTimeframe else { return }
                 chartPrices = points.map(\.price)
                 chartTimestamps = points.map(\.ts)
                 chartLoading = false
-                if selectedPriceMode.isGraded, let latest = points.last {
-                    gradedHeroPrice = latest.price
+                switch requestMode {
+                case .graded:
+                    gradedHeroPrice = points.last?.price
                     printingHeroPrice = nil
-                } else if let latest = points.last {
-                    printingHeroPrice = latest.price
-                } else {
+                case .nearMint:
+                    gradedHeroPrice = nil
                     printingHeroPrice = nil
                 }
             }
         } catch {
             await MainActor.run {
+                guard activeCard.id == requestSlug,
+                      selectedPriceMode == requestMode,
+                      selectedPrintingId == requestPrintingId,
+                      selectedTimeframe == requestTimeframe else { return }
                 chartPrices = []
                 chartTimestamps = []
                 chartLoading = false

@@ -97,7 +97,7 @@ export async function GET(req: Request) {
 
     const [pulseMap, cardsResult, imagesResult] = await Promise.all([
       slugArray.length > 0
-        ? getCanonicalMarketPulseMap(publicDb, slugArray)
+        ? getCanonicalMarketPulseMap(publicDb, slugArray, { includeJpPriceCoverage: true })
         : Promise.resolve(new Map()),
       slugArray.length > 0
         ? publicDb

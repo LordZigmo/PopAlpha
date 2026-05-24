@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { resolveCanonicalMarketPulse } from "../lib/data/market.ts";
+import { loadJpPriceCoverageMap } from "../lib/data/jp-price-coverage.ts";
 
 export function runMarketTruthPhase1Tests() {
   const justtcgOnly = resolveCanonicalMarketPulse({
@@ -217,8 +218,128 @@ export function runMarketTruthPhase1Tests() {
   assert.deepEqual(staleLiveCollapsed.sampleCounts7d, { justtcg: 0, scrydex: 0, total: 0 });
   assert.equal(staleLiveCollapsed.changePct, null);
   assert.equal(staleLiveCollapsed.changeWindow, null);
+
+  const jpNativeOnly = resolveCanonicalMarketPulse({
+    market_price: null,
+    market_price_as_of: null,
+    active_listings_7d: null,
+    snapshot_count_30d: null,
+    market_confidence_score: null,
+    market_low_confidence: null,
+    change_pct_24h: null,
+    change_pct_7d: null,
+    display_price_source: "snkrdunk",
+    display_price_usd: 23,
+    display_price_as_of: "2026-05-24T19:41:08.485Z",
+    display_price_sample_count: 21,
+  });
+
+  assert.equal(jpNativeOnly.marketPrice, 23);
+  assert.equal(jpNativeOnly.marketPriceAsOf, "2026-05-24T19:41:08.485Z");
+  assert.equal(jpNativeOnly.scrydexPrice, null);
+  assert.equal(jpNativeOnly.priceSource, "snkrdunk");
+  assert.equal(jpNativeOnly.blendPolicy, "SNKRDUNK_PRIMARY");
+  assert.equal(jpNativeOnly.confidenceScore, 92);
+  assert.equal(jpNativeOnly.lowConfidence, false);
+  assert.deepEqual(jpNativeOnly.sourceMix, { justtcgWeight: 0, scrydexWeight: 0, jpNativeWeight: 1 });
+  assert.deepEqual(jpNativeOnly.sampleCounts7d, { justtcg: 0, scrydex: 0, jpNative: 21, total: 21 });
+
+  const jpMarketFallback = resolveCanonicalMarketPulse({
+    market_price: 17,
+    market_price_as_of: "2026-05-24T18:00:00.000Z",
+    active_listings_7d: 8,
+    snapshot_count_30d: 30,
+    market_confidence_score: 84,
+    market_low_confidence: false,
+    change_pct_24h: 3.2,
+    change_pct_7d: null,
+    display_price_source: "market",
+    display_price_usd: 17,
+    display_price_as_of: "2026-05-24T18:00:00.000Z",
+    display_price_sample_count: 30,
+  });
+
+  assert.equal(jpMarketFallback.marketPrice, 17);
+  assert.equal(jpMarketFallback.scrydexPrice, 17);
+  assert.equal(jpMarketFallback.priceSource, "market");
+  assert.equal(jpMarketFallback.blendPolicy, "SCRYDEX_PRIMARY");
+  assert.deepEqual(jpMarketFallback.sourceMix, { justtcgWeight: 0, scrydexWeight: 1 });
+}
+
+export async function runJpPriceCoverageTests() {
+  const calls = [];
+  const supabase = {
+    from(table) {
+      calls.push(["from", table]);
+      return {
+        select(columns) {
+          calls.push(["select", columns]);
+          return this;
+        },
+        in(column, values) {
+          calls.push(["in", column, values]);
+          return this;
+        },
+        eq(column, value) {
+          calls.push(["eq", column, value]);
+          return this;
+        },
+        async returns() {
+          return {
+            data: [
+              {
+                canonical_slug: "pokemon-card-151-126-magmar-jp",
+                display_price_source: "snkrdunk",
+                display_price_usd: 23,
+                display_price_as_of: "2026-05-24T19:41:08.485Z",
+                display_price_sample_count: 21,
+                market_price: null,
+                market_price_as_of: null,
+                market_confidence_score: null,
+                market_low_confidence: null,
+                active_listings_7d: null,
+                snapshot_count_30d: null,
+                change_pct_24h: null,
+                change_pct_7d: null,
+              },
+              {
+                canonical_slug: "bad-source",
+                display_price_source: "unknown",
+                display_price_usd: 99,
+                display_price_as_of: "2026-05-24T19:41:08.485Z",
+                display_price_sample_count: 50,
+                market_price: null,
+                market_price_as_of: null,
+                market_confidence_score: null,
+                market_low_confidence: null,
+                active_listings_7d: null,
+                snapshot_count_30d: null,
+                change_pct_24h: null,
+                change_pct_7d: null,
+              },
+            ],
+            error: null,
+          };
+        },
+      };
+    },
+  };
+
+  const coverage = await loadJpPriceCoverageMap(supabase, [
+    "pokemon-card-151-126-magmar-jp",
+    "pokemon-card-151-126-magmar-jp",
+    "",
+  ]);
+
+  assert.equal(calls[0][1], "public_jp_price_coverage");
+  assert.deepEqual(calls.find((call) => call[0] === "eq"), ["eq", "covered_by_price", true]);
+  assert.equal(coverage.size, 1);
+  assert.equal(coverage.get("pokemon-card-151-126-magmar-jp")?.displayPriceUsd, 23);
+  assert.equal(coverage.get("pokemon-card-151-126-magmar-jp")?.displayPriceSource, "snkrdunk");
+  assert.equal(coverage.has("bad-source"), false);
 }
 
 runMarketTruthPhase1Tests();
+await runJpPriceCoverageTests();
 
 console.log("market truth phase1 tests passed");

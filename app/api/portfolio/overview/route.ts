@@ -104,7 +104,7 @@ export async function GET(req: Request) {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 86400 * 1000).toISOString();
     const printingIds = [...new Set(holdings.map((h) => h.printing_id).filter(Boolean))] as string[];
     const [pulseMap, cardsResult, imagesResult, historyResult, printingMetaResult] = await Promise.all([
-      getCanonicalMarketPulseMap(pub, slugs),
+      getCanonicalMarketPulseMap(pub, slugs, { includeJpPriceCoverage: true }),
       pub.from("canonical_cards")
         .select("slug, canonical_name, set_name, year, subject")
         .in("slug", slugs),
@@ -117,7 +117,9 @@ export async function GET(req: Request) {
       pub.from("public_price_history_canonical")
         .select("canonical_slug, ts, price")
         .in("canonical_slug", slugs)
+        .not("variant_ref", "ilike", "%::GRADED::%")
         .eq("source_window", "snapshot")
+        .eq("currency", "USD")
         .gte("ts", thirtyDaysAgo)
         .order("ts", { ascending: true })
         .limit(2000),

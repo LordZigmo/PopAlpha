@@ -178,6 +178,33 @@ type CardDisplayIdentityRow = {
 
 type HomepageLogger = Pick<Console, "error" | "info">;
 
+type JpPriceCoverageRow = {
+  canonical_slug: string;
+  canonical_name: string;
+  set_name: string | null;
+  year: number | null;
+  card_number: string | null;
+  primary_image_url?: string | null;
+  mirrored_primary_image_url?: string | null;
+  mirrored_primary_thumb_url?: string | null;
+  market_price: number | null;
+  market_price_as_of: string | null;
+  change_pct_24h: number | null;
+  change_pct_7d: number | null;
+  active_listings_7d: number | null;
+  market_confidence_score: number | null;
+  snapshot_count_30d: number | null;
+  market_low_confidence: boolean | null;
+  yahoo_jp_price: number | null;
+  yahoo_jp_price_jpy: number | null;
+  yahoo_jp_sample_count: number | null;
+  snkrdunk_price: number | null;
+  snkrdunk_price_jpy: number | null;
+  snkrdunk_sample_count: number | null;
+  display_price_usd: number | null;
+  display_price_as_of: string | null;
+};
+
 type HomepageDataOverrides = {
   positiveChangeRows?: ChangeCandidateRow[];
   negativeChangeRows?: ChangeCandidateRow[];
@@ -187,6 +214,7 @@ type HomepageDataOverrides = {
   images?: ImageRow[];
   sparklineRows?: SparklineRow[];
   displayIdentities?: CardDisplayIdentityRow[];
+  dailyMovers?: DailyMoverBundle;
   pricesRefreshedToday?: number | null;
   trackedCardsWithLivePrice?: number | null;
 };
@@ -424,86 +452,54 @@ async function loadJapaneseRail(
   client: NonNullable<ReturnType<typeof dbPublic>>,
   limit: number,
 ): Promise<HomepageCard[]> {
-  // canonical_cards (language=JP) JOIN public_card_metrics on the
-  // canonical RAW row so we surface the headline price every JP card
-  // has — graded variants light up later as Scrydex pricing flows.
   const { data, error } = await client
-    .from("canonical_cards")
+    .from("public_jp_price_coverage")
     .select(
-      "slug, canonical_name, set_name, year, card_number, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url, public_card_metrics!inner(market_price, market_price_as_of, change_pct_24h, change_pct_7d, active_listings_7d, market_confidence_score, snapshot_count_30d, market_low_confidence, printing_id, grade, yahoo_jp_price, yahoo_jp_price_jpy, yahoo_jp_sample_count, snkrdunk_price, snkrdunk_price_jpy, snkrdunk_sample_count)",
+      "canonical_slug, canonical_name, set_name, year, card_number, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url, market_price, market_price_as_of, change_pct_24h, change_pct_7d, active_listings_7d, market_confidence_score, snapshot_count_30d, market_low_confidence, yahoo_jp_price, yahoo_jp_price_jpy, yahoo_jp_sample_count, snkrdunk_price, snkrdunk_price_jpy, snkrdunk_sample_count, display_price_usd, display_price_as_of",
     )
-    .eq("language", "JP")
-    .eq("public_card_metrics.grade", "RAW")
-    .is("public_card_metrics.printing_id", null)
-    .not("public_card_metrics.market_price", "is", null)
-    .order("market_price_as_of", {
-      foreignTable: "public_card_metrics",
-      ascending: false,
-      nullsFirst: false,
-    })
+    .eq("covered_by_price", true)
+    .order("display_price_as_of", { ascending: false, nullsFirst: false })
     .limit(limit);
 
   if (error || !data) return [];
-
-  type Joined = CardRow & {
-    public_card_metrics:
-      | Array<{
-        market_price: number | null;
-        market_price_as_of: string | null;
-        change_pct_24h: number | null;
-        change_pct_7d: number | null;
-        active_listings_7d: number | null;
-        market_confidence_score: number | null;
-        snapshot_count_30d: number | null;
-        market_low_confidence: boolean | null;
-        yahoo_jp_price: number | null;
-        yahoo_jp_price_jpy: number | null;
-        yahoo_jp_sample_count: number | null;
-        snkrdunk_price: number | null;
-        snkrdunk_price_jpy: number | null;
-        snkrdunk_sample_count: number | null;
-      }>
-      | null;
-  };
-  const rows = data as unknown as Joined[];
+  const rows = data as unknown as JpPriceCoverageRow[];
   return rows
     .map<HomepageCard | null>((row) => {
-      const metrics = row.public_card_metrics?.[0] ?? null;
-      if (!metrics || metrics.market_price == null || metrics.market_price <= 0) return null;
-      const changePct = metrics.change_pct_24h ?? metrics.change_pct_7d ?? null;
-      const changeWindow: "24H" | "7D" = metrics.change_pct_24h != null ? "24H" : "7D";
+      if (row.display_price_usd == null || row.display_price_usd <= 0) return null;
+      const changePct = row.change_pct_24h ?? row.change_pct_7d ?? null;
+      const changeWindow: "24H" | "7D" = row.change_pct_24h != null ? "24H" : "7D";
       const image = resolveCardImage({
         primary_image_url: row.primary_image_url ?? null,
         mirrored_primary_image_url: row.mirrored_primary_image_url ?? null,
         mirrored_primary_thumb_url: row.mirrored_primary_thumb_url ?? null,
       });
-      const highConfidence = (metrics.active_listings_7d ?? 0) >= HIGH_CONF_LIQUIDITY_MIN;
+      const highConfidence = (row.active_listings_7d ?? 0) >= HIGH_CONF_LIQUIDITY_MIN;
       return {
-        slug: row.slug,
+        slug: row.canonical_slug,
         name: row.canonical_name,
         set_name: row.set_name ?? null,
         year: row.year ?? null,
         card_number: row.card_number ?? null,
-        market_price: metrics.market_price,
+        market_price: row.display_price_usd,
         change_pct: changePct,
         change_window: changeWindow,
-        confidence_score: metrics.market_confidence_score ?? null,
-        low_confidence: Boolean(metrics.market_low_confidence),
+        confidence_score: row.market_confidence_score ?? null,
+        low_confidence: Boolean(row.market_low_confidence),
         market_strength_score: null,
         market_direction: null,
         mover_tier: highConfidence ? "hot" : "warming",
         image_url: image.full,
         image_thumb_url: image.thumb,
         sparkline_7d: [],
-        sales_count_30d: metrics.snapshot_count_30d ?? null,
-        active_listings_7d: metrics.active_listings_7d ?? null,
-        updated_at: metrics.market_price_as_of ?? null,
-        yahoo_jp_price: metrics.yahoo_jp_price,
-        yahoo_jp_price_jpy: metrics.yahoo_jp_price_jpy,
-        yahoo_jp_sample_count: metrics.yahoo_jp_sample_count,
-        snkrdunk_price: metrics.snkrdunk_price,
-        snkrdunk_price_jpy: metrics.snkrdunk_price_jpy,
-        snkrdunk_sample_count: metrics.snkrdunk_sample_count,
+        sales_count_30d: row.snapshot_count_30d ?? null,
+        active_listings_7d: row.active_listings_7d ?? null,
+        updated_at: row.display_price_as_of ?? null,
+        yahoo_jp_price: row.yahoo_jp_price,
+        yahoo_jp_price_jpy: row.yahoo_jp_price_jpy,
+        yahoo_jp_sample_count: row.yahoo_jp_sample_count,
+        snkrdunk_price: row.snkrdunk_price,
+        snkrdunk_price_jpy: row.snkrdunk_price_jpy,
+        snkrdunk_sample_count: row.snkrdunk_sample_count,
       };
     })
     .filter((card): card is HomepageCard => card !== null);
@@ -558,7 +554,7 @@ async function loadJapaneseSignalRails(
     budgetMovers: [],
   };
 
-  // Fetch every JP card with usable RAW pricing — paginate via .range()
+  // Fetch every JP card with trusted RAW price coverage — paginate via .range()
   // because PostgREST caps each response at 1000 rows. The JP catalog's
   // priced cohort is climbing (~3-5k today, growing as Snkrdunk and
   // Yahoo! JP matches expand) and the in-memory ranking below needs to
@@ -566,49 +562,24 @@ async function loadJapaneseSignalRails(
   // can never reach the rail. Same pattern getJapaneseCatalogState uses
   // in lib/data/tier-summary.ts. Hard cap at 20k as a safety valve so a
   // pipeline bug can never balloon this loader unbounded.
-  type Joined = CardRow & {
-    public_card_metrics:
-      | Array<{
-        market_price: number | null;
-        market_price_as_of: string | null;
-        change_pct_24h: number | null;
-        change_pct_7d: number | null;
-        active_listings_7d: number | null;
-        market_confidence_score: number | null;
-        snapshot_count_30d: number | null;
-        market_low_confidence: boolean | null;
-        yahoo_jp_price: number | null;
-        yahoo_jp_price_jpy: number | null;
-        yahoo_jp_sample_count: number | null;
-        snkrdunk_price: number | null;
-        snkrdunk_price_jpy: number | null;
-        snkrdunk_sample_count: number | null;
-      }>
-      | null;
-  };
-
   const PAGE_SIZE = 1000;
   const MAX_ROWS = 20_000;
-  const rows: Joined[] = [];
+  const rows: JpPriceCoverageRow[] = [];
   let from = 0;
   while (rows.length < MAX_ROWS) {
     const { data, error } = await client
-      .from("canonical_cards")
+      .from("public_jp_price_coverage")
       .select(
-        "slug, canonical_name, set_name, year, card_number, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url, public_card_metrics!inner(market_price, market_price_as_of, change_pct_24h, change_pct_7d, active_listings_7d, market_confidence_score, snapshot_count_30d, market_low_confidence, printing_id, grade, yahoo_jp_price, yahoo_jp_price_jpy, yahoo_jp_sample_count, snkrdunk_price, snkrdunk_price_jpy, snkrdunk_sample_count)",
+        "canonical_slug, canonical_name, set_name, year, card_number, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url, market_price, market_price_as_of, change_pct_24h, change_pct_7d, active_listings_7d, market_confidence_score, snapshot_count_30d, market_low_confidence, yahoo_jp_price, yahoo_jp_price_jpy, yahoo_jp_sample_count, snkrdunk_price, snkrdunk_price_jpy, snkrdunk_sample_count, display_price_usd, display_price_as_of",
       )
-      .eq("language", "JP")
-      .eq("public_card_metrics.grade", "RAW")
-      .is("public_card_metrics.printing_id", null)
-      .not("public_card_metrics.market_price", "is", null)
-      .gte("public_card_metrics.market_price", JP_BUDGET_MIN_PRICE)
-      .gte("public_card_metrics.market_confidence_score", MIN_CONFIDENCE_SCORE)
+      .eq("covered_by_price", true)
+      .gte("display_price_usd", JP_BUDGET_MIN_PRICE)
+      .gte("market_confidence_score", MIN_CONFIDENCE_SCORE)
       // Deterministic ordering required for stable .range() pagination:
       // without an explicit order, PostgreSQL can return rows in any
       // sequence across requests, so later pages would skip or
-      // duplicate candidates. `slug` is the canonical_cards PK
-      // (unique + indexed), making it the cheapest stable key.
-      .order("slug", { ascending: true })
+      // duplicate candidates.
+      .order("canonical_slug", { ascending: true })
       .range(from, from + PAGE_SIZE - 1);
     if (error || !data) {
       // First-page error → return empty so the JP rails just render
@@ -617,7 +588,7 @@ async function loadJapaneseSignalRails(
       if (rows.length === 0) return empty;
       break;
     }
-    const page = data as unknown as Joined[];
+    const page = data as unknown as JpPriceCoverageRow[];
     rows.push(...page);
     if (page.length < PAGE_SIZE) break;
     from += PAGE_SIZE;
@@ -637,11 +608,10 @@ async function loadJapaneseSignalRails(
   const nowMs = Date.now();
 
   for (const row of rows) {
-    const metrics = row.public_card_metrics?.[0] ?? null;
-    if (!metrics || metrics.market_price == null || metrics.market_price <= 0) continue;
-    if (metrics.market_low_confidence === true) continue;
+    if (row.display_price_usd == null || row.display_price_usd < JP_BUDGET_MIN_PRICE) continue;
+    if (row.market_low_confidence === true) continue;
 
-    const asOfMs = metrics.market_price_as_of ? Date.parse(metrics.market_price_as_of) : NaN;
+    const asOfMs = row.display_price_as_of ? Date.parse(row.display_price_as_of) : NaN;
     if (!Number.isFinite(asOfMs)) continue;
     const ageHours = (nowMs - asOfMs) / (60 * 60 * 1000);
     if (ageHours > JP_FRESHNESS_MAX_AGE_HOURS) continue;
@@ -651,47 +621,47 @@ async function loadJapaneseSignalRails(
       mirrored_primary_image_url: row.mirrored_primary_image_url ?? null,
       mirrored_primary_thumb_url: row.mirrored_primary_thumb_url ?? null,
     });
-    const highConfidence = (metrics.active_listings_7d ?? 0) >= HIGH_CONF_LIQUIDITY_MIN;
+    const highConfidence = (row.active_listings_7d ?? 0) >= HIGH_CONF_LIQUIDITY_MIN;
     const baseCard = (changePct: number, window: HomepageSignalWindow): HomepageCard => ({
-      slug: row.slug,
+      slug: row.canonical_slug,
       name: row.canonical_name,
       set_name: row.set_name ?? null,
       year: row.year ?? null,
       card_number: row.card_number ?? null,
-      market_price: metrics.market_price,
+      market_price: row.display_price_usd,
       change_pct: changePct,
       change_window: window,
-      confidence_score: metrics.market_confidence_score ?? null,
-      low_confidence: Boolean(metrics.market_low_confidence),
+      confidence_score: row.market_confidence_score ?? null,
+      low_confidence: Boolean(row.market_low_confidence),
       market_strength_score: null,
       market_direction: null,
       mover_tier: highConfidence ? "hot" : "warming",
       image_url: image.full,
       image_thumb_url: image.thumb,
       sparkline_7d: [],
-      sales_count_30d: metrics.snapshot_count_30d ?? null,
-      active_listings_7d: metrics.active_listings_7d ?? null,
-      updated_at: metrics.market_price_as_of ?? null,
-      yahoo_jp_price: metrics.yahoo_jp_price,
-      yahoo_jp_price_jpy: metrics.yahoo_jp_price_jpy,
-      yahoo_jp_sample_count: metrics.yahoo_jp_sample_count,
-      snkrdunk_price: metrics.snkrdunk_price,
-      snkrdunk_price_jpy: metrics.snkrdunk_price_jpy,
-      snkrdunk_sample_count: metrics.snkrdunk_sample_count,
+      sales_count_30d: row.snapshot_count_30d ?? null,
+      active_listings_7d: row.active_listings_7d ?? null,
+      updated_at: row.display_price_as_of ?? null,
+      yahoo_jp_price: row.yahoo_jp_price,
+      yahoo_jp_price_jpy: row.yahoo_jp_price_jpy,
+      yahoo_jp_sample_count: row.yahoo_jp_sample_count,
+      snkrdunk_price: row.snkrdunk_price,
+      snkrdunk_price_jpy: row.snkrdunk_price_jpy,
+      snkrdunk_sample_count: row.snkrdunk_sample_count,
     });
 
-    if (metrics.change_pct_24h != null && Math.abs(metrics.change_pct_24h) <= JP_MAX_CHANGE_PCT) {
+    if (row.change_pct_24h != null && Math.abs(row.change_pct_24h) <= JP_MAX_CHANGE_PCT) {
       candidates24h.push({
-        card: baseCard(metrics.change_pct_24h, "24H"),
-        changePct: metrics.change_pct_24h,
-        marketPrice: metrics.market_price,
+        card: baseCard(row.change_pct_24h, "24H"),
+        changePct: row.change_pct_24h,
+        marketPrice: row.display_price_usd,
       });
     }
-    if (metrics.change_pct_7d != null && Math.abs(metrics.change_pct_7d) <= JP_MAX_CHANGE_PCT) {
+    if (row.change_pct_7d != null && Math.abs(row.change_pct_7d) <= JP_MAX_CHANGE_PCT) {
       candidates7d.push({
-        card: baseCard(metrics.change_pct_7d, "7D"),
-        changePct: metrics.change_pct_7d,
-        marketPrice: metrics.market_price,
+        card: baseCard(row.change_pct_7d, "7D"),
+        changePct: row.change_pct_7d,
+        marketPrice: row.display_price_usd,
       });
     }
   }
@@ -861,6 +831,20 @@ function dedupeHomepageCards(cards: HomepageCard[]): HomepageCard[] {
 
 function combineHomepageCards(groups: HomepageCard[][], limit = SECTION_LIMIT): HomepageCard[] {
   return dedupeHomepageCards(groups.flat()).slice(0, limit);
+}
+
+function collectDailyMoverBundleCards(bundle: DailyMoverBundle): HomepageCard[] {
+  return [
+    ...bundle.gainers,
+    ...bundle.losers,
+    ...bundle.momentum_24h,
+    ...bundle.momentum_7d,
+    ...bundle.budget_gainers,
+    ...bundle.mid_gainers,
+    ...bundle.mid_losers,
+    ...bundle.mid_momentum_24h,
+    ...bundle.mid_momentum_7d,
+  ];
 }
 
 function hoursSince(iso: string | null | undefined, nowMs = Date.now()): number | null {
@@ -1171,6 +1155,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
     let sparklineRows: SparklineRow[] = [];
     let pricesRefreshedToday: number | null = null;
     let trackedCardsWithLivePrice: number | null = null;
+    let dailyMovers: DailyMoverBundle = { ...EMPTY_DAILY_MOVER_BUNDLE };
 
     if (overrides) {
       positiveChangeRows = overrides.positiveChangeRows ?? [];
@@ -1182,6 +1167,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
       sparklineRows = overrides.sparklineRows ?? [];
       pricesRefreshedToday = overrides.pricesRefreshedToday ?? null;
       trackedCardsWithLivePrice = overrides.trackedCardsWithLivePrice ?? null;
+      dailyMovers = overrides.dailyMovers ?? { ...EMPTY_DAILY_MOVER_BUNDLE };
     } else {
       const client = db;
       if (!client) return EMPTY;
@@ -1264,11 +1250,25 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
       trackedCardsWithLivePrice = trackedCountResult.count ?? null;
     }
 
+    // Load the stable daily rail membership before metadata enrichment so
+    // its slugs are included in the current public_card_metrics lookup below.
+    if (!overrides && db) {
+      try {
+        dailyMovers = await loadDailyTopMoversBundle(db, nowMs);
+      } catch (err) {
+        logger.error(
+          "[homepage] daily_top_movers",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
+
     // ── Collect all unique slugs ──────────────────────────────────────────
     const allSlugs = new Set<string>();
     for (const r of positiveChangeRows) allSlugs.add(r.canonical_slug);
     for (const r of negativeChangeRows) allSlugs.add(r.canonical_slug);
     for (const r of trendingVariants) allSlugs.add(r.canonical_slug);
+    for (const card of collectDailyMoverBundleCards(dailyMovers)) allSlugs.add(card.slug);
 
     // JP rails are sourced independently from the EN mover queries —
     // they read canonical_cards JOIN public_card_metrics filtered to
@@ -1359,6 +1359,8 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
           .select("canonical_slug, ts, price")
           .in("canonical_slug", batch)
           .in("provider", ["SCRYDEX", "POKEMON_TCG_API"])
+          .not("variant_ref", "ilike", "%::GRADED::%")
+          .eq("currency", "USD")
           .eq("source_window", "7d")
           .order("ts", { ascending: false })
           .limit(Math.max(batch.length * 24, 120)))),
@@ -1766,22 +1768,6 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
     unusualFiltered.sort((a, b) => (b.active_listings_7d ?? 0) - (a.active_listings_7d ?? 0));
     const unusualVolumeOut = unusualFiltered.slice(0, SECTION_LIMIT);
 
-    // Prefer the daily-computed top movers (generated by
-    // compute_daily_top_movers RPC once per day when catalog coverage is
-    // complete). If unavailable, fall back to the live per-request
-    // computation below.
-    let dailyMovers: DailyMoverBundle = { ...EMPTY_DAILY_MOVER_BUNDLE };
-    if (!overrides && db) {
-      try {
-        dailyMovers = await loadDailyTopMoversBundle(db, nowMs);
-      } catch (err) {
-        logger.error(
-          "[homepage] daily_top_movers",
-          err instanceof Error ? err.message : String(err),
-        );
-      }
-    }
-
     // JP rails were hoisted above the EN-only early-return guard so
     // the data is already loaded by this point. See the load block
     // earlier in this function (just before `if (allSlugs.size === 0)`).
@@ -1798,36 +1784,59 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
     const liveDrops24H = negativeMoversByWindow["24H"].cards.slice(0, SECTION_LIMIT);
     const liveDrops7D = negativeMoversByWindow["7D"].cards.slice(0, SECTION_LIMIT);
 
+    // Daily rows decide stable rail membership; current public_card_metrics
+    // decides the user-visible price/as-of. This prevents stale daily
+    // snapshots from disagreeing with the card detail page.
+    const repriceDailyCards = (cards: HomepageCard[]): HomepageCard[] => cards.map((card) => toCard(card.slug, {
+      mover_tier: card.mover_tier,
+      changePct: card.change_pct,
+      changeWindow: card.change_window,
+      preferOverrideChange: true,
+      allowSparklineFallback: false,
+    }));
+    const dailyMoversForDisplay: DailyMoverBundle = {
+      gainers: repriceDailyCards(dailyMovers.gainers),
+      losers: repriceDailyCards(dailyMovers.losers),
+      momentum_24h: repriceDailyCards(dailyMovers.momentum_24h),
+      momentum_7d: repriceDailyCards(dailyMovers.momentum_7d),
+      budget_gainers: repriceDailyCards(dailyMovers.budget_gainers),
+      mid_gainers: repriceDailyCards(dailyMovers.mid_gainers),
+      mid_losers: repriceDailyCards(dailyMovers.mid_losers),
+      mid_momentum_24h: repriceDailyCards(dailyMovers.mid_momentum_24h),
+      mid_momentum_7d: repriceDailyCards(dailyMovers.mid_momentum_7d),
+      computed_at_date: dailyMovers.computed_at_date,
+    };
+
     // Split the daily list by change_window so the UI's 24H/7D pills still
     // work. If one window is empty in the daily list, fall back to the other.
-    const dailyGainers24H = dailyMovers.gainers.filter((c) => c.change_window === "24H");
-    const dailyGainers7D = dailyMovers.gainers.filter((c) => c.change_window === "7D");
-    const dailyLosers24H = dailyMovers.losers.filter((c) => c.change_window === "24H");
-    const dailyLosers7D = dailyMovers.losers.filter((c) => c.change_window === "7D");
+    const dailyGainers24H = dailyMoversForDisplay.gainers.filter((c) => c.change_window === "24H");
+    const dailyGainers7D = dailyMoversForDisplay.gainers.filter((c) => c.change_window === "7D");
+    const dailyLosers24H = dailyMoversForDisplay.losers.filter((c) => c.change_window === "24H");
+    const dailyLosers7D = dailyMoversForDisplay.losers.filter((c) => c.change_window === "7D");
 
     const signalBoard = {
       top_movers: {
         "24H": dailyGainers24H.length > 0
           ? dailyGainers24H.slice(0, SECTION_LIMIT)
-          : (dailyMovers.gainers.length > 0
-            ? dailyMovers.gainers.slice(0, SECTION_LIMIT)
+          : (dailyMoversForDisplay.gainers.length > 0
+            ? dailyMoversForDisplay.gainers.slice(0, SECTION_LIMIT)
             : liveTopMovers24H),
         "7D": dailyGainers7D.length > 0
           ? dailyGainers7D.slice(0, SECTION_LIMIT)
-          : (dailyMovers.gainers.length > 0
-            ? dailyMovers.gainers.slice(0, SECTION_LIMIT)
+          : (dailyMoversForDisplay.gainers.length > 0
+            ? dailyMoversForDisplay.gainers.slice(0, SECTION_LIMIT)
             : liveTopMovers7D),
       },
       biggest_drops: {
         "24H": dailyLosers24H.length > 0
           ? dailyLosers24H.slice(0, SECTION_LIMIT)
-          : (dailyMovers.losers.length > 0
-            ? dailyMovers.losers.slice(0, SECTION_LIMIT)
+          : (dailyMoversForDisplay.losers.length > 0
+            ? dailyMoversForDisplay.losers.slice(0, SECTION_LIMIT)
             : liveDrops24H),
         "7D": dailyLosers7D.length > 0
           ? dailyLosers7D.slice(0, SECTION_LIMIT)
-          : (dailyMovers.losers.length > 0
-            ? dailyMovers.losers.slice(0, SECTION_LIMIT)
+          : (dailyMoversForDisplay.losers.length > 0
+            ? dailyMoversForDisplay.losers.slice(0, SECTION_LIMIT)
             : liveDrops7D),
       },
       momentum: {
@@ -1835,15 +1844,15 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
         // rail (which prefers momentum over top_movers) doesn't flip
         // every app open. Fall back to live compute if today's daily
         // list is missing.
-        "24H": dailyMovers.momentum_24h.length > 0
-          ? dailyMovers.momentum_24h.slice(0, SECTION_LIMIT)
+        "24H": dailyMoversForDisplay.momentum_24h.length > 0
+          ? dailyMoversForDisplay.momentum_24h.slice(0, SECTION_LIMIT)
           : combineHomepageCards([
               positiveMoversByWindow["24H"].emerging,
               positiveMoversByWindow["24H"].highConfidence,
               positiveMoversByWindow["24H"].all,
             ]),
-        "7D": dailyMovers.momentum_7d.length > 0
-          ? dailyMovers.momentum_7d.slice(0, SECTION_LIMIT)
+        "7D": dailyMoversForDisplay.momentum_7d.length > 0
+          ? dailyMoversForDisplay.momentum_7d.slice(0, SECTION_LIMIT)
           : combineHomepageCards([
               trendingCandidatesOut,
               positiveMoversByWindow["7D"].all,
@@ -1851,8 +1860,8 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
       },
       unusual_volume: unusualVolumeOut,
       breakouts: breakoutsOut,
-      mid_movers: dailyMovers.mid_gainers.slice(0, SECTION_LIMIT),
-      budget_movers: dailyMovers.budget_gainers.slice(0, SECTION_LIMIT),
+      mid_movers: dailyMoversForDisplay.mid_gainers.slice(0, SECTION_LIMIT),
+      budget_movers: dailyMoversForDisplay.budget_gainers.slice(0, SECTION_LIMIT),
       japanese_top_movers: japaneseRails.topMovers,
       japanese_biggest_drops: japaneseRails.biggestDrops,
       japanese_momentum: japaneseRails.momentum,

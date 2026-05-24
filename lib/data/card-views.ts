@@ -124,7 +124,7 @@ export async function getTopViewedCards(days = 7, limit = 5): Promise<HomepageCa
       .from("canonical_cards")
       .select("slug, canonical_name, set_name, year, card_number, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url")
       .in("slug", rankedSlugs),
-    getCanonicalMarketPulseMap(supabase, rankedSlugs),
+    getCanonicalMarketPulseMap(supabase, rankedSlugs, { includeJpPriceCoverage: true }),
   ]);
 
   if (cardsError) {

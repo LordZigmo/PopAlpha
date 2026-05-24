@@ -410,7 +410,9 @@ async function runBroadSearch(params: {
   let allMarketPulseBySlug = new Map<string, CanonicalMarketPulse>();
 
   if (needsAllPrices) {
-    allMarketPulseBySlug = await getCanonicalMarketPulseMap(supabase, relevanceOrderedSlugs);
+    allMarketPulseBySlug = await getCanonicalMarketPulseMap(supabase, relevanceOrderedSlugs, {
+      includeJpPriceCoverage: true,
+    });
   }
 
   const filteredRelevanceSlugs = pricedOnly
@@ -476,7 +478,7 @@ async function runBroadSearch(params: {
     pagePrintingsQuery,
     needsAllPrices
       ? Promise.resolve(new Map(pageSlugs.map((slug) => [slug, allMarketPulseBySlug.get(slug) ?? null])))
-      : getCanonicalMarketPulseMap(supabase, pageSlugs),
+      : getCanonicalMarketPulseMap(supabase, pageSlugs, { includeJpPriceCoverage: true }),
   ]);
   const pagePrintingsRaw = pagePrintingsResult.data;
   const pagePrintings = ((pagePrintingsRaw ?? []) as PrintingRow[]).filter(isPhysicalSearchPrinting);
@@ -577,7 +579,7 @@ async function loadSetSearchEnhancements(setName: string): Promise<{
 
   const slugs = canonicalRows.map((row) => row.slug);
   const [marketPulseBySlug, printingRowsResult] = await Promise.all([
-    getCanonicalMarketPulseMap(supabase, slugs),
+    getCanonicalMarketPulseMap(supabase, slugs, { includeJpPriceCoverage: true }),
     supabase
       .from("card_printings")
       .select("id, canonical_slug, set_name, card_number, language, finish, finish_detail, edition, stamp, image_url")

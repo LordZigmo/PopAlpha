@@ -164,11 +164,10 @@ struct MarketPulseSection: View {
     /// redundant.
     private var visibleCategories: [Category] {
         if japaneseOnly {
-            // Mirror the web JP board ordering: Movers, Pullbacks,
-            // Momentum (windowed, reads japaneseMomentum), Mid, Budget,
-            // then `.japanese` discovery last. Breakouts / Unusual
-            // stay EN-only because the server hasn't shipped JP
-            // equivalents for those signals yet.
+            // Lead with `.japanese` discovery because JP source prices
+            // are actively refreshed even when the mover-change rails
+            // are sparse. Movers/Pullbacks/Momentum remain available
+            // after it for days where enough `change_pct_*` data exists.
             //
             // .japanese was hidden in commit beb649b on the assumption
             // the five JP movers rails would carry the load. They
@@ -180,10 +179,10 @@ struct MarketPulseSection: View {
             // refresh-tier hot/warm pool instead and is the only one
             // that actually surfaces JP cards today.
             //
-            // Restored 2026-05-18 as the same-day rescue. The durable
-            // fix is a JP change_pct populator; until that ships, this
-            // tab is the only thing keeping JP cards on the homepage.
-            return [.movers, .pullbacks, .momentum, .mid, .budget, .japanese]
+            // Restored 2026-05-18 as the same-day rescue. Promoted
+            // 2026-05-24 so JP mode starts on cards, not a possibly
+            // empty movement rail.
+            return [.japanese, .movers, .pullbacks, .momentum, .mid, .budget]
         }
         // EN mode currently hides `.momentum` because the EN .breakouts
         // tab already falls back to momentum data when breakouts is
@@ -202,7 +201,10 @@ struct MarketPulseSection: View {
     /// non-JP value (e.g. SwiftUI state restoration).
     private var activeCategory: Category {
         if !visibleCategories.contains(category) {
-            return .movers
+            return firstNonEmptyVisibleCategory()
+        }
+        if japaneseOnly && cards(for: category).isEmpty {
+            return firstNonEmptyVisibleCategory()
         }
         return category
     }
@@ -212,16 +214,11 @@ struct MarketPulseSection: View {
     /// empty state when a populated rail exists in another visible
     /// tab.
     ///
-    /// Motivating case (2026-05-18 rescue): JP mode lists
-    /// `[.movers, .pullbacks, .momentum, .mid, .budget, .japanese]`
-    /// but the first five are starved at the source (the JP pricing
-    /// path doesn't write `change_pct_*`, so the rail loader's gate
-    /// in `lib/data/homepage.ts:~666` filters every JP card out of
-    /// the windowed rails). The `.japanese` discovery rail is the
-    /// only one with data today. Defaulting `category = .movers`
-    /// renders an empty state on first JP open. This helper resolves
-    /// the user to `.japanese` automatically until the durable JP
-    /// change_pct populator ships.
+    /// Motivating case (2026-05-24): production has thousands of fresh
+    /// JP prices, but only a small slice currently has `change_pct_*`.
+    /// A JP page that starts on Movers can therefore look empty even
+    /// though the discovery rail is populated. This helper resolves to
+    /// the first populated JP category, with `.japanese` checked first.
     ///
     /// Falls back to `.movers` only when every visible rail is empty,
     /// which is a legitimate "nothing to show" state worth showing
@@ -233,6 +230,22 @@ struct MarketPulseSection: View {
             }
         }
         return .movers
+    }
+
+    private func retargetCategoryIfNeeded(animated: Bool) {
+        let needsRetarget =
+            !visibleCategories.contains(category)
+            || cards(for: category).isEmpty
+        guard needsRetarget else { return }
+        let next = firstNonEmptyVisibleCategory()
+        guard next != category else { return }
+        if animated {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                category = next
+            }
+        } else {
+            category = next
+        }
     }
 
     /// Brand-aware accent for a given category. Only the Movers tab
@@ -267,12 +280,7 @@ struct MarketPulseSection: View {
         // (the EN case, and the eventual JP case once the change_pct
         // populator ships).
         .onAppear {
-            if cards(for: category).isEmpty {
-                let next = firstNonEmptyVisibleCategory()
-                if next != category {
-                    category = next
-                }
-            }
+            retargetCategoryIfNeeded(animated: false)
         }
         // Keep `category` in sync with the current market's
         // visibleCategories. Without this, toggling EN→JP while on
@@ -288,17 +296,15 @@ struct MarketPulseSection: View {
         // JP flip never strands the user on an empty Movers tab
         // (same JP-mode rationale as `.onAppear` above).
         .onChange(of: japaneseOnly) { _, _ in
-            let needsRetarget =
-                !visibleCategories.contains(category)
-                || cards(for: category).isEmpty
-            if needsRetarget {
-                let next = firstNonEmptyVisibleCategory()
-                if next != category {
-                    withAnimation(.easeInOut(duration: 0.18)) {
-                        category = next
-                    }
-                }
+            retargetCategoryIfNeeded(animated: true)
+        }
+        .onChange(of: selectedWindow) { _, _ in
+            if japaneseOnly {
+                retargetCategoryIfNeeded(animated: true)
             }
+        }
+        .onChange(of: signalBoard) { _, _ in
+            retargetCategoryIfNeeded(animated: false)
         }
     }
 

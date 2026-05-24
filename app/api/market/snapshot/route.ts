@@ -5,6 +5,10 @@ import { measureAsync } from "@/lib/perf";
 import { filterRawHistoryRowsForPrinting } from "@/lib/pricing/raw-history";
 import { buildProviderPriceDisplay } from "@/lib/pricing/provider-price-display";
 import {
+  convertPriceHistoryRowToUsd,
+  loadPriceHistoryFxRows,
+} from "@/lib/pricing/price-history-currency";
+import {
   computeConfidenceBand,
   resolveWeightedMarketPrice,
   type ObservationInput,
@@ -180,6 +184,7 @@ export async function GET(req: Request) {
 
   const pointCounts = { scrydex: 0 };
   let historyRows: ProviderHistoryAsOfRow[] = [];
+  const observations: ObservationInput[] = [];
   if (scrydex.usdPrice !== null) {
     let historyRowsQuery = supabase
       .from("public_price_history")
@@ -216,12 +221,28 @@ export async function GET(req: Request) {
     historyRows = grade === "RAW"
       ? filterRawHistoryRowsForPrinting(loadedHistoryRows, rawPricingPrintingId)
       : loadedHistoryRows;
+    const maxHistoryDate = historyRows
+      .map((row) => {
+        const date = new Date(row.ts);
+        return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
+      })
+      .filter((value): value is string => Boolean(value))
+      .sort()
+      .at(-1) ?? null;
+    const fxRows = await loadPriceHistoryFxRows(supabase, maxHistoryDate);
     for (const row of historyRows) {
       const provider = normalizeRawProviderName(row.provider);
+      const priceUsd = convertPriceHistoryRowToUsd(row, fxRows);
+      if (!provider || priceUsd === null || priceUsd <= 0) continue;
       const tsMs = new Date(row.ts).getTime();
-      if (!Number.isFinite(tsMs)) continue;
-      if (tsMs < Date.now() - 7 * 24 * 60 * 60 * 1000) continue;
-      if (provider === "SCRYDEX") pointCounts.scrydex += 1;
+      if (Number.isFinite(tsMs) && tsMs >= Date.now() - 7 * 24 * 60 * 60 * 1000 && provider === "SCRYDEX") {
+        pointCounts.scrydex += 1;
+      }
+      observations.push({
+        provider,
+        ts: row.ts,
+        price: priceUsd,
+      });
     }
   }
 
@@ -238,17 +259,6 @@ export async function GET(req: Request) {
     marketPriceFallback: null,
     median7dFallback: null,
   });
-
-  const observations: ObservationInput[] = [];
-  for (const row of historyRows) {
-    const provider = normalizeRawProviderName(row.provider);
-    if (!provider || !Number.isFinite(row.price) || row.price <= 0) continue;
-    observations.push({
-      provider,
-      ts: row.ts,
-      price: row.price,
-    });
-  }
 
   const confidenceBand = computeConfidenceBand({ observations });
 

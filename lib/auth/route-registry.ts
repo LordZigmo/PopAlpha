@@ -29,6 +29,7 @@ export const PUBLIC_ROUTES = [
   "search/cards",
   "search/suggest",
   "canonical/match",
+  "market/arbitrage",
   "market/snapshot",
   "tcg/pricing",
   "tcg/sets/search",

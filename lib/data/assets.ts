@@ -20,11 +20,17 @@ import {
   extractRawVariantPrintingId as extractRawVariantPrintingIdFromIdentity,
   parseVariantRef as parseCanonicalVariantRef,
 } from "@/lib/identity/variant-ref";
+import {
+  convertPriceHistoryRowToUsd,
+  loadPriceHistoryFxRows,
+} from "@/lib/pricing/price-history-currency";
 
 // ── Shared types ────────────────────────────────────────────────────────────
 
 export type AssetMetrics = {
   // Core price stats (from refresh_card_metrics)
+  market_price: number | null;
+  market_price_as_of: string | null;
   median_7d: number | null;
   median_30d: number | null;
   low_30d: number | null;
@@ -144,6 +150,7 @@ type PublicHistoryRow = {
   ts: string | null;
   provider: string | null;
   price?: number | string | null;
+  currency?: string | null;
 };
 
 function getHistoryQueryProfiles(params: {
@@ -347,7 +354,7 @@ export async function getChartSeries(
   const rows = await loadPublicHistoryRows({
     slug,
     since,
-    select: "ts, price, provider, variant_ref",
+    select: "ts, price, currency, provider, variant_ref",
     limit: CHART_POINT_LIMIT,
     ascending: true,
     variantRef,
@@ -358,11 +365,28 @@ export async function getChartSeries(
     errorLabel: "[getChartSeries]",
   });
 
+  const maxHistoryDate = rows
+    .map((row) => {
+      const date = new Date(row.ts ?? "");
+      return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
+    })
+    .filter((value): value is string => Boolean(value))
+    .sort()
+    .at(-1) ?? null;
+  const fxRows = await loadPriceHistoryFxRows(dbPublic(), maxHistoryDate);
+
   return rows
     .map((row) => {
       const ts = row.ts ?? null;
-      const price = Number(row.price);
-      if (!ts || !Number.isFinite(price)) return null;
+      const price = convertPriceHistoryRowToUsd(
+        {
+          price: Number(row.price),
+          currency: row.currency ?? null,
+          ts,
+        },
+        fxRows,
+      );
+      if (!ts || price === null || !Number.isFinite(price)) return null;
       return { ts, price };
     })
     .filter((row): row is ChartPoint => row !== null);
@@ -389,6 +413,7 @@ async function getLatestMetrics(
     .select(
       [
         "median_7d", "median_30d", "low_30d", "high_30d", "trimmed_median_30d",
+        "market_price", "market_price_as_of",
         "volatility_30d", "liquidity_score", "percentile_rank",
         "active_listings_7d", "snapshot_count_30d",
         "provider_trend_slope_7d", "provider_cov_price_30d",
@@ -734,18 +759,20 @@ export async function buildAssetViewModel(
     ? await getChartSeries(slug, selectedVariantRef, days, { grade, isSealed })
     : [];
 
-  // 4. Compute price metrics from series + read pre-computed changes from card_metrics.
-  const price_now = series.length > 0 ? series[series.length - 1].price : null;
-  const prices = series.map((p) => p.price);
-  const range_30d_low  = prices.length > 0 ? Math.min(...prices) : null;
-  const range_30d_high = prices.length > 0 ? Math.max(...prices) : null;
-
-  // Read pre-computed change percentages from card_metrics (populated by refresh_price_changes).
+  // 4. Read authoritative price metrics before deriving display values.
   const metricsRow = await getLatestMetrics(
     slug,
     grade,
     grade === "RAW" && !isSealed ? preferredPrintingId : null,
   );
+  const price_now = grade === "RAW"
+    ? (metricsRow?.market_price ?? null)
+    : series.length > 0 ? series[series.length - 1].price : null;
+  const prices = series.map((p) => p.price);
+  const range_30d_low  = prices.length > 0 ? Math.min(...prices) : null;
+  const range_30d_high = prices.length > 0 ? Math.max(...prices) : null;
+
+  // Read pre-computed change percentages from card_metrics (populated by refresh_price_changes).
   const change_24h_pct = metricsRow?.change_pct_24h ?? null;
   const change_7d_pct  = metricsRow?.change_pct_7d ?? null;
 

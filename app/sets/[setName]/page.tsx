@@ -311,7 +311,7 @@ export default async function SetBrowserPage({ params }: { params: Promise<{ set
       .from("card_printings")
       .select("canonical_slug, image_url, language, finish, edition")
       .in("canonical_slug", slugs),
-    getCanonicalMarketPulseMap(supabase, slugs),
+    getCanonicalMarketPulseMap(supabase, slugs, { includeJpPriceCoverage: true }),
     getSetSummaryHistory(decodedSetName, 90),
   ]);
 
