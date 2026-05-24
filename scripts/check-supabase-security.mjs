@@ -185,6 +185,7 @@ const publicFunctions = runLinkedDbQuery(
       p.oid,
       p.oid::regprocedure::text as signature,
       p.proname as function_name,
+      p.prorettype = 'pg_catalog.trigger'::regtype as returns_trigger,
       p.prosecdef as security_definer,
       coalesce(p.proconfig, '{}'::text[]) as proconfig
     from pg_proc p
@@ -385,6 +386,7 @@ for (const row of publicFunctions) {
   const exposedRoles = Object.keys(row.exposed_roles ?? {}).sort();
   actualFunctionContracts.set(signature, {
     exposedRoles,
+    returnsTrigger: row.returns_trigger === true,
     securityDefiner: row.security_definer === true,
     proconfig: normalizeTextArray(row.proconfig),
   });
@@ -393,7 +395,10 @@ for (const row of publicFunctions) {
 for (const [signature, contract] of actualFunctionContracts) {
   const expectedRoles = normalizePrivileges(PUBLIC_FUNCTION_EXECUTE_ALLOWLIST[signature] ?? []);
 
-  if (!sameValues(contract.exposedRoles, expectedRoles)) {
+  // Trigger functions are not public RPC surfaces: PostgreSQL only lets
+  // them run from table triggers, so access is governed by the table's
+  // RLS/grant contract instead of function EXECUTE visibility.
+  if (!contract.returnsTrigger && !sameValues(contract.exposedRoles, expectedRoles)) {
     addFailure(
       "function-execute",
       `${signature} exposes [${formatList(contract.exposedRoles)}] but expected [${formatList(expectedRoles)}].`,

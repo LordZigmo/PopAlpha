@@ -1259,13 +1259,7 @@ export const PHASE2_DIRECT_PUBLIC_READ_TABLES = [
   "deck_cards",
   "fx_rates",
   "printing_aliases",
-  // NOTE: set_pair_map (added in this PR's migration) is intentionally
-  // NOT yet listed here. The schema-guardrails job validates contract
-  // entries against the LIVE prod DB *before* the supabase-migrations
-  // workflow runs (post-merge), so a contract entry would fail CI on
-  // PRs that introduce a new table. Follow-up PR adds set_pair_map to
-  // both this list and PUBLIC_SELECT_ONLY_OBJECTS once the migration
-  // has applied to prod.
+  "set_pair_map",
 ];
 
 export const PHASE2_INTERNAL_BASE_VIEW_TABLES = [
@@ -1506,9 +1500,7 @@ export const PUBLIC_SELECT_ONLY_OBJECTS = [
   "market_snapshots",
   "pricing_transparency_snapshots",
   "printing_aliases",
-  // NOTE: set_pair_map intentionally NOT listed here — see the matching
-  // note in PHASE2_DIRECT_PUBLIC_READ_TABLES. Follow-up PR adds it once
-  // the migration in this PR has applied to prod.
+  "set_pair_map",
   "public_ai_brief_latest",
   "public_card_condition_prices",
   "public_card_display_identity",
