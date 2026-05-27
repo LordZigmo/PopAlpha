@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
-import { getHomepageData } from "../lib/data/homepage.ts";
+import {
+  getHomepageData,
+  hasJpNativeHomepagePriceSource,
+  hasProviderParityForHomepage,
+} from "../lib/data/homepage.ts";
 
 const FIXED_NOW = Date.parse("2026-03-10T12:00:00.000Z");
 const NOOP_LOGGER = {
@@ -81,6 +85,31 @@ function buildDailyMoverBundle(overrides = {}) {
 export async function runHomepageDataTests() {
   const freshIso = "2026-03-10T11:30:00.000Z";
   const earlierIso = "2026-03-10T10:15:00.000Z";
+
+  assert.equal(
+    hasProviderParityForHomepage({ market_provenance: { parityStatus: "MATCH" } }),
+    true,
+  );
+  assert.equal(
+    hasProviderParityForHomepage({ market_provenance: { parityStatus: "MISMATCH" } }),
+    false,
+  );
+  assert.equal(
+    hasProviderParityForHomepage({ market_provenance: { parityStatus: "MISSING_PROVIDER" } }),
+    false,
+  );
+  assert.equal(
+    hasProviderParityForHomepage({ market_provenance: { parityStatus: "UNKNOWN" } }),
+    false,
+  );
+  assert.equal(
+    hasProviderParityForHomepage({ market_provenance: null }),
+    false,
+  );
+  assert.equal(hasJpNativeHomepagePriceSource("yahoo_jp"), true);
+  assert.equal(hasJpNativeHomepagePriceSource("snkrdunk"), true);
+  assert.equal(hasJpNativeHomepagePriceSource("market"), false);
+  assert.equal(hasJpNativeHomepagePriceSource(null), false);
 
   const data = await getHomepageData({
     now: () => FIXED_NOW,
@@ -952,6 +981,7 @@ export async function runHomepageDataTests() {
             changePct7d: 6.1,
             changePct: 4.2,
             changeWindow: "24H",
+            parityStatus: "MATCH",
             confidenceScore: 88,
             lowConfidence: false,
           }),
@@ -980,4 +1010,52 @@ export async function runHomepageDataTests() {
       confidence_score: 88,
     }],
   );
+
+  const uncorroboratedDailyData = await getHomepageData({
+    now: () => FIXED_NOW,
+    logger: NOOP_LOGGER,
+    dataOverrides: {
+      positiveChangeRows: [],
+      negativeChangeRows: [],
+      trendingVariants: [],
+      cards: [
+        { slug: "daily-scrydex-only", canonical_name: "Daily Scrydex Only", set_name: "Daily Set", year: 2026 },
+      ],
+      dailyMovers: buildDailyMoverBundle({
+        gainers: [
+          buildHomepageCard({
+            slug: "daily-scrydex-only",
+            name: "Daily Scrydex Only",
+            set_name: "Daily Set",
+            market_price: 128.95,
+            updated_at: freshIso,
+            change_pct: 22.1,
+            change_window: "24H",
+            mover_tier: "hot",
+          }),
+        ],
+      }),
+      marketPulseMap: new Map([
+        [
+          "daily-scrydex-only",
+          buildPulse({
+            marketPrice: 128.95,
+            marketPriceAsOf: freshIso,
+            activeListings7d: 6,
+            snapshotCount30d: 31,
+            changePct24h: 22.1,
+            changePct7d: 18.3,
+            changePct: 22.1,
+            changeWindow: "24H",
+            parityStatus: "MISSING_PROVIDER",
+            confidenceScore: 61,
+            lowConfidence: false,
+          }),
+        ],
+      ]),
+    },
+  });
+
+  assert.deepEqual(uncorroboratedDailyData.signal_board.top_movers["24H"], []);
+  assert.deepEqual(uncorroboratedDailyData.signal_board.top_movers["7D"], []);
 }
