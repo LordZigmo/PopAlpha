@@ -1732,7 +1732,9 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
     const trendingCandidatesOut: HomepageCard[] = [];
     for (const row of trendingVariants) {
       if (excludedSlugSet.has(row.canonical_slug)) continue;
-      const price = marketPulseMap.get(row.canonical_slug)?.marketPrice ?? null;
+      const marketPulse = marketPulseMap.get(row.canonical_slug);
+      if (!hasProviderParityStatusForHomepage(marketPulse?.parityStatus)) continue;
+      const price = marketPulse?.marketPrice ?? null;
       if (price == null || price < MIN_PRICE) continue;
       const trendPct = Number.isFinite(row.provider_trend_slope_7d ?? NaN)
         ? Number((row.provider_trend_slope_7d as number).toFixed(2))
