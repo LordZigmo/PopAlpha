@@ -135,6 +135,9 @@ type ChangeCandidateRow = {
   market_confidence_score: number | null;
   market_low_confidence: boolean | null;
   active_listings_7d: number | null;
+  market_provenance?: {
+    parityStatus?: string | null;
+  } | null;
 };
 
 type VariantRow = {
@@ -201,6 +204,7 @@ type JpPriceCoverageRow = {
   snkrdunk_price: number | null;
   snkrdunk_price_jpy: number | null;
   snkrdunk_sample_count: number | null;
+  display_price_source?: string | null;
   display_price_usd: number | null;
   display_price_as_of: string | null;
 };
@@ -455,9 +459,10 @@ async function loadJapaneseRail(
   const { data, error } = await client
     .from("public_jp_price_coverage")
     .select(
-      "canonical_slug, canonical_name, set_name, year, card_number, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url, market_price, market_price_as_of, change_pct_24h, change_pct_7d, active_listings_7d, market_confidence_score, snapshot_count_30d, market_low_confidence, yahoo_jp_price, yahoo_jp_price_jpy, yahoo_jp_sample_count, snkrdunk_price, snkrdunk_price_jpy, snkrdunk_sample_count, display_price_usd, display_price_as_of",
+      "canonical_slug, canonical_name, set_name, year, card_number, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url, market_price, market_price_as_of, change_pct_24h, change_pct_7d, active_listings_7d, market_confidence_score, snapshot_count_30d, market_low_confidence, yahoo_jp_price, yahoo_jp_price_jpy, yahoo_jp_sample_count, snkrdunk_price, snkrdunk_price_jpy, snkrdunk_sample_count, display_price_source, display_price_usd, display_price_as_of",
     )
     .eq("covered_by_price", true)
+    .in("display_price_source", ["yahoo_jp", "snkrdunk"])
     .order("display_price_as_of", { ascending: false, nullsFirst: false })
     .limit(limit);
 
@@ -466,6 +471,7 @@ async function loadJapaneseRail(
   return rows
     .map<HomepageCard | null>((row) => {
       if (row.display_price_usd == null || row.display_price_usd <= 0) return null;
+      if (!hasJpNativeHomepagePriceSource(row.display_price_source)) return null;
       const changePct = row.change_pct_24h ?? row.change_pct_7d ?? null;
       const changeWindow: "24H" | "7D" = row.change_pct_24h != null ? "24H" : "7D";
       const image = resolveCardImage({
@@ -570,9 +576,10 @@ async function loadJapaneseSignalRails(
     const { data, error } = await client
       .from("public_jp_price_coverage")
       .select(
-        "canonical_slug, canonical_name, set_name, year, card_number, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url, market_price, market_price_as_of, change_pct_24h, change_pct_7d, active_listings_7d, market_confidence_score, snapshot_count_30d, market_low_confidence, yahoo_jp_price, yahoo_jp_price_jpy, yahoo_jp_sample_count, snkrdunk_price, snkrdunk_price_jpy, snkrdunk_sample_count, display_price_usd, display_price_as_of",
+        "canonical_slug, canonical_name, set_name, year, card_number, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url, market_price, market_price_as_of, change_pct_24h, change_pct_7d, active_listings_7d, market_confidence_score, snapshot_count_30d, market_low_confidence, yahoo_jp_price, yahoo_jp_price_jpy, yahoo_jp_sample_count, snkrdunk_price, snkrdunk_price_jpy, snkrdunk_sample_count, display_price_source, display_price_usd, display_price_as_of",
       )
       .eq("covered_by_price", true)
+      .in("display_price_source", ["yahoo_jp", "snkrdunk"])
       .gte("display_price_usd", JP_BUDGET_MIN_PRICE)
       .gte("market_confidence_score", MIN_CONFIDENCE_SCORE)
       // Deterministic ordering required for stable .range() pagination:
@@ -609,6 +616,7 @@ async function loadJapaneseSignalRails(
 
   for (const row of rows) {
     if (row.display_price_usd == null || row.display_price_usd < JP_BUDGET_MIN_PRICE) continue;
+    if (!hasJpNativeHomepagePriceSource(row.display_price_source)) continue;
     if (row.market_low_confidence === true) continue;
 
     const asOfMs = row.display_price_as_of ? Date.parse(row.display_price_as_of) : NaN;
@@ -1126,6 +1134,18 @@ function compareDirectionalCandidates(
   return (right.market_price ?? 0) - (left.market_price ?? 0);
 }
 
+function hasProviderParityStatusForHomepage(parityStatus: string | null | undefined): boolean {
+  return parityStatus === "MATCH";
+}
+
+export function hasProviderParityForHomepage(row: Pick<ChangeCandidateRow, "market_provenance">): boolean {
+  return hasProviderParityStatusForHomepage(row.market_provenance?.parityStatus);
+}
+
+export function hasJpNativeHomepagePriceSource(source: string | null | undefined): boolean {
+  return source === "yahoo_jp" || source === "snkrdunk";
+}
+
 export async function getHomepageData(options: HomepageDataOptions = {}): Promise<HomepageData> {
   const now = options.now ?? Date.now;
   const logger = options.logger ?? DEFAULT_LOGGER;
@@ -1181,7 +1201,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
         // filter is already applied via `market_price_as_of >= recentMarketCutoffIso`.
         client
           .from("public_card_metrics")
-          .select("canonical_slug, market_price, market_price_as_of, snapshot_count_30d, change_pct_24h, change_pct_7d, market_confidence_score, market_low_confidence, active_listings_7d")
+          .select("canonical_slug, market_price, market_price_as_of, snapshot_count_30d, change_pct_24h, change_pct_7d, market_confidence_score, market_low_confidence, active_listings_7d, market_provenance")
           .eq("grade", "RAW")
           .is("printing_id", null)
           .gte("market_price", MIN_MOVER_PRICE)
@@ -1197,7 +1217,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
         // stability reason as top_movers.
         client
           .from("public_card_metrics")
-          .select("canonical_slug, market_price, market_price_as_of, snapshot_count_30d, change_pct_24h, change_pct_7d, market_confidence_score, market_low_confidence, active_listings_7d")
+          .select("canonical_slug, market_price, market_price_as_of, snapshot_count_30d, change_pct_24h, change_pct_7d, market_confidence_score, market_low_confidence, active_listings_7d, market_provenance")
           .eq("grade", "RAW")
           .is("printing_id", null)
           .gte("market_price", MIN_MOVER_PRICE)
@@ -1243,8 +1263,10 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
       if (refreshedCountResult.error) logger.error("[homepage] refreshed_count", refreshedCountResult.error.message);
       if (trackedCountResult.error) logger.error("[homepage] tracked_count", trackedCountResult.error.message);
 
-      positiveChangeRows = (positiveChangeResult.data ?? []) as ChangeCandidateRow[];
-      negativeChangeRows = (negativeChangeResult.data ?? []) as ChangeCandidateRow[];
+      positiveChangeRows = ((positiveChangeResult.data ?? []) as ChangeCandidateRow[])
+        .filter(hasProviderParityForHomepage);
+      negativeChangeRows = ((negativeChangeResult.data ?? []) as ChangeCandidateRow[])
+        .filter(hasProviderParityForHomepage);
       trendingVariants = dedupVariants((trendingVariantResult.data ?? []) as VariantRow[], CANDIDATE_FETCH_LIMIT);
       pricesRefreshedToday = refreshedCountResult.count ?? null;
       trackedCardsWithLivePrice = trackedCountResult.count ?? null;
@@ -1787,13 +1809,17 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
     // Daily rows decide stable rail membership; current public_card_metrics
     // decides the user-visible price/as-of. This prevents stale daily
     // snapshots from disagreeing with the card detail page.
-    const repriceDailyCards = (cards: HomepageCard[]): HomepageCard[] => cards.map((card) => toCard(card.slug, {
-      mover_tier: card.mover_tier,
-      changePct: card.change_pct,
-      changeWindow: card.change_window,
-      preferOverrideChange: true,
-      allowSparklineFallback: false,
-    }));
+    const repriceDailyCards = (cards: HomepageCard[]): HomepageCard[] => cards.flatMap((card) => {
+      const marketPulse = marketPulseMap.get(card.slug);
+      if (!hasProviderParityStatusForHomepage(marketPulse?.parityStatus)) return [];
+      return [toCard(card.slug, {
+        mover_tier: card.mover_tier,
+        changePct: card.change_pct,
+        changeWindow: card.change_window,
+        preferOverrideChange: true,
+        allowSparklineFallback: false,
+      })];
+    });
     const dailyMoversForDisplay: DailyMoverBundle = {
       gainers: repriceDailyCards(dailyMovers.gainers),
       losers: repriceDailyCards(dailyMovers.losers),
