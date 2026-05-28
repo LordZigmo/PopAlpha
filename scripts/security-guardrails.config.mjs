@@ -234,6 +234,13 @@ export const AUTH_GLUE_ENTRYPOINT_CONTRACTS = {
 };
 
 export const PRIVILEGED_PACKAGE_SCRIPT_CONTRACTS = {
+  "check:ai-cron-smoke": packageScriptContract({
+    target: "scripts/check-ai-cron-smoke.mjs",
+    intendedCaller: "CI/operator smoke-testing the AI crons against a live-creds server (SMOKE_BASE_URL) to catch silent LLM fallbacks before they ship",
+    trustModel: "manual_cron_route_driver_wrapper",
+    requiredTrustInputs: ["CRON_SECRET", "SMOKE_BASE_URL"],
+    expectedCommandFragments: ["scripts/check-ai-cron-smoke.mjs"],
+  }),
   "check:security:doctor": packageScriptContract({
     target: "scripts/check-linked-db-prereqs.mjs",
     intendedCaller: "local developer or CI operator bootstrapping linked-schema checks",
@@ -660,6 +667,15 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
     requiredTrustInputs: ["supabase_linked_cli", "SUPABASE_DB_PASSWORD"],
     expectedSignals: ["linked_db_helper"],
     usesServiceRole: false,
+  }),
+  "scripts/check-ai-cron-smoke.mjs": operationalScript({
+    classification: "manual_cron_route_driver",
+    executionMode: "verification",
+    intendedCaller: "CI/operator smoke-testing the AI crons against a server with live AI creds (SMOKE_BASE_URL) to catch silent LLM fallbacks before they ship",
+    requiredTrustInputs: ["CRON_SECRET", "SMOKE_BASE_URL"],
+    expectedSignals: ["cron_secret_route_driver"],
+    usesServiceRole: false,
+    notes: "Read-only HTTP client: hits refresh-card-profiles + refresh-ai-brief with a minimal batch and asserts the LLM actually ran (docs/external-api-failure-modes.md #3). No service role; SKIPS when SMOKE_BASE_URL/CRON_SECRET are unset.",
   }),
   "scripts/check-supabase-security.mjs": operationalScript({
     classification: "linked_db_guardrail",
