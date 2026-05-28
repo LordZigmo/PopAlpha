@@ -1729,9 +1729,9 @@ struct CardDetailView: View {
     ///   • JP card + both JP sources → "Yahoo! JP + Snkrdunk (sold archive)"
     ///   • JP card + only Yahoo! → "Yahoo! Auctions JP (sold archive)"
     ///   • JP card + only Snkrdunk → "Snkrdunk (sold archive)"
-    ///   • JP card + neither → "Scrydex (US fallback)" — explains why
-    ///     a JP card might show a US-derived price.
-    ///   • EN card → "Scrydex (primary)"
+    ///   • JP card + neither → "PopAlpha market feeds (US fallback)" — explains
+    ///     why a JP card might show a US-derived price.
+    ///   • EN card → "PopAlpha market feeds"
     private var priceSourceDescription: String {
         if isJapaneseCard {
             let yj = (cardMetrics?.yahooJpPrice ?? 0) > 0
@@ -1739,9 +1739,9 @@ struct CardDetailView: View {
             if yj && snk { return "Yahoo! JP + Snkrdunk (sold archive)" }
             if yj { return "Yahoo! Auctions JP (sold archive)" }
             if snk { return "Snkrdunk (sold archive)" }
-            return "Scrydex (US fallback)"
+            return "PopAlpha market feeds (US fallback)"
         }
-        return "Scrydex (primary)"
+        return "PopAlpha market feeds"
     }
 
     /// Single attribution line under the hero — shows the source name,
