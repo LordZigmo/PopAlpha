@@ -383,6 +383,7 @@ final class AuthService {
 
     // MARK: - Sign Out
 
+    @MainActor
     func signOut() {
         Task {
             try? await Clerk.shared.auth.signOut()

@@ -1252,6 +1252,21 @@ struct HomepageWindowedCardsDTO: Decodable, Hashable {
         case d7 = "7D"
     }
 
+    init(h24: [HomepageCardDTO], d7: [HomepageCardDTO]) {
+        self.h24 = h24
+        self.d7 = d7
+    }
+
+    // Tolerate a missing/renamed rail key rather than failing the whole
+    // homepage decode — an absent window just renders empty.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        h24 = try c.decodeIfPresent([HomepageCardDTO].self, forKey: .h24) ?? []
+        d7 = try c.decodeIfPresent([HomepageCardDTO].self, forKey: .d7) ?? []
+    }
+
+    static let empty = HomepageWindowedCardsDTO(h24: [], d7: [])
+
     func forWindow(_ window: SignalWindow) -> [HomepageCardDTO] {
         switch window {
         case .h24: return h24
@@ -1289,6 +1304,33 @@ struct HomepageSignalBoardDTO: Decodable, Hashable {
     let japaneseMomentum: HomepageWindowedCardsDTO?
     let japaneseMidMovers: [HomepageCardDTO]?
     let japaneseBudgetMovers: [HomepageCardDTO]?
+
+    enum CodingKeys: String, CodingKey {
+        case topMovers, biggestDrops, momentum
+        case unusualVolume, breakouts, midMovers, budgetMovers, japanese
+        case japaneseTopMovers, japaneseBiggestDrops, japaneseMomentum
+        case japaneseMidMovers, japaneseBudgetMovers
+    }
+
+    // The three core windowed rails are required in the model but a
+    // dropped/renamed server key should degrade to an empty rail, not
+    // blank the entire Market tab by failing the whole decode.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        topMovers = try c.decodeIfPresent(HomepageWindowedCardsDTO.self, forKey: .topMovers) ?? .empty
+        biggestDrops = try c.decodeIfPresent(HomepageWindowedCardsDTO.self, forKey: .biggestDrops) ?? .empty
+        momentum = try c.decodeIfPresent(HomepageWindowedCardsDTO.self, forKey: .momentum) ?? .empty
+        unusualVolume = try c.decodeIfPresent([HomepageCardDTO].self, forKey: .unusualVolume)
+        breakouts = try c.decodeIfPresent([HomepageCardDTO].self, forKey: .breakouts)
+        midMovers = try c.decodeIfPresent([HomepageCardDTO].self, forKey: .midMovers)
+        budgetMovers = try c.decodeIfPresent([HomepageCardDTO].self, forKey: .budgetMovers)
+        japanese = try c.decodeIfPresent([HomepageCardDTO].self, forKey: .japanese)
+        japaneseTopMovers = try c.decodeIfPresent(HomepageWindowedCardsDTO.self, forKey: .japaneseTopMovers)
+        japaneseBiggestDrops = try c.decodeIfPresent(HomepageWindowedCardsDTO.self, forKey: .japaneseBiggestDrops)
+        japaneseMomentum = try c.decodeIfPresent(HomepageWindowedCardsDTO.self, forKey: .japaneseMomentum)
+        japaneseMidMovers = try c.decodeIfPresent([HomepageCardDTO].self, forKey: .japaneseMidMovers)
+        japaneseBudgetMovers = try c.decodeIfPresent([HomepageCardDTO].self, forKey: .japaneseBudgetMovers)
+    }
 }
 
 struct HomepageDataDTO: Decodable, Hashable {
@@ -1301,6 +1343,29 @@ struct HomepageDataDTO: Decodable, Hashable {
     let asOf: String?
     let pricesRefreshedToday: Int?
     let trackedCardsWithLivePrice: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case movers, highConfidenceMovers, emergingMovers, losers, trending
+        case signalBoard, asOf, pricesRefreshedToday, trackedCardsWithLivePrice
+    }
+
+    // A dropped/renamed top-level rail key defaults to an empty list
+    // instead of failing the whole /api/homepage decode (which would
+    // blank the Market tab wholesale). signalBoard stays required — it
+    // is the core of the page — but its own decoder tolerates missing
+    // sub-rails, so a partial board still decodes.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        movers = try c.decodeIfPresent([HomepageCardDTO].self, forKey: .movers) ?? []
+        highConfidenceMovers = try c.decodeIfPresent([HomepageCardDTO].self, forKey: .highConfidenceMovers) ?? []
+        emergingMovers = try c.decodeIfPresent([HomepageCardDTO].self, forKey: .emergingMovers) ?? []
+        losers = try c.decodeIfPresent([HomepageCardDTO].self, forKey: .losers) ?? []
+        trending = try c.decodeIfPresent([HomepageCardDTO].self, forKey: .trending) ?? []
+        signalBoard = try c.decode(HomepageSignalBoardDTO.self, forKey: .signalBoard)
+        asOf = try c.decodeIfPresent(String.self, forKey: .asOf)
+        pricesRefreshedToday = try c.decodeIfPresent(Int.self, forKey: .pricesRefreshedToday)
+        trackedCardsWithLivePrice = try c.decodeIfPresent(Int.self, forKey: .trackedCardsWithLivePrice)
+    }
 }
 
 enum SignalWindow: String, CaseIterable, Hashable {
@@ -1328,6 +1393,31 @@ struct HomepageAIBriefDTO: Decodable, Hashable {
     let source: String?          // "llm" | "fallback"
     let dataAsOf: String?
     let generatedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case market, version, summary, takeaway
+        case whatsHappening, whyItMatters, whatToWatch
+        case focusSet, modelLabel, source, dataAsOf, generatedAt
+    }
+
+    // The three required strings default to empty so a malformed brief
+    // doesn't throw and break the whole ai-brief response decode (the
+    // card falls back to its own empty state instead).
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        market = try c.decodeIfPresent(String.self, forKey: .market)
+        version = try c.decodeIfPresent(String.self, forKey: .version) ?? ""
+        summary = try c.decodeIfPresent(String.self, forKey: .summary) ?? ""
+        takeaway = try c.decodeIfPresent(String.self, forKey: .takeaway) ?? ""
+        whatsHappening = try c.decodeIfPresent(String.self, forKey: .whatsHappening)
+        whyItMatters = try c.decodeIfPresent(String.self, forKey: .whyItMatters)
+        whatToWatch = try c.decodeIfPresent(String.self, forKey: .whatToWatch)
+        focusSet = try c.decodeIfPresent(String.self, forKey: .focusSet)
+        modelLabel = try c.decodeIfPresent(String.self, forKey: .modelLabel)
+        source = try c.decodeIfPresent(String.self, forKey: .source)
+        dataAsOf = try c.decodeIfPresent(String.self, forKey: .dataAsOf)
+        generatedAt = try c.decodeIfPresent(String.self, forKey: .generatedAt)
+    }
 }
 
 struct HomepageAIBriefResponseDTO: Decodable {
@@ -1355,6 +1445,30 @@ struct PortfolioSummaryDTO: Decodable, Hashable {
     let dailyPnlAmount: Double
     let dailyPnlPct: Double?
     let holdingCount: Int
+
+    init(totalMarketValue: Double, totalCostBasis: Double, dailyPnlAmount: Double, dailyPnlPct: Double?, holdingCount: Int) {
+        self.totalMarketValue = totalMarketValue
+        self.totalCostBasis = totalCostBasis
+        self.dailyPnlAmount = dailyPnlAmount
+        self.dailyPnlPct = dailyPnlPct
+        self.holdingCount = holdingCount
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case totalMarketValue, totalCostBasis, dailyPnlAmount, dailyPnlPct, holdingCount
+    }
+
+    // A null/absent numeric field defaults to 0 rather than breaking the
+    // whole portfolio-summary decode (which would blank the homepage
+    // portfolio block).
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        totalMarketValue = try c.decodeIfPresent(Double.self, forKey: .totalMarketValue) ?? 0
+        totalCostBasis = try c.decodeIfPresent(Double.self, forKey: .totalCostBasis) ?? 0
+        dailyPnlAmount = try c.decodeIfPresent(Double.self, forKey: .dailyPnlAmount) ?? 0
+        dailyPnlPct = try c.decodeIfPresent(Double.self, forKey: .dailyPnlPct)
+        holdingCount = try c.decodeIfPresent(Int.self, forKey: .holdingCount) ?? 0
+    }
 }
 
 struct HomepageMeDTO {

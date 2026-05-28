@@ -176,14 +176,19 @@ final class MultiScanSession: ObservableObject {
     /// the user can retry / triage. Throws only on HTTP failure.
     func submit() async throws -> BulkScanImportSummary {
         let snapshot = entries
+        let submittedIds = Set(snapshot.map { $0.id })
         let result = try await HoldingsService.shared.bulkAddFromScans(snapshot)
-        if result.errors.isEmpty {
-            entries.removeAll()
-        } else {
-            let failedIndices = Set(result.errors.map { $0.rowIndex })
-            entries = snapshot.enumerated().compactMap { (i, e) in
-                failedIndices.contains(i) ? e : nil
-            }
+        // Rebuild by entry id, not by snapshot index: keep (a) snapshot
+        // rows whose import failed and (b) any row scanned AFTER the
+        // snapshot was taken (a card added mid-submit). The old
+        // index-based rebuild from `snapshot` silently dropped a
+        // mid-submit scan on both the success and partial-failure paths.
+        let failedIndices = Set(result.errors.map { $0.rowIndex })
+        let failedIds = Set(
+            snapshot.enumerated().compactMap { failedIndices.contains($0.offset) ? $0.element.id : nil }
+        )
+        entries = entries.filter { entry in
+            !submittedIds.contains(entry.id) || failedIds.contains(entry.id)
         }
         return result
     }

@@ -173,6 +173,10 @@ struct PortfolioHeroView: View {
     // MARK: - Formatting
 
     private func formatCurrency(_ value: Double) -> String {
+        // `Int(value)` traps on NaN/Inf, and the formatter returns nil
+        // for exactly those values — so the fallback is the path that
+        // would crash. Guard up front.
+        guard value.isFinite else { return "$0" }
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
         formatter.currencyCode = "USD"
@@ -181,6 +185,7 @@ struct PortfolioHeroView: View {
     }
 
     private func formatDelta(_ amount: Double) -> String {
+        guard amount.isFinite else { return "$0" }
         let sign = amount >= 0 ? "+" : ""
         if abs(amount) >= 100 { return "\(sign)$\(Int(amount))" }
         return "\(sign)$\(String(format: "%.2f", amount))"

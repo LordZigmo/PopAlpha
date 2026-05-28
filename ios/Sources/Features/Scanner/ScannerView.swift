@@ -147,6 +147,11 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
         fatalError("init(coder:) has not been implemented")
     }
 
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+        videoOutput.setSampleBufferDelegate(nil, queue: nil)
+    }
+
     override func loadView() {
         view = previewView
     }
@@ -158,6 +163,7 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
         previewView.previewLayer.videoGravity = .resizeAspectFill
 
         configureCameraAccess()
+        registerSessionObservers()
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -244,23 +250,39 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
         }
     }
 
+    private static let cameraDeniedMessage = "Camera access is off. Enable it in Settings to scan cards."
+    private static let cameraUnavailableMessage = "The camera is unavailable on this device."
+
+    /// Surfaces a camera bring-up failure to the view model on the main
+    /// actor. `ScannerHost` mirrors `cameraSetupFailure` into `initError`,
+    /// so the scanner shows an actionable overlay instead of a permanent
+    /// "Starting camera…" placeholder (the session never starts on
+    /// denial, so no frame ever arrives and `firstFrameRendered` never
+    /// flips).
+    private func reportCameraSetupFailure(_ message: String) {
+        Task { @MainActor [weak viewModel] in
+            viewModel?.reportCameraSetupFailure(message)
+        }
+    }
+
     private func configureCameraAccess() {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:
             configureSessionIfNeeded()
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
-                guard granted, let self else {
+                guard let self else { return }
+                guard granted else {
+                    self.reportCameraSetupFailure(Self.cameraDeniedMessage)
                     return
                 }
-
                 self.configureSessionIfNeeded()
                 self.startSessionIfNeeded()
             }
         case .denied, .restricted:
-            break
+            reportCameraSetupFailure(Self.cameraDeniedMessage)
         @unknown default:
-            break
+            reportCameraSetupFailure(Self.cameraDeniedMessage)
         }
     }
 
@@ -280,6 +302,7 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
             guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: self.cameraPosition),
                   let input = try? AVCaptureDeviceInput(device: device),
                   self.captureSession.canAddInput(input) else {
+                self.reportCameraSetupFailure(Self.cameraUnavailableMessage)
                 return
             }
 
@@ -310,6 +333,7 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
             self.videoOutput.setSampleBufferDelegate(self, queue: self.sampleBufferQueue)
 
             guard self.captureSession.canAddOutput(self.videoOutput) else {
+                self.reportCameraSetupFailure(Self.cameraUnavailableMessage)
                 return
             }
 
@@ -344,6 +368,37 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
             }
 
             self.captureSession.stopRunning()
+        }
+    }
+
+    // AVCaptureSession stops on a runtime error (e.g. mediaservices
+    // reset) or an interruption (incoming call, Control Center, another
+    // app taking the camera, multitasking) and does NOT restart on its
+    // own. Without these observers the scanner froze on its last frame
+    // until the user left and re-entered the tab. Restart on the session
+    // queue once the session is configured but no longer running. These
+    // notifications can be delivered off the main thread, so the
+    // handlers touch no UI state — only the session queue.
+    private func registerSessionObservers() {
+        let center = NotificationCenter.default
+        center.addObserver(self, selector: #selector(handleSessionRuntimeError(_:)),
+                           name: .AVCaptureSessionRuntimeError, object: captureSession)
+        center.addObserver(self, selector: #selector(handleSessionInterruptionEnded(_:)),
+                           name: .AVCaptureSessionInterruptionEnded, object: captureSession)
+    }
+
+    @objc private func handleSessionRuntimeError(_ notification: Notification) {
+        restartSessionIfStopped()
+    }
+
+    @objc private func handleSessionInterruptionEnded(_ notification: Notification) {
+        restartSessionIfStopped()
+    }
+
+    private func restartSessionIfStopped() {
+        sessionQueue.async { [weak self] in
+            guard let self, self.isSessionConfigured, !self.captureSession.isRunning else { return }
+            self.captureSession.startRunning()
         }
     }
 

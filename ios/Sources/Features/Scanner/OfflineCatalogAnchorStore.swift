@@ -210,6 +210,14 @@ public final class OfflineCatalogAnchorStore: @unchecked Sendable {
     ///
     /// Uses `serialAccessQueue.sync` so the array isn't replaced
     /// mid-iteration by a concurrent sync.
+    ///
+    /// WARNING: `body` runs INSIDE `serialAccessQueue.sync`. Do not call
+    /// anything that re-enters this queue (another `withAnchorsPointer`,
+    /// `watermarkUnixMs`, `_seedAnchorsForTesting`, …) from within `body`
+    /// — `DispatchQueue.sync` onto the queue you're already on
+    /// self-deadlocks. Today the kNN closure doesn't re-enter; if that
+    /// changes, copy the flat buffer out under the lock and call `body`
+    /// outside the `sync`.
     public func withAnchorsPointer<R>(
         _ body: (UnsafePointer<Float>?, _ numAnchors: Int) throws -> R
     ) rethrows -> R {
