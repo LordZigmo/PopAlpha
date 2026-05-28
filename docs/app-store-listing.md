@@ -8,7 +8,7 @@ Drafts for every App Store Connect text field for the v1.0.0 submission. Paste s
 
 ## 0. Submission Status
 
-Where we are on the path to "Submit for Review." Updated 2026-05-14.
+Where we are on the path to "Submit for Review." Updated 2026-05-28.
 
 ### ✅ Done (in-binary work shipped, tested where applicable)
 
@@ -25,10 +25,11 @@ Where we are on the path to "Submit for Review." Updated 2026-05-14.
 | Email sign-UP (new users, fallthrough) | ✅ | 5 Codex-hardened iterations: dispatch order, legal disclaimer, `.complete` status guard, stale-attempt protection, resend reuse |
 | Apple Sign In | ✅ | App ID capability + `.p8` key (combined with APNs key for v1, split on next rotation) + Clerk SSO connection — tested on device |
 | Google OAuth | ✅ | Already working from earlier release prep |
-| Version bump → 1.0.0 | ✅ | `MARKETING_VERSION = 1.0.0`, `CURRENT_PROJECT_VERSION = 1` |
+| Version bump → 1.0.0 | ✅ | `MARKETING_VERSION = 1.0.0`, `CURRENT_PROJECT_VERSION = 2026.5.24` |
 | Demo Apple Review mailbox | ✅ | `review.popalpha@proton.me` (Proton free, 2FA disabled) |
 | Clerk Dashboard: Email identifier + Email-code strategy enabled | ✅ | Production instance |
 | Clerk Dashboard: Phone identifier disabled, Password strategy disabled, Username/Name optional | ✅ | Required to avoid `.missingRequirements` after email verification |
+| Trustworthy Market Price + homepage Market watch | ✅ | Market Price is the conservative PopAlpha anchor; recent market signals are separate context; strict movers stay policy-gated |
 
 ### 🟡 In Progress (you, light lift)
 
@@ -115,9 +116,9 @@ WHAT YOU GET WITH POPALPHA
 • Camera scanner — point at any English Pokémon card; PopAlpha
   identifies it and pulls up the latest prices in seconds.
 
-• Live market prices — aggregated from public sources and
-  refreshed throughout the day. Raw and graded prices, with
-  variant breakdowns where available.
+• Market Price — PopAlpha's conservative card-value anchor,
+  refreshed throughout the day. Recent market signals appear as
+  context when the market is moving.
 
 • Price history charts — see how a card has moved over the last
   week, month, year, or its full history. Switch between raw and
@@ -137,15 +138,14 @@ WHAT YOU GET WITH POPALPHA
   current price, completion percentage, and movers.
 
 FREE TO START
-Browse prices, chart history, scan a few cards a day, and track
-a small portfolio without an account. Sign up to save more, sync
-across devices, and get the full daily AI brief.
+Browse prices, chart history, scan cards, and track a small
+portfolio without an account. Sign up to save more, sync across
+devices, and get the full daily AI brief.
 
 POPALPHA PRO
-Unlock the offline scanner — instant on-device card identification
-that works in patchy connectivity (e.g. card shows, the back of a
-binder pile at home). Pro is available as a monthly or annual
-subscription; cancel anytime in iOS Settings.
+Unlock deeper collector insights, Pro market signals, and price
+alerts built around the cards you care about. Pro is available as
+a monthly or annual subscription; cancel anytime in iOS Settings.
 
 PRIVACY
 We don't track you across other apps or websites. We don't sell
@@ -347,11 +347,11 @@ demo creds above unlock the signed-in surface (portfolio + wishlist).
    item so the signed-in experience renders meaningfully on first
    sign-in.
 
-— TO TEST THE PAYWALL: tap the Scan tab, run a few scans to hit
-   the free quota, and the paywall sheet will appear. The
-   subscription is "Pro Monthly" or "Pro Yearly" — both unlock the
-   on-device offline scanner. Restore Purchases works from the
-   paywall and from Settings.
+— TO TEST THE PAYWALL: open Settings → Upgrade to PopAlpha Pro,
+   or tap the crown on the scanner. The scanner itself is free; the
+   subscription is "Pro Monthly" or "Pro Yearly" and unlocks deeper
+   collector insights, Pro market signals, and price alerts. Restore
+   Purchases works from the paywall and from Settings.
 
 — TO TEST ACCOUNT DELETION: Settings → Delete My Account →
    Confirm. The account is removed from our auth provider (Clerk)
@@ -411,8 +411,8 @@ For each subscription. Apple requires per-IAP review notes + a screenshot of the
 | **Reference Name** | `Pro Monthly` |
 | **Display Name** | `PopAlpha Pro` |
 | **Subscription Duration** | 1 Month |
-| **Description** | `Unlock instant on-device card scanning that works without a network connection. Pro Monthly is an auto-renewing subscription billed monthly. Cancel anytime in iOS Settings.` |
-| **Review Notes** | `Pro unlocks the on-device offline scanner. Triggered by tapping the Scan tab and running scans past the free quota. To test, use the demo account credentials and run scans until the paywall appears.` |
+| **Description** | `Unlock deeper collector insights, Pro market signals, and price alerts. Pro Monthly is an auto-renewing subscription billed monthly. Cancel anytime in iOS Settings.` |
+| **Review Notes** | `The scanner is free. Pro unlocks collector insights, market signals, and price alerts. To test, use the demo account credentials, then open Settings → Upgrade to PopAlpha Pro or tap the scanner crown.` |
 
 ### `ai.popalpha.premium.pro.yearly`
 
@@ -421,7 +421,7 @@ For each subscription. Apple requires per-IAP review notes + a screenshot of the
 | **Reference Name** | `Pro Yearly` |
 | **Display Name** | `PopAlpha Pro (Yearly)` |
 | **Subscription Duration** | 1 Year |
-| **Description** | `Unlock instant on-device card scanning that works without a network connection. Pro Yearly is an auto-renewing subscription billed annually at a discount vs. monthly. Cancel anytime in iOS Settings.` |
+| **Description** | `Unlock deeper collector insights, Pro market signals, and price alerts. Pro Yearly is an auto-renewing subscription billed annually at a discount vs. monthly. Cancel anytime in iOS Settings.` |
 | **Review Notes** | `Same entitlement as Pro Monthly with annual billing. Defaults to ~16% savings vs 12 × monthly. Subscription group "Pro".` |
 
 ### Subscription group localization (one entry, English)
@@ -473,7 +473,7 @@ Apple needs screenshots for the iPhone-only v1 target:
 4. **Portfolio** — value chart + holdings list
 5. **Set browse** — set page with movers + completion %
 6. **Wishlist** — alert badges
-7. *(optional)* **Pro paywall** — clean show of the offline scanner pitch
+7. *(optional)* **Pro paywall** — clean show of the market intelligence pitch
 
 **Caption guidance** (Apple allows captions overlaid on screenshots; the captions are NOT translated and aren't searchable, but they massively improve conversion):
 
@@ -485,7 +485,7 @@ Apple needs screenshots for the iPhone-only v1 target:
 | 4 | `Track what your collection's worth` |
 | 5 | `Drill into any set` |
 | 6 | `Get notified when wishlist cards drop` |
-| 7 | `Pro: instant offline scanning` |
+| 7 | `Pro: smarter market calls` |
 
 ---
 
@@ -493,7 +493,7 @@ Apple needs screenshots for the iPhone-only v1 target:
 
 Run through this before tapping **Submit for Review**:
 
-- [ ] Bundle version `MARKETING_VERSION = 1.0.0`, `CURRENT_PROJECT_VERSION = 1` (already set)
+- [ ] Bundle version `MARKETING_VERSION = 1.0.0`, `CURRENT_PROJECT_VERSION = 2026.5.24` (already set)
 - [ ] Demo account credentials seeded + pasted into App Review Information
 - [ ] Privacy nutrition labels filled out (§8)
 - [ ] Age rating wizard completed → 4+ (§7)

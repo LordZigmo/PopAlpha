@@ -12,6 +12,7 @@ import {
   computeConfidenceBand,
   resolveWeightedMarketPrice,
   type ObservationInput,
+  type WeightedMarketPriceResult,
 } from "@/lib/pricing/market-confidence";
 import { resolveSnapshotTrust } from "@/lib/pricing/snapshot-trust";
 
@@ -21,6 +22,7 @@ type SnapshotRow = {
   canonical_slug: string;
   printing_id: string | null;
   grade: string;
+  scrydex_price: number | null;
   market_price: number | null;
   market_price_as_of: string | null;
   active_listings_7d: number | null;
@@ -33,6 +35,11 @@ type SnapshotRow = {
   market_low_confidence: boolean | null;
   market_blend_policy: string | null;
   market_provenance: Record<string, unknown> | null;
+  market_price_display_state: string | null;
+  recent_market_signal_usd: number | null;
+  recent_market_signal_as_of: string | null;
+  recent_market_signal_delta_pct: number | null;
+  recent_market_signal_direction: "HIGHER" | "LOWER" | null;
 };
 
 type ProviderHistoryAsOfRow = {
@@ -49,20 +56,28 @@ type ParityRow = {
 
 function normalizeRawProviderName(provider: string | null | undefined): "SCRYDEX" | null {
   const normalized = String(provider ?? "").trim().toUpperCase();
-  // POKEMON_TCG_API is a historical Scrydex-compatible provider label in
-  // older history rows. Public provenance still reports the active source
-  // as Scrydex so clients do not see a mixed-provider story.
+  // POKEMON_TCG_API is a historical compatible provider label in older
+  // history rows. Public copy stays neutral and provider names remain legacy
+  // compatibility fields only.
   if (normalized === "SCRYDEX" || normalized === "POKEMON_TCG_API") return "SCRYDEX";
   return null;
 }
+
+type TrustedMarketProvenance = {
+  trustStatus?: string | null;
+  confidenceStatus?: string | null;
+  publicInputStatus?: string | null;
+  sourceMix?: Record<string, unknown> | null;
+};
 
 const GRADED_GRADES = new Set(["LE_7", "G8", "G9", "G9_5", "G10", "G10_PERFECT"]);
 
 /**
  * Pick the headline price for the snapshot based on grade.
  *
- * RAW headline uses card_metrics.market_price (Phase A: that's scrydex's
- * `low` field, aligned with TCGplayer's published Market Price label).
+ * RAW headline uses public_card_metrics.market_price, which is now the
+ * conservative PopAlpha Market Price anchor. Recent public signals travel in
+ * separate recentMarketSignal* fields.
  *
  * Graded card_metrics rows have market_price = NULL — the refresh
  * function doesn't compute a "market price" for graded SKUs because the
@@ -133,7 +148,7 @@ export async function GET(req: Request) {
   let query = supabase
     .from("public_card_metrics")
     .select(
-      "canonical_slug, printing_id, grade, market_price, market_price_as_of, active_listings_7d, median_7d, median_30d, trimmed_median_30d, low_30d, high_30d, market_confidence_score, market_low_confidence, market_blend_policy, market_provenance"
+      "canonical_slug, printing_id, grade, scrydex_price, market_price, market_price_as_of, active_listings_7d, median_7d, median_30d, trimmed_median_30d, low_30d, high_30d, market_confidence_score, market_low_confidence, market_blend_policy, market_provenance, market_price_display_state, recent_market_signal_usd, recent_market_signal_as_of, recent_market_signal_delta_pct, recent_market_signal_direction"
     )
     .eq("canonical_slug", slug)
     .eq("grade", grade)
@@ -159,19 +174,24 @@ export async function GET(req: Request) {
   // provider × bucket fan-out lives in variant_metrics). Without this
   // fall-back the route returned null for every graded request even
   // though the chart shows real prices.
-  const scrydexSourcePrice = pickHeadlineSourcePrice(grade, result.data ?? null);
+  const marketProvenance = (result.data?.market_provenance ?? null) as TrustedMarketProvenance | null;
+  const headlineProvider = "SCRYDEX";
+  const providerPolicy = result.data?.market_blend_policy
+    ?? marketProvenance?.trustStatus
+    ?? (grade === "RAW" ? "POPALPHA_MARKET_LOW_CONFIDENCE" : "SCRYDEX_GRADED_MEDIAN");
+  const headlineSourcePrice = pickHeadlineSourcePrice(grade, result.data ?? null);
   // RAW carries a real as_of from market_price_as_of. Graded medians are
   // a rolling 30-day computation with no clean "as of" stamp — defer
   // marketPriceAsOf to after the history fetch so we can use the most
   // recent history row's ts instead. Until then, hold the RAW value.
   const scrydexAsOf =
-    grade === "RAW" && scrydexSourcePrice !== null
+    grade === "RAW" && headlineSourcePrice !== null
       ? (result.data?.market_price_as_of ?? null)
       : null;
-  const scrydex = await buildProviderPriceDisplay({
+  const headlineProviderDisplay = await buildProviderPriceDisplay({
     supabase,
-    provider: "SCRYDEX",
-    sourcePrice: scrydexSourcePrice,
+    provider: headlineProvider,
+    sourcePrice: headlineSourcePrice,
     sourceCurrency: "USD",
     asOf: scrydexAsOf,
   });
@@ -185,7 +205,7 @@ export async function GET(req: Request) {
   const pointCounts = { scrydex: 0 };
   let historyRows: ProviderHistoryAsOfRow[] = [];
   const observations: ObservationInput[] = [];
-  if (scrydex.usdPrice !== null) {
+  if (headlineProviderDisplay.usdPrice !== null && headlineProvider === "SCRYDEX") {
     let historyRowsQuery = supabase
       .from("public_price_history")
       .select("provider, variant_ref, ts, price, currency")
@@ -246,12 +266,12 @@ export async function GET(req: Request) {
     }
   }
 
-  const weighted = resolveWeightedMarketPrice({
+  const weighted: WeightedMarketPriceResult = resolveWeightedMarketPrice({
     providers: [
       {
         provider: "SCRYDEX",
-        price: scrydex.usdPrice,
-        asOfTs: scrydex.asOf,
+        price: headlineProviderDisplay.usdPrice,
+        asOfTs: headlineProviderDisplay.asOf,
         points7d: pointCounts.scrydex,
       },
     ],
@@ -265,13 +285,13 @@ export async function GET(req: Request) {
   const modelConfidence = Math.round((weighted.confidenceScore * 0.65) + (confidenceBand.confidenceScore * 0.35));
   const lowConfidence = weighted.lowConfidence || confidenceBand.lowConfidence;
 
-  const marketPriceUsd = scrydex.usdPrice ?? null;
+  const marketPriceUsd = headlineProviderDisplay.usdPrice ?? null;
   // Compute marketPriceAsOf:
   //   - RAW: use the existing market_price_as_of stamp (real "last sold").
   //   - Graded: median_30d has no clean as_of, so use the most recent
   //     history row's ts as a "last refreshed" proxy. Falls back to
   //     null if no history rows landed.
-  let marketPriceAsOf: string | null = marketPriceUsd !== null ? (scrydex.asOf ?? null) : null;
+  let marketPriceAsOf: string | null = marketPriceUsd !== null ? (headlineProviderDisplay.asOf ?? null) : null;
   if (marketPriceUsd !== null && marketPriceAsOf === null && historyRows.length > 0) {
     let latestMs = -Infinity;
     let latestIso: string | null = null;
@@ -306,7 +326,7 @@ export async function GET(req: Request) {
       : null;
   const trust = resolveSnapshotTrust(trustRow, {
     blendPolicy: marketPriceUsd !== null
-      ? (grade === "RAW" ? "SCRYDEX_PRIMARY" : "SCRYDEX_GRADED_MEDIAN")
+      ? (grade === "RAW" ? providerPolicy : "SCRYDEX_GRADED_MEDIAN")
       : "NO_PRICE",
     confidenceScore: marketPriceUsd !== null ? modelConfidence : 0,
     lowConfidence: marketPriceUsd === null ? true : lowConfidence,
@@ -314,14 +334,19 @@ export async function GET(req: Request) {
 
   return NextResponse.json({
     ok: true,
-    providerPolicy: "SCRYDEX_ONLY_RAW",
+    providerPolicy,
     priceObservationCount7d: result.data?.active_listings_7d ?? 0,
     deprecatedProviderFields: ["justtcgPrice", "pokemontcgPrice", "active7d"],
     justtcgPrice: null,
-    scrydexPrice: marketPriceUsd,
+    scrydexPrice: result.data?.scrydex_price ?? (headlineProvider === "SCRYDEX" ? marketPriceUsd : null),
     pokemontcgPrice: null,
     marketPrice: marketPriceUsd,
     marketPriceAsOf,
+    marketPriceDisplayState: result.data?.market_price_display_state ?? (marketPriceUsd !== null ? "ALIGNED" : "NO_RELIABLE_PRICE"),
+    recentMarketSignalUsd: result.data?.recent_market_signal_usd ?? null,
+    recentMarketSignalAsOf: result.data?.recent_market_signal_as_of ?? null,
+    recentMarketSignalDeltaPct: result.data?.recent_market_signal_delta_pct ?? null,
+    recentMarketSignalDirection: result.data?.recent_market_signal_direction ?? null,
     parityStatus,
     blendPolicy: trust.blendPolicy,
     confidenceScore: trust.confidenceScore,
@@ -336,10 +361,10 @@ export async function GET(req: Request) {
       excludedSample: confidenceBand.excluded.slice(0, 20),
     },
     provenance: {
-      primaryProvider: "SCRYDEX",
-      providerPolicy: "SCRYDEX_ONLY_RAW",
+      primaryProvider: marketPriceUsd !== null ? headlineProvider : null,
+      providerPolicy,
       historicalAliases: ["POKEMON_TCG_API"],
-      sourceMix: {
+      sourceMix: marketProvenance?.sourceMix ?? {
         justtcgWeight: 0,
         scrydexWeight: marketPriceUsd !== null ? 1 : 0,
       },
@@ -352,7 +377,7 @@ export async function GET(req: Request) {
       sampleSize30d: marketPriceUsd !== null ? historyRows.length : 0,
       sampleSizeFiltered: marketPriceUsd !== null ? confidenceBand.sampleSize : 0,
     },
-    providers: marketPriceUsd !== null ? [scrydex] : [],
+    providers: marketPriceUsd !== null ? [headlineProviderDisplay] : [],
     // Deprecated name retained for API compatibility. This is a count of
     // recent price observations, not live marketplace listings.
     active7d: result.data?.active_listings_7d ?? 0,

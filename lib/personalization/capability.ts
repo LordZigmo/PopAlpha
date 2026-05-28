@@ -1,12 +1,11 @@
 /**
  * Capability / feature-gate boundary.
  *
- * V1: enabled by default. Real LLM path opt-in via env.
+ * V1: feature availability is env-controlled; Pro entitlement is enforced by
+ * the route handler before personalized explanations are generated.
  *
- * Single swap point for future paywall wiring — `getPersonalizationCapability`
- * is called wherever the feature is rendered or served. To paywall later,
- * extend this function (e.g. check `hasPro(actor.clerk_user_id)`) without
- * touching any of the consumers.
+ * Single swap point for mode/debug wiring — `getPersonalizationCapability`
+ * is called wherever the feature is rendered or served.
  */
 
 import type { Actor } from "./types";
@@ -33,6 +32,7 @@ function falsy(value: string | undefined): boolean {
 }
 
 export function getPersonalizationCapability(_actor: Actor): PersonalizationCapability {
+  void _actor;
   const personalizationDisabled = falsy(process.env.NEXT_PUBLIC_ENABLE_PERSONALIZATION);
   const llmEnabled = truthy(process.env.NEXT_PUBLIC_ENABLE_PERSONALIZATION_LLM);
   const debugEnabled =

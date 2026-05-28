@@ -107,6 +107,12 @@ export function hasReplicateConfig(): boolean {
   return Boolean(process.env.REPLICATE_API_TOKEN?.trim() && process.env.REPLICATE_CLIP_MODEL_VERSION?.trim());
 }
 
+export function hasImageEmbedderConfig(): boolean {
+  const variant = process.env.IMAGE_EMBEDDER_VARIANT?.trim();
+  if (variant === "modal-siglip") return hasModalSiglipConfig();
+  return hasReplicateConfig();
+}
+
 export function getReplicateClipEmbedder(): ReplicateClipEmbedder {
   const token = process.env.REPLICATE_API_TOKEN?.trim();
   const version = process.env.REPLICATE_CLIP_MODEL_VERSION?.trim();

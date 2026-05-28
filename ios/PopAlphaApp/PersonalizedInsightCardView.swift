@@ -3,8 +3,8 @@ import SwiftUI
 // MARK: - Personalized Insight Card
 //
 // Mirrors the web `<PersonalizedCardInsight />` purple pill placed directly
-// below the AI Brief. Renders null when personalization is disabled or the
-// request fails. Observational tone, no buy/sell language.
+// below the AI Brief. Free users see a static Pro preview; Pro users get the
+// actual personalized explanation. Observational tone, no buy/sell language.
 
 struct PersonalizedInsightCardView: View {
     let canonicalSlug: String
@@ -24,8 +24,16 @@ struct PersonalizedInsightCardView: View {
 
     var body: some View {
         guardedContent
-            .task(id: taskKey) {
-                await load()
+            .task(id: "\(taskKey)|\(gate.isPro)") {
+                if gate.isPro {
+                    await load()
+                } else {
+                    response = nil
+                    loading = false
+                }
+            }
+            .sheet(isPresented: $showPaywall) {
+                PaywallView(context: .collectorProfile, surface: "card_detail_insight_teaser")
             }
     }
 
@@ -35,7 +43,9 @@ struct PersonalizedInsightCardView: View {
 
     @ViewBuilder
     private var guardedContent: some View {
-        if response?.enabled == false {
+        if !gate.isPro {
+            lockedContent
+        } else if response?.enabled == false {
             EmptyView()
         } else {
             content
@@ -53,23 +63,8 @@ struct PersonalizedInsightCardView: View {
             )
             .lineSpacing(3)
 
-            // Reasons + caveats are the "deep" personalization layer.
-            // Free users see the summary above (it's their actual
-            // personalized lead) but the supporting reasoning is
-            // gated behind Pro — tap surfaces the paywall with the
-            // collector-profile context.
             if hasUnlockableContent {
-                if gate.isPro {
-                    reasonsAndCaveats
-                } else {
-                    LockedPreviewOverlay(
-                        ctaText: "Unlock with Pro",
-                        blurRadius: 5,
-                        onTap: { showPaywall = true },
-                    ) {
-                        reasonsAndCaveats
-                    }
-                }
+                reasonsAndCaveats
             }
         }
         .padding(16)
@@ -91,8 +86,62 @@ struct PersonalizedInsightCardView: View {
         )
         .shadow(color: Self.purpleGlow.opacity(0.28), radius: 14, x: 0, y: 0)
         .shadow(color: .black.opacity(0.24), radius: 30, x: 0, y: 18)
-        .sheet(isPresented: $showPaywall) {
-            PaywallView(context: .collectorProfile, surface: "card_detail_insight_teaser")
+    }
+
+    private var lockedContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            header
+
+            Text("Preview: Pro compares this card against your collecting style, recent activity, and taste signals.")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(Self.purpleText)
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+
+            LockedPreviewOverlay(
+                ctaText: "Upgrade to Pro",
+                blurRadius: 5,
+                onTap: { showPaywall = true }
+            ) {
+                VStack(alignment: .leading, spacing: 8) {
+                    lockedPreviewRow("Style match analysis")
+                    lockedPreviewRow("Why it fits or stretches your profile")
+                    lockedPreviewRow("Signals to watch before adding it")
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 2)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Self.purpleAccent.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(alignment: .leading) {
+            Capsule()
+                .fill(Self.purpleAccent)
+                .frame(width: 3)
+                .padding(.vertical, 10)
+                .padding(.leading, 2)
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Self.purpleBorder.opacity(0.35), lineWidth: 1)
+        )
+        .shadow(color: Self.purpleGlow.opacity(0.28), radius: 14, x: 0, y: 0)
+        .shadow(color: .black.opacity(0.24), radius: 30, x: 0, y: 18)
+    }
+
+    private func lockedPreviewRow(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Circle()
+                .fill(Self.purpleBorder.opacity(0.75))
+                .frame(width: 5, height: 5)
+                .padding(.top, 7)
+            Text(text)
+                .font(.system(size: 14, weight: .regular))
+                .foregroundStyle(Self.purpleText.opacity(0.92))
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -162,7 +211,7 @@ struct PersonalizedInsightCardView: View {
     }
 
     private var badge: some View {
-        Text(fitsLabel)
+        Text(gate.isPro ? fitsLabel : "Pro")
             .font(.system(size: 11, weight: .semibold))
             .foregroundStyle(Self.purpleText)
             .padding(.horizontal, 10)

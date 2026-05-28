@@ -36,14 +36,12 @@ export const PUBLIC_ROUTES = [
   "psa/cert",
   "psa/cert/activity",
   "ebay/browse",
-  "card-profiles",
   "handles/availability",
   "health",
   "homepage",
   "homepage/ai-brief",
   "homepage/community",
   "personalization/events",
-  "personalization/explanation",
   "personalization/profile",
   "waitlist",
 ];
@@ -136,12 +134,13 @@ export const USER_ROUTES = [
   "activity/notifications",
   "activity/notifications/read",
   "activity/profile",
+  "card-profiles",
   "community-pulse",
   "private-sales",
   "private-sales/[id]",
   "pro/signals",
-  // Premium offline scanner correction. User reports a wrong scan
-  // via the picker; this endpoint creates a kNN anchor (source =
+  // Scanner correction. User reports a wrong scan via the picker;
+  // this endpoint creates a kNN anchor (source =
   // 'user_correction') tagged with the active embedder's
   // model_version so the offline catalog's anchor sync surfaces it.
   // Distinct from /api/admin/scan-eval/promote which ALSO writes to
@@ -154,6 +153,7 @@ export const USER_ROUTES = [
   "holdings/summary",
   "portfolio/overview",
   "portfolio/activity",
+  "personalization/explanation",
   "homepage/me",
   "me",
   "me/export",

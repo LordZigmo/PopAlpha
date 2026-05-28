@@ -76,7 +76,7 @@
           "introductoryOffer" : null,
           "localizations" : [
             {
-              "description" : "Pro monthly: offline scanner + sub-second on-device identify + unlimited scans.",
+              "description" : "Pro monthly: collector insights, market signals, and price alerts.",
               "displayName" : "PopAlpha Pro (Monthly)",
               "locale" : "en_US"
             }
@@ -103,7 +103,7 @@
           },
           "localizations" : [
             {
-              "description" : "Pro yearly: same offline scanner perks, billed once a year.",
+              "description" : "Pro yearly: same collector insights and market signals, billed once a year.",
               "displayName" : "PopAlpha Pro (Yearly)",
               "locale" : "en_US"
             }

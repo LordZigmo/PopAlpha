@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getCurrencyToUsdRateAt } from "@/lib/pricing/fx";
 
-export type ProviderName = "JUSTTCG" | "SCRYDEX";
+export type ProviderName = "JUSTTCG" | "SCRYDEX" | "PRICECHARTING";
 
 export type ProviderPriceDisplay = {
   provider: ProviderName;

@@ -19,8 +19,13 @@ export type CardDetailPriceCompare = {
   pokemontcgPrice: number | null;
   marketPrice: number | null;
   asOf: string | null;
+  marketPriceDisplayState: "ALIGNED" | "SIGNAL_HIGHER" | "SIGNAL_LOWER" | "PUBLIC_ONLY" | "UNDER_REVIEW" | "NO_RELIABLE_PRICE" | string | null;
+  recentMarketSignalUsd: number | null;
+  recentMarketSignalAsOf: string | null;
+  recentMarketSignalDeltaPct: number | null;
+  recentMarketSignalDirection: "HIGHER" | "LOWER" | string | null;
   providers: Array<{
-    provider: "JUSTTCG" | "SCRYDEX";
+    provider: "JUSTTCG" | "SCRYDEX" | "PRICECHARTING";
     sourcePrice: number | null;
     sourceCurrency: string | null;
     usdPrice: number | null;

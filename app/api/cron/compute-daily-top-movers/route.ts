@@ -7,11 +7,10 @@
  * Behavior:
  *   1. If today's rows already exist, skip (user: "generated once daily").
  *   2. Otherwise call compute_daily_top_movers RPC.
- *   3. RPC has a tier-aware coverage gate — fresh_24h count of hot-tier
- *      slugs and fresh_7d count of warm-tier slugs must each clear their
- *      thresholds (default hot ≥ 500, warm ≥ 7,500). If not, it returns
- *      without writing. Cron quietly logs "waiting" and will retry on
- *      the next tick.
+ *   3. RPC has a public-policy coverage gate — enough cards must have a
+ *      fresh, PopAlpha-confident, permitted-public-input movement signal
+ *      to produce a trustworthy daily cache. If not, it returns without
+ *      writing. Cron logs the gate trip and will retry on the next tick.
  *
  * Schedule: 0 14,17,21 * * * (14:00 UTC = 9am EST, with retries at
  * 17:00 UTC and 21:00 UTC). The 9am EST primary attempt gives a stable
@@ -107,6 +106,8 @@ export async function GET(req: Request) {
     warm_fresh_7d?: number;
     hot_fresh_24h_threshold?: number;
     warm_fresh_7d_threshold?: number;
+    public_eligible_fresh_24h?: number;
+    public_eligible_threshold?: number;
     computed_at_date?: string;
   };
 
@@ -134,6 +135,8 @@ export async function GET(req: Request) {
       hot_fresh_24h_threshold: result.hot_fresh_24h_threshold ?? null,
       warm_fresh_7d: result.warm_fresh_7d ?? null,
       warm_fresh_7d_threshold: result.warm_fresh_7d_threshold ?? null,
+      public_eligible_fresh_24h: result.public_eligible_fresh_24h ?? null,
+      public_eligible_threshold: result.public_eligible_threshold ?? null,
       newest_existing_row: newest,
       stuck_days: stuckDays,
       today,

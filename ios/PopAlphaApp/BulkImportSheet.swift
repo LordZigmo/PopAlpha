@@ -853,15 +853,16 @@ struct BulkImportPreviewView: View {
     /// resolves instead of waiting for the whole batch.
     private func resolveAll() async {
         let limit = 6  // concurrent lookups
+        let rowsSnapshot = rows
         await withTaskGroup(of: (Int, BulkImportRow.ResolutionState, SearchCardResult?).self) { group in
             var inFlight = 0
             var nextIndex = 0
 
             func dispatch() {
-                while inFlight < limit && nextIndex < rows.count {
+                while inFlight < limit && nextIndex < rowsSnapshot.count {
                     let i = nextIndex
                     nextIndex += 1
-                    let row = rows[i]
+                    let row = rowsSnapshot[i]
                     inFlight += 1
                     group.addTask {
                         let result = await resolveOne(row)

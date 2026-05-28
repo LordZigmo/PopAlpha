@@ -1,7 +1,9 @@
 // OfflineScannerWarmup.swift
 //
-// App-wide entry point for warming the offline scanner pipeline at
-// launch. Pairs with `OfflineScanOrchestrator.shared`.
+// App-wide entry point for warming scanner cold-start costs at launch.
+// Pairs with `OfflineScanOrchestrator.shared` when the offline path is
+// enabled, and still warms cheap local Vision/OCR state when scans use
+// the server path.
 //
 // Why this exists:
 //   ScannerHost is `@StateObject` inside ScannerTabView. On iOS 17+,
@@ -13,8 +15,9 @@
 //
 // This namespace's `startIfNeeded()` is called from:
 //   - PopAlphaApp.body.task (priority .utility) — fires at app launch,
-//     so the 9s catalog+model+SigLIP load runs while the user is on
-//     the homepage / market / portfolio.
+//     so the local OCR cost and, when enabled, the 9s catalog+model+
+//     SigLIP load run while the user is on the homepage / market /
+//     portfolio.
 //   - ScannerHost.init() — redundant fallback in case the App-level
 //     trigger somehow doesn't fire (test runners, future refactor).
 //     The dispatchOnce guard makes the second call a no-op.
@@ -24,46 +27,39 @@ import OSLog
 import UIKit
 
 enum OfflineScannerWarmup {
-    /// Set on first call; subsequent calls return immediately. The
-    /// underlying `OfflineScanOrchestrator.shared.prewarm()` is also
-    /// idempotent (it coalesces against any in-flight setupTask), but
-    /// we guard here too to avoid spawning multiple parallel Tasks
-    /// that would all do the same work.
-    private static let started = AtomicBool(initialValue: false)
+    /// Local Vision/OCR warmup is useful for every scanner path,
+    /// including the current TestFlight server-routed path. Offline
+    /// orchestrator warmup is tracked separately because the heavy
+    /// SigLIP load is tracked separately because the offline path is
+    /// still gated by its feature flag while scanner access remains
+    /// free.
+    private static let localStarted = AtomicBool(initialValue: false)
+    private static let offlineStarted = AtomicBool(initialValue: false)
 
-    /// Fire-and-forget warmup. Gated on premium because the SigLIP
-    /// model load is expensive (~2-9s of CoreML compilation) and
-    /// free-tier users never use the offline path. .utility priority
-    /// so it competes minimally with active UI work.
+    /// Fire-and-forget warmup. Always warms the cheap local OCR state;
+    /// conditionally warms the offline orchestrator when the feature
+    /// flag is enabled. .utility priority so it competes minimally
+    /// with active UI work.
     static func startIfNeeded() async {
-        guard started.compareAndSwap(expected: false, desired: true) else {
-            // Already started — caller doesn't need to wait, the
-            // shared orchestrator will be ready when whoever needs
-            // it next awaits prewarm() / ensureReady() / identify().
-            return
-        }
+        async let warmLocal: Void = startLocalWarmupIfNeeded()
+        async let warmOffline: Void = startOfflineWarmupIfNeeded()
+        _ = await (warmLocal, warmOffline)
+    }
 
+    private static func startLocalWarmupIfNeeded() async {
+        guard localStarted.compareAndSwap(expected: false, desired: true) else { return }
+        await prewarmOCR()
+    }
+
+    private static func startOfflineWarmupIfNeeded() async {
         let enabled = await MainActor.run { PremiumGate.shared.offlineScannerEnabled }
-        guard enabled else {
-            // Free tier — reset the flag in case the user upgrades
-            // mid-session and we want to warm then. Cheap.
-            started.store(false)
-            return
-        }
+        guard enabled else { return }
+        guard offlineStarted.compareAndSwap(expected: false, desired: true) else { return }
 
-        // Two parallel warmup tasks at the App level:
-        //   1. Orchestrator: catalog + CoreML SigLIP model + dummy
-        //      embed + dummy kNN (forces fp16 expansion)
-        //   2. OCR: Vision's VNRecognizeTextRequest internal state
-        //
-        // Vision rectangle detection prewarm stays in ScannerHost
-        // since it needs the engine from the view model (not
-        // available until the scanner tab activates). That cost is
-        // small (~700-900ms) and runs concurrently with camera
-        // session startup once the user does open the tab.
-        async let warmOrch: Void = OfflineScanOrchestrator.shared.prewarm()
-        async let warmOCR: Void = prewarmOCR()
-        _ = await (warmOrch, warmOCR)
+        // Catalog + CoreML SigLIP model + dummy embed + dummy kNN
+        // (forces fp16 expansion). Kept behind the offline gate because
+        // it is the expensive part of scanner warmup.
+        await OfflineScanOrchestrator.shared.prewarm()
     }
 
     private static func prewarmOCR() async {

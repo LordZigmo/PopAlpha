@@ -15,9 +15,8 @@
 // PRICING TIERS (subject to revision before submission):
 //
 //   Pro Monthly  — auto-renewing subscription, 1 month period
-//                  Unlocks: offline scanner (catalog + on-device
-//                  CoreML inference), sub-second scan latency,
-//                  unlimited scans (free tier capped post-quota).
+//                  Unlocks: market analytics, collector insights,
+//                  price alerts, and other higher-intent tools.
 //
 //   Pro Yearly   — auto-renewing subscription, 1 year period
 //                  Same entitlement as monthly with annual discount.

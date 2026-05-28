@@ -480,7 +480,7 @@ struct ScanPickerSheet: View {
         promoting = true
         PAHaptics.tap()
 
-        // Fire-and-forget correction. Premium offline scans go through
+        // Fire-and-forget correction. Offline scanner corrections go through
         // /api/scan/correction (user-gated, anchor-only) — pre-2026-05-02
         // we hit /api/admin/scan-eval/promote which 401'd for non-admin
         // users AND triggered an aggressive auth teardown that signed

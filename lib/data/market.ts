@@ -16,6 +16,52 @@ import {
 
 export type MarketChangeWindow = "24H" | "7D";
 
+export type MarketBlendPolicy =
+  | "NO_PRICE"
+  | "SCRYDEX_PRIMARY"
+  | "YAHOO_JP_PRIMARY"
+  | "SNKRDUNK_PRIMARY"
+  | "POPALPHA_MARKET_CONFIDENT"
+  | "POPALPHA_MARKET_LOW_CONFIDENCE"
+  | "POPALPHA_MARKET_QUARANTINED"
+  | "NO_RELIABLE_PRICE"
+  | "OUTLIER_SUPPRESSED";
+
+export type MarketPriceDisplayState =
+  | "ALIGNED"
+  | "SIGNAL_HIGHER"
+  | "SIGNAL_LOWER"
+  | "PUBLIC_ONLY"
+  | "UNDER_REVIEW"
+  | "NO_RELIABLE_PRICE";
+
+export type MarketProvenance = {
+  trustedPriceSource?: "SCRYDEX" | null;
+  trustStatus?: string | null;
+  confidenceStatus?: "HIGH" | "LOW" | "QUARANTINED" | "NONE" | string | null;
+  publicInputStatus?: "SUPPORTED" | "QUARANTINED" | "INSUFFICIENT_PUBLIC_INPUT" | string | null;
+  priceConflictStatus?: "CONSISTENT" | "PUBLIC_INPUT_ONLY" | "INTERNAL_GUARDRAIL_DIVERGED" | "NONE" | string | null;
+  internalGuardrailStatus?: "CONSISTENT" | "DIVERGED" | "PRIVATE_ONLY" | "NOT_AVAILABLE" | string | null;
+  movementHistorySource?: "PERMITTED_MARKET_INPUT" | string | null;
+  parityStatus?: RawParityStatus | string | null;
+  sourceMix?: {
+    justtcgWeight?: number;
+    scrydexWeight?: number;
+    publicInputWeight?: number;
+    jpNativeWeight?: number;
+  };
+  sampleCounts7d?: {
+    justtcg?: number | string;
+    scrydex?: number | string;
+    public?: number | string;
+    jpNative?: number | string;
+    total?: number | string;
+  };
+  marketPriceDisplayState?: MarketPriceDisplayState | string | null;
+  recentMarketSignalDirection?: "HIGHER" | "LOWER" | string | null;
+  recentMarketSignalDeltaPct?: number | string | null;
+};
+
 type CanonicalMarketMetricRow = {
   canonical_slug: string;
   justtcg_price: number | null;
@@ -33,19 +79,19 @@ type CanonicalMarketMetricRow = {
   provider_price_changes_count_30d?: number | null;
   market_confidence_score?: number | null;
   market_low_confidence?: boolean | null;
-  market_blend_policy?: "NO_PRICE" | "SCRYDEX_PRIMARY" | "YAHOO_JP_PRIMARY" | "SNKRDUNK_PRIMARY" | null;
-  market_provenance?: {
-    sourceMix?: {
-      justtcgWeight?: number;
-      scrydexWeight?: number;
-    };
-  } | null;
+  market_blend_policy?: MarketBlendPolicy | null;
+  market_provenance?: MarketProvenance | null;
   change_pct_24h: number | null;
   change_pct_7d: number | null;
   display_price_source?: JpPriceCoverageSource | null;
   display_price_usd?: number | null;
   display_price_as_of?: string | null;
   display_price_sample_count?: number | null;
+  market_price_display_state?: MarketPriceDisplayState | string | null;
+  recent_market_signal_usd?: number | null;
+  recent_market_signal_as_of?: string | null;
+  recent_market_signal_delta_pct?: number | null;
+  recent_market_signal_direction?: "HIGHER" | "LOWER" | string | null;
 };
 
 type CanonicalParityRow = {
@@ -79,20 +125,32 @@ export type CanonicalMarketPulse = {
   changePct: number | null;
   changeWindow: MarketChangeWindow | null;
   parityStatus: RawParityStatus;
-  blendPolicy?: "NO_PRICE" | "SCRYDEX_PRIMARY" | "YAHOO_JP_PRIMARY" | "SNKRDUNK_PRIMARY";
+  blendPolicy?: MarketBlendPolicy;
   confidenceScore?: number;
   lowConfidence?: boolean;
   marketStrengthScore?: number | null;
   marketDirection?: MarketDirection | null;
   priceSource?: "market" | "yahoo_jp" | "snkrdunk" | null;
+  trustedPriceSource?: "SCRYDEX" | null;
+  trustStatus?: string | null;
+  confidenceStatus?: string | null;
+  publicInputStatus?: string | null;
+  movementHistorySource?: string | null;
+  marketPriceDisplayState?: MarketPriceDisplayState | null;
+  recentMarketSignalUsd?: number | null;
+  recentMarketSignalAsOf?: string | null;
+  recentMarketSignalDeltaPct?: number | null;
+  recentMarketSignalDirection?: "HIGHER" | "LOWER" | null;
   sourceMix?: {
     justtcgWeight: number;
     scrydexWeight: number;
+    publicInputWeight?: number;
     jpNativeWeight?: number;
   };
   sampleCounts7d?: {
     justtcg: number;
     scrydex: number;
+    public?: number;
     jpNative?: number;
     total: number;
   };
@@ -100,6 +158,55 @@ export type CanonicalMarketPulse = {
 
 function toFiniteNumber(value: number | null | undefined): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function toFiniteCount(value: number | string | null | undefined): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string") return null;
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeRawParityStatus(value: string | null | undefined, fallback: RawParityStatus): RawParityStatus {
+  if (value === "MATCH" || value === "MISMATCH" || value === "MISSING_PROVIDER" || value === "UNKNOWN") return value;
+  return fallback;
+}
+
+function isMarketBlendPolicy(value: string | null | undefined): value is MarketBlendPolicy {
+  return value === "NO_PRICE"
+    || value === "SCRYDEX_PRIMARY"
+    || value === "YAHOO_JP_PRIMARY"
+    || value === "SNKRDUNK_PRIMARY"
+    || value === "POPALPHA_MARKET_CONFIDENT"
+    || value === "POPALPHA_MARKET_LOW_CONFIDENCE"
+    || value === "POPALPHA_MARKET_QUARANTINED"
+    || value === "NO_RELIABLE_PRICE"
+    || value === "OUTLIER_SUPPRESSED";
+}
+
+function isMarketPriceDisplayState(value: string | null | undefined): value is MarketPriceDisplayState {
+  return value === "ALIGNED"
+    || value === "SIGNAL_HIGHER"
+    || value === "SIGNAL_LOWER"
+    || value === "PUBLIC_ONLY"
+    || value === "UNDER_REVIEW"
+    || value === "NO_RELIABLE_PRICE";
+}
+
+function normalizeMarketPriceDisplayState(value: string | null | undefined): MarketPriceDisplayState | null {
+  return isMarketPriceDisplayState(value) ? value : null;
+}
+
+function normalizeSignalDirection(value: string | null | undefined): "HIGHER" | "LOWER" | null {
+  if (value === "HIGHER" || value === "LOWER") return value;
+  return null;
+}
+
+function toFiniteOptionalNumber(value: number | string | null | undefined): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string") return null;
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function compareIsoDesc(left: string | null | undefined, right: string | null | undefined): number {
@@ -178,6 +285,11 @@ function metricRowFromJpCoverage(
     display_price_usd: coverage.displayPriceUsd,
     display_price_as_of: coverage.displayPriceAsOf,
     display_price_sample_count: coverage.displayPriceSampleCount,
+    market_price_display_state: baseRow?.market_price_display_state ?? null,
+    recent_market_signal_usd: baseRow?.recent_market_signal_usd ?? null,
+    recent_market_signal_as_of: baseRow?.recent_market_signal_as_of ?? null,
+    recent_market_signal_delta_pct: baseRow?.recent_market_signal_delta_pct ?? null,
+    recent_market_signal_direction: baseRow?.recent_market_signal_direction ?? null,
   };
 }
 
@@ -186,17 +298,50 @@ export function resolveCanonicalMarketPulse(
   parityStatus: RawParityStatus = "UNKNOWN",
   variantSignals: CanonicalVariantSignalRow | null = null,
 ): CanonicalMarketPulse {
+  const provenance = row?.market_provenance ?? null;
   const displaySource = row?.display_price_source ?? null;
   const jpNativeSource = isJpNativeCoverageSource(displaySource);
   const displayPrice = toFiniteNumber(row?.display_price_usd);
   const rawMarketPrice = toFiniteNumber(row?.market_price);
   const marketPrice = displayPrice ?? rawMarketPrice;
-  const scrydexPrice = jpNativeSource ? rawMarketPrice : marketPrice;
-  const scrydexOnlySampleCounts = (row?.market_provenance as {
-    sampleCounts7d?: { scrydex?: number };
-  } | null)?.sampleCounts7d;
+  const trustedPriceSource = provenance?.trustedPriceSource ?? null;
+  const trustStatus = provenance?.trustStatus ?? null;
+  const confidenceStatus = provenance?.confidenceStatus ?? null;
+  const publicInputStatus = provenance?.publicInputStatus ?? null;
+  const movementHistorySource = provenance?.movementHistorySource ?? null;
+  const rowDisplayState = normalizeMarketPriceDisplayState(row?.market_price_display_state ?? null);
+  const provenanceDisplayState = normalizeMarketPriceDisplayState(provenance?.marketPriceDisplayState ?? null);
+  const marketPriceDisplayState = marketPrice !== null
+    ? (rowDisplayState ?? provenanceDisplayState ?? "ALIGNED")
+    : "NO_RELIABLE_PRICE";
+  const recentMarketSignalUsd = marketPrice !== null ? toFiniteNumber(row?.recent_market_signal_usd) : null;
+  const recentMarketSignalAsOf = recentMarketSignalUsd !== null ? (row?.recent_market_signal_as_of ?? null) : null;
+  const recentMarketSignalDeltaPct = recentMarketSignalUsd !== null
+    ? (toFiniteNumber(row?.recent_market_signal_delta_pct) ?? toFiniteOptionalNumber(provenance?.recentMarketSignalDeltaPct))
+    : null;
+  const recentMarketSignalDirection = recentMarketSignalUsd !== null
+    ? normalizeSignalDirection(row?.recent_market_signal_direction ?? provenance?.recentMarketSignalDirection ?? null)
+    : null;
+  const provenanceParityStatus = normalizeRawParityStatus(provenance?.parityStatus ?? null, parityStatus);
+  const inferredPriceParityStatus: RawParityStatus | null =
+    provenance?.priceConflictStatus === "CONSISTENT"
+    && publicInputStatus === "SUPPORTED"
+    && confidenceStatus === "HIGH"
+      ? "MATCH"
+      : null;
+  const effectiveParityStatus = provenance?.parityStatus
+    ? (provenanceParityStatus === "MISSING_PROVIDER" && inferredPriceParityStatus
+        ? inferredPriceParityStatus
+        : provenanceParityStatus)
+    : inferredPriceParityStatus ?? parityStatus;
+  const scrydexPrice = jpNativeSource ? rawMarketPrice : (toFiniteNumber(row?.scrydex_price) ?? rawMarketPrice);
+  const sampleCounts7d = provenance?.sampleCounts7d;
   const scrydexPoints7d = rawMarketPrice !== null
-    ? Math.max(0, toFiniteNumber(scrydexOnlySampleCounts?.scrydex) ?? 0)
+    ? Math.max(0, toFiniteCount(sampleCounts7d?.scrydex) ?? 0)
+    : 0;
+  const explicitPublicPoints7d = toFiniteCount(sampleCounts7d?.public);
+  const publicPoints7d = rawMarketPrice !== null
+    ? Math.max(0, explicitPublicPoints7d ?? toFiniteCount(sampleCounts7d?.scrydex) ?? 0)
     : 0;
   const jpNativeSampleCount = jpNativeSource
     ? Math.max(0, Math.floor(toFiniteNumber(row?.display_price_sample_count) ?? 0))
@@ -233,11 +378,14 @@ export function resolveCanonicalMarketPulse(
   });
   const blendPolicy = marketPrice === null
     ? "NO_PRICE"
-    : displaySource === "yahoo_jp"
+    : isMarketBlendPolicy(row?.market_blend_policy)
+      ? row.market_blend_policy
+      : displaySource === "yahoo_jp"
       ? "YAHOO_JP_PRIMARY"
       : displaySource === "snkrdunk"
         ? "SNKRDUNK_PRIMARY"
         : "SCRYDEX_PRIMARY";
+  const provenanceSourceMix = provenance?.sourceMix;
 
   const basePayload = {
     justtcgPrice: null,
@@ -250,23 +398,39 @@ export function resolveCanonicalMarketPulse(
     snapshotCount30d,
     changePct24h: change24h,
     changePct7d: change7d,
-    parityStatus,
+    parityStatus: effectiveParityStatus,
     blendPolicy,
     confidenceScore,
     lowConfidence,
     marketStrengthScore: marketStrength.marketStrengthScore,
     marketDirection: marketStrength.marketDirection,
     priceSource: displaySource ?? (marketPrice !== null ? "market" : null),
+    trustedPriceSource,
+    trustStatus,
+    confidenceStatus,
+    publicInputStatus,
+    movementHistorySource,
+    marketPriceDisplayState,
+    recentMarketSignalUsd,
+    recentMarketSignalAsOf,
+    recentMarketSignalDeltaPct,
+    recentMarketSignalDirection,
     sourceMix: {
       justtcgWeight: 0,
-      scrydexWeight: marketPrice !== null && !jpNativeSource ? 1 : 0,
+      scrydexWeight: marketPrice !== null && !jpNativeSource
+        ? (provenanceSourceMix?.publicInputWeight ?? 1)
+        : 0,
+      ...(provenanceSourceMix?.publicInputWeight !== undefined
+        ? { publicInputWeight: provenanceSourceMix.publicInputWeight }
+        : {}),
       ...(jpNativeSource ? { jpNativeWeight: 1 } : {}),
     },
     sampleCounts7d: {
       justtcg: 0,
       scrydex: scrydexPoints7d,
+      ...(explicitPublicPoints7d !== null && publicPoints7d > 0 ? { public: publicPoints7d } : {}),
       ...(jpNativeSource ? { jpNative: jpNativeSampleCount } : {}),
-      total: jpNativeSource ? jpNativeSampleCount : scrydexPoints7d,
+      total: jpNativeSource ? jpNativeSampleCount : Math.max(scrydexPoints7d, publicPoints7d),
     },
   } satisfies Omit<CanonicalMarketPulse, "changePct" | "changeWindow">;
 
@@ -309,7 +473,7 @@ export async function getCanonicalMarketPulseMap(
   ] = await Promise.all([
     supabase
       .from("public_card_metrics")
-      .select("canonical_slug, justtcg_price, scrydex_price, pokemontcg_price, market_price, market_price_as_of, liquidity_score, active_listings_7d, snapshot_count_30d, median_7d, provider_trend_slope_7d, provider_cov_price_30d, provider_price_relative_to_30d_range, provider_price_changes_count_30d, market_confidence_score, market_low_confidence, market_blend_policy, market_provenance, change_pct_24h, change_pct_7d")
+      .select("canonical_slug, justtcg_price, scrydex_price, pokemontcg_price, market_price, market_price_as_of, liquidity_score, active_listings_7d, snapshot_count_30d, median_7d, provider_trend_slope_7d, provider_cov_price_30d, provider_price_relative_to_30d_range, provider_price_changes_count_30d, market_confidence_score, market_low_confidence, market_blend_policy, market_provenance, change_pct_24h, change_pct_7d, market_price_display_state, recent_market_signal_usd, recent_market_signal_as_of, recent_market_signal_delta_pct, recent_market_signal_direction")
       .in("canonical_slug", slugs)
       .is("printing_id", null)
       .eq("grade", "RAW")

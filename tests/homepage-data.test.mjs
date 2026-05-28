@@ -24,13 +24,22 @@ function buildPulse(overrides = {}) {
     changePct7d: null,
     changePct: null,
     changeWindow: null,
-    parityStatus: "UNKNOWN",
+    parityStatus: "MATCH",
+    blendPolicy: "POPALPHA_MARKET_CONFIDENT",
+    marketPriceDisplayState: "ALIGNED",
+    recentMarketSignalUsd: null,
+    recentMarketSignalAsOf: null,
+    recentMarketSignalDeltaPct: null,
+    recentMarketSignalDirection: null,
+    confidenceStatus: "HIGH",
+    publicInputStatus: "SUPPORTED",
+    movementHistorySource: "PERMITTED_MARKET_INPUT",
     confidenceScore: 90,
     lowConfidence: false,
     marketStrengthScore: null,
     marketDirection: null,
-    sourceMix: { justtcgWeight: 1, scrydexWeight: 0 },
-    sampleCounts7d: { justtcg: 0, scrydex: 0, total: 0 },
+    sourceMix: { justtcgWeight: 0, scrydexWeight: 1, publicInputWeight: 1 },
+    sampleCounts7d: { justtcg: 0, scrydex: 2, public: 2, total: 2 },
     ...overrides,
   };
 }
@@ -43,6 +52,11 @@ function buildHomepageCard(overrides = {}) {
     year: 2026,
     card_number: null,
     market_price: null,
+    market_price_display_state: null,
+    recent_market_signal_usd: null,
+    recent_market_signal_as_of: null,
+    recent_market_signal_delta_pct: null,
+    recent_market_signal_direction: null,
     change_pct: null,
     change_window: null,
     confidence_score: null,
@@ -85,25 +99,100 @@ function buildDailyMoverBundle(overrides = {}) {
 export async function runHomepageDataTests() {
   const freshIso = "2026-03-10T11:30:00.000Z";
   const earlierIso = "2026-03-10T10:15:00.000Z";
+  const supportedMarketProvenance = {
+    parityStatus: "MATCH",
+    confidenceStatus: "HIGH",
+    publicInputStatus: "SUPPORTED",
+    movementHistorySource: "PERMITTED_MARKET_INPUT",
+    sampleCounts7d: { public: 2 },
+  };
 
   assert.equal(
-    hasProviderParityForHomepage({ market_provenance: { parityStatus: "MATCH" } }),
+    hasProviderParityForHomepage({
+      market_provenance: {
+        parityStatus: "MATCH",
+        confidenceStatus: "HIGH",
+        publicInputStatus: "SUPPORTED",
+        movementHistorySource: "PERMITTED_MARKET_INPUT",
+        sampleCounts7d: { public: 2 },
+      },
+      change_pct_24h: 4.2,
+      change_pct_7d: null,
+    }),
     true,
   );
   assert.equal(
-    hasProviderParityForHomepage({ market_provenance: { parityStatus: "MISMATCH" } }),
+    hasProviderParityForHomepage({
+      market_provenance: {
+        parityStatus: "MATCH",
+        confidenceStatus: "LOW",
+        publicInputStatus: "SUPPORTED",
+        movementHistorySource: null,
+        sampleCounts7d: { public: 2 },
+      },
+      change_pct_24h: 4.2,
+      change_pct_7d: null,
+    }),
     false,
   );
   assert.equal(
-    hasProviderParityForHomepage({ market_provenance: { parityStatus: "MISSING_PROVIDER" } }),
+    hasProviderParityForHomepage({
+      market_provenance: {
+        parityStatus: "MISMATCH",
+        confidenceStatus: "HIGH",
+        publicInputStatus: "SUPPORTED",
+        movementHistorySource: "PERMITTED_MARKET_INPUT",
+        sampleCounts7d: { public: 2 },
+      },
+      change_pct_24h: 4.2,
+      change_pct_7d: null,
+    }),
     false,
   );
   assert.equal(
-    hasProviderParityForHomepage({ market_provenance: { parityStatus: "UNKNOWN" } }),
+    hasProviderParityForHomepage({
+      market_provenance: {
+        parityStatus: "MISSING_PROVIDER",
+        confidenceStatus: "HIGH",
+        publicInputStatus: "SUPPORTED",
+        movementHistorySource: "PERMITTED_MARKET_INPUT",
+        sampleCounts7d: { public: 2 },
+      },
+      change_pct_24h: 4.2,
+      change_pct_7d: null,
+    }),
     false,
   );
   assert.equal(
-    hasProviderParityForHomepage({ market_provenance: null }),
+    hasProviderParityForHomepage({
+      market_provenance: {
+        parityStatus: "UNKNOWN",
+        confidenceStatus: "HIGH",
+        publicInputStatus: "SUPPORTED",
+        movementHistorySource: "PERMITTED_MARKET_INPUT",
+        sampleCounts7d: { public: 2 },
+      },
+      change_pct_24h: 4.2,
+      change_pct_7d: null,
+    }),
+    false,
+  );
+  assert.equal(
+    hasProviderParityForHomepage({
+      market_provenance: {
+        parityStatus: "MATCH",
+        confidenceStatus: "HIGH",
+        publicInputStatus: "SUPPORTED",
+        movementHistorySource: "PERMITTED_MARKET_INPUT",
+        sampleCounts7d: { public: 1 },
+      },
+      change_pct_24h: 4.2,
+      change_pct_7d: null,
+    }),
+    false,
+  );
+  assert.equal(
+    hasProviderParityForHomepage({ market_provenance: null, change_pct_24h: null, change_pct_7d: null }),
     false,
   );
   assert.equal(hasJpNativeHomepagePriceSource("yahoo_jp"), true);
@@ -126,6 +215,7 @@ export async function runHomepageDataTests() {
           market_confidence_score: 94,
           market_low_confidence: false,
           active_listings_7d: 7,
+          market_provenance: supportedMarketProvenance,
         },
         {
           canonical_slug: "beta-under-dollar",
@@ -137,6 +227,7 @@ export async function runHomepageDataTests() {
           market_confidence_score: 93,
           market_low_confidence: false,
           active_listings_7d: 4,
+          market_provenance: supportedMarketProvenance,
         },
         {
           canonical_slug: "gamma-thin-data",
@@ -148,6 +239,7 @@ export async function runHomepageDataTests() {
           market_confidence_score: 91,
           market_low_confidence: false,
           active_listings_7d: 4,
+          market_provenance: supportedMarketProvenance,
         },
         {
           canonical_slug: "delta-emerging",
@@ -159,6 +251,7 @@ export async function runHomepageDataTests() {
           market_confidence_score: 92,
           market_low_confidence: false,
           active_listings_7d: 4,
+          market_provenance: supportedMarketProvenance,
         },
       ],
       negativeChangeRows: [
@@ -172,6 +265,7 @@ export async function runHomepageDataTests() {
           market_confidence_score: 90,
           market_low_confidence: false,
           active_listings_7d: 8,
+          market_provenance: supportedMarketProvenance,
         },
         {
           canonical_slug: "epsilon-thin-drop",
@@ -183,6 +277,7 @@ export async function runHomepageDataTests() {
           market_confidence_score: 92,
           market_low_confidence: false,
           active_listings_7d: 8,
+          market_provenance: supportedMarketProvenance,
         },
       ],
       trendingVariants: [
@@ -217,7 +312,7 @@ export async function runHomepageDataTests() {
             lowConfidence: false,
             marketStrengthScore: 81,
             marketDirection: "bullish",
-            sampleCounts7d: { justtcg: 4, scrydex: 0, total: 4 },
+            sampleCounts7d: { justtcg: 4, scrydex: 2, public: 2, total: 4 },
           }),
         ],
         [
@@ -233,7 +328,7 @@ export async function runHomepageDataTests() {
             changeWindow: "7D",
             confidenceScore: 93,
             lowConfidence: false,
-            sampleCounts7d: { justtcg: 3, scrydex: 0, total: 3 },
+            sampleCounts7d: { justtcg: 3, scrydex: 2, public: 2, total: 3 },
           }),
         ],
         [
@@ -249,7 +344,7 @@ export async function runHomepageDataTests() {
             changeWindow: "7D",
             confidenceScore: 91,
             lowConfidence: false,
-            sampleCounts7d: { justtcg: 5, scrydex: 0, total: 5 },
+            sampleCounts7d: { justtcg: 5, scrydex: 1, public: 1, total: 5 },
           }),
         ],
         [
@@ -267,7 +362,7 @@ export async function runHomepageDataTests() {
             lowConfidence: false,
             marketStrengthScore: 68,
             marketDirection: "bullish",
-            sampleCounts7d: { justtcg: 6, scrydex: 0, total: 6 },
+            sampleCounts7d: { justtcg: 6, scrydex: 2, public: 2, total: 6 },
           }),
         ],
         [
@@ -285,7 +380,7 @@ export async function runHomepageDataTests() {
             lowConfidence: false,
             marketStrengthScore: 64,
             marketDirection: "bearish",
-            sampleCounts7d: { justtcg: 6, scrydex: 0, total: 6 },
+            sampleCounts7d: { justtcg: 6, scrydex: 2, public: 2, total: 6 },
           }),
         ],
         [
@@ -301,7 +396,7 @@ export async function runHomepageDataTests() {
             changeWindow: "7D",
             confidenceScore: 92,
             lowConfidence: false,
-            sampleCounts7d: { justtcg: 7, scrydex: 0, total: 7 },
+            sampleCounts7d: { justtcg: 7, scrydex: 1, public: 1, total: 7 },
           }),
         ],
         [
@@ -318,7 +413,7 @@ export async function runHomepageDataTests() {
             parityStatus: "MATCH",
             confidenceScore: 91,
             lowConfidence: false,
-            sampleCounts7d: { justtcg: 9, scrydex: 2, total: 11 },
+            sampleCounts7d: { justtcg: 9, scrydex: 2, public: 2, total: 11 },
           }),
         ],
       ]),
@@ -388,7 +483,7 @@ export async function runHomepageDataTests() {
 
   assert.deepEqual(
     data.trending.map((card) => ({ slug: card.slug, change_pct: card.change_pct, change_window: card.change_window })),
-    [{ slug: "trend-card", change_pct: 6.5, change_window: "7D" }],
+    [{ slug: "trend-card", change_pct: 31.7, change_window: "7D" }],
   );
 
   assert.equal(data.as_of, freshIso);
@@ -496,6 +591,13 @@ export async function runHomepageDataTests() {
           market_confidence_score: 71,
           market_low_confidence: false,
           active_listings_7d: 9,
+          market_provenance: {
+            parityStatus: "MATCH",
+            confidenceStatus: "HIGH",
+            publicInputStatus: "SUPPORTED",
+            movementHistorySource: "PERMITTED_MARKET_INPUT",
+            sampleCounts7d: { public: 2 },
+          },
         },
       ],
       negativeChangeRows: [
@@ -509,6 +611,13 @@ export async function runHomepageDataTests() {
           market_confidence_score: 69,
           market_low_confidence: false,
           active_listings_7d: 8,
+          market_provenance: {
+            parityStatus: "MATCH",
+            confidenceStatus: "HIGH",
+            publicInputStatus: "SUPPORTED",
+            movementHistorySource: "PERMITTED_MARKET_INPUT",
+            sampleCounts7d: { public: 2 },
+          },
         },
       ],
       trendingVariants: [],
@@ -1007,7 +1116,7 @@ export async function runHomepageDataTests() {
       slug: "daily-stale-snapshot",
       market_price: 42.5,
       updated_at: freshIso,
-      change_pct: 18.7,
+      change_pct: 4.2,
       change_window: "24H",
       active_listings_7d: 9,
       confidence_score: 88,
@@ -1061,4 +1170,165 @@ export async function runHomepageDataTests() {
 
   assert.deepEqual(uncorroboratedDailyData.signal_board.top_movers["24H"], []);
   assert.deepEqual(uncorroboratedDailyData.signal_board.top_movers["7D"], []);
+
+  const marketWatchData = await getHomepageData({
+    now: () => FIXED_NOW,
+    logger: NOOP_LOGGER,
+    dataOverrides: {
+      positiveChangeRows: [],
+      negativeChangeRows: [],
+      marketWatchRows: [
+        {
+          canonical_slug: "watch-premium",
+          market_price: 1420,
+          market_price_as_of: freshIso,
+          market_price_display_state: "SIGNAL_HIGHER",
+          recent_market_signal_usd: 1750,
+          recent_market_signal_as_of: freshIso,
+          recent_market_signal_delta_pct: 23.24,
+          recent_market_signal_direction: "HIGHER",
+          snapshot_count_30d: 40,
+          change_pct_24h: 18.5,
+          change_pct_7d: 24.1,
+          market_confidence_score: 90,
+          market_low_confidence: false,
+          market_blend_policy: "POPALPHA_MARKET_CONFIDENT",
+          active_listings_7d: 12,
+          market_provenance: supportedMarketProvenance,
+        },
+        {
+          canonical_slug: "watch-mid",
+          market_price: 46,
+          market_price_as_of: freshIso,
+          market_price_display_state: "ALIGNED",
+          recent_market_signal_usd: null,
+          recent_market_signal_as_of: null,
+          recent_market_signal_delta_pct: null,
+          recent_market_signal_direction: null,
+          snapshot_count_30d: 32,
+          change_pct_24h: null,
+          change_pct_7d: null,
+          market_confidence_score: 88,
+          market_low_confidence: false,
+          market_blend_policy: "POPALPHA_MARKET_CONFIDENT",
+          active_listings_7d: 10,
+          market_provenance: supportedMarketProvenance,
+        },
+        {
+          canonical_slug: "watch-budget",
+          market_price: 6.25,
+          market_price_as_of: freshIso,
+          market_price_display_state: "ALIGNED",
+          recent_market_signal_usd: null,
+          recent_market_signal_as_of: null,
+          recent_market_signal_delta_pct: null,
+          recent_market_signal_direction: null,
+          snapshot_count_30d: 28,
+          change_pct_24h: null,
+          change_pct_7d: null,
+          market_confidence_score: 87,
+          market_low_confidence: false,
+          market_blend_policy: "POPALPHA_MARKET_CONFIDENT",
+          active_listings_7d: 8,
+          market_provenance: supportedMarketProvenance,
+        },
+        {
+          canonical_slug: "watch-low-dollar",
+          market_price: 0.04,
+          market_price_as_of: freshIso,
+          market_price_display_state: "ALIGNED",
+          recent_market_signal_usd: null,
+          recent_market_signal_as_of: null,
+          recent_market_signal_delta_pct: null,
+          recent_market_signal_direction: null,
+          snapshot_count_30d: 24,
+          change_pct_24h: null,
+          change_pct_7d: null,
+          market_confidence_score: 86,
+          market_low_confidence: false,
+          market_blend_policy: "POPALPHA_MARKET_CONFIDENT",
+          active_listings_7d: 6,
+          market_provenance: supportedMarketProvenance,
+        },
+        {
+          canonical_slug: "watch-quarantined",
+          market_price: null,
+          market_price_as_of: null,
+          market_price_display_state: "UNDER_REVIEW",
+          recent_market_signal_usd: null,
+          recent_market_signal_as_of: null,
+          recent_market_signal_delta_pct: null,
+          recent_market_signal_direction: null,
+          snapshot_count_30d: 24,
+          change_pct_24h: null,
+          change_pct_7d: null,
+          market_confidence_score: 0,
+          market_low_confidence: true,
+          market_blend_policy: "POPALPHA_MARKET_QUARANTINED",
+          active_listings_7d: 0,
+          market_provenance: { ...supportedMarketProvenance, confidenceStatus: "QUARANTINED" },
+        },
+      ],
+      trendingVariants: [],
+      cards: [
+        { slug: "watch-premium", canonical_name: "Watch Premium", set_name: "Premium Set", year: 2026 },
+        { slug: "watch-mid", canonical_name: "Watch Mid", set_name: "Mid Set", year: 2026 },
+        { slug: "watch-budget", canonical_name: "Watch Budget", set_name: "Budget Set", year: 2026 },
+        { slug: "watch-low-dollar", canonical_name: "Watch Low Dollar", set_name: "Low Set", year: 2026 },
+        { slug: "watch-quarantined", canonical_name: "Watch Quarantined", set_name: "Premium Set", year: 2026 },
+      ],
+      marketPulseMap: new Map([
+        [
+          "watch-premium",
+          buildPulse({
+            marketPrice: 1420,
+            marketPriceAsOf: freshIso,
+            activeListings7d: 12,
+            snapshotCount30d: 40,
+            changePct24h: 18.5,
+            changePct7d: 24.1,
+            changePct: 18.5,
+            changeWindow: "24H",
+            confidenceScore: 90,
+            marketPriceDisplayState: "SIGNAL_HIGHER",
+            recentMarketSignalUsd: 1750,
+            recentMarketSignalAsOf: freshIso,
+            recentMarketSignalDeltaPct: 23.24,
+            recentMarketSignalDirection: "HIGHER",
+          }),
+        ],
+        ["watch-mid", buildPulse({ marketPrice: 46, marketPriceAsOf: freshIso, activeListings7d: 10, snapshotCount30d: 32, confidenceScore: 88 })],
+        ["watch-budget", buildPulse({ marketPrice: 6.25, marketPriceAsOf: freshIso, activeListings7d: 8, snapshotCount30d: 28, confidenceScore: 87 })],
+        ["watch-low-dollar", buildPulse({ marketPrice: 0.04, marketPriceAsOf: freshIso, activeListings7d: 6, snapshotCount30d: 24, confidenceScore: 86 })],
+        [
+          "watch-quarantined",
+          buildPulse({
+            marketPrice: null,
+            marketPriceAsOf: null,
+            blendPolicy: "POPALPHA_MARKET_QUARANTINED",
+            marketPriceDisplayState: "UNDER_REVIEW",
+            confidenceScore: 0,
+            lowConfidence: true,
+          }),
+        ],
+      ]),
+    },
+  });
+
+  assert.deepEqual(
+    marketWatchData.signal_board.market_watch.map((card) => ({
+      slug: card.slug,
+      market_price: card.market_price,
+      change_pct: card.change_pct,
+      recent_market_signal_usd: card.recent_market_signal_usd,
+      recent_market_signal_direction: card.recent_market_signal_direction,
+    })),
+    [
+      { slug: "watch-premium", market_price: 1420, change_pct: null, recent_market_signal_usd: 1750, recent_market_signal_direction: "HIGHER" },
+      { slug: "watch-mid", market_price: 46, change_pct: null, recent_market_signal_usd: null, recent_market_signal_direction: null },
+      { slug: "watch-budget", market_price: 6.25, change_pct: null, recent_market_signal_usd: null, recent_market_signal_direction: null },
+      { slug: "watch-low-dollar", market_price: 0.04, change_pct: null, recent_market_signal_usd: null, recent_market_signal_direction: null },
+    ],
+  );
+  assert.deepEqual(marketWatchData.signal_board.top_movers["24H"], []);
 }

@@ -132,7 +132,7 @@ export async function GET(req: Request) {
         t.device_token,
         {
           title: "Your free trial ends tomorrow",
-          body: "Subscribe to keep your collector profile, market signals, and unlimited scans.",
+          body: "Subscribe to keep your collector profile, market signals, and price alerts.",
         },
         {
           environment: t.environment as ApnsEnvironment,

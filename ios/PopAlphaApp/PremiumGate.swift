@@ -10,10 +10,10 @@
 //      Any code that just needs "is the user pro" should NOT have
 //      to import StoreKit. Gate exposes a plain `Bool`.
 //
-//   2. Feature toggles. `offlineScannerEnabled` is gated by
-//      "is pro AND offline scanner feature flag enabled" — keeping
-//      the conjunction in one place lets us flip features on/off
-//      without touching call sites.
+//   2. Feature toggles. `offlineScannerEnabled` mirrors the offline
+//      scanner feature flag in one place so scanner routing can flip
+//      without touching call sites. Scanner access is intentionally
+//      free; Pro gates market/collector intelligence, not identify.
 //
 //   3. DEBUG override. During development we want to flip pro on
 //      without making real purchases. This layer reads a
@@ -55,13 +55,17 @@ public final class PremiumGate: ObservableObject {
     /// directly to the gate without importing StoreKit.
     @Published public private(set) var isPro: Bool = false
 
-    /// Convenience: is the offline scanner unlocked? Keep the
-    /// conjunction here so feature flips don't sprawl across the
-    /// codebase. During the scanner-accuracy sprint this stays false
-    /// so scans route through the centrally trained server/model path.
+    /// Convenience: is the offline scanner enabled? Scanner access is
+    /// free, so this flag is not tied to Pro. During the scanner-
+    /// accuracy sprint this stays false so scans route through the
+    /// centrally trained server/model path.
     @Published public private(set) var offlineScannerEnabled: Bool = false
 
-    public init(store: PremiumStore = .shared) {
+    public convenience init() {
+        self.init(store: PremiumStore.shared)
+    }
+
+    public init(store: PremiumStore) {
         self.store = store
 
         // Bind the store's published status to our flags.
@@ -112,7 +116,7 @@ public final class PremiumGate: ObservableObject {
         let effectivePro = realPro
         #endif
         if isPro != effectivePro { isPro = effectivePro }
-        let offlineFlag = effectivePro && FeatureFlags.isOfflineScannerEnabled
+        let offlineFlag = FeatureFlags.isOfflineScannerEnabled
         if offlineScannerEnabled != offlineFlag {
             offlineScannerEnabled = offlineFlag
         }

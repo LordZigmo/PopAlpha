@@ -29,7 +29,6 @@ struct ScannerTabView: View {
     @State private var showPaywallSheet = false
     @State private var showMultiScanSheet = false
     @StateObject private var premiumGate = PremiumGate.shared
-    @StateObject private var scanQuota = ScanQuota.shared
     @StateObject private var multiScanSession = MultiScanSession()
 
     // MARK: - Multi-scan flash overlay state
@@ -60,23 +59,11 @@ struct ScannerTabView: View {
     @State private var flashFlying: Bool = false
     @State private var flashTask: Task<Void, Never>?
 
-    /// Tracks which scanner surface most recently flipped
-    /// `showPaywallSheet`, so the paywall analytics carry the right
-    /// `surface` property. Three triggers feed a single sheet — crown
-    /// tap, scan quota wall (camera tap when at the limit), and the
-    /// quota-approaching warning toast — and we want PostHog funnels
-    /// to break them down separately.
+    /// Tracks which scanner surface most recently opened the Pro
+    /// upsell so paywall analytics carry the right `surface`
+    /// property. The scanner itself is free; this crown entry is an
+    /// optional upgrade path for market and collector intelligence.
     @State private var paywallSurface: String = "scanner_crown"
-
-    // One-shot quota-approaching warning state. Fires once per day
-    // when the user completes their 4th scan (remaining == 1), as a
-    // soft-friction precursor to the hard wall on scan #5. Cross-
-    // launch dedupe lives in ScanQuota (UserDefaults-backed via
-    // markWarned / lastWarnedScansToday) so the toast doesn't re-
-    // fire every cold launch when the user is sitting at remaining
-    // == 1. Local @State here is just the in-flight visibility flag
-    // for the slide-in/auto-dismiss animation.
-    @State private var quotaWarningVisible = false
     #if DEBUG
     @State private var smokeReport: OfflineScannerSmokeReport?
     @State private var smokeRunning = false
@@ -126,18 +113,9 @@ struct ScannerTabView: View {
                         PAHaptics.tap()
                         // Drop the tap if a scan is already in flight —
                         // ScannerHost has its own re-entry guard, but
-                        // bypassing the quota counter here keeps mashed
-                        // taps from over-spending the daily allowance.
+                        // returning here avoids scheduling redundant
+                        // capture work while the first identify runs.
                         guard !scanner.isIdentifying else { return }
-                        if !premiumGate.isPro {
-                            scanQuota.rolloverIfNewDay()
-                            if !scanQuota.canScan {
-                                paywallSurface = "scanner_quota_wall"
-                                showPaywallSheet = true
-                                return
-                            }
-                            scanQuota.recordScan()
-                        }
                         Task { await scanner.captureFrameAndIdentify() }
                     }
                     .allowsHitTesting(scanner.initError == nil)
@@ -166,41 +144,16 @@ struct ScannerTabView: View {
                     .animation(.easeInOut(duration: 0.2), value: scanner.identifyError)
                 }
 
-                // Quota-approaching warning toast. Only shows when
-                // scansToday == dailyLimit - 1 (1 left), the user
-                // isn't pro, no identify is in flight, and the
-                // paywall isn't already open. Sits in the same
-                // bottom-center slot as the identify toast — they're
-                // mutually exclusive (the identify toast is up
-                // during scans; this one fires after a scan settles
-                // back to idle).
-                if quotaWarningVisible {
-                    VStack {
-                        Spacer()
-                        ScanQuotaWarningToast(
-                            remaining: scanQuota.remaining,
-                            onTap: handleQuotaWarningTap,
-                        )
-                        .padding(.horizontal, 24)
-                        .padding(.bottom, 140)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
-                    .animation(.easeInOut(duration: 0.25), value: quotaWarningVisible)
-                }
-
                 // Top-right corner buttons. Crown is always visible
-                // (taps open the paywall, long-press toggles the DEBUG
-                // override). The smoke-test button is DEBUG-only and
-                // compile-stripped from release builds.
+                // as an optional Pro upgrade entry, not a scanner
+                // gate. Long-press toggles the DEBUG override. The
+                // smoke-test button is DEBUG-only and compile-
+                // stripped from release builds.
                 VStack {
                     HStack {
                         Spacer()
                         VStack(spacing: 6) {
                             crownButton
-                            if !premiumGate.isPro {
-                                scanQuotaIndicator
-                            }
                             languagePill
                             #if DEBUG
                             offlineSmokeButton
@@ -340,12 +293,10 @@ struct ScannerTabView: View {
             }
             #endif
             .sheet(isPresented: $showPaywallSheet) {
-                // All three routes that flip showPaywallSheet from this
-                // view (crown tap, scan-quota exhaustion, quota-warning
-                // banner tap) are scanner-contextual frictions, so the
-                // paywall hero copy leads with scanner value. The
-                // specific entry point is captured separately in
-                // `paywallSurface` for PostHog analytics.
+                // Scanner access is free. The crown opens Pro as an
+                // optional upsell for market intelligence, collector
+                // insights, and alerts; it never gates identifying
+                // cards.
                 PaywallView(context: .scanner, surface: paywallSurface)
             }
             .sheet(isPresented: $showMultiScanSheet) {
@@ -370,17 +321,6 @@ struct ScannerTabView: View {
             .onChange(of: scanner.lastMatch) { _, newValue in
                 handleIdentifyResult(newValue)
             }
-            // Quota-warning trigger: evaluate when a scan settles back
-            // to idle (isIdentifying true → false), at which point
-            // remaining reflects the just-completed scan and the
-            // toast can show without overlapping the identify toast.
-            // Day-rollover dedupe is handled inside ScanQuota — its
-            // markWarned/lastWarnedScansToday APIs are persisted in
-            // UserDefaults and reset by rolloverIfNewDay, so we don't
-            // need a manual reset here.
-            .onChange(of: scanner.isIdentifying) { _, identifying in
-                if !identifying { evaluateQuotaWarning() }
-            }
             // Pause Vision detection while the review sheet is open.
             // Otherwise the camera keeps detecting cards behind the
             // modal and the multi-mode branch in handleIdentifyResult
@@ -397,14 +337,9 @@ struct ScannerTabView: View {
                 }
             }
             // Pause Vision detection for the paywall's lifetime when
-            // we're in multi-mode. Without this, a quota-wall paywall
-            // triggered by an auto-detect could be re-triggered by
-            // the next auto-detect while the modal is open — burning
-            // server calls and stacking up identify firings the user
-            // can't see. Single-mode paywalls (crown tap, tap-quota
-            // wall) don't need this because auto-detect doesn't add
-            // tray entries there and tap is gated up front. (Codex
-            // P2 review on PR #83.)
+            // we're in multi-mode. The crown is optional, but if the
+            // user opens Pro from the scanner we should not keep
+            // appending hidden tray entries behind the modal.
             .onChange(of: showPaywallSheet) { _, isPresented in
                 guard scanner.multiScanMode else { return }
                 if isPresented {
@@ -426,56 +361,11 @@ struct ScannerTabView: View {
                 triggerMultiScanFlash(for: id)
             }
             .onAppear {
-                // Wire the auto-detect quota-blocked callback so
-                // ScannerHost's installNetworkIdentifier can surface
-                // the paywall sheet without direct access to our
-                // @State. Idempotent — re-assignment on tab-switch
-                // / view-reappear is fine. (Codex P2 review on PR
-                // #83: pre-identify quota gate.)
-                scanner.onAutoDetectQuotaBlocked = {
-                    paywallSurface = "scanner_quota_wall_multi"
-                    showPaywallSheet = true
-                }
                 #if DEBUG
                 runSmokeTestIfRequested()
                 #endif
             }
         }
-    }
-
-    // MARK: - Quota-approaching warning (4th-of-5 scan trigger)
-    //
-    // Fires once per day for free users when remaining hits 1. The
-    // toast is presentation-only (ScanQuotaWarningToast); this method
-    // gates trigger conditions and schedules auto-dismiss after 4s
-    // of being on screen so it doesn't camp.
-
-    private func evaluateQuotaWarning() {
-        guard !premiumGate.isPro,
-              scanQuota.remaining == 1,
-              !showPaywallSheet,
-              !scanner.isIdentifying,
-              scanQuota.lastWarnedScansToday != scanQuota.scansToday
-        else { return }
-
-        scanQuota.markWarned()
-        withAnimation { quotaWarningVisible = true }
-
-        Task { @MainActor in
-            try? await Task.sleep(for: .seconds(4))
-            // Re-check: if the user already tapped + opened the
-            // paywall, or navigated away, don't bother animating out.
-            if quotaWarningVisible {
-                withAnimation { quotaWarningVisible = false }
-            }
-        }
-    }
-
-    private func handleQuotaWarningTap() {
-        PAHaptics.tap()
-        quotaWarningVisible = false
-        paywallSurface = "scanner_quota_warning"
-        showPaywallSheet = true
     }
 
     // MARK: - Camera-starting placeholder
@@ -532,29 +422,13 @@ struct ScannerTabView: View {
         }
     }
 
-    // MARK: - Free-tier scan-quota indicator
+    // MARK: - Crown button (Pro entry + DEBUG override toggle)
     //
-    // Tiny pill below the crown showing "X left" today. Hidden for
-    // pro users (they're unlimited). Lets the user see why a tap
-    // got intercepted into the paywall sheet on their 6th attempt.
-
-    private var scanQuotaIndicator: some View {
-        let remaining = scanQuota.remaining
-        return Text(remaining > 0 ? "\(remaining) left" : "Daily limit")
-            .font(.system(size: 9, weight: .semibold))
-            .foregroundStyle(remaining > 0 ? PA.Colors.hairline(0.75) : Color.yellow.opacity(0.95))
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-            .background(.ultraThinMaterial.opacity(0.5))
-            .clipShape(Capsule())
-    }
-
-    // MARK: - Crown button (paywall entry + DEBUG override toggle)
-    //
-    // Tap: open the paywall sheet (always — production + DEBUG).
+    // Tap: open the Pro sheet (always — production + DEBUG).
     // Long-press: in DEBUG builds only, flip PremiumGate's override
-    // so QA can exercise the pro path without a real StoreKit purchase.
-    // Filled crown = currently pro (real or override), hollow = free.
+    // so QA can exercise pro-only analytics without a real StoreKit
+    // purchase. Filled crown = currently pro (real or override),
+    // hollow = free.
     //
     // We can't use a SwiftUI Button + simultaneousGesture(LongPress)
     // here — the Button still fires its tap action on touch-up after
@@ -908,46 +782,26 @@ struct ScannerTabView: View {
                 // can produce another stable window for the SAME card
                 // and append it again. Drop repeat-slug auto-detect
                 // results inside a short window so the pack/binder
-                // flow doesn't inflate the tray or burn quota for the
-                // same physical card. Tap/library entries are
-                // deliberate user actions — they bypass this guard
-                // (the same user might genuinely want to scan two
-                // copies of the same card via tap).
+                // flow doesn't inflate the tray for the same physical
+                // card. Tap/library entries are deliberate user
+                // actions — they bypass this guard (the same user
+                // might genuinely want to scan two copies of the same
+                // card via tap).
                 //
                 // 2026-05-17 — also includes "auto_saliency", the
                 // 2026-05-16 full-art fallback trigger. Without it
                 // here a full-art lingering in frame would re-fire
-                // every `saliencyCooldown` (8s) and append + charge
-                // each time, defeating both the dedupe-tray and
-                // refund logic the rectangle path already has.
+                // every `saliencyCooldown` (8s) and append each time,
+                // defeating the dedupe-tray logic the rectangle path
+                // already has.
                 // (Codex P2 review on PR #111.)
                 if (scanner.lastTriggerSource == "auto"
                     || scanner.lastTriggerSource == "auto_saliency"),
                    multiScanSession.shouldDedupeAutoDetect(slug: match.slug) {
-                    // The upstream gate charged a quota unit before
-                    // this server call; refund it now since the
-                    // duplicate is being dropped from the tray.
-                    // Without this refund a card lingering in the
-                    // viewfinder eats quota on every re-fire even
-                    // though the stack doesn't grow. Premium users
-                    // didn't charge upstream, so don't refund.
-                    if !premiumGate.isPro {
-                        scanQuota.refundScan()
-                    }
                     scanner.clearLastMatch()
                     scanner.resumeScanning()
                     return
                 }
-                // Quota was already charged upstream in
-                // ScannerHost.installNetworkIdentifier — every server
-                // call deserves a quota tick regardless of result
-                // tier. LOW/error results land in the default branch
-                // below and don't append, but the charge stays
-                // (consistent with "you used a server call"). Only
-                // same-slug auto-detect duplicates are refunded
-                // (block above). Tap and library are charged at
-                // their own entry points. (Codex P2 review on PR
-                // #83, eleventh pass.)
                 PAHaptics.tap()
                 multiScanSession.append(
                     match: match,
@@ -1327,14 +1181,6 @@ final class ScannerHost: ObservableObject {
         }
     }
 
-    /// Called from the auto-detect hook when a free-tier user in
-    /// multi-scan mode runs out of daily quota. Lets ScannerTabView
-    /// surface the paywall sheet without ScannerHost needing direct
-    /// access to its @State. Wired in `.onAppear`. Pre-runIdentify
-    /// quota gate (Codex P2 review on PR #83) — replaces the earlier
-    /// post-identify gate in handleIdentifyResult.
-    var onAutoDetectQuotaBlocked: (@MainActor () -> Void)?
-
     /// Mirrors `ScannerViewModel.firstFrameRendered`. Drives the
     /// "Starting camera…" placeholder in ScannerTabView's body so the
     /// user sees motion + text instead of pure black during the
@@ -1403,12 +1249,8 @@ final class ScannerHost: ObservableObject {
 
     /// Entry point the most recent runIdentify call came from —
     /// "auto" (Vision rectangle stable-fire), "tap" / "tap_multiframe"
-    /// (manual tap-to-capture), or "library" (photo picker). Read by
-    /// the multi-scan quota gate to decide whether to charge quota
-    /// for the result: tap-path scans were already charged at the
-    /// tap handler (lines ~97-104) and library scans bypass quota
-    /// in single mode, so multi-mode should only newly-charge
-    /// auto-detect results to avoid double-spending.
+    /// (manual tap-to-capture), or "library" (photo picker). Used for
+    /// telemetry and multi-scan same-card auto-detect dedupe.
     @Published private(set) var lastTriggerSource: String?
     @Published private(set) var lastCorrectionMetadata: ScanCorrectionPredictedMetadata?
 
@@ -1431,7 +1273,7 @@ final class ScannerHost: ObservableObject {
     private var cancellable: AnyObject?
     /// Lazily-built offline orchestrator. Only constructed once
     /// PremiumGate.shared.offlineScannerEnabled flips true — keeps
-    /// free-tier launches from incurring the model-load cost.
+    /// server-routed launches from incurring the model-load cost.
     private var offlineOrchestrator: OfflineScanOrchestrator?
 
     init() {
@@ -1484,27 +1326,23 @@ final class ScannerHost: ObservableObject {
         }
     }
 
-    /// Background prewarm of the offline pipeline. The heavy work
-    /// (orchestrator + OCR) is done at App.body.task — see
-    /// OfflineScannerWarmup.startIfNeeded(). This entry point is
-    /// retained as a fallback (in case App-level wasn't called yet)
-    /// AND to fire the Vision rectangle prewarm, which needs the
-    /// engine from the view model and therefore can only run after
-    /// the scanner tab activates.
+    /// Background prewarm of scanner cold-start costs. The app-level
+    /// warmup handles OCR plus the offline orchestrator when enabled;
+    /// this fallback also fires the Vision rectangle prewarm, which
+    /// needs the engine from the view model and therefore can only run
+    /// after the scanner tab activates.
     ///
     /// `nonisolated` so the child tasks ACTUALLY run in parallel.
     /// ScannerHost is @MainActor; without nonisolated, the async-let
     /// tasks would inherit main-actor isolation and queue serially.
     nonisolated private func prewarmIfPossible() async {
-        let enabled = await MainActor.run { PremiumGate.shared.offlineScannerEnabled }
-        guard enabled else { return }
         // Read the engine off main once so the rest runs nonisolated.
         let engine: PopAlphaVisionEngine? = await MainActor.run { self.viewModel?.visionEngine }
         // Two parallel warm tasks:
-        //   - App-level warmup (orchestrator + OCR). Idempotent — if
-        //     PopAlphaApp.body.task already fired this, second call
-        //     is a no-op via the dispatchOnce-style guard inside
-        //     OfflineScannerWarmup. Belt-and-braces.
+        //   - App-level warmup (OCR, and offline orchestrator when
+        //     enabled). Idempotent — if PopAlphaApp.body.task already
+        //     fired this, second call is a no-op via the dispatchOnce-
+        //     style guards inside OfflineScannerWarmup.
         //   - Vision rectangle: VNDetectRectanglesRequest. Real-device
         //     2026-05-05 saw the FIRST tap_detect call take 672ms vs
         //     ~10-20ms steady state. Pre-warming absorbs that cost.
@@ -1513,27 +1351,6 @@ final class ScannerHost: ObservableObject {
         async let warmApp: Void = OfflineScannerWarmup.startIfNeeded()
         async let warmVision: Void = Self.prewarmVisionRectangle(engine: engine)
         _ = await (warmApp, warmVision)
-    }
-
-    /// One-time OCR warmup. Vision's VNRecognizeTextRequest does
-    /// internal JIT/state allocation on first invocation that adds
-    /// ~200ms to scan_e2e on the user's first scan. Running it once
-    /// against a tiny synthetic image during prewarm absorbs that
-    /// cost off the user's critical path.
-    nonisolated private static func prewarmOCR() async {
-        let t0 = Date()
-        // Synthetic image just needs to drive Vision through one full
-        // recognition pass. Mid-gray 256×256 is enough — Vision sees
-        // no text but still goes through detector init.
-        let size = CGSize(width: 256, height: 256)
-        let renderer = UIGraphicsImageRenderer(size: size)
-        let dummy = renderer.image { ctx in
-            UIColor.gray.setFill()
-            ctx.fill(CGRect(origin: .zero, size: size))
-        }
-        _ = await OCRService.extractCardIdentifiersMulti(from: dummy)
-        let elapsed = Date().timeIntervalSince(t0) * 1000
-        Logger.scan.debug("prewarm_ocr: total=\(String(format: "%.1f", elapsed))ms")
     }
 
     /// One-time Vision rectangle detection warmup. The same detector
@@ -1595,40 +1412,6 @@ final class ScannerHost: ObservableObject {
     private func installNetworkIdentifier(_ vm: ScannerViewModel) {
         vm.onStableCardCaptured = { [weak self] image, perspectiveCorrection, triggerKind in
             guard let self else { return }
-
-            // Pre-identify quota gate for multi-scan auto-detect
-            // (Codex P2 review on PR #83). Without this, a free-tier
-            // user with no scans left still uploads the JPEG and
-            // hits /api/scan/identify on every stable auto-capture —
-            // the server-side cost is wasted, and dismissing the
-            // paywall lets the loop continue. Gating here intercepts
-            // before runIdentify ever fires. Single-mode auto-detect
-            // doesn't gate here (existing back-compat behavior); the
-            // tap path has its own quota check before
-            // captureFrameAndIdentify, and library imports bypass
-            // intentionally.
-            let blocked = await MainActor.run {
-                guard self.multiScanMode, !PremiumGate.shared.isPro else {
-                    return false
-                }
-                ScanQuota.shared.rolloverIfNewDay()
-                if !ScanQuota.shared.canScan {
-                    self.onAutoDetectQuotaBlocked?()
-                    return true
-                }
-                // canScan check happens here (pre-identify) so a user
-                // at the wall never makes a server call. recordScan
-                // does NOT happen here — it lives inside runIdentify,
-                // AFTER the re-entry guard, so the daily counter
-                // doesn't tick for callbacks that the guard drops
-                // (in-flight identify, result waiting on screen).
-                // Codex P2 on PR #83 (twelfth pass) caught the over-
-                // charge from charging at this layer. The dedupe-
-                // drop branch in handleIdentifyResult still refunds
-                // for same-card auto-re-fires.
-                return false
-            }
-            if blocked { return }
 
             // triggerKind plumbed through from the engine: "auto" for
             // the rectangle stability-gate path, "auto_saliency" for
@@ -1716,24 +1499,6 @@ final class ScannerHost: ObservableObject {
         self.isIdentifying = true
         self.identifyError = nil
 
-        // Multi-scan auto-detect quota charge (Codex P2 review on PR
-        // #83, twelfth pass). Lives BEHIND the re-entry guard above
-        // because the upstream onStableCardCaptured hook can fire
-        // for frames that this guard then drops (a previous identify
-        // is in flight or a result is waiting on screen). Charging
-        // before the guard would tick the daily counter for those
-        // suppressed callbacks even though no server call ran.
-        // Scoped to auto-detect triggers ("auto" or "auto_saliency" —
-        // the latter is the 2026-05-16 full-art fallback) — tap is
-        // charged at the tap handler, library bypasses by convention.
-        // Premium skips. The dedupe-drop branch in handleIdentifyResult
-        // refunds same-card auto-re-fires; LOW results stay charged
-        // because the server call actually ran.
-        if (triggerSource == "auto" || triggerSource == "auto_saliency"),
-           self.multiScanMode,
-           !PremiumGate.shared.isPro {
-            ScanQuota.shared.recordScan()
-        }
         // Belt-and-braces: clear Vision's stability buffer so the
         // next post-arm re-detection requires a fresh stable window.
         self.viewModel?.pauseForExternalCapture()
@@ -1814,11 +1579,11 @@ final class ScannerHost: ObservableObject {
         self.lastOCRCardNumbersCount = ocrMulti.cardNumbers.count
         Logger.scan.debug("ocr frameSize=\(Int(imageForOCR.size.width))x\(Int(imageForOCR.size.height)) cardNumbers=\(ocrMulti.cardNumbers) setHint=\(ocrMulti.setHint ?? "nil") ms=\(String(format: "%.1f", ocrMs))")
 
-        // Offline-first when premium gate is open. On any offline
+        // Offline-first when the feature flag is open. On any offline
         // failure (catalog not downloaded, model load error, embed
         // error, identify error) we silently fall back to the
-        // network path — free-tier behavior never regresses when
-        // premium turns on.
+        // network path so the scanner never gets worse when offline
+        // routing turns on.
         let offlineEnabled = await MainActor.run { PremiumGate.shared.offlineScannerEnabled }
         // JP scans bypass the offline orchestrator — the bundled .papb
         // catalog has zero JP rows (it's built from EN siglip2 rows

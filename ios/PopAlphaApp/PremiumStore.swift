@@ -1,8 +1,8 @@
 // PremiumStore.swift
 //
 // StoreKit 2 wrapper. Owns the live transaction listener +
-// entitlement cache. UI layers (paywall, settings, scanner premium
-// gate) bind to `@Published var status` rather than calling
+// entitlement cache. UI layers (paywall, settings, Pro-only
+// insights) bind to `@Published var status` rather than calling
 // StoreKit directly.
 //
 // LIFECYCLE:

@@ -82,6 +82,11 @@ type CardRow = {
   set_name: string | null;
   card_number: string | null;
   market_price: number | null;
+  market_price_display_state?: string | null;
+  recent_market_signal_usd?: number | null;
+  recent_market_signal_as_of?: string | null;
+  recent_market_signal_delta_pct?: number | null;
+  recent_market_signal_direction?: "HIGHER" | "LOWER" | string | null;
   median_7d: number | null;
   median_30d: number | null;
   change_pct_7d: number | null;
@@ -116,6 +121,11 @@ function toProfileInput(
     setName: row.set_name,
     cardNumber: row.card_number,
     marketPrice: row.market_price,
+    marketPriceDisplayState: row.market_price_display_state ?? null,
+    recentMarketSignalUsd: row.recent_market_signal_usd ?? null,
+    recentMarketSignalAsOf: row.recent_market_signal_as_of ?? null,
+    recentMarketSignalDeltaPct: row.recent_market_signal_delta_pct ?? null,
+    recentMarketSignalDirection: row.recent_market_signal_direction ?? null,
     median7d: row.median_7d,
     median30d: row.median_30d,
     changePct7d: row.change_pct_7d,

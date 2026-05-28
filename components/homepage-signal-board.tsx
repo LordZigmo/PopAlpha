@@ -17,6 +17,7 @@ import { useMarket } from "@/lib/market-context";
 
 type SignalWindow = HomepageSignalWindow;
 type HomepageSignalBoardProps = {
+  marketWatch: HomepageCard[];
   topMoversByWindow: HomepageWindowedCards;
   biggestDropsByWindow: HomepageWindowedCards;
   momentumByWindow: HomepageWindowedCards;
@@ -61,6 +62,7 @@ function pillClasses(n: number | null): string {
 }
 
 export default function HomepageSignalBoard({
+  marketWatch,
   topMoversByWindow,
   biggestDropsByWindow,
   momentumByWindow,
@@ -90,6 +92,7 @@ export default function HomepageSignalBoard({
 
   return (
     <EnglishSignalBoard
+      marketWatch={marketWatch}
       topMoversByWindow={topMoversByWindow}
       biggestDropsByWindow={biggestDropsByWindow}
       momentumByWindow={momentumByWindow}
@@ -100,12 +103,14 @@ export default function HomepageSignalBoard({
 }
 
 function EnglishSignalBoard({
+  marketWatch,
   topMoversByWindow,
   biggestDropsByWindow,
   momentumByWindow,
   midMovers,
   budgetMovers,
 }: {
+  marketWatch: HomepageCard[];
   topMoversByWindow: HomepageWindowedCards;
   biggestDropsByWindow: HomepageWindowedCards;
   momentumByWindow: HomepageWindowedCards;
@@ -120,6 +125,15 @@ function EnglishSignalBoard({
 
   return (
     <>
+      <SignalRailSection
+        id="market-watch"
+        eyebrow="Trusted prices"
+        eyebrowClassName="text-[#9BE7F6]"
+        title="Market watch"
+        cards={marketWatch}
+        emptyMessage="Market watch is warming up"
+      />
+
       <SignalRailSection
         id="top-movers"
         eyebrow="Recent Market"
@@ -399,9 +413,9 @@ function SignalCard({ card, useJpSource = false }: { card: HomepageCard; useJpSo
   // count (see lib/pricing/jp-price-source.ts). When a JP source is
   // picked we render its ¥-native label ("¥3,200 ($21.00)") and tag the
   // tile with the source name. The change-pct badge is hidden in that
-  // case because today's change_pct comes from Scrydex's USD reflection
-  // and doesn't describe a JP-source price baseline — mirrors the iOS
-  // `preferringJpSource()` transform.
+  // case because today's change_pct comes from the default USD market
+  // anchor and doesn't describe a JP-source price baseline — mirrors the
+  // iOS `preferringJpSource()` transform.
   const jpPick = useJpSource
     ? selectJpPriceSource({
         yahooJpPrice: card.yahoo_jp_price,
@@ -422,6 +436,9 @@ function SignalCard({ card, useJpSource = false }: { card: HomepageCard; useJpSo
       })
     : null;
   const priceMeta = priceDisplay ? formatPriceDisplay(priceDisplay) : null;
+  const showRecentSignal = !showJp
+    && card.recent_market_signal_usd !== null
+    && card.recent_market_signal_direction !== null;
 
   return (
     <Link
@@ -465,6 +482,11 @@ function SignalCard({ card, useJpSource = false }: { card: HomepageCard; useJpSo
             </span>
           ) : null}
         </div>
+        {showRecentSignal ? (
+          <p className="mt-1 truncate text-[11px] text-[#7A8490]">
+            Recent market signal {formatPrice(card.recent_market_signal_usd)}
+          </p>
+        ) : null}
       </div>
     </Link>
   );

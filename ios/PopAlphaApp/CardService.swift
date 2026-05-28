@@ -404,14 +404,12 @@ actor CardService {
     // MARK: - Card Profile (AI Brief)
 
     func fetchCardProfile(slug: String) async throws -> CardProfileResult? {
-        let data = try await Supabase.query(
-            table: "card_profiles",
-            select: "signal_label,verdict,chip,summary_short,summary_long",
-            filters: [("canonical_slug", "eq", slug)],
-            limit: 1
+        let response: CardProfileAPIResponse = try await APIClient.get(
+            path: "/api/card-profiles",
+            query: [("slug", slug)],
+            decoder: decoder
         )
-        let rows = try decoder.decode([CardProfileResult].self, from: data)
-        return rows.first
+        return response.profile
     }
 
     // MARK: - Cross-language pairing
@@ -787,6 +785,12 @@ struct CardProfileResult: Decodable {
     let chip: String?          // e.g. "🔥 Breakout Alert"
     let summaryShort: String
     let summaryLong: String?
+}
+
+struct CardProfileAPIResponse: Decodable {
+    let ok: Bool
+    let slug: String
+    let profile: CardProfileResult?
 }
 
 // MARK: - Cross-language pairing DTOs

@@ -16,6 +16,7 @@ export const DBADMIN_ALLOWED_PREFIXES = [
 ];
 
 export const DBADMIN_ALLOWED_FILES = [
+  "app/api/card-profiles/route.ts",
   "app/api/cards/[slug]/view/route.ts",
   "app/api/ebay/deletion-notification/route.ts",
   "app/api/holdings/route.ts",
@@ -48,6 +49,7 @@ export const DBADMIN_ALLOWED_FILES = [
   // number from observation metadata — non-sensitive pricing data we
   // already render to users. Codex P2 on PR #99.
   "components/market-summary-card.tsx",
+  "lib/card-profiles.ts",
   "lib/data/canonical-card-match.ts",
   "lib/db/admin.ts",
   "lib/entitlements.ts",
@@ -56,6 +58,7 @@ export const DBADMIN_ALLOWED_FILES = [
 ];
 
 export const DBADMIN_ALLOWED_ROUTE_KEYS = [
+  "card-profiles",
   "cards/[slug]/view",
   "holdings",
   "holdings/bulk-import",
@@ -867,6 +870,15 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
     expectedSignals: ["service_role_client"],
     usesServiceRole: true,
   }),
+  "scripts/import-pricecharting-products.mjs": operationalScript({
+    classification: "service_role_backfill",
+    executionMode: "manual_backfill",
+    intendedCaller: "trusted operator importing a PriceCharting CSV export into private trusted-price tables",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY", "PriceCharting CSV export or authenticated CSV URL"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+    notes: "Private raw PriceCharting rows remain service-role only and are used as internal guardrails. Public prices must be derived from permitted public inputs.",
+  }),
   "scripts/fill-scrydex-history-gaps.mjs": operationalScript({
     classification: "service_role_repair",
     executionMode: "manual_repair",
@@ -1266,7 +1278,6 @@ export const PHASE2_DIRECT_PUBLIC_READ_TABLES = [
   "canonical_cards",
   "card_aliases",
   "card_printings",
-  "card_profiles",
   // EN <-> JP card-pairing junction (PR #67) — RLS on, anon/auth SELECT
   // via USING (true), no anon/auth write grants; service-role only
   // writes via the cron + backfill script.
@@ -1345,6 +1356,7 @@ export const RLS_REQUIRED_PUBLIC_TABLES = [
   "apple_subscriptions",
   "card_condition_prices",
   "card_image_embeddings",
+  "card_profiles",
   "card_translations",
   "daily_top_movers",
   "grade_aliases",
@@ -1371,6 +1383,7 @@ export const RLS_REQUIRED_PUBLIC_TABLES = [
   "personalization_profiles",
   "pending_rollups",
   "pricing_transparency_snapshots",
+  "provider_price_history",
   "private_sales",
   "profile_follows",
   "profile_post_card_mentions",
@@ -1503,7 +1516,6 @@ export const PUBLIC_SELECT_ONLY_OBJECTS = [
   "canonical_set_catalog",
   "card_aliases",
   "card_printings",
-  "card_profiles",
   // EN <-> JP card-pairing junction (PR #67) and the set-code lookup
   // that gates it (PR #119). Both: anon/auth SELECT only;
   // service-role-only writes from the cron + backfill script.
@@ -1647,6 +1659,7 @@ export const INTERNAL_NO_GRANT_OBJECTS = [
   "card_embeddings",
   "card_external_mappings",
   "card_image_embeddings",
+  "card_profiles",
   "card_profile_coverage",
   "card_profile_failure_buckets",
   "card_metrics",
@@ -1684,6 +1697,7 @@ export const INTERNAL_NO_GRANT_OBJECTS = [
   "provider_ingests",
   "provider_normalized_observations",
   "provider_observation_matches",
+  "provider_price_history",
   "provider_raw_payload_lineages",
   "provider_raw_payloads",
   "provider_set_health",

@@ -257,7 +257,7 @@ columns added to `scan_identify_events` via migration
 iOS sends these as query params on `/api/scan/identify`; the route
 parses and persists them via `logScanEvent` (commit d7f6d30).
 
-**Offline scans (premium, dominant path)** — PostHog `card_scanned`
+**Offline scans (feature-gated path)** — PostHog `card_scanned`
 event emitted from `ScannerHost.runIdentify` on every scan
 completion (success AND error paths). Properties cover the full
 diagnostic surface plus winning_path / confidence / top_match_slug /

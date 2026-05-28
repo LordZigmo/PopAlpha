@@ -9,7 +9,7 @@
  *     sales (its median is more stable).
  *   - If only one source has data, use that one.
  *   - If neither has data, return null source — tile falls back to the
- *     Scrydex market_price.
+ *     default Market Price.
  *
  * Lives in lib/pricing/ alongside displayed-market-price.ts since it's
  * the same family of "pick the right price to render" helpers.
@@ -68,7 +68,7 @@ export function selectJpPriceSource(input: {
 
   // Require a minimum sample count before promoting a JP source onto a
   // tile. Single-sale medians are too noisy to surface alongside
-  // Scrydex's typically multi-day rolling price.
+  // the default USD market anchor.
   const yjQualifies = yj > 0 && yjN >= MIN_SAMPLE_FOR_TILE;
   const snkQualifies = snk > 0 && snkN >= MIN_SAMPLE_FOR_TILE;
 

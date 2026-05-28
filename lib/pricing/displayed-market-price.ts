@@ -9,6 +9,7 @@
  * downstream components branch off of `kind`:
  *
  *   live          < 7d old           "$5.82" + change badge as today
+ *   abundant      <= $2              exact price — no change/confidence badges
  *   stale_recent  7-30d old          "Last sold $5.82 · Apr 28" — no badge
  *   stale_old     30-180d old        "Last sold $5.82 · Apr 2026" — subdued, no badge,
  *                                    "Sparse market" pill replaces confidence
@@ -23,15 +24,19 @@
  * current" rendering.
  */
 
-export type PriceDisplayKind = "live" | "stale_recent" | "stale_old" | "no_market";
+export type PriceDisplayKind = "live" | "abundant" | "stale_recent" | "stale_old" | "no_market";
 
 export type RefreshTier = "hot" | "warm" | "sparse" | "dormant" | "unknown";
 
 export type PriceDisplay =
   | { kind: "live"; price: number; asOf: string; ageDays: number }
+  | { kind: "abundant"; price: number; asOf: string; ageDays: number; threshold: number }
   | { kind: "stale_recent"; price: number; asOf: string; ageDays: number; ageLabel: string }
   | { kind: "stale_old"; price: number; asOf: string; ageDays: number; ageLabel: string }
   | { kind: "no_market"; asOf: string | null };
+
+export const ABUNDANT_RAW_CARD_MAX_USD = 2;
+export const ABUNDANT_RAW_CARD_MESSAGE = "Low-dollar card";
 
 const STALE_RECENT_DAYS = 7;
 const STALE_OLD_DAYS = 30;
@@ -71,6 +76,10 @@ export function resolveDisplayedMarketPrice(input: {
 
   const ageDays = Math.max(0, Math.floor((nowMs - asOfMs) / MS_PER_DAY));
 
+  if (price <= ABUNDANT_RAW_CARD_MAX_USD && ageDays < NO_MARKET_DAYS) {
+    return { kind: "abundant", price, asOf, ageDays, threshold: ABUNDANT_RAW_CARD_MAX_USD };
+  }
+
   if (ageDays < STALE_RECENT_DAYS) return { kind: "live", price, asOf, ageDays };
   if (ageDays < STALE_OLD_DAYS) {
     return { kind: "stale_recent", price, asOf, ageDays, ageLabel: formatRecentAge(asOf) };
@@ -107,6 +116,7 @@ function formatMoney(price: number): string {
  */
 export function formatPriceDisplay(display: PriceDisplay): {
   label: string;
+  description?: string;
   subdued: boolean;
   showChangeBadge: boolean;
   showConfidencePill: boolean;
@@ -118,6 +128,14 @@ export function formatPriceDisplay(display: PriceDisplay): {
         subdued: false,
         showChangeBadge: true,
         showConfidencePill: true,
+      };
+    case "abundant":
+      return {
+        label: formatMoney(display.price),
+        description: ABUNDANT_RAW_CARD_MESSAGE,
+        subdued: false,
+        showChangeBadge: false,
+        showConfidencePill: false,
       };
     case "stale_recent":
       return {

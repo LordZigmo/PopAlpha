@@ -1,7 +1,8 @@
 // PaywallView.swift
 //
 // Auto-renewable subscription paywall. Presented as a sheet from
-// the scanner crown tap and the Settings → Upgrade Plan row.
+// optional Pro entry points such as the scanner crown tap and the
+// Settings → Upgrade Plan row.
 //
 // Apple paywall compliance (App Review 3.1.2):
 //   - Title (PopAlpha Pro), period, and price-per-period are visible
@@ -22,7 +23,7 @@ import StoreKit
 import SwiftUI
 
 /// Surface that opens the paywall. Drives the hero copy so a paywall
-/// presented from the scanner can lead with scanner value, etc. All
+/// presented from the scanner can lead with market intelligence, etc. All
 /// existing call sites pass `.generic` (the default) — the contextual
 /// branches are wiring for future variant tests.
 public enum PaywallContext: String {
@@ -284,13 +285,14 @@ struct PaywallView: View {
     }
 
     /// Prominent value prop. Driven by the surface that opened the
-    /// paywall so a scanner-triggered open can lead with scanner copy.
+    /// paywall. Scanner access is free, so scanner-triggered copy
+    /// points at the intelligence unlocked after identifying a card.
     private var heroHeadline: String {
         switch context {
         case .generic:
             return "Make smarter Pokémon card decisions."
         case .scanner:
-            return "Unlock faster card scanning"
+            return "Unlock market intelligence"
         case .collectorProfile:
             return "Unlock your collector profile"
         case .reengagement:
@@ -304,15 +306,15 @@ struct PaywallView: View {
     private var heroSubheadline: String {
         switch context {
         case .generic:
-            return "Unlock Pro signals, collector insights, and faster scanning built around your collection."
+            return "Unlock Pro signals, collector insights, and alerts built around your collection."
         case .scanner:
-            return "Scan quickly, identify cards offline, and turn every scan into a market read."
+            return "Scanning is free. Pro helps you decide what each card means for your collection and the market."
         case .collectorProfile:
             return "See your collection style, radar chart, and AI insights tuned to the cards you own."
         case .reengagement:
             return "Pick up where you left off — your Pro features are one tap away."
         case .trialExpiring:
-            return "Subscribe today to keep your collector profile, market signals, and unlimited scans."
+            return "Subscribe today to keep your collector profile, market signals, and price alerts."
         }
     }
 
@@ -320,9 +322,7 @@ struct PaywallView: View {
 
     private var benefits: some View {
         // Order is intentional: lead with the more differentiated and
-        // emotionally compelling value (insights > signals > offline
-        // scanning). Offline scanning is useful but not the strongest
-        // first sell.
+        // emotionally compelling value (insights > signals > alerts).
         VStack(spacing: 8) {
             benefitRow(
                 icon: "person.crop.square.filled.and.at.rectangle",
@@ -335,9 +335,9 @@ struct PaywallView: View {
                 subtitle: "See which cards are gaining momentum, breaking out, or moving into better buy ranges.",
             )
             benefitRow(
-                icon: "wifi.slash",
-                title: "Faster offline scanning",
-                subtitle: "Identify cards quickly, even with a weak connection.",
+                icon: "bell.badge",
+                title: "Price Alerts",
+                subtitle: "Know when watched cards move, break out, or reach a better buy range.",
             )
         }
     }

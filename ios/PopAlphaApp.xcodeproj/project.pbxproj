@@ -96,7 +96,6 @@
 		DD000001000000000000F205 /* PremiumGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F204 /* PremiumGate.swift */; };
 		DD000001000000000000F207 /* OfflineScanOrchestrator.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F206 /* OfflineScanOrchestrator.swift */; };
 		DD000001000000000000F211 /* PaywallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F210 /* PaywallView.swift */; };
-		DD000001000000000000F221 /* ScanQuota.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F220 /* ScanQuota.swift */; };
 		DD000001000000000000F231 /* ModerationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F230 /* ModerationService.swift */; };
 		DD000001000000000000F233 /* ReportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F232 /* ReportSheet.swift */; };
 		DD000001000000000000F235 /* BlockedUsersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F234 /* BlockedUsersView.swift */; };
@@ -104,7 +103,6 @@
 		DD000001000000000000F239 /* ReachabilityMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F238 /* ReachabilityMonitor.swift */; };
 		DD000001000000000000F23B /* PushPermissionPromptSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F23A /* PushPermissionPromptSheet.swift */; };
 		DD000001000000000000F23D /* SignInSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F23C /* SignInSheet.swift */; };
-		DD000001000000000000F241 /* ScanQuotaWarningToast.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F240 /* ScanQuotaWarningToast.swift */; };
 		DD000001000000000000F401 /* ScanDebugCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001000000000000F400 /* ScanDebugCapture.swift */; };
 		DD00000100000000000FF001 /* MultiScanSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000FF000 /* MultiScanSession.swift */; };
 		DD00000100000000000FF101 /* MultiScanTrayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00000100000000000FF100 /* MultiScanTrayView.swift */; };
@@ -204,7 +202,6 @@
 		DD000001000000000000F204 /* PremiumGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumGate.swift; sourceTree = "<group>"; };
 		DD000001000000000000F206 /* OfflineScanOrchestrator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineScanOrchestrator.swift; sourceTree = "<group>"; };
 		DD000001000000000000F210 /* PaywallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaywallView.swift; sourceTree = "<group>"; };
-		DD000001000000000000F220 /* ScanQuota.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanQuota.swift; sourceTree = "<group>"; };
 		DD000001000000000000F230 /* ModerationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModerationService.swift; sourceTree = "<group>"; };
 		DD000001000000000000F232 /* ReportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportSheet.swift; sourceTree = "<group>"; };
 		DD000001000000000000F234 /* BlockedUsersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockedUsersView.swift; sourceTree = "<group>"; };
@@ -212,7 +209,6 @@
 		DD000001000000000000F238 /* ReachabilityMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReachabilityMonitor.swift; sourceTree = "<group>"; };
 		DD000001000000000000F23A /* PushPermissionPromptSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushPermissionPromptSheet.swift; sourceTree = "<group>"; };
 		DD000001000000000000F23C /* SignInSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInSheet.swift; sourceTree = "<group>"; };
-		DD000001000000000000F240 /* ScanQuotaWarningToast.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanQuotaWarningToast.swift; sourceTree = "<group>"; };
 		DD000001000000000000F300 /* Products.storekit */ = {isa = PBXFileReference; lastKnownFileType = file.storekit; path = Products.storekit; sourceTree = "<group>"; };
 		DD000001000000000000F400 /* ScanDebugCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanDebugCapture.swift; sourceTree = "<group>"; };
 		DD00000100000000000FF000 /* MultiScanSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiScanSession.swift; sourceTree = "<group>"; };
@@ -318,7 +314,6 @@
 				DD000001000000000000F202 /* PremiumStore.swift */,
 				DD000001000000000000F204 /* PremiumGate.swift */,
 				DD000001000000000000F210 /* PaywallView.swift */,
-				DD000001000000000000F220 /* ScanQuota.swift */,
 				DD000001000000000000F206 /* OfflineScanOrchestrator.swift */,
 				DD000001000000000000F800 /* OfflineScannerWarmup.swift */,
 				DD000001000000000000F230 /* ModerationService.swift */,
@@ -328,7 +323,6 @@
 				DD000001000000000000F238 /* ReachabilityMonitor.swift */,
 				DD000001000000000000F23A /* PushPermissionPromptSheet.swift */,
 				DD000001000000000000F23C /* SignInSheet.swift */,
-				DD000001000000000000F240 /* ScanQuotaWarningToast.swift */,
 				DD000001000000000000F300 /* Products.storekit */,
 				DD000001000000000000F400 /* ScanDebugCapture.swift */,
 				DD00000100000000000FF000 /* MultiScanSession.swift */,
@@ -526,7 +520,6 @@
 				DD000001000000000000F203 /* PremiumStore.swift in Sources */,
 				DD000001000000000000F205 /* PremiumGate.swift in Sources */,
 				DD000001000000000000F211 /* PaywallView.swift in Sources */,
-				DD000001000000000000F221 /* ScanQuota.swift in Sources */,
 				DD000001000000000000F207 /* OfflineScanOrchestrator.swift in Sources */,
 				DD000001000000000000F801 /* OfflineScannerWarmup.swift in Sources */,
 				DD000001000000000000F401 /* ScanDebugCapture.swift in Sources */,
@@ -539,7 +532,6 @@
 				DD000001000000000000F239 /* ReachabilityMonitor.swift in Sources */,
 				DD000001000000000000F23B /* PushPermissionPromptSheet.swift in Sources */,
 				DD000001000000000000F23D /* SignInSheet.swift in Sources */,
-				DD000001000000000000F241 /* ScanQuotaWarningToast.swift in Sources */,
 				EE00000100000000000000F2 /* SetDetailView.swift in Sources */,
 				1100000100000000000000F1 /* PortfolioModels.swift in Sources */,
 				1100000100000000000000F3 /* PortfolioHeroView.swift in Sources */,

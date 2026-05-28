@@ -1,6 +1,9 @@
 "use client";
 
-import { Sparkles } from "lucide-react";
+import { useState } from "react";
+import { Lock, Sparkles } from "lucide-react";
+
+import PricingModal from "@/components/billing/pricing-modal";
 import { buildPopAlphaScoutSummary } from "@/lib/ai/scout-summary";
 import TypewriterText from "@/components/typewriter-text";
 
@@ -13,6 +16,7 @@ type PopAlphaScoutPreviewProps = {
   activeListings7d: number | null;
   summaryText?: string | null;
   updatedAt?: string | null;
+  isPro?: boolean;
 };
 
 function formatUpdatedAgo(value: string | null | undefined): string {
@@ -30,50 +34,81 @@ function formatUpdatedAgo(value: string | null | undefined): string {
 }
 
 export default function PopAlphaScoutPreview(props: PopAlphaScoutPreviewProps) {
-  const summary = props.summaryText?.trim()
-    || buildPopAlphaScoutSummary({
-      cardName: props.cardName,
-      marketPrice: props.marketPrice,
-      fairValue: props.fairValue,
-      changePct: props.changePct,
-      changeLabel: props.changeLabel,
-      // The prop is named `activeListings7d` for legacy consistency with
-      // the DB column, but the value is fresh price observations, not
-      // listings. Map to the accurate name on the LLM/fallback input.
-      priceObservations7d: props.activeListings7d,
-    }).summaryLong;
+  const [pricingOpen, setPricingOpen] = useState(false);
+  const summary = props.isPro
+    ? props.summaryText?.trim()
+      || buildPopAlphaScoutSummary({
+        cardName: props.cardName,
+        marketPrice: props.marketPrice,
+        fairValue: props.fairValue,
+        changePct: props.changePct,
+        changeLabel: props.changeLabel,
+        // The prop is named `activeListings7d` for legacy consistency with
+        // the DB column, but the value is fresh price observations, not
+        // listings. Map to the accurate name on the LLM/fallback input.
+        priceObservations7d: props.activeListings7d,
+      }).summaryLong
+    : null;
   const updatedAgo = formatUpdatedAgo(props.updatedAt);
 
   return (
-    <section className="relative mt-6 overflow-hidden rounded-2xl border border-[rgba(0,180,216,0.32)] border-l-4 border-l-[#00B4D8] bg-[rgba(0,180,216,0.12)] px-4 py-3 shadow-[0_0_28px_rgba(0,180,216,0.28),0_18px_60px_rgba(0,0,0,0.24)] backdrop-blur-md">
-      <span className="pointer-events-none absolute inset-y-0 -left-1 w-1/2 scout-blue-shimmer" aria-hidden="true" />
-      <div className="relative z-10 flex items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 text-[22px] font-semibold tracking-[-0.02em] text-[#7DD3E8] sm:text-[24px]">
-            <Sparkles size={14} strokeWidth={2.2} className="text-[#A5E4F2]" />
-            Where this card stands today
+    <>
+      <section className="relative mt-6 overflow-hidden rounded-2xl border border-[rgba(0,180,216,0.32)] border-l-4 border-l-[#00B4D8] bg-[rgba(0,180,216,0.12)] px-4 py-3 shadow-[0_0_28px_rgba(0,180,216,0.28),0_18px_60px_rgba(0,0,0,0.24)] backdrop-blur-md">
+        <span className="pointer-events-none absolute inset-y-0 -left-1 w-1/2 scout-blue-shimmer" aria-hidden="true" />
+        <div className="relative z-10 flex items-start justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 text-[22px] font-semibold tracking-[-0.02em] text-[#7DD3E8] sm:text-[24px]">
+              <Sparkles size={14} strokeWidth={2.2} className="text-[#A5E4F2]" />
+              Where this card stands today
+            </div>
+            <p className="mt-1 text-[12px] font-medium tracking-[0.04em] text-[rgba(165,228,242,0.85)] sm:text-[13px]">
+              Market snapshot
+            </p>
           </div>
-          <p className="mt-1 text-[12px] font-medium tracking-[0.04em] text-[rgba(165,228,242,0.85)] sm:text-[13px]">
-            Market snapshot
-          </p>
-        </div>
-        <div className="flex shrink-0 flex-col items-end">
-          <span className="inline-flex h-[2.25rem] items-center gap-2 self-start rounded-full border border-[#00B4D8]/25 bg-[#00B4D8]/10 px-3 text-[14px] font-semibold leading-none tracking-[-0.01em] text-[#CFF7FF]">
-            <span className="relative flex h-3.5 w-3.5 items-center justify-center">
-              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#00B4D8] shadow-[0_0_10px_rgba(0,180,216,0.75)]" />
+          <div className="flex shrink-0 flex-col items-end">
+            <span className="inline-flex h-[2.25rem] items-center gap-2 self-start rounded-full border border-[#00B4D8]/25 bg-[#00B4D8]/10 px-3 text-[14px] font-semibold leading-none tracking-[-0.01em] text-[#CFF7FF]">
+              <span className="relative flex h-3.5 w-3.5 items-center justify-center">
+                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#00B4D8] shadow-[0_0_10px_rgba(0,180,216,0.75)]" />
+              </span>
+              {props.isPro ? "Snapshot" : "Pro"}
             </span>
-            Snapshot
-          </span>
-          <span className="mt-1 pr-1 text-[11px] font-medium tracking-[0.04em] text-[rgba(165,228,242,0.75)]">
-            {updatedAgo}
-          </span>
+            {props.isPro ? (
+              <span className="mt-1 pr-1 text-[11px] font-medium tracking-[0.04em] text-[rgba(165,228,242,0.75)]">
+                {updatedAgo}
+              </span>
+            ) : null}
+          </div>
         </div>
-      </div>
 
-      <TypewriterText
-        text={summary}
-        className="relative z-10 mt-2 text-[18px] font-medium leading-relaxed text-[#E0F7FC] sm:text-[19px]"
-      />
-    </section>
+        {props.isPro && summary ? (
+          <TypewriterText
+            text={summary}
+            className="relative z-10 mt-2 text-[18px] font-medium leading-relaxed text-[#E0F7FC] sm:text-[19px]"
+          />
+        ) : (
+          <div className="relative z-10 mt-3">
+            <p className="text-[18px] font-medium leading-relaxed text-[#E0F7FC] sm:text-[19px]">
+              Preview: Pro analyzes price movement, market depth, and value signals for this card.
+            </p>
+            <div className="relative mt-3 overflow-hidden rounded-2xl border border-[#00B4D8]/20 bg-black/20 px-4 py-3">
+              <div className="pointer-events-none space-y-2 blur-[5px]" aria-hidden="true">
+                <p className="h-3 w-11/12 rounded-full bg-[#A5E4F2]/35" />
+                <p className="h-3 w-9/12 rounded-full bg-[#A5E4F2]/25" />
+                <p className="h-3 w-10/12 rounded-full bg-[#A5E4F2]/20" />
+              </div>
+              <button
+                type="button"
+                onClick={() => setPricingOpen(true)}
+                className="absolute inset-x-0 top-1/2 mx-auto inline-flex w-max -translate-y-1/2 items-center gap-2 rounded-full bg-[#00B4D8] px-4 py-2 text-[13px] font-bold text-white shadow-[0_0_18px_rgba(0,180,216,0.45)] transition hover:bg-[#20C7E8]"
+              >
+                <Lock size={13} strokeWidth={2.4} />
+                Upgrade to Pro
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+      <PricingModal open={pricingOpen} onClose={() => setPricingOpen(false)} />
+    </>
   );
 }

@@ -183,7 +183,7 @@ Known state: `AuthService` has TODO stubs and is not wired to real Clerk flows. 
 **Key facts:**
 - `relativePath = .;` works when `Package.swift` is a sibling of the `.xcodeproj` (both at `ios/` in our case). The path is relative to the xcodeproj's containing directory, **not** the xcodeproj itself.
 - Xcode auto-detects the new package on next build — no `pod install`-style step.
-- `xcodebuild ... build` with no prior cache generated `PopAlphaCore_PopAlphaCore.bundle/` containing the compiled `.mlmodelc` (from `.mlpackage`), plus auto-generated Swift interface for the model. `.process("Resources")` in `Package.swift` handled the mlpackage correctly — **no `.copy` fallback was needed**.
+- `xcodebuild ... build` with no prior cache generated `PopAlphaCore_PopAlphaCore.bundle/` containing the compiled `.mlmodelc` (from `.mlpackage`), plus auto-generated Swift interface for the model. `Package.swift` should process each `.mlpackage` and data file explicitly; processing the whole `Resources` directory can make SwiftPM see duplicate inner `Manifest.json`, `weight.bin`, and `model.mlmodel` names.
 - The fallback plan (GUI: Xcode → File → Add Package Dependencies → Add Local…) was not needed, but it's the safe escape hatch if a future pbxproj edit corrupts the file.
 
 **Found:** 2026-04-11, wiring the existing `ios/Sources/Features/Scanner/` package into the `PopAlphaApp` target.
@@ -202,4 +202,3 @@ Known state: `AuthService` has TODO stubs and is not wired to real Clerk flows. 
 The host then becomes the `@StateObject` for the SwiftUI view, which reads `host.viewModel` to hand to `ScannerView(viewModel:)` and reacts to `host.lastRecognized` via `.onChange`. See `ios/PopAlphaApp/ScannerTabView.swift` for the full pattern.
 
 **Found:** 2026-04-11, same wire-up session.
-

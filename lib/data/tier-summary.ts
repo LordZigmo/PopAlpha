@@ -133,7 +133,7 @@ const JAPANESE_FRESH_WINDOW_MS = JAPANESE_FRESH_WINDOW_DAYS * 24 * 60 * 60 * 100
  *                       public_card_metrics, regardless of grade or
  *                       whether market_price is populated. This is
  *                       the matching pipeline's success rate — when
- *                       Scrydex returns observations for a card, did
+ *                       the provider pipeline returns observations for a card, did
  *                       we cleanly attach them to the canonical row.
  *                       A card with only graded slab observations
  *                       counts as matched here even though its RAW

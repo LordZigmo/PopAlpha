@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { dbAdmin } from "@/lib/db/admin";
+import { hasPro } from "@/lib/entitlements";
 
 import {
   getCardStyleFeatures,
@@ -69,6 +70,15 @@ export async function GET(req: Request) {
 
   if (!capability.enabled) {
     const response = NextResponse.json({ ok: true, enabled: false, explanation: null });
+    if (actor.needs_cookie_set) setActorCookieOnResponse(response, actor.actor_key);
+    return response;
+  }
+
+  if (!actor.clerk_user_id || !(await hasPro(actor.clerk_user_id))) {
+    const response = NextResponse.json(
+      { ok: false, error: "Pro subscription required." },
+      { status: 403 },
+    );
     if (actor.needs_cookie_set) setActorCookieOnResponse(response, actor.actor_key);
     return response;
   }

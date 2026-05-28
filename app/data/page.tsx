@@ -375,7 +375,7 @@ export default async function DataPage() {
                       {formatPct(japanese.matchedPct)}
                     </p>
                     <p className="mt-1 text-[12px] text-[#8B8B8B]">
-                      {formatNumber(japanese.matchedCards)} of {formatNumber(japanese.totalCards)} matched to Scrydex observations
+                      {formatNumber(japanese.matchedCards)} of {formatNumber(japanese.totalCards)} matched to public market observations
                     </p>
                   </div>
                   <div className="rounded-2xl border border-white/[0.05] bg-[#0F0808] p-4">
@@ -456,7 +456,7 @@ export default async function DataPage() {
 
                 <div className="mt-5 space-y-2 text-[13px] leading-6 text-[#8B8B8B]">
                   <p>
-                    <span className="font-semibold text-[#C9CDD3]">Reading the metrics.</span> "Pipeline matched" is whether Scrydex observations attached to a canonical card — RAW or graded. "Has RAW price" is whether we can show an ungraded headline price; structurally lower for JP than EN because many JP holos primarily trade as PSA/CGC slabs and Scrydex has no RAW NM data on them. "Fresh RAW" is how recent that RAW headline is.
+                    <span className="font-semibold text-[#C9CDD3]">Reading the metrics.</span> "Pipeline matched" is whether public market observations attached to a canonical card — RAW or graded. "Has RAW price" is whether we can show an ungraded headline price; structurally lower for JP than EN because many JP holos primarily trade as PSA/CGC slabs and have limited RAW NM public data. "Fresh RAW" is how recent that RAW headline is.
                   </p>
                   <p>
                     <span className="font-semibold text-[#C9CDD3]">Onboarding rule.</span> Pipeline matched &gt; 90% on a new set means our matching logic is working. RAW % is informational — it reflects what JP collectors actually trade, not pipeline health. Add the next batch of JP sets when Pipeline matched stays &gt; 90% for a few days.
@@ -535,7 +535,7 @@ export default async function DataPage() {
                 <span className="font-semibold text-white">Refresh cadence.</span> Hot cards refresh every six hours. Warm refreshes daily. Sparse refreshes a few times a week. Dormant gets a weekly sweep so a sale brings it back to life.
               </li>
               <li>
-                <span className="font-semibold text-white">Source.</span> All RAW market prices are sourced from Scrydex. No invented data, no synthetic fills.
+                <span className="font-semibold text-white">Source.</span> Market Price is PopAlpha&apos;s conservative public market anchor. Recent market signals appear separately when they meaningfully diverge. No invented data, no synthetic fills.
               </li>
               <li>
                 <span className="font-semibold text-white">Last classified.</span>{" "}

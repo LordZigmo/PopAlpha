@@ -5,6 +5,7 @@ import {
   getScrydexCredentials,
   type ScrydexCard,
 } from "@/lib/scrydex/client";
+import { buildSetSeedRowsForScrydexImport } from "@/lib/admin/scrydex-canonical-set-seed";
 import { buildCanonicalSearchDoc, normalizeSearchText, stripDiacritics } from "@/lib/search/normalize.mjs";
 
 export type ScrydexCanonicalImportParams = {
@@ -436,6 +437,17 @@ export async function runScrydexCanonicalImport(params: ScrydexCanonicalImportPa
             0,
           );
       } else {
+        const setSeedRows = buildSetSeedRowsForScrydexImport(
+          preparedCards,
+          params.provisional ? "scrydex_provisional" : "scrydex_set_metadata",
+        );
+        if (setSeedRows.length > 0) {
+          const { error: setSeedError } = await supabase
+            .from("sets")
+            .upsert(setSeedRows, { onConflict: "set_id", ignoreDuplicates: true });
+          if (setSeedError) throw new Error(`sets seed failed: ${setSeedError.message}`);
+        }
+
         const canonicalRows = preparedCards.map((prepared) => ({
           ...prepared.canonical,
           source: sourceValue,
@@ -495,11 +507,11 @@ export async function runScrydexCanonicalImport(params: ScrydexCanonicalImportPa
             .select("id, source_id");
           if (printingError) {
             console.error("[scrydex-canonical] card_printings upsert error:", printingError.message, printingError.details);
-            itemsFailed += chunk.length;
-          } else {
-            itemsUpserted += chunk.length;
-            for (const row of inserted ?? []) sourceIdToPrintingId.set(row.source_id, row.id);
+            throw new Error(`card_printings upsert failed: ${printingError.message}`);
           }
+
+          itemsUpserted += chunk.length;
+          for (const row of inserted ?? []) sourceIdToPrintingId.set(row.source_id, row.id);
         }
 
         const allPrintingAliases: Array<{ alias: string; printing_id: string }> = [];

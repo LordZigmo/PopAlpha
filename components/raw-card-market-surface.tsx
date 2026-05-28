@@ -8,11 +8,13 @@ import CardMarketIntelClient from "@/components/card-market-intel-client";
 import CardModeToggle from "@/components/card-mode-toggle";
 import { Pill } from "@/components/ios-grouped-ui";
 import MarketPulse from "@/components/market-pulse";
+import PersonalizedCardInsight from "@/components/personalized-card-insight";
 import PopAlphaScoutPreview from "@/components/popalpha-scout-preview";
 import type { FinishGroup } from "@/lib/cards/detail-types";
 import type { RawCardMarketVariant } from "@/components/raw-card-variant-types";
 import {
   PRICING_DISPLAY_V2_ENABLED,
+  formatPriceDisplay,
   resolveDisplayedMarketPrice,
 } from "@/lib/pricing/displayed-market-price";
 import {
@@ -35,6 +37,8 @@ type RawCardMarketSurfaceProps = {
   gradedHref: string;
   scoutSummaryText: string | null;
   scoutUpdatedAt: string | null;
+  isPro: boolean;
+  personalizedVariantRef: string | null;
   currentCardPulse: {
     bullishVotes: number;
     bearishVotes: number;
@@ -146,6 +150,8 @@ export default function RawCardMarketSurface({
   gradedHref,
   scoutSummaryText,
   scoutUpdatedAt,
+  isPro,
+  personalizedVariantRef,
   currentCardPulse,
   children,
 }: RawCardMarketSurfaceProps) {
@@ -163,6 +169,11 @@ export default function RawCardMarketSurface({
   const currentPrice = activeVariant?.currentPrice ?? null;
   const fairValue = activeVariant?.marketBalancePrice ?? null;
   const priceChangePct = activeVariant?.changePct7d ?? null;
+  const marketPriceDisplayState = activeVariant?.marketPriceDisplayState ?? null;
+  const recentMarketSignalUsd = activeVariant?.recentMarketSignalUsd ?? null;
+  const recentMarketSignalAsOf = activeVariant?.recentMarketSignalAsOf ?? null;
+  const recentMarketSignalDirection = activeVariant?.recentMarketSignalDirection ?? null;
+  const recentMarketSignalDeltaPct = activeVariant?.recentMarketSignalDeltaPct ?? null;
   const displayPrimaryPrice = currentPrice;
   const formattedAsOf = formatAsOf(activeVariant?.asOfTs ?? null);
   // Phase 2 of tiered-refresh: classify the price by age. Stale cards
@@ -173,9 +184,12 @@ export default function RawCardMarketSurface({
         marketPriceAsOf: activeVariant?.asOfTs ?? null,
       })
     : null;
+  const heroPriceMeta = heroPriceDisplay ? formatPriceDisplay(heroPriceDisplay) : null;
   const showPrimaryPrice = !heroPriceDisplay || heroPriceDisplay.kind !== "no_market";
-  const primaryPrice = displayPrimaryPrice != null && showPrimaryPrice ? formatUsdCompact(displayPrimaryPrice) : null;
-  const showPriceChange = !heroPriceDisplay || heroPriceDisplay.kind === "live";
+  const primaryPrice = displayPrimaryPrice != null && showPrimaryPrice
+    ? formatUsdCompact(displayPrimaryPrice)
+    : null;
+  const showPriceChange = !heroPriceDisplay || heroPriceMeta?.showChangeBadge === true;
   const scoutMarketPrice = showPriceChange ? currentPrice : null;
   const displayedPriceChangePct = showPriceChange ? priceChangePct : null;
   const heroPriceLabel = (() => {
@@ -188,10 +202,18 @@ export default function RawCardMarketSurface({
     if (heroPriceDisplay?.kind === "no_market") {
       return "No recent market";
     }
+    const marketLabel = marketPriceDisplayState === "ALIGNED" ? "Aligned market price" : "Market Price";
     return formattedAsOf
-      ? `Near-mint market price · Updated ${formattedAsOf}`
-      : "Near-mint market price";
+      ? `${marketLabel} · Updated ${formattedAsOf}`
+      : marketLabel;
   })();
+  const showRecentMarketSignal = recentMarketSignalUsd !== null && recentMarketSignalDirection !== null;
+  const recentMarketSignalDeltaLabel = recentMarketSignalDeltaPct != null
+    ? `${Math.abs(recentMarketSignalDeltaPct) >= 10 ? Math.abs(recentMarketSignalDeltaPct).toFixed(0) : Math.abs(recentMarketSignalDeltaPct).toFixed(1)}%`
+    : null;
+  const recentMarketSignalCopy = showRecentMarketSignal
+    ? `${recentMarketSignalDirection === "HIGHER" ? "higher" : "lower"}${recentMarketSignalDeltaLabel ? ` by ${recentMarketSignalDeltaLabel}` : ""}`
+    : null;
   const priceChangeColor = displayedPriceChangePct == null
     ? "#6B6B6B"
     : displayedPriceChangePct > 0
@@ -283,42 +305,15 @@ export default function RawCardMarketSurface({
                     <p className="mt-1 text-[14px] text-[#555]">
                       {heroPriceLabel}
                     </p>
-                    {activeVariant?.scrydexPrice != null ? (
+                    {showRecentMarketSignal ? (
                       <div className="mt-1 text-[13px] tabular-nums text-[#7A7A7A]">
                         <p>
-                          Scrydex: {activeVariant?.scrydexPrice != null ? formatUsdCompact(activeVariant.scrydexPrice) : "—"}{" "}
-                          <span className="text-[#5E5E5E]">Updated: {formatAsOf(activeVariant?.scrydexAsOfTs ?? null) ?? "--"}</span>
+                          Recent market signal: {formatUsdCompact(recentMarketSignalUsd)}{" "}
+                          <span className="text-[#5E5E5E]">
+                            {recentMarketSignalCopy}
+                            {recentMarketSignalAsOf ? ` · Updated ${formatAsOf(recentMarketSignalAsOf) ?? "--"}` : ""}
+                          </span>
                         </p>
-                        {/*
-                          Phase C-2 (2026-05-16): surface scrydex's
-                          asking-anchored value when it diverges
-                          meaningfully from the headline. The headline
-                          (after Phase A) tracks scrydex `low` to match
-                          TCGplayer's published Market Price label. The
-                          asking value (`market`/`high`) reflects current
-                          listing-side pressure. We only render this
-                          line when the gap is ≥10% so it adds signal
-                          rather than noise on cards where the two
-                          align tightly.
-                        */}
-                        {(() => {
-                          const headline = activeVariant?.scrydexPrice ?? null;
-                          const asking = activeVariant?.scrydexAskingHighUsd ?? null;
-                          if (headline == null || asking == null) return null;
-                          if (headline <= 0) return null;
-                          const gapPct = ((asking - headline) / headline) * 100;
-                          if (!Number.isFinite(gapPct) || gapPct < 10) return null;
-                          return (
-                            <p
-                              title="Recent listing-side asking value. The headline price tracks recent-sold medians (TCGplayer's Market Price label); this 'Asking' value reflects current asks, which often sit above sold prices on thin-liquidity cards."
-                            >
-                              Asking: {formatUsdCompact(asking)}{" "}
-                              <span className="text-[#5E5E5E]">
-                                +{gapPct.toFixed(0)}% over recent sales
-                              </span>
-                            </p>
-                          );
-                        })()}
                       </div>
                     ) : null}
                   </>
@@ -378,6 +373,13 @@ export default function RawCardMarketSurface({
             activeListings7d={activeVariant?.activeListings7d ?? null}
             summaryText={scoutSummaryText}
             updatedAt={scoutUpdatedAt}
+            isPro={isPro}
+          />
+
+          <PersonalizedCardInsight
+            canonicalSlug={canonicalSlug}
+            variantRef={personalizedVariantRef}
+            isPro={isPro}
           />
 
           <section className="mt-6 mb-6 grid gap-2 sm:grid-cols-3">

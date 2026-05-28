@@ -1,6 +1,10 @@
 import SwiftUI
 import NukeUI
 
+private let abundantRawCardMaxUsd: Double = 2
+private let abundantRawCardHeroLabel = "Abundant"
+private let abundantRawCardDetailLabel = "Usually under $2 - pay what feels fair"
+
 // MARK: - Price Mode
 
 enum PriceMode: Equatable, Hashable {
@@ -103,7 +107,9 @@ struct CardDetailView: View {
     }
 
     @Environment(\.dismiss) private var dismiss
+    @StateObject private var premiumGate = PremiumGate.shared
     @State private var showCorrectionSheet = false
+    @State private var showMarketSummaryPaywall = false
     /// Tracks the "sign in then auto-save this card" flow. Set when an
     /// unauthenticated user taps the + FAB; cleared on completion or
     /// cancel. Watched by an .onChange so when isAuthenticated flips
@@ -214,6 +220,11 @@ struct CardDetailView: View {
             snkrdunkPrice: cardMetrics?.snkrdunkPrice,
             snkrdunkSampleCount: cardMetrics?.snkrdunkSampleCount
         )
+    }
+
+    private var isAbundantNearMintHeroPrice: Bool {
+        guard !selectedPriceMode.isGraded, let price = preferredHeroPrice else { return false }
+        return price > 0 && price <= abundantRawCardMaxUsd
     }
 
     /// Source label shown next to the hero price so the user knows
@@ -378,7 +389,11 @@ struct CardDetailView: View {
                 pairedImageUrl = pairing?.pairedImageUrl
             }
 
-            cardProfile = try? await CardService.shared.fetchCardProfile(slug: activeCard.id)
+            if premiumGate.isPro {
+                cardProfile = try? await CardService.shared.fetchCardProfile(slug: activeCard.id)
+            } else {
+                cardProfile = nil
+            }
             cardMetrics = try? await CardService.shared.fetchCardMetrics(slug: activeCard.id)
             // First metrics arrival is the cue to drop the toggle fade.
             // Cleared here rather than in the toggle tap so the fade
@@ -491,6 +506,15 @@ struct CardDetailView: View {
                     printingId: selectedPrintingId
                 ) {
                     await MainActor.run { conditionPrices = prices }
+                }
+            }
+        }
+        .onChange(of: premiumGate.isPro) { _, isPro in
+            Task {
+                if isPro {
+                    cardProfile = try? await CardService.shared.fetchCardProfile(slug: activeCard.id)
+                } else {
+                    cardProfile = nil
                 }
             }
         }
@@ -869,7 +893,7 @@ struct CardDetailView: View {
             // raw mechanics. (Watchlist row was removed; "Add to
             // Portfolio" lives in the floating action button on the
             // root view, so this card stays in its previous slot.)
-            if cardProfile != nil {
+            if cardProfile != nil || !premiumGate.isPro {
                 aiBriefSection
             }
 
@@ -989,7 +1013,7 @@ struct CardDetailView: View {
                 // Scrydex market_price, not the Yahoo!-derived median,
                 // so showing a Scrydex delta next to a Yahoo! price
                 // would imply causality that doesn't exist.
-                if !selectedPriceMode.isGraded && !suppressHeroChangeBadge {
+                if !selectedPriceMode.isGraded && !suppressHeroChangeBadge && !isAbundantNearMintHeroPrice {
                     HStack(spacing: 4) {
                         Image(systemName: heroChange.direction.arrowSymbol)
                             .font(.system(size: 12, weight: .bold))
@@ -1006,6 +1030,13 @@ struct CardDetailView: View {
                         .font(PA.Typography.caption)
                         .foregroundStyle(PA.Colors.muted)
                 }
+            }
+
+            if isAbundantNearMintHeroPrice {
+                Text(abundantRawCardDetailLabel)
+                    .font(PA.Typography.caption)
+                    .foregroundStyle(PA.Colors.muted)
+                    .accessibilityLabel("Usually under two dollars. Pay what feels fair.")
             }
 
             // Source attribution for JP cards. When BOTH Yahoo! JP and
@@ -1486,75 +1517,125 @@ struct CardDetailView: View {
     @ViewBuilder
     private var aiBriefSection: some View {
         if let profile = cardProfile {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .center, spacing: 8) {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(detailAccent)
-                    Text("Where this card stands today")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(detailAccent)
-                        .kerning(-0.2)
-                    Spacer(minLength: 0)
-                    if let chip = profile.chip?.trimmingCharacters(in: .whitespacesAndNewlines), !chip.isEmpty {
-                        Text(chip)
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(PA.Colors.text)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .background(detailAccent.opacity(0.28))
-                            .clipShape(Capsule())
-                            .overlay(
-                                Capsule()
-                                    .stroke(detailAccent.opacity(0.45), lineWidth: 1)
-                            )
-                    }
-                }
+            aiBriefCard {
+                aiBriefHeader(chip: profile.chip)
+                aiBriefUnlockedBody(profile)
+            }
+        } else if !premiumGate.isPro {
+            aiBriefCard {
+                aiBriefHeader(chip: "Pro")
+                aiBriefLockedPreview
+            }
+        }
+    }
 
-                Text(summaryHeadline(from: profile))
-                    .font(.system(size: 15, weight: .semibold))
+    private func aiBriefCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            content()
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(detailAccent.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(alignment: .leading) {
+            // Inset rounded rail — tucks inside the card's rounded
+            // corners instead of trying to trace them.
+            Capsule()
+                .fill(detailAccent)
+                .frame(width: 3)
+                .padding(.vertical, 10)
+                .padding(.leading, 2)
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(detailAccent.opacity(0.35), lineWidth: 1)
+        )
+        .shadow(color: detailAccent.opacity(0.22), radius: 14, x: 0, y: 0)
+        .shadow(color: .black.opacity(0.24), radius: 30, x: 0, y: 18)
+        .sheet(isPresented: $showMarketSummaryPaywall) {
+            PaywallView(context: .generic, surface: "card_detail_market_summary_teaser")
+        }
+    }
+
+    private func aiBriefHeader(chip: String?) -> some View {
+        HStack(alignment: .center, spacing: 8) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(detailAccent)
+            Text("Where this card stands today")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(detailAccent)
+                .kerning(-0.2)
+            Spacer(minLength: 0)
+            if let chip = chip?.trimmingCharacters(in: .whitespacesAndNewlines), !chip.isEmpty {
+                Text(chip)
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(PA.Colors.text)
-                    .lineSpacing(3)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(detailAccent.opacity(0.28))
+                    .clipShape(Capsule())
+                    .overlay(
+                        Capsule()
+                            .stroke(detailAccent.opacity(0.45), lineWidth: 1)
+                    )
+            }
+        }
+    }
 
-                if let interpretation = summaryInterpretation(from: profile) {
-                    Text(interpretation)
+    @ViewBuilder
+    private func aiBriefUnlockedBody(_ profile: CardProfileResult) -> some View {
+        Text(summaryHeadline(from: profile))
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(PA.Colors.text)
+            .lineSpacing(3)
+            .fixedSize(horizontal: false, vertical: true)
+
+        if let interpretation = summaryInterpretation(from: profile) {
+            Text(interpretation)
+                .font(.system(size: 13, weight: .regular))
+                .foregroundStyle(PA.Colors.textSecondary)
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+
+        if shouldShowThinDataNote {
+            HStack(spacing: 6) {
+                Image(systemName: "dot.radiowaves.left.and.right")
+                    .font(.system(size: 10, weight: .semibold))
+                Text("Read calibrated for thin market depth")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .foregroundStyle(PA.Colors.muted)
+            .padding(.top, 2)
+        }
+    }
+
+    private var aiBriefLockedPreview: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Preview: Pro reads price movement, market depth, and collector demand for this card.")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(PA.Colors.text)
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+
+            LockedPreviewOverlay(
+                ctaText: "Upgrade to Pro",
+                blurRadius: 5,
+                onTap: { showMarketSummaryPaywall = true }
+            ) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Momentum, liquidity, and confidence read")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(PA.Colors.text.opacity(0.85))
+                    Text("AI interpretation tuned to the card's current market signals and recent observations.")
                         .font(.system(size: 13, weight: .regular))
                         .foregroundStyle(PA.Colors.textSecondary)
                         .lineSpacing(3)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
-
-                if shouldShowThinDataNote {
-                    HStack(spacing: 6) {
-                        Image(systemName: "dot.radiowaves.left.and.right")
-                            .font(.system(size: 10, weight: .semibold))
-                        Text("Read calibrated for thin market depth")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .foregroundStyle(PA.Colors.muted)
-                    .padding(.top, 2)
-                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 2)
             }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(detailAccent.opacity(0.12))
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(alignment: .leading) {
-                // Inset rounded rail — tucks inside the card's rounded
-                // corners instead of trying to trace them.
-                Capsule()
-                    .fill(detailAccent)
-                    .frame(width: 3)
-                    .padding(.vertical, 10)
-                    .padding(.leading, 2)
-            }
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(detailAccent.opacity(0.35), lineWidth: 1)
-            )
-            .shadow(color: detailAccent.opacity(0.22), radius: 14, x: 0, y: 0)
-            .shadow(color: .black.opacity(0.24), radius: 30, x: 0, y: 18)
         }
     }
 
@@ -2172,6 +2253,7 @@ struct CardDetailView: View {
             // Falls back to printing-specific override → MarketCard's
             // headline price (Scrydex) when no JP data is present.
             if let usd = preferredHeroPrice {
+                if usd <= abundantRawCardMaxUsd { return abundantRawCardHeroLabel }
                 if usd >= 1000 { return String(format: "$%.0f", usd) }
                 return String(format: "$%.2f", usd)
             }

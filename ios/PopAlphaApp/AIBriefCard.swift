@@ -188,9 +188,11 @@ struct AIBriefCard: View {
                     // collapsing back doesn't carry intent. Best-effort:
                     // PersonalizationService.track is debounced + batched.
                     if willExpand {
-                        PersonalizationService.shared.track(
-                            PersonalizedEvent(type: .aiBriefReadMoreTapped)
-                        )
+                        Task {
+                            await PersonalizationService.shared.track(
+                                PersonalizedEvent(type: .aiBriefReadMoreTapped)
+                            )
+                        }
                     }
                 } label: {
                     HStack(spacing: 4) {

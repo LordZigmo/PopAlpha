@@ -35,6 +35,11 @@ type CardProfileRow = {
 
 type CardMetricsRow = {
   market_price: number | null;
+  market_price_display_state: string | null;
+  recent_market_signal_usd: number | null;
+  recent_market_signal_as_of: string | null;
+  recent_market_signal_delta_pct: number | null;
+  recent_market_signal_direction: "HIGHER" | "LOWER" | string | null;
   median_7d: number | null;
   median_30d: number | null;
   change_pct_7d: number | null;
@@ -87,7 +92,7 @@ async function readMarketSignal(
       admin
         .from("public_card_metrics")
         .select(
-          "market_price, median_7d, median_30d, change_pct_7d, low_30d, high_30d, active_listings_7d, volatility_30d, liquidity_score",
+          "market_price, market_price_display_state, recent_market_signal_usd, recent_market_signal_as_of, recent_market_signal_delta_pct, recent_market_signal_direction, median_7d, median_30d, change_pct_7d, low_30d, high_30d, active_listings_7d, volatility_30d, liquidity_score",
         )
         .eq("canonical_slug", canonicalSlug)
         .is("printing_id", null)
@@ -144,7 +149,7 @@ async function ensureMarketSignal(
       admin
         .from("public_card_metrics")
         .select(
-          "market_price, median_7d, median_30d, change_pct_7d, low_30d, high_30d, active_listings_7d, volatility_30d, liquidity_score",
+          "market_price, market_price_display_state, recent_market_signal_usd, recent_market_signal_as_of, recent_market_signal_delta_pct, recent_market_signal_direction, median_7d, median_30d, change_pct_7d, low_30d, high_30d, active_listings_7d, volatility_30d, liquidity_score",
         )
         .eq("canonical_slug", canonicalSlug)
         .is("printing_id", null)
@@ -173,6 +178,11 @@ async function ensureMarketSignal(
       setName: canonical.set_name,
       cardNumber: canonical.card_number,
       marketPrice: metrics.market_price,
+      marketPriceDisplayState: metrics.market_price_display_state,
+      recentMarketSignalUsd: metrics.recent_market_signal_usd,
+      recentMarketSignalAsOf: metrics.recent_market_signal_as_of,
+      recentMarketSignalDeltaPct: metrics.recent_market_signal_delta_pct,
+      recentMarketSignalDirection: metrics.recent_market_signal_direction,
       median7d: metrics.median_7d,
       median30d: metrics.median_30d,
       changePct7d: metrics.change_pct_7d,

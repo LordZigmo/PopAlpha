@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Compass } from "lucide-react";
+import { Compass, Lock } from "lucide-react";
 
+import PricingModal from "@/components/billing/pricing-modal";
 import TypewriterText from "@/components/typewriter-text";
 import type { PersonalizedExplanation } from "@/lib/personalization/types";
 
@@ -24,6 +25,7 @@ type ApiResponse = {
 type Props = {
   canonicalSlug: string;
   variantRef?: string | null;
+  isPro?: boolean;
 };
 
 function formatUpdatedAgo(value: string | null | undefined): string {
@@ -46,7 +48,8 @@ function fitsLabel(fits: PersonalizedExplanation["fits"] | undefined): string {
   return "Your style";
 }
 
-export default function PersonalizedCardInsight({ canonicalSlug, variantRef }: Props) {
+export default function PersonalizedCardInsight({ canonicalSlug, variantRef, isPro = false }: Props) {
+  const [pricingOpen, setPricingOpen] = useState(false);
   const [state, setState] = useState<
     | { kind: "loading" }
     | { kind: "disabled" }
@@ -55,6 +58,9 @@ export default function PersonalizedCardInsight({ canonicalSlug, variantRef }: P
   >({ kind: "loading" });
 
   useEffect(() => {
+    if (!isPro) {
+      return;
+    }
     let cancelled = false;
     async function load() {
       try {
@@ -81,7 +87,61 @@ export default function PersonalizedCardInsight({ canonicalSlug, variantRef }: P
     return () => {
       cancelled = true;
     };
-  }, [canonicalSlug, variantRef]);
+  }, [canonicalSlug, isPro, variantRef]);
+
+  if (!isPro) {
+    return (
+      <>
+        <section
+          aria-labelledby="personalized-insight-heading"
+          className="relative mt-6 overflow-hidden rounded-2xl border border-[rgba(192,132,252,0.35)] border-l-4 border-l-[#A855F7] bg-[rgba(168,85,247,0.12)] px-4 py-3 shadow-[0_0_28px_rgba(168,85,247,0.28),0_18px_60px_rgba(0,0,0,0.24)] backdrop-blur-md"
+        >
+          <span
+            className="pointer-events-none absolute inset-y-0 -left-1 w-1/2 personalized-holo-shimmer"
+            aria-hidden="true"
+          />
+          <div className="relative z-10 flex items-start justify-between gap-4">
+            <div>
+              <div
+                id="personalized-insight-heading"
+                className="flex items-center gap-2 text-[30px] font-semibold tracking-[-0.03em] text-[#D8B4FE] sm:text-[32px]"
+              >
+                <Compass size={14} strokeWidth={2.2} className="text-[#E9D5FF]" />
+                How this fits your style
+              </div>
+              <p className="mt-1 text-[12px] font-medium tracking-[0.04em] text-[rgba(233,213,255,0.85)] sm:text-[13px]">
+                Personalized for you
+              </p>
+            </div>
+            <span className="inline-flex h-[2.25rem] items-center gap-2 rounded-full border border-[rgba(192,132,252,0.45)] bg-[rgba(168,85,247,0.28)] px-3 text-[14px] font-semibold leading-none tracking-[-0.01em] text-[#F5F3FF]">
+              Pro
+            </span>
+          </div>
+
+          <p className="relative z-10 mt-3 text-[18px] font-medium leading-relaxed text-[#F5F3FF] sm:text-[19px]">
+            Preview: Pro compares this card against your collecting style, recent activity, and taste signals.
+          </p>
+
+          <div className="relative z-10 mt-3 overflow-hidden rounded-2xl border border-[rgba(192,132,252,0.22)] bg-black/20 px-4 py-3">
+            <ul className="pointer-events-none space-y-2 blur-[5px]" aria-hidden="true">
+              <li className="h-3 w-10/12 rounded-full bg-[#E9D5FF]/35" />
+              <li className="h-3 w-8/12 rounded-full bg-[#E9D5FF]/25" />
+              <li className="h-3 w-9/12 rounded-full bg-[#E9D5FF]/20" />
+            </ul>
+            <button
+              type="button"
+              onClick={() => setPricingOpen(true)}
+              className="absolute inset-x-0 top-1/2 mx-auto inline-flex w-max -translate-y-1/2 items-center gap-2 rounded-full bg-[#A855F7] px-4 py-2 text-[13px] font-bold text-white shadow-[0_0_18px_rgba(168,85,247,0.45)] transition hover:bg-[#B968FF]"
+            >
+              <Lock size={13} strokeWidth={2.4} />
+              Upgrade to Pro
+            </button>
+          </div>
+        </section>
+        <PricingModal open={pricingOpen} onClose={() => setPricingOpen(false)} />
+      </>
+    );
+  }
 
   if (state.kind === "disabled") return null;
   if (state.kind === "error") return null;

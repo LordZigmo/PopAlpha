@@ -271,14 +271,11 @@ HTTP request itself fails, retry once with idempotency — the
 client retains the tray contents until success. Show "Couldn't
 add — retry?" with the partial results visible.
 
-### Premium gating
-Single-mode scans count against the free-tier scan quota
-(`PremiumGate.shared.offlineScannerEnabled`). Multi-mode should
-follow the same accounting — each individual scan adds to the
-quota. **Deferred decision:** does multi-mode require Pro? My
-suggestion is no for v1 (don't add another paywall for
-something that should be a quality-of-life win), but
-free-tier's existing per-day scan limit still applies.
+### Access model
+Single-mode and multi-mode scanning are free and unlimited. Pro
+monetization belongs around what the scan unlocks next: deeper
+collector insights, market analytics, price alerts, and richer
+portfolio workflows.
 
 ### Confidence indicators in the tray
 Color-coded confidence badge per chip / row:

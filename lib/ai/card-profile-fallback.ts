@@ -43,6 +43,11 @@ export type CardProfileInput = {
   setName: string | null;
   cardNumber: string | null;
   marketPrice: number | null;
+  marketPriceDisplayState?: "ALIGNED" | "SIGNAL_HIGHER" | "SIGNAL_LOWER" | "PUBLIC_ONLY" | "UNDER_REVIEW" | "NO_RELIABLE_PRICE" | string | null;
+  recentMarketSignalUsd?: number | null;
+  recentMarketSignalAsOf?: string | null;
+  recentMarketSignalDeltaPct?: number | null;
+  recentMarketSignalDirection?: "HIGHER" | "LOWER" | string | null;
   median7d: number | null;
   median30d: number | null;
   changePct7d: number | null;
@@ -239,6 +244,16 @@ function formatSignedPct(value: number | null): string | null {
   return `${value > 0 ? "+" : value < 0 ? "-" : ""}${formatted}%`;
 }
 
+function formatMarketSignalSentence(input: CardProfileInput): string | null {
+  if (input.marketPrice == null || !Number.isFinite(input.marketPrice)) return null;
+  const signalPrice = input.recentMarketSignalUsd;
+  if (signalPrice == null || !Number.isFinite(signalPrice)) return null;
+  const direction = input.recentMarketSignalDirection;
+  if (direction !== "HIGHER" && direction !== "LOWER") return null;
+  const directionText = direction === "HIGHER" ? "higher" : "lower";
+  return `${input.canonicalName}'s Market Price is around ${formatUsd(input.marketPrice)}, while recent market signals are ${directionText} near ${formatUsd(signalPrice)}.`;
+}
+
 // ── Fallback tier classification ────────────────────────────────────────────
 //
 // For most of the catalog (cheap commons, set-completion fillers, dusty
@@ -330,9 +345,12 @@ type Narrative = { happening: string; matters: string; watch: string };
 function buildMidPremiumNarrative(input: CardProfileInput, signal: SignalLabel): Narrative {
   const priceText = formatUsd(input.marketPrice);
   const changeText = formatSignedPct(input.changePct7d);
+  const marketSignalSentence = formatMarketSignalSentence(input);
 
   let happening: string;
-  if (changeText && input.changePct7d != null && input.changePct7d > 0) {
+  if (marketSignalSentence) {
+    happening = marketSignalSentence;
+  } else if (changeText && input.changePct7d != null && input.changePct7d > 0) {
     happening = `${input.canonicalName} is up ${changeText} over the last 7 days, trading around ${priceText}.`;
   } else if (changeText && input.changePct7d != null && input.changePct7d < 0) {
     happening = `${input.canonicalName} is down ${changeText} over the last 7 days, trading around ${priceText}.`;

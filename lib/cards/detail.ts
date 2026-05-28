@@ -57,6 +57,14 @@ type RawMetricRow = {
   pokemontcg_price?: number | null;
   market_price: number | null;
   market_price_as_of: string | null;
+  market_price_display_state: string | null;
+  recent_market_signal_usd: number | null;
+  recent_market_signal_as_of: string | null;
+  recent_market_signal_delta_pct: number | null;
+  recent_market_signal_direction: "HIGHER" | "LOWER" | string | null;
+  market_provenance?: {
+    trustedPriceSource?: string | null;
+  } | null;
 };
 
 type RawSignalRow = {
@@ -294,26 +302,31 @@ async function buildPriceCompare(params: {
   metricsRow: RawMetricRow | null;
 }): Promise<CardDetailPriceCompare | null> {
   const { supabase, metricsRow } = params;
-  const scrydexSourcePrice = metricsRow?.market_price ?? null;
-  const scrydexAsOf = scrydexSourcePrice !== null ? (metricsRow?.market_price_as_of ?? null) : null;
-  if (scrydexSourcePrice === null) return null;
+  const headlineSourcePrice = metricsRow?.market_price ?? null;
+  const headlineAsOf = headlineSourcePrice !== null ? (metricsRow?.market_price_as_of ?? null) : null;
+  if (headlineSourcePrice === null) return null;
 
-  const scrydexDisplay = await buildProviderPriceDisplay({
+  const headlineDisplay = await buildProviderPriceDisplay({
     supabase,
     provider: "SCRYDEX",
-    sourcePrice: scrydexSourcePrice,
+    sourcePrice: headlineSourcePrice,
     sourceCurrency: "USD",
-    asOf: scrydexAsOf,
+    asOf: headlineAsOf,
   });
 
-  const providers: ProviderPriceDisplay[] = [scrydexDisplay];
+  const providers: ProviderPriceDisplay[] = [headlineDisplay];
 
   return {
     justtcgPrice: null,
-    scrydexPrice: scrydexDisplay.usdPrice,
+    scrydexPrice: headlineDisplay.usdPrice,
     pokemontcgPrice: null,
-    marketPrice: scrydexDisplay.usdPrice,
-    asOf: scrydexAsOf,
+    marketPrice: headlineDisplay.usdPrice,
+    asOf: headlineAsOf,
+    marketPriceDisplayState: metricsRow?.market_price_display_state ?? (headlineDisplay.usdPrice !== null ? "ALIGNED" : "NO_RELIABLE_PRICE"),
+    recentMarketSignalUsd: headlineDisplay.usdPrice !== null ? (metricsRow?.recent_market_signal_usd ?? null) : null,
+    recentMarketSignalAsOf: headlineDisplay.usdPrice !== null ? (metricsRow?.recent_market_signal_as_of ?? null) : null,
+    recentMarketSignalDeltaPct: headlineDisplay.usdPrice !== null ? (metricsRow?.recent_market_signal_delta_pct ?? null) : null,
+    recentMarketSignalDirection: headlineDisplay.usdPrice !== null ? (metricsRow?.recent_market_signal_direction ?? null) : null,
     providers,
   };
 }
@@ -426,7 +439,7 @@ export async function buildCardDetailResponse(inputSlug: string): Promise<CardDe
       .order("id", { ascending: true }),
     supabase
       .from("public_card_metrics")
-      .select("printing_id, liquidity_score, snapshot_count_30d, justtcg_price, scrydex_price, pokemontcg_price, market_price, market_price_as_of")
+      .select("printing_id, liquidity_score, snapshot_count_30d, justtcg_price, scrydex_price, pokemontcg_price, market_price, market_price_as_of, market_price_display_state, recent_market_signal_usd, recent_market_signal_as_of, recent_market_signal_delta_pct, recent_market_signal_direction, market_provenance")
       .eq("canonical_slug", canonicalSlug)
       .eq("grade", "RAW"),
     supabase

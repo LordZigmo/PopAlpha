@@ -6,7 +6,8 @@
 // being legible) and overlays a centered cyan pill CTA.
 //
 // Used by:
-//   - PersonalizedInsightCardView (reasons + caveats, free-tier branch)
+//   - CardDetailView (AI market summary, free-tier branch)
+//   - PersonalizedInsightCardView (collector-style insight, free-tier branch)
 //   - CollectorRadarLockedCard (entire radar canvas)
 //
 // Design notes:
@@ -44,6 +45,7 @@ struct LockedPreviewOverlay<Content: View>: View {
         ZStack {
             content()
                 .blur(radius: blurRadius)
+                .accessibilityHidden(true)
                 .allowsHitTesting(false)
 
             // Soft fade at the bottom so blurred content reads as a

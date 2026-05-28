@@ -153,6 +153,23 @@ export async function runCardProfileFallbackTests() {
     assert.match(result.summaryLong, /no clear move in either direction/);
   }
 
+  {
+    const result = buildFallbackProfile(
+      makeInput({
+        canonicalName: "Umbreon ex",
+        marketPrice: 1418.7,
+        recentMarketSignalUsd: 1750.5,
+        recentMarketSignalDirection: "HIGHER",
+        recentMarketSignalDeltaPct: 23.4,
+        rarity: "Special Illustration Rare",
+        setName: "Prismatic Evolutions",
+        year: 2025,
+      }),
+    );
+    assert.match(result.summaryLong, /Market Price is around \$1,419/);
+    assert.match(result.summaryLong, /recent market signals are higher near \$1,751/);
+  }
+
   // ── High-mover override (bulk tier with notable move) ─────────────────────
 
   {

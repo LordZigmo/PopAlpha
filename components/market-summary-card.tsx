@@ -52,6 +52,11 @@ type CardMetricRow = {
   active_listings_7d: number | null;
   market_price: number | null;
   market_price_as_of: string | null;
+  market_price_display_state: RawCardMarketVariant["marketPriceDisplayState"] | null;
+  recent_market_signal_usd: number | null;
+  recent_market_signal_as_of: string | null;
+  recent_market_signal_delta_pct: number | null;
+  recent_market_signal_direction: RawCardMarketVariant["recentMarketSignalDirection"] | null;
   change_pct_7d: number | null;
   median_30d: number | null;
   trimmed_median_30d: number | null;
@@ -342,6 +347,11 @@ export async function loadRawCardMarketVariants(params: {
         "active_listings_7d",
         "market_price",
         "market_price_as_of",
+        "market_price_display_state",
+        "recent_market_signal_usd",
+        "recent_market_signal_as_of",
+        "recent_market_signal_delta_pct",
+        "recent_market_signal_direction",
         "change_pct_7d",
         "median_30d",
         "trimmed_median_30d",
@@ -469,9 +479,9 @@ export async function loadRawCardMarketVariants(params: {
     const preferredHistory = scrydexSeries?.points ?? [];
     const metrics = cardMetricsByPrinting.get(variant.printingId) ?? null;
     const signalRow = chooseSignalRow(signalRowsByPrinting.get(variant.printingId) ?? []);
-    const liveScrydexPrice = metrics?.market_price ?? null;
-    const hasLivePrice = liveScrydexPrice !== null;
-    const liveScrydexAsOfTs = hasLivePrice ? (metrics?.market_price_as_of ?? null) : null;
+    const liveMarketPrice = metrics?.market_price ?? null;
+    const hasLivePrice = liveMarketPrice !== null;
+    const liveMarketAsOfTs = hasLivePrice ? (metrics?.market_price_as_of ?? null) : null;
 
     const liquidity = computeLiquidity({
       priceChanges30d: metrics?.provider_price_changes_count_30d ?? null,
@@ -487,12 +497,12 @@ export async function loadRawCardMarketVariants(params: {
       descriptorLabel: variant.descriptorLabel,
       imageUrl: variant.imageUrl,
       rarity: variant.rarity,
-      currentPrice: liveScrydexPrice,
+      currentPrice: liveMarketPrice,
       changePct7d: metrics?.change_pct_7d ?? null,
       justtcgPrice: null,
       justtcgAsOfTs: null,
-      scrydexPrice: liveScrydexPrice,
-      scrydexAsOfTs: liveScrydexAsOfTs,
+      scrydexPrice: liveMarketPrice,
+      scrydexAsOfTs: liveMarketAsOfTs,
       // Phase C-2 (2026-05-16): asking-anchored auxiliary value. Only
       // surface when distinguishably above the headline (≥10% gap) so
       // the line doesn't add noise on cards where low ≈ market. UI
@@ -500,7 +510,12 @@ export async function loadRawCardMarketVariants(params: {
       // negligible. See raw-card-market-surface render.
       scrydexAskingHighUsd: hasLivePrice ? (askingPriceByPrinting.get(variant.printingId) ?? null) : null,
       marketBalancePrice: metrics?.trimmed_median_30d ?? metrics?.median_30d ?? null,
-      asOfTs: liveScrydexAsOfTs,
+      marketPriceDisplayState: metrics?.market_price_display_state ?? null,
+      recentMarketSignalUsd: hasLivePrice ? (metrics?.recent_market_signal_usd ?? null) : null,
+      recentMarketSignalAsOf: hasLivePrice ? (metrics?.recent_market_signal_as_of ?? null) : null,
+      recentMarketSignalDeltaPct: hasLivePrice ? (metrics?.recent_market_signal_delta_pct ?? null) : null,
+      recentMarketSignalDirection: hasLivePrice ? (metrics?.recent_market_signal_direction ?? null) : null,
+      asOfTs: liveMarketAsOfTs,
       trendSlope7d: signalRow?.provider_trend_slope_7d ?? null,
       history7d: filterRecentDays(preferredHistory, 7),
       history30d: filterRecentDays(preferredHistory, 30),
@@ -513,7 +528,7 @@ export async function loadRawCardMarketVariants(params: {
       signalValue: null,
       signalValueLabel: null,
       signalsHistoryPoints30d: hasLivePrice ? (metrics?.snapshot_count_30d ?? null) : null,
-      signalsAsOfTs: hasLivePrice ? liveScrydexAsOfTs : null,
+      signalsAsOfTs: hasLivePrice ? liveMarketAsOfTs : null,
       liquidityScore: hasLivePrice ? (liquidity?.score ?? null) : null,
       liquidityTier: hasLivePrice ? (liquidity?.tier ?? null) : null,
       liquidityTone: liquidity?.tone ?? "neutral",

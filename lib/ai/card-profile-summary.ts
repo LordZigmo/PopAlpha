@@ -110,7 +110,10 @@ function buildUserPrompt(
   lines.push(`Fixed signal: ${baseline.signalLabel}; verdict: ${baseline.verdict}`);
 
   const priceFacts = [
-    formatUsd(input.marketPrice) ? `market ${formatUsd(input.marketPrice)}` : null,
+    formatUsd(input.marketPrice) ? `Market Price ${formatUsd(input.marketPrice)}` : null,
+    formatUsd(input.recentMarketSignalUsd ?? null) && (input.recentMarketSignalDirection === "HIGHER" || input.recentMarketSignalDirection === "LOWER")
+      ? `recent market signal ${input.recentMarketSignalDirection === "HIGHER" ? "higher" : "lower"} near ${formatUsd(input.recentMarketSignalUsd ?? null)}`
+      : null,
     formatUsd(input.median7d) ? `7d median ${formatUsd(input.median7d)}` : null,
     formatUsd(input.median30d) ? `30d median ${formatUsd(input.median30d)}` : null,
     formatSignedPct(input.changePct7d) ? `7d move ${formatSignedPct(input.changePct7d)}` : null,

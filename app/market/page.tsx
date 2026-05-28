@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { PHASE_PRODUCTION_BUILD } from "next/constants";
 import { currentUser } from "@clerk/nextjs/server";
 import { generateText } from "ai";
 import { getHomepageData, type HomepageCard } from "@/lib/data/homepage";
@@ -62,6 +63,7 @@ const EMPTY_DATA: {
   trending: HomepageCard[];
   signal_board: {
     top_movers: { "24H": HomepageCard[]; "7D": HomepageCard[] };
+    market_watch: HomepageCard[];
     biggest_drops: { "24H": HomepageCard[]; "7D": HomepageCard[] };
     momentum: { "24H": HomepageCard[]; "7D": HomepageCard[] };
     unusual_volume: HomepageCard[];
@@ -86,6 +88,7 @@ const EMPTY_DATA: {
   trending: [],
   signal_board: {
     top_movers: { "24H": [], "7D": [] },
+    market_watch: [],
     biggest_drops: { "24H": [], "7D": [] },
     momentum: { "24H": [], "7D": [] },
     unusual_volume: [],
@@ -544,6 +547,9 @@ async function generateAceSummary(
   communityCards: HomepageSummaryCommunityCard[],
 ): Promise<string> {
   const fallback = buildAceNarrativeFallback(movers, trending, losers, communityCards);
+  if (process.env.NEXT_PHASE === PHASE_PRODUCTION_BUILD) {
+    return fallback;
+  }
   const topContext = buildHomepageSummaryContext(HOMEPAGE_SUMMARY_CONFIG, movers, trending, losers, communityCards);
   const { system, prompt } = buildHomepageSummaryPrompt(HOMEPAGE_SUMMARY_CONFIG, topContext);
   const abortController = new AbortController();
@@ -972,6 +978,7 @@ export default async function Home() {
       </section>
 
       <HomepageSignalBoard
+        marketWatch={signalBoard.market_watch}
         topMoversByWindow={topMoverCardsByWindow}
         biggestDropsByWindow={biggestDropsByWindow}
         momentumByWindow={momentumCardsByWindow}

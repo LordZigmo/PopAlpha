@@ -11,6 +11,7 @@ import type { FinishGroup } from "@/lib/cards/detail-types";
 import type { SharedPrivateSale } from "@/lib/data/shared-private-sales";
 import {
   PRICING_DISPLAY_V2_ENABLED,
+  formatPriceDisplay,
   resolveDisplayedMarketPrice,
 } from "@/lib/pricing/displayed-market-price";
 
@@ -23,6 +24,11 @@ type MarketSummaryCardClientProps = {
     justtcgAsOfTs: string | null;
     scrydexPrice: number | null;
     scrydexAsOfTs: string | null;
+    marketPriceDisplayState?: "ALIGNED" | "SIGNAL_HIGHER" | "SIGNAL_LOWER" | "PUBLIC_ONLY" | "UNDER_REVIEW" | "NO_RELIABLE_PRICE" | null;
+    recentMarketSignalUsd?: number | null;
+    recentMarketSignalAsOf?: string | null;
+    recentMarketSignalDeltaPct?: number | null;
+    recentMarketSignalDirection?: "HIGHER" | "LOWER" | null;
     asOfTs: string | null;
     changePct7d: number | null;
     trendSlope7d?: number | null;
@@ -197,8 +203,11 @@ export default function MarketSummaryCardClient({
     ?? null;
 
   const currentPrice = activeVariant?.currentPrice ?? null;
-  const scrydexPrice = activeVariant?.scrydexPrice ?? null;
-  const scrydexAsOfTs = activeVariant?.scrydexAsOfTs ?? null;
+  const recentMarketSignalUsd = activeVariant?.recentMarketSignalUsd ?? null;
+  const recentMarketSignalAsOf = activeVariant?.recentMarketSignalAsOf ?? null;
+  const recentMarketSignalDirection = activeVariant?.recentMarketSignalDirection ?? null;
+  const recentMarketSignalDeltaPct = activeVariant?.recentMarketSignalDeltaPct ?? null;
+  const marketPriceDisplayState = activeVariant?.marketPriceDisplayState ?? null;
   const asOfTs = activeVariant?.asOfTs ?? null;
   const changePct7d = activeVariant?.changePct7d ?? null;
   const history7d = activeVariant?.history7d ?? [];
@@ -238,8 +247,9 @@ export default function MarketSummaryCardClient({
         marketPriceAsOf: asOfTs,
       })
     : null;
+  const priceMeta = priceDisplay ? formatPriceDisplay(priceDisplay) : null;
   const hasDisplayablePrice = currentPrice !== null && (!priceDisplay || priceDisplay.kind !== "no_market");
-  const showChange = !priceDisplay || priceDisplay.kind === "live";
+  const showChange = !priceDisplay || priceMeta?.showChangeBadge === true;
   const changeValue = showChange
     ? (effectiveWindow === "7d"
         ? changePct7d ?? computeChange(chartSeries)
@@ -249,10 +259,20 @@ export default function MarketSummaryCardClient({
     ? "Last Observed Price"
     : priceDisplay?.kind === "stale_old"
       ? "Sparse Market Price"
-      : "Market Price";
+      : marketPriceDisplayState === "ALIGNED"
+        ? "Aligned Market Price"
+        : "Market Price";
   const marketPriceTimeLabel = priceDisplay?.kind === "stale_recent" || priceDisplay?.kind === "stale_old"
     ? priceDisplay.ageLabel
     : formatRelativeTime(asOfTs) ?? "";
+  const marketPriceValue = formatUsd(currentPrice);
+  const showRecentMarketSignal = recentMarketSignalUsd !== null && recentMarketSignalDirection !== null;
+  const recentMarketSignalDeltaLabel = recentMarketSignalDeltaPct != null
+    ? formatPercent(Math.abs(recentMarketSignalDeltaPct)).replace(/^\+/, "")
+    : null;
+  const recentMarketSignalCopy = showRecentMarketSignal
+    ? `${recentMarketSignalDirection === "HIGHER" ? "Higher" : "Lower"}${recentMarketSignalDeltaLabel ? ` by ${recentMarketSignalDeltaLabel}` : ""}`
+    : null;
   const { low, high } = computeLowHigh(chartSeries);
   const sampleCount = hasDisplayablePrice ? chartSeries.length : 0;
 
@@ -300,23 +320,28 @@ export default function MarketSummaryCardClient({
                   {marketPriceHeading}
                 </p>
                 <span className="text-[38px] font-bold leading-none tracking-[-0.03em] tabular-nums text-[#F0F0F0] sm:text-[44px]">
-                  {formatUsd(currentPrice)}
+                  {marketPriceValue}
                 </span>
               </div>
               <span className="shrink-0 text-[14px] text-[#6B6B6B]">{marketPriceTimeLabel}</span>
             </div>
 
-            <div className="grid grid-cols-1 gap-2 rounded-2xl border border-white/[0.06] bg-[#151515] px-3 py-3">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex flex-col gap-0.5">
-                  <span className="text-[13px] text-[#A8A8A8]">Scrydex</span>
-                  <span className="text-[12px] text-[#8A8A8A]">Updated: {formatRelativeTime(scrydexAsOfTs) ?? "--"}</span>
+            {showRecentMarketSignal ? (
+              <div className="grid grid-cols-1 gap-2 rounded-2xl border border-white/[0.06] bg-[#151515] px-3 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-[13px] text-[#A8A8A8]">Recent market signal</span>
+                    <span className="text-[12px] text-[#8A8A8A]">
+                      {recentMarketSignalCopy}
+                      {recentMarketSignalAsOf ? ` · Updated ${formatRelativeTime(recentMarketSignalAsOf) ?? "--"}` : ""}
+                    </span>
+                  </div>
+                  <span className="text-[14px] font-semibold tabular-nums text-[#EDEDED]">
+                    {formatUsd(recentMarketSignalUsd)}
+                  </span>
                 </div>
-                <span className="text-[14px] font-semibold tabular-nums text-[#EDEDED]">
-                  {formatUsd(scrydexPrice)}
-                </span>
               </div>
-            </div>
+            ) : null}
 
             {/* Chart */}
             <EnhancedChart

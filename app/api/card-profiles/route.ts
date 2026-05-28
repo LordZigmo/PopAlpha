@@ -1,17 +1,9 @@
 import { NextResponse } from "next/server";
-import { dbPublic } from "@/lib/db";
+import { requireUser } from "@/lib/auth/require";
+import { loadCardProfileDetail } from "@/lib/card-profiles";
+import { hasPro } from "@/lib/entitlements";
 
 export const runtime = "nodejs";
-
-type CardProfileRow = {
-  canonical_slug: string;
-  signal_label: string | null;
-  verdict: string | null;
-  chip: string | null;
-  summary_short: string;
-  summary_long: string | null;
-  created_at: string;
-};
 
 function sanitizeSlug(value: string | null): string {
   return (value ?? "").trim().toLowerCase();
@@ -28,25 +20,23 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: "Missing slug query param." }, { status: 400 });
   }
 
+  const auth = await requireUser(req);
+  if (!auth.ok) return auth.response;
+
+  if (!(await hasPro(auth.userId))) {
+    return NextResponse.json(
+      { ok: false, error: "Pro subscription required." },
+      { status: 403 },
+    );
+  }
+
   try {
-    const supabase = dbPublic();
-    const { data, error } = await supabase
-      .from("card_profiles")
-      .select("canonical_slug, signal_label, verdict, chip, summary_short, summary_long, created_at")
-      .eq("canonical_slug", slug)
-      .maybeSingle<CardProfileRow>();
-
-    if (error) {
-      throw new Error(`Failed reading card_profiles: ${error.message}`);
-    }
-
     return NextResponse.json({
       ok: true,
       slug,
-      profile: data ?? null,
+      profile: await loadCardProfileDetail(slug),
     });
   } catch (error) {
     return NextResponse.json({ ok: false, slug, error: toErrorMessage(error) }, { status: 500 });
   }
 }
-

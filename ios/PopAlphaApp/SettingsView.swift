@@ -126,7 +126,7 @@ struct SettingsView: View {
                         Text("Upgrade to PopAlpha Pro")
                             .font(.system(size: 15, weight: .medium))
                             .foregroundStyle(PA.Colors.text)
-                        Text("Offline scanner, collector insights, and pro signals")
+                        Text("Collector insights, market signals, and price alerts")
                             .font(PA.Typography.caption)
                             .foregroundStyle(PA.Colors.muted)
                     }

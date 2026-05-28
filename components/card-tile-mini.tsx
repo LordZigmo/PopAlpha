@@ -55,10 +55,10 @@ export default function CardTileMini({
   card: HomepageCard;
 }) {
   // JP-source pick: if either Yahoo! JP or Snkrdunk has a price with
-  // >= 3 samples, prefer the JP-native source over Scrydex's USD
-  // reflection. Mirrors the iOS hero logic from PR #51 — confidence-
-  // pick between the two sources (more samples = winner). When neither
-  // qualifies, falls back to card.market_price (Scrydex) below.
+  // >= 3 samples, prefer the JP-native source over the public USD market
+  // anchor. Mirrors the iOS hero logic from PR #51: confidence-pick between
+  // the two sources (more samples = winner). When neither qualifies, fall
+  // back to card.market_price below.
   const jpSource = selectJpPriceSource({
     yahooJpPrice: card.yahoo_jp_price,
     yahooJpPriceJpy: card.yahoo_jp_price_jpy,
@@ -88,9 +88,9 @@ export default function CardTileMini({
     : null;
   const priceMeta = priceDisplay ? formatPriceDisplay(priceDisplay) : null;
 
-  // Scrydex confidence pill suppressed on JP-source rows. Its underlying
-  // score (market_confidence_score) is computed against the Scrydex
-  // market_price; pairing it with a Snkrdunk/Yahoo price below would tell
+  // Confidence pill suppressed on JP-source rows. Its underlying
+  // score (market_confidence_score) is computed against the public USD
+  // market anchor; pairing it with a Snkrdunk/Yahoo price below would tell
   // a mixed story. The sample-count tooltip on the price label already
   // conveys JP-source confidence ("n=60 sales"). Codex P2 on PR #57.
   const confidence = jpSource.source === null
@@ -162,8 +162,8 @@ export default function CardTileMini({
             </span>
             {/*
               Small source pill for JP-native rows so the user can see
-              at a glance that this isn't Scrydex's USD reflection. Only
-              renders when a JP source was picked.
+              at a glance that this is not the default USD market anchor.
+              Only renders when a JP source was picked.
             */}
             {jpSource.source ? (
               <span
@@ -175,7 +175,7 @@ export default function CardTileMini({
             ) : null}
           </div>
           {/*
-            Change badge tracks Scrydex's change_pct, which isn't
+            Change badge tracks the default USD market anchor, which is not
             comparable to the JP-source median. Hide on JP-source rows
             (matches iOS suppressHeroChangeBadge logic from PR #51).
           */}

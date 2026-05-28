@@ -18,13 +18,13 @@ let package = Package(
             name: "PopAlphaCore",
             path: "Sources/Features/Scanner",
             exclude: [
-                ".DS_Store",
-                "ai_env",
-                "training_logs",
-                "training_runs"
+                "ai_env"
             ],
             resources: [
-                .process("Resources")
+                .process("Resources/Catalog/siglip2_catalog_v1.papb"),
+                .process("Resources/Models/PopAlphaRFDETRLive.mlpackage"),
+                .process("Resources/Models/siglip2_base_patch16_384.mlpackage"),
+                .process("Resources/mock_cards.json")
             ]
         )
     ]

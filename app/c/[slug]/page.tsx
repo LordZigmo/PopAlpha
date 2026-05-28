@@ -21,6 +21,7 @@ import { GroupedSection, Pill, SegmentedControl, StatStripItem } from "@/compone
 import CanonicalCardShell from "@/components/layout/CanonicalCardShell";
 import MarketPulse from "@/components/market-pulse";
 import MarketSummaryCard, { loadRawCardMarketVariants } from "@/components/market-summary-card";
+import PersonalizedCardInsight from "@/components/personalized-card-insight";
 import PopAlphaScoutPreview from "@/components/popalpha-scout-preview";
 import RawCardMarketSurface from "@/components/raw-card-market-surface";
 import type { RawCardMarketVariantInput } from "@/components/raw-card-variant-types";
@@ -29,6 +30,7 @@ import type { HomepageCard } from "@/lib/data/homepage";
 import { buildEbaySearchQueries, type GradeSelection, type GradedSource } from "@/lib/ebay-query";
 import { buildFinishGroups } from "@/lib/cards/detail";
 import { choosePreferredRawPricingPrinting } from "@/lib/cards/raw-pricing-printing";
+import { loadCardProfileSummary, type CardProfileSummary } from "@/lib/card-profiles";
 import { getCardViewSnapshot } from "@/lib/data/card-views";
 import { getCommunityPulseSnapshot } from "@/lib/data/community-pulse";
 import { getRelatedCardCarousels } from "@/lib/data/related-cards";
@@ -36,6 +38,7 @@ import { buildGradedVariantRef } from "@/lib/identity/variant-ref";
 import { dbPublic } from "@/lib/db";
 import { createServerSupabaseUserClient } from "@/lib/db/user";
 import { buildAssetViewModel } from "@/lib/data/assets";
+import { hasPro } from "@/lib/entitlements";
 import { filterRawHistoryRowsForPrinting } from "@/lib/pricing/raw-history";
 import { resolveWeightedMarketPrice } from "@/lib/pricing/market-confidence";
 import {
@@ -44,6 +47,7 @@ import {
 } from "@/lib/pricing/price-history-currency";
 import {
   PRICING_DISPLAY_V2_ENABLED,
+  formatPriceDisplay,
   resolveDisplayedMarketPrice,
 } from "@/lib/pricing/displayed-market-price";
 import {
@@ -84,15 +88,14 @@ type SnapshotRow = {
   high_30d: number | null;
   market_price: number | null;
   market_price_as_of: string | null;
+  market_price_display_state: "ALIGNED" | "SIGNAL_HIGHER" | "SIGNAL_LOWER" | "PUBLIC_ONLY" | "UNDER_REVIEW" | "NO_RELIABLE_PRICE" | null;
+  recent_market_signal_usd: number | null;
+  recent_market_signal_as_of: string | null;
+  recent_market_signal_delta_pct: number | null;
+  recent_market_signal_direction: "HIGHER" | "LOWER" | null;
   market_confidence_score: number | null;
   market_low_confidence: boolean | null;
   market_blend_policy: string | null;
-};
-
-type CardProfileRow = {
-  summary_short: string;
-  summary_long: string | null;
-  updated_at: string | null;
 };
 
 type HoldingQtyRow = {
@@ -102,7 +105,6 @@ type HoldingQtyRow = {
 type CanonicalCardPageBaseData = {
   canonical: CanonicalCardRow | null;
   printings: CardPrintingRow[];
-  cardProfile: CardProfileRow | null;
 };
 
 const DEFAULT_BACK_HREF = "/search";
@@ -203,7 +205,7 @@ function chooseDefaultPrinting(printings: CardPrintingRow[]): CardPrintingRow | 
 
 const getCanonicalCardPageBaseData = cache(async (slug: string): Promise<CanonicalCardPageBaseData> => {
   const supabase = dbPublic();
-  const [{ data: canonical }, { data: printingsData }, { data: cardProfile }] = await Promise.all([
+  const [{ data: canonical }, { data: printingsData }] = await Promise.all([
     supabase
       .from("canonical_cards")
       .select("slug, canonical_name, subject, set_name, year, card_number")
@@ -213,17 +215,11 @@ const getCanonicalCardPageBaseData = cache(async (slug: string): Promise<Canonic
       .from("card_printings")
       .select("id, language, set_code, finish, finish_detail, edition, stamp, image_url, rarity, updated_at")
       .eq("canonical_slug", slug),
-    supabase
-      .from("card_profiles")
-      .select("summary_short, summary_long, updated_at")
-      .eq("canonical_slug", slug)
-      .maybeSingle<CardProfileRow>(),
   ]);
 
   return {
     canonical: canonical && isPhysicalPokemonSet({ setName: canonical.set_name }) ? canonical : null,
     printings: ((printingsData ?? []) as CardPrintingRow[]).sort(sortPrintings),
-    cardProfile: cardProfile ?? null,
   };
 });
 
@@ -285,7 +281,7 @@ function buildCanonicalCardMetadataTitle(canonical: CanonicalCardRow): string {
 
 function buildCanonicalCardMetadataDescription(
   canonical: CanonicalCardRow,
-  cardProfile: CardProfileRow | null,
+  cardProfile: CardProfileSummary | null,
   selectedPrinting: CardPrintingRow | null,
 ): string {
   const profileSummary = cardProfile?.summary_short?.trim();
@@ -311,7 +307,7 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  const { canonical, printings, cardProfile } = await getCanonicalCardPageBaseData(slug);
+  const { canonical, printings } = await getCanonicalCardPageBaseData(slug);
 
   if (!canonical) {
     return {
@@ -325,7 +321,7 @@ export async function generateMetadata({
 
   const selectedPrinting = chooseDefaultPrinting(printings);
   const title = buildCanonicalCardMetadataTitle(canonical);
-  const description = buildCanonicalCardMetadataDescription(canonical, cardProfile, selectedPrinting);
+  const description = buildCanonicalCardMetadataDescription(canonical, null, selectedPrinting);
   const canonicalPath = `/c/${encodeURIComponent(slug)}`;
   const primaryImageUrl = selectedPrinting?.image_url ?? null;
 
@@ -602,7 +598,9 @@ export default async function CanonicalCardPage({
   const debugEnabled = debug === "1";
   const backHref = resolveBackHref(returnTo);
   const activeMarketWindow = selectedMarketWindow(marketWindow);
-  const { canonical, printings, cardProfile } = await getCanonicalCardPageBaseData(slug);
+  const userIsPro = await hasPro(user?.id ?? null);
+  const { canonical, printings } = await getCanonicalCardPageBaseData(slug);
+  const cardProfile = userIsPro ? await loadCardProfileSummary(slug) : null;
 
   if (!canonical) notFound();
 
@@ -686,7 +684,7 @@ export default async function CanonicalCardPage({
       (["RAW", "PSA9", "PSA10"] as const).map((g) => {
         const q = supabase
           .from("public_card_metrics")
-          .select("active_listings_7d, median_7d, median_30d, trimmed_median_30d, low_30d, high_30d, market_price, market_price_as_of, market_confidence_score, market_low_confidence, market_blend_policy")
+          .select("active_listings_7d, median_7d, median_30d, trimmed_median_30d, low_30d, high_30d, market_price, market_price_as_of, market_price_display_state, recent_market_signal_usd, recent_market_signal_as_of, recent_market_signal_delta_pct, recent_market_signal_direction, market_confidence_score, market_low_confidence, market_blend_policy")
           .eq("canonical_slug", slug)
           .eq("grade", g);
         const effectivePrintingId = g === "RAW" ? rawMetricsPrintingIdForQuery : gradedPrintingIdForQuery;
@@ -773,6 +771,11 @@ export default async function CanonicalCardPage({
         snkrdunk_price: null,
         snkrdunk_price_jpy: null,
         snkrdunk_sample_count: null,
+        market_price_display_state: null,
+        recent_market_signal_usd: null,
+        recent_market_signal_as_of: null,
+        recent_market_signal_delta_pct: null,
+        recent_market_signal_direction: null,
       }],
       user?.id ?? null,
     ),
@@ -893,21 +896,27 @@ export default async function CanonicalCardPage({
       marketWindow: activeMarketWindow,
     },
   );
+  const personalizedVariantRef = viewMode === "GRADED" && selectedPrinting && activeProvider && activeBucket
+    ? buildGradedVariantRef(selectedPrinting.id, activeProvider, activeBucket)
+    : selectedPrinting?.id
+      ? `${selectedPrinting.id}::RAW`
+      : null;
 
-  const rawSourceScrydex = rawSnap.data?.market_price ?? null;
-  const rawSourceScrydexTs = rawSourceScrydex !== null ? (rawSnap.data?.market_price_as_of ?? null) : null;
+  const rawMarketAnchor = rawSnap.data?.market_price ?? null;
+  const rawMarketAnchorTs = rawMarketAnchor !== null ? (rawSnap.data?.market_price_as_of ?? null) : null;
   // Phase 2 of tiered-refresh: classify the raw price by age so a 30-day
   // -old "current market price" label gets rewritten as "Last sold · {date}".
   // Computed here once and consumed below by primaryPriceLabel.
   const rawPriceDisplay =
     PRICING_DISPLAY_V2_ENABLED && viewMode === "RAW"
       ? resolveDisplayedMarketPrice({
-          marketPrice: rawSourceScrydex,
-          marketPriceAsOf: rawSourceScrydexTs,
+          marketPrice: rawMarketAnchor,
+          marketPriceAsOf: rawMarketAnchorTs,
         })
       : null;
+  const rawPriceMeta = rawPriceDisplay ? formatPriceDisplay(rawPriceDisplay) : null;
   let rawPointsScrydex7d = 0;
-  if (rawSourceScrydex !== null) {
+  if (rawMarketAnchor !== null) {
     const referenceTsMs = rawProviderHistoryRows
       .map((row) => new Date(row.ts).getTime())
       .filter((ts) => Number.isFinite(ts))
@@ -922,8 +931,8 @@ export default async function CanonicalCardPage({
   }
   const rawPricingFallback = viewMode === "RAW"
     ? resolveRawDisplayPrice({
-      scrydex: rawSourceScrydex,
-      scrydexAsOfTs: rawSourceScrydexTs,
+      scrydex: rawMarketAnchor,
+      scrydexAsOfTs: rawMarketAnchorTs,
       scrydexPoints7d: rawPointsScrydex7d,
       parityStatus: rawParityStatus,
     })
@@ -951,7 +960,9 @@ export default async function CanonicalCardPage({
     : (snapshotData?.median_7d ?? null);
   const showPrimaryPrice = viewMode !== "RAW" || !rawPriceDisplay || rawPriceDisplay.kind !== "no_market";
   const displayPrimaryPrice = showPrimaryPrice ? displayPrimaryPriceCandidate : null;
-  const primaryPrice = displayPrimaryPrice != null ? formatUsdCompact(displayPrimaryPrice) : null;
+  const primaryPrice = displayPrimaryPrice != null
+    ? formatUsdCompact(displayPrimaryPrice)
+    : null;
   const primaryPriceLabel = viewMode === "RAW" && currentRawPrice != null
     ? (() => {
       if (rawPriceDisplay && rawPriceDisplay.kind === "stale_recent") {
@@ -966,7 +977,10 @@ export default async function CanonicalCardPage({
       const confidenceSuffix = rawPricing
         ? ` · Confidence ${rawPricing.confidenceScore}%${rawPricing.lowConfidence ? " (low)" : ""}`
         : "";
-      return `Current market price (Scrydex)${confidenceSuffix}`;
+      const marketLabel = rawSnap.data?.market_price_display_state === "ALIGNED"
+        ? "Aligned market price"
+        : "Market Price";
+      return `${marketLabel}${confidenceSuffix}`;
     })()
     : `${selectedSnapshotGrade
       ? legacyGradeLabel(selectedSnapshotGrade)
@@ -976,7 +990,7 @@ export default async function CanonicalCardPage({
     } · 7-day median observed price`;
 
   const priceChangePct = vm?.change_7d_pct ?? null;
-  const showPriceChange = viewMode === "RAW" && (!rawPriceDisplay || rawPriceDisplay.kind === "live");
+  const showPriceChange = viewMode === "RAW" && (!rawPriceDisplay || rawPriceMeta?.showChangeBadge === true);
   const displayPriceChangePct = showPriceChange && typeof priceChangePct === "number" && Number.isFinite(priceChangePct)
     ? priceChangePct
     : null;
@@ -1127,6 +1141,8 @@ export default async function CanonicalCardPage({
           gradedHref={gradedModeHref}
           scoutSummaryText={cardProfile?.summary_long ?? cardProfile?.summary_short ?? null}
           scoutUpdatedAt={scoutUpdatedAt}
+          isPro={userIsPro}
+          personalizedVariantRef={personalizedVariantRef}
           currentCardPulse={rawPulseSnapshot}
         >
           {commonTailSections}
@@ -1273,6 +1289,13 @@ export default async function CanonicalCardPage({
           activeListings7d={snapshotData?.active_listings_7d ?? null}
           summaryText={cardProfile?.summary_long ?? cardProfile?.summary_short ?? null}
           updatedAt={scoutUpdatedAt}
+          isPro={userIsPro}
+        />
+
+        <PersonalizedCardInsight
+          canonicalSlug={slug}
+          variantRef={personalizedVariantRef}
+          isPro={userIsPro}
         />
 
         <section className="mt-6 mb-6 grid gap-2 sm:grid-cols-3">

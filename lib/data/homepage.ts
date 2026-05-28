@@ -18,6 +18,9 @@ import {
   getCanonicalMarketPulseMap,
   resolveCanonicalMarketPulse,
   type CanonicalMarketPulse,
+  type MarketBlendPolicy,
+  type MarketPriceDisplayState,
+  type MarketProvenance,
 } from "@/lib/data/market";
 import type { MarketDirection } from "@/lib/data/market-strength";
 import { dbPublic } from "@/lib/db";
@@ -36,6 +39,11 @@ export type HomepageCard = {
   card_number: string | null;
   display_card_number?: string | null;
   market_price: number | null;
+  market_price_display_state: MarketPriceDisplayState | null;
+  recent_market_signal_usd: number | null;
+  recent_market_signal_as_of: string | null;
+  recent_market_signal_delta_pct: number | null;
+  recent_market_signal_direction: "HIGHER" | "LOWER" | null;
   price_identity_label?: string | null;
   price_finish_label?: string | null;
   price_finish?: string | null;
@@ -57,7 +65,7 @@ export type HomepageCard = {
   active_listings_7d: number | null;
   updated_at: string | null;
   // JP-native price sources surfaced on JP-rail tiles so the user
-  // sees real JP-market data instead of Scrydex's USD reflection
+  // sees real JP-market data instead of the default USD market anchor
   // when we have it. Both are nullable — most non-JP cards will be
   // null here. Tile rendering uses lib/pricing/jp-price-source.ts
   // to confidence-pick between them.
@@ -82,6 +90,7 @@ export type HomepageCard = {
 export type HomepageWindowedCards = Record<HomepageSignalWindow, HomepageCard[]>;
 
 export type HomepageSignalBoardData = {
+  market_watch: HomepageCard[];
   top_movers: HomepageWindowedCards;
   biggest_drops: HomepageWindowedCards;
   momentum: HomepageWindowedCards;
@@ -99,7 +108,7 @@ export type HomepageSignalBoardData = {
   budget_movers: HomepageCard[];
   // JP catalog rails (canonical_cards.language = 'JP'). Mirror the EN
   // structure 1:1 so the JP market view feels as busy as EN. Sourced
-  // from public_card_metrics' Scrydex change_pct columns filtered to
+  // from public_card_metrics' public change_pct columns filtered to
   // language='JP'; once the JP-native delta pipeline (jp_card_metrics)
   // ships these loaders swap to it without changing the wire shape.
   japanese_top_movers: HomepageWindowedCards;
@@ -129,15 +138,19 @@ type ChangeCandidateRow = {
   canonical_slug: string;
   market_price: number | null;
   market_price_as_of: string | null;
+  market_price_display_state?: MarketPriceDisplayState | null;
+  recent_market_signal_usd?: number | null;
+  recent_market_signal_as_of?: string | null;
+  recent_market_signal_delta_pct?: number | null;
+  recent_market_signal_direction?: "HIGHER" | "LOWER" | null;
   snapshot_count_30d: number | null;
   change_pct_24h: number | null;
   change_pct_7d: number | null;
   market_confidence_score: number | null;
   market_low_confidence: boolean | null;
   active_listings_7d: number | null;
-  market_provenance?: {
-    parityStatus?: string | null;
-  } | null;
+  market_blend_policy?: MarketBlendPolicy | null;
+  market_provenance?: MarketProvenance | null;
 };
 
 type VariantRow = {
@@ -212,6 +225,7 @@ type JpPriceCoverageRow = {
 type HomepageDataOverrides = {
   positiveChangeRows?: ChangeCandidateRow[];
   negativeChangeRows?: ChangeCandidateRow[];
+  marketWatchRows?: ChangeCandidateRow[];
   trendingVariants?: VariantRow[];
   cards?: CardRow[];
   marketPulseMap?: Map<string, CanonicalMarketPulse>;
@@ -232,6 +246,7 @@ export type HomepageDataOptions = {
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const SECTION_LIMIT = 5;
+const MARKET_WATCH_LIMIT = 20;
 const SIGNAL_WINDOWS: HomepageSignalWindow[] = ["24H", "7D"];
 /** Minimum 7d median to filter noise / $0 cards */
 const MIN_PRICE = 0.5;
@@ -246,15 +261,14 @@ const MIN_CHANGES_TRENDING = 3;
 /** Over-fetch factor for candidate lists (we filter in JS) */
 const CANDIDATE_FETCH_LIMIT = 80;
 const LIVE_CANDIDATE_FETCH_LIMIT = CANDIDATE_FETCH_LIMIT * 3;
+const MARKET_WATCH_CANDIDATE_FETCH_LIMIT = 160;
 const BATCH_LOOKUP_SLUG_LIMIT = 40;
 const SENTINEL_PRICES = new Set([23456.78]);
 const MIN_MOVER_CHANGE_PCT = 2.5;
 const MIN_CONFIDENCE_SCORE = 45;
 const HIGH_CONF_LIQUIDITY_MIN = 6;
 const EMERGING_LIQUIDITY_MAX = 5;
-const MOVER_LOOKBACK_DAYS = 30;
-const MIN_MOVER_COVERAGE_RATIO = 0.9;
-const MIN_MOVER_SNAPSHOT_COUNT_30D = Math.ceil(MOVER_LOOKBACK_DAYS * MIN_MOVER_COVERAGE_RATIO);
+const MIN_PUBLIC_MOVER_HISTORY_POINTS = 2;
 const MAX_DAILY_MOVER_AGE_DAYS = 1;
 
 function createEmptyWindowedCards(): HomepageWindowedCards {
@@ -382,6 +396,11 @@ async function loadDailyTopMoversBundle(
       year: canonicalCard?.year ?? null,
       card_number: canonicalCard?.card_number ?? null,
       market_price: row.market_price,
+      market_price_display_state: null,
+      recent_market_signal_usd: null,
+      recent_market_signal_as_of: null,
+      recent_market_signal_delta_pct: null,
+      recent_market_signal_direction: null,
       change_pct: row.change_pct,
       change_window: row.change_window,
       confidence_score: row.confidence_score,
@@ -487,6 +506,11 @@ async function loadJapaneseRail(
         year: row.year ?? null,
         card_number: row.card_number ?? null,
         market_price: row.display_price_usd,
+        market_price_display_state: null,
+        recent_market_signal_usd: null,
+        recent_market_signal_as_of: null,
+        recent_market_signal_delta_pct: null,
+        recent_market_signal_direction: null,
         change_pct: changePct,
         change_window: changeWindow,
         confidence_score: row.market_confidence_score ?? null,
@@ -524,8 +548,8 @@ async function loadJapaneseRail(
  *
  * Gates vs EN: keep market_confidence_score / low_confidence quality
  * floors. Drop snapshot_count_30d gate (EN tuning, kills JP cards whose
- * Scrydex history is shallow). Use a 7d freshness window since JP cards
- * are less likely to have 24h snapshots than EN.
+ * public market history is shallow). Use a 7d freshness window since JP
+ * cards are less likely to have 24h snapshots than EN.
  */
 type JpRailBundle = {
   topMovers: HomepageWindowedCards;
@@ -637,6 +661,11 @@ async function loadJapaneseSignalRails(
       year: row.year ?? null,
       card_number: row.card_number ?? null,
       market_price: row.display_price_usd,
+      market_price_display_state: null,
+      recent_market_signal_usd: null,
+      recent_market_signal_as_of: null,
+      recent_market_signal_delta_pct: null,
+      recent_market_signal_direction: null,
       change_pct: changePct,
       change_window: window,
       confidence_score: row.market_confidence_score ?? null,
@@ -753,6 +782,7 @@ async function loadJapaneseSignalRails(
 
 function createEmptySignalBoard(): HomepageSignalBoardData {
   return {
+    market_watch: [],
     top_movers: createEmptyWindowedCards(),
     biggest_drops: createEmptyWindowedCards(),
     momentum: createEmptyWindowedCards(),
@@ -866,6 +896,13 @@ function toFiniteChange(value: number | null | undefined): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function toFiniteCount(value: number | string | null | undefined): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string") return null;
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function computeLiquidityWeight(activeListings7d: number | null | undefined): number {
   if (!Number.isFinite(activeListings7d ?? NaN)) return 0.5;
   const value = Math.max(0, activeListings7d ?? 0);
@@ -881,10 +918,17 @@ function buildFallbackPulseFromCandidate(row: ChangeCandidateRow): CanonicalMark
   return resolveCanonicalMarketPulse({
     market_price: row.market_price,
     market_price_as_of: row.market_price_as_of,
+    market_price_display_state: row.market_price_display_state ?? null,
+    recent_market_signal_usd: row.recent_market_signal_usd ?? null,
+    recent_market_signal_as_of: row.recent_market_signal_as_of ?? null,
+    recent_market_signal_delta_pct: row.recent_market_signal_delta_pct ?? null,
+    recent_market_signal_direction: row.recent_market_signal_direction ?? null,
     active_listings_7d: row.active_listings_7d,
     snapshot_count_30d: row.snapshot_count_30d,
     market_confidence_score: row.market_confidence_score,
     market_low_confidence: row.market_low_confidence,
+    market_blend_policy: row.market_blend_policy ?? null,
+    market_provenance: row.market_provenance,
     change_pct_24h: row.change_pct_24h,
     change_pct_7d: row.change_pct_7d,
   });
@@ -1007,6 +1051,7 @@ function collectHomepageDataSlugs(data: HomepageData): string[] {
   addCards(data.emerging_movers);
   addCards(data.losers);
   addCards(data.trending);
+  addCards(data.signal_board.market_watch);
   addWindowed(data.signal_board.top_movers);
   addWindowed(data.signal_board.biggest_drops);
   addWindowed(data.signal_board.momentum);
@@ -1037,6 +1082,7 @@ function applyDisplayIdentityToHomepageData(
     trending: data.trending.map((card) => applyDisplayIdentityToCard(card, identityBySlug)),
     signal_board: {
       ...data.signal_board,
+      market_watch: data.signal_board.market_watch.map((card) => applyDisplayIdentityToCard(card, identityBySlug)),
       top_movers: applyDisplayIdentityToWindowedCards(data.signal_board.top_movers, identityBySlug),
       biggest_drops: applyDisplayIdentityToWindowedCards(data.signal_board.biggest_drops, identityBySlug),
       momentum: applyDisplayIdentityToWindowedCards(data.signal_board.momentum, identityBySlug),
@@ -1138,8 +1184,45 @@ function hasProviderParityStatusForHomepage(parityStatus: string | null | undefi
   return parityStatus === "MATCH";
 }
 
-export function hasProviderParityForHomepage(row: Pick<ChangeCandidateRow, "market_provenance">): boolean {
-  return hasProviderParityStatusForHomepage(row.market_provenance?.parityStatus);
+function hasPermittedPublicMovement(params: {
+  parityStatus?: string | null;
+  confidenceStatus?: string | null;
+  publicInputStatus?: string | null;
+  movementHistorySource?: string | null;
+  historyPoints30d?: number | string | null;
+  changePct24h?: number | null;
+  changePct7d?: number | null;
+}): boolean {
+  return hasProviderParityStatusForHomepage(params.parityStatus)
+    && params.publicInputStatus === "SUPPORTED"
+    && params.confidenceStatus === "HIGH"
+    && params.movementHistorySource === "PERMITTED_MARKET_INPUT"
+    && (toFiniteChange(params.changePct24h) !== null || toFiniteChange(params.changePct7d) !== null)
+    && (toFiniteCount(params.historyPoints30d) ?? 0) >= MIN_PUBLIC_MOVER_HISTORY_POINTS;
+}
+
+export function hasProviderParityForHomepage(row: Pick<ChangeCandidateRow, "market_provenance" | "change_pct_24h" | "change_pct_7d">): boolean {
+  return hasPermittedPublicMovement({
+    parityStatus: row.market_provenance?.parityStatus,
+    confidenceStatus: row.market_provenance?.confidenceStatus,
+    publicInputStatus: row.market_provenance?.publicInputStatus,
+    movementHistorySource: row.market_provenance?.movementHistorySource,
+    historyPoints30d: row.market_provenance?.sampleCounts7d?.public ?? row.market_provenance?.sampleCounts7d?.scrydex,
+    changePct24h: row.change_pct_24h,
+    changePct7d: row.change_pct_7d,
+  });
+}
+
+function hasPermittedPublicPulse(marketPulse: CanonicalMarketPulse | null | undefined): boolean {
+  return hasPermittedPublicMovement({
+    parityStatus: marketPulse?.parityStatus,
+    confidenceStatus: marketPulse?.confidenceStatus,
+    publicInputStatus: marketPulse?.publicInputStatus,
+    movementHistorySource: marketPulse?.movementHistorySource,
+    historyPoints30d: marketPulse?.sampleCounts7d?.public ?? marketPulse?.snapshotCount30d,
+    changePct24h: marketPulse?.changePct24h,
+    changePct7d: marketPulse?.changePct7d,
+  });
 }
 
 export function hasJpNativeHomepagePriceSource(source: string | null | undefined): boolean {
@@ -1168,6 +1251,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
 
     let positiveChangeRows: ChangeCandidateRow[] = [];
     let negativeChangeRows: ChangeCandidateRow[] = [];
+    let marketWatchRows: ChangeCandidateRow[] = [];
     let trendingVariants: VariantRow[] = [];
     let cardsRows: CardRow[] = [];
     let marketPulseMap = new Map<string, CanonicalMarketPulse>();
@@ -1180,6 +1264,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
     if (overrides) {
       positiveChangeRows = overrides.positiveChangeRows ?? [];
       negativeChangeRows = overrides.negativeChangeRows ?? [];
+      marketWatchRows = overrides.marketWatchRows ?? [];
       trendingVariants = dedupVariants(overrides.trendingVariants ?? [], CANDIDATE_FETCH_LIMIT);
       cardsRows = overrides.cards ?? [];
       marketPulseMap = overrides.marketPulseMap ?? new Map<string, CanonicalMarketPulse>();
@@ -1193,7 +1278,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
       if (!client) return EMPTY;
 
       // ── Batch 1: movers + variant-level trend data + canonical counts ──
-      const [positiveChangeResult, negativeChangeResult, trendingVariantResult, refreshedCountResult, trackedCountResult] = await Promise.all([
+      const [positiveChangeResult, negativeChangeResult, marketWatchResult, trendingVariantResult, refreshedCountResult, trackedCountResult] = await Promise.all([
         // 1. Top movers — prefer 24h, then fall back to 7d when 24h is unavailable.
         // Order by the change itself (not `market_price_as_of`) so the fallback
         // is stable between requests: "biggest mover wins" instead of
@@ -1228,7 +1313,22 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
           .order("market_confidence_score", { ascending: false })
           .limit(LIVE_CANDIDATE_FETCH_LIMIT),
 
-        // 3. Trending — positive slope with activity from variant_metrics
+        // 3. Market watch -- trusted recent EN prices, no movement claim required.
+        client
+          .from("public_card_metrics")
+          .select("canonical_slug, market_price, market_price_as_of, market_price_display_state, recent_market_signal_usd, recent_market_signal_as_of, recent_market_signal_delta_pct, recent_market_signal_direction, snapshot_count_30d, change_pct_24h, change_pct_7d, market_confidence_score, market_low_confidence, market_blend_policy, active_listings_7d, market_provenance")
+          .eq("grade", "RAW")
+          .is("printing_id", null)
+          .eq("language", "EN")
+          .eq("market_blend_policy", "POPALPHA_MARKET_CONFIDENT")
+          .not("market_price", "is", null)
+          .gte("market_price_as_of", recentMarketCutoffIso)
+          .order("market_confidence_score", { ascending: false })
+          .order("active_listings_7d", { ascending: false, nullsFirst: false })
+          .order("market_price_as_of", { ascending: false, nullsFirst: false })
+          .limit(MARKET_WATCH_CANDIDATE_FETCH_LIMIT),
+
+        // 4. Trending — positive slope with activity from variant_metrics
         client
           .from("public_variant_metrics")
           .select("canonical_slug, provider_trend_slope_7d, provider_price_changes_count_30d, updated_at")
@@ -1239,7 +1339,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
           .order("provider_trend_slope_7d", { ascending: false })
           .limit(CANDIDATE_FETCH_LIMIT),
 
-        // 4. Count of cards with a fresh price update in the last 24h
+        // 5. Count of cards with a fresh price update in the last 24h
         client
           .from("public_card_metrics")
           .select("canonical_slug", { count: "exact", head: true })
@@ -1248,7 +1348,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
           .not("market_price", "is", null)
           .gte("market_price_as_of", refreshedTodayCutoffIso),
 
-        // 5. Count of canonical RAW cards with a live market price
+        // 6. Count of canonical RAW cards with a live market price
         client
           .from("public_card_metrics")
           .select("canonical_slug", { count: "exact", head: true })
@@ -1259,6 +1359,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
 
       if (positiveChangeResult.error) logger.error("[homepage] movers_24h", positiveChangeResult.error.message);
       if (negativeChangeResult.error) logger.error("[homepage] drops_24h", negativeChangeResult.error.message);
+      if (marketWatchResult.error) logger.error("[homepage] market_watch", marketWatchResult.error.message);
       if (trendingVariantResult.error) logger.error("[homepage] trending", trendingVariantResult.error.message);
       if (refreshedCountResult.error) logger.error("[homepage] refreshed_count", refreshedCountResult.error.message);
       if (trackedCountResult.error) logger.error("[homepage] tracked_count", trackedCountResult.error.message);
@@ -1267,7 +1368,11 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
         .filter(hasProviderParityForHomepage);
       negativeChangeRows = ((negativeChangeResult.data ?? []) as ChangeCandidateRow[])
         .filter(hasProviderParityForHomepage);
-      trendingVariants = dedupVariants((trendingVariantResult.data ?? []) as VariantRow[], CANDIDATE_FETCH_LIMIT);
+      marketWatchRows = (marketWatchResult.data ?? []) as ChangeCandidateRow[];
+      // EN sustained-trending used to come from provider variant slopes.
+      // Keep this empty until we have a permitted observed-price movement
+      // layer with enough history for homepage claims.
+      trendingVariants = [];
       pricesRefreshedToday = refreshedCountResult.count ?? null;
       trackedCardsWithLivePrice = trackedCountResult.count ?? null;
     }
@@ -1289,6 +1394,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
     const allSlugs = new Set<string>();
     for (const r of positiveChangeRows) allSlugs.add(r.canonical_slug);
     for (const r of negativeChangeRows) allSlugs.add(r.canonical_slug);
+    for (const r of marketWatchRows) allSlugs.add(r.canonical_slug);
     for (const r of trendingVariants) allSlugs.add(r.canonical_slug);
     for (const card of collectDailyMoverBundleCards(dailyMovers)) allSlugs.add(card.slug);
 
@@ -1427,6 +1533,10 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
       if (marketPulseMap.has(row.canonical_slug)) continue;
       marketPulseMap.set(row.canonical_slug, buildFallbackPulseFromCandidate(row));
     }
+    for (const row of marketWatchRows) {
+      if (marketPulseMap.has(row.canonical_slug)) continue;
+      marketPulseMap.set(row.canonical_slug, buildFallbackPulseFromCandidate(row));
+    }
 
     // ── Build lookup maps ─────────────────────────────────────────────────
     const cardMap = new Map<string, CardRow>();
@@ -1478,6 +1588,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
         changeWindow?: HomepageSignalWindow | null;
         preferOverrideChange?: boolean;
         allowSparklineFallback?: boolean;
+        suppressChange?: boolean;
       } = {},
     ): HomepageCard {
       const card = cardMap.get(slug);
@@ -1493,7 +1604,10 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
       let selectedChangePct: number | null = null;
       let selectedChangeWindow: HomepageSignalWindow | null = null;
 
-      if (overrides.preferOverrideChange && overrideChangePct !== null) {
+      if (overrides.suppressChange) {
+        selectedChangePct = null;
+        selectedChangeWindow = null;
+      } else if (overrides.preferOverrideChange && overrideChangePct !== null) {
         selectedChangePct = overrideChangePct;
         selectedChangeWindow = overrides.changeWindow ?? null;
       } else if (marketChangePct !== null) {
@@ -1522,6 +1636,11 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
         year: card?.year ?? null,
         card_number: card?.card_number ?? null,
         market_price: marketPulse?.marketPrice ?? overrides.fallbackPrice ?? null,
+        market_price_display_state: marketPulse?.marketPriceDisplayState ?? null,
+        recent_market_signal_usd: marketPulse?.recentMarketSignalUsd ?? null,
+        recent_market_signal_as_of: marketPulse?.recentMarketSignalAsOf ?? null,
+        recent_market_signal_delta_pct: marketPulse?.recentMarketSignalDeltaPct ?? null,
+        recent_market_signal_direction: marketPulse?.recentMarketSignalDirection ?? null,
         change_pct: selectedChangePct,
         change_window: selectedChangeWindow,
         confidence_score: typeof marketPulse?.confidenceScore === "number"
@@ -1541,9 +1660,8 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
         sales_count_30d: salesCount30d,
         active_listings_7d: activeListings7d,
         updated_at: updatedAt,
-        // marketPulse comes from card_metrics directly (Scrydex
-        // derived); doesn't carry JP-source prices. Tile-mini falls
-        // back to market_price for these rows.
+        // marketPulse doesn't carry JP-source prices. Tile-mini falls back
+        // to market_price for these rows.
         yahoo_jp_price: null,
         yahoo_jp_price_jpy: null,
         yahoo_jp_sample_count: null,
@@ -1589,12 +1707,13 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
       if (collector.seenSlugs.has(row.canonical_slug)) return false;
       const marketPulse = marketPulseMap.get(row.canonical_slug);
       if (!marketPulse) { if (preferredWindow === null) positiveRejects.noMarketPulse++; return false; }
+      if (!hasPermittedPublicPulse(marketPulse)) { if (preferredWindow === null) positiveRejects.noMarketPulse++; return false; }
       const marketPrice = marketPulse.marketPrice ?? row.market_price ?? null;
       if (marketPrice == null) { if (preferredWindow === null) positiveRejects.priceTooLow++; return false; }
       if (SENTINEL_PRICES.has(Number(marketPrice.toFixed(2)))) { if (preferredWindow === null) positiveRejects.priceTooLow++; return false; }
       if (marketPrice < MIN_MOVER_PRICE) { if (preferredWindow === null) positiveRejects.priceTooLow++; return false; }
-      const snapshotCount30d = marketPulse.snapshotCount30d ?? row.snapshot_count_30d ?? 0;
-      if (snapshotCount30d < MIN_MOVER_SNAPSHOT_COUNT_30D) { if (preferredWindow === null) positiveRejects.snapshotTooLow++; return false; }
+      const publicHistoryPoints30d = marketPulse.snapshotCount30d ?? marketPulse.sampleCounts7d?.public ?? 0;
+      if (publicHistoryPoints30d < MIN_PUBLIC_MOVER_HISTORY_POINTS) { if (preferredWindow === null) positiveRejects.snapshotTooLow++; return false; }
       const directionalChange = preferredWindow
         ? selectDirectionalChangeForWindow(row, "positive", preferredWindow)
         : selectDirectionalChange(row, "positive");
@@ -1645,10 +1764,11 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
       if (collector.seenSlugs.has(row.canonical_slug)) return false;
       const marketPulse = marketPulseMap.get(row.canonical_slug);
       if (!marketPulse) { if (preferredWindow === null) negativeRejects.noMarketPulse++; return false; }
+      if (!hasPermittedPublicPulse(marketPulse)) { if (preferredWindow === null) negativeRejects.noMarketPulse++; return false; }
       const price = marketPulse.marketPrice ?? row.market_price ?? null;
       if (price == null || price < MIN_MOVER_PRICE) { if (preferredWindow === null) negativeRejects.priceTooLow++; return false; }
-      const snapshotCount30d = marketPulse.snapshotCount30d ?? row.snapshot_count_30d ?? 0;
-      if (snapshotCount30d < MIN_MOVER_SNAPSHOT_COUNT_30D) { if (preferredWindow === null) negativeRejects.snapshotTooLow++; return false; }
+      const publicHistoryPoints30d = marketPulse.snapshotCount30d ?? marketPulse.sampleCounts7d?.public ?? 0;
+      if (publicHistoryPoints30d < MIN_PUBLIC_MOVER_HISTORY_POINTS) { if (preferredWindow === null) negativeRejects.snapshotTooLow++; return false; }
       const stalenessHours = hoursSince(marketPulse.marketPriceAsOf ?? row.market_price_as_of ?? null, nowMs);
       if (stalenessHours === null || stalenessHours > RECENT_MARKET_MAX_AGE_HOURS) { if (preferredWindow === null) negativeRejects.staleOrLowConf++; return false; }
       const confidenceScore = marketPulse.confidenceScore ?? row.market_confidence_score ?? 0;
@@ -1721,11 +1841,124 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
 
     const losersOut = mixedNegativeMovers.cards.slice(0, SECTION_LIMIT);
 
+    type MarketWatchBand = "premium" | "mid" | "budget" | "low";
+    type MarketWatchCandidate = {
+      row: ChangeCandidateRow;
+      card: HomepageCard;
+      band: MarketWatchBand;
+      setKey: string;
+      confidenceScore: number;
+      activeListings7d: number;
+      asOfMs: number;
+    };
+    const marketWatchRejects = {
+      excluded: 0,
+      noCard: 0,
+      noPulse: 0,
+      noPrice: 0,
+      stale: 0,
+      lowConfidence: 0,
+      notTrusted: 0,
+    };
+    const marketWatchBandForPrice = (price: number): MarketWatchBand => {
+      if (price >= 100) return "premium";
+      if (price >= 25) return "mid";
+      if (price >= 2) return "budget";
+      return "low";
+    };
+    const compareMarketWatchCandidates = (left: MarketWatchCandidate, right: MarketWatchCandidate): number => {
+      const confidenceDelta = right.confidenceScore - left.confidenceScore;
+      if (confidenceDelta !== 0) return confidenceDelta;
+      const activeDelta = right.activeListings7d - left.activeListings7d;
+      if (activeDelta !== 0) return activeDelta;
+      const asOfDelta = right.asOfMs - left.asOfMs;
+      if (asOfDelta !== 0) return asOfDelta;
+      return (right.card.market_price ?? 0) - (left.card.market_price ?? 0);
+    };
+
+    const marketWatchCandidates: MarketWatchCandidate[] = [];
+    for (const row of marketWatchRows) {
+      if (excludedSlugSet.has(row.canonical_slug)) { marketWatchRejects.excluded++; continue; }
+      const baseCard = cardMap.get(row.canonical_slug);
+      if (!baseCard) { marketWatchRejects.noCard++; continue; }
+      const marketPulse = marketPulseMap.get(row.canonical_slug);
+      if (!marketPulse) { marketWatchRejects.noPulse++; continue; }
+      const price = marketPulse.marketPrice ?? row.market_price ?? null;
+      if (price == null || price <= 0 || SENTINEL_PRICES.has(Number(price.toFixed(2)))) {
+        marketWatchRejects.noPrice++;
+        continue;
+      }
+      const asOf = marketPulse.marketPriceAsOf ?? row.market_price_as_of ?? null;
+      const stalenessHours = hoursSince(asOf, nowMs);
+      if (stalenessHours === null || stalenessHours > RECENT_MARKET_MAX_AGE_HOURS) {
+        marketWatchRejects.stale++;
+        continue;
+      }
+      const confidenceScore = marketPulse.confidenceScore ?? row.market_confidence_score ?? 0;
+      if (marketPulse.lowConfidence === true || row.market_low_confidence === true || confidenceScore < MIN_CONFIDENCE_SCORE) {
+        marketWatchRejects.lowConfidence++;
+        continue;
+      }
+      const displayState = marketPulse.marketPriceDisplayState ?? row.market_price_display_state ?? null;
+      const blendPolicy = marketPulse.blendPolicy ?? row.market_blend_policy ?? null;
+      if (
+        blendPolicy !== "POPALPHA_MARKET_CONFIDENT"
+        || displayState === "UNDER_REVIEW"
+        || displayState === "NO_RELIABLE_PRICE"
+      ) {
+        marketWatchRejects.notTrusted++;
+        continue;
+      }
+      marketWatchCandidates.push({
+        row,
+        card: toCard(row.canonical_slug, {
+          fallbackPrice: row.market_price,
+          suppressChange: true,
+          allowSparklineFallback: false,
+        }),
+        band: marketWatchBandForPrice(price),
+        setKey: (baseCard.set_name ?? "__unknown_set__").toLowerCase(),
+        confidenceScore,
+        activeListings7d: marketPulse.activeListings7d ?? row.active_listings_7d ?? 0,
+        asOfMs: asOf ? Date.parse(asOf) : 0,
+      });
+    }
+    marketWatchCandidates.sort(compareMarketWatchCandidates);
+
+    const marketWatchSetCounts = new Map<string, number>();
+    const marketWatchPickedSlugs = new Set<string>();
+    const marketWatchPicked: HomepageCard[] = [];
+    const pickMarketWatchCandidate = (candidate: MarketWatchCandidate, setCap = 2): boolean => {
+      if (marketWatchPickedSlugs.has(candidate.card.slug)) return false;
+      const setCount = marketWatchSetCounts.get(candidate.setKey) ?? 0;
+      if (setCount >= setCap) return false;
+      marketWatchSetCounts.set(candidate.setKey, setCount + 1);
+      marketWatchPickedSlugs.add(candidate.card.slug);
+      marketWatchPicked.push(candidate.card);
+      return true;
+    };
+    const perBandTarget = Math.ceil(MARKET_WATCH_LIMIT / 4);
+    for (const band of ["premium", "mid", "budget", "low"] as const) {
+      let pickedForBand = 0;
+      for (const candidate of marketWatchCandidates) {
+        if (candidate.band !== band) continue;
+        if (pickMarketWatchCandidate(candidate)) pickedForBand++;
+        if (pickedForBand >= perBandTarget || marketWatchPicked.length >= MARKET_WATCH_LIMIT) break;
+      }
+      if (marketWatchPicked.length >= MARKET_WATCH_LIMIT) break;
+    }
+    for (const candidate of marketWatchCandidates) {
+      if (marketWatchPicked.length >= MARKET_WATCH_LIMIT) break;
+      pickMarketWatchCandidate(candidate);
+    }
+    const marketWatchOut = marketWatchPicked.slice(0, MARKET_WATCH_LIMIT);
+
     logger.info("[homepage.telemetry.filter_pipeline]", JSON.stringify({
-      batch1: { positiveChangeRows: positiveChangeRows.length, negativeChangeRows: negativeChangeRows.length, trendingVariants: trendingVariants.length, allSlugs: allSlugs.size },
-      jsFiltered: { movers: mixedPositiveMovers.all.length, highConfidence: mixedPositiveMovers.highConfidence.length, emerging: mixedPositiveMovers.emerging.length, losers: mixedNegativeMovers.cards.length },
+      batch1: { positiveChangeRows: positiveChangeRows.length, negativeChangeRows: negativeChangeRows.length, marketWatchRows: marketWatchRows.length, trendingVariants: trendingVariants.length, allSlugs: allSlugs.size },
+      jsFiltered: { marketWatch: marketWatchOut.length, movers: mixedPositiveMovers.all.length, highConfidence: mixedPositiveMovers.highConfidence.length, emerging: mixedPositiveMovers.emerging.length, losers: mixedNegativeMovers.cards.length },
       positiveRejects,
       negativeRejects,
+      marketWatchRejects,
     }));
 
     // ── Trending: filter to cards with real prices above MIN_PRICE ────────
@@ -1733,12 +1966,11 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
     for (const row of trendingVariants) {
       if (excludedSlugSet.has(row.canonical_slug)) continue;
       const marketPulse = marketPulseMap.get(row.canonical_slug);
-      if (!hasProviderParityStatusForHomepage(marketPulse?.parityStatus)) continue;
-      const price = marketPulse?.marketPrice ?? null;
+      if (!marketPulse) continue;
+      if (!hasPermittedPublicPulse(marketPulse)) continue;
+      const price = marketPulse.marketPrice ?? null;
       if (price == null || price < MIN_PRICE) continue;
-      const trendPct = Number.isFinite(row.provider_trend_slope_7d ?? NaN)
-        ? Number((row.provider_trend_slope_7d as number).toFixed(2))
-        : null;
+      const trendPct = marketPulse.changePct7d ?? marketPulse.changePct24h;
       trendingCandidatesOut.push(toCard(row.canonical_slug, {
         changePct: trendPct,
         changeWindow: trendPct !== null ? "7D" : null,
@@ -1813,10 +2045,17 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
     // snapshots from disagreeing with the card detail page.
     const repriceDailyCards = (cards: HomepageCard[]): HomepageCard[] => cards.flatMap((card) => {
       const marketPulse = marketPulseMap.get(card.slug);
-      if (!hasProviderParityStatusForHomepage(marketPulse?.parityStatus)) return [];
+      if (!marketPulse) return [];
+      if (!hasPermittedPublicPulse(marketPulse)) return [];
+      const currentChange = card.change_window === "24H"
+        ? marketPulse.changePct24h
+        : card.change_window === "7D"
+          ? marketPulse.changePct7d
+          : marketPulse.changePct;
+      if (currentChange === null || card.change_window === null) return [];
       return [toCard(card.slug, {
         mover_tier: card.mover_tier,
-        changePct: card.change_pct,
+        changePct: currentChange,
         changeWindow: card.change_window,
         preferOverrideChange: true,
         allowSparklineFallback: false,
@@ -1843,6 +2082,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
     const dailyLosers7D = dailyMoversForDisplay.losers.filter((c) => c.change_window === "7D");
 
     const signalBoard = {
+      market_watch: marketWatchOut,
       top_movers: {
         "24H": dailyGainers24H.length > 0
           ? dailyGainers24H.slice(0, SECTION_LIMIT)
