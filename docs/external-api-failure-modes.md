@@ -129,7 +129,9 @@ As of 2026-04-26, after the Incident 2 fix landed:
 ### Fixed
 - **`lib/ai/card-profile-summary.ts`** — uses the patched pattern (logged + propagated `failureReason`). Reference implementation for new LLM call sites.
 
-### Still vulnerable — needs the same treatment
+### Remediated (verified 2026-05-28) — was "Still vulnerable"
+
+> **UPDATE 2026-05-28 (Opus 4.8 review):** Both sites below are now fixed. Each logs the error with `name` + `message` and propagates a `failureReason` on the result, with the timeout raised to `15_000`. For homepage-brief, the consumer `app/api/cron/refresh-ai-brief/route.ts` additionally flips `ok: !llmPathDegraded` / HTTP 500 on full degradation while keeping a legitimate no-mover-data fallback (no `failureReason`) at `ok:true`. `SOURCE_VERSION` in `llm.ts` is now `llm-v${PROFILE_VERSION}` (the stale "gemini2-flash" label is gone). The code snippets below are the **pre-fix** state, kept for history; see Follow-up work items 1–2.
 
 - **`lib/personalization/explanation/llm.ts`** *(highest priority)* — line 223:
   ```ts
@@ -157,8 +159,8 @@ As of 2026-04-26, after the Incident 2 fix landed:
 
 ## Follow-up work
 
-1. **Apply the `e3f2549` pattern to `lib/personalization/explanation/llm.ts`**. Add a `failureReason?: string` field to `PersonalizedExplanation` (or wrap the return in a `Result` type), log error name + message in the catch, and have the consuming code path surface degradation in whatever response it's part of.
-2. **Apply the same pattern to `lib/ai/homepage-brief.ts`**. Add `failureReason?: string` to `HomepageBrief`, propagate it through to the cron's API response. Bump `HOMEPAGE_BRIEF_TIMEOUT_MS` to 15 s for parity with card-profile.
+1. ~~**Apply the `e3f2549` pattern to `lib/personalization/explanation/llm.ts`**~~ — **DONE (verified 2026-05-28).** Catch logs `name: message` and returns `failureReason: "llm-threw:<name>:<msg>"` (parse-miss path returns `"parse-miss"`); `LLM_TIMEOUT_MS = 15_000`; `SOURCE_VERSION = llm-v${PROFILE_VERSION}`.
+2. ~~**Apply the same pattern to `lib/ai/homepage-brief.ts`**~~ — **DONE (verified 2026-05-28).** `HomepageBrief.failureReason` propagates through `app/api/cron/refresh-ai-brief/route.ts` (`llmPathDegraded` → `ok:false` / HTTP 500); `HOMEPAGE_BRIEF_TIMEOUT_MS = 15_000`.
 3. **Add a smoke check to CI/preview** that hits each AI cron with `?maxCards=1` and asserts `llmGenerated > 0`. Costs ~$0.001 per CI run, would have caught Incident 2 within the deploy that broke it.
 4. **Generalize the "100 % degradation = ok:false" rule into a small shared helper.** Something like `isLlmPathDegraded({ processed, llmCount })` so each cron route doesn't reinvent the predicate. Optional — consistency over reach.
 
