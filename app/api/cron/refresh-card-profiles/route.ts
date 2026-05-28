@@ -33,6 +33,7 @@ import {
   buildFallbackProfile,
   type CardProfileInput,
 } from "@/lib/ai/card-profile-summary";
+import { isLlmPathDegraded } from "@/lib/ai/llm-degradation";
 
 export const runtime = "nodejs";
 export const maxDuration = 180;
@@ -499,7 +500,7 @@ export async function GET(req: Request) {
   // tokens — the prior silent-success shape — now returns ok:false so
   // the caller (or a future scheduled cron) can alert instead of
   // shrugging.
-  const llmPathDegraded = totalProcessed > 0 && totalLlm === 0;
+  const llmPathDegraded = isLlmPathDegraded({ processed: totalProcessed, llmCount: totalLlm });
   const ok = firstError === null && !llmPathDegraded && !haltedForLlmProviderFailure;
   return NextResponse.json(
     {

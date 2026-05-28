@@ -426,6 +426,13 @@ export const PRIVILEGED_WORKFLOW_CONTRACTS = {
     requiredTrustInputs: ["SUPABASE_PROJECT_REF", "SUPABASE_ACCESS_TOKEN", "SUPABASE_DB_PASSWORD"],
     expectedSignals: ["github_actions_secrets", "supabase_migration_apply"],
   }),
+  ".github/workflows/ai-cron-smoke.yml": privilegedEntrypoint({
+    type: "scheduled_internal_automation_workflow",
+    intendedCaller: "GitHub Actions deployment_status on a successful Vercel preview deploy, smoke-testing the AI crons against the preview environment_url",
+    trustModel: "cron_secret_route_call",
+    requiredTrustInputs: ["SMOKE_BASE_URL (preview environment_url)", "CRON_SECRET", "VERCEL_AUTOMATION_BYPASS_SECRET"],
+    expectedSignals: ["github_actions_secrets", "cron_secret_call"],
+  }),
 };
 
 function internalAdminSessionRoute(intendedCaller, authSourceFiles) {

@@ -16,6 +16,9 @@
 //   SMOKE_BASE_URL=https://<preview>.vercel.app CRON_SECRET=*** \
 //     node scripts/check-ai-cron-smoke.mjs
 //
+// Against a protected Vercel preview, also set VERCEL_AUTOMATION_BYPASS_SECRET
+// to send the x-vercel-protection-bypass header.
+//
 // When SMOKE_BASE_URL or CRON_SECRET is unset it SKIPS (exit 0) so it is a
 // no-op anywhere it can't run. Cost: ~$0.001 (one card profile + EN/JP briefs).
 // Note: this is NOT a dry run — it performs the crons' real (tiny) work.
@@ -96,9 +99,14 @@ async function runCheck(check) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
+    const headers = { authorization: `Bearer ${cronSecret}` };
+    // Vercel preview deploys are usually behind Deployment Protection; the
+    // bypass secret lets CI reach the app instead of Vercel's auth wall.
+    const bypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim();
+    if (bypass) headers["x-vercel-protection-bypass"] = bypass;
     const res = await fetch(url, {
       method: "GET",
-      headers: { authorization: `Bearer ${cronSecret}` },
+      headers,
       signal: controller.signal,
     });
     const text = await res.text();
