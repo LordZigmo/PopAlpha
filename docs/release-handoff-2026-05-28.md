@@ -73,3 +73,17 @@ Known iOS note:
 - Check that AI summaries describe the PopAlpha market anchor and recent market signal without implying direct eBay/TCGplayer sourcing.
 - Check that quarantined/no-reliable-price cards remain hidden from public headline price surfaces.
 - Check that App Store listing copy matches the current Pro model: scanner is free; Pro is market intelligence, collector insights, alerts, and richer workflows.
+
+## Post-Handoff Updates (2026-05-28 — independent Opus 4.8 review)
+
+This RC was independently re-verified end-to-end, and one gap was fixed and merged.
+
+**The release candidate is now `242bc61`** (was `bba6f9d`); the only delta is PR #128. Build the TestFlight archive from `242bc61`, not `bba6f9d`.
+
+- **iOS price-source copy reframed (PR #128).** The EN `CardDetailView` "Price Source" row and the `MarketplaceView` EN footer named "Scrydex" directly — a violation of the no-direct-sourcing rule above. Both now read `PopAlpha market feeds` (the JP `Yahoo Japan & Snkrdunk` labels were already compliant and are unchanged). Web copy, AI prompts, and the App Store listing were already clean. iOS Release build re-verified green after the change.
+- **Live `public_card_metrics` confirms the trust behavior in production.** The view is **per-printing**; the card-detail headline uses the canonical aggregate (`printing_id IS NULL`).
+  - `prismatic-evolutions-161-umbreon-ex` canonical row: `market_price = 1418.70`, `recent_market_signal_usd = 1750.50`, `SIGNAL_HIGHER`, confidence HIGH / `POPALPHA_MARKET_CONFIDENT`. The conservative anchor is the headline; the higher public signal is context. ✔
+  - `evolving-skies-65-espeon-vmax`, `burning-shadows-41-raichu`, `surging-sparks-238-pikachu-ex` canonical rows are `UNDER_REVIEW` / `NO_RELIABLE_PRICE` with `market_price = null` (headline suppressed). ✔ High `PUBLIC_ONLY` values seen on individual printings (e.g. an espeon-vmax printing at `$7,038.90` from 1 listing / 1 snapshot, confidence LOW) are thin non-default printings, never the card headline.
+- **Silent-fallback LLM sites verified remediated.** The two sites `docs/external-api-failure-modes.md` flagged (`lib/personalization/explanation/llm.ts`, `lib/ai/homepage-brief.ts`) now log + propagate `failureReason` and flip `ok:false` / HTTP 500 on full degradation. That doc has been updated.
+- **Verifications re-run green:** `test:homepage`, `test:market-truth`, `displayed-market-price`, `check:migration-function-body`, `npm run build` (incl. all 13 security static checks, 123 routes), iOS Release build (`** BUILD SUCCEEDED **`). Build telemetry: `marketWatchRows: 160`, `marketWatch: 20`, `missing: 0`.
+- **Still outstanding (not trust-blocking):** signed TestFlight archive from `242bc61` → App Store Connect. iOS on-device display parity for the new states (state badges, recent-market-signal context, the Market Watch rail) remains deferred — cosmetic and decode-safe, not price-correctness.
