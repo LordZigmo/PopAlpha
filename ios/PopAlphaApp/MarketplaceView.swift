@@ -456,7 +456,7 @@ struct MarketplaceView: View {
     }
 
     @ViewBuilder
-    private func footer(asOf: String, attribution: String = "Scrydex & PokémonTCG") -> some View {
+    private func footer(asOf: String, attribution: String = "PopAlpha market feeds") -> some View {
         Text("Data as of \(formatAsOf(asOf)) · \(attribution)")
             .font(.system(size: 10, weight: .medium))
             .foregroundStyle(PA.Colors.muted)
