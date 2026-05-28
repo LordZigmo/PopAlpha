@@ -32,6 +32,7 @@
     "check:price-history-views": "node scripts/check-price-history-view-contract.mjs",
     "check:set-summary-views": "node scripts/check-set-summary-view-contract.mjs",
     "check:jp-price-coverage-view": "node scripts/check-jp-price-coverage-view-contract.mjs",
+    "check:ai-cron-smoke": "node scripts/check-ai-cron-smoke.mjs",
     "audit:price-spotcheck": "node --env-file=.env.local scripts/audit-public-price-spotcheck.mjs",
     "check:security:doctor": "node --env-file=.env.local scripts/check-linked-db-prereqs.mjs",
     "check:security:invariants": "node scripts/check-security-invariants.mjs",
