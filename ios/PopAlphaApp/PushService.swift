@@ -131,6 +131,7 @@ final class PushService {
     /// Called by the sheet after the user picks Enable or Not Now —
     /// either way we record that the soft prompt has run so we don't
     /// nag on subsequent sign-ins / launches.
+    @MainActor
     func markSoftPromptSeen() {
         defaults.set(true, forKey: softPromptSeenKey)
         showSoftPrompt = false
@@ -194,6 +195,7 @@ final class PushService {
         }
     }
 
+    @MainActor
     func handleRegistrationFailure(_ error: Error) {
         // Silent on simulator — APNs registration always fails there
         // with "remote notifications are not supported in the simulator"

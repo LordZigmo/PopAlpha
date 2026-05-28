@@ -1,5 +1,6 @@
 import SwiftUI
 import NukeUI
+import OSLog
 
 // MARK: - User Profile View (for viewing other users)
 
@@ -375,7 +376,7 @@ struct UserProfileView: View {
             let (items, _) = try await ActivityService.shared.fetchProfileActivity(handle: handle)
             activityItems = items
         } catch {
-            // Silently fail
+            Logger.ui.debug("profile activity load failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 

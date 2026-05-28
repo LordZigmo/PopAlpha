@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 // MARK: - Notification Service — Background polling for unread count
 
@@ -31,7 +32,7 @@ final class NotificationService {
     /// One-shot refresh of unread count
     func refreshUnreadCount() async {
         guard AuthService.shared.isAuthenticated else {
-            unreadCount = 0
+            await MainActor.run { self.unreadCount = 0 }
             return
         }
 
@@ -41,7 +42,9 @@ final class NotificationService {
                 self.unreadCount = count
             }
         } catch {
-            // Silently fail — polling shouldn't crash the app
+            // Best-effort polling (retries every 60s) — don't crash, but
+            // log so a persistent failure is visible instead of silent.
+            Logger.api.debug("notification unread refresh failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 

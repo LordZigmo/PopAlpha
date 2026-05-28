@@ -164,6 +164,11 @@ public final class PopAlphaVisionEngine {
     private let frameGate = DispatchSemaphore(value: 1)
 
     private let expectedCardAspectRatio = CGFloat(2.5 / 3.5)
+    /// Reused across perspective-correction crops. Building a fresh
+    /// CIContext per crop allocates GPU resources (~5-10ms) and churned
+    /// under rapid multi-scan auto-fire. CIContext rendering is
+    /// thread-safe, so one shared instance is safe on the analysis queue.
+    private let cropContext = CIContext(options: nil)
     private lazy var rectangleRequest: VNDetectRectanglesRequest = makeRectangleRequest()
     private var candidate: StableCandidate?
 
@@ -868,8 +873,7 @@ public final class PopAlphaVisionEngine {
 
         let outputExtent = outputImage.extent
 
-        let context = CIContext(options: nil)
-        guard let outputCG = context.createCGImage(outputImage, from: outputExtent) else {
+        guard let outputCG = cropContext.createCGImage(outputImage, from: outputExtent) else {
             return nil
         }
 

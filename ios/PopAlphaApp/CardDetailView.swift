@@ -1,5 +1,6 @@
 import SwiftUI
 import NukeUI
+import OSLog
 
 private let abundantRawCardMaxUsd: Double = 2
 private let abundantRawCardHeroLabel = "Abundant"
@@ -394,7 +395,15 @@ struct CardDetailView: View {
             } else {
                 cardProfile = nil
             }
-            cardMetrics = try? await CardService.shared.fetchCardMetrics(slug: activeCard.id)
+            do {
+                cardMetrics = try await CardService.shared.fetchCardMetrics(slug: activeCard.id)
+            } catch {
+                // Preserve the prior fallback (nil → cached activeCard.price,
+                // which is last-known-trusted, not garbage) but don't let a
+                // price-fetch failure masquerade as a healthy load — log it.
+                cardMetrics = nil
+                Logger.api.debug("card metrics fetch failed slug=\(activeCard.id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
             // First metrics arrival is the cue to drop the toggle fade.
             // Cleared here rather than in the toggle tap so the fade
             // outlasts profile fetch latency (~100–400ms) and reads as

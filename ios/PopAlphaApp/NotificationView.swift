@@ -1,4 +1,5 @@
 import SwiftUI
+import OSLog
 
 // MARK: - Notification View
 //
@@ -234,7 +235,11 @@ struct NotificationView: View {
         do {
             let (items, _) = try await ActivityService.shared.fetchNotifications()
             notifications = items
-            try? await ActivityService.shared.markNotificationsRead()
+            do {
+                try await ActivityService.shared.markNotificationsRead()
+            } catch {
+                Logger.api.debug("markNotificationsRead failed: \(error.localizedDescription, privacy: .public)")
+            }
             NotificationService.shared.clearUnreadCount()
         } catch {
             feedError = "Couldn't load activity"

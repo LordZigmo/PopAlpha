@@ -1,5 +1,6 @@
 import Combine
 import SwiftUI
+import UIKit
 import PopAlphaCore
 import OSLog
 
@@ -419,6 +420,16 @@ struct ScannerTabView: View {
                 .multilineTextAlignment(.center)
                 .lineLimit(3)
                 .padding(.horizontal, 28)
+            Button("Open Settings") {
+                guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                UIApplication.shared.open(url)
+            }
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(.white.opacity(0.15), in: Capsule())
+            .padding(.top, 4)
         }
     }
 
@@ -1399,6 +1410,9 @@ final class ScannerHost: ObservableObject {
                 }
                 if self.firstFrameRendered != vm.firstFrameRendered {
                     self.firstFrameRendered = vm.firstFrameRendered
+                }
+                if let failure = vm.cameraSetupFailure, self.initError == nil {
+                    self.initError = failure
                 }
             }
         }

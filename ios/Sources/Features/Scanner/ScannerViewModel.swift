@@ -35,6 +35,14 @@ public final class ScannerViewModel: ObservableObject, PopAlphaVisionEngineDeleg
     /// 5-6s "hang" because the runloop is idle waiting for frames).
     @Published public private(set) var firstFrameRendered = false
 
+    /// Non-nil when the camera could not be brought up — permission
+    /// denied/restricted, or no usable capture device. Mirrored into
+    /// `ScannerHost.initError` so the scanner shows an actionable
+    /// overlay (with an Open Settings link) instead of a permanent
+    /// "Starting camera…" placeholder (the session never starts on
+    /// denial, so no frame arrives and `firstFrameRendered` never flips).
+    @Published public private(set) var cameraSetupFailure: String?
+
     /// Vision-normalized bounding box of the current live candidate (origin bottom-left, 0–1 range),
     /// or nil when the engine has no active candidate. Updated every frame the candidate is visible.
     @Published public private(set) var candidateBoundingBox: CGRect?
@@ -116,6 +124,15 @@ public final class ScannerViewModel: ObservableObject, PopAlphaVisionEngineDeleg
     public func markFirstFrameRendered() {
         if !firstFrameRendered {
             firstFrameRendered = true
+        }
+    }
+
+    /// Reports a camera bring-up failure (permission denied/restricted
+    /// or no usable capture device). Idempotent — the first failure
+    /// wins so repeated authorization callbacks don't thrash the value.
+    public func reportCameraSetupFailure(_ message: String) {
+        if cameraSetupFailure == nil {
+            cameraSetupFailure = message
         }
     }
 

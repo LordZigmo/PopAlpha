@@ -1,5 +1,6 @@
 import SwiftUI
 import NukeUI
+import OSLog
 
 /// Shown after a medium-confidence scan when the identifier narrowed
 /// the card to a short list but couldn't pick a single winner with
@@ -492,18 +493,22 @@ struct ScanPickerSheet: View {
             let lang = scanLanguage
             let store = onCorrectionSubmitted
             Task.detached {
-                let result = try? await ScanService.submitCorrection(
-                    image: bytes,
-                    canonicalSlug: slug,
-                    language: lang,
-                    notes: "picker-sheet-select",
-                    predicted: correctionMetadata,
-                )
-                if result?.ok == true {
-                    // Trigger an anchor sync so the next scan can
-                    // see this correction. Non-blocking; the picker
-                    // dismiss has already navigated.
-                    await MainActor.run { store?() }
+                do {
+                    let result = try await ScanService.submitCorrection(
+                        image: bytes,
+                        canonicalSlug: slug,
+                        language: lang,
+                        notes: "picker-sheet-select",
+                        predicted: correctionMetadata,
+                    )
+                    if result.ok {
+                        // Trigger an anchor sync so the next scan can
+                        // see this correction. Non-blocking; the picker
+                        // dismiss has already navigated.
+                        await MainActor.run { store?() }
+                    }
+                } catch {
+                    Logger.scan.debug("scan correction submit failed (picker): \(error.localizedDescription, privacy: .public)")
                 }
             }
         }
@@ -550,15 +555,19 @@ struct ScanPickerSheet: View {
             let lang = scanLanguage
             let store = onCorrectionSubmitted
             Task.detached {
-                let r = try? await ScanService.submitCorrection(
-                    image: bytes,
-                    canonicalSlug: slug,
-                    language: lang,
-                    notes: "picker-sheet-search-select",
-                    predicted: correctionMetadata,
-                )
-                if r?.ok == true {
-                    await MainActor.run { store?() }
+                do {
+                    let r = try await ScanService.submitCorrection(
+                        image: bytes,
+                        canonicalSlug: slug,
+                        language: lang,
+                        notes: "picker-sheet-search-select",
+                        predicted: correctionMetadata,
+                    )
+                    if r.ok {
+                        await MainActor.run { store?() }
+                    }
+                } catch {
+                    Logger.scan.debug("scan correction submit failed (search): \(error.localizedDescription, privacy: .public)")
                 }
             }
         }
