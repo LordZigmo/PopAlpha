@@ -15,8 +15,12 @@ name: AI cron smoke (preview)
 #   - If Preview Deployment Protection is on: repo secret VERCEL_AUTOMATION_BYPASS_SECRET.
 #   - Vercel ↔ GitHub integration emitting deployment_status events (default on).
 # Verify the environment naming + environment_url against your Vercel setup; the
-# smoke script SKIPS (exit 0) if SMOKE_BASE_URL/CRON_SECRET are empty, so a
-# misconfiguration degrades to a no-op rather than a false failure.
+# smoke script SKIPS (exit 0) if SMOKE_BASE_URL/CRON_SECRET are empty. It is also
+# narrow on purpose: it HARD-FAILS only on the Incident-2 silent lie (HTTP 200 +
+# ok:true while the LLM never ran) and WARNs (exit 0) on everything else —
+# non-2xx, ok:false, 401 (CRON_SECRET or Deployment Protection), transport
+# errors. So a Preview WITHOUT live AI creds warns (an honest no-op) instead of
+# false-failing; add AI creds to Preview if you want a hard signal here.
 
 on:
   deployment_status
