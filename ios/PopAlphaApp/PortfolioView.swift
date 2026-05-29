@@ -235,6 +235,63 @@ struct PortfolioView: View {
 
     // MARK: - Positions Header (title + view-mode toggle)
 
+    /// Renders the positions in the current view mode (list or grid).
+    /// Shared by the flat list and by each raw/graded section.
+    @ViewBuilder
+    private func positionsBody(_ items: [Position]) -> some View {
+        switch positionsViewMode {
+        case .list:
+            let descriptors = positionDescriptors
+            LazyVStack(spacing: 10) {
+                ForEach(items) { position in
+                    PortfolioPositionCell(
+                        position: position,
+                        metadata: position.canonicalSlug.flatMap { overview?.cardMetadata?[$0] },
+                        descriptor: descriptors[position.id],
+                        onTap: { selectedCard = cardFor(position: position) },
+                        onLotTap: { lot in editingLot = lot }
+                    )
+                    .swipeRevealActions(
+                        isScrollLocked: $isSwipingCard,
+                        onEdit: { editingLot = position.lots.first },
+                        onDelete: { Task { await deleteLots(position.lots.map(\.id)) } }
+                    )
+                }
+            }
+        case .grid:
+            LazyVGrid(
+                columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
+                spacing: 12
+            ) {
+                ForEach(items) { position in
+                    PortfolioCardGridCell(
+                        position: position,
+                        metadata: position.canonicalSlug.flatMap { overview?.cardMetadata?[$0] },
+                        onTap: { selectedCard = cardFor(position: position) }
+                    )
+                }
+            }
+        }
+    }
+
+    /// A labeled raw/graded section: header with the card count, then the
+    /// positions in the current view mode.
+    @ViewBuilder
+    private func positionsSection(title: String, positions items: [Position]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Text(title)
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(PA.Colors.text)
+                Text("\(items.reduce(0) { $0 + $1.totalQty })")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(PA.Colors.muted)
+                Spacer(minLength: 0)
+            }
+            positionsBody(items)
+        }
+    }
+
     private var positionsHeader: some View {
         HStack(spacing: 8) {
             Image(systemName: "rectangle.stack")
@@ -361,38 +418,18 @@ struct PortfolioView: View {
                             .padding(.horizontal, PA.Layout.sectionPadding)
 
                         Group {
-                            switch positionsViewMode {
-                            case .list:
-                                let descriptors = positionDescriptors
-                                LazyVStack(spacing: 10) {
-                                    ForEach(positions) { position in
-                                        PortfolioPositionCell(
-                                            position: position,
-                                            metadata: position.canonicalSlug.flatMap { overview?.cardMetadata?[$0] },
-                                            descriptor: descriptors[position.id],
-                                            onTap: { selectedCard = cardFor(position: position) },
-                                            onLotTap: { lot in editingLot = lot }
-                                        )
-                                        .swipeRevealActions(
-                                            isScrollLocked: $isSwipingCard,
-                                            onEdit: { editingLot = position.lots.first },
-                                            onDelete: { Task { await deleteLots(position.lots.map(\.id)) } }
-                                        )
-                                    }
+                            // Collectors think in raw vs graded — split the
+                            // list into labeled sections when the portfolio
+                            // holds both, otherwise render a flat list.
+                            let rawPositions = positions.filter { $0.grade == "RAW" }
+                            let gradedPositions = positions.filter { $0.grade != "RAW" }
+                            if !rawPositions.isEmpty && !gradedPositions.isEmpty {
+                                VStack(alignment: .leading, spacing: 18) {
+                                    positionsSection(title: "Raw", positions: rawPositions)
+                                    positionsSection(title: "Graded", positions: gradedPositions)
                                 }
-                            case .grid:
-                                LazyVGrid(
-                                    columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
-                                    spacing: 12
-                                ) {
-                                    ForEach(positions) { position in
-                                        PortfolioCardGridCell(
-                                            position: position,
-                                            metadata: position.canonicalSlug.flatMap { overview?.cardMetadata?[$0] },
-                                            onTap: { selectedCard = cardFor(position: position) }
-                                        )
-                                    }
-                                }
+                            } else {
+                                positionsBody(positions)
                             }
                         }
                         .padding(.horizontal, PA.Layout.sectionPadding)
