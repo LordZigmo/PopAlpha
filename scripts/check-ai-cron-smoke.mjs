@@ -111,7 +111,30 @@ async function runCheck(check) {
     });
     const text = await res.text();
     if (res.status === 401) {
-      return { status: "fail", detail: "HTTP 401 — CRON_SECRET rejected" };
+      // A 401 can come from two different layers, and conflating them hides the
+      // real cause:
+      //   (a) Vercel Deployment Protection's auth wall, which fires at the edge
+      //       BEFORE the route runs when the x-vercel-protection-bypass secret
+      //       is missing/stale (HTML "Authentication Required" page +
+      //       _vercel_sso_nonce cookie). We never reached the app, so the LLM
+      //       path is UNVALIDATED — inconclusive, not degraded — and must NOT
+      //       red-flag CI (that is the Incident-2 guard's job, not a transport
+      //       check's).
+      //   (b) the route's own requireCron rejecting CRON_SECRET (JSON body).
+      //       That IS a real auth regression and stays a hard fail.
+      const contentType = res.headers.get("content-type") ?? "";
+      const isProtectionWall = contentType.includes("text/html")
+        || /_vercel_sso_nonce|Authentication Required/i.test(text);
+      if (isProtectionWall) {
+        return {
+          status: "warn",
+          detail:
+            "HTTP 401 from Vercel Deployment Protection — could not bypass to reach the app, "
+            + "so the LLM path was NOT validated. Set VERCEL_AUTOMATION_BYPASS_SECRET to the "
+            + "project's current automation-bypass token to enable real validation.",
+        };
+      }
+      return { status: "fail", detail: "HTTP 401 — route rejected CRON_SECRET" };
     }
     let body;
     try {
