@@ -56,6 +56,7 @@ struct MarketPulseSection: View {
     @Environment(\.market) private var market
 
     enum Category: String, CaseIterable, Identifiable {
+        case marketWatch
         case movers
         case breakouts
         case unusual
@@ -69,6 +70,7 @@ struct MarketPulseSection: View {
 
         var label: String {
             switch self {
+            case .marketWatch: return "Watch"
             case .movers: return "Movers"
             case .breakouts: return "Breakouts"
             case .unusual: return "Unusual"
@@ -84,6 +86,7 @@ struct MarketPulseSection: View {
             switch self {
             // Server tiers: premium ≥ $50, mid $8–$50, budget $1–$8
             // (migration 20260504230000_compute_daily_top_movers_mid_tier.sql)
+            case .marketWatch: return "MARKET WATCH"
             case .movers: return "LIVE MARKET"
             case .breakouts: return "BREAKOUTS"
             case .unusual: return "UNUSUAL"
@@ -97,6 +100,7 @@ struct MarketPulseSection: View {
 
         var title: String {
             switch self {
+            case .marketWatch: return "Market Watch"
             case .movers: return "Top Movers"
             case .breakouts: return "Breakouts"
             case .unusual: return "Unusual Volume"
@@ -110,6 +114,7 @@ struct MarketPulseSection: View {
 
         var color: Color {
             switch self {
+            case .marketWatch: return PA.Colors.accent
             case .movers: return PA.Colors.accent
             case .breakouts: return Color(red: 0.486, green: 0.227, blue: 0.929)
             case .unusual: return PA.Colors.gold
@@ -126,6 +131,7 @@ struct MarketPulseSection: View {
         /// Nil means "let the badge speak for itself".
         var sectionRationale: String? {
             switch self {
+            case .marketWatch: return nil
             case .movers: return nil
             case .breakouts: return "Thin supply move"
             case .unusual: return "Unusual volume"
@@ -146,12 +152,12 @@ struct MarketPulseSection: View {
         var isWindowed: Bool {
             switch self {
             case .movers, .pullbacks, .momentum: return true
-            case .breakouts, .unusual, .mid, .budget, .japanese: return false
+            case .breakouts, .unusual, .mid, .budget, .japanese, .marketWatch: return false
             }
         }
     }
 
-    @State private var category: Category = .movers
+    @State private var category: Category = .marketWatch
 
     /// Categories shown in the tab strip. JP-only mode exposes the
     /// same mover board as EN — Movers / Pullbacks / Mid / Budget /
@@ -494,12 +500,15 @@ struct MarketPulseSection: View {
                 return (signalBoard.japaneseBudgetMovers ?? []).map { $0.preferringJpSource() }
             case .japanese:
                 return (signalBoard.japanese ?? []).map { $0.preferringJpSource() }
-            case .breakouts, .unusual:
+            case .breakouts, .unusual, .marketWatch:
                 // Not exposed in JP-mode tab strip; defensive fallback.
                 return []
             }
         }
         switch category {
+        case .marketWatch:
+            // Lead rail — trusted EN cards; empty on older server builds.
+            return signalBoard.marketWatch ?? []
         case .movers:
             return signalBoard.topMovers.forWindow(selectedWindow)
         case .breakouts:
@@ -539,6 +548,7 @@ struct MarketPulseSection: View {
 
     private func emptyMessage(for category: Category) -> String {
         switch category {
+        case .marketWatch: return "No market watch cards yet"
         case .movers: return "No \(selectedWindow.label) movers yet"
         case .breakouts: return "No breakouts yet"
         case .unusual: return "No unusual activity"

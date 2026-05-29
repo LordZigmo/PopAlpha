@@ -3,8 +3,7 @@ import NukeUI
 import OSLog
 
 private let abundantRawCardMaxUsd: Double = 2
-private let abundantRawCardHeroLabel = "Abundant"
-private let abundantRawCardDetailLabel = "Usually under $2 - pay what feels fair"
+private let abundantRawCardDetailLabel = "Low-dollar card"
 
 // MARK: - Price Mode
 
@@ -507,7 +506,13 @@ struct CardDetailView: View {
                 if let metrics = try? await CardService.shared.fetchCardMetrics(
                     slug: activeCard.id,
                     printingId: selectedPrintingId
-                ) {
+                ), metrics.isTrustedHeadline {
+                    // Only let a per-printing row take over the hero when
+                    // it's the trusted anchor. Under the price-trust
+                    // pipeline most per-printing rows are PUBLIC_ONLY /
+                    // low-confidence; applying them dropped the hero below
+                    // the canonical price the homepage shows (e.g. a $7
+                    // canonical headline became a $5.27 per-printing row).
                     await MainActor.run { cardMetrics = metrics }
                 }
                 if let prices = try? await CardService.shared.fetchConditionPrices(
@@ -1045,7 +1050,7 @@ struct CardDetailView: View {
                 Text(abundantRawCardDetailLabel)
                     .font(PA.Typography.caption)
                     .foregroundStyle(PA.Colors.muted)
-                    .accessibilityLabel("Usually under two dollars. Pay what feels fair.")
+                    .accessibilityLabel("Low-dollar card")
             }
 
             // Source attribution for JP cards. When BOTH Yahoo! JP and
@@ -2262,7 +2267,9 @@ struct CardDetailView: View {
             // Falls back to printing-specific override → MarketCard's
             // headline price (Scrydex) when no JP data is present.
             if let usd = preferredHeroPrice {
-                if usd <= abundantRawCardMaxUsd { return abundantRawCardHeroLabel }
+                // Low-dollar cards render the exact price (matches the
+                // homepage + web) with a "Low-dollar card" caption below,
+                // instead of hiding the number behind an "Abundant" label.
                 if usd >= 1000 { return String(format: "$%.0f", usd) }
                 return String(format: "$%.2f", usd)
             }
