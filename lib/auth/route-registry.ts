@@ -86,6 +86,7 @@ export const CRON_ROUTES = [
   "cron/recompute-refresh-tier",
   "cron/notify-trial-expiring",
   "cron/import-pricecharting",
+  "cron/check-pricecharting-freshness",
   "admin/cleanup/delete-thumb-overlay-augs",
 ];
 

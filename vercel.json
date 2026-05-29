@@ -29,6 +29,10 @@
       "schedule": "0 11 * * *"
     },
     {
+      "path": "/api/cron/check-pricecharting-freshness",
+      "schedule": "0 14 * * *"
+    },
+    {
       "path": "/api/cron/refresh-card-embeddings",
       "schedule": "30 9 * * *"
     },
