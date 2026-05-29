@@ -61,6 +61,21 @@ public final class PremiumGate: ObservableObject {
     /// centrally trained server/model path.
     @Published public private(set) var offlineScannerEnabled: Bool = false
 
+    // MARK: - Free AI-analysis budget (device-scoped; counts signed-out)
+
+    /// Free / anonymous users get the full AI analysis on up to this many
+    /// distinct cards; beyond that the analysis renders behind the Pro
+    /// invisible-ink lock. Device-scoped (UserDefaults) so it applies even
+    /// when signed out, and keyed by slug so revisiting an already-unlocked
+    /// card doesn't burn another view.
+    public static let freeAnalysisLimit = 3
+    private static let freeAnalysisSeenKey = "ai.popalpha.freeAnalysisSeenSlugs"
+
+    /// Count of distinct cards a free user has spent on the full analysis.
+    /// Published so any "N of 3 free reads" UI can react.
+    @Published public private(set) var freeAnalysisSeenCount: Int = 0
+    private var freeAnalysisSeenSlugs: Set<String> = []
+
     public convenience init() {
         self.init(store: PremiumStore.shared)
     }
@@ -80,6 +95,11 @@ public final class PremiumGate: ObservableObject {
         // first sink registration; recompute synchronously so the
         // initial UI is correct).
         recompute(from: store.status)
+
+        freeAnalysisSeenSlugs = Set(
+            UserDefaults.standard.stringArray(forKey: Self.freeAnalysisSeenKey) ?? []
+        )
+        freeAnalysisSeenCount = freeAnalysisSeenSlugs.count
     }
 
     // MARK: - DEBUG override
@@ -120,5 +140,28 @@ public final class PremiumGate: ObservableObject {
         if offlineScannerEnabled != offlineFlag {
             offlineScannerEnabled = offlineFlag
         }
+    }
+
+    // MARK: - Free analysis budget
+
+    /// Whether the full AI analysis should be revealed for `slug`. Pro
+    /// unlocks everything; otherwise a card already revealed stays
+    /// revealed, and new cards are allowed until the free limit is hit.
+    public func canRevealAnalysis(slug: String) -> Bool {
+        if isPro { return true }
+        if freeAnalysisSeenSlugs.contains(slug) { return true }
+        return freeAnalysisSeenSlugs.count < Self.freeAnalysisLimit
+    }
+
+    /// Record that a free user saw the full analysis for `slug`. No-op for
+    /// Pro (unlimited — shouldn't consume budget), already-counted cards,
+    /// and once the limit is reached. Persists across launches.
+    public func recordAnalysisReveal(slug: String) {
+        guard !isPro,
+              !freeAnalysisSeenSlugs.contains(slug),
+              freeAnalysisSeenSlugs.count < Self.freeAnalysisLimit else { return }
+        freeAnalysisSeenSlugs.insert(slug)
+        freeAnalysisSeenCount = freeAnalysisSeenSlugs.count
+        UserDefaults.standard.set(Array(freeAnalysisSeenSlugs), forKey: Self.freeAnalysisSeenKey)
     }
 }

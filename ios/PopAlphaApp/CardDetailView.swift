@@ -389,8 +389,11 @@ struct CardDetailView: View {
                 pairedImageUrl = pairing?.pairedImageUrl
             }
 
-            if premiumGate.isPro {
+            if premiumGate.canRevealAnalysis(slug: activeCard.id) {
                 cardProfile = try? await CardService.shared.fetchCardProfile(slug: activeCard.id)
+                // Spend a free-budget view only on a real reveal — no-op for
+                // Pro users and for cards the user already unlocked.
+                if cardProfile != nil { premiumGate.recordAnalysisReveal(slug: activeCard.id) }
             } else {
                 cardProfile = nil
             }
@@ -523,10 +526,11 @@ struct CardDetailView: View {
                 }
             }
         }
-        .onChange(of: premiumGate.isPro) { _, isPro in
+        .onChange(of: premiumGate.isPro) { _, _ in
             Task {
-                if isPro {
+                if premiumGate.canRevealAnalysis(slug: activeCard.id) {
                     cardProfile = try? await CardService.shared.fetchCardProfile(slug: activeCard.id)
+                    if cardProfile != nil { premiumGate.recordAnalysisReveal(slug: activeCard.id) }
                 } else {
                     cardProfile = nil
                 }
