@@ -389,7 +389,7 @@ actor CardService {
         } ?? ("printing_id", "is", "null")
         let data = try await Supabase.query(
             table: "public_card_metrics",
-            select: "canonical_slug,market_price,market_price_as_of,change_pct_24h,change_pct_7d,market_confidence_score,market_low_confidence,median_7d,median_30d,low_30d,high_30d,active_listings_7d,snapshot_count_30d,yahoo_jp_price,yahoo_jp_price_jpy,yahoo_jp_sample_count,yahoo_jp_observed_at,snkrdunk_price,snkrdunk_sample_count,snkrdunk_observed_at,snkrdunk_product_code,canonical_name_native,set_name_native,language",
+            select: "canonical_slug,market_price,market_price_as_of,change_pct_24h,change_pct_7d,market_confidence_score,market_low_confidence,market_price_display_state,market_blend_policy,median_7d,median_30d,low_30d,high_30d,active_listings_7d,snapshot_count_30d,yahoo_jp_price,yahoo_jp_price_jpy,yahoo_jp_sample_count,yahoo_jp_observed_at,snkrdunk_price,snkrdunk_sample_count,snkrdunk_observed_at,snkrdunk_product_code,canonical_name_native,set_name_native,language",
             filters: [
                 ("canonical_slug", "eq", slug),
                 ("grade", "eq", "RAW"),
@@ -890,6 +890,18 @@ struct CardMetricsResult: Decodable {
     let canonicalNameNative: String?
     let setNameNative: String?
     let language: String?
+    /// Trust signals from public_card_metrics. Used to keep the detail
+    /// hero on the canonical trusted anchor instead of letting a
+    /// low-confidence per-printing row downgrade it (homepage parity).
+    let marketPriceDisplayState: String?
+    let marketBlendPolicy: String?
+
+    /// True when this row is the trusted headline (a real price under
+    /// the confident blend policy). Per-printing rows are usually
+    /// PUBLIC_ONLY / low-confidence and should not replace the hero.
+    var isTrustedHeadline: Bool {
+        marketPrice != nil && marketBlendPolicy == "POPALPHA_MARKET_CONFIDENT"
+    }
 }
 
 struct GradedVariantMetricRow: Decodable {
@@ -1276,6 +1288,10 @@ struct HomepageWindowedCardsDTO: Decodable, Hashable {
 }
 
 struct HomepageSignalBoardDTO: Decodable, Hashable {
+    // Lead rail — trusted English cards shown first, the populated
+    // counterpart to the strict (often sparse) mover rails. Optional so
+    // older server builds without market_watch still decode.
+    let marketWatch: [HomepageCardDTO]?
     let topMovers: HomepageWindowedCardsDTO
     let biggestDrops: HomepageWindowedCardsDTO
     let momentum: HomepageWindowedCardsDTO
@@ -1306,6 +1322,7 @@ struct HomepageSignalBoardDTO: Decodable, Hashable {
     let japaneseBudgetMovers: [HomepageCardDTO]?
 
     enum CodingKeys: String, CodingKey {
+        case marketWatch
         case topMovers, biggestDrops, momentum
         case unusualVolume, breakouts, midMovers, budgetMovers, japanese
         case japaneseTopMovers, japaneseBiggestDrops, japaneseMomentum
@@ -1317,6 +1334,7 @@ struct HomepageSignalBoardDTO: Decodable, Hashable {
     // blank the entire Market tab by failing the whole decode.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        marketWatch = try c.decodeIfPresent([HomepageCardDTO].self, forKey: .marketWatch)
         topMovers = try c.decodeIfPresent(HomepageWindowedCardsDTO.self, forKey: .topMovers) ?? .empty
         biggestDrops = try c.decodeIfPresent(HomepageWindowedCardsDTO.self, forKey: .biggestDrops) ?? .empty
         momentum = try c.decodeIfPresent(HomepageWindowedCardsDTO.self, forKey: .momentum) ?? .empty

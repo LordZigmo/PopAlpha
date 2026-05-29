@@ -269,7 +269,13 @@ const MIN_CONFIDENCE_SCORE = 45;
 const HIGH_CONF_LIQUIDITY_MIN = 6;
 const EMERGING_LIQUIDITY_MAX = 5;
 const MIN_PUBLIC_MOVER_HISTORY_POINTS = 2;
-const MAX_DAILY_MOVER_AGE_DAYS = 1;
+// Was 1. The strict price-trust coverage gate (eligible-pool threshold 25)
+// can trip on consecutive days, writing zero daily_top_movers rows; a 1-day
+// fallback then empties the signal-board rails entirely (observed 05-27/05-29
+// 2026). 3 days lets the last good bundle bridge short gate-trip gaps —
+// freshness-degraded but present beats empty. The underlying gate sparsity is
+// mitigated product-side by the Market Watch rail.
+const MAX_DAILY_MOVER_AGE_DAYS = 3;
 
 function createEmptyWindowedCards(): HomepageWindowedCards {
   return { "24H": [], "7D": [] };
