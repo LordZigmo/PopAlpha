@@ -1425,6 +1425,16 @@ export const RLS_REQUIRED_PUBLIC_TABLES = [
   "snkrdunk_card_prices",
   "snkrdunk_product_map",
   "yahoo_jp_card_prices",
+  // PriceCharting trusted-price pipeline. RLS-on / no-grants — service-role
+  // writes only (manual CLI + the import-pricecharting cron). Consumers read
+  // the derived headline via the public_card_metrics view; the raw product /
+  // observation / match rows and the trusted-raw-price + parity tables stay
+  // internal guardrail state. No-grant coverage below in INTERNAL_NO_GRANT_OBJECTS.
+  "canonical_pricecharting_price_parity",
+  "canonical_trusted_raw_prices",
+  "pricecharting_product_matches",
+  "pricecharting_product_observations",
+  "pricecharting_products",
   "variant_token_registry",
   "wishlist_items",
   "user_blocks",
@@ -1754,6 +1764,13 @@ export const INTERNAL_NO_GRANT_OBJECTS = [
   "variant_token_registry",
   // Yahoo! JP pricing companion. Same access model as snkrdunk_card_prices.
   "yahoo_jp_card_prices",
+  // PriceCharting trusted-price pipeline — service-role-only, read via the
+  // public_card_metrics view. RLS coverage above in RLS_REQUIRED_PUBLIC_TABLES.
+  "canonical_pricecharting_price_parity",
+  "canonical_trusted_raw_prices",
+  "pricecharting_product_matches",
+  "pricecharting_product_observations",
+  "pricecharting_products",
 ];
 
 export const PUBLIC_VIEW_NAMES = [
