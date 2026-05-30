@@ -227,7 +227,7 @@ export async function generateCardProfile(
       // empty or truncated → ~100% "parse-miss" (every card silently fell
       // back to the template). This is a tiny structured task, so minimize
       // thinking (family-correct control) and give the JSON ample room.
-      maxOutputTokens: 768,
+      maxOutputTokens: 1024,
       providerOptions: {
         google: {
           thinkingConfig: geminiThinkingConfigForModel(getCardProfileModelIdForInput(input)),
