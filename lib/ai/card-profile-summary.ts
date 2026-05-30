@@ -4,9 +4,11 @@ import { generateText } from "ai";
 
 import {
   getPopAlphaCardProfileModel,
+  getPopAlphaCardProfileModelId,
   getPopAlphaFeaturedCardProfileModel,
   getPopAlphaFeaturedCardProfileModelId,
 } from "@/lib/ai/models";
+import { geminiThinkingConfigForModel } from "@/lib/ai/model-config";
 import {
   buildFallbackProfile,
   buildMetricsHash,
@@ -140,6 +142,14 @@ function getCardProfileModelForInput(input: CardProfileInput) {
     : getPopAlphaCardProfileModel();
 }
 
+// The Gateway model id actually used for this card, so we can pick the matching
+// thinking control (gemini-3 → thinkingLevel, gemini-2.5 → thinkingBudget).
+function getCardProfileModelIdForInput(input: CardProfileInput): string {
+  return input.isHighPriority
+    ? getPopAlphaFeaturedCardProfileModelId()
+    : getPopAlphaCardProfileModelId();
+}
+
 function getCardProfileModelLabelForInput(input: CardProfileInput): string {
   return input.isHighPriority
     ? getPopAlphaFeaturedCardProfileModelId()
@@ -212,7 +222,17 @@ export async function generateCardProfile(
       system: SYSTEM_PROMPT,
       prompt: buildUserPrompt(input, fallbackProfile),
       abortSignal: abortController.signal,
-      maxOutputTokens: 220,
+      // Gemini 2.5/3 are thinking models. With reasoning on, the output
+      // budget is spent on (discarded) thoughts, leaving the JSON answer
+      // empty or truncated → ~100% "parse-miss" (every card silently fell
+      // back to the template). This is a tiny structured task, so minimize
+      // thinking (family-correct control) and give the JSON ample room.
+      maxOutputTokens: 768,
+      providerOptions: {
+        google: {
+          thinkingConfig: geminiThinkingConfigForModel(getCardProfileModelIdForInput(input)),
+        },
+      },
       maxRetries: CARD_PROFILE_MAX_RETRIES,
       experimental_telemetry: {
         isEnabled: true,
