@@ -1,26 +1,32 @@
-name: AI cron smoke (preview)
+name: AI cron smoke (production)
 
-# Runs the AI-cron smoke check (scripts/check-ai-cron-smoke.mjs) against a
-# Vercel PREVIEW deployment once it succeeds, to catch the silent-LLM-fallback
-# class before it reaches production — see docs/external-api-failure-modes.md.
+# Runs the AI-cron smoke check (scripts/check-ai-cron-smoke.mjs) against the
+# Vercel PRODUCTION deployment once it succeeds, to catch the silent-LLM-fallback
+# class before it lingers in production — see docs/external-api-failure-modes.md.
+#
+# Why production (not preview): Preview deployments sit behind Vercel Deployment
+# Protection (an SSO wall), so the smoke check there only ever saw a 401 and
+# WARNed/skipped — it never actually ran. Production has no SSO wall and carries
+# the real CRON_SECRET + live AI provider creds, so this is where the check
+# produces a meaningful signal that the LLM path is healthy post-deploy.
 #
 # Vercel's GitHub integration posts `deployment_status` events; this fires on a
-# successful, non-production one and points the smoke check at the live preview
+# successful Production one and points the smoke check at the live deployment
 # URL. It exercises the real crons (a ~$0.001 LLM call) and writes the tiny
-# amount those crons normally write to whatever DB the preview is wired to.
+# amount those crons normally write to the production DB.
+#
+# NOTE: deployment_status-triggered workflows ONLY run from the file on the
+# default branch — so this gate takes effect once merged to main, on the next
+# production deploy.
 #
 # Prerequisites (configure once):
-#   - Repo Actions secret `CRON_SECRET` matching the Preview env's CRON_SECRET.
-#   - The Preview deployment must have live AI provider creds in its env.
-#   - If Preview Deployment Protection is on: repo secret VERCEL_AUTOMATION_BYPASS_SECRET.
+#   - Repo Actions secret `CRON_SECRET` matching Production's CRON_SECRET.
+#   - Production must have live AI provider creds in its env (it does).
 #   - Vercel ↔ GitHub integration emitting deployment_status events (default on).
-# Verify the environment naming + environment_url against your Vercel setup; the
-# smoke script SKIPS (exit 0) if SMOKE_BASE_URL/CRON_SECRET are empty. It is also
+# The smoke script SKIPS (exit 0) if SMOKE_BASE_URL/CRON_SECRET are empty. It is
 # narrow on purpose: it HARD-FAILS only on the Incident-2 silent lie (HTTP 200 +
 # ok:true while the LLM never ran) and WARNs (exit 0) on everything else —
-# non-2xx, ok:false, 401 (CRON_SECRET or Deployment Protection), transport
-# errors. So a Preview WITHOUT live AI creds warns (an honest no-op) instead of
-# false-failing; add AI creds to Preview if you want a hard signal here.
+# non-2xx, ok:false, 401, transport errors.
 
 on:
   deployment_status
@@ -30,12 +36,14 @@ permissions:
 
 jobs:
   ai-cron-smoke:
-    # Only successful preview deploys — skip production and non-success states.
+    # Only successful production deploys — skip preview and non-success states.
     if: >
       github.event.deployment_status.state == 'success' &&
       github.event.deployment_status.environment_url != '' &&
-      !contains(github.event.deployment_status.environment, 'Production') &&
-      !contains(github.event.deployment_status.environment, 'production')
+      (
+        contains(github.event.deployment_status.environment, 'Production') ||
+        contains(github.event.deployment_status.environment, 'production')
+      )
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -47,11 +55,9 @@ jobs:
           node-version: "24"
 
       # No `npm ci` — the smoke script has zero dependencies (uses global
-      # fetch), so skipping install keeps this fast on every preview deploy.
-      - name: Smoke-test AI crons against the preview deploy
+      # fetch), so skipping install keeps this fast on every production deploy.
+      - name: Smoke-test AI crons against the production deploy
         env:
           SMOKE_BASE_URL: ${{ github.event.deployment_status.environment_url }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
-          # Only needed if Preview Deployment Protection is enabled.
-          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
         run: npm run check:ai-cron-smoke

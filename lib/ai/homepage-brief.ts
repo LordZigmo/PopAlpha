@@ -2,7 +2,10 @@ import "server-only";
 
 import { generateText } from "ai";
 
-import { getPopAlphaHomepageBriefModelId } from "@/lib/ai/model-config";
+import {
+  geminiThinkingConfigForModel,
+  getPopAlphaHomepageBriefModelId,
+} from "@/lib/ai/model-config";
 import { getPopAlphaHomepageBriefModel } from "@/lib/ai/models";
 import type { HomepageCard, HomepageData } from "@/lib/data/homepage";
 
@@ -664,7 +667,17 @@ export async function generateHomepageBrief(
       system,
       prompt,
       abortSignal: abortController.signal,
-      maxOutputTokens: 520,
+      // gemini-3-flash is a thinking model; minimize reasoning so the output
+      // budget yields the JSON brief instead of discarded thoughts (this whole
+      // surface was 100% parse-miss fallback from exactly this). Gemini 3 uses
+      // thinkingLevel, not thinkingBudget — geminiThinkingConfigForModel picks
+      // the family-correct control.
+      maxOutputTokens: 900,
+      providerOptions: {
+        google: {
+          thinkingConfig: geminiThinkingConfigForModel(getPopAlphaHomepageBriefModelId()),
+        },
+      },
       experimental_telemetry: {
         isEnabled: true,
         functionId: "homepage-brief",

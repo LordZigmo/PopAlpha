@@ -49,3 +49,27 @@ export function getPopAlphaGatewayEmbeddingModelId(): string {
     DEFAULT_POPALPHA_AI_GATEWAY_EMBEDDING_MODEL
   );
 }
+
+export type GeminiThinkingConfig = {
+  thinkingBudget?: number;
+  thinkingLevel?: "minimal" | "low" | "medium" | "high";
+  includeThoughts?: boolean;
+};
+
+// Minimize Gemini "thinking" for our tiny structured-JSON tasks (card profile,
+// homepage brief). With reasoning on, thought tokens consume the output budget
+// and the JSON answer comes back empty/truncated → 100% parse-miss → silent
+// template fallback (observed in prod: every recent parse-miss was on
+// gemini-3-flash). The control differs by family and the two are MUTUALLY
+// EXCLUSIVE — sending both thinking_level and thinking_budget in one request is
+// a 400 (https://ai.google.dev/gemini-api/docs/gemini-3#thinking_level):
+//   - Gemini 3.x: thinking_level. "low" is supported by every Gemini 3 model
+//     ("minimal" only by some), so we use "low" to stay safe across gateway
+//     model routing.
+//   - Gemini 2.5: thinking_budget. 0 disables thinking.
+export function geminiThinkingConfigForModel(modelId: string): GeminiThinkingConfig {
+  if (/gemini-3/i.test(modelId)) {
+    return { thinkingLevel: "low", includeThoughts: false };
+  }
+  return { thinkingBudget: 0, includeThoughts: false };
+}
