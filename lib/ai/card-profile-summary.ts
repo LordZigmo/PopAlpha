@@ -63,10 +63,12 @@ export const CARD_PROFILE_MAX_RETRIES = 0;
 const SYSTEM_PROMPT = [
   "You write PopAlpha card notes for Pokemon TCG collectors.",
   "Use only the supplied facts. Do not invent prices, listings, supply, or advice.",
+  "Market Price is the only current price. Never state a median, 30-day high, or signal figure as the current or 'new' price.",
+  "If a recent signal sits above or below Market Price, call it an unconfirmed signal — do not present it as the price.",
   "Plain English, short sentences, smart friend tone. No jargon, hype, or slang.",
   "Do not say buy, sell, hold, investment, or being an AI.",
   'Return only JSON: {"summary_short":"...","summary_long":"..."}.',
-  "summary_short: 2 sentences, 18-32 words. Lead with the market move.",
+  "summary_short: 2 sentences, 18-32 words. Lead with the current Market Price and its move; state the time window explicitly (e.g. 'over the past 7 days'), never the word 'recently'.",
   "summary_long: 3 sentences, 30-55 words. Move, why it matters, what to watch.",
   "- No prose, no code fences, no markdown outside the JSON.",
 ].join("\n");
@@ -112,13 +114,13 @@ function buildUserPrompt(
   lines.push(`Fixed signal: ${baseline.signalLabel}; verdict: ${baseline.verdict}`);
 
   const priceFacts = [
-    formatUsd(input.marketPrice) ? `Market Price ${formatUsd(input.marketPrice)}` : null,
+    formatUsd(input.marketPrice) ? `Current Market Price (the only current price) ${formatUsd(input.marketPrice)}` : null,
     formatUsd(input.recentMarketSignalUsd ?? null) && (input.recentMarketSignalDirection === "HIGHER" || input.recentMarketSignalDirection === "LOWER")
-      ? `recent market signal ${input.recentMarketSignalDirection === "HIGHER" ? "higher" : "lower"} near ${formatUsd(input.recentMarketSignalUsd ?? null)}`
+      ? `unconfirmed recent signal ${input.recentMarketSignalDirection === "HIGHER" ? "higher" : "lower"} near ${formatUsd(input.recentMarketSignalUsd ?? null)} (context only, not the current price)`
       : null,
-    formatUsd(input.median7d) ? `7d median ${formatUsd(input.median7d)}` : null,
-    formatUsd(input.median30d) ? `30d median ${formatUsd(input.median30d)}` : null,
-    formatSignedPct(input.changePct7d) ? `7d move ${formatSignedPct(input.changePct7d)}` : null,
+    formatUsd(input.median7d) ? `7d median ${formatUsd(input.median7d)} (context only)` : null,
+    formatUsd(input.median30d) ? `30d median ${formatUsd(input.median30d)} (context only)` : null,
+    formatSignedPct(input.changePct7d) ? `move over the past 7 days ${formatSignedPct(input.changePct7d)}` : null,
   ].filter(Boolean);
   if (priceFacts.length > 0) lines.push(`Price facts: ${priceFacts.join("; ")}`);
   if (input.low30d != null && input.high30d != null) {
