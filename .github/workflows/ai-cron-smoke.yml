@@ -1,48 +1,47 @@
 name: AI cron smoke (production)
 
 # Runs the AI-cron smoke check (scripts/check-ai-cron-smoke.mjs) against the
-# Vercel PRODUCTION deployment once it succeeds, to catch the silent-LLM-fallback
-# class before it lingers in production — see docs/external-api-failure-modes.md.
+# live PRODUCTION site to catch the silent-LLM-fallback class — see
+# docs/external-api-failure-modes.md.
 #
-# Why production (not preview): Preview deployments sit behind Vercel Deployment
-# Protection (an SSO wall), so the smoke check there only ever saw a 401 and
-# WARNed/skipped — it never actually ran. Production has no SSO wall and carries
-# the real CRON_SECRET + live AI provider creds, so this is where the check
-# produces a meaningful signal that the LLM path is healthy post-deploy.
+# Why it points at https://popalpha.ai (the public prod domain) instead of the
+# deployment_status.environment_url: every Vercel *deployment* URL — preview AND
+# the per-deploy production URL — sits behind Deployment Protection (an SSO
+# wall), so the check only ever got HTTP 401 and WARNed; it never actually ran.
+# The public production alias is NOT behind that wall (the cron routes gate
+# themselves with requireCron / CRON_SECRET), so hitting it with the cron secret
+# reaches the real LLM path that users' data flows through.
 #
-# Vercel's GitHub integration posts `deployment_status` events; this fires on a
-# successful Production one and points the smoke check at the live deployment
-# URL. It exercises the real crons (a ~$0.001 LLM call) and writes the tiny
-# amount those crons normally write to the production DB.
+# Triggers:
+#   - deployment_status: auto-run after each successful PRODUCTION deploy.
+#   - workflow_dispatch: run on demand (Actions tab or `gh workflow run`).
 #
-# NOTE: deployment_status-triggered workflows ONLY run from the file on the
-# default branch — so this gate takes effect once merged to main, on the next
-# production deploy.
+# NOTE: deployment_status-triggered workflows only run from the file on the
+# default branch, so changes here take effect after merge to main.
 #
-# Prerequisites (configure once):
-#   - Repo Actions secret `CRON_SECRET` matching Production's CRON_SECRET.
-#   - Production must have live AI provider creds in its env (it does).
-#   - Vercel ↔ GitHub integration emitting deployment_status events (default on).
-# The smoke script SKIPS (exit 0) if SMOKE_BASE_URL/CRON_SECRET are empty. It is
-# narrow on purpose: it HARD-FAILS only on the Incident-2 silent lie (HTTP 200 +
-# ok:true while the LLM never ran) and WARNs (exit 0) on everything else —
-# non-2xx, ok:false, 401, transport errors.
+# Prereqs: repo Actions secret CRON_SECRET must match production's CRON_SECRET
+# (unified across envs). The smoke script SKIPS (exit 0) if CRON_SECRET is empty.
+# It HARD-FAILS only on the Incident-2 silent lie (HTTP 200 + ok:true while the
+# LLM never ran) and WARNs (exit 0) on everything else (non-2xx, ok:false, 401).
 
 on:
-  deployment_status
+  deployment_status:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   ai-cron-smoke:
-    # Only successful production deploys — skip preview and non-success states.
+    # Manual runs always; auto runs only on successful Production deploys.
     if: >
-      github.event.deployment_status.state == 'success' &&
-      github.event.deployment_status.environment_url != '' &&
+      github.event_name == 'workflow_dispatch' ||
       (
-        contains(github.event.deployment_status.environment, 'Production') ||
-        contains(github.event.deployment_status.environment, 'production')
+        github.event.deployment_status.state == 'success' &&
+        (
+          contains(github.event.deployment_status.environment, 'Production') ||
+          contains(github.event.deployment_status.environment, 'production')
+        )
       )
     runs-on: ubuntu-latest
     steps:
@@ -54,10 +53,10 @@ jobs:
         with:
           node-version: "24"
 
-      # No `npm ci` — the smoke script has zero dependencies (uses global
-      # fetch), so skipping install keeps this fast on every production deploy.
-      - name: Smoke-test AI crons against the production deploy
+      # No `npm ci` — the smoke script has zero dependencies (uses global fetch).
+      - name: Smoke-test AI crons against production
         env:
-          SMOKE_BASE_URL: ${{ github.event.deployment_status.environment_url }}
+          # Public prod alias (not the SSO-walled per-deploy URL). See header.
+          SMOKE_BASE_URL: https://popalpha.ai
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: npm run check:ai-cron-smoke
