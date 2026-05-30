@@ -19,6 +19,9 @@ export const PUBLIC_ROUTES = [
   "cards/[slug]/detail",
   "cards/[slug]/ladder",
   "cards/[slug]/view",
+  // AI card profile (summary). Public so free + signed-out users get the
+  // first 3 analyses (client-side budget); cron-generated, non-PII per-card data.
+  "card-profiles",
   "scan/identify",
   // Anchor delta sync for the offline scanner. Returns user_correction
   // rows (slug + metadata + 768d embedding) added since a watermark.
@@ -136,7 +139,6 @@ export const USER_ROUTES = [
   "activity/notifications",
   "activity/notifications/read",
   "activity/profile",
-  "card-profiles",
   "community-pulse",
   "private-sales",
   "private-sales/[id]",

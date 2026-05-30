@@ -1319,7 +1319,11 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
           .order("market_confidence_score", { ascending: false })
           .limit(LIVE_CANDIDATE_FETCH_LIMIT),
 
-        // 3. Market watch -- trusted recent EN prices, no movement claim required.
+        // 3. Market watch -- trusted recent EN prices that actually moved in
+        // the last 24h. Movement-aware (2026-05-30): the rail used to make no
+        // movement claim, which surfaced flat cards (e.g. a $1,370 card sitting
+        // at 0.0% overnight) that read as "why is this here?" on the homepage.
+        // Now it requires a meaningful 24h move (|change| >= 1%).
         client
           .from("public_card_metrics")
           .select("canonical_slug, market_price, market_price_as_of, market_price_display_state, recent_market_signal_usd, recent_market_signal_as_of, recent_market_signal_delta_pct, recent_market_signal_direction, snapshot_count_30d, change_pct_24h, change_pct_7d, market_confidence_score, market_low_confidence, market_blend_policy, active_listings_7d, market_provenance")
@@ -1329,6 +1333,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
           .eq("market_blend_policy", "POPALPHA_MARKET_CONFIDENT")
           .not("market_price", "is", null)
           .gte("market_price_as_of", recentMarketCutoffIso)
+          .or("change_pct_24h.gte.1,change_pct_24h.lte.-1")
           .order("market_confidence_score", { ascending: false })
           .order("active_listings_7d", { ascending: false, nullsFirst: false })
           .order("market_price_as_of", { ascending: false, nullsFirst: false })
