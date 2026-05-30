@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/auth/require";
 import { loadCardProfileDetail } from "@/lib/card-profiles";
-import { hasPro } from "@/lib/entitlements";
 
 export const runtime = "nodejs";
 
@@ -14,20 +12,18 @@ function toErrorMessage(error: unknown): string {
   return String(error);
 }
 
+// Public read. The AI card profile (summary_short / summary_long) is
+// cron-generated, non-PII, per-card content derived from the public catalog —
+// the same trust class as other public card data. Free AND signed-out users
+// get it so the client-side free-analysis budget (3 distinct cards, device-
+// scoped in PremiumGate) can actually reveal real content; that 3-card cap is
+// a UX nudge, not a security boundary. (Was gated requireUser + hasPro, which
+// silently made the "3 free analyses" feature non-functional for everyone but
+// Pro — see CardDetailView's aiBriefSection.)
 export async function GET(req: Request) {
   const slug = sanitizeSlug(new URL(req.url).searchParams.get("slug"));
   if (!slug) {
     return NextResponse.json({ ok: false, error: "Missing slug query param." }, { status: 400 });
-  }
-
-  const auth = await requireUser(req);
-  if (!auth.ok) return auth.response;
-
-  if (!(await hasPro(auth.userId))) {
-    return NextResponse.json(
-      { ok: false, error: "Pro subscription required." },
-      { status: 403 },
-    );
   }
 
   try {
