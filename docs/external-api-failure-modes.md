@@ -78,6 +78,31 @@ try {
 
 ---
 
+## Incident 3 — Gemini 3 thinking-budget parse-miss silent fallback (2026-05-27 → 2026-05-30, ~3 days)
+
+A different mechanism than Incident 2 — nothing *threw*. The model returned, but its output budget was spent on reasoning, so the JSON answer came back empty/truncated and the parser rejected it. This is the **parse-miss** path, not the `llm-threw:` path, so Incident 2's error-name fingerprinting said nothing.
+
+**Symptom:** `card_profiles` stopped producing `source='llm'` rows after 2026-05-27 (every refresh landed `source='fallback'`, `failure_reason='parse-miss'`), and `ai_brief_cache` was 100% fallback on every hourly run. All on `model_label='google/gemini-3-flash'`. The gemini-2.5-flash-lite path was unaffected.
+
+**Root cause:** `gemini-3-flash` is a thinking model. `generateText` was called with a tight `maxOutputTokens` and no thinking control, so reasoning tokens consumed the budget and the JSON answer was empty/truncated → `parseLlmProfile` returned null → `parse-miss` → fallback. Critically, Gemini 3 uses a **different** thinking control than Gemini 2.5: `thinking_level` (not `thinking_budget`), and the two are mutually exclusive (sending both is a 400).
+
+**Why our guards didn't catch it sooner:**
+- The Incident-2 degradation guard *did* flip card profiles to `ok:false` (`processed>0 && llm===0`) — but nobody reads the scheduled cron response, and the brief uses a separate item-level signal.
+- The `ai-cron-smoke` workflow that should have caught it pointed at the Vercel *deployment* URL, which sits behind Deployment Protection (SSO wall) for production too — so it only ever got HTTP 401 and WARNed; it never reached the LLM.
+
+**Fingerprint:** `source='llm'` rows stop appearing while `source='fallback'` rows keep landing, with `failure_reason='parse-miss'` (model returned text, but unparseable) — as opposed to `llm-threw:` (model never returned). Parse-miss after a model swap ⇒ suspect the new model's reasoning is eating the output budget.
+
+**Fix (PRs #143/#144/#145):**
+
+| Change | Detail |
+|---|---|
+| Family-correct thinking control | `geminiThinkingConfigForModel` in `lib/ai/model-config.ts`: gemini-3 → `thinkingLevel:"minimal"`, gemini-2.5 → `thinkingBudget:0`. ("low" recovered the brief but still truncated the smaller card-profile budget — only "minimal" fully removes the consumption.) |
+| Output headroom | card-profile `maxOutputTokens` 220 → 1024; brief 520 → 900 |
+| Price-aware schedule | `refresh-card-profiles` moved to `45 11-23` (after the 11:00 trusted-price import) so summaries regenerate against fresh prices |
+| Smoke actually runs | `ai-cron-smoke` now targets the public prod alias `popalpha.ai` (not the SSO-walled deploy URL) + a `workflow_dispatch` trigger. Post-fix prod run: *"all LLM crons demonstrably exercised the model."* |
+
+---
+
 ## The generalized rule
 
 > Any blanket try/catch around an external API call MUST satisfy three properties:
