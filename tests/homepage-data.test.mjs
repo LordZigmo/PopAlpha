@@ -1324,7 +1324,10 @@ export async function runHomepageDataTests() {
       recent_market_signal_direction: card.recent_market_signal_direction,
     })),
     [
-      { slug: "watch-premium", market_price: 1420, change_pct: null, recent_market_signal_usd: 1750, recent_market_signal_direction: "HIGHER" },
+      // Market Watch now shows the move (post chart-series-truth, change_pct is
+      // the same median basis as the hero, so the badge is consistent). Cards
+      // with a real move surface it; the rest (no change data) stay null.
+      { slug: "watch-premium", market_price: 1420, change_pct: 18.5, recent_market_signal_usd: 1750, recent_market_signal_direction: "HIGHER" },
       { slug: "watch-mid", market_price: 46, change_pct: null, recent_market_signal_usd: null, recent_market_signal_direction: null },
       { slug: "watch-budget", market_price: 6.25, change_pct: null, recent_market_signal_usd: null, recent_market_signal_direction: null },
       { slug: "watch-low-dollar", market_price: 0.04, change_pct: null, recent_market_signal_usd: null, recent_market_signal_direction: null },

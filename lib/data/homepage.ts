@@ -1924,7 +1924,12 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
         row,
         card: toCard(row.canonical_slug, {
           fallbackPrice: row.market_price,
-          suppressChange: true,
+          // Show the 24h/7d move. This was suppressed because the change used to
+          // be computed off a different basis than the displayed price (the
+          // Scrydex series vs the PriceCharting hero), so a badge here could
+          // contradict the price. Post the chart-series-truth fix, change_pct is
+          // the same median basis as the hero, so the badge is now consistent.
+          // allowSparklineFallback stays false — only ever show a real move.
           allowSparklineFallback: false,
         }),
         band: marketWatchBandForPrice(price),
