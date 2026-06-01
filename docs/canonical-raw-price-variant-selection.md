@@ -1,10 +1,10 @@
 # Canonical RAW price — variant selection & failure modes
 
-How PopAlpha picks the ONE ungraded price it shows for a canonical card (the
-hero / chart / 24h-7d change), and the two failure modes the 2026-05-31
-variant-alignment investigation surfaced. Distinct from
-`card-detail-variant-picker.md` (that's the *UI* variant selector; this is the
-*backend* price the headline derives from).
+How PopAlpha derives the two ungraded numbers it shows for a canonical card —
+the **freshest price** (hero) and the **3-day median** (sub-line) — plus the
+chart / 24h-7d change, and the two failure modes the 2026-05-31 variant-alignment
+investigation surfaced. Distinct from `card-detail-variant-picker.md` (that's the
+*UI* variant selector; this is the *backend* price the headline derives from).
 
 ## How the price's variant is chosen
 
@@ -12,7 +12,7 @@ A canonical card (e.g. `skyridge-1-aerodactyl`) maps to multiple
 `card_printings` (finishes: NON_HOLO / HOLO / REVERSE_HOLO / ALT_HOLO; plus
 edition / stamp), each with its own market price. The displayed RAW price comes
 from **one** of them, chosen in `refresh_price_changes_core` (latest body:
-`supabase/migrations/20260531140000_*`):
+`supabase/migrations/20260601120000_*`):
 
 1. `preferred_canonical_raw_printing(slug)` (`20260309230000_prefer_base_printing_for_canonical_raw.sql`)
    picks the **printing** — ORDER BY: EN first → edition (UNLIMITED<UNKNOWN<else)
@@ -25,11 +25,41 @@ from **one** of them, chosen in `refresh_price_changes_core` (latest body:
 3. `provider_variant_match_score` (`20260309234500_*`) ranks the surviving
    variant_refs against the preferred finish/edition/stamp; ties break on
    recency → price-proximity to `current_scrydex_price` → source_priority.
-4. The hero = a rolling **3-day median** of that one variant's daily series
-   (chart-series-truth, `#147`); the 24h/7d change is median-vs-median.
+4. From that one variant's daily series PopAlpha derives **two** values
+   (chart-series-truth, `#147`): the **3-day median** (`display_price`, the
+   robust headline / sub-line) and the **freshest daily point**
+   (`latest_price`, the hero — the newest point the median already folds in).
+   The 24h/7d change is median-vs-median.
 
-`public_card_metrics` reads these as the EN-RAW `market_price` / `change_pct_*`,
-COALESCEing to the prior basis when there's no ungraded series.
+`public_card_metrics` exposes both as the EN-RAW `latest_price` (freshest, the
+hero) and `market_price` (the 3-day median, the sub-line), guarded identically —
+both null when the headline is suppressed; `latest_price` falls back to the
+median basis so the hero never blanks; COALESCE to the prior basis when there's
+no ungraded series.
+
+### Per-printing parity — "the hero follows the finish" (`20260601120000`)
+
+The same freshest + 3-day-median pair is computed for **every per-printing RAW
+row** by `refresh_per_printing_raw_price_display` (each printing's own RAW
+snapshot daily series; 99.9% of printings are single-variant, so it equals the
+per-printing chart). Why it exists: `refresh_price_changes_core` only writes the
+canonical (`printing_id IS NULL`) row, so per-printing rows used to have
+`display_price` NULL and the view's COALESCE fell through to the raw scrydex
+basis. The iOS detail re-fetches the per-printing row for the selected finish and
+lets it drive the hero — so the detail headline diverged from the homepage
+(canonical) even though both describe "the price of this card" (e.g.
+`ascended-heroes-295-mega-dragonite-ex`: homepage median $325 vs detail
+per-printing raw $335.58/$315). Now:
+- For the **preferred** printing the per-printing series IS the canonical series,
+  so detail-default == homepage (verified: mega-dragonite `894b4f09` → 325/325).
+- For **other** finishes the hero/median follow that finish (verified:
+  skyridge-1-aerodactyl reverse-holo 1159.80 vs NON_HOLO 199.95), still subject
+  to every per-printing trust guard (a DIVERGED/quarantined finish stays null).
+
+The two display-refresh functions are **disjoint**: core owns `printing_id IS
+NULL`, the per-printing function owns `printing_id IS NOT NULL`; no column is
+double-written. Both run from the existing `refresh_price_changes()` /
+`refresh_price_changes_for_cards()` wrappers, so the crons need no change.
 
 ### `variant_ref` format (price_history_points)
 - Ungraded: `<printing_id>::<scrydex_variant>::RAW` → `split_part(...,'::',3)='RAW'`
