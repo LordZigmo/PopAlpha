@@ -20,15 +20,17 @@ export const metadata: Metadata = {
   description,
   manifest: "/manifest.webmanifest",
   icons: {
+    // App-icon favicon (the mascot, rendered by app/icon.tsx). The old brand-mark
+    // SVG entry was dropped so SVG-preferring browsers don't show a different icon
+    // than the PNG app icon. ?v bumped to bust cached favicons.
     icon: [
-      { url: "/icon?v=4", sizes: "512x512", type: "image/png" },
-      { url: "/brand/popalpha-icon.svg?v=4", type: "image/svg+xml" },
+      { url: "/icon?v=5", sizes: "512x512", type: "image/png" },
     ],
     apple: [
-      { url: "/apple-icon?v=4", sizes: "180x180", type: "image/png" },
+      { url: "/apple-icon?v=5", sizes: "180x180", type: "image/png" },
     ],
     shortcut: [
-      { url: "/icon?v=4", sizes: "512x512", type: "image/png" },
+      { url: "/icon?v=5", sizes: "512x512", type: "image/png" },
     ],
   },
   alternates: {

@@ -9,6 +9,14 @@ const logoSvg = readFileSync(
 
 const logoDataUrl = `data:image/svg+xml;base64,${Buffer.from(logoSvg).toString("base64")}`;
 
+// The standard PopAlpha app icon (the mascot) — copied from the iOS AppIcon to
+// public/brand/popalpha-app-icon.png. Rendered full-bleed for the web favicon /
+// apple-touch icon so the browser tab + home-screen icon match the iOS app.
+const appIconPng = readFileSync(
+  join(process.cwd(), "public/brand/popalpha-app-icon.png"),
+);
+const appIconDataUrl = `data:image/png;base64,${appIconPng.toString("base64")}`;
+
 function LogoFrame({ size }: { size: number }) {
   return (
     <div
@@ -34,28 +42,15 @@ function LogoFrame({ size }: { size: number }) {
   );
 }
 
-export function createBrandIconResponse(size: number) {
+// Web favicon / apple-touch icon = the standard app icon (the mascot), rendered
+// full-bleed. The mascot already carries its own dark background, so it needs no
+// frame/gradient chrome — that decorative LogoFrame treatment stays on the
+// social share cards (createSocialImageResponse) only.
+export function createAppIconResponse(size: number) {
   return new ImageResponse(
     (
-      <div
-        style={{
-          display: "flex",
-          height: "100%",
-          width: "100%",
-          alignItems: "center",
-          justifyContent: "center",
-          background: "linear-gradient(160deg, #02050b 0%, #071226 52%, #02050b 100%)",
-        }}
-      >
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            background:
-              "radial-gradient(circle at 50% 18%, rgba(0,180,216,0.18), rgba(0,0,0,0) 58%)",
-          }}
-        />
-        <LogoFrame size={Math.round(size * 0.74)} />
+      <div style={{ display: "flex", height: "100%", width: "100%" }}>
+        <img alt="PopAlpha" src={appIconDataUrl} width={size} height={size} />
       </div>
     ),
     { width: size, height: size },
