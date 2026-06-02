@@ -1,4 +1,4 @@
-import { createBrandIconResponse } from "./brand-image";
+import { createAppIconResponse } from "./brand-image";
 
 export const size = {
   width: 180,
@@ -8,5 +8,5 @@ export const size = {
 export const contentType = "image/png";
 
 export default function AppleIcon() {
-  return createBrandIconResponse(size.width);
+  return createAppIconResponse(size.width);
 }
