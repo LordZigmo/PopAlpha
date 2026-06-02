@@ -43,6 +43,12 @@ export type CardProfileInput = {
   setName: string | null;
   cardNumber: string | null;
   marketPrice: number | null;
+  // Freshest single observed sale (public_card_metrics.latest_price) + its date.
+  // Fed to the model only as DATED, explicitly-non-current context — the Market
+  // Price still leads as the only "current price". Optional so non-cron builders
+  // of CardProfileInput can omit it (treated as absent → no freshest line).
+  latestPrice?: number | null;
+  latestPriceAsOf?: string | null;
   marketPriceDisplayState?: "ALIGNED" | "SIGNAL_HIGHER" | "SIGNAL_LOWER" | "PUBLIC_ONLY" | "UNDER_REVIEW" | "NO_RELIABLE_PRICE" | string | null;
   recentMarketSignalUsd?: number | null;
   recentMarketSignalAsOf?: string | null;
