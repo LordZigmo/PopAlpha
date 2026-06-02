@@ -1,0 +1,549 @@
+-- JP RAW market_price / latest_price resolve from the JP-native series.
+--
+-- Fixes the trust risk flagged during the price-display redesign: JP RAW cards
+-- carry market_blend_policy = SCRYDEX_PRIMARY, so card_metrics.market_price is the
+-- Scrydex price — a thin/wrong US-market reflection for a JP card (e.g. $0.68 for
+-- a card that sold for $31 on Snkrdunk; ~3.6x off on median). It was dormant
+-- (every JP display path overrode it via selectJpPriceSource / public_jp_price_
+-- coverage), but any reader of public_card_metrics.market_price for a JP row got
+-- garbage — a latent trust hazard.
+--
+-- Fix: put the JP-RAW price-source policy where the other per-language policies
+-- already live (this view). For JP RAW (language='JP', grade='RAW'):
+--   * market_price -> jp_display_price (the blended Snkrdunk+Yahoo 14-day median)
+--   * latest_price -> jp_latest_price (the freshest trusted sold point)
+-- NULL when there's no qualifying JP series (honest — no Scrydex fallback). JP
+-- graded already routes through the grade<>'RAW' branch; EN paths untouched.
+-- public_jp_price_coverage's 'market' fallback (which reads this market_price)
+-- now resolves to the correct JP median instead of Scrydex garbage; the homepage
+-- filters to yahoo_jp/snkrdunk sources so its behavior is unchanged.
+--
+-- supersedes: 20260602050000_graded_freshest_14d_median_view.sql
+--             (public_card_metrics — identical body except four added JP-RAW CASE
+--              branches in public_market_price / _as_of / public_latest_price /
+--              _as_of. No column added, dropped, reordered or repurposed.)
+
+create or replace view public.public_card_metrics as
+with metric_rows as (
+  select
+    base_cm.*,
+    (
+      base_cm.grade = 'RAW'
+      and base_cm.market_price is not null
+      and coalesce(base_cm.snapshot_count_30d, 0) >= 5
+      and base_cm.market_price > (
+        greatest(
+          coalesce(nullif(base_cm.median_7d, 0), 0),
+          coalesce(nullif(base_cm.median_30d, 0), 0),
+          coalesce(nullif(base_cm.trimmed_median_30d, 0), 0),
+          coalesce(nullif(base_cm.low_30d, 0), 0),
+          1
+        ) * 20
+      )
+    ) as raw_market_price_outlier
+  from public.card_metrics base_cm
+),
+joined_rows as (
+  select
+    cm.*,
+    cc.canonical_name_native,
+    cc.set_name_native,
+    cc.language as canonical_language,
+    (cc.language = 'EN' and cm.grade = 'RAW') as is_en_raw,
+    ctrp.trust_status as private_trust_status,
+    ctrp.trusted_price_usd as private_trusted_price_usd,
+    ctrp.trusted_price_as_of as private_trusted_price_as_of,
+    ctrp.trusted_price_source as private_trusted_price_source,
+    ctrp.pricecharting_price_usd as private_guardrail_price_usd,
+    ctrp.pricecharting_as_of as private_guardrail_as_of,
+    ctrp.scrydex_price_usd as private_scrydex_price_usd,
+    ctrp.scrydex_as_of as private_scrydex_as_of,
+    ctrp.quarantine_reason as private_quarantine_reason,
+    coalesce(yjp_specific.price_usd, yjp_canonical.price_usd) as yahoo_jp_price_out,
+    coalesce(yjp_specific.price_jpy, yjp_canonical.price_jpy) as yahoo_jp_price_jpy_out,
+    coalesce(yjp_specific.sample_count, yjp_canonical.sample_count) as yahoo_jp_sample_count_out,
+    coalesce(yjp_specific.observed_at, yjp_canonical.observed_at) as yahoo_jp_observed_at_out,
+    coalesce(snk_specific.price_usd, snk_canonical.price_usd) as snkrdunk_price_out,
+    coalesce(snk_specific.sample_count, snk_canonical.sample_count) as snkrdunk_sample_count_out,
+    coalesce(snk_specific.observed_at, snk_canonical.observed_at) as snkrdunk_observed_at_out,
+    coalesce(snk_specific.snkrdunk_product_code, snk_canonical.snkrdunk_product_code) as snkrdunk_product_code_out,
+    coalesce(snk_specific.price_jpy, snk_canonical.price_jpy) as snkrdunk_price_jpy_out
+  from metric_rows cm
+  left join public.yahoo_jp_card_prices yjp_specific
+    on yjp_specific.canonical_slug = cm.canonical_slug
+   and yjp_specific.printing_id = cm.printing_id
+   and yjp_specific.grade = cm.grade
+  left join public.yahoo_jp_card_prices yjp_canonical
+    on yjp_canonical.canonical_slug = cm.canonical_slug
+   and yjp_canonical.printing_id is null
+   and yjp_canonical.grade = cm.grade
+  left join public.snkrdunk_card_prices snk_specific
+    on snk_specific.canonical_slug = cm.canonical_slug
+   and snk_specific.printing_id = cm.printing_id
+   and snk_specific.grade = cm.grade
+  left join public.snkrdunk_card_prices snk_canonical
+    on snk_canonical.canonical_slug = cm.canonical_slug
+   and snk_canonical.printing_id is null
+   and snk_canonical.grade = cm.grade
+  left join public.canonical_cards cc
+    on cc.slug = cm.canonical_slug
+  left join public.canonical_trusted_raw_prices ctrp
+    on ctrp.canonical_slug = cm.canonical_slug
+   and ctrp.printing_id is not distinct from cm.printing_id
+),
+public_price_policy as (
+  select
+    j.*,
+    case
+      when j.is_en_raw then
+        -- Chart-series-truth: EN-RAW headline derives from the Scrydex daily
+        -- snapshot median (display_price), the same series the chart plots.
+        -- COALESCE to the prior basis when no snapshot series exists (chart is
+        -- then sparse/empty too, so nothing to be inconsistent with). All
+        -- suppression branches below still hard-null exactly as before.
+        case
+          when j.private_trust_status = 'PRICECHARTING_SCRYDEX_MATCH'
+            then coalesce(j.display_price, j.private_trusted_price_usd)
+          when j.private_trust_status in ('PRICECHARTING_PRIMARY', 'PRICECHARTING_DIVERGED', 'NO_TRUSTED_PRICE')
+            then null
+          when j.raw_market_price_outlier
+            then null
+          when j.private_trust_status = 'SCRYDEX_ONLY_DEMOTED'
+            then coalesce(j.display_price, j.private_scrydex_price_usd, j.market_price)
+          else coalesce(j.display_price, j.market_price)
+        end
+      -- Graded (grade <> 'RAW'): the 14-day median display price (freshest+median
+      -- redesign). Graded market_price is always NULL today, so this is purely
+      -- additive — coalesce only ever resolves to display_price.
+      when j.grade <> 'RAW' then coalesce(j.display_price, j.market_price)
+      -- JP RAW: the base market_price is SCRYDEX_PRIMARY (a thin/wrong US-market
+      -- price for JP cards). Use the JP-native 14-day median instead; NULL when
+      -- there's no qualifying JP series (honest, not the Scrydex garbage).
+      when j.canonical_language = 'JP' and j.grade = 'RAW' then j.jp_display_price
+      when j.raw_market_price_outlier then null
+      else j.market_price
+    end as public_market_price,
+    case
+      when j.is_en_raw then
+        case
+          when j.private_trust_status = 'PRICECHARTING_SCRYDEX_MATCH'
+            then case
+                   when j.display_price is not null then j.display_price_as_of
+                   else coalesce(j.private_trusted_price_as_of, j.private_guardrail_as_of, j.market_price_as_of)
+                 end
+          when j.private_trust_status in ('PRICECHARTING_PRIMARY', 'PRICECHARTING_DIVERGED', 'NO_TRUSTED_PRICE')
+            then null
+          when j.raw_market_price_outlier
+            then null
+          when j.private_trust_status = 'SCRYDEX_ONLY_DEMOTED'
+            then case
+                   when j.display_price is not null then j.display_price_as_of
+                   else coalesce(j.private_scrydex_as_of, j.private_trusted_price_as_of, j.market_price_as_of)
+                 end
+          else case
+                 when j.display_price is not null then j.display_price_as_of
+                 else j.market_price_as_of
+               end
+        end
+      when j.grade <> 'RAW' then
+        case when j.display_price is not null then j.display_price_as_of else j.market_price_as_of end
+      when j.canonical_language = 'JP' and j.grade = 'RAW' then j.jp_display_price_as_of
+      when j.raw_market_price_outlier then null
+      else j.market_price_as_of
+    end as public_market_price_as_of,
+    case
+      when j.is_en_raw then
+        case
+          when j.private_trust_status = 'PRICECHARTING_SCRYDEX_MATCH'
+            then coalesce(j.private_scrydex_as_of, j.provider_compare_as_of)
+          when j.private_trust_status in ('PRICECHARTING_PRIMARY', 'PRICECHARTING_DIVERGED', 'NO_TRUSTED_PRICE')
+            then null
+          when j.raw_market_price_outlier
+            then null
+          when j.private_trust_status = 'SCRYDEX_ONLY_DEMOTED'
+            then coalesce(j.private_scrydex_as_of, j.private_trusted_price_as_of, j.provider_compare_as_of)
+          else j.provider_compare_as_of
+        end
+      when j.raw_market_price_outlier then null
+      else j.provider_compare_as_of
+    end as public_provider_compare_as_of
+  from joined_rows j
+),
+public_signal_policy as (
+  select
+    p.*,
+    -- Freshest hero price. Same suppression as the headline (null when the
+    -- median headline is hidden). For EN-RAW: the freshest daily snapshot point,
+    -- falling back to the median basis so the hero never blanks. For JP / graded
+    -- (non-EN-RAW): mirror the headline price — their hero comes from JP-native /
+    -- graded sources, not the Scrydex snapshot the latest_price column holds, so
+    -- never surface a snapshot-derived freshest here (a later step wires their
+    -- own freshest+median). One value per spot, never a competing basis.
+    case
+      when p.public_market_price is null then null
+      when p.is_en_raw then coalesce(p.latest_price, p.public_market_price)
+      -- Graded hero = freshest sold point, falling back to the 14d-median headline.
+      when p.grade <> 'RAW' then coalesce(p.latest_price, p.public_market_price)
+      when p.canonical_language = 'JP' and p.grade = 'RAW' then coalesce(p.jp_latest_price, p.public_market_price)
+      else p.public_market_price
+    end as public_latest_price,
+    case
+      when p.public_market_price is null then null
+      when p.is_en_raw then coalesce(p.latest_price_as_of, p.public_market_price_as_of)
+      when p.grade <> 'RAW' then coalesce(p.latest_price_as_of, p.public_market_price_as_of)
+      when p.canonical_language = 'JP' and p.grade = 'RAW' then coalesce(p.jp_latest_price_as_of, p.public_market_price_as_of)
+      else p.public_market_price_as_of
+    end as public_latest_price_as_of,
+    case
+      when p.is_en_raw then
+        -- Median-basis change so the hero and the change % are coherent. Use
+        -- the display change when the headline itself came from display_price;
+        -- otherwise fall back to the prior change basis under the same guard.
+        case
+          when p.public_market_price is null then null
+          when p.display_price is not null then p.display_change_pct_24h
+          when p.private_trust_status = 'PRICECHARTING_SCRYDEX_MATCH'
+            then p.change_pct_24h
+          else null
+        end
+      when p.raw_market_price_outlier then null
+      else p.change_pct_24h
+    end as public_change_pct_24h,
+    case
+      when p.is_en_raw then
+        case
+          when p.public_market_price is null then null
+          when p.display_price is not null then p.display_change_pct_7d
+          when p.private_trust_status = 'PRICECHARTING_SCRYDEX_MATCH'
+            then p.change_pct_7d
+          else null
+        end
+      when p.raw_market_price_outlier then null
+      else p.change_pct_7d
+    end as public_change_pct_7d,
+    case
+      when p.is_en_raw then
+        case
+          when p.private_trust_status = 'PRICECHARTING_SCRYDEX_MATCH'
+           and p.public_market_price is not null
+            then 90
+          when p.private_trust_status in ('PRICECHARTING_PRIMARY', 'PRICECHARTING_DIVERGED', 'NO_TRUSTED_PRICE')
+            then 0
+          when p.raw_market_price_outlier
+            then 0
+          when p.public_market_price is not null
+            then least(coalesce(p.market_confidence_score, 25), 35)
+          else 0
+        end
+      when p.raw_market_price_outlier then 0
+      else p.market_confidence_score
+    end as public_confidence_score,
+    case
+      when p.is_en_raw then
+        case
+          when p.private_trust_status = 'PRICECHARTING_SCRYDEX_MATCH'
+           and p.public_market_price is not null
+            then false
+          else true
+        end
+      when p.raw_market_price_outlier then true
+      else p.market_low_confidence
+    end as public_low_confidence,
+    case
+      when p.is_en_raw then
+        case
+          when p.private_trust_status = 'PRICECHARTING_SCRYDEX_MATCH'
+           and p.public_market_price is not null
+            then 'POPALPHA_MARKET_CONFIDENT'
+          when p.private_trust_status = 'PRICECHARTING_DIVERGED'
+            then 'POPALPHA_MARKET_QUARANTINED'
+          when p.private_trust_status = 'PRICECHARTING_PRIMARY'
+            then 'NO_RELIABLE_PRICE'
+          when p.raw_market_price_outlier
+            then 'OUTLIER_SUPPRESSED'
+          when p.public_market_price is not null
+            then 'POPALPHA_MARKET_LOW_CONFIDENCE'
+          else 'NO_RELIABLE_PRICE'
+        end
+      when p.raw_market_price_outlier then 'OUTLIER_SUPPRESSED'
+      else p.market_blend_policy
+    end as public_market_blend_policy
+  from public_price_policy p
+),
+public_signal_context as (
+  select
+    s.*,
+    case
+      when s.is_en_raw
+       and s.private_trust_status = 'PRICECHARTING_SCRYDEX_MATCH'
+       and s.public_market_price is not null
+       and s.private_scrydex_price_usd is not null
+        then s.private_scrydex_price_usd
+      else null
+    end as recent_market_signal_usd,
+    case
+      when s.is_en_raw
+       and s.private_trust_status = 'PRICECHARTING_SCRYDEX_MATCH'
+       and s.public_market_price is not null
+       and s.private_scrydex_price_usd is not null
+        then s.private_scrydex_as_of
+      else null
+    end as recent_market_signal_as_of
+  from public_signal_policy s
+),
+public_signal_gap as (
+  select
+    c.*,
+    case
+      when c.recent_market_signal_usd is not null
+       and c.public_market_price is not null
+       and c.public_market_price > 0
+        then round((((c.recent_market_signal_usd - c.public_market_price) / c.public_market_price) * 100)::numeric, 2)
+      else null
+    end as recent_market_signal_delta_pct,
+    case
+      when c.recent_market_signal_usd is not null
+       and c.public_market_price is not null
+       and c.public_market_price > 0
+       and abs((c.recent_market_signal_usd - c.public_market_price)::numeric) >=
+          case
+            when c.public_market_price < 25 then 1
+            when c.public_market_price < 100 then 5
+            when c.public_market_price < 500 then 25
+            else 50
+          end
+       and abs((((c.recent_market_signal_usd - c.public_market_price) / c.public_market_price) * 100)::numeric) >=
+          case
+            when c.public_market_price < 25 then 20
+            when c.public_market_price < 100 then 15
+            when c.public_market_price < 500 then 10
+            else 8
+          end
+       and c.recent_market_signal_usd > c.public_market_price
+        then 'HIGHER'
+      when c.recent_market_signal_usd is not null
+       and c.public_market_price is not null
+       and c.public_market_price > 0
+       and abs((c.recent_market_signal_usd - c.public_market_price)::numeric) >=
+          case
+            when c.public_market_price < 25 then 1
+            when c.public_market_price < 100 then 5
+            when c.public_market_price < 500 then 25
+            else 50
+          end
+       and abs((((c.recent_market_signal_usd - c.public_market_price) / c.public_market_price) * 100)::numeric) >=
+          case
+            when c.public_market_price < 25 then 20
+            when c.public_market_price < 100 then 15
+            when c.public_market_price < 500 then 10
+            else 8
+          end
+       and c.recent_market_signal_usd < c.public_market_price
+        then 'LOWER'
+      else null
+    end as recent_market_signal_direction
+  from public_signal_context c
+),
+public_display_policy as (
+  select
+    g.*,
+    case
+      when g.is_en_raw
+       and (g.private_trust_status = 'PRICECHARTING_DIVERGED' or g.raw_market_price_outlier)
+       and g.public_market_price is null
+        then 'UNDER_REVIEW'
+      when g.public_market_price is null
+        then 'NO_RELIABLE_PRICE'
+      when g.is_en_raw
+       and g.private_trust_status = 'SCRYDEX_ONLY_DEMOTED'
+        then 'PUBLIC_ONLY'
+      when g.recent_market_signal_direction = 'HIGHER'
+        then 'SIGNAL_HIGHER'
+      when g.recent_market_signal_direction = 'LOWER'
+        then 'SIGNAL_LOWER'
+      else 'ALIGNED'
+    end as market_price_display_state
+  from public_signal_gap g
+),
+public_provenance_policy as (
+  select
+    s.*,
+    case
+      when s.is_en_raw then
+        jsonb_strip_nulls(jsonb_build_object(
+          'marketPriceLabel', 'PopAlpha Market Price',
+          'marketPriceDisplayState', s.market_price_display_state,
+          'recentMarketSignalDirection', s.recent_market_signal_direction,
+          'recentMarketSignalDeltaPct', s.recent_market_signal_delta_pct,
+          'confidenceStatus',
+            case
+              when s.private_trust_status = 'PRICECHARTING_SCRYDEX_MATCH'
+               and s.public_market_price is not null
+                then 'HIGH'
+              when s.private_trust_status = 'PRICECHARTING_DIVERGED'
+                then 'QUARANTINED'
+              when s.public_market_price is not null
+                then 'LOW'
+              else 'NONE'
+            end,
+          'publicInputStatus',
+            case
+              when s.private_trust_status = 'PRICECHARTING_DIVERGED'
+                then 'QUARANTINED'
+              when s.private_trust_status = 'PRICECHARTING_PRIMARY'
+                then 'INSUFFICIENT_PUBLIC_INPUT'
+              when s.public_market_price is not null
+                then 'SUPPORTED'
+              else 'INSUFFICIENT_PUBLIC_INPUT'
+            end,
+          'priceConflictStatus',
+            case
+              when s.private_trust_status = 'PRICECHARTING_DIVERGED'
+                then 'INTERNAL_GUARDRAIL_DIVERGED'
+              when s.private_trust_status = 'PRICECHARTING_SCRYDEX_MATCH'
+                then 'CONSISTENT'
+              when s.public_market_price is not null
+                then 'PUBLIC_INPUT_ONLY'
+              else 'NONE'
+            end,
+          'internalGuardrailStatus',
+            case
+              when s.private_trust_status = 'PRICECHARTING_DIVERGED' then 'DIVERGED'
+              when s.private_trust_status = 'PRICECHARTING_SCRYDEX_MATCH' then 'CONSISTENT'
+              when s.private_trust_status = 'PRICECHARTING_PRIMARY' then 'PRIVATE_ONLY'
+              else 'NOT_AVAILABLE'
+            end,
+          'priceAsOf', s.public_market_price_as_of,
+          'movementHistorySource',
+            case
+              when s.public_market_price is not null
+               and (s.public_change_pct_24h is not null or s.public_change_pct_7d is not null)
+                then 'PERMITTED_MARKET_INPUT'
+              else null
+            end,
+          'quarantineReason',
+            case
+              when s.private_trust_status = 'PRICECHARTING_DIVERGED'
+                then 'PUBLIC_INPUT_DIVERGED_FROM_INTERNAL_GUARDRAIL'
+              when s.private_trust_status = 'PRICECHARTING_PRIMARY'
+                then 'MISSING_PERMITTED_PUBLIC_INPUT'
+              when s.raw_market_price_outlier and s.public_market_price is null
+                then 'PUBLIC_INPUT_OUTLIER_SUPPRESSED'
+              else null
+            end,
+          'parityStatus',
+            case
+              when s.public_market_price is not null
+               and (s.public_change_pct_24h is not null or s.public_change_pct_7d is not null)
+               and s.private_trust_status = 'PRICECHARTING_SCRYDEX_MATCH'
+                then 'MATCH'
+              else 'MISSING_PROVIDER'
+            end,
+          'sourceMix',
+            jsonb_build_object(
+              'scrydexWeight',
+                case when s.public_market_price is not null then 1 else 0 end,
+              'publicInputWeight',
+                case when s.public_market_price is not null then 1 else 0 end
+            ),
+          'sampleCounts7d',
+            jsonb_build_object(
+              'scrydex',
+                case
+                  when coalesce(s.market_provenance->'sampleCounts7d'->>'scrydex', '') ~ '^[0-9]+$'
+                    then (s.market_provenance->'sampleCounts7d'->>'scrydex')::integer
+                  else 0
+                end,
+              'public',
+                case
+                  when s.public_market_price is not null
+                   and coalesce(s.market_provenance->'sampleCounts7d'->>'scrydex', '') ~ '^[0-9]+$'
+                    then (s.market_provenance->'sampleCounts7d'->>'scrydex')::integer
+                  else 0
+                end
+            )
+        ))
+      when s.raw_market_price_outlier then coalesce(s.market_provenance, '{}'::jsonb) || jsonb_build_object('parityStatus', 'MISSING_PROVIDER')
+      else s.market_provenance
+    end as public_market_provenance
+  from public_display_policy s
+)
+select
+  id,
+  canonical_slug,
+  printing_id,
+  grade,
+  median_7d,
+  median_30d,
+  low_30d,
+  high_30d,
+  trimmed_median_30d,
+  volatility_30d,
+  liquidity_score,
+  percentile_rank,
+  scarcity_adjusted_value,
+  active_listings_7d,
+  snapshot_count_30d,
+  provider_trend_slope_7d,
+  provider_trend_slope_30d,
+  provider_cov_price_7d,
+  provider_cov_price_30d,
+  provider_price_relative_to_30d_range,
+  provider_min_price_all_time,
+  provider_min_price_all_time_date,
+  provider_max_price_all_time,
+  provider_max_price_all_time_date,
+  provider_as_of_ts,
+  provider_price_changes_count_30d,
+  justtcg_price,
+  case
+    when is_en_raw and public_market_price is null then null
+    when raw_market_price_outlier then null
+    else coalesce(recent_market_signal_usd, scrydex_price)
+  end as scrydex_price,
+  case
+    when is_en_raw and public_market_price is null then null
+    when raw_market_price_outlier then null
+    else coalesce(recent_market_signal_usd, scrydex_price)
+  end as pokemontcg_price,
+  yahoo_jp_price_out as yahoo_jp_price,
+  yahoo_jp_price_jpy_out as yahoo_jp_price_jpy,
+  yahoo_jp_sample_count_out as yahoo_jp_sample_count,
+  yahoo_jp_observed_at_out as yahoo_jp_observed_at,
+  snkrdunk_price_out as snkrdunk_price,
+  snkrdunk_sample_count_out as snkrdunk_sample_count,
+  snkrdunk_observed_at_out as snkrdunk_observed_at,
+  snkrdunk_product_code_out as snkrdunk_product_code,
+  public_market_price as market_price,
+  public_market_price_as_of as market_price_as_of,
+  public_provider_compare_as_of as provider_compare_as_of,
+  public_confidence_score as market_confidence_score,
+  public_low_confidence as market_low_confidence,
+  public_market_blend_policy as market_blend_policy,
+  public_market_provenance as market_provenance,
+  public_change_pct_24h as change_pct_24h,
+  public_change_pct_7d as change_pct_7d,
+  updated_at,
+  canonical_name_native,
+  set_name_native,
+  canonical_language as language,
+  snkrdunk_price_jpy_out as snkrdunk_price_jpy,
+  market_price_display_state,
+  recent_market_signal_usd,
+  recent_market_signal_as_of,
+  recent_market_signal_delta_pct,
+  recent_market_signal_direction,
+  -- New columns MUST be appended last: CREATE OR REPLACE VIEW only allows
+  -- adding trailing columns, not reordering existing ones.
+  public_latest_price as latest_price,
+  public_latest_price_as_of as latest_price_as_of,
+  -- JP-native freshest hero + 14-day median (additive; raw passthrough of the
+  -- new base columns). NULL for non-JP rows. iOS reads these for the JP detail
+  -- hero + "14-day median" sub-line; the base market_price stays untouched.
+  jp_latest_price,
+  jp_latest_price_as_of,
+  jp_display_price,
+  jp_display_price_as_of
+from public_provenance_policy;
+
+grant select on public.public_card_metrics to anon, authenticated;
