@@ -71,6 +71,7 @@ export const CRON_ROUTES = [
   "cron/refresh-card-image-embeddings",
   "cron/refresh-card-translations",
   "cron/refresh-per-printing-display",
+  "cron/refresh-jp-price-display",
   "cron/augment-card-image-embeddings",
   "cron/embed-card-art-crops",
   "cron/keepwarm-image-embedder",

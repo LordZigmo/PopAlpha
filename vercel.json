@@ -49,6 +49,10 @@
       "schedule": "0 */2 * * *"
     },
     {
+      "path": "/api/cron/refresh-jp-price-display",
+      "schedule": "40 * * * *"
+    },
+    {
       "path": "/api/cron/augment-card-image-embeddings?maxCards=32",
       "schedule": "*/5 * * * *"
     },
