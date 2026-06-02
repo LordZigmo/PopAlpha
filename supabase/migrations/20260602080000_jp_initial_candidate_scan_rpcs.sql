@@ -117,33 +117,43 @@ stable
 security definer
 set search_path = public
 as $$
-  select
-    c.slug as canonical_slug,
-    case when a.canonical_slug is null then 1 else 2 end as tier
-  from public.canonical_cards c
-  left join public.jp_ingestion_attempts a
-    on a.provider = 'YAHOO_JP'
-   and a.canonical_slug = c.slug
-  where c.language = 'JP'
-    and not (c.slug = any(p_suppressed))
-    -- at least one MATCHED provider mapping (mirrors !inner MATCHED embed)
-    and exists (
-      select 1
-      from public.provider_card_map pcm
-      where pcm.canonical_slug = c.slug
-        and pcm.mapping_status = 'MATCHED'
-    )
-    -- no-price: no Yahoo! RAW row for this slug (mirrors grade='RAW' Set check)
-    and not exists (
-      select 1
-      from public.yahoo_jp_card_prices y
-      where y.canonical_slug = c.slug
-        and y.grade = 'RAW'
-    )
-  order by
-    (case when a.canonical_slug is null then 1 else 2 end),
-    c.created_at desc,
-    c.slug
+  -- tier is derived from an EXISTS (NOT a LEFT JOIN to the to-many
+  -- jp_ingestion_attempts table). A slug accrues one attempt row per cron tick
+  -- and the table has no uniqueness constraint, so a LEFT JOIN would emit the
+  -- same canonical_slug once per attempt; with `limit p_limit` applied before
+  -- the route's Set dedupe, a heavily-retried no-price slug would duplicate and
+  -- crowd out other initial candidates. EXISTS makes each card contribute
+  -- exactly ONE row before the limit.
+  select s.canonical_slug, s.tier
+  from (
+    select
+      c.slug as canonical_slug,
+      case when exists (
+        select 1
+        from public.jp_ingestion_attempts a
+        where a.provider = 'YAHOO_JP'
+          and a.canonical_slug = c.slug
+      ) then 2 else 1 end as tier,
+      c.created_at
+    from public.canonical_cards c
+    where c.language = 'JP'
+      and not (c.slug = any(p_suppressed))
+      -- at least one MATCHED provider mapping (mirrors !inner MATCHED embed)
+      and exists (
+        select 1
+        from public.provider_card_map pcm
+        where pcm.canonical_slug = c.slug
+          and pcm.mapping_status = 'MATCHED'
+      )
+      -- no-price: no Yahoo! RAW row for this slug (mirrors grade='RAW' Set check)
+      and not exists (
+        select 1
+        from public.yahoo_jp_card_prices y
+        where y.canonical_slug = c.slug
+          and y.grade = 'RAW'
+      )
+  ) s
+  order by s.tier, s.created_at desc, s.canonical_slug
   limit greatest(p_limit, 0);
 $$;
 
