@@ -115,6 +115,7 @@ type ConditionPriceRow = {
 function toProfileInput(
   row: CardRow,
   conditionPrices: Array<{ condition: string; price: number }> | null,
+  latest: { price: number | null; asOf: string | null } | null,
 ): CardProfileInput {
   return {
     canonicalSlug: row.canonical_slug,
@@ -122,6 +123,8 @@ function toProfileInput(
     setName: row.set_name,
     cardNumber: row.card_number,
     marketPrice: row.market_price,
+    latestPrice: latest?.price ?? null,
+    latestPriceAsOf: latest?.asOf ?? null,
     marketPriceDisplayState: row.market_price_display_state ?? null,
     recentMarketSignalUsd: row.recent_market_signal_usd ?? null,
     recentMarketSignalAsOf: row.recent_market_signal_as_of ?? null,
@@ -163,6 +166,34 @@ async function fetchConditionPricesForSlugs(
     const existing = result.get(row.canonical_slug) ?? [];
     existing.push({ condition: row.condition, price: Number(row.price) });
     result.set(row.canonical_slug, existing);
+  }
+  return result;
+}
+
+// Freshest sold price (+ its date) for the canonical RAW row — the same
+// latest_price the detail hero shows. Fed to the model as DATED, non-current
+// context; the Market Price still leads. Canonical RAW only; NULL for JP/graded
+// (their freshest lives in jp_latest_price / per-grade rows), which simply omits
+// the freshest line from those prompts.
+async function fetchLatestPricesForSlugs(
+  supabase: ReturnType<typeof dbAdmin>,
+  slugs: string[],
+): Promise<Map<string, { price: number | null; asOf: string | null }>> {
+  if (slugs.length === 0) return new Map();
+  const { data, error } = await supabase
+    .from("public_card_metrics")
+    .select("canonical_slug,latest_price,latest_price_as_of")
+    .in("canonical_slug", slugs)
+    .is("printing_id", null)
+    .eq("grade", "RAW");
+  if (error) return new Map();
+  const result = new Map<string, { price: number | null; asOf: string | null }>();
+  for (const row of (data ?? []) as Array<{
+    canonical_slug: string;
+    latest_price: number | null;
+    latest_price_as_of: string | null;
+  }>) {
+    result.set(row.canonical_slug, { price: row.latest_price, asOf: row.latest_price_as_of });
   }
   return result;
 }
@@ -411,8 +442,12 @@ export async function GET(req: Request) {
     for (let i = 0; i < cards.length; i += batchSize) {
       if (Date.now() >= deadline) return true;
       const chunkCards = cards.slice(i, i + batchSize);
-      const conditionMap = await fetchConditionPricesForSlugs(supabase, chunkCards.map((c) => c.canonical_slug));
-      const chunk = chunkCards.map((c) => toProfileInput(c, conditionMap.get(c.canonical_slug) ?? null));
+      const chunkSlugs = chunkCards.map((c) => c.canonical_slug);
+      const conditionMap = await fetchConditionPricesForSlugs(supabase, chunkSlugs);
+      const latestMap = await fetchLatestPricesForSlugs(supabase, chunkSlugs);
+      const chunk = chunkCards.map((c) =>
+        toProfileInput(c, conditionMap.get(c.canonical_slug) ?? null, latestMap.get(c.canonical_slug) ?? null),
+      );
       const stats = await processChunk(supabase, chunk, concurrency, deadline);
       totalLlm += stats.llm;
       totalFallbacks += stats.fallbacks;

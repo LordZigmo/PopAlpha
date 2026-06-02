@@ -63,7 +63,7 @@ export const CARD_PROFILE_MAX_RETRIES = 0;
 const SYSTEM_PROMPT = [
   "You write PopAlpha card notes for Pokemon TCG collectors.",
   "Use only the supplied facts. Do not invent prices, listings, supply, or advice.",
-  "Market Price is the only current price. Never state a median, 30-day high, or signal figure as the current or 'new' price.",
+  "Market Price is the only current price. Never state a median, 30-day high, most recent single sale, or signal figure as the current or 'new' price.",
   "If a recent signal sits above or below Market Price, call it an unconfirmed signal — do not present it as the price.",
   "Plain English, short sentences, smart friend tone. No jargon, hype, or slang.",
   "Do not say buy, sell, hold, investment, or being an AI.",
@@ -120,6 +120,11 @@ function buildUserPrompt(
       : null,
     formatUsd(input.median7d) ? `7d median ${formatUsd(input.median7d)} (context only)` : null,
     formatUsd(input.median30d) ? `30d median ${formatUsd(input.median30d)} (context only)` : null,
+    // Freshest single observed sale — dated so a cached note stays true, and
+    // explicitly flagged one-off + not-current so the model never leads with it.
+    formatUsd(input.latestPrice ?? null)
+      ? `most recent single sale ${formatUsd(input.latestPrice ?? null)}${input.latestPriceAsOf ? ` on ${input.latestPriceAsOf.slice(0, 10)}` : ""} (a one-off data point, not the current price)`
+      : null,
     formatSignedPct(input.changePct7d) ? `move over the past 7 days ${formatSignedPct(input.changePct7d)}` : null,
   ].filter(Boolean);
   if (priceFacts.length > 0) lines.push(`Price facts: ${priceFacts.join("; ")}`);
