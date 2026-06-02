@@ -49,6 +49,7 @@ import { retrySupabaseWriteOperation } from "@/lib/backfill/supabase-write-retry
 
 const SLUG_CHUNK_SIZE = 100;
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+const FOURTEEN_DAYS_MS = 14 * 24 * 60 * 60 * 1000;
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 const SIGNAL_POINT_THRESHOLD = 10; // matches refresh_derived_signals_for_variants
 
@@ -193,6 +194,17 @@ function pricesWithin(points: HistoryPoint[], windowMs: number): number[] {
     if (Number.isFinite(t) && t >= cutoff) out.push(p.price);
   }
   return out;
+}
+
+// Points (not just prices) within a trailing window — needed when we also want
+// the freshest point's timestamp (e.g. the freshest-hero "as of"). Mirrors
+// pricesWithin's cutoff/parse semantics.
+function pointsWithin(points: HistoryPoint[], windowMs: number): HistoryPoint[] {
+  const cutoff = Date.now() - windowMs;
+  return points.filter((p) => {
+    const t = Date.parse(p.ts);
+    return Number.isFinite(t) && t >= cutoff;
+  });
 }
 
 function median(values: number[]): number | null {
@@ -534,6 +546,29 @@ export async function runGradedVariantMetricsWriter(args: {
         const w7 = pricesWithin(g.points, 7 * 24 * 60 * 60 * 1000);
         const w30 = pricesWithin(g.points, THIRTY_DAYS_MS);
         if (w30.length === 0) continue;
+
+        // Freshest hero + 14-day median display (price-display redesign, graded).
+        // Mirrors the RAW per-printing design: hero = freshest sold point, the
+        // sub-line = 14-day median (graded is sparse, so 14d not 3d). Both null
+        // when nothing landed in the last 14 days — iOS then falls back to the
+        // 30d median. Computed from the SAME g.points as median_30d, so it can
+        // never disagree with the analytics on this row.
+        const points14 = pointsWithin(g.points, FOURTEEN_DAYS_MS);
+        let displayPrice: number | null = null;
+        let displayPriceAsOf: string | null = null;
+        let latestPrice: number | null = null;
+        let latestPriceAsOf: string | null = null;
+        if (points14.length > 0) {
+          let freshest = points14[0];
+          for (const p of points14) {
+            if (Date.parse(p.ts) > Date.parse(freshest.ts)) freshest = p;
+          }
+          latestPrice = roundMetric(freshest.price);
+          latestPriceAsOf = freshest.ts;
+          displayPrice = median(points14.map((p) => p.price));
+          displayPriceAsOf = freshest.ts; // latest day in the 14d median window
+        }
+
         cmWrites.push({
           canonical_slug: g.canonicalSlug,
           printing_id: g.printingId,
@@ -544,6 +579,12 @@ export async function runGradedVariantMetricsWriter(args: {
           high_30d: Math.max(...w30),
           trimmed_median_30d: trimmedMedian(w30),
           snapshot_count_30d: w30.length,
+          // Freshest hero + 14d median. NULL clears a row whose freshest point
+          // has aged out of the 14d window (upsert always writes the current value).
+          latest_price: latestPrice,
+          latest_price_as_of: latestPriceAsOf,
+          display_price: displayPrice,
+          display_price_as_of: displayPriceAsOf,
           updated_at: nowIso,
         });
       }
