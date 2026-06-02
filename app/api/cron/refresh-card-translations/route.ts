@@ -18,6 +18,14 @@
  *        (ambiguous, e.g. multiple same-name printings) → leave
  *        unpaired. Don't guess.
  *
+ * Manual override lane: rows with source='manual' are hand-curated for cards the
+ * rule can't disambiguate — multi-version chase cards where several same-name
+ * versions exist on each side (e.g. the "Mega <Pokemon> ex" SAR ladders), paired
+ * by rarity tier instead of name. The cleanup deletes (deletePairingsForEnSlug /
+ * upsertPrimaryPairing in lib/jp/translation-match.mjs) only touch source='set_pair'
+ * rows, so this pass NEVER wipes manual overrides. See migration
+ * 20260602010000_seed_manual_mega_ex_jp_pairings.sql.
+ *
  * Why we dropped the cosine matcher (PR #109's design): cross-language
  * SigLIP cosine on art crops produced a ~0.02 margin between same-art
  * and different-art same-Pokemon pairs — too thin for a global

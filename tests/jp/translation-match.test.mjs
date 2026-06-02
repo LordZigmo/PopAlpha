@@ -200,6 +200,8 @@ export async function runTranslationMatchTests() {
         ops: [
           ["delete", { count: "exact" }],
           ["eq", "en_slug", "base-set-some-slug"],
+          // Scoped to auto-generated rows so manual overrides survive the cron.
+          ["eq", "source", "set_pair"],
         ],
       },
     ]);
@@ -221,6 +223,8 @@ export async function runTranslationMatchTests() {
       ["delete", { count: "exact" }],
       ["eq", "en_slug", "base-set-4-charizard"],
       ["neq", "jp_slug", "expansion-pack-6-charizard-jp"],
+      // Stale-delete never clobbers a manual override.
+      ["eq", "source", "set_pair"],
     ]);
     assert.equal(supabase.calls[1].table, "card_translations");
     assert.equal(supabase.calls[1].ops[0][0], "upsert");
