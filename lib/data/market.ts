@@ -69,6 +69,8 @@ type CanonicalMarketMetricRow = {
   pokemontcg_price?: number | null;
   market_price: number | null;
   market_price_as_of?: string | null;
+  latest_price?: number | null;
+  latest_price_as_of?: string | null;
   liquidity_score?: number | null;
   active_listings_7d?: number | null;
   snapshot_count_30d?: number | null;
@@ -117,6 +119,12 @@ export type CanonicalMarketPulse = {
   pokemontcgPrice: number | null;
   marketPrice: number | null;
   marketPriceAsOf?: string | null;
+  // Freshest hero price (public_card_metrics.latest_price). The homepage shows
+  // this as the card price so it matches the detail hero; falls back to
+  // marketPrice (the median) when no freshest point exists. For JP-native rows
+  // the source price is already the freshest, so latestPrice == marketPrice.
+  latestPrice?: number | null;
+  latestPriceAsOf?: string | null;
   liquidityScore?: number | null;
   activeListings7d?: number | null;
   snapshotCount30d?: number | null;
@@ -387,12 +395,29 @@ export function resolveCanonicalMarketPulse(
         : "SCRYDEX_PRIMARY";
   const provenanceSourceMix = provenance?.sourceMix;
 
+  // Freshest hero price for the homepage card price (so it matches the detail
+  // hero). EN: prefer the view's guarded latest_price, fall back to the median.
+  // JP-native: the picked source price is already the freshest observation, and
+  // the view's latest_price column isn't JP-aware — so use marketPrice directly.
+  const latestPrice = marketPrice === null
+    ? null
+    : jpNativeSource
+      ? marketPrice
+      : (toFiniteNumber(row?.latest_price) ?? marketPrice);
+  const latestPriceAsOf = latestPrice === null
+    ? null
+    : jpNativeSource
+      ? (row?.display_price_as_of ?? row?.market_price_as_of ?? null)
+      : (row?.latest_price_as_of ?? row?.display_price_as_of ?? row?.market_price_as_of ?? null);
+
   const basePayload = {
     justtcgPrice: null,
     scrydexPrice,
     pokemontcgPrice: null,
     marketPrice,
     marketPriceAsOf: marketPrice !== null ? (row?.display_price_as_of ?? row?.market_price_as_of ?? null) : null,
+    latestPrice,
+    latestPriceAsOf,
     liquidityScore: marketPrice !== null && !jpNativeSource ? toFiniteNumber(row?.liquidity_score) : null,
     activeListings7d,
     snapshotCount30d,
@@ -473,7 +498,7 @@ export async function getCanonicalMarketPulseMap(
   ] = await Promise.all([
     supabase
       .from("public_card_metrics")
-      .select("canonical_slug, justtcg_price, scrydex_price, pokemontcg_price, market_price, market_price_as_of, liquidity_score, active_listings_7d, snapshot_count_30d, median_7d, provider_trend_slope_7d, provider_cov_price_30d, provider_price_relative_to_30d_range, provider_price_changes_count_30d, market_confidence_score, market_low_confidence, market_blend_policy, market_provenance, change_pct_24h, change_pct_7d, market_price_display_state, recent_market_signal_usd, recent_market_signal_as_of, recent_market_signal_delta_pct, recent_market_signal_direction")
+      .select("canonical_slug, justtcg_price, scrydex_price, pokemontcg_price, market_price, market_price_as_of, latest_price, latest_price_as_of, liquidity_score, active_listings_7d, snapshot_count_30d, median_7d, provider_trend_slope_7d, provider_cov_price_30d, provider_price_relative_to_30d_range, provider_price_changes_count_30d, market_confidence_score, market_low_confidence, market_blend_policy, market_provenance, change_pct_24h, change_pct_7d, market_price_display_state, recent_market_signal_usd, recent_market_signal_as_of, recent_market_signal_delta_pct, recent_market_signal_direction")
       .in("canonical_slug", slugs)
       .is("printing_id", null)
       .eq("grade", "RAW")

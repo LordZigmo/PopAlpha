@@ -220,6 +220,8 @@ type JpPriceCoverageRow = {
   display_price_source?: string | null;
   display_price_usd: number | null;
   display_price_as_of: string | null;
+  jp_latest_price: number | null;
+  jp_latest_price_as_of: string | null;
 };
 
 type HomepageDataOverrides = {
@@ -484,7 +486,7 @@ async function loadJapaneseRail(
   const { data, error } = await client
     .from("public_jp_price_coverage")
     .select(
-      "canonical_slug, canonical_name, set_name, year, card_number, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url, market_price, market_price_as_of, change_pct_24h, change_pct_7d, active_listings_7d, market_confidence_score, snapshot_count_30d, market_low_confidence, yahoo_jp_price, yahoo_jp_price_jpy, yahoo_jp_sample_count, snkrdunk_price, snkrdunk_price_jpy, snkrdunk_sample_count, display_price_source, display_price_usd, display_price_as_of",
+      "canonical_slug, canonical_name, set_name, year, card_number, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url, market_price, market_price_as_of, change_pct_24h, change_pct_7d, active_listings_7d, market_confidence_score, snapshot_count_30d, market_low_confidence, yahoo_jp_price, yahoo_jp_price_jpy, yahoo_jp_sample_count, snkrdunk_price, snkrdunk_price_jpy, snkrdunk_sample_count, display_price_source, display_price_usd, display_price_as_of, jp_latest_price, jp_latest_price_as_of",
     )
     .eq("covered_by_price", true)
     .in("display_price_source", ["yahoo_jp", "snkrdunk"])
@@ -495,7 +497,11 @@ async function loadJapaneseRail(
   const rows = data as unknown as JpPriceCoverageRow[];
   return rows
     .map<HomepageCard | null>((row) => {
-      if (row.display_price_usd == null || row.display_price_usd <= 0) return null;
+      // Prefer the blended freshest JP price (jp_latest_price) over the
+      // source-pick display price, which can be a stale Yahoo observation
+      // (e.g. $0.20 when Snkrdunk shows $31). Falls back when no fresh point.
+      const jpDisplayPrice = row.jp_latest_price ?? row.display_price_usd;
+      if (jpDisplayPrice == null || jpDisplayPrice <= 0) return null;
       if (!hasJpNativeHomepagePriceSource(row.display_price_source)) return null;
       const changePct = row.change_pct_24h ?? row.change_pct_7d ?? null;
       const changeWindow: "24H" | "7D" = row.change_pct_24h != null ? "24H" : "7D";
@@ -511,7 +517,7 @@ async function loadJapaneseRail(
         set_name: row.set_name ?? null,
         year: row.year ?? null,
         card_number: row.card_number ?? null,
-        market_price: row.display_price_usd,
+        market_price: jpDisplayPrice,
         market_price_display_state: null,
         recent_market_signal_usd: null,
         recent_market_signal_as_of: null,
@@ -529,7 +535,7 @@ async function loadJapaneseRail(
         sparkline_7d: [],
         sales_count_30d: row.snapshot_count_30d ?? null,
         active_listings_7d: row.active_listings_7d ?? null,
-        updated_at: row.display_price_as_of ?? null,
+        updated_at: (row.jp_latest_price != null ? row.jp_latest_price_as_of : null) ?? row.display_price_as_of ?? null,
         yahoo_jp_price: row.yahoo_jp_price,
         yahoo_jp_price_jpy: row.yahoo_jp_price_jpy,
         yahoo_jp_sample_count: row.yahoo_jp_sample_count,
@@ -606,7 +612,7 @@ async function loadJapaneseSignalRails(
     const { data, error } = await client
       .from("public_jp_price_coverage")
       .select(
-        "canonical_slug, canonical_name, set_name, year, card_number, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url, market_price, market_price_as_of, change_pct_24h, change_pct_7d, active_listings_7d, market_confidence_score, snapshot_count_30d, market_low_confidence, yahoo_jp_price, yahoo_jp_price_jpy, yahoo_jp_sample_count, snkrdunk_price, snkrdunk_price_jpy, snkrdunk_sample_count, display_price_source, display_price_usd, display_price_as_of",
+        "canonical_slug, canonical_name, set_name, year, card_number, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url, market_price, market_price_as_of, change_pct_24h, change_pct_7d, active_listings_7d, market_confidence_score, snapshot_count_30d, market_low_confidence, yahoo_jp_price, yahoo_jp_price_jpy, yahoo_jp_sample_count, snkrdunk_price, snkrdunk_price_jpy, snkrdunk_sample_count, display_price_source, display_price_usd, display_price_as_of, jp_latest_price, jp_latest_price_as_of",
       )
       .eq("covered_by_price", true)
       .in("display_price_source", ["yahoo_jp", "snkrdunk"])
@@ -645,11 +651,17 @@ async function loadJapaneseSignalRails(
   const nowMs = Date.now();
 
   for (const row of rows) {
-    if (row.display_price_usd == null || row.display_price_usd < JP_BUDGET_MIN_PRICE) continue;
+    // Prefer the blended freshest JP price (+ as-of) over the source-pick
+    // display price/as-of, which can be a stale Yahoo observation. Budget
+    // membership, the freshness gate, and the displayed price all use this one
+    // value so the rail can't filter on one price and show another.
+    const jpDisplayPrice = row.jp_latest_price ?? row.display_price_usd;
+    const jpDisplayAsOf = (row.jp_latest_price != null ? row.jp_latest_price_as_of : null) ?? row.display_price_as_of;
+    if (jpDisplayPrice == null || jpDisplayPrice < JP_BUDGET_MIN_PRICE) continue;
     if (!hasJpNativeHomepagePriceSource(row.display_price_source)) continue;
     if (row.market_low_confidence === true) continue;
 
-    const asOfMs = row.display_price_as_of ? Date.parse(row.display_price_as_of) : NaN;
+    const asOfMs = jpDisplayAsOf ? Date.parse(jpDisplayAsOf) : NaN;
     if (!Number.isFinite(asOfMs)) continue;
     const ageHours = (nowMs - asOfMs) / (60 * 60 * 1000);
     if (ageHours > JP_FRESHNESS_MAX_AGE_HOURS) continue;
@@ -666,7 +678,7 @@ async function loadJapaneseSignalRails(
       set_name: row.set_name ?? null,
       year: row.year ?? null,
       card_number: row.card_number ?? null,
-      market_price: row.display_price_usd,
+      market_price: jpDisplayPrice,
       market_price_display_state: null,
       recent_market_signal_usd: null,
       recent_market_signal_as_of: null,
@@ -684,7 +696,7 @@ async function loadJapaneseSignalRails(
       sparkline_7d: [],
       sales_count_30d: row.snapshot_count_30d ?? null,
       active_listings_7d: row.active_listings_7d ?? null,
-      updated_at: row.display_price_as_of ?? null,
+      updated_at: jpDisplayAsOf ?? null,
       yahoo_jp_price: row.yahoo_jp_price,
       yahoo_jp_price_jpy: row.yahoo_jp_price_jpy,
       yahoo_jp_sample_count: row.yahoo_jp_sample_count,
@@ -697,14 +709,14 @@ async function loadJapaneseSignalRails(
       candidates24h.push({
         card: baseCard(row.change_pct_24h, "24H"),
         changePct: row.change_pct_24h,
-        marketPrice: row.display_price_usd,
+        marketPrice: jpDisplayPrice,
       });
     }
     if (row.change_pct_7d != null && Math.abs(row.change_pct_7d) <= JP_MAX_CHANGE_PCT) {
       candidates7d.push({
         card: baseCard(row.change_pct_7d, "7D"),
         changePct: row.change_pct_7d,
-        marketPrice: row.display_price_usd,
+        marketPrice: jpDisplayPrice,
       });
     }
   }
@@ -1637,8 +1649,11 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
       const activeListings7d = typeof marketPulse?.activeListings7d === "number" && Number.isFinite(marketPulse.activeListings7d)
         ? marketPulse.activeListings7d
         : null;
-      const updatedAt = typeof marketPulse?.marketPriceAsOf === "string" && marketPulse.marketPriceAsOf.length > 0
-        ? marketPulse.marketPriceAsOf
+      // Price + as-of follow the freshest hero (latest_price) so the homepage
+      // card price matches the detail hero; fall back to the median when absent.
+      const priceAsOf = marketPulse?.latestPriceAsOf ?? marketPulse?.marketPriceAsOf ?? null;
+      const updatedAt = typeof priceAsOf === "string" && priceAsOf.length > 0
+        ? priceAsOf
         : null;
       return {
         slug,
@@ -1646,7 +1661,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
         set_name: card?.set_name ?? null,
         year: card?.year ?? null,
         card_number: card?.card_number ?? null,
-        market_price: marketPulse?.marketPrice ?? overrides.fallbackPrice ?? null,
+        market_price: marketPulse?.latestPrice ?? marketPulse?.marketPrice ?? overrides.fallbackPrice ?? null,
         market_price_display_state: marketPulse?.marketPriceDisplayState ?? null,
         recent_market_signal_usd: marketPulse?.recentMarketSignalUsd ?? null,
         recent_market_signal_as_of: marketPulse?.recentMarketSignalAsOf ?? null,
