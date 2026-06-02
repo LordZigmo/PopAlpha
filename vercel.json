@@ -45,6 +45,10 @@
       "schedule": "0 3 * * 0"
     },
     {
+      "path": "/api/cron/refresh-per-printing-display?maxCards=10000",
+      "schedule": "0 */2 * * *"
+    },
+    {
       "path": "/api/cron/augment-card-image-embeddings?maxCards=32",
       "schedule": "*/5 * * * *"
     },

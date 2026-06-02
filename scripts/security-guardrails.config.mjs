@@ -506,6 +506,7 @@ export const INTERNAL_ROUTE_TRUST_CONTRACTS = {
   "cron/refresh-card-embeddings": cronSecretRoute("cron/internal automation"),
   "cron/refresh-card-image-embeddings": cronSecretRoute("cron/internal automation"),
   "cron/refresh-card-translations": cronSecretRoute("cron/internal automation"),
+  "cron/refresh-per-printing-display": cronSecretRoute("cron/internal automation"),
   "cron/augment-card-image-embeddings": cronSecretRoute("cron/internal automation"),
   "cron/embed-card-art-crops": cronSecretRoute("cron/internal automation"),
   "cron/keepwarm-image-embedder": cronSecretRoute("cron/internal automation"),
