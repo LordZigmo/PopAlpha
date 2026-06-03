@@ -21,7 +21,11 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
   }
 
   // Landing and standalone marketing pages own their full-width layout — no rails.
-  if (pathname === "/" || pathname.startsWith("/compare")) {
+  if (
+    pathname === "/" ||
+    pathname.startsWith("/compare") ||
+    pathname === "/japanese-pokemon-card-prices"
+  ) {
     return <>{children}</>;
   }
 

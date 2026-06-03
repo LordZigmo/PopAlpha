@@ -38,6 +38,19 @@ export function breadcrumbSchema(
   };
 }
 
+// For the ranked "best of" listicles. Mirrors the visible ranked list.
+export function itemListSchema(names: string[]): JsonLdObject {
+  return {
+    "@context": "https://schema.org",
+    "@type": "ItemList",
+    itemListElement: names.map((name, index) => ({
+      "@type": "ListItem",
+      position: index + 1,
+      name,
+    })),
+  };
+}
+
 // PopAlpha as a free iOS app. No aggregateRating/reviewCount — we have no review
 // corpus, and fabricated ratings risk a manual penalty.
 export function softwareApplicationSchema(): JsonLdObject {
