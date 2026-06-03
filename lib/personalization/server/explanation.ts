@@ -429,7 +429,11 @@ export async function getCollectorInsight(
   // doesn't cross the coarse `dataConfidence` band (e.g. saving different cards
   // or shifting favorite sets while staying "high") still invalidates a now-
   // stale read for the same user × card × market state.
-  const metricsHash = `ci:${signals.dataConfidence}:${collectorSignalsDigest(signals)}:${metricsHashFor(features, signalHash, profile)}`;
+  // `capability.mode` ("template" | "llm") is part of the key so flipping
+  // NEXT_PUBLIC_ENABLE_PERSONALIZATION_LLM for a card that already cached a
+  // template read re-generates on the LLM path instead of returning the old
+  // template payload forever. (profileVersion covers builder/schema bumps.)
+  const metricsHash = `ci:${capability.mode}:${signals.dataConfidence}:${collectorSignalsDigest(signals)}:${metricsHashFor(features, signalHash, profile)}`;
 
   const cached = await readCache<CollectorInsight>(
     actor,
