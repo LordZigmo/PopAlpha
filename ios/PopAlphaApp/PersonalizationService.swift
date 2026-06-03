@@ -78,12 +78,32 @@ struct PersonalizedProfileSummary: Decodable {
     let eventCount: Int
 }
 
+/// Structured Collector Insight — answers "should this card matter to THIS
+/// user?" given their collector type + collection behavior. All fields optional
+/// so the UI degrades gracefully if the server omits any (decode resilience)
+/// and the app survives the server returning the older `explanation`-only shape.
+struct CollectorInsight: Decodable {
+    let fitLabel: String?        // Core Match | Strong Match | … | Pass for Your Profile
+    let fitScore: Int?           // 0–100
+    let collectorType: String?
+    let summary: String?
+    let roleInCollection: String?
+    let tradeoff: String?
+    let bestMove: String?        // Buy | Watch | Hold | Grade | Sell | Pass | …
+    let popAlphaRead: String?
+    let confidence: String?      // "low" | "medium" | "high"
+    let dataBasis: String?
+}
+
 struct PersonalizedExplanationResponse: Decodable {
     let ok: Bool
     let enabled: Bool?
     let mode: String?          // "template" | "llm"
     let explanation: PersonalizedExplanation?
     let profileSummary: PersonalizedProfileSummary?
+    /// New user-centered Collector Insight (replaces the loose `explanation`
+    /// rendering). Optional during the server rollout.
+    let collectorInsight: CollectorInsight?
 }
 
 struct PersonalizedProfile: Decodable {

@@ -60,18 +60,19 @@ struct PersonalizedInsightCardView: View {
     }
 
     private var content: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             header
-
-            TypewriterishText(
-                text: summaryText,
-                font: .system(size: 16, weight: .medium),
-                color: Self.purpleText
-            )
-            .lineSpacing(3)
-
-            if hasUnlockableContent {
-                reasonsAndCaveats
+            if let insight {
+                collectorInsightBody(insight)
+            } else {
+                // Decode-resilient transition fallback: the server hasn't
+                // returned the structured Collector Insight yet (older schema).
+                // Show a single line rather than a blank card.
+                Text(fallbackSummary)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(Self.purpleText)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(16)
@@ -93,6 +94,100 @@ struct PersonalizedInsightCardView: View {
         )
         .shadow(color: Self.purpleGlow.opacity(0.28), radius: 14, x: 0, y: 0)
         .shadow(color: .black.opacity(0.24), radius: 30, x: 0, y: 18)
+    }
+
+    private var insight: CollectorInsight? { response?.collectorInsight }
+
+    private var fallbackSummary: String {
+        if let s = response?.explanation?.summary, !s.isEmpty { return s }
+        if loading { return "Reading your collection…" }
+        return "PopAlpha learns your collecting style as you browse and scan."
+    }
+
+    // MARK: - Collector Insight sections
+    // Each section renders only when its field is present, so a partial
+    // response (or a missing field) degrades gracefully instead of showing
+    // an empty header.
+
+    @ViewBuilder
+    private func collectorInsightBody(_ insight: CollectorInsight) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if let summary = insight.summary, !summary.isEmpty {
+                Text(summary)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(Self.purpleText)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            insightSection("Role in your collection", insight.roleInCollection)
+            insightSection("The tradeoff", insight.tradeoff)
+            bestMoveSection(insight.bestMove)
+            if let read = insight.popAlphaRead, !read.isEmpty {
+                popAlphaReadView(read)
+            }
+            if let basis = insight.dataBasis, !basis.isEmpty {
+                Text(basis)
+                    .font(.system(size: 10))
+                    .italic()
+                    .foregroundStyle(Self.purpleMuted.opacity(0.6))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func insightSection(_ title: String, _ body: String?) -> some View {
+        if let body, !body.isEmpty {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title.uppercased())
+                    .font(.system(size: 10, weight: .bold))
+                    .tracking(0.8)
+                    .foregroundStyle(Self.purpleHeading)
+                Text(body)
+                    .font(.system(size: 14))
+                    .foregroundStyle(Self.purpleText.opacity(0.92))
+                    .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func bestMoveSection(_ move: String?) -> some View {
+        if let move, !move.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("BEST MOVE")
+                    .font(.system(size: 10, weight: .bold))
+                    .tracking(0.8)
+                    .foregroundStyle(Self.purpleHeading)
+                Text(move)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Self.purpleText)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Self.purpleAccent.opacity(0.30))
+                    .clipShape(Capsule())
+            }
+        }
+    }
+
+    private func popAlphaReadView(_ read: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 5) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 10, weight: .semibold))
+                Text("POPALPHA READ")
+                    .font(.system(size: 10, weight: .bold))
+                    .tracking(0.8)
+            }
+            .foregroundStyle(Self.purpleHeading)
+            Text(read)
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                .foregroundStyle(Self.purpleText)
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.top, 2)
     }
 
     private var lockedContent: some View {
@@ -152,63 +247,43 @@ struct PersonalizedInsightCardView: View {
         }
     }
 
-    private var hasUnlockableContent: Bool {
-        let hasReasons = !(response?.explanation?.reasons ?? []).isEmpty
-        let hasCaveats = !(response?.explanation?.caveats ?? []).isEmpty
-        return hasReasons || hasCaveats
-    }
-
-    @ViewBuilder
-    private var reasonsAndCaveats: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if let reasons = response?.explanation?.reasons, !reasons.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(Array(reasons.enumerated()), id: \.offset) { _, reason in
-                        HStack(alignment: .top, spacing: 8) {
-                            Circle()
-                                .fill(Self.purpleBorder.opacity(0.75))
-                                .frame(width: 5, height: 5)
-                                .padding(.top, 7)
-                            Text(reason)
-                                .font(.system(size: 14, weight: .regular))
-                                .foregroundStyle(Self.purpleText.opacity(0.92))
-                                .lineSpacing(3)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                }
-            }
-
-            if let caveats = response?.explanation?.caveats, !caveats.isEmpty {
-                Text(caveats.joined(separator: " · "))
-                    .font(.system(size: 11, weight: .regular))
-                    .italic()
-                    .foregroundStyle(Self.purpleMuted.opacity(0.65))
-            }
-        }
-    }
-
     private var header: some View {
         HStack(alignment: .top, spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Image(systemName: "wand.and.stars")
+                    Image(systemName: "person.crop.circle.badge.checkmark")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(Self.purpleMuted)
-                    Text("How this fits your style")
+                    Text("Collector Insight")
                         .font(.system(size: 16, weight: .bold))
                         .foregroundStyle(Self.purpleHeading)
                 }
-                Text("Personalized for you")
+                Text(headerSubtitle)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Self.purpleMuted.opacity(0.8))
                     .tracking(0.4)
             }
             Spacer(minLength: 8)
+            fitBadge
+        }
+    }
+
+    private var headerSubtitle: String {
+        if gate.isPro, let type = insight?.collectorType, !type.isEmpty {
+            return "For your \(type) profile"
+        }
+        return "Does this card fit you?"
+    }
+
+    @ViewBuilder
+    private var fitBadge: some View {
+        if !gate.isPro {
+            badgeCapsule("Pro")
+        } else if let insight, let label = insight.fitLabel, !label.isEmpty {
             VStack(alignment: .trailing, spacing: 3) {
-                badge
-                if let pct = confidencePct {
-                    Text("\(pct)% signal")
+                badgeCapsule(label)
+                if let score = insight.fitScore {
+                    Text("\(score)/100")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(Self.purpleMuted.opacity(0.75))
                         .tracking(0.4)
@@ -217,8 +292,8 @@ struct PersonalizedInsightCardView: View {
         }
     }
 
-    private var badge: some View {
-        Text(gate.isPro ? fitsLabel : "Pro")
+    private func badgeCapsule(_ text: String) -> some View {
+        Text(text)
             .font(.system(size: 11, weight: .semibold))
             .foregroundStyle(Self.purpleText)
             .padding(.horizontal, 10)
@@ -244,34 +319,8 @@ struct PersonalizedInsightCardView: View {
         loading = false
     }
 
-    // MARK: - Derived
-
-    private var summaryText: String {
-        if let summary = response?.explanation?.summary, !summary.isEmpty {
-            return summary
-        }
-        if loading {
-            return "Reading your activity…"
-        }
-        return "We’ll learn your collecting style as you browse."
-    }
-
-    private var fitsLabel: String {
-        switch response?.explanation?.fits {
-        case "contrast":
-            return "Off pattern"
-        case "aligned":
-            return "Your style"
-        default:
-            return "Your style"
-        }
-    }
-
-    private var confidencePct: Int? {
-        guard let confidence = response?.profileSummary?.confidence else { return nil }
-        guard response?.profileSummary?.eventCount ?? 0 > 0 else { return nil }
-        return Int(round(confidence * 100))
-    }
+    // (Derived helpers for the old loose schema were removed — the structured
+    // CollectorInsight is rendered directly by collectorInsightBody.)
 }
 
 // MARK: - TypewriterishText
