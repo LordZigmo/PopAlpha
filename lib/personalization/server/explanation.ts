@@ -22,6 +22,7 @@ import type {
   Actor,
   CardStyleFeatures,
   CollectorInsight,
+  CollectorSignals,
   PersonalizedExplanation,
   StyleProfile,
 } from "../types";
@@ -78,6 +79,30 @@ function metricsHashFor(
     features.is_mainstream ? "1" : "0",
     marketSignalHash ?? "",
   ].join("|");
+  return crypto.createHash("sha256").update(payload).digest("hex").slice(0, 16);
+}
+
+// Stable digest of the QUALITATIVE collector signals that shape the insight
+// copy — saved / watchlisted / scanned / repeat-viewed card names, favorite
+// sets, graded-vs-raw + language lean, and the collector type + traits.
+// Folded into the Collector Insight cache key so a signal change that doesn't
+// cross the coarse `dataConfidence` band (e.g. the user saves different cards
+// or shifts favorite sets while staying "high") still invalidates a now-stale
+// read for the same user × card. Volatile counters (eventCount, raw
+// profileConfidence) are intentionally excluded so the cache isn't busted on
+// every single behavior event.
+function collectorSignalsDigest(signals: CollectorSignals): string {
+  const payload = JSON.stringify([
+    signals.collectorType,
+    signals.supportingTraits,
+    signals.savedCardNames,
+    signals.watchlistCardNames,
+    signals.scannedCardNames,
+    signals.repeatedlyViewedCardNames,
+    signals.favoriteSets,
+    signals.gradedVsRawInterest,
+    signals.languagePreference,
+  ]);
   return crypto.createHash("sha256").update(payload).digest("hex").slice(0, 16);
 }
 
@@ -395,10 +420,12 @@ export async function getCollectorInsight(
     signalHash = fetched.signalHash;
   }
 
-  // Namespace + fold the data-richness band into the cache key so a thin→rich
-  // collection transition (e.g. after the user saves a few cards) invalidates
-  // a stale soft read for the same user × card × market state.
-  const metricsHash = `ci:${signals.dataConfidence}:${metricsHashFor(features, signalHash)}`;
+  // Namespace + fold BOTH the data-richness band AND a digest of the
+  // qualitative collector signals into the cache key, so a signal change that
+  // doesn't cross the coarse `dataConfidence` band (e.g. saving different cards
+  // or shifting favorite sets while staying "high") still invalidates a now-
+  // stale read for the same user × card × market state.
+  const metricsHash = `ci:${signals.dataConfidence}:${collectorSignalsDigest(signals)}:${metricsHashFor(features, signalHash)}`;
 
   const cached = await readCache<CollectorInsight>(
     actor,
