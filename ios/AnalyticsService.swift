@@ -98,6 +98,14 @@ enum AnalyticsEvent: String {
     case paywallDismissed = "paywall_dismissed"
     case paywallRestoreSucceeded = "paywall_restore_succeeded"
     case paywallPurchaseFailed = "paywall_purchase_failed"
+
+    // Market Brief (3 free) vs Collector Insight (Pro-only) funnel.
+    // paywall_from_collector_insight is captured via the paywall_viewed
+    // `surface` property ("card_detail_insight_teaser").
+    case marketBriefViewed = "market_brief_viewed"
+    case collectorInsightViewed = "collector_insight_viewed"
+    case collectorInsightLockedViewed = "collector_insight_locked_viewed"
+    case collectorInsightUnlockTapped = "collector_insight_unlock_tapped"
 }
 
 final class AnalyticsService {

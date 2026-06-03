@@ -17,6 +17,8 @@ struct PersonalizedInsightCardView: View {
     @State private var response: PersonalizedExplanationResponse?
     @StateObject private var gate = PremiumGate.shared
     @State private var showPaywall: Bool = false
+    @State private var didLogLockedView = false
+    @State private var didLogInsightView = false
 
     private static let purpleBorder = Color(red: 0.752, green: 0.517, blue: 0.988)     // #C084FC
     private static let purpleAccent = Color(red: 0.659, green: 0.333, blue: 0.969)     // #A855F7
@@ -27,6 +29,14 @@ struct PersonalizedInsightCardView: View {
 
     var body: some View {
         guardedContent
+            .onAppear {
+                // Free users always see the locked teaser on appear; the Pro
+                // "viewed" event fires in load() once the real insight resolves.
+                if !gate.isPro, !didLogLockedView {
+                    didLogLockedView = true
+                    AnalyticsService.shared.capture(.collectorInsightLockedViewed, properties: ["slug": canonicalSlug])
+                }
+            }
             .task(id: "\(taskKey)|\(gate.isPro)") {
                 if gate.isPro {
                     await load()
@@ -203,7 +213,10 @@ struct PersonalizedInsightCardView: View {
             LockedPreviewOverlay(
                 ctaText: "Upgrade to Pro",
                 blurRadius: 5,
-                onTap: { showPaywall = true }
+                onTap: {
+                    AnalyticsService.shared.capture(.collectorInsightUnlockTapped, properties: ["slug": canonicalSlug])
+                    showPaywall = true
+                }
             ) {
                 VStack(alignment: .leading, spacing: 8) {
                     lockedPreviewRow("Style match analysis")
@@ -317,6 +330,18 @@ struct PersonalizedInsightCardView: View {
         )
         response = result
         loading = false
+        // collector_insight_viewed: a Pro user resolved a real insight. The
+        // `source` property ("llm"/"template"/"fallback") lets analytics tell a
+        // deterministic fallback apart from a live LLM read, so a fallback is
+        // never mistaken for a successful generation.
+        if gate.isPro, let insight = result?.collectorInsight, !didLogInsightView {
+            didLogInsightView = true
+            AnalyticsService.shared.capture(.collectorInsightViewed, properties: [
+                "slug": canonicalSlug,
+                "fit_label": insight.fitLabel ?? "",
+                "source": insight.source ?? "",
+            ])
+        }
     }
 
     // (Derived helpers for the old loose schema were removed — the structured

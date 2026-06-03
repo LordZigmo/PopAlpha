@@ -93,6 +93,10 @@ struct CollectorInsight: Decodable {
     let popAlphaRead: String?
     let confidence: String?      // "low" | "medium" | "high"
     let dataBasis: String?
+    /// Generation source: "llm" | "template" | "fallback". Lets the client
+    /// distinguish a deterministic fallback from a live LLM read so it isn't
+    /// mistaken for a successful generation (the server logs it too).
+    let source: String?
 }
 
 struct PersonalizedExplanationResponse: Decodable {

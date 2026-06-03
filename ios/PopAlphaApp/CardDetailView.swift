@@ -122,6 +122,10 @@ struct CardDetailView: View {
     @StateObject private var premiumGate = PremiumGate.shared
     @State private var showCorrectionSheet = false
     @State private var showMarketSummaryPaywall = false
+    /// Slugs for which we've already fired market_brief_viewed, so the analytics
+    /// event fires once per card (re-fires on an in-place EN↔JP slug swap) but
+    /// not again when the brief scrolls back into view.
+    @State private var loggedBriefSlugs: Set<String> = []
     /// Tracks the "sign in then auto-save this card" flow. Set when an
     /// unauthenticated user taps the + FAB; cleared on completion or
     /// cancel. Watched by an .onChange so when isAuthenticated flips
@@ -1630,6 +1634,18 @@ struct CardDetailView: View {
                        PremiumGate.freeAnalysisLimit - premiumGate.freeAnalysisSeenCount >= 1 {
                         freeAnalysisMeter
                     }
+                }
+                // market_brief_viewed: the user saw the REAL, readable brief
+                // (free pre-budget or Pro). .task(id:) re-runs on an in-place
+                // slug swap; the Set keeps it to once per card.
+                .task(id: activeCard.id) {
+                    let slug = activeCard.id
+                    guard !loggedBriefSlugs.contains(slug) else { return }
+                    loggedBriefSlugs.insert(slug)
+                    AnalyticsService.shared.capture(.marketBriefViewed, properties: [
+                        "slug": slug,
+                        "is_pro": premiumGate.isPro,
+                    ])
                 }
             } else {
                 // Free budget spent: show the REAL summary behind the
