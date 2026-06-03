@@ -506,6 +506,35 @@ The `compute_daily_top_movers()` call is idempotent — it `DELETE`s today's row
 - [.github/workflows/supabase-migrations.yml](../.github/workflows/supabase-migrations.yml) — pre-deploy step
 - [app/api/cron/compute-daily-top-movers/route.ts](../app/api/cron/compute-daily-top-movers/route.ts) — gate-trip observability
 
+### 16. PostgREST `.eq`/`.is` on a `!left`/`!inner` embedded to-many relation silently empties the result set → JP candidate query degraded to a blind alphabetical head → JP ingestion frozen ~9 days (2026-05/06)
+
+**Symptom:** Both JP-native sources (Yahoo! JP + Snkrdunk) stopped rotating through new cards for ~9 days. The crons kept "succeeding" but only ever re-touched the same alphabetically-first slice of the catalog; never-attempted / no-price cards were never picked up for first-pass coverage.
+
+**Root cause:** A refactor (commit `1bdb948`) moved the `loadInitial*` "never-attempted first, then no-price" selection server-side using **PostgREST embedded-relation filters** — `.select("...jp_ingestion_attempts!left(id)")` then `.is("jp_ingestion_attempts.id", null)` to express "no attempt row." Applying an `.eq`/`.is` filter to a `!left` (or `!inner`) embedded **to-many** relation makes PostgREST drop the left-join NULL rows — so the "never-attempted" cards (which by definition have **no** attempt row, i.e. exactly the rows we wanted) were filtered OUT. The query came back empty, and the surrounding code silently fell through to `.order("canonical_slug").range(0, batch)` — a blind alphabetical head of the matched universe. Because the head was a stable alphabetical prefix, the same cards were re-selected every tick and the rotation froze. It "succeeded" the whole time, so nothing alerted.
+
+**Why it wasn't caught:** A green cron run + a non-empty candidate list looks healthy. The candidates *were* non-empty (the alphabetical head), just wrong. Nobody verified the returned candidates were genuinely stale / never-attempted vs. the alphabetical head.
+
+**Fix:** Reverted `1bdb948` in PR #162, then re-implemented the initial-candidate selection as real SQL RPCs (`scan_snkrdunk_initial_candidates`, `scan_yahoo_initial_candidates`) using a proper `LEFT JOIN public.jp_ingestion_attempts ... IS NULL` (+ `NOT EXISTS` for the no-price predicate), which correctly retains never-attempted rows. The crons call the RPC for the initial budget and still fall through to the unchanged `pickRefreshCandidates` stalest-priced path for any remaining budget.
+
+**Diagnostic / validation query** (the exact check that would have caught `1bdb948` — run on any candidate query before trusting it):
+```sql
+-- Are the returned candidates genuinely never-attempted + no-price,
+-- or just the alphabetically-first rows? Count MATCHED rows that sort
+-- BEFORE the first returned slug and were (correctly) excluded. If this
+-- is ~0, you are looking at a blind alphabetical head — STOP.
+select count(*) as matched_before_first_returned
+from public.canonical_cards c
+where c.language = 'JP'
+  and exists (select 1 from public.provider_card_map p
+              where p.canonical_slug = c.slug and p.mapping_status = 'MATCHED')
+  and c.slug < '<first-returned-slug>';
+```
+
+**Lessons:**
+- **Never apply `.eq`/`.is` to a `!left`/`!inner` embedded to-many relation to express "no related row."** It silently drops the left-join NULL rows and empties the result set. Use a SQL RPC with `LEFT JOIN ... IS NULL` / `NOT EXISTS` instead.
+- **Always verify cron candidate queries return genuinely stale / never-attempted rows, not the alphabetical head** (prove there exist earlier-sorting rows that were correctly excluded). A green run with a non-empty list is not proof of correct selection.
+- **Prefer SQL RPCs over chained PostgREST embeds for candidate selection.** This is the third consecutive reason this playbook recommends RPCs over `.order().range()` on selection-critical tables (see "Things not to do").
+
 ---
 
 ## Operational checklists
@@ -694,6 +723,7 @@ WHERE provider = 'SCRYDEX' AND provider_set_id = '__provider__';
 - **Don't set `statement_timeout` inside scan RPCs.** The outer job timeout is the authoritative cap. Inner timeouts cause drain-loop retry cascades.
 - **Don't use `CASE WHEN` in ORDER BY** unless every branch references an actual column. A NULL branch is treated as a constant and errors.
 - **Don't use `.order().range()` in new PostgREST client code on match-path tables.** Use the RPC pattern.
+- **Don't apply `.eq`/`.is` to a `!left`/`!inner` embedded to-many relation to express "no related row."** PostgREST drops the left-join NULL rows and silently empties the result set, degrading a `.range()` candidate query into a blind alphabetical head. Use a SQL RPC with `LEFT JOIN ... IS NULL` / `NOT EXISTS`, and verify candidate queries return genuinely stale/never-attempted rows (not the alphabetical head). See Incident #16. (Froze JP ingestion ~9 days, commit `1bdb948`, reverted #162; RPC re-implementation followed.)
 - **Don't trust per-file `maxDuration` without checking Vercel project-level Function Max Duration.** The project cap silently overrides.
 - **Don't set homepage to `force-dynamic` if queries read heavy aggregate tables.** ISR with 30–60s revalidate is almost always the right call.
 - **Don't increase Scrydex call volume to fix a DB problem.** The goal is minimum credit burn. If DB is slow, tune DB; don't poll Scrydex more.
