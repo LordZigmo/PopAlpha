@@ -489,14 +489,22 @@ async function loadDailyTopMoversBundle(
 async function loadJapaneseRail(
   client: NonNullable<ReturnType<typeof dbPublic>>,
   limit: number,
+  // Optional price-tier filter (on display_price_usd) so the same loader powers
+  // the all-prices "Trending" rail and the Mid ($8-50) / Budget (<$8) discovery
+  // rails. Tier membership is approximate at the boundary since the displayed
+  // price is jp_latest_price ?? display_price_usd, but close enough for a rail.
+  opts: { minPrice?: number; maxPrice?: number } = {},
 ): Promise<HomepageCard[]> {
-  const { data, error } = await client
+  let query = client
     .from("public_jp_price_coverage")
     .select(
       "canonical_slug, canonical_name, set_name, year, card_number, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url, market_price, market_price_as_of, change_pct_24h, change_pct_7d, active_listings_7d, market_confidence_score, snapshot_count_30d, market_low_confidence, yahoo_jp_price, yahoo_jp_price_jpy, yahoo_jp_sample_count, snkrdunk_price, snkrdunk_price_jpy, snkrdunk_sample_count, display_price_source, display_price_usd, display_price_as_of, jp_latest_price, jp_latest_price_as_of",
     )
     .eq("covered_by_price", true)
-    .in("display_price_source", ["yahoo_jp", "snkrdunk"])
+    .in("display_price_source", ["yahoo_jp", "snkrdunk"]);
+  if (opts.minPrice != null) query = query.gte("display_price_usd", opts.minPrice);
+  if (opts.maxPrice != null) query = query.lt("display_price_usd", opts.maxPrice);
+  const { data, error } = await query
     .order("display_price_as_of", { ascending: false, nullsFirst: false })
     .limit(limit);
 
@@ -1444,10 +1452,18 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
     };
     if (!overrides && db) {
       try {
-        [japaneseRail, japaneseRails] = await Promise.all([
+        const [jpRail, jpRails, jpMid, jpBudget] = await Promise.all([
           loadJapaneseRail(db, JAPANESE_RAIL_LIMIT),
           loadJapaneseSignalRails(db, SECTION_LIMIT),
+          // Mid ($8-50) and Budget (<$8) price-tier discovery rails. The
+          // change_pct-based mid/budget rails in loadJapaneseSignalRails stay
+          // empty until JP movers data lands (~mid-June), so populate these from
+          // the priced cohort by price tier (freshest first) for now.
+          loadJapaneseRail(db, JAPANESE_RAIL_LIMIT, { minPrice: JP_MID_MIN_PRICE, maxPrice: JP_PREMIUM_MIN_PRICE }),
+          loadJapaneseRail(db, JAPANESE_RAIL_LIMIT, { minPrice: JP_BUDGET_MIN_PRICE, maxPrice: JP_MID_MIN_PRICE }),
         ]);
+        japaneseRail = jpRail;
+        japaneseRails = { ...jpRails, midMovers: jpMid, budgetMovers: jpBudget };
       } catch (err) {
         logger.error(
           "[homepage] japanese_rail",
