@@ -10,7 +10,7 @@ export default function ComparisonFaq({ items }: ComparisonFaqProps) {
   return (
     <section className="mt-16">
       <h2 className="text-[20px] font-semibold tracking-[-0.01em] text-white sm:text-[22px]">
-        FAQ
+        ❓ FAQ
       </h2>
       <dl className="mt-6 divide-y divide-white/[0.06]">
         {items.map((item) => (
