@@ -127,7 +127,7 @@ struct AIBriefCard: View {
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(market.accent)
                         .accessibilityHidden(true)
-                    Text("AI BRIEF")
+                    Text("POPALPHA BRIEF")
                         .font(.system(size: 10, weight: .semibold))
                         .tracking(2.0)
                         .foregroundStyle(market.accent)
@@ -206,7 +206,7 @@ struct AIBriefCard: View {
                     .foregroundStyle(market.accent)
                 }
                 .buttonStyle(.plain)
-                .accessibilityHint(isExpanded ? "Collapses the AI brief" : "Expands the full AI brief")
+                .accessibilityHint(isExpanded ? "Collapses the PopAlpha Brief" : "Expands the full PopAlpha Brief")
             }
 
             // Personalization proof strip — replaces the old single
@@ -438,7 +438,7 @@ struct AIBriefCard: View {
     }
 }
 
-#Preview("AI Brief — placeholder") {
+#Preview("PopAlpha Brief — placeholder") {
     AIBriefCard(brief: nil, fallbackAsOf: nil, styleLabel: nil)
         .padding()
         .background(PA.Colors.background)

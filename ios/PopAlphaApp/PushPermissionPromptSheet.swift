@@ -38,7 +38,7 @@ struct PushPermissionPromptSheet: View {
                 .multilineTextAlignment(.center)
                 .padding(.bottom, 8)
 
-            Text("Get notified when the cards you watch move and when our AI brief drops.")
+            Text("Get notified when the cards you watch move and when your PopAlpha Brief drops.")
                 .font(.system(size: 15))
                 .foregroundStyle(PA.Colors.textSecondary)
                 .multilineTextAlignment(.center)
@@ -51,7 +51,7 @@ struct PushPermissionPromptSheet: View {
                         copy: "Real-time alerts when a card on your wishlist hits a new low.")
                 benefit(icon: "chart.line.uptrend.xyaxis", title: "Big movers",
                         copy: "Daily picks for cards that just moved more than the rest of the market.")
-                benefit(icon: "sparkles", title: "Daily AI brief",
+                benefit(icon: "sparkles", title: "Daily PopAlpha Brief",
                         copy: "A short summary of what's happening in the market each morning.")
             }
             .padding(.horizontal, 32)

@@ -140,6 +140,11 @@ struct CardDetailView: View {
     @State private var chartError: String?
     @State private var cardProfile: CardProfileResult?
     @State private var cardMetrics: CardMetricsResult?
+    /// Prefetched price metrics for the EN/JP paired slug so tapping the
+    /// language toggle shows the partner's hero price instantly instead of
+    /// waiting on a fresh fetch. Consumed on swap only when the prefetched
+    /// slug matches the target; re-primed for the new partner after each swap.
+    @State private var preloadedPairedMetrics: (slug: String, metrics: CardMetricsResult)?
     @State private var friendActivity: ActivityService.CardActivityResponse?
     @State private var showAddHolding = false
     @State private var selectedPriceMode: PriceMode = .nearMint
@@ -431,6 +436,17 @@ struct CardDetailView: View {
                 pairedSlug = pairing?.pairedSlug
                 pairedLanguage = pairing?.pairedLang
                 pairedImageUrl = pairing?.pairedImageUrl
+            }
+            // Preload the paired (EN↔JP) card's price metrics in the background
+            // so tapping the language toggle is instant. Fire-and-forget; the
+            // swap consumes this only when the prefetched slug matches the
+            // target, so a stale prefetch is harmless.
+            if let partner = pairing?.pairedSlug {
+                Task {
+                    if let m = try? await CardService.shared.fetchCardMetrics(slug: partner) {
+                        await MainActor.run { preloadedPairedMetrics = (partner, m) }
+                    }
+                }
             }
 
             // Always fetch the (cron-generated, cached) profile so the
@@ -899,7 +915,10 @@ struct CardDetailView: View {
         // Wipe per-slug caches so the UI doesn't briefly render stale
         // data for the new slug while .task(id:) refetches.
         cardProfile = nil
-        cardMetrics = nil
+        // If we prefetched the target's price metrics, prime them so the hero
+        // price is instant; otherwise nil and the .task refetch fills it in.
+        cardMetrics = preloadedPairedMetrics?.slug == targetSlug ? preloadedPairedMetrics?.metrics : nil
+        preloadedPairedMetrics = nil
         chartPrices = []
         chartTimestamps = []
         chartError = nil

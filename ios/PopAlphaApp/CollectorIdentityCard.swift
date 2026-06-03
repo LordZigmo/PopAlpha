@@ -12,6 +12,21 @@ struct CollectorIdentityCard: View {
     /// reveal the secondary archetypes a user also shows traits of.
     @State private var traitsExpanded = false
 
+    /// The radar-axis color this collector type is defined by, so the card
+    /// matches the dominant axis on the collector radar (e.g. Nostalgia
+    /// Curator → the amber nostalgia axis). Shared by the surface tint, the
+    /// icon, the confidence meter, and the traits badge.
+    private var typeColor: Color {
+        switch profile.primaryType {
+        case .nostalgiaCurator:                   return PA.AxisColors.nostalgia        // amber
+        case .modernMomentum:                     return PA.AxisColors.currentEra       // blue
+        case .marketOpportunist, .sealedStrategist: return PA.AxisColors.marketHeat     // red
+        case .gradedPurist, .trophyCollector:     return PA.AxisColors.slabFocus        // silver
+        case .setFinisher, .completionist, .binderBuilder: return PA.AxisColors.collectionDepth // green
+        case .grailHunter:                        return PA.AxisColors.tasteProfile     // purple
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             headerRow
@@ -19,9 +34,10 @@ struct CollectorIdentityCard: View {
             if !profile.traits.isEmpty { traitsDropdown }
         }
         .padding(20)
-        .background(cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: PA.Layout.panelRadius, style: .continuous))
-        .overlay(accentBorder)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // Solid, type-colored surface — same treatment as the PopAlpha Brief
+        // card, tinted to the collector type's radar-axis color.
+        .liquidGlassSurface(accent: typeColor)
         .padding(.horizontal, PA.Layout.sectionPadding)
     }
 
@@ -31,11 +47,11 @@ struct CollectorIdentityCard: View {
         HStack(spacing: 12) {
             ZStack {
                 Circle()
-                    .fill(PA.Colors.accent.opacity(0.12))
+                    .fill(typeColor.opacity(0.18))
                     .frame(width: 44, height: 44)
                 Image(systemName: profile.primaryType.icon)
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(PA.Colors.accent)
+                    .foregroundStyle(typeColor)
             }
 
             VStack(alignment: .leading, spacing: 2) {
@@ -86,10 +102,10 @@ struct CollectorIdentityCard: View {
 
                     Text("\(profile.traits.count)")
                         .font(.system(size: 10, weight: .bold, design: .rounded))
-                        .foregroundStyle(PA.Colors.accent)
+                        .foregroundStyle(typeColor)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 1)
-                        .background(PA.Colors.accent.opacity(0.12))
+                        .background(typeColor.opacity(0.16))
                         .clipShape(Capsule())
 
                     Spacer()
@@ -138,46 +154,17 @@ struct CollectorIdentityCard: View {
         VStack(spacing: 3) {
             Text("\(Int(profile.confidence * 100))%")
                 .font(.system(size: 12, weight: .bold, design: .rounded))
-                .foregroundStyle(PA.Colors.accent)
+                .foregroundStyle(typeColor)
 
             HStack(spacing: 2) {
                 ForEach(0..<5, id: \.self) { i in
                     let threshold = Double(i + 1) / 5.0
                     RoundedRectangle(cornerRadius: 1.5)
-                        .fill(profile.confidence >= threshold ? PA.Colors.accent : PA.Colors.surfaceSoft)
+                        .fill(profile.confidence >= threshold ? typeColor : PA.Colors.surfaceSoft)
                         .frame(width: 6, height: 3)
                 }
             }
         }
     }
 
-    // MARK: - Background + Border
-
-    private var cardBackground: some View {
-        ZStack {
-            PA.Gradients.cardSurface
-            RadialGradient(
-                colors: [PA.Colors.accent.opacity(0.06), .clear],
-                center: .topLeading,
-                startRadius: 0,
-                endRadius: 200
-            )
-        }
-    }
-
-    private var accentBorder: some View {
-        RoundedRectangle(cornerRadius: PA.Layout.panelRadius, style: .continuous)
-            .stroke(
-                LinearGradient(
-                    colors: [
-                        PA.Colors.accent.opacity(0.2),
-                        PA.Colors.accent.opacity(0.05),
-                        PA.Colors.hairline(0.03),
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ),
-                lineWidth: 1
-            )
-    }
 }
