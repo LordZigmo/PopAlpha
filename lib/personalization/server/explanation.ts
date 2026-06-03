@@ -65,6 +65,7 @@ type CanonicalCardRow = {
 function metricsHashFor(
   features: CardStyleFeatures,
   marketSignalHash: string | null,
+  profile: StyleProfile | null,
 ): string {
   // Bake the per-card market signal into the cache key so a fresh BREAKOUT /
   // COOLING swap invalidates last week's read for the same user × card.
@@ -78,6 +79,14 @@ function metricsHashFor(
     features.is_art_centric ? "1" : "0",
     features.is_mainstream ? "1" : "0",
     marketSignalHash ?? "",
+    // Profile alignment inputs: computeAlignment(features, profile) reads
+    // profile.scores and can flip fits / fitLabel / fitScore / copy when a
+    // score crosses its threshold. profile.version is a constant schema
+    // version (it does NOT increment per recompute — see recompute.ts), so
+    // the scores themselves must be in the key, or a recompute that shifts a
+    // user's style (without changing dataConfidence or their saved-card
+    // names) would serve a stale read for the same card.
+    profile ? JSON.stringify(profile.scores) : "",
   ].join("|");
   return crypto.createHash("sha256").update(payload).digest("hex").slice(0, 16);
 }
@@ -339,13 +348,14 @@ async function writeCache<T>(
 }
 
 /**
- * Get a personalized explanation for (actor, card). Honors the cache and
- * respects the capability mode (template vs. LLM).
+ * Get the legacy loose `explanation` for (actor, card). Honors the cache and
+ * the capability mode.
  *
- * On the LLM path, the per-card market signal is fetched from `card_profiles`
- * and woven into the prompt. If that row is missing, we generate it inline
- * (one extra Gemini call on first view) so the combined read can speak to
- * the actual market state — coherence over a tiny latency hit.
+ * This path is deterministic — `buildPersonalizedExplanation` ignores the
+ * market context (`void _market`) — so it no longer fetches or backfills a
+ * per-card market signal. Doing so duplicated the LLM backfill the Collector
+ * Insight path already performs (a race + extra Gemini cost on a card's first
+ * view). Market state now lives entirely on the Collector Insight path.
  */
 export async function getPersonalizedExplanation(
   actor: Actor,
@@ -356,17 +366,11 @@ export async function getPersonalizedExplanation(
   const capability = getPersonalizationCapability(actor);
   const profileVersion = profile?.version ?? PROFILE_VERSION;
 
-  // Pull (or backfill) the market signal only on the LLM path. Template
-  // path doesn't reason about market state, so it doesn't need it.
-  let market: MarketSignalContext | null = null;
-  let signalHash: string | null = null;
-  if (capability.mode === "llm" && profile) {
-    const fetched = await ensureMarketSignal(card.canonical_slug);
-    market = fetched.context;
-    signalHash = fetched.signalHash;
-  }
-
-  const metricsHash = metricsHashFor(features, signalHash);
+  // No market backfill here: the legacy explanation is deterministic
+  // (buildPersonalizedExplanation ignores market), and getCollectorInsight
+  // already fetches/backfills the per-card signal on the LLM path. Fetching
+  // it here too raced that backfill and doubled the Gemini cost on first view.
+  const metricsHash = metricsHashFor(features, null, profile);
 
   const cached = await readCache<PersonalizedExplanation>(
     actor,
@@ -381,7 +385,7 @@ export async function getPersonalizedExplanation(
     features,
     profile,
     capability,
-    market,
+    null,
   );
   await writeCache(actor, card.canonical_slug, profileVersion, metricsHash, explanation);
   return explanation;
@@ -425,7 +429,7 @@ export async function getCollectorInsight(
   // doesn't cross the coarse `dataConfidence` band (e.g. saving different cards
   // or shifting favorite sets while staying "high") still invalidates a now-
   // stale read for the same user × card × market state.
-  const metricsHash = `ci:${signals.dataConfidence}:${collectorSignalsDigest(signals)}:${metricsHashFor(features, signalHash)}`;
+  const metricsHash = `ci:${signals.dataConfidence}:${collectorSignalsDigest(signals)}:${metricsHashFor(features, signalHash, profile)}`;
 
   const cached = await readCache<CollectorInsight>(
     actor,
