@@ -4,21 +4,19 @@ type ComparisonFaqProps = {
   items: FaqItem[];
 };
 
-// Renders the FAQ as visible text. The same `items` feed the FAQPage JSON-LD, so
-// the structured data always matches what's on the page.
+// Visible Q&A. The same `items` feed the FAQPage JSON-LD, so structured data
+// always matches the page.
 export default function ComparisonFaq({ items }: ComparisonFaqProps) {
   return (
-    <section className="mt-6 rounded-[28px] border border-[#1E1E1E] bg-[#101010] p-6 sm:p-8">
-      <h2 className="text-[24px] font-semibold leading-[1.1] tracking-[-0.03em] sm:text-[30px]">
-        Frequently asked questions
+    <section className="mt-16">
+      <h2 className="text-[20px] font-semibold tracking-[-0.01em] text-white sm:text-[22px]">
+        FAQ
       </h2>
-      <dl className="mt-5 space-y-6">
+      <dl className="mt-6 divide-y divide-white/[0.06]">
         {items.map((item) => (
-          <div key={item.question}>
-            <dt className="text-[16px] font-semibold text-[#F0F0F0]">{item.question}</dt>
-            <dd className="mt-2 text-[15px] leading-7 text-[#A0A0A0] sm:text-[16px]">
-              {item.answer}
-            </dd>
+          <div key={item.question} className="py-5 first:pt-0">
+            <dt className="text-[16px] font-medium text-white">{item.question}</dt>
+            <dd className="mt-2 text-[15px] leading-7 text-[#9A9A9A]">{item.answer}</dd>
           </div>
         ))}
       </dl>

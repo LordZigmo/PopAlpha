@@ -6,42 +6,42 @@ type ComparisonTableProps = {
   rows: VersusRow[];
 };
 
-// A real, visible <table>. Every cell renders actual text — this is the source of
-// truth that any structured data must mirror. The PopAlpha column is accent-tinted.
+// Minimalist table: row separators only, no card/box. Real visible text in every
+// cell. PopAlpha column is lightly emphasized; the competitor column stays muted.
 export default function ComparisonTable({
   caption,
   competitorName,
   rows,
 }: ComparisonTableProps) {
   return (
-    <section className="mt-6 rounded-[28px] border border-[#1E1E1E] bg-[#101010] p-6 sm:p-8">
-      <h2 className="text-[24px] font-semibold leading-[1.1] tracking-[-0.03em] sm:text-[30px]">
+    <section className="mt-16">
+      <h2 className="text-[20px] font-semibold tracking-[-0.01em] text-white sm:text-[22px]">
         {caption}
       </h2>
-      <div className="mt-5 overflow-x-auto">
-        <table className="w-full min-w-[34rem] border-collapse text-left text-[14px] sm:text-[15px]">
+      <div className="mt-6 overflow-x-auto">
+        <table className="w-full min-w-[32rem] border-collapse text-left text-[15px]">
           <caption className="sr-only">{caption}</caption>
           <thead>
-            <tr className="border-b border-[#1E1E1E]">
-              <th scope="col" className="py-3 pr-4 font-semibold text-[#6B6B6B]">
+            <tr className="border-b border-white/[0.12] text-[13px]">
+              <th scope="col" className="py-3 pr-4 font-normal text-[#8A8A8E]">
                 Feature
               </th>
-              <th scope="col" className="py-3 pr-4 font-semibold text-[#00B4D8]">
+              <th scope="col" className="py-3 pr-4 font-medium text-white">
                 PopAlpha
               </th>
-              <th scope="col" className="py-3 font-semibold text-[#A0A0A0]">
+              <th scope="col" className="py-3 font-normal text-[#8A8A8E]">
                 {competitorName}
               </th>
             </tr>
           </thead>
           <tbody>
             {rows.map((row) => (
-              <tr key={row.feature} className="border-b border-[#1A1A1A] align-top">
-                <th scope="row" className="py-3 pr-4 font-medium text-[#D0D0D0]">
+              <tr key={row.feature} className="border-b border-white/[0.06] align-top">
+                <th scope="row" className="py-3.5 pr-4 font-normal text-[#9A9A9A]">
                   {row.feature}
                 </th>
-                <td className="py-3 pr-4 text-[#E6E6E6]">{row.popalpha}</td>
-                <td className="py-3 text-[#9A9A9A]">{row.competitor}</td>
+                <td className="py-3.5 pr-4 text-[#E8E8E8]">{row.popalpha}</td>
+                <td className="py-3.5 text-[#8A8A8E]">{row.competitor}</td>
               </tr>
             ))}
           </tbody>

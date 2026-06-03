@@ -1,30 +1,17 @@
 type ComparisonHeroProps = {
-  eyebrow: string;
   h1: string;
-  updated: string;
+  subtitle: string;
+  lead: string;
 };
 
-function formatUpdated(iso: string): string {
-  const date = new Date(`${iso}T00:00:00Z`);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-    timeZone: "UTC",
-  });
-}
-
-export default function ComparisonHero({ eyebrow, h1, updated }: ComparisonHeroProps) {
+export default function ComparisonHero({ h1, subtitle, lead }: ComparisonHeroProps) {
   return (
-    <div className="rounded-[28px] border border-[#1E1E1E] bg-[#101010] p-6 sm:p-8">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6B6B6B]">
-        {eyebrow}
-      </p>
-      <h1 className="mt-3 text-[28px] font-semibold leading-[1.02] tracking-[-0.05em] sm:text-[44px] lg:text-[48px]">
+    <div>
+      <h1 className="text-[32px] font-semibold leading-[1.1] tracking-[-0.02em] text-white sm:text-[40px]">
         {h1}
       </h1>
-      <p className="mt-4 text-[13px] text-[#6B6B6B]">Updated {formatUpdated(updated)}</p>
+      <p className="mt-3 text-[16px] leading-7 text-[#8A8A8E] sm:text-[17px]">{subtitle}</p>
+      <p className="mt-8 text-[17px] leading-8 text-[#CFCFCF]">{lead}</p>
     </div>
   );
 }

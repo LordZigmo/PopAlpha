@@ -10,15 +10,16 @@ const POPALPHA_VS_COLLECTR: ComparisonEntry = {
   slug: "popalpha-vs-collectr",
   competitorName: "Collectr",
   competitorDescriptor: "a multi-game, multi-collectible portfolio tracker",
-  eyebrow: "PopAlpha vs Collectr",
   h1: "PopAlpha vs Collectr",
+  subtitle:
+    "Which app is better for scanning, pricing, and understanding Pokémon cards?",
   metaTitle:
     "PopAlpha vs Collectr: Which Pokémon Card App Is Better for Scanning? (2026)",
   metaDescription:
     "PopAlpha vs Collectr compared for Pokémon collectors: free unlimited card scanning, English and Japanese card prices, AI market summaries, and market signals. See which app fits your collection.",
   quickAnswer:
     "PopAlpha is best for collectors who want unlimited free Pokémon card scanning plus market intelligence — English and Japanese card prices, AI market summaries, and daily market signals. Collectr is known for tracking many games and collectibles in one portfolio, so it may fit better if you collect across several TCGs. If you focus on Pokémon — especially Japanese cards and market trends — PopAlpha goes deeper.",
-  tableCaption: "PopAlpha vs Collectr at a glance",
+  tableCaption: "How they compare",
   rows: [
     {
       feature: "Free card scanning",
@@ -117,7 +118,6 @@ const POPALPHA_VS_COLLECTR: ComparisonEntry = {
     },
   ],
   cta: {
-    eyebrow: "Try PopAlpha",
     heading: "Ready to try the free Pokémon card scanner?",
     body: "Unlimited free scanning plus English and Japanese card prices and AI market summaries. Join the waitlist and we'll email you when iPhone access opens.",
   },

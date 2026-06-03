@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import Image from "next/image";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getAllComparisonSlugs, getComparison } from "@/lib/compare/data";
 import {
@@ -8,7 +10,6 @@ import {
 } from "@/lib/compare/schema";
 import JsonLd from "@/components/compare/json-ld";
 import ComparisonHero from "@/components/compare/comparison-hero";
-import QuickAnswerBox from "@/components/compare/quick-answer-box";
 import ComparisonTable from "@/components/compare/comparison-table";
 import HonestBreakdown from "@/components/compare/honest-breakdown";
 import ComparisonFaq from "@/components/compare/comparison-faq";
@@ -58,6 +59,17 @@ export async function generateMetadata({
   };
 }
 
+function formatUpdated(iso: string): string {
+  const date = new Date(`${iso}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+}
+
 export default async function ComparePage({
   params,
 }: {
@@ -81,11 +93,29 @@ export default async function ComparePage({
   ];
 
   return (
-    <main className="min-h-screen bg-[#0A0A0A] px-4 py-12 text-[#F0F0F0] sm:px-6">
+    <div className="min-h-screen bg-[#0A0A0A] text-[#F0F0F0]">
       <JsonLd data={jsonLd} />
-      <div className="mx-auto max-w-4xl">
-        <ComparisonHero eyebrow={entry.eyebrow} h1={entry.h1} updated={entry.updated} />
-        <QuickAnswerBox text={entry.quickAnswer} />
+
+      <header className="mx-auto flex max-w-2xl items-center justify-between px-6 py-6">
+        <Link href="/" aria-label="PopAlpha home" className="flex items-center">
+          <Image
+            src="/brand/popalpha-modern-white.png"
+            alt="PopAlpha"
+            width={840}
+            height={182}
+            className="h-7 w-auto"
+          />
+        </Link>
+        <Link
+          href="#waitlist"
+          className="text-[13px] text-[#8A8A8E] transition-colors hover:text-white"
+        >
+          Join waitlist
+        </Link>
+      </header>
+
+      <article className="mx-auto max-w-2xl px-6 pb-28 pt-6 sm:pt-10">
+        <ComparisonHero h1={entry.h1} subtitle={entry.subtitle} lead={entry.quickAnswer} />
         <ComparisonTable
           caption={entry.tableCaption}
           competitorName={entry.competitorName}
@@ -94,7 +124,17 @@ export default async function ComparePage({
         <HonestBreakdown sections={entry.breakdown} />
         <ComparisonFaq items={entry.faq} />
         <ComparisonCta cta={entry.cta} />
-      </div>
-    </main>
+
+        <p className="mt-16 text-[13px] text-[#6B6B6B]">
+          Updated {formatUpdated(entry.updated)} ·{" "}
+          <Link
+            href="/"
+            className="text-[#8A8A8E] underline-offset-2 hover:text-white hover:underline"
+          >
+            popalpha.ai
+          </Link>
+        </p>
+      </article>
+    </div>
   );
 }

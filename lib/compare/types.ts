@@ -15,7 +15,6 @@ export type BreakdownSection = {
 };
 
 export type CtaCopy = {
-  eyebrow: string;
   heading: string;
   body: string;
   /** Optional secondary link. Unused while the app is waitlist-only. */
@@ -30,9 +29,10 @@ type ComparisonBase = {
   slug: string;
   metaTitle: string;
   metaDescription: string;
-  eyebrow: string;
   h1: string;
-  /** 2–4 sentence answer-box paragraph — the featured-snippet / LLM-extract target. */
+  /** One-line question / positioning shown under the title. */
+  subtitle: string;
+  /** 2–4 sentence lead paragraph — also the featured-snippet / LLM-extract target. */
   quickAnswer: string;
   breakdown: BreakdownSection[];
   faq: FaqItem[];

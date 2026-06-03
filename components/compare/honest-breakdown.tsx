@@ -8,14 +8,11 @@ export default function HonestBreakdown({ sections }: HonestBreakdownProps) {
   return (
     <>
       {sections.map((section) => (
-        <section
-          key={section.heading}
-          className="mt-6 rounded-[28px] border border-[#1E1E1E] bg-[#101010] p-6 sm:p-8"
-        >
-          <h2 className="text-[24px] font-semibold leading-[1.1] tracking-[-0.03em] sm:text-[30px]">
+        <section key={section.heading} className="mt-16">
+          <h2 className="text-[20px] font-semibold tracking-[-0.01em] text-white sm:text-[22px]">
             {section.heading}
           </h2>
-          <div className="mt-4 space-y-5 text-[15px] leading-7 text-[#A0A0A0] sm:text-[16px]">
+          <div className="mt-4 space-y-4 text-[16px] leading-7 text-[#A8A8A8]">
             {section.paragraphs.map((paragraph, index) => (
               <p key={index}>{paragraph}</p>
             ))}
