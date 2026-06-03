@@ -289,8 +289,8 @@ private struct SetMarketDigest {
         }
 
         let trend = Self.trendSummary(
-            change7dPct: summary?.change7dPct,
-            change30dPct: summary?.change30dPct
+            change7DPct: summary?.change7DPct,
+            change30DPct: summary?.change30DPct
         )
         self.trendTitle = trend.title
         self.trendDetail = trend.detail
@@ -341,15 +341,15 @@ private struct SetMarketDigest {
         return sorted[mid]
     }
 
-    private static func trendSummary(change7dPct: Double?, change30dPct: Double?) -> (title: String, detail: String, changePct: Double?) {
-        if let change = change7dPct {
+    private static func trendSummary(change7DPct: Double?, change30DPct: Double?) -> (title: String, detail: String, changePct: Double?) {
+        if let change = change7DPct {
             if change >= 8 { return ("Rising", "\(SetMarketFormat.signedPercent(change)) over 7D", change) }
             if change >= 2 { return ("Leaning Up", "\(SetMarketFormat.signedPercent(change)) over 7D", change) }
             if change <= -8 { return ("Cooling Off", "\(SetMarketFormat.signedPercent(change)) over 7D", change) }
             if change <= -2 { return ("Softening", "\(SetMarketFormat.signedPercent(change)) over 7D", change) }
             return ("Steady", "\(SetMarketFormat.signedPercent(change)) over 7D", change)
         }
-        if let change = change30dPct {
+        if let change = change30DPct {
             if change >= 8 { return ("Rising", "\(SetMarketFormat.signedPercent(change)) over 30D", change) }
             if change <= -8 { return ("Cooling Off", "\(SetMarketFormat.signedPercent(change)) over 30D", change) }
             return ("Mixed", "\(SetMarketFormat.signedPercent(change)) over 30D", change)
@@ -368,7 +368,7 @@ private struct SetMarketDigest {
     ) -> SetMoverDisplay? {
         let row = (movers ?? [])
             .filter { mover in
-                guard let change = mover.change7dPct else { return false }
+                guard let change = mover.change7DPct else { return false }
                 return direction == .up ? change > 0 : change < 0
             }
             .first
@@ -378,7 +378,7 @@ private struct SetMarketDigest {
             title: direction == .up ? "Strongest" : "Weakest",
             cardName: card?.name ?? SetMarketFormat.nameFromSlug(row.canonicalSlug),
             price: row.price,
-            change7dPct: row.change7dPct,
+            change7DPct: row.change7DPct,
             finish: row.finish
         )
     }
@@ -397,7 +397,7 @@ private struct SetMoverDisplay: Identifiable {
     let title: String
     let cardName: String
     let price: Double?
-    let change7dPct: Double?
+    let change7DPct: Double?
     let finish: String?
 }
 
@@ -700,7 +700,7 @@ private struct SetMoverTile: View {
                 Text(SetMarketFormat.compactCurrency(mover.price))
                     .font(.system(size: 12, weight: .bold, design: .rounded))
                     .foregroundStyle(PA.Colors.text)
-                Text(SetMarketFormat.signedPercent(mover.change7dPct))
+                Text(SetMarketFormat.signedPercent(mover.change7DPct))
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(tone.color)
             }

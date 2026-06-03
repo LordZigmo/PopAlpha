@@ -52,8 +52,17 @@ struct LockedPreviewOverlay<Content: View>: View {
             // particles over the blur so the locked preview reads as
             // "magically hidden" (à la iMessage invisible ink) rather
             // than merely blurred or broken.
+            //
+            // Feathered mask (not a hard clipShape) so the dust dissolves
+            // softly into the card instead of ending at a crisp rectangular
+            // border — the hard edge read as unprofessional.
             InvisibleInkShimmer()
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .mask(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color.white)
+                        .padding(2)
+                        .blur(radius: 7)
+                )
                 .accessibilityHidden(true)
 
             // Soft fade at the bottom so blurred content reads as a
@@ -94,42 +103,77 @@ struct LockedPreviewOverlay<Content: View>: View {
     }
 }
 
-/// iMessage "invisible ink"-style shimmer: a stable field of tiny
-/// particles that twinkle and drift, drawn over blurred content so a
-/// locked preview reads as "magically hidden" rather than merely blurred.
-/// Canvas + TimelineView keeps it cheap — one redraw per frame, no
-/// per-particle SwiftUI views. The field is deterministic (a seeded PRNG
-/// re-seeded every frame), so only the time-driven twinkle + drift move;
-/// the particle positions stay put, which reads as shimmer, not static.
+/// iMessage "invisible ink"-style shimmer: a dense field of fine,
+/// scintillating particles drawn over blurred content so a locked preview
+/// reads as "magically hidden" rather than merely blurred. Canvas +
+/// TimelineView keeps it cheap — one redraw per frame, no per-particle
+/// SwiftUI views. The field is deterministic (a seeded PRNG re-seeded every
+/// frame), so particle positions stay put while the time-driven
+/// scintillation + micro-drift animate.
+///
+/// Quality notes (what makes it read as "ink dust" and not "noise"):
+///   • Density — a dense, fine grain of ~1000 sub-pixel particles, not
+///     scattered dots; fineness (sub-pixel radius + blur) keeps it elegant
+///     even at high count.
+///   • Scintillation — brightness is sin raised to a power, so each particle
+///     sits dim and briefly flares; at any instant a different subset is lit,
+///     which reads as sparkle rather than a uniform pulse.
+///   • Depth — ~14% are larger, slower "glints" layered over the fine dust.
+///   • Motion — a small two-frequency drift jiggles each particle organically.
+///   • A faint blur + additive (.plusLighter) blending fuses the grain into
+///     glowing dust instead of crisp pixels.
 struct InvisibleInkShimmer: View {
-    var particleCount: Int = 220
+    var particleCount: Int = 1000
     var tint: Color = .white
 
     var body: some View {
         TimelineView(.animation) { timeline in
             Canvas { context, size in
                 let t = timeline.date.timeIntervalSinceReferenceDate
-                var rng = SplitMix64(seed: 0xA5A5_5A5A_C3C3_3C3C)
+                var rng = SplitMix64(seed: 0xC0FF_EE15_600D_5EED)
+                // Additive blending so overlapping particles brighten into
+                // soft clusters rather than flat-stacking.
+                context.blendMode = .plusLighter
                 for _ in 0..<particleCount {
                     let baseX = rng.nextUnit() * size.width
                     let baseY = rng.nextUnit() * size.height
                     let phase = rng.nextUnit() * 2 * .pi
-                    let speed = 0.6 + rng.nextUnit() * 1.4
-                    let twinkle = 0.5 + 0.5 * sin(t * 1.6 * speed + phase)
-                    let radius = 0.4 + rng.nextUnit() * 1.3
-                    let driftX = sin(t * speed + phase) * 1.1
-                    let driftY = cos(t * speed * 0.8 + phase) * 1.1
+                    let isGlint = rng.nextUnit() > 0.86
+
+                    // Scintillation: pow() makes each particle flare briefly
+                    // then sit dim, so the field sparkles instead of pulsing.
+                    let speed = isGlint ? (0.9 + rng.nextUnit() * 1.2)
+                                        : (2.0 + rng.nextUnit() * 3.5)
+                    let s = 0.5 + 0.5 * sin(t * speed + phase)
+                    // s^2 for glints, s^3 for dust: dust still flares-then-dims
+                    // (reads as sparkle), but more of the field is lit at any
+                    // instant than the old s^4, so it feels alive, not sparse.
+                    let twinkle = isGlint ? s * s : s * s * s
+
+                    // Organic micro-drift from two layered frequencies.
+                    let driftMag = isGlint ? 1.3 : 0.7
+                    let driftX = (sin(t * 0.7 * speed + phase) * 0.7
+                        + sin(t * 1.9 * speed + phase * 1.7) * 0.3) * driftMag
+                    let driftY = (cos(t * 0.6 * speed + phase) * 0.7
+                        + cos(t * 2.2 * speed + phase * 1.3) * 0.3) * driftMag
+
+                    let radius = isGlint ? (0.9 + rng.nextUnit() * 1.0)
+                                         : (0.25 + rng.nextUnit() * 0.5)
                     let rect = CGRect(
                         x: baseX + driftX - radius,
                         y: baseY + driftY - radius,
                         width: radius * 2,
                         height: radius * 2
                     )
-                    context.opacity = 0.12 + twinkle * 0.78
+                    // Present silver dust (à la iMessage), not faint: a small
+                    // always-on floor so the grain reads even at rest, plus a
+                    // brighter flare. Fine radius + blur keep it soft, not gaudy.
+                    context.opacity = (isGlint ? 0.09 : 0.045) + twinkle * (isGlint ? 0.62 : 0.48)
                     context.fill(Path(ellipseIn: rect), with: .color(tint))
                 }
             }
         }
+        .blur(radius: 0.5)
         .blendMode(.plusLighter)
         .allowsHitTesting(false)
     }

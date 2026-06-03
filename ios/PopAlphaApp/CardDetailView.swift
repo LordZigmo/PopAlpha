@@ -38,7 +38,9 @@ enum PriceMode: Equatable, Hashable {
 
 func selectNearMintHeroPrice(
     isJapaneseCard: Bool,
+    latestPrice: Double?,
     marketPrice: Double?,
+    jpLatestPrice: Double?,
     activeCardPrice: Double,
     chartFallbackPrice: Double?,
     yahooJpPrice: Double?,
@@ -47,6 +49,12 @@ func selectNearMintHeroPrice(
     snkrdunkSampleCount: Int?
 ) -> Double? {
     if isJapaneseCard {
+        // JP hero = the blended Snkrdunk+Yahoo freshest trusted sold point
+        // (jp_latest_price, sample_count>=3). This supersedes the per-source
+        // sample-count pick, which could surface a stale Yahoo observation
+        // (e.g. $0.20 while Snkrdunk shows $31). Fall back to the per-source
+        // pick only when no fresh blended point exists yet.
+        if let jpLatestPrice, jpLatestPrice > 0 { return jpLatestPrice }
         let pick = selectJpPriceSource(
             yahooJpPrice: yahooJpPrice,
             yahooJpSampleCount: yahooJpSampleCount,
@@ -57,6 +65,10 @@ func selectNearMintHeroPrice(
             return price
         }
     }
+    // EN-RAW hero = the freshest snapshot point (latest_price). The view
+    // already guards it (null when suppressed) and falls back to the median
+    // basis, so this is the freshest when we have one, else the 3-day median.
+    if let latestPrice, latestPrice > 0 { return latestPrice }
     if let marketPrice, marketPrice > 0 { return marketPrice }
     if activeCardPrice > 0 { return activeCardPrice }
     if let chartFallbackPrice, chartFallbackPrice > 0 { return chartFallbackPrice }
@@ -212,7 +224,9 @@ struct CardDetailView: View {
     private var preferredHeroPrice: Double? {
         selectNearMintHeroPrice(
             isJapaneseCard: isJapaneseCard,
+            latestPrice: cardMetrics?.latestPrice,
             marketPrice: cardMetrics?.marketPrice,
+            jpLatestPrice: cardMetrics?.jpLatestPrice,
             activeCardPrice: cardMetrics == nil ? activeCard.price : 0,
             chartFallbackPrice: printingHeroPrice,
             yahooJpPrice: cardMetrics?.yahooJpPrice,
@@ -227,12 +241,42 @@ struct CardDetailView: View {
         return price > 0 && price <= abundantRawCardMaxUsd
     }
 
+    /// The 3-day median shown directly below the freshest hero price for
+    /// EN-RAW cards. The hero (above) is the freshest daily point; this is the
+    /// steadier 3-day median that the newest point already folds into — two
+    /// distinct values, one per line, neither competing for the hero spot.
+    /// Because cardMetrics becomes the per-printing row once a finish is
+    /// selected, both track the chosen finish. nil for JP (its hero comes from
+    /// JP-native sold sources), graded (separate path), low-dollar cards, and
+    /// when no median is available.
+    private var medianSublineText: String? {
+        // JP: the blended 14-day median (jp_display_price) sits under the freshest
+        // hero (jp_latest_price). JP sold data is ~weekly, so the window is 14d
+        // (not the EN 3d). nil when the card has no qualifying JP series.
+        if isJapaneseCard {
+            guard let median = cardMetrics?.jpDisplayPrice, median > 0 else { return nil }
+            let f = median >= 1000 ? String(format: "$%.0f", median) : String(format: "$%.2f", median)
+            return "14-day median: \(f)"
+        }
+        // Graded's 14-day median lives on the selected graded metric row (a
+        // separate fetch), not the RAW cardMetrics — see gradedMedianSublineText.
+        guard !selectedPriceMode.isGraded, !isAbundantNearMintHeroPrice else { return nil }
+        guard let median = cardMetrics?.marketPrice, median > 0 else { return nil }
+        let formatted = median >= 1000 ? String(format: "$%.0f", median) : String(format: "$%.2f", median)
+        return "3-day median: \(formatted)"
+    }
+
     /// Source label shown next to the hero price so the user knows
     /// which provider the number came from. Matches the confidence-pick
     /// winner from preferredHeroPrice. Affects only the inline hint,
     /// not the top-level pricing structure.
     private var heroPriceSourceLabel: String? {
         if isJapaneseCard {
+            // When the hero is the blended freshest (jp_latest_price), it isn't
+            // attributable to one source (could be Snkrdunk or Yahoo, whichever
+            // sold most recently) — label it neutrally rather than risk naming
+            // the wrong source. Only the per-source fallback names a provider.
+            if let jp = cardMetrics?.jpLatestPrice, jp > 0 { return "JP sold listings" }
             let pick = selectJpPriceSource(
                 yahooJpPrice: cardMetrics?.yahooJpPrice,
                 yahooJpSampleCount: cardMetrics?.yahooJpSampleCount,
@@ -389,14 +433,15 @@ struct CardDetailView: View {
                 pairedImageUrl = pairing?.pairedImageUrl
             }
 
-            if premiumGate.canRevealAnalysis(slug: activeCard.id) {
-                cardProfile = try? await CardService.shared.fetchCardProfile(slug: activeCard.id)
-                // Spend a free-budget view only on a real reveal — no-op for
-                // Pro users and for cards the user already unlocked.
-                if cardProfile != nil { premiumGate.recordAnalysisReveal(slug: activeCard.id) }
-            } else {
-                cardProfile = nil
-            }
+            // Always fetch the (cron-generated, cached) profile so the
+            // locked state can blur the REAL summary rather than a generic
+            // placeholder. recordAnalysisReveal runs BEFORE assigning so the
+            // render sees the card as already-unlocked (no clear→blur flash
+            // on the 3rd reveal); it no-ops for Pro, already-unlocked cards,
+            // and once the free limit is hit — those render behind the blur.
+            let fetchedProfile = try? await CardService.shared.fetchCardProfile(slug: activeCard.id)
+            if fetchedProfile != nil { premiumGate.recordAnalysisReveal(slug: activeCard.id) }
+            cardProfile = fetchedProfile
             do {
                 cardMetrics = try await CardService.shared.fetchCardMetrics(slug: activeCard.id)
             } catch {
@@ -456,7 +501,7 @@ struct CardDetailView: View {
                     if let canonical = candidates.first(where: { $0.printingId == nil }) {
                         resolved[bucket] = canonical
                     } else {
-                        let best = candidates.max { ($0.snapshotCount30d ?? 0) < ($1.snapshotCount30d ?? 0) }
+                        let best = candidates.max { ($0.snapshotCount30D ?? 0) < ($1.snapshotCount30D ?? 0) }
                         if let best { resolved[bucket] = best }
                     }
                 }
@@ -468,7 +513,7 @@ struct CardDetailView: View {
                 let validBuckets: Set<String> = ["LE_7", "G8", "G9", "G9_5", "G10", "G10_PERFECT"]
                 let options = rows
                     .filter { validProviders.contains($0.provider) && validBuckets.contains($0.grade) }
-                    .filter { ($0.historyPoints30d ?? 0) >= 3 || $0.providerAsOfTs != nil }
+                    .filter { ($0.historyPoints30D ?? 0) >= 3 || $0.providerAsOfTs != nil }
                     .map { PriceMode.graded(provider: $0.provider, bucket: $0.grade) }
                 let seen = NSMutableOrderedSet()
                 var unique: [PriceMode] = []
@@ -509,13 +554,18 @@ struct CardDetailView: View {
                 if let metrics = try? await CardService.shared.fetchCardMetrics(
                     slug: activeCard.id,
                     printingId: selectedPrintingId
-                ), metrics.isTrustedHeadline {
-                    // Only let a per-printing row take over the hero when
-                    // it's the trusted anchor. Under the price-trust
-                    // pipeline most per-printing rows are PUBLIC_ONLY /
-                    // low-confidence; applying them dropped the hero below
-                    // the canonical price the homepage shows (e.g. a $7
-                    // canonical headline became a $5.27 per-printing row).
+                ), metrics.marketPrice != nil {
+                    // Hero follows the selected finish. Since migration
+                    // 20260601120000 every per-printing RAW row carries the
+                    // same freshest + 3-day-median basis as the canonical row
+                    // (its own finish's snapshot series), so a per-printing
+                    // takeover now shows that finish's real price — not the
+                    // stale raw scrydex basis that used to drop the hero below
+                    // the homepage. Gate only on a non-null market_price so a
+                    // suppressed/quarantined finish keeps the prior hero
+                    // instead of blanking it. For the preferred (default)
+                    // printing the per-printing series IS the canonical series,
+                    // so the initial load matches the homepage with no flicker.
                     await MainActor.run { cardMetrics = metrics }
                 }
                 if let prices = try? await CardService.shared.fetchConditionPrices(
@@ -528,12 +578,9 @@ struct CardDetailView: View {
         }
         .onChange(of: premiumGate.isPro) { _, _ in
             Task {
-                if premiumGate.canRevealAnalysis(slug: activeCard.id) {
-                    cardProfile = try? await CardService.shared.fetchCardProfile(slug: activeCard.id)
-                    if cardProfile != nil { premiumGate.recordAnalysisReveal(slug: activeCard.id) }
-                } else {
-                    cardProfile = nil
-                }
+                let fetchedProfile = try? await CardService.shared.fetchCardProfile(slug: activeCard.id)
+                if fetchedProfile != nil { premiumGate.recordAnalysisReveal(slug: activeCard.id) }
+                cardProfile = fetchedProfile
             }
         }
         .navigationBarBackButtonHidden()
@@ -1050,6 +1097,16 @@ struct CardDetailView: View {
                 }
             }
 
+            // 3-day median, directly below the freshest hero. Shown for EN-RAW
+            // (and the selected finish) so the user sees live-vs-trend without
+            // two numbers fighting for the hero spot.
+            if let medianText = medianSublineText {
+                Text(medianText)
+                    .font(PA.Typography.caption)
+                    .foregroundStyle(PA.Colors.muted)
+                    .accessibilityLabel(medianText)
+            }
+
             if isAbundantNearMintHeroPrice {
                 Text(abundantRawCardDetailLabel)
                     .font(PA.Typography.caption)
@@ -1128,9 +1185,9 @@ struct CardDetailView: View {
     private var heroChange: (pct: Double?, direction: ChangeDirection, text: String, window: String) {
         let pct: Double?
         let window: String
-        if let metrics = cardMetrics, let m24 = metrics.changePct24h {
+        if let metrics = cardMetrics, let m24 = metrics.changePct24H {
             pct = m24; window = "24H"
-        } else if let metrics = cardMetrics, let m7 = metrics.changePct7d {
+        } else if let metrics = cardMetrics, let m7 = metrics.changePct7D {
             pct = m7; window = "7D"
         } else {
             pct = activeCard.changePct; window = activeCard.changeWindow
@@ -1418,8 +1475,8 @@ struct CardDetailView: View {
     /// sparse but price history is rich.
     private var liquidityDescriptor: (label: String, tone: DetailTone) {
         guard let metrics = cardMetrics else { return ("—", .muted) }
-        let listings = metrics.activeListings7d ?? 0
-        let snapshots = metrics.snapshotCount30d ?? 0
+        let listings = metrics.activeListings7D ?? 0
+        let snapshots = metrics.snapshotCount30D ?? 0
         if listings >= 15 || snapshots >= 12 { return ("Strong", .positive) }
         if listings >= 5 || snapshots >= 5 { return ("Moderate", .accent) }
         if listings >= 1 || snapshots >= 1 { return ("Thin", .neutral) }
@@ -1535,14 +1592,25 @@ struct CardDetailView: View {
     @ViewBuilder
     private var aiBriefSection: some View {
         if let profile = cardProfile {
-            aiBriefCard {
-                aiBriefHeader(chip: profile.chip)
-                aiBriefUnlockedBody(profile)
+            if premiumGate.canRevealAnalysis(slug: activeCard.id) {
+                aiBriefCard {
+                    aiBriefHeader(chip: profile.chip)
+                    aiBriefUnlockedBody(profile)
+                }
+            } else {
+                // Free budget spent: show the REAL summary behind the
+                // invisible-ink blur instead of a generic placeholder.
+                aiBriefCard {
+                    aiBriefHeader(chip: "Pro")
+                    aiBriefLockedPreview(profile)
+                }
             }
         } else if !premiumGate.isPro {
+            // Profile not loaded yet (or none exists) — light teaser so the
+            // section still renders with shape.
             aiBriefCard {
                 aiBriefHeader(chip: "Pro")
-                aiBriefLockedPreview
+                aiBriefLockedPreview(nil)
             }
         }
     }
@@ -1553,37 +1621,29 @@ struct CardDetailView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(detailAccent.opacity(0.12))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(alignment: .leading) {
-            // Inset rounded rail — tucks inside the card's rounded
-            // corners instead of trying to trace them.
-            Capsule()
-                .fill(detailAccent)
-                .frame(width: 3)
-                .padding(.vertical, 10)
-                .padding(.leading, 2)
-        }
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(detailAccent.opacity(0.35), lineWidth: 1)
-        )
-        .shadow(color: detailAccent.opacity(0.22), radius: 14, x: 0, y: 0)
-        .shadow(color: .black.opacity(0.24), radius: 30, x: 0, y: 18)
+        // Match the front-page AI brief container (AIBriefCard) so the two
+        // read as the same component.
+        .liquidGlassSurface(accent: detailAccent)
         .sheet(isPresented: $showMarketSummaryPaywall) {
             PaywallView(context: .generic, surface: "card_detail_market_summary_teaser")
         }
     }
 
     private func aiBriefHeader(chip: String?) -> some View {
-        HStack(alignment: .center, spacing: 8) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(detailAccent)
-            Text("Where this card stands today")
-                .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(detailAccent)
-                .kerning(-0.2)
+        // "AI BRIEF" eyebrow — mirrors AIBriefCard's header so the card-detail
+        // summary reads as the same component as the front-page brief.
+        HStack(spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(detailAccent)
+                    .accessibilityHidden(true)
+                Text("AI BRIEF")
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(2.0)
+                    .foregroundStyle(detailAccent)
+                    .accessibilityAddTraits(.isHeader)
+            }
             Spacer(minLength: 0)
             if let chip = chip?.trimmingCharacters(in: .whitespacesAndNewlines), !chip.isEmpty {
                 Text(chip)
@@ -1604,14 +1664,14 @@ struct CardDetailView: View {
     @ViewBuilder
     private func aiBriefUnlockedBody(_ profile: CardProfileResult) -> some View {
         Text(summaryHeadline(from: profile))
-            .font(.system(size: 15, weight: .semibold))
+            .font(.system(size: 14, weight: .semibold))
             .foregroundStyle(PA.Colors.text)
             .lineSpacing(3)
             .fixedSize(horizontal: false, vertical: true)
 
         if let interpretation = summaryInterpretation(from: profile) {
             Text(interpretation)
-                .font(.system(size: 13, weight: .regular))
+                .font(.system(size: 14, weight: .regular))
                 .foregroundStyle(PA.Colors.textSecondary)
                 .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1629,31 +1689,45 @@ struct CardDetailView: View {
         }
     }
 
-    private var aiBriefLockedPreview: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Preview: Pro reads price movement, market depth, and collector demand for this card.")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(PA.Colors.text)
-                .lineSpacing(3)
-                .fixedSize(horizontal: false, vertical: true)
-
-            LockedPreviewOverlay(
-                ctaText: "Upgrade to Pro",
-                blurRadius: 5,
-                onTap: { showMarketSummaryPaywall = true }
-            ) {
-                VStack(alignment: .leading, spacing: 8) {
+    private func aiBriefLockedPreview(_ profile: CardProfileResult?) -> some View {
+        LockedPreviewOverlay(
+            ctaText: "Upgrade to Pro",
+            blurRadius: 5,
+            onTap: { showMarketSummaryPaywall = true }
+        ) {
+            VStack(alignment: .leading, spacing: 8) {
+                if let profile {
+                    // The REAL AI summary, blurred behind the invisible-ink
+                    // overlay — a legible-shaped tease of the actual read for
+                    // this card, not a generic placeholder. Same 14pt type as
+                    // the unlocked body / front-page brief.
+                    Text(summaryHeadline(from: profile))
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(PA.Colors.text)
+                        .lineSpacing(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let interpretation = summaryInterpretation(from: profile) {
+                        Text(interpretation)
+                            .font(.system(size: 14, weight: .regular))
+                            .foregroundStyle(PA.Colors.textSecondary)
+                            .lineSpacing(3)
+                            .lineLimit(3)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                } else {
+                    // No profile loaded yet — keep a light teaser so the
+                    // section still has shape while the read loads.
                     Text("Momentum, liquidity, and confidence read")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(PA.Colors.text.opacity(0.85))
                     Text("AI interpretation tuned to the card's current market signals and recent observations.")
-                        .font(.system(size: 13, weight: .regular))
+                        .font(.system(size: 14, weight: .regular))
                         .foregroundStyle(PA.Colors.textSecondary)
                         .lineSpacing(3)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, 2)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 2)
         }
     }
 
@@ -1732,7 +1806,7 @@ struct CardDetailView: View {
                 if isJapaneseCard, let count = primaryJpSampleCount {
                     infoRow(label: "Sample Confidence", value: formatYahooJpSampleCount(count))
                 }
-                infoRow(label: "7D Median", value: formatMedian7d(cardMetrics?.median7d))
+                infoRow(label: "7D Median", value: formatMedian7d(cardMetrics?.median7D))
                 infoRow(label: "Volatility", value: "Low")
             }
             .padding(16)
@@ -2000,20 +2074,28 @@ struct CardDetailView: View {
 
     private func buildGradedSummaryRows(_ metric: GradedCardMetricRow) -> [GradedSummaryRow] {
         var rows: [GradedSummaryRow] = []
-        if let median7d = metric.median7d {
-            rows.append(.init(label: "7D Median", value: formatConditionPrice(median7d), emphasized: true))
+        // 14-day median (price-display redesign) — the steady headline for this
+        // grade, pairing with the freshest sold point in the hero above. Sourced
+        // from the view's graded market_price (= display_price, the 14d median);
+        // graded sold data is sparse, so 14d (not the EN 3d). Decodes cleanly,
+        // unlike the median7D/30d rows below (the #49 digit-boundary bug).
+        if let median14 = metric.marketPrice, median14 > 0 {
+            rows.append(.init(label: "14D Median", value: formatConditionPrice(median14), emphasized: true))
         }
-        if let median30d = metric.median30d {
-            rows.append(.init(label: "30D Median", value: formatConditionPrice(median30d), emphasized: false))
+        if let median7D = metric.median7D {
+            rows.append(.init(label: "7D Median", value: formatConditionPrice(median7D), emphasized: false))
         }
-        if let low = metric.low30d, let high = metric.high30d {
+        if let median30D = metric.median30D {
+            rows.append(.init(label: "30D Median", value: formatConditionPrice(median30D), emphasized: false))
+        }
+        if let low = metric.low30D, let high = metric.high30D {
             rows.append(.init(
                 label: "30D Range",
                 value: "\(formatConditionPrice(low)) – \(formatConditionPrice(high))",
                 emphasized: false
             ))
         }
-        if let count = metric.snapshotCount30d {
+        if let count = metric.snapshotCount30D {
             rows.append(.init(label: "Sample Size (30D)", value: "\(count) sales", emphasized: false))
         }
         return rows

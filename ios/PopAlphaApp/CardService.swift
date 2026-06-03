@@ -97,7 +97,7 @@ actor CardService {
         let result = metrics.compactMap { m -> MarketCard? in
             let card = cardMap[m.canonicalSlug]
             let sparkline = sparkMap[m.canonicalSlug] ?? []
-            let changePct = m.changePct24h ?? derivePctFromSparkline(sparkline)
+            let changePct = m.changePct24H ?? derivePctFromSparkline(sparkline)
             let price = m.marketPrice ?? 0
 
             return MarketCard(
@@ -107,8 +107,8 @@ actor CardService {
                 cardNumber: card?.cardNumber.map { "#\($0)" } ?? "",
                 price: price,
                 changePct: changePct,
-                changeWindow: m.changePct24h != nil ? "24H" : "7D",
-                rarity: classifyRarity(price: price, listings: m.activeListings7d),
+                changeWindow: m.changePct24H != nil ? "24H" : "7D",
+                rarity: classifyRarity(price: price, listings: m.activeListings7D),
                 sparkline: sparkline.isEmpty ? [price] : sparkline,
                 imageGradient: [GradientStop(r: 0.1, g: 0.05, b: 0.15), GradientStop(r: 0.2, g: 0.1, b: 0.3)],
                 imageURL: imageMap[m.canonicalSlug].flatMap(URL.init(string:)),
@@ -207,7 +207,7 @@ actor CardService {
     func fetchGradedCardMetrics(slug: String) async throws -> [GradedCardMetricRow] {
         let data = try await Supabase.query(
             table: "public_card_metrics",
-            select: "canonical_slug,printing_id,grade,median_7d,median_30d,low_30d,high_30d,trimmed_median_30d,snapshot_count_30d,updated_at",
+            select: "canonical_slug,printing_id,grade,latest_price,latest_price_as_of,market_price,market_price_as_of,median_7d,median_30d,low_30d,high_30d,trimmed_median_30d,snapshot_count_30d,updated_at",
             filters: [
                 ("canonical_slug", "eq", slug),
                 ("grade", "in", "(LE_7,G8,G9,G9_5,G10,G10_PERFECT)"),
@@ -357,9 +357,9 @@ actor CardService {
             limit: 5000
         )
 
-        struct Row: Decodable { let changePct24h: Double? }
+        struct Row: Decodable { let changePct24H: Double? }
         let rows = try decoder.decode([Row].self, from: data)
-        let values = rows.compactMap(\.changePct24h)
+        let values = rows.compactMap(\.changePct24H)
         guard !values.isEmpty else { return nil }
         return values.reduce(0, +) / Double(values.count)
     }
@@ -389,7 +389,7 @@ actor CardService {
         } ?? ("printing_id", "is", "null")
         let data = try await Supabase.query(
             table: "public_card_metrics",
-            select: "canonical_slug,market_price,market_price_as_of,change_pct_24h,change_pct_7d,market_confidence_score,market_low_confidence,market_price_display_state,market_blend_policy,median_7d,median_30d,low_30d,high_30d,active_listings_7d,snapshot_count_30d,yahoo_jp_price,yahoo_jp_price_jpy,yahoo_jp_sample_count,yahoo_jp_observed_at,snkrdunk_price,snkrdunk_sample_count,snkrdunk_observed_at,snkrdunk_product_code,canonical_name_native,set_name_native,language",
+            select: "canonical_slug,market_price,market_price_as_of,latest_price,latest_price_as_of,jp_latest_price,jp_latest_price_as_of,jp_display_price,jp_display_price_as_of,change_pct_24h,change_pct_7d,market_confidence_score,market_low_confidence,market_price_display_state,market_blend_policy,median_7d,median_30d,low_30d,high_30d,active_listings_7d,snapshot_count_30d,yahoo_jp_price,yahoo_jp_price_jpy,yahoo_jp_sample_count,yahoo_jp_observed_at,snkrdunk_price,snkrdunk_sample_count,snkrdunk_observed_at,snkrdunk_product_code,canonical_name_native,set_name_native,language",
             filters: [
                 ("canonical_slug", "eq", slug),
                 ("grade", "eq", "RAW"),
@@ -625,10 +625,10 @@ actor CardService {
             // Preserve nil when the metrics row is missing — UI renders "—"
             // rather than fabricating a fake 0%. Only fall through 24h → 7d
             // when the row exists but the 24h column is null.
-            let changePct = m?.changePct24h ?? m?.changePct7d
+            let changePct = m?.changePct24H ?? m?.changePct7D
             let changeWindow: String = {
                 guard let m else { return "24H" }
-                return m.changePct24h != nil ? "24H" : "7D"
+                return m.changePct24H != nil ? "24H" : "7D"
             }()
 
             return MarketCard(
@@ -691,12 +691,12 @@ struct MetricsRow: Decodable {
     let canonicalSlug: String
     let marketPrice: Double?
     let marketPriceAsOf: String?
-    let changePct24h: Double?
-    let changePct7d: Double?
+    let changePct24H: Double?
+    let changePct7D: Double?
     let marketConfidenceScore: Int?
     let marketLowConfidence: Bool?
-    let activeListings7d: Int?
-    let snapshotCount30d: Int?
+    let activeListings7D: Int?
+    let snapshotCount30D: Int?
 }
 
 struct CardRow: Decodable {
@@ -728,8 +728,8 @@ struct SetSummarySnapshotRow: Decodable {
     let asOfDate: String
     let marketCap: Double?
     let marketCapAllVariants: Double?
-    let change7dPct: Double?
-    let change30dPct: Double?
+    let change7DPct: Double?
+    let change30DPct: Double?
     let heatScore: Double?
     let breakoutCount: Int?
     let valueZoneCount: Int?
@@ -745,7 +745,7 @@ struct SetSummaryMoverRow: Decodable, Identifiable, Hashable {
     let canonicalSlug: String
     let variantRef: String?
     let price: Double?
-    let change7dPct: Double?
+    let change7DPct: Double?
     let finish: String?
 
     var id: String { variantRef ?? canonicalSlug }
@@ -756,8 +756,8 @@ struct SetFinishSummaryRow: Decodable, Identifiable, Hashable {
     let finish: String
     let marketCap: Double?
     let cardCount: Int?
-    let change7dPct: Double?
-    let change30dPct: Double?
+    let change7DPct: Double?
+    let change30DPct: Double?
     let updatedAt: String?
 
     var id: String { finish }
@@ -847,18 +847,46 @@ enum CardLanguage: String {
 
 struct CardMetricsResult: Decodable {
     let canonicalSlug: String
+    /// The 3-day median (the steady headline / "3-day median" sub-line).
     let marketPrice: Double?
     let marketPriceAsOf: String?
-    let changePct24h: Double?
-    let changePct7d: Double?
+    /// The freshest daily snapshot point — the hero. The newest point the
+    /// 3-day median above already folds in. Guarded identically to
+    /// marketPrice in public_card_metrics (null when the headline is
+    /// suppressed; falls back to the median basis so the hero never blanks).
+    /// Populated for EN-RAW canonical AND per-printing rows (per migration
+    /// 20260601120000), so the hero follows the selected finish.
+    let latestPrice: Double?
+    let latestPriceAsOf: String?
+    /// JP-native freshest hero + 14-day median (public_card_metrics jp_* columns,
+    /// migration 20260602040000). The blended Snkrdunk+Yahoo sold-listing series:
+    /// jpLatestPrice = freshest trusted (sample_count>=3) point, jpDisplayPrice =
+    /// 14-day median. Only set on JP cards. The JP detail hero reads jpLatestPrice
+    /// and the sub-line shows jpDisplayPrice ("14-day median"). Kept separate from
+    /// the Scrydex-semantics latestPrice/marketPrice so the two never collide.
+    /// (No digit boundaries in these names, so .convertFromSnakeCase maps them
+    /// cleanly — unlike the 24H/7D fields below.)
+    let jpLatestPrice: Double?
+    let jpLatestPriceAsOf: String?
+    let jpDisplayPrice: Double?
+    let jpDisplayPriceAsOf: String?
+    // NOTE: trailing letter is UPPERCASE (24H/7D/30D) on purpose. The decoder
+    // uses .convertFromSnakeCase, which capitalizes the char after a digit:
+    // `change_pct_24h` -> `changePct24H`, `median_7d` -> `median7D`. With
+    // lowercase-suffix names these silently decoded to nil (the detail's change
+    // badge + stats fell back to passed-in/placeholder values). Matching the
+    // converter's output (same convention as sparkline7D elsewhere) makes them
+    // decode. See task: fix convertFromSnakeCase digit-boundary across structs.
+    let changePct24H: Double?
+    let changePct7D: Double?
     let marketConfidenceScore: Int?
     let marketLowConfidence: Bool?
-    let median7d: Double?
-    let median30d: Double?
-    let low30d: Double?
-    let high30d: Double?
-    let activeListings7d: Int?
-    let snapshotCount30d: Int?
+    let median7D: Double?
+    let median30D: Double?
+    let low30D: Double?
+    let high30D: Double?
+    let activeListings7D: Int?
+    let snapshotCount30D: Int?
     /// Japanese-market scraped price columns. Populated by
     /// scripts/run-yahoo-jp-pipeline.mjs from Yahoo! Auctions JP
     /// closed-auction sold listings. Only set on JP-language
@@ -909,7 +937,7 @@ struct GradedVariantMetricRow: Decodable {
     let provider: String
     let grade: String
     let providerAsOfTs: String?
-    let historyPoints30d: Int?
+    let historyPoints30D: Int?
 }
 
 /// Aggregate market summary stats per (slug, grade bucket). Sourced from
@@ -919,12 +947,22 @@ struct GradedCardMetricRow: Decodable, Identifiable {
     let canonicalSlug: String
     let printingId: String?
     let grade: String
-    let median7d: Double?
-    let median30d: Double?
-    let low30d: Double?
-    let high30d: Double?
-    let trimmedMedian30d: Double?
-    let snapshotCount30d: Int?
+    /// Freshest hero + 14-day median for this grade (price-display redesign,
+    /// migration 20260602050000). The graded card_metrics rollup writes
+    /// latest_price (freshest sold point) + display_price (14-day median), which
+    /// the view surfaces as latest_price (hero) + market_price (median). No digit
+    /// boundary in these names, so .convertFromSnakeCase maps them cleanly — the
+    /// median7D/median30D fields below still hit that decode bug (task #49).
+    let latestPrice: Double?
+    let latestPriceAsOf: String?
+    let marketPrice: Double?
+    let marketPriceAsOf: String?
+    let median7D: Double?
+    let median30D: Double?
+    let low30D: Double?
+    let high30D: Double?
+    let trimmedMedian30D: Double?
+    let snapshotCount30D: Int?
     let updatedAt: String?
 
     var id: String { "\(canonicalSlug)::\(printingId ?? "null")::\(grade)" }

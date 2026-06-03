@@ -34,8 +34,8 @@ struct MarketPulseSection: View {
     let watchlistSlugs: Set<String>
 
     // Folded-in KPIs (previously on TodayPulseStrip).
-    let pricesRefreshed24h: Int?
-    let avgChange24h: Double?
+    let pricesRefreshed24H: Int?
+    let avgChange24H: Double?
     let marketCap: Double?
 
     let onSelect: (HomepageCardDTO) -> Void
@@ -78,7 +78,7 @@ struct MarketPulseSection: View {
             case .momentum: return "Momentum"
             case .mid: return "Mid"
             case .budget: return "Budget"
-            case .japanese: return "Japan"
+            case .japanese: return "Trending"
             }
         }
 
@@ -94,7 +94,7 @@ struct MarketPulseSection: View {
             case .momentum: return "MOMENTUM"
             case .mid: return "$8–$50"
             case .budget: return "UNDER $8"
-            case .japanese: return "JAPAN"
+            case .japanese: return "TRENDING"
             }
         }
 
@@ -108,7 +108,7 @@ struct MarketPulseSection: View {
             case .momentum: return "Momentum"
             case .mid: return "Mid Movers"
             case .budget: return "Budget Movers"
-            case .japanese: return "Japanese Cards"
+            case .japanese: return "Trending"
             }
         }
 
@@ -188,7 +188,13 @@ struct MarketPulseSection: View {
             // Restored 2026-05-18 as the same-day rescue. Promoted
             // 2026-05-24 so JP mode starts on cards, not a possibly
             // empty movement rail.
-            return [.japanese, .movers, .pullbacks, .momentum, .mid, .budget]
+            // Always show `.japanese` (the populated discovery lead), but hide
+            // the movers tabs until they actually have cards. Otherwise launch
+            // shows five tabs that open to an empty state — the JP movers rails
+            // are change_pct-gated until ~mid-June. They reappear automatically
+            // once `change_pct_*` lights them up.
+            let jpCategories: [Category] = [.japanese, .movers, .pullbacks, .momentum, .mid, .budget]
+            return jpCategories.filter { $0 == .japanese || !cards(for: $0).isEmpty }
         }
         // EN mode currently hides `.momentum` because the EN .breakouts
         // tab already falls back to momentum data when breakouts is
@@ -327,10 +333,10 @@ struct MarketPulseSection: View {
             // read like a Bloomberg ticker; collectors who don't
             // come from finance bounced off them. Same numbers,
             // plain English.
-            if let count = pricesRefreshed24h {
+            if let count = pricesRefreshed24H {
                 kpi(label: "Cards tracked 24H", value: formatCount(count))
             }
-            if let avg = avgChange24h {
+            if let avg = avgChange24H {
                 kpi(
                     label: "Avg change 24H",
                     value: formatSignedPct(avg),

@@ -49,8 +49,8 @@ struct MarketplaceView: View {
     @Binding var selectedTab: AppTab
 
     // MARK: KPI strip data (folded into MarketPulseSection's header)
-    @State private var pricesRefreshed24h: Int?
-    @State private var avgChange24h: Double?
+    @State private var pricesRefreshed24H: Int?
+    @State private var avgChange24H: Double?
     @State private var marketCap: Double?
 
     // MARK: Personal context
@@ -337,8 +337,8 @@ struct MarketplaceView: View {
                 signalBoard: data.signalBoard,
                 highConfidenceMovers: data.highConfidenceMovers,
                 watchlistSlugs: watchlistSlugs,
-                pricesRefreshed24h: pricesRefreshed24h,
-                avgChange24h: avgChange24h,
+                pricesRefreshed24H: pricesRefreshed24H,
+                avgChange24H: avgChange24H,
                 marketCap: marketCap,
                 onSelect: handleSelect,
                 japaneseOnly: true
@@ -373,8 +373,8 @@ struct MarketplaceView: View {
                 signalBoard: data.signalBoard,
                 highConfidenceMovers: data.highConfidenceMovers,
                 watchlistSlugs: watchlistSlugs,
-                pricesRefreshed24h: pricesRefreshed24h,
-                avgChange24h: avgChange24h,
+                pricesRefreshed24H: pricesRefreshed24H,
+                avgChange24H: avgChange24H,
                 marketCap: marketCap,
                 onSelect: handleSelect
             )
@@ -692,8 +692,8 @@ struct MarketplaceView: View {
         let avg = try? await CardService.shared.fetchAvgChange24h()
         let cap = try? await CardService.shared.fetchMarketCap()
         await MainActor.run {
-            pricesRefreshed24h = count
-            avgChange24h = avg
+            pricesRefreshed24H = count
+            avgChange24H = avg
             marketCap = cap
         }
     }

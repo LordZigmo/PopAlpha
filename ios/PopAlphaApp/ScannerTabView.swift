@@ -145,18 +145,19 @@ struct ScannerTabView: View {
                     .animation(.easeInOut(duration: 0.2), value: scanner.identifyError)
                 }
 
-                // Top-right corner buttons. Crown is always visible
-                // as an optional Pro upgrade entry, not a scanner
-                // gate. Long-press toggles the DEBUG override. The
-                // smoke-test button is DEBUG-only and compile-
-                // stripped from release builds.
+                // Top-right corner controls. Scanner is free (freemium),
+                // so there is NO Pro paywall here in release builds — the
+                // language pill is the only persistent control. The crown
+                // (DEBUG-only) is the QA Pro-override toggle, and the
+                // smoke-test button is also DEBUG-only; both are
+                // compile-stripped from release builds.
                 VStack {
                     HStack {
                         Spacer()
                         VStack(spacing: 6) {
-                            crownButton
                             languagePill
                             #if DEBUG
+                            crownButton
                             offlineSmokeButton
                             #endif
                         }
@@ -433,22 +434,20 @@ struct ScannerTabView: View {
         }
     }
 
-    // MARK: - Crown button (Pro entry + DEBUG override toggle)
+    // MARK: - Crown button (DEBUG-only QA Pro-override toggle)
     //
-    // Tap: open the Pro sheet (always — production + DEBUG).
-    // Long-press: in DEBUG builds only, flip PremiumGate's override
-    // so QA can exercise pro-only analytics without a real StoreKit
-    // purchase. Filled crown = currently pro (real or override),
-    // hollow = free.
+    // DEBUG-only. The scanner is free (freemium), so RELEASE builds show no
+    // crown / Pro paywall in the top-right at all. In DEBUG this remains a
+    // QA affordance:
+    //   Tap: open the Pro sheet.
+    //   Long-press (≥0.6s): flip PremiumGate's override so QA can exercise
+    //     pro-only surfaces without a real StoreKit purchase.
+    // Filled crown = currently pro (real or override), hollow = free.
     //
-    // We can't use a SwiftUI Button + simultaneousGesture(LongPress)
-    // here — the Button still fires its tap action on touch-up after
-    // a long press completes, so the paywall sheet pops up alongside
-    // the override toggle. Using a plain Image + ExclusiveGesture
-    // (LongPress before Tap) makes the two mutually exclusive: held
-    // ≥0.6s recognizes long-press and cancels tap; released earlier
-    // falls through to tap.
-
+    // Plain Image + ExclusiveGesture (LongPress before Tap) keeps tap and
+    // long-press mutually exclusive — a SwiftUI Button would still fire its
+    // tap on touch-up after a completed long press.
+    #if DEBUG
     private var crownButton: some View {
         Image(systemName: premiumGate.isPro ? "crown.fill" : "crown")
             .font(.system(size: 14, weight: .semibold))
@@ -469,16 +468,13 @@ struct ScannerTabView: View {
             paywallSurface = "scanner_crown"
             showPaywallSheet = true
         }
-        #if DEBUG
         let longPress = LongPressGesture(minimumDuration: 0.6).onEnded { _ in
             PAHaptics.tap()
             premiumGate.debugOverrideEnabled.toggle()
         }
         return longPress.exclusively(before: tap)
-        #else
-        return tap
-        #endif
     }
+    #endif
 
     // MARK: - Offline smoke-test button + sheet plumbing (DEBUG only)
 
