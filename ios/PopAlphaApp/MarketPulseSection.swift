@@ -449,16 +449,21 @@ struct MarketPulseSection: View {
 
     private var activeSection: some View {
         let cat = activeCategory
+        let catCards = cards(for: cat)
         return MoverSection(
             eyebrow: cat.eyebrow,
             eyebrowColor: brandedColor(cat),
             title: cat.title,
             window: cat.isWindowed ? selectedWindow : nil,
-            cards: cards(for: cat),
+            cards: catCards,
             emptyMessage: emptyMessage(for: cat),
             onSelect: onSelect,
             watchlistSlugs: watchlistSlugs,
             sectionRationale: cat.sectionRationale,
+            // JP "Trending" is the sole JP rail until the movers rails light up
+            // (~mid-June), so show its full feed inline — the "See all" overflow
+            // is still a placeholder. EN keeps the compact 5-row preview.
+            maxCompactRows: japaneseOnly ? max(4, catCards.count - 1) : 4,
             trailingAccessory: {
                 // Window toggle sits inline with the section title for
                 // windowed categories (Movers, Pullbacks). Non-windowed

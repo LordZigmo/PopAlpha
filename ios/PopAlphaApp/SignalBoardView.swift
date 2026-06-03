@@ -50,7 +50,7 @@ struct MoverSection<TrailingAccessory: View>: View {
     /// toggle is adjacent to the data it controls.
     let trailingAccessory: () -> TrailingAccessory
 
-    private let maxCompactRows = 4
+    let maxCompactRows: Int
 
     init(
         eyebrow: String,
@@ -62,6 +62,7 @@ struct MoverSection<TrailingAccessory: View>: View {
         onSelect: @escaping (HomepageCardDTO) -> Void,
         watchlistSlugs: Set<String> = [],
         sectionRationale: String? = nil,
+        maxCompactRows: Int = 4,
         @ViewBuilder trailingAccessory: @escaping () -> TrailingAccessory = { EmptyView() }
     ) {
         self.eyebrow = eyebrow
@@ -73,6 +74,7 @@ struct MoverSection<TrailingAccessory: View>: View {
         self.onSelect = onSelect
         self.watchlistSlugs = watchlistSlugs
         self.sectionRationale = sectionRationale
+        self.maxCompactRows = maxCompactRows
         self.trailingAccessory = trailingAccessory
     }
 
