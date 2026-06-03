@@ -48,10 +48,6 @@ struct MarketplaceView: View {
     /// singleton or NotificationCenter.
     @Binding var selectedTab: AppTab
 
-    // MARK: KPI strip data (folded into MarketPulseSection's header)
-    @State private var pricesRefreshed24H: Int?
-    @State private var avgChange24H: Double?
-    @State private var marketCap: Double?
 
     // MARK: Personal context
     @State private var meData: HomepageMeDTO?
@@ -337,9 +333,6 @@ struct MarketplaceView: View {
                 signalBoard: data.signalBoard,
                 highConfidenceMovers: data.highConfidenceMovers,
                 watchlistSlugs: watchlistSlugs,
-                pricesRefreshed24H: pricesRefreshed24H,
-                avgChange24H: avgChange24H,
-                marketCap: marketCap,
                 onSelect: handleSelect,
                 japaneseOnly: true
             )
@@ -373,9 +366,6 @@ struct MarketplaceView: View {
                 signalBoard: data.signalBoard,
                 highConfidenceMovers: data.highConfidenceMovers,
                 watchlistSlugs: watchlistSlugs,
-                pricesRefreshed24H: pricesRefreshed24H,
-                avgChange24H: avgChange24H,
-                marketCap: marketCap,
                 onSelect: handleSelect
             )
             .id("movers")
@@ -567,7 +557,6 @@ struct MarketplaceView: View {
             loadError = nil
         }
 
-        async let statsTask: Void = loadStats()
         async let meTask: HomepageMeDTO? = {
             do { return try await CardService.shared.fetchHomepageMe() }
             catch { return nil }
@@ -592,7 +581,6 @@ struct MarketplaceView: View {
             catch { Logger.ui.debug("community load error: \(error)"); return nil }
         }()
 
-        _ = await statsTask
         let me = await meTask
         let profile = await profileTask
         let brief = await briefTask
@@ -687,16 +675,6 @@ struct MarketplaceView: View {
         }
     }
 
-    private func loadStats() async {
-        let count = try? await CardService.shared.fetchPricesRefreshedToday()
-        let avg = try? await CardService.shared.fetchAvgChange24h()
-        let cap = try? await CardService.shared.fetchMarketCap()
-        await MainActor.run {
-            pricesRefreshed24H = count
-            avgChange24H = avg
-            marketCap = cap
-        }
-    }
 }
 
 // MARK: - Top Bar (44pt)

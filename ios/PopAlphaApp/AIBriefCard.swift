@@ -149,13 +149,14 @@ struct AIBriefCard: View {
             if isExpanded, let trio = threeStep {
                 threeStepSummary(trio.whats, trio.why, trio.watch)
             } else {
-                Text(summary)
-                    .font(.system(size: 14))
-                    .foregroundStyle(PA.Colors.text)
-                    .lineSpacing(3)
-                    .lineLimit(isExpanded ? nil : 3)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
+                // Types the summary out like a typewriter on first
+                // appearance. Live briefs only — placeholder/fallback copy
+                // appears instantly so a degraded state isn't dressed up.
+                BriefTypewriterText(
+                    text: summary,
+                    lineLimit: isExpanded ? nil : 3,
+                    animate: isLive
+                )
             }
 
             // Takeaway chip + toggle (read more ↔ show less)
@@ -435,6 +436,73 @@ struct AIBriefCard: View {
         let hours = minutes / 60
         if hours < 24 { return "Updated \(hours)h ago" }
         return "Updated \(hours / 24)d ago"
+    }
+}
+
+// MARK: - Typewriter text
+//
+// Types the brief summary out character-by-character on first appearance so
+// the homepage's editorial anchor reads as if it's being written live. The
+// final height is reserved up front (a hidden full-text layer) so the card
+// never reflows as characters appear. Per-character speed scales to the
+// paragraph length — a short brief stays readable, a long one never drags —
+// and Reduce Motion (or `animate: false`) shows the full text immediately.
+private struct BriefTypewriterText: View {
+    let text: String
+    var lineLimit: Int?
+    var animate: Bool = true
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var shownCount = 0
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            // Invisible full-text layer reserves the final height.
+            styled(Text(verbatim: text)).hidden()
+            styled(Text(verbatim: typedPrefix))
+        }
+        // Re-runs when the brief text changes (placeholder → live), so the
+        // real summary types in once it loads.
+        .task(id: text) { await typeOut() }
+    }
+
+    private func styled(_ text: Text) -> some View {
+        text
+            .font(.system(size: 14))
+            .foregroundStyle(PA.Colors.text)
+            .lineSpacing(3)
+            .lineLimit(lineLimit)
+            .multilineTextAlignment(.leading)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var typedPrefix: String {
+        guard shownCount < text.count else { return text }
+        return String(text.prefix(shownCount))
+    }
+
+    private func typeOut() async {
+        // Reduce Motion, opt-out, or trivial strings: show instantly.
+        guard animate, !reduceMotion, text.count > 1 else {
+            shownCount = text.count
+            return
+        }
+        // Aim for the whole paragraph to finish in ~2.2s, clamped so short
+        // briefs aren't instant and long ones don't crawl.
+        let perChar = min(0.045, max(0.011, 2.2 / Double(text.count)))
+        let step = UInt64(perChar * 1_000_000_000)
+        shownCount = 0
+        var shown = 0
+        while shown < text.count {
+            shown += 1
+            shownCount = shown
+            try? await Task.sleep(nanoseconds: step)
+            if Task.isCancelled {
+                shownCount = text.count
+                return
+            }
+        }
+        shownCount = text.count
     }
 }
 

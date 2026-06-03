@@ -306,64 +306,6 @@ actor CardService {
         return try decoder.decode([PricePoint].self, from: data).filter(\.isUSD)
     }
 
-    // MARK: - Prices Refreshed (24h count, matches homepage)
-
-    func fetchPricesRefreshedToday() async throws -> Int {
-        let cutoff = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-24 * 3600))
-        return try await Supabase.count(
-            table: "public_card_metrics",
-            filters: [
-                ("grade", "eq", "RAW"),
-                ("printing_id", "is", "null"),
-                ("market_price_as_of", "gte", cutoff),
-            ]
-        )
-    }
-
-    // MARK: - Market Cap (sum of all card market prices)
-
-    func fetchMarketCap() async throws -> Double {
-        let data = try await Supabase.query(
-            table: "public_card_metrics",
-            select: "market_price",
-            filters: [
-                ("grade", "eq", "RAW"),
-                ("printing_id", "is", "null"),
-                ("market_price", "not.is", "null"),
-                ("market_price", "gt", "0"),
-            ],
-            limit: 10000
-        )
-
-        struct Row: Decodable { let marketPrice: Double? }
-        let rows = try decoder.decode([Row].self, from: data)
-        return rows.compactMap(\.marketPrice).reduce(0, +)
-    }
-
-    // MARK: - Average 24h Change (across all priced cards)
-
-    func fetchAvgChange24h() async throws -> Double? {
-        // Fetch change_pct_24h for all canonical RAW cards with a price
-        let data = try await Supabase.query(
-            table: "public_card_metrics",
-            select: "change_pct_24h",
-            filters: [
-                ("grade", "eq", "RAW"),
-                ("printing_id", "is", "null"),
-                ("market_price", "not.is", "null"),
-                ("market_price", "gt", "1"),
-                ("change_pct_24h", "not.is", "null"),
-            ],
-            limit: 5000
-        )
-
-        struct Row: Decodable { let changePct24H: Double? }
-        let rows = try decoder.decode([Row].self, from: data)
-        let values = rows.compactMap(\.changePct24H)
-        guard !values.isEmpty else { return nil }
-        return values.reduce(0, +) / Double(values.count)
-    }
-
     // MARK: - Card Detail (from metrics)
 
     /// Fetch the public_card_metrics row for a card.

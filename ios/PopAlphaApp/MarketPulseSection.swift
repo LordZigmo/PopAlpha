@@ -3,8 +3,8 @@ import SwiftUI
 // MARK: - Market Pulse Section
 //
 // Collapses the four previously-stacked MoverSections (Top movers,
-// Breakouts, Unusual volume, Pullbacks) into one tabbed module, and
-// folds the old TodayPulseStrip KPIs + 24H/7D toggle into its header.
+// Breakouts, Unusual volume, Pullbacks) into one tabbed module, with
+// the 24H / 7D window toggle inline beside the active section title.
 //
 // Before (pre-rebalance):
 //   [ TodayPulseStrip: title + KPIs + timeframe ]
@@ -14,7 +14,6 @@ import SwiftUI
 //   [ Pullbacks   — 1 featured + 4 rows            ]   ~260pt
 //
 // After (this file):
-//   [ KPI microstrip · 24H / 7D toggle        ]
 //   [ Movers | Breakouts | Unusual | Pullbacks ]   ← one active at a time
 //   [ 1 featured + 4 compact rows              ]
 //
@@ -33,19 +32,12 @@ struct MarketPulseSection: View {
     let highConfidenceMovers: [HomepageCardDTO]
     let watchlistSlugs: Set<String>
 
-    // Folded-in KPIs (previously on TodayPulseStrip).
-    let pricesRefreshed24H: Int?
-    let avgChange24H: Double?
-    let marketCap: Double?
-
     let onSelect: (HomepageCardDTO) -> Void
 
-    /// When true, this section is the JP-market homepage's sole
-    /// content surface: the category tab bar is suppressed, the KPI
-    /// microstrip is hidden (those numbers describe the EN catalog),
-    /// the 24H/7D window toggle is hidden, and the body renders the
-    /// `.japanese` rail directly. Defaults to false so every existing
-    /// call site keeps the historical multi-tab behavior.
+    /// When true, this section renders the JP-market homepage's tab set
+    /// (Trending + the JP movers rails) instead of the EN categories.
+    /// Defaults to false so every existing call site keeps the
+    /// historical EN multi-tab behavior.
     var japaneseOnly: Bool = false
 
     /// Homepage market injected by `MarketplaceView`. Used only for
@@ -272,13 +264,6 @@ struct MarketPulseSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            // KPI microstrip stays EN-only: the numbers describe the
-            // whole catalog freshness and EN-tilted market cap, not the
-            // JP slice. The category tab strip shows in both modes —
-            // JP-only mode renders a JP-flavored set of tabs.
-            if !japaneseOnly {
-                headerStrip
-            }
             categoryTabs
             activeSection
         }
@@ -317,50 +302,6 @@ struct MarketPulseSection: View {
         }
         .onChange(of: signalBoard) { _, _ in
             retargetCategoryIfNeeded(animated: false)
-        }
-    }
-
-    // MARK: - Header strip (KPIs)
-    //
-    // The 24H / 7D window toggle used to live on the right side of this
-    // strip; it now sits inline with the section title (see
-    // `activeSection`) so the control is directly adjacent to the data
-    // it switches. The KPIs alone fill this row.
-
-    private var headerStrip: some View {
-        HStack(spacing: 14) {
-            // Friendlier labels — the old "Prices 24H" / "Mkt Cap"
-            // read like a Bloomberg ticker; collectors who don't
-            // come from finance bounced off them. Same numbers,
-            // plain English.
-            if let count = pricesRefreshed24H {
-                kpi(label: "Cards tracked 24H", value: formatCount(count))
-            }
-            if let avg = avgChange24H {
-                kpi(
-                    label: "Avg change 24H",
-                    value: formatSignedPct(avg),
-                    tone: avg >= 0 ? PA.Colors.positive : PA.Colors.negative
-                )
-            }
-            if let cap = marketCap, cap > 0 {
-                kpi(label: "Tracked market cap", value: formatDollar(cap))
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, PA.Layout.sectionPadding)
-    }
-
-    private func kpi(label: String, value: String, tone: Color = PA.Colors.text) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(label)
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(PA.Colors.muted)
-            Text(value)
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundStyle(tone)
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
         }
     }
 
@@ -571,20 +512,4 @@ struct MarketPulseSection: View {
         }
     }
 
-    // MARK: - Formatters
-
-    private func formatDollar(_ n: Double) -> String {
-        if n >= 1_000_000 { return String(format: "$%.1fM", n / 1_000_000) }
-        if n >= 1_000 { return String(format: "$%.1fK", n / 1_000) }
-        return String(format: "$%.0f", n)
-    }
-
-    private func formatCount(_ n: Int) -> String {
-        if n >= 1000 { return String(format: "%.1fK", Double(n) / 1000) }
-        return "\(n)"
-    }
-
-    private func formatSignedPct(_ n: Double) -> String {
-        String(format: "%+.1f%%", n)
-    }
 }
