@@ -13,7 +13,10 @@ import {
   setActorCookieOnResponse,
 } from "@/lib/personalization/server/actor";
 import { loadProfile } from "@/lib/personalization/server/recompute";
-import { getPersonalizedExplanation } from "@/lib/personalization/server/explanation";
+import {
+  getCollectorInsight,
+  getPersonalizedExplanation,
+} from "@/lib/personalization/server/explanation";
 import { getPersonalizationCapability } from "@/lib/personalization/capability";
 import type { ExplanationCardInput } from "@/lib/personalization/explanation";
 
@@ -69,7 +72,13 @@ export async function GET(req: Request) {
   const capability = getPersonalizationCapability(actor);
 
   if (!capability.enabled) {
-    const response = NextResponse.json({ ok: true, enabled: false, explanation: null });
+    const response = NextResponse.json({
+      ok: true,
+      enabled: false,
+      collectorInsight: null,
+      // Legacy key retained for the existing web component.
+      explanation: null,
+    });
     if (actor.needs_cookie_set) setActorCookieOnResponse(response, actor.actor_key);
     return response;
   }
@@ -144,12 +153,19 @@ export async function GET(req: Request) {
     set_name: canonical.set_name,
   };
 
-  const explanation = await getPersonalizedExplanation(actor, card, features, profile);
+  // Primary surface: the structured, USER-centered Collector Insight.
+  // `explanation` (legacy loose shape) is retained for the existing web
+  // component until it migrates to `collectorInsight`.
+  const [collectorInsight, explanation] = await Promise.all([
+    getCollectorInsight(actor, card, features, profile),
+    getPersonalizedExplanation(actor, card, features, profile),
+  ]);
 
   const response = NextResponse.json({
     ok: true,
     enabled: true,
     mode: capability.mode,
+    collectorInsight,
     explanation,
     profile_summary: profile
       ? {

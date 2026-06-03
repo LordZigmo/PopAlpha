@@ -153,6 +153,7 @@ As of 2026-04-26, after the Incident 2 fix landed:
 
 ### Fixed
 - **`lib/ai/card-profile-summary.ts`** — uses the patched pattern (logged + propagated `failureReason`). Reference implementation for new LLM call sites.
+- **`lib/personalization/explanation/llm.ts`** — rewritten 2026-06-03 for the **Collector Insight** (USER-centered fit read; distinct from the card-centered Market Brief). Now `buildLlmCollectorInsight` and uses **`generateObject` with a Zod schema** (`CollectorInsightSchema`) instead of `generateText` + a hand-rolled JSON parser — structured output is forced by the SDK. The catch is still discipline-compliant: it logs `name: message` and returns the deterministic `buildCollectorInsightTemplate` tagged `source:"fallback"` with `failureReason`. A schema/parse failure (`NoObjectGeneratedError`/`TypeValidationError`) is fingerprinted as `"parse-miss"`; a transport throw as `"llm-threw:<name>:<msg>"`. Timeout `15_000`, `maxOutputTokens` 900, family-correct `thinkingConfig` (avoids the Incident-3 reasoning-eats-the-budget truncation). `SOURCE_VERSION = collector-llm-v${PROFILE_VERSION}`.
 
 ### Remediated (verified 2026-05-28) — was "Still vulnerable"
 
