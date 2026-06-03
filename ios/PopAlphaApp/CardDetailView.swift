@@ -1004,7 +1004,8 @@ struct CardDetailView: View {
             // differentiated layer; renders its own fallback when signal is thin.
             PersonalizedInsightCardView(
                 canonicalSlug: activeCard.id,
-                variantRef: selectedPrintingId.map { "\($0)::RAW" }
+                variantRef: selectedPrintingId.map { "\($0)::RAW" },
+                cardName: activeCard.name
             )
 
             // 9. Details grid — metadata break after the narrative sections.
@@ -1622,6 +1623,13 @@ struct CardDetailView: View {
                 aiBriefCard {
                     aiBriefHeader(chip: profile.chip)
                     aiBriefUnlockedBody(profile)
+                    // Visible metering: free users see how many analyses remain
+                    // so the value feels metered (and the upgrade is contextual)
+                    // rather than hitting a silent wall on the next card.
+                    if !premiumGate.isPro,
+                       PremiumGate.freeAnalysisLimit - premiumGate.freeAnalysisSeenCount >= 1 {
+                        freeAnalysisMeter
+                    }
                 }
             } else {
                 // Free budget spent: show the REAL summary behind the
@@ -1641,6 +1649,30 @@ struct CardDetailView: View {
         }
     }
 
+    /// Visible free-analysis meter shown under the unlocked brief for free
+    /// users — "N free analyses left · Go unlimited" — tappable to the paywall.
+    private var freeAnalysisMeter: some View {
+        let remaining = max(0, PremiumGate.freeAnalysisLimit - premiumGate.freeAnalysisSeenCount)
+        return Button {
+            PAHaptics.tap()
+            showMarketSummaryPaywall = true
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(detailAccent)
+                Text(remaining == 1 ? "1 free analysis left" : "\(remaining) free analyses left")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(PA.Colors.textSecondary)
+                Text("· Go unlimited")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(detailAccent)
+                Spacer(minLength: 0)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
     private func aiBriefCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             content()
@@ -1651,7 +1683,11 @@ struct CardDetailView: View {
         // read as the same component.
         .liquidGlassSurface(accent: detailAccent)
         .sheet(isPresented: $showMarketSummaryPaywall) {
-            PaywallView(context: .generic, surface: "card_detail_market_summary_teaser")
+            PaywallView(
+                context: .generic,
+                surface: "card_detail_market_summary_teaser",
+                personalization: .init(cardName: activeCard.name, cardChangePct: heroChange.pct)
+            )
         }
     }
 

@@ -9,6 +9,9 @@ import SwiftUI
 struct PersonalizedInsightCardView: View {
     let canonicalSlug: String
     let variantRef: String?
+    /// Display name of the card, passed from the detail view so the paywall
+    /// this teaser opens can personalize ("Go deeper on <card>").
+    var cardName: String? = nil
 
     @State private var loading: Bool = true
     @State private var response: PersonalizedExplanationResponse?
@@ -33,7 +36,11 @@ struct PersonalizedInsightCardView: View {
                 }
             }
             .sheet(isPresented: $showPaywall) {
-                PaywallView(context: .collectorProfile, surface: "card_detail_insight_teaser")
+                PaywallView(
+                    context: .collectorProfile,
+                    surface: "card_detail_insight_teaser",
+                    personalization: .init(cardName: cardName)
+                )
             }
     }
 

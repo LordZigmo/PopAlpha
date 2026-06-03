@@ -56,6 +56,18 @@ struct PaywallView: View {
     /// silently masquerading as a known surface.
     var surface: String = "unknown"
 
+    /// Optional, call-site-supplied personalization so the hero can speak to the
+    /// user's own data (their card, their portfolio) instead of generic copy —
+    /// the single biggest paywall conversion lever. All fields optional; the
+    /// hero falls back to the ROI/context copy when absent.
+    struct Personalization {
+        var cardName: String? = nil
+        var cardChangePct: Double? = nil
+        var portfolioValue: Double? = nil
+        var portfolioCardCount: Int? = nil
+    }
+    var personalization = Personalization()
+
     @State private var selectedProductID: String = PremiumProducts.proYearly
     @State private var isPurchasing: Bool = false
     @State private var errorMessage: String? = nil
@@ -284,31 +296,40 @@ struct PaywallView: View {
         }
     }
 
-    /// Prominent value prop. Driven by the surface that opened the
-    /// paywall. Scanner access is free, so scanner-triggered copy
-    /// points at the intelligence unlocked after identifying a card.
+    /// Prominent value prop. Personalized to the user's own data when the call
+    /// site supplies it (their card / their portfolio); otherwise leads with the
+    /// ROI hook — for a money-decision app, "Pro pays for itself" is the
+    /// strongest universal frame.
     private var heroHeadline: String {
+        if let value = personalization.portfolioValue, value > 0 {
+            return "Your collection is worth \(value.formatted(.currency(code: "USD").precision(.fractionLength(0))))."
+        }
+        if let card = personalization.cardName {
+            if let chg = personalization.cardChangePct, abs(chg) >= 1 {
+                let arrow = chg >= 0 ? "up" : "down"
+                return "\(card) is \(arrow) \(Int(abs(chg).rounded()))% — know what's next."
+            }
+            return "Know what \(card) is really worth."
+        }
         switch context {
-        case .generic:
-            return "Make smarter Pokémon card decisions."
-        case .scanner:
-            return "Unlock market intelligence"
-        case .collectorProfile:
-            return "Unlock your collector profile"
-        case .reengagement:
-            return "Welcome back."
-        case .trialExpiring:
-            return "Your free trial ends soon."
+        case .reengagement:  return "Welcome back."
+        case .trialExpiring: return "Your free trial ends soon."
+        case .generic, .scanner, .collectorProfile:
+            return "Don't overpay. Don't sell low."
         }
     }
 
-    /// Smaller supporting line under the headline. Same context split.
+    /// Smaller supporting line. When personalized, it carries the ROI + the
+    /// mechanism; otherwise it's the per-context detail.
     private var heroSubheadline: String {
+        if personalization.portfolioValue != nil || personalization.cardName != nil {
+            return "One better buy or sell pays for a year of Pro — with unlimited AI analysis, market signals, and price alerts."
+        }
         switch context {
         case .generic:
-            return "Unlock Pro signals, collector insights, and alerts built around your collection."
+            return "One better buy or sell pays for a year of Pro — unlimited AI analysis, signals, and alerts built around your collection."
         case .scanner:
-            return "Scanning is free. Pro helps you decide what each card means for your collection and the market."
+            return "Scanning is free. Pro gives every card you scan unlimited AI analysis and alerts so you catch the next move."
         case .collectorProfile:
             return "See your collection style, radar chart, and AI insights tuned to the cards you own."
         case .reengagement:
@@ -397,9 +418,24 @@ struct PaywallView: View {
             return "7 days free"
         }
         if productID == PremiumProducts.proYearly {
-            return "Save 37%"
+            return yearlySavingsBadge
         }
         return nil
+    }
+
+    /// Real savings of yearly vs 12× monthly, computed from live StoreKit prices
+    /// so the badge can't drift from actual pricing (a misleading-price App
+    /// Review risk). Falls back to a sensible default before products load.
+    private var yearlySavingsBadge: String? {
+        guard let yearly = store.products[PremiumProducts.proYearly]?.price,
+              let monthly = store.products[PremiumProducts.proMonthly]?.price else {
+            return "Save 37%"
+        }
+        let yearlyUSD = NSDecimalNumber(decimal: yearly).doubleValue
+        let annualizedMonthly = NSDecimalNumber(decimal: monthly).doubleValue * 12
+        guard annualizedMonthly > yearlyUSD, yearlyUSD > 0 else { return nil }
+        let pct = Int(((annualizedMonthly - yearlyUSD) / annualizedMonthly * 100).rounded())
+        return pct >= 1 ? "Save \(pct)%" : nil
     }
 
     private func planRow(productID: String, badge: String?) -> some View {
@@ -548,7 +584,7 @@ struct PaywallView: View {
         case .eligible:
             let priced = planPrice(product: store.products[selectedProductID], productID: selectedProductID)
             return DisclosureCopy(
-                friendly: "Free for 7 days, then \(priced). Cancel anytime.",
+                friendly: "Free for 7 days — we'll remind you before it ends. Then \(priced). Cancel anytime.",
                 legal: legal,
             )
         case .unknown:

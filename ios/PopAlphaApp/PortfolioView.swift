@@ -406,7 +406,7 @@ struct PortfolioView: View {
                         if let identity = overview?.toIdentity() {
                             CollectorIdentityCard(profile: identity)
                         }
-                        CollectorRadarLockedCard()
+                        CollectorRadarLockedCard(portfolioValue: summary.totalValue, cardCount: summary.cardCount)
                     }
                 }
 

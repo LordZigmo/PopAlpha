@@ -17,6 +17,11 @@
 import SwiftUI
 
 struct CollectorRadarLockedCard: View {
+    /// Real portfolio totals, passed from PortfolioView so the paywall this card
+    /// opens can lead with the user's own numbers ("Your collection is worth $X").
+    var portfolioValue: Double? = nil
+    var cardCount: Int? = nil
+
     @State private var showPaywall = false
 
     // Dummy axis values lifted from PortfolioDemoView's mock so the
@@ -50,7 +55,11 @@ struct CollectorRadarLockedCard: View {
         .overlay(accentBorder)
         .padding(.horizontal, PA.Layout.sectionPadding)
         .sheet(isPresented: $showPaywall) {
-            PaywallView(context: .collectorProfile, surface: "portfolio_radar_locked")
+            PaywallView(
+                context: .collectorProfile,
+                surface: "portfolio_radar_locked",
+                personalization: .init(portfolioValue: portfolioValue, portfolioCardCount: cardCount)
+            )
         }
     }
 
