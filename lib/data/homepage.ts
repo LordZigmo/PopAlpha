@@ -1463,7 +1463,14 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
           loadJapaneseRail(db, JAPANESE_RAIL_LIMIT, { minPrice: JP_BUDGET_MIN_PRICE, maxPrice: JP_MID_MIN_PRICE }),
         ]);
         japaneseRail = jpRail;
-        japaneseRails = { ...jpRails, midMovers: jpMid, budgetMovers: jpBudget };
+        // Prefer the signal-ranked (change_pct) mid/budget rails once they have
+        // data (~mid-June); fall back to the price-tier discovery rails while
+        // they're still empty so the JP home isn't a single rail today.
+        japaneseRails = {
+          ...jpRails,
+          midMovers: jpRails.midMovers.length > 0 ? jpRails.midMovers : jpMid,
+          budgetMovers: jpRails.budgetMovers.length > 0 ? jpRails.budgetMovers : jpBudget,
+        };
       } catch (err) {
         logger.error(
           "[homepage] japanese_rail",
