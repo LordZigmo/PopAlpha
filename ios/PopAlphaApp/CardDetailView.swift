@@ -1060,40 +1060,47 @@ struct CardDetailView: View {
                     .clipShape(Capsule())
             }
 
-            // EN/JP language toggle. Renders only when card_translations
-            // has a pairing for this card; absent otherwise so the
-            // pricing block doesn't grow a disabled control for the
-            // ~60–80% of cards that lack a JP/EN counterpart.
-            if let partnerSlug = pairedSlug, pairedLanguage != nil {
-                languageToggleControl(partnerSlug: partnerSlug)
-            }
+            // Market price hero row. The EN/JP language toggle (when a
+            // card_translations pairing exists) sits trailing on this row —
+            // across from the price — instead of on its own line above. The
+            // outer HStack centers the toggle against the price; the inner
+            // HStack keeps the price + change badge baseline-aligned.
+            HStack(alignment: .center) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text(currentHeroPrice)
+                        .font(PA.Typography.heroPrice)
+                        .foregroundStyle(PA.Colors.text)
 
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Text(currentHeroPrice)
-                    .font(PA.Typography.heroPrice)
-                    .foregroundStyle(PA.Colors.text)
+                    // Suppress the change badge when the hero price is
+                    // sourced from Yahoo! JP — change_pct_24h/7d track the
+                    // Scrydex market_price, not the Yahoo!-derived median,
+                    // so showing a Scrydex delta next to a Yahoo! price
+                    // would imply causality that doesn't exist.
+                    if !selectedPriceMode.isGraded && !suppressHeroChangeBadge && !isAbundantNearMintHeroPrice {
+                        HStack(spacing: 4) {
+                            Image(systemName: heroChange.direction.arrowSymbol)
+                                .font(.system(size: 12, weight: .bold))
+                                // Decorative — adjacent percent text conveys direction.
+                                .accessibilityHidden(true)
+                            Text(heroChange.text)
+                                .font(.system(size: 15, weight: .semibold))
+                        }
+                        .foregroundStyle(heroChange.direction.color)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("\(heroChange.direction.accessibilityWord) \(heroChange.text)")
 
-                // Suppress the change badge when the hero price is
-                // sourced from Yahoo! JP — change_pct_24h/7d track the
-                // Scrydex market_price, not the Yahoo!-derived median,
-                // so showing a Scrydex delta next to a Yahoo! price
-                // would imply causality that doesn't exist.
-                if !selectedPriceMode.isGraded && !suppressHeroChangeBadge && !isAbundantNearMintHeroPrice {
-                    HStack(spacing: 4) {
-                        Image(systemName: heroChange.direction.arrowSymbol)
-                            .font(.system(size: 12, weight: .bold))
-                            // Decorative — adjacent percent text conveys direction.
-                            .accessibilityHidden(true)
-                        Text(heroChange.text)
-                            .font(.system(size: 15, weight: .semibold))
+                        Text(heroChange.window)
+                            .font(PA.Typography.caption)
+                            .foregroundStyle(PA.Colors.muted)
                     }
-                    .foregroundStyle(heroChange.direction.color)
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel("\(heroChange.direction.accessibilityWord) \(heroChange.text)")
+                }
 
-                    Text(heroChange.window)
-                        .font(PA.Typography.caption)
-                        .foregroundStyle(PA.Colors.muted)
+                // EN/JP language toggle — across from the market price. Renders
+                // only when card_translations has a pairing (absent for the
+                // ~60–80% of cards without a JP/EN counterpart).
+                if let partnerSlug = pairedSlug, pairedLanguage != nil {
+                    Spacer(minLength: 8)
+                    languageToggleControl(partnerSlug: partnerSlug)
                 }
             }
 
