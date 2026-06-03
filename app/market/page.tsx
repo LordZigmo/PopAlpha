@@ -655,29 +655,6 @@ export default async function Home() {
   const heroBriefGrounding = trackedCardsWithLivePrice !== null && pricesRefreshedToday !== null
     ? `Grounded in ${livePriceCount} live prices and ${refreshedCount} refreshed cards from the last 24 hours.`
     : "Grounded in live market pricing and request-time refresh rails.";
-  const heroProofStats = [
-    {
-      value: livePriceCount,
-      label: "Coverage online",
-      detail: "Canonical RAW cards with an active public market price right now.",
-      accentClass: "border-[#173642] bg-[linear-gradient(180deg,rgba(15,29,36,0.9),rgba(10,18,24,0.94))]",
-      dotClass: "bg-[#42D6E8]",
-    },
-    {
-      value: refreshedCount,
-      label: "Fresh in 24h",
-      detail: "Cards updated inside the trailing 24-hour freshness window.",
-      accentClass: "border-[#17382E] bg-[linear-gradient(180deg,rgba(14,27,22,0.9),rgba(9,18,15,0.94))]",
-      dotClass: "bg-[#5CE07D]",
-    },
-    {
-      value: asOf ? asOf : "Awaiting update",
-      label: "Latest market tick",
-      detail: "Most recent timestamp currently flowing through PopAlpha's price rails.",
-      accentClass: "border-[#25303B] bg-[linear-gradient(180deg,rgba(17,22,28,0.9),rgba(11,14,18,0.94))]",
-      dotClass: "bg-[#A5B4FC]",
-    },
-  ] as const;
   const strongMoversBadge = getChangeWindowBadge([
     ...topMoverCardsByWindow["24H"],
     ...topMoverCardsByWindow["7D"],
@@ -779,42 +756,6 @@ export default async function Home() {
               <p className="mt-5 max-w-lg text-[17px] leading-8 text-[#98A2AE] sm:text-[18px]">
                 {HERO_SUBHEADLINE}
               </p>
-
-              <div className="mt-7 max-w-[660px] rounded-[24px] border border-[#16303A] bg-[linear-gradient(180deg,rgba(8,16,22,0.94),rgba(7,12,18,0.98))] p-4 shadow-[0_20px_55px_rgba(0,0,0,0.28)] ring-1 ring-white/[0.04] sm:p-5">
-                <div className="flex flex-wrap items-center justify-between gap-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#7DD3FC]">
-                    Public Proof
-                  </p>
-                  <Link
-                    href="/data"
-                    className="inline-flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.03] px-4 py-2 text-[12px] font-semibold text-[#E7EDF2] transition-all hover:border-white/[0.15] hover:bg-white/[0.06] hover:text-white"
-                  >
-                    See live coverage
-                  </Link>
-                </div>
-
-                <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                  {heroProofStats.map((stat) => (
-                    <div
-                      key={stat.label}
-                      className={`rounded-[18px] border px-4 py-3 ${stat.accentClass}`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className={`h-2 w-2 rounded-full ${stat.dotClass}`} />
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#8FA0AF]">
-                          {stat.label}
-                        </p>
-                      </div>
-                      <p className="mt-3 text-[22px] font-semibold tracking-tight text-white">
-                        {stat.value}
-                      </p>
-                      <p className="mt-2 text-[11px] leading-5 text-[#7B8793]">
-                        {stat.detail}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
 
               <div className="mt-8 grid gap-3 sm:grid-cols-3">
                 {discoveryCards.map((card) => (
@@ -940,9 +881,12 @@ export default async function Home() {
                         Proof
                       </Link>
                     </div>
-                    <p className="mt-2 text-[15px] font-medium leading-relaxed text-[#D4DCE4]">
-                      {heroBrief.lead}
-                    </p>
+                    <TypewriterText
+                      as="p"
+                      className="mt-2 text-[15px] font-medium leading-relaxed text-[#D4DCE4]"
+                      text={heroBrief.lead}
+                      speedMs={Math.max(9, Math.min(26, Math.round(2200 / Math.max(1, heroBrief.lead.length))))}
+                    />
                     {heroBrief.secondary ? (
                       <p className="mt-3 text-[14px] leading-relaxed text-[#94A0AB]">
                         {heroBrief.secondary}
