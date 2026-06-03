@@ -46,7 +46,13 @@ import {
 export const runtime = "nodejs";
 export const maxDuration = 300; // Vercel pro tick ceiling
 
-const DEFAULT_BATCH_SIZE = 30; // smaller than yahoo (50) — robots.txt softness
+const DEFAULT_BATCH_SIZE = 50; // raised from 30 to use idle deadline headroom (batches of 30 finished in ~130s of the 300s budget). Per-card delay is unchanged, so robots.txt politeness is preserved and the deadline guard still halts gracefully.
+// Reserve ~60% of each batch for stale-refresh (freshness) and cap
+// initial-coverage at ~40% (breadth). #163 made initial-coverage return a full
+// batch of never-attempted products; seeded first into byProduct it consumed
+// the whole budget and skipped the stale-refresh scan, so the 4k+ already-priced
+// JP cards never re-scraped and their displayed prices went stale.
+const STALE_REFRESH_BUDGET_RATIO = 0.6;
 const INTER_CARD_DELAY_MS = 4000;
 
 // Mirror of scripts/run-snkrdunk-pipeline.mjs — derive price_jpy at write
@@ -161,9 +167,11 @@ async function pickRefreshCandidates(
     ...recentTransient.sourceKeys,
   ]);
 
+  // Cap initial-coverage so the stale-refresh scan below keeps its budget share.
+  const initialBudget = Math.max(1, limit - Math.ceil(limit * STALE_REFRESH_BUDGET_RATIO));
   const initialCandidates = await loadInitialSnkrdunkCandidates(supabase, {
     suppressedSourceKeys,
-    limit,
+    limit: initialBudget,
   });
 
   // Dedupe by snkrdunk_product_code (one re-fetch covers all grade rows

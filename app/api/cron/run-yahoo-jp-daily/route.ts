@@ -53,6 +53,14 @@ export const runtime = "nodejs";
 export const maxDuration = 300; // Vercel hobby/pro tick ceiling
 
 const DEFAULT_BATCH_SIZE = 50;
+// Reserve ~60% of each batch for stale-refresh (freshness) and cap
+// initial-coverage at ~40% (breadth). #163 made initial-coverage return a full
+// batch of never-attempted slugs; left unbounded it consumed the whole budget
+// and starved the stale-refresh path, so the 4k+ already-priced JP cards never
+// re-scraped and their displayed prices went stale. This run is deadline-bound
+// (halts at the ~270s reserve before clearing a 50-card batch), so capping
+// initial keeps the stale-refresh slugs within reach of the deadline too.
+const STALE_REFRESH_BUDGET_RATIO = 0.6;
 const INTER_CARD_DELAY_MS = 4000;
 // Yahoo's sold archive is sparse for long-tail JP cards. Store even a
 // single matched RAW sale; consumers can use sample_count to decide
@@ -212,6 +220,8 @@ async function pickRefreshCandidates(supabase: ReturnType<typeof dbAdmin>, limit
     ...recentTransient.slugs,
   ]);
 
+  // Cap initial-coverage so stale-refresh keeps a guaranteed share of the batch.
+  const initialBudget = Math.max(1, limit - Math.ceil(limit * STALE_REFRESH_BUDGET_RATIO));
   const [staleSlugs, initialFetchSlugs] = await Promise.all([
     loadStaleYahooSlugs(supabase, {
       cutoffIso,
@@ -220,7 +230,7 @@ async function pickRefreshCandidates(supabase: ReturnType<typeof dbAdmin>, limit
     }),
     loadInitialYahooSlugs(supabase, {
       suppressedSlugs,
-      limit,
+      limit: initialBudget,
     }),
   ]);
 
