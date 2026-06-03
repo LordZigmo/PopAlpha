@@ -13,6 +13,7 @@ import {
 import { PROFILE_VERSION } from "../constants";
 import { getPersonalizationCapability } from "../capability";
 import {
+  buildCollectorInsight,
   buildPersonalizedExplanation,
   type ExplanationCardInput,
   type MarketSignalContext,
@@ -20,9 +21,11 @@ import {
 import type {
   Actor,
   CardStyleFeatures,
+  CollectorInsight,
   PersonalizedExplanation,
   StyleProfile,
 } from "../types";
+import { assembleCollectorSignals } from "./collector-signals";
 
 type CardProfileRow = {
   canonical_slug: string;
@@ -255,12 +258,17 @@ async function ensureMarketSignal(
   }
 }
 
-async function readCache(
+// The cache table stores an opaque JSONB `payload` keyed by
+// (actor_key, canonical_slug, profile_version, metrics_hash). Both the legacy
+// PersonalizedExplanation and the structured CollectorInsight ride the same
+// table; we keep them from colliding by namespacing the Collector Insight
+// metrics_hash with a "ci:" prefix (see metricsHashFor / getCollectorInsight).
+async function readCache<T>(
   actor: Actor,
   canonicalSlug: string,
   profileVersion: number,
   metricsHash: string,
-): Promise<PersonalizedExplanation | null> {
+): Promise<T | null> {
   try {
     const admin = dbAdmin();
     const { data, error } = await admin
@@ -274,18 +282,18 @@ async function readCache(
       .limit(1)
       .maybeSingle();
     if (error || !data) return null;
-    return data.payload as PersonalizedExplanation;
+    return data.payload as T;
   } catch {
     return null;
   }
 }
 
-async function writeCache(
+async function writeCache<T>(
   actor: Actor,
   canonicalSlug: string,
   profileVersion: number,
   metricsHash: string,
-  payload: PersonalizedExplanation,
+  payload: T,
 ): Promise<void> {
   try {
     const admin = dbAdmin();
@@ -335,7 +343,12 @@ export async function getPersonalizedExplanation(
 
   const metricsHash = metricsHashFor(features, signalHash);
 
-  const cached = await readCache(actor, card.canonical_slug, profileVersion, metricsHash);
+  const cached = await readCache<PersonalizedExplanation>(
+    actor,
+    card.canonical_slug,
+    profileVersion,
+    metricsHash,
+  );
   if (cached) return cached;
 
   const explanation = await buildPersonalizedExplanation(
@@ -347,4 +360,62 @@ export async function getPersonalizedExplanation(
   );
   await writeCache(actor, card.canonical_slug, profileVersion, metricsHash, explanation);
   return explanation;
+}
+
+/**
+ * Get the structured Collector Insight for (actor, card) — the USER-centered
+ * "should this card matter to this collector?" read. This is the primary
+ * personalization surface; `getPersonalizedExplanation` is the legacy loose
+ * shape retained for the existing web component.
+ *
+ * Honors the same per-(actor, card) cache (namespaced via a "ci:" metrics-hash
+ * prefix so it can't collide with legacy explanation rows) and the capability
+ * mode. On the LLM path the per-card market signal is fetched/backfilled and
+ * passed as ENTRY-FIT context only — the prompt is told not to re-explain it.
+ */
+export async function getCollectorInsight(
+  actor: Actor,
+  card: ExplanationCardInput,
+  features: CardStyleFeatures,
+  profile: StyleProfile | null,
+): Promise<CollectorInsight> {
+  const capability = getPersonalizationCapability(actor);
+  const profileVersion = profile?.version ?? PROFILE_VERSION;
+
+  // Assemble the user-collection signal digest. Cheap, best-effort reads; any
+  // failure degrades a signal to empty/unknown rather than throwing.
+  const signals = await assembleCollectorSignals(actor, profile);
+
+  // Pull (or backfill) the market signal only on the LLM path.
+  let market: MarketSignalContext | null = null;
+  let signalHash: string | null = null;
+  if (capability.mode === "llm" && profile) {
+    const fetched = await ensureMarketSignal(card.canonical_slug);
+    market = fetched.context;
+    signalHash = fetched.signalHash;
+  }
+
+  // Namespace + fold the data-richness band into the cache key so a thin→rich
+  // collection transition (e.g. after the user saves a few cards) invalidates
+  // a stale soft read for the same user × card × market state.
+  const metricsHash = `ci:${signals.dataConfidence}:${metricsHashFor(features, signalHash)}`;
+
+  const cached = await readCache<CollectorInsight>(
+    actor,
+    card.canonical_slug,
+    profileVersion,
+    metricsHash,
+  );
+  if (cached) return cached;
+
+  const insight = await buildCollectorInsight(
+    card,
+    features,
+    profile,
+    signals,
+    capability,
+    market,
+  );
+  await writeCache(actor, card.canonical_slug, profileVersion, metricsHash, insight);
+  return insight;
 }
