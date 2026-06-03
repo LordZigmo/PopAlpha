@@ -249,6 +249,13 @@ export type HomepageDataOptions = {
 
 const SECTION_LIMIT = 5;
 const MARKET_WATCH_LIMIT = 20;
+// The JP discovery rail ("Trending") is the ONLY populated JP home rail until
+// the change_pct-gated JP movers rails light up (~mid-June). EN looks full via
+// ~8 small rails of SECTION_LIMIT each; JP currently has just this one, so a
+// 5-card cap makes the JP home a stub. Give the sole JP rail a generous limit.
+// (loadJapaneseSignalRails stays at SECTION_LIMIT — those follow the EN
+// multi-rail sizing once they have data.)
+const JAPANESE_RAIL_LIMIT = 40;
 const SIGNAL_WINDOWS: HomepageSignalWindow[] = ["24H", "7D"];
 /** Minimum 7d median to filter noise / $0 cards */
 const MIN_PRICE = 0.5;
@@ -1438,7 +1445,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
     if (!overrides && db) {
       try {
         [japaneseRail, japaneseRails] = await Promise.all([
-          loadJapaneseRail(db, SECTION_LIMIT),
+          loadJapaneseRail(db, JAPANESE_RAIL_LIMIT),
           loadJapaneseSignalRails(db, SECTION_LIMIT),
         ]);
       } catch (err) {
