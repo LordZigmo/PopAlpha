@@ -93,17 +93,9 @@ struct MoverSection<TrailingAccessory: View>: View {
                 }
                 Spacer(minLength: 8)
                 trailingAccessory()
-                if cards.count > (1 + maxCompactRows) {
-                    Button {
-                        // Phase 2: navigation to full section view
-                        PAHaptics.tap()
-                    } label: {
-                        Text("See all")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(PA.Colors.textSecondary)
-                    }
-                    .buttonStyle(.plain)
-                }
+                // "See all" overflow is intentionally omitted until the
+                // full-section screen exists — App Review (2.1) rejects no-op
+                // controls, so we don't render a button that does nothing.
             }
             .padding(.horizontal, PA.Layout.sectionPadding)
 

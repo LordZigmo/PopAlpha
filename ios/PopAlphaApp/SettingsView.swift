@@ -371,6 +371,20 @@ struct SettingsView: View {
                     Divider().background(PA.Colors.border).padding(.leading, 44)
 
                     linkRow(icon: "person.2", title: "Community Guidelines", url: "https://popalpha.ai/community-guidelines")
+
+                    Divider().background(PA.Colors.border).padding(.leading, 44)
+
+                    // Non-affiliation / trademark disclaimer (App Review 5.2 +
+                    // good-faith nominative use). Mirror this in the App Store
+                    // description too.
+                    Text("PopAlpha is an independent app and is not affiliated with, endorsed, sponsored, or approved by Nintendo, The Pokémon Company, Game Freak, or Creatures Inc. Pokémon and all related names and images are trademarks and copyrights of their respective owners. Prices are aggregated from public marketplace data for informational purposes only.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(PA.Colors.muted)
+                        .lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 10)
                 }
 
                 // Sign out (only visible when signed in)
