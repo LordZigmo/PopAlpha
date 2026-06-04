@@ -70,6 +70,8 @@ struct MarketplaceView: View {
     /// Kept separate from `searchSelectedCard` so the two pipelines
     /// don't fight over the same NavigationStack destination state.
     @State private var selectedCard: MarketCard?
+    /// Set pushed by tapping a linkified set name in the AI brief.
+    @State private var selectedSetName: String?
 
     /// Timestamp + auth-state-key for the last loadAll fire.
     /// Together they form a debounce key that suppresses runaway
@@ -175,6 +177,9 @@ struct MarketplaceView: View {
             .navigationDestination(item: $selectedCard) { card in
                 CardDetailView(card: card)
             }
+            .navigationDestination(item: $selectedSetName) { name in
+                SetDetailView(setName: name)
+            }
             // Universal Links — DeepLinkRouter parses popalpha.ai URLs in
             // ContentView.onContinueUserActivity and stashes a pending
             // destination. We reuse the search → searchSelectedCard →
@@ -201,7 +206,14 @@ struct MarketplaceView: View {
         }
 
         // 2. AI Brief — handles its own placeholder when brief is nil.
-        AIBriefCard(brief: aiBrief, fallbackAsOf: data?.asOf, styleLabel: styleLabel)
+        AIBriefCard(
+            brief: aiBrief,
+            fallbackAsOf: data?.asOf,
+            styleLabel: styleLabel,
+            linkTargets: briefLinkTargets(for: aiBrief),
+            onOpenCard: openBriefCard,
+            onOpenSet: openBriefSet
+        )
             .padding(.horizontal, PA.Layout.sectionPadding)
 
         // 3. Movers FIRST for guests — they don't have a personalized
@@ -246,7 +258,14 @@ struct MarketplaceView: View {
             .padding(.horizontal, PA.Layout.sectionPadding)
 
         // 2. AI Brief — personalized when style is known.
-        AIBriefCard(brief: aiBrief, fallbackAsOf: data?.asOf, styleLabel: styleLabel)
+        AIBriefCard(
+            brief: aiBrief,
+            fallbackAsOf: data?.asOf,
+            styleLabel: styleLabel,
+            linkTargets: briefLinkTargets(for: aiBrief),
+            onOpenCard: openBriefCard,
+            onOpenSet: openBriefSet
+        )
             .padding(.horizontal, PA.Layout.sectionPadding)
 
         // 3. Compact scan strip — keeps scan one tap away even though
@@ -324,7 +343,14 @@ struct MarketplaceView: View {
         // Same slot the EN sequences use, backed by the JP AI Brief
         // cache (/api/homepage/ai-brief?market=JP). Freshness comes
         // from the JP rail itself, not EN's signal-board timestamp.
-        AIBriefCard(brief: jpAIBrief, fallbackAsOf: jpFooterAsOf, styleLabel: styleLabel)
+        AIBriefCard(
+            brief: jpAIBrief,
+            fallbackAsOf: jpFooterAsOf,
+            styleLabel: styleLabel,
+            linkTargets: briefLinkTargets(for: jpAIBrief),
+            onOpenCard: openBriefCard,
+            onOpenSet: openBriefSet
+        )
             .padding(.horizontal, PA.Layout.sectionPadding)
 
         if let data {
@@ -508,6 +534,40 @@ struct MarketplaceView: View {
     private func handleSelect(_ card: HomepageCardDTO) {
         PAHaptics.tap()
         selectedCard = card.toMarketCard()
+    }
+
+    // MARK: - AI brief deep links
+    //
+    // Resolve the set/card names the brief may mention against the homepage's
+    // already-loaded mover data, so a tapped name routes to a real
+    // destination. Only entities present in that data (plus the brief's focus
+    // set) become links — anything else stays plain text. `handleBriefLink`
+    // in AIBriefCard already fires the haptic.
+
+    private func briefLinkTargets(for brief: HomepageAIBriefDTO?) -> [BriefLinkTarget] {
+        var targets: [BriefLinkTarget] = []
+        var seenSlugs = Set<String>()
+        var seenSets = Set<String>()
+        for card in data?.signalBoard.allRailCards ?? [] {
+            if seenSlugs.insert(card.slug).inserted {
+                targets.append(BriefLinkTarget(name: card.name, kind: .card, slug: card.slug))
+            }
+            if let set = card.setName, !set.isEmpty, seenSets.insert(set).inserted {
+                targets.append(BriefLinkTarget(name: set, kind: .set, slug: set))
+            }
+        }
+        if let focus = brief?.focusSet, !focus.isEmpty, seenSets.insert(focus).inserted {
+            targets.append(BriefLinkTarget(name: focus, kind: .set, slug: focus))
+        }
+        return targets
+    }
+
+    private func openBriefCard(_ slug: String) {
+        selectedCard = MarketCard.stub(slug: slug)
+    }
+
+    private func openBriefSet(_ name: String) {
+        selectedSetName = name
     }
 
     // MARK: - Deep link

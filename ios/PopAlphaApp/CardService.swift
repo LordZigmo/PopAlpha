@@ -1301,6 +1301,31 @@ struct HomepageSignalBoardDTO: Decodable, Hashable {
     let japaneseMidMovers: [HomepageCardDTO]?
     let japaneseBudgetMovers: [HomepageCardDTO]?
 
+    /// All cards across every rail (both windows) — the candidate pool for
+    /// resolving linkable set/card names in the homepage AI brief against the
+    /// data the brief was built from. Dedup happens at the call site; order
+    /// isn't significant (the brief linkifier matches by name).
+    var allRailCards: [HomepageCardDTO] {
+        var out: [HomepageCardDTO] = []
+        out += marketWatch ?? []
+        out += unusualVolume ?? []
+        out += breakouts ?? []
+        out += midMovers ?? []
+        out += budgetMovers ?? []
+        out += japanese ?? []
+        out += japaneseMidMovers ?? []
+        out += japaneseBudgetMovers ?? []
+        for window in SignalWindow.allCases {
+            out += topMovers.forWindow(window)
+            out += biggestDrops.forWindow(window)
+            out += momentum.forWindow(window)
+            out += japaneseTopMovers?.forWindow(window) ?? []
+            out += japaneseBiggestDrops?.forWindow(window) ?? []
+            out += japaneseMomentum?.forWindow(window) ?? []
+        }
+        return out
+    }
+
     enum CodingKeys: String, CodingKey {
         case marketWatch
         case topMovers, biggestDrops, momentum

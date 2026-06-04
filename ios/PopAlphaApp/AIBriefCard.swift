@@ -11,6 +11,30 @@ import SwiftUI
 // directly by MarketplaceView in either the guest or authed sequence,
 // independently of the rest of the signal-board surface.
 
+// MARK: - Brief link target
+//
+// A set or card the homepage AI brief may name, resolved from the homepage's
+// already-loaded mover data so a tapped name routes to a real destination.
+// MarketplaceView builds these from `data.signalBoard` (+ the brief's focus
+// set) and hands them to AIBriefCard, which linkifies matching names in the
+// brief prose. Only names we can resolve here get linked — everything else
+// stays plain text (no guessing, no broken links).
+struct BriefLinkTarget: Hashable {
+    enum Kind: Hashable { case set, card }
+    let name: String
+    let kind: Kind
+    /// Card → canonical slug; set → the set name (iOS routes sets by name).
+    let slug: String
+
+    var url: URL? {
+        let encoded = slug.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? slug
+        switch kind {
+        case .card: return URL(string: "popalpha://brief-link/card/\(encoded)")
+        case .set:  return URL(string: "popalpha://brief-link/set/\(encoded)")
+        }
+    }
+}
+
 struct AIBriefCard: View {
     let brief: HomepageAIBriefDTO?
     let fallbackAsOf: String?
@@ -20,6 +44,14 @@ struct AIBriefCard: View {
     /// market. Nil for guests and for authed users who haven't yet hit
     /// the minimum-event threshold for a profile.
     let styleLabel: String?
+
+    /// Sets/cards the brief may mention, resolved from the homepage's
+    /// already-loaded mover data so a tapped name routes to a real
+    /// destination. Empty on the placeholder/preview paths → plain text.
+    var linkTargets: [BriefLinkTarget] = []
+    /// Host-wired navigation for a tapped link (canonical slug / set name).
+    var onOpenCard: (String) -> Void = { _ in }
+    var onOpenSet: (String) -> Void = { _ in }
 
     /// In-place expansion state. Tapping "Read more" un-truncates the
     /// summary and reveals the 3-step labeled body without pushing a
@@ -49,6 +81,40 @@ struct AIBriefCard: View {
     private var summary: String { brief?.summary ?? Self.placeholderSummary }
     private var takeaway: String { brief?.takeaway ?? Self.placeholderTakeaway }
     private var isLive: Bool { brief != nil && brief?.source != "fallback" }
+
+    // MARK: - Linkification
+    // Turns set/card names the brief mentions into tappable links, matched
+    // against `linkTargets` (longest names first, and skip already-linked
+    // ranges so a set name nested inside a card name doesn't double-link).
+    // Only the first occurrence of each name is linked — enough for a brief
+    // that names an entity once or twice.
+    private func linkified(_ text: String) -> AttributedString {
+        var attr = AttributedString(text)
+        guard !linkTargets.isEmpty else { return attr }
+        for target in linkTargets.sorted(by: { $0.name.count > $1.name.count }) {
+            guard target.name.count >= 3, let url = target.url else { continue }
+            if let r = attr.range(of: target.name, options: [.caseInsensitive]), attr[r].link == nil {
+                attr[r].link = url
+                attr[r].foregroundColor = market.accent
+                attr[r].underlineStyle = .single
+            }
+        }
+        return attr
+    }
+
+    private func handleBriefLink(_ url: URL) -> OpenURLAction.Result {
+        guard url.scheme == "popalpha", url.host == "brief-link" else { return .systemAction }
+        let parts = url.pathComponents.filter { $0 != "/" }   // [kind, value]
+        guard parts.count == 2 else { return .systemAction }
+        let value = parts[1].removingPercentEncoding ?? parts[1]
+        PAHaptics.tap()
+        switch parts[0] {
+        case "card": onOpenCard(value)
+        case "set":  onOpenSet(value)
+        default: return .systemAction
+        }
+        return .handled
+    }
 
     /// Returns the 3-step trio iff all three labeled fields are present
     /// on the current brief. Older v1 briefs don't have them yet, so we
@@ -155,7 +221,8 @@ struct AIBriefCard: View {
                 BriefTypewriterText(
                     text: summary,
                     lineLimit: isExpanded ? nil : 3,
-                    animate: isLive
+                    animate: isLive,
+                    attributed: linkified(summary)
                 )
             }
 
@@ -229,6 +296,8 @@ struct AIBriefCard: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .liquidGlassSurface(accent: market.accent)
+        // Route taps on linkified set/card names in the brief prose.
+        .environment(\.openURL, OpenURLAction(handler: handleBriefLink))
     }
 
     // MARK: - Three-step summary (expanded body)
@@ -256,7 +325,7 @@ struct AIBriefCard: View {
                     .tracking(1.2)
                     .foregroundStyle(market.accent)
             }
-            Text(text)
+            Text(linkified(text))
                 .font(.system(size: 14))
                 .foregroundStyle(PA.Colors.text)
                 .lineSpacing(3)
@@ -451,6 +520,10 @@ private struct BriefTypewriterText: View {
     let text: String
     var lineLimit: Int?
     var animate: Bool = true
+    /// Linkified version of `text`, shown (tappable) once typing completes.
+    /// While typing we show the plain prefix; linkifying only restyles ranges,
+    /// so the (hidden) full-text layer still reserves the correct height.
+    var attributed: AttributedString? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var shownCount = 0
@@ -459,7 +532,11 @@ private struct BriefTypewriterText: View {
         ZStack(alignment: .topLeading) {
             // Invisible full-text layer reserves the final height.
             styled(Text(verbatim: text)).hidden()
-            styled(Text(verbatim: typedPrefix))
+            if shownCount >= text.count, let attributed {
+                styled(Text(attributed))
+            } else {
+                styled(Text(verbatim: typedPrefix))
+            }
         }
         // Re-runs when the brief text changes (placeholder → live), so the
         // real summary types in once it loads.
