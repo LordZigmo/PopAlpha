@@ -63,7 +63,13 @@ struct MarketplaceView: View {
 
     // MARK: UI state
     @State private var showSearch = false
-    @State private var selectedWindow: SignalWindow = .h24
+    // Default to 7D: the 24H windowed rails (Top Movers / Pullbacks /
+    // Momentum) are structurally sparse — change_pct_24h is unpopulated
+    // for ~99% of the catalog (tiered refresh → few cards have two
+    // consecutive daily points), so the premium 24H "gainer" rail is
+    // routinely a lonely 1-card list. 7D has real coverage, so it's the
+    // healthier default landing window. Users can still toggle to 24H.
+    @State private var selectedWindow: SignalWindow = .d7
     @State private var searchSelectedCard: MarketCard?
     @AppStorage("popalpha.market.hero.dismissed.v1") private var isMarketHeroDismissed = false
     /// Card pushed by tapping a row in ForYou / MarketPulse / Community.

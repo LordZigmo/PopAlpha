@@ -423,6 +423,11 @@ struct MarketPulseSection: View {
         .transition(.opacity.combined(with: .move(edge: .trailing)))
     }
 
+    /// Below this many cards, the premium-only daily "Top Movers" rail
+    /// (≥ $50, structurally sparse) is treated as too thin and the Movers
+    /// tab falls back to the richer live high-confidence movers.
+    private static let minMoversBeforeFallback = 3
+
     private func cards(for category: Category) -> [HomepageCardDTO] {
         // In JP-only mode the mover/pullback/mid/budget tabs read from
         // the JP-specific signal-board fields rather than the EN ones,
@@ -462,7 +467,20 @@ struct MarketPulseSection: View {
             // Lead rail — trusted EN cards; empty on older server builds.
             return signalBoard.marketWatch ?? []
         case .movers:
-            return signalBoard.topMovers.forWindow(selectedWindow)
+            // The daily "Top Movers" rail is premium-only (≥ $50) and
+            // structurally sparse — on a typical day a single ≥ $50 card
+            // qualifies per window, surfacing as a lonely 1-card rail
+            // (and, when the daily snapshot's stored change is clobbered
+            // by a flat canonical 24h metric, a misleading 0.0%). When the
+            // windowed list is thin, fall back to the live high-confidence
+            // movers (liquidity-gated gainers across price tiers) so the
+            // tab shows a real set of movers. Each card self-labels its
+            // own 24H/7D window, so the fallback stays honest.
+            let windowedMovers = signalBoard.topMovers.forWindow(selectedWindow)
+            if windowedMovers.count >= Self.minMoversBeforeFallback || highConfidenceMovers.isEmpty {
+                return windowedMovers
+            }
+            return highConfidenceMovers
         case .breakouts:
             // Prefer Phase 2 dedicated breakouts; fall back to momentum.
             return signalBoard.breakouts
