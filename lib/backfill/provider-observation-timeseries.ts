@@ -52,6 +52,7 @@ type MatchScanRow = {
 type PriceSnapshotStateRow = {
   provider_ref: string | null;
   observed_at: string;
+  price_value: number | null;
 };
 
 type CleanupSnapshotRow = {
@@ -250,11 +251,17 @@ function parseTrendAnchorPoints(
   return anchors;
 }
 
+// Prior-snapshot state per providerRef: the latest existing price_snapshots
+// row's observed_at + price_value. Feeds the history-point floor cadence in
+// shouldWriteHistoryPoint (warm/sparse/dormant), so threading both fields is
+// required — observed_at alone can't evaluate the material-move branch.
+type PriorSnapshotState = { observedAt: string; priceValue: number | null };
+
 async function loadExistingWriteState(
   provider: SupportedProvider,
   rows: CandidateRow[],
 ): Promise<{
-  snapshotObservedAtByProviderRef: Map<string, string>;
+  snapshotStateByProviderRef: Map<string, PriorSnapshotState>;
   writtenSnapshotHistoryKeys: Set<string>;
 }> {
   const supabase = dbAdmin();
@@ -274,13 +281,13 @@ async function loadExistingWriteState(
       .filter(Boolean),
   )];
 
-  const snapshotObservedAtByProviderRef = new Map<string, string>();
+  const snapshotStateByProviderRef = new Map<string, PriorSnapshotState>();
   const writtenSnapshotHistoryKeys = new Set<string>();
 
   if (providerRefs.length > 0) {
     const { data, error } = await supabase
       .from("price_snapshots")
-      .select("provider_ref, observed_at")
+      .select("provider_ref, observed_at, price_value")
       .eq("provider", provider)
       .in("provider_ref", providerRefs);
     if (error) throw new Error(`price_snapshots(load existing): ${error.message}`);
@@ -288,9 +295,12 @@ async function loadExistingWriteState(
     for (const row of (data ?? []) as PriceSnapshotStateRow[]) {
       const providerRef = String(row.provider_ref ?? "").trim();
       if (!providerRef || !row.observed_at) continue;
-      const existingObservedAt = snapshotObservedAtByProviderRef.get(providerRef) ?? null;
-      if (!existingObservedAt || existingObservedAt < row.observed_at) {
-        snapshotObservedAtByProviderRef.set(providerRef, row.observed_at);
+      const existing = snapshotStateByProviderRef.get(providerRef) ?? null;
+      if (!existing || existing.observedAt < row.observed_at) {
+        const priceValue = typeof row.price_value === "number" && Number.isFinite(row.price_value)
+          ? row.price_value
+          : null;
+        snapshotStateByProviderRef.set(providerRef, { observedAt: row.observed_at, priceValue });
       }
     }
   }
@@ -320,7 +330,7 @@ async function loadExistingWriteState(
   }
 
   return {
-    snapshotObservedAtByProviderRef,
+    snapshotStateByProviderRef,
     writtenSnapshotHistoryKeys,
   };
 }
@@ -335,6 +345,11 @@ async function loadCandidateRows(params: {
   rows: CandidateRow[];
   scanned: number;
   skippedAlreadyWritten: number;
+  // Prior-snapshot state for every selected providerRef, accumulated across
+  // scan pages. Threaded into the write loop so the history-point floor can
+  // see the prior observed_at + price. Empty when params.force is true (the
+  // floor intentionally fails open under force).
+  priorSnapshotByProviderRef: Map<string, PriorSnapshotState>;
 }> {
   const supabase = dbAdmin();
 
@@ -352,7 +367,7 @@ async function loadCandidateRows(params: {
 
     const { data: matchData, error: matchError } = await matchQuery.maybeSingle<MatchScanRow>();
     if (matchError) throw new Error(`provider_observation_matches(load by observationId): ${matchError.message}`);
-    if (!matchData) return { rows: [], scanned: 0, skippedAlreadyWritten: 0 };
+    if (!matchData) return { rows: [], scanned: 0, skippedAlreadyWritten: 0, priorSnapshotByProviderRef: new Map() };
 
     const { data: obsData, error: obsError } = await supabase
       .from("provider_normalized_observations")
@@ -361,7 +376,7 @@ async function loadCandidateRows(params: {
       .eq("provider", params.provider)
       .maybeSingle<ObservationRow>();
     if (obsError) throw new Error(`provider_normalized_observations(load by observationId): ${obsError.message}`);
-    if (!obsData) return { rows: [], scanned: 1, skippedAlreadyWritten: 0 };
+    if (!obsData) return { rows: [], scanned: 1, skippedAlreadyWritten: 0, priorSnapshotByProviderRef: new Map() };
 
     const providerKey = buildProviderCardMapKey(obsData.provider_card_id, obsData.provider_variant_id);
     const providerCardMapByKey = await loadProviderCardMapByKeys({
@@ -370,19 +385,28 @@ async function loadCandidateRows(params: {
     });
     const mapping = providerCardMapByKey.get(providerKey) ?? null;
     if (!mapping || mapping.mapping_status !== "MATCHED" || !mapping.canonical_slug) {
-      return { rows: [], scanned: 1, skippedAlreadyWritten: 0 };
+      return { rows: [], scanned: 1, skippedAlreadyWritten: 0, priorSnapshotByProviderRef: new Map() };
     }
 
+    // Single-observation path (targeted backfill): tier is left null so the
+    // policy fails open and writes — same as the prior behavior. No prior-
+    // snapshot state needed.
     return {
       rows: [{ mapping, observation: obsData, tier: null }],
       scanned: 1,
       skippedAlreadyWritten: 0,
+      priorSnapshotByProviderRef: new Map(),
     };
   }
 
   const selected: CandidateRow[] = [];
   let scanned = 0;
   let skippedAlreadyWritten = 0;
+  // Prior-snapshot state (observed_at + price_value) per providerRef for the
+  // rows we select, accumulated across scan pages so the write loop can engage
+  // the history-point floor. Populated only on the non-force path — under force
+  // the floor fails open and this map is left empty.
+  const priorSnapshotByProviderRef = new Map<string, PriorSnapshotState>();
   // Keyset cursor — see migration 20260504045000.
   let cursorUpdatedAt: string | null = null;
   let cursorObservationId: string | null = null;
@@ -481,14 +505,19 @@ async function loadCandidateRows(params: {
       if (!params.force && existingWriteState) {
         const providerRef = buildProviderRef(params.provider, row.observation.provider_variant_id);
         const historyVariantRef = buildHistoryVariantRef(row, params.provider);
-        const latestSnapshotObservedAt = existingWriteState.snapshotObservedAtByProviderRef.get(providerRef) ?? null;
+        const priorSnapshot = existingWriteState.snapshotStateByProviderRef.get(providerRef) ?? null;
         const historySnapshotKey = `${historyVariantRef}::${row.observation.observed_at}`;
-        const snapshotCurrent = latestSnapshotObservedAt !== null
-          && latestSnapshotObservedAt >= row.observation.observed_at;
+        const snapshotCurrent = priorSnapshot !== null
+          && priorSnapshot.observedAt >= row.observation.observed_at;
         const historyCurrent = existingWriteState.writtenSnapshotHistoryKeys.has(historySnapshotKey);
         if (snapshotCurrent && historyCurrent) {
           skippedAlreadyWritten += 1;
           continue;
+        }
+        // Carry the prior snapshot forward to the write loop so the
+        // history-point floor can compare ages + the material-move delta.
+        if (priorSnapshot) {
+          priorSnapshotByProviderRef.set(providerRef, priorSnapshot);
         }
       }
 
@@ -497,7 +526,7 @@ async function loadCandidateRows(params: {
     }
   }
 
-  return { rows: selected, scanned, skippedAlreadyWritten };
+  return { rows: selected, scanned, skippedAlreadyWritten, priorSnapshotByProviderRef };
 }
 
 async function cleanupStaleProviderVariantWrites(params: {
@@ -849,16 +878,18 @@ export async function runProviderObservationTimeseries(opts: {
       // point. Snapshots are still upserted above (cheap, used by the
       // homepage). Anchor history points stay coupled to the snapshot
       // history point — if we skip the snapshot entry, we skip its
-      // anchors too. For sparse/dormant the policy returns false; for
-      // warm without per-row last-snapshot state visible here, the
-      // policy currently falls through to "write" (acceptable — the
-      // sparse/dormant skip is the biggest cohort).
+      // anchors too. The floor cadence (warm/sparse/dormant) needs the
+      // prior snapshot's observed_at + price; loadCandidateRows threads
+      // that state here per providerRef (non-force path only). Under
+      // force the map is empty → the floor fails open and we write
+      // everything, which is the correct behavior for a forced backfill.
+      const priorSnapshot = candidateResult.priorSnapshotByProviderRef.get(providerRef) ?? null;
       const writeHistory = shouldWriteHistoryPoint({
         tier: row.tier,
         observedAtIso: row.observation.observed_at,
         observedPriceUsd,
-        latestSnapshotObservedAtIso: null,
-        latestSnapshotPriceUsd: null,
+        latestSnapshotObservedAtIso: priorSnapshot?.observedAt ?? null,
+        latestSnapshotPriceUsd: priorSnapshot?.priceValue ?? null,
       });
       if (!writeHistory) {
         tieredHistorySkipped += 1;
