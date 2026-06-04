@@ -15,6 +15,7 @@ import {
 import { loadProfile } from "@/lib/personalization/server/recompute";
 import {
   getCollectorInsight,
+  getCollectorInsightTeaser,
   getPersonalizedExplanation,
 } from "@/lib/personalization/server/explanation";
 import { getPersonalizationCapability } from "@/lib/personalization/capability";
@@ -83,14 +84,11 @@ export async function GET(req: Request) {
     return response;
   }
 
-  if (!actor.clerk_user_id || !(await hasPro(actor.clerk_user_id))) {
-    const response = NextResponse.json(
-      { ok: false, error: "Pro subscription required." },
-      { status: 403 },
-    );
-    if (actor.needs_cookie_set) setActorCookieOnResponse(response, actor.actor_key);
-    return response;
-  }
+  // Pro gets the full read; everyone else gets a deterministic teaser (fit +
+  // summary lead only — the depth is omitted server-side in getCollectorInsight-
+  // Teaser, so it never leaves the API for a non-Pro actor). This powers the
+  // paywall's locked Collector Insight preview.
+  const isPro = !!actor.clerk_user_id && (await hasPro(actor.clerk_user_id));
 
   const url = new URL(req.url);
   const slug = parseSlug(url);
@@ -153,18 +151,21 @@ export async function GET(req: Request) {
     set_name: canonical.set_name,
   };
 
-  // Primary surface: the structured, USER-centered Collector Insight.
-  // `explanation` (legacy loose shape) is retained for the existing web
-  // component until it migrates to `collectorInsight`.
-  const [collectorInsight, explanation] = await Promise.all([
-    getCollectorInsight(actor, card, features, profile),
-    getPersonalizedExplanation(actor, card, features, profile),
-  ]);
+  // Primary surface: the structured, USER-centered Collector Insight. Pro gets
+  // the full read + the legacy `explanation`; free users get the deterministic
+  // teaser (fit + summary lead, no depth, no LLM cost) and no `explanation`.
+  const [collectorInsight, explanation] = isPro
+    ? await Promise.all([
+        getCollectorInsight(actor, card, features, profile),
+        getPersonalizedExplanation(actor, card, features, profile),
+      ])
+    : [await getCollectorInsightTeaser(actor, card, features, profile), null];
 
   const response = NextResponse.json({
     ok: true,
     enabled: true,
-    mode: capability.mode,
+    mode: isPro ? capability.mode : "template",
+    preview: !isPro,
     collectorInsight,
     explanation,
     profile_summary: profile
