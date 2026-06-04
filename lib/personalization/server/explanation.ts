@@ -14,6 +14,7 @@ import { PROFILE_VERSION } from "../constants";
 import { getPersonalizationCapability } from "../capability";
 import {
   buildCollectorInsight,
+  buildCollectorInsightTemplate,
   buildPersonalizedExplanation,
   type ExplanationCardInput,
   type MarketSignalContext,
@@ -453,4 +454,31 @@ export async function getCollectorInsight(
   );
   await writeCache(actor, card.canonical_slug, profileVersion, metricsHash, insight);
   return insight;
+}
+
+/**
+ * Free-preview teaser of the Collector Insight: the deterministic read trimmed
+ * to the fields the paywall's locked preview shows — fit label + score, the
+ * summary lead, and collector type. The depth (role in collection, tradeoff,
+ * best move, PopAlpha read, dataBasis) is deliberately OMITTED so it never
+ * reaches a non-Pro actor. This path never calls the LLM (always the cheap
+ * deterministic builder, regardless of the capability flag) and isn't cached —
+ * it's a one-shot template build.
+ */
+export async function getCollectorInsightTeaser(
+  actor: Actor,
+  card: ExplanationCardInput,
+  features: CardStyleFeatures,
+  profile: StyleProfile | null,
+): Promise<Partial<CollectorInsight>> {
+  const signals = await assembleCollectorSignals(actor, profile);
+  const full = buildCollectorInsightTemplate(card, features, profile, signals);
+  return {
+    fitLabel: full.fitLabel,
+    fitScore: full.fitScore,
+    collectorType: full.collectorType,
+    summary: full.summary,
+    confidence: full.confidence,
+    source: "template",
+  };
 }
