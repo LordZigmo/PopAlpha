@@ -447,6 +447,16 @@ function FinalCta() {
         <div className="mt-10">
           <WaitlistForm variant="final" />
         </div>
+
+        <p className="mt-8 text-[13px] text-[#7B8794]">
+          <Link
+            href="/compare"
+            className="inline-flex items-center gap-1 text-[#9EB2C2] transition hover:text-white"
+          >
+            Compare PopAlpha to other apps
+            <span aria-hidden="true">→</span>
+          </Link>
+        </p>
       </div>
     </section>
   );
@@ -461,6 +471,7 @@ function LandingFooter() {
         <p>&copy; {new Date().getFullYear()} PopAlpha. All rights reserved.</p>
         <div className="flex items-center gap-5">
           <Link href="/about" className="transition hover:text-white">About</Link>
+          <Link href="/compare" className="transition hover:text-white">Compare</Link>
           <Link href="/data" className="transition hover:text-white">Data</Link>
           <Link href="/sign-in" className="transition hover:text-white">Sign in</Link>
         </div>
