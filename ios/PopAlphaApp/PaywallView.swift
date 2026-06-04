@@ -69,6 +69,9 @@ struct PaywallView: View {
     var personalization = Personalization()
 
     @State private var selectedProductID: String = PremiumProducts.proYearly
+    /// Drives the trial-start celebration overlay before the paywall
+    /// auto-dismisses on a successful subscribe.
+    @State private var showTrialSuccess = false
     @State private var isPurchasing: Bool = false
     @State private var errorMessage: String? = nil
     @State private var pendingMessage: String? = nil
@@ -183,6 +186,10 @@ struct PaywallView: View {
                 .padding(.top, 4)
                 .padding(.bottom, 20)
             }
+
+            if showTrialSuccess {
+                trialSuccessOverlay
+            }
         }
         .task {
             // Products are usually pre-loaded at App.task; trigger again
@@ -214,9 +221,10 @@ struct PaywallView: View {
             }
         }
         .onChange(of: gate.isPro) { _, isProNow in
-            // Auto-dismiss the moment the user becomes pro (purchase or
-            // restore), so they don't have to tap close.
-            if isProNow { dismiss() }
+            // Auto-dismiss the moment the user becomes pro — but NOT while the
+            // trial-start celebration is playing (the subscribe path drives its
+            // own animated dismiss). This still covers the restore path.
+            if isProNow && !showTrialSuccess { dismiss() }
         }
         .onAppear {
             guard !didFireViewedEvent else { return }
@@ -301,6 +309,13 @@ struct PaywallView: View {
     /// ROI hook — for a money-decision app, "Pro pays for itself" is the
     /// strongest universal frame.
     private var heroHeadline: String {
+        // Collector-insight surface (a specific card): continue the read the
+        // user tapped, framed around fit/identity — never price. (Gated on a
+        // card name so the portfolio-radar surface, which also uses
+        // .collectorProfile but supplies portfolioValue, keeps its own copy.)
+        if context == .collectorProfile, let card = personalization.cardName {
+            return "See how \(card) fits your collection."
+        }
         if let value = personalization.portfolioValue, value > 0 {
             return "Your collection is worth \(value.formatted(.currency(code: "USD").precision(.fractionLength(0))))."
         }
@@ -322,6 +337,12 @@ struct PaywallView: View {
     /// Smaller supporting line. When personalized, it carries the ROI + the
     /// mechanism; otherwise it's the per-context detail.
     private var heroSubheadline: String {
+        // Collector-insight surface: lead with the free-scanning reassurance —
+        // it kills the "wait, are scans paywalled?" objection right at the
+        // decision — then the intelligence frame (not price/ROI).
+        if context == .collectorProfile, personalization.cardName != nil {
+            return "Scanning stays unlimited and free. Pro unlocks the intelligence behind every card."
+        }
         if personalization.portfolioValue != nil || personalization.cardName != nil {
             return "One better buy or sell pays for a year of Pro — with unlimited AI analysis, market signals, and price alerts."
         }
@@ -339,26 +360,82 @@ struct PaywallView: View {
         }
     }
 
+    // MARK: - Trial-start celebration
+
+    /// Cue under the checkmark — names the card when we have it.
+    private var successSubtitle: String {
+        if context == .collectorProfile, let card = personalization.cardName {
+            return "Unlocking your read on \(card)…"
+        }
+        return "Unlocking your Collector Insights…"
+    }
+
+    /// Brief celebratory beat the instant a subscribe succeeds, before the
+    /// paywall dismisses — rewards the commit and signals the read is loading.
+    @ViewBuilder
+    private var trialSuccessOverlay: some View {
+        ZStack {
+            PA.Colors.background.opacity(0.97).ignoresSafeArea()
+            VStack(spacing: 18) {
+                ZStack {
+                    Circle()
+                        .fill(PA.Colors.accentSoft)
+                        .frame(width: 116, height: 116)
+                        .scaleEffect(showTrialSuccess ? 1 : 0.3)
+                    ForEach(0..<6, id: \.self) { i in
+                        Image(systemName: "sparkle")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(PA.Colors.gold)
+                            .offset(y: -66)
+                            .rotationEffect(.degrees(Double(i) / 6 * 360))
+                            .scaleEffect(showTrialSuccess ? 1 : 0.1)
+                            .opacity(showTrialSuccess ? 1 : 0)
+                    }
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 68, weight: .bold))
+                        .foregroundStyle(PA.Colors.accent)
+                        .scaleEffect(showTrialSuccess ? 1 : 0.2)
+                        .rotationEffect(.degrees(showTrialSuccess ? 0 : -25))
+                }
+                Text("You're in.")
+                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                    .foregroundStyle(PA.Colors.text)
+                Text(successSubtitle)
+                    .font(.system(size: 14))
+                    .foregroundStyle(PA.Colors.textSecondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(40)
+        }
+        .transition(.opacity)
+    }
+
     // MARK: - Benefits
 
     private var benefits: some View {
-        // Order is intentional: lead with the more differentiated and
-        // emotionally compelling value (insights > signals > alerts).
+        // Reinforcement below the decision — what Pro unlocks, framed as
+        // understanding/identity (not data/price). Leads with the most
+        // differentiated value.
         VStack(spacing: 8) {
             benefitRow(
                 icon: "person.crop.square.filled.and.at.rectangle",
                 title: "Collector Insights",
-                subtitle: "See your radar profile, collection style, and AI reads tuned to the cards you own.",
+                subtitle: "Whether a card is you — how it fits your style, your gaps, and your next move."
+            )
+            benefitRow(
+                icon: "sparkles",
+                title: "AI Market Briefs",
+                subtitle: "Why a card's moving, in plain English — the story behind the number."
             )
             benefitRow(
                 icon: "chart.line.uptrend.xyaxis",
-                title: "Pro Market Signals",
-                subtitle: "See which cards are gaining momentum, breaking out, or moving into better buy ranges.",
+                title: "Collection Signals",
+                subtitle: "What's quietly gaining steam across the sets you actually collect."
             )
             benefitRow(
                 icon: "bell.badge",
-                title: "Price Alerts",
-                subtitle: "Know when watched cards move, break out, or reach a better buy range.",
+                title: "Opportunity Alerts",
+                subtitle: "A nudge the moment a card you're watching hits one worth acting on."
             )
         }
     }
@@ -647,6 +724,13 @@ struct PaywallView: View {
     }
 
     private var ctaText: String {
+        // Collector-insight surface: remind them exactly what the tap delivers.
+        if context == .collectorProfile, personalization.cardName != nil {
+            switch selectedTrialState {
+            case .eligible, .unknown: return "Start Free Trial — See My Read"
+            case .noTrial:            return "Unlock My Read"
+            }
+        }
         switch selectedTrialState {
         case .eligible: return "Start 7-day free trial"
         case .unknown:  return "Try 7 days free"
@@ -732,16 +816,15 @@ struct PaywallView: View {
                 subscribedProps["was_trial"] = isTrialOffer
                 subscribedProps["display_price"] = product.displayPrice
                 AnalyticsService.shared.capture(.paywallSubscribed, properties: subscribedProps)
-                // Dismiss explicitly so the paywall closes immediately
-                // after the system purchase sheet does. The onChange
-                // handler on gate.isPro is a safety net (covers the
-                // restore path), but real-device tests showed the
-                // observation chain (StoreKit → Transaction.finish →
-                // refreshStatus → @Published store.status → Combine
-                // sink → gate.isPro → onChange → dismiss) sometimes
-                // races with view re-render and the user briefly sees
-                // the paywall again. Calling dismiss directly removes
-                // that gap.
+                // Celebrate the commit before closing — a brief beat that
+                // rewards the decision and cues the read is unlocking. The
+                // gate.isPro onChange is gated off while this plays so the two
+                // dismiss paths don't race (real-device note from the prior fix).
+                PAHaptics.tap()
+                withAnimation(.spring(response: 0.55, dampingFraction: 0.7)) {
+                    showTrialSuccess = true
+                }
+                try? await Task.sleep(nanoseconds: 1_600_000_000)
                 dismiss()
             case .userCancelled:
                 var failProps = paywallEventProps
