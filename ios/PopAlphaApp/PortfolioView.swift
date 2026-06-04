@@ -354,21 +354,35 @@ struct PortfolioView: View {
     private var portfolioContent: some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(spacing: 28) {
-                // 1. Hero — totals, P&L, sparkline.
+                // 1. Collector identity — the type is pinned to the TOP
+                // of the page so the signed-in layout matches the
+                // logged-out PortfolioDemoView (identity → hero → radar →
+                // insights). Gated on the same freemium threshold as the
+                // analytics sections below; the radar + AI feed follow the
+                // hero. Renders as its own CollectorIdentityCard (the same
+                // surface the demo uses) rather than reverting to the
+                // merged-into-radar header.
+                if hasFullAnalysis, let identity = overview?.toIdentity() {
+                    CollectorIdentityCard(profile: identity)
+                }
+
+                // 2. Hero — totals, P&L, sparkline.
                 PortfolioHeroView(
                     summary: summary,
                     selectedWindow: $selectedWindow,
                     costBasisGap: costBasisGap
                 )
 
-                // 2. Below-threshold users see the unlock progress
+                // 3. Below-threshold users see the unlock progress
                 // teaser instead of the analytics sections.
                 if !hasFullAnalysis {
                     InsightsUnlockProgress(cardsAdded: positions.count)
                 }
 
-                // 3. Collector identity + radar + AI insights.
-                // Evolution lives at the bottom of the page.
+                // 4. Collector radar + AI insights. The identity/type
+                // card renders at the TOP of the page (above the hero);
+                // the radar + insights follow here. Evolution lives at the
+                // bottom of the page.
                 //
                 // Gating layers:
                 //   - hasFullAnalysis (>= 3 cards) is the freemium
@@ -380,13 +394,12 @@ struct PortfolioView: View {
                 //     insights feed — that's hidden until upgrade.
                 if hasFullAnalysis {
                     if premiumGate.isPro {
-                        // Identity merges into the radar card's header
-                        // for Pro so the type + radar render as a single
-                        // screenshot-friendly surface.
+                        // Radar only — the collector type renders as its
+                        // own card at the top of the page (matching the
+                        // demo), so no merged identity header here.
                         if let radar = overview?.radarProfile {
                             CollectorRadarCard(
                                 profile: radar,
-                                identity: overview?.toIdentity(),
                                 badges: overview?.badges ?? []
                             )
                         }
@@ -400,17 +413,14 @@ struct PortfolioView: View {
                             )
                         }
                     } else {
-                        // Free w/ 3+ cards: identity stays as its own
-                        // card above the locked radar teaser. Merging
-                        // into the locked variant is a follow-up.
-                        if let identity = overview?.toIdentity() {
-                            CollectorIdentityCard(profile: identity)
-                        }
+                        // Free w/ 3+ cards: the identity/type card already
+                        // renders at the top of the page, so only the
+                        // locked radar teaser shows here.
                         CollectorRadarLockedCard(portfolioValue: summary.totalValue, cardCount: summary.cardCount)
                     }
                 }
 
-                // 4. Positions list ("Your Cards"), always shown when
+                // 5. Positions list ("Your Cards"), always shown when
                 // there are holdings.
                 if !positions.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
