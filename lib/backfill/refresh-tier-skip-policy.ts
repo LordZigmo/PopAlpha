@@ -1,32 +1,35 @@
 /**
  * lib/backfill/refresh-tier-skip-policy.ts
  *
- * Phase 3 of the tiered-refresh plan (2026-05-06). Stops the 5-table
- * write amplification on the ~12k sparse/dormant cards whose prices
- * aren't moving. Single source of truth for the per-tier decision so
- * timeseries and variant-metrics stages can't drift apart.
+ * Phase 3 of the tiered-refresh plan (2026-05-06), revised 2026-06-04.
+ * Bounds the 5-table write amplification on low-activity cards while
+ * keeping a usable price series for the 24h/7d change computation. Single
+ * source of truth for the per-tier decision so the timeseries and
+ * variant-metrics stages can't drift apart.
  *
- * What we skip per tier:
- *   hot      Always write everything (snapshot + history + variant_metrics).
- *   warm     Snapshot always. History + metrics only if the price moved
- *            materially OR the last write is >= 48h old (catch
- *            slow-changing cards before they drift out of the 30-day
- *            window).
- *   sparse   Snapshot always. Never write history points or variant_metrics —
- *            the data wouldn't be useful (rare-trade cards have noisy
- *            stats anyway, and the homepage rails read off the snapshot
- *            row, not history).
- *   dormant  Snapshot always (Phase 4 cuts the fetch entirely; until
- *            then we let the snapshot row record any incidental
- *            observation). Never write history or metrics.
+ * History points (price_history_points — the series the change metric reads):
+ *   hot      Always write.
+ *   warm     Floor cadence: write on a material price move OR when the last
+ *            write is >= 48h old.
+ *   sparse   Same floor cadence as warm. (Previously skipped history entirely,
+ *            which starved the 24h/7d change — with sparse never writing a
+ *            point, only ~117 EN cards had a computable 24h change. Writing on
+ *            the floor cadence rebuilds a daily-ish series so the change can
+ *            compute. Credit-neutral: only changes what we do with the
+ *            observations the pipeline has already fetched, not the fetch rate.)
+ *   dormant  Same floor cadence (Phase 4 will cut the fetch entirely; until
+ *            then any incidental observation follows the floor cadence).
+ *   unknown  Fail open — write (never seen this card; capture it).
  *
- * Snapshot row is intentionally always written for any non-NULL tier
- * because it's the source for the "Last sold $X · {date}" UX shipped
- * in Phase 2. Skipping it would freeze the as_of timestamp at the last
- * pre-Phase-3 fetch.
+ * variant_metrics are intentionally NOT changed by this revision: rare-trade
+ * stats stay too noisy to be useful, so sparse/dormant still skip them
+ * (see shouldRefreshVariantMetrics).
  *
- * Env: PIPELINE_TIER_SKIP_ENABLED. Default ON. Set to "false" to fall
- * through to today's "always write" behavior across both stages.
+ * Snapshot rows are always written for any non-NULL tier (the source for the
+ * "Last sold $X · {date}" UX); skipping would freeze the as_of timestamp.
+ *
+ * Env: PIPELINE_TIER_SKIP_ENABLED. Default ON. Set to "false" to fall through
+ * to unconditional "always write" across both stages.
  */
 
 export type RefreshTier = "hot" | "warm" | "sparse" | "dormant" | "unknown";
@@ -34,8 +37,12 @@ export type RefreshTier = "hot" | "warm" | "sparse" | "dormant" | "unknown";
 export const PIPELINE_TIER_SKIP_ENABLED =
   process.env.PIPELINE_TIER_SKIP_ENABLED !== "false";
 
-const WARM_PRICE_DELTA_PCT = 0.005;
-const WARM_MIN_REWRITE_AGE_MS = 48 * 60 * 60 * 1000;
+// Floor cadence for all non-hot tiers (warm/sparse/dormant): write a history
+// point when the price moved materially since the last write, or when the last
+// write is at least this old — so slow-moving cards still keep a series before
+// they drift out of the 24h/7d change windows.
+const FLOOR_PRICE_DELTA_PCT = 0.005;
+const FLOOR_MIN_REWRITE_AGE_MS = 48 * 60 * 60 * 1000;
 
 function normalizeTier(value: string | null | undefined): RefreshTier {
   if (value === "hot" || value === "warm" || value === "sparse" || value === "dormant") {
@@ -59,24 +66,26 @@ export function shouldWriteHistoryPoint(input: {
   if (!PIPELINE_TIER_SKIP_ENABLED) return true;
   const tier = normalizeTier(input.tier);
   if (tier === "hot") return true;
-  if (tier === "sparse" || tier === "dormant") return false;
   if (tier === "unknown") return true; // fail open — never seen this card before, capture it
-  // warm: write only on material change or stale prior write
+  // warm / sparse / dormant: floor cadence — write on a material price move OR
+  // when the prior write is >= 48h old, so every non-hot card keeps a daily-ish
+  // price series for the 24h/7d change computation. (sparse/dormant used to
+  // return false here, which starved the change metric.)
   const lastTsMs = input.latestSnapshotObservedAtIso
     ? new Date(input.latestSnapshotObservedAtIso).getTime()
     : null;
   const observedTsMs = new Date(input.observedAtIso).getTime();
   if (lastTsMs === null || !Number.isFinite(lastTsMs)) return true;
-  if (Number.isFinite(observedTsMs) && observedTsMs - lastTsMs >= WARM_MIN_REWRITE_AGE_MS) return true;
+  if (Number.isFinite(observedTsMs) && observedTsMs - lastTsMs >= FLOOR_MIN_REWRITE_AGE_MS) return true;
   if (input.latestSnapshotPriceUsd === null || input.latestSnapshotPriceUsd <= 0) return true;
   const deltaPct = Math.abs(input.observedPriceUsd - input.latestSnapshotPriceUsd) / input.latestSnapshotPriceUsd;
-  return deltaPct >= WARM_PRICE_DELTA_PCT;
+  return deltaPct >= FLOOR_PRICE_DELTA_PCT;
 }
 
 /**
  * Decide whether to refresh variant_metrics for a touched canonical
  * card. Hot always; warm only on material change since last metrics
- * write; sparse/dormant never.
+ * write; sparse/dormant never (rare-trade stats stay too noisy).
  */
 export function shouldRefreshVariantMetrics(input: {
   tier: string | null | undefined;
