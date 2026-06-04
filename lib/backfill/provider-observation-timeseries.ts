@@ -940,7 +940,16 @@ export async function runProviderObservationTimeseries(opts: {
       // threads that floor reference here keyed by historyVariantRef
       // (non-force path only). Under force the map is empty → the floor
       // fails open and we write everything, correct for a forced backfill.
-      const latestSnapshotHistory = candidateResult.latestSnapshotHistoryByVariantRef.get(historyVariantRef) ?? null;
+      const latestSnapshotHistoryRef = candidateResult.latestSnapshotHistoryByVariantRef.get(historyVariantRef) ?? null;
+      // Ignore a same/future-ts reference: the floor measures the gap since the last
+      // STRICTLY-PRIOR snapshot history write. A reference at or after this
+      // observation's observed_at (a backdated or out-of-order observation) would
+      // zero/negate the age delta and wrongly suppress this write, so treat it as
+      // "no prior point" → the floor fails open and we write.
+      const latestSnapshotHistory =
+        latestSnapshotHistoryRef && latestSnapshotHistoryRef.ts < row.observation.observed_at
+          ? latestSnapshotHistoryRef
+          : null;
       const writeHistory = shouldWriteHistoryPoint({
         tier: row.tier,
         observedAtIso: row.observation.observed_at,
