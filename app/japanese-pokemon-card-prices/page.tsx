@@ -82,9 +82,9 @@ const SECTIONS: BreakdownSection[] = [
     ],
   },
   {
-    heading: "📈 EN vs JP: the same card, two markets",
+    heading: "🌍 English Cards vs Japanese Cards: Different Markets",
     paragraphs: [
-      "Because the two markets move independently, PopAlpha tracks both and can surface where Japanese and English prices diverge — useful if you buy or sell across regions.",
+      "PopAlpha uses English market data for English cards and Japanese market data for Japanese cards. Rather than converting one market into another, PopAlpha matches each card to the market where that version actually trades.",
     ],
   },
 ];
