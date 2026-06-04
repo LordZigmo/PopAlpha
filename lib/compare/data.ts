@@ -279,7 +279,7 @@ const BEST_FREE_TCG_SCANNER: ComparisonEntry = {
       bestFor: "Best for: collectors tracking many games and collectibles in one portfolio.",
       notes: [
         "Known for broad multi-collectible portfolio tracking",
-        "Scanning is offered; free limits vary by plan",
+        "Scanning is offered, but unlimited scanning requires the paid PRO plan — free scanning is capped",
         "Less Pokémon-specific market depth than a focused app",
       ],
     },
@@ -290,6 +290,7 @@ const BEST_FREE_TCG_SCANNER: ComparisonEntry = {
       bestFor: "Best for: players who scan across multiple trading card games.",
       notes: [
         "Known for scanning across several TCGs",
+        "Free plan caps scanning at 200 scans/month and a 60-card collection; unlimited scanning needs a paid plan",
         "Useful if your collection spans many games",
         "Pokémon market intelligence is not its main focus",
       ],
@@ -311,7 +312,7 @@ const BEST_FREE_TCG_SCANNER: ComparisonEntry = {
       heading: "🔎 What makes a free scanner actually useful",
       paragraphs: [
         "A good free scanner does three things well: it identifies cards quickly from your camera, it keeps scanning genuinely free, and it gives you something useful after the scan — a real price, not just a name.",
-        "The catch with many 'free' scanners is that identifying a card is free, but prices, history, or portfolio features sit behind a paywall. PopAlpha keeps scanning unlimited and free, and adds pricing and market context on top.",
+        "The catch with many 'free' scanners is that scanning itself is often metered — capped at a number of scans per month, or a small collection size — and prices, history, or portfolio features can sit behind a paywall. For example, Ludex's free plan caps you at 200 scans a month and 60 cards, and Collectr reserves unlimited scanning for its paid PRO plan. PopAlpha keeps scanning unlimited and free, and adds pricing and market context on top.",
       ],
     },
     {
@@ -329,7 +330,7 @@ const BEST_FREE_TCG_SCANNER: ComparisonEntry = {
     {
       heading: "📝 A note on free tiers",
       paragraphs: [
-        "Free tiers and features change often, so check each app's current terms before you commit. The comparisons here describe each app's general focus rather than a fixed feature list.",
+        "Free tiers and limits change often, so check each app's current terms before you commit — the figures here reflect each app's published plans as of mid-2026.",
       ],
     },
   ],
@@ -347,7 +348,7 @@ const BEST_FREE_TCG_SCANNER: ComparisonEntry = {
     {
       question: "Do free card scanners limit how many cards you can scan?",
       answer:
-        "Some do, or they paywall the prices after identifying the card. PopAlpha's scanning is unlimited and free, and you can browse prices and a small portfolio for free too.",
+        "Some do — for example, capping free scans per month or limiting how many cards you can store — or they paywall the prices after identifying the card. PopAlpha's scanning is unlimited and free, and you can browse prices and a small portfolio for free too.",
     },
     {
       question: "Does PopAlpha scan Japanese cards?",
@@ -364,7 +365,7 @@ const BEST_FREE_TCG_SCANNER: ComparisonEntry = {
     "popalpha-vs-pricecharting",
     "best-pokemon-card-price-app",
   ],
-  updated: "2026-06-03",
+  updated: "2026-06-04",
 };
 
 const BEST_POKEMON_CARD_PRICE_APP: ComparisonEntry = {
