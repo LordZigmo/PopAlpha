@@ -26,7 +26,7 @@ const POPALPHA_VS_COLLECTR: ComparisonEntry = {
     {
       feature: "📷 Free card scanning",
       popalpha: "Yes — unlimited, never paywalled",
-      competitor: "Offered; scan limits vary by plan",
+      competitor: "Offered, but unlimited scanning requires paid PRO",
     },
     {
       feature: "🎯 Primary focus",
@@ -80,7 +80,7 @@ const POPALPHA_VS_COLLECTR: ComparisonEntry = {
       paragraphs: [
         "PopAlpha is built specifically for the Pokémon market, so it goes deeper on the things Pokémon collectors actually trade on: variant-level pricing, RAW versus graded premiums, and a daily read on which cards and sets are moving.",
         "Japanese cards are a standout. PopAlpha prices them natively from Yahoo! Auctions Japan and Snkrdunk and uses whichever source has more recent sample sales, instead of converting a single English price into yen. For collectors of Japanese Pokémon cards, that market-native pricing is hard to find elsewhere.",
-        "Scanning stays free and unlimited. You can identify cards as fast as you can point your camera, and the optional Pro tier layers market intelligence on top rather than gating the scanner.",
+        "Scanning stays free and unlimited. You can identify cards as fast as you can point your camera, and the optional Pro tier layers market intelligence on top rather than gating the scanner. Collectr, by contrast, reserves unlimited scanning for its paid PRO plan — its free scanning is capped.",
       ],
     },
     {
@@ -128,7 +128,7 @@ const POPALPHA_VS_COLLECTR: ComparisonEntry = {
     "best-free-tcg-scanner",
     "best-pokemon-card-price-app",
   ],
-  updated: "2026-06-03",
+  updated: "2026-06-04",
 };
 
 const POPALPHA_VS_PRICECHARTING: ComparisonEntry = {
