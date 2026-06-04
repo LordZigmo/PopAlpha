@@ -425,8 +425,8 @@ const BEST_POKEMON_CARD_PRICE_APP: ComparisonEntry = {
     },
     {
       rank: 4,
-      name: "eBay sold listings",
-      oneLiner: "The raw sold comps many collectors check by hand.",
+      name: "Checking sold comps by hand",
+      oneLiner: "The raw recent sold prices collectors look up themselves.",
       bestFor: "Best for: verifying a specific recent sale yourself.",
       notes: [
         "The closest thing to ground-truth recent sales",
