@@ -328,31 +328,45 @@ async function loadExistingWriteState(
     // 7d per candidate variant_ref.
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
     const observedAtSet = new Set(observedAts);
-    const { data, error } = await supabase
-      .from("price_history_points")
-      .select("variant_ref, ts, price, source_window")
-      .eq("provider", provider)
-      .eq("source_window", "snapshot")
-      .gte("ts", sevenDaysAgo)
-      .in("variant_ref", historyVariantRefs);
-    if (error) throw new Error(`price_history_points(load existing): ${error.message}`);
+    // Per-variant_ref the set is small (~1 point/day × 7d), but the TOTAL across
+    // all candidate variant_refs can exceed PostgREST's default 1000-row cap — and
+    // a silent truncation there would drop floor references → spurious history
+    // writes. So page the lookup with a stable order and accumulate across pages
+    // (the latest-per-variant_ref + dedup keys are built from the full set
+    // regardless of how rows split across page boundaries).
+    const HISTORY_PAGE_SIZE = 1000;
+    for (let from = 0; ; from += HISTORY_PAGE_SIZE) {
+      const { data, error } = await supabase
+        .from("price_history_points")
+        .select("variant_ref, ts, price, source_window")
+        .eq("provider", provider)
+        .eq("source_window", "snapshot")
+        .gte("ts", sevenDaysAgo)
+        .in("variant_ref", historyVariantRefs)
+        .order("variant_ref", { ascending: true })
+        .order("ts", { ascending: false })
+        .range(from, from + HISTORY_PAGE_SIZE - 1);
+      if (error) throw new Error(`price_history_points(load existing): ${error.message}`);
 
-    for (const row of (data ?? []) as PriceHistoryStateRow[]) {
-      const variantRef = String(row.variant_ref ?? "").trim();
-      const ts = String(row.ts ?? "").trim();
-      if (!variantRef || !ts) continue;
-      // (1) Exact already-written key — only meaningful for this cycle's ts values.
-      if (observedAtSet.has(ts)) {
-        writtenSnapshotHistoryKeys.add(`${variantRef}::${ts}`);
+      const pageRows = (data ?? []) as PriceHistoryStateRow[];
+      for (const row of pageRows) {
+        const variantRef = String(row.variant_ref ?? "").trim();
+        const ts = String(row.ts ?? "").trim();
+        if (!variantRef || !ts) continue;
+        // (1) Exact already-written key — only meaningful for this cycle's ts values.
+        if (observedAtSet.has(ts)) {
+          writtenSnapshotHistoryKeys.add(`${variantRef}::${ts}`);
+        }
+        // (2) Latest snapshot-source point per variant_ref → the floor reference.
+        const existing = latestSnapshotHistoryByVariantRef.get(variantRef) ?? null;
+        if (!existing || existing.ts < ts) {
+          const price = typeof row.price === "number" && Number.isFinite(row.price)
+            ? row.price
+            : null;
+          latestSnapshotHistoryByVariantRef.set(variantRef, { ts, price });
+        }
       }
-      // (2) Latest snapshot-source point per variant_ref → the floor reference.
-      const existing = latestSnapshotHistoryByVariantRef.get(variantRef) ?? null;
-      if (!existing || existing.ts < ts) {
-        const price = typeof row.price === "number" && Number.isFinite(row.price)
-          ? row.price
-          : null;
-        latestSnapshotHistoryByVariantRef.set(variantRef, { ts, price });
-      }
+      if (pageRows.length < HISTORY_PAGE_SIZE) break;
     }
   }
 
