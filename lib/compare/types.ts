@@ -24,6 +24,14 @@ export type CtaCopy = {
   };
 };
 
+/** External citation shown in the page's "Sources" list. Competitor links use nofollow. */
+export type ComparisonSource = {
+  label: string;
+  url: string;
+  /** Adds rel="nofollow" — for competitor pages we cite but don't endorse. */
+  nofollow?: boolean;
+};
+
 type ComparisonBase = {
   /** URL slug, no leading slash, e.g. "popalpha-vs-collectr". */
   slug: string;
@@ -41,6 +49,8 @@ type ComparisonBase = {
   related: string[];
   /** ISO date (YYYY-MM-DD); shown as "Updated …" and used for sitemap lastModified. */
   updated: string;
+  /** Optional external citations (e.g., a competitor's own pricing page backing a stated figure). */
+  sources?: ComparisonSource[];
 };
 
 /** Head-to-head: "PopAlpha vs <competitor>". */

@@ -35,7 +35,7 @@ const POPALPHA_VS_COLLECTR: ComparisonEntry = {
     },
     {
       feature: "💵 English card pricing",
-      popalpha: "Scrydex, PriceCharting, eBay sold listings",
+      popalpha: "PopAlpha market feeds (real US sold data)",
       competitor: "Aggregated market pricing",
     },
     {
@@ -129,6 +129,9 @@ const POPALPHA_VS_COLLECTR: ComparisonEntry = {
     "best-pokemon-card-price-app",
   ],
   updated: "2026-06-04",
+  sources: [
+    { label: "Collectr — PRO membership (plan limits)", url: "https://getcollectr.com/pro", nofollow: true },
+  ],
 };
 
 const POPALPHA_VS_PRICECHARTING: ComparisonEntry = {
@@ -157,7 +160,7 @@ const POPALPHA_VS_PRICECHARTING: ComparisonEntry = {
     },
     {
       feature: "💵 English card pricing",
-      popalpha: "Scrydex, PriceCharting, eBay sold listings",
+      popalpha: "PopAlpha market feeds (real US sold data)",
       competitor: "Yes — a core strength",
     },
     {
@@ -206,9 +209,9 @@ const POPALPHA_VS_PRICECHARTING: ComparisonEntry = {
       ],
     },
     {
-      heading: "🔗 They actually work together",
+      heading: "🔗 Use them together",
       paragraphs: [
-        "It isn't strictly either/or. PopAlpha uses PriceCharting as one of several English pricing inputs, alongside Scrydex and eBay sold listings. Think of PriceCharting as one source feeding the market price PopAlpha shows you after a scan.",
+        "It isn't strictly either/or. PriceCharting is great for broad reference lookups across many categories, while PopAlpha turns real US sold data into a conservative market price the moment you scan a Pokémon card — and adds Japanese pricing most databases don't cover. Many collectors use a database for research and PopAlpha for the card in hand.",
       ],
     },
   ],
@@ -231,7 +234,7 @@ const POPALPHA_VS_PRICECHARTING: ComparisonEntry = {
     {
       question: "Should I use PopAlpha or PriceCharting?",
       answer:
-        "Use PopAlpha to scan cards and get Pokémon-specific pricing and signals on your phone. Use PriceCharting for broad web price lookups across many collectibles. They can complement each other — PopAlpha even draws on PriceCharting for some English prices.",
+        "Use PopAlpha to scan cards and get Pokémon-specific pricing and signals on your phone. Use PriceCharting for broad web price lookups across many collectibles. They can complement each other — many collectors use a database for research and PopAlpha for the card in hand.",
     },
   ],
   cta: {
@@ -267,7 +270,7 @@ const BEST_FREE_TCG_SCANNER: ComparisonEntry = {
       bestFor: "Best for: Pokémon collectors who want unlimited free scanning plus pricing and signals.",
       notes: [
         "Unlimited free scanning — identifying cards is never paywalled",
-        "English pricing (Scrydex, PriceCharting, eBay sold) plus market-native Japanese prices (Yahoo! Auctions Japan, Snkrdunk)",
+        "English pricing from PopAlpha market feeds, plus market-native Japanese prices (Yahoo! Auctions Japan, Snkrdunk)",
         "Daily AI market brief and per-card summaries (3 free, then Pro)",
         "iPhone app in early access, with a live web market today",
       ],
@@ -303,7 +306,7 @@ const BEST_FREE_TCG_SCANNER: ComparisonEntry = {
       notes: [
         "Strong for reference prices and marketplaces",
         "Built around databases/marketplaces, not camera-first scanning",
-        "PopAlpha actually draws on these kinds of sources for its English prices",
+        "PopAlpha gives you a market price right after a scan, instead of a manual lookup",
       ],
     },
   ],
@@ -366,6 +369,10 @@ const BEST_FREE_TCG_SCANNER: ComparisonEntry = {
     "best-pokemon-card-price-app",
   ],
   updated: "2026-06-04",
+  sources: [
+    { label: "Collectr — PRO membership (plan limits)", url: "https://getcollectr.com/pro", nofollow: true },
+    { label: "Ludex — membership plans", url: "https://www.ludex.com/membership/", nofollow: true },
+  ],
 };
 
 const BEST_POKEMON_CARD_PRICE_APP: ComparisonEntry = {
@@ -424,7 +431,7 @@ const BEST_POKEMON_CARD_PRICE_APP: ComparisonEntry = {
       notes: [
         "The closest thing to ground-truth recent sales",
         "Requires manual averaging and condition judgement",
-        "PopAlpha builds on eBay sold listings (plus other sources) so you don't have to",
+        "PopAlpha turns real US sold data into a market price for you, so you don't have to average comps by hand",
       ],
     },
   ],
@@ -451,7 +458,7 @@ const BEST_POKEMON_CARD_PRICE_APP: ComparisonEntry = {
     {
       heading: "📝 A note on sources",
       paragraphs: [
-        "Prices come from third-party sources (including Scrydex, PriceCharting, and eBay sold listings for English, and Yahoo! Auctions Japan and Snkrdunk for Japanese) and can change. Always sanity-check a high-value purchase against recent sales.",
+        "English prices come from PopAlpha's own market feeds; Japanese prices come natively from Yahoo! Auctions Japan and Snkrdunk. Prices can change, so always sanity-check a high-value purchase against recent sales.",
       ],
     },
   ],
