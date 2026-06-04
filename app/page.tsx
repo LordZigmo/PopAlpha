@@ -38,7 +38,7 @@ export default async function Home() {
   return (
     <div className="landing-shell min-h-screen bg-[#060608] text-[#F0F0F0]">
       <SiteHeader
-        navItems={[]}
+        navItems={[{ label: "Compare", href: "/compare" }]}
         primaryCta={{ label: "Join Waitlist", href: "#waitlist" }}
         showSignIn={false}
         logoPriority
