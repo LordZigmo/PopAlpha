@@ -25,12 +25,6 @@ function parseStringArg(argv, name, fallback = "") {
 function providerConfig() {
   return [
     {
-      provider: "JUSTTCG",
-      endpoint: "/cards",
-      route: "/api/cron/normalize-justtcg-raw",
-      extraParams: { allowRetired: "1" },
-    },
-    {
       provider: "SCRYDEX",
       endpoint: "/en/expansions/{id}/cards",
       route: "/api/cron/normalize-pokemontcg-raw",
