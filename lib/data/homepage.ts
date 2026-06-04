@@ -2113,10 +2113,22 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
         : card.change_window === "7D"
           ? marketPulse.changePct7d
           : marketPulse.changePct;
-      if (currentChange === null || card.change_window === null) return [];
+      // Prefer the fresh canonical change — it keeps the homepage in step
+      // with the detail page when a daily snapshot goes stale (a stale
+      // daily +18% gets corrected to the current +4%). But fall back to the
+      // daily compute's own change when the canonical one is missing or
+      // flat (0): the canonical aggregate can read 0.0% for a card that
+      // genuinely moved at the per-printing level — the granularity the
+      // daily compute ranked it on — so without this a real mover surfaced
+      // at a misleading 0.0% (e.g. N's Zoroark ex: per-printing +4.06% 24H
+      // but canonical 0.00%). Price + as-of still reprice via toCard below.
+      const effectiveChange = currentChange !== null && currentChange !== 0
+        ? currentChange
+        : card.change_pct;
+      if (effectiveChange === null || card.change_window === null) return [];
       return [toCard(card.slug, {
         mover_tier: card.mover_tier,
-        changePct: currentChange,
+        changePct: effectiveChange,
         changeWindow: card.change_window,
         preferOverrideChange: true,
         allowSparklineFallback: false,
