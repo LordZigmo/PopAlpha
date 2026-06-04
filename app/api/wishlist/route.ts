@@ -1,9 +1,17 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require";
-import { createServerSupabaseUserClient } from "@/lib/db/user";
+import { dbAdmin } from "@/lib/db/admin";
 import { getPostHogClient } from "@/lib/posthog-server";
 
 export const runtime = "nodejs";
+
+// Uses dbAdmin() + manual owner_id scoping, NOT the RLS user-client. The iOS
+// app authenticates with a Clerk Bearer JWT that Supabase RLS cannot validate
+// (no JWT template configured), so requesting_clerk_user_id() is null under the
+// user-client and the RLS insert with_check / select qual both fail — adds
+// never persist and the list reads back empty. requireUser() already verifies
+// identity; scoping every query by owner_id = auth.userId is equivalent to RLS.
+// Mirrors the established app/api/holdings/route.ts pattern.
 
 export type WishlistRow = {
   id: number;
@@ -23,7 +31,7 @@ export async function GET(req: Request) {
   const auth = await requireUser(req);
   if (!auth.ok) return auth.response;
 
-  const db = await createServerSupabaseUserClient();
+  const db = dbAdmin();
 
   const { data: items, error } = await db
     .from("wishlist_items")
@@ -107,7 +115,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "canonical_slug is required." }, { status: 400 });
   }
 
-  const db = await createServerSupabaseUserClient();
+  const db = dbAdmin();
 
   const { error } = await db
     .from("wishlist_items")
@@ -165,7 +173,7 @@ export async function DELETE(req: Request) {
     return NextResponse.json({ ok: false, error: "slug is required." }, { status: 400 });
   }
 
-  const db = await createServerSupabaseUserClient();
+  const db = dbAdmin();
 
   const { error } = await db
     .from("wishlist_items")

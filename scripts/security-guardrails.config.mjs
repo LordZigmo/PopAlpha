@@ -21,6 +21,10 @@ export const DBADMIN_ALLOWED_FILES = [
   "app/api/ebay/deletion-notification/route.ts",
   "app/api/holdings/route.ts",
   "app/api/holdings/bulk-import/route.ts",
+  // wishlist: user-owned writes manually scoped by owner_id; the RLS user-client
+  // can't satisfy requesting_clerk_user_id() for the iOS Clerk Bearer JWT (same
+  // reason as holdings). See the header comment in app/api/wishlist/route.ts.
+  "app/api/wishlist/route.ts",
   "app/api/iap/verify/route.ts",
   "app/api/me/route.ts",
   "app/api/personalization/events/route.ts",
@@ -62,6 +66,7 @@ export const DBADMIN_ALLOWED_ROUTE_KEYS = [
   "cards/[slug]/view",
   "holdings",
   "holdings/bulk-import",
+  "wishlist",
   "iap/verify",
   "me",
   "personalization/events",
