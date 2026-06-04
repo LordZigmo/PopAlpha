@@ -46,17 +46,28 @@ function listMigrationFiles() {
 }
 
 function latestViewDefinition(viewName) {
-  const needle = `create or replace view public.${viewName}`;
+  // Recognize both CREATE OR REPLACE VIEW and DROP VIEW + plain CREATE VIEW
+  // (the latter is required when a migration drops a column from the view).
+  const needles = [
+    `create or replace view public.${viewName}`,
+    `create view public.${viewName}`,
+  ];
   const files = listMigrationFiles();
   for (const filename of files.toReversed()) {
     const fullPath = path.join(MIGRATIONS_DIR, filename);
     const content = fs.readFileSync(fullPath, "utf8");
     const normalized = content.toLowerCase();
-    if (normalized.includes(needle)) {
+    if (needles.some((needle) => normalized.includes(needle))) {
       return { filename, content: normalized };
     }
   }
   return null;
+}
+
+// pg_get_viewdef-sourced bodies (DROP+CREATE migrations) drop the `public.`
+// schema qualifier hand-written bodies carry; normalize both sides.
+function stripSchema(text) {
+  return text.replaceAll("public.", "");
 }
 
 const violations = [];
@@ -66,8 +77,9 @@ for (const contract of REQUIRED_CONTRACTS) {
     violations.push(`${contract.view}: no create-or-replace definition found`);
     continue;
   }
+  const haystack = stripSchema(definition.content);
   for (const fragment of contract.fragments) {
-    if (!definition.content.includes(fragment.toLowerCase())) {
+    if (!haystack.includes(stripSchema(fragment.toLowerCase()))) {
       violations.push(`${contract.view}: ${definition.filename} is missing "${fragment}"`);
     }
   }
