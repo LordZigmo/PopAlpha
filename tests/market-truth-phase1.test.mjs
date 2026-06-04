@@ -3,8 +3,7 @@ import { resolveCanonicalMarketPulse } from "../lib/data/market.ts";
 import { loadJpPriceCoverageMap } from "../lib/data/jp-price-coverage.ts";
 
 export function runMarketTruthPhase1Tests() {
-  const justtcgOnly = resolveCanonicalMarketPulse({
-    justtcg_price: 1.25,
+  const noLivePrice = resolveCanonicalMarketPulse({
     scrydex_price: null,
     pokemontcg_price: null,
     market_price: null,
@@ -19,27 +18,25 @@ export function runMarketTruthPhase1Tests() {
     provider_price_changes_count_30d: 12,
     market_confidence_score: 92,
     market_low_confidence: false,
-    market_blend_policy: "SINGLE_PROVIDER",
+    market_blend_policy: "NO_PRICE",
     market_provenance: {
-      sourceMix: { justtcgWeight: 1, scrydexWeight: 0 },
-      sampleCounts7d: { justtcg: 7, scrydex: 0 },
+      sourceMix: { scrydexWeight: 0 },
+      sampleCounts7d: { scrydex: 0 },
     },
     change_pct_24h: 4.2,
     change_pct_7d: 6.8,
   });
 
-  assert.equal(justtcgOnly.justtcgPrice, null);
-  assert.equal(justtcgOnly.marketPrice, null);
-  assert.equal(justtcgOnly.marketPriceAsOf, null);
-  assert.equal(justtcgOnly.blendPolicy, "NO_PRICE");
-  assert.equal(justtcgOnly.lowConfidence, true);
-  assert.equal(justtcgOnly.marketStrengthScore, null);
-  assert.equal(justtcgOnly.marketDirection, null);
-  assert.deepEqual(justtcgOnly.sourceMix, { justtcgWeight: 0, scrydexWeight: 0 });
-  assert.deepEqual(justtcgOnly.sampleCounts7d, { justtcg: 0, scrydex: 0, total: 0 });
+  assert.equal(noLivePrice.marketPrice, null);
+  assert.equal(noLivePrice.marketPriceAsOf, null);
+  assert.equal(noLivePrice.blendPolicy, "NO_PRICE");
+  assert.equal(noLivePrice.lowConfidence, true);
+  assert.equal(noLivePrice.marketStrengthScore, null);
+  assert.equal(noLivePrice.marketDirection, null);
+  assert.deepEqual(noLivePrice.sourceMix, { scrydexWeight: 0 });
+  assert.deepEqual(noLivePrice.sampleCounts7d, { scrydex: 0, total: 0 });
 
   const blendedRow = resolveCanonicalMarketPulse({
-    justtcg_price: 1.25,
     scrydex_price: 1.01,
     pokemontcg_price: 1.01,
     market_price: 1.01,
@@ -54,22 +51,21 @@ export function runMarketTruthPhase1Tests() {
     provider_price_changes_count_30d: 10,
     market_confidence_score: 77,
     market_low_confidence: false,
-    market_blend_policy: "FALLBACK_STALE_OR_OUTLIER",
+    market_blend_policy: "SCRYDEX_PRIMARY",
     market_provenance: {
-      sourceMix: { justtcgWeight: 0.6, scrydexWeight: 0.4 },
-      sampleCounts7d: { justtcg: 11, scrydex: 4 },
+      sourceMix: { scrydexWeight: 1 },
+      sampleCounts7d: { scrydex: 4 },
     },
     change_pct_24h: null,
     change_pct_7d: 3.1,
   });
 
-  assert.equal(blendedRow.justtcgPrice, null);
   assert.equal(blendedRow.scrydexPrice, 1.01);
   assert.equal(blendedRow.pokemontcgPrice, null);
   assert.equal(blendedRow.marketPrice, 1.01);
   assert.equal(blendedRow.blendPolicy, "SCRYDEX_PRIMARY");
-  assert.deepEqual(blendedRow.sourceMix, { justtcgWeight: 0, scrydexWeight: 1 });
-  assert.deepEqual(blendedRow.sampleCounts7d, { justtcg: 0, scrydex: 4, total: 4 });
+  assert.deepEqual(blendedRow.sourceMix, { scrydexWeight: 1 });
+  assert.deepEqual(blendedRow.sampleCounts7d, { scrydex: 4, total: 4 });
   assert.equal(blendedRow.changePct, 3.1);
   assert.equal(blendedRow.changeWindow, "7D");
   assert.ok(blendedRow.marketStrengthScore !== null);
@@ -77,7 +73,6 @@ export function runMarketTruthPhase1Tests() {
 
   const enrichedFromVariantSignals = resolveCanonicalMarketPulse(
     {
-      justtcg_price: null,
       scrydex_price: 1.98,
       pokemontcg_price: null,
       market_price: 1.98,
@@ -94,8 +89,8 @@ export function runMarketTruthPhase1Tests() {
       market_low_confidence: false,
       market_blend_policy: "SCRYDEX_PRIMARY",
       market_provenance: {
-        sourceMix: { justtcgWeight: 0, scrydexWeight: 1 },
-        sampleCounts7d: { justtcg: 0, scrydex: 5 },
+        sourceMix: { scrydexWeight: 1 },
+        sampleCounts7d: { scrydex: 5 },
       },
       change_pct_24h: null,
       change_pct_7d: 63.63636363636363,
@@ -103,7 +98,7 @@ export function runMarketTruthPhase1Tests() {
     "MATCH",
     {
       canonical_slug: "journey-together-56-lillie-s-clefairy-ex",
-      provider: "JUSTTCG",
+      provider: "SCRYDEX",
       provider_trend_slope_7d: 0.0773078206122944,
       provider_cov_price_30d: 0.172906057805584,
       provider_price_relative_to_30d_range: 0.352941176470588,
@@ -119,7 +114,6 @@ export function runMarketTruthPhase1Tests() {
   assert.equal(enrichedFromVariantSignals.marketDirection, "bullish");
 
   const scrydexOnly = resolveCanonicalMarketPulse({
-    justtcg_price: null,
     scrydex_price: 0.94,
     pokemontcg_price: 0.94,
     market_price: 0.94,
@@ -136,8 +130,8 @@ export function runMarketTruthPhase1Tests() {
     market_low_confidence: false,
     market_blend_policy: "SCRYDEX_PRIMARY",
     market_provenance: {
-      sourceMix: { justtcgWeight: 0, scrydexWeight: 1 },
-      sampleCounts7d: { justtcg: 0, scrydex: 4 },
+      sourceMix: { scrydexWeight: 1 },
+      sampleCounts7d: { scrydex: 4 },
     },
     change_pct_24h: 5.6,
     change_pct_7d: 9.9,
@@ -154,7 +148,6 @@ export function runMarketTruthPhase1Tests() {
   assert.equal(scrydexOnly.marketDirection, "bullish");
 
   const bearishScrydex = resolveCanonicalMarketPulse({
-    justtcg_price: null,
     scrydex_price: 1.42,
     pokemontcg_price: 1.42,
     market_price: 1.42,
@@ -171,8 +164,8 @@ export function runMarketTruthPhase1Tests() {
     market_low_confidence: false,
     market_blend_policy: "SCRYDEX_PRIMARY",
     market_provenance: {
-      sourceMix: { justtcgWeight: 0, scrydexWeight: 1 },
-      sampleCounts7d: { justtcg: 0, scrydex: 8 },
+      sourceMix: { scrydexWeight: 1 },
+      sampleCounts7d: { scrydex: 8 },
     },
     change_pct_24h: -6.4,
     change_pct_7d: -11.8,
@@ -183,7 +176,6 @@ export function runMarketTruthPhase1Tests() {
   assert.equal(bearishScrydex.marketDirection, "bearish");
 
   const staleLiveCollapsed = resolveCanonicalMarketPulse({
-    justtcg_price: null,
     scrydex_price: null,
     pokemontcg_price: 0.98,
     market_price: null,
@@ -200,8 +192,8 @@ export function runMarketTruthPhase1Tests() {
     market_low_confidence: false,
     market_blend_policy: "NO_PRICE",
     market_provenance: {
-      sourceMix: { justtcgWeight: 0, scrydexWeight: 1 },
-      sampleCounts7d: { justtcg: 0, scrydex: 6 },
+      sourceMix: { scrydexWeight: 1 },
+      sampleCounts7d: { scrydex: 6 },
     },
     change_pct_24h: 4.1,
     change_pct_7d: 8.3,
@@ -214,8 +206,8 @@ export function runMarketTruthPhase1Tests() {
   assert.equal(staleLiveCollapsed.blendPolicy, "NO_PRICE");
   assert.equal(staleLiveCollapsed.marketStrengthScore, null);
   assert.equal(staleLiveCollapsed.marketDirection, null);
-  assert.deepEqual(staleLiveCollapsed.sourceMix, { justtcgWeight: 0, scrydexWeight: 0 });
-  assert.deepEqual(staleLiveCollapsed.sampleCounts7d, { justtcg: 0, scrydex: 0, total: 0 });
+  assert.deepEqual(staleLiveCollapsed.sourceMix, { scrydexWeight: 0 });
+  assert.deepEqual(staleLiveCollapsed.sampleCounts7d, { scrydex: 0, total: 0 });
   assert.equal(staleLiveCollapsed.changePct, null);
   assert.equal(staleLiveCollapsed.changeWindow, null);
 
@@ -241,8 +233,8 @@ export function runMarketTruthPhase1Tests() {
   assert.equal(jpNativeOnly.blendPolicy, "SNKRDUNK_PRIMARY");
   assert.equal(jpNativeOnly.confidenceScore, 92);
   assert.equal(jpNativeOnly.lowConfidence, false);
-  assert.deepEqual(jpNativeOnly.sourceMix, { justtcgWeight: 0, scrydexWeight: 0, jpNativeWeight: 1 });
-  assert.deepEqual(jpNativeOnly.sampleCounts7d, { justtcg: 0, scrydex: 0, jpNative: 21, total: 21 });
+  assert.deepEqual(jpNativeOnly.sourceMix, { scrydexWeight: 0, jpNativeWeight: 1 });
+  assert.deepEqual(jpNativeOnly.sampleCounts7d, { scrydex: 0, jpNative: 21, total: 21 });
 
   const jpMarketFallback = resolveCanonicalMarketPulse({
     market_price: 17,
@@ -263,7 +255,7 @@ export function runMarketTruthPhase1Tests() {
   assert.equal(jpMarketFallback.scrydexPrice, 17);
   assert.equal(jpMarketFallback.priceSource, "market");
   assert.equal(jpMarketFallback.blendPolicy, "SCRYDEX_PRIMARY");
-  assert.deepEqual(jpMarketFallback.sourceMix, { justtcgWeight: 0, scrydexWeight: 1 });
+  assert.deepEqual(jpMarketFallback.sourceMix, { scrydexWeight: 1 });
 }
 
 export async function runJpPriceCoverageTests() {

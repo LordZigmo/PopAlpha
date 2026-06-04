@@ -74,7 +74,6 @@ export async function GET(req: Request) {
         .from("variant_metrics")
         .select("*")
         .eq("canonical_slug", slug)
-        .eq("provider", "JUSTTCG")
         .eq("grade", "RAW")
         .order("history_points_30d", { ascending: false })
         .limit(10)

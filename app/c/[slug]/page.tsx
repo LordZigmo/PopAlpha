@@ -501,7 +501,7 @@ function resolveRawDisplayPrice(params: {
   blendPolicy: string;
   confidenceScore: number;
   lowConfidence: boolean;
-  sourceMix: { justtcgWeight: number; scrydexWeight: number };
+  sourceMix: { scrydexWeight: number };
 } {
   const weighted = resolveWeightedMarketPrice({
     providers: [
@@ -516,7 +516,6 @@ function resolveRawDisplayPrice(params: {
     confidenceScore: params.scrydex !== null ? weighted.confidenceScore : 0,
     lowConfidence: params.scrydex === null ? true : weighted.lowConfidence,
     sourceMix: {
-      justtcgWeight: 0,
       scrydexWeight: params.scrydex !== null ? 1 : 0,
     },
   };

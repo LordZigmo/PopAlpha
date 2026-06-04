@@ -336,8 +336,7 @@ export async function GET(req: Request) {
     ok: true,
     providerPolicy,
     priceObservationCount7d: result.data?.active_listings_7d ?? 0,
-    deprecatedProviderFields: ["justtcgPrice", "pokemontcgPrice", "active7d"],
-    justtcgPrice: null,
+    deprecatedProviderFields: ["pokemontcgPrice", "active7d"],
     scrydexPrice: result.data?.scrydex_price ?? (headlineProvider === "SCRYDEX" ? marketPriceUsd : null),
     pokemontcgPrice: null,
     marketPrice: marketPriceUsd,
@@ -365,13 +364,11 @@ export async function GET(req: Request) {
       providerPolicy,
       historicalAliases: ["POKEMON_TCG_API"],
       sourceMix: marketProvenance?.sourceMix ?? {
-        justtcgWeight: 0,
         scrydexWeight: marketPriceUsd !== null ? 1 : 0,
       },
       providerWeights: weighted.providerWeights,
       providerDivergencePct: weighted.providerDivergencePct,
       lastUpdate: {
-        justtcg: null,
         scrydex: marketPriceUsd !== null ? marketPriceAsOf : null,
       },
       sampleSize30d: marketPriceUsd !== null ? historyRows.length : 0,

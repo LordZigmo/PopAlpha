@@ -112,8 +112,6 @@ export default function CardMarketIntelClient({
           printingId: variant.printingId,
           label: variant.label,
           currentPrice: variant.currentPrice,
-          justtcgPrice: variant.justtcgPrice,
-          justtcgAsOfTs: variant.justtcgAsOfTs,
           scrydexPrice: variant.scrydexPrice,
           scrydexAsOfTs: variant.scrydexAsOfTs,
           marketPriceDisplayState: variant.marketPriceDisplayState,

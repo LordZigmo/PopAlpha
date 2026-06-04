@@ -36,7 +36,7 @@ export async function GET(req: Request) {
       ? supabase
           .from("provider_card_map")
           .select("provider, canonical_slug, printing_id, provider_card_id, provider_variant_id, mapping_status, match_confidence, metadata, updated_at")
-          .eq("provider", "JUSTTCG")
+          .eq("provider", "SCRYDEX")
           .eq("asset_type", "single")
           .eq("mapping_status", "MATCHED")
           .in("printing_id", printingIds)
@@ -67,13 +67,13 @@ export async function GET(req: Request) {
   const rows = (diagnostics ?? []).map((row) => ({
     ...row,
     tracked_assets: trackedByPrinting.get(row.printing_id) ?? [],
-    justtcg_mappings: mappingsByPrinting.get(row.printing_id) ?? [],
+    provider_mappings: mappingsByPrinting.get(row.printing_id) ?? [],
   }));
 
   const { data: latestNightlyRun } = await supabase
     .from("ingest_runs")
     .select("id, started_at, ended_at, status, ok, meta")
-    .eq("job", "sync_justtcg_prices_nightly")
+    .eq("job", "scrydex_canonical_import")
     .order("started_at", { ascending: false })
     .limit(1)
     .maybeSingle();

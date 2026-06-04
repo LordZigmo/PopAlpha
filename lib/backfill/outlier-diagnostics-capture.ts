@@ -23,9 +23,8 @@ type DiagnosticInsert = {
   };
 };
 
-function normalizeProvider(provider: string | null | undefined): "JUSTTCG" | "SCRYDEX" | null {
+function normalizeProvider(provider: string | null | undefined): "SCRYDEX" | null {
   const normalized = String(provider ?? "").trim().toUpperCase();
-  if (normalized === "JUSTTCG") return "JUSTTCG";
   if (normalized === "SCRYDEX" || normalized === "POKEMON_TCG_API") return "SCRYDEX";
   return null;
 }
@@ -49,7 +48,7 @@ export async function captureOutlierDiagnostics(opts?: {
   const { data, error } = await supabase
     .from("public_price_history")
     .select("canonical_slug, variant_ref, provider, ts, price")
-    .in("provider", ["JUSTTCG", "SCRYDEX", "POKEMON_TCG_API"])
+    .in("provider", ["SCRYDEX", "POKEMON_TCG_API"])
     .eq("source_window", "snapshot")
     .gte("ts", sinceIso)
     .order("ts", { ascending: false })

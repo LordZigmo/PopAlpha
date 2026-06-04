@@ -14,7 +14,6 @@ export type CardDetailMetrics = {
 };
 
 export type CardDetailPriceCompare = {
-  justtcgPrice: number | null;
   scrydexPrice: number | null;
   pokemontcgPrice: number | null;
   marketPrice: number | null;
@@ -25,7 +24,7 @@ export type CardDetailPriceCompare = {
   recentMarketSignalDeltaPct: number | null;
   recentMarketSignalDirection: "HIGHER" | "LOWER" | string | null;
   providers: Array<{
-    provider: "JUSTTCG" | "SCRYDEX" | "PRICECHARTING";
+    provider: "SCRYDEX" | "PRICECHARTING";
     sourcePrice: number | null;
     sourceCurrency: string | null;
     usdPrice: number | null;

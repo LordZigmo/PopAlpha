@@ -20,8 +20,6 @@ type MarketSummaryCardClientProps = {
     printingId: string;
     label: string;
     currentPrice: number | null;
-    justtcgPrice: number | null;
-    justtcgAsOfTs: string | null;
     scrydexPrice: number | null;
     scrydexAsOfTs: string | null;
     marketPriceDisplayState?: "ALIGNED" | "SIGNAL_HIGHER" | "SIGNAL_LOWER" | "PUBLIC_ONLY" | "UNDER_REVIEW" | "NO_RELIABLE_PRICE" | null;

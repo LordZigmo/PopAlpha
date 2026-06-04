@@ -1,6 +1,6 @@
 import { dbAdmin } from "@/lib/db/admin";
 
-type Provider = "JUSTTCG" | "SCRYDEX";
+type Provider = "SCRYDEX";
 
 type ProviderAudit = {
   provider: Provider;
@@ -29,7 +29,7 @@ export async function captureMatchingQualityAudit(windowHours = 24): Promise<{
   const supabase = dbAdmin();
   const capturedAt = new Date().toISOString();
   const sinceIso = new Date(Date.now() - Math.max(1, windowHours) * 60 * 60 * 1000).toISOString();
-  const providers: Provider[] = ["JUSTTCG", "SCRYDEX"];
+  const providers: Provider[] = ["SCRYDEX"];
   const audits: ProviderAudit[] = [];
 
   for (const provider of providers) {

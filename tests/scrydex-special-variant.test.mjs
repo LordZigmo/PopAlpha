@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { buildLegacyVariantRef } from "../lib/providers/justtcg.ts";
 import {
   normalizeScrydexStampToken,
   parseScrydexVariantSemantics,
@@ -44,16 +43,6 @@ function runScrydexSpecialVariantTests() {
   assert.equal(pokemonCenter.normalizedFinish, "UNKNOWN");
   assert.equal(pokemonCenter.hasSpecialVariantToken, true);
   assert.equal(pokemonCenter.stampLabel, "pokemon center");
-  const pokemonCenterVariantRef = buildLegacyVariantRef(
-    "pokemoncenterstamp",
-    pokemonCenter.normalizedEdition,
-    pokemonCenter.stampLabel,
-    "Near Mint",
-    "English",
-    "RAW",
-  );
-  assert.ok(!pokemonCenterVariantRef.includes(":none:"));
-  assert.match(pokemonCenterVariantRef, /:pokemon-center:/);
 
   const masterBall = parseScrydexVariantSemantics("masterballreverseholofoil");
   assert.equal(masterBall.normalizedStamp, "MASTER_BALL_PATTERN");

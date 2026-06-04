@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getCurrencyToUsdRateAt } from "@/lib/pricing/fx";
 
-export type ProviderName = "JUSTTCG" | "SCRYDEX" | "PRICECHARTING";
+export type ProviderName = "SCRYDEX" | "PRICECHARTING";
 
 export type ProviderPriceDisplay = {
   provider: ProviderName;
@@ -69,9 +69,7 @@ export async function buildProviderPriceDisplay(params: {
 }
 
 export function averageProviderUsdPrice(rows: ProviderPriceDisplay[]): number | null {
-  const justtcg = rows.find((row) => row.provider === "JUSTTCG")?.usdPrice ?? null;
   const scrydex = rows.find((row) => row.provider === "SCRYDEX")?.usdPrice ?? null;
   if (typeof scrydex === "number" && Number.isFinite(scrydex) && scrydex > 0) return scrydex;
-  if (typeof justtcg === "number" && Number.isFinite(justtcg) && justtcg > 0) return justtcg;
   return null;
 }

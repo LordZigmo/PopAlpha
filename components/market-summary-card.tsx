@@ -499,8 +499,6 @@ export async function loadRawCardMarketVariants(params: {
       rarity: variant.rarity,
       currentPrice: liveMarketPrice,
       changePct7d: metrics?.change_pct_7d ?? null,
-      justtcgPrice: null,
-      justtcgAsOfTs: null,
       scrydexPrice: liveMarketPrice,
       scrydexAsOfTs: liveMarketAsOfTs,
       // Phase C-2 (2026-05-16): asking-anchored auxiliary value. Only
