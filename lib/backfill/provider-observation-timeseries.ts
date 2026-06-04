@@ -946,6 +946,15 @@ export async function runProviderObservationTimeseries(opts: {
       // observation's observed_at (a backdated or out-of-order observation) would
       // zero/negate the age delta and wrongly suppress this write, so treat it as
       // "no prior point" → the floor fails open and we write.
+      //
+      // We deliberately fail open here rather than falling back to the latest
+      // EARLIER strictly-prior point (the map holds only one point per
+      // variant_ref). Failing open is always safe — the floor is a write-cost
+      // gate, not a correctness gate, so the worst case is one redundant history
+      // row. The fallback would only ever change behavior when a future-dated
+      // history point coexists with a recent prior one, which the always-current
+      // daily snapshot flow does not produce (the force/backfill path bypasses
+      // the floor entirely).
       const latestSnapshotHistory =
         latestSnapshotHistoryRef && latestSnapshotHistoryRef.ts < row.observation.observed_at
           ? latestSnapshotHistoryRef
