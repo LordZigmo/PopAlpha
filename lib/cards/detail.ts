@@ -52,7 +52,6 @@ type RawMetricRow = {
   printing_id: string | null;
   liquidity_score: number | null;
   snapshot_count_30d: number | null;
-  justtcg_price: number | null;
   scrydex_price: number | null;
   pokemontcg_price?: number | null;
   market_price: number | null;
@@ -317,7 +316,6 @@ async function buildPriceCompare(params: {
   const providers: ProviderPriceDisplay[] = [headlineDisplay];
 
   return {
-    justtcgPrice: null,
     scrydexPrice: headlineDisplay.usdPrice,
     pokemontcgPrice: null,
     marketPrice: headlineDisplay.usdPrice,
@@ -439,7 +437,7 @@ export async function buildCardDetailResponse(inputSlug: string): Promise<CardDe
       .order("id", { ascending: true }),
     supabase
       .from("public_card_metrics")
-      .select("printing_id, liquidity_score, snapshot_count_30d, justtcg_price, scrydex_price, pokemontcg_price, market_price, market_price_as_of, market_price_display_state, recent_market_signal_usd, recent_market_signal_as_of, recent_market_signal_delta_pct, recent_market_signal_direction, market_provenance")
+      .select("printing_id, liquidity_score, snapshot_count_30d, scrydex_price, pokemontcg_price, market_price, market_price_as_of, market_price_display_state, recent_market_signal_usd, recent_market_signal_as_of, recent_market_signal_delta_pct, recent_market_signal_direction, market_provenance")
       .eq("canonical_slug", canonicalSlug)
       .eq("grade", "RAW"),
     supabase

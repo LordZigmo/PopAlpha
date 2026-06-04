@@ -13,7 +13,6 @@ const NOOP_LOGGER = {
 
 function buildPulse(overrides = {}) {
   return {
-    justtcgPrice: null,
     scrydexPrice: null,
     pokemontcgPrice: null,
     marketPrice: null,
@@ -38,8 +37,8 @@ function buildPulse(overrides = {}) {
     lowConfidence: false,
     marketStrengthScore: null,
     marketDirection: null,
-    sourceMix: { justtcgWeight: 0, scrydexWeight: 1, publicInputWeight: 1 },
-    sampleCounts7d: { justtcg: 0, scrydex: 2, public: 2, total: 2 },
+    sourceMix: { scrydexWeight: 1, publicInputWeight: 1 },
+    sampleCounts7d: { scrydex: 2, public: 2, total: 2 },
     ...overrides,
   };
 }
@@ -312,7 +311,7 @@ export async function runHomepageDataTests() {
             lowConfidence: false,
             marketStrengthScore: 81,
             marketDirection: "bullish",
-            sampleCounts7d: { justtcg: 4, scrydex: 2, public: 2, total: 4 },
+            sampleCounts7d: { scrydex: 2, public: 2, total: 4 },
           }),
         ],
         [
@@ -328,7 +327,7 @@ export async function runHomepageDataTests() {
             changeWindow: "7D",
             confidenceScore: 93,
             lowConfidence: false,
-            sampleCounts7d: { justtcg: 3, scrydex: 2, public: 2, total: 3 },
+            sampleCounts7d: { scrydex: 2, public: 2, total: 3 },
           }),
         ],
         [
@@ -344,7 +343,7 @@ export async function runHomepageDataTests() {
             changeWindow: "7D",
             confidenceScore: 91,
             lowConfidence: false,
-            sampleCounts7d: { justtcg: 5, scrydex: 1, public: 1, total: 5 },
+            sampleCounts7d: { scrydex: 1, public: 1, total: 5 },
           }),
         ],
         [
@@ -362,7 +361,7 @@ export async function runHomepageDataTests() {
             lowConfidence: false,
             marketStrengthScore: 68,
             marketDirection: "bullish",
-            sampleCounts7d: { justtcg: 6, scrydex: 2, public: 2, total: 6 },
+            sampleCounts7d: { scrydex: 2, public: 2, total: 6 },
           }),
         ],
         [
@@ -380,7 +379,7 @@ export async function runHomepageDataTests() {
             lowConfidence: false,
             marketStrengthScore: 64,
             marketDirection: "bearish",
-            sampleCounts7d: { justtcg: 6, scrydex: 2, public: 2, total: 6 },
+            sampleCounts7d: { scrydex: 2, public: 2, total: 6 },
           }),
         ],
         [
@@ -396,7 +395,7 @@ export async function runHomepageDataTests() {
             changeWindow: "7D",
             confidenceScore: 92,
             lowConfidence: false,
-            sampleCounts7d: { justtcg: 7, scrydex: 1, public: 1, total: 7 },
+            sampleCounts7d: { scrydex: 1, public: 1, total: 7 },
           }),
         ],
         [
@@ -413,7 +412,7 @@ export async function runHomepageDataTests() {
             parityStatus: "MATCH",
             confidenceScore: 91,
             lowConfidence: false,
-            sampleCounts7d: { justtcg: 9, scrydex: 2, public: 2, total: 11 },
+            sampleCounts7d: { scrydex: 2, public: 2, total: 11 },
           }),
         ],
       ]),

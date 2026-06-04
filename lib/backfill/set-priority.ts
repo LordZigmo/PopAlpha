@@ -42,7 +42,6 @@ type RawMarketMetricRow = {
   canonical_slug: string;
   market_price: number | null;
   market_price_as_of: string | null;
-  justtcg_price: number | null;
   scrydex_price: number | null;
   change_pct_24h: number | null;
   change_pct_7d: number | null;
@@ -100,7 +99,6 @@ async function loadRawMarketMetricRows(
           "canonical_slug",
           "market_price",
           "market_price_as_of",
-          "justtcg_price",
           "scrydex_price",
           "change_pct_24h",
           "change_pct_7d",
@@ -121,7 +119,6 @@ async function loadRawMarketMetricRows(
           canonical_slug,
           market_price,
           market_price_as_of::text as market_price_as_of,
-          justtcg_price,
           scrydex_price,
           change_pct_24h,
           change_pct_7d,
@@ -243,7 +240,7 @@ async function loadStaleExtremeMoverPriorityCards(params: {
     const staleWeight = isStale
       ? 1.5 + Math.min(4, (hoursSinceAsOf ?? staleWindowHours * 2) / staleWindowHours)
       : 0.75;
-    const providerGapWeight = row.justtcg_price == null || row.scrydex_price == null ? 1.2 : 1;
+    const providerGapWeight = row.scrydex_price == null ? 1.2 : 1;
     const priceChangesCount = Math.max(0, Math.floor(finiteNumber(row.provider_price_changes_count_30d) ?? 0));
     const thinHistoryWeight = priceChangesCount <= 3
       ? 1.25
@@ -372,7 +369,6 @@ export async function loadHighValueStaleSetPriority(params: {
   const setBuckets = new Map<string, Array<{
     marketPrice: number;
     marketAsOf: string | null;
-    justtcgPrice: number | null;
     scrydexPrice: number | null;
   }>>();
   for (const row of metricRows) {
@@ -386,7 +382,6 @@ export async function loadHighValueStaleSetPriority(params: {
     bucket.push({
       marketPrice,
       marketAsOf: row.market_price_as_of,
-      justtcgPrice: row.justtcg_price,
       scrydexPrice: row.scrydex_price,
     });
     setBuckets.set(setName, bucket);
@@ -401,17 +396,17 @@ export async function loadHighValueStaleSetPriority(params: {
     if (topRows.length === 0) continue;
 
     let staleTop25 = 0;
-    let dualProviderGap = 0;
+    let providerGap = 0;
     let weightedPrice = 0;
     for (const row of topRows) {
       weightedPrice += row.marketPrice;
       const asOfMs = row.marketAsOf ? new Date(row.marketAsOf).getTime() : NaN;
       if (!Number.isFinite(asOfMs) || asOfMs < staleCutoffMs) staleTop25 += 1;
-      if (row.justtcgPrice == null || row.scrydexPrice == null) dualProviderGap += 1;
+      if (row.scrydexPrice == null) providerGap += 1;
     }
 
-    // Strongly bias stale high-value sets; include dual-provider gaps for freshness convergence.
-    const score = staleTop25 * 1000 + dualProviderGap * 250 + weightedPrice;
+    // Strongly bias stale high-value sets; include provider-coverage gaps for freshness convergence.
+    const score = staleTop25 * 1000 + providerGap * 250 + weightedPrice;
     if (score > 0) setScoreByName.set(normalizeText(setName), score);
   }
 

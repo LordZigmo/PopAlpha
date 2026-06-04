@@ -160,7 +160,6 @@ export async function GET(req: Request) {
       // Fall back through providers when market_price is null
       const price = pulse?.marketPrice
         ?? pulse?.scrydexPrice
-        ?? pulse?.justtcgPrice
         ?? pulse?.pokemontcgPrice
         ?? null;
       if (price != null) slugRawPriceMap.set(slug, price);

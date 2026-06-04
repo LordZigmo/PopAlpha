@@ -279,8 +279,7 @@ function computeLiquidityWeight(activeListings7d: number): number {
 
 function deriveLegacyTotalRawFromCoverage(coverage: PricingTransparencySnapshot["coverage"] & Record<string, unknown>): number {
   const both = typeof coverage.both === "number" && Number.isFinite(coverage.both) ? coverage.both : 0;
-  const justtcgOnly = typeof coverage.justtcgOnly === "number" && Number.isFinite(coverage.justtcgOnly) ? coverage.justtcgOnly : 0;
-  return Math.max(0, both + justtcgOnly + (coverage.scrydexOnly ?? 0) + (coverage.none ?? 0));
+  return Math.max(0, both + (coverage.scrydexOnly ?? 0) + (coverage.none ?? 0));
 }
 
 async function loadLiveMarketCoverageCounts(
@@ -347,7 +346,7 @@ function normalizePricingTransparencySnapshot(
     alerts: snapshot.alerts
       .filter((alert) => !alert.startsWith("Blendable parity coverage is low"))
       .map((alert) => {
-        if (alert.startsWith("Hard alert: zero JustTCG/Scrydex snapshot observations in 24h.")) {
+        if (alert.startsWith("Hard alert: zero Scrydex snapshot observations in 24h.")) {
           return "Hard alert: zero live market snapshot observations in 24h.";
         }
         if (alert.startsWith("Dual-provider coverage below SLO")) {
@@ -644,7 +643,7 @@ export async function computePricingTransparencySnapshot(): Promise<PricingTrans
     market_confidence_score: number | null;
     market_low_confidence: boolean | null;
     market_provenance: {
-      sampleCounts7d?: { justtcg?: number; scrydex?: number };
+      sampleCounts7d?: { scrydex?: number };
     } | null;
     market_price_as_of: string | null;
     active_listings_7d: number | null;

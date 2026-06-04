@@ -1,6 +1,6 @@
 export type RawParityStatus = "MATCH" | "MISMATCH" | "MISSING_PROVIDER" | "UNKNOWN";
 
-export type ProviderKey = "JUSTTCG" | "SCRYDEX";
+export type ProviderKey = "SCRYDEX";
 
 export type ProviderInput = {
   provider: ProviderKey;
@@ -54,7 +54,6 @@ export type WeightedMarketPriceResult = {
   confidenceScore: number;
   lowConfidence: boolean;
   sourceMix: {
-    justtcgWeight: number;
     scrydexWeight: number;
   };
   providerDivergencePct: number | null;
@@ -248,7 +247,7 @@ export function resolveWeightedMarketPrice(params: {
       providerWeights: [],
       confidenceScore: fallback == null ? 0 : 20,
       lowConfidence: true,
-      sourceMix: { justtcgWeight: 0, scrydexWeight: 0 },
+      sourceMix: { scrydexWeight: 0 },
       providerDivergencePct: null,
     };
   }
@@ -257,20 +256,12 @@ export function resolveWeightedMarketPrice(params: {
   for (const row of providers) {
     byProvider.set(row.provider, row);
   }
-  const just = byProvider.get("JUSTTCG") ?? null;
   const scry = byProvider.get("SCRYDEX") ?? null;
 
-  let divergencePct: number | null = null;
-  let outlierProvider: ProviderKey | null = null;
-  if (just && scry) {
-    const mean = (just.price + scry.price) / 2;
-    divergencePct = mean > 0 ? (Math.abs(just.price - scry.price) / mean) * 100 : null;
-    const high = Math.max(just.price, scry.price);
-    const low = Math.min(just.price, scry.price);
-    if (low > 0 && high / low >= 3.5) {
-      outlierProvider = just.price > scry.price ? "JUSTTCG" : "SCRYDEX";
-    }
-  }
+  // Provider divergence/outlier suppression required a second provider arm
+  // to compare against. With Scrydex as the sole pricing provider there is
+  // nothing to diverge from, so divergence is always null here.
+  const divergencePct: number | null = null;
 
   const weights: ProviderWeight[] = providers.map((row) => {
     const freshnessHours = toFreshnessHours(row.asOfTs ?? null, nowMs);
@@ -279,18 +270,13 @@ export function resolveWeightedMarketPrice(params: {
     const fresh = freshnessFactor(freshnessHours);
     const volume = volumeFactor(points7d);
     const parityFactor = params.parityStatus === "MATCH" ? 1 : params.parityStatus === "UNKNOWN" ? 0.92 : 0.72;
-    const divergenceFactor = divergencePct == null ? 1 : Math.max(0.25, 1 - Math.min(0.75, divergencePct / 220));
-    const base = row.provider === "JUSTTCG" ? 1 : 0.96;
+    const base = 0.96;
 
-    let trust = base * fresh * volume * parityFactor * divergenceFactor;
+    let trust = base * fresh * volume * parityFactor;
     let excludedReason: ProviderWeight["excludedReason"] = null;
     if (freshnessHours != null && freshnessHours > 168) {
       trust *= 0.05;
       excludedReason = "STALE";
-    }
-    if (outlierProvider && row.provider === outlierProvider) {
-      trust *= 0.03;
-      excludedReason = excludedReason ?? "OUTLIER";
     }
 
     return {
@@ -312,28 +298,19 @@ export function resolveWeightedMarketPrice(params: {
     ? weights.map((row) => ({ ...row, weight: row.weight / totalWeight }))
     : weights.map((row) => ({ ...row, weight: 0 }));
   const scrydexWeight = normalizedWeights.find((row) => row.provider === "SCRYDEX") ?? null;
-  const justtcgWeight = normalizedWeights.find((row) => row.provider === "JUSTTCG") ?? null;
   const scrydexPreferred = scry && scrydexWeight?.excludedReason == null;
-  const justtcgPreferred = just && justtcgWeight?.excludedReason == null;
 
   if (scry && scrydexPreferred) {
     marketPrice = scry.price;
     blendPolicy = "SCRYDEX_PRIMARY";
-  } else if (just && justtcgPreferred) {
-    marketPrice = just.price;
-    blendPolicy = scry ? "FALLBACK_STALE_OR_OUTLIER" : "SINGLE_PROVIDER";
   } else if (scry) {
     marketPrice = scry.price;
     blendPolicy = "FALLBACK_STALE_OR_OUTLIER";
-  } else if (just) {
-    marketPrice = just.price;
-    blendPolicy = "SINGLE_PROVIDER";
   } else if (fallbackPrice != null) {
     marketPrice = fallbackPrice;
     blendPolicy = "FALLBACK_STALE_OR_OUTLIER";
   }
 
-  const justWeight = justtcgWeight?.weight ?? 0;
   const scrydexMix = scrydexWeight?.weight ?? 0;
 
   const availabilityScore = providers.length === 2 ? 1 : 0.55;
@@ -362,7 +339,6 @@ export function resolveWeightedMarketPrice(params: {
     confidenceScore,
     lowConfidence: confidenceScore < 45 || (providers.length === 1 && !scry),
     sourceMix: {
-      justtcgWeight: round(justWeight, 4),
       scrydexWeight: round(scrydexMix, 4),
     },
     providerDivergencePct: divergencePct != null ? round(divergencePct, 2) : null,

@@ -45,13 +45,11 @@ export type MarketProvenance = {
   movementHistorySource?: "PERMITTED_MARKET_INPUT" | string | null;
   parityStatus?: RawParityStatus | string | null;
   sourceMix?: {
-    justtcgWeight?: number;
     scrydexWeight?: number;
     publicInputWeight?: number;
     jpNativeWeight?: number;
   };
   sampleCounts7d?: {
-    justtcg?: number | string;
     scrydex?: number | string;
     public?: number | string;
     jpNative?: number | string;
@@ -64,7 +62,6 @@ export type MarketProvenance = {
 
 type CanonicalMarketMetricRow = {
   canonical_slug: string;
-  justtcg_price: number | null;
   scrydex_price: number | null;
   pokemontcg_price?: number | null;
   market_price: number | null;
@@ -114,7 +111,6 @@ type CanonicalVariantSignalRow = {
 };
 
 export type CanonicalMarketPulse = {
-  justtcgPrice: number | null;
   scrydexPrice: number | null;
   pokemontcgPrice: number | null;
   marketPrice: number | null;
@@ -150,13 +146,11 @@ export type CanonicalMarketPulse = {
   recentMarketSignalDeltaPct?: number | null;
   recentMarketSignalDirection?: "HIGHER" | "LOWER" | null;
   sourceMix?: {
-    justtcgWeight: number;
     scrydexWeight: number;
     publicInputWeight?: number;
     jpNativeWeight?: number;
   };
   sampleCounts7d?: {
-    justtcg: number;
     scrydex: number;
     public?: number;
     jpNative?: number;
@@ -270,7 +264,6 @@ function metricRowFromJpCoverage(
 ): CanonicalMarketMetricRow {
   return {
     canonical_slug: coverage.canonicalSlug,
-    justtcg_price: baseRow?.justtcg_price ?? null,
     scrydex_price: baseRow?.scrydex_price ?? baseRow?.market_price ?? coverage.marketPrice,
     pokemontcg_price: baseRow?.pokemontcg_price ?? null,
     market_price: baseRow?.market_price ?? coverage.marketPrice,
@@ -411,7 +404,6 @@ export function resolveCanonicalMarketPulse(
       : (row?.latest_price_as_of ?? row?.display_price_as_of ?? row?.market_price_as_of ?? null);
 
   const basePayload = {
-    justtcgPrice: null,
     scrydexPrice,
     pokemontcgPrice: null,
     marketPrice,
@@ -441,7 +433,6 @@ export function resolveCanonicalMarketPulse(
     recentMarketSignalDeltaPct,
     recentMarketSignalDirection,
     sourceMix: {
-      justtcgWeight: 0,
       scrydexWeight: marketPrice !== null && !jpNativeSource
         ? (provenanceSourceMix?.publicInputWeight ?? 1)
         : 0,
@@ -451,7 +442,6 @@ export function resolveCanonicalMarketPulse(
       ...(jpNativeSource ? { jpNativeWeight: 1 } : {}),
     },
     sampleCounts7d: {
-      justtcg: 0,
       scrydex: scrydexPoints7d,
       ...(explicitPublicPoints7d !== null && publicPoints7d > 0 ? { public: publicPoints7d } : {}),
       ...(jpNativeSource ? { jpNative: jpNativeSampleCount } : {}),
@@ -498,7 +488,7 @@ export async function getCanonicalMarketPulseMap(
   ] = await Promise.all([
     supabase
       .from("public_card_metrics")
-      .select("canonical_slug, justtcg_price, scrydex_price, pokemontcg_price, market_price, market_price_as_of, latest_price, latest_price_as_of, liquidity_score, active_listings_7d, snapshot_count_30d, median_7d, provider_trend_slope_7d, provider_cov_price_30d, provider_price_relative_to_30d_range, provider_price_changes_count_30d, market_confidence_score, market_low_confidence, market_blend_policy, market_provenance, change_pct_24h, change_pct_7d, market_price_display_state, recent_market_signal_usd, recent_market_signal_as_of, recent_market_signal_delta_pct, recent_market_signal_direction")
+      .select("canonical_slug, scrydex_price, pokemontcg_price, market_price, market_price_as_of, latest_price, latest_price_as_of, liquidity_score, active_listings_7d, snapshot_count_30d, median_7d, provider_trend_slope_7d, provider_cov_price_30d, provider_price_relative_to_30d_range, provider_price_changes_count_30d, market_confidence_score, market_low_confidence, market_blend_policy, market_provenance, change_pct_24h, change_pct_7d, market_price_display_state, recent_market_signal_usd, recent_market_signal_as_of, recent_market_signal_delta_pct, recent_market_signal_direction")
       .in("canonical_slug", slugs)
       .is("printing_id", null)
       .eq("grade", "RAW")

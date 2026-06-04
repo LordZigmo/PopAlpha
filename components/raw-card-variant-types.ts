@@ -11,8 +11,6 @@ export type RawCardMarketVariant = {
   rarity: string | null;
   currentPrice: number | null;
   changePct7d: number | null;
-  justtcgPrice: number | null;
-  justtcgAsOfTs: string | null;
   scrydexPrice: number | null;
   scrydexAsOfTs: string | null;
   // Legacy auxiliary public signal retained for older callers. New UI should
