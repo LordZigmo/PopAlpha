@@ -215,6 +215,7 @@ public_signal_policy as (
             then coalesce(
               p.change_pct_24h,
               case when abs(p.private_pricecharting_change_pct_24h) <= 200
+                     and p.private_guardrail_as_of >= now() - interval '48 hours'
                    then p.private_pricecharting_change_pct_24h else null end
             )
           else null
@@ -237,6 +238,7 @@ public_signal_policy as (
             then coalesce(
               p.change_pct_7d,
               case when abs(p.private_pricecharting_change_pct_7d) <= 200
+                     and p.private_guardrail_as_of >= now() - interval '48 hours'
                    then p.private_pricecharting_change_pct_7d else null end
             )
           else null
