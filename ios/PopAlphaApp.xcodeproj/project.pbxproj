@@ -379,6 +379,7 @@
 				AA00000100000000000000F2 /* Sources */,
 				AA00000100000000000000D1 /* Frameworks */,
 				AA00000100000000000000F3 /* Resources */,
+				AA00000100000000000000FA /* Set Build Number */,
 			);
 			buildRules = (
 			);
@@ -449,6 +450,29 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		AA00000100000000000000FA /* Set Build Number */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Set Build Number (date.time)";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "plist=\"${TARGET_BUILD_DIR}/${INFOPLIST_PATH}\"
+if [ -f \"$plist\" ]; then
+  bn=\"$(date +%Y%m%d).$(date +%H%M)\"
+  /usr/libexec/PlistBuddy -c \"Set :CFBundleVersion $bn\" \"$plist\"
+  echo \"note: CFBundleVersion set to $bn\"
+fi
+";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		AA00000100000000000000F2 /* Sources */ = {
