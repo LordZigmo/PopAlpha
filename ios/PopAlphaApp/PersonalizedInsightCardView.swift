@@ -49,7 +49,7 @@ struct PersonalizedInsightCardView: View {
                 PaywallView(
                     context: .collectorProfile,
                     surface: "card_detail_insight_teaser",
-                    personalization: .init(cardName: cardName)
+                    personalization: .init(cardName: cardName, canonicalSlug: canonicalSlug)
                 )
             }
     }

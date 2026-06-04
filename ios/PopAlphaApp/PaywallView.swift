@@ -65,6 +65,9 @@ struct PaywallView: View {
         var cardChangePct: Double? = nil
         var portfolioValue: Double? = nil
         var portfolioCardCount: Int? = nil
+        /// Canonical slug of the tapped card — lets the collector-insight
+        /// surface fetch a real deterministic teaser of THIS card's read.
+        var canonicalSlug: String? = nil
     }
     var personalization = Personalization()
 
@@ -72,6 +75,11 @@ struct PaywallView: View {
     /// Drives the trial-start celebration overlay before the paywall
     /// auto-dismisses on a successful subscribe.
     @State private var showTrialSuccess = false
+    /// Deterministic Collector Insight teaser for the tapped card. nil until
+    /// fetched, and while the server still Pro-gates free users (the fetch
+    /// returns nil there → the teaser shows its honest blurred fallback).
+    @State private var teaserInsight: CollectorInsight?
+    @State private var teaserDidLoad = false
     @State private var isPurchasing: Bool = false
     @State private var errorMessage: String? = nil
     @State private var pendingMessage: String? = nil
@@ -175,8 +183,15 @@ struct PaywallView: View {
                 VStack(spacing: 20) {
                     closeButton
                     hero
+                    if showsCollectorTeaser {
+                        collectorInsightTeaser
+                    }
                     benefits
-                    plans
+                    if store.productsLoaded && store.products.isEmpty {
+                        plansRetryBanner
+                    } else {
+                        plans
+                    }
                     purchaseDisclosure
                     purchaseActions
                     statusMessages
@@ -219,6 +234,9 @@ struct PaywallView: View {
                 let eligible = eligibilityByProductID[productID] ?? false
                 Logger.api.info("[paywall] product=\(productID) loaded=\(product != nil) introOffer=\(hasOffer) eligible=\(eligible) state=\(String(describing: self.trialState(forProductID: productID)))")
             }
+        }
+        .task(id: personalization.canonicalSlug) {
+            await loadTeaserInsight()
         }
         .onChange(of: gate.isPro) { _, isProNow in
             // Auto-dismiss the moment the user becomes pro — but NOT while the
@@ -360,6 +378,114 @@ struct PaywallView: View {
         }
     }
 
+    // MARK: - Collector Insight teaser
+    //
+    // Leads the collector-insight paywall with the thing the user tapped: a
+    // partial read of THIS card. When the server returns a real deterministic
+    // read, the fit badge + lead line are real and only the depth blurs. Until
+    // the server free-preview ships (the route Pro-gates free users today, so
+    // the fetch returns nil), it degrades to an honest invitation + blurred
+    // structure — never a fabricated score.
+
+    private var showsCollectorTeaser: Bool {
+        context == .collectorProfile && personalization.cardName != nil
+    }
+
+    private func loadTeaserInsight() async {
+        guard showsCollectorTeaser, let slug = personalization.canonicalSlug, !teaserDidLoad else { return }
+        teaserDidLoad = true
+        let resp = await PersonalizationService.shared.fetchExplanation(slug: slug, variantRef: nil)
+        teaserInsight = resp?.collectorInsight
+    }
+
+    private static let teaserAccent = Color(red: 0.659, green: 0.333, blue: 0.969)
+
+    private var teaserLeadLine: String {
+        if let summary = teaserInsight?.summary, !summary.isEmpty {
+            // First sentence reads; the rest blurs below.
+            if let end = summary.firstIndex(of: ".") {
+                return String(summary[...end])
+            }
+            return summary
+        }
+        let card = personalization.cardName ?? "this card"
+        return "See how \(card) fits your collecting style — your full read is one tap away."
+    }
+
+    @ViewBuilder
+    private func teaserFitBadge() -> some View {
+        let text: String = {
+            if let label = teaserInsight?.fitLabel, !label.isEmpty {
+                return teaserInsight?.fitScore.map { "\(label) · \($0)/100" } ?? label
+            }
+            return "PRO"
+        }()
+        Text(text)
+            .font(.system(size: 10, weight: .bold))
+            .foregroundStyle(Self.teaserAccent)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Self.teaserAccent.opacity(0.16))
+            .clipShape(Capsule())
+    }
+
+    private func teaserBlurRow(_ title: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title.uppercased())
+                .font(.system(size: 9, weight: .bold))
+                .tracking(0.8)
+                .foregroundStyle(Self.teaserAccent.opacity(0.85))
+            Text("This part of your read is reserved for Pro — it unlocks the moment you start.")
+                .font(.system(size: 13))
+                .foregroundStyle(PA.Colors.text)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var collectorInsightTeaser: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 6) {
+                Image(systemName: "person.crop.circle.badge.checkmark")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Self.teaserAccent)
+                Text("COLLECTOR INSIGHT")
+                    .font(.system(size: 10, weight: .bold))
+                    .tracking(1.2)
+                    .foregroundStyle(Self.teaserAccent)
+                Spacer()
+                teaserFitBadge()
+            }
+            Text(teaserLeadLine)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(PA.Colors.text)
+                .fixedSize(horizontal: false, vertical: true)
+            ZStack {
+                VStack(alignment: .leading, spacing: 10) {
+                    teaserBlurRow("Role in your collection")
+                    teaserBlurRow("Best move")
+                }
+                .blur(radius: 5)
+                .accessibilityHidden(true)
+                HStack(spacing: 5) {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 10, weight: .bold))
+                    Text("Unlock the full read")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .foregroundStyle(Self.teaserAccent)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Self.teaserAccent.opacity(0.10))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Self.teaserAccent.opacity(0.35), lineWidth: 1)
+        )
+    }
+
     // MARK: - Trial-start celebration
 
     /// Cue under the checkmark — names the card when we have it.
@@ -411,6 +537,36 @@ struct PaywallView: View {
     }
 
     // MARK: - Benefits
+
+    /// Shown when StoreKit finished loading but returned no products — a
+    /// graceful "Retry" instead of blank price rows. (The usual root cause
+    /// pre-launch is the subscriptions not yet being live in App Store
+    /// Connect; Retry recovers a transient network failure.)
+    private var plansRetryBanner: some View {
+        VStack(spacing: 8) {
+            Text("Couldn't load plans")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(PA.Colors.text)
+            Text("Check your connection and try again.")
+                .font(.system(size: 13))
+                .foregroundStyle(PA.Colors.textSecondary)
+            Button {
+                Task { await store.loadProducts() }
+            } label: {
+                Text("Retry")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(PA.Colors.accent)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 8)
+                    .background(PA.Colors.accentSoft)
+                    .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 2)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 16)
+    }
 
     private var benefits: some View {
         // Reinforcement below the decision — what Pro unlocks, framed as
