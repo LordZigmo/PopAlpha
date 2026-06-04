@@ -14,6 +14,7 @@ import ComparisonHero from "@/components/compare/comparison-hero";
 import ComparisonTable from "@/components/compare/comparison-table";
 import ListicleList from "@/components/compare/listicle-list";
 import HonestBreakdown from "@/components/compare/honest-breakdown";
+import MethodologySection from "@/components/compare/methodology-section";
 import ComparisonFaq from "@/components/compare/comparison-faq";
 import ComparisonCta from "@/components/compare/comparison-cta";
 import CompareCrossLinks from "@/components/compare/compare-cross-links";
@@ -126,6 +127,7 @@ export default async function ComparePage({
       )}
 
       <HonestBreakdown sections={entry.breakdown} />
+      <MethodologySection />
       <ComparisonFaq items={entry.faq} />
       <ComparisonCta cta={entry.cta} />
       <CompareCrossLinks currentSlug={entry.slug} related={entry.related} />
