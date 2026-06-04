@@ -1016,6 +1016,11 @@ struct CardDetailView: View {
             detailsGrid
                 .padding(.top, 8)
 
+            // 9b. JP per-source breakdown — its own metadata panel (moved out
+            // of the hero), so the price area stays focused on the single
+            // blended read while the unblended sources sit with the metadata.
+            jpSourcesPanel
+
             // 10. Friend activity (only when authenticated + signal exists)
             if let activity = friendActivity, activity.ownerCount > 0 || !activity.recent.isEmpty {
                 friendActivitySection(activity)
@@ -1145,37 +1150,9 @@ struct CardDetailView: View {
                     .accessibilityLabel("Low-dollar card")
             }
 
-            // Source attribution for JP cards. When BOTH Yahoo! JP and
-            // Snkrdunk have data, render each as its own line so the
-            // user can see both signals side-by-side and judge for
-            // themselves (the hero shows the confidence-pick winner;
-            // these lines show the unblended sources). When only one
-            // is present, render just that one — same behavior as
-            // pre-Snkrdunk.
-            if isJapaneseCard {
-                let yj = cardMetrics?.yahooJpPrice ?? 0
-                let snk = cardMetrics?.snkrdunkPrice ?? 0
-                if yj > 0 || snk > 0 {
-                    VStack(alignment: .leading, spacing: 4) {
-                        if yj > 0, let metrics = cardMetrics {
-                            sourceAttributionLine(
-                                source: "Yahoo! Auctions JP",
-                                usd: metrics.yahooJpPrice,
-                                jpy: metrics.yahooJpPriceJpy,
-                                sampleCount: metrics.yahooJpSampleCount
-                            )
-                        }
-                        if snk > 0, let metrics = cardMetrics {
-                            sourceAttributionLine(
-                                source: "Snkrdunk",
-                                usd: metrics.snkrdunkPrice,
-                                jpy: nil, // Snkrdunk's English API serves USD directly
-                                sampleCount: metrics.snkrdunkSampleCount
-                            )
-                        }
-                    }
-                }
-            }
+            // (JP per-source breakdown moved out of the hero into its own
+            // bottom metadata panel — see `jpSourcesPanel`. The hero keeps just
+            // the single blended JP read so the price area stays focused.)
         }
     }
 
@@ -1488,6 +1465,49 @@ struct CardDetailView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
         .glassSurface()
+    }
+
+    /// JP cards: the per-source breakdown (Yahoo! Auctions JP + Snkrdunk),
+    /// moved out of the hero into its own bottom metadata panel — same
+    /// glass-surface treatment as the details tiles. The hero shows the single
+    /// blended read; this shows the unblended sources so the user can judge
+    /// them. Reuses sourceAttributionLine, so no per-source detail is lost.
+    /// Renders nothing for non-JP cards or when no JP source has data.
+    @ViewBuilder
+    private var jpSourcesPanel: some View {
+        if isJapaneseCard {
+            let yj = cardMetrics?.yahooJpPrice ?? 0
+            let snk = cardMetrics?.snkrdunkPrice ?? 0
+            if yj > 0 || snk > 0 {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Native Sources")
+                        .font(PA.Typography.caption)
+                        .foregroundStyle(PA.Colors.muted)
+                        .tracking(0.4)
+                        .textCase(.uppercase)
+                    if yj > 0, let metrics = cardMetrics {
+                        sourceAttributionLine(
+                            source: "Yahoo! Auctions JP",
+                            usd: metrics.yahooJpPrice,
+                            jpy: metrics.yahooJpPriceJpy,
+                            sampleCount: metrics.yahooJpSampleCount
+                        )
+                    }
+                    if snk > 0, let metrics = cardMetrics {
+                        sourceAttributionLine(
+                            source: "Snkrdunk",
+                            usd: metrics.snkrdunkPrice,
+                            jpy: nil, // Snkrdunk's English API serves USD directly
+                            sampleCount: metrics.snkrdunkSampleCount
+                        )
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
+                .glassSurface()
+                .padding(.top, 8)
+            }
+        }
     }
 
     /// Derives a user-facing Confidence label from the numeric score
@@ -1914,8 +1934,8 @@ struct CardDetailView: View {
         return "PopAlpha market feeds"
     }
 
-    /// Single attribution line under the hero — shows the source name,
-    /// optional JPY equivalent, and sample-count. Used twice on JP
+    /// Single attribution line in the bottom JP sources panel — shows the
+    /// source name, optional JPY equivalent, and sample-count. Used twice on JP
     /// cards that have both Yahoo! and Snkrdunk data (the confidence-
     /// pick winner is already in the hero; these lines show the
     /// per-source detail). Inline rather than its own file because
