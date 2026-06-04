@@ -353,11 +353,15 @@ async function loadExistingWriteState(
         const variantRef = String(row.variant_ref ?? "").trim();
         const ts = String(row.ts ?? "").trim();
         if (!variantRef || !ts) continue;
-        // (1) Exact already-written key — only meaningful for this cycle's ts values.
+        // (1) Exact already-written key for THIS cycle's ts. These rows are also
+        // excluded from the floor reference (via `continue`) so the floor compares
+        // each observation against a strictly-PRIOR history write, never against a
+        // same-cycle point (which would zero out the age delta and wrongly suppress).
         if (observedAtSet.has(ts)) {
           writtenSnapshotHistoryKeys.add(`${variantRef}::${ts}`);
+          continue;
         }
-        // (2) Latest snapshot-source point per variant_ref → the floor reference.
+        // (2) Latest PRIOR snapshot-source point per variant_ref → the floor reference.
         const existing = latestSnapshotHistoryByVariantRef.get(variantRef) ?? null;
         if (!existing || existing.ts < ts) {
           const price = typeof row.price === "number" && Number.isFinite(row.price)
