@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 
 const title = "About | PopAlpha";
 const description = "What PopAlpha tracks, how the data works, and what the platform is building.";
@@ -104,6 +105,16 @@ export default function AboutPage() {
           </p>
           <p className="mt-4 text-[15px] leading-7 text-[#A0A0A0] sm:text-[16px]">
             Whether you&apos;re buying your first single or building a serious collection, PopAlpha helps you understand the market without the stress.
+          </p>
+          <p className="mt-4 text-[15px] leading-7 text-[#A0A0A0] sm:text-[16px]">
+            Wondering how we stack up?{" "}
+            <Link
+              href="/compare"
+              className="text-[#D0D0D0] underline underline-offset-4 transition hover:text-white"
+            >
+              See how PopAlpha compares to other Pokémon card apps
+            </Link>
+            .
           </p>
         </section>
       </div>

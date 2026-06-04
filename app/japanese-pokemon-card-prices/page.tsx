@@ -41,28 +41,28 @@ export const metadata: Metadata = {
 };
 
 const LEAD =
-  "Japanese Pokémon cards trade on Japanese marketplaces, so their real value comes from Japanese sold data — not an English price converted into yen. PopAlpha prices Japanese cards natively from Yahoo! Auctions Japan and Snkrdunk, using whichever source has more recent sample sales. Here's how Japanese card pricing works and how to check it.";
+  "Japanese Pokémon cards trade on Japanese marketplaces, so their real value is whatever they actually sell for there — which can differ from the US price, especially with the yen exchange rate in play. PopAlpha prices Japanese cards natively from Yahoo! Auctions Japan and Snkrdunk, using whichever source has more recent sample sales. Here's how Japanese card pricing works, and how to use it to your advantage.";
 
 const ROWS: VersusRow[] = [
   {
     feature: "📊 Price basis",
     popalpha: "Japanese sold listings (Yahoo! JP, Snkrdunk)",
-    competitor: "English market, converted to yen",
+    competitor: "What the card sells for in the US",
   },
   {
     feature: "🇯🇵 Reflects Japanese demand",
     popalpha: "Yes",
-    competitor: "No — mirrors the English market",
+    competitor: "No — it tracks the US market",
   },
   {
     feature: "🕒 Freshness",
-    popalpha: "Recent JP sample sales, with staleness labels",
-    competitor: "Tied to the English source",
+    popalpha: "Recent Japanese sample sales, with staleness labels",
+    competitor: "Whatever the US listing shows",
   },
   {
-    feature: "🎯 Accuracy for JP cards",
+    feature: "🎯 Accuracy for a Japanese card",
     popalpha: "Market-native",
-    competitor: "Often off — JP and EN prices diverge",
+    competitor: "Often off — Japan and the US move apart, and the yen widens the gap",
   },
 ];
 
@@ -70,8 +70,8 @@ const SECTIONS: BreakdownSection[] = [
   {
     heading: "🇯🇵 Why Japanese cards need Japanese prices",
     paragraphs: [
-      "Japanese Pokémon cards are bought and sold mostly on Japanese marketplaces. Their real value comes from what they actually sell for there — not from taking an English price and converting it into yen.",
-      "English and Japanese markets diverge: a card can be common in one and sought-after in the other. Converting across them hides that gap.",
+      "Japanese Pokémon cards are bought and sold mostly on Japanese marketplaces, so their real value is whatever they actually sell for there. And that's where the opportunity is: because Japanese prices and the yen exchange rate often differ from the rest of the world, knowing the true Japanese market price is how collectors save money buying from Japan — or profit on the difference when the same card sells for more abroad.",
+      "English and Japanese markets move independently — a card can be common in one and sought-after in the other — so the price you see abroad can be a poor guide to what a Japanese copy is really worth.",
     ],
   },
   {
@@ -82,9 +82,9 @@ const SECTIONS: BreakdownSection[] = [
     ],
   },
   {
-    heading: "📈 EN vs JP: the same card, two markets",
+    heading: "🌍 English Cards vs Japanese Cards: Different Markets",
     paragraphs: [
-      "Because the two markets move independently, PopAlpha tracks both and can surface where Japanese and English prices diverge — useful if you buy or sell across regions.",
+      "PopAlpha uses English market data for English cards and Japanese market data for Japanese cards. Rather than converting one market into another, PopAlpha matches each card to the market where that version actually trades.",
     ],
   },
 ];
@@ -96,9 +96,9 @@ const FAQ: FaqItem[] = [
       "Look at Japanese sold data — marketplaces like Yahoo! Auctions Japan and Snkrdunk. PopAlpha aggregates these into a single market-native price so you don't have to translate listings and average them yourself.",
   },
   {
-    question: "Does PopAlpha convert English prices into yen?",
+    question: "Is it cheaper to buy Pokémon cards from Japan?",
     answer:
-      "No. For Japanese cards it uses native Japanese sold data from Yahoo! Auctions Japan and Snkrdunk, not a converted English price.",
+      "Often, yes — Japanese cards can sell for less on Japanese marketplaces, and a favorable yen exchange rate can widen that gap. The catch is knowing the real Japanese market price first, which PopAlpha shows natively from Yahoo! Auctions Japan and Snkrdunk so you can tell when buying from Japan actually saves money.",
   },
   {
     question: "Are Japanese Pokémon cards worth more than English ones?",
@@ -143,8 +143,8 @@ export default function JapanesePricesPage() {
         lead={LEAD}
       />
       <ComparisonTable
-        caption="📊 Market-native vs converted pricing"
-        competitorName="Converted EN price"
+        caption="📊 The Japanese price vs the US price"
+        competitorName="Going by the US price"
         rows={ROWS}
       />
       <HonestBreakdown sections={SECTIONS} />
