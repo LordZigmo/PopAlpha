@@ -190,6 +190,8 @@ export default function MarketSummaryCardClient({
   onWindowChange,
 }: MarketSummaryCardClientProps) {
   const [activeWindow, setActiveWindow] = useState<WindowKey>(selectedWindow);
+  // Edition overlay view: both lines by default, or isolate one edition.
+  const [editionView, setEditionView] = useState<"BOTH" | "UNLIMITED" | "FIRST_EDITION">("BOTH");
 
   useEffect(() => {
     setActiveWindow(selectedWindow);
@@ -247,8 +249,9 @@ export default function MarketSummaryCardClient({
   // 1st Edition printing (same finish + stamp), chart them together so the
   // edition premium is visible at a glance — Collectr-style. Falls back to
   // the single-series EnhancedChart when no sibling edition exists or either
-  // side lacks enough points in the active window.
-  const dualEditionSeries: MultiLineSeries[] | null = (() => {
+  // side lacks enough points in the active window. The pills let a user
+  // isolate a single edition when they only want one line.
+  const editionChart = (() => {
     if (!activeVariant?.finish) return null;
     const stampKey = String(activeVariant.stamp ?? "").trim().toUpperCase();
     const siblings = variants.filter(
@@ -271,11 +274,19 @@ export default function MarketSummaryCardClient({
     if (unlimitedPoints.length < MIN_POINTS_FOR_CHART || firstEditionPoints.length < MIN_POINTS_FOR_CHART) {
       return null;
     }
-    return [
-      { key: "UNLIMITED", label: "Unlimited", color: "var(--color-accent)", points: unlimitedPoints },
-      { key: "FIRST_EDITION", label: "1st Edition", color: "#A78BFA", points: firstEditionPoints },
-    ];
+    const lastPrice = (pts: HistoryPointRow[]) => pts[pts.length - 1]?.price ?? null;
+    return {
+      unlimited: { points: unlimitedPoints, currentPrice: unlimited.currentPrice ?? lastPrice(unlimitedPoints) },
+      firstEdition: { points: firstEditionPoints, currentPrice: firstEdition.currentPrice ?? lastPrice(firstEditionPoints) },
+    };
   })();
+
+  const dualEditionSeries: MultiLineSeries[] | null = editionChart
+    ? [
+        { key: "UNLIMITED", label: "Unlimited", color: "var(--color-accent)", points: editionChart.unlimited.points },
+        { key: "FIRST_EDITION", label: "1st Edition", color: "#A78BFA", points: editionChart.firstEdition.points },
+      ]
+    : null;
 
   const priceDisplay = PRICING_DISPLAY_V2_ENABLED
     ? resolveDisplayedMarketPrice({
@@ -379,9 +390,42 @@ export default function MarketSummaryCardClient({
               </div>
             ) : null}
 
-            {/* Chart — overlay both editions when available, else single line */}
-            {dualEditionSeries ? (
-              <MultiLineChart series={dualEditionSeries} scale="absolute" showChangeDetails />
+            {/* Chart — overlay both editions when available (with pills to
+                isolate one), else single line. */}
+            {editionChart && dualEditionSeries ? (
+              <div className="space-y-3">
+                <div className="inline-flex rounded-full border border-white/[0.08] bg-[#0D0D0D] p-0.5">
+                  {([
+                    ["BOTH", "Both"],
+                    ["UNLIMITED", "Unlimited"],
+                    ["FIRST_EDITION", "1st Edition"],
+                  ] as const).map(([key, label]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setEditionView(key)}
+                      className={[
+                        "rounded-full px-3 py-1 text-[13px] font-semibold transition-colors",
+                        editionView === key ? "bg-[#2b313d] text-[#F0F0F0]" : "text-[#777]",
+                      ].join(" ")}
+                      aria-pressed={editionView === key}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {editionView === "BOTH" ? (
+                  <MultiLineChart series={dualEditionSeries} scale="absolute" showChangeDetails />
+                ) : (
+                  <EnhancedChart
+                    points={editionView === "UNLIMITED" ? editionChart.unlimited.points : editionChart.firstEdition.points}
+                    windowLabel={effectiveWindow.toUpperCase()}
+                    currentPrice={editionView === "UNLIMITED" ? editionChart.unlimited.currentPrice : editionChart.firstEdition.currentPrice}
+                    changePercent={computeChange(editionView === "UNLIMITED" ? editionChart.unlimited.points : editionChart.firstEdition.points)}
+                    sharedSales={sharedSales}
+                  />
+                )}
+              </div>
             ) : (
               <EnhancedChart
                 points={chartSeries}

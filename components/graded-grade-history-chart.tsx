@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 
-import MultiLineChart, { type MultiLineSeries } from "@/components/multi-line-chart";
+import MultiLineChart, { type MultiLineSeries, type MultiLineScale } from "@/components/multi-line-chart";
 import type { GradeBucket } from "@/lib/cards/detail-types";
 import type { GradedGradeSeries } from "@/lib/cards/graded-grade-history";
 
@@ -50,6 +50,11 @@ export default function GradedGradeHistoryChart({
   providerLabel,
   selectedWindow,
 }: GradedGradeHistoryChartProps) {
+  // Indexed by default: traders care most about which grade is appreciating
+  // fastest, and a shared $ axis would flatten the low grades against PSA 10.
+  // The legend still carries each grade's current dollar value, and the $
+  // toggle flips to absolute prices on demand.
+  const [scale, setScale] = useState<MultiLineScale>("indexed");
   const [windowKey, setWindowKey] = useState<WindowKey>(selectedWindow === "90d" ? "90d" : "30d");
 
   const chartSeries = useMemo<MultiLineSeries[]>(() => {
@@ -70,9 +75,29 @@ export default function GradedGradeHistoryChart({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <p className="text-[17px] font-semibold text-[#F0F0F0]">Grade Performance</p>
-          <p className="mt-0.5 text-[13px] text-[#6B6B6B]">{providerLabel} grades · observed market prices</p>
+          <p className="mt-0.5 text-[13px] text-[#6B6B6B]">
+            {providerLabel} grades ·{" "}
+            {scale === "indexed" ? "indexed to window start — compare momentum" : "observed market prices"}
+          </p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Scale toggle: % (indexed momentum) vs $ (absolute prices) */}
+          <div className="inline-flex rounded-full border border-white/[0.08] bg-[#0D0D0D] p-0.5">
+            {(["indexed", "absolute"] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setScale(mode)}
+                className={[
+                  "rounded-full px-3 py-1 text-[13px] font-semibold transition-colors",
+                  scale === mode ? "bg-[#2b313d] text-[#F0F0F0]" : "text-[#777]",
+                ].join(" ")}
+                aria-pressed={scale === mode}
+              >
+                {mode === "indexed" ? "%" : "$"}
+              </button>
+            ))}
+          </div>
           {/* Window toggle */}
           <div className="inline-flex rounded-full border border-white/[0.08] bg-[#0D0D0D] p-0.5">
             {(["30d", "90d"] as const).map((key) => (
@@ -95,7 +120,7 @@ export default function GradedGradeHistoryChart({
 
       <div className="mt-4">
         {chartSeries.length > 0 ? (
-          <MultiLineChart series={chartSeries} scale="absolute" />
+          <MultiLineChart series={chartSeries} scale={scale} />
         ) : (
           <div className="flex h-[200px] items-center justify-center rounded-2xl border border-dashed border-white/[0.06] text-[15px] text-[#777]">
             Not enough graded history in this window yet.
