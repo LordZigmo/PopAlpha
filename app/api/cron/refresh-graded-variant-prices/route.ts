@@ -16,7 +16,11 @@
  *   aggregation by slug, and stamps a watermark so successive ticks rotate through all
  *   ~24k graded cards. Same bounded pattern as refresh-per-printing-display.
  *
- * Schedule: every 2h, maxCards=10000 → ~3 ticks for a full cycle; reads whatever
+ * Schedule: every 2h, maxCards=4000 → ~6 ticks (~12h) for a full cycle over the ~24k
+ * graded cards. Sized at 4000 (not 10000): variant_price_daily is ~5M rows, and a larger
+ * per-tick scope flips the planner to a full scan that risks the 300s ceiling — and since
+ * the watermark only advances on success, a timeout would stick and never make progress
+ * (measured post-deploy: 4000 finishes comfortably, 10000 does not). Reads whatever
  * variant_price_daily holds (refreshed daily by refresh-set-summaries at 09:00 UTC).
  *
  * Trust: cron — bearer CRON_SECRET.
@@ -29,7 +33,7 @@ import { dbAdmin } from "@/lib/db/admin";
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-const DEFAULT_MAX_CARDS = 10000;
+const DEFAULT_MAX_CARDS = 4000;
 const MAX_CARDS_LIMIT = 20000;
 
 function parseMaxCards(raw: string | null): number {
