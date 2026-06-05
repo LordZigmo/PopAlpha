@@ -17,9 +17,11 @@
 -- as one new CTE `computed_mirrored` inserted between `computed` and `ranked`,
 -- with `ranked` repointed at it. Per-printing and per-grade rows are unchanged
 -- (the mirror's CASE only fires for printing_id IS NULL AND grade = 'RAW').
--- Fallback: when the preferred printing has no RAW metrics row yet, keep the
--- existing pooled value (coalesce) so single-printing / not-yet-backfilled cards
--- are unaffected. refresh_price_changes_core already isolates the preferred
+-- Fallback: ONLY when the preferred printing has no computed RAW row (pref
+-- absent) do we keep the existing pooled value, so single-printing /
+-- not-yet-backfilled cards are unaffected. When the preferred row IS present we
+-- use its stats verbatim (including NULLs) rather than per-column coalescing back
+-- to the pool, so the canonical row stays internally consistent with one printing. refresh_price_changes_core already isolates the preferred
 -- printing for change_pct, so it is intentionally NOT touched here.
 --
 -- Bodies below are the live definitions (from 20260604190000) reproduced verbatim
@@ -312,22 +314,23 @@ begin
   ),
   -- NEW: canonical RAW row mirrors the preferred printing's stats instead of the
   -- pooled cross-printing aggregate. Only fires for (printing_id IS NULL, RAW);
-  -- every other row passes through unchanged. coalesce keeps the pooled value as
-  -- a fallback when the preferred printing has no computed RAW row.
+  -- every other row passes through unchanged. Gated on pref EXISTENCE
+  -- (pref.canonical_slug is not null): present -> use the preferred printing's
+  -- stats verbatim incl. NULLs; absent -> keep the pooled fallback.
   computed_mirrored as (
     select
       c.canonical_slug,
       c.printing_id,
       c.grade,
-      case when c.printing_id is null and c.grade = 'RAW' then coalesce(pref.median_7d, c.median_7d) else c.median_7d end as median_7d,
-      case when c.printing_id is null and c.grade = 'RAW' then coalesce(pref.median_30d, c.median_30d) else c.median_30d end as median_30d,
-      case when c.printing_id is null and c.grade = 'RAW' then coalesce(pref.low_30d, c.low_30d) else c.low_30d end as low_30d,
-      case when c.printing_id is null and c.grade = 'RAW' then coalesce(pref.high_30d, c.high_30d) else c.high_30d end as high_30d,
-      case when c.printing_id is null and c.grade = 'RAW' then coalesce(pref.trimmed_median_30d, c.trimmed_median_30d) else c.trimmed_median_30d end as trimmed_median_30d,
-      case when c.printing_id is null and c.grade = 'RAW' then coalesce(pref.volatility_30d, c.volatility_30d) else c.volatility_30d end as volatility_30d,
-      case when c.printing_id is null and c.grade = 'RAW' then coalesce(pref.liquidity_score, c.liquidity_score) else c.liquidity_score end as liquidity_score,
-      case when c.printing_id is null and c.grade = 'RAW' then coalesce(pref.active_7d_count, c.active_7d_count) else c.active_7d_count end as active_7d_count,
-      case when c.printing_id is null and c.grade = 'RAW' then coalesce(pref.snapshot_count_30d, c.snapshot_count_30d) else c.snapshot_count_30d end as snapshot_count_30d,
+      case when c.printing_id is null and c.grade = 'RAW' and pref.canonical_slug is not null then pref.median_7d else c.median_7d end as median_7d,
+      case when c.printing_id is null and c.grade = 'RAW' and pref.canonical_slug is not null then pref.median_30d else c.median_30d end as median_30d,
+      case when c.printing_id is null and c.grade = 'RAW' and pref.canonical_slug is not null then pref.low_30d else c.low_30d end as low_30d,
+      case when c.printing_id is null and c.grade = 'RAW' and pref.canonical_slug is not null then pref.high_30d else c.high_30d end as high_30d,
+      case when c.printing_id is null and c.grade = 'RAW' and pref.canonical_slug is not null then pref.trimmed_median_30d else c.trimmed_median_30d end as trimmed_median_30d,
+      case when c.printing_id is null and c.grade = 'RAW' and pref.canonical_slug is not null then pref.volatility_30d else c.volatility_30d end as volatility_30d,
+      case when c.printing_id is null and c.grade = 'RAW' and pref.canonical_slug is not null then pref.liquidity_score else c.liquidity_score end as liquidity_score,
+      case when c.printing_id is null and c.grade = 'RAW' and pref.canonical_slug is not null then pref.active_7d_count else c.active_7d_count end as active_7d_count,
+      case when c.printing_id is null and c.grade = 'RAW' and pref.canonical_slug is not null then pref.snapshot_count_30d else c.snapshot_count_30d end as snapshot_count_30d,
       c.scrydex_price,
       c.market_price,
       c.market_price_as_of,
@@ -795,15 +798,15 @@ begin
       c.canonical_slug,
       c.printing_id,
       c.grade,
-      case when c.printing_id is null and c.grade = 'RAW' then coalesce(pref.median_7d, c.median_7d) else c.median_7d end as median_7d,
-      case when c.printing_id is null and c.grade = 'RAW' then coalesce(pref.median_30d, c.median_30d) else c.median_30d end as median_30d,
-      case when c.printing_id is null and c.grade = 'RAW' then coalesce(pref.low_30d, c.low_30d) else c.low_30d end as low_30d,
-      case when c.printing_id is null and c.grade = 'RAW' then coalesce(pref.high_30d, c.high_30d) else c.high_30d end as high_30d,
-      case when c.printing_id is null and c.grade = 'RAW' then coalesce(pref.trimmed_median_30d, c.trimmed_median_30d) else c.trimmed_median_30d end as trimmed_median_30d,
-      case when c.printing_id is null and c.grade = 'RAW' then coalesce(pref.volatility_30d, c.volatility_30d) else c.volatility_30d end as volatility_30d,
-      case when c.printing_id is null and c.grade = 'RAW' then coalesce(pref.liquidity_score, c.liquidity_score) else c.liquidity_score end as liquidity_score,
-      case when c.printing_id is null and c.grade = 'RAW' then coalesce(pref.active_7d_count, c.active_7d_count) else c.active_7d_count end as active_7d_count,
-      case when c.printing_id is null and c.grade = 'RAW' then coalesce(pref.snapshot_count_30d, c.snapshot_count_30d) else c.snapshot_count_30d end as snapshot_count_30d,
+      case when c.printing_id is null and c.grade = 'RAW' and pref.canonical_slug is not null then pref.median_7d else c.median_7d end as median_7d,
+      case when c.printing_id is null and c.grade = 'RAW' and pref.canonical_slug is not null then pref.median_30d else c.median_30d end as median_30d,
+      case when c.printing_id is null and c.grade = 'RAW' and pref.canonical_slug is not null then pref.low_30d else c.low_30d end as low_30d,
+      case when c.printing_id is null and c.grade = 'RAW' and pref.canonical_slug is not null then pref.high_30d else c.high_30d end as high_30d,
+      case when c.printing_id is null and c.grade = 'RAW' and pref.canonical_slug is not null then pref.trimmed_median_30d else c.trimmed_median_30d end as trimmed_median_30d,
+      case when c.printing_id is null and c.grade = 'RAW' and pref.canonical_slug is not null then pref.volatility_30d else c.volatility_30d end as volatility_30d,
+      case when c.printing_id is null and c.grade = 'RAW' and pref.canonical_slug is not null then pref.liquidity_score else c.liquidity_score end as liquidity_score,
+      case when c.printing_id is null and c.grade = 'RAW' and pref.canonical_slug is not null then pref.active_7d_count else c.active_7d_count end as active_7d_count,
+      case when c.printing_id is null and c.grade = 'RAW' and pref.canonical_slug is not null then pref.snapshot_count_30d else c.snapshot_count_30d end as snapshot_count_30d,
       c.scrydex_price,
       c.market_price,
       c.market_price_as_of,
