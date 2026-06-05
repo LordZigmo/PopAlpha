@@ -251,6 +251,12 @@ function pickJpSource(rows: MetricsRow[]): MetricsRow | null {
 // chosen printing and all its per-grader prices would flip on DB row order
 // across requests/plans (Supabase returns these unordered).
 function dominantPriceWins(cand: GradedPriceRow, cur: GradedPriceRow): boolean {
+  // market_price_usd (14d median) is the advertised per-grader headline, so a
+  // printing that HAS one beats a busier-but-staler printing whose 14d median is
+  // null (sparse graded sales: many obs in days 15–30 but none in the last 14).
+  const ch = cand.market_price != null;
+  const uh = cur.market_price != null;
+  if (ch !== uh) return ch;
   const cn = cand.snapshot_count_30d ?? -1;
   const un = cur.snapshot_count_30d ?? -1;
   if (cn !== un) return cn > un;
