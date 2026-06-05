@@ -1218,6 +1218,8 @@ export const PHASE2_DIRECT_PUBLIC_READ_TABLES = [
 
 export const PHASE2_INTERNAL_BASE_VIEW_TABLES = [
   "card_metrics",
+  "graded_variant_prices",
+  "graded_variant_prices_refresh_state",
   "market_latest",
   "price_history",
   "price_history_points",
@@ -1243,6 +1245,7 @@ export const PHASE3_PUBLIC_SELECT_ONLY_VIEWS = [
   "public_card_page_view_daily",
   "public_card_page_view_totals",
   "public_community_vote_totals",
+  "public_graded_variant_prices",
   "public_jp_price_coverage",
   "public_market_latest",
   "public_price_history",
@@ -1476,6 +1479,7 @@ export const PUBLIC_SELECT_ONLY_OBJECTS = [
   "public_community_most_saved_7d",
   "public_community_trending_7d",
   "public_community_vote_totals",
+  "public_graded_variant_prices",
   "public_jp_price_coverage",
   "public_market_latest",
   "public_price_history",
@@ -1665,6 +1669,11 @@ export const INTERNAL_NO_GRANT_OBJECTS = [
   "variant_price_latest",
   "variant_sentiment_latest",
   "variant_signals_latest",
+  // Grader-split: per-(printing, grader, grade) graded prices + its refresh-state
+  // watermark. No anon/auth grants — consumers read via public_graded_variant_prices.
+  // RLS coverage above in RLS_REQUIRED_PUBLIC_TABLES (via PHASE2_INTERNAL_BASE_VIEW_TABLES).
+  "graded_variant_prices",
+  "graded_variant_prices_refresh_state",
   "variant_token_registry",
   // Yahoo! JP pricing companion. Same access model as snkrdunk_card_prices.
   "yahoo_jp_card_prices",
@@ -1696,6 +1705,7 @@ export const PUBLIC_VIEW_NAMES = [
   "public_community_most_saved_7d",
   "public_community_trending_7d",
   "public_community_vote_totals",
+  "public_graded_variant_prices",
   "public_jp_price_coverage",
   "public_market_latest",
   "public_price_history",
