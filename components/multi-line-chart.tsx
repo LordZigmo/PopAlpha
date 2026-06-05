@@ -270,9 +270,10 @@ export default function MultiLineChart({
               <span className="h-0.5 w-3.5 rounded" style={{ backgroundColor: s.color }} aria-hidden="true" />
               <span className="text-[#9A9A9A]">{s.label}</span>
               {last ? (
-                <span className="tabular-nums text-[#6B6B6B]">
-                  {scale === "indexed" ? formatIndexDelta(last.value) : formatUsd(last.price)}
-                </span>
+                // Always the current dollar value, even in indexed mode, so each
+                // grade/edition is labeled with its real price while the lines
+                // stay momentum-comparable.
+                <span className="tabular-nums text-[#6B6B6B]">{formatUsd(last.price)}</span>
               ) : null}
             </span>
           );
