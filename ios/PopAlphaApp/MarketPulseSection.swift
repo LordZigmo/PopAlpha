@@ -481,7 +481,13 @@ struct MarketPulseSection: View {
             // (then thin windowed as a last resort rather than an empty rail). Every card
             // self-labels its own window (activeSection passes window=nil for .movers), so
             // the badge stays honest in every branch.
+            // Filter to cards whose changeWindow actually matches the selected window.
+            // The backend fills top_movers["7D"] from the UNWINDOWED 24H daily gainers as a
+            // fallback (lib/data/homepage.ts), so forWindow(.d7) can return 24H cards that
+            // would otherwise satisfy the count gate and pre-empt the genuine-7D momentum
+            // fallback below — leaving the 7D tab showing 24H movers.
             let windowedMovers = signalBoard.topMovers.forWindow(selectedWindow)
+                .filter { $0.changeWindow == selectedWindow.rawValue }
             if windowedMovers.count >= Self.minMoversBeforeFallback {
                 return windowedMovers
             }
