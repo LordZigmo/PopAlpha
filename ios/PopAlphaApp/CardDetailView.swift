@@ -144,6 +144,12 @@ struct CardDetailView: View {
     /// (LE_7, G8, G9, G9_5, G10, G10_PERFECT). Sourced from card_metrics
     /// which is keyed (slug, printing_id, grade) — no provider dimension.
     @State private var gradedCardMetricsByBucket: [String: GradedCardMetricRow] = [:]
+    /// Per-bucket price history for the active grader, overlaid as the
+    /// "Grade Performance" comparison chart. Indexed by default so momentum
+    /// is comparable across the PSA 10 → PSA 7 price gap; the %/$ toggle
+    /// flips to absolute dollars.
+    @State private var gradePerfSeries: [GradePerfDatum] = []
+    @State private var gradePerfScale: MultiSeriesChartModel.Scale = .indexed
     /// Slug of the cross-language partner card (EN <-> JP). Nil when no
     /// pairing exists in card_translations, or before the
     /// /api/cards/[slug]/detail fetch lands. Populated by .task on each
@@ -371,6 +377,12 @@ struct CardDetailView: View {
         // the EN card's chart-cleared state and never refetch.
         .task(id: "\(activeCard.id)|\(selectedTimeframe.rawValue)|\(selectedPriceMode)|\(selectedPrintingId ?? "")") {
             await loadChart()
+        }
+        // Grade Performance overlay: per-bucket history for the active grader.
+        // Keyed so it refires on grader / timeframe / printing / availability
+        // changes, mirroring the main chart's task.
+        .task(id: "gradePerf|\(activeCard.id)|\(selectedTimeframe.rawValue)|\(selectedPriceMode)|\(selectedPrintingId ?? "")|\(availableGradedOptions.count)") {
+            await loadGradePerformance()
         }
         // Keyed by activeCard.id so the entire data-load fan-out re-fires
         // when the user taps the EN/JP toggle and we swap activeCard.
@@ -938,6 +950,11 @@ struct CardDetailView: View {
             // 7. Chart section — supporting evidence after the read.
             chartSection
 
+            // 7b. Grade Performance — overlay every grade of the active grader
+            //     so the user can compare which grade is moving quicker.
+            //     Self-gates to graded mode with ≥2 buckets of history.
+            gradePerformanceSection
+
             // 8. Personalized insight ("How this fits your style") — secondary
             // differentiated layer; renders its own fallback when signal is thin.
             PersonalizedInsightCardView(
@@ -1331,6 +1348,159 @@ struct CardDetailView: View {
                 // that's the cause, so keep this generic.
                 chartError = "Couldn't load price history."
             }
+        }
+    }
+
+    // MARK: - Grade Performance (multi-grade overlay)
+
+    private struct GradePerfDatum: Identifiable {
+        let id: String        // grade bucket (e.g. "G10")
+        let label: String
+        let color: Color
+        let points: [PricePoint]
+    }
+
+    private static let gradePerfOrder = ["G10_PERFECT", "G10", "G9_5", "G9", "G8", "LE_7"]
+
+    private func gradePerfColor(_ bucket: String) -> Color {
+        switch bucket {
+        case "G10_PERFECT": return Color(red: 0.957, green: 0.447, blue: 0.714)
+        case "G10":         return Color(red: 0.204, green: 0.827, blue: 0.600)
+        case "G9_5":        return Color(red: 0.376, green: 0.647, blue: 0.980)
+        case "G9":          return Color(red: 0.659, green: 0.545, blue: 0.980)
+        case "G8":          return Color(red: 0.984, green: 0.749, blue: 0.141)
+        case "LE_7":        return Color(red: 0.984, green: 0.443, blue: 0.522)
+        default:            return PA.Colors.neutral
+        }
+    }
+
+    private func gradePerfLabel(_ bucket: String) -> String {
+        switch bucket {
+        case "G10_PERFECT": return "10 Perfect"
+        case "G10":         return "10"
+        case "G9_5":        return "9.5"
+        case "G9":          return "9"
+        case "G8":          return "8"
+        case "LE_7":        return "7 or less"
+        default:            return bucket
+        }
+    }
+
+    @ViewBuilder
+    private var gradePerformanceSection: some View {
+        if selectedPriceMode.isGraded, gradePerfSeries.count >= 2 {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Grade Performance")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(PA.Colors.text)
+                        Text("\(selectedGradingAgency) grades · \(gradePerfScale == .indexed ? "indexed to window start" : "observed prices")")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(PA.Colors.muted)
+                    }
+                    Spacer()
+                    gradePerfScaleToggle
+                }
+
+                MultiLineChartView(
+                    series: gradePerfSeries.map {
+                        MultiLineSeriesInput(id: $0.id, label: $0.label, color: $0.color, points: $0.points)
+                    },
+                    scale: gradePerfScale,
+                    showChangeDetails: false,
+                    height: 150
+                )
+            }
+            .padding(16)
+            .glassSurface()
+        }
+    }
+
+    private var gradePerfScaleToggle: some View {
+        HStack(spacing: 2) {
+            ForEach([MultiSeriesChartModel.Scale.indexed, MultiSeriesChartModel.Scale.absolute], id: \.self) { mode in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) { gradePerfScale = mode }
+                } label: {
+                    Text(mode == .indexed ? "%" : "$")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(gradePerfScale == mode ? PA.Colors.background : PA.Colors.muted)
+                        .frame(width: 30, height: 24)
+                        .background(gradePerfScale == mode ? detailAccent : PA.Colors.surfaceSoft)
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    /// Fetches per-bucket history for the active grader in parallel and
+    /// assembles the overlay series (high grade → low). Cleared when not in
+    /// graded mode or fewer than two buckets have data.
+    private func loadGradePerformance() async {
+        guard case let .graded(grader, _) = selectedPriceMode else {
+            await MainActor.run { gradePerfSeries = [] }
+            return
+        }
+        let buckets = availableGradedOptions.compactMap { mode -> String? in
+            if case let .graded(provider, bucket) = mode, provider == grader { return bucket }
+            return nil
+        }
+        guard buckets.count >= 2 else {
+            await MainActor.run { gradePerfSeries = [] }
+            return
+        }
+
+        let slug = activeCard.id
+        let printingId = selectedPrintingId
+        let tf = selectedTimeframe
+
+        var fetched: [String: [PricePoint]] = [:]
+        await withTaskGroup(of: (String, [PricePoint]).self) { group in
+            for bucket in buckets {
+                group.addTask {
+                    do {
+                        let pts: [PricePoint]
+                        if let pid = printingId {
+                            pts = try await CardService.shared.fetchPrintingGradedPriceHistory(
+                                slug: slug, printingId: pid, provider: grader, bucket: bucket, timeframe: tf
+                            )
+                        } else {
+                            pts = try await CardService.shared.fetchGradedPriceHistory(
+                                slug: slug, provider: grader, bucket: bucket, timeframe: tf
+                            )
+                        }
+                        return (bucket, pts)
+                    } catch {
+                        return (bucket, [])
+                    }
+                }
+            }
+            for await (bucket, pts) in group where pts.count >= 2 {
+                fetched[bucket] = pts
+            }
+        }
+
+        let ordered: [GradePerfDatum] = Self.gradePerfOrder.compactMap { bucket in
+            guard let pts = fetched[bucket] else { return nil }
+            return GradePerfDatum(
+                id: bucket,
+                label: gradePerfLabel(bucket),
+                color: gradePerfColor(bucket),
+                points: pts
+            )
+        }
+
+        await MainActor.run {
+            // Drop the result if the user has since changed grader / timeframe /
+            // printing / card (mirrors loadChart's staleness guard).
+            guard activeCard.id == slug,
+                  selectedTimeframe == tf,
+                  selectedPrintingId == printingId,
+                  case let .graded(currentGrader, _) = selectedPriceMode,
+                  currentGrader == grader else { return }
+            gradePerfSeries = ordered
         }
     }
 
