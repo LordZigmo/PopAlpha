@@ -205,15 +205,19 @@ actor CardService {
     /// the user's selectedPrintingId; fall back to canonical (NULL); fall
     /// back to any row.
     func fetchGradedCardMetrics(slug: String) async throws -> [GradedCardMetricRow] {
+        // public_graded_variant_prices is per (slug, printing_id, grade, GRADER) —
+        // so PSA 10 and CGC 10 are distinct rows. CardDetailView keys these by
+        // (grader, bucket) so the agency pills actually change the price. Higher
+        // limit: per-grader × per-printing rows multiply (≈6 buckets × 4 graders).
         let data = try await Supabase.query(
-            table: "public_card_metrics",
-            select: "canonical_slug,printing_id,grade,median_7d,median_30d,low_30d,high_30d,trimmed_median_30d,snapshot_count_30d,updated_at",
+            table: "public_graded_variant_prices",
+            select: "canonical_slug,printing_id,grade,grader,market_price,market_price_as_of,latest_price_as_of,median_7d,median_30d,low_30d,high_30d,snapshot_count_30d,updated_at",
             filters: [
                 ("canonical_slug", "eq", slug),
                 ("grade", "in", "(LE_7,G8,G9,G9_5,G10,G10_PERFECT)"),
             ],
             order: "grade.asc",
-            limit: 60
+            limit: 200
         )
         return try decoder.decode([GradedCardMetricRow].self, from: data)
     }
@@ -919,15 +923,20 @@ struct GradedCardMetricRow: Decodable, Identifiable {
     let canonicalSlug: String
     let printingId: String?
     let grade: String
+    let grader: String
+    let marketPrice: Double?       // 14-day median (the per-grader headline)
+    let marketPriceAsOf: String?
+    let latestPriceAsOf: String?   // freshness fallback for the dominant-printing tie-break
     let median7d: Double?
     let median30d: Double?
     let low30d: Double?
     let high30d: Double?
-    let trimmedMedian30d: Double?
     let snapshotCount30d: Int?
     let updatedAt: String?
 
-    var id: String { "\(canonicalSlug)::\(printingId ?? "null")::\(grade)" }
+    // id includes grader so PSA/CGC/BGS/TAG rows for the same printing+grade
+    // don't collide (they're distinct rows in public_graded_variant_prices).
+    var id: String { "\(canonicalSlug)::\(printingId ?? "null")::\(grade)::\(grader)" }
 }
 
 struct ConditionPriceRow: Decodable, Identifiable {

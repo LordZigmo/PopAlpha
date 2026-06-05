@@ -439,26 +439,30 @@ struct CardDetailView: View {
             ) {
                 await MainActor.run { conditionPrices = prices }
             }
-            // Load per-bucket graded market summary stats. Each card may
-            // have several rows per bucket (one canonical printing_id=NULL
-            // aggregate plus one row per printing). Pick the best row per
-            // bucket: prefer canonical (NULL) since it aggregates all
-            // printings; fall back to the printing-scoped row with the
-            // most snapshot_count_30d data; final fallback to whatever
-            // row we have.
+            // Per-(grader, bucket) graded market summary. public_graded_variant_prices
+            // is per (printing, grader, grade), so key by "GRADER::bucket" — the agency
+            // pills (PSA/CGC/BGS/TAG) then map to distinct rows. For a slug with several
+            // printings of one grader+grade, pick the dominant printing: prefer a usable
+            // 14d market_price, then most snapshot_count_30d, then freshest, then
+            // printing_id (mirrors the web ladder's tie-break so the pick is stable).
+            // No canonical printing_id=NULL row exists in this view.
             if let rows = try? await CardService.shared.fetchGradedCardMetrics(slug: activeCard.id) {
                 var grouped: [String: [GradedCardMetricRow]] = [:]
                 for row in rows {
-                    grouped[row.grade, default: []].append(row)
+                    grouped["\(row.grader)::\(row.grade)", default: []].append(row)
                 }
                 var resolved: [String: GradedCardMetricRow] = [:]
-                for (bucket, candidates) in grouped {
-                    if let canonical = candidates.first(where: { $0.printingId == nil }) {
-                        resolved[bucket] = canonical
-                    } else {
-                        let best = candidates.max { ($0.snapshotCount30d ?? 0) < ($1.snapshotCount30d ?? 0) }
-                        if let best { resolved[bucket] = best }
+                for (key, candidates) in grouped {
+                    let best = candidates.max { a, b in
+                        let aHas = a.marketPrice != nil, bHas = b.marketPrice != nil
+                        if aHas != bHas { return !aHas }
+                        let aN = a.snapshotCount30d ?? -1, bN = b.snapshotCount30d ?? -1
+                        if aN != bN { return aN < bN }
+                        let aAsOf = a.marketPriceAsOf ?? a.latestPriceAsOf ?? "", bAsOf = b.marketPriceAsOf ?? b.latestPriceAsOf ?? ""
+                        if aAsOf != bAsOf { return aAsOf < bAsOf }
+                        return (a.printingId ?? "") > (b.printingId ?? "")
                     }
+                    if let best { resolved[key] = best }
                 }
                 await MainActor.run { gradedCardMetricsByBucket = resolved }
             }
@@ -1942,15 +1946,15 @@ struct CardDetailView: View {
 
     // MARK: - Graded Market Summary
 
-    /// Aggregate market-summary stats for the currently-selected graded
-    /// bucket. card_metrics is per (slug, printing, grade) — no provider —
-    /// so this section is bucket-level (e.g. "10 Market Summary"), not
-    /// per-(provider, bucket). Renders only when graded mode is selected
-    /// AND we have a card_metrics row for the active bucket.
+    /// Per-(grader, bucket) market-summary stats for the selected graded variant.
+    /// public_graded_variant_prices IS per-grader, so this keys by "GRADER::bucket"
+    /// — tapping PSA vs CGC swaps to that grader's own row (e.g. PSA 10 $3,431 vs
+    /// CGC 10 $761). Renders only when graded mode is selected AND we have a row
+    /// for the active (grader, bucket).
     @ViewBuilder
     private var gradedMarketSummarySection: some View {
-        if case .graded(_, let bucket) = selectedPriceMode,
-           let metric = gradedCardMetricsByBucket[bucket] {
+        if case .graded(let provider, let bucket) = selectedPriceMode,
+           let metric = gradedCardMetricsByBucket["\(provider)::\(bucket)"] {
             let rows = buildGradedSummaryRows(metric)
             if !rows.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
@@ -2000,8 +2004,13 @@ struct CardDetailView: View {
 
     private func buildGradedSummaryRows(_ metric: GradedCardMetricRow) -> [GradedSummaryRow] {
         var rows: [GradedSummaryRow] = []
+        // Lead with the 14-day median (the per-grader headline). Graded 7d windows
+        // are often empty, so the emphasis falls back to 7D only when 14D is absent.
+        if let market = metric.marketPrice {
+            rows.append(.init(label: "14D Median", value: formatConditionPrice(market), emphasized: true))
+        }
         if let median7d = metric.median7d {
-            rows.append(.init(label: "7D Median", value: formatConditionPrice(median7d), emphasized: true))
+            rows.append(.init(label: "7D Median", value: formatConditionPrice(median7d), emphasized: metric.marketPrice == nil))
         }
         if let median30d = metric.median30d {
             rows.append(.init(label: "30D Median", value: formatConditionPrice(median30d), emphasized: false))
