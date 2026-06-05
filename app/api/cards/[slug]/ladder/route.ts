@@ -245,6 +245,31 @@ function pickJpSource(rows: MetricsRow[]): MetricsRow | null {
   return rows.find(hasJp) ?? raw ?? rows[0] ?? null;
 }
 
+// Stable "dominant printing/row" picks: most-traded (or most-active), then
+// freshest, then printing_id / variant_ref. Graded sales are sparse, so ties on
+// the primary signal (e.g. one sale per printing) are common — without these the
+// chosen printing and all its per-grader prices would flip on DB row order
+// across requests/plans (Supabase returns these unordered).
+function dominantPriceWins(cand: GradedPriceRow, cur: GradedPriceRow): boolean {
+  const cn = cand.snapshot_count_30d ?? -1;
+  const un = cur.snapshot_count_30d ?? -1;
+  if (cn !== un) return cn > un;
+  const ca = cand.market_price_as_of ?? cand.latest_price_as_of ?? "";
+  const ua = cur.market_price_as_of ?? cur.latest_price_as_of ?? "";
+  if (ca !== ua) return ca > ua; // ISO timestamps sort chronologically; fresher wins
+  return (cand.printing_id ?? "") < (cur.printing_id ?? "");
+}
+
+function dominantActivityWins(cand: VariantRow, cur: VariantRow): boolean {
+  const cp = cand.history_points_30d ?? -1;
+  const up = cur.history_points_30d ?? -1;
+  if (cp !== up) return cp > up;
+  const ca = cand.provider_as_of_ts ?? "";
+  const ua = cur.provider_as_of_ts ?? "";
+  if (ca !== ua) return ca > ua;
+  return (cand.variant_ref ?? "") < (cur.variant_ref ?? "");
+}
+
 function groupGraders(
   variantRows: VariantRow[],
   gradedPriceRows: GradedPriceRow[],
@@ -261,7 +286,7 @@ function groupGraders(
     if (p.grade !== grade || p.grader == null) continue;
     if (!(GRADED_PROVIDERS as readonly string[]).includes(p.grader)) continue;
     const existing = priceByGrader.get(p.grader);
-    if (!existing || (p.snapshot_count_30d ?? -1) > (existing.snapshot_count_30d ?? -1)) {
+    if (!existing || dominantPriceWins(p, existing)) {
       priceByGrader.set(p.grader, p);
     }
   }
@@ -272,7 +297,7 @@ function groupGraders(
     if (r.grade !== grade || r.provider == null) continue;
     if (!(GRADED_PROVIDERS as readonly string[]).includes(r.provider)) continue;
     const existing = activityByGrader.get(r.provider);
-    if (!existing || (r.history_points_30d ?? -1) > (existing.history_points_30d ?? -1)) {
+    if (!existing || dominantActivityWins(r, existing)) {
       activityByGrader.set(r.provider, r);
     }
   }
