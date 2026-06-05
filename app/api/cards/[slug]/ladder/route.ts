@@ -22,19 +22,21 @@ export const runtime = "nodejs";
  *                                     fallback chain for graded headline price
  *   - public_variant_metrics        → per-(slug, variant_ref, provider, grade)
  *                                     trend + activity (no median, no signals)
+ *   - public_graded_variant_prices  → per-(slug, printing_id, grade, grader)
+ *                                     price: latest + 14d/7d/30d median + 30D
+ *                                     range + sample count (the PSA10≠CGC10 split)
  *
  * Signal columns (signal_trend / signal_breakout / signal_value) stay in
  * pro_variant_metrics — that's the Pro paywall boundary established by
  * supabase/migrations/20260303230000_signal_paywall_views.sql. Use
  * /api/pro/signals for those.
  *
- * Per-grader median spread (PSA10 = $X vs CGC10 = $Y) is intentionally
- * NOT in this v1: variant_metrics has trend slope + history points per
- * (provider, grade) but no median price column. Surfacing per-grader
- * medians needs a separate aggregation pass over price_snapshots, which
- * the metrics writer doesn't currently produce. v2 candidate; flagged
- * via summary.data_quality_note so the LLM doesn't claim per-grader
- * spread is missing because the card lacks data.
+ * Per-grader price spread (PSA10 = $X vs CGC10 = $Y) IS surfaced now, from
+ * public_graded_variant_prices (the grader-split landed in #189/#190). Each
+ * graders[] rung carries that grader's own latest price + 14d/7d/30d median +
+ * 30D range + sample count, taken from the most-traded printing of the slug.
+ * variant_metrics still supplies per-grader trend + activity; the two are
+ * merged in groupGraders().
  *
  * Cross-language note: jp_source surfaces JP-NATIVE prices for the
  * SAME canonical_slug (e.g. an EN card's slug joined to Yahoo/Snkrdunk
@@ -100,13 +102,43 @@ type VariantRow = {
   provider_as_of_ts: string | null;
 };
 
+type GradedPriceRow = {
+  printing_id: string | null;
+  grade: string | null;
+  grader: string | null;
+  latest_price: number | null;
+  latest_price_as_of: string | null;
+  market_price: number | null;
+  market_price_as_of: string | null;
+  median_7d: number | null;
+  median_30d: number | null;
+  low_30d: number | null;
+  high_30d: number | null;
+  snapshot_count_30d: number | null;
+};
+
 type GraderBreakdown = {
   provider: string;
+  // Activity (public_variant_metrics): most-ACTIVE printing for this grader+grade.
   history_points_30d: number | null;
   provider_trend_slope_7d: number | null;
   provider_price_relative_to_30d_range: number | null;
   provider_price_changes_count_30d: number | null;
   provider_as_of_ts: string | null;
+  // Price (public_graded_variant_prices): the most-TRADED printing for this
+  // grader+grade. printing_id labels WHICH printing — for multi-printing cards
+  // different graders can resolve to different printings, so compare with that in
+  // mind. market_price_usd = 14-day median (the headline). This is what makes
+  // PSA 10 vs CGC 10 a real per-grader number instead of a pooled average.
+  printing_id: string | null;
+  latest_price_usd: number | null;
+  market_price_usd: number | null;
+  median_7d_usd: number | null;
+  median_30d_usd: number | null;
+  low_30d_usd: number | null;
+  high_30d_usd: number | null;
+  price_snapshot_count_30d: number | null;
+  price_as_of: string | null;
 };
 
 type GradeRung = {
@@ -135,8 +167,8 @@ type GradeRung = {
   change_pct_7d: number | null;
   // Premium vs RAW headline. 1.0 on RAW. null when either side missing.
   premium_vs_raw: number | null;
-  // Per-grader (PSA / CGC / BGS / TAG) activity rows from
-  // public_variant_metrics. No medians (see route docstring). Only
+  // Per-grader (PSA / CGC / BGS / TAG) rungs: price (public_graded_variant_prices)
+  // + activity (public_variant_metrics), merged in groupGraders(). Only
   // populated for graded grades; empty array on RAW.
   graders: GraderBreakdown[];
 };
@@ -213,39 +245,62 @@ function pickJpSource(rows: MetricsRow[]): MetricsRow | null {
   return rows.find(hasJp) ?? raw ?? rows[0] ?? null;
 }
 
-function groupGraders(rows: VariantRow[], grade: GradeKey): GraderBreakdown[] {
+function groupGraders(
+  variantRows: VariantRow[],
+  gradedPriceRows: GradedPriceRow[],
+  grade: GradeKey,
+): GraderBreakdown[] {
   if (grade === "RAW") return [];
-  return rows
-    .filter(
-      (r) =>
-        r.grade === grade &&
-        r.provider != null &&
-        (GRADED_PROVIDERS as readonly string[]).includes(r.provider),
-    )
-    .reduce<GraderBreakdown[]>((acc, r) => {
-      // De-dupe by provider, keeping the row with the most history
-      // points (variant_metrics is per (variant_ref, provider, grade)
-      // and a single slug+grade can have multiple variant_refs in
-      // theory; pick the most-active one to represent the grader).
-      const existingIdx = acc.findIndex((g) => g.provider === r.provider);
-      const candidate: GraderBreakdown = {
-        provider: r.provider as string,
-        history_points_30d: r.history_points_30d,
-        provider_trend_slope_7d: r.provider_trend_slope_7d,
-        provider_price_relative_to_30d_range: r.provider_price_relative_to_30d_range,
-        provider_price_changes_count_30d: r.provider_price_changes_count_30d,
-        provider_as_of_ts: r.provider_as_of_ts,
+
+  // Per-grader PRICE: the most-traded printing (highest snapshot_count_30d)
+  // for this grader+grade. Slug-level framing — same as the activity rail,
+  // this answers "what does THIS grader's <grade> of <slug> trade at",
+  // collapsing to the dominant printing when a slug has several.
+  const priceByGrader = new Map<string, GradedPriceRow>();
+  for (const p of gradedPriceRows) {
+    if (p.grade !== grade || p.grader == null) continue;
+    if (!(GRADED_PROVIDERS as readonly string[]).includes(p.grader)) continue;
+    const existing = priceByGrader.get(p.grader);
+    if (!existing || (p.snapshot_count_30d ?? -1) > (existing.snapshot_count_30d ?? -1)) {
+      priceByGrader.set(p.grader, p);
+    }
+  }
+
+  // Per-grader ACTIVITY: the most-active printing (highest history_points_30d).
+  const activityByGrader = new Map<string, VariantRow>();
+  for (const r of variantRows) {
+    if (r.grade !== grade || r.provider == null) continue;
+    if (!(GRADED_PROVIDERS as readonly string[]).includes(r.provider)) continue;
+    const existing = activityByGrader.get(r.provider);
+    if (!existing || (r.history_points_30d ?? -1) > (existing.history_points_30d ?? -1)) {
+      activityByGrader.set(r.provider, r);
+    }
+  }
+
+  // A grader appears if it has EITHER a price or an activity row.
+  const providers = new Set<string>([...priceByGrader.keys(), ...activityByGrader.keys()]);
+  return [...providers]
+    .map((provider): GraderBreakdown => {
+      const a = activityByGrader.get(provider);
+      const p = priceByGrader.get(provider);
+      return {
+        provider,
+        history_points_30d: a?.history_points_30d ?? null,
+        provider_trend_slope_7d: a?.provider_trend_slope_7d ?? null,
+        provider_price_relative_to_30d_range: a?.provider_price_relative_to_30d_range ?? null,
+        provider_price_changes_count_30d: a?.provider_price_changes_count_30d ?? null,
+        provider_as_of_ts: a?.provider_as_of_ts ?? null,
+        printing_id: p?.printing_id ?? null,
+        latest_price_usd: p?.latest_price ?? null,
+        market_price_usd: p?.market_price ?? null,
+        median_7d_usd: p?.median_7d ?? null,
+        median_30d_usd: p?.median_30d ?? null,
+        low_30d_usd: p?.low_30d ?? null,
+        high_30d_usd: p?.high_30d ?? null,
+        price_snapshot_count_30d: p?.snapshot_count_30d ?? null,
+        price_as_of: p?.market_price_as_of ?? p?.latest_price_as_of ?? null,
       };
-      if (existingIdx === -1) {
-        acc.push(candidate);
-      } else {
-        const existing = acc[existingIdx];
-        const existingPts = existing.history_points_30d ?? -1;
-        const candidatePts = candidate.history_points_30d ?? -1;
-        if (candidatePts > existingPts) acc[existingIdx] = candidate;
-      }
-      return acc;
-    }, [])
+    })
     .sort((a, b) => a.provider.localeCompare(b.provider));
 }
 
@@ -264,7 +319,7 @@ export async function GET(
 
   const supabase = dbPublic();
 
-  const [canonicalResult, metricsResult, variantResult, jpCoverageResult] = await Promise.all([
+  const [canonicalResult, metricsResult, variantResult, gradedPriceResult, jpCoverageResult] = await Promise.all([
     supabase
       .from("canonical_cards")
       .select("slug, canonical_name, set_name, year, card_number, language")
@@ -331,6 +386,30 @@ export async function GET(
       .eq("canonical_slug", slug)
       .in("provider", [...GRADED_PROVIDERS])
       .in("grade", [...GRADE_ORDER]),
+    // Per-grader PRICE (PR-B). public_graded_variant_prices is keyed
+    // (canonical_slug, printing_id, grade, grader) — the per-(printing,
+    // grader, grade) split landed in #189/#190. groupGraders() folds the
+    // most-traded printing's price into each grader rung. RAW won't match.
+    supabase
+      .from("public_graded_variant_prices")
+      .select(
+        [
+          "printing_id",
+          "grade",
+          "grader",
+          "latest_price",
+          "latest_price_as_of",
+          "market_price",
+          "market_price_as_of",
+          "median_7d",
+          "median_30d",
+          "low_30d",
+          "high_30d",
+          "snapshot_count_30d",
+        ].join(", "),
+      )
+      .eq("canonical_slug", slug)
+      .in("grade", [...GRADE_ORDER]),
     loadJpPriceCoverageMap(supabase, [slug])
       .then((data) => ({ data, error: null as Error | null }))
       .catch((error: unknown) => ({
@@ -351,6 +430,10 @@ export async function GET(
     console.error("[cards/ladder] public_variant_metrics", slug, variantResult.error.message);
     return NextResponse.json({ ok: false, error: "Internal error." }, { status: 500 });
   }
+  if (gradedPriceResult.error) {
+    console.error("[cards/ladder] public_graded_variant_prices", slug, gradedPriceResult.error.message);
+    return NextResponse.json({ ok: false, error: "Internal error." }, { status: 500 });
+  }
   if (jpCoverageResult.error) {
     console.error("[cards/ladder] public_jp_price_coverage", slug, jpCoverageResult.error.message);
     return NextResponse.json({ ok: false, error: "Internal error." }, { status: 500 });
@@ -365,6 +448,7 @@ export async function GET(
   // GenericStringError union for joined `select()` strings.
   const metricRows = (metricsResult.data ?? []) as unknown as MetricsRow[];
   const variantRows = (variantResult.data ?? []) as unknown as VariantRow[];
+  const gradedPriceRows = (gradedPriceResult.data ?? []) as unknown as GradedPriceRow[];
 
   // Pre-resolve RAW headline so we can compute premiums in one pass.
   const rawRow = pickGradeRow(metricRows, "RAW");
@@ -389,7 +473,7 @@ export async function GET(
         change_pct_24h: null,
         change_pct_7d: null,
         premium_vs_raw: null,
-        graders: groupGraders(variantRows, grade),
+        graders: groupGraders(variantRows, gradedPriceRows, grade),
       };
     }
 
@@ -420,7 +504,7 @@ export async function GET(
       change_pct_24h: grade === "RAW" ? row.change_pct_24h : null,
       change_pct_7d: grade === "RAW" ? row.change_pct_7d : null,
       premium_vs_raw: premium,
-      graders: groupGraders(variantRows, grade),
+      graders: groupGraders(variantRows, gradedPriceRows, grade),
     };
   });
 
@@ -458,11 +542,15 @@ export async function GET(
   const dataQualityNote =
     "Per-grade headline walks the fallback chain " +
     "market_price → median_7d → median_30d → trimmed_median_30d. " +
-    "Graded headline is the cross-grader aggregate from card_metrics; " +
-    "per-grader median spread (PSA10 vs CGC10) is not in v1 of this " +
-    "endpoint — variant_metrics has per-grader trend + activity but no " +
-    "per-grader median price column. Direction signals (signal_trend, " +
-    "signal_breakout, signal_value) are paywalled and live in /api/pro/signals.";
+    "The grade-rung headline is the cross-grader aggregate from card_metrics; " +
+    "per-grader price spread (PSA10 vs CGC10) IS available in graders[] — each " +
+    "carries that grader's own latest / 14d / 7d / 30d price + 30D range + sample " +
+    "count from public_graded_variant_prices, taken from that grader's most-traded " +
+    "printing (graders[].printing_id labels which; for multi-printing cards different " +
+    "graders can resolve to different printings, so do not read a cross-grader gap as " +
+    "a pure grade premium without checking printing_id). " +
+    "Direction signals (signal_trend, signal_breakout, signal_value) are " +
+    "paywalled and live in /api/pro/signals.";
 
   // Latest as_of across the rungs is the response-level freshness anchor.
   const asOf = grades.reduce<string | null>((latest, g) => {
