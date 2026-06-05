@@ -37,6 +37,16 @@ function formatChartDate(ts: string): string {
   }).format(date);
 }
 
+function formatPct(value: number): string {
+  const abs = Math.abs(value);
+  const formatted = abs >= 10 ? abs.toFixed(0) : abs.toFixed(1);
+  return `${value > 0 ? "+" : value < 0 ? "-" : ""}${formatted}%`;
+}
+
+function pctColor(value: number): string {
+  return value > 0 ? "#00DC5A" : value < 0 ? "#FF3B30" : "#6B6B6B";
+}
+
 const SVG_W = 600;
 const SVG_H = 200;
 const PAD_X = 0;
@@ -49,7 +59,7 @@ export default function EnhancedChart({
   sharedSales,
 }: EnhancedChartProps) {
   const svgRef = useRef<SVGSVGElement>(null);
-  const [hover, setHover] = useState<{ x: number; y: number; price: number; ts: string } | null>(null);
+  const [hover, setHover] = useState<{ x: number; y: number; price: number; ts: string; i: number } | null>(null);
   const [hoverDot, setHoverDot] = useState<{ x: number; y: number; price: number; date: string } | null>(null);
 
   // Y range needs to accommodate both the market line AND the shared-
@@ -120,22 +130,36 @@ export default function EnhancedChart({
       .filter((value): value is { x: number; y: number; price: number; date: string } => value !== null);
   }, [sharedSales, points, toY]);
 
-  const handleMouseMove = useCallback(
-    (e: React.MouseEvent<SVGSVGElement>) => {
+  // Shared scrubber used by both pointer (desktop) and touch (mobile) so
+  // "tap and scroll through" the chart updates the readout on phones too.
+  const setHoverFromClientX = useCallback(
+    (clientX: number) => {
       if (!svgRef.current || points.length < 2) return;
       const rect = svgRef.current.getBoundingClientRect();
-      const relX = (e.clientX - rect.left) / rect.width;
+      const relX = (clientX - rect.left) / rect.width;
       const idx = Math.round(relX * (points.length - 1));
       const clamped = Math.max(0, Math.min(idx, points.length - 1));
       const pt = points[clamped];
       if (pt) {
-        setHover({ x: toX(clamped), y: toY(pt.price), price: pt.price, ts: pt.ts });
+        setHover({ x: toX(clamped), y: toY(pt.price), price: pt.price, ts: pt.ts, i: clamped });
       }
     },
     [points, toX, toY],
   );
 
+  const handleMouseMove = useCallback(
+    (e: React.MouseEvent<SVGSVGElement>) => setHoverFromClientX(e.clientX),
+    [setHoverFromClientX],
+  );
   const handleMouseLeave = useCallback(() => setHover(null), []);
+  const handleTouchMove = useCallback(
+    (e: React.TouchEvent<SVGSVGElement>) => {
+      const touch = e.touches[0];
+      if (touch) setHoverFromClientX(touch.clientX);
+    },
+    [setHoverFromClientX],
+  );
+  const handleTouchEnd = useCallback(() => setHover(null), []);
 
   if (points.length < 2) {
     return (
@@ -168,9 +192,14 @@ export default function EnhancedChart({
         ref={svgRef}
         viewBox={`0 0 ${SVG_W} ${SVG_H}`}
         className="w-full h-[200px] sm:h-[260px]"
+        style={{ touchAction: "pan-y" }}
         preserveAspectRatio="none"
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
+        onTouchStart={handleTouchMove}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchEnd}
       >
         <defs>
           <linearGradient id="chart-fill-grad" x1="0" y1="0" x2="0" y2="1">
@@ -248,19 +277,44 @@ export default function EnhancedChart({
         <span className="text-[12px] font-tabular text-[#444] pl-1">{formatUsd(min)}</span>
       </div>
 
-      {/* Hover tooltip — market line */}
-      {hover && !hoverDot && (
-        <div
-          className="pointer-events-none absolute top-0 z-10 rounded-lg border border-white/[0.08] bg-[#151515] px-2.5 py-1.5 text-[14px] shadow-lg"
-          style={{
-            left: `${(hover.x / SVG_W) * 100}%`,
-            transform: "translateX(-50%)",
-          }}
-        >
-          <span className="font-semibold tabular-nums text-[#F0F0F0]">{formatUsd(hover.price)}</span>
-          <span className="ml-2 text-[#6B6B6B]">{formatChartDate(hover.ts)}</span>
-        </div>
-      )}
+      {/* Hover tooltip — market line: day price, change from window start,
+          and the 24h (vs previous day) change for the hovered day. */}
+      {hover && !hoverDot && (() => {
+        const originPrice = points[0]?.price ?? null;
+        const originPct = originPrice && originPrice > 0
+          ? ((hover.price - originPrice) / originPrice) * 100
+          : null;
+        const prevPrice = hover.i > 0 ? points[hover.i - 1]?.price ?? null : null;
+        const pct24h = prevPrice && prevPrice > 0
+          ? ((hover.price - prevPrice) / prevPrice) * 100
+          : null;
+        return (
+          <div
+            className="pointer-events-none absolute top-0 z-10 rounded-lg border border-white/[0.08] bg-[#151515] px-2.5 py-1.5 shadow-lg"
+            style={{
+              left: `${(hover.x / SVG_W) * 100}%`,
+              transform: `translateX(${hover.x > SVG_W * 0.6 ? "-100%" : "-50%"})`,
+            }}
+          >
+            <div className="text-[12px] text-[#6B6B6B]">{formatChartDate(hover.ts)}</div>
+            <div className="text-[15px] font-semibold tabular-nums text-[#F0F0F0]">{formatUsd(hover.price)}</div>
+            <div className="mt-0.5 flex items-center gap-2.5 text-[12px] tabular-nums">
+              {originPct !== null ? (
+                <span className="text-[#8A8A8A]">
+                  From start{" "}
+                  <span className="font-semibold" style={{ color: pctColor(originPct) }}>{formatPct(originPct)}</span>
+                </span>
+              ) : null}
+              {pct24h !== null ? (
+                <span className="text-[#8A8A8A]">
+                  24h{" "}
+                  <span className="font-semibold" style={{ color: pctColor(pct24h) }}>{formatPct(pct24h)}</span>
+                </span>
+              ) : null}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Hover tooltip — community sale dot */}
       {hoverDot && (

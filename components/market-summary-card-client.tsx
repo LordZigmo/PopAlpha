@@ -381,7 +381,7 @@ export default function MarketSummaryCardClient({
 
             {/* Chart — overlay both editions when available, else single line */}
             {dualEditionSeries ? (
-              <MultiLineChart series={dualEditionSeries} scale="absolute" />
+              <MultiLineChart series={dualEditionSeries} scale="absolute" showChangeDetails />
             ) : (
               <EnhancedChart
                 points={chartSeries}

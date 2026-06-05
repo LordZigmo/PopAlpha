@@ -24,7 +24,23 @@ type MultiLineChartProps = {
    */
   scale?: MultiLineScale;
   heightClass?: string;
+  /**
+   * When true, the hover readout adds, per series, the change from the
+   * window's origin point and the 24h (vs previous day) change for the
+   * hovered day — used on the market summary chart.
+   */
+  showChangeDetails?: boolean;
 };
+
+function formatPct(value: number): string {
+  const abs = Math.abs(value);
+  const formatted = abs >= 10 ? abs.toFixed(0) : abs.toFixed(1);
+  return `${value > 0 ? "+" : value < 0 ? "-" : ""}${formatted}%`;
+}
+
+function pctColor(value: number): string {
+  return value > 0 ? "#00DC5A" : value < 0 ? "#FF3B30" : "#6B6B6B";
+}
 
 const SVG_W = 600;
 const SVG_H = 200;
@@ -60,6 +76,7 @@ export default function MultiLineChart({
   series,
   scale = "absolute",
   heightClass = "h-[200px] sm:h-[260px]",
+  showChangeDetails = false,
 }: MultiLineChartProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [hoverTsMs, setHoverTsMs] = useState<number | null>(null);
@@ -108,33 +125,57 @@ export default function MultiLineChart({
     [domain.minVal, domain.valRange],
   );
 
-  const handleMouseMove = useCallback(
-    (e: React.MouseEvent<SVGSVGElement>) => {
+  // Shared scrubber for pointer (desktop) + touch (mobile) so tap-and-drag
+  // updates the readout on phones too.
+  const setHoverFromClientX = useCallback(
+    (clientX: number) => {
       if (!svgRef.current) return;
       const rect = svgRef.current.getBoundingClientRect();
-      const frac = (e.clientX - rect.left) / rect.width;
+      const frac = (clientX - rect.left) / rect.width;
       const clamped = Math.max(0, Math.min(1, frac));
       setHoverTsMs(domain.minTs + clamped * domain.tsRange);
     },
     [domain.minTs, domain.tsRange],
   );
+  const handleMouseMove = useCallback(
+    (e: React.MouseEvent<SVGSVGElement>) => setHoverFromClientX(e.clientX),
+    [setHoverFromClientX],
+  );
   const handleMouseLeave = useCallback(() => setHoverTsMs(null), []);
+  const handleTouchMove = useCallback(
+    (e: React.TouchEvent<SVGSVGElement>) => {
+      const touch = e.touches[0];
+      if (touch) setHoverFromClientX(touch.clientX);
+    },
+    [setHoverFromClientX],
+  );
+  const handleTouchEnd = useCallback(() => setHoverTsMs(null), []);
 
-  // For the hovered timestamp, the nearest in-window point of each series.
+  // For the hovered timestamp, the nearest in-window point of each series,
+  // plus that series' origin price and previous-day price for change math.
   const hoverReadout = useMemo(() => {
     if (hoverTsMs === null) return null;
     const rows = prepared
       .map((s) => {
-        let nearest = s.values[0];
+        let nearestIdx = 0;
         let bestDelta = Infinity;
-        for (const v of s.values) {
-          const delta = Math.abs(v.tsMs - hoverTsMs);
+        for (let i = 0; i < s.values.length; i++) {
+          const delta = Math.abs(s.values[i].tsMs - hoverTsMs);
           if (delta < bestDelta) {
             bestDelta = delta;
-            nearest = v;
+            nearestIdx = i;
           }
         }
-        return nearest ? { key: s.key, label: s.label, color: s.color, point: nearest } : null;
+        const point = s.values[nearestIdx];
+        if (!point) return null;
+        return {
+          key: s.key,
+          label: s.label,
+          color: s.color,
+          point,
+          originPrice: s.values[0]?.price ?? null,
+          prevPrice: nearestIdx > 0 ? s.values[nearestIdx - 1]?.price ?? null : null,
+        };
       })
       .filter((row): row is NonNullable<typeof row> => row !== null);
     if (rows.length === 0) return null;
@@ -160,9 +201,14 @@ export default function MultiLineChart({
         ref={svgRef}
         viewBox={`0 0 ${SVG_W} ${SVG_H}`}
         className={`w-full ${heightClass}`}
+        style={{ touchAction: "pan-y" }}
         preserveAspectRatio="none"
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
+        onTouchStart={handleTouchMove}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchEnd}
       >
         {/* Grid */}
         {gridYs.map((y) => (
@@ -244,19 +290,45 @@ export default function MultiLineChart({
           }}
         >
           <div className="mb-1 text-[11px] text-[#6B6B6B]">{formatChartDate(new Date(hoverReadout.tsMs).toISOString())}</div>
-          <div className="flex flex-col gap-0.5">
-            {hoverReadout.rows.map((row) => (
-              <div key={row.key} className="flex items-center gap-2 text-[13px]">
-                <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: row.color }} />
-                <span className="text-[#9A9A9A]">{row.label}</span>
-                <span className="ml-auto font-semibold tabular-nums text-[#F0F0F0]">
-                  {formatUsd(row.point.price)}
-                  {scale === "indexed" ? (
-                    <span className="ml-1 text-[11px] font-normal text-[#6B6B6B]">{formatIndexDelta(row.point.value)}</span>
+          <div className="flex flex-col gap-1">
+            {hoverReadout.rows.map((row) => {
+              const originPct = row.originPrice && row.originPrice > 0
+                ? ((row.point.price - row.originPrice) / row.originPrice) * 100
+                : null;
+              const pct24h = row.prevPrice && row.prevPrice > 0
+                ? ((row.point.price - row.prevPrice) / row.prevPrice) * 100
+                : null;
+              return (
+                <div key={row.key} className="flex flex-col gap-0.5">
+                  <div className="flex items-center gap-2 text-[13px]">
+                    <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: row.color }} />
+                    <span className="text-[#9A9A9A]">{row.label}</span>
+                    <span className="ml-auto font-semibold tabular-nums text-[#F0F0F0]">
+                      {formatUsd(row.point.price)}
+                      {scale === "indexed" && !showChangeDetails ? (
+                        <span className="ml-1 text-[11px] font-normal text-[#6B6B6B]">{formatIndexDelta(row.point.value)}</span>
+                      ) : null}
+                    </span>
+                  </div>
+                  {showChangeDetails && (originPct !== null || pct24h !== null) ? (
+                    <div className="flex items-center gap-2.5 pl-4 text-[11px] tabular-nums text-[#8A8A8A]">
+                      {originPct !== null ? (
+                        <span>
+                          From start{" "}
+                          <span className="font-semibold" style={{ color: pctColor(originPct) }}>{formatPct(originPct)}</span>
+                        </span>
+                      ) : null}
+                      {pct24h !== null ? (
+                        <span>
+                          24h{" "}
+                          <span className="font-semibold" style={{ color: pctColor(pct24h) }}>{formatPct(pct24h)}</span>
+                        </span>
+                      ) : null}
+                    </div>
                   ) : null}
-                </span>
-              </div>
-            ))}
+                </div>
+              );
+            })}
           </div>
         </div>
       ) : null}
