@@ -395,7 +395,12 @@ struct MarketPulseSection: View {
             eyebrow: cat.eyebrow,
             eyebrowColor: brandedColor(cat),
             title: cat.title,
-            window: cat.isWindowed ? selectedWindow : nil,
+            // .movers self-labels each card's own window (nil), not the toggle's: its
+            // fallback chain (gainers → window momentum → high-confidence) can include the
+            // window-agnostic high-confidence list, and each card already carries its true
+            // changeWindow — so a 24H card never wears a 7D badge. Other windowed rails keep
+            // the explicit toggle window (their fallbacks are window-specific via forWindow).
+            window: (cat.isWindowed && cat != .movers) ? selectedWindow : nil,
             cards: catCards,
             emptyMessage: emptyMessage(for: cat),
             onSelect: onSelect,
@@ -467,20 +472,24 @@ struct MarketPulseSection: View {
             // Lead rail — trusted EN cards; empty on older server builds.
             return signalBoard.marketWatch ?? []
         case .movers:
-            // The daily "Top Movers" rail is premium-only (≥ $50) and
-            // structurally sparse — on a typical day a single ≥ $50 card
-            // qualifies per window, surfacing as a lonely 1-card rail
-            // (and, when the daily snapshot's stored change is clobbered
-            // by a flat canonical 24h metric, a misleading 0.0%). When the
-            // windowed list is thin, fall back to the live high-confidence
-            // movers (liquidity-gated gainers across price tiers) so the
-            // tab shows a real set of movers. Each card self-labels its
-            // own 24H/7D window, so the fallback stays honest.
+            // The daily "Top Movers" rail is premium-only (≥ $50) and structurally
+            // sparse. Gainers exist ONLY as a 24H kind, so the 7D tab's windowed list is
+            // empty and always falls back. Fall back to the SELECTED WINDOW's momentum
+            // leaders first, so the 7D tab shows genuine 7D movers — not the
+            // window-agnostic high-confidence list, which made a 24H value wear a 7D badge
+            // (value stuck, label flipped). Final safety net: live high-confidence movers
+            // (then thin windowed as a last resort rather than an empty rail). Every card
+            // self-labels its own window (activeSection passes window=nil for .movers), so
+            // the badge stays honest in every branch.
             let windowedMovers = signalBoard.topMovers.forWindow(selectedWindow)
-            if windowedMovers.count >= Self.minMoversBeforeFallback || highConfidenceMovers.isEmpty {
+            if windowedMovers.count >= Self.minMoversBeforeFallback {
                 return windowedMovers
             }
-            return highConfidenceMovers
+            let windowMomentum = signalBoard.momentum.forWindow(selectedWindow)
+            if !windowMomentum.isEmpty {
+                return windowMomentum
+            }
+            return highConfidenceMovers.isEmpty ? windowedMovers : highConfidenceMovers
         case .breakouts:
             // Prefer Phase 2 dedicated breakouts; fall back to momentum.
             return signalBoard.breakouts
