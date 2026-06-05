@@ -150,6 +150,11 @@ struct CardDetailView: View {
     /// flips to absolute dollars.
     @State private var gradePerfSeries: [GradePerfDatum] = []
     @State private var gradePerfScale: MultiSeriesChartModel.Scale = .indexed
+    /// RAW edition overlay — Unlimited + 1st Edition of the same finish/stamp,
+    /// charted together by default with pills to isolate one.
+    @State private var editionFocus: EditionFocus = .both
+    @State private var editionUnlimited: [PricePoint] = []
+    @State private var editionFirst: [PricePoint] = []
     /// Slug of the cross-language partner card (EN <-> JP). Nil when no
     /// pairing exists in card_translations, or before the
     /// /api/cards/[slug]/detail fetch lands. Populated by .task on each
@@ -383,6 +388,10 @@ struct CardDetailView: View {
         // changes, mirroring the main chart's task.
         .task(id: "gradePerf|\(activeCard.id)|\(selectedTimeframe.rawValue)|\(selectedPriceMode)|\(selectedPrintingId ?? "")|\(availableGradedOptions.count)") {
             await loadGradePerformance()
+        }
+        // RAW edition overlay: fetch both editions' history for the chart.
+        .task(id: "edition|\(activeCard.id)|\(selectedTimeframe.rawValue)|\(selectedPriceMode)|\(selectedPrintingId ?? "")|\(availablePrintings.count)") {
+            await loadEditionOverlay()
         }
         // Keyed by activeCard.id so the entire data-load fan-out re-fires
         // when the user taps the EN/JP toggle and we swap activeCard.
@@ -1195,15 +1204,15 @@ struct CardDetailView: View {
             .background(PA.Colors.surface)
             .clipShape(RoundedRectangle(cornerRadius: 10))
 
+            // Edition overlay pills — RAW mode, when an Unlimited + 1st
+            // Edition pair exists. Both lines by default; tap to isolate one.
+            if !selectedPriceMode.isGraded, hasEditionOverlay {
+                editionFocusPills
+            }
+
             // Interactive chart
             ZStack {
-                InteractiveChartView(
-                    data: activeChartPrices,
-                    timestamps: activeChartTimestamps,
-                    direction: chartDirection,
-                    lineWidth: 2,
-                    height: 140
-                )
+                chartContent
                 .opacity(chartLoading || (chartError != nil && chartPrices.isEmpty) ? 0.3 : 1)
                 .animation(.easeOut(duration: 0.2), value: chartLoading)
 
@@ -1501,6 +1510,108 @@ struct CardDetailView: View {
                   case let .graded(currentGrader, _) = selectedPriceMode,
                   currentGrader == grader else { return }
             gradePerfSeries = ordered
+        }
+    }
+
+    // MARK: - RAW Edition Overlay (Unlimited + 1st Edition)
+
+    private enum EditionFocus { case both, unlimited, firstEdition }
+
+    /// Printing ids of the Unlimited + 1st Edition pair for the active
+    /// finish/stamp, when both exist. nil otherwise (most cards).
+    private var editionPair: (unlimitedId: String, firstId: String)? {
+        guard let active = availablePrintings.first(where: { $0.id == selectedPrintingId }) ?? availablePrintings.first else {
+            return nil
+        }
+        let stampKey = (active.stamp ?? "").uppercased()
+        let siblings = availablePrintings.filter {
+            $0.finish == active.finish && ($0.stamp ?? "").uppercased() == stampKey
+        }
+        guard let unlimited = siblings.first(where: { $0.edition == "UNLIMITED" }),
+              let first = siblings.first(where: { $0.edition == "FIRST_EDITION" }) else {
+            return nil
+        }
+        return (unlimited.id, first.id)
+    }
+
+    /// True only once both editions have enough history to overlay.
+    private var hasEditionOverlay: Bool {
+        editionPair != nil && editionUnlimited.count >= 2 && editionFirst.count >= 2
+    }
+
+    @ViewBuilder
+    private var chartContent: some View {
+        if !selectedPriceMode.isGraded, hasEditionOverlay {
+            switch editionFocus {
+            case .both:
+                MultiLineChartView(
+                    series: [
+                        MultiLineSeriesInput(id: "unlimited", label: "Unlimited", color: PA.Colors.accent, points: editionUnlimited),
+                        MultiLineSeriesInput(id: "first", label: "1st Edition", color: Color(red: 0.659, green: 0.545, blue: 0.980), points: editionFirst),
+                    ],
+                    scale: .absolute,
+                    showChangeDetails: true,
+                    height: 140
+                )
+            case .unlimited:
+                InteractiveChartView(data: editionUnlimited.map(\.price), timestamps: editionUnlimited.map(\.ts), direction: editionDirection(editionUnlimited), lineWidth: 2, height: 140)
+            case .firstEdition:
+                InteractiveChartView(data: editionFirst.map(\.price), timestamps: editionFirst.map(\.ts), direction: editionDirection(editionFirst), lineWidth: 2, height: 140)
+            }
+        } else {
+            InteractiveChartView(data: activeChartPrices, timestamps: activeChartTimestamps, direction: chartDirection, lineWidth: 2, height: 140)
+        }
+    }
+
+    private var editionFocusPills: some View {
+        HStack(spacing: 6) {
+            editionPill("Both", .both)
+            editionPill("Unlimited", .unlimited)
+            editionPill("1st Edition", .firstEdition)
+        }
+    }
+
+    private func editionPill(_ title: String, _ focus: EditionFocus) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.15)) { editionFocus = focus }
+        } label: {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(editionFocus == focus ? PA.Colors.background : PA.Colors.muted)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(editionFocus == focus ? detailAccent : PA.Colors.surfaceSoft)
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func editionDirection(_ pts: [PricePoint]) -> ChangeDirection {
+        guard pts.count >= 2, let first = pts.first?.price, let last = pts.last?.price else { return .flat }
+        return ChangeDirection.from(last - first)
+    }
+
+    /// Fetches both editions' raw history in parallel. Cleared when not in
+    /// RAW mode or no Unlimited/1st-Edition pair exists.
+    private func loadEditionOverlay() async {
+        guard !selectedPriceMode.isGraded, let pair = editionPair else {
+            await MainActor.run { editionUnlimited = []; editionFirst = [] }
+            return
+        }
+        let slug = activeCard.id
+        let tf = selectedTimeframe
+        let uId = pair.unlimitedId
+        let fId = pair.firstId
+
+        async let uFetch = CardService.shared.fetchPrintingPriceHistory(slug: slug, printingId: uId, timeframe: tf)
+        async let fFetch = CardService.shared.fetchPrintingPriceHistory(slug: slug, printingId: fId, timeframe: tf)
+        let u = (try? await uFetch) ?? []
+        let f = (try? await fFetch) ?? []
+
+        await MainActor.run {
+            guard activeCard.id == slug, selectedTimeframe == tf, !selectedPriceMode.isGraded else { return }
+            editionUnlimited = u
+            editionFirst = f
         }
     }
 
