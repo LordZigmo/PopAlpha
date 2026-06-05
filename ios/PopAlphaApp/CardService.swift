@@ -211,7 +211,7 @@ actor CardService {
         // limit: per-grader × per-printing rows multiply (≈6 buckets × 4 graders).
         let data = try await Supabase.query(
             table: "public_graded_variant_prices",
-            select: "canonical_slug,printing_id,grade,grader,market_price,market_price_as_of,median_7d,median_30d,low_30d,high_30d,snapshot_count_30d,updated_at",
+            select: "canonical_slug,printing_id,grade,grader,market_price,market_price_as_of,latest_price_as_of,median_7d,median_30d,low_30d,high_30d,snapshot_count_30d,updated_at",
             filters: [
                 ("canonical_slug", "eq", slug),
                 ("grade", "in", "(LE_7,G8,G9,G9_5,G10,G10_PERFECT)"),
@@ -926,6 +926,7 @@ struct GradedCardMetricRow: Decodable, Identifiable {
     let grader: String
     let marketPrice: Double?       // 14-day median (the per-grader headline)
     let marketPriceAsOf: String?
+    let latestPriceAsOf: String?   // freshness fallback for the dominant-printing tie-break
     let median7d: Double?
     let median30d: Double?
     let low30d: Double?

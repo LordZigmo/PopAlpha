@@ -458,7 +458,7 @@ struct CardDetailView: View {
                         if aHas != bHas { return !aHas }
                         let aN = a.snapshotCount30d ?? -1, bN = b.snapshotCount30d ?? -1
                         if aN != bN { return aN < bN }
-                        let aAsOf = a.marketPriceAsOf ?? "", bAsOf = b.marketPriceAsOf ?? ""
+                        let aAsOf = a.marketPriceAsOf ?? a.latestPriceAsOf ?? "", bAsOf = b.marketPriceAsOf ?? b.latestPriceAsOf ?? ""
                         if aAsOf != bAsOf { return aAsOf < bAsOf }
                         return (a.printingId ?? "") > (b.printingId ?? "")
                     }
