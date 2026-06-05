@@ -6,6 +6,7 @@ import FinishVariantPicker from "@/components/finish-variant-picker";
 import { GroupCard, GroupedSection } from "@/components/ios-grouped-ui";
 import PriceTickerStrip from "@/components/price-ticker-strip";
 import EnhancedChart from "@/components/enhanced-chart";
+import MultiLineChart, { type MultiLineSeries } from "@/components/multi-line-chart";
 import type { HistoryPointRow } from "@/components/raw-card-variant-types";
 import type { FinishGroup } from "@/lib/cards/detail-types";
 import type { SharedPrivateSale } from "@/lib/data/shared-private-sales";
@@ -19,6 +20,9 @@ type MarketSummaryCardClientProps = {
   variants: Array<{
     printingId: string;
     label: string;
+    finish?: "NON_HOLO" | "HOLO" | "REVERSE_HOLO" | "ALT_HOLO" | "UNKNOWN";
+    edition?: "UNLIMITED" | "FIRST_EDITION" | "UNKNOWN";
+    stamp?: string | null;
     currentPrice: number | null;
     scrydexPrice: number | null;
     scrydexAsOfTs: string | null;
@@ -239,6 +243,40 @@ export default function MarketSummaryCardClient({
     history90d,
   });
 
+  // Edition overlay: when the selected finish has BOTH an Unlimited and a
+  // 1st Edition printing (same finish + stamp), chart them together so the
+  // edition premium is visible at a glance — Collectr-style. Falls back to
+  // the single-series EnhancedChart when no sibling edition exists or either
+  // side lacks enough points in the active window.
+  const dualEditionSeries: MultiLineSeries[] | null = (() => {
+    if (!activeVariant?.finish) return null;
+    const stampKey = String(activeVariant.stamp ?? "").trim().toUpperCase();
+    const siblings = variants.filter(
+      (variant) =>
+        variant.finish === activeVariant.finish
+        && String(variant.stamp ?? "").trim().toUpperCase() === stampKey,
+    );
+    const unlimited = siblings.find((variant) => variant.edition === "UNLIMITED");
+    const firstEdition = siblings.find((variant) => variant.edition === "FIRST_EDITION");
+    if (!unlimited || !firstEdition) return null;
+
+    const pickWindow = (variant: (typeof variants)[number]) =>
+      effectiveWindow === "90d"
+        ? variant.history90d
+        : effectiveWindow === "7d"
+          ? variant.history7d
+          : variant.history30d;
+    const unlimitedPoints = pickWindow(unlimited);
+    const firstEditionPoints = pickWindow(firstEdition);
+    if (unlimitedPoints.length < MIN_POINTS_FOR_CHART || firstEditionPoints.length < MIN_POINTS_FOR_CHART) {
+      return null;
+    }
+    return [
+      { key: "UNLIMITED", label: "Unlimited", color: "var(--color-accent)", points: unlimitedPoints },
+      { key: "FIRST_EDITION", label: "1st Edition", color: "#A78BFA", points: firstEditionPoints },
+    ];
+  })();
+
   const priceDisplay = PRICING_DISPLAY_V2_ENABLED
     ? resolveDisplayedMarketPrice({
         marketPrice: currentPrice,
@@ -341,14 +379,18 @@ export default function MarketSummaryCardClient({
               </div>
             ) : null}
 
-            {/* Chart */}
-            <EnhancedChart
-              points={chartSeries}
-              windowLabel={effectiveWindow.toUpperCase()}
-              currentPrice={currentPrice}
-              changePercent={changeValue}
-              sharedSales={sharedSales}
-            />
+            {/* Chart — overlay both editions when available, else single line */}
+            {dualEditionSeries ? (
+              <MultiLineChart series={dualEditionSeries} scale="absolute" />
+            ) : (
+              <EnhancedChart
+                points={chartSeries}
+                windowLabel={effectiveWindow.toUpperCase()}
+                currentPrice={currentPrice}
+                changePercent={changeValue}
+                sharedSales={sharedSales}
+              />
+            )}
 
             <div className="border-t border-white/[0.06]" />
 
