@@ -2031,10 +2031,22 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
       if (!hasPermittedPublicPulse(marketPulse)) continue;
       const price = marketPulse.marketPrice ?? null;
       if (price == null || price < MIN_PRICE) continue;
+      // Window-pure labeling: stamp the window the value ACTUALLY came from. The
+      // `changePct7d ?? changePct24h` fallback means a card with no real 7d change
+      // still carries a 24h value — labeling it "7D" makes it a mislabeled mover in
+      // the 7D momentum fallback (and any 7D rail). Label honestly so the 7D filter
+      // below — and the iOS `changeWindow == "7D"` top-movers filter — can exclude
+      // 24h-derived cards. (Codex P2 on #195.)
       const trendPct = marketPulse.changePct7d ?? marketPulse.changePct24h;
+      const trendWindow: HomepageSignalWindow | null =
+        marketPulse.changePct7d != null
+          ? "7D"
+          : marketPulse.changePct24h != null
+            ? "24H"
+            : null;
       trendingCandidatesOut.push(toCard(row.canonical_slug, {
         changePct: trendPct,
-        changeWindow: trendPct !== null ? "7D" : null,
+        changeWindow: trendWindow,
         preferOverrideChange: true,
         allowSparklineFallback: false,
       }));
@@ -2192,12 +2204,18 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
               positiveMoversByWindow["24H"].highConfidence,
               positiveMoversByWindow["24H"].all,
             ]),
-        "7D": dailyMoversForDisplay.momentum_7d.length > 0
+        // Window-pure: only genuine-7D cards in the 7D momentum rail. The trending
+        // pool carries 24h-derived cards (now honestly labeled "24H" above), so filter
+        // the assembled list to change_window === "7D" — otherwise the iOS For-You
+        // momentum fallback surfaces a 24h value under the 7D toggle (the client can't
+        // distinguish it, since it's the momentum bucket, not top_movers). Codex P2 on #195.
+        "7D": (dailyMoversForDisplay.momentum_7d.length > 0
           ? dailyMoversForDisplay.momentum_7d.slice(0, SECTION_LIMIT)
           : combineHomepageCards([
               trendingCandidatesOut,
               positiveMoversByWindow["7D"].all,
-            ]),
+            ])
+        ).filter((card) => card.change_window === "7D"),
       },
       unusual_volume: unusualVolumeOut,
       breakouts: breakoutsOut,
