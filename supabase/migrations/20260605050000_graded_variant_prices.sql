@@ -174,7 +174,7 @@ begin
     select
       canonical_slug, printing_id, grader, grade,
       percentile_cont(0.5) within group (order by close_price) filter (where as_of_date >= current_date - 14) as market_price,
-      max(as_of_date)::timestamptz                                       filter (where as_of_date >= current_date - 14) as market_price_as_of,
+      (max(as_of_date) filter (where as_of_date >= current_date - 14))::timestamptz as market_price_as_of,
       percentile_cont(0.5) within group (order by close_price) filter (where as_of_date >= current_date - 7)  as median_7d,
       percentile_cont(0.5) within group (order by close_price) filter (where as_of_date >= current_date - 30) as median_30d,
       min(close_price) filter (where as_of_date >= current_date - 30) as low_30d,
