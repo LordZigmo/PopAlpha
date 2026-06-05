@@ -49,7 +49,7 @@
       "schedule": "0 */2 * * *"
     },
     {
-      "path": "/api/cron/refresh-graded-variant-prices?maxCards=10000",
+      "path": "/api/cron/refresh-graded-variant-prices?maxCards=4000",
       "schedule": "30 */2 * * *"
     },
     {
