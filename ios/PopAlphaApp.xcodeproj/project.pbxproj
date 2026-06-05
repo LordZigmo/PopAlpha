@@ -42,6 +42,7 @@
 		AA00000100000000000000D2 /* SupabaseClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000D4 /* SupabaseClient.swift */; };
 		AA00000100000000000000D3 /* CardService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000D5 /* CardService.swift */; };
 		AA00000100000000000000D6 /* InteractiveChartView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000D7 /* InteractiveChartView.swift */; };
+		AA000001000000000000CB01 /* MultiLineChartView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000001000000000000CA01 /* MultiLineChartView.swift */; };
 		AA00000100000000000000E0 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000B2 /* Preview Assets.xcassets */; };
 		AA00000100000000000000E5 /* ActivityService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000E8 /* ActivityService.swift */; };
 		AA00000100000000000000E7 /* ActivityEventCell.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000000000EA /* ActivityEventCell.swift */; };
@@ -148,6 +149,7 @@
 		AA00000100000000000000D4 /* SupabaseClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupabaseClient.swift; sourceTree = "<group>"; };
 		AA00000100000000000000D5 /* CardService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardService.swift; sourceTree = "<group>"; };
 		AA00000100000000000000D7 /* InteractiveChartView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractiveChartView.swift; sourceTree = "<group>"; };
+		AA000001000000000000CA01 /* MultiLineChartView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiLineChartView.swift; sourceTree = "<group>"; };
 		AA00000100000000000000E8 /* ActivityService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityService.swift; sourceTree = "<group>"; };
 		AA00000100000000000000EA /* ActivityEventCell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityEventCell.swift; sourceTree = "<group>"; };
 		AA00000100000000000000EC /* WishlistService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WishlistService.swift; sourceTree = "<group>"; };
@@ -262,6 +264,7 @@
 				AA00000100000000000000D4 /* SupabaseClient.swift */,
 				AA00000100000000000000D5 /* CardService.swift */,
 				AA00000100000000000000D7 /* InteractiveChartView.swift */,
+				AA000001000000000000CA01 /* MultiLineChartView.swift */,
 				AA00000100000000000000E8 /* ActivityService.swift */,
 				AA00000100000000000000EA /* ActivityEventCell.swift */,
 				AA00000100000000000000EC /* WishlistService.swift */,
@@ -468,6 +471,7 @@
 				AA00000100000000000000D2 /* SupabaseClient.swift in Sources */,
 				AA00000100000000000000D3 /* CardService.swift in Sources */,
 				AA00000100000000000000D6 /* InteractiveChartView.swift in Sources */,
+				AA000001000000000000CB01 /* MultiLineChartView.swift in Sources */,
 				AA00000100000000000000E5 /* ActivityService.swift in Sources */,
 				AA00000100000000000000E7 /* ActivityEventCell.swift in Sources */,
 				AA00000100000000000000EB /* WishlistService.swift in Sources */,

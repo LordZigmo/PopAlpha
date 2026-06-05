@@ -34,6 +34,17 @@ struct InteractiveChartView: View {
         return ("\(sign)\(String(format: "%.2f", pct))%", ChangeDirection.from(pct))
     }
 
+    /// 24h (previous-day) change for the scrubbed day. Daily snapshots make
+    /// the previous point ≈ 24h; nil at the first point (no prior day).
+    private var display24h: (text: String, direction: ChangeDirection)? {
+        guard let idx = scrubIndex, idx > 0, idx < data.count else { return nil }
+        let prev = data[idx - 1]
+        guard prev > 0 else { return nil }
+        let pct = ((data[idx] - prev) / prev) * 100
+        let sign = pct > 0 ? "+" : ""
+        return ("\(sign)\(String(format: "%.2f", pct))%", ChangeDirection.from(pct))
+    }
+
     /// VoiceOver summary so the scrubber-based chart is at least
     /// describable to screen readers (the drag gesture itself is not
     /// reachable via VoiceOver). Reads e.g. "Price chart, $10.50 to
@@ -139,9 +150,21 @@ struct InteractiveChartView: View {
                     .contentTransition(.numericText())
 
                 if let change = displayChange {
-                    Text(change.text)
+                    (Text("start ")
+                        .font(.system(size: 11))
+                        .foregroundColor(PA.Colors.muted)
+                     + Text(change.text)
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(change.direction.color)
+                        .foregroundColor(change.direction.color))
+                }
+
+                if let d24 = display24h {
+                    (Text("24h ")
+                        .font(.system(size: 11))
+                        .foregroundColor(PA.Colors.muted)
+                     + Text(d24.text)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(d24.direction.color))
                 }
 
                 Spacer()
