@@ -152,7 +152,7 @@ begin
   -- seg4=grader, seg5=bucket. The uuid guard keeps the ::uuid cast safe.
   create temporary table _gvp_daily on commit drop as
   select distinct on (canonical_slug, printing_id, grader, grade, as_of_date)
-    canonical_slug, printing_id, grader, grade, as_of_date, close_price
+    canonical_slug, printing_id, grader, grade, as_of_date, close_price, low_price, high_price, sample_count
   from (
     select
       vpd.canonical_slug,
@@ -172,6 +172,9 @@ begin
            end as grade,
       vpd.as_of_date,
       vpd.close_price,
+      vpd.low_price,
+      vpd.high_price,
+      vpd.sample_count,
       case when vpd.variant_ref like '%::GRADED::%' then 0 else 1 end as form_rank
     from public.variant_price_daily vpd
     join _gvp_cards c on c.canonical_slug = vpd.canonical_slug
@@ -210,9 +213,9 @@ begin
       (max(as_of_date) filter (where as_of_date >= current_date - 14))::timestamptz as market_price_as_of,
       percentile_cont(0.5) within group (order by close_price) filter (where as_of_date >= current_date - 7)  as median_7d,
       percentile_cont(0.5) within group (order by close_price) filter (where as_of_date >= current_date - 30) as median_30d,
-      min(close_price) filter (where as_of_date >= current_date - 30) as low_30d,
-      max(close_price) filter (where as_of_date >= current_date - 30) as high_30d,
-      count(*)         filter (where as_of_date >= current_date - 30) as snapshot_count_30d
+      min(low_price)  filter (where as_of_date >= current_date - 30) as low_30d,
+      max(high_price) filter (where as_of_date >= current_date - 30) as high_30d,
+      coalesce(sum(sample_count) filter (where as_of_date >= current_date - 30), 0)::int as snapshot_count_30d
     from _gvp_daily
     group by canonical_slug, printing_id, grader, grade
   ),
