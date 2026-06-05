@@ -447,7 +447,15 @@ struct MarketPulseSection: View {
             eyebrow: cat.eyebrow,
             eyebrowColor: brandedColor(cat),
             title: cat.title,
-            window: cat.isWindowed ? selectedWindow : nil,
+            // .movers self-labels each card's own window (nil) rather than the toggle's.
+            // Its windowed list is gainers (24H-only — there is no 7D gainer kind), so the
+            // 7D tab ALWAYS falls back to the window-agnostic highConfidenceMovers. Stamping
+            // selectedWindow onto that fallback made a 24H mover wear a "7D" badge: the value
+            // stayed put and only the label flipped between 24H/7D (the reported bug). Each
+            // card already carries its true changeWindow, so nil keeps the badge honest.
+            // momentum/breakouts/pullbacks fall back to window-SPECIFIC lists (forWindow),
+            // so they keep the explicit toggle window.
+            window: (cat.isWindowed && cat != .movers) ? selectedWindow : nil,
             cards: cards(for: cat),
             emptyMessage: emptyMessage(for: cat),
             onSelect: onSelect,
