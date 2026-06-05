@@ -30,12 +30,16 @@
 -- aggregation by slug (index-backed). A side watermark table advances every picked card
 -- (incl. cards whose graded data has aged out, so they rotate out instead of clogging).
 --
--- Scope (v1): the long ::GRADED:: variant_ref form, verified against prod
--- variant_price_daily (810,605 rows / 24,763 cards, current through today) — grader =
--- segment 4, bucket = segment 5 in the G10/G9_5/... vocabulary the iOS graded view
--- (CardService.fetchGradedCardMetrics) already filters on. The legacy 3-segment short
--- form (<pid>::PROVIDER::token, ~3k rows / 43 cards / 0.4%) is excluded — a follow-up can
--- fold it in if it ever matters. printing_id is parsed from the ref and is part of the
+-- Scope: BOTH graded variant_ref dialects are ingested so no graded card is silently
+-- dropped — (a) the dominant long form <printing>::<set-pt>::GRADED::<grader>::<bucket>::RAW
+-- (verified against prod variant_price_daily: 810,605 rows / 24,763 cards, current through
+-- today; grader = seg4, bucket = seg5), and (b) the canonical short form
+-- <printing>::<grader>::<grade_token> that buildGradedVariantRef + the scheduled Scrydex
+-- daily pipeline still write (~3k rows / 43 cards, current), whose tokens
+-- (10 / 9_5 / 7_OR_LESS / ...) are normalized to the same G10 / G9_5 / LE_7 vocabulary the
+-- iOS graded view (CardService.fetchGradedCardMetrics) filters on. When both forms exist for
+-- one (printing, grader, grade) they merge into a single row (more observations for the
+-- median). printing_id is parsed from the ref and is part of the
 -- PK, so — unlike the nullable sibling columns that carry `references card_printings(id)
 -- on delete set null` — it intentionally has NO printing FK: a NOT-NULL PK member can't be
 -- set-null, an on-delete-cascade FK would let one stale parsed ref fail the whole refresh,
@@ -147,22 +151,51 @@ begin
   -- Parsed graded daily series, scoped to the picked cards. seg1=printing_id,
   -- seg4=grader, seg5=bucket. The uuid guard keeps the ::uuid cast safe.
   create temporary table _gvp_daily on commit drop as
-  select
-    vpd.canonical_slug,
-    split_part(vpd.variant_ref,'::',1)::uuid as printing_id,
-    split_part(vpd.variant_ref,'::',4)       as grader,
-    split_part(vpd.variant_ref,'::',5)       as grade,
-    vpd.as_of_date,
-    vpd.close_price
-  from public.variant_price_daily vpd
-  join _gvp_cards c on c.canonical_slug = vpd.canonical_slug
-  where vpd.variant_ref like '%::GRADED::%'
-    and split_part(vpd.variant_ref,'::',4) in ('PSA','CGC','BGS','TAG')
-    and split_part(vpd.variant_ref,'::',5) in ('LE_7','G8','G9','G9_5','G10','G10_PERFECT')
-    and split_part(vpd.variant_ref,'::',1) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-    and vpd.close_price is not null
-    and vpd.close_price > 0
-    and vpd.as_of_date >= current_date - 33;
+  select distinct on (canonical_slug, printing_id, grader, grade, as_of_date)
+    canonical_slug, printing_id, grader, grade, as_of_date, close_price
+  from (
+    select
+      vpd.canonical_slug,
+      split_part(vpd.variant_ref,'::',1)::uuid as printing_id,
+      case when vpd.variant_ref like '%::GRADED::%'
+           then split_part(vpd.variant_ref,'::',4)
+           else split_part(vpd.variant_ref,'::',2) end as grader,
+      case when vpd.variant_ref like '%::GRADED::%' then split_part(vpd.variant_ref,'::',5)
+           else case split_part(vpd.variant_ref,'::',3)
+                  when '10'         then 'G10'
+                  when '10_PERFECT' then 'G10_PERFECT'
+                  when '9_5'        then 'G9_5'
+                  when '9'          then 'G9'
+                  when '8'          then 'G8'
+                  when '7_OR_LESS'  then 'LE_7'
+                  else split_part(vpd.variant_ref,'::',3) end
+           end as grade,
+      vpd.as_of_date,
+      vpd.close_price,
+      case when vpd.variant_ref like '%::GRADED::%' then 0 else 1 end as form_rank
+    from public.variant_price_daily vpd
+    join _gvp_cards c on c.canonical_slug = vpd.canonical_slug
+    where split_part(vpd.variant_ref,'::',1) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      and vpd.close_price is not null
+      and vpd.close_price > 0
+      and vpd.as_of_date >= current_date - 33
+      and (
+        -- long form: <printing>::<set-pt>::GRADED::<grader>::<bucket>::RAW
+        (vpd.variant_ref like '%::GRADED::%'
+          and split_part(vpd.variant_ref,'::',4) in ('PSA','CGC','BGS','TAG')
+          and split_part(vpd.variant_ref,'::',5) in ('LE_7','G8','G9','G9_5','G10','G10_PERFECT'))
+        or
+        -- canonical short form: <printing>::<grader>::<grade_token> (exactly 3 segments)
+        (vpd.variant_ref not like '%::GRADED::%'
+          and split_part(vpd.variant_ref,'::',2) in ('PSA','CGC','BGS','TAG')
+          and split_part(vpd.variant_ref,'::',3) in ('10','10_PERFECT','9_5','9','8','7_OR_LESS')
+          and split_part(vpd.variant_ref,'::',4) = '')
+      )
+  ) parsed
+  -- One close per (combo, day): prefer the long form, then the higher close. The short ref
+  -- re-encodes the same sale as the long ref, so without this the same day would be counted
+  -- twice — inflating snapshot_count_30d (the sample size shown in the iOS graded summary).
+  order by canonical_slug, printing_id, grader, grade, as_of_date, form_rank, close_price desc;
 
   -- Re-derive every picked card's graded rows from scratch: drop the old rows (so
   -- combos whose data aged out vanish instead of going stale), then insert current.
@@ -183,23 +216,46 @@ begin
     from _gvp_daily
     group by canonical_slug, printing_id, grader, grade
   ),
-  latest as (
-    select distinct on (canonical_slug, printing_id, grader, grade)
+  latest_parsed as (
+    select
       vpl.canonical_slug,
       split_part(vpl.variant_ref,'::',1)::uuid as printing_id,
-      split_part(vpl.variant_ref,'::',4)       as grader,
-      split_part(vpl.variant_ref,'::',5)       as grade,
+      case when vpl.variant_ref like '%::GRADED::%'
+           then split_part(vpl.variant_ref,'::',4)
+           else split_part(vpl.variant_ref,'::',2) end as grader,
+      case when vpl.variant_ref like '%::GRADED::%' then split_part(vpl.variant_ref,'::',5)
+           else case split_part(vpl.variant_ref,'::',3)
+                  when '10'         then 'G10'
+                  when '10_PERFECT' then 'G10_PERFECT'
+                  when '9_5'        then 'G9_5'
+                  when '9'          then 'G9'
+                  when '8'          then 'G8'
+                  when '7_OR_LESS'  then 'LE_7'
+                  else split_part(vpl.variant_ref,'::',3) end
+           end as grade,
       vpl.latest_price,
       vpl.latest_observed_at
     from public.variant_price_latest vpl
     join _gvp_cards c on c.canonical_slug = vpl.canonical_slug
-    where vpl.variant_ref like '%::GRADED::%'
-      and split_part(vpl.variant_ref,'::',4) in ('PSA','CGC','BGS','TAG')
-      and split_part(vpl.variant_ref,'::',5) in ('LE_7','G8','G9','G9_5','G10','G10_PERFECT')
-      and split_part(vpl.variant_ref,'::',1) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+    where split_part(vpl.variant_ref,'::',1) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
       and vpl.latest_price is not null
       and vpl.latest_price > 0
-    order by canonical_slug, printing_id, grader, grade, vpl.latest_observed_at desc
+      and (
+        (vpl.variant_ref like '%::GRADED::%'
+          and split_part(vpl.variant_ref,'::',4) in ('PSA','CGC','BGS','TAG')
+          and split_part(vpl.variant_ref,'::',5) in ('LE_7','G8','G9','G9_5','G10','G10_PERFECT'))
+        or
+        (vpl.variant_ref not like '%::GRADED::%'
+          and split_part(vpl.variant_ref,'::',2) in ('PSA','CGC','BGS','TAG')
+          and split_part(vpl.variant_ref,'::',3) in ('10','10_PERFECT','9_5','9','8','7_OR_LESS')
+          and split_part(vpl.variant_ref,'::',4) = '')
+      )
+  ),
+  latest as (
+    select distinct on (canonical_slug, printing_id, grader, grade)
+      canonical_slug, printing_id, grader, grade, latest_price, latest_observed_at
+    from latest_parsed
+    order by canonical_slug, printing_id, grader, grade, latest_observed_at desc
   ),
   computed as (
     select
