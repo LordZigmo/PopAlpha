@@ -40,19 +40,6 @@ export async function GET(req: Request) {
   const supabase = dbAdmin();
 
   try {
-    const { data, error } = await supabase.rpc("refresh_derived_signals");
-    if (error && !error.message.toLowerCase().includes("statement timeout")) {
-      return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
-    }
-    let rowsUpdated =
-      typeof data === "number"
-        ? data
-        : Number((data as { rowsUpdated?: number; rows?: number } | null)?.rowsUpdated ?? (data as { rows?: number } | null)?.rows ?? 0);
-
-    if (rowsUpdated > 0) {
-      return NextResponse.json({ ok: true, rowsUpdated });
-    }
-
     const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
     let fallbackRowsUpdated = 0;
     let from = 0;
@@ -180,8 +167,7 @@ export async function GET(req: Request) {
       from += SIGNAL_BATCH_SIZE;
     }
 
-    rowsUpdated = Math.max(rowsUpdated, fallbackRowsUpdated);
-    return NextResponse.json({ ok: true, rowsUpdated });
+    return NextResponse.json({ ok: true, rowsUpdated: fallbackRowsUpdated });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ ok: false, error: msg }, { status: 500 });

@@ -53,6 +53,14 @@ export const runtime = "nodejs";
 export const maxDuration = 300; // Vercel hobby/pro tick ceiling
 
 const DEFAULT_BATCH_SIZE = 50;
+// Reserve ~60% of each batch for stale-refresh (freshness) and cap
+// initial-coverage at ~40% (breadth). #163 made initial-coverage return a full
+// batch of never-attempted slugs; left unbounded it consumed the whole budget
+// and starved the stale-refresh path, so the 4k+ already-priced JP cards never
+// re-scraped and their displayed prices went stale. This run is deadline-bound
+// (halts at the ~270s reserve before clearing a 50-card batch), so capping
+// initial keeps the stale-refresh slugs within reach of the deadline too.
+const STALE_REFRESH_BUDGET_RATIO = 0.6;
 const INTER_CARD_DELAY_MS = 4000;
 // Yahoo's sold archive is sparse for long-tail JP cards. Store even a
 // single matched RAW sale; consumers can use sample_count to decide
@@ -66,10 +74,8 @@ const NONPRODUCTIVE_RETRY_HOURS = 24 * 7; // low-sample/no-query cards rotate ou
 const TRANSIENT_RETRY_HOURS = 6; // scrape/write failures get a shorter cooldown
 const CANDIDATE_SCAN_PAGE_SIZE = 1000;
 const MAX_STALE_PRICE_SCAN_ROWS = 5000;
-const MAX_INITIAL_FETCH_SCAN_ROWS = 25_000;
 const YAHOO_ROUTE = "/api/cron/run-yahoo-jp-daily";
 const BASE_CARD_SELECT = "slug,canonical_name,canonical_name_native,set_name,set_name_native,card_number,year,language";
-const MATCHED_JP_CARD_SELECT = "slug,canonical_name,canonical_name_native,set_name,set_name_native,card_number,year,language,provider_card_map!inner(mapping_status)";
 
 // Mirror the JPY/USD rate used by the orchestrator + lib/pricing/fx.ts
 // so the column matches what the rest of the app produces.
@@ -99,54 +105,6 @@ type YahooProcessResult =
   | { slug: string; status: "scrape-failed"; reason: string }
   | { slug: string; status: "write-failed"; reason: string }
   | { slug: string; status: "no-query"; reason: string };
-
-async function loadYahooScrapedSlugs(
-  supabase: ReturnType<typeof dbAdmin>,
-  slugs: string[],
-): Promise<Set<string>> {
-  const scraped = new Set<string>();
-  const chunkSize = 100;
-
-  for (let i = 0; i < slugs.length; i += chunkSize) {
-    const chunk = slugs.slice(i, i + chunkSize);
-    const { data, error } = await supabase
-      .from("yahoo_jp_card_prices")
-      .select("canonical_slug")
-      .eq("grade", "RAW")
-      .in("canonical_slug", chunk);
-    if (error) throw new Error(`yahoo_jp_card_prices(scraped slugs): ${error.message}`);
-
-    for (const row of data ?? []) {
-      if (row.canonical_slug) scraped.add(row.canonical_slug);
-    }
-  }
-
-  return scraped;
-}
-
-async function loadYahooAttemptedSlugs(
-  supabase: ReturnType<typeof dbAdmin>,
-  slugs: string[],
-): Promise<Set<string>> {
-  const attempted = new Set<string>();
-  const chunkSize = 100;
-
-  for (let i = 0; i < slugs.length; i += chunkSize) {
-    const chunk = slugs.slice(i, i + chunkSize);
-    const { data, error } = await supabase
-      .from("jp_ingestion_attempts")
-      .select("canonical_slug")
-      .eq("provider", "YAHOO_JP")
-      .in("canonical_slug", chunk);
-    if (error) throw new Error(`jp_ingestion_attempts(yahoo attempted slugs): ${error.message}`);
-
-    for (const row of data ?? []) {
-      if (row.canonical_slug) attempted.add(row.canonical_slug);
-    }
-  }
-
-  return attempted;
-}
 
 async function loadStaleYahooSlugs(
   supabase: ReturnType<typeof dbAdmin>,
@@ -188,6 +146,23 @@ async function loadStaleYahooSlugs(
   return staleSlugs;
 }
 
+/**
+ * Initial-coverage candidates: JP-language cards with >=1 MATCHED
+ * provider_card_map and no Yahoo! RAW price row yet, never-attempted (no
+ * YAHOO_JP jp_ingestion_attempts row for the slug) first (tier 1), then
+ * attempted-but-still-no-price (tier 2), excluding the suppressed slugs.
+ * The ordering, no-price exclusion, suppression filter, slug dedupe, and
+ * limit all happen server-side in scan_yahoo_initial_candidates so we no
+ * longer page the matched-JP universe + load scraped/attempted membership
+ * Sets per page.
+ *
+ * Why an RPC (and not chained PostgREST embeds): applying `.eq`/`.is` to a
+ * `!left`-embedded to-many relation makes PostgREST drop the left-join NULL
+ * rows — which silently filtered out the never-attempted cards we most want,
+ * degrading selection to a blind alphabetical head and freezing the rotation
+ * for ~9 days (commit 1bdb948, reverted #162). The RPC uses a real
+ * LEFT JOIN ... IS NULL so never-attempted rows are retained.
+ */
 async function loadInitialYahooSlugs(
   supabase: ReturnType<typeof dbAdmin>,
   input: {
@@ -195,51 +170,14 @@ async function loadInitialYahooSlugs(
     limit: number;
   },
 ): Promise<string[]> {
-  const neverAttemptedSlugs: string[] = [];
-  const retryNoPriceSlugs: string[] = [];
-  const seen = new Set<string>();
-  const candidatePoolSize = () => neverAttemptedSlugs.length + retryNoPriceSlugs.length;
+  const { data, error } = await supabase.rpc("scan_yahoo_initial_candidates", {
+    p_limit: input.limit,
+    p_suppressed: [...input.suppressedSlugs],
+  });
+  if (error) throw new Error(`scan_yahoo_initial_candidates: ${error.message}`);
 
-  for (
-    let from = 0;
-    candidatePoolSize() < input.limit && from < MAX_INITIAL_FETCH_SCAN_ROWS;
-    from += CANDIDATE_SCAN_PAGE_SIZE
-  ) {
-    const { data, error } = await supabase
-      .from("canonical_cards")
-      .select(MATCHED_JP_CARD_SELECT)
-      .eq("language", "JP")
-      .eq("provider_card_map.mapping_status", "MATCHED")
-      .order("created_at", { ascending: false })
-      .range(from, from + CANDIDATE_SCAN_PAGE_SIZE - 1);
-    if (error) throw new Error(`matched-jp scan: ${error.message}`);
-
-    const rows = (data ?? []) as CardRow[];
-    const pageSlugs: string[] = [];
-    for (const row of rows) {
-      if (seen.has(row.slug) || input.suppressedSlugs.has(row.slug)) continue;
-      seen.add(row.slug);
-      pageSlugs.push(row.slug);
-    }
-
-    const [everScraped, everAttempted] = await Promise.all([
-      loadYahooScrapedSlugs(supabase, pageSlugs),
-      loadYahooAttemptedSlugs(supabase, pageSlugs),
-    ]);
-    for (const slug of pageSlugs) {
-      if (everScraped.has(slug)) continue;
-      if (everAttempted.has(slug)) {
-        retryNoPriceSlugs.push(slug);
-      } else {
-        neverAttemptedSlugs.push(slug);
-      }
-      if (candidatePoolSize() >= input.limit) break;
-    }
-
-    if (rows.length < CANDIDATE_SCAN_PAGE_SIZE) break;
-  }
-
-  return [...neverAttemptedSlugs, ...retryNoPriceSlugs].slice(0, input.limit);
+  const rows = (data ?? []) as Array<{ canonical_slug: string }>;
+  return rows.map((row) => row.canonical_slug);
 }
 
 /**
@@ -282,6 +220,8 @@ async function pickRefreshCandidates(supabase: ReturnType<typeof dbAdmin>, limit
     ...recentTransient.slugs,
   ]);
 
+  // Cap initial-coverage so stale-refresh keeps a guaranteed share of the batch.
+  const initialBudget = Math.max(1, limit - Math.ceil(limit * STALE_REFRESH_BUDGET_RATIO));
   const [staleSlugs, initialFetchSlugs] = await Promise.all([
     loadStaleYahooSlugs(supabase, {
       cutoffIso,
@@ -290,7 +230,7 @@ async function pickRefreshCandidates(supabase: ReturnType<typeof dbAdmin>, limit
     }),
     loadInitialYahooSlugs(supabase, {
       suppressedSlugs,
-      limit,
+      limit: initialBudget,
     }),
   ]);
 

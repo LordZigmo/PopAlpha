@@ -14,7 +14,7 @@ export function runVariantRefTests() {
 
   assert.equal(buildRawVariantRef(printingId), `${printingId}::RAW`);
   assert.equal(buildVariantRef({ printingId, grade: "RAW" }), `${printingId}::RAW`);
-  assert.equal(buildVariantRef({ printingId, provider: "JUSTTCG", grade: "RAW" }), `${printingId}::RAW`);
+  assert.equal(buildVariantRef({ printingId, provider: "SCRYDEX", grade: "RAW" }), `${printingId}::RAW`);
 
   assert.equal(
     buildGradedVariantRef(printingId, "PSA", "G9"),
@@ -84,7 +84,7 @@ export function runVariantRefTests() {
     buildProviderHistoryVariantRef({
       printingId,
       canonicalSlug: "base-4-charizard",
-      provider: "JUSTTCG",
+      provider: "SCRYDEX",
       providerVariantId: "variant-123",
     }),
     `${printingId}::variant-123::RAW`,
@@ -106,7 +106,7 @@ export function runVariantRefTests() {
     buildProviderHistoryVariantRef({
       printingId: null,
       canonicalSlug: "sealed:sv1-booster-box",
-      provider: "JUSTTCG",
+      provider: "SCRYDEX",
       providerVariantId: "variant-789",
     }),
     "sealed:sv1-booster-box::variant-789::RAW",

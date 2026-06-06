@@ -161,10 +161,22 @@ struct CardDetailView: View {
     @State private var selectedPrintingId: String?
     @State private var printingHeroPrice: Double?
     @State private var conditionPrices: [ConditionPriceRow] = []
-    /// Per-grade-bucket aggregate market summary, keyed by grade bucket
-    /// (LE_7, G8, G9, G9_5, G10, G10_PERFECT). Sourced from card_metrics
-    /// which is keyed (slug, printing_id, grade) — no provider dimension.
+    /// Per-(grader, grade) market summary, keyed "GRADER::bucket" (e.g.
+    /// "PSA::G10") so PSA 10 ≠ CGC 10 ≠ TAG 10. Sourced from
+    /// public_graded_variant_prices via fetchGradedCardMetrics; the headline
+    /// is marketPrice (14-day median). One dominant printing is resolved per
+    /// (grader, grade) — see the tie-break in the loader (#192 grader-split).
     @State private var gradedCardMetricsByBucket: [String: GradedCardMetricRow] = [:]
+    /// Per-bucket price history for the active grader, overlaid as the
+    /// "Grade Performance" comparison chart. Indexed by default so momentum
+    /// is comparable across the PSA 10 → PSA 7 price gap; the %/$ toggle
+    /// flips to absolute dollars.
+    @State private var gradePerfSeries: [GradePerfDatum] = []
+    @State private var gradePerfScale: MultiSeriesChartModel.Scale = .indexed
+    /// RAW variant overlay — all printings sharing the active finish
+    /// (editions + stamps) charted together, with pills to isolate one.
+    @State private var variantFocus: String? = nil   // nil = All; else printingId
+    @State private var variantSeries: [VariantSeriesDatum] = []
     /// Slug of the cross-language partner card (EN <-> JP). Nil when no
     /// pairing exists in card_translations, or before the
     /// /api/cards/[slug]/detail fetch lands. Populated by .task on each
@@ -425,6 +437,16 @@ struct CardDetailView: View {
         .task(id: "\(activeCard.id)|\(selectedTimeframe.rawValue)|\(selectedPriceMode)|\(selectedPrintingId ?? "")") {
             await loadChart()
         }
+        // Grade Performance overlay: per-bucket history for the active grader.
+        // Keyed so it refires on grader / timeframe / printing / availability
+        // changes, mirroring the main chart's task.
+        .task(id: "gradePerf|\(activeCard.id)|\(selectedTimeframe.rawValue)|\(selectedPriceMode)|\(selectedPrintingId ?? "")|\(availableGradedOptions.count)") {
+            await loadGradePerformance()
+        }
+        // RAW variant overlay: fetch each comparable variant's history.
+        .task(id: "variant|\(activeCard.id)|\(selectedTimeframe.rawValue)|\(selectedPriceMode)|\(selectedPrintingId ?? "")|\(availablePrintings.count)") {
+            await loadVariantOverlay()
+        }
         // Keyed by activeCard.id so the entire data-load fan-out re-fires
         // when the user taps the EN/JP toggle and we swap activeCard.
         // Without the id, SwiftUI runs the task only on first appearance
@@ -504,26 +526,30 @@ struct CardDetailView: View {
             ) {
                 await MainActor.run { conditionPrices = prices }
             }
-            // Load per-bucket graded market summary stats. Each card may
-            // have several rows per bucket (one canonical printing_id=NULL
-            // aggregate plus one row per printing). Pick the best row per
-            // bucket: prefer canonical (NULL) since it aggregates all
-            // printings; fall back to the printing-scoped row with the
-            // most snapshot_count_30d data; final fallback to whatever
-            // row we have.
+            // Per-(grader, bucket) graded market summary. public_graded_variant_prices
+            // is per (printing, grader, grade), so key by "GRADER::bucket" — the agency
+            // pills (PSA/CGC/BGS/TAG) then map to distinct rows. For a slug with several
+            // printings of one grader+grade, pick the dominant printing: prefer a usable
+            // 14d market_price, then most snapshot_count_30d, then freshest, then
+            // printing_id (mirrors the web ladder's tie-break so the pick is stable).
+            // No canonical printing_id=NULL row exists in this view.
             if let rows = try? await CardService.shared.fetchGradedCardMetrics(slug: activeCard.id) {
                 var grouped: [String: [GradedCardMetricRow]] = [:]
                 for row in rows {
-                    grouped[row.grade, default: []].append(row)
+                    grouped["\(row.grader)::\(row.grade)", default: []].append(row)
                 }
                 var resolved: [String: GradedCardMetricRow] = [:]
-                for (bucket, candidates) in grouped {
-                    if let canonical = candidates.first(where: { $0.printingId == nil }) {
-                        resolved[bucket] = canonical
-                    } else {
-                        let best = candidates.max { ($0.snapshotCount30D ?? 0) < ($1.snapshotCount30D ?? 0) }
-                        if let best { resolved[bucket] = best }
+                for (key, candidates) in grouped {
+                    let best = candidates.max { a, b in
+                        let aHas = a.marketPrice != nil, bHas = b.marketPrice != nil
+                        if aHas != bHas { return !aHas }
+                        let aN = a.snapshotCount30d ?? -1, bN = b.snapshotCount30d ?? -1
+                        if aN != bN { return aN < bN }
+                        let aAsOf = a.marketPriceAsOf ?? a.latestPriceAsOf ?? "", bAsOf = b.marketPriceAsOf ?? b.latestPriceAsOf ?? ""
+                        if aAsOf != bAsOf { return aAsOf < bAsOf }
+                        return (a.printingId ?? "") > (b.printingId ?? "")
                     }
+                    if let best { resolved[key] = best }
                 }
                 await MainActor.run { gradedCardMetricsByBucket = resolved }
             }
@@ -611,11 +637,15 @@ struct CardDetailView: View {
                     dismiss()
                 } label: {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(PA.Colors.text)
-                        .frame(width: 36, height: 36)
-                        .background(.ultraThinMaterial.opacity(0.5))
-                        .clipShape(Circle())
+                        // No custom circle background: iOS 26 wraps toolbar
+                        // buttons in its own Liquid Glass capsule, so a custom
+                        // .ultraThinMaterial circle doubled up ("circle inside a
+                        // circle"). Let the system provide the chrome; keep a
+                        // 44pt tap target so it stays easy to hit.
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .accessibilityLabel("Back")
             }
@@ -637,11 +667,13 @@ struct CardDetailView: View {
                             subject: Text(activeCard.name.isEmpty ? "PopAlpha card" : activeCard.name)
                         ) {
                             Image(systemName: "square.and.arrow.up")
-                                .font(.system(size: 14, weight: .semibold))
+                                .font(.system(size: 16, weight: .semibold))
                                 .foregroundStyle(PA.Colors.text)
-                                .frame(width: 36, height: 36)
-                                .background(.ultraThinMaterial.opacity(0.5))
-                                .clipShape(Circle())
+                                // Same as the back button: no custom circle —
+                                // iOS 26 supplies the glass capsule, so the
+                                // custom one doubled up.
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
                         }
                         .accessibilityLabel("Share card")
                     }
@@ -1004,6 +1036,11 @@ struct CardDetailView: View {
             // 7. Chart section — supporting evidence after the read.
             chartSection
 
+            // 7b. Grade Performance — overlay every grade of the active grader
+            //     so the user can compare which grade is moving quicker.
+            //     Self-gates to graded mode with ≥2 buckets of history.
+            gradePerformanceSection
+
             // 8. Personalized insight ("How this fits your style") — secondary
             // differentiated layer; renders its own fallback when signal is thin.
             PersonalizedInsightCardView(
@@ -1239,15 +1276,15 @@ struct CardDetailView: View {
             .background(PA.Colors.surface)
             .clipShape(RoundedRectangle(cornerRadius: 10))
 
+            // Variant overlay pills — RAW mode, when the active finish has ≥2
+            // variants (editions/stamps). All lines by default; tap to isolate.
+            if !selectedPriceMode.isGraded, hasVariantOverlay {
+                variantFocusPills
+            }
+
             // Interactive chart
             ZStack {
-                InteractiveChartView(
-                    data: activeChartPrices,
-                    timestamps: activeChartTimestamps,
-                    direction: chartDirection,
-                    lineWidth: 2,
-                    height: 140
-                )
+                chartContent
                 .opacity(chartLoading || (chartError != nil && chartPrices.isEmpty) ? 0.3 : 1)
                 .animation(.easeOut(duration: 0.2), value: chartLoading)
 
@@ -1391,6 +1428,307 @@ struct CardDetailView: View {
                 // OfflineBanner already explains "you're offline" if
                 // that's the cause, so keep this generic.
                 chartError = "Couldn't load price history."
+            }
+        }
+    }
+
+    // MARK: - Grade Performance (multi-grade overlay)
+
+    private struct GradePerfDatum: Identifiable {
+        let id: String        // grade bucket (e.g. "G10")
+        let label: String
+        let color: Color
+        let points: [PricePoint]
+    }
+
+    private static let gradePerfOrder = ["G10_PERFECT", "G10", "G9_5", "G9", "G8", "LE_7"]
+
+    private func gradePerfColor(_ bucket: String) -> Color {
+        switch bucket {
+        case "G10_PERFECT": return Color(red: 0.957, green: 0.447, blue: 0.714)
+        case "G10":         return Color(red: 0.204, green: 0.827, blue: 0.600)
+        case "G9_5":        return Color(red: 0.376, green: 0.647, blue: 0.980)
+        case "G9":          return Color(red: 0.659, green: 0.545, blue: 0.980)
+        case "G8":          return Color(red: 0.984, green: 0.749, blue: 0.141)
+        case "LE_7":        return Color(red: 0.984, green: 0.443, blue: 0.522)
+        default:            return PA.Colors.neutral
+        }
+    }
+
+    private func gradePerfLabel(_ bucket: String) -> String {
+        switch bucket {
+        case "G10_PERFECT": return "10 Perfect"
+        case "G10":         return "10"
+        case "G9_5":        return "9.5"
+        case "G9":          return "9"
+        case "G8":          return "8"
+        case "LE_7":        return "7 or less"
+        default:            return bucket
+        }
+    }
+
+    @ViewBuilder
+    private var gradePerformanceSection: some View {
+        if selectedPriceMode.isGraded, gradePerfSeries.count >= 2 {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Grade Performance")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(PA.Colors.text)
+                        Text("\(selectedGradingAgency) grades · \(gradePerfScale == .indexed ? "indexed to window start" : "observed prices")")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(PA.Colors.muted)
+                    }
+                    Spacer()
+                    gradePerfScaleToggle
+                }
+
+                MultiLineChartView(
+                    series: gradePerfSeries.map {
+                        MultiLineSeriesInput(id: $0.id, label: $0.label, color: $0.color, points: $0.points)
+                    },
+                    scale: gradePerfScale,
+                    showChangeDetails: false,
+                    height: 150
+                )
+            }
+            .padding(16)
+            .glassSurface()
+        }
+    }
+
+    private var gradePerfScaleToggle: some View {
+        HStack(spacing: 2) {
+            ForEach([MultiSeriesChartModel.Scale.indexed, MultiSeriesChartModel.Scale.absolute], id: \.self) { mode in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) { gradePerfScale = mode }
+                } label: {
+                    Text(mode == .indexed ? "%" : "$")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(gradePerfScale == mode ? PA.Colors.background : PA.Colors.muted)
+                        .frame(width: 30, height: 24)
+                        .background(gradePerfScale == mode ? detailAccent : PA.Colors.surfaceSoft)
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    /// Fetches per-bucket history for the active grader in parallel and
+    /// assembles the overlay series (high grade → low). Cleared when not in
+    /// graded mode or fewer than two buckets have data.
+    private func loadGradePerformance() async {
+        guard case let .graded(grader, _) = selectedPriceMode else {
+            await MainActor.run { gradePerfSeries = [] }
+            return
+        }
+        let buckets = availableGradedOptions.compactMap { mode -> String? in
+            if case let .graded(provider, bucket) = mode, provider == grader { return bucket }
+            return nil
+        }
+        guard buckets.count >= 2 else {
+            await MainActor.run { gradePerfSeries = [] }
+            return
+        }
+
+        let slug = activeCard.id
+        let printingId = selectedPrintingId
+        let tf = selectedTimeframe
+
+        var fetched: [String: [PricePoint]] = [:]
+        await withTaskGroup(of: (String, [PricePoint]).self) { group in
+            for bucket in buckets {
+                group.addTask {
+                    do {
+                        let pts: [PricePoint]
+                        if let pid = printingId {
+                            pts = try await CardService.shared.fetchPrintingGradedPriceHistory(
+                                slug: slug, printingId: pid, provider: grader, bucket: bucket, timeframe: tf
+                            )
+                        } else {
+                            pts = try await CardService.shared.fetchGradedPriceHistory(
+                                slug: slug, provider: grader, bucket: bucket, timeframe: tf
+                            )
+                        }
+                        return (bucket, pts)
+                    } catch {
+                        return (bucket, [])
+                    }
+                }
+            }
+            for await (bucket, pts) in group where pts.count >= 2 {
+                fetched[bucket] = pts
+            }
+        }
+
+        let ordered: [GradePerfDatum] = Self.gradePerfOrder.compactMap { bucket in
+            guard let pts = fetched[bucket] else { return nil }
+            return GradePerfDatum(
+                id: bucket,
+                label: gradePerfLabel(bucket),
+                color: gradePerfColor(bucket),
+                points: pts
+            )
+        }
+
+        await MainActor.run {
+            // Drop the result if the user has since changed grader / timeframe /
+            // printing / card (mirrors loadChart's staleness guard).
+            guard activeCard.id == slug,
+                  selectedTimeframe == tf,
+                  selectedPrintingId == printingId,
+                  case let .graded(currentGrader, _) = selectedPriceMode,
+                  currentGrader == grader else { return }
+            gradePerfSeries = ordered
+        }
+    }
+
+    // MARK: - RAW Variant Overlay (editions + stamps of the same finish)
+
+    private struct VariantSeriesDatum: Identifiable {
+        let id: String        // printingId
+        let label: String
+        let color: Color
+        let points: [PricePoint]
+    }
+
+    private static let variantPalette: [Color] = [
+        PA.Colors.accent,                               // teal
+        Color(red: 0.659, green: 0.545, blue: 0.980),   // purple
+        Color(red: 0.984, green: 0.749, blue: 0.141),   // amber
+        Color(red: 0.376, green: 0.647, blue: 0.980),   // blue
+        Color(red: 0.984, green: 0.443, blue: 0.522),   // rose
+    ]
+
+    /// Short legend label distinguishing a printing within its finish group:
+    /// edition (1st Ed) + stamp (Shadowless, Poké Ball…). "Unlimited" when it
+    /// carries neither.
+    private func variantLabel(_ p: CardPrintingOption) -> String {
+        var parts: [String] = []
+        if p.edition == "FIRST_EDITION" { parts.append("1st Ed") }
+        if let stamp = p.stamp, !stamp.isEmpty { parts.append(CardPrintingOption.stampLabel(stamp)) }
+        return parts.isEmpty ? "Unlimited" : parts.joined(separator: " · ")
+    }
+
+    /// Printings comparable to the active one — same finish, any edition/stamp
+    /// (stamped vs non-stamped, 1st Ed vs Unlimited). Capped to the palette
+    /// size so the overlay stays readable; cross-finish stays on the picker.
+    private var variantGroupPrintings: [CardPrintingOption] {
+        guard let active = availablePrintings.first(where: { $0.id == selectedPrintingId }) ?? availablePrintings.first else {
+            return []
+        }
+        return availablePrintings
+            .filter { $0.finish == active.finish }
+            .prefix(Self.variantPalette.count)
+            .map { $0 }
+    }
+
+    /// True once at least two variants of the active finish have chartable
+    /// history (single-printing cards never trip this).
+    private var hasVariantOverlay: Bool { variantSeries.count >= 2 }
+
+    @ViewBuilder
+    private var chartContent: some View {
+        if !selectedPriceMode.isGraded, hasVariantOverlay {
+            if let focus = variantFocus, let one = variantSeries.first(where: { $0.id == focus }) {
+                InteractiveChartView(data: one.points.map(\.price), timestamps: one.points.map(\.ts), direction: variantDirection(one.points), lineWidth: 2, height: 140)
+            } else {
+                MultiLineChartView(
+                    series: variantSeries.map { MultiLineSeriesInput(id: $0.id, label: $0.label, color: $0.color, points: $0.points) },
+                    scale: .absolute,
+                    showChangeDetails: true,
+                    height: 140
+                )
+            }
+        } else {
+            InteractiveChartView(data: activeChartPrices, timestamps: activeChartTimestamps, direction: chartDirection, lineWidth: 2, height: 140)
+        }
+    }
+
+    private var variantFocusPills: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                variantPill("All", isActive: variantFocus == nil) { variantFocus = nil }
+                ForEach(variantSeries) { v in
+                    variantPill(v.label, isActive: variantFocus == v.id, dot: v.color) { variantFocus = v.id }
+                }
+            }
+        }
+    }
+
+    private func variantPill(_ title: String, isActive: Bool, dot: Color? = nil, _ action: @escaping () -> Void) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.15)) { action() }
+        } label: {
+            HStack(spacing: 5) {
+                if let dot {
+                    Circle().fill(dot).frame(width: 6, height: 6)
+                }
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(isActive ? PA.Colors.background : PA.Colors.muted)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(isActive ? detailAccent : PA.Colors.surfaceSoft)
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func variantDirection(_ pts: [PricePoint]) -> ChangeDirection {
+        guard pts.count >= 2, let first = pts.first?.price, let last = pts.last?.price else { return .flat }
+        return ChangeDirection.from(last - first)
+    }
+
+    /// Fetches each comparable variant's raw history in parallel. Cleared when
+    /// not in RAW mode or the active finish has fewer than two variants.
+    private func loadVariantOverlay() async {
+        guard !selectedPriceMode.isGraded else {
+            await MainActor.run { variantSeries = [] }
+            return
+        }
+        let group = variantGroupPrintings
+        guard group.count >= 2 else {
+            await MainActor.run { variantSeries = [] }
+            return
+        }
+        let slug = activeCard.id
+        let tf = selectedTimeframe
+
+        var fetched: [String: [PricePoint]] = [:]
+        await withTaskGroup(of: (String, [PricePoint]).self) { taskGroup in
+            for p in group {
+                let pid = p.id
+                taskGroup.addTask {
+                    let pts = (try? await CardService.shared.fetchPrintingPriceHistory(slug: slug, printingId: pid, timeframe: tf)) ?? []
+                    return (pid, pts)
+                }
+            }
+            for await (pid, pts) in taskGroup where pts.count >= 2 {
+                fetched[pid] = pts
+            }
+        }
+
+        // Preserve group order; assign palette colors by position so a given
+        // printing keeps a stable color across the chart, legend, and pills.
+        let ordered: [VariantSeriesDatum] = group.enumerated().compactMap { idx, p in
+            guard let pts = fetched[p.id] else { return nil }
+            return VariantSeriesDatum(
+                id: p.id,
+                label: variantLabel(p),
+                color: Self.variantPalette[idx % Self.variantPalette.count],
+                points: pts
+            )
+        }
+
+        await MainActor.run {
+            guard activeCard.id == slug, selectedTimeframe == tf, !selectedPriceMode.isGraded else { return }
+            variantSeries = ordered
+            if let f = variantFocus, !ordered.contains(where: { $0.id == f }) {
+                variantFocus = nil
             }
         }
     }
@@ -2114,15 +2452,15 @@ struct CardDetailView: View {
 
     // MARK: - Graded Market Summary
 
-    /// Aggregate market-summary stats for the currently-selected graded
-    /// bucket. card_metrics is per (slug, printing, grade) — no provider —
-    /// so this section is bucket-level (e.g. "10 Market Summary"), not
-    /// per-(provider, bucket). Renders only when graded mode is selected
-    /// AND we have a card_metrics row for the active bucket.
+    /// Per-(grader, bucket) market-summary stats for the selected graded variant.
+    /// public_graded_variant_prices IS per-grader, so this keys by "GRADER::bucket"
+    /// — tapping PSA vs CGC swaps to that grader's own row (e.g. PSA 10 $3,431 vs
+    /// CGC 10 $761). Renders only when graded mode is selected AND we have a row
+    /// for the active (grader, bucket).
     @ViewBuilder
     private var gradedMarketSummarySection: some View {
-        if case .graded(_, let bucket) = selectedPriceMode,
-           let metric = gradedCardMetricsByBucket[bucket] {
+        if case .graded(let provider, let bucket) = selectedPriceMode,
+           let metric = gradedCardMetricsByBucket["\(provider)::\(bucket)"] {
             let rows = buildGradedSummaryRows(metric)
             if !rows.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
@@ -2172,28 +2510,25 @@ struct CardDetailView: View {
 
     private func buildGradedSummaryRows(_ metric: GradedCardMetricRow) -> [GradedSummaryRow] {
         var rows: [GradedSummaryRow] = []
-        // 14-day median (price-display redesign) — the steady headline for this
-        // grade, pairing with the freshest sold point in the hero above. Sourced
-        // from the view's graded market_price (= display_price, the 14d median);
-        // graded sold data is sparse, so 14d (not the EN 3d). Decodes cleanly,
-        // unlike the median7D/30d rows below (the #49 digit-boundary bug).
-        if let median14 = metric.marketPrice, median14 > 0 {
-            rows.append(.init(label: "14D Median", value: formatConditionPrice(median14), emphasized: true))
+        // Lead with the 14-day median (the per-grader headline). Graded 7d windows
+        // are often empty, so the emphasis falls back to 7D only when 14D is absent.
+        if let market = metric.marketPrice {
+            rows.append(.init(label: "14D Median", value: formatConditionPrice(market), emphasized: true))
         }
-        if let median7D = metric.median7D {
-            rows.append(.init(label: "7D Median", value: formatConditionPrice(median7D), emphasized: false))
+        if let median7d = metric.median7d {
+            rows.append(.init(label: "7D Median", value: formatConditionPrice(median7d), emphasized: metric.marketPrice == nil))
         }
-        if let median30D = metric.median30D {
-            rows.append(.init(label: "30D Median", value: formatConditionPrice(median30D), emphasized: false))
+        if let median30d = metric.median30d {
+            rows.append(.init(label: "30D Median", value: formatConditionPrice(median30d), emphasized: false))
         }
-        if let low = metric.low30D, let high = metric.high30D {
+        if let low = metric.low30d, let high = metric.high30d {
             rows.append(.init(
                 label: "30D Range",
                 value: "\(formatConditionPrice(low)) – \(formatConditionPrice(high))",
                 emphasized: false
             ))
         }
-        if let count = metric.snapshotCount30D {
+        if let count = metric.snapshotCount30d {
             rows.append(.init(label: "Sample Size (30D)", value: "\(count) sales", emphasized: false))
         }
         return rows

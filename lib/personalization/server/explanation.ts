@@ -13,6 +13,8 @@ import {
 import { PROFILE_VERSION } from "../constants";
 import { getPersonalizationCapability } from "../capability";
 import {
+  buildCollectorInsight,
+  buildCollectorInsightTemplate,
   buildPersonalizedExplanation,
   type ExplanationCardInput,
   type MarketSignalContext,
@@ -20,9 +22,12 @@ import {
 import type {
   Actor,
   CardStyleFeatures,
+  CollectorInsight,
+  CollectorSignals,
   PersonalizedExplanation,
   StyleProfile,
 } from "../types";
+import { assembleCollectorSignals } from "./collector-signals";
 
 type CardProfileRow = {
   canonical_slug: string;
@@ -61,6 +66,7 @@ type CanonicalCardRow = {
 function metricsHashFor(
   features: CardStyleFeatures,
   marketSignalHash: string | null,
+  profile: StyleProfile | null,
 ): string {
   // Bake the per-card market signal into the cache key so a fresh BREAKOUT /
   // COOLING swap invalidates last week's read for the same user × card.
@@ -74,7 +80,39 @@ function metricsHashFor(
     features.is_art_centric ? "1" : "0",
     features.is_mainstream ? "1" : "0",
     marketSignalHash ?? "",
+    // Profile alignment inputs: computeAlignment(features, profile) reads
+    // profile.scores and can flip fits / fitLabel / fitScore / copy when a
+    // score crosses its threshold. profile.version is a constant schema
+    // version (it does NOT increment per recompute — see recompute.ts), so
+    // the scores themselves must be in the key, or a recompute that shifts a
+    // user's style (without changing dataConfidence or their saved-card
+    // names) would serve a stale read for the same card.
+    profile ? JSON.stringify(profile.scores) : "",
   ].join("|");
+  return crypto.createHash("sha256").update(payload).digest("hex").slice(0, 16);
+}
+
+// Stable digest of the QUALITATIVE collector signals that shape the insight
+// copy — saved / watchlisted / scanned / repeat-viewed card names, favorite
+// sets, graded-vs-raw + language lean, and the collector type + traits.
+// Folded into the Collector Insight cache key so a signal change that doesn't
+// cross the coarse `dataConfidence` band (e.g. the user saves different cards
+// or shifts favorite sets while staying "high") still invalidates a now-stale
+// read for the same user × card. Volatile counters (eventCount, raw
+// profileConfidence) are intentionally excluded so the cache isn't busted on
+// every single behavior event.
+function collectorSignalsDigest(signals: CollectorSignals): string {
+  const payload = JSON.stringify([
+    signals.collectorType,
+    signals.supportingTraits,
+    signals.savedCardNames,
+    signals.watchlistCardNames,
+    signals.scannedCardNames,
+    signals.repeatedlyViewedCardNames,
+    signals.favoriteSets,
+    signals.gradedVsRawInterest,
+    signals.languagePreference,
+  ]);
   return crypto.createHash("sha256").update(payload).digest("hex").slice(0, 16);
 }
 
@@ -255,12 +293,17 @@ async function ensureMarketSignal(
   }
 }
 
-async function readCache(
+// The cache table stores an opaque JSONB `payload` keyed by
+// (actor_key, canonical_slug, profile_version, metrics_hash). Both the legacy
+// PersonalizedExplanation and the structured CollectorInsight ride the same
+// table; we keep them from colliding by namespacing the Collector Insight
+// metrics_hash with a "ci:" prefix (see metricsHashFor / getCollectorInsight).
+async function readCache<T>(
   actor: Actor,
   canonicalSlug: string,
   profileVersion: number,
   metricsHash: string,
-): Promise<PersonalizedExplanation | null> {
+): Promise<T | null> {
   try {
     const admin = dbAdmin();
     const { data, error } = await admin
@@ -274,18 +317,18 @@ async function readCache(
       .limit(1)
       .maybeSingle();
     if (error || !data) return null;
-    return data.payload as PersonalizedExplanation;
+    return data.payload as T;
   } catch {
     return null;
   }
 }
 
-async function writeCache(
+async function writeCache<T>(
   actor: Actor,
   canonicalSlug: string,
   profileVersion: number,
   metricsHash: string,
-  payload: PersonalizedExplanation,
+  payload: T,
 ): Promise<void> {
   try {
     const admin = dbAdmin();
@@ -306,13 +349,14 @@ async function writeCache(
 }
 
 /**
- * Get a personalized explanation for (actor, card). Honors the cache and
- * respects the capability mode (template vs. LLM).
+ * Get the legacy loose `explanation` for (actor, card). Honors the cache and
+ * the capability mode.
  *
- * On the LLM path, the per-card market signal is fetched from `card_profiles`
- * and woven into the prompt. If that row is missing, we generate it inline
- * (one extra Gemini call on first view) so the combined read can speak to
- * the actual market state — coherence over a tiny latency hit.
+ * This path is deterministic — `buildPersonalizedExplanation` ignores the
+ * market context (`void _market`) — so it no longer fetches or backfills a
+ * per-card market signal. Doing so duplicated the LLM backfill the Collector
+ * Insight path already performs (a race + extra Gemini cost on a card's first
+ * view). Market state now lives entirely on the Collector Insight path.
  */
 export async function getPersonalizedExplanation(
   actor: Actor,
@@ -323,8 +367,56 @@ export async function getPersonalizedExplanation(
   const capability = getPersonalizationCapability(actor);
   const profileVersion = profile?.version ?? PROFILE_VERSION;
 
-  // Pull (or backfill) the market signal only on the LLM path. Template
-  // path doesn't reason about market state, so it doesn't need it.
+  // No market backfill here: the legacy explanation is deterministic
+  // (buildPersonalizedExplanation ignores market), and getCollectorInsight
+  // already fetches/backfills the per-card signal on the LLM path. Fetching
+  // it here too raced that backfill and doubled the Gemini cost on first view.
+  const metricsHash = metricsHashFor(features, null, profile);
+
+  const cached = await readCache<PersonalizedExplanation>(
+    actor,
+    card.canonical_slug,
+    profileVersion,
+    metricsHash,
+  );
+  if (cached) return cached;
+
+  const explanation = await buildPersonalizedExplanation(
+    card,
+    features,
+    profile,
+    capability,
+    null,
+  );
+  await writeCache(actor, card.canonical_slug, profileVersion, metricsHash, explanation);
+  return explanation;
+}
+
+/**
+ * Get the structured Collector Insight for (actor, card) — the USER-centered
+ * "should this card matter to this collector?" read. This is the primary
+ * personalization surface; `getPersonalizedExplanation` is the legacy loose
+ * shape retained for the existing web component.
+ *
+ * Honors the same per-(actor, card) cache (namespaced via a "ci:" metrics-hash
+ * prefix so it can't collide with legacy explanation rows) and the capability
+ * mode. On the LLM path the per-card market signal is fetched/backfilled and
+ * passed as ENTRY-FIT context only — the prompt is told not to re-explain it.
+ */
+export async function getCollectorInsight(
+  actor: Actor,
+  card: ExplanationCardInput,
+  features: CardStyleFeatures,
+  profile: StyleProfile | null,
+): Promise<CollectorInsight> {
+  const capability = getPersonalizationCapability(actor);
+  const profileVersion = profile?.version ?? PROFILE_VERSION;
+
+  // Assemble the user-collection signal digest. Cheap, best-effort reads; any
+  // failure degrades a signal to empty/unknown rather than throwing.
+  const signals = await assembleCollectorSignals(actor, profile);
+
+  // Pull (or backfill) the market signal only on the LLM path.
   let market: MarketSignalContext | null = null;
   let signalHash: string | null = null;
   if (capability.mode === "llm" && profile) {
@@ -333,18 +425,60 @@ export async function getPersonalizedExplanation(
     signalHash = fetched.signalHash;
   }
 
-  const metricsHash = metricsHashFor(features, signalHash);
+  // Namespace + fold BOTH the data-richness band AND a digest of the
+  // qualitative collector signals into the cache key, so a signal change that
+  // doesn't cross the coarse `dataConfidence` band (e.g. saving different cards
+  // or shifting favorite sets while staying "high") still invalidates a now-
+  // stale read for the same user × card × market state.
+  // `capability.mode` ("template" | "llm") is part of the key so flipping
+  // NEXT_PUBLIC_ENABLE_PERSONALIZATION_LLM for a card that already cached a
+  // template read re-generates on the LLM path instead of returning the old
+  // template payload forever. (profileVersion covers builder/schema bumps.)
+  const metricsHash = `ci:${capability.mode}:${signals.dataConfidence}:${collectorSignalsDigest(signals)}:${metricsHashFor(features, signalHash, profile)}`;
 
-  const cached = await readCache(actor, card.canonical_slug, profileVersion, metricsHash);
+  const cached = await readCache<CollectorInsight>(
+    actor,
+    card.canonical_slug,
+    profileVersion,
+    metricsHash,
+  );
   if (cached) return cached;
 
-  const explanation = await buildPersonalizedExplanation(
+  const insight = await buildCollectorInsight(
     card,
     features,
     profile,
+    signals,
     capability,
     market,
   );
-  await writeCache(actor, card.canonical_slug, profileVersion, metricsHash, explanation);
-  return explanation;
+  await writeCache(actor, card.canonical_slug, profileVersion, metricsHash, insight);
+  return insight;
+}
+
+/**
+ * Free-preview teaser of the Collector Insight: the deterministic read trimmed
+ * to the fields the paywall's locked preview shows — fit label + score, the
+ * summary lead, and collector type. The depth (role in collection, tradeoff,
+ * best move, PopAlpha read, dataBasis) is deliberately OMITTED so it never
+ * reaches a non-Pro actor. This path never calls the LLM (always the cheap
+ * deterministic builder, regardless of the capability flag) and isn't cached —
+ * it's a one-shot template build.
+ */
+export async function getCollectorInsightTeaser(
+  actor: Actor,
+  card: ExplanationCardInput,
+  features: CardStyleFeatures,
+  profile: StyleProfile | null,
+): Promise<Partial<CollectorInsight>> {
+  const signals = await assembleCollectorSignals(actor, profile);
+  const full = buildCollectorInsightTemplate(card, features, profile, signals);
+  return {
+    fitLabel: full.fitLabel,
+    fitScore: full.fitScore,
+    collectorType: full.collectorType,
+    summary: full.summary,
+    confidence: full.confidence,
+    source: "template",
+  };
 }

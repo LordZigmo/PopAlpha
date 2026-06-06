@@ -9,10 +9,13 @@ export type RawCardMarketVariant = {
   descriptorLabel: string | null;
   imageUrl: string | null;
   rarity: string | null;
+  // Carried through so the market chart can overlay sibling editions
+  // (Unlimited vs 1st Edition) of the same finish/stamp on one graph.
+  finish: "NON_HOLO" | "HOLO" | "REVERSE_HOLO" | "ALT_HOLO" | "UNKNOWN";
+  edition: "UNLIMITED" | "FIRST_EDITION" | "UNKNOWN";
+  stamp: string | null;
   currentPrice: number | null;
   changePct7d: number | null;
-  justtcgPrice: number | null;
-  justtcgAsOfTs: string | null;
   scrydexPrice: number | null;
   scrydexAsOfTs: string | null;
   // Legacy auxiliary public signal retained for older callers. New UI should

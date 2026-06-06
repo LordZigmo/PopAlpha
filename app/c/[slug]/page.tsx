@@ -17,6 +17,7 @@ import CardModeToggle from "@/components/card-mode-toggle";
 import CardViewTracker from "@/components/card-view-tracker";
 import CollapsibleSection from "@/components/collapsible-section";
 import EbayListings from "@/components/ebay-listings";
+import GradedGradeHistoryChart from "@/components/graded-grade-history-chart";
 import { GroupedSection, Pill, SegmentedControl, StatStripItem } from "@/components/ios-grouped-ui";
 import CanonicalCardShell from "@/components/layout/CanonicalCardShell";
 import MarketPulse from "@/components/market-pulse";
@@ -29,6 +30,7 @@ import CardTileMini from "@/components/card-tile-mini";
 import type { HomepageCard } from "@/lib/data/homepage";
 import { buildEbaySearchQueries, type GradeSelection, type GradedSource } from "@/lib/ebay-query";
 import { buildFinishGroups } from "@/lib/cards/detail";
+import { loadGradedGradeHistory } from "@/lib/cards/graded-grade-history";
 import { choosePreferredRawPricingPrinting } from "@/lib/cards/raw-pricing-printing";
 import { loadCardProfileSummary, type CardProfileSummary } from "@/lib/card-profiles";
 import { getCardViewSnapshot } from "@/lib/data/card-views";
@@ -501,7 +503,7 @@ function resolveRawDisplayPrice(params: {
   blendPolicy: string;
   confidenceScore: number;
   lowConfidence: boolean;
-  sourceMix: { justtcgWeight: number; scrydexWeight: number };
+  sourceMix: { scrydexWeight: number };
 } {
   const weighted = resolveWeightedMarketPrice({
     providers: [
@@ -516,7 +518,6 @@ function resolveRawDisplayPrice(params: {
     confidenceScore: params.scrydex !== null ? weighted.confidenceScore : 0,
     lowConfidence: params.scrydex === null ? true : weighted.lowConfidence,
     sourceMix: {
-      justtcgWeight: 0,
       scrydexWeight: params.scrydex !== null ? 1 : 0,
     },
   };
@@ -1032,6 +1033,23 @@ export default async function CanonicalCardPage({
       value: latestUsd != null ? formatUsdCompact(latestUsd) : "Forming",
     };
   });
+  // Per-grade price history for the active grader, across every bucket that
+  // has data — powers the "Grade Performance" multi-line overlay so users can
+  // see which grade is moving quicker. Only loaded in GRADED mode.
+  const gradedGradeSeries = viewMode === "GRADED" && selectedPrinting && activeProvider
+    ? await loadGradedGradeHistory({
+        supabase,
+        canonicalSlug: slug,
+        printingId: selectedPrinting.id,
+        provider: activeProvider,
+      }).catch((error) => {
+        console.error(
+          "[CanonicalCardPage] graded grade history load failed:",
+          error instanceof Error ? error.message : String(error),
+        );
+        return [];
+      })
+    : [];
   const trendMetricValue = showPriceChange ? formatSignalScore(priceChangePct) : "Stale";
   const activityMetric = priceObservationActivityLabel(snapshotData?.active_listings_7d ?? null);
   const scoutMarketPrice = viewMode === "RAW" && !showPriceChange ? null : displayPrimaryPrice;
@@ -1278,6 +1296,14 @@ export default async function CanonicalCardPage({
                 ) : null}
               </div>
             </div>
+          ) : null}
+
+          {viewMode === "GRADED" && activeProvider && gradedGradeSeries.length > 0 ? (
+            <GradedGradeHistoryChart
+              series={gradedGradeSeries}
+              providerLabel={providerLabel(activeProvider)}
+              selectedWindow={activeMarketWindow}
+            />
           ) : null}
 
         <PopAlphaScoutPreview

@@ -249,6 +249,13 @@ export type HomepageDataOptions = {
 
 const SECTION_LIMIT = 5;
 const MARKET_WATCH_LIMIT = 20;
+// The JP discovery rail ("Trending") is the ONLY populated JP home rail until
+// the change_pct-gated JP movers rails light up (~mid-June). EN looks full via
+// ~8 small rails of SECTION_LIMIT each; JP currently has just this one, so a
+// 5-card cap makes the JP home a stub. Give the sole JP rail a generous limit.
+// (loadJapaneseSignalRails stays at SECTION_LIMIT — those follow the EN
+// multi-rail sizing once they have data.)
+const JAPANESE_RAIL_LIMIT = 40;
 const SIGNAL_WINDOWS: HomepageSignalWindow[] = ["24H", "7D"];
 /** Minimum 7d median to filter noise / $0 cards */
 const MIN_PRICE = 0.5;
@@ -482,14 +489,22 @@ async function loadDailyTopMoversBundle(
 async function loadJapaneseRail(
   client: NonNullable<ReturnType<typeof dbPublic>>,
   limit: number,
+  // Optional price-tier filter (on display_price_usd) so the same loader powers
+  // the all-prices "Trending" rail and the Mid ($8-50) / Budget (<$8) discovery
+  // rails. Tier membership is approximate at the boundary since the displayed
+  // price is jp_latest_price ?? display_price_usd, but close enough for a rail.
+  opts: { minPrice?: number; maxPrice?: number } = {},
 ): Promise<HomepageCard[]> {
-  const { data, error } = await client
+  let query = client
     .from("public_jp_price_coverage")
     .select(
       "canonical_slug, canonical_name, set_name, year, card_number, primary_image_url, mirrored_primary_image_url, mirrored_primary_thumb_url, market_price, market_price_as_of, change_pct_24h, change_pct_7d, active_listings_7d, market_confidence_score, snapshot_count_30d, market_low_confidence, yahoo_jp_price, yahoo_jp_price_jpy, yahoo_jp_sample_count, snkrdunk_price, snkrdunk_price_jpy, snkrdunk_sample_count, display_price_source, display_price_usd, display_price_as_of, jp_latest_price, jp_latest_price_as_of",
     )
     .eq("covered_by_price", true)
-    .in("display_price_source", ["yahoo_jp", "snkrdunk"])
+    .in("display_price_source", ["yahoo_jp", "snkrdunk"]);
+  if (opts.minPrice != null) query = query.gte("display_price_usd", opts.minPrice);
+  if (opts.maxPrice != null) query = query.lt("display_price_usd", opts.maxPrice);
+  const { data, error } = await query
     .order("display_price_as_of", { ascending: false, nullsFirst: false })
     .limit(limit);
 
@@ -1437,10 +1452,25 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
     };
     if (!overrides && db) {
       try {
-        [japaneseRail, japaneseRails] = await Promise.all([
-          loadJapaneseRail(db, SECTION_LIMIT),
+        const [jpRail, jpRails, jpMid, jpBudget] = await Promise.all([
+          loadJapaneseRail(db, JAPANESE_RAIL_LIMIT),
           loadJapaneseSignalRails(db, SECTION_LIMIT),
+          // Mid ($8-50) and Budget (<$8) price-tier discovery rails. The
+          // change_pct-based mid/budget rails in loadJapaneseSignalRails stay
+          // empty until JP movers data lands (~mid-June), so populate these from
+          // the priced cohort by price tier (freshest first) for now.
+          loadJapaneseRail(db, JAPANESE_RAIL_LIMIT, { minPrice: JP_MID_MIN_PRICE, maxPrice: JP_PREMIUM_MIN_PRICE }),
+          loadJapaneseRail(db, JAPANESE_RAIL_LIMIT, { minPrice: JP_BUDGET_MIN_PRICE, maxPrice: JP_MID_MIN_PRICE }),
         ]);
+        japaneseRail = jpRail;
+        // Prefer the signal-ranked (change_pct) mid/budget rails once they have
+        // data (~mid-June); fall back to the price-tier discovery rails while
+        // they're still empty so the JP home isn't a single rail today.
+        japaneseRails = {
+          ...jpRails,
+          midMovers: jpRails.midMovers.length > 0 ? jpRails.midMovers : jpMid,
+          budgetMovers: jpRails.budgetMovers.length > 0 ? jpRails.budgetMovers : jpBudget,
+        };
       } catch (err) {
         logger.error(
           "[homepage] japanese_rail",
@@ -2001,16 +2031,33 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
       if (!hasPermittedPublicPulse(marketPulse)) continue;
       const price = marketPulse.marketPrice ?? null;
       if (price == null || price < MIN_PRICE) continue;
+      // Window-pure labeling: stamp the window the value ACTUALLY came from. The
+      // `changePct7d ?? changePct24h` fallback means a card with no real 7d change
+      // still carries a 24h value — labeling it "7D" makes it a mislabeled mover in
+      // the 7D momentum fallback (and any 7D rail). Label honestly so the 7D filter
+      // below — and the iOS `changeWindow == "7D"` top-movers filter — can exclude
+      // 24h-derived cards. (Codex P2 on #195.)
       const trendPct = marketPulse.changePct7d ?? marketPulse.changePct24h;
+      const trendWindow: HomepageSignalWindow | null =
+        marketPulse.changePct7d != null
+          ? "7D"
+          : marketPulse.changePct24h != null
+            ? "24H"
+            : null;
       trendingCandidatesOut.push(toCard(row.canonical_slug, {
         changePct: trendPct,
-        changeWindow: trendPct !== null ? "7D" : null,
+        changeWindow: trendWindow,
         preferOverrideChange: true,
         allowSparklineFallback: false,
       }));
     }
     trendingCandidatesOut.sort(compareChangeDescending);
     const trendingOut = trendingCandidatesOut.slice(0, SECTION_LIMIT);
+    // Genuine-7D subset of the trending pool for the 7D rails (top_movers + momentum).
+    // The pool honestly labels cards with no real 7d change as "24H" (above); those must
+    // not surface under the 7D toggle. The non-windowed `trendingOut` rail above keeps the
+    // full mixed set. Codex P2 on #197.
+    const trending7D = trendingCandidatesOut.filter((card) => card.change_window === "7D");
     // ── Derived conviction sections (Phase 2) ────────────────────────────
     //
     // Build from the already-assembled positive + negative mover pools so
@@ -2066,7 +2113,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
     const liveTopMovers7D = combineHomepageCards([
       positiveMoversByWindow["7D"].highConfidence,
       positiveMoversByWindow["7D"].all,
-      trendingCandidatesOut,
+      trending7D,
     ]);
     const liveDrops24H = negativeMoversByWindow["24H"].cards.slice(0, SECTION_LIMIT);
     const liveDrops7D = negativeMoversByWindow["7D"].cards.slice(0, SECTION_LIMIT);
@@ -2083,10 +2130,22 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
         : card.change_window === "7D"
           ? marketPulse.changePct7d
           : marketPulse.changePct;
-      if (currentChange === null || card.change_window === null) return [];
+      // Prefer the fresh canonical change — it keeps the homepage in step
+      // with the detail page when a daily snapshot goes stale (a stale
+      // daily +18% gets corrected to the current +4%). But fall back to the
+      // daily compute's own change when the canonical one is missing or
+      // flat (0): the canonical aggregate can read 0.0% for a card that
+      // genuinely moved at the per-printing level — the granularity the
+      // daily compute ranked it on — so without this a real mover surfaced
+      // at a misleading 0.0% (e.g. N's Zoroark ex: per-printing +4.06% 24H
+      // but canonical 0.00%). Price + as-of still reprice via toCard below.
+      const effectiveChange = currentChange !== null && currentChange !== 0
+        ? currentChange
+        : card.change_pct;
+      if (effectiveChange === null || card.change_window === null) return [];
       return [toCard(card.slug, {
         mover_tier: card.mover_tier,
-        changePct: currentChange,
+        changePct: effectiveChange,
         changeWindow: card.change_window,
         preferOverrideChange: true,
         allowSparklineFallback: false,
@@ -2111,6 +2170,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
     const dailyGainers7D = dailyMoversForDisplay.gainers.filter((c) => c.change_window === "7D");
     const dailyLosers24H = dailyMoversForDisplay.losers.filter((c) => c.change_window === "24H");
     const dailyLosers7D = dailyMoversForDisplay.losers.filter((c) => c.change_window === "7D");
+    const dailyMomentum7D = dailyMoversForDisplay.momentum_7d.filter((c) => c.change_window === "7D");
 
     const signalBoard = {
       market_watch: marketWatchOut,
@@ -2150,10 +2210,15 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
               positiveMoversByWindow["24H"].highConfidence,
               positiveMoversByWindow["24H"].all,
             ]),
-        "7D": dailyMoversForDisplay.momentum_7d.length > 0
-          ? dailyMoversForDisplay.momentum_7d.slice(0, SECTION_LIMIT)
+        // Window-pure: only genuine-7D cards in the 7D momentum rail. Branch on the
+        // filtered `dailyMomentum7D` length (like dailyGainers7D above) so an all-non-7D
+        // daily list falls back to the live pool instead of an empty rail. The trending
+        // pool is mixed after honest "24H" labeling, so use its genuine-7D subset; the
+        // per-window positive movers are already 7D by construction. Codex P2 on #195 / #197.
+        "7D": dailyMomentum7D.length > 0
+          ? dailyMomentum7D.slice(0, SECTION_LIMIT)
           : combineHomepageCards([
-              trendingCandidatesOut,
+              trending7D,
               positiveMoversByWindow["7D"].all,
             ]),
       },

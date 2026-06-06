@@ -92,22 +92,47 @@ function latestMigrationContaining(fragment) {
   return null;
 }
 
+// pg_get_viewdef-sourced bodies (DROP+CREATE migrations) drop the `public.`
+// schema qualifier hand-written bodies carry; normalize both sides.
+function stripSchema(text) {
+  return text.replaceAll("public.", "");
+}
+
+// Recognize both CREATE OR REPLACE VIEW and DROP VIEW + plain CREATE VIEW (the
+// latter is required when a migration drops a column from the view).
+function latestViewDefinition(viewName) {
+  for (const filename of listMigrationFiles().toReversed()) {
+    const content = fs.readFileSync(path.join(MIGRATIONS_DIR, filename), "utf8").toLowerCase();
+    if (
+      content.includes(`create or replace view public.${viewName}`) ||
+      content.includes(`create view public.${viewName}`)
+    ) {
+      return { filename, content };
+    }
+  }
+  return null;
+}
+
 const violations = [];
 
 for (const contract of PUBLIC_VIEW_CONTRACTS) {
-  const viewDefinition = latestMigrationContaining(`create or replace view public.${contract.view}`);
+  const viewDefinition = latestViewDefinition(contract.view);
   if (!viewDefinition) {
-    violations.push(`${contract.view}: no CREATE OR REPLACE VIEW definition found`);
+    violations.push(`${contract.view}: no CREATE [OR REPLACE] VIEW definition found`);
     continue;
   }
 
-  const expectedSelect = `create or replace view public.${contract.view} as select * from public.${contract.source};`;
-  if (!viewDefinition.content.includes(expectedSelect)) {
+  const haystack = stripSchema(viewDefinition.content);
+  const expectedSelects = [
+    `create or replace view public.${contract.view} as select * from public.${contract.source};`,
+    `create view public.${contract.view} as select * from public.${contract.source};`,
+  ].map((expected) => stripSchema(expected));
+  if (!expectedSelects.some((expected) => haystack.includes(expected))) {
     violations.push(`${contract.view}: ${viewDefinition.filename} must expose public.${contract.source} with SELECT *`);
   }
 
-  const expectedGrant = `grant select on public.${contract.view} to anon, authenticated;`;
-  if (!viewDefinition.content.includes(expectedGrant)) {
+  const expectedGrant = stripSchema(`grant select on public.${contract.view} to anon, authenticated;`);
+  if (!haystack.includes(expectedGrant)) {
     violations.push(`${contract.view}: ${viewDefinition.filename} is missing anon/authenticated SELECT grant`);
   }
 }

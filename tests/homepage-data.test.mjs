@@ -13,7 +13,6 @@ const NOOP_LOGGER = {
 
 function buildPulse(overrides = {}) {
   return {
-    justtcgPrice: null,
     scrydexPrice: null,
     pokemontcgPrice: null,
     marketPrice: null,
@@ -38,8 +37,8 @@ function buildPulse(overrides = {}) {
     lowConfidence: false,
     marketStrengthScore: null,
     marketDirection: null,
-    sourceMix: { justtcgWeight: 0, scrydexWeight: 1, publicInputWeight: 1 },
-    sampleCounts7d: { justtcg: 0, scrydex: 2, public: 2, total: 2 },
+    sourceMix: { scrydexWeight: 1, publicInputWeight: 1 },
+    sampleCounts7d: { scrydex: 2, public: 2, total: 2 },
     ...overrides,
   };
 }
@@ -312,7 +311,7 @@ export async function runHomepageDataTests() {
             lowConfidence: false,
             marketStrengthScore: 81,
             marketDirection: "bullish",
-            sampleCounts7d: { justtcg: 4, scrydex: 2, public: 2, total: 4 },
+            sampleCounts7d: { scrydex: 2, public: 2, total: 4 },
           }),
         ],
         [
@@ -328,7 +327,7 @@ export async function runHomepageDataTests() {
             changeWindow: "7D",
             confidenceScore: 93,
             lowConfidence: false,
-            sampleCounts7d: { justtcg: 3, scrydex: 2, public: 2, total: 3 },
+            sampleCounts7d: { scrydex: 2, public: 2, total: 3 },
           }),
         ],
         [
@@ -344,7 +343,7 @@ export async function runHomepageDataTests() {
             changeWindow: "7D",
             confidenceScore: 91,
             lowConfidence: false,
-            sampleCounts7d: { justtcg: 5, scrydex: 1, public: 1, total: 5 },
+            sampleCounts7d: { scrydex: 1, public: 1, total: 5 },
           }),
         ],
         [
@@ -362,7 +361,7 @@ export async function runHomepageDataTests() {
             lowConfidence: false,
             marketStrengthScore: 68,
             marketDirection: "bullish",
-            sampleCounts7d: { justtcg: 6, scrydex: 2, public: 2, total: 6 },
+            sampleCounts7d: { scrydex: 2, public: 2, total: 6 },
           }),
         ],
         [
@@ -380,7 +379,7 @@ export async function runHomepageDataTests() {
             lowConfidence: false,
             marketStrengthScore: 64,
             marketDirection: "bearish",
-            sampleCounts7d: { justtcg: 6, scrydex: 2, public: 2, total: 6 },
+            sampleCounts7d: { scrydex: 2, public: 2, total: 6 },
           }),
         ],
         [
@@ -396,7 +395,7 @@ export async function runHomepageDataTests() {
             changeWindow: "7D",
             confidenceScore: 92,
             lowConfidence: false,
-            sampleCounts7d: { justtcg: 7, scrydex: 1, public: 1, total: 7 },
+            sampleCounts7d: { scrydex: 1, public: 1, total: 7 },
           }),
         ],
         [
@@ -413,7 +412,7 @@ export async function runHomepageDataTests() {
             parityStatus: "MATCH",
             confidenceScore: 91,
             lowConfidence: false,
-            sampleCounts7d: { justtcg: 9, scrydex: 2, public: 2, total: 11 },
+            sampleCounts7d: { scrydex: 2, public: 2, total: 11 },
           }),
         ],
       ]),
@@ -1120,6 +1119,78 @@ export async function runHomepageDataTests() {
       change_window: "24H",
       active_listings_7d: 9,
       confidence_score: 88,
+    }],
+  );
+
+  // Regression (N's Zoroark ex): a daily mover whose canonical 24h change
+  // reads a flat 0.0% — the aggregate row failed to capture a move the
+  // per-printing-aware daily compute did rank it on — must surface the
+  // daily change (+4.06%), not the misleading 0.0%. Price + as-of still
+  // reprice from the current pulse. Contrast with daily-stale-snapshot,
+  // where the canonical change is a real non-zero value and wins.
+  const dailyFlatCanonicalData = await getHomepageData({
+    now: () => FIXED_NOW,
+    logger: NOOP_LOGGER,
+    dataOverrides: {
+      positiveChangeRows: [],
+      negativeChangeRows: [],
+      trendingVariants: [],
+      cards: [
+        { slug: "daily-flat-canonical", canonical_name: "Daily Flat Canonical", set_name: "Daily Set", year: 2026 },
+      ],
+      dailyMovers: buildDailyMoverBundle({
+        gainers: [
+          buildHomepageCard({
+            slug: "daily-flat-canonical",
+            name: "Daily Flat Canonical",
+            set_name: "Daily Set",
+            market_price: 186.26,
+            updated_at: freshIso,
+            change_pct: 4.06,
+            change_window: "24H",
+            mover_tier: "hot",
+          }),
+        ],
+      }),
+      marketPulseMap: new Map([
+        [
+          "daily-flat-canonical",
+          buildPulse({
+            marketPrice: 186.26,
+            marketPriceAsOf: freshIso,
+            activeListings7d: 44,
+            snapshotCount30d: 31,
+            changePct24h: 0,
+            changePct7d: 4.64,
+            changePct: 0,
+            changeWindow: "24H",
+            parityStatus: "MATCH",
+            confidenceScore: 90,
+            lowConfidence: false,
+          }),
+        ],
+      ]),
+    },
+  });
+
+  assert.deepEqual(
+    dailyFlatCanonicalData.signal_board.top_movers["24H"].map((card) => ({
+      slug: card.slug,
+      market_price: card.market_price,
+      updated_at: card.updated_at,
+      change_pct: card.change_pct,
+      change_window: card.change_window,
+      active_listings_7d: card.active_listings_7d,
+      confidence_score: card.confidence_score,
+    })),
+    [{
+      slug: "daily-flat-canonical",
+      market_price: 186.26,
+      updated_at: freshIso,
+      change_pct: 4.06,
+      change_window: "24H",
+      active_listings_7d: 44,
+      confidence_score: 90,
     }],
   );
 

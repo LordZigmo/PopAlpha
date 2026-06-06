@@ -1,31 +1,46 @@
 import "server-only";
 
-import { generateText } from "ai";
+import { generateObject } from "ai";
+import { z } from "zod";
 
 import { getPopAlphaModel } from "@/lib/ai/models";
+import { getPopAlphaGatewayModelId, geminiThinkingConfigForModel } from "@/lib/ai/model-config";
 
 import { PROFILE_VERSION } from "../constants";
 import type {
   CardStyleFeatures,
-  PersonalizedExplanation,
+  CollectorBestMove,
+  CollectorFitLabel,
+  CollectorInsight,
+  CollectorSignals,
   StyleProfile,
 } from "../types";
-import { buildTemplateExplanation, type ExplanationCardInput } from "./template";
+import { COLLECTOR_BEST_MOVES, COLLECTOR_FIT_LABELS } from "../types";
+import { buildCollectorInsightTemplate } from "./collector-insight-template";
+import type { ExplanationCardInput } from "./template";
 
-// Bumped from 6_000 to 15_000 alongside the gemini-2.0-flash → 2.5-flash
-// migration (commits ed9219a + 564ce8c). Same lesson as card-profile:
-// 2.5-flash p95 sits in the 5-10s range and a 6s budget silently aborts
-// a meaningful tail of calls. 15s gives headroom while staying inside
-// any reasonable end-user wait expectation; the response is cached, so
-// only the first request per (actor, card, metricsHash) tuple pays this.
+// gemini-2.5/3-flash p95 sits in the 5–10s range; a tight budget silently
+// aborts a meaningful tail of calls. 15s gives headroom while staying inside
+// any reasonable end-user wait. The response is cached, so only the first
+// request per (actor, card, metricsHash) tuple pays this.
 const LLM_TIMEOUT_MS = 15_000;
+// Structured tasks under a tight output budget truncate when the model spends
+// budget on reasoning. This is a small fixed-schema task, so give the JSON
+// ample room (mirrors the card-profile-summary headroom lesson).
+const LLM_MAX_OUTPUT_TOKENS = 900;
+const LLM_MAX_RETRIES = 2;
 // Cache-row provenance label; actual model is owned by lib/ai/models.ts.
-const SOURCE_VERSION = `llm-v${PROFILE_VERSION}`;
+const SOURCE_VERSION = `collector-llm-v${PROFILE_VERSION}`;
 
 /**
  * Market signal context, sourced from the per-card market summary
  * (`card_profiles`). When a row is missing this is null and the prompt
  * falls back to plain feature reasoning.
+ *
+ * NOTE: this is the CARD-centered Market Brief context. The Collector Insight
+ * prompt is told NOT to re-explain it — it is provided only so the user-
+ * centered read can reason about whether the *current entry* fits this user,
+ * not to restate what the market is doing.
  */
 export type MarketSignalContext = {
   signalLabel: string | null;     // BREAKOUT | COOLING | VALUE_ZONE | STEADY | OVERHEATED
@@ -40,240 +55,268 @@ export type MarketSignalContext = {
   priceObservations7d: number | null;
 };
 
+// ── Structured output schema ────────────────────────────────────────────────
+//
+// generateObject forces the model to return JSON matching this schema. On a
+// schema violation the SDK throws (caught below) → honest fallback, never a
+// fabricated read. This is the structured replacement for the old loose
+// free-text parse.
+const CollectorInsightSchema = z.object({
+  fitLabel: z
+    .enum(COLLECTOR_FIT_LABELS as unknown as [CollectorFitLabel, ...CollectorFitLabel[]])
+    .describe("How strongly this card fits the user's collector type. Pick the single best label."),
+  fitScore: z
+    .number()
+    .min(0)
+    .max(100)
+    .describe("0–100. How well this card fits THIS user's profile. Not a market score."),
+  collectorType: z
+    .string()
+    .min(1)
+    .max(80)
+    .describe("The user's determined collector type, restated in plain collector language."),
+  summary: z
+    .string()
+    .min(1)
+    .max(360)
+    .describe("Why this card fits or does not fit THIS user. Specific to their collector type. Not a market recap."),
+  roleInCollection: z
+    .string()
+    .min(1)
+    .max(200)
+    .describe("The role this card would play in the user's collection (e.g. centerpiece, supporting piece, watchlist-only)."),
+  tradeoff: z
+    .string()
+    .min(1)
+    .max(280)
+    .describe("The honest tradeoff. Always present, even for a strong fit. No hype-only."),
+  bestMove: z
+    .enum(COLLECTOR_BEST_MOVES as unknown as [CollectorBestMove, ...CollectorBestMove[]])
+    .describe("The single best move for THIS user. Not financial advice — collector framing."),
+  popAlphaRead: z
+    .string()
+    .min(1)
+    .max(220)
+    .describe("One memorable, slightly opinionated final read."),
+  confidence: z
+    .enum(["low", "medium", "high"])
+    .describe("How certain you are, given how much real user data informed this. Use 'low' when data is thin."),
+  dataBasis: z
+    .string()
+    .min(1)
+    .max(200)
+    .describe("Brief note on what user data informed this read (saved cards, scans, sets, etc.)."),
+});
+
 const SYSTEM_PROMPT = [
-  "You are PopAlpha's personal card guide for Pokémon TCG collectors.",
-  "You get (1) the collector's style profile, (2) features of a single card, and (3) the card's market signal.",
+  "You are PopAlpha's Collector Insight engine.",
+  "You are NOT writing a general market brief — the Market Brief already explains what's happening with this card in the broader market.",
+  "Your job: explain how this card fits THIS specific user's collector type and collection behavior.",
   "",
-  "Your job: write a short read that ties together how the card is moving AND whether it fits this collector's style.",
-  "The combined read is the point. A move that does not fit their style is a heads-up to skip. A quiet card that does fit is worth watching. A move that fits is a real heads-up.",
+  "Given: card identity, set, variant/language, raw/graded context, current market signals, the user's collector type, and the user's collection / watchlist / scan behavior when available.",
+  "Write a Collector Insight answering ONE question: 'Should this card matter to this user?'",
   "",
-  // Voice + rules trimmed deliberately. Larger prompts pushed Gemini past
-  // first-token latency budgets and drove AbortError rates up. Additions
-  // here pay a per-card cost on every personalized read.
-  "Voice:",
-  "- 8th-grade reading level. Short sentences. Plain English. Everyday words.",
-  "- Smart friend who knows their taste, not Wall Street analyst. No jargon, hype, or slang.",
-  "- Speak in second person ('you usually go for…').",
-  "- Be honest when the card does not fit. Say so plainly.",
-  "- If confidence is low, say so. Don't pretend.",
-  "- Never say buy / sell / hold. Use 'worth watching', 'cooling off', 'good buying range', 'running hot'.",
-  "- Don't mention being an AI.",
-  "",
-  "Price tracking field:",
-  "- 'Price tracking (7d)': thin (sparse data), steady (reliable), dense (very well-tracked).",
-  "- This is NOT marketplace listings, supply, or copies for sale.",
-  "- NEVER cite the raw 'Price observations' count. Never write 'X listings' or 'supply is thin'.",
-  "",
-  "Pattern: what's happening with the card → why it matters for THIS collector (style fit) → what to watch next.",
-  "",
-  "Weave market + style:",
-  "- BREAKOUT + match → 'moving, and it's your kind of card'.",
-  "- BREAKOUT + no match → 'moving, but not your usual pick'.",
-  "- VALUE_ZONE + match → 'good buying range that fits your taste'.",
-  "- COOLING / OVERHEATED + match → flag as heads-up, not entry.",
-  "- STEADY → patient; say whether that fits.",
-  "- No market signal → focus on style; say data is thin.",
-  "",
-  "Output ONLY a JSON object matching:",
-  '  {"headline":"...","summary":"...","why_it_matches":"...","reasons":["...","..."],"caveats":["..."]}',
+  "Return structured JSON: fitLabel, fitScore, collectorType, summary, roleInCollection, tradeoff, bestMove, popAlphaRead, confidence, dataBasis.",
   "",
   "Rules:",
-  "- headline: 6–10 words tying move + style fit.",
-  "    e.g. \"Moving fast, and it's your kind of card\", \"Quiet, but in a good buying range\".",
-  "- summary: 2–3 sentences, 25–55 words. Use the pattern above.",
-  "- why_it_matches: 1 sentence naming the style trait.",
-  "- reasons: 2–4 short phrases, 8–18 words each. Mix market + style.",
-  "- caveats: 0–2 short phrases. Use one when style or move signal is thin.",
-  "- No prose, no code fences, no markdown outside the JSON.",
+  "- Be specific to the user's collector type. Reference their actual signals when given (saved/watchlist/scanned cards, favorite sets, graded-vs-raw, JP-vs-EN).",
+  "- Do NOT repeat the market brief. The market signal is context for whether the current ENTRY fits this user, not something to re-explain.",
+  "- No financial advice. Use collector framing ('watchlist card', 'centerpiece', 'long-term piece'), never 'invest' / 'guaranteed' / 'can't miss'.",
+  "- Do not hype every card. If it's a weak fit, say so clearly. Not every card is a Core Match.",
+  "- Always include an honest tradeoff, even when the fit is strong.",
+  "- Plain collector language. Concise enough for mobile.",
+  "- Mention the data basis briefly.",
+  "",
+  "If user data is limited, do NOT fake certainty: set confidence to 'low' and use softer framing —",
+  "  e.g. 'Early read: based on your scans so far…' or 'PopAlpha doesn't have much collection history yet, but this card appears to fit…'.",
+  "",
+  "Tone: direct, premium, collector-native, specific, honest, useful, slightly opinionated. NOT hypey, NOT horoscope-like, NOT vague.",
+  "AVOID phrases like: 'aligns with your collecting journey', 'a great addition to any collection', 'as a passionate collector', 'strong potential' (without a reason), 'undervalued gem' (unless real signals support it).",
+  "GOOD patterns: 'For your profile, this card matters because…', 'This fits your collection as a centerpiece, not a quick flip.',",
+  "  'The card fits your taste, but the current entry may not give you much room for error.', 'This is more of a watchlist card than a buy-right-now card.',",
+  "  'Good card, but not core to the collection you appear to be building.', 'This fits your heart. The question is whether the current price fits your head.'",
 ].join("\n");
+
+function languageLabel(pref: CollectorSignals["languagePreference"]): string {
+  switch (pref) {
+    case "jp":
+      return "Japanese-language";
+    case "en":
+      return "English-language";
+    case "mixed":
+      return "both JP and EN";
+    default:
+      return "unknown";
+  }
+}
+
+function gradedLabel(interest: CollectorSignals["gradedVsRawInterest"]): string {
+  switch (interest) {
+    case "graded":
+      return "graded / slabs";
+    case "raw":
+      return "raw / ungraded";
+    case "mixed":
+      return "both graded and raw";
+    default:
+      return "unknown";
+  }
+}
 
 function buildUserPrompt(
   card: ExplanationCardInput,
   features: CardStyleFeatures,
-  profile: StyleProfile,
+  signals: CollectorSignals,
   market: MarketSignalContext | null,
 ): string {
   const lines: string[] = [];
-  lines.push("## Collector style profile");
-  lines.push(`Dominant style: ${profile.dominant_style_label}`);
-  if (profile.supporting_traits.length > 0) {
-    lines.push(`Supporting traits: ${profile.supporting_traits.join(", ")}`);
+
+  lines.push("## This user (collector profile)");
+  lines.push(`Collector type: ${signals.collectorType}`);
+  if (signals.supportingTraits.length > 0) {
+    lines.push(`Supporting traits: ${signals.supportingTraits.join(", ")}`);
   }
-  lines.push(`Confidence: ${profile.confidence.toFixed(2)}`);
-  lines.push(`Event count: ${profile.event_count}`);
-  lines.push("Top dimension scores (0..1):");
-  for (const evidence of profile.evidence.slice(0, 5)) {
-    lines.push(`  - ${evidence.label}: ${evidence.weight}`);
+  lines.push(`Profile confidence (0..1): ${signals.profileConfidence.toFixed(2)}`);
+  lines.push(`Total tracked actions: ${signals.eventCount}`);
+  lines.push(`Data richness: ${signals.dataConfidence}`);
+  lines.push(`Graded vs raw interest: ${gradedLabel(signals.gradedVsRawInterest)}`);
+  lines.push(`Language preference: ${languageLabel(signals.languagePreference)}`);
+  if (signals.savedCardNames.length > 0) {
+    lines.push(`Saved cards: ${signals.savedCardNames.slice(0, 8).join("; ")}`);
   }
+  if (signals.watchlistCardNames.length > 0) {
+    lines.push(`Watchlist cards: ${signals.watchlistCardNames.slice(0, 8).join("; ")}`);
+  }
+  if (signals.scannedCardNames.length > 0) {
+    lines.push(`Scanned cards: ${signals.scannedCardNames.slice(0, 8).join("; ")}`);
+  }
+  if (signals.repeatedlyViewedCardNames.length > 0) {
+    lines.push(`Repeatedly viewed: ${signals.repeatedlyViewedCardNames.slice(0, 6).join("; ")}`);
+  }
+  if (signals.favoriteSets.length > 0) {
+    lines.push(`Most-engaged sets: ${signals.favoriteSets.slice(0, 4).join("; ")}`);
+  }
+  if (
+    signals.savedCardNames.length === 0
+    && signals.watchlistCardNames.length === 0
+    && signals.scannedCardNames.length === 0
+  ) {
+    lines.push("(No saved / watchlist / scanned cards on record yet — keep the read soft and set confidence low.)");
+  }
+
   lines.push("");
-  lines.push("## Card features");
+  lines.push("## This card");
   lines.push(`Card: ${card.canonical_name}`);
   if (card.set_name) lines.push(`Set: ${card.set_name}`);
   if (features.release_year != null) lines.push(`Released: ${features.release_year}`);
   lines.push(`Era: ${features.era}`);
-  lines.push(`Graded variant: ${features.is_graded ? "yes" : "no"}`);
+  lines.push(`Graded variant being viewed: ${features.is_graded ? "yes" : "no"}`);
   lines.push(`Iconic character: ${features.is_iconic ? "yes" : "no"}`);
   lines.push(`Art-forward rarity: ${features.is_art_centric ? "yes" : "no"}`);
   lines.push(`Liquidity band: ${features.liquidity_band}`);
   lines.push(`Volatility band: ${features.volatility_band}`);
 
   lines.push("");
-  lines.push("## Market signal");
+  lines.push("## Market context (DO NOT re-explain — for entry-fit judgement only)");
   if (market) {
     if (market.signalLabel) lines.push(`Signal: ${market.signalLabel}`);
     if (market.verdict) lines.push(`Verdict: ${market.verdict}`);
-    if (market.chip) lines.push(`Chip phrase: ${market.chip}`);
-    if (market.summaryShort) lines.push(`Recent read: ${market.summaryShort}`);
-    if (market.marketPrice != null) lines.push(`Price: $${market.marketPrice.toFixed(2)}`);
+    if (market.summaryShort) lines.push(`Market read (already shown to the user elsewhere): ${market.summaryShort}`);
+    if (market.marketPrice != null) lines.push(`Market price: $${market.marketPrice.toFixed(2)}`);
     if (market.changePct7d != null) {
       lines.push(`7-day change: ${market.changePct7d > 0 ? "+" : ""}${market.changePct7d.toFixed(1)}%`);
     }
-    if (market.priceObservations7d != null) {
-      // The bucket is what the model should reference; the raw count is
-      // for tie-breaking only. The "do NOT cite the raw count" rule lives
-      // in SYSTEM_PROMPT, not restated per card, to keep prompts compact.
-      const bucket = market.priceObservations7d <= 4
-        ? "thin"
-        : market.priceObservations7d < 30
-          ? "steady"
-          : "dense";
-      lines.push(`Price tracking (7d): ${bucket}`);
-      lines.push(`Price observations raw count (7d): ${market.priceObservations7d}`);
-    }
   } else {
-    lines.push("No fresh market signal available — reason from style + features only.");
+    lines.push("No fresh market signal — reason from collector fit and card features only.");
   }
 
   return lines.join("\n");
 }
 
-type ParsedLlmExplanation = {
-  headline: string;
-  summary: string;
-  why_it_matches: string;
-  reasons: string[];
-  caveats: string[];
-};
-
-function extractJsonObject(raw: string): string | null {
-  if (!raw) return null;
-  let text = raw.trim();
-  text = text.replace(/^```(?:json)?\s*/i, "").replace(/```$/i, "").trim();
-  const start = text.indexOf("{");
-  if (start < 0) return null;
-  let depth = 0;
-  for (let i = start; i < text.length; i++) {
-    const ch = text[i];
-    if (ch === "{") depth++;
-    else if (ch === "}") {
-      depth--;
-      if (depth === 0) return text.slice(start, i + 1);
-    }
-  }
-  return null;
-}
-
-function parseLlmOutput(raw: string): ParsedLlmExplanation | null {
-  const json = extractJsonObject(raw);
-  if (!json) return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(json);
-  } catch {
-    return null;
-  }
-  if (!parsed || typeof parsed !== "object") return null;
-  const obj = parsed as Record<string, unknown>;
-  const headline = typeof obj.headline === "string" ? obj.headline.trim() : "";
-  const summary = typeof obj.summary === "string" ? obj.summary.trim() : "";
-  const why = typeof obj.why_it_matches === "string" ? obj.why_it_matches.trim() : "";
-  const reasons = Array.isArray(obj.reasons)
-    ? obj.reasons.filter((v) => typeof v === "string").map((v) => (v as string).trim()).filter((v) => v.length > 0)
-    : [];
-  const caveats = Array.isArray(obj.caveats)
-    ? obj.caveats.filter((v) => typeof v === "string").map((v) => (v as string).trim()).filter((v) => v.length > 0)
-    : [];
-  if (!headline || !summary || !why) return null;
-  if (reasons.length === 0) return null;
-  if (headline.length > 120 || summary.length > 400 || why.length > 200) return null;
-  return { headline, summary, why_it_matches: why, reasons, caveats };
-}
-
 /**
- * Generate a personalized explanation via Gemini.
- * Returns the template fallback on any error or timeout.
- *
- * The prompt reasons across both the user's style profile and the per-card
- * market signal (when available) so the read tells the user not just whether
- * the card fits their pattern, but whether the current move is the kind of
- * price action they usually engage with.
+ * Generate a structured Collector Insight via the LLM (forced structured
+ * output). On any error, timeout, or schema violation, returns the
+ * deterministic template insight tagged source:"fallback" + failureReason —
+ * never a fabricated read. See docs/external-api-failure-modes.md.
  */
-export async function buildLlmExplanation(
+export async function buildLlmCollectorInsight(
   card: ExplanationCardInput,
   features: CardStyleFeatures,
   profile: StyleProfile,
+  signals: CollectorSignals,
   market: MarketSignalContext | null,
-): Promise<PersonalizedExplanation> {
+): Promise<CollectorInsight> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
   try {
-    const result = await generateText({
+    const result = await generateObject({
       model: getPopAlphaModel(),
+      schema: CollectorInsightSchema,
       system: SYSTEM_PROMPT,
-      prompt: buildUserPrompt(card, features, profile, market),
+      prompt: buildUserPrompt(card, features, signals, market),
       abortSignal: controller.signal,
+      // Gemini 2.5/3 are thinking models. With reasoning on, the output budget
+      // is spent on (discarded) thoughts, leaving the JSON answer empty or
+      // truncated → schema-validation failure → silent template fallback.
+      // Minimize thinking (family-correct control) and give the JSON room.
+      maxOutputTokens: LLM_MAX_OUTPUT_TOKENS,
+      maxRetries: LLM_MAX_RETRIES,
+      providerOptions: {
+        google: {
+          thinkingConfig: geminiThinkingConfigForModel(getPopAlphaGatewayModelId()),
+        },
+      },
       experimental_telemetry: {
         isEnabled: true,
-        functionId: "personalized-card-explanation",
+        recordInputs: false,
+        recordOutputs: false,
+        functionId: "collector-insight",
         metadata: {
-          dominant_style: profile.dominant_style_label,
+          collector_type: signals.collectorType,
+          data_confidence: signals.dataConfidence,
           ...(market?.signalLabel ? { signal_label: market.signalLabel } : {}),
         },
       },
     });
-    const parsed = parseLlmOutput(result.text ?? "");
-    if (!parsed) {
-      // LLM responded but the output didn't match the JSON contract.
-      // Distinct from a thrown error — it means the model is reachable
-      // and the API key works, the prompt or output is the issue.
-      const sample = String(result.text ?? "").slice(0, 120).replace(/\s+/g, " ");
-      console.warn(
-        `[personalization:llm] parse miss slug=${card.canonical_slug} sample="${sample}"`,
-      );
-      return {
-        ...buildTemplateExplanation(card, features, profile),
-        source: "fallback",
-        failureReason: "parse-miss",
-      };
-    }
+
+    const obj = result.object;
     return {
-      headline: parsed.headline,
-      summary: parsed.summary,
-      why_it_matches: parsed.why_it_matches,
-      reasons: parsed.reasons,
-      caveats: parsed.caveats,
-      confidence: profile.confidence,
-      fits: profile.confidence >= 0.4 ? "aligned" : "neutral",
+      fitLabel: obj.fitLabel,
+      fitScore: Math.max(0, Math.min(100, Math.round(obj.fitScore))),
+      collectorType: obj.collectorType,
+      summary: obj.summary,
+      roleInCollection: obj.roleInCollection,
+      tradeoff: obj.tradeoff,
+      bestMove: obj.bestMove,
+      popAlphaRead: obj.popAlphaRead,
+      confidence: obj.confidence,
+      dataBasis: obj.dataBasis,
       generated_at: new Date().toISOString(),
       source: "llm",
       source_version: SOURCE_VERSION,
     };
   } catch (err) {
-    // Surface the actual error before falling back. Previously this
-    // catch was bare (`catch { return template }`), which made every
-    // upstream failure — auth, model deprecation, rate limit, abort —
-    // indistinguishable from a user being on the template tier by
-    // design. See docs/external-api-failure-modes.md for the
-    // generalized rule.
+    // Surface the actual error before falling back. A blind catch here would
+    // make a 100% LLM outage (auth, deprecation, rate limit, abort, or a
+    // schema-validation parse-miss) indistinguishable from a user being on the
+    // template tier by design. See docs/external-api-failure-modes.md.
     const errName = err instanceof Error ? err.name : "UnknownError";
     const errMsg = err instanceof Error ? err.message : String(err);
+    // generateObject throws a distinct error class on schema/parse failure
+    // (NoObjectGeneratedError / TypeValidationError) vs. a transport throw.
+    // Both still mean "no usable LLM output" → honest fallback.
+    const isParseMiss =
+      errName === "AI_NoObjectGeneratedError"
+      || errName === "NoObjectGeneratedError"
+      || errName === "AI_TypeValidationError"
+      || errName === "TypeValidationError";
     console.error(
-      `[personalization:llm] generateText threw slug=${card.canonical_slug} ${errName}: ${errMsg}`,
+      `[personalization:collector-insight] generateObject ${isParseMiss ? "parse-miss" : "threw"} slug=${card.canonical_slug} ${errName}: ${errMsg}`,
     );
     return {
-      ...buildTemplateExplanation(card, features, profile),
+      ...buildCollectorInsightTemplate(card, features, profile, signals),
       source: "fallback",
-      failureReason: `llm-threw:${errName}:${errMsg.slice(0, 160)}`,
+      failureReason: isParseMiss ? "parse-miss" : `llm-threw:${errName}:${errMsg.slice(0, 160)}`,
     };
   } finally {
     clearTimeout(timeoutId);

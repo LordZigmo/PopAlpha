@@ -497,10 +497,11 @@ export async function loadRawCardMarketVariants(params: {
       descriptorLabel: variant.descriptorLabel,
       imageUrl: variant.imageUrl,
       rarity: variant.rarity,
+      finish: variant.finish,
+      edition: variant.edition,
+      stamp: variant.stamp,
       currentPrice: liveMarketPrice,
       changePct7d: metrics?.change_pct_7d ?? null,
-      justtcgPrice: null,
-      justtcgAsOfTs: null,
       scrydexPrice: liveMarketPrice,
       scrydexAsOfTs: liveMarketAsOfTs,
       // Phase C-2 (2026-05-16): asking-anchored auxiliary value. Only

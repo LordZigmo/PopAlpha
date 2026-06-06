@@ -46,7 +46,13 @@ import {
 export const runtime = "nodejs";
 export const maxDuration = 300; // Vercel pro tick ceiling
 
-const DEFAULT_BATCH_SIZE = 30; // smaller than yahoo (50) — robots.txt softness
+const DEFAULT_BATCH_SIZE = 50; // raised from 30 to use idle deadline headroom (batches of 30 finished in ~130s of the 300s budget). Per-card delay is unchanged, so robots.txt politeness is preserved and the deadline guard still halts gracefully.
+// Reserve ~60% of each batch for stale-refresh (freshness) and cap
+// initial-coverage at ~40% (breadth). #163 made initial-coverage return a full
+// batch of never-attempted products; seeded first into byProduct it consumed
+// the whole budget and skipped the stale-refresh scan, so the 4k+ already-priced
+// JP cards never re-scraped and their displayed prices went stale.
+const STALE_REFRESH_BUDGET_RATIO = 0.6;
 const INTER_CARD_DELAY_MS = 4000;
 
 // Mirror of scripts/run-snkrdunk-pipeline.mjs — derive price_jpy at write
@@ -69,7 +75,6 @@ const NONPRODUCTIVE_RETRY_HOURS = 24 * 7;
 const TRANSIENT_RETRY_HOURS = 6;
 const CANDIDATE_SCAN_PAGE_SIZE = 1000;
 const MAX_STALE_PRICE_SCAN_ROWS = 5000;
-const MAX_INITIAL_FETCH_SCAN_ROWS = 25_000;
 const SNKRDUNK_ROUTE = "/api/cron/run-snkrdunk-daily";
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -81,9 +86,10 @@ type RefreshCandidate = {
   observed_at: string | null;
 };
 
-type SnkrdunkProductMapRow = {
+type SnkrdunkInitialCandidateRow = {
   canonical_slug: string;
   snkrdunk_product_code: string;
+  tier: number;
 };
 
 type SnkrdunkProcessResult =
@@ -92,53 +98,22 @@ type SnkrdunkProcessResult =
   | { slug: string; status: "scrape-failed"; reason: string }
   | { slug: string; status: "write-failed"; reason: string };
 
-async function loadSnkrdunkPricedProductCodes(
-  supabase: ReturnType<typeof dbAdmin>,
-  productCodes: string[],
-): Promise<Set<string>> {
-  const priced = new Set<string>();
-  const chunkSize = 100;
-
-  for (let i = 0; i < productCodes.length; i += chunkSize) {
-    const chunk = productCodes.slice(i, i + chunkSize);
-    const { data, error } = await supabase
-      .from("snkrdunk_card_prices")
-      .select("snkrdunk_product_code")
-      .in("snkrdunk_product_code", chunk);
-    if (error) throw new Error(`snkrdunk_card_prices(priced product codes): ${error.message}`);
-
-    for (const row of data ?? []) {
-      if (row.snkrdunk_product_code) priced.add(row.snkrdunk_product_code);
-    }
-  }
-
-  return priced;
-}
-
-async function loadSnkrdunkAttemptedSourceKeys(
-  supabase: ReturnType<typeof dbAdmin>,
-  productCodes: string[],
-): Promise<Set<string>> {
-  const attempted = new Set<string>();
-  const chunkSize = 100;
-
-  for (let i = 0; i < productCodes.length; i += chunkSize) {
-    const chunk = productCodes.slice(i, i + chunkSize);
-    const { data, error } = await supabase
-      .from("jp_ingestion_attempts")
-      .select("source_key")
-      .eq("provider", "SNKRDUNK")
-      .in("source_key", chunk);
-    if (error) throw new Error(`jp_ingestion_attempts(snkrdunk attempted source keys): ${error.message}`);
-
-    for (const row of data ?? []) {
-      if (row.source_key) attempted.add(row.source_key);
-    }
-  }
-
-  return attempted;
-}
-
+/**
+ * Initial-coverage candidates: MATCHED Snkrdunk products that have no price
+ * row yet, never-attempted (no SNKRDUNK jp_ingestion_attempts row for the
+ * product code) first (tier 1), then attempted-but-still-no-price (tier 2),
+ * excluding the suppressed source keys. The ordering, no-price exclusion,
+ * suppression filter, product-code dedupe, and limit all happen server-side
+ * in scan_snkrdunk_initial_candidates so we no longer page the full map +
+ * load priced/attempted membership Sets per page.
+ *
+ * Why an RPC (and not chained PostgREST embeds): applying `.eq`/`.is` to a
+ * `!left`-embedded to-many relation makes PostgREST drop the left-join NULL
+ * rows — which silently filtered out the never-attempted products we most
+ * want, degrading selection to a blind alphabetical head and freezing the
+ * rotation for ~9 days (commit 1bdb948, reverted #162). The RPC uses a real
+ * LEFT JOIN ... IS NULL so never-attempted rows are retained.
+ */
 async function loadInitialSnkrdunkCandidates(
   supabase: ReturnType<typeof dbAdmin>,
   input: {
@@ -146,61 +121,19 @@ async function loadInitialSnkrdunkCandidates(
     limit: number;
   },
 ): Promise<RefreshCandidate[]> {
-  const neverAttemptedCandidates: RefreshCandidate[] = [];
-  const retryNoPriceCandidates: RefreshCandidate[] = [];
-  const seenProductCodes = new Set<string>();
-  const candidatePoolSize = () => neverAttemptedCandidates.length + retryNoPriceCandidates.length;
+  const { data, error } = await supabase.rpc("scan_snkrdunk_initial_candidates", {
+    p_limit: input.limit,
+    p_suppressed: [...input.suppressedSourceKeys],
+  });
+  if (error) throw new Error(`scan_snkrdunk_initial_candidates: ${error.message}`);
 
-  for (
-    let from = 0;
-    candidatePoolSize() < input.limit && from < MAX_INITIAL_FETCH_SCAN_ROWS;
-    from += CANDIDATE_SCAN_PAGE_SIZE
-  ) {
-    const { data, error } = await supabase
-      .from("snkrdunk_product_map")
-      .select("canonical_slug, snkrdunk_product_code")
-      .eq("mapping_status", "MATCHED")
-      .order("canonical_slug", { ascending: true })
-      .range(from, from + CANDIDATE_SCAN_PAGE_SIZE - 1);
-    if (error) throw new Error(`snkrdunk_product_map(initial scan): ${error.message}`);
-
-    const rows = (data ?? []) as SnkrdunkProductMapRow[];
-    const pageRows: SnkrdunkProductMapRow[] = [];
-    for (const row of rows) {
-      const productCode = row.snkrdunk_product_code;
-      if (!productCode) continue;
-      if (seenProductCodes.has(productCode) || input.suppressedSourceKeys.has(productCode)) continue;
-      seenProductCodes.add(productCode);
-      pageRows.push(row);
-    }
-
-    const productCodes = pageRows.map((row) => row.snkrdunk_product_code);
-    const [pricedProductCodes, attemptedSourceKeys] = await Promise.all([
-      loadSnkrdunkPricedProductCodes(supabase, productCodes),
-      loadSnkrdunkAttemptedSourceKeys(supabase, productCodes),
-    ]);
-
-    for (const row of pageRows) {
-      const productCode = row.snkrdunk_product_code;
-      if (pricedProductCodes.has(productCode)) continue;
-      const candidate: RefreshCandidate = {
-        canonical_slug: row.canonical_slug,
-        printing_id: null,
-        snkrdunk_product_code: productCode,
-        observed_at: null,
-      };
-      if (attemptedSourceKeys.has(productCode)) {
-        retryNoPriceCandidates.push(candidate);
-      } else {
-        neverAttemptedCandidates.push(candidate);
-      }
-      if (candidatePoolSize() >= input.limit) break;
-    }
-
-    if (rows.length < CANDIDATE_SCAN_PAGE_SIZE) break;
-  }
-
-  return [...neverAttemptedCandidates, ...retryNoPriceCandidates].slice(0, input.limit);
+  const rows = (data ?? []) as SnkrdunkInitialCandidateRow[];
+  return rows.map((row) => ({
+    canonical_slug: row.canonical_slug,
+    printing_id: null,
+    snkrdunk_product_code: row.snkrdunk_product_code,
+    observed_at: null,
+  }));
 }
 
 /**
@@ -234,9 +167,11 @@ async function pickRefreshCandidates(
     ...recentTransient.sourceKeys,
   ]);
 
+  // Cap initial-coverage so the stale-refresh scan below keeps its budget share.
+  const initialBudget = Math.max(1, limit - Math.ceil(limit * STALE_REFRESH_BUDGET_RATIO));
   const initialCandidates = await loadInitialSnkrdunkCandidates(supabase, {
     suppressedSourceKeys,
-    limit,
+    limit: initialBudget,
   });
 
   // Dedupe by snkrdunk_product_code (one re-fetch covers all grade rows

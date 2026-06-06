@@ -5,22 +5,22 @@ import SwiftUI
 // Authed-only tri-stat row that sits below the TopBar on the Market tab
 // and answers "what's mine today?" before any broad market stats. Each
 // chip is a compact KPI tile with an eyebrow label, a primary value, and
-// a secondary line — Watchlist · Portfolio · Style.
+// a secondary line — Watchlist · Portfolio. (The Style / collector-type
+// chip was removed; the row is now the two account stats only.)
 //
 // Renders nothing for guests. The old "Sign in to personalize" guest
 // banner that used to sit at the top of the screen has been replaced by
 // `MarketHeroCard` (top of screen) and `SignInPromoCard` (further down,
 // after the user has seen the value prop and a market read).
 //
-// Reuses `.glassSurface()`, `PA.Typography`, `PA.Colors.accent`. The
-// Style chip's label comes from `PersonalizationService.fetchProfile()`.
+// Reuses `.glassSurface()`, `PA.Typography`, `PA.Colors.accent`.
 
 struct PersonalPulseSection: View {
     let me: HomepageMeDTO?
-    /// Personalization profile's dominant style label ("Graded PSA Collector",
-    /// "Modern Sealed", etc). Nil for profiles that haven't hit the
-    /// minimum-event threshold yet. Passed down from MarketplaceView so
-    /// the Style chip can render consistently here and in the AI Brief.
+    /// Dominant collector-style label from the personalization profile.
+    /// Retained on the initializer for caller compatibility — MarketplaceView
+    /// passes the same value to the AI Brief — but no longer rendered here:
+    /// the Style chip that consumed it was removed from this row.
     let styleLabel: String?
 
     private var auth: AuthService { AuthService.shared }
@@ -50,8 +50,6 @@ struct PersonalPulseSection: View {
             watchlistChip
             divider
             portfolioChip
-            divider
-            styleChip
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -122,29 +120,6 @@ struct PersonalPulseSection: View {
         let amount = formatDollar(abs(p.dailyPnlAmount))
         guard let pct = p.dailyPnlPct else { return "\(sign)\(amount)" }
         return "\(sign)\(amount) (\(formatPct(pct)))"
-    }
-
-    // MARK: - Style chip
-
-    @ViewBuilder
-    private var styleChip: some View {
-        if let styleLabel {
-            chip(
-                eyebrow: "STYLE",
-                icon: "scope",
-                primary: styleLabel,
-                secondary: "Learned from your taps",
-                tone: market.accent
-            )
-        } else {
-            chip(
-                eyebrow: "STYLE",
-                icon: "scope",
-                primary: "Learning",
-                secondary: "Browse to shape your feed",
-                tone: PA.Colors.muted
-            )
-        }
     }
 
     // MARK: - Shared chip layout

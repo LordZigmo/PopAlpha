@@ -291,6 +291,11 @@ public final class PopAlphaCardClassifier {
         case .int32:
             let values = multiArray.dataPointer.bindMemory(to: Int32.self, capacity: count)
             return argMaxIndex(count: count) { index in Double(values[index]) }
+        // `MLMultiArrayDataType.int8` only exists in the iOS 26 SDK. Guard the
+        // case at COMPILE time (not just runtime #available) so older toolchains
+        // — e.g. Xcode 16.4 in CI — don't choke on a symbol their SDK lacks.
+        // On those toolchains int8 outputs fall through to @unknown default.
+        #if compiler(>=6.2)
         case .int8:
             if #available(iOS 26.0, *) {
                 let values = multiArray.dataPointer.bindMemory(to: Int8.self, capacity: count)
@@ -298,6 +303,7 @@ public final class PopAlphaCardClassifier {
             }
 
             return nil
+        #endif
         @unknown default:
             return nil
         }

@@ -37,18 +37,18 @@ const ACCEPTED_GRADES = new Set([
  *     specific graders.
  *
  * Provider handling: signals are computed under the provider responsible
- * for the price series (JUSTTCG for RAW; PSA/CGC/BGS/TAG for graded).
- * The route doesn't filter by provider — `signal_trend IS NOT NULL`
+ * for the price series (SCRYDEX/PriceCharting for RAW; PSA/CGC/BGS/TAG for
+ * graded). The route doesn't filter by provider — `signal_trend IS NOT NULL`
  * already restricts to rows the calculator has emitted, regardless of
  * which provider produced the underlying snapshots. Response includes
  * the distinct providers in `providers` so the client can attribute.
  *
  * Phase 4 of docs/graded-surfacing-plan.md (shipped 2026-05-16): the
  * prior short-circuit returning empty for graded grades was based on a
- * stale Phase 0 finding. The same change also fixed a long-standing
- * RAW bug — the route had been filtering `provider = 'SCRYDEX'` since
- * inception, but signals for RAW live under `JUSTTCG`, so the RAW path
- * also returned zero rows. Codex P1 on PR #102.
+ * stale Phase 0 finding. The same change also removed a hardcoded
+ * `provider = 'SCRYDEX'` filter that had been dropping RAW rows whose
+ * signals are attributed to a different provider label, so the RAW path
+ * stopped returning zero rows. Codex P1 on PR #102.
  */
 export async function GET(req: Request) {
   // 1. Auth (cheap) → 2. Entitlement (cheap) → 3. Rate limit

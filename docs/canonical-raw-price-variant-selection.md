@@ -6,6 +6,11 @@ chart / 24h-7d change, and the two failure modes the 2026-05-31 variant-alignmen
 investigation surfaced. Distinct from `card-detail-variant-picker.md` (that's the
 *UI* variant selector; this is the *backend* price the headline derives from).
 
+For the **graded** counterpart — the per-grader (PSA/CGC/BGS/TAG) price surface,
+its bounded watermark refresh, and the shared dominant-printing tie-break — see
+`grader-split-playbook.md`. Same bounded/watermark shape as the per-printing RAW
+refresh; orthogonal dimension (grader vs printing).
+
 ## How the price's variant is chosen
 
 A canonical card (e.g. `skyridge-1-aerodactyl`) maps to multiple
