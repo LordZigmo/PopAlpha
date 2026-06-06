@@ -140,9 +140,11 @@ struct CardDetailView: View {
     @State private var selectedPrintingId: String?
     @State private var printingHeroPrice: Double?
     @State private var conditionPrices: [ConditionPriceRow] = []
-    /// Per-grade-bucket aggregate market summary, keyed by grade bucket
-    /// (LE_7, G8, G9, G9_5, G10, G10_PERFECT). Sourced from card_metrics
-    /// which is keyed (slug, printing_id, grade) — no provider dimension.
+    /// Per-(grader, grade) market summary, keyed "GRADER::bucket" (e.g.
+    /// "PSA::G10") so PSA 10 ≠ CGC 10 ≠ TAG 10. Sourced from
+    /// public_graded_variant_prices via fetchGradedCardMetrics; the headline
+    /// is marketPrice (14-day median). One dominant printing is resolved per
+    /// (grader, grade) — see the tie-break in the loader (#192 grader-split).
     @State private var gradedCardMetricsByBucket: [String: GradedCardMetricRow] = [:]
     /// Per-bucket price history for the active grader, overlaid as the
     /// "Grade Performance" comparison chart. Indexed by default so momentum
