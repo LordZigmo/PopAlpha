@@ -27,8 +27,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Show Xcode version
-        run: xcodebuild -version
+      - name: Select newest installed Xcode
+        # Ship-line parity: build with the newest Xcode the runner has, not
+        # the image default. We were verifying on 16.4 while the app is
+        # archived on Xcode 26 — that gap hid iOS-26-only issues. Also logs
+        # which Xcodes exist so we can see if 26 is available yet.
+        run: |
+          echo "Available Xcodes:"; ls -d /Applications/Xcode_*.app 2>/dev/null || true
+          NEWEST="$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)"
+          if [ -n "$NEWEST" ]; then
+            echo "Selecting $NEWEST"
+            sudo xcode-select -s "$NEWEST/Contents/Developer"
+          fi
+          xcodebuild -version
 
       - name: Build for iOS Simulator (Debug, no signing)
         run: |
