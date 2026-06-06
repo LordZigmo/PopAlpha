@@ -1,32 +1,32 @@
 -- 20260606140000_canonical_raw_headline_single_source.sql
 --
 -- supersedes: 20260601120000_freshest_price_and_per_printing_display.sql
+-- supersedes: 20260602030000_per_printing_display_watermark.sql
 --
 -- Single source of truth for the canonical RAW headline price.
 --
 -- BUG: the canonical (printing_id IS NULL, RAW) display_price / latest_price /
 -- display_change_pct_* were computed off the POOLED canonical daily series, which
--- can fold in a stale snapshot -> the homepage (reads the canonical row) showed a
--- different, inflated number than the detail (reads the per-printing row's clean
--- series). N's Zoroark ex (Ascended Heroes #286): canonical $192.25 vs the real
--- per-printing close $190. Two functions wrote the canonical headline on decoupled
--- crons, so it could also drift (#42).
+-- folds in a stale snapshot -> the homepage (canonical row) showed an inflated
+-- number vs the detail (per-printing's clean series). N's Zoroark ex (Ascended
+-- Heroes #286): canonical $192.25 vs the real per-printing close $190. Two functions
+-- wrote the headline on decoupled crons, so it also drifted (#42).
 --
--- FIX (two surgical edits; both bodies are otherwise reproduced VERBATIM from
--- 20260601120000 -- diff them to confirm):
---   1. refresh_price_changes_core: STOP writing the canonical display_price /
---      display_price_as_of / latest_price / latest_price_as_of / display_change_pct_*.
---      It still writes change_pct_24h / change_pct_7d. (The now-unused display CTEs
---      are intentionally left in place to keep the diff minimal -- computed and
---      discarded; a later cleanup can remove them.)
---   2. refresh_per_printing_raw_price_display: after computing the per-printing RAW
---      display/latest, MIRROR the preferred printing's values onto the canonical RAW
---      row -> the per-printing function is now the SOLE writer of the canonical
---      headline. One real computation, surfaced on BOTH the homepage and the detail,
---      which therefore cannot disagree or drift. Extends task #52 (medians) to the headline.
+-- FIX (both bodies reproduced VERBATIM from their latest definers; diff to confirm):
+--   1. refresh_price_changes_core (from 20260601120000): STOP writing the canonical
+--      display_price / display_price_as_of / latest_price / latest_price_as_of /
+--      display_change_pct_*. Keeps change_pct_24h / change_pct_7d. (Now-unused display
+--      CTEs left in place to keep the diff minimal.)
+--   2. refresh_per_printing_raw_price_display(int) (from 20260602030000 -- the LIVE
+--      watermark overload the production cron actually calls; the old text[] overload
+--      is gone): after the bounded per-printing update, MIRROR the preferred printing's
+--      display/latest onto the canonical RAW row, scoped to the slugs THIS tick
+--      refreshed (stays bounded). This makes the per-printing function the SOLE writer
+--      of the canonical headline -> one real number on both the homepage and the
+--      detail, no drift. Extends task #52 (medians) to the live headline.
 --
--- Data correction is POST-MERGE via scoped refresh_per_printing_raw_price_display()
--- batches (NOT in this migration -> avoids a full recompute timing out the apply).
+-- Data correction POST-MERGE via refresh_per_printing_raw_price_display(NULL) batches
+-- (NOT in this migration -> avoids a long apply).
 
 create or replace function public.refresh_price_changes_core(p_canonical_slugs text[] default null)
 returns jsonb
@@ -414,9 +414,9 @@ begin
     update public.card_metrics cm
     set
       -- Canonical headline (display_price / latest_price / display_change_pct_*) is
-      -- NO LONGER written here -- refresh_per_printing_raw_price_display mirrors it
-      -- from the preferred printing as the single source of truth. Core keeps only
-      -- change_pct_24h / change_pct_7d (used as a fallback by public_card_metrics).
+      -- NO LONGER written here -- refresh_per_printing_raw_price_display(int) mirrors
+      -- it from the preferred printing as the single source of truth. Core keeps only
+      -- change_pct_24h / change_pct_7d (a fallback used by public_card_metrics).
       change_pct_24h = c.change_pct_24h,
       change_pct_7d = c.change_pct_7d
     from changes c
@@ -444,13 +444,7 @@ begin
   );
 end;
 $$;
--- ---------------------------------------------------------------------------
--- 3. refresh_per_printing_raw_price_display — per-printing RAW display/latest.
---    Computes from each printing's own RAW snapshot daily series (source-priority
---    deduped per day, mirroring the canonical daily series). Owns ONLY
---    printing_id IS NOT NULL rows; disjoint from refresh_price_changes_core.
--- ---------------------------------------------------------------------------
-create or replace function public.refresh_per_printing_raw_price_display(p_canonical_slugs text[] default null)
+create or replace function public.refresh_per_printing_raw_price_display(p_max_cards int default null)
 returns jsonb
 language plpgsql
 security definer
@@ -461,6 +455,7 @@ as $$
 declare
   updated_count int := 0;
   mirror_count int := 0;
+  v_batch_slugs text[];
   cutoff_14d timestamptz := now() - interval '14 days';
   cutoff_24h timestamptz := now() - interval '24 hours';
   cutoff_7d timestamptz := now() - interval '7 days';
@@ -469,15 +464,16 @@ declare
   cutoff_10d timestamptz := now() - interval '10 days';
 begin
   with pp_scope as (
+    -- The N stalest per-printing RAW rows (NULL p_max_cards = all). The stamp at
+    -- the end advances every scoped row out of the "stalest" window, so successive
+    -- cron ticks cycle through the whole set.
     select cm.id as metric_id, cm.canonical_slug, cm.printing_id
     from public.card_metrics cm
     where cm.grade = 'RAW'
       and cm.printing_id is not null
       and cm.canonical_slug is not null
-      and (
-        p_canonical_slugs is null
-        or cm.canonical_slug = any(p_canonical_slugs)
-      )
+    order by cm.per_printing_display_refreshed_at asc nulls first, cm.id
+    limit p_max_cards
   ),
   daily_source_rank as (
     select
@@ -501,7 +497,6 @@ begin
       and ph.ts >= cutoff_14d
       and ph.price is not null
       and ph.price > 0
-      -- Ungraded only (graded refs also end in ::RAW; discriminator is seg 3).
       and split_part(ph.variant_ref, '::', 3) = 'RAW'
     group by
       s.metric_id,
@@ -568,6 +563,9 @@ begin
     left join latest_daily ld using (metric_id)
   ),
   do_update as (
+    -- Write every scoped row (values from vals, NULL if no series) and stamp the
+    -- watermark so it rotates out of the "stalest" window. No diff predicate: the
+    -- stamp must advance on every scoped row, and the batch is bounded by p_max_cards.
     update public.card_metrics cm
     set
       display_price = v.display_price,
@@ -575,57 +573,56 @@ begin
       latest_price = v.latest_price,
       latest_price_as_of = v.latest_price_as_of,
       display_change_pct_24h = v.display_change_pct_24h,
-      display_change_pct_7d = v.display_change_pct_7d
+      display_change_pct_7d = v.display_change_pct_7d,
+      per_printing_display_refreshed_at = now()
     from pp_scope s
     left join vals v on v.metric_id = s.metric_id
     where cm.id = s.metric_id
-      and (
-        cm.display_price is distinct from v.display_price
-        or cm.display_price_as_of is distinct from v.display_price_as_of
-        or cm.latest_price is distinct from v.latest_price
-        or cm.latest_price_as_of is distinct from v.latest_price_as_of
-        or cm.display_change_pct_24h is distinct from v.display_change_pct_24h
-        or cm.display_change_pct_7d is distinct from v.display_change_pct_7d
-      )
-    returning 1
+    returning cm.canonical_slug
   )
-  select count(*) into updated_count from do_update;
+  select count(*), array_agg(distinct canonical_slug)
+  into updated_count, v_batch_slugs
+  from do_update;
 
-  -- Canonical RAW row mirrors the preferred printing's DISPLAY values, so the
-  -- headline the app reads (homepage = canonical row, detail = per-printing row) is
-  -- ONE real number, not a second value computed off the contaminated canonical
-  -- series. This function is now the SOLE writer of the canonical RAW display/latest
-  -- (refresh_price_changes_core no longer writes them), so the two surfaces cannot
-  -- disagree or drift (closes #42). Extends task #52 (medians) to the live headline.
-  with canon_mirror as (
-    update public.card_metrics canon
-    set
-      display_price = pref.display_price,
-      display_price_as_of = pref.display_price_as_of,
-      latest_price = pref.latest_price,
-      latest_price_as_of = pref.latest_price_as_of,
-      display_change_pct_24h = pref.display_change_pct_24h,
-      display_change_pct_7d = pref.display_change_pct_7d
-    from public.card_metrics pref
-    where canon.printing_id is null
-      and canon.grade = 'RAW'
-      and (p_canonical_slugs is null or canon.canonical_slug = any(p_canonical_slugs))
-      and pref.canonical_slug = canon.canonical_slug
-      and pref.grade = 'RAW'
-      and pref.printing_id = public.preferred_canonical_raw_printing(canon.canonical_slug)
-      and pref.printing_id is not null
-      and (
-        canon.display_price is distinct from pref.display_price
-        or canon.display_price_as_of is distinct from pref.display_price_as_of
-        or canon.latest_price is distinct from pref.latest_price
-        or canon.latest_price_as_of is distinct from pref.latest_price_as_of
-        or canon.display_change_pct_24h is distinct from pref.display_change_pct_24h
-        or canon.display_change_pct_7d is distinct from pref.display_change_pct_7d
-      )
-    returning 1
-  )
-  select count(*) into mirror_count from canon_mirror;
+  -- Canonical RAW headline = the preferred printing's clean value, mirrored ONLY for
+  -- the slugs this watermark tick just refreshed (NOT all rows -> stays bounded like
+  -- the per-printing update above). This int overload is the one the production cron
+  -- calls, so the homepage canonical row stays in lockstep with the per-printing
+  -- detail rows. Single source of truth: refresh_price_changes_core no longer writes
+  -- the canonical headline. Extends task #52 (medians) to the live headline; #42.
+  if v_batch_slugs is not null and array_length(v_batch_slugs, 1) > 0 then
+    with canon_mirror as (
+      update public.card_metrics canon
+      set
+        display_price = pref.display_price,
+        display_price_as_of = pref.display_price_as_of,
+        latest_price = pref.latest_price,
+        latest_price_as_of = pref.latest_price_as_of,
+        display_change_pct_24h = pref.display_change_pct_24h,
+        display_change_pct_7d = pref.display_change_pct_7d
+      from public.card_metrics pref
+      where canon.printing_id is null
+        and canon.grade = 'RAW'
+        and canon.canonical_slug = any(v_batch_slugs)
+        and pref.canonical_slug = canon.canonical_slug
+        and pref.grade = 'RAW'
+        and pref.printing_id = public.preferred_canonical_raw_printing(canon.canonical_slug)
+        and pref.printing_id is not null
+        and (
+          canon.display_price is distinct from pref.display_price
+          or canon.display_price_as_of is distinct from pref.display_price_as_of
+          or canon.latest_price is distinct from pref.latest_price
+          or canon.latest_price_as_of is distinct from pref.latest_price_as_of
+          or canon.display_change_pct_24h is distinct from pref.display_change_pct_24h
+          or canon.display_change_pct_7d is distinct from pref.display_change_pct_7d
+        )
+      returning 1
+    )
+    select count(*) into mirror_count from canon_mirror;
+  end if;
 
   return jsonb_build_object('pp_updated', updated_count, 'canon_mirrored', mirror_count);
 end;
 $$;
+
+revoke all on function public.refresh_per_printing_raw_price_display(int) from public, anon, authenticated;
