@@ -67,12 +67,10 @@ struct SetDetailView: View {
                     dismiss()
                 } label: {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(PA.Colors.text)
-                        .frame(width: 38, height: 38)
-                        .background(.ultraThinMaterial.opacity(0.5))
-                        .clipShape(Circle())
-                        // 44pt minimum tap target (see CardDetailView).
+                        // No custom circle — iOS 26 supplies the glass capsule
+                        // (see CardDetailView). 44pt tap target retained.
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }

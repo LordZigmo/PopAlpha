@@ -69,8 +69,28 @@ extension UINavigationController: UIGestureRecognizerDelegate {
         interactivePopGestureRecognizer?.delegate = self
     }
 
+    // Re-assert the delegate after each appearance. On iOS 26 SwiftUI's
+    // NavigationStack can reset interactivePopGestureRecognizer.delegate across
+    // pushes, which silently dropped the swipe-back gesture even though
+    // viewDidLoad had set it once.
+    override open func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        interactivePopGestureRecognizer?.delegate = self
+    }
+
     public func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         viewControllers.count > 1
+    }
+
+    // This delegate is only attached to interactivePopGestureRecognizer, so
+    // allowing simultaneous recognition lets the left-edge pan coexist with the
+    // content's scroll/drag gestures instead of being swallowed on scroll-heavy
+    // detail screens — the other half of why the swipe didn't engage.
+    public func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        true
     }
 }
 
