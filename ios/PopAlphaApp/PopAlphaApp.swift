@@ -56,6 +56,24 @@ struct PopAlphaApp: App {
     }
 }
 
+// Restores the interactive edge-swipe "back" gesture on screens that hide
+// the system back button for a custom chevron (CardDetailView, SetDetailView).
+// NavigationStack is backed by a UINavigationController whose
+// interactivePopGestureRecognizer is disabled the moment the default back
+// button is removed; re-attaching its delegate brings the swipe back. The
+// `viewControllers.count > 1` guard means it only fires when there's a screen
+// to pop, so it never interferes with sheet roots or the tab roots.
+extension UINavigationController: UIGestureRecognizerDelegate {
+    override open func viewDidLoad() {
+        super.viewDidLoad()
+        interactivePopGestureRecognizer?.delegate = self
+    }
+
+    public func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        viewControllers.count > 1
+    }
+}
+
 // SplashScreenView sits in a ZStack above ContentView so the app's
 // startup work (Clerk session restore, StoreKit listener, scanner
 // warmup) kicks off at t=0 — the splash just covers the UI for

@@ -571,11 +571,16 @@ struct CardDetailView: View {
                     dismiss()
                 } label: {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(PA.Colors.text)
-                        .frame(width: 36, height: 36)
+                        .frame(width: 38, height: 38)
                         .background(.ultraThinMaterial.opacity(0.5))
                         .clipShape(Circle())
+                        // Expand the tap target to Apple's 44pt minimum while
+                        // keeping the visible chip compact — the back button
+                        // was easy to miss at 36pt.
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .accessibilityLabel("Back")
             }

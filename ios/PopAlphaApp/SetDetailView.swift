@@ -67,12 +67,16 @@ struct SetDetailView: View {
                     dismiss()
                 } label: {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(PA.Colors.text)
-                        .frame(width: 36, height: 36)
+                        .frame(width: 38, height: 38)
                         .background(.ultraThinMaterial.opacity(0.5))
                         .clipShape(Circle())
+                        // 44pt minimum tap target (see CardDetailView).
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
+                .accessibilityLabel("Back")
             }
         }
         .navigationDestination(item: $selectedCard) { card in
