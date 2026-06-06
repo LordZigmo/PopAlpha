@@ -2053,6 +2053,11 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
     }
     trendingCandidatesOut.sort(compareChangeDescending);
     const trendingOut = trendingCandidatesOut.slice(0, SECTION_LIMIT);
+    // Genuine-7D subset of the trending pool for the 7D rails (top_movers + momentum).
+    // The pool honestly labels cards with no real 7d change as "24H" (above); those must
+    // not surface under the 7D toggle. The non-windowed `trendingOut` rail above keeps the
+    // full mixed set. Codex P2 on #197.
+    const trending7D = trendingCandidatesOut.filter((card) => card.change_window === "7D");
     // ── Derived conviction sections (Phase 2) ────────────────────────────
     //
     // Build from the already-assembled positive + negative mover pools so
@@ -2108,7 +2113,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
     const liveTopMovers7D = combineHomepageCards([
       positiveMoversByWindow["7D"].highConfidence,
       positiveMoversByWindow["7D"].all,
-      trendingCandidatesOut,
+      trending7D,
     ]);
     const liveDrops24H = negativeMoversByWindow["24H"].cards.slice(0, SECTION_LIMIT);
     const liveDrops7D = negativeMoversByWindow["7D"].cards.slice(0, SECTION_LIMIT);
@@ -2204,19 +2209,18 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
               positiveMoversByWindow["24H"].highConfidence,
               positiveMoversByWindow["24H"].all,
             ]),
-        // Window-pure: only genuine-7D cards in the 7D momentum rail. Filter each source
-        // to change_window === "7D" BEFORE the rail limit, so the limit yields up to
-        // SECTION_LIMIT genuine-7D cards rather than an under-filled rail (post-limit
-        // filtering would drop 24h-derived cards that already consumed limit slots). The
-        // trending pool carries 24h-derived cards (honestly labeled "24H" above) the iOS
-        // momentum fallback can't distinguish. Codex P2 on #195 / #197.
+        // Window-pure: only genuine-7D cards in the 7D momentum rail. Use the shared
+        // genuine-7D trending subset (the pool is mixed after honest "24H" labeling); the
+        // per-window positive movers are already 7D by construction. Daily momentum_7d is
+        // filtered defensively (external DB rows) BEFORE the limit so a 24h row can't
+        // consume a slot and under-fill the rail. Codex P2 on #195 / #197.
         "7D": dailyMoversForDisplay.momentum_7d.length > 0
           ? dailyMoversForDisplay.momentum_7d
               .filter((card) => card.change_window === "7D")
               .slice(0, SECTION_LIMIT)
           : combineHomepageCards([
-              trendingCandidatesOut.filter((card) => card.change_window === "7D"),
-              positiveMoversByWindow["7D"].all.filter((card) => card.change_window === "7D"),
+              trending7D,
+              positiveMoversByWindow["7D"].all,
             ]),
       },
       unusual_volume: unusualVolumeOut,
