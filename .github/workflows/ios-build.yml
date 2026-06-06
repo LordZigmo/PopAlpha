@@ -30,7 +30,7 @@ jobs:
       - name: Show Xcode version
         run: xcodebuild -version
 
-      - name: Build for iOS Simulator (no signing)
+      - name: Build for iOS Simulator (Debug, no signing)
         run: |
           set -o pipefail
           xcodebuild build \
@@ -40,3 +40,19 @@ jobs:
             -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO
+
+      - name: Build for device (Release, no signing) — archive-equivalent compile
+        # Closes the gap between the Debug/Simulator smoke above and what an
+        # archive actually does: Release optimizations + the device (arm64)
+        # SDK. Signing is still disabled — the archive itself layers signing
+        # on top, but this catches Release-only / device-only compile breaks.
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project ios/PopAlphaApp.xcodeproj \
+            -scheme PopAlphaApp \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
