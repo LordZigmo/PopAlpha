@@ -2204,18 +2204,20 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
               positiveMoversByWindow["24H"].highConfidence,
               positiveMoversByWindow["24H"].all,
             ]),
-        // Window-pure: only genuine-7D cards in the 7D momentum rail. The trending
-        // pool carries 24h-derived cards (now honestly labeled "24H" above), so filter
-        // the assembled list to change_window === "7D" — otherwise the iOS For-You
-        // momentum fallback surfaces a 24h value under the 7D toggle (the client can't
-        // distinguish it, since it's the momentum bucket, not top_movers). Codex P2 on #195.
-        "7D": (dailyMoversForDisplay.momentum_7d.length > 0
-          ? dailyMoversForDisplay.momentum_7d.slice(0, SECTION_LIMIT)
+        // Window-pure: only genuine-7D cards in the 7D momentum rail. Filter each source
+        // to change_window === "7D" BEFORE the rail limit, so the limit yields up to
+        // SECTION_LIMIT genuine-7D cards rather than an under-filled rail (post-limit
+        // filtering would drop 24h-derived cards that already consumed limit slots). The
+        // trending pool carries 24h-derived cards (honestly labeled "24H" above) the iOS
+        // momentum fallback can't distinguish. Codex P2 on #195 / #197.
+        "7D": dailyMoversForDisplay.momentum_7d.length > 0
+          ? dailyMoversForDisplay.momentum_7d
+              .filter((card) => card.change_window === "7D")
+              .slice(0, SECTION_LIMIT)
           : combineHomepageCards([
-              trendingCandidatesOut,
-              positiveMoversByWindow["7D"].all,
-            ])
-        ).filter((card) => card.change_window === "7D"),
+              trendingCandidatesOut.filter((card) => card.change_window === "7D"),
+              positiveMoversByWindow["7D"].all.filter((card) => card.change_window === "7D"),
+            ]),
       },
       unusual_volume: unusualVolumeOut,
       breakouts: breakoutsOut,
