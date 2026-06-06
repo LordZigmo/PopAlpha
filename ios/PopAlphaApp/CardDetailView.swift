@@ -140,10 +140,23 @@ struct CardDetailView: View {
     @State private var selectedPrintingId: String?
     @State private var printingHeroPrice: Double?
     @State private var conditionPrices: [ConditionPriceRow] = []
-    /// Per-grade-bucket aggregate market summary, keyed by grade bucket
-    /// (LE_7, G8, G9, G9_5, G10, G10_PERFECT). Sourced from card_metrics
-    /// which is keyed (slug, printing_id, grade) — no provider dimension.
+    /// Per-(grader, grade) market summary, keyed "GRADER::bucket" (e.g.
+    /// "PSA::G10") so PSA 10 ≠ CGC 10 ≠ TAG 10. Sourced from
+    /// public_graded_variant_prices via fetchGradedCardMetrics; the headline
+    /// is marketPrice (14-day median). One dominant printing is resolved per
+    /// (grader, grade) — see the tie-break in the loader (#192 grader-split).
     @State private var gradedCardMetricsByBucket: [String: GradedCardMetricRow] = [:]
+    /// Per-bucket price history for the active grader, overlaid as the
+    /// "Grade Performance" comparison chart. Indexed by default so momentum
+    /// is comparable across the PSA 10 → PSA 7 price gap; the %/$ toggle
+    /// flips to absolute dollars.
+    @State private var gradePerfSeries: [GradePerfDatum] = []
+    @State private var gradePerfScale: MultiSeriesChartModel.Scale = .indexed
+    /// RAW edition overlay — Unlimited + 1st Edition of the same finish/stamp,
+    /// charted together by default with pills to isolate one.
+    @State private var editionFocus: EditionFocus = .both
+    @State private var editionUnlimited: [PricePoint] = []
+    @State private var editionFirst: [PricePoint] = []
     /// Slug of the cross-language partner card (EN <-> JP). Nil when no
     /// pairing exists in card_translations, or before the
     /// /api/cards/[slug]/detail fetch lands. Populated by .task on each
@@ -371,6 +384,16 @@ struct CardDetailView: View {
         // the EN card's chart-cleared state and never refetch.
         .task(id: "\(activeCard.id)|\(selectedTimeframe.rawValue)|\(selectedPriceMode)|\(selectedPrintingId ?? "")") {
             await loadChart()
+        }
+        // Grade Performance overlay: per-bucket history for the active grader.
+        // Keyed so it refires on grader / timeframe / printing / availability
+        // changes, mirroring the main chart's task.
+        .task(id: "gradePerf|\(activeCard.id)|\(selectedTimeframe.rawValue)|\(selectedPriceMode)|\(selectedPrintingId ?? "")|\(availableGradedOptions.count)") {
+            await loadGradePerformance()
+        }
+        // RAW edition overlay: fetch both editions' history for the chart.
+        .task(id: "edition|\(activeCard.id)|\(selectedTimeframe.rawValue)|\(selectedPriceMode)|\(selectedPrintingId ?? "")|\(availablePrintings.count)") {
+            await loadEditionOverlay()
         }
         // Keyed by activeCard.id so the entire data-load fan-out re-fires
         // when the user taps the EN/JP toggle and we swap activeCard.
@@ -938,6 +961,11 @@ struct CardDetailView: View {
             // 7. Chart section — supporting evidence after the read.
             chartSection
 
+            // 7b. Grade Performance — overlay every grade of the active grader
+            //     so the user can compare which grade is moving quicker.
+            //     Self-gates to graded mode with ≥2 buckets of history.
+            gradePerformanceSection
+
             // 8. Personalized insight ("How this fits your style") — secondary
             // differentiated layer; renders its own fallback when signal is thin.
             PersonalizedInsightCardView(
@@ -1178,15 +1206,15 @@ struct CardDetailView: View {
             .background(PA.Colors.surface)
             .clipShape(RoundedRectangle(cornerRadius: 10))
 
+            // Edition overlay pills — RAW mode, when an Unlimited + 1st
+            // Edition pair exists. Both lines by default; tap to isolate one.
+            if !selectedPriceMode.isGraded, hasEditionOverlay {
+                editionFocusPills
+            }
+
             // Interactive chart
             ZStack {
-                InteractiveChartView(
-                    data: activeChartPrices,
-                    timestamps: activeChartTimestamps,
-                    direction: chartDirection,
-                    lineWidth: 2,
-                    height: 140
-                )
+                chartContent
                 .opacity(chartLoading || (chartError != nil && chartPrices.isEmpty) ? 0.3 : 1)
                 .animation(.easeOut(duration: 0.2), value: chartLoading)
 
@@ -1331,6 +1359,261 @@ struct CardDetailView: View {
                 // that's the cause, so keep this generic.
                 chartError = "Couldn't load price history."
             }
+        }
+    }
+
+    // MARK: - Grade Performance (multi-grade overlay)
+
+    private struct GradePerfDatum: Identifiable {
+        let id: String        // grade bucket (e.g. "G10")
+        let label: String
+        let color: Color
+        let points: [PricePoint]
+    }
+
+    private static let gradePerfOrder = ["G10_PERFECT", "G10", "G9_5", "G9", "G8", "LE_7"]
+
+    private func gradePerfColor(_ bucket: String) -> Color {
+        switch bucket {
+        case "G10_PERFECT": return Color(red: 0.957, green: 0.447, blue: 0.714)
+        case "G10":         return Color(red: 0.204, green: 0.827, blue: 0.600)
+        case "G9_5":        return Color(red: 0.376, green: 0.647, blue: 0.980)
+        case "G9":          return Color(red: 0.659, green: 0.545, blue: 0.980)
+        case "G8":          return Color(red: 0.984, green: 0.749, blue: 0.141)
+        case "LE_7":        return Color(red: 0.984, green: 0.443, blue: 0.522)
+        default:            return PA.Colors.neutral
+        }
+    }
+
+    private func gradePerfLabel(_ bucket: String) -> String {
+        switch bucket {
+        case "G10_PERFECT": return "10 Perfect"
+        case "G10":         return "10"
+        case "G9_5":        return "9.5"
+        case "G9":          return "9"
+        case "G8":          return "8"
+        case "LE_7":        return "7 or less"
+        default:            return bucket
+        }
+    }
+
+    @ViewBuilder
+    private var gradePerformanceSection: some View {
+        if selectedPriceMode.isGraded, gradePerfSeries.count >= 2 {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Grade Performance")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(PA.Colors.text)
+                        Text("\(selectedGradingAgency) grades · \(gradePerfScale == .indexed ? "indexed to window start" : "observed prices")")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(PA.Colors.muted)
+                    }
+                    Spacer()
+                    gradePerfScaleToggle
+                }
+
+                MultiLineChartView(
+                    series: gradePerfSeries.map {
+                        MultiLineSeriesInput(id: $0.id, label: $0.label, color: $0.color, points: $0.points)
+                    },
+                    scale: gradePerfScale,
+                    showChangeDetails: false,
+                    height: 150
+                )
+            }
+            .padding(16)
+            .glassSurface()
+        }
+    }
+
+    private var gradePerfScaleToggle: some View {
+        HStack(spacing: 2) {
+            ForEach([MultiSeriesChartModel.Scale.indexed, MultiSeriesChartModel.Scale.absolute], id: \.self) { mode in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) { gradePerfScale = mode }
+                } label: {
+                    Text(mode == .indexed ? "%" : "$")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(gradePerfScale == mode ? PA.Colors.background : PA.Colors.muted)
+                        .frame(width: 30, height: 24)
+                        .background(gradePerfScale == mode ? detailAccent : PA.Colors.surfaceSoft)
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    /// Fetches per-bucket history for the active grader in parallel and
+    /// assembles the overlay series (high grade → low). Cleared when not in
+    /// graded mode or fewer than two buckets have data.
+    private func loadGradePerformance() async {
+        guard case let .graded(grader, _) = selectedPriceMode else {
+            await MainActor.run { gradePerfSeries = [] }
+            return
+        }
+        let buckets = availableGradedOptions.compactMap { mode -> String? in
+            if case let .graded(provider, bucket) = mode, provider == grader { return bucket }
+            return nil
+        }
+        guard buckets.count >= 2 else {
+            await MainActor.run { gradePerfSeries = [] }
+            return
+        }
+
+        let slug = activeCard.id
+        let printingId = selectedPrintingId
+        let tf = selectedTimeframe
+
+        var fetched: [String: [PricePoint]] = [:]
+        await withTaskGroup(of: (String, [PricePoint]).self) { group in
+            for bucket in buckets {
+                group.addTask {
+                    do {
+                        let pts: [PricePoint]
+                        if let pid = printingId {
+                            pts = try await CardService.shared.fetchPrintingGradedPriceHistory(
+                                slug: slug, printingId: pid, provider: grader, bucket: bucket, timeframe: tf
+                            )
+                        } else {
+                            pts = try await CardService.shared.fetchGradedPriceHistory(
+                                slug: slug, provider: grader, bucket: bucket, timeframe: tf
+                            )
+                        }
+                        return (bucket, pts)
+                    } catch {
+                        return (bucket, [])
+                    }
+                }
+            }
+            for await (bucket, pts) in group where pts.count >= 2 {
+                fetched[bucket] = pts
+            }
+        }
+
+        let ordered: [GradePerfDatum] = Self.gradePerfOrder.compactMap { bucket in
+            guard let pts = fetched[bucket] else { return nil }
+            return GradePerfDatum(
+                id: bucket,
+                label: gradePerfLabel(bucket),
+                color: gradePerfColor(bucket),
+                points: pts
+            )
+        }
+
+        await MainActor.run {
+            // Drop the result if the user has since changed grader / timeframe /
+            // printing / card (mirrors loadChart's staleness guard).
+            guard activeCard.id == slug,
+                  selectedTimeframe == tf,
+                  selectedPrintingId == printingId,
+                  case let .graded(currentGrader, _) = selectedPriceMode,
+                  currentGrader == grader else { return }
+            gradePerfSeries = ordered
+        }
+    }
+
+    // MARK: - RAW Edition Overlay (Unlimited + 1st Edition)
+
+    private enum EditionFocus { case both, unlimited, firstEdition }
+
+    /// Printing ids of the Unlimited + 1st Edition pair for the active
+    /// finish/stamp, when both exist. nil otherwise (most cards).
+    private var editionPair: (unlimitedId: String, firstId: String)? {
+        guard let active = availablePrintings.first(where: { $0.id == selectedPrintingId }) ?? availablePrintings.first else {
+            return nil
+        }
+        let stampKey = (active.stamp ?? "").uppercased()
+        let siblings = availablePrintings.filter {
+            $0.finish == active.finish && ($0.stamp ?? "").uppercased() == stampKey
+        }
+        guard let unlimited = siblings.first(where: { $0.edition == "UNLIMITED" }),
+              let first = siblings.first(where: { $0.edition == "FIRST_EDITION" }) else {
+            return nil
+        }
+        return (unlimited.id, first.id)
+    }
+
+    /// True only once both editions have enough history to overlay.
+    private var hasEditionOverlay: Bool {
+        editionPair != nil && editionUnlimited.count >= 2 && editionFirst.count >= 2
+    }
+
+    @ViewBuilder
+    private var chartContent: some View {
+        if !selectedPriceMode.isGraded, hasEditionOverlay {
+            switch editionFocus {
+            case .both:
+                MultiLineChartView(
+                    series: [
+                        MultiLineSeriesInput(id: "unlimited", label: "Unlimited", color: PA.Colors.accent, points: editionUnlimited),
+                        MultiLineSeriesInput(id: "first", label: "1st Edition", color: Color(red: 0.659, green: 0.545, blue: 0.980), points: editionFirst),
+                    ],
+                    scale: .absolute,
+                    showChangeDetails: true,
+                    height: 140
+                )
+            case .unlimited:
+                InteractiveChartView(data: editionUnlimited.map(\.price), timestamps: editionUnlimited.map(\.ts), direction: editionDirection(editionUnlimited), lineWidth: 2, height: 140)
+            case .firstEdition:
+                InteractiveChartView(data: editionFirst.map(\.price), timestamps: editionFirst.map(\.ts), direction: editionDirection(editionFirst), lineWidth: 2, height: 140)
+            }
+        } else {
+            InteractiveChartView(data: activeChartPrices, timestamps: activeChartTimestamps, direction: chartDirection, lineWidth: 2, height: 140)
+        }
+    }
+
+    private var editionFocusPills: some View {
+        HStack(spacing: 6) {
+            editionPill("Both", .both)
+            editionPill("Unlimited", .unlimited)
+            editionPill("1st Edition", .firstEdition)
+        }
+    }
+
+    private func editionPill(_ title: String, _ focus: EditionFocus) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.15)) { editionFocus = focus }
+        } label: {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(editionFocus == focus ? PA.Colors.background : PA.Colors.muted)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(editionFocus == focus ? detailAccent : PA.Colors.surfaceSoft)
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func editionDirection(_ pts: [PricePoint]) -> ChangeDirection {
+        guard pts.count >= 2, let first = pts.first?.price, let last = pts.last?.price else { return .flat }
+        return ChangeDirection.from(last - first)
+    }
+
+    /// Fetches both editions' raw history in parallel. Cleared when not in
+    /// RAW mode or no Unlimited/1st-Edition pair exists.
+    private func loadEditionOverlay() async {
+        guard !selectedPriceMode.isGraded, let pair = editionPair else {
+            await MainActor.run { editionUnlimited = []; editionFirst = [] }
+            return
+        }
+        let slug = activeCard.id
+        let tf = selectedTimeframe
+        let uId = pair.unlimitedId
+        let fId = pair.firstId
+
+        async let uFetch = CardService.shared.fetchPrintingPriceHistory(slug: slug, printingId: uId, timeframe: tf)
+        async let fFetch = CardService.shared.fetchPrintingPriceHistory(slug: slug, printingId: fId, timeframe: tf)
+        let u = (try? await uFetch) ?? []
+        let f = (try? await fFetch) ?? []
+
+        await MainActor.run {
+            guard activeCard.id == slug, selectedTimeframe == tf, !selectedPriceMode.isGraded else { return }
+            editionUnlimited = u
+            editionFirst = f
         }
     }
 

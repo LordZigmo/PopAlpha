@@ -111,6 +111,9 @@ export default function CardMarketIntelClient({
         variants={variants.map((variant) => ({
           printingId: variant.printingId,
           label: variant.label,
+          finish: variant.finish,
+          edition: variant.edition,
+          stamp: variant.stamp,
           currentPrice: variant.currentPrice,
           scrydexPrice: variant.scrydexPrice,
           scrydexAsOfTs: variant.scrydexAsOfTs,

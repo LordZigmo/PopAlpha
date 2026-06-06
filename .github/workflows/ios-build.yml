@@ -1,0 +1,42 @@
+name: iOS Build
+
+# Compile-checks the native iOS app on a macOS runner. SwiftUI/UIKit can't
+# build on Linux, so this is the gate that verifies iOS changes actually
+# compile. Path-filtered to ios/** to avoid spending macOS minutes on
+# web-only changes.
+
+on:
+  push:
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios-build.yml"
+  pull_request:
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios-build.yml"
+
+concurrency:
+  group: ios-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build (iOS Simulator)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Build for iOS Simulator (no signing)
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project ios/PopAlphaApp.xcodeproj \
+            -scheme PopAlphaApp \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
