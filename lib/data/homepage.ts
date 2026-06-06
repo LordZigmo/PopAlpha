@@ -2031,16 +2031,33 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
       if (!hasPermittedPublicPulse(marketPulse)) continue;
       const price = marketPulse.marketPrice ?? null;
       if (price == null || price < MIN_PRICE) continue;
+      // Window-pure labeling: stamp the window the value ACTUALLY came from. The
+      // `changePct7d ?? changePct24h` fallback means a card with no real 7d change
+      // still carries a 24h value — labeling it "7D" makes it a mislabeled mover in
+      // the 7D momentum fallback (and any 7D rail). Label honestly so the 7D filter
+      // below — and the iOS `changeWindow == "7D"` top-movers filter — can exclude
+      // 24h-derived cards. (Codex P2 on #195.)
       const trendPct = marketPulse.changePct7d ?? marketPulse.changePct24h;
+      const trendWindow: HomepageSignalWindow | null =
+        marketPulse.changePct7d != null
+          ? "7D"
+          : marketPulse.changePct24h != null
+            ? "24H"
+            : null;
       trendingCandidatesOut.push(toCard(row.canonical_slug, {
         changePct: trendPct,
-        changeWindow: trendPct !== null ? "7D" : null,
+        changeWindow: trendWindow,
         preferOverrideChange: true,
         allowSparklineFallback: false,
       }));
     }
     trendingCandidatesOut.sort(compareChangeDescending);
     const trendingOut = trendingCandidatesOut.slice(0, SECTION_LIMIT);
+    // Genuine-7D subset of the trending pool for the 7D rails (top_movers + momentum).
+    // The pool honestly labels cards with no real 7d change as "24H" (above); those must
+    // not surface under the 7D toggle. The non-windowed `trendingOut` rail above keeps the
+    // full mixed set. Codex P2 on #197.
+    const trending7D = trendingCandidatesOut.filter((card) => card.change_window === "7D");
     // ── Derived conviction sections (Phase 2) ────────────────────────────
     //
     // Build from the already-assembled positive + negative mover pools so
@@ -2096,7 +2113,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
     const liveTopMovers7D = combineHomepageCards([
       positiveMoversByWindow["7D"].highConfidence,
       positiveMoversByWindow["7D"].all,
-      trendingCandidatesOut,
+      trending7D,
     ]);
     const liveDrops24H = negativeMoversByWindow["24H"].cards.slice(0, SECTION_LIMIT);
     const liveDrops7D = negativeMoversByWindow["7D"].cards.slice(0, SECTION_LIMIT);
@@ -2153,6 +2170,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
     const dailyGainers7D = dailyMoversForDisplay.gainers.filter((c) => c.change_window === "7D");
     const dailyLosers24H = dailyMoversForDisplay.losers.filter((c) => c.change_window === "24H");
     const dailyLosers7D = dailyMoversForDisplay.losers.filter((c) => c.change_window === "7D");
+    const dailyMomentum7D = dailyMoversForDisplay.momentum_7d.filter((c) => c.change_window === "7D");
 
     const signalBoard = {
       market_watch: marketWatchOut,
@@ -2192,10 +2210,15 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
               positiveMoversByWindow["24H"].highConfidence,
               positiveMoversByWindow["24H"].all,
             ]),
-        "7D": dailyMoversForDisplay.momentum_7d.length > 0
-          ? dailyMoversForDisplay.momentum_7d.slice(0, SECTION_LIMIT)
+        // Window-pure: only genuine-7D cards in the 7D momentum rail. Branch on the
+        // filtered `dailyMomentum7D` length (like dailyGainers7D above) so an all-non-7D
+        // daily list falls back to the live pool instead of an empty rail. The trending
+        // pool is mixed after honest "24H" labeling, so use its genuine-7D subset; the
+        // per-window positive movers are already 7D by construction. Codex P2 on #195 / #197.
+        "7D": dailyMomentum7D.length > 0
+          ? dailyMomentum7D.slice(0, SECTION_LIMIT)
           : combineHomepageCards([
-              trendingCandidatesOut,
+              trending7D,
               positiveMoversByWindow["7D"].all,
             ]),
       },
