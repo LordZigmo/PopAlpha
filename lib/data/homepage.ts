@@ -2170,6 +2170,7 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
     const dailyGainers7D = dailyMoversForDisplay.gainers.filter((c) => c.change_window === "7D");
     const dailyLosers24H = dailyMoversForDisplay.losers.filter((c) => c.change_window === "24H");
     const dailyLosers7D = dailyMoversForDisplay.losers.filter((c) => c.change_window === "7D");
+    const dailyMomentum7D = dailyMoversForDisplay.momentum_7d.filter((c) => c.change_window === "7D");
 
     const signalBoard = {
       market_watch: marketWatchOut,
@@ -2209,15 +2210,13 @@ export async function getHomepageData(options: HomepageDataOptions = {}): Promis
               positiveMoversByWindow["24H"].highConfidence,
               positiveMoversByWindow["24H"].all,
             ]),
-        // Window-pure: only genuine-7D cards in the 7D momentum rail. Use the shared
-        // genuine-7D trending subset (the pool is mixed after honest "24H" labeling); the
-        // per-window positive movers are already 7D by construction. Daily momentum_7d is
-        // filtered defensively (external DB rows) BEFORE the limit so a 24h row can't
-        // consume a slot and under-fill the rail. Codex P2 on #195 / #197.
-        "7D": dailyMoversForDisplay.momentum_7d.length > 0
-          ? dailyMoversForDisplay.momentum_7d
-              .filter((card) => card.change_window === "7D")
-              .slice(0, SECTION_LIMIT)
+        // Window-pure: only genuine-7D cards in the 7D momentum rail. Branch on the
+        // filtered `dailyMomentum7D` length (like dailyGainers7D above) so an all-non-7D
+        // daily list falls back to the live pool instead of an empty rail. The trending
+        // pool is mixed after honest "24H" labeling, so use its genuine-7D subset; the
+        // per-window positive movers are already 7D by construction. Codex P2 on #195 / #197.
+        "7D": dailyMomentum7D.length > 0
+          ? dailyMomentum7D.slice(0, SECTION_LIMIT)
           : combineHomepageCards([
               trending7D,
               positiveMoversByWindow["7D"].all,
