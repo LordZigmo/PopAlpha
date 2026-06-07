@@ -447,6 +447,12 @@ struct CardDetailView: View {
         .task(id: "variant|\(activeCard.id)|\(selectedTimeframe.rawValue)|\(selectedPriceMode)|\(selectedPrintingId ?? "")|\(availablePrintings.count)") {
             await loadVariantOverlay()
         }
+        // A new picker selection moves the hero to a different printing; drop any
+        // isolated focus so the chart can't stay stuck on the old variant's line.
+        // (The all-finish overlay usually still contains the focused printing, so
+        // loadVariantOverlay's absent-only cleanup wouldn't clear it.) Timeframe /
+        // EN-JP changes deliberately keep the focus.
+        .onChange(of: selectedPrintingId) { _, _ in variantFocus = nil }
         // Keyed by activeCard.id so the entire data-load fan-out re-fires
         // when the user taps the EN/JP toggle and we swap activeCard.
         // Without the id, SwiftUI runs the task only on first appearance
