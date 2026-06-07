@@ -63,7 +63,7 @@ struct PopAlphaApp: App {
 // button is removed; re-attaching its delegate brings the swipe back. The
 // `viewControllers.count > 1` guard means it only fires when there's a screen
 // to pop, so it never interferes with sheet roots or the tab roots.
-extension UINavigationController: UIGestureRecognizerDelegate {
+extension UINavigationController: @retroactive UIGestureRecognizerDelegate {
     override open func viewDidLoad() {
         super.viewDidLoad()
         interactivePopGestureRecognizer?.delegate = self
