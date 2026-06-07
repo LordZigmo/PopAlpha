@@ -253,6 +253,13 @@ public_signal_policy as (
         -- otherwise fall back to the prior change basis under the same guard.
         case
           when p.public_market_price is null then null
+          -- Single-source PriceCharting: deliberately NO change badge. MUST run
+          -- before the display-change fallback — the single-source headline is now
+          -- non-null, so a stray display_change_pct_24h would otherwise leak a
+          -- movement % onto a low-confidence single-source price.
+          when p.private_trust_status = 'PRICECHARTING_PRIMARY'
+           and p.private_pricecharting_observations_7d >= 5
+            then null
           when p.display_price is not null and p.display_change_pct_24h is not null
             then p.display_change_pct_24h
           -- Price-corroborated (MATCH) cards: prefer the Scrydex-derived change;
@@ -267,10 +274,8 @@ public_signal_policy as (
                      and p.private_guardrail_as_of >= now() - interval '48 hours'
                    then p.private_pricecharting_change_pct_24h else null end
             )
-          -- Single-source PriceCharting: deliberately NO change badge. The price
-          -- is a low-confidence single source; we don't attach a movement % to
-          -- it (mirrors how DIVERGED / thin PRIMARY surface no change). Stays
-          -- null even though the headline is now populated.
+          -- Everything else (non-MATCH corroborated paths) stays null — conservative.
+          -- Single-source is already nulled above, ahead of the display fallback.
           else null
         end
       when p.raw_market_price_outlier then null
@@ -280,6 +285,11 @@ public_signal_policy as (
       when p.is_en_raw then
         case
           when p.public_market_price is null then null
+          -- Single-source PriceCharting: no change badge (see 24h note) — guard runs
+          -- before the display-change fallback.
+          when p.private_trust_status = 'PRICECHARTING_PRIMARY'
+           and p.private_pricecharting_observations_7d >= 5
+            then null
           when p.display_price is not null and p.display_change_pct_7d is not null
             then p.display_change_pct_7d
           -- Price-corroborated (MATCH) cards: prefer the Scrydex-derived change;
@@ -294,7 +304,7 @@ public_signal_policy as (
                      and p.private_guardrail_as_of >= now() - interval '48 hours'
                    then p.private_pricecharting_change_pct_7d else null end
             )
-          -- Single-source PriceCharting: no change badge (see 24h note).
+          -- Everything else stays null (single-source nulled above).
           else null
         end
       when p.raw_market_price_outlier then null
