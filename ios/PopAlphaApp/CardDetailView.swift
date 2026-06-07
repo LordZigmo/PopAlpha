@@ -1684,15 +1684,16 @@ struct CardDetailView: View {
         return ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
                 variantPill("All", isActive: selectedPrintingId == nil) { selectedPrintingId = nil }
-                // Every selectable printing — not just the chartable ones — so a
-                // finish with no/sparse history is still pickable. Colored by
-                // position so each finish always shows its palette color (matching
-                // its overlay line), even when history is too sparse to draw a line.
+                // Every selectable printing — not just the chartable ones. A charted
+                // finish mirrors its overlay line's color (lookup → always matches +
+                // stays distinct); a finish with no line falls back to its palette
+                // slot so it still shows a color instead of a blank dot.
                 ForEach(Array(availablePrintings.enumerated()), id: \.element.id) { idx, p in
                     variantPill(
                         variantLabel(p, includeFinish: mixedFinish),
                         isActive: selectedPrintingId == p.id,
-                        dot: Self.variantPalette[idx % Self.variantPalette.count]
+                        dot: variantSeries.first(where: { $0.id == p.id })?.color
+                              ?? Self.variantPalette[idx % Self.variantPalette.count]
                     ) { selectedPrintingId = p.id }
                 }
             }
