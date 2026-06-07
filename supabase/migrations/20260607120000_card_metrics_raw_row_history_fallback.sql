@@ -50,11 +50,7 @@ begin
     -- alive + priced when its price_snapshots RAW row has gone stale.
     select
       php.canonical_slug,
-      case
-        when split_part(php.variant_ref, '::', 1) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-          then split_part(php.variant_ref, '::', 1)::uuid
-        else null::uuid
-      end as printing_id,
+      php.printing_id, -- Phase-3-resolved printing; variant_ref seg1 keeps the base UUID after stamp/edition remap
       php.price as price_value,
       php.ts as observed_at
     from public.price_history_points php
@@ -513,11 +509,7 @@ begin
     from (
       select
         php.canonical_slug,
-        case
-          when split_part(php.variant_ref, '::', 1) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-            then split_part(php.variant_ref, '::', 1)::uuid
-          else null::uuid
-        end as printing_id
+        php.printing_id -- Phase-3-resolved printing (see raw_history_pts), not variant_ref seg1
       from public.price_history_points php
       where php.provider in ('SCRYDEX', 'POKEMON_TCG_API')
         and php.source_window in ('snapshot', '30d')
@@ -641,11 +633,7 @@ begin
     -- see refresh_card_metrics() for rationale; scoped to v_target_slugs here.
     select
       php.canonical_slug,
-      case
-        when split_part(php.variant_ref, '::', 1) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-          then split_part(php.variant_ref, '::', 1)::uuid
-        else null::uuid
-      end as printing_id,
+      php.printing_id, -- Phase-3-resolved printing; variant_ref seg1 keeps the base UUID after stamp/edition remap
       php.price as price_value,
       php.ts as observed_at
     from public.price_history_points php
@@ -1093,11 +1081,7 @@ begin
     from (
       select
         php.canonical_slug,
-        case
-          when split_part(php.variant_ref, '::', 1) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-            then split_part(php.variant_ref, '::', 1)::uuid
-          else null::uuid
-        end as printing_id
+        php.printing_id -- Phase-3-resolved printing (see raw_history_pts), not variant_ref seg1
       from public.price_history_points php
       where php.provider in ('SCRYDEX', 'POKEMON_TCG_API')
         and php.source_window in ('snapshot', '30d')
