@@ -124,18 +124,26 @@ struct SearchView: View {
                     .textInputAutocapitalization(.never)
                     .submitLabel(.search)
 
-                if !query.isEmpty {
+                // Show the clear control whenever there's text OR the field is
+                // focused — so backspacing to empty still leaves a tap target to
+                // drop the keyboard (an empty, focused field otherwise strands it).
+                if !query.isEmpty || isTextFieldFocused {
                     Button {
-                        query = ""
-                        results = []
-                        hasSearched = false
-                        searchError = nil
+                        if query.isEmpty {
+                            // Already empty → the tap just dismisses the keyboard.
+                            isTextFieldFocused = false
+                        } else {
+                            query = ""
+                            results = []
+                            hasSearched = false
+                            searchError = nil
+                        }
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 16))
                             .foregroundStyle(PA.Colors.muted)
                     }
-                    .accessibilityLabel("Clear search")
+                    .accessibilityLabel(query.isEmpty ? "Dismiss keyboard" : "Clear search")
                 }
             }
             .padding(10)
