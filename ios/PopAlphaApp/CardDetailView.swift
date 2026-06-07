@@ -447,6 +447,12 @@ struct CardDetailView: View {
         .task(id: "variant|\(activeCard.id)|\(selectedTimeframe.rawValue)|\(selectedPriceMode)|\(selectedPrintingId ?? "")|\(availablePrintings.count)") {
             await loadVariantOverlay()
         }
+        // A new picker selection moves the hero to a different printing; drop any
+        // isolated focus so the chart can't stay stuck on the old variant's line.
+        // (The all-finish overlay usually still contains the focused printing, so
+        // loadVariantOverlay's absent-only cleanup wouldn't clear it.) Timeframe /
+        // EN-JP changes deliberately keep the focus.
+        .onChange(of: selectedPrintingId) { _, _ in variantFocus = nil }
         // Keyed by activeCard.id so the entire data-load fan-out re-fires
         // when the user taps the EN/JP toggle and we swap activeCard.
         // Without the id, SwiftUI runs the task only on first appearance
@@ -1585,7 +1591,7 @@ struct CardDetailView: View {
         }
     }
 
-    // MARK: - RAW Variant Overlay (editions + stamps of the same finish)
+    // MARK: - RAW Variant Overlay (all printings — every finish, edition, stamp)
 
     private struct VariantSeriesDatum: Identifiable {
         let id: String        // printingId
@@ -1602,27 +1608,37 @@ struct CardDetailView: View {
         Color(red: 0.984, green: 0.443, blue: 0.522),   // rose
     ]
 
-    /// Short legend label distinguishing a printing within its finish group:
-    /// edition (1st Ed) + stamp (Shadowless, Poké Ball…). "Unlimited" when it
-    /// carries neither.
-    private func variantLabel(_ p: CardPrintingOption) -> String {
+    /// Short legend label for a printing in the overlay. Prepends the finish
+    /// (Holo / Reverse Holo / Regular…) when the overlay spans more than one
+    /// finish, then edition (1st Ed) + stamp (Shadowless, Poké Ball…).
+    /// "Unlimited" when it carries none of those.
+    private func variantLabel(_ p: CardPrintingOption, includeFinish: Bool) -> String {
         var parts: [String] = []
+        if includeFinish { parts.append(p.finishLabel) }
         if p.edition == "FIRST_EDITION" { parts.append("1st Ed") }
         if let stamp = p.stamp, !stamp.isEmpty { parts.append(CardPrintingOption.stampLabel(stamp)) }
         return parts.isEmpty ? "Unlimited" : parts.joined(separator: " · ")
     }
 
-    /// Printings comparable to the active one — same finish, any edition/stamp
-    /// (stamped vs non-stamped, 1st Ed vs Unlimited). Capped to the palette
-    /// size so the overlay stays readable; cross-finish stays on the picker.
+    /// Every printing of this card — all finishes, editions, and stamps —
+    /// overlaid on one graph (e.g. Holo Unlimited + Regular + Reverse Holo +
+    /// 1st Ed). Capped to the palette size so the overlay stays readable;
+    /// printings without enough chartable history are dropped downstream. The
+    /// selected printing is always kept even when it sorts past the cap
+    /// (fetchPrintings orders by finish), so changing finish never renders an
+    /// overlay that omits the user's current pick.
     private var variantGroupPrintings: [CardPrintingOption] {
-        guard let active = availablePrintings.first(where: { $0.id == selectedPrintingId }) ?? availablePrintings.first else {
-            return []
+        let cap = Self.variantPalette.count
+        let head = Array(availablePrintings.prefix(cap))
+        // Common case (≤ cap, or the selection is already in the first `cap`):
+        // natural order → stable colors, selection included.
+        if availablePrintings.count <= cap || head.contains(where: { $0.id == selectedPrintingId }) {
+            return head
         }
-        return availablePrintings
-            .filter { $0.finish == active.finish }
-            .prefix(Self.variantPalette.count)
-            .map { $0 }
+        // More printings than colors and the selection sorts past the cap:
+        // swap it in so the user's pick is always on the chart.
+        guard let active = availablePrintings.first(where: { $0.id == selectedPrintingId }) else { return head }
+        return [active] + head.dropLast()
     }
 
     /// True once at least two variants of the active finish have chartable
@@ -1712,13 +1728,16 @@ struct CardDetailView: View {
             }
         }
 
+        // Show the finish in each legend label only when the overlay actually
+        // spans more than one finish (otherwise "Holo" on every line is noise).
+        let mixedFinish = Set(group.map(\.finish)).count > 1
         // Preserve group order; assign palette colors by position so a given
         // printing keeps a stable color across the chart, legend, and pills.
         let ordered: [VariantSeriesDatum] = group.enumerated().compactMap { idx, p in
             guard let pts = fetched[p.id] else { return nil }
             return VariantSeriesDatum(
                 id: p.id,
-                label: variantLabel(p),
+                label: variantLabel(p, includeFinish: mixedFinish),
                 color: Self.variantPalette[idx % Self.variantPalette.count],
                 points: pts
             )
