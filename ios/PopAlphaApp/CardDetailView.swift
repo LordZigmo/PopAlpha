@@ -149,6 +149,11 @@ struct CardDetailView: View {
     /// waiting on a fresh fetch. Consumed on swap only when the prefetched
     /// slug matches the target; re-primed for the new partner after each swap.
     @State private var preloadedPairedMetrics: (slug: String, metrics: CardMetricsResult)?
+    /// The canonical (card-level) metrics, captured on load and never replaced by
+    /// the per-printing price takeover. The hero change badge reads this so the
+    /// detail's 24h/7d move always matches the homepage — the per-printing change
+    /// is frequently unpopulated and would otherwise blank the badge to "--".
+    @State private var canonicalMetrics: CardMetricsResult?
     @State private var friendActivity: ActivityService.CardActivityResponse?
     @State private var showAddHolding = false
     @State private var selectedPriceMode: PriceMode = .nearMint
@@ -492,6 +497,7 @@ struct CardDetailView: View {
             cardProfile = fetchedProfile
             do {
                 cardMetrics = try await CardService.shared.fetchCardMetrics(slug: activeCard.id)
+                canonicalMetrics = cardMetrics
             } catch {
                 // Preserve the prior fallback (nil → cached activeCard.price,
                 // which is last-known-trusted, not garbage) but don't let a
@@ -960,6 +966,7 @@ struct CardDetailView: View {
         // If we prefetched the target's price metrics, prime them so the hero
         // price is instant; otherwise nil and the .task refetch fills it in.
         cardMetrics = preloadedPairedMetrics?.slug == targetSlug ? preloadedPairedMetrics?.metrics : nil
+        canonicalMetrics = cardMetrics
         preloadedPairedMetrics = nil
         chartPrices = []
         chartTimestamps = []
@@ -1236,9 +1243,14 @@ struct CardDetailView: View {
     private var heroChange: (pct: Double?, direction: ChangeDirection, text: String, window: String) {
         let pct: Double?
         let window: String
-        if let metrics = cardMetrics, let m24 = metrics.changePct24H {
+        // The change badge reflects the CARD-LEVEL move — the canonical row, the
+        // same value the homepage shows. cardMetrics may have been taken over by
+        // the selected printing (for the per-finish price), whose change is often
+        // unpopulated and would blank the badge or diverge from the homepage.
+        let changeSource = canonicalMetrics ?? cardMetrics
+        if let metrics = changeSource, let m24 = metrics.changePct24H {
             pct = m24; window = "24H"
-        } else if let metrics = cardMetrics, let m7 = metrics.changePct7D {
+        } else if let metrics = changeSource, let m7 = metrics.changePct7D {
             pct = m7; window = "7D"
         } else {
             pct = activeCard.changePct; window = activeCard.changeWindow
