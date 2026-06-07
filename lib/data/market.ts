@@ -22,6 +22,7 @@ export type MarketBlendPolicy =
   | "YAHOO_JP_PRIMARY"
   | "SNKRDUNK_PRIMARY"
   | "POPALPHA_MARKET_CONFIDENT"
+  | "POPALPHA_MARKET_SINGLE_SOURCE"
   | "POPALPHA_MARKET_LOW_CONFIDENCE"
   | "POPALPHA_MARKET_QUARANTINED"
   | "NO_RELIABLE_PRICE"
@@ -32,6 +33,7 @@ export type MarketPriceDisplayState =
   | "SIGNAL_HIGHER"
   | "SIGNAL_LOWER"
   | "PUBLIC_ONLY"
+  | "PRICECHARTING_SINGLE_SOURCE"
   | "UNDER_REVIEW"
   | "NO_RELIABLE_PRICE";
 
@@ -180,6 +182,7 @@ function isMarketBlendPolicy(value: string | null | undefined): value is MarketB
     || value === "YAHOO_JP_PRIMARY"
     || value === "SNKRDUNK_PRIMARY"
     || value === "POPALPHA_MARKET_CONFIDENT"
+    || value === "POPALPHA_MARKET_SINGLE_SOURCE"
     || value === "POPALPHA_MARKET_LOW_CONFIDENCE"
     || value === "POPALPHA_MARKET_QUARANTINED"
     || value === "NO_RELIABLE_PRICE"
@@ -191,6 +194,7 @@ function isMarketPriceDisplayState(value: string | null | undefined): value is M
     || value === "SIGNAL_HIGHER"
     || value === "SIGNAL_LOWER"
     || value === "PUBLIC_ONLY"
+    || value === "PRICECHARTING_SINGLE_SOURCE"
     || value === "UNDER_REVIEW"
     || value === "NO_RELIABLE_PRICE";
 }

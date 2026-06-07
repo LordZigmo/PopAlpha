@@ -562,8 +562,12 @@ public_provenance_policy as (
             end,
           'sourceMix',
             jsonb_build_object(
+              -- Single-source PriceCharting (PRIMARY) has a price but NO Scrydex —
+              -- claim zero Scrydex weight so source-mix consumers aren't misled.
               'scrydexWeight',
-                case when s.public_market_price is not null then 1 else 0 end,
+                case when s.public_market_price is not null
+                      and coalesce(s.private_trust_status, '') <> 'PRICECHARTING_PRIMARY'
+                     then 1 else 0 end,
               'publicInputWeight',
                 case when s.public_market_price is not null then 1 else 0 end
             ),
