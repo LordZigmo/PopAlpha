@@ -1284,11 +1284,13 @@ struct CardDetailView: View {
             .background(PA.Colors.surface)
             .clipShape(RoundedRectangle(cornerRadius: 10))
 
-            // Variant select pills — RAW mode, shown when ≥2 printings (finishes /
-            // editions / stamps) are chartable. "All" overlays every finish on a
-            // normalized scale; tapping a pill isolates that line and sets the
-            // headline price to that printing.
-            if !selectedPriceMode.isGraded, hasVariantOverlay {
+            // Variant select pills — RAW mode. Shown when ≥2 printings are
+            // chartable, OR a finish is currently selected — so "All" stays
+            // reachable even if loadVariantOverlay filtered the overlay down to a
+            // single chartable line (otherwise the headline/chart could strand on
+            // a printing with no way back). "All" overlays every finish on a
+            // normalized scale; tapping a pill isolates that line + sets the price.
+            if !selectedPriceMode.isGraded, hasVariantOverlay || selectedPrintingId != nil {
                 variantSelectPills
             }
 
