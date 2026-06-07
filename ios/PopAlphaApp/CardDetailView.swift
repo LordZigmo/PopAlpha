@@ -137,7 +137,7 @@ struct CardDetailView: View {
     /// so the user immediately sees they're back on the same card.
     @State private var showAddedBanner = false
     @State private var autoAddError: String?
-    @State private var selectedTimeframe: ChartTimeframe = .week
+    @State private var selectedTimeframe: ChartTimeframe = .month
     @State private var chartPrices: [Double] = []
     @State private var chartTimestamps: [String] = []
     @State private var chartLoading = false
@@ -1606,12 +1606,16 @@ struct CardDetailView: View {
         let points: [PricePoint]
     }
 
+    // Stable, vivid colors assigned to printings by position (1st finish → [0],
+    // 2nd → [1], …) so a printing keeps one color across the chart, legend, and
+    // pills. 3rd = purple, 4th = red per design; all kept distinct so a 3–4
+    // finish overlay stays legible.
     private static let variantPalette: [Color] = [
-        PA.Colors.accent,                               // teal
-        Color(red: 0.659, green: 0.545, blue: 0.980),   // purple
-        Color(red: 0.984, green: 0.749, blue: 0.141),   // amber
-        Color(red: 0.376, green: 0.647, blue: 0.980),   // blue
-        Color(red: 0.984, green: 0.443, blue: 0.522),   // rose
+        PA.Colors.accent,                               // 1st — teal
+        Color(red: 0.984, green: 0.749, blue: 0.141),   // 2nd — amber
+        Color(red: 0.659, green: 0.545, blue: 0.980),   // 3rd — purple
+        Color(red: 0.918, green: 0.263, blue: 0.275),   // 4th — red
+        Color(red: 0.376, green: 0.647, blue: 0.980),   // 5th — blue
     ]
 
     /// Short legend label for a printing in the overlay. Prepends the finish
@@ -1681,13 +1685,14 @@ struct CardDetailView: View {
             HStack(spacing: 6) {
                 variantPill("All", isActive: selectedPrintingId == nil) { selectedPrintingId = nil }
                 // Every selectable printing — not just the chartable ones — so a
-                // finish with no/sparse history is still pickable. The dot matches
-                // its overlay line when it has one; otherwise the pill shows no dot.
-                ForEach(availablePrintings, id: \.id) { p in
+                // finish with no/sparse history is still pickable. Colored by
+                // position so each finish always shows its palette color (matching
+                // its overlay line), even when history is too sparse to draw a line.
+                ForEach(Array(availablePrintings.enumerated()), id: \.element.id) { idx, p in
                     variantPill(
                         variantLabel(p, includeFinish: mixedFinish),
                         isActive: selectedPrintingId == p.id,
-                        dot: variantSeries.first(where: { $0.id == p.id })?.color
+                        dot: Self.variantPalette[idx % Self.variantPalette.count]
                     ) { selectedPrintingId = p.id }
                 }
             }
