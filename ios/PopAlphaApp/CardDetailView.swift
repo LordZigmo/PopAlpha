@@ -1617,9 +1617,22 @@ struct CardDetailView: View {
     /// Every printing of this card — all finishes, editions, and stamps —
     /// overlaid on one graph (e.g. Holo Unlimited + Regular + Reverse Holo +
     /// 1st Ed). Capped to the palette size so the overlay stays readable;
-    /// printings without enough chartable history are dropped downstream.
+    /// printings without enough chartable history are dropped downstream. The
+    /// selected printing is always kept even when it sorts past the cap
+    /// (fetchPrintings orders by finish), so changing finish never renders an
+    /// overlay that omits the user's current pick.
     private var variantGroupPrintings: [CardPrintingOption] {
-        Array(availablePrintings.prefix(Self.variantPalette.count))
+        let cap = Self.variantPalette.count
+        let head = Array(availablePrintings.prefix(cap))
+        // Common case (≤ cap, or the selection is already in the first `cap`):
+        // natural order → stable colors, selection included.
+        if availablePrintings.count <= cap || head.contains(where: { $0.id == selectedPrintingId }) {
+            return head
+        }
+        // More printings than colors and the selection sorts past the cap:
+        // swap it in so the user's pick is always on the chart.
+        guard let active = availablePrintings.first(where: { $0.id == selectedPrintingId }) else { return head }
+        return [active] + head.dropLast()
     }
 
     /// True once at least two variants of the active finish have chartable
