@@ -148,6 +148,8 @@ struct InteractiveChartView: View {
                     .font(.system(size: 22, weight: .bold, design: .rounded))
                     .foregroundStyle(PA.Colors.text)
                     .contentTransition(.numericText())
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
 
                 if let change = displayChange {
                     (Text("start ")
@@ -156,6 +158,8 @@ struct InteractiveChartView: View {
                      + Text(change.text)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(change.direction.color))
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
                 }
 
                 if let d24 = display24h {
@@ -165,6 +169,8 @@ struct InteractiveChartView: View {
                      + Text(d24.text)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(d24.direction.color))
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
                 }
 
                 Spacer()

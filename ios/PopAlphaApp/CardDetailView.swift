@@ -178,9 +178,9 @@ struct CardDetailView: View {
     /// flips to absolute dollars.
     @State private var gradePerfSeries: [GradePerfDatum] = []
     @State private var gradePerfScale: MultiSeriesChartModel.Scale = .indexed
-    /// RAW variant overlay — all printings sharing the active finish
-    /// (editions + stamps) charted together, with pills to isolate one.
-    @State private var variantFocus: String? = nil   // nil = All; else printingId
+    /// RAW variant overlay — every printing (finishes + editions + stamps)
+    /// charted together; the finish pills set selectedPrintingId, which
+    /// isolates one line (nil = All → normalized overlay of every finish).
     @State private var variantSeries: [VariantSeriesDatum] = []
     /// Slug of the cross-language partner card (EN <-> JP). Nil when no
     /// pairing exists in card_translations, or before the
@@ -452,12 +452,6 @@ struct CardDetailView: View {
         .task(id: "variant|\(activeCard.id)|\(selectedTimeframe.rawValue)|\(selectedPriceMode)|\(selectedPrintingId ?? "")|\(availablePrintings.count)") {
             await loadVariantOverlay()
         }
-        // A new picker selection moves the hero to a different printing; drop any
-        // isolated focus so the chart can't stay stuck on the old variant's line.
-        // (The all-finish overlay usually still contains the focused printing, so
-        // loadVariantOverlay's absent-only cleanup wouldn't clear it.) Timeframe /
-        // EN-JP changes deliberately keep the focus.
-        .onChange(of: selectedPrintingId) { _, _ in variantFocus = nil }
         // Keyed by activeCard.id so the entire data-load fan-out re-fires
         // when the user taps the EN/JP toggle and we swap activeCard.
         // Without the id, SwiftUI runs the task only on first appearance
@@ -521,14 +515,15 @@ struct CardDetailView: View {
                     variantRef: selectedPrintingId.map { "\($0)::RAW" }
                 )
             )
-            // Load available finish variants. Ordering is handled downstream
-            // by `toFinishGroups()` so the picker controls the visual order.
+            // Load every printing (finishes + editions + stamps) for the chart's
+            // finish pills.
             if let printings = try? await CardService.shared.fetchPrintings(slug: activeCard.id) {
-                let groups = printings.toFinishGroups()
-                let initialId = groups.first?.defaultPrintingId ?? printings.first?.id
+                // selectedPrintingId stays nil by default → the chart shows the
+                // all-finish overlay and the headline reads the canonical
+                // (preferred-printing) price. Tapping a finish pill on the chart
+                // selects that printing.
                 await MainActor.run {
                     availablePrintings = printings
-                    if selectedPrintingId == nil { selectedPrintingId = initialId }
                 }
             }
             // Load condition-based prices
@@ -1016,11 +1011,6 @@ struct CardDetailView: View {
             // 1. Title + Price section (recognition + current market state)
             pricingSection
 
-            // 2. Finish variant pill selector — identity cue, stays near title
-            if shouldShowFinishPicker {
-                finishPillSection
-            }
-
             // PopAlpha insight — the wedge. First real payoff on the
             // page; anchors the user around our interpretation before
             // raw mechanics. (Watchlist row was removed; "Add to
@@ -1294,10 +1284,12 @@ struct CardDetailView: View {
             .background(PA.Colors.surface)
             .clipShape(RoundedRectangle(cornerRadius: 10))
 
-            // Variant overlay pills — RAW mode, when the active finish has ≥2
-            // variants (editions/stamps). All lines by default; tap to isolate.
+            // Variant select pills — RAW mode, shown when ≥2 printings (finishes /
+            // editions / stamps) are chartable. "All" overlays every finish on a
+            // normalized scale; tapping a pill isolates that line and sets the
+            // headline price to that printing.
             if !selectedPriceMode.isGraded, hasVariantOverlay {
-                variantFocusPills
+                variantSelectPills
             }
 
             // Interactive chart
@@ -1660,12 +1652,15 @@ struct CardDetailView: View {
     @ViewBuilder
     private var chartContent: some View {
         if !selectedPriceMode.isGraded, hasVariantOverlay {
-            if let focus = variantFocus, let one = variantSeries.first(where: { $0.id == focus }) {
+            if let sel = selectedPrintingId, let one = variantSeries.first(where: { $0.id == sel }) {
+                // A specific finish is selected → isolate its line.
                 InteractiveChartView(data: one.points.map(\.price), timestamps: one.points.map(\.ts), direction: variantDirection(one.points), lineWidth: 2, height: 140)
             } else {
+                // "All" → every finish overlaid on a normalized (indexed) scale, so a
+                // low-dollar Reverse Holo stays visible beside a high-dollar Holo.
                 MultiLineChartView(
                     series: variantSeries.map { MultiLineSeriesInput(id: $0.id, label: $0.label, color: $0.color, points: $0.points) },
-                    scale: .absolute,
+                    scale: .indexed,
                     showChangeDetails: true,
                     height: 140
                 )
@@ -1675,12 +1670,12 @@ struct CardDetailView: View {
         }
     }
 
-    private var variantFocusPills: some View {
+    private var variantSelectPills: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
-                variantPill("All", isActive: variantFocus == nil) { variantFocus = nil }
+                variantPill("All", isActive: selectedPrintingId == nil) { selectedPrintingId = nil }
                 ForEach(variantSeries) { v in
-                    variantPill(v.label, isActive: variantFocus == v.id, dot: v.color) { variantFocus = v.id }
+                    variantPill(v.label, isActive: selectedPrintingId == v.id, dot: v.color) { selectedPrintingId = v.id }
                 }
             }
         }
@@ -1688,6 +1683,7 @@ struct CardDetailView: View {
 
     private func variantPill(_ title: String, isActive: Bool, dot: Color? = nil, _ action: @escaping () -> Void) -> some View {
         Button {
+            PAHaptics.selection()
             withAnimation(.easeInOut(duration: 0.15)) { action() }
         } label: {
             HStack(spacing: 5) {
@@ -1758,9 +1754,6 @@ struct CardDetailView: View {
         await MainActor.run {
             guard activeCard.id == slug, selectedTimeframe == tf, !selectedPriceMode.isGraded else { return }
             variantSeries = ordered
-            if let f = variantFocus, !ordered.contains(where: { $0.id == f }) {
-                variantFocus = nil
-            }
         }
     }
 
@@ -2570,86 +2563,6 @@ struct CardDetailView: View {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short
         return "Updated \(formatter.localizedString(for: date, relativeTo: Date()))"
-    }
-
-    // MARK: - Finish Variant Selector
-
-    private var finishGroups: [FinishGroup] {
-        availablePrintings.toFinishGroups()
-    }
-
-    private var activeFinishGroup: FinishGroup? {
-        let groups = finishGroups
-        if let id = selectedPrintingId,
-           let match = groups.first(where: { group in
-               group.variants.contains(where: { $0.printingId == id })
-           }) {
-            return match
-        }
-        return groups.first
-    }
-
-    private var shouldShowFinishPicker: Bool {
-        let groups = finishGroups
-        if groups.count > 1 { return true }
-        if let only = groups.first, only.variants.count > 1 { return true }
-        return false
-    }
-
-    private var finishPillSection: some View {
-        let groups = finishGroups
-        let active = activeFinishGroup
-
-        return VStack(alignment: .leading, spacing: 10) {
-            Text("Finish")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(PA.Colors.muted)
-                .textCase(.uppercase)
-
-            HStack(spacing: 6) {
-                ForEach(groups) { group in
-                    let isActive = active?.id == group.id
-                    Button {
-                        PAHaptics.selection()
-                        selectedPrintingId = group.defaultPrintingId
-                    } label: {
-                        Text(group.finishLabel)
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(isActive ? PA.Colors.background : PA.Colors.text)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 7)
-                            .background(isActive ? detailAccent : PA.Colors.surfaceSoft)
-                            .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-
-            if let active, active.variants.count > 1 {
-                HStack(spacing: 6) {
-                    ForEach(active.variants) { variant in
-                        let isActive = selectedPrintingId == variant.printingId
-                        Button {
-                            PAHaptics.selection()
-                            selectedPrintingId = variant.printingId
-                        } label: {
-                            Text(variant.stampLabel)
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(isActive ? PA.Colors.text : PA.Colors.muted)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(isActive ? PA.Colors.surfaceSoft : Color.clear)
-                                .overlay(
-                                    Capsule().stroke(isActive ? detailAccent.opacity(0.4) : PA.Colors.muted.opacity(0.15), lineWidth: 1)
-                                )
-                                .clipShape(Capsule())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.leading, 4)
-            }
-        }
     }
 
     // MARK: - Grade Pill Selector
