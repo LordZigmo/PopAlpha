@@ -1284,13 +1284,13 @@ struct CardDetailView: View {
             .background(PA.Colors.surface)
             .clipShape(RoundedRectangle(cornerRadius: 10))
 
-            // Variant select pills — RAW mode. Shown when ≥2 printings are
-            // chartable, OR a finish is currently selected — so "All" stays
-            // reachable even if loadVariantOverlay filtered the overlay down to a
-            // single chartable line (otherwise the headline/chart could strand on
-            // a printing with no way back). "All" overlays every finish on a
-            // normalized scale; tapping a pill isolates that line + sets the price.
-            if !selectedPriceMode.isGraded, hasVariantOverlay || selectedPrintingId != nil {
+            // Variant select pills — RAW mode. Shown whenever the card has ≥2
+            // selectable printings (or one is selected, so "All" stays reachable).
+            // Pills cover every selectable finish — not just the chartable ones —
+            // so a finish with no/sparse history is still pickable for the headline
+            // price. "All" overlays the chartable finishes on a normalized scale;
+            // tapping a pill isolates that line (when it has one) + sets the price.
+            if !selectedPriceMode.isGraded, availablePrintings.count > 1 || selectedPrintingId != nil {
                 variantSelectPills
             }
 
@@ -1673,11 +1673,22 @@ struct CardDetailView: View {
     }
 
     private var variantSelectPills: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        // Finish prefix only when finishes actually differ, so a single-finish
+        // card's edition pills read "1st Ed" / "Unlimited" rather than
+        // "Holo · 1st Ed" / "Holo · Unlimited".
+        let mixedFinish = Set(availablePrintings.map(\.finishLabel)).count > 1
+        return ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
                 variantPill("All", isActive: selectedPrintingId == nil) { selectedPrintingId = nil }
-                ForEach(variantSeries) { v in
-                    variantPill(v.label, isActive: selectedPrintingId == v.id, dot: v.color) { selectedPrintingId = v.id }
+                // Every selectable printing — not just the chartable ones — so a
+                // finish with no/sparse history is still pickable. The dot matches
+                // its overlay line when it has one; otherwise the pill shows no dot.
+                ForEach(availablePrintings, id: \.id) { p in
+                    variantPill(
+                        variantLabel(p, includeFinish: mixedFinish),
+                        isActive: selectedPrintingId == p.id,
+                        dot: variantSeries.first(where: { $0.id == p.id })?.color
+                    ) { selectedPrintingId = p.id }
                 }
             }
         }
