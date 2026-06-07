@@ -573,14 +573,26 @@ public_provenance_policy as (
             ),
           'sampleCounts7d',
             jsonb_build_object(
+              -- Single-source PriceCharting: no Scrydex sales (scrydex 0), and the
+              -- public sample is the PriceCharting obs that passed the >=5 gate —
+              -- not the absent/stale Scrydex count — so the row isn't seen as
+              -- unsampled by UI / strength logic.
               'scrydex',
                 case
+                  when s.private_trust_status = 'PRICECHARTING_PRIMARY'
+                   and s.private_pricecharting_observations_7d >= 5
+                   and s.public_market_price is not null
+                    then 0
                   when coalesce(s.market_provenance->'sampleCounts7d'->>'scrydex', '') ~ '^[0-9]+$'
                     then (s.market_provenance->'sampleCounts7d'->>'scrydex')::integer
                   else 0
                 end,
               'public',
                 case
+                  when s.private_trust_status = 'PRICECHARTING_PRIMARY'
+                   and s.private_pricecharting_observations_7d >= 5
+                   and s.public_market_price is not null
+                    then s.private_pricecharting_observations_7d
                   when s.public_market_price is not null
                    and coalesce(s.market_provenance->'sampleCounts7d'->>'scrydex', '') ~ '^[0-9]+$'
                     then (s.market_provenance->'sampleCounts7d'->>'scrydex')::integer
