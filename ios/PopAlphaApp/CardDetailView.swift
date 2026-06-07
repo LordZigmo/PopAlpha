@@ -1757,16 +1757,15 @@ struct CardDetailView: View {
         // Show the finish in each legend label only when the overlay actually
         // spans more than one finish (otherwise "Holo" on every line is noise).
         let mixedFinish = Set(group.map(\.finish)).count > 1
-        // Color each line by the printing's position in availablePrintings (NOT the
-        // capped group order, which swaps a past-cap selection to the front), so a
-        // line always matches its pill — the pills color by the same index.
-        let ordered: [VariantSeriesDatum] = group.compactMap { p in
+        // Color drawn lines by their position in the (capped) overlay set so the
+        // ≤5 lines on screen are always mutually distinct. Pills mirror a line's
+        // color via a lookup (below), so a line and its pill never drift apart.
+        let ordered: [VariantSeriesDatum] = group.enumerated().compactMap { idx, p in
             guard let pts = fetched[p.id] else { return nil }
-            let colorIdx = availablePrintings.firstIndex(where: { $0.id == p.id }) ?? 0
             return VariantSeriesDatum(
                 id: p.id,
                 label: variantLabel(p, includeFinish: mixedFinish),
-                color: Self.variantPalette[colorIdx % Self.variantPalette.count],
+                color: Self.variantPalette[idx % Self.variantPalette.count],
                 points: pts
             )
         }
