@@ -1076,6 +1076,27 @@ struct CardDetailView: View {
         .padding(PA.Layout.sectionPadding)
     }
 
+    /// Explanation shown in place of a value when the canonical EN-RAW price is
+    /// suppressed because our two market sources (PriceCharting + Scrydex)
+    /// disagree beyond the trust threshold (market_blend_policy ==
+    /// "POPALPHA_MARKET_QUARANTINED"). We deliberately show no headline for these
+    /// — asserting either source would imply a confidence we don't have — so this
+    /// tells the user WHY the price is blank rather than leaving a bare dash.
+    /// Gated on the hero actually being blank ("—") so it auto-hides the moment a
+    /// graded/JP variant with a real price is selected.
+    private var divergedPriceNote: String? {
+        // EN-RAW canonical only — the QUARANTINED policy describes the raw
+        // PriceCharting-vs-Scrydex divergence, not a graded or JP variant. In
+        // graded mode a missing graded price also renders "—", so gate out
+        // non-raw modes (and JP) to avoid attaching the note to the wrong price.
+        guard !selectedPriceMode.isGraded,
+              !isJapaneseCard,
+              currentHeroPrice == "—",
+              cardMetrics?.marketBlendPolicy == "POPALPHA_MARKET_QUARANTINED"
+        else { return nil }
+        return "Our market sources disagree too much to give a confident price — some independent research may be required."
+    }
+
     private var pricingSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top) {
@@ -1188,6 +1209,24 @@ struct CardDetailView: View {
                     .font(PA.Typography.caption)
                     .foregroundStyle(PA.Colors.muted)
                     .accessibilityLabel("Low-dollar card")
+            }
+
+            // Diverged-price note: PriceCharting + Scrydex conflict beyond the
+            // trust threshold, so the headline is intentionally blank. Explain it.
+            if let divergedPriceNote {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(PA.Colors.muted)
+                        .accessibilityHidden(true)
+                    Text(divergedPriceNote)
+                        .font(PA.Typography.caption)
+                        .foregroundStyle(PA.Colors.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.top, 2)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(divergedPriceNote)
             }
 
             // (JP per-source breakdown moved out of the hero into its own
