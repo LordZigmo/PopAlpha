@@ -60,6 +60,7 @@ struct MarketplaceView: View {
     @State private var community: HomepageCommunityDTO?
     @State private var isLoading = true
     @State private var loadError: String?
+    @State private var skeletonPulse = false
 
     // MARK: UI state
     @State private var showSearch = false
@@ -418,15 +419,33 @@ struct MarketplaceView: View {
         }
     }
 
+    // Skeleton placeholder for the signal rails — a couple of title bars + card
+    // rows that gently pulse, so a cold/slow load reads as "content arriving"
+    // rather than a bare spinner. Now rarely seen (the homepage precompute makes
+    // /api/homepage a ~ms blob read), but it's the honest loading affordance.
     private var loadingState: some View {
-        VStack(spacing: 16) {
-            ProgressView().tint(market.accent)
-            Text("Loading market signals...")
-                .font(PA.Typography.cardSubtitle)
-                .foregroundStyle(PA.Colors.muted)
+        VStack(alignment: .leading, spacing: 28) {
+            ForEach(0..<2, id: \.self) { _ in
+                VStack(alignment: .leading, spacing: 12) {
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(PA.Colors.muted.opacity(0.18))
+                        .frame(width: 150, height: 16)
+                    HStack(spacing: 12) {
+                        ForEach(0..<3, id: \.self) { _ in
+                            RoundedRectangle(cornerRadius: 14)
+                                .fill(PA.Colors.muted.opacity(0.12))
+                                .frame(width: 132, height: 168)
+                        }
+                    }
+                }
+            }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 60)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 8)
+        .opacity(skeletonPulse ? 1.0 : 0.55)
+        .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: skeletonPulse)
+        .onAppear { skeletonPulse = true }
+        .accessibilityLabel("Loading market signals")
     }
 
     private func errorState(_ message: String) -> some View {
@@ -629,7 +648,25 @@ struct MarketplaceView: View {
         }()
         async let profileTask: PersonalizedProfileResponse? =
             PersonalizationService.shared.fetchProfile()
-        async let signalTask = CardService.shared.fetchHomepageSignalBoard()
+        // Auto-retry the signal board on transient failure (network blip, a cold
+        // function) so a flaky first load self-heals instead of dropping the user
+        // on the manual retry CTA. Cancellation is re-thrown immediately (never
+        // retried) so a legitimate .task re-fire still wins.
+        async let signalTask: HomepageDataDTO = {
+            var lastError: Error?
+            for attempt in 0..<3 {
+                do { return try await CardService.shared.fetchHomepageSignalBoard() }
+                catch is CancellationError { throw CancellationError() }
+                catch let urlError as URLError where urlError.code == .cancelled { throw urlError }
+                catch {
+                    lastError = error
+                    if attempt < 2 {
+                        try await Task.sleep(nanoseconds: UInt64(attempt + 1) * 400_000_000)
+                    }
+                }
+            }
+            throw lastError ?? URLError(.unknown)
+        }()
         // Logger.ui.debug on the catch so a failing fetch leaves a
         // breadcrumb in the Xcode console — silent catch masked total
         // failure as "brief is just empty" before. (See
