@@ -83,6 +83,7 @@ export const CRON_ROUTES = [
   "cron/refresh-graded-variant-metrics",
   "cron/refresh-set-summaries",
   "cron/refresh-ai-brief",
+  "cron/refresh-homepage-cache",
   "cron/refresh-card-profiles",
   "cron/downsample-price-history",
   "cron/prune-old-data",
