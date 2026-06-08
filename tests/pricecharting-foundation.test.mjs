@@ -297,6 +297,64 @@ export async function runPriceChartingFoundationTests() {
     console_name: "Pokemon 2000 Topps Chrome",
     genre: "Pokemon Card",
   }), false);
+
+  // Set-token gate (Bucket A): a console name that is a SHORTER form of the
+  // canonical set must still match — "Expedition Base Set" <-> console "Pokemon
+  // Expedition" (previously failed: the product name polluted the set tokens and
+  // "base" wasn't on the product side).
+  const expeditionMatch = buildPriceChartingMatchDecision({
+    product: {
+      product_id: "pc-golem-expedition",
+      product_name: "Golem #14",
+      console_name: "Pokemon Expedition",
+      genre: "Pokemon Card",
+    },
+    canonicalCards: [{
+      slug: "expedition-base-set-14-golem",
+      language: "EN",
+      canonical_name: "Golem",
+      card_number: "14",
+      set_name: "Expedition Base Set",
+    }],
+    printings: [{
+      id: "printing-golem-expedition",
+      canonical_slug: "expedition-base-set-14-golem",
+      language: "EN",
+      finish: "NON_HOLO",
+      edition: "UNLIMITED",
+      stamp: null,
+    }],
+  });
+  assert.equal(expeditionMatch.matchStatus, "MATCHED");
+  assert.equal(expeditionMatch.canonicalSlug, "expedition-base-set-14-golem");
+
+  // Distinctive-token guard: a generic "base" overlap must NOT pull "Base Set 2"
+  // into console "Pokemon Base Set" — the reverse-subset direction is gated on a
+  // distinctive (len>=5) shared token, and "base" is not one.
+  const baseSet2NoLeak = buildPriceChartingMatchDecision({
+    product: {
+      product_id: "pc-charizard-base-set",
+      product_name: "Charizard #4",
+      console_name: "Pokemon Base Set",
+      genre: "Pokemon Card",
+    },
+    canonicalCards: [{
+      slug: "base-set-2-4-charizard",
+      language: "EN",
+      canonical_name: "Charizard",
+      card_number: "4",
+      set_name: "Base Set 2",
+    }],
+    printings: [{
+      id: "printing-charizard-bs2",
+      canonical_slug: "base-set-2-4-charizard",
+      language: "EN",
+      finish: "HOLO",
+      edition: "UNLIMITED",
+      stamp: null,
+    }],
+  });
+  assert.notEqual(baseSet2NoLeak.matchStatus, "MATCHED");
 }
 
 await runPriceChartingFoundationTests();
