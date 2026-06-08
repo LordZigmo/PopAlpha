@@ -1085,7 +1085,13 @@ struct CardDetailView: View {
     /// Gated on the hero actually being blank ("—") so it auto-hides the moment a
     /// graded/JP variant with a real price is selected.
     private var divergedPriceNote: String? {
-        guard currentHeroPrice == "—",
+        // EN-RAW canonical only — the QUARANTINED policy describes the raw
+        // PriceCharting-vs-Scrydex divergence, not a graded or JP variant. In
+        // graded mode a missing graded price also renders "—", so gate out
+        // non-raw modes (and JP) to avoid attaching the note to the wrong price.
+        guard !selectedPriceMode.isGraded,
+              !isJapaneseCard,
+              currentHeroPrice == "—",
               cardMetrics?.marketBlendPolicy == "POPALPHA_MARKET_QUARANTINED"
         else { return nil }
         return "Our market sources disagree too much to give a confident price — some independent research may be required."
