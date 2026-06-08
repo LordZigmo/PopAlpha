@@ -71,7 +71,12 @@ const MIN_SAMPLE_COUNT = 3;
 const REFRESH_AFTER_HOURS = 24 * 7; // 7 days
 const DEADLINE_RESERVE_MS = 30_000;
 const SCRAPE_PAGES = 4; // most cards have ≤2 pages; 4 is safe upper bound
-const NONPRODUCTIVE_RETRY_HOURS = 24 * 7;
+// Low-sample codes (Snkrdunk returns listings but < MIN_SAMPLE_COUNT sold per
+// grade) never yield a price, so re-probing them weekly just burns the scarce
+// initial-coverage slots. ~2,804 matched codes are low-sample vs ~2,853 never
+// scraped (2026-06-08) — re-admitting the former every 7d starved the latter.
+// Park ~monthly: still catches a card that later gains liquidity.
+const NONPRODUCTIVE_RETRY_HOURS = 24 * 30;
 const TRANSIENT_RETRY_HOURS = 6;
 const CANDIDATE_SCAN_PAGE_SIZE = 1000;
 const MAX_STALE_PRICE_SCAN_ROWS = 5000;
