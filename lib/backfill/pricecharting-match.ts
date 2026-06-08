@@ -297,20 +297,32 @@ function scoreCandidate(params: {
   if (!allTokensIncluded(cardNameTokens, productTokens)) return null;
 
   const setText = simplifiedSetText(params.card.set_name);
-  const productSetText = simplifiedSetText(`${params.product.console_name ?? ""} ${params.product.product_name}`);
+  // Compare against the CONSOLE name only — the product name (card name + number)
+  // pollutes the set tokens and was blocking legit matches (e.g. canonical
+  // "Expedition Base Set" vs console "Pokemon Expedition" → product text
+  // "expedition golem 14", which dropped the "base" token and failed the gate).
+  const productSetText = simplifiedSetText(params.product.console_name ?? "");
   const setTokens = tokenSet(setText);
   const productSetTokens = tokenSet(productSetText);
+  const overlap = [...setTokens].filter((token) => productSetTokens.has(token));
+  // Forward: every canonical set token appears in the console (e.g. "151" ⊆
+  //   "scarlet violet 151"). Reverse: the console's tokens are a subset of the
+  //   canonical's (console "expedition" ⊆ canonical "expedition base") — but ONLY
+  //   when a distinctive (len>=5) token is shared, so a generic "base"/"the"
+  //   overlap can't pull e.g. "Base Set 2" into "Base Set".
+  const hasDistinctiveOverlap = overlap.some((token) => token.length >= 5);
   const setMatch = setText.length > 0 && (
-    productSetText.includes(setText)
-    || setText.includes(productSetText)
-    || allTokensIncluded(setTokens, productSetTokens)
+    allTokensIncluded(setTokens, productSetTokens)
+    || (allTokensIncluded(productSetTokens, setTokens) && hasDistinctiveOverlap)
   );
   if (!setMatch) return null;
 
   return {
     card: params.card,
     nameScore: cardNameTokens.size,
-    setScore: setTokens.size,
+    // Overlap-based so an exact set match outscores a subset match, breaking
+    // candidate ties toward the correct set (NEEDS_REVIEW still guards true ties).
+    setScore: overlap.length,
   };
 }
 
