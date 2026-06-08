@@ -109,6 +109,10 @@
       "schedule": "23 * * * *"
     },
     {
+      "path": "/api/cron/refresh-homepage-cache",
+      "schedule": "42 * * * *"
+    },
+    {
       "path": "/api/cron/refresh-card-profiles?mode=auto&maxBackfillCards=5&maxRefreshCards=100&concurrency=4&batchSize=10",
       "schedule": "45 11-23 * * *"
     },
