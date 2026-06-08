@@ -1284,6 +1284,7 @@ export const RLS_REQUIRED_PUBLIC_TABLES = [
   "activity_events",
   "activity_likes",
   "ai_brief_cache",
+  "homepage_cache",
   "app_users",
   "apple_subscriptions",
   "card_condition_prices",
@@ -1472,6 +1473,7 @@ export const PUBLIC_SELECT_ONLY_OBJECTS = [
   "printing_aliases",
   "set_pair_map",
   "public_ai_brief_latest",
+  "public_homepage_latest",
   "public_card_condition_prices",
   "public_card_display_identity",
   "public_card_metrics",
@@ -1514,6 +1516,10 @@ export const SEQUENCE_GRANT_CONTRACTS = {
     authenticated: ["USAGE"],
   },
   ai_brief_cache_id_seq: {
+    anon: [],
+    authenticated: [],
+  },
+  homepage_cache_id_seq: {
     anon: [],
     authenticated: [],
   },
@@ -1597,6 +1603,7 @@ export const SEQUENCE_GRANT_CONTRACTS = {
 
 export const INTERNAL_NO_GRANT_OBJECTS = [
   "ai_brief_cache",
+  "homepage_cache",
   "apple_subscriptions",
   "card_condition_prices",
   "card_embeddings",
@@ -1698,6 +1705,7 @@ export const PUBLIC_VIEW_NAMES = [
   "pro_card_metrics",
   "pro_variant_metrics",
   "public_ai_brief_latest",
+  "public_homepage_latest",
   "public_card_condition_prices",
   "public_card_display_identity",
   "public_card_metrics",
