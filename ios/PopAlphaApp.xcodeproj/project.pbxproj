@@ -703,6 +703,7 @@ fi
 				INFOPLIST_KEY_CFBundleDisplayName = PopAlpha;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.shopping";
 				INFOPLIST_KEY_NSCameraUsageDescription = "PopAlpha uses the camera to scan and identify collectible cards.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Saves scan-capture diagnostics to Photos so you can review what the scanner actually saw on each scan attempt.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = NO;
