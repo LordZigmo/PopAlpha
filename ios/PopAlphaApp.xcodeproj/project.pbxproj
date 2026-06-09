@@ -10,8 +10,6 @@
 		1100000100000000000000F1 /* PortfolioModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000100000000000000A1 /* PortfolioModels.swift */; };
 		1100000100000000000000F3 /* PortfolioHeroView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000100000000000000A3 /* PortfolioHeroView.swift */; };
 		1100000100000000000000F4 /* CollectorIdentityCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000100000000000000A4 /* CollectorIdentityCard.swift */; };
-		1100000100000000000000F5 /* PortfolioCompositionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000100000000000000A5 /* PortfolioCompositionView.swift */; };
-		1100000100000000000000F6 /* TopHoldingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000100000000000000A6 /* TopHoldingsView.swift */; };
 		1100000100000000000000F7 /* PortfolioInsightView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000100000000000000A7 /* PortfolioInsightView.swift */; };
 		1100000100000000000000F8 /* PortfolioEmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000100000000000000A8 /* PortfolioEmptyStateView.swift */; };
 		1200000100000000000000F1 /* PortfolioValueChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1200000100000000000000A1 /* PortfolioValueChart.swift */; };
@@ -55,7 +53,6 @@
 		BB00000100000000000000F6 /* SearchResultCell.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00000100000000000000A6 /* SearchResultCell.swift */; };
 		BB00000100000000000000F7 /* ProfileService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00000100000000000000A7 /* ProfileService.swift */; };
 		BB00000100000000000000F8 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00000100000000000000A8 /* NotificationService.swift */; };
-		BB00000100000000000000F9 /* ActivityCommentSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00000100000000000000A9 /* ActivityCommentSheet.swift */; };
 		BB00000100000000000000FA /* NotificationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00000100000000000000B1 /* NotificationView.swift */; };
 		BB00000100000000000000FB /* UserProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00000100000000000000B2 /* UserProfileView.swift */; };
 		CC00000100000000000000F1 /* HoldingsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00000100000000000000A1 /* HoldingsModels.swift */; };
@@ -119,8 +116,6 @@
 		1100000100000000000000A1 /* PortfolioModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioModels.swift; sourceTree = "<group>"; };
 		1100000100000000000000A3 /* PortfolioHeroView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioHeroView.swift; sourceTree = "<group>"; };
 		1100000100000000000000A4 /* CollectorIdentityCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollectorIdentityCard.swift; sourceTree = "<group>"; };
-		1100000100000000000000A5 /* PortfolioCompositionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioCompositionView.swift; sourceTree = "<group>"; };
-		1100000100000000000000A6 /* TopHoldingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopHoldingsView.swift; sourceTree = "<group>"; };
 		1100000100000000000000A7 /* PortfolioInsightView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioInsightView.swift; sourceTree = "<group>"; };
 		1100000100000000000000A8 /* PortfolioEmptyStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioEmptyStateView.swift; sourceTree = "<group>"; };
 		1200000100000000000000A1 /* PortfolioValueChart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioValueChart.swift; sourceTree = "<group>"; };
@@ -160,7 +155,6 @@
 		BB00000100000000000000A6 /* SearchResultCell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchResultCell.swift; sourceTree = "<group>"; };
 		BB00000100000000000000A7 /* ProfileService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileService.swift; sourceTree = "<group>"; };
 		BB00000100000000000000A8 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
-		BB00000100000000000000A9 /* ActivityCommentSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityCommentSheet.swift; sourceTree = "<group>"; };
 		BB00000100000000000000B1 /* NotificationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationView.swift; sourceTree = "<group>"; };
 		BB00000100000000000000B2 /* UserProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserProfileView.swift; sourceTree = "<group>"; };
 		CC00000100000000000000A1 /* HoldingsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoldingsModels.swift; sourceTree = "<group>"; };
@@ -275,7 +269,6 @@
 				BB00000100000000000000A6 /* SearchResultCell.swift */,
 				BB00000100000000000000A7 /* ProfileService.swift */,
 				BB00000100000000000000A8 /* NotificationService.swift */,
-				BB00000100000000000000A9 /* ActivityCommentSheet.swift */,
 				BB00000100000000000000B1 /* NotificationView.swift */,
 				BB00000100000000000000B2 /* UserProfileView.swift */,
 				CC00000100000000000000A1 /* HoldingsModels.swift */,
@@ -332,8 +325,6 @@
 				1100000100000000000000A1 /* PortfolioModels.swift */,
 				1100000100000000000000A3 /* PortfolioHeroView.swift */,
 				1100000100000000000000A4 /* CollectorIdentityCard.swift */,
-				1100000100000000000000A5 /* PortfolioCompositionView.swift */,
-				1100000100000000000000A6 /* TopHoldingsView.swift */,
 				1100000100000000000000A7 /* PortfolioInsightView.swift */,
 				1100000100000000000000A8 /* PortfolioEmptyStateView.swift */,
 				1200000100000000000000A1 /* PortfolioValueChart.swift */,
@@ -505,7 +496,6 @@ fi
 				BB00000100000000000000F6 /* SearchResultCell.swift in Sources */,
 				BB00000100000000000000F7 /* ProfileService.swift in Sources */,
 				BB00000100000000000000F8 /* NotificationService.swift in Sources */,
-				BB00000100000000000000F9 /* ActivityCommentSheet.swift in Sources */,
 				BB00000100000000000000FA /* NotificationView.swift in Sources */,
 				BB00000100000000000000FB /* UserProfileView.swift in Sources */,
 				CC00000100000000000000F1 /* HoldingsModels.swift in Sources */,
@@ -561,8 +551,6 @@ fi
 				1100000100000000000000F1 /* PortfolioModels.swift in Sources */,
 				1100000100000000000000F3 /* PortfolioHeroView.swift in Sources */,
 				1100000100000000000000F4 /* CollectorIdentityCard.swift in Sources */,
-				1100000100000000000000F5 /* PortfolioCompositionView.swift in Sources */,
-				1100000100000000000000F6 /* TopHoldingsView.swift in Sources */,
 				1100000100000000000000F7 /* PortfolioInsightView.swift in Sources */,
 				1100000100000000000000F8 /* PortfolioEmptyStateView.swift in Sources */,
 				1200000100000000000000F1 /* PortfolioValueChart.swift in Sources */,

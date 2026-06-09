@@ -64,15 +64,3 @@ enum ActivityVisibility: String, CaseIterable, Identifiable {
         }
     }
 }
-
-// MARK: - Data Export
-
-struct DataExportResponse: Decodable {
-    let ok: Bool
-    let data: ExportData?
-}
-
-struct ExportData: Decodable {
-    let exportedAt: String
-    // All other fields are dynamic JSON — we just store the raw data
-}
