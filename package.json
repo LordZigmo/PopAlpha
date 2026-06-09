@@ -83,7 +83,8 @@
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "sharp": "^0.33.5",
-    "web-push": "^3.6.7"
+    "web-push": "^3.6.7",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.2.1",
