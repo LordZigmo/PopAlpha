@@ -777,11 +777,30 @@ struct HoldingsListView: View {
 
     private var gridMode: some View {
         ScrollView(.vertical, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 18) {
+                if isSplit {
+                    gridSection("Raw", rawPositions)
+                    gridSection("Graded", gradedPositions)
+                } else {
+                    gridSection(nil, sortedByValue(rows))
+                }
+            }
+            .padding(.horizontal, PA.Layout.sectionPadding)
+            .padding(.vertical, 12)
+        }
+    }
+
+    @ViewBuilder
+    private func gridSection(_ title: String?, _ items: [Position]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let title {
+                sectionHeader(title)
+            }
             LazyVGrid(
                 columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
                 spacing: 12
             ) {
-                ForEach(sortedByValue(rows)) { position in
+                ForEach(items) { position in
                     PortfolioCardGridCell(
                         position: position,
                         metadata: position.canonicalSlug.flatMap { metadata?[$0] },
@@ -789,8 +808,6 @@ struct HoldingsListView: View {
                     )
                 }
             }
-            .padding(.horizontal, PA.Layout.sectionPadding)
-            .padding(.vertical, 12)
         }
     }
 
