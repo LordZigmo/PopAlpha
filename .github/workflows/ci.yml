@@ -33,6 +33,9 @@ jobs:
       - name: Homepage tests
         run: npm run test:homepage
 
+      - name: Pricing display tests
+        run: npm run test:pricing-display
+
       - name: Build
         run: npm run build
 

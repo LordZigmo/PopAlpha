@@ -1,5 +1,6 @@
 import "server-only";
 import { dbAdmin } from "@/lib/db/admin";
+import { getPostHogClient } from "@/lib/posthog-server";
 
 /**
  * Server-side entitlement check.
@@ -25,6 +26,19 @@ export async function hasPro(userId: string | null | undefined): Promise<boolean
 
   if (error) {
     console.error("[entitlements] hasPro lookup failed", { userId, message: error.message });
+    // Fail-closed is correct (never leak paid content), but it means a
+    // Supabase blip locks paying users out of Pro surfaces. Emit a
+    // PostHog event so a spike is visible on a dashboard/alert instead
+    // of only in per-request logs. Must never throw from this path.
+    try {
+      getPostHogClient().capture({
+        distinctId: userId,
+        event: "entitlement_check_failed",
+        properties: { message: error.message },
+      });
+    } catch {
+      // Telemetry failure must not affect the entitlement decision.
+    }
     return false;
   }
 

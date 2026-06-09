@@ -37,6 +37,17 @@ export type JpPriceSource = {
   label: string;
 };
 
+/**
+ * Snkrdunk has no native JPY observation — its English API returns USD
+ * only, and the `snkrdunk_price_jpy` column is back-computed from that
+ * USD via an FX rate at write time. Rendering that derived number as
+ * "¥3,200" presents fabricated precision as a JP-market quote, so the
+ * picker refuses to emit it: the snkrdunk path always returns
+ * `priceJpy: null` and renderers fall back to the true USD value. If a
+ * native Snkrdunk JPY scrape ships later, lift this here (one place)
+ * rather than per-surface.
+ */
+
 const MIN_SAMPLE_FOR_TILE = 3;
 
 export function selectJpPriceSource(input: {
@@ -56,9 +67,11 @@ export function selectJpPriceSource(input: {
   const snk = typeof input.snkrdunkPrice === "number" && input.snkrdunkPrice > 0
     ? input.snkrdunkPrice
     : 0;
-  const snkJpy = typeof input.snkrdunkPriceJpy === "number" && input.snkrdunkPriceJpy > 0
-    ? input.snkrdunkPriceJpy
-    : null;
+  // FX-derived, not a real listed yen price — never displayed (see note
+  // on the type above). The parameter stays accepted so call sites don't
+  // churn when a native scrape lands.
+  const snkJpy: number | null = null;
+  void input.snkrdunkPriceJpy;
   const yjN = typeof input.yahooJpSampleCount === "number"
     ? input.yahooJpSampleCount
     : 0;

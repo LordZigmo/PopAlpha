@@ -46,6 +46,11 @@ struct PortfolioPositionCell: View {
                 let direction = chg >= 0 ? "up" : "down"
                 parts.append("\(direction) \(formatPct(abs(chg))) at market")
             }
+        } else if position.allCostsUnknown {
+            parts.append("cost not recorded")
+        } else if position.hasUnknownCostLots {
+            // Spoken form spells out what the visual "+" suffix means.
+            parts.append("partial cost basis, at least $\(String(format: "%.2f", position.costBasis))")
         } else {
             parts.append("cost basis \(position.formattedCostBasis)")
         }
@@ -248,11 +253,19 @@ struct PortfolioPositionCell: View {
                     .font(.system(size: 15, weight: .semibold, design: .rounded))
                     .foregroundStyle(PA.Colors.text)
 
-                Text("cost basis")
+                Text(costBasisCaption)
                     .font(.system(size: 10))
                     .foregroundStyle(PA.Colors.muted)
             }
         }
+    }
+
+    /// Caption under the cost-basis figure. Distinguishes a complete
+    /// total from a known-lots-only partial so the "+"-suffixed number
+    /// reads as a floor, and from the no-data case ("—").
+    private var costBasisCaption: String {
+        if position.allCostsUnknown { return "cost not recorded" }
+        return position.hasUnknownCostLots ? "partial cost basis" : "cost basis"
     }
 
     // MARK: - Lot Row

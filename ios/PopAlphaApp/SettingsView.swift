@@ -626,8 +626,12 @@ struct SettingsView: View {
         .accessibilityLabel("\(title): \(value)")
     }
 
+    // Renders nothing if the URL string doesn't parse — a dead row is
+    // recoverable in review; a force-unwrap crash in Settings is not.
+    @ViewBuilder
     private func linkRow(icon: String, title: String, url: String) -> some View {
-        Link(destination: URL(string: url)!) {
+        if let destination = URL(string: url) {
+        Link(destination: destination) {
             HStack(spacing: 12) {
                 Image(systemName: icon)
                     .font(.system(size: 16))
@@ -649,6 +653,7 @@ struct SettingsView: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel(title)
         .accessibilityHint("Opens link")
+        }
     }
 
     // MARK: - Sign-in Prompt

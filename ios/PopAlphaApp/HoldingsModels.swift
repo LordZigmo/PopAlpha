@@ -166,16 +166,41 @@ struct Position: Identifiable, Hashable {
         lots.reduce(0) { $0 + $1.totalCost }
     }
 
+    /// Quantity across lots that actually have a recorded cost. Used as
+    /// the avgCost denominator so unknown-cost lots don't dilute the
+    /// per-copy average toward zero (10 unknown lots + one $50 lot is a
+    /// ~$50 card, not a $4.55 card).
+    var knownCostQty: Int {
+        lots.filter { $0.pricePaidUsd != nil }.reduce(0) { $0 + $1.qty }
+    }
+
+    /// True when at least one lot has no recorded cost basis — the
+    /// position total is a known-lots-only partial, and the UI should
+    /// say so instead of presenting it as the full cost.
+    var hasUnknownCostLots: Bool {
+        lots.contains { $0.pricePaidUsd == nil }
+    }
+
+    /// True when NO lot has a recorded cost — there is no cost basis to
+    /// show at all, only a quantity.
+    var allCostsUnknown: Bool {
+        lots.allSatisfy { $0.pricePaidUsd == nil }
+    }
+
     var avgCost: Double {
-        totalQty > 0 ? costBasis / Double(totalQty) : 0
+        knownCostQty > 0 ? costBasis / Double(knownCostQty) : 0
     }
 
     var formattedAvgCost: String {
-        "$\(String(format: "%.2f", avgCost))"
+        allCostsUnknown ? "—" : "$\(String(format: "%.2f", avgCost))"
     }
 
+    /// "—" when no lot has a cost, "$X.XX+" when only some do (the sum
+    /// is a floor, not the true total), plain "$X.XX" when complete.
     var formattedCostBasis: String {
-        "$\(String(format: "%.2f", costBasis))"
+        if allCostsUnknown { return "—" }
+        let base = "$\(String(format: "%.2f", costBasis))"
+        return hasUnknownCostLots ? "\(base)+" : base
     }
 
     /// Group holdings into positions by (printingId ?? canonicalSlug) + grade

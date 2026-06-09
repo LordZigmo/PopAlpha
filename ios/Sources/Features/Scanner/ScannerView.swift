@@ -159,8 +159,8 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        previewView.previewLayer.session = captureSession
-        previewView.previewLayer.videoGravity = .resizeAspectFill
+        previewView.previewLayer?.session = captureSession
+        previewView.previewLayer?.videoGravity = .resizeAspectFill
 
         configureCameraAccess()
         registerSessionObservers()
@@ -184,8 +184,8 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
 
     private func installNormalizedRectConverterIfNeeded() {
         guard !hasInstalledConverter, let viewModel else { return }
+        guard let layer = previewView.previewLayer else { return }
         hasInstalledConverter = true
-        let layer = previewView.previewLayer
         let converter: (CGRect) -> CGRect? = { [weak layer] visionBLPortrait in
             guard let layer else { return nil }
             // Vision returns coordinates in portrait-oriented BL space because we
@@ -239,7 +239,7 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
     func updatePreviewOrientation() {
         let rotationAngle = interfaceRotationAngle()
 
-        if let previewConnection = previewView.previewLayer.connection,
+        if let previewConnection = previewView.previewLayer?.connection,
            previewConnection.isVideoRotationAngleSupported(rotationAngle) {
             previewConnection.videoRotationAngle = rotationAngle
         }
@@ -710,11 +710,10 @@ private final class CameraPreviewView: UIView {
         AVCaptureVideoPreviewLayer.self
     }
 
-    var previewLayer: AVCaptureVideoPreviewLayer {
-        guard let layer = layer as? AVCaptureVideoPreviewLayer else {
-            fatalError("Expected AVCaptureVideoPreviewLayer")
-        }
-
-        return layer
+    // Optional rather than fatalError: the `layerClass` override above
+    // guarantees the cast in practice, but a degraded (black) preview is
+    // recoverable for the user where a crash in the scanner is not.
+    var previewLayer: AVCaptureVideoPreviewLayer? {
+        layer as? AVCaptureVideoPreviewLayer
     }
 }

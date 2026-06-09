@@ -91,6 +91,18 @@ actor HoldingsService {
     func bulkAddFromScans(_ entries: [MultiScanEntry]) async throws -> BulkScanImportSummary {
         try AuthService.shared.requireAuth()
 
+        // Idempotency backstop: a thrown chunk is AMBIGUOUS — a timeout
+        // or lost/undecodable response can arrive AFTER the server
+        // committed the insert, and retrying such a chunk duplicates
+        // holdings. Snapshot per-key lot counts up front; when a chunk
+        // throws, re-fetch and compare deltas to decide whether it
+        // landed (the route inserts each chunk atomically, so it's
+        // all-or-nothing per chunk). nil snapshot (the GET itself
+        // failed) disables the backstop and preserves the old
+        // pessimistic behavior.
+        let preImportCounts = (try? await fetchHoldings()).map(Self.lotCountsByKey)
+        var confirmedInsertedCounts: [String: Int] = [:]
+
         var totalInserted = 0
         var allErrors: [BulkScanImportError] = []
         var cursor = 0
@@ -125,6 +137,13 @@ actor HoldingsService {
                 )
 
                 totalInserted += response.inserted
+                // Track which rows the server confirmed (chunk rows not
+                // in errors[]) so the backstop's delta math can tell a
+                // later ambiguous chunk apart from these.
+                let failedRelativeIndices = Set(response.errors.map { $0.rowIndex })
+                for (relativeIndex, entry) in chunk.enumerated() where !failedRelativeIndices.contains(relativeIndex) {
+                    confirmedInsertedCounts[Self.lotKey(for: entry), default: 0] += 1
+                }
                 // Re-index chunk-relative row_index back to tray-
                 // absolute so the caller can correlate per-row
                 // errors with the original MultiScanEntry array.
@@ -137,6 +156,25 @@ actor HoldingsService {
                     )
                 }
             } catch {
+                // Ambiguous failure: the request may or may not have
+                // committed server-side. Ask the backstop before
+                // assuming "not inserted".
+                if let preImportCounts,
+                   await failedChunkLanded(
+                       chunk: chunk,
+                       preCounts: preImportCounts,
+                       confirmedCounts: confirmedInsertedCounts,
+                   ) == true {
+                    // Committed — only the response was lost. Count the
+                    // chunk as inserted and keep going; retrying it
+                    // would create duplicate holdings.
+                    totalInserted += chunk.count
+                    for entry in chunk {
+                        confirmedInsertedCounts[Self.lotKey(for: entry), default: 0] += 1
+                    }
+                    cursor = chunkEnd
+                    continue
+                }
                 // First-chunk failure with no progress yet — rethrow
                 // so the caller surfaces a clear connection/auth
                 // error and the tray stays fully intact for retry.
@@ -182,6 +220,69 @@ actor HoldingsService {
     /// this is split into multiple POSTs; smaller trays do a single
     /// round-trip.
     private static let bulkImportChunkSize: Int = 500
+
+    // MARK: - Bulk import idempotency backstop
+
+    /// Identity key for the delta math. The bulk-import route stores
+    /// canonical_slug / printing_id / grade verbatim (trimmed only), so
+    /// what we send is what fetchHoldings() returns — exact string
+    /// equality is safe. Each tray entry inserts exactly one holdings
+    /// row (qty is a column, not a row multiplier), so counting rows
+    /// per key measures inserts directly.
+    private static func lotKey(slug: String?, printingId: String?, grade: String?) -> String {
+        "\(slug ?? "")|\(printingId ?? "")|\(grade ?? "")"
+    }
+
+    private static func lotKey(for entry: MultiScanEntry) -> String {
+        lotKey(slug: entry.match.slug, printingId: entry.printingId, grade: entry.grade)
+    }
+
+    private static func lotCountsByKey(_ holdings: [HoldingRow]) -> [String: Int] {
+        var counts: [String: Int] = [:]
+        for h in holdings {
+            counts[lotKey(slug: h.canonicalSlug, printingId: h.printingId, grade: h.grade), default: 0] += 1
+        }
+        return counts
+    }
+
+    /// Decides whether a chunk whose POST threw actually committed.
+    /// Returns true only when every key the chunk would have inserted
+    /// shows a full unexplained delta (rows present beyond the pre-
+    /// import snapshot and the confirmed inserts from earlier chunks).
+    /// Returns false when no key shows any delta, nil when the picture
+    /// is mixed/partial (e.g. a concurrent add from another device) or
+    /// the verification fetch itself failed — callers treat nil as
+    /// "unknown" and fall back to the pessimistic retry path, which is
+    /// today's behavior.
+    private func failedChunkLanded(
+        chunk: ArraySlice<MultiScanEntry>,
+        preCounts: [String: Int],
+        confirmedCounts: [String: Int],
+    ) async -> Bool? {
+        guard let current = try? await fetchHoldings() else { return nil }
+        let postCounts = Self.lotCountsByKey(current)
+
+        var expected: [String: Int] = [:]
+        for entry in chunk {
+            expected[Self.lotKey(for: entry), default: 0] += 1
+        }
+
+        var landedKeys = 0
+        var missingKeys = 0
+        for (key, need) in expected {
+            let unexplained = (postCounts[key] ?? 0) - (preCounts[key] ?? 0) - (confirmedCounts[key] ?? 0)
+            if unexplained >= need {
+                landedKeys += 1
+            } else if unexplained <= 0 {
+                missingKeys += 1
+            } else {
+                return nil // partial delta — can't attribute safely
+            }
+        }
+        if landedKeys > 0 && missingKeys == 0 { return true }
+        if missingKeys > 0 && landedKeys == 0 { return false }
+        return nil
+    }
 
     // MARK: - Delete
 
