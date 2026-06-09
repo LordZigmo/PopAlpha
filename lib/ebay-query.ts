@@ -83,7 +83,3 @@ export function buildEbaySearchQueries(input: EbayQueryInput): string[] {
   ];
   return uniqueQueries(queries);
 }
-
-export function buildEbayQuery(input: EbayQueryInput): string {
-  return buildEbaySearchQueries(input)[0] ?? "";
-}

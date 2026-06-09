@@ -8,7 +8,7 @@ import {
   getTierSummary,
   type JapaneseCatalogState,
   type PipelineStatus,
-  type RefreshTier,
+  type SummaryTier,
   type TierSummary,
 } from "@/lib/data/tier-summary";
 
@@ -60,7 +60,7 @@ function formatRelativeTime(iso: string | null): string {
   return `${diffDay} day${diffDay === 1 ? "" : "s"} ago`;
 }
 
-const TIER_COPY: Record<RefreshTier, { title: string; trade: string; show: string; dotClass: string }> = {
+const TIER_COPY: Record<SummaryTier, { title: string; trade: string; show: string; dotClass: string }> = {
   hot: {
     title: "Hot",
     trade: "Trade actively, often every day. The fast-moving end of the catalog.",
@@ -128,7 +128,7 @@ function StatusPill({ status }: { status: PipelineStatus }) {
   );
 }
 
-function TierCard({ entry, copy }: { entry: TierSummary["tiers"][number]; copy: typeof TIER_COPY[RefreshTier] }) {
+function TierCard({ entry, copy }: { entry: TierSummary["tiers"][number]; copy: typeof TIER_COPY[SummaryTier] }) {
   return (
     <article className="rounded-2xl border border-[#1E1E1E] bg-[#0D0D0D] p-5 sm:p-6">
       <div className="flex items-baseline gap-3">

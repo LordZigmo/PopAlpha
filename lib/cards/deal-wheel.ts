@@ -100,13 +100,6 @@ export function getDealWheelInsight(selectedPrice: number, balancePrice: number)
   return `$${dollars.replace(/^\$/, "")} above market (+${pctStr}%) \u2014 ${strength} dealer premium`;
 }
 
-export function getCenterProgress(selectedPrice: number, balancePrice: number): number {
-  if (!Number.isFinite(balancePrice) || balancePrice <= 0) return 0;
-  const pct = ((selectedPrice - balancePrice) / balancePrice) * 100;
-  const maxPct = 45;
-  return Math.max(-1, Math.min(1, pct / maxPct));
-}
-
 export function isNearCenter(selectedPrice: number, balancePrice: number): boolean {
   if (!Number.isFinite(balancePrice) || balancePrice <= 0) return false;
   const pct = Math.abs(((selectedPrice - balancePrice) / balancePrice) * 100);

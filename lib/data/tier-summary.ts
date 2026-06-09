@@ -18,10 +18,10 @@
  */
 import { createClient } from "@supabase/supabase-js";
 
-export type RefreshTier = "hot" | "warm" | "sparse" | "dormant";
+export type SummaryTier = "hot" | "warm" | "sparse" | "dormant";
 
 export type TierSummaryEntry = {
-  tier: RefreshTier;
+  tier: SummaryTier;
   count: number;
   pct: number;
 };
@@ -40,7 +40,7 @@ export type PipelineStatus = {
   daysStale: number | null;
 };
 
-const TIER_ORDER: RefreshTier[] = ["hot", "warm", "sparse", "dormant"];
+const TIER_ORDER: SummaryTier[] = ["hot", "warm", "sparse", "dormant"];
 
 function publicSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -53,7 +53,7 @@ function publicSupabase() {
 
 export async function getTierSummary(): Promise<TierSummary> {
   const supabase = publicSupabase();
-  const counts: Record<RefreshTier, number> = { hot: 0, warm: 0, sparse: 0, dormant: 0 };
+  const counts: Record<SummaryTier, number> = { hot: 0, warm: 0, sparse: 0, dormant: 0 };
 
   for (const tier of TIER_ORDER) {
     const { count, error } = await supabase

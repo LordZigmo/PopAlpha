@@ -43,12 +43,6 @@ function formatSignedUsd(value: number): string {
   return `${value > 0 ? "+" : value < 0 ? "-" : ""}${formatUsd(abs)}`;
 }
 
-function formatSignedPercent(value: number): string {
-  if (!Number.isFinite(value)) return "\u2014";
-  const digits = Math.abs(value) >= 10 ? 0 : 1;
-  return `${value > 0 ? "+" : value < 0 ? "-" : ""}${Math.abs(value).toFixed(digits)}%`;
-}
-
 function formatPercentOfMarket(value: number): string {
   if (!Number.isFinite(value)) return "\u2014";
   const digits = value >= 100 ? 0 : 1;

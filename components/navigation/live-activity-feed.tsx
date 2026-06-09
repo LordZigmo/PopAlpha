@@ -23,27 +23,6 @@ type LiveActivityResponse = {
   }>;
 };
 
-const MOCK_EVENTS: LiveFeedItem[] = [
-  {
-    href: "/c/prismatic-evolutions-161-umbreon-ex",
-    title: "User_X just added Umbreon ex to Watchlist",
-    detail: "Prismatic Evolutions",
-    at: new Date(Date.now() - 5 * 60_000).toISOString(),
-  },
-  {
-    href: "/c/sv-promo-xy-mew-ex",
-    title: "User_Y predicted a +5% move on Mew ex",
-    detail: "Fresh community signal",
-    at: new Date(Date.now() - 11 * 60_000).toISOString(),
-  },
-  {
-    href: "/c/151-199-charizard-ex",
-    title: "User_Z just checked Charizard ex",
-    detail: "151",
-    at: new Date(Date.now() - 19 * 60_000).toISOString(),
-  },
-];
-
 function timeAgo(iso: string | null): string {
   if (!iso) return "just now";
   const ms = Date.now() - new Date(iso).getTime();
@@ -74,11 +53,11 @@ export default function LiveActivityFeed() {
             at: card.last_viewed_at,
           })));
         } else {
-          setEvents(MOCK_EVENTS);
+          setEvents([]);
         }
       })
       .catch(() => {
-        if (!cancelled) setEvents(MOCK_EVENTS);
+        if (!cancelled) setEvents([]);
       });
 
     return () => {

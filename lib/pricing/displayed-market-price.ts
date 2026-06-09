@@ -24,9 +24,11 @@
  * current" rendering.
  */
 
+import type { RefreshTier } from "@/lib/backfill/refresh-tier-skip-policy";
+
 export type PriceDisplayKind = "live" | "abundant" | "stale_recent" | "stale_old" | "no_market";
 
-export type RefreshTier = "hot" | "warm" | "sparse" | "dormant" | "unknown";
+export type { RefreshTier };
 
 export type PriceDisplay =
   | { kind: "live"; price: number; asOf: string; ageDays: number }

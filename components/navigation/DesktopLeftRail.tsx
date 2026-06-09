@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { useSafeUser } from "@/lib/auth/use-safe-user";
-import { Activity, Home, PieChart, Plus, Users } from "lucide-react";
+import { Home, PieChart, Plus, Users } from "lucide-react";
 import { useUnreadNotificationCount } from "@/lib/activity/use-unread-count";
 
 const DESKTOP_LEFT_RAIL_WIDTH = "md:w-[min(30vw,22rem)]";

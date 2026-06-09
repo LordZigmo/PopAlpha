@@ -150,7 +150,9 @@ export async function POST(req: Request) {
         .eq("slug", canonical_slug)
         .maybeSingle();
       if (card?.canonical_name) cardName = card.canonical_name;
-    } catch {}
+    } catch (err) {
+      console.warn("[wishlist] card name lookup failed", canonical_slug, err);
+    }
     emitActivityEvent({
       actorId: auth.userId,
       eventType: "wishlist.card_added",
