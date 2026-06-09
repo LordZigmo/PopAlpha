@@ -51,6 +51,56 @@ function publicSupabase() {
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
+export type FxFreshness = {
+  pair: "JPYUSD";
+  /** The conversion rate the JP pricing rail is effectively using. */
+  rate: number;
+  /** YYYY-MM-DD of the newest fx_rates row, null when on fallback. */
+  rateDate: string | null;
+  /** Whole days since rateDate (0 = today), null when on fallback. */
+  ageDays: number | null;
+  /**
+   * "table" — the fx_rates ingest is feeding conversions.
+   * "fallback" — no usable fx_rates row; conversions use the static
+   * env/default rate (lib/pricing/fx.ts), which can drift from market.
+   */
+  source: "table" | "fallback";
+};
+
+const FALLBACK_JPY_TO_USD_RATE = 0.0068;
+
+/**
+ * Freshness of the JPY→USD rate behind every converted JP price on the
+ * site. The ingest cron runs weekdays (FX markets close on weekends),
+ * so an age of 1–3 days over a weekend is normal; check-fx-rates-health
+ * alerts ops independently when it goes genuinely stale.
+ */
+export async function getFxFreshness(): Promise<FxFreshness> {
+  const supabase = publicSupabase();
+  const { data, error } = await supabase
+    .from("fx_rates")
+    .select("rate, rate_date")
+    .eq("pair", "JPYUSD")
+    .order("rate_date", { ascending: false })
+    .limit(1)
+    .maybeSingle<{ rate: number | null; rate_date: string | null }>();
+
+  if (
+    error ||
+    !data ||
+    typeof data.rate !== "number" ||
+    !Number.isFinite(data.rate) ||
+    data.rate <= 0 ||
+    !data.rate_date
+  ) {
+    return { pair: "JPYUSD", rate: FALLBACK_JPY_TO_USD_RATE, rateDate: null, ageDays: null, source: "fallback" };
+  }
+
+  const ageMs = Date.now() - new Date(`${data.rate_date}T00:00:00Z`).getTime();
+  const ageDays = Number.isFinite(ageMs) ? Math.max(0, Math.floor(ageMs / 86_400_000)) : null;
+  return { pair: "JPYUSD", rate: data.rate, rateDate: data.rate_date, ageDays, source: "table" };
+}
+
 export async function getTierSummary(): Promise<TierSummary> {
   const supabase = publicSupabase();
   const counts: Record<SummaryTier, number> = { hot: 0, warm: 0, sparse: 0, dormant: 0 };

@@ -30,6 +30,7 @@ type InputRow = {
   acquired_on?: unknown;
   venue?: unknown;
   cert_number?: unknown;
+  client_lot_id?: unknown;
 };
 
 type RowError = { row_index: number; error: string };
@@ -46,7 +47,18 @@ type InsertPayload = {
   venue: string | null;
   cert_number: string | null;
   source: HoldingsSource;
+  /**
+   * Idempotency key. Client-supplied (iOS MultiScanEntry.id) on scanner
+   * imports so a retried chunk whose earlier POST committed but whose
+   * response was lost upserts to a no-op instead of duplicating the
+   * lot; server-minted UUID for clients that don't send one (uniform
+   * keys keep PostgREST bulk insert happy, and an unknown-to-the-client
+   * key can never match a retry).
+   */
+  client_lot_id: string;
 };
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Mirrors the holdings.source CHECK constraint from
 // supabase/migrations/20260421200152_holdings_source.sql which allows
@@ -144,6 +156,21 @@ export async function POST(req: Request) {
       price_paid_usd = row.price_paid_usd;
     }
 
+    // Optional idempotency key. Malformed values are a per-row error
+    // rather than silently dropped — a client that THINKS it sent a key
+    // but didn't would lose its retry protection without noticing.
+    let client_lot_id: string | undefined;
+    if (row.client_lot_id !== undefined && row.client_lot_id !== null) {
+      if (typeof row.client_lot_id !== "string" || !UUID_PATTERN.test(row.client_lot_id)) {
+        errors.push({
+          row_index: index,
+          error: "client_lot_id must be a UUID when provided.",
+        });
+        return;
+      }
+      client_lot_id = row.client_lot_id.toLowerCase();
+    }
+
     toInsert.push({
       owner_clerk_id: auth.userId,
       canonical_slug,
@@ -160,6 +187,13 @@ export async function POST(req: Request) {
       // same source: the bulk-import endpoint is intended for one
       // homogeneous import at a time.
       source,
+      // Always populated: PostgREST bulk inserts require uniform keys
+      // across rows, so rather than relying on the DB default for rows
+      // that omit the key (which would 400 a mixed batch), mint a
+      // server-side UUID. Server-minted keys are unknown to the client
+      // and therefore never match a retry — identical to default
+      // semantics.
+      client_lot_id: client_lot_id ?? crypto.randomUUID(),
     });
   });
 
@@ -171,9 +205,19 @@ export async function POST(req: Request) {
   }
 
   const supabase = dbAdmin();
+  // Upsert with ignore-duplicates against the (owner_clerk_id,
+  // client_lot_id) unique constraint: a retried chunk whose earlier
+  // POST committed server-side (timeout / lost response) no-ops with
+  // inserted=0 instead of duplicating the user's lots. Rows without a
+  // client key get a fresh server-side UUID via the column default and
+  // can never conflict, so legacy clients keep plain-insert semantics.
   const { error, count } = await supabase
     .from("holdings")
-    .insert(toInsert, { count: "exact" });
+    .upsert(toInsert, {
+      onConflict: "owner_clerk_id,client_lot_id",
+      ignoreDuplicates: true,
+      count: "exact",
+    });
 
   if (error) {
     console.error("[holdings/bulk-import]", error.message);

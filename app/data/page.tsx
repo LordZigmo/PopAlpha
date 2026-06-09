@@ -3,9 +3,11 @@ import type { Metadata } from "next";
 import { ArrowRight, BookOpen, House, Layers3, Search } from "lucide-react";
 import CanonicalCardShell from "@/components/layout/CanonicalCardShell";
 import {
+  getFxFreshness,
   getJapaneseCatalogState,
   getPipelineStatus,
   getTierSummary,
+  type FxFreshness,
   type JapaneseCatalogState,
   type PipelineStatus,
   type SummaryTier,
@@ -181,10 +183,11 @@ function SectionJump({ href, label }: { href: string; label: string }) {
 }
 
 export default async function DataPage() {
-  const [tierResult, pipelineResult, japaneseResult] = await Promise.allSettled([
+  const [tierResult, pipelineResult, japaneseResult, fxResult] = await Promise.allSettled([
     getTierSummary(),
     getPipelineStatus(),
     getJapaneseCatalogState(),
+    getFxFreshness(),
   ]);
 
   if (tierResult.status === "rejected") {
@@ -200,9 +203,15 @@ export default async function DataPage() {
       japaneseResult.reason instanceof Error ? japaneseResult.reason.message : String(japaneseResult.reason));
   }
 
+  if (fxResult.status === "rejected") {
+    console.error("[data/page] failed to load FX freshness:",
+      fxResult.reason instanceof Error ? fxResult.reason.message : String(fxResult.reason));
+  }
+
   const tierSummary = tierResult.status === "fulfilled" ? tierResult.value : null;
   const pipelineStatus = pipelineResult.status === "fulfilled" ? pipelineResult.value : null;
   const japanese: JapaneseCatalogState | null = japaneseResult.status === "fulfilled" ? japaneseResult.value : null;
+  const fx: FxFreshness | null = fxResult.status === "fulfilled" ? fxResult.value : null;
 
   const totalCards = tierSummary?.total ?? 0;
   const hotCount = tierSummary?.tiers.find((t) => t.tier === "hot")?.count ?? 0;
@@ -402,6 +411,22 @@ export default async function DataPage() {
                   <p className="mt-4 text-[12px] text-[#6B7280]">
                     Most recent JP price observed: {formatRelativeTime(japanese.latestPriceAsOf)}
                   </p>
+                ) : null}
+
+                {fx ? (
+                  fx.source === "table" ? (
+                    <p className="mt-1 text-[12px] text-[#6B7280]">
+                      JPY→USD conversion rate: {fx.rate} · updated {fx.rateDate}
+                      {fx.ageDays != null
+                        ? ` (${fx.ageDays === 0 ? "today" : `${fx.ageDays} day${fx.ageDays === 1 ? "" : "s"} ago`} — refreshed each weekday)`
+                        : null}
+                    </p>
+                  ) : (
+                    <p className="mt-1 text-[12px] text-[#FBBF24]">
+                      JPY→USD conversion is using a static fallback rate ({fx.rate}) — live FX data is
+                      unavailable, so converted JP prices may drift slightly from market rates.
+                    </p>
+                  )
                 ) : null}
 
                 {japanese.sets.length > 0 ? (
