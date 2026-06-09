@@ -487,6 +487,14 @@ function SignalCard({ card, useJpSource = false }: { card: HomepageCard; useJpSo
             Recent market signal {formatPrice(card.recent_market_signal_usd)}
           </p>
         ) : null}
+        {!showJp && card.low_confidence && priceMeta?.label !== "—" ? (
+          <p
+            className="mt-1 truncate text-[10px] font-medium text-[#FF8A80]"
+            title="Limited corroborating sales data — treat this price as an estimate"
+          >
+            Low-confidence price
+          </p>
+        ) : null}
       </div>
     </Link>
   );

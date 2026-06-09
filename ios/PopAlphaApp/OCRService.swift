@@ -28,13 +28,15 @@ enum OCRService {
     /// Regex picks up "177/217" or "177 / 217" with optional surrounding
     /// whitespace. First capture = card number, second = set size.
     /// We return the first capture only since set size isn't needed.
-    private static let collectorPattern: NSRegularExpression = {
-        // swiftlint:disable:next force_try
-        try! NSRegularExpression(
-            pattern: #"\b(\d{1,3})\s*/\s*(\d{1,3})\b"#,
-            options: []
-        )
-    }()
+    // Optional rather than `try!`: the pattern is a compile-time
+    // constant so this never fails in practice, but OCR is a boost,
+    // not a gate (see extractCardIdentifiers) — if it ever did, the
+    // right behavior is "no card-number candidates, CLIP-only scan",
+    // not a crash inside the scanner.
+    private static let collectorPattern: NSRegularExpression? = try? NSRegularExpression(
+        pattern: #"\b(\d{1,3})\s*/\s*(\d{1,3})\b"#,
+        options: []
+    )
 
     /// Combined extractor: returns the FIRST card-number candidate +
     /// set-name hint. Convenience wrapper around
@@ -861,6 +863,7 @@ enum OCRService {
     ///     attack damage; the X cap of 999 catches OCR garbage without
     ///     rejecting real numbering.
     static func collectorNumberCandidates(in text: String) -> [String] {
+        guard let collectorPattern else { return [] }
         var candidates: [String] = []
         var seen = Set<String>()
         let ns = text as NSString

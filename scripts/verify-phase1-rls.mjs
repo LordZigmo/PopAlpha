@@ -422,6 +422,11 @@ for (const viewName of PHASE3_INTERNAL_NO_GRANT_VIEWS) {
 assertRoleCannotReadInternalTable("pro_variant_metrics", "anon");
 assertRoleCannotReadInternalTable("pro_variant_metrics", "authenticated", userA);
 assertRoleCannotReadInternalTable("market_snapshot_rollups", "anon");
+// card_profiles moved to INTERNAL_NO_GRANT_OBJECTS when the card-profile
+// AI routes were Pro-gated (2026-05-25); reads go through server routes
+// with the service role, so anon/authenticated must be denied.
+assertRoleCannotReadInternalTable("card_profiles", "anon");
+assertRoleCannotReadInternalTable("card_profiles", "authenticated", userA);
 
 const publicRows = runQuery(`
 begin;
@@ -447,7 +452,6 @@ assert(publicRows.length === 1, "public catalog read test returned no rows");
 assert(publicRows[0].canonical_cards === true, "anon read failed for canonical_cards");
 assert(publicRows[0].card_aliases === true, "anon read failed for card_aliases");
 assert(publicRows[0].card_printings === true, "anon read failed for card_printings");
-assert(publicRows[0].card_profiles === true, "anon read failed for card_profiles");
 assert(publicRows[0].deck_cards === true, "anon read failed for deck_cards");
 assert(publicRows[0].fx_rates === true, "anon read failed for fx_rates");
 assert(publicRows[0].printing_aliases === true, "anon read failed for printing_aliases");

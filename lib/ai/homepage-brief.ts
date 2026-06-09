@@ -299,7 +299,11 @@ function formatJpSourcePrice(card: BriefCardSnapshot): string | null {
     {
       label: "Snkrdunk",
       usd: card.snkrdunkPrice,
-      jpy: card.snkrdunkPriceJpy,
+      // snkrdunk_price_jpy is FX-derived from the USD value, not a real
+      // listed yen price — leading the brief with "¥X,XXX" would put
+      // fabricated precision into AI prose. USD only (matches
+      // lib/pricing/jp-price-source.ts and the iOS attribution row).
+      jpy: null,
       sampleCount: card.snkrdunkSampleCount ?? 0,
     },
     {

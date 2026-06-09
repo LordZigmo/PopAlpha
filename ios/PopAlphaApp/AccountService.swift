@@ -33,7 +33,9 @@ actor AccountService {
         try AuthService.shared.requireAuth()
 
         // We need raw data, not decoded — so use a manual request
-        let url = URL(string: "\(APIClient.baseURL)/api/me/export")!
+        guard let url = URL(string: "\(APIClient.baseURL)/api/me/export") else {
+            throw APIError.invalidURL("/api/me/export")
+        }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.setValue("application/json", forHTTPHeaderField: "Accept")

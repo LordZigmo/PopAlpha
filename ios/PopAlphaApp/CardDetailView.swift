@@ -315,6 +315,37 @@ struct CardDetailView: View {
         return nil
     }
 
+    /// heroPriceSourceLabel plus the age of the observation behind the
+    /// hero price — "JP sold listings · 5 hours ago". The as-of column
+    /// matches whichever value the hero selected: the blended
+    /// jp_latest_price carries its own timestamp; the per-source
+    /// fallback uses that source's observed_at. Falls back to the bare
+    /// label when no timestamp is available rather than hiding the
+    /// source attribution.
+    private var heroPriceSourceSubline: String? {
+        // Graded mode swaps the hero to the graded ladder price — a raw
+        // JP-feed attribution under it would mislabel the number.
+        guard !selectedPriceMode.isGraded, let label = heroPriceSourceLabel else { return nil }
+        let asOf: String?
+        if let jp = cardMetrics?.jpLatestPrice, jp > 0 {
+            asOf = cardMetrics?.jpLatestPriceAsOf
+        } else {
+            let pick = selectJpPriceSource(
+                yahooJpPrice: cardMetrics?.yahooJpPrice,
+                yahooJpSampleCount: cardMetrics?.yahooJpSampleCount,
+                snkrdunkPrice: cardMetrics?.snkrdunkPrice,
+                snkrdunkSampleCount: cardMetrics?.snkrdunkSampleCount
+            )
+            switch pick.source {
+            case .yahooJp: asOf = cardMetrics?.yahooJpObservedAt
+            case .snkrdunk: asOf = cardMetrics?.snkrdunkObservedAt
+            default: asOf = nil
+            }
+        }
+        guard let asOf else { return label }
+        return "\(label) · \(formatYahooJpObservedAt(asOf))"
+    }
+
     /// Suppress the change-percent badge when the hero is showing a
     /// JP-scraper price (Yahoo! or Snkrdunk). The change columns track
     /// the Scrydex market_price, not the JP-derived median, so showing
@@ -458,12 +489,20 @@ struct CardDetailView: View {
         // and the toggled view would stay frozen on the original slug's
         // data.
         .task(id: activeCard.id) {
+            // Capture the slug this task was started for. Every state
+            // write below re-checks it against the live activeCard.id:
+            // .task(id:) cancels the old task on an EN/JP swap, but a
+            // response that already resumed (or a cancellation error
+            // landing in a catch) could otherwise write the OLD card's
+            // data over the NEW card's primed state.
+            let slug = activeCard.id
             // Cross-language pairing lookup. Hits /api/cards/[slug]/detail
             // which now carries canonical.pairedSlug + pairedLanguage. A
             // failed fetch (table missing, network blip) leaves the
             // toggle hidden — degrades silently.
-            let pairing: CardPairing? = try? await CardService.shared.fetchCardPairing(slug: activeCard.id)
+            let pairing: CardPairing? = try? await CardService.shared.fetchCardPairing(slug: slug)
             await MainActor.run {
+                guard activeCard.id == slug else { return }
                 pairedSlug = pairing?.pairedSlug
                 pairedLanguage = pairing?.pairedLang
                 pairedImageUrl = pairing?.pairedImageUrl
@@ -486,18 +525,25 @@ struct CardDetailView: View {
             // render sees the card as already-unlocked (no clear→blur flash
             // on the 3rd reveal); it no-ops for Pro, already-unlocked cards,
             // and once the free limit is hit — those render behind the blur.
-            let fetchedProfile = try? await CardService.shared.fetchCardProfile(slug: activeCard.id)
-            if fetchedProfile != nil { premiumGate.recordAnalysisReveal(slug: activeCard.id) }
+            let fetchedProfile = try? await CardService.shared.fetchCardProfile(slug: slug)
+            guard activeCard.id == slug else { return }
+            if fetchedProfile != nil { premiumGate.recordAnalysisReveal(slug: slug) }
             cardProfile = fetchedProfile
             do {
-                cardMetrics = try await CardService.shared.fetchCardMetrics(slug: activeCard.id)
-                canonicalMetrics = cardMetrics
+                let metrics = try await CardService.shared.fetchCardMetrics(slug: slug)
+                guard activeCard.id == slug else { return }
+                cardMetrics = metrics
+                canonicalMetrics = metrics
             } catch {
+                // A cancelled fetch means the user already swapped cards —
+                // the new slug's task owns the state now; clobbering it
+                // with nil here would blank the price it just primed.
+                guard activeCard.id == slug, !Task.isCancelled else { return }
                 // Preserve the prior fallback (nil → cached activeCard.price,
                 // which is last-known-trusted, not garbage) but don't let a
                 // price-fetch failure masquerade as a healthy load — log it.
                 cardMetrics = nil
-                Logger.api.debug("card metrics fetch failed slug=\(activeCard.id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                Logger.api.debug("card metrics fetch failed slug=\(slug, privacy: .public): \(error.localizedDescription, privacy: .public)")
             }
             // First metrics arrival is the cue to drop the toggle fade.
             // Cleared here rather than in the toggle tap so the fade
@@ -505,33 +551,39 @@ struct CardDetailView: View {
             // intentional motion instead of a flash.
             await MainActor.run { togglingLanguage = false }
             if AuthService.shared.isAuthenticated {
-                friendActivity = try? await ActivityService.shared.fetchCardActivity(slug: activeCard.id)
+                let activity = try? await ActivityService.shared.fetchCardActivity(slug: slug)
+                guard activeCard.id == slug else { return }
+                friendActivity = activity
             }
             // Fire a card_view personalization event once per appearance.
             await PersonalizationService.shared.track(
                 PersonalizedEvent(
                     type: .cardView,
-                    canonicalSlug: activeCard.id,
+                    canonicalSlug: slug,
                     variantRef: selectedPrintingId.map { "\($0)::RAW" }
                 )
             )
             // Load every printing (finishes + editions + stamps) for the chart's
             // finish pills.
-            if let printings = try? await CardService.shared.fetchPrintings(slug: activeCard.id) {
+            if let printings = try? await CardService.shared.fetchPrintings(slug: slug) {
                 // selectedPrintingId stays nil by default → the chart shows the
                 // all-finish overlay and the headline reads the canonical
                 // (preferred-printing) price. Tapping a finish pill on the chart
                 // selects that printing.
                 await MainActor.run {
+                    guard activeCard.id == slug else { return }
                     availablePrintings = printings
                 }
             }
             // Load condition-based prices
             if let prices = try? await CardService.shared.fetchConditionPrices(
-                slug: activeCard.id,
+                slug: slug,
                 printingId: selectedPrintingId
             ) {
-                await MainActor.run { conditionPrices = prices }
+                await MainActor.run {
+                    guard activeCard.id == slug else { return }
+                    conditionPrices = prices
+                }
             }
             // Per-(grader, bucket) graded market summary. public_graded_variant_prices
             // is per (printing, grader, grade), so key by "GRADER::bucket" — the agency
@@ -540,7 +592,7 @@ struct CardDetailView: View {
             // 14d market_price, then most snapshot_count_30d, then freshest, then
             // printing_id (mirrors the web ladder's tie-break so the pick is stable).
             // No canonical printing_id=NULL row exists in this view.
-            if let rows = try? await CardService.shared.fetchGradedCardMetrics(slug: activeCard.id) {
+            if let rows = try? await CardService.shared.fetchGradedCardMetrics(slug: slug) {
                 var grouped: [String: [GradedCardMetricRow]] = [:]
                 for row in rows {
                     grouped["\(row.grader)::\(row.grade)", default: []].append(row)
@@ -558,10 +610,13 @@ struct CardDetailView: View {
                     }
                     if let best { resolved[key] = best }
                 }
-                await MainActor.run { gradedCardMetricsByBucket = resolved }
+                await MainActor.run {
+                    guard activeCard.id == slug else { return }
+                    gradedCardMetricsByBucket = resolved
+                }
             }
             // Load available graded options lazily
-            if let rows = try? await CardService.shared.fetchGradedVariantMetrics(slug: activeCard.id) {
+            if let rows = try? await CardService.shared.fetchGradedVariantMetrics(slug: slug) {
                 let validProviders: Set<String> = ["PSA", "CGC", "BGS", "TAG"]
                 let validBuckets: Set<String> = ["LE_7", "G8", "G9", "G9_5", "G10", "G10_PERFECT"]
                 let options = rows
@@ -578,6 +633,7 @@ struct CardDetailView: View {
                     }
                 }
                 await MainActor.run {
+                    guard activeCard.id == slug else { return }
                     availableGradedOptions = unique
                     gradedMetricsLoaded = true
                     // Pre-select the first available agency and its highest grade
@@ -592,6 +648,14 @@ struct CardDetailView: View {
             AddHoldingSheet(preselectedCard: activeCard.asSearchResult)
         }
         .onChange(of: selectedPrintingId) {
+            // This Task is unstructured — unlike .task(id:), nothing
+            // cancels it when the user swaps EN/JP mid-flight. Capture
+            // the (slug, printing) pair it was started for and discard
+            // the response if either moved on, so a finish-pill tap
+            // followed by a quick language toggle can't land the OLD
+            // card's per-printing price on the NEW card's hero.
+            let slug = activeCard.id
+            let printing = selectedPrintingId
             Task {
                 // Re-fetch the per-printing metrics row so the hero
                 // price reflects the selected finish. The view-side
@@ -605,8 +669,8 @@ struct CardDetailView: View {
                 // (HOLO + Reverse Holo / NON_HOLO) now show different
                 // hero prices when the user taps a different pill.
                 if let metrics = try? await CardService.shared.fetchCardMetrics(
-                    slug: activeCard.id,
-                    printingId: selectedPrintingId
+                    slug: slug,
+                    printingId: printing
                 ), metrics.marketPrice != nil {
                     // Hero follows the selected finish. Since migration
                     // 20260601120000 every per-printing RAW row carries the
@@ -619,20 +683,31 @@ struct CardDetailView: View {
                     // instead of blanking it. For the preferred (default)
                     // printing the per-printing series IS the canonical series,
                     // so the initial load matches the homepage with no flicker.
-                    await MainActor.run { cardMetrics = metrics }
+                    await MainActor.run {
+                        guard activeCard.id == slug, selectedPrintingId == printing else { return }
+                        cardMetrics = metrics
+                    }
                 }
                 if let prices = try? await CardService.shared.fetchConditionPrices(
-                    slug: activeCard.id,
-                    printingId: selectedPrintingId
+                    slug: slug,
+                    printingId: printing
                 ) {
-                    await MainActor.run { conditionPrices = prices }
+                    await MainActor.run {
+                        guard activeCard.id == slug, selectedPrintingId == printing else { return }
+                        conditionPrices = prices
+                    }
                 }
             }
         }
         .onChange(of: premiumGate.isPro) { _, _ in
+            // Unstructured like the printing handler above — pin the
+            // slug so a profile fetched for the pre-toggle card can't
+            // land on the post-toggle one.
+            let slug = activeCard.id
             Task {
-                let fetchedProfile = try? await CardService.shared.fetchCardProfile(slug: activeCard.id)
-                if fetchedProfile != nil { premiumGate.recordAnalysisReveal(slug: activeCard.id) }
+                let fetchedProfile = try? await CardService.shared.fetchCardProfile(slug: slug)
+                guard activeCard.id == slug else { return }
+                if fetchedProfile != nil { premiumGate.recordAnalysisReveal(slug: slug) }
                 cardProfile = fetchedProfile
             }
         }
@@ -1202,6 +1277,16 @@ struct CardDetailView: View {
                     .font(PA.Typography.caption)
                     .foregroundStyle(PA.Colors.muted)
                     .accessibilityLabel(medianText)
+            }
+
+            // JP source + observation age, directly under the hero. JP sold
+            // data lands hourly-to-weekly; without the age a day-old price
+            // reads as live.
+            if let sourceLine = heroPriceSourceSubline {
+                Text(sourceLine)
+                    .font(PA.Typography.caption)
+                    .foregroundStyle(PA.Colors.muted)
+                    .accessibilityLabel("Price source: \(sourceLine)")
             }
 
             if isAbundantNearMintHeroPrice {
