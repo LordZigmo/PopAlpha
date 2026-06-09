@@ -35,13 +35,10 @@ struct PortfolioView: View {
     // setting to a HoldingRow auto-presents the sheet.
     @State private var editingLot: HoldingRow?
 
-    // Positions list view mode (table rows vs card grid)
-    @State private var positionsViewMode: PositionsViewMode = .list
-    // Set to true while a card swipe is in progress so the ScrollView
-    // can't scroll vertically at the same time.
-    @State private var isSwipingCard = false
-
-    private enum PositionsViewMode { case list, grid }
+    // Drives navigation to the full, swipe-manageable holdings list
+    // (HoldingsListView), reached via the "View all" / "Manage cards"
+    // button under the top-5 preview.
+    @State private var showAllHoldings = false
 
     private var auth: AuthService { AuthService.shared }
 
@@ -230,20 +227,61 @@ struct PortfolioView: View {
             .navigationDestination(item: $selectedCard) { card in
                 CardDetailView(card: card)
             }
+            .navigationDestination(isPresented: $showAllHoldings) {
+                HoldingsListView(
+                    positions: positions,
+                    metadata: overview?.cardMetadata,
+                    descriptors: positionDescriptors,
+                    onTapCard: { position in selectedCard = cardFor(position: position) },
+                    onEditLot: { lot in editingLot = lot },
+                    onDelete: { ids in Task { await deleteLots(ids) } }
+                )
+            }
         }
     }
 
-    // MARK: - Positions Header (title + view-mode toggle)
+    // MARK: - "Your Cards" preview (top-5 + View all)
 
-    /// Renders the positions in the current view mode (list or grid).
-    /// Shared by the flat list and by each raw/graded section.
+    /// Positions ranked by market value (price × qty), falling back to
+    /// average cost until overview metadata lands. Drives the top-5
+    /// preview and seeds the full list.
+    private var rankedPositions: [Position] {
+        positions.sorted { positionValue($0) > positionValue($1) }
+    }
+
+    private func positionValue(_ p: Position) -> Double {
+        let price = p.canonicalSlug.flatMap { overview?.cardMetadata?[$0]?.marketPrice } ?? p.avgCost
+        return price * Double(p.totalQty)
+    }
+
+    /// "Your Cards" section: a top-5-by-value preview (tap → detail) plus a
+    /// gateway button into the full, swipe-manageable list. The full list
+    /// (HoldingsListView) is a native `List`, so swipe-to-edit/delete and
+    /// scrolling are handled by UIKit — no custom drag gesture fighting the
+    /// page scroll, which is what made the inline list hard to scroll.
     @ViewBuilder
-    private func positionsBody(_ items: [Position]) -> some View {
-        switch positionsViewMode {
-        case .list:
-            let descriptors = positionDescriptors
+    private var yourCardsPreview: some View {
+        let descriptors = positionDescriptors
+        let preview = Array(rankedPositions.prefix(5))
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "rectangle.stack")
+                    .font(.system(size: 14))
+                    .foregroundStyle(PA.Colors.accent)
+                    .accessibilityHidden(true)
+                Text("Your Cards")
+                    .font(PA.Typography.sectionTitle)
+                    .foregroundStyle(PA.Colors.text)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer()
+                Text("\(positions.reduce(0) { $0 + $1.totalQty })")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(PA.Colors.muted)
+                    .accessibilityLabel("\(positions.reduce(0) { $0 + $1.totalQty }) cards total")
+            }
+
             LazyVStack(spacing: 10) {
-                ForEach(items) { position in
+                ForEach(preview) { position in
                     PortfolioPositionCell(
                         position: position,
                         metadata: position.canonicalSlug.flatMap { overview?.cardMetadata?[$0] },
@@ -251,89 +289,30 @@ struct PortfolioView: View {
                         onTap: { selectedCard = cardFor(position: position) },
                         onLotTap: { lot in editingLot = lot }
                     )
-                    .swipeRevealActions(
-                        isScrollLocked: $isSwipingCard,
-                        onEdit: { editingLot = position.lots.first },
-                        onDelete: { Task { await deleteLots(position.lots.map(\.id)) } }
-                    )
                 }
             }
-        case .grid:
-            LazyVGrid(
-                columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
-                spacing: 12
-            ) {
-                ForEach(items) { position in
-                    PortfolioCardGridCell(
-                        position: position,
-                        metadata: position.canonicalSlug.flatMap { overview?.cardMetadata?[$0] },
-                        onTap: { selectedCard = cardFor(position: position) }
-                    )
+
+            // Always present so swipe-to-manage (edit/delete) stays reachable
+            // for any portfolio size. Label depends on whether it reveals more.
+            Button {
+                PAHaptics.selection()
+                showAllHoldings = true
+            } label: {
+                HStack(spacing: 6) {
+                    Text(positions.count > 5 ? "View all \(positions.count) cards" : "Manage cards")
+                        .font(.system(size: 13, weight: .semibold))
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 11, weight: .semibold))
                 }
-            }
-        }
-    }
-
-    /// A labeled raw/graded section: header with the card count, then the
-    /// positions in the current view mode.
-    @ViewBuilder
-    private func positionsSection(title: String, positions items: [Position]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                Text(title)
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(PA.Colors.text)
-                Text("\(items.reduce(0) { $0 + $1.totalQty })")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(PA.Colors.muted)
-                Spacer(minLength: 0)
-            }
-            positionsBody(items)
-        }
-    }
-
-    private var positionsHeader: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "rectangle.stack")
-                .font(.system(size: 14))
                 .foregroundStyle(PA.Colors.accent)
-                .accessibilityHidden(true)
-            Text("Your Cards")
-                .font(PA.Typography.sectionTitle)
-                .foregroundStyle(PA.Colors.text)
-                .accessibilityAddTraits(.isHeader)
-
-            Spacer()
-
-            viewModeToggle
-        }
-    }
-
-    private var viewModeToggle: some View {
-        HStack(spacing: 0) {
-            viewModeButton(.list, icon: "list.bullet")
-            viewModeButton(.grid, icon: "square.grid.2x2.fill")
-        }
-        .padding(2)
-        .background(PA.Colors.surfaceSoft)
-        .clipShape(Capsule())
-    }
-
-    private func viewModeButton(_ mode: PositionsViewMode, icon: String) -> some View {
-        Button {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                positionsViewMode = mode
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(PA.Colors.surfaceSoft.opacity(0.5))
+                .clipShape(RoundedRectangle(cornerRadius: PA.Layout.panelRadius, style: .continuous))
             }
-            PAHaptics.selection()
-        } label: {
-            Image(systemName: icon)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(positionsViewMode == mode ? PA.Colors.background : PA.Colors.textSecondary)
-                .frame(width: 28, height: 22)
-                .background(positionsViewMode == mode ? PA.Colors.accent : Color.clear)
-                .clipShape(Capsule())
+            .buttonStyle(.plain)
+            .accessibilityHint("Opens the full list where you can edit or delete cards")
         }
-        .buttonStyle(.plain)
     }
 
     /// Build a stub MarketCard to navigate to CardDetailView from a position.
@@ -420,30 +399,11 @@ struct PortfolioView: View {
                     }
                 }
 
-                // 5. Positions list ("Your Cards"), always shown when
-                // there are holdings.
+                // 5. Positions preview ("Your Cards") — top-5 by value
+                // with a gateway to the full, swipe-manageable list.
                 if !positions.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        positionsHeader
-                            .padding(.horizontal, PA.Layout.sectionPadding)
-
-                        Group {
-                            // Collectors think in raw vs graded — split the
-                            // list into labeled sections when the portfolio
-                            // holds both, otherwise render a flat list.
-                            let rawPositions = positions.filter { $0.grade == "RAW" }
-                            let gradedPositions = positions.filter { $0.grade != "RAW" }
-                            if !rawPositions.isEmpty && !gradedPositions.isEmpty {
-                                VStack(alignment: .leading, spacing: 18) {
-                                    positionsSection(title: "Raw", positions: rawPositions)
-                                    positionsSection(title: "Graded", positions: gradedPositions)
-                                }
-                            } else {
-                                positionsBody(positions)
-                            }
-                        }
+                    yourCardsPreview
                         .padding(.horizontal, PA.Layout.sectionPadding)
-                    }
                 }
 
                 // 5. Evolution timeline — anchored at the bottom of the
@@ -459,7 +419,6 @@ struct PortfolioView: View {
             }
             .padding(.bottom, 40)
         }
-        .scrollDisabled(isSwipingCard)
     }
 
     // MARK: - Loading & Error States
@@ -679,6 +638,215 @@ struct PortfolioView: View {
         }
         // Reload to sync with server (also triggers overview refresh)
         await loadPortfolio()
+    }
+}
+
+// MARK: - Holdings List ("View all")
+
+/// Full holdings list, reached from the portfolio "View all" / "Manage
+/// cards" button. Built on a native `List` so swipe-to-edit/delete and
+/// vertical scrolling are handled by UIKit — the inline version attached a
+/// custom `DragGesture` to every row that fought the page's scroll, which
+/// is what made the holdings hard to scroll. Grid mode falls back to a
+/// ScrollView + LazyVGrid (cards don't swipe in grid mode, so there is no
+/// gesture to conflict with the scroll).
+struct HoldingsListView: View {
+    let positions: [Position]
+    let metadata: [String: APICardMetadata]?
+    let descriptors: [String: String]
+    let onTapCard: (Position) -> Void
+    let onEditLot: (HoldingRow) -> Void
+    let onDelete: ([String]) -> Void
+
+    private enum ViewMode { case list, grid }
+    @State private var viewMode: ViewMode = .list
+    // Local mirror of `positions` so a swipe-delete animates out
+    // immediately, before the parent's reload round-trip lands. Seeded in
+    // init (no first-frame flash) and re-synced via the .task below.
+    @State private var rows: [Position]
+
+    init(
+        positions: [Position],
+        metadata: [String: APICardMetadata]?,
+        descriptors: [String: String],
+        onTapCard: @escaping (Position) -> Void,
+        onEditLot: @escaping (HoldingRow) -> Void,
+        onDelete: @escaping ([String]) -> Void
+    ) {
+        self.positions = positions
+        self.metadata = metadata
+        self.descriptors = descriptors
+        self.onTapCard = onTapCard
+        self.onEditLot = onEditLot
+        self.onDelete = onDelete
+        _rows = State(initialValue: positions)
+    }
+
+    private func value(_ p: Position) -> Double {
+        let price = p.canonicalSlug.flatMap { metadata?[$0]?.marketPrice } ?? p.avgCost
+        return price * Double(p.totalQty)
+    }
+
+    private func sortedByValue(_ items: [Position]) -> [Position] {
+        items.sorted { value($0) > value($1) }
+    }
+
+    private var rawPositions: [Position] { sortedByValue(rows.filter { $0.grade == "RAW" }) }
+    private var gradedPositions: [Position] { sortedByValue(rows.filter { $0.grade != "RAW" }) }
+    private var isSplit: Bool { !rawPositions.isEmpty && !gradedPositions.isEmpty }
+
+    var body: some View {
+        ZStack {
+            PA.Colors.background.ignoresSafeArea()
+            if rows.isEmpty {
+                emptyState
+            } else if viewMode == .list {
+                listMode
+            } else {
+                gridMode
+            }
+        }
+        .navigationTitle("Your Cards")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(PA.Colors.surface, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) { viewModeToggle }
+        }
+        // Keep the local mirror in sync when the parent's positions change
+        // (e.g. after an edit elsewhere). Seeding happens in init so the
+        // first frame is never spuriously empty.
+        .task(id: positions) { rows = positions }
+    }
+
+    // MARK: List mode (native swipe actions)
+
+    private var listMode: some View {
+        List {
+            if isSplit {
+                Section { rowsFor(rawPositions) } header: { sectionHeader("Raw") }
+                Section { rowsFor(gradedPositions) } header: { sectionHeader("Graded") }
+            } else {
+                rowsFor(sortedByValue(rows))
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(PA.Colors.background)
+    }
+
+    @ViewBuilder
+    private func rowsFor(_ items: [Position]) -> some View {
+        ForEach(items) { position in
+            PortfolioPositionCell(
+                position: position,
+                metadata: position.canonicalSlug.flatMap { metadata?[$0] },
+                descriptor: descriptors[position.id],
+                onTap: { onTapCard(position) },
+                onLotTap: { onEditLot($0) }
+            )
+            .listRowInsets(EdgeInsets(top: 5, leading: PA.Layout.sectionPadding, bottom: 5, trailing: PA.Layout.sectionPadding))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button(role: .destructive) {
+                    let ids = position.lots.map(\.id)
+                    withAnimation { rows.removeAll { $0.id == position.id } }
+                    onDelete(ids)
+                } label: {
+                    Label("Delete", systemImage: "trash.fill")
+                }
+                Button {
+                    if let first = position.lots.first { onEditLot(first) }
+                } label: {
+                    Label("Edit", systemImage: "ellipsis")
+                }
+                .tint(Color(red: 0.25, green: 0.25, blue: 0.30))
+            }
+        }
+    }
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 13, weight: .bold))
+            .foregroundStyle(PA.Colors.text)
+            .textCase(nil)
+    }
+
+    // MARK: Grid mode (tap-only, no swipe)
+
+    private var gridMode: some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 18) {
+                if isSplit {
+                    gridSection("Raw", rawPositions)
+                    gridSection("Graded", gradedPositions)
+                } else {
+                    gridSection(nil, sortedByValue(rows))
+                }
+            }
+            .padding(.horizontal, PA.Layout.sectionPadding)
+            .padding(.vertical, 12)
+        }
+    }
+
+    @ViewBuilder
+    private func gridSection(_ title: String?, _ items: [Position]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let title {
+                sectionHeader(title)
+            }
+            LazyVGrid(
+                columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
+                spacing: 12
+            ) {
+                ForEach(items) { position in
+                    PortfolioCardGridCell(
+                        position: position,
+                        metadata: position.canonicalSlug.flatMap { metadata?[$0] },
+                        onTap: { onTapCard(position) }
+                    )
+                }
+            }
+        }
+    }
+
+    // MARK: Toggle + empty
+
+    private var viewModeToggle: some View {
+        HStack(spacing: 0) {
+            toggleButton(.list, icon: "list.bullet")
+            toggleButton(.grid, icon: "square.grid.2x2.fill")
+        }
+        .padding(2)
+        .background(PA.Colors.surfaceSoft)
+        .clipShape(Capsule())
+    }
+
+    private func toggleButton(_ mode: ViewMode, icon: String) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) { viewMode = mode }
+            PAHaptics.selection()
+        } label: {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(viewMode == mode ? PA.Colors.background : PA.Colors.textSecondary)
+                .frame(width: 28, height: 22)
+                .background(viewMode == mode ? PA.Colors.accent : Color.clear)
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "rectangle.stack")
+                .font(.system(size: 28))
+                .foregroundStyle(PA.Colors.muted)
+            Text("No cards yet")
+                .font(PA.Typography.cardSubtitle)
+                .foregroundStyle(PA.Colors.muted)
+        }
     }
 }
 
