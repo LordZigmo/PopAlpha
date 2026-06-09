@@ -127,7 +127,9 @@ enum APIClient {
     // MARK: - Internals
 
     private static func buildURL(path: String, query: [(String, String)] = []) throws -> URL {
-        var components = URLComponents(string: "\(baseURL)\(path)")!
+        guard var components = URLComponents(string: "\(baseURL)\(path)") else {
+            throw APIError.invalidURL(path)
+        }
         if !query.isEmpty {
             components.queryItems = query.map { URLQueryItem(name: $0.0, value: $0.1) }
         }
