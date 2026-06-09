@@ -258,22 +258,6 @@ export async function fetchExpansionsPage(
   return normalizeScrydexListPayload(payload);
 }
 
-/** Fetch a single expansion's metadata, including is_online_only. */
-export async function fetchExpansionDetail(
-  expansionId: string,
-  credentials: ScrydexCredentials,
-): Promise<ScrydexExpansion | null> {
-  const trimmed = String(expansionId ?? "").trim();
-  if (!trimmed) return null;
-  const language = scrydexLanguageForSetId(trimmed);
-  const payload = await fetchScrydexJson<{ data?: ScrydexExpansion }>(
-    `/${language}/expansions/${encodeURIComponent(trimmed)}`,
-    new URLSearchParams(),
-    credentials,
-  );
-  return payload.data ?? null;
-}
-
 /**
  * Fetch cards for a given expansion (or whole language catalog) with pagination.
  * Routes to /en/ or /ja/ based on the expansion ID suffix — JP set IDs end

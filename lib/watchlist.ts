@@ -119,25 +119,3 @@ export function watchlistCount(): number {
   return state.certs.length + state.cards.length;
 }
 
-export function toggleWatchCert(entry: Omit<WatchCertEntry, "updatedAt">): WatchlistState {
-  if (isSavedCert(entry.cert)) {
-    return { ...readWatchlist(), certs: removeCert(entry.cert) };
-  }
-  return { ...readWatchlist(), certs: addCert(entry) };
-}
-
-export function toggleWatchCard(entry: Omit<WatchCardEntry, "updatedAt">): WatchlistState {
-  if (isSavedCard(entry.slug)) {
-    return { ...readWatchlist(), cards: removeCard(entry.slug) };
-  }
-  return { ...readWatchlist(), cards: addCard(entry) };
-}
-
-export function removeWatchCert(cert: string): WatchlistState {
-  return { ...readWatchlist(), certs: removeCert(cert) };
-}
-
-export function removeWatchCard(slug: string): WatchlistState {
-  return { ...readWatchlist(), cards: removeCard(slug) };
-}
-

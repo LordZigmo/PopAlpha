@@ -67,9 +67,3 @@ export async function buildProviderPriceDisplay(params: {
     asOf: params.asOf ?? null,
   };
 }
-
-export function averageProviderUsdPrice(rows: ProviderPriceDisplay[]): number | null {
-  const scrydex = rows.find((row) => row.provider === "SCRYDEX")?.usdPrice ?? null;
-  if (typeof scrydex === "number" && Number.isFinite(scrydex) && scrydex > 0) return scrydex;
-  return null;
-}

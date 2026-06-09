@@ -50,10 +50,3 @@ export function dbUser(jwt: string): SupabaseClient {
     },
   });
 }
-
-// ── Backward-compatible re-export ────────────────────────────────────────────
-
-/** @deprecated Use dbPublic() for reads, dbUser() for user routes, or the admin client from "@/lib/db/admin" for privileged ops. */
-export function getServerSupabaseClient(): SupabaseClient {
-  return dbPublic();
-}
