@@ -44,7 +44,19 @@ The `keyNotFound` error tells you exactly what key the decoder was looking for.
 
 ## Xcode project file (`project.pbxproj`)
 
-_(none yet)_
+### Removing a Swift file: filter its 4 entries by the unique filename token
+
+**Context:** Retiring `SwipeRevealRow.swift` (PR #214) meant removing it from `project.pbxproj`, not just `rm`-ing the file — a dangling reference fails the build.
+
+**A source file has exactly 4 entries**, each carrying the filename in a `/* SwipeRevealRow.swift … */` comment: a `PBXBuildFile`, a `PBXFileReference`, a `children` entry in its group, and a `files` entry in the `PBXSourcesBuildPhase`. Because all four contain the unique filename token, the safest removal is to filter them out wholesale rather than hand-match tab-indented lines:
+```bash
+grep -v "SwipeRevealRow" project.pbxproj > project.pbxproj.new && mv project.pbxproj.new project.pbxproj
+```
+Verify `rg -c SwipeRevealRow project.pbxproj` returns 0, then build to confirm the project still parses.
+
+**Adding** a file is the riskier direction — it needs genuinely unique 24-char hex IDs (a grep *count* lies about uniqueness; verify in *content* mode). PR #214 sidestepped the add entirely by defining the new `HoldingsListView` inside the existing `PortfolioView.swift` rather than a new file. See the SPM add-note below for the full add procedure.
+
+**Found:** 2026-06-09 (PR #214).
 
 Future entries: add here when you hit weirdness with adding files, targets, or build settings that aren't obvious from just editing the pbxproj.
 
@@ -116,6 +128,20 @@ For other orientations (front camera, landscape interface, upside-down), the tra
 **Reference implementation:** `ios/Sources/Features/Scanner/ScannerView.swift` → `ScannerCameraViewController.installNormalizedRectConverterIfNeeded()`.
 
 **Found:** 2026-04-11. Initially shipped with a y-flip-only conversion; the user caught the misalignment within minutes. The corrected transform above is what actually matches the card on-screen.
+
+---
+
+### Custom `.highPriorityGesture(DragGesture)` on rows inside a `ScrollView` starves the scroll
+
+**Symptom:** User: "Whenever I reach my own cards on the portfolio page, it becomes incredibly hard to scroll up and down." Scrolling worked fine over the hero/analytics at the top, but the moment a finger landed on the holdings list, vertical drags barely moved the page. The list was already a `LazyVStack` (lazy), so it was **not** a row-count or rendering problem.
+
+**Root cause:** Each holding row attached a custom swipe-to-edit/delete `DragGesture` via **`.highPriorityGesture`** (the old `SwipeRevealRow.swift`). `highPriorityGesture` wins the touch **ahead of** the enclosing `ScrollView`'s pan recognizer. The gesture waited 10pt to decide horizontal-vs-vertical and `return`ed early on vertical — but by then it had already claimed the touch sequence, so the ScrollView's pan never engaged. Net effect: any vertical drag *starting on a card* got eaten. (Tell-tale that someone was already fighting this: a workaround `@State isSwipingCard` flag + `.scrollDisabled(isSwipingCard)` papering over the same conflict.)
+
+**Fix:** Don't put a custom `highPriorityGesture` `DragGesture` on rows inside a `ScrollView`. For swipe-to-action, use a **native `List` + `.swipeActions`** — UIKit owns both the scroll and the swipe, zero conflict — or keep the rows **tap-only**. We did both: the portfolio page now shows a tap-only top-5 preview (no swipe), and "View all" opens `HoldingsListView`, a native `List` with `.swipeActions(edge: .trailing)` for edit/delete. `SwipeRevealRow.swift` was deleted entirely. See `ios/PopAlphaApp/PortfolioView.swift` → `HoldingsListView`.
+
+**Generalization:** `.highPriorityGesture` means "beat every gesture below me, unconditionally" — including the scroll. A gesture that only *conditionally* wants the touch (horizontal = mine, vertical = let it scroll) **cannot** be expressed with `highPriorityGesture`, because by the time you know the axis you've already starved the scroll. If you need swipe rows, reach for `List` / `.swipeActions` first; only hand-roll a drag gesture when you're *not* inside a scroll container. A `@State isScrollLocked`-style flag plus `.scrollDisabled` is the smell that you're losing this fight.
+
+**Found:** 2026-06-09 (PR #214), portfolio holdings.
 
 ---
 
