@@ -18,7 +18,6 @@
 		1200000100000000000000F2 /* InsightsUnlockProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1200000100000000000000A2 /* InsightsUnlockProgress.swift */; };
 		1200000100000000000000F3 /* PortfolioCardGridCell.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1200000100000000000000A3 /* PortfolioCardGridCell.swift */; };
 		1300000100000000000000F1 /* CollectorRadarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1300000100000000000000A1 /* CollectorRadarView.swift */; };
-		1400000100000000000000F1 /* SwipeRevealRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1400000100000000000000A1 /* SwipeRevealRow.swift */; };
 		1500000100000000000000F1 /* CollectorRadarCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1500000100000000000000A1 /* CollectorRadarCard.swift */; };
 		1600000100000000000000F1 /* PortfolioDemoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1600000100000000000000A1 /* PortfolioDemoView.swift */; };
 		9D02350A7D2DDE1FBA2D79A5 /* CollectorRadarLockedCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 833C1F6DE131209C109EB423 /* CollectorRadarLockedCard.swift */; };
@@ -128,7 +127,6 @@
 		1200000100000000000000A2 /* InsightsUnlockProgress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightsUnlockProgress.swift; sourceTree = "<group>"; };
 		1200000100000000000000A3 /* PortfolioCardGridCell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioCardGridCell.swift; sourceTree = "<group>"; };
 		1300000100000000000000A1 /* CollectorRadarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollectorRadarView.swift; sourceTree = "<group>"; };
-		1400000100000000000000A1 /* SwipeRevealRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipeRevealRow.swift; sourceTree = "<group>"; };
 		1500000100000000000000A1 /* CollectorRadarCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollectorRadarCard.swift; sourceTree = "<group>"; };
 		1600000100000000000000A1 /* PortfolioDemoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioDemoView.swift; sourceTree = "<group>"; };
 		833C1F6DE131209C109EB423 /* CollectorRadarLockedCard.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CollectorRadarLockedCard.swift; sourceTree = "<group>"; };
@@ -342,7 +340,6 @@
 				1200000100000000000000A2 /* InsightsUnlockProgress.swift */,
 				1200000100000000000000A3 /* PortfolioCardGridCell.swift */,
 				1300000100000000000000A1 /* CollectorRadarView.swift */,
-				1400000100000000000000A1 /* SwipeRevealRow.swift */,
 				1500000100000000000000A1 /* CollectorRadarCard.swift */,
 				1600000100000000000000A1 /* PortfolioDemoView.swift */,
 				AA00000100000000000000B1 /* Assets.xcassets */,
@@ -572,7 +569,6 @@ fi
 				1200000100000000000000F2 /* InsightsUnlockProgress.swift in Sources */,
 				1200000100000000000000F3 /* PortfolioCardGridCell.swift in Sources */,
 				1300000100000000000000F1 /* CollectorRadarView.swift in Sources */,
-				1400000100000000000000F1 /* SwipeRevealRow.swift in Sources */,
 				1500000100000000000000F1 /* CollectorRadarCard.swift in Sources */,
 				1600000100000000000000F1 /* PortfolioDemoView.swift in Sources */,
 				B8C1012FB0F85B919D4EB1DF /* LockedPreviewOverlay.swift in Sources */,
