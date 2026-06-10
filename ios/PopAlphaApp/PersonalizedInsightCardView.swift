@@ -211,7 +211,7 @@ struct PersonalizedInsightCardView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             LockedPreviewOverlay(
-                ctaText: "Upgrade to Pro",
+                ctaText: "Unlock Pro Insights",
                 blurRadius: 5,
                 onTap: {
                     AnalyticsService.shared.capture(.collectorInsightUnlockTapped, properties: ["slug": canonicalSlug])

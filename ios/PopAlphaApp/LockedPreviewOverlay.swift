@@ -15,9 +15,12 @@
 //     adapts to light/dark + Reduce Transparency for free.
 //   • One slow specular sheen sweeps diagonally every ~7s — a whisper of
 //     holo-foil, on-brand for a TCG app. Static under Reduce Motion.
-//   • The lock state is a composed, centered column (material lock badge,
-//     "POPALPHA PRO" eyebrow, accent CTA capsule) instead of a floating
-//     pill — and the ENTIRE surface is the tap target, not just the pill.
+//   • The lock state is a single centered accent CTA capsule (no lock
+//     badge, no eyebrow — the gloss itself communicates "locked"), and
+//     the ENTIRE surface is the tap target, not just the capsule.
+//   • `cornerRadius` lets a caller wrap a WHOLE card and have the gloss
+//     hug the container's continuous corners exactly; radius 0 keeps a
+//     feathered edge for overlays on inset regions.
 //
 // Used by:
 //   - CardDetailView (AI market summary, free-tier branch)
@@ -35,6 +38,12 @@ struct LockedPreviewOverlay<Content: View>: View {
     /// far-stronger floor so content can never be legible regardless of
     /// what a caller passes.
     let blurRadius: CGFloat
+    /// When > 0, the whole treatment (aura, frost, sheen) is clipped to a
+    /// continuous rounded rect of this radius — pass the wrapped card's
+    /// own corner radius so the gloss hugs its container exactly. When 0
+    /// (default), the frost feathers out softly instead, for overlays on
+    /// inset regions inside a larger card.
+    let cornerRadius: CGFloat
     let onTap: () -> Void
     @ViewBuilder let content: () -> Content
 
@@ -43,11 +52,13 @@ struct LockedPreviewOverlay<Content: View>: View {
     init(
         ctaText: String,
         blurRadius: CGFloat = 5,
+        cornerRadius: CGFloat = 0,
         onTap: @escaping () -> Void,
         @ViewBuilder content: @escaping () -> Content
     ) {
         self.ctaText = ctaText
         self.blurRadius = blurRadius
+        self.cornerRadius = cornerRadius
         self.onTap = onTap
         self.content = content
     }
@@ -65,18 +76,11 @@ struct LockedPreviewOverlay<Content: View>: View {
                     .accessibilityHidden(true)
                     .allowsHitTesting(false)
 
-                // Edge-to-edge frost. Feathered mask (soft-blurred fill,
-                // not a clipShape) so the material dissolves into whatever
-                // container it sits in — no visible rectangle, no corner-
-                // radius assumptions about the parent card.
-                Rectangle()
-                    .fill(.ultraThinMaterial)
-                    .mask(
-                        Rectangle()
-                            .fill(Color.white)
-                            .padding(1)
-                            .blur(radius: 5)
-                    )
+                // Edge-to-edge frost. In rounded mode the outer clip below
+                // shapes it; in feathered mode a soft-blurred mask dissolves
+                // it into the surrounding container instead of ending at a
+                // visible rectangle.
+                frostLayer
                     .allowsHitTesting(false)
 
                 // Holo-foil sheen: one narrow specular band drifting
@@ -88,63 +92,53 @@ struct LockedPreviewOverlay<Content: View>: View {
                         .accessibilityHidden(true)
                 }
 
-                lockState
+                unlockButton
             }
-            .contentShape(Rectangle())
+            .clipShape(RoundedRectangle(cornerRadius: max(cornerRadius, 0.1), style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: max(cornerRadius, 0.1), style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(ctaText)
         .accessibilityHint("Opens the PopAlpha Pro paywall")
     }
 
-    // MARK: - Lock state
-
-    private var lockState: some View {
-        VStack(spacing: 10) {
-            ZStack {
-                Circle()
-                    .fill(.ultraThinMaterial)
-                    .frame(width: 44, height: 44)
-                    .overlay(
-                        Circle().strokeBorder(
-                            LinearGradient(
-                                colors: [Color.white.opacity(0.35), Color.white.opacity(0.05)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 1
-                        )
-                    )
-                Image(systemName: "lock.fill")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(PA.Colors.accent)
-            }
-
-            Text("POPALPHA PRO")
-                .font(.system(size: 10, weight: .semibold))
-                .tracking(2.2)
-                .foregroundStyle(PA.Colors.textSecondary)
-
-            HStack(spacing: 6) {
-                Text(ctaText)
-                    .font(.system(size: 13, weight: .bold))
-                Image(systemName: "arrow.right")
-                    .font(.system(size: 11, weight: .bold))
-            }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 9)
-            .background(
-                LinearGradient(
-                    colors: [PA.Colors.accent, PA.Colors.accent.opacity(0.85)],
-                    startPoint: .leading,
-                    endPoint: .trailing
+    @ViewBuilder
+    private var frostLayer: some View {
+        if cornerRadius > 0 {
+            Rectangle().fill(.ultraThinMaterial)
+        } else {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .mask(
+                    Rectangle()
+                        .fill(Color.white)
+                        .padding(1)
+                        .blur(radius: 5)
                 )
-            )
-            .clipShape(Capsule())
-            .shadow(color: PA.Colors.accent.opacity(0.35), radius: 14, x: 0, y: 5)
         }
-        .padding(.vertical, 8)
+    }
+
+    // MARK: - Unlock CTA
+
+    private var unlockButton: some View {
+        HStack(spacing: 6) {
+            Text(ctaText)
+                .font(.system(size: 13, weight: .bold))
+            Image(systemName: "arrow.right")
+                .font(.system(size: 11, weight: .bold))
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 10)
+        .background(
+            LinearGradient(
+                colors: [PA.Colors.accent, PA.Colors.accent.opacity(0.85)],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        )
+        .clipShape(Capsule())
+        .shadow(color: PA.Colors.accent.opacity(0.35), radius: 14, x: 0, y: 5)
     }
 
     // MARK: - Specular sheen
