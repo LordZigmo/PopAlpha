@@ -2153,11 +2153,14 @@ struct CardDetailView: View {
                 aiBriefCard {
                     aiBriefHeader(chip: profile.chip)
                     aiBriefUnlockedBody(profile)
-                    // Visible metering: free users see how many analyses remain
-                    // so the value feels metered (and the upgrade is contextual)
-                    // rather than hitting a silent wall on the next card.
-                    if !premiumGate.isPro,
-                       PremiumGate.freeAnalysisLimit - premiumGate.freeAnalysisSeenCount >= 1 {
+                    // Visible metering: free users see how much of the free
+                    // budget they've burned, with the same accent capsule
+                    // they'll meet on the locked cards — so the upgrade is
+                    // contextual rather than hitting a silent wall on the
+                    // next card. Shown on every unlocked brief for free
+                    // users, including re-views after the budget is spent
+                    // ("3 of 3" — the most persuasive moment).
+                    if !premiumGate.isPro {
                         freeAnalysisMeter
                     }
                 }
@@ -2202,28 +2205,44 @@ struct CardDetailView: View {
         }
     }
 
-    /// Visible free-analysis meter shown under the unlocked brief for free
-    /// users — "N free analyses left · Go unlimited" — tappable to the paywall.
+    /// Free-budget banner under the unlocked brief: "You've used X of 3
+    /// intelligence briefs." with a compact Upgrade to Pro capsule that
+    /// mirrors the locked cards' CTA (same gradient + arrow, smaller) so
+    /// the metered state and the locked state read as one system.
     private var freeAnalysisMeter: some View {
-        let remaining = max(0, PremiumGate.freeAnalysisLimit - premiumGate.freeAnalysisSeenCount)
-        return Button {
-            PAHaptics.tap()
-            showMarketSummaryPaywall = true
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(detailAccent)
-                Text(remaining == 1 ? "1 free analysis left" : "\(remaining) free analyses left")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(PA.Colors.textSecondary)
-                Text("· Go unlimited")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(detailAccent)
-                Spacer(minLength: 0)
+        let used = min(premiumGate.freeAnalysisSeenCount, PremiumGate.freeAnalysisLimit)
+        return HStack(spacing: 10) {
+            Text("You've used \(used) of \(PremiumGate.freeAnalysisLimit) intelligence briefs.")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(PA.Colors.textSecondary)
+
+            Spacer(minLength: 0)
+
+            Button {
+                PAHaptics.tap()
+                showMarketSummaryPaywall = true
+            } label: {
+                HStack(spacing: 4) {
+                    Text("Upgrade to Pro")
+                        .font(.system(size: 11, weight: .bold))
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 9, weight: .bold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(
+                    LinearGradient(
+                        colors: [PA.Colors.accent, PA.Colors.accent.opacity(0.85)],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .clipShape(Capsule())
             }
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
+        .padding(.top, 2)
     }
 
     private func aiBriefCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
