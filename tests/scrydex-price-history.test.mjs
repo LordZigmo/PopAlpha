@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { isRetryableSupabaseEdgeErrorMessage } from "../lib/db/postgres-admin.ts";
+import { applyQueuedBatchPreset } from "../lib/backfill/provider-pipeline-batch-config.ts";
 import {
   DEFAULT_SCRYDEX_PINNED_HOT_SET_IDS,
   resolveScrydexPinnedHotSetIds,
@@ -53,6 +54,26 @@ async function runScrydexPriceHistoryTests() {
   assert.equal(calculateScrydexStageObservationBudget(295), 3540); // Ascended Heroes
   assert.equal(calculateScrydexStageObservationBudget(10_000), 6000); // cap
   assert.ok(calculateScrydexStageObservationBudget(295) > 1500, "budget must exceed per-capture volume");
+
+  // The queued-job preset must not clamp the volume budgets away (Codex
+  // P1 on PR #220: the old 250 cap silently discarded them at execution).
+  // First attempts pass through up to the 6000 ceiling; failing jobs
+  // still de-escalate to the RETRY/MINIMAL presets.
+  const firstAttempt = applyQueuedBatchPreset("SCRYDEX", "PIPELINE", 1, {
+    timeseriesObservations: 3540,
+    metricsObservations: 3540,
+    matchObservations: 100,
+  });
+  assert.equal(firstAttempt.timeseriesObservations, 3540);
+  assert.equal(firstAttempt.metricsObservations, 3540);
+  assert.equal(
+    applyQueuedBatchPreset("SCRYDEX", "PIPELINE", 2, { timeseriesObservations: 3540, matchObservations: 100 }).timeseriesObservations,
+    80,
+  );
+  assert.equal(
+    applyQueuedBatchPreset("SCRYDEX", "PIPELINE", 4, { timeseriesObservations: 3540, matchObservations: 100 }).timeseriesObservations,
+    40,
+  );
   assert.equal(resolveScrydexDailyRequestBudget({
     totalAvailableRequests: 347,
     recentSuccessfulRequests: 218,
