@@ -181,8 +181,12 @@ struct ContentView: View {
             PaywallView(context: .trialExpiring, surface: "trial_expiring_warning")
         }
         // Enjoyment gate — both alerts are native (system alert + system
-        // text-field alert), and the "Yes" path hands off to StoreKit's
-        // system review sheet, so the whole flow reads as Apple UI.
+        // text-field alert), and EVERY branch ends at StoreKit's system
+        // review sheet: "Yes" immediately, "No" after the feedback alert
+        // closes. The gate sequences feedback first, it never filters who
+        // gets the review prompt (App Review guideline 5.6.1 — custom
+        // prompts must not pre-screen reviewers). StoreKit itself decides
+        // whether the sheet actually appears (3-per-365-days cap).
         .alert("Enjoying PopAlpha?", isPresented: $showEnjoymentGate) {
             Button("No") {
                 AnalyticsService.shared.capture(.reviewGateAnswered, properties: ["answer": "no"])
@@ -196,20 +200,20 @@ struct ContentView: View {
             }
             Button("Yes") {
                 AnalyticsService.shared.capture(.reviewGateAnswered, properties: ["answer": "yes"])
-                // Let the gate alert fully dismiss before StoreKit
-                // presents its sheet — back-to-back presentations can
-                // swallow the review prompt.
-                Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(400))
-                    requestReview()
-                }
+                requestReviewAfterAlertDismiss()
             }
             .keyboardShortcut(.defaultAction)
         }
         .alert("What could be better?", isPresented: $showFeedbackAlert) {
             TextField("Your feedback", text: $feedbackText)
-            Button("Send") { submitGateFeedback() }
-            Button("Cancel", role: .cancel) { feedbackText = "" }
+            Button("Send") {
+                submitGateFeedback()
+                requestReviewAfterAlertDismiss()
+            }
+            Button("Cancel", role: .cancel) {
+                feedbackText = ""
+                requestReviewAfterAlertDismiss()
+            }
         } message: {
             Text("We read every one of these.")
         }
@@ -281,6 +285,17 @@ struct ContentView: View {
             }
             AnalyticsService.shared.capture(.reviewGateShown, properties: ["open_count": openCount])
             showEnjoymentGate = true
+        }
+    }
+
+    /// Hands off to StoreKit's review sheet once the currently
+    /// dismissing alert is fully gone — back-to-back presentations can
+    /// swallow the review prompt. Whether the sheet actually appears is
+    /// StoreKit's call.
+    private func requestReviewAfterAlertDismiss() {
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(400))
+            requestReview()
         }
     }
 
