@@ -1,33 +1,44 @@
 // LockedPreviewOverlay.swift
 //
-// Shared "teaser + blur" wrapper used by every Pro-gated surface that
-// renders a preview behind a paywall. Wraps content in a soft blur
-// (so the user feels what they're missing without the actual data
-// being legible) and overlays a centered cyan pill CTA.
+// Shared "full-gloss frost" wrapper used by every Pro-gated surface that
+// renders a preview behind a paywall.
+//
+// Design (revised 2026-06-10 — replaced the blur+particle-dust treatment,
+// which read as a box floating over half-hidden content with visible mask
+// edges):
+//   • Commit fully to the gloss: the wrapped content is blurred far past
+//     legibility into an abstract color aura, so each module keeps its
+//     hue identity (the brief glows teal, the insight glows purple) while
+//     nothing structural reads through.
+//   • A real system material (.ultraThinMaterial) washes edge-to-edge
+//     with a feathered mask — no inner box, no crisp border, and it
+//     adapts to light/dark + Reduce Transparency for free.
+//   • One slow specular sheen sweeps diagonally every ~7s — a whisper of
+//     holo-foil, on-brand for a TCG app. Static under Reduce Motion.
+//   • The lock state is a composed, centered column (material lock badge,
+//     "POPALPHA PRO" eyebrow, accent CTA capsule) instead of a floating
+//     pill — and the ENTIRE surface is the tap target, not just the pill.
 //
 // Used by:
 //   - CardDetailView (AI market summary, free-tier branch)
 //   - PersonalizedInsightCardView (collector-style insight, free-tier branch)
 //   - CollectorRadarLockedCard (entire radar canvas)
 //
-// Design notes:
-//   - The wrapped content is rendered live — same layout, same height —
-//     so adding/removing the lock state doesn't reshuffle anything
-//     above or below in the parent layout.
-//   - .allowsHitTesting(false) on the blurred content means taps fall
-//     through to the CTA pill underneath. The pill is the only
-//     interactive element while locked.
-//   - The bottom gradient fade sells "preview" rather than "broken" —
-//     the blurred content visibly trails off into the surface color
-//     rather than ending at a hard edge.
+// Layout contract (unchanged): the wrapped content renders live at its
+// natural size, so toggling the lock state never reshuffles the parent.
 
 import SwiftUI
 
 struct LockedPreviewOverlay<Content: View>: View {
     let ctaText: String
+    /// Retained for call-site compatibility; the frost enforces its own
+    /// far-stronger floor so content can never be legible regardless of
+    /// what a caller passes.
     let blurRadius: CGFloat
     let onTap: () -> Void
     @ViewBuilder let content: () -> Content
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(
         ctaText: String,
@@ -42,159 +53,133 @@ struct LockedPreviewOverlay<Content: View>: View {
     }
 
     var body: some View {
-        ZStack {
-            content()
-                .blur(radius: blurRadius)
-                .accessibilityHidden(true)
-                .allowsHitTesting(false)
+        Button(action: onTap) {
+            ZStack {
+                // The real content, dissolved into a color aura. Saturation
+                // is nudged up so the aura glows with the module's brand
+                // hue instead of going muddy under the frost.
+                content()
+                    .blur(radius: max(blurRadius * 3.5, 16))
+                    .saturation(1.15)
+                    .opacity(0.9)
+                    .accessibilityHidden(true)
+                    .allowsHitTesting(false)
 
-            // Invisible-ink shimmer — a field of twinkling, drifting
-            // particles over the blur so the locked preview reads as
-            // "magically hidden" (à la iMessage invisible ink) rather
-            // than merely blurred or broken.
-            //
-            // Feathered mask (not a hard clipShape) so the dust dissolves
-            // softly into the card instead of ending at a crisp rectangular
-            // border — the hard edge read as unprofessional.
-            InvisibleInkShimmer()
-                .mask(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Color.white)
-                        .padding(2)
-                        .blur(radius: 7)
-                )
-                .accessibilityHidden(true)
+                // Edge-to-edge frost. Feathered mask (soft-blurred fill,
+                // not a clipShape) so the material dissolves into whatever
+                // container it sits in — no visible rectangle, no corner-
+                // radius assumptions about the parent card.
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .mask(
+                        Rectangle()
+                            .fill(Color.white)
+                            .padding(1)
+                            .blur(radius: 5)
+                    )
+                    .allowsHitTesting(false)
 
-            // Soft fade at the bottom so blurred content reads as a
-            // preview rather than a broken render.
-            VStack(spacing: 0) {
-                Spacer(minLength: 0)
+                // Holo-foil sheen: one narrow specular band drifting
+                // diagonally on a slow loop. Additive blend + low opacity
+                // keep it at "did the light just catch that?" level.
+                if !reduceMotion {
+                    specularSheen
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+
+                lockState
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(ctaText)
+        .accessibilityHint("Opens the PopAlpha Pro paywall")
+    }
+
+    // MARK: - Lock state
+
+    private var lockState: some View {
+        VStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(.ultraThinMaterial)
+                    .frame(width: 44, height: 44)
+                    .overlay(
+                        Circle().strokeBorder(
+                            LinearGradient(
+                                colors: [Color.white.opacity(0.35), Color.white.opacity(0.05)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1
+                        )
+                    )
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(PA.Colors.accent)
+            }
+
+            Text("POPALPHA PRO")
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(2.2)
+                .foregroundStyle(PA.Colors.textSecondary)
+
+            HStack(spacing: 6) {
+                Text(ctaText)
+                    .font(.system(size: 13, weight: .bold))
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 11, weight: .bold))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 9)
+            .background(
                 LinearGradient(
-                    colors: [Color.clear, PA.Colors.background.opacity(0.55)],
-                    startPoint: .top,
-                    endPoint: .bottom
+                    colors: [PA.Colors.accent, PA.Colors.accent.opacity(0.85)],
+                    startPoint: .leading,
+                    endPoint: .trailing
                 )
-                .frame(height: 48)
-            }
-            .allowsHitTesting(false)
-
-            Button(action: onTap) {
-                HStack(spacing: 6) {
-                    Image(systemName: "lock.fill")
-                        .font(.system(size: 11, weight: .semibold))
-                    Text(ctaText)
-                        .font(.system(size: 13, weight: .bold))
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 9)
-                .background(
-                    LinearGradient(
-                        colors: [PA.Colors.accent, PA.Colors.accent.opacity(0.85)],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
-                .clipShape(Capsule())
-                .shadow(color: PA.Colors.accent.opacity(0.45), radius: 12, x: 0, y: 4)
-            }
-            .buttonStyle(.plain)
+            )
+            .clipShape(Capsule())
+            .shadow(color: PA.Colors.accent.opacity(0.35), radius: 14, x: 0, y: 5)
         }
+        .padding(.vertical, 8)
     }
-}
 
-/// iMessage "invisible ink"-style shimmer: a dense field of fine,
-/// scintillating particles drawn over blurred content so a locked preview
-/// reads as "magically hidden" rather than merely blurred. Canvas +
-/// TimelineView keeps it cheap — one redraw per frame, no per-particle
-/// SwiftUI views. The field is deterministic (a seeded PRNG re-seeded every
-/// frame), so particle positions stay put while the time-driven
-/// scintillation + micro-drift animate.
-///
-/// Quality notes (what makes it read as "ink dust" and not "noise"):
-///   • Density — a dense, fine grain of ~1000 sub-pixel particles, not
-///     scattered dots; fineness (sub-pixel radius + blur) keeps it elegant
-///     even at high count.
-///   • Scintillation — brightness is sin raised to a power, so each particle
-///     sits dim and briefly flares; at any instant a different subset is lit,
-///     which reads as sparkle rather than a uniform pulse.
-///   • Depth — ~14% are larger, slower "glints" layered over the fine dust.
-///   • Motion — a small two-frequency drift jiggles each particle organically.
-///   • A faint blur + additive (.plusLighter) blending fuses the grain into
-///     glowing dust instead of crisp pixels.
-struct InvisibleInkShimmer: View {
-    var particleCount: Int = 1000
-    var tint: Color = .white
+    // MARK: - Specular sheen
 
-    var body: some View {
-        TimelineView(.animation) { timeline in
-            Canvas { context, size in
-                let t = timeline.date.timeIntervalSinceReferenceDate
-                var rng = SplitMix64(seed: 0xC0FF_EE15_600D_5EED)
-                // Additive blending so overlapping particles brighten into
-                // soft clusters rather than flat-stacking.
-                context.blendMode = .plusLighter
-                for _ in 0..<particleCount {
-                    let baseX = rng.nextUnit() * size.width
-                    let baseY = rng.nextUnit() * size.height
-                    let phase = rng.nextUnit() * 2 * .pi
-                    let isGlint = rng.nextUnit() > 0.86
-
-                    // Scintillation: pow() makes each particle flare briefly
-                    // then sit dim, so the field sparkles instead of pulsing.
-                    let speed = isGlint ? (0.9 + rng.nextUnit() * 1.2)
-                                        : (2.0 + rng.nextUnit() * 3.5)
-                    let s = 0.5 + 0.5 * sin(t * speed + phase)
-                    // s^2 for glints, s^3 for dust: dust still flares-then-dims
-                    // (reads as sparkle), but more of the field is lit at any
-                    // instant than the old s^4, so it feels alive, not sparse.
-                    let twinkle = isGlint ? s * s : s * s * s
-
-                    // Organic micro-drift from two layered frequencies.
-                    let driftMag = isGlint ? 1.3 : 0.7
-                    let driftX = (sin(t * 0.7 * speed + phase) * 0.7
-                        + sin(t * 1.9 * speed + phase * 1.7) * 0.3) * driftMag
-                    let driftY = (cos(t * 0.6 * speed + phase) * 0.7
-                        + cos(t * 2.2 * speed + phase * 1.3) * 0.3) * driftMag
-
-                    let radius = isGlint ? (0.9 + rng.nextUnit() * 1.0)
-                                         : (0.25 + rng.nextUnit() * 0.5)
-                    let rect = CGRect(
-                        x: baseX + driftX - radius,
-                        y: baseY + driftY - radius,
-                        width: radius * 2,
-                        height: radius * 2
-                    )
-                    // Present silver dust (à la iMessage), not faint: a small
-                    // always-on floor so the grain reads even at rest, plus a
-                    // brighter flare. Fine radius + blur keep it soft, not gaudy.
-                    context.opacity = (isGlint ? 0.09 : 0.045) + twinkle * (isGlint ? 0.62 : 0.48)
-                    context.fill(Path(ellipseIn: rect), with: .color(tint))
-                }
-            }
+    /// Narrow diagonal highlight band sweeping the surface every ~7s.
+    /// Built from gradient stops (no GeometryReader needed): the band's
+    /// center travels from past the leading edge to past the trailing
+    /// edge; stop locations are clamped so the gradient stays valid at
+    /// the extremes.
+    private var specularSheen: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+            let period: Double = 7
+            let phase = timeline.date.timeIntervalSinceReferenceDate
+                .truncatingRemainder(dividingBy: period) / period
+            let center = -0.3 + phase * 1.6
+            LinearGradient(
+                stops: sheenStops(center: center),
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
         }
-        .blur(radius: 0.5)
         .blendMode(.plusLighter)
-        .allowsHitTesting(false)
-    }
-}
-
-/// Tiny deterministic PRNG (SplitMix64) so the shimmer's particle field is
-/// identical every frame — only the time-driven twinkle/drift animates.
-private struct SplitMix64 {
-    private var state: UInt64
-    init(seed: UInt64) { state = seed }
-
-    mutating func next() -> UInt64 {
-        state &+= 0x9E37_79B9_7F4A_7C15
-        var z = state
-        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
-        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
-        return z ^ (z >> 31)
+        .opacity(0.16)
     }
 
-    /// Next value in [0, 1).
-    mutating func nextUnit() -> Double {
-        Double(next() >> 11) * (1.0 / 9_007_199_254_740_992.0)
+    private func sheenStops(center: Double) -> [Gradient.Stop] {
+        func clamp(_ value: Double) -> CGFloat {
+            CGFloat(min(1, max(0, value)))
+        }
+        return [
+            .init(color: .clear, location: 0),
+            .init(color: .clear, location: clamp(center - 0.16)),
+            .init(color: Color.white.opacity(0.55), location: clamp(center)),
+            .init(color: .clear, location: clamp(center + 0.16)),
+            .init(color: .clear, location: 1),
+        ]
     }
 }
