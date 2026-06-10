@@ -41,20 +41,19 @@ struct ContentView: View {
     @State private var showReengagementPaywall = false
     @State private var showTrialExpiringPaywall = false
 
-    // Enjoyment gate → review/feedback flow (the X-style pattern: every
-    // surface is native). Fires once, on the 3rd cold launch — Apple's
-    // HIG says ask only after demonstrated engagement, the system
-    // prompt is capped at 3 shows/365d, and sentiment gates measurably
-    // convert best around the 3rd session — then routes "Yes" to the
-    // StoreKit system review prompt and "Not really" to a native
-    // text-field alert whose submission lands in PostHog.
+    // App Store review ask — StoreKit's system prompt, invoked directly
+    // on the 3rd cold launch (Apple's HIG: ask only after demonstrated
+    // engagement; the sheet is capped at 3 shows/365d and StoreKit
+    // decides whether it actually appears). No custom pre-prompt: App
+    // Review guideline 5.6.1 disallows custom review prompts, so
+    // feedback is collected on a separate surface instead (Profile →
+    // Request a Feature).
     @Environment(\.requestReview) private var requestReview
-    @State private var showEnjoymentGate = false
-    @State private var showFeedbackAlert = false
-    @State private var feedbackText = ""
     private static let appOpenCountKey = "ai.popalpha.review.appOpenCount"
-    private static let enjoymentGateShownKey = "ai.popalpha.review.gateShown"
-    private static let enjoymentGateMinOpens = 3
+    // Key string predates the removal of the enjoyment-gate pre-prompt;
+    // kept so installs that already saw a prompt aren't re-asked.
+    private static let reviewRequestedKey = "ai.popalpha.review.gateShown"
+    private static let reviewRequestMinOpens = 3
 
     private static let reengagementShownKey = "ai.popalpha.premium.reengagement.shown"
     /// Per-trial dedupe for the trial-expiring auto-paywall. Keyed by
@@ -180,51 +179,14 @@ struct ContentView: View {
         .sheet(isPresented: $showTrialExpiringPaywall) {
             PaywallView(context: .trialExpiring, surface: "trial_expiring_warning")
         }
-        // Enjoyment gate — both alerts are native (system alert + system
-        // text-field alert), and EVERY branch ends at StoreKit's system
-        // review sheet: "Yes" immediately, "No" after the feedback alert
-        // closes. The gate sequences feedback first, it never filters who
-        // gets the review prompt (App Review guideline 5.6.1 — custom
-        // prompts must not pre-screen reviewers). StoreKit itself decides
-        // whether the sheet actually appears (3-per-365-days cap).
-        .alert("Enjoying PopAlpha?", isPresented: $showEnjoymentGate) {
-            Button("No") {
-                AnalyticsService.shared.capture(.reviewGateAnswered, properties: ["answer": "no"])
-                // Brief gap so the gate alert finishes dismissing before
-                // the feedback alert presents — back-to-back alert
-                // presentations are occasionally dropped by SwiftUI.
-                Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(400))
-                    showFeedbackAlert = true
-                }
-            }
-            Button("Yes") {
-                AnalyticsService.shared.capture(.reviewGateAnswered, properties: ["answer": "yes"])
-                requestReviewAfterAlertDismiss()
-            }
-            .keyboardShortcut(.defaultAction)
-        }
-        .alert("What could be better?", isPresented: $showFeedbackAlert) {
-            TextField("Your feedback", text: $feedbackText)
-            Button("Send") {
-                submitGateFeedback()
-                requestReviewAfterAlertDismiss()
-            }
-            Button("Cancel", role: .cancel) {
-                feedbackText = ""
-                requestReviewAfterAlertDismiss()
-            }
-        } message: {
-            Text("We read every one of these.")
-        }
         .onAppear {
-            // Paywall evaluators run first so the enjoyment gate's
-            // initial guard sees any same-tick sheet decision; the gate
-            // also re-checks at presentation time for the async cases
-            // (e.g. re-engagement firing when products load).
+            // Paywall evaluators run first so the review ask's initial
+            // guard sees any same-tick sheet decision; the review ask
+            // also re-checks at request time for the async cases (e.g.
+            // re-engagement firing when products load).
             evaluateReengagement()
             evaluateTrialExpiring()
-            evaluateEnjoymentGate()
+            evaluateReviewRequest()
         }
         .onChange(of: premiumStore.productsLoaded) { _, _ in
             evaluateReengagement()
@@ -244,34 +206,33 @@ struct ContentView: View {
         }
     }
 
-    /// Count this cold launch and decide whether to present the
-    /// enjoyment gate. Mirrors the reengagement pattern: idempotent,
-    /// UserDefaults-deduped (the gate shows exactly once per install),
-    /// and deferred a beat so it never lands on top of the launch
-    /// animation. Skipped while another auto-prompt is up — the gate
-    /// can wait for launch #4; a stacked-sheet collision can't be
-    /// undone.
-    private func evaluateEnjoymentGate() {
+    /// Count this cold launch and decide whether to hand off to
+    /// StoreKit's review prompt. Mirrors the reengagement pattern:
+    /// idempotent, UserDefaults-deduped (we ask once per install;
+    /// StoreKit's own 3-per-365d cap governs beyond that), and deferred
+    /// a beat so it never lands on top of the launch animation. Skipped
+    /// while another auto-prompt is up — the ask can wait for launch
+    /// #4; a stacked-sheet collision can't be undone.
+    private func evaluateReviewRequest() {
         let defaults = UserDefaults.standard
         let openCount = defaults.integer(forKey: Self.appOpenCountKey) + 1
         defaults.set(openCount, forKey: Self.appOpenCountKey)
 
-        guard !defaults.bool(forKey: Self.enjoymentGateShownKey),
-              openCount >= Self.enjoymentGateMinOpens,
+        guard !defaults.bool(forKey: Self.reviewRequestedKey),
+              openCount >= Self.reviewRequestMinOpens,
               !showReengagementPaywall,
               !showTrialExpiringPaywall,
               !PushService.shared.showSoftPrompt
         else { return }
 
         // Burn the dedupe key up front so a re-entrant appear can't
-        // double-schedule — but RE-CHECK at presentation time and
-        // un-burn if another auto-prompt won the launch in the
-        // meantime. The paywall evaluators run after this one (and the
-        // re-engagement check re-fires asynchronously when products
-        // load), so a sheet can appear inside the 2s window; presenting
-        // the alert over it would be dropped and the gate would be
-        // consumed without ever being seen (Codex P2 on PR #220).
-        defaults.set(true, forKey: Self.enjoymentGateShownKey)
+        // double-schedule — but RE-CHECK at request time and un-burn if
+        // another auto-prompt won the launch in the meantime. The
+        // paywall evaluators run after this one (and the re-engagement
+        // check re-fires asynchronously when products load), so a sheet
+        // can appear inside the 2s window; requesting the review under
+        // it would waste the once-per-install ask (Codex P2 on PR #220).
+        defaults.set(true, forKey: Self.reviewRequestedKey)
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(2))
             guard !showReengagementPaywall,
@@ -279,38 +240,13 @@ struct ContentView: View {
                   !PushService.shared.showSoftPrompt
             else {
                 // Another prompt owns this launch — release the key so
-                // the gate retries cleanly on the next cold launch.
-                defaults.set(false, forKey: Self.enjoymentGateShownKey)
+                // the ask retries cleanly on the next cold launch.
+                defaults.set(false, forKey: Self.reviewRequestedKey)
                 return
             }
-            AnalyticsService.shared.capture(.reviewGateShown, properties: ["open_count": openCount])
-            showEnjoymentGate = true
-        }
-    }
-
-    /// Hands off to StoreKit's review sheet once the currently
-    /// dismissing alert is fully gone — back-to-back presentations can
-    /// swallow the review prompt. Whether the sheet actually appears is
-    /// StoreKit's call.
-    private func requestReviewAfterAlertDismiss() {
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(400))
+            AnalyticsService.shared.capture(.reviewPromptRequested, properties: ["open_count": openCount])
             requestReview()
         }
-    }
-
-    /// Sends the gate's "Not really" feedback to PostHog — the v1
-    /// feedback inbox. Empty submissions are dropped client-side; text
-    /// is capped defensively so a paste-bomb can't bloat the event.
-    private func submitGateFeedback() {
-        let trimmed = feedbackText.trimmingCharacters(in: .whitespacesAndNewlines)
-        feedbackText = ""
-        guard !trimmed.isEmpty else { return }
-        AnalyticsService.shared.capture(.feedbackSubmitted, properties: [
-            "text": String(trimmed.prefix(1000)),
-            "source": "enjoyment_gate",
-        ])
-        PAHaptics.tap()
     }
 
     /// Decide whether to auto-present the trial re-engagement paywall.
