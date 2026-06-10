@@ -17,6 +17,7 @@
  * per kind per day).
  */
 import { createClient } from "@supabase/supabase-js";
+import { getJpyToUsdRate } from "@/lib/pricing/fx";
 
 export type SummaryTier = "hot" | "warm" | "sparse" | "dormant";
 
@@ -67,8 +68,6 @@ export type FxFreshness = {
   source: "table" | "fallback";
 };
 
-const FALLBACK_JPY_TO_USD_RATE = 0.0068;
-
 /**
  * Freshness of the JPY→USD rate behind every converted JP price on the
  * site. The ingest cron runs weekdays (FX markets close on weekends),
@@ -93,7 +92,11 @@ export async function getFxFreshness(): Promise<FxFreshness> {
     data.rate <= 0 ||
     !data.rate_date
   ) {
-    return { pair: "JPYUSD", rate: FALLBACK_JPY_TO_USD_RATE, rateDate: null, ageDays: null, source: "fallback" };
+    // Report the SAME rate conversions actually use in this scenario:
+    // getJpyToUsdRate() honors the JPY_TO_USD_RATE env override before
+    // its hardcoded default (Codex P2 on PR #218 — a hardcoded 0.0068
+    // here could display a different number than the one in effect).
+    return { pair: "JPYUSD", rate: getJpyToUsdRate(), rateDate: null, ageDays: null, source: "fallback" };
   }
 
   const ageMs = Date.now() - new Date(`${data.rate_date}T00:00:00Z`).getTime();

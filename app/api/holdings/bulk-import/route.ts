@@ -211,13 +211,34 @@ export async function POST(req: Request) {
   // inserted=0 instead of duplicating the user's lots. Rows without a
   // client key get a fresh server-side UUID via the column default and
   // can never conflict, so legacy clients keep plain-insert semantics.
-  const { error, count } = await supabase
+  let { error, count } = await supabase
     .from("holdings")
     .upsert(toInsert, {
       onConflict: "owner_clerk_id,client_lot_id",
       ignoreDuplicates: true,
       count: "exact",
     });
+
+  // Migration-lag compatibility (Codex P1 on PR #218): the app deploy
+  // and the supabase-migrations workflow start in parallel on merge,
+  // and Vercel preview deploys share the production DB — so this code
+  // can run against a schema that doesn't have client_lot_id yet.
+  // When the error is specifically "schema doesn't know that column /
+  // constraint" (PGRST204 = column missing from PostgREST's schema
+  // cache, 42703 = undefined column, 42P10 = no matching ON CONFLICT
+  // constraint), retry as a legacy plain insert without the key —
+  // identical to pre-migration behavior, idempotency simply not yet
+  // active. Any other error keeps the original failure path.
+  if (error && ["PGRST204", "42703", "42P10"].includes(error.code ?? "")) {
+    console.warn(
+      "[holdings/bulk-import] client_lot_id schema not present yet; falling back to legacy insert",
+      { code: error.code },
+    );
+    const legacyRows = toInsert.map(({ client_lot_id: _omitted, ...rest }) => rest);
+    ({ error, count } = await supabase
+      .from("holdings")
+      .insert(legacyRows, { count: "exact" }));
+  }
 
   if (error) {
     console.error("[holdings/bulk-import]", error.message);
