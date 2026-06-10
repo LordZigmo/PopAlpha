@@ -28,6 +28,7 @@ import type {
   StyleProfile,
 } from "../types";
 import { assembleCollectorSignals } from "./collector-signals";
+import { toCollectorInsightTeaser } from "../explanation/teaser";
 
 type CardProfileRow = {
   canonical_slug: string;
@@ -473,12 +474,8 @@ export async function getCollectorInsightTeaser(
 ): Promise<Partial<CollectorInsight>> {
   const signals = await assembleCollectorSignals(actor, profile);
   const full = buildCollectorInsightTemplate(card, features, profile, signals);
-  return {
-    fitLabel: full.fitLabel,
-    fitScore: full.fitScore,
-    collectorType: full.collectorType,
-    summary: full.summary,
-    confidence: full.confidence,
-    source: "template",
-  };
+  // Pure pick-list projection — contract-tested in
+  // tests/personalization/teaser-contract.test.mjs so Pro-only depth
+  // fields can never leak into the free-tier response.
+  return toCollectorInsightTeaser(full);
 }

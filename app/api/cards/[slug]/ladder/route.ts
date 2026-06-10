@@ -187,7 +187,16 @@ type LadderResponse = {
   grades: GradeRung[];
   jp_source: {
     snkrdunk_price_usd: number | null;
-    snkrdunk_price_jpy: number | null;
+    /**
+     * Always null. Snkrdunk's English API serves USD only; the DB's
+     * snkrdunk_price_jpy is back-computed from that USD via an FX rate
+     * at write time, not a seller-listed yen value. Emitting it here
+     * invited consumers to render fabricated yen precision (see
+     * lib/pricing/jp-price-source.ts). Field retained for response-
+     * shape stability; populate only if a native Snkrdunk JPY scrape
+     * ever ships.
+     */
+    snkrdunk_price_jpy: null;
     snkrdunk_sample_count: number | null;
     snkrdunk_observed_at: string | null;
     yahoo_jp_price_usd: number | null;
@@ -543,7 +552,7 @@ export async function GET(
   const jpRow = jpCoverage ? null : pickJpSource(metricRows);
   const jpSource: LadderResponse["jp_source"] = {
     snkrdunk_price_usd: jpCoverage?.snkrdunkPriceUsd ?? jpRow?.snkrdunk_price ?? null,
-    snkrdunk_price_jpy: jpCoverage?.snkrdunkPriceJpy ?? jpRow?.snkrdunk_price_jpy ?? null,
+    snkrdunk_price_jpy: null,
     snkrdunk_sample_count: jpCoverage?.snkrdunkSampleCount ?? jpRow?.snkrdunk_sample_count ?? null,
     snkrdunk_observed_at: jpCoverage?.snkrdunkObservedAt ?? jpRow?.snkrdunk_observed_at ?? null,
     yahoo_jp_price_usd: jpCoverage?.yahooJpPriceUsd ?? jpRow?.yahoo_jp_price ?? null,

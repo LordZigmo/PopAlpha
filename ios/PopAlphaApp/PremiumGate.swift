@@ -163,5 +163,17 @@ public final class PremiumGate: ObservableObject {
         freeAnalysisSeenSlugs.insert(slug)
         freeAnalysisSeenCount = freeAnalysisSeenSlugs.count
         UserDefaults.standard.set(Array(freeAnalysisSeenSlugs), forKey: Self.freeAnalysisSeenKey)
+        // Server-visible record of free-budget burn — the cap itself is
+        // device-scoped (UserDefaults), so PostHog is where we measure
+        // cap-hit rate and reinstall-reset abuse before deciding whether
+        // server-side enforcement is worth building.
+        AnalyticsService.shared.capture(
+            .freeAnalysisRevealed,
+            properties: [
+                "slug": slug,
+                "seen_count": freeAnalysisSeenCount,
+                "limit": Self.freeAnalysisLimit,
+            ]
+        )
     }
 }

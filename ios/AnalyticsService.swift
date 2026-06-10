@@ -106,6 +106,13 @@ enum AnalyticsEvent: String {
     case collectorInsightViewed = "collector_insight_viewed"
     case collectorInsightLockedViewed = "collector_insight_locked_viewed"
     case collectorInsightUnlockTapped = "collector_insight_unlock_tapped"
+    // Free-tier budget consumption. The 3-reveal cap lives in
+    // UserDefaults (device-scoped — a reinstall resets it), so this
+    // event is the server-visible record of budget burn: dashboard the
+    // distribution of `seen_count` per person to measure how often the
+    // cap is actually hit and whether reinstall-abuse is material
+    // before investing in server-side enforcement.
+    case freeAnalysisRevealed = "free_analysis_revealed"
 }
 
 final class AnalyticsService {

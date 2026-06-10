@@ -117,6 +117,14 @@ actor HoldingsService {
                     "canonical_slug": entry.match.slug,
                     "grade": entry.grade,
                     "qty": entry.quantity,
+                    // Idempotency key: MultiScanEntry.id is stable across
+                    // retries of the same tray, so the server (unique on
+                    // owner + client_lot_id, ignore-duplicates upsert)
+                    // recognizes a resubmitted row that already committed
+                    // and no-ops instead of duplicating the lot. First
+                    // line of defense; the delta backstop below remains
+                    // for servers predating the column.
+                    "client_lot_id": entry.id.uuidString.lowercased(),
                 ]
                 if let printingId = entry.printingId {
                     row["printing_id"] = printingId
