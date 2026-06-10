@@ -184,16 +184,6 @@ struct ContentView: View {
         // text-field alert), and the "Yes" path hands off to StoreKit's
         // system review sheet, so the whole flow reads as Apple UI.
         .alert("Enjoying PopAlpha?", isPresented: $showEnjoymentGate) {
-            Button("Yes") {
-                AnalyticsService.shared.capture(.reviewGateAnswered, properties: ["answer": "yes"])
-                // Let the gate alert fully dismiss before StoreKit
-                // presents its sheet — back-to-back presentations can
-                // swallow the review prompt.
-                Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(400))
-                    requestReview()
-                }
-            }
             Button("No") {
                 AnalyticsService.shared.capture(.reviewGateAnswered, properties: ["answer": "no"])
                 // Brief gap so the gate alert finishes dismissing before
@@ -204,6 +194,17 @@ struct ContentView: View {
                     showFeedbackAlert = true
                 }
             }
+            Button("Yes") {
+                AnalyticsService.shared.capture(.reviewGateAnswered, properties: ["answer": "yes"])
+                // Let the gate alert fully dismiss before StoreKit
+                // presents its sheet — back-to-back presentations can
+                // swallow the review prompt.
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(400))
+                    requestReview()
+                }
+            }
+            .keyboardShortcut(.defaultAction)
         }
         .alert("What could be better?", isPresented: $showFeedbackAlert) {
             TextField("Your feedback", text: $feedbackText)
