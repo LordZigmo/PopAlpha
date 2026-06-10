@@ -1,5 +1,6 @@
 import SwiftUI
 import NukeUI
+import StoreKit
 
 struct ContentView: View {
     // Default to Scanner tab when launched with -runOfflineSmoke or
@@ -39,6 +40,22 @@ struct ContentView: View {
     @StateObject private var premiumGate = PremiumGate.shared
     @State private var showReengagementPaywall = false
     @State private var showTrialExpiringPaywall = false
+
+    // Enjoyment gate → review/feedback flow (the X-style pattern: every
+    // surface is native). Fires once, on the 3rd cold launch — Apple's
+    // HIG says ask only after demonstrated engagement, the system
+    // prompt is capped at 3 shows/365d, and sentiment gates measurably
+    // convert best around the 3rd session — then routes "Yes" to the
+    // StoreKit system review prompt and "Not really" to a native
+    // text-field alert whose submission lands in PostHog.
+    @Environment(\.requestReview) private var requestReview
+    @State private var showEnjoymentGate = false
+    @State private var showFeedbackAlert = false
+    @State private var feedbackText = ""
+    private static let appOpenCountKey = "ai.popalpha.review.appOpenCount"
+    private static let enjoymentGateShownKey = "ai.popalpha.review.gateShown"
+    private static let enjoymentGateMinOpens = 3
+
     private static let reengagementShownKey = "ai.popalpha.premium.reengagement.shown"
     /// Per-trial dedupe for the trial-expiring auto-paywall. Keyed by
     /// trial expiration date (epoch seconds) so a future trial — if
@@ -163,7 +180,40 @@ struct ContentView: View {
         .sheet(isPresented: $showTrialExpiringPaywall) {
             PaywallView(context: .trialExpiring, surface: "trial_expiring_warning")
         }
+        // Enjoyment gate — both alerts are native (system alert + system
+        // text-field alert), and the "Yes" path hands off to StoreKit's
+        // system review sheet, so the whole flow reads as Apple UI.
+        .alert("Enjoying PopAlpha?", isPresented: $showEnjoymentGate) {
+            Button("Yes") {
+                AnalyticsService.shared.capture(.reviewGateAnswered, properties: ["answer": "yes"])
+                // Let the gate alert fully dismiss before StoreKit
+                // presents its sheet — back-to-back presentations can
+                // swallow the review prompt.
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(400))
+                    requestReview()
+                }
+            }
+            Button("No") {
+                AnalyticsService.shared.capture(.reviewGateAnswered, properties: ["answer": "no"])
+                // Brief gap so the gate alert finishes dismissing before
+                // the feedback alert presents — back-to-back alert
+                // presentations are occasionally dropped by SwiftUI.
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(400))
+                    showFeedbackAlert = true
+                }
+            }
+        }
+        .alert("What could be better?", isPresented: $showFeedbackAlert) {
+            TextField("Your feedback", text: $feedbackText)
+            Button("Send") { submitGateFeedback() }
+            Button("Cancel", role: .cancel) { feedbackText = "" }
+        } message: {
+            Text("We read every one of these.")
+        }
         .onAppear {
+            evaluateEnjoymentGate()
             evaluateReengagement()
             evaluateTrialExpiring()
         }
@@ -183,6 +233,47 @@ struct ContentView: View {
             }
             evaluateReengagement()
         }
+    }
+
+    /// Count this cold launch and decide whether to present the
+    /// enjoyment gate. Mirrors the reengagement pattern: idempotent,
+    /// UserDefaults-deduped (the gate shows exactly once per install),
+    /// and deferred a beat so it never lands on top of the launch
+    /// animation. Skipped while another auto-prompt is up — the gate
+    /// can wait for launch #4; a stacked-sheet collision can't be
+    /// undone.
+    private func evaluateEnjoymentGate() {
+        let defaults = UserDefaults.standard
+        let openCount = defaults.integer(forKey: Self.appOpenCountKey) + 1
+        defaults.set(openCount, forKey: Self.appOpenCountKey)
+
+        guard !defaults.bool(forKey: Self.enjoymentGateShownKey),
+              openCount >= Self.enjoymentGateMinOpens,
+              !showReengagementPaywall,
+              !showTrialExpiringPaywall,
+              !PushService.shared.showSoftPrompt
+        else { return }
+
+        defaults.set(true, forKey: Self.enjoymentGateShownKey)
+        AnalyticsService.shared.capture(.reviewGateShown, properties: ["open_count": openCount])
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            showEnjoymentGate = true
+        }
+    }
+
+    /// Sends the gate's "Not really" feedback to PostHog — the v1
+    /// feedback inbox. Empty submissions are dropped client-side; text
+    /// is capped defensively so a paste-bomb can't bloat the event.
+    private func submitGateFeedback() {
+        let trimmed = feedbackText.trimmingCharacters(in: .whitespacesAndNewlines)
+        feedbackText = ""
+        guard !trimmed.isEmpty else { return }
+        AnalyticsService.shared.capture(.feedbackSubmitted, properties: [
+            "text": String(trimmed.prefix(1000)),
+            "source": "enjoyment_gate",
+        ])
+        PAHaptics.tap()
     }
 
     /// Decide whether to auto-present the trial re-engagement paywall.
@@ -263,6 +354,11 @@ struct ProfileTabView: View {
     // from the navigational menu items above. Always confirmed via an
     // action sheet so a stray tap never logs the user out.
     @State private var showSignOutConfirmation = false
+    // "Request a Feature" — native text-field alert whose submission
+    // lands in PostHog (feature_requested with `text`); the v1 feature
+    // request inbox, same pattern as the enjoyment gate's feedback path.
+    @State private var showFeatureRequestAlert = false
+    @State private var featureRequestText = ""
 
     var body: some View {
         NavigationStack {
@@ -280,6 +376,42 @@ struct ProfileTabView: View {
             guard auth.isAuthenticated else { return }
             await loadProfile()
         }
+        // Native text-field alert (the same Apple-UI-everywhere pattern
+        // as the enjoyment gate). Submissions land in PostHog as
+        // feature_requested events — the v1 feature-request inbox.
+        .alert("Request a Feature", isPresented: $showFeatureRequestAlert) {
+            TextField("What should PopAlpha do next?", text: $featureRequestText)
+            Button("Send") { submitFeatureRequest() }
+            Button("Cancel", role: .cancel) { featureRequestText = "" }
+        } message: {
+            Text("We read every one of these.")
+        }
+    }
+
+    /// Sends the feature request to PostHog. Empty submissions are
+    /// dropped client-side; text capped defensively.
+    private func submitFeatureRequest() {
+        let trimmed = featureRequestText.trimmingCharacters(in: .whitespacesAndNewlines)
+        featureRequestText = ""
+        guard !trimmed.isEmpty else { return }
+        AnalyticsService.shared.capture(.featureRequested, properties: [
+            "text": String(trimmed.prefix(1000)),
+            "source": "profile_menu",
+        ])
+        PAHaptics.tap()
+    }
+
+    /// Menu row that opens the feature-request alert. A Button (not a
+    /// NavigationLink) so it matches the row styling while presenting
+    /// the alert in place.
+    private var featureRequestRow: some View {
+        Button {
+            PAHaptics.tap()
+            showFeatureRequestAlert = true
+        } label: {
+            profileMenuRow(icon: "lightbulb", title: "Request a Feature")
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Sign-in Prompt
@@ -364,6 +496,8 @@ struct ProfileTabView: View {
                     profileMenuRow(icon: "heart", title: "Watchlist")
                 }
                 .buttonStyle(.plain)
+
+                featureRequestRow
 
                 NavigationLink {
                     SettingsView()
@@ -451,6 +585,8 @@ struct ProfileTabView: View {
                     profileMenuRow(icon: "bell.badge", title: "Activity")
                 }
                 .buttonStyle(.plain)
+
+                featureRequestRow
 
                 NavigationLink {
                     SettingsView()

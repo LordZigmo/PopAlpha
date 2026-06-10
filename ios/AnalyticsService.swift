@@ -113,6 +113,18 @@ enum AnalyticsEvent: String {
     // cap is actually hit and whether reinstall-abuse is material
     // before investing in server-side enforcement.
     case freeAnalysisRevealed = "free_analysis_revealed"
+
+    // Review/feedback loop. The enjoyment gate fires once, on the 3rd
+    // cold launch (Apple HIG: only after demonstrated engagement; the
+    // system review prompt is capped at 3 shows/365d so we spend it on
+    // users who already said yes). `review_gate_answered` carries
+    // `answer` ("yes"/"no"); both feedback events carry `text` — that's
+    // the entire feedback inbox for v1, surfaced as a PostHog insight,
+    // until volume justifies a real table + admin view.
+    case reviewGateShown = "review_gate_shown"
+    case reviewGateAnswered = "review_gate_answered"
+    case feedbackSubmitted = "feedback_submitted"
+    case featureRequested = "feature_requested"
 }
 
 final class AnalyticsService {
