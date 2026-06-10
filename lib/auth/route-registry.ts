@@ -94,6 +94,7 @@ export const CRON_ROUTES = [
   "cron/notify-trial-expiring",
   "cron/import-pricecharting",
   "cron/check-pricecharting-freshness",
+  "cron/check-scrydex-raw-liveness",
   "admin/cleanup/delete-thumb-overlay-augs",
 ];
 

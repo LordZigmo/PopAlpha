@@ -116,6 +116,18 @@ function volumeFactor(points7d: number): number {
   return 0.4 + (points7d / 80) * 0.6;
 }
 
+// Known recovery limitation (observed 2026-06-10, Ascended Heroes
+// pipeline-starvation incident): the MAD/IQR anchors are unweighted by
+// recency, so after a multi-week observation gap the surviving STALE
+// points own the median and genuinely-moved fresh prices get excluded
+// as outliers (Mega Froslass ex #275: six ~$96 May points rejected
+// every fresh ~$82 June point with reason "MAD"). This self-resolves as
+// fresh points accumulate and stale ones age out of the 30d window
+// (~3-7 days), and the upstream fix is preventing long gaps in the
+// first place (check-scrydex-raw-liveness + volume-sized stage
+// budgets) — so we deliberately do NOT recency-weight here. If a
+// future incident needs faster recovery, drain the set then re-run
+// refresh-card-metrics daily rather than weakening the filter.
 function robustFilterPrices<T extends ObservationInput>(points: T[]): { kept: T[]; excluded: ExcludedObservation[] } {
   if (points.length < 5) return { kept: points, excluded: [] };
 

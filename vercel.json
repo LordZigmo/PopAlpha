@@ -33,6 +33,10 @@
       "schedule": "0 14 * * *"
     },
     {
+      "path": "/api/cron/check-scrydex-raw-liveness",
+      "schedule": "25 2,8,14,20 * * *"
+    },
+    {
       "path": "/api/cron/refresh-card-embeddings",
       "schedule": "30 9 * * *"
     },

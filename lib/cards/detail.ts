@@ -589,8 +589,22 @@ export async function buildCardDetailResponse(inputSlug: string): Promise<CardDe
     metrics: buildGradedMetrics(row),
   }));
 
+  // Default-mode rule (revised 2026-06-10): open in GRADED only when a
+  // graded series has real depth, or when there is no usable RAW series
+  // at all. The old `hasAnyGraded` check flipped the default to GRADED
+  // off a single graded observation — for PSA, `available` requires only
+  // a non-null provider_as_of_ts — so a freshly released chase card
+  // (Ascended Heroes Mega Froslass ex: 145 RAW points/30d) opened on a
+  // 1-point month-old PSA chart while its rich RAW market hid behind the
+  // mode toggle. Vintage cards with genuine graded depth keep the GRADED
+  // default; graded-only cards (no usable RAW market) still fall back to
+  // it rather than opening on an empty RAW chart.
   const hasAnyGraded = gradedMatrix.some((row) => row.available || row.metrics !== null);
-  const defaultMode = hasAnyGraded ? "GRADED" : "RAW";
+  const hasDeepGraded = gradedMatrix.some(
+    (row) => (row.metrics?.points30d ?? 0) >= GRADED_AVAILABILITY_THRESHOLD,
+  );
+  const hasUsableRaw = rawVariants.some((variant) => variant.available);
+  const defaultMode = hasDeepGraded || (!hasUsableRaw && hasAnyGraded) ? "GRADED" : "RAW";
   const defaultPrintingId = pickBestPrintingId(rawVariants, gradedMatrix, defaultMode);
   const defaultProvider = defaultMode === "GRADED"
     ? pickDefaultProvider(gradedMatrix, defaultPrintingId)
