@@ -2153,11 +2153,14 @@ struct CardDetailView: View {
                 aiBriefCard {
                     aiBriefHeader(chip: profile.chip)
                     aiBriefUnlockedBody(profile)
-                    // Visible metering: free users see how many analyses remain
-                    // so the value feels metered (and the upgrade is contextual)
-                    // rather than hitting a silent wall on the next card.
-                    if !premiumGate.isPro,
-                       PremiumGate.freeAnalysisLimit - premiumGate.freeAnalysisSeenCount >= 1 {
+                    // Visible metering: free users see how much of the free
+                    // budget they've burned, with the same accent capsule
+                    // they'll meet on the locked cards — so the upgrade is
+                    // contextual rather than hitting a silent wall on the
+                    // next card. Shown on every unlocked brief for free
+                    // users, including re-views after the budget is spent
+                    // ("3 of 3" — the most persuasive moment).
+                    if !premiumGate.isPro {
                         freeAnalysisMeter
                     }
                 }
@@ -2174,45 +2177,72 @@ struct CardDetailView: View {
                     ])
                 }
             } else {
-                // Free budget spent: show the REAL summary behind the
-                // invisible-ink blur instead of a generic placeholder.
-                aiBriefCard {
-                    aiBriefHeader(chip: "Pro")
-                    aiBriefLockedPreview(profile)
-                }
+                // Free budget spent: the WHOLE card — header, chip, and the
+                // REAL summary — glosses out under the frost, clipped to the
+                // card's own corners, with a single unlock CTA.
+                lockedAiBriefCard(profile)
             }
         } else if !premiumGate.isPro {
             // Profile not loaded yet (or none exists) — light teaser so the
             // section still renders with shape.
+            lockedAiBriefCard(nil)
+        }
+    }
+
+    /// Full-card gloss for the locked summary: the overlay wraps the
+    /// entire card (not an inner region), so the frost runs edge-to-edge
+    /// and hugs the container's continuous corners — no inner box.
+    private func lockedAiBriefCard(_ profile: CardProfileResult?) -> some View {
+        LockedPreviewOverlay(
+            ctaText: "Unlock Pro Insights",
+            cornerRadius: PA.Layout.panelRadius,
+            onTap: { showMarketSummaryPaywall = true }
+        ) {
             aiBriefCard {
                 aiBriefHeader(chip: "Pro")
-                aiBriefLockedPreview(nil)
+                aiBriefLockedPreview(profile)
             }
         }
     }
 
-    /// Visible free-analysis meter shown under the unlocked brief for free
-    /// users — "N free analyses left · Go unlimited" — tappable to the paywall.
+    /// Free-budget banner under the unlocked brief: "You've used X of 3
+    /// intelligence briefs." with a compact Upgrade to Pro capsule that
+    /// mirrors the locked cards' CTA (same gradient + arrow, smaller) so
+    /// the metered state and the locked state read as one system.
     private var freeAnalysisMeter: some View {
-        let remaining = max(0, PremiumGate.freeAnalysisLimit - premiumGate.freeAnalysisSeenCount)
-        return Button {
-            PAHaptics.tap()
-            showMarketSummaryPaywall = true
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(detailAccent)
-                Text(remaining == 1 ? "1 free analysis left" : "\(remaining) free analyses left")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(PA.Colors.textSecondary)
-                Text("· Go unlimited")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(detailAccent)
-                Spacer(minLength: 0)
+        let used = min(premiumGate.freeAnalysisSeenCount, PremiumGate.freeAnalysisLimit)
+        return HStack(spacing: 10) {
+            Text("You've used \(used) of \(PremiumGate.freeAnalysisLimit) intelligence briefs.")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(PA.Colors.textSecondary)
+
+            Spacer(minLength: 0)
+
+            Button {
+                PAHaptics.tap()
+                showMarketSummaryPaywall = true
+            } label: {
+                HStack(spacing: 4) {
+                    Text("Upgrade to Pro")
+                        .font(.system(size: 11, weight: .bold))
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 9, weight: .bold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(
+                    LinearGradient(
+                        colors: [PA.Colors.accent, PA.Colors.accent.opacity(0.85)],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .clipShape(Capsule())
             }
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
+        .padding(.top, 2)
     }
 
     private func aiBriefCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
@@ -2234,15 +2264,16 @@ struct CardDetailView: View {
     }
 
     private func aiBriefHeader(chip: String?) -> some View {
-        // "AI BRIEF" eyebrow — mirrors AIBriefCard's header so the card-detail
-        // summary reads as the same component as the front-page brief.
+        // "POPALPHA SUMMARY" eyebrow — renamed from "AI BRIEF" (2026-06-10,
+        // de-AI of user-facing value props) while keeping the same eyebrow
+        // styling as the front-page brief so the two still read as kin.
         HStack(spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "sparkles")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(detailAccent)
                     .accessibilityHidden(true)
-                Text("AI BRIEF")
+                Text("POPALPHA SUMMARY")
                     .font(.system(size: 10, weight: .semibold))
                     .tracking(2.0)
                     .foregroundStyle(detailAccent)
@@ -2293,12 +2324,11 @@ struct CardDetailView: View {
         }
     }
 
+    /// The body that renders UNDER the full-card gloss (see
+    /// lockedAiBriefCard). The real summary text, not a placeholder — the
+    /// overlay dissolves it into the card's color aura, so the tease is
+    /// the card's genuine shape and hue without a legible word.
     private func aiBriefLockedPreview(_ profile: CardProfileResult?) -> some View {
-        LockedPreviewOverlay(
-            ctaText: "Upgrade to Pro",
-            blurRadius: 5,
-            onTap: { showMarketSummaryPaywall = true }
-        ) {
             VStack(alignment: .leading, spacing: 8) {
                 if let profile {
                     // The REAL AI summary, blurred behind the invisible-ink
@@ -2324,7 +2354,7 @@ struct CardDetailView: View {
                     Text("Momentum, liquidity, and confidence read")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(PA.Colors.text.opacity(0.85))
-                    Text("AI interpretation tuned to the card's current market signals and recent observations.")
+                    Text("Interpretation tuned to the card's current market signals and recent observations.")
                         .font(.system(size: 14, weight: .regular))
                         .foregroundStyle(PA.Colors.textSecondary)
                         .lineSpacing(3)
@@ -2332,7 +2362,6 @@ struct CardDetailView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 2)
-        }
     }
 
     /// Canonical one-line read — defaults to `summary_short` and trims

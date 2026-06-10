@@ -35,8 +35,22 @@ type ProviderPresetMap = Record<PipelineBatchKind | "MINIMAL", PipelineBatchPres
 // (~540 observations) were only 74% covered per day. 250 obs/job restores
 // full daily coverage for all sets.
 //
+// 2026-06-10: raised PIPELINE timeseries/metrics caps 250 → 6000 to match
+// the volume-derived stage budgets (calculateScrydexStageObservationBudget,
+// cap 6000) shipped after the Ascended Heroes starvation incident. A
+// 295-card set emits ~1,500 observations per capture once graded variants
+// fill in, so the 250 clamp here was silently discarding the enqueued
+// budgets and the starvation would have resumed at a slower rate (caught
+// by Codex review on PR #220). The preset is a ceiling, not a workload:
+// actual work is bounded by the set's real pending observations, and the
+// incident's manual drain processed 2,000 observations in 34s — well
+// inside the 300s job window. matchObservations stays at 250: the match
+// stage demonstrably kept up throughout the incident.
+//
 // RETRY and MINIMAL stay lower — those are the de-escalation path when jobs
 // are failing, and still protect against CPU spikes on a struggling DB.
+// Explicit volume budgets are deliberately still clamped by those presets:
+// a job that has already failed should retry small, not huge.
 const QUEUED_BATCH_PRESETS: Record<PipelineBatchProvider, ProviderPresetMap> = {
   SCRYDEX: {
     PIPELINE: {
@@ -44,8 +58,8 @@ const QUEUED_BATCH_PRESETS: Record<PipelineBatchProvider, ProviderPresetMap> = {
       maxRequests: 15,
       payloadLimit: 15,
       matchObservations: 250,
-      timeseriesObservations: 250,
-      metricsObservations: 250,
+      timeseriesObservations: 6000,
+      metricsObservations: 6000,
     },
     RETRY: {
       setLimit: 1,

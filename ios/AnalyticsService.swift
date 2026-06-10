@@ -113,6 +113,17 @@ enum AnalyticsEvent: String {
     // cap is actually hit and whether reinstall-abuse is material
     // before investing in server-side enforcement.
     case freeAnalysisRevealed = "free_analysis_revealed"
+
+    // Review/feedback loop. The StoreKit review prompt is requested
+    // directly once per install, on the 3rd cold launch (Apple HIG:
+    // only after demonstrated engagement; guideline 5.6.1 disallows a
+    // custom pre-prompt, and StoreKit decides whether the sheet
+    // actually appears — this event records the request, not a
+    // confirmed impression). `feature_requested` carries `text` —
+    // that's the entire feedback inbox for v1, surfaced as a PostHog
+    // insight, until volume justifies a real table + admin view.
+    case reviewPromptRequested = "review_prompt_requested"
+    case featureRequested = "feature_requested"
 }
 
 final class AnalyticsService {

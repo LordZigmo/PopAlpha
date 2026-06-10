@@ -1,5 +1,6 @@
 import SwiftUI
 import NukeUI
+import StoreKit
 
 struct ContentView: View {
     // Default to Scanner tab when launched with -runOfflineSmoke or
@@ -39,6 +40,21 @@ struct ContentView: View {
     @StateObject private var premiumGate = PremiumGate.shared
     @State private var showReengagementPaywall = false
     @State private var showTrialExpiringPaywall = false
+
+    // App Store review ask — StoreKit's system prompt, invoked directly
+    // on the 3rd cold launch (Apple's HIG: ask only after demonstrated
+    // engagement; the sheet is capped at 3 shows/365d and StoreKit
+    // decides whether it actually appears). No custom pre-prompt: App
+    // Review guideline 5.6.1 disallows custom review prompts, so
+    // feedback is collected on a separate surface instead (Profile →
+    // Request a Feature).
+    @Environment(\.requestReview) private var requestReview
+    private static let appOpenCountKey = "ai.popalpha.review.appOpenCount"
+    // Key string predates the removal of the enjoyment-gate pre-prompt;
+    // kept so installs that already saw a prompt aren't re-asked.
+    private static let reviewRequestedKey = "ai.popalpha.review.gateShown"
+    private static let reviewRequestMinOpens = 3
+
     private static let reengagementShownKey = "ai.popalpha.premium.reengagement.shown"
     /// Per-trial dedupe for the trial-expiring auto-paywall. Keyed by
     /// trial expiration date (epoch seconds) so a future trial — if
@@ -164,8 +180,13 @@ struct ContentView: View {
             PaywallView(context: .trialExpiring, surface: "trial_expiring_warning")
         }
         .onAppear {
+            // Paywall evaluators run first so the review ask's initial
+            // guard sees any same-tick sheet decision; the review ask
+            // also re-checks at request time for the async cases (e.g.
+            // re-engagement firing when products load).
             evaluateReengagement()
             evaluateTrialExpiring()
+            evaluateReviewRequest()
         }
         .onChange(of: premiumStore.productsLoaded) { _, _ in
             evaluateReengagement()
@@ -182,6 +203,49 @@ struct ContentView: View {
                 UserDefaults.standard.set(false, forKey: Self.reengagementShownKey)
             }
             evaluateReengagement()
+        }
+    }
+
+    /// Count this cold launch and decide whether to hand off to
+    /// StoreKit's review prompt. Mirrors the reengagement pattern:
+    /// idempotent, UserDefaults-deduped (we ask once per install;
+    /// StoreKit's own 3-per-365d cap governs beyond that), and deferred
+    /// a beat so it never lands on top of the launch animation. Skipped
+    /// while another auto-prompt is up — the ask can wait for launch
+    /// #4; a stacked-sheet collision can't be undone.
+    private func evaluateReviewRequest() {
+        let defaults = UserDefaults.standard
+        let openCount = defaults.integer(forKey: Self.appOpenCountKey) + 1
+        defaults.set(openCount, forKey: Self.appOpenCountKey)
+
+        guard !defaults.bool(forKey: Self.reviewRequestedKey),
+              openCount >= Self.reviewRequestMinOpens,
+              !showReengagementPaywall,
+              !showTrialExpiringPaywall,
+              !PushService.shared.showSoftPrompt
+        else { return }
+
+        // Burn the dedupe key up front so a re-entrant appear can't
+        // double-schedule — but RE-CHECK at request time and un-burn if
+        // another auto-prompt won the launch in the meantime. The
+        // paywall evaluators run after this one (and the re-engagement
+        // check re-fires asynchronously when products load), so a sheet
+        // can appear inside the 2s window; requesting the review under
+        // it would waste the once-per-install ask (Codex P2 on PR #220).
+        defaults.set(true, forKey: Self.reviewRequestedKey)
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            guard !showReengagementPaywall,
+                  !showTrialExpiringPaywall,
+                  !PushService.shared.showSoftPrompt
+            else {
+                // Another prompt owns this launch — release the key so
+                // the ask retries cleanly on the next cold launch.
+                defaults.set(false, forKey: Self.reviewRequestedKey)
+                return
+            }
+            AnalyticsService.shared.capture(.reviewPromptRequested, properties: ["open_count": openCount])
+            requestReview()
         }
     }
 
@@ -263,6 +327,11 @@ struct ProfileTabView: View {
     // from the navigational menu items above. Always confirmed via an
     // action sheet so a stray tap never logs the user out.
     @State private var showSignOutConfirmation = false
+    // "Request a Feature" — native text-field alert whose submission
+    // lands in PostHog (feature_requested with `text`); the v1 feature
+    // request inbox, same pattern as the enjoyment gate's feedback path.
+    @State private var showFeatureRequestAlert = false
+    @State private var featureRequestText = ""
 
     var body: some View {
         NavigationStack {
@@ -280,6 +349,42 @@ struct ProfileTabView: View {
             guard auth.isAuthenticated else { return }
             await loadProfile()
         }
+        // Native text-field alert (the same Apple-UI-everywhere pattern
+        // as the enjoyment gate). Submissions land in PostHog as
+        // feature_requested events — the v1 feature-request inbox.
+        .alert("Request a Feature", isPresented: $showFeatureRequestAlert) {
+            TextField("What should PopAlpha do next?", text: $featureRequestText)
+            Button("Send") { submitFeatureRequest() }
+            Button("Cancel", role: .cancel) { featureRequestText = "" }
+        } message: {
+            Text("We read every one of these.")
+        }
+    }
+
+    /// Sends the feature request to PostHog. Empty submissions are
+    /// dropped client-side; text capped defensively.
+    private func submitFeatureRequest() {
+        let trimmed = featureRequestText.trimmingCharacters(in: .whitespacesAndNewlines)
+        featureRequestText = ""
+        guard !trimmed.isEmpty else { return }
+        AnalyticsService.shared.capture(.featureRequested, properties: [
+            "text": String(trimmed.prefix(1000)),
+            "source": "profile_menu",
+        ])
+        PAHaptics.tap()
+    }
+
+    /// Menu row that opens the feature-request alert. A Button (not a
+    /// NavigationLink) so it matches the row styling while presenting
+    /// the alert in place.
+    private var featureRequestRow: some View {
+        Button {
+            PAHaptics.tap()
+            showFeatureRequestAlert = true
+        } label: {
+            profileMenuRow(icon: "lightbulb", title: "Request a Feature")
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Sign-in Prompt
@@ -364,6 +469,8 @@ struct ProfileTabView: View {
                     profileMenuRow(icon: "heart", title: "Watchlist")
                 }
                 .buttonStyle(.plain)
+
+                featureRequestRow
 
                 NavigationLink {
                     SettingsView()
@@ -451,6 +558,8 @@ struct ProfileTabView: View {
                     profileMenuRow(icon: "bell.badge", title: "Activity")
                 }
                 .buttonStyle(.plain)
+
+                featureRequestRow
 
                 NavigationLink {
                     SettingsView()
