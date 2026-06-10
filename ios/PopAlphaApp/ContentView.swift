@@ -214,9 +214,13 @@ struct ContentView: View {
             Text("We read every one of these.")
         }
         .onAppear {
-            evaluateEnjoymentGate()
+            // Paywall evaluators run first so the enjoyment gate's
+            // initial guard sees any same-tick sheet decision; the gate
+            // also re-checks at presentation time for the async cases
+            // (e.g. re-engagement firing when products load).
             evaluateReengagement()
             evaluateTrialExpiring()
+            evaluateEnjoymentGate()
         }
         .onChange(of: premiumStore.productsLoaded) { _, _ in
             evaluateReengagement()
@@ -255,10 +259,27 @@ struct ContentView: View {
               !PushService.shared.showSoftPrompt
         else { return }
 
+        // Burn the dedupe key up front so a re-entrant appear can't
+        // double-schedule — but RE-CHECK at presentation time and
+        // un-burn if another auto-prompt won the launch in the
+        // meantime. The paywall evaluators run after this one (and the
+        // re-engagement check re-fires asynchronously when products
+        // load), so a sheet can appear inside the 2s window; presenting
+        // the alert over it would be dropped and the gate would be
+        // consumed without ever being seen (Codex P2 on PR #220).
         defaults.set(true, forKey: Self.enjoymentGateShownKey)
-        AnalyticsService.shared.capture(.reviewGateShown, properties: ["open_count": openCount])
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(2))
+            guard !showReengagementPaywall,
+                  !showTrialExpiringPaywall,
+                  !PushService.shared.showSoftPrompt
+            else {
+                // Another prompt owns this launch — release the key so
+                // the gate retries cleanly on the next cold launch.
+                defaults.set(false, forKey: Self.enjoymentGateShownKey)
+                return
+            }
+            AnalyticsService.shared.capture(.reviewGateShown, properties: ["open_count": openCount])
             showEnjoymentGate = true
         }
     }
