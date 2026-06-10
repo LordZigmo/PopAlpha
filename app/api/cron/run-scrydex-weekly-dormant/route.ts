@@ -22,7 +22,10 @@ import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/auth/require";
 import { enqueuePipelineJob } from "@/lib/backfill/provider-pipeline-job-queue";
 import { getProviderCooldownState } from "@/lib/backfill/provider-cooldown";
-import { planScrydexDailyCapture } from "@/lib/backfill/scrydex-price-history";
+import {
+  calculateScrydexStageObservationBudget,
+  planScrydexDailyCapture,
+} from "@/lib/backfill/scrydex-price-history";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -40,8 +43,11 @@ export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
     const matchObservations = parseOptionalInt(url.searchParams.get("observations")) ?? 100;
-    const timeseriesObservations = parseOptionalInt(url.searchParams.get("timeseriesObservations")) ?? matchObservations;
-    const metricsObservations = parseOptionalInt(url.searchParams.get("metricsObservations")) ?? timeseriesObservations;
+    // Stage budgets follow the same volume-aware default as the daily
+    // cron (see calculateScrydexStageObservationBudget — 2026-06-10
+    // starvation incident); explicit query params still override.
+    const timeseriesObservationsOverride = parseOptionalInt(url.searchParams.get("timeseriesObservations"));
+    const metricsObservationsOverride = parseOptionalInt(url.searchParams.get("metricsObservations"));
     const maxRequests = parseOptionalInt(url.searchParams.get("maxRequests"));
     const force = url.searchParams.get("force") === "1";
 
@@ -76,6 +82,8 @@ export async function GET(req: Request) {
       const dailyCaptureRequests = Math.max(1, selectedSet.dailyCaptureRequests);
       plannedRequests += dailyCaptureRequests;
 
+      const setStageBudget = calculateScrydexStageObservationBudget(selectedSet.expectedCardCount);
+
       const queued = await enqueuePipelineJob({
         provider: "SCRYDEX",
         jobKind: "PIPELINE",
@@ -86,8 +94,8 @@ export async function GET(req: Request) {
           maxRequests: dailyCaptureRequests,
           payloadLimit: dailyCaptureRequests,
           matchObservations,
-          timeseriesObservations,
-          metricsObservations,
+          timeseriesObservations: timeseriesObservationsOverride ?? setStageBudget,
+          metricsObservations: metricsObservationsOverride ?? setStageBudget,
           force,
         },
         // Slightly lower priority than the daily cron's 125 — the

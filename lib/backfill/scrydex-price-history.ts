@@ -348,6 +348,38 @@ export function calculateScrydexDailyCaptureRequests(cardCount: number): number 
   return Math.max(1, Math.ceil(cardCount / 100));
 }
 
+// Per-set observation budget for the downstream timeseries/metrics
+// pipeline stages, derived from the set's expected card count.
+//
+// Incident 2026-06-10 (Ascended Heroes): the flat default of 100
+// observations per job was far below a 295-card set's per-capture
+// volume (~1,500 observations once graded variants ballooned in
+// April–May), and the consumer re-scans newest-first from the top each
+// run — so ~70% of the set's RAW snapshots/history/metrics silently
+// froze for almost a month while every health surface stayed green.
+//
+// Cards average ~1 RAW + a handful of graded variant observations per
+// capture, plus backlog from prior under-budget runs; ×12 with a hard
+// cap keeps one job comfortably able to drain a full set (the manual
+// drain processed 2,000 observations in 34s, well inside the 300s cron
+// ceiling). The floor covers tiny sets/promos whose backlog can still
+// exceed their card count.
+const STAGE_OBSERVATIONS_PER_CARD = 12;
+const STAGE_OBSERVATION_BUDGET_MIN = 500;
+const STAGE_OBSERVATION_BUDGET_MAX = 6000;
+
+export function calculateScrydexStageObservationBudget(
+  expectedCardCount: number | null | undefined,
+): number {
+  const cards = typeof expectedCardCount === "number" && Number.isFinite(expectedCardCount)
+    ? Math.max(0, Math.floor(expectedCardCount))
+    : 0;
+  return Math.min(
+    STAGE_OBSERVATION_BUDGET_MAX,
+    Math.max(STAGE_OBSERVATION_BUDGET_MIN, cards * STAGE_OBSERVATIONS_PER_CARD),
+  );
+}
+
 export function calculateScrydexHistoryBackfillCredits(cardCount: number): number {
   if (!Number.isFinite(cardCount) || cardCount <= 0) return 0;
   return Math.max(0, Math.floor(cardCount)) * SCRYDEX_HISTORY_CREDITS_PER_CARD;

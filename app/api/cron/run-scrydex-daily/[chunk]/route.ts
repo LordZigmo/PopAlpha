@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/auth/require";
 import { enqueuePipelineJob } from "@/lib/backfill/provider-pipeline-job-queue";
 import { getProviderCooldownState } from "@/lib/backfill/provider-cooldown";
-import { planScrydexDailyCapture } from "@/lib/backfill/scrydex-price-history";
+import {
+  calculateScrydexStageObservationBudget,
+  planScrydexDailyCapture,
+} from "@/lib/backfill/scrydex-price-history";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -36,8 +39,12 @@ export async function GET(
     const chunkNumber = parseChunkParam(chunk);
     const url = new URL(req.url);
     const matchObservations = parseOptionalInt(url.searchParams.get("observations")) ?? 100;
-    const timeseriesObservations = parseOptionalInt(url.searchParams.get("timeseriesObservations")) ?? matchObservations;
-    const metricsObservations = parseOptionalInt(url.searchParams.get("metricsObservations")) ?? timeseriesObservations;
+    // Explicit operator overrides for the downstream stage budgets. When
+    // absent, each set gets a volume-derived budget (see
+    // stageObservationBudget) instead of inheriting the flat match
+    // default.
+    const timeseriesObservationsOverride = parseOptionalInt(url.searchParams.get("timeseriesObservations"));
+    const metricsObservationsOverride = parseOptionalInt(url.searchParams.get("metricsObservations"));
     const maxRequests = parseOptionalInt(url.searchParams.get("maxRequests"));
     const historyDays = parseOptionalInt(url.searchParams.get("historyDays"));
     const requireFullRecentHistory = url.searchParams.get("requireFullRecentHistory") === "1";
@@ -84,6 +91,17 @@ export async function GET(
       const dailyCaptureRequests = Math.max(1, selectedSet.dailyCaptureRequests);
       plannedRequests += dailyCaptureRequests;
 
+      // Volume-aware downstream budgets: an explicit query param still
+      // wins (operator override), but the default scales with the set
+      // instead of inheriting the flat 100 that caused the 2026-06-10
+      // starvation incident. The match stage keeps its flat default —
+      // it demonstrably kept up (every variant of the frozen cards was
+      // re-matched nightly); only the snapshot/history/metrics consumers
+      // starved.
+      const setStageBudget = calculateScrydexStageObservationBudget(selectedSet.expectedCardCount);
+      const setTimeseriesObservations = timeseriesObservationsOverride ?? setStageBudget;
+      const setMetricsObservations = metricsObservationsOverride ?? setStageBudget;
+
       const queued = await enqueuePipelineJob({
         provider: "SCRYDEX",
         jobKind: "PIPELINE",
@@ -94,8 +112,8 @@ export async function GET(
           maxRequests: dailyCaptureRequests,
           payloadLimit: dailyCaptureRequests,
           matchObservations,
-          timeseriesObservations,
-          metricsObservations,
+          timeseriesObservations: setTimeseriesObservations,
+          metricsObservations: setMetricsObservations,
           force,
         },
         priority: 125,
@@ -111,6 +129,8 @@ export async function GET(
         providerCardCount: selectedSet.providerCardCount,
         matchedCardCount: selectedSet.matchedCardCount,
         dailyCaptureRequests,
+        timeseriesObservations: setTimeseriesObservations,
+        metricsObservations: setMetricsObservations,
         priorityWeight: selectedSet.priorityWeight,
         priorityReasons: selectedSet.priorityReasons,
         enqueued: queued.enqueued,

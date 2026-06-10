@@ -542,6 +542,7 @@ export const INTERNAL_ROUTE_TRUST_CONTRACTS = {
   "cron/notify-trial-expiring": cronSecretRoute("cron/internal automation"),
   "cron/import-pricecharting": cronSecretRoute("cron/internal automation"),
   "cron/check-pricecharting-freshness": cronSecretRoute("cron/internal automation"),
+  "cron/check-scrydex-raw-liveness": cronSecretRoute("cron/internal automation"),
 };
 
 export const DEBUG_ROUTE_TRUST_CONTRACTS = {

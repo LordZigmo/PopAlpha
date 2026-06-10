@@ -10,6 +10,7 @@ import {
   buildScrydexRecentHistoryCatchupPlan,
   calculateScrydexDailyCaptureRequests,
   calculateScrydexHistoryBackfillCredits,
+  calculateScrydexStageObservationBudget,
   historyDateToSnapshotTs,
   isMissingScrydexCardHistoryErrorMessage,
   isRetryableHistoryWriteErrorMessage,
@@ -43,6 +44,15 @@ async function runScrydexPriceHistoryTests() {
   assert.equal(calculateScrydexDailyCaptureRequests(0), 1);
   assert.equal(calculateScrydexDailyCaptureRequests(245), 3);
   assert.equal(calculateScrydexHistoryBackfillCredits(5), 15);
+
+  // Stage budget scales with set size (2026-06-10 starvation incident):
+  // a 295-card set must never get the old flat-100 budget again.
+  assert.equal(calculateScrydexStageObservationBudget(null), 500);
+  assert.equal(calculateScrydexStageObservationBudget(0), 500);
+  assert.equal(calculateScrydexStageObservationBudget(10), 500); // floor
+  assert.equal(calculateScrydexStageObservationBudget(295), 3540); // Ascended Heroes
+  assert.equal(calculateScrydexStageObservationBudget(10_000), 6000); // cap
+  assert.ok(calculateScrydexStageObservationBudget(295) > 1500, "budget must exceed per-capture volume");
   assert.equal(resolveScrydexDailyRequestBudget({
     totalAvailableRequests: 347,
     recentSuccessfulRequests: 218,
