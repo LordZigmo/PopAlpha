@@ -163,9 +163,13 @@ begin
   end loop;
   _result := _result || jsonb_build_object('price_history_points', _table_total);
 
-  -- 7b. price_history_points - downsample 30-31d window (the batch
-  --     helper bounds its own work; skipped when the budget is spent)
-  if clock_timestamp() <= _deadline then
+  -- 7b. price_history_points - downsample 30-31d window. The helper's
+  --     LIMIT bounds its delete set, not its window scan over the slab,
+  --     so one call can run for tens of seconds on a cold or bloated
+  --     day — only start it with real headroom left. Catch-up passes
+  --     that skip it are fine: steady-state nights keep up with the
+  --     rolling one-day slab.
+  if clock_timestamp() <= _deadline - interval '20 seconds' then
     _ds_deleted := coalesce(
       (public.downsample_price_history_points_batch(
         _chunk_limit,
