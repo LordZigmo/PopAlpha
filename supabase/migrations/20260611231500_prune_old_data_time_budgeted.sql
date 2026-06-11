@@ -1,5 +1,10 @@
 -- Time-budgeted prune_old_data (2026-06-11).
 --
+-- supersedes: 20260524230328_provider_price_history_foundation.sql
+-- (body diffed against that definition: all eight prune sections kept
+-- identical retention windows and key columns; downsample call kept the
+-- same args; ingest_runs is the only new section.)
+--
 -- The previous definition deleted at most ONE 5,000-row chunk per table
 -- per nightly run — sized long before the Scrydex volume-budget work
 -- (2026-06-10) scaled pipeline throughput. Daily inflow into
