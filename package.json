@@ -16,6 +16,7 @@
     "test:holdings": "node --experimental-strip-types --loader ./scripts/ts-root-loader.mjs tests/run-holdings-tests.mjs",
     "test:price-history": "node --experimental-strip-types --loader ./scripts/ts-root-loader.mjs tests/price-history-currency.test.mjs",
     "test:pricecharting": "node --experimental-strip-types --loader ./scripts/ts-root-loader.mjs tests/pricecharting-foundation.test.mjs",
+    "test:psa-spec-match": "node --experimental-strip-types --loader ./scripts/ts-root-loader.mjs tests/psa-spec-match.test.mjs",
     "test:market-truth": "node --experimental-strip-types --loader ./scripts/ts-root-loader.mjs tests/market-truth-phase1.test.mjs",
     "test:arbitrage": "node --experimental-strip-types --loader ./scripts/ts-root-loader.mjs tests/jp-en-arbitrage.test.mjs",
     "test:jp-translation-match": "node tests/jp/translation-match.test.mjs",

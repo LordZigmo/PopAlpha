@@ -3,6 +3,7 @@ import { type SupabaseClient } from "@supabase/supabase-js";
 import { getCertificate, type CertificateResponse } from "@/lib/psa/client";
 import { dbAdmin } from "@/lib/db/admin";
 import { buildSnapshotParsed, hashSnapshotParsed } from "@/lib/psa/snapshot";
+import { runPsaSpecMatch } from "@/lib/backfill/psa-spec-match";
 import { measureAsync } from "@/lib/perf";
 import { createRateLimiter } from "@/lib/rate-limit";
 
@@ -88,7 +89,26 @@ async function harvestSpecTarget(params: {
     );
     if (error) {
       console.warn("[psa/cert] spec target harvest failed", { specId, error: error.message });
+      return;
     }
+
+    // Match-on-arrival (Population Tables Phase 2): try to map the spec
+    // to a canonical card while the cert payload is hot. The runner skips
+    // already-MATCHED/verified specs in one cheap query, so repeat scans
+    // cost almost nothing. Time-boxed — the daily match-psa-specs sweep
+    // is the backstop for anything skipped here.
+    const matchTimeoutMs = 2500;
+    await Promise.race([
+      runPsaSpecMatch({ specId, logRun: false }).then((result) => {
+        if (!result.ok) {
+          console.warn("[psa/cert] spec match attempt failed", {
+            specId,
+            error: result.firstError,
+          });
+        }
+      }),
+      new Promise<void>((resolve) => setTimeout(resolve, matchTimeoutMs)),
+    ]);
   } catch (error) {
     console.warn("[psa/cert] spec target harvest threw", {
       error: error instanceof Error ? error.message : String(error),

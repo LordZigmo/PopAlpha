@@ -105,3 +105,49 @@ detectable and reversible.
   `mcp__Vercel__web_fetch_vercel_url` reaches public popalpha.ai routes.
 - iOS builds are CI-verified (`ios-build` workflow); web typecheck via
   `npx tsc --noEmit`, lint via `npx eslint <files>`.
+
+---
+
+## Decisions (2026-06-11 build session)
+
+Phase 2 engine built on branch `claude/happy-archimedes-slu1ux`
+(migration `20260611233000_psa_spec_card_mapping.sql`). Decisions taken,
+per the "decide and document" mandate above:
+
+- **Dedicated tables, additive only.** `psa_set_map` is the PSA-brand →
+  set_code backbone (analog of `provider_set_map`); `psa_spec_card_map`
+  is the per-spec outcome (analog of `provider_card_map`): canonical_slug
+  + optional `printing_id` (a spec is finer than a card), `mapping_status`
+  MATCHED/UNMATCHED with `match_reason` as the review-queue discriminator
+  (`MISSING_PSA_SET_MAP`, `SUBJECT_MISMATCH`, `LOW_CONFIDENCE_MATCH_BLOCKED`,
+  `NON_CARD_CATEGORY`, `AMBIGUOUS_*`, …), and `verified` for
+  owner-confirmed ground truth the pipeline never overwrites.
+- **Set backbone: curated wins, derivation is persisted.** The matcher
+  derives brand→set deterministically (embedded set codes like "SV4a-",
+  normalized set-name equality, series-prefix stripping) and PERSISTS
+  every derivation into `psa_set_map` as `source='DERIVED'` so each
+  assumption is visible/correctable in SQL. Curated rows (`MANUAL`/`SEED`)
+  always override. No seed rows shipped in the migration — at 4 specs the
+  backbone is curated interactively.
+- **Match shape: number-driven, subject-verified.** Within the resolved
+  set: card_number candidates (zero-padding tolerant), verified against
+  `canonical_name` (a number hit whose name disagrees queues as
+  SUBJECT_MISMATCH — wrong-card pop is worse than no pop). PSA `Variety`
+  maps to finish/edition/stamp to pin the printing; failure to pin never
+  fails the slug match. Auto threshold 0.9
+  (`PSA_SPEC_MIN_AUTO_MATCH_CONFIDENCE`); below it, the proposal is
+  queued in metadata, never applied.
+- **JP handled, not deferred.** "JAPANESE" infix → `language='JP'`,
+  code probes try the `_ja` suffix. 2 of the first 4 real specs are JP.
+- **Entry points.** Match-on-arrival inside the `/api/psa/cert` harvest
+  hook (time-boxed 2.5s, never blocks the lookup); daily sweep cron
+  `match-psa-specs` 08:20 UTC retries the queue as curation/catalog grow
+  (DB-only — zero PSA API quota); `?mode=report` is the audit artifact
+  (coverage %, match rate, confidence distribution, queue breakdown,
+  random samples for psacard.com spot-checks).
+- **Inventory reality (2026-06-11).** Production holds 4 specs to date —
+  Illustrator Pikachu (1998 JP promo, NO card number), Trick or Trade
+  foil pack (category PACKS → NON_CARD_CATEGORY by design), Van Gogh
+  Pikachu (SVP promo), JP sv4a Mew ex. The deliverable is the machinery +
+  explicit queueing; coverage proof = every target decided
+  (matched-or-queued), spot-checked by the owner.

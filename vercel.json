@@ -41,6 +41,10 @@
       "schedule": "50 7 * * *"
     },
     {
+      "path": "/api/cron/match-psa-specs",
+      "schedule": "20 8 * * *"
+    },
+    {
       "path": "/api/cron/refresh-card-embeddings",
       "schedule": "30 9 * * *"
     },
