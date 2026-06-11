@@ -1809,7 +1809,8 @@ struct CardDetailView: View {
                 series: gradePerfSeries.map { MultiLineSeriesInput(id: $0.id, label: $0.label, color: $0.color, points: $0.points) },
                 scale: gradePerfScale,
                 showChangeDetails: true,
-                height: 140
+                height: 140,
+                showsBounds: true
             )
         } else if !selectedPriceMode.isGraded, hasVariantOverlay {
             if let sel = selectedPrintingId, let one = variantSeries.first(where: { $0.id == sel }) {
@@ -1822,7 +1823,8 @@ struct CardDetailView: View {
                     series: variantSeries.map { MultiLineSeriesInput(id: $0.id, label: $0.label, color: $0.color, points: $0.points) },
                     scale: .indexed,
                     showChangeDetails: true,
-                    height: 140
+                    height: 140,
+                    showsBounds: true
                 )
             }
         } else {
