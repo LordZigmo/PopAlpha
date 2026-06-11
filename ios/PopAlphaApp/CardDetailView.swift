@@ -223,6 +223,9 @@ struct CardDetailView: View {
     @State private var ebayLoadState: EbayLoadState = .idle
     @State private var ebayListings: [EbayListing] = []
     @State private var ebayTotalAsks: Int = 0
+    /// Card id the current listings belong to — lets reappear skip the
+    /// refetch while a language-toggle (new id, same view) reloads.
+    @State private var ebayLoadedCardId: String? = nil
 
     /// Bug-report flow: category dialog → optional note alert → PostHog.
     @State private var showBugCategoryDialog = false
@@ -2608,7 +2611,10 @@ struct CardDetailView: View {
         }
         .padding(16)
         .glassSurface()
-        .task { await loadEbayListings() }
+        // task(id:) so a JP/EN language toggle (which swaps activeCard
+        // in place) refetches for the new card instead of showing the
+        // previous card's asks (codex P2).
+        .task(id: activeCard.id) { await loadEbayListings() }
     }
 
     private func ebayListingRow(_ listing: EbayListing) -> some View {
@@ -2665,7 +2671,9 @@ struct CardDetailView: View {
     /// web card page's primary eBay search ("name number setName") and
     /// lets the route's relevance filter + total-ask sort do the rest.
     private func loadEbayListings(force: Bool = false) async {
-        if !force, ebayLoadState != .idle { return }
+        let cardId = activeCard.id
+        if !force, ebayLoadState != .idle, ebayLoadedCardId == cardId { return }
+        ebayLoadedCardId = cardId
         ebayLoadState = .loading
         let name = activeCard.name.trimmingCharacters(in: .whitespacesAndNewlines)
         // MarketCard.cardNumber is the display form ("#199") — the
@@ -2697,7 +2705,12 @@ struct CardDetailView: View {
                 query: query
             )
             guard envelope.ok else { throw URLError(.badServerResponse) }
-            ebayListings = (envelope.items ?? []).filter { $0.totalAsk != nil }
+            // Route order is item-price ascending; re-sort by TOTAL
+            // buyer cost (price + shipping) so "lowest total ask first"
+            // is true when shipping varies (codex P2).
+            ebayListings = (envelope.items ?? [])
+                .filter { $0.totalAsk != nil }
+                .sorted { ($0.totalAsk ?? .infinity) < ($1.totalAsk ?? .infinity) }
             ebayTotalAsks = envelope.total ?? ebayListings.count
             ebayLoadState = .loaded
             Logger.api.debug("ebay loaded items=\(envelope.items?.count ?? -1, privacy: .public) kept=\(self.ebayListings.count, privacy: .public)")
