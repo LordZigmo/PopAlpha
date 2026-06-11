@@ -397,20 +397,43 @@ struct LiquidGlassSurface: ViewModifier {
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .strokeBorder(
                         LinearGradient(
-                            colors: [
-                                accent.opacity(0.50),
-                                .white.opacity(0.16),
-                                accent.opacity(0.18),
-                                .white.opacity(0.22)
-                            ],
+                            colors: borderGradientColors,
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         ),
                         lineWidth: 1
                     )
             }
-            .shadow(color: accent.opacity(0.30), radius: 18, x: 0, y: 6)
-            .shadow(color: .black.opacity(0.20), radius: 24, x: 0, y: 12)
+            // Light mode gets no chroma halo — the accent glow around
+            // every card was the single biggest "blue" signal on the
+            // light homepage. Dark keeps the tinted bloom.
+            .shadow(
+                color: colorScheme == .light ? .black.opacity(0.06) : accent.opacity(0.30),
+                radius: 18, x: 0, y: 6
+            )
+            .shadow(
+                color: .black.opacity(colorScheme == .light ? 0.10 : 0.20),
+                radius: 24, x: 0, y: 12
+            )
+    }
+
+    /// Border stops. Light mode is a neutral glass edge (faint dark
+    /// hairline + white sheen); dark keeps the accent-tinted rim.
+    private var borderGradientColors: [Color] {
+        if colorScheme == .light {
+            return [
+                .black.opacity(0.10),
+                .white.opacity(0.45),
+                .black.opacity(0.06),
+                .white.opacity(0.30)
+            ]
+        }
+        return [
+            accent.opacity(0.50),
+            .white.opacity(0.16),
+            accent.opacity(0.18),
+            .white.opacity(0.22)
+        ]
     }
 
     /// Accent-wash stops. Dark mode runs hot (rich tinted glass);
@@ -418,16 +441,18 @@ struct LiquidGlassSurface: ViewModifier {
     private var accentGradientColors: [Color] {
         switch colorScheme {
         case .light:
-            // 2026-06-11: dialed way down from 0.28/0.10/0.22/0.08 — at
-            // those values the wash read as a "blue shimmer" over the
-            // homepage cards in light mode instead of tinted glass. Light
-            // mode now leans on the material itself with only a whisper
-            // of accent chroma; dark mode is untouched.
+            // 2026-06-11 (round 2): chroma-free. Even the "whisper"
+            // accent stops (0.10/0.04/0.08/0.03) still read as a blue
+            // wash across the homepage in light mode — owner asked for
+            // the blue gone completely. Light glass is now pure neutral
+            // frost: white sheen over the material, zero accent in the
+            // wash (accent survives only in small text/icons, which sit
+            // on the content layer, not the surface). Dark is untouched.
             return [
-                accent.opacity(0.10),
-                accent.opacity(0.04),
-                accent.opacity(0.08),
-                accent.opacity(0.03)
+                .white.opacity(0.45),
+                .white.opacity(0.18),
+                .white.opacity(0.32),
+                .white.opacity(0.12)
             ]
         case .dark:
             // The original PR #86 values (0.55 / 0.22 / 0.45 / 0.18)
@@ -476,15 +501,17 @@ struct LiquidGlassSurface: ViewModifier {
         // the accent-tinted base below, the highlight area looks like
         // a brighter glint of the same chroma — exactly how a real
         // reflection on tinted glass behaves.
-        // In light mode the accent-colored sweep is the main "blue
-        // shimmer" offender — over a light material even a low peak
-        // reads as a moving colored band. Cut it to a third so the
-        // sweep registers as glass catching light, not a blue glint.
-        let peak = colorScheme == .light ? shineIntensity * 0.35 : shineIntensity
+        // In light mode the sweep is pure white — a specular glint on
+        // neutral glass. Even a low-peak accent-colored band read as a
+        // moving blue shimmer (round 1 cut it to a third; round 2
+        // removes the chroma entirely per owner feedback). Dark keeps
+        // the tinted reflection.
+        let sweep: Color = colorScheme == .light ? .white : accent
+        let peak = colorScheme == .light ? shineIntensity * 0.5 : shineIntensity
         return [
-            .init(color: accent.opacity(0), location: max(center - halfWidth, 0)),
-            .init(color: accent.opacity(peak), location: center),
-            .init(color: accent.opacity(0), location: min(center + halfWidth, 1))
+            .init(color: sweep.opacity(0), location: max(center - halfWidth, 0)),
+            .init(color: sweep.opacity(peak), location: center),
+            .init(color: sweep.opacity(0), location: min(center + halfWidth, 1))
         ]
     }
 }

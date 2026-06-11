@@ -72,6 +72,11 @@ struct AIBriefCard: View {
     /// copy.
     @Environment(\.market) private var market
 
+    /// Light mode renders the brief's inner chips/strips as neutral
+    /// surfaces (no accent wash) — owner feedback 2026-06-11: kill the
+    /// blue around the AI summary. Dark keeps the tinted-glass accents.
+    @Environment(\.colorScheme) private var colorScheme
+
     // Placeholder copy used only when the /api/homepage/ai-brief cache is
     // empty (e.g. fresh deploy, cron hasn't run yet). Real briefs come
     // from Gemini via the hourly cron.
@@ -237,11 +242,23 @@ struct AIBriefCard: View {
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
-                .background(market.accent.opacity(0.12))
+                // Neutral chip in light mode — the accent wash was part
+                // of the "blue around the brief" the owner flagged; the
+                // accent stays in dark where the tinted glass is the look.
+                .background(
+                    colorScheme == .light
+                        ? Color.black.opacity(0.05)
+                        : market.accent.opacity(0.12)
+                )
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .stroke(market.accent.opacity(0.2), lineWidth: 0.5)
+                        .stroke(
+                            colorScheme == .light
+                                ? Color.black.opacity(0.08)
+                                : market.accent.opacity(0.2),
+                            lineWidth: 0.5
+                        )
                 )
 
                 Spacer()
@@ -364,7 +381,13 @@ struct AIBriefCard: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(market.accent.opacity(0.08))
+        // Neutral in light (see colorScheme doc note above); accent
+        // tint only on dark's tinted glass.
+        .background(
+            colorScheme == .light
+                ? Color.black.opacity(0.04)
+                : market.accent.opacity(0.08)
+        )
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
