@@ -3,10 +3,11 @@
 -- supersedes: 20260611231500_prune_old_data_time_budgeted.sql
 -- (body diffed against that definition: identical sections, identical
 -- retention windows, loop structure, downsample headroom gate, and
--- budget_exhausted flag. Two deltas: the table ORDER changed, and the
+-- budget_exhausted flag. Three deltas: the table ORDER changed; the
 -- provider_ingests filter column is fixed from created_at — which does
--- not exist; see section 9 — to ingested_at. Plus one new index outside
--- the function.)
+-- not exist; see section 9 — to ingested_at; and the payload section is
+-- gated on section 1 having fully drained (see section 8). Plus one new
+-- index outside the function.)
 --
 -- Operating the 2026-06-11 drain surfaced a referential-action
 -- amplification the table order steps straight into:
@@ -69,6 +70,12 @@ declare
   _table_total  int;
   _loops        int;
   _ds_deleted   int;
+  -- True only when section 1 exits because its last chunk came back
+  -- short (observations clean), not because the loop cap or clock
+  -- stopped it. Gates the payload section: deleting payloads while
+  -- expired observations still reference them recreates the SET NULL
+  -- multi-index fan-out this ordering exists to avoid.
+  _obs_drained  boolean := false;
   _result       jsonb := '{}'::jsonb;
 begin
   -- 1. provider_normalized_observations - 14-day retention (the 32 GB
@@ -89,6 +96,10 @@ begin
     _table_total := _table_total + _deleted; _loops := _loops + 1;
     exit when _deleted < _chunk_limit;
   end loop;
+  -- Natural exit (short last chunk) means no expired observations
+  -- remain; a loop-cap or deadline exit means a backlog persists and
+  -- the payload section must wait for a later call.
+  _obs_drained := coalesce(_deleted, _chunk_limit) < _chunk_limit;
   _result := _result || jsonb_build_object('provider_normalized_observations', _table_total);
 
   -- 2. listing_observations - 14-day retention
@@ -209,19 +220,30 @@ begin
   --    against a backlogged observations table one 10k chunk meant
   --    ~1.19M multi-index row updates. With observations drained the
   --    fan-out is ~zero.
+  --
+  --    Gated on _obs_drained (codex P1 on PR #223): running in the same
+  --    call is only safe when section 1 exited because observations are
+  --    CLEAN. If it exited on the loop cap (e.g. the nightly default of
+  --    10 against a multi-million-row backlog), expired observations
+  --    still reference these payloads and one chunk here would recreate
+  --    the fan-out — and a resulting statement_timeout would roll back
+  --    the observation deletes from the same call.
   _table_total := 0; _loops := 0;
-  while clock_timestamp() <= _deadline and _loops < _max_loops_per_table loop
-    delete from public.provider_raw_payloads
-    where  id in (
-      select id from public.provider_raw_payloads
-      where  fetched_at < now() - interval '14 days'
-      limit  _chunk_limit
-    );
-    get diagnostics _deleted = row_count;
-    _table_total := _table_total + _deleted; _loops := _loops + 1;
-    exit when _deleted < _chunk_limit;
-  end loop;
-  _result := _result || jsonb_build_object('provider_raw_payloads', _table_total);
+  if _obs_drained then
+    while clock_timestamp() <= _deadline and _loops < _max_loops_per_table loop
+      delete from public.provider_raw_payloads
+      where  id in (
+        select id from public.provider_raw_payloads
+        where  fetched_at < now() - interval '14 days'
+        limit  _chunk_limit
+      );
+      get diagnostics _deleted = row_count;
+      _table_total := _table_total + _deleted; _loops := _loops + 1;
+      exit when _deleted < _chunk_limit;
+    end loop;
+  end if;
+  _result := _result || jsonb_build_object('provider_raw_payloads', _table_total)
+                     || jsonb_build_object('payloads_gated_on_observations_backlog', not _obs_drained);
 
   -- 9. provider_ingests - 30-day retention. Runs LAST: each delete
   --    fires SET NULL into price_snapshots; cheap now that
