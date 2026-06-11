@@ -17,14 +17,19 @@
 -- This version loops per table — chunked deletes until the table is
 -- caught up, a per-table loop cap is hit, or the global clock budget is
 -- exhausted — so steady-state nights cost what they always did, while
--- backlogged tables actually drain. The function takes an optional
+-- backlogged tables actually drain. The budget is checked BEFORE each
+-- chunk (and the downsample step), so an exhausted budget returns
+-- cleanly instead of running one more chunk per remaining table and
+-- risking the outer statement_timeout rolling back the whole call; the
+-- result carries a budget_exhausted flag so a partial pass can't be
+-- read as a clean one. The function takes an optional
 -- per-table chunk-loop cap so an operator can run aggressive catch-up
 -- passes (`select prune_old_data(50);` repeatedly) without redefining
 -- anything; the cron's bare rpc() call keeps the conservative default.
 --
 -- Also adds ingest_runs (30d) — 4.4 GB of run logs had no retention at
--- all — and ships a one-time ANALYZE so the planner sees the new
--- reality after big drains.
+-- all. (No ANALYZE here: the post-drain VACUUM (FULL, ANALYZE) reclaim
+-- step below is what shows the planner the new reality.)
 --
 -- NOTE ON DISK RECLAIM: deletes mark space reusable but do not shrink
 -- files. After the backlog drains, run off-peak:
@@ -53,7 +58,7 @@ declare
 begin
   -- 1. provider_raw_payloads - 14-day retention
   _table_total := 0; _loops := 0;
-  loop
+  while clock_timestamp() <= _deadline and _loops < _max_loops_per_table loop
     delete from public.provider_raw_payloads
     where  id in (
       select id from public.provider_raw_payloads
@@ -62,15 +67,13 @@ begin
     );
     get diagnostics _deleted = row_count;
     _table_total := _table_total + _deleted; _loops := _loops + 1;
-    exit when _deleted < _chunk_limit
-           or _loops >= _max_loops_per_table
-           or clock_timestamp() > _deadline;
+    exit when _deleted < _chunk_limit;
   end loop;
   _result := _result || jsonb_build_object('provider_raw_payloads', _table_total);
 
   -- 2. provider_ingests - 30-day retention
   _table_total := 0; _loops := 0;
-  loop
+  while clock_timestamp() <= _deadline and _loops < _max_loops_per_table loop
     delete from public.provider_ingests
     where  id in (
       select id from public.provider_ingests
@@ -79,9 +82,7 @@ begin
     );
     get diagnostics _deleted = row_count;
     _table_total := _table_total + _deleted; _loops := _loops + 1;
-    exit when _deleted < _chunk_limit
-           or _loops >= _max_loops_per_table
-           or clock_timestamp() > _deadline;
+    exit when _deleted < _chunk_limit;
   end loop;
   _result := _result || jsonb_build_object('provider_ingests', _table_total);
 
@@ -89,7 +90,7 @@ begin
   --    offender; pipeline-intermediate rows already consumed into
   --    price_snapshots / price_history_points)
   _table_total := 0; _loops := 0;
-  loop
+  while clock_timestamp() <= _deadline and _loops < _max_loops_per_table loop
     delete from public.provider_normalized_observations
     where  id in (
       select id from public.provider_normalized_observations
@@ -98,15 +99,13 @@ begin
     );
     get diagnostics _deleted = row_count;
     _table_total := _table_total + _deleted; _loops := _loops + 1;
-    exit when _deleted < _chunk_limit
-           or _loops >= _max_loops_per_table
-           or clock_timestamp() > _deadline;
+    exit when _deleted < _chunk_limit;
   end loop;
   _result := _result || jsonb_build_object('provider_normalized_observations', _table_total);
 
   -- 4. listing_observations - 14-day retention
   _table_total := 0; _loops := 0;
-  loop
+  while clock_timestamp() <= _deadline and _loops < _max_loops_per_table loop
     delete from public.listing_observations
     where  id in (
       select id from public.listing_observations
@@ -115,15 +114,13 @@ begin
     );
     get diagnostics _deleted = row_count;
     _table_total := _table_total + _deleted; _loops := _loops + 1;
-    exit when _deleted < _chunk_limit
-           or _loops >= _max_loops_per_table
-           or clock_timestamp() > _deadline;
+    exit when _deleted < _chunk_limit;
   end loop;
   _result := _result || jsonb_build_object('listing_observations', _table_total);
 
   -- 5. card_page_views - 90-day retention
   _table_total := 0; _loops := 0;
-  loop
+  while clock_timestamp() <= _deadline and _loops < _max_loops_per_table loop
     delete from public.card_page_views
     where  id in (
       select id from public.card_page_views
@@ -132,15 +129,13 @@ begin
     );
     get diagnostics _deleted = row_count;
     _table_total := _table_total + _deleted; _loops := _loops + 1;
-    exit when _deleted < _chunk_limit
-           or _loops >= _max_loops_per_table
-           or clock_timestamp() > _deadline;
+    exit when _deleted < _chunk_limit;
   end loop;
   _result := _result || jsonb_build_object('card_page_views', _table_total);
 
   -- 6. price_snapshots - 45-day retention
   _table_total := 0; _loops := 0;
-  loop
+  while clock_timestamp() <= _deadline and _loops < _max_loops_per_table loop
     delete from public.price_snapshots
     where  id in (
       select id from public.price_snapshots
@@ -149,15 +144,13 @@ begin
     );
     get diagnostics _deleted = row_count;
     _table_total := _table_total + _deleted; _loops := _loops + 1;
-    exit when _deleted < _chunk_limit
-           or _loops >= _max_loops_per_table
-           or clock_timestamp() > _deadline;
+    exit when _deleted < _chunk_limit;
   end loop;
   _result := _result || jsonb_build_object('price_snapshots', _table_total);
 
   -- 7a. price_history_points - 90-day hard delete
   _table_total := 0; _loops := 0;
-  loop
+  while clock_timestamp() <= _deadline and _loops < _max_loops_per_table loop
     delete from public.price_history_points
     where  id in (
       select id from public.price_history_points
@@ -166,27 +159,29 @@ begin
     );
     get diagnostics _deleted = row_count;
     _table_total := _table_total + _deleted; _loops := _loops + 1;
-    exit when _deleted < _chunk_limit
-           or _loops >= _max_loops_per_table
-           or clock_timestamp() > _deadline;
+    exit when _deleted < _chunk_limit;
   end loop;
   _result := _result || jsonb_build_object('price_history_points', _table_total);
 
-  -- 7b. price_history_points - downsample 30-31d window (unchanged: the
-  --     batch helper bounds its own work)
-  _ds_deleted := coalesce(
-    (public.downsample_price_history_points_batch(
-      _chunk_limit,
-      now() - interval '30 days',
-      now() - interval '31 days'
-    )->>'deleted')::int,
-    0
-  );
+  -- 7b. price_history_points - downsample 30-31d window (the batch
+  --     helper bounds its own work; skipped when the budget is spent)
+  if clock_timestamp() <= _deadline then
+    _ds_deleted := coalesce(
+      (public.downsample_price_history_points_batch(
+        _chunk_limit,
+        now() - interval '30 days',
+        now() - interval '31 days'
+      )->>'deleted')::int,
+      0
+    );
+  else
+    _ds_deleted := 0;
+  end if;
   _result := _result || jsonb_build_object('price_history_points_downsampled', _ds_deleted);
 
   -- 8. provider_price_history - 180-day retention
   _table_total := 0; _loops := 0;
-  loop
+  while clock_timestamp() <= _deadline and _loops < _max_loops_per_table loop
     delete from public.provider_price_history
     where id in (
       select id from public.provider_price_history
@@ -195,16 +190,14 @@ begin
     );
     get diagnostics _deleted = row_count;
     _table_total := _table_total + _deleted; _loops := _loops + 1;
-    exit when _deleted < _chunk_limit
-           or _loops >= _max_loops_per_table
-           or clock_timestamp() > _deadline;
+    exit when _deleted < _chunk_limit;
   end loop;
   _result := _result || jsonb_build_object('provider_price_history', _table_total);
 
   -- 9. ingest_runs - 30-day retention (NEW: 4.4 GB of run logs had no
   --    retention at all)
   _table_total := 0; _loops := 0;
-  loop
+  while clock_timestamp() <= _deadline and _loops < _max_loops_per_table loop
     delete from public.ingest_runs
     where id in (
       select id from public.ingest_runs
@@ -213,11 +206,15 @@ begin
     );
     get diagnostics _deleted = row_count;
     _table_total := _table_total + _deleted; _loops := _loops + 1;
-    exit when _deleted < _chunk_limit
-           or _loops >= _max_loops_per_table
-           or clock_timestamp() > _deadline;
+    exit when _deleted < _chunk_limit;
   end loop;
   _result := _result || jsonb_build_object('ingest_runs', _table_total);
+
+  -- A zero above can mean "table is clean" or "budget ran out before this
+  -- table was reached" — this flag disambiguates for the cron log reader.
+  _result := _result || jsonb_build_object(
+    'budget_exhausted', clock_timestamp() > _deadline
+  );
 
   return _result;
 end;
