@@ -73,9 +73,9 @@ diffing. Every day our snapshot cron runs is moat accrued.
   price_history_points 10 -> 5.3 GB. Nightly cron now runs ?loops=100:
   measured inflow is ~430k obs/day, so the old loops=10 default
   (100k/night cap) would have silently re-starved. Verify the nightly
-  prune log shows budget_exhausted=false and small per-table numbers;
-  if provider_observation_matches bloat matters later, VACUUM FULL it
-  (~5 GB reclaimable, was left in place 2026-06-11). Supabase
+  prune log shows budget_exhausted=false and small per-table numbers.
+  provider_observation_matches was VACUUM FULLed later the same day
+  (6.5 -> 1.4 GB), landing the database at **28 GB** final. Supabase
   provisioned disk does NOT auto-shrink — reduce in Dashboard ->
   Database -> Disk after confirming steady state.
 - **Scrydex credit-burn telemetry** — `backlog`: surface daily credit
