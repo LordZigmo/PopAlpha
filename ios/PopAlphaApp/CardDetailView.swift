@@ -172,16 +172,14 @@ struct CardDetailView: View {
     /// is marketPrice (14-day median). One dominant printing is resolved per
     /// (grader, grade) — see the tie-break in the loader (#192 grader-split).
     @State private var gradedCardMetricsByBucket: [String: GradedCardMetricRow] = [:]
-    /// Per-bucket price history for the active grader, overlaid on the
-    /// MAIN chart when "All" is selected in the grade pills (mirrors the
-    /// finish pills' overlay). Absolute dollars by default — the chart
-    /// reads as the market's actual grade ladder; the %/$ toggle flips
-    /// to indexed momentum across the PSA 10 → PSA 7 price gap.
+    /// Per-bucket price history for the active grader. Graded mode's
+    /// chart is ALWAYS this blended grade ladder (≥2 chartable buckets;
+    /// single-bucket cards fall back to the plain line). Absolute
+    /// dollars by default — the chart reads as the market's actual
+    /// grade ladder; the %/$ toggle flips to indexed momentum across
+    /// the PSA 10 → PSA 7 price gap.
     @State private var gradePerfSeries: [GradePerfDatum] = []
     @State private var gradePerfScale: MultiSeriesChartModel.Scale = .absolute
-    /// True → the graded chart overlays every grade bucket; tapping a
-    /// grade pill (or the wheel) isolates that bucket's line.
-    @State private var showAllGrades = true
     /// RAW variant overlay — every printing (finishes + editions + stamps)
     /// charted together; the finish pills set selectedPrintingId, which
     /// isolates one line (nil = All → normalized overlay of every finish).
@@ -1420,9 +1418,11 @@ struct CardDetailView: View {
                 variantSelectPills
             }
 
-            // Grade pills — GRADED mode's mirror of the finish pills. Shown
-            // once ≥2 buckets have chartable history for the active grader.
-            if selectedPriceMode.isGraded, gradePerfSeries.count >= 2 {
+            // Grade pills — GRADED mode's mirror of the finish pills, and
+            // the only grade selector (the picker wheel is gone). Keyed to
+            // selectable buckets, not chartable ones, so a grade with
+            // sparse history is still pickable for the headline price.
+            if selectedPriceMode.isGraded, bucketsForAgency(selectedGradingAgency).count > 1 {
                 gradeSelectPills
             }
 
@@ -1621,36 +1621,31 @@ struct CardDetailView: View {
         return nil
     }
 
-    /// Grade select pills — the GRADED-mode mirror of the finish pills.
-    /// "All" overlays every grade bucket on the main chart (loot-rarity
-    /// colors rank the ladder); tapping a grade isolates its line and
-    /// drives the headline price, exactly like tapping a finish. The $/%
-    /// scale toggle rides the row only while the overlay is showing.
+    /// Grade select pills — the GRADED-mode mirror of the finish pills,
+    /// and the only grade selector (the old picker wheel is gone). The
+    /// chart itself stays the blended grade ladder; a pill picks which
+    /// grade drives the headline price and metrics, shown by its
+    /// loot-rarity dot. Pills cover every selectable bucket — not just
+    /// the chartable ones — so a grade with sparse history is still
+    /// pickable for the price. The $/% toggle rides the row whenever
+    /// the ladder is charted.
     private var gradeSelectPills: some View {
         HStack(spacing: 8) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
-                    variantPill("All", isActive: showAllGrades) { showAllGrades = true }
-                    ForEach(gradePerfSeries) { series in
+                    ForEach(bucketsForAgency(selectedGradingAgency), id: \.self) { bucket in
                         variantPill(
-                            series.label,
-                            isActive: !showAllGrades && activeGradeBucket == series.id,
-                            dot: series.color
+                            gradePerfLabel(bucket),
+                            isActive: activeGradeBucket == bucket,
+                            dot: gradePerfColor(bucket)
                         ) {
-                            showAllGrades = false
-                            // Route through the same state the wheel uses so
-                            // the wheel, pills, metrics, and chart stay in
-                            // lockstep (the wheel's onChange applies the mode).
-                            if selectedGradeBucket != series.id {
-                                selectedGradeBucket = series.id
-                            } else {
-                                applyGradedSelection()
-                            }
+                            selectedGradeBucket = bucket
+                            applyGradedSelection()
                         }
                     }
                 }
             }
-            if showAllGrades {
+            if gradePerfSeries.count >= 2 {
                 gradePerfScaleToggle
             }
         }
@@ -1803,10 +1798,13 @@ struct CardDetailView: View {
 
     @ViewBuilder
     private var chartContent: some View {
-        if selectedPriceMode.isGraded, showAllGrades, gradePerfSeries.count >= 2 {
-            // "All" grades → the whole grade ladder on one graph, in
-            // observed dollars by default (the %/$ toggle flips to
-            // indexed momentum). Loot-rarity colors rank the lines.
+        if selectedPriceMode.isGraded, gradePerfSeries.count >= 2 {
+            // Graded mode ALWAYS charts the blended grade ladder — never
+            // a single isolated line (single-bucket cards fall through to
+            // the plain chart below, there's nothing to blend). Observed
+            // dollars by default; the %/$ toggle flips to indexed
+            // momentum. Loot-rarity colors rank the lines; the selected
+            // grade pill drives only the headline price and metrics.
             MultiLineChartView(
                 series: gradePerfSeries.map { MultiLineSeriesInput(id: $0.id, label: $0.label, color: $0.color, points: $0.points) },
                 scale: gradePerfScale,
@@ -2792,18 +2790,6 @@ struct CardDetailView: View {
         return unique.sorted { (order.firstIndex(of: $0) ?? 99) < (order.firstIndex(of: $1) ?? 99) }
     }
 
-    private func gradeDisplayLabel(_ bucket: String) -> String {
-        switch bucket {
-        case "LE_7": return "7 or less"
-        case "G8": return "8"
-        case "G9": return "9"
-        case "G9_5": return "9.5"
-        case "G10": return "10"
-        case "G10_PERFECT": return "10 Perfect"
-        default: return bucket
-        }
-    }
-
     private var gradePillSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             // Row 1: Near Mint / Graded toggle
@@ -2816,9 +2802,6 @@ struct CardDetailView: View {
                 }
                 gradePill(title: "Graded", selected: selectedPriceMode.isGraded) {
                     PAHaptics.selection()
-                    // Entering graded mode always opens on the full grade
-                    // ladder — the overlay is the read; a pill isolates.
-                    showAllGrades = true
                     applyGradedSelection()
                 }
             }
@@ -2847,45 +2830,9 @@ struct CardDetailView: View {
                     }
                 }
 
-                // Row 3: Grade picker wheel
-                let buckets = bucketsForAgency(selectedGradingAgency)
-                if buckets.count > 1 {
-                    HStack(spacing: 0) {
-                        Text("Grade")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(PA.Colors.muted)
-                            .padding(.leading, 4)
-
-                        Picker("Grade", selection: $selectedGradeBucket) {
-                            ForEach(buckets, id: \.self) { bucket in
-                                Text(gradeDisplayLabel(bucket))
-                                    .tag(bucket)
-                            }
-                        }
-                        .pickerStyle(.wheel)
-                        .frame(height: 100)
-                        .clipped()
-                        .onChange(of: selectedGradeBucket) {
-                            PAHaptics.selection()
-                            // Choosing a specific grade (wheel or chart pill —
-                            // both route through this state) isolates its line.
-                            showAllGrades = false
-                            applyGradedSelection()
-                        }
-                    }
-                    .padding(8)
-                    .glassSurface()
-                } else if let only = buckets.first {
-                    HStack(spacing: 6) {
-                        Text("Grade")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(PA.Colors.muted)
-                        Text(gradeDisplayLabel(only))
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(PA.Colors.text)
-                    }
-                    .padding(.leading, 4)
-                }
+                // (The old Row 3 grade picker wheel is gone — grade
+                // selection lives on the chart's grade pills, which carry
+                // the loot-rarity dot for each bucket.)
             }
 
             if selectedPriceMode.isGraded && availableGradedOptions.isEmpty && gradedMetricsLoaded {
