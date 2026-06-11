@@ -97,6 +97,7 @@ export const CRON_ROUTES = [
   "cron/check-scrydex-raw-liveness",
   "cron/snapshot-psa-pop",
   "cron/match-psa-specs",
+  "cron/discover-psa-specs",
   "admin/cleanup/delete-thumb-overlay-augs",
 ];
 

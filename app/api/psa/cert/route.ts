@@ -71,11 +71,12 @@ async function harvestSpecTarget(params: {
           : NaN;
     if (!Number.isInteger(specId) || specId <= 0) return;
 
+    const certField = (key: string): string | null => {
+      const v = psaCert?.[key];
+      return typeof v === "string" && v.trim() ? v.trim() : null;
+    };
     const description = ["Year", "Brand", "CardNumber", "Subject", "Variety"]
-      .map((key) => {
-        const v = psaCert?.[key];
-        return typeof v === "string" ? v.trim() : "";
-      })
+      .map((key) => certField(key) ?? "")
       .filter(Boolean)
       .join(" ");
 
@@ -84,6 +85,16 @@ async function harvestSpecTarget(params: {
         spec_id: specId,
         ...(description ? { description } : {}),
         source: "cert_scan",
+        // Structured fields for the spec matcher — description is a
+        // lossy concat; these are the real inputs.
+        fields: {
+          year: certField("Year"),
+          brand: certField("Brand"),
+          category: certField("Category"),
+          cardNumber: certField("CardNumber"),
+          subject: certField("Subject"),
+          variety: certField("Variety"),
+        },
       },
       { onConflict: "spec_id", ignoreDuplicates: true }
     );

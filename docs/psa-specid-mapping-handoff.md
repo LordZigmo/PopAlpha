@@ -151,3 +151,47 @@ per the "decide and document" mandate above:
   Pikachu (SVP promo), JP sv4a Mew ex. The deliverable is the machinery +
   explicit queueing; coverage proof = every target decided
   (matched-or-queued), spot-checked by the owner.
+
+## Phase 2b: SpecID inventory expansion (2026-06-11, same session)
+
+Owner direction: organic harvest (4 specs from scans) is not enough —
+population coverage must be able to reach the whole catalog. Decisions:
+
+- **Discovery channel = PSA pop-report set pages.** `POST
+  www.psacard.com/Pop/GetSetItems` (form: `headingID`, `categoryID`,
+  `draw/start/length`) returns every spec in a set — SpecID, subject,
+  card number, AND the current grade distribution. One page fetch ≈
+  full-set discovery + a same-day pop snapshot, costing zero official
+  API quota. Endpoint shape sourced from established third-party
+  scrapers; **unverified from our egress** (PSA fronts www.psacard.com
+  with Cloudflare) — hence:
+- **Script-first verification.** `scripts/discover-psa-specs.mjs` runs
+  the same engine (`lib/backfill/psa-spec-discovery.ts`) from the
+  owner's residential connection. The cron route
+  (`/api/cron/discover-psa-specs`) is registered but deliberately NOT
+  scheduled in vercel.json until both the row schema and Vercel-egress
+  viability are confirmed. Treat schema drift as a parser fix in
+  `lib/psa/pop-scrape.ts` (`normalizePopSetRow` is alias-tolerant and
+  keeps the raw row).
+- **Registry: `psa_pop_set_pages`** (heading_id PK). Owner-seeded rows;
+  each carries `canonical_set_code`, so specs discovered from a page
+  match with their set identity KNOWN — no brand-string parsing.
+  Targets gain `fields` jsonb (structured inputs captured at
+  harvest/discovery — scraped specs have no cert payload to hydrate
+  from) and `pop_heading_id` (provenance). The cert harvest hook now
+  writes `fields` too.
+- **Snapshot provenance.** `psa_spec_pop_snapshots.source`:
+  `'api'` (official GetPSASpecPopulation) vs `'pop_scrape'`. The
+  official cron labels its rows explicitly and remains the
+  verification/priority lane; matched specs get a
+  `psa_spec_targets.priority` floor of 10 so the ~60-call/day API
+  budget flows to specs that can render on a card page.
+- **Quota math that forced this:** tens of thousands of Pokémon specs
+  vs ~60 official calls/day means the API alone could never sustain
+  daily whole-catalog history. Scrape pages for breadth, API for
+  trust.
+- **Open items:** TCG `categoryID` value (owner curl), live row-schema
+  confirmation, Vercel egress test, automated crawl of the category
+  browse pages to seed `psa_pop_set_pages` at scale (manual SQL seeding
+  until then), and a coverage metric (% of canonical cards with ≥1
+  mapped spec) in the report mode.

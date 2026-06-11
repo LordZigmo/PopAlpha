@@ -109,6 +109,9 @@ export async function GET(req: Request) {
             auth_count: pop.auth,
             grade_counts: pop.pop ?? {},
             raw: pop.raw,
+            // Explicit: a pop_scrape row for the same day may exist and
+            // the official API reading should win the provenance label.
+            source: "api",
           },
           { onConflict: "spec_id,captured_on" }
         );

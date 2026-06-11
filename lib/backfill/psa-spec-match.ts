@@ -46,11 +46,26 @@ const MIN_AUTO_MATCH_CONFIDENCE = process.env.PSA_SPEC_MIN_AUTO_MATCH_CONFIDENCE
 const UNMATCHED_RETRY_HOURS = process.env.PSA_SPEC_UNMATCHED_RETRY_HOURS
   ? Number.parseInt(process.env.PSA_SPEC_UNMATCHED_RETRY_HOURS, 10)
   : 24;
+/** psa_spec_targets.priority floor applied on MATCH — the snapshot
+ * cron's rotation orders by priority within equal staleness, so mapped
+ * specs win official-API budget over unmapped ones. */
+const MATCHED_PRIORITY_FLOOR = 10;
 
 type TargetRow = {
   spec_id: number;
   description: string | null;
   canonical_slug: string | null;
+  priority: number | null;
+  fields: Record<string, unknown> | null;
+  pop_heading_id: number | null;
+};
+
+type PopPageHintRow = {
+  heading_id: number;
+  title: string | null;
+  language: string;
+  canonical_set_code: string | null;
+  set_confidence: number;
 };
 
 type SpecCardMapRow = {
@@ -129,6 +144,32 @@ function parseDateMs(value: string | null | undefined): number | null {
   return Number.isFinite(ms) ? ms : null;
 }
 
+function storedString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+/** psa_spec_targets.fields jsonb → PsaSpecFields. Written by the cert
+ * harvest hook and pop-page discovery; null/garbage falls back to the
+ * cert-store RPC. */
+function parseStoredFields(
+  specId: number,
+  fields: Record<string, unknown> | null,
+): PsaSpecFields | null {
+  if (!fields || typeof fields !== "object" || Array.isArray(fields)) return null;
+  const candidate: PsaSpecFields = {
+    specId,
+    year: storedString(fields.year),
+    brand: storedString(fields.brand),
+    category: storedString(fields.category),
+    cardNumber: storedString(fields.cardNumber),
+    subject: storedString(fields.subject),
+    variety: storedString(fields.variety),
+  };
+  // A row with no identifying content is not usable structure.
+  if (!candidate.brand && !candidate.subject && !candidate.cardNumber) return null;
+  return candidate;
+}
+
 export async function runPsaSpecMatch(opts: {
   limit?: number;
   specId?: number | null;
@@ -158,7 +199,7 @@ export async function runPsaSpecMatch(opts: {
     // ── 1. Candidate targets ─────────────────────────────────────────
     let targetQuery = supabase
       .from("psa_spec_targets")
-      .select("spec_id, description, canonical_slug")
+      .select("spec_id, description, canonical_slug, priority, fields, pop_heading_id")
       .order("spec_id", { ascending: true })
       .limit(TARGET_SCAN_CAP);
     if (opts.specId) targetQuery = targetQuery.eq("spec_id", opts.specId);
@@ -203,8 +244,19 @@ export async function runPsaSpecMatch(opts: {
 
     if (candidates.length > 0) {
       // ── 2. Structured fields + matching context ────────────────────
+      // Targets carry their own `fields` when harvested with structure
+      // (cert scans since Phase 2b, pop-page discovery always — scraped
+      // specs have NO cert payload to hydrate from). The cert-store RPC
+      // covers the rest.
       const fieldsBySpec = new Map<number, PsaSpecFields>();
-      for (const ids of chunk(candidates.map((row) => row.spec_id), IN_CLAUSE_CHUNK)) {
+      for (const candidate of candidates) {
+        const stored = parseStoredFields(candidate.spec_id, candidate.fields);
+        if (stored) fieldsBySpec.set(candidate.spec_id, stored);
+      }
+      const missingFieldIds = candidates
+        .map((row) => row.spec_id)
+        .filter((specId) => !fieldsBySpec.has(specId));
+      for (const ids of chunk(missingFieldIds, IN_CLAUSE_CHUNK)) {
         const { data, error } = await supabase.rpc("scan_psa_spec_cert_fields", {
           p_spec_ids: ids,
         });
@@ -219,6 +271,29 @@ export async function runPsaSpecMatch(opts: {
             subject: row.subject,
             variety: row.variety,
           });
+        }
+      }
+
+      // Pop-page provenance pins the set directly — discovery pages are
+      // registered with a canonical_set_code, so specs found there skip
+      // brand parsing entirely.
+      const pageHints = new Map<number, PopPageHintRow>();
+      const headingIds = [
+        ...new Set(
+          candidates
+            .map((row) => row.pop_heading_id)
+            .filter((value): value is number => typeof value === "number"),
+        ),
+      ];
+      for (const ids of chunk(headingIds, IN_CLAUSE_CHUNK)) {
+        if (ids.length === 0) continue;
+        const { data, error } = await supabase
+          .from("psa_pop_set_pages")
+          .select("heading_id, title, language, canonical_set_code, set_confidence")
+          .in("heading_id", ids);
+        if (error) throw new Error(`psa_pop_set_pages(hints): ${error.message}`);
+        for (const row of (data ?? []) as PopPageHintRow[]) {
+          pageHints.set(row.heading_id, row);
         }
       }
 
@@ -237,27 +312,47 @@ export async function runPsaSpecMatch(opts: {
       if (setIndexError) throw new Error(`scan_canonical_set_index: ${setIndexError.message}`);
       const setIndex = (setIndexRows ?? []) as CanonicalSetIndexRow[];
 
-      // ── 3. Resolve sets per distinct brand ─────────────────────────
+      // ── 3. Resolve sets: page hint first, then per distinct brand ──
       const resolutionByKey = new Map<string, PsaSetResolution | null>();
+      const resolutionBySpec = new Map<number, PsaSetResolution | null>();
       const derivedRows: Array<Record<string, unknown>> = [];
       for (const candidate of candidates) {
-        const fields = fieldsBySpec.get(candidate.spec_id);
-        if (!fields?.brand) continue;
-        const parsed = parsePsaBrand(fields.brand);
-        if (resolutionByKey.has(parsed.key)) continue;
-        const resolution = resolvePsaSet({ parsed, curatedByKey, setIndex });
-        resolutionByKey.set(parsed.key, resolution);
-        if (resolution && resolution.method !== "CURATED") {
-          derivedRows.push({
-            psa_brand_key: parsed.key,
-            canonical_set_code: resolution.setCode,
-            canonical_set_name: resolution.setName,
-            language: resolution.language,
-            confidence: resolution.confidence,
-            source: "DERIVED",
-            notes: `derived via ${resolution.method}`,
+        const hint = candidate.pop_heading_id !== null
+          ? pageHints.get(candidate.pop_heading_id)
+          : undefined;
+        if (hint?.canonical_set_code) {
+          resolutionBySpec.set(candidate.spec_id, {
+            setCode: hint.canonical_set_code,
+            setName: hint.title,
+            language: hint.language,
+            method: "CURATED",
+            confidence: Math.min(1, Math.max(0, hint.set_confidence)),
           });
+          continue;
         }
+
+        const fields = fieldsBySpec.get(candidate.spec_id);
+        if (!fields?.brand) {
+          resolutionBySpec.set(candidate.spec_id, null);
+          continue;
+        }
+        const parsed = parsePsaBrand(fields.brand);
+        if (!resolutionByKey.has(parsed.key)) {
+          const resolution = resolvePsaSet({ parsed, curatedByKey, setIndex });
+          resolutionByKey.set(parsed.key, resolution);
+          if (resolution && resolution.method !== "CURATED") {
+            derivedRows.push({
+              psa_brand_key: parsed.key,
+              canonical_set_code: resolution.setCode,
+              canonical_set_name: resolution.setName,
+              language: resolution.language,
+              confidence: resolution.confidence,
+              source: "DERIVED",
+              notes: `derived via ${resolution.method}`,
+            });
+          }
+        }
+        resolutionBySpec.set(candidate.spec_id, resolutionByKey.get(parsed.key) ?? null);
       }
       if (derivedRows.length > 0 && !dryRun) {
         const { error: derivedError } = await supabase
@@ -272,7 +367,7 @@ export async function runPsaSpecMatch(opts: {
       // ── 4. Printings + canonical names for resolved sets ───────────
       const neededSetCodes = [
         ...new Set(
-          [...resolutionByKey.values()]
+          [...resolutionBySpec.values()]
             .filter((res): res is PsaSetResolution => res !== null)
             .map((res) => res.setCode),
         ),
@@ -310,7 +405,7 @@ export async function runPsaSpecMatch(opts: {
       // ── 5. Decide + persist ─────────────────────────────────────────
       const nowIso = new Date().toISOString();
       const writes: SpecCardMapWriteRow[] = [];
-      const slugSyncs: Array<{ specId: number; slug: string | null }> = [];
+      const slugSyncs: Array<{ specId: number; slug: string | null; priority: number }> = [];
 
       for (const candidate of candidates) {
         processed += 1;
@@ -332,10 +427,9 @@ export async function runPsaSpecMatch(opts: {
             updated_at: nowIso,
           };
         } else {
-          const parsed = parsePsaBrand(fields.brand);
           const decision = decideSpecMatch({
             fields,
-            setResolution: resolutionByKey.get(parsed.key) ?? null,
+            setResolution: resolutionBySpec.get(candidate.spec_id) ?? null,
             printings,
             canonicalNamesBySlug,
           });
@@ -400,8 +494,22 @@ export async function runPsaSpecMatch(opts: {
           const reason = write.match_reason ?? "UNKNOWN";
           unmatchedByReason[reason] = (unmatchedByReason[reason] ?? 0) + 1;
         }
-        if ((candidate.canonical_slug ?? null) !== write.canonical_slug) {
-          slugSyncs.push({ specId: candidate.spec_id, slug: write.canonical_slug });
+        // Matched specs get a priority floor so the official-API
+        // snapshot budget favors specs that can actually render on a
+        // card page once the rotation grows past the daily budget.
+        const currentPriority = candidate.priority ?? 0;
+        const priorityFloor = write.mapping_status === "MATCHED"
+          ? Math.max(currentPriority, MATCHED_PRIORITY_FLOOR)
+          : currentPriority;
+        if (
+          (candidate.canonical_slug ?? null) !== write.canonical_slug
+          || priorityFloor !== currentPriority
+        ) {
+          slugSyncs.push({
+            specId: candidate.spec_id,
+            slug: write.canonical_slug,
+            priority: priorityFloor,
+          });
         }
         if (samples.length < 25) {
           samples.push({
@@ -430,7 +538,7 @@ export async function runPsaSpecMatch(opts: {
             batch.map(async (sync) => {
               const { error } = await supabase
                 .from("psa_spec_targets")
-                .update({ canonical_slug: sync.slug })
+                .update({ canonical_slug: sync.slug, priority: sync.priority })
                 .eq("spec_id", sync.specId);
               if (error) {
                 throw new Error(`psa_spec_targets(slug sync ${sync.specId}): ${error.message}`);
