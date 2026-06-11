@@ -124,6 +124,11 @@ enum AnalyticsEvent: String {
     // insight, until volume justifies a real table + admin view.
     case reviewPromptRequested = "review_prompt_requested"
     case featureRequested = "feature_requested"
+    // Card-page bug reports. Carries `category` (wrong_price /
+    // wrong_metadata / other), `slug`, `card_name`, and an optional
+    // free-text `note` — the triage queue is a PostHog insight filtered
+    // by category, same v1 pattern as `feature_requested`.
+    case bugReported = "bug_reported"
 }
 
 final class AnalyticsService {

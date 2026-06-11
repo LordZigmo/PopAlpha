@@ -119,6 +119,8 @@ struct CardDetailView: View {
     }
 
     @Environment(\.dismiss) private var dismiss
+    /// Opens eBay listing URLs in the user's browser (section 12).
+    @Environment(\.openURL) private var openURL
     @StateObject private var premiumGate = PremiumGate.shared
     @State private var showCorrectionSheet = false
     @State private var showMarketSummaryPaywall = false
@@ -210,6 +212,24 @@ struct CardDetailView: View {
     /// engage the spinner mid-flight.
     private enum SpinDragState { case undecided, engaged, rejected }
     @State private var spinDragState: SpinDragState = .undecided
+
+    // MARK: - Live eBay listings + bug report state
+
+    /// Lazy-loaded live listings from /api/ebay/browse (the same route
+    /// the web card page uses). Fetched once when the section first
+    /// appears; failures collapse the section to a quiet retry row
+    /// rather than blocking the page.
+    private enum EbayLoadState { case idle, loading, loaded, failed }
+    @State private var ebayLoadState: EbayLoadState = .idle
+    @State private var ebayListings: [EbayListing] = []
+    @State private var ebayTotalAsks: Int = 0
+
+    /// Bug-report flow: category dialog → optional note alert → PostHog.
+    @State private var showBugCategoryDialog = false
+    @State private var bugNoteText = ""
+    @State private var pendingBugCategory: BugReportCategory? = nil
+    @State private var showBugNoteAlert = false
+    @State private var bugReportSubmitted = false
 
     // MARK: - JP card theming
 
@@ -1147,6 +1167,14 @@ struct CardDetailView: View {
             //     user can audit the hero price's freshness.
             marketInfoSection
                 .padding(.top, 6)
+
+            // 12. Live eBay listings — real asks, affiliate-decorated
+            //     server-side once EBAY_EPN_CAMPAIGN_ID is configured.
+            ebayListingsSection
+
+            // 13. Report-a-bug — last on purpose: a user who scrolled
+            //     everything and still sees something wrong lands here.
+            bugReportSection
         }
         .padding(PA.Layout.sectionPadding)
     }
@@ -2489,6 +2517,282 @@ struct CardDetailView: View {
     ///   • JP card + neither → "PopAlpha market feeds (US fallback)" — explains
     ///     why a JP card might show a US-derived price.
     ///   • EN card → "PopAlpha market feeds"
+    // MARK: - Live eBay listings (section 12)
+
+    /// Decodable mirror of /api/ebay/browse's mapBrowseItem payload.
+    /// The route already relevance-filters and sorts by total ask.
+    struct EbayListing: Decodable, Identifiable {
+        struct Money: Decodable {
+            let value: String
+            let currency: String
+        }
+        let externalId: String
+        let title: String
+        let price: Money?
+        let shipping: Money?
+        let itemWebUrl: String
+        let image: String?
+        let condition: String?
+
+        var id: String { externalId.isEmpty ? itemWebUrl : externalId }
+
+        /// Price + shipping, the number a buyer actually pays.
+        var totalAsk: Double? {
+            guard let p = price.flatMap({ Double($0.value) }) else { return nil }
+            return p + (shipping.flatMap { Double($0.value) } ?? 0)
+        }
+    }
+
+    private struct EbayBrowseEnvelope: Decodable {
+        let ok: Bool
+        let total: Int?
+        let items: [EbayListing]?
+    }
+
+    private var ebayListingsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Text("Live eBay Listings")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(PA.Colors.text)
+                if ebayLoadState == .loaded, ebayTotalAsks > 0 {
+                    Text("\(ebayTotalAsks) asks")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(PA.Colors.textSecondary)
+                }
+                Spacer()
+            }
+
+            switch ebayLoadState {
+            case .idle, .loading:
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Checking live asks…")
+                        .font(.system(size: 13))
+                        .foregroundStyle(PA.Colors.textSecondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.vertical, 10)
+            case .failed:
+                Button {
+                    Task { await loadEbayListings(force: true) }
+                } label: {
+                    Label("Couldn't load listings — tap to retry", systemImage: "arrow.clockwise")
+                        .font(.system(size: 13))
+                        .foregroundStyle(PA.Colors.textSecondary)
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.vertical, 10)
+            case .loaded:
+                if ebayListings.isEmpty {
+                    Text("No live listings matched this card right now.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(PA.Colors.textSecondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 10)
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(Array(ebayListings.prefix(5).enumerated()), id: \.element.id) { index, listing in
+                            ebayListingRow(listing)
+                            if index < min(ebayListings.count, 5) - 1 {
+                                Divider().overlay(PA.Colors.border.opacity(0.6))
+                            }
+                        }
+                    }
+                    Text("Lowest total ask first · prices include shipping · PopAlpha may earn a commission")
+                        .font(.system(size: 10))
+                        .foregroundStyle(PA.Colors.muted)
+                }
+            }
+        }
+        .padding(16)
+        .glassSurface()
+        .task { await loadEbayListings() }
+    }
+
+    private func ebayListingRow(_ listing: EbayListing) -> some View {
+        Button {
+            guard let url = URL(string: listing.itemWebUrl) else { return }
+            PAHaptics.tap()
+            openURL(url)
+        } label: {
+            HStack(spacing: 10) {
+                LazyImage(url: listing.image.flatMap(URL.init(string:))) { state in
+                    if let image = state.image {
+                        image.resizable().aspectRatio(contentMode: .fill)
+                    } else {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(PA.Colors.surfaceSoft)
+                    }
+                }
+                .frame(width: 40, height: 56)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(listing.title)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(PA.Colors.text)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                    if let condition = listing.condition, !condition.isEmpty {
+                        Text(condition)
+                            .font(.system(size: 11))
+                            .foregroundStyle(PA.Colors.textSecondary)
+                    }
+                }
+                Spacer(minLength: 8)
+
+                VStack(alignment: .trailing, spacing: 2) {
+                    if let total = listing.totalAsk {
+                        Text(total, format: .currency(code: listing.price?.currency ?? "USD"))
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .foregroundStyle(PA.Colors.text)
+                    }
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(PA.Colors.muted)
+                }
+            }
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(listing.title), opens on eBay")
+    }
+
+    /// Fetches live listings once per card view. The query mirrors the
+    /// web card page's primary eBay search ("name number setName") and
+    /// lets the route's relevance filter + total-ask sort do the rest.
+    private func loadEbayListings(force: Bool = false) async {
+        if !force, ebayLoadState != .idle { return }
+        ebayLoadState = .loading
+        let name = activeCard.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        // MarketCard.cardNumber is the display form ("#199") — the
+        // route's card-number relevance filter expects the bare number
+        // and returns zero matches when the hash leaks through
+        // (verified against prod 2026-06-11). Keep letters/slashes:
+        // numbers like TG12/TG30 are real.
+        var number = activeCard.cardNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+        if number.hasPrefix("#") { number = String(number.dropFirst()) }
+        let setName = activeCard.setName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let q = [name, number, setName].filter { !$0.isEmpty }.joined(separator: " ")
+        guard !q.isEmpty else {
+            ebayLoadState = .loaded
+            ebayListings = []
+            return
+        }
+        var query: [(String, String)] = [
+            ("q", q),
+            ("canonicalName", name),
+            ("grade", "RAW"),
+            ("limit", "20"),
+        ]
+        if !setName.isEmpty { query.append(("setName", setName)) }
+        if !number.isEmpty { query.append(("cardNumber", number)) }
+        Logger.api.debug("ebay fetch q='\(q, privacy: .public)'")
+        do {
+            let envelope: EbayBrowseEnvelope = try await APIClient.get(
+                path: "/api/ebay/browse",
+                query: query
+            )
+            guard envelope.ok else { throw URLError(.badServerResponse) }
+            ebayListings = (envelope.items ?? []).filter { $0.totalAsk != nil }
+            ebayTotalAsks = envelope.total ?? ebayListings.count
+            ebayLoadState = .loaded
+            Logger.api.debug("ebay loaded items=\(envelope.items?.count ?? -1, privacy: .public) kept=\(self.ebayListings.count, privacy: .public)")
+        } catch {
+            if Task.isCancelled { return }
+            Logger.api.debug("ebay failed: \(String(describing: error), privacy: .public)")
+            ebayLoadState = .failed
+        }
+    }
+
+    // MARK: - Report a bug (section 13)
+
+    enum BugReportCategory: String, CaseIterable, Identifiable {
+        case wrongPrice = "wrong_price"
+        case wrongMetadata = "wrong_metadata"
+        case other = "other"
+
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .wrongPrice:    "Wrong price"
+            case .wrongMetadata: "Wrong name, set, or image"
+            case .other:         "Something else"
+            }
+        }
+    }
+
+    private var bugReportSection: some View {
+        VStack(spacing: 6) {
+            Button {
+                PAHaptics.tap()
+                showBugCategoryDialog = true
+            } label: {
+                Label(
+                    bugReportSubmitted ? "Thanks — report sent" : "Report an issue with this card",
+                    systemImage: bugReportSubmitted ? "checkmark.circle.fill" : "exclamationmark.bubble"
+                )
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(bugReportSubmitted ? PA.Colors.positive : PA.Colors.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.vertical, 10)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(bugReportSubmitted)
+        }
+        .confirmationDialog(
+            "What's wrong on this page?",
+            isPresented: $showBugCategoryDialog,
+            titleVisibility: .visible
+        ) {
+            ForEach(BugReportCategory.allCases) { category in
+                Button(category.label) {
+                    pendingBugCategory = category
+                    bugNoteText = ""
+                    showBugNoteAlert = true
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .alert(
+            pendingBugCategory?.label ?? "Report an issue",
+            isPresented: $showBugNoteAlert
+        ) {
+            TextField("Add a detail (optional)", text: $bugNoteText)
+            Button("Send") { submitBugReport() }
+            Button("Cancel", role: .cancel) { pendingBugCategory = nil }
+        } message: {
+            Text("Goes straight to the team with this card attached.")
+        }
+    }
+
+    /// Same v1 inbox pattern as Request-a-Feature: a typed PostHog event
+    /// (`bug_reported`) carrying the card context, triaged by category
+    /// as a PostHog insight. No backend table until volume demands one.
+    private func submitBugReport() {
+        guard let category = pendingBugCategory else { return }
+        let note = bugNoteText.trimmingCharacters(in: .whitespacesAndNewlines)
+        var properties: [String: Any] = [
+            "category": category.rawValue,
+            "slug": activeCard.id,
+            "card_name": activeCard.name,
+            "set_name": activeCard.setName,
+            "card_number": activeCard.cardNumber,
+            "source": "card_detail",
+        ]
+        if !note.isEmpty {
+            properties["note"] = String(note.prefix(1000))
+        }
+        AnalyticsService.shared.capture(.bugReported, properties: properties)
+        PAHaptics.tap()
+        withAnimation(.easeInOut(duration: 0.2)) { bugReportSubmitted = true }
+        pendingBugCategory = nil
+    }
+
     private var priceSourceDescription: String {
         if isJapaneseCard {
             let yj = (cardMetrics?.yahooJpPrice ?? 0) > 0
