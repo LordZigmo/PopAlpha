@@ -221,6 +221,11 @@ end;
 $$;
 
 revoke all on function public.prune_old_data(int) from public, anon, authenticated;
+-- The cron route calls this through dbAdmin() (service_role). Default
+-- ACLs already grant it EXECUTE today, but state that explicitly so the
+-- nightly prune survives any future default-privilege hardening
+-- (matches 20260522213801_harden_public_function_execute_contract).
+grant execute on function public.prune_old_data(int) to service_role;
 
 -- The zero-arg signature was replaced by the defaulted-arg one above;
 -- drop the old function if it still exists under its original signature
