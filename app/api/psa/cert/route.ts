@@ -45,6 +45,57 @@ async function logLookup(params: {
   });
 }
 
+/**
+ * Harvest the cert's SpecID into the population-snapshot rotation
+ * (psa_spec_targets → snapshot-psa-pop cron). Every scanned slab grows
+ * pop-over-time coverage organically. Best-effort: a failure here must
+ * never break the lookup the user is waiting on.
+ */
+async function harvestSpecTarget(params: {
+  supabase: SupabaseClient;
+  data: CertificateResponse;
+}) {
+  try {
+    const raw = params.data.raw as Record<string, unknown> | null;
+    const psaCert =
+      raw && typeof raw.PSACert === "object" && raw.PSACert !== null
+        ? (raw.PSACert as Record<string, unknown>)
+        : null;
+    const specIdValue = psaCert?.SpecID;
+    const specId =
+      typeof specIdValue === "number" && Number.isInteger(specIdValue)
+        ? specIdValue
+        : typeof specIdValue === "string"
+          ? Number.parseInt(specIdValue, 10)
+          : NaN;
+    if (!Number.isInteger(specId) || specId <= 0) return;
+
+    const description = ["Year", "Brand", "CardNumber", "Subject", "Variety"]
+      .map((key) => {
+        const v = psaCert?.[key];
+        return typeof v === "string" ? v.trim() : "";
+      })
+      .filter(Boolean)
+      .join(" ");
+
+    const { error } = await params.supabase.from("psa_spec_targets").upsert(
+      {
+        spec_id: specId,
+        ...(description ? { description } : {}),
+        source: "cert_scan",
+      },
+      { onConflict: "spec_id", ignoreDuplicates: true }
+    );
+    if (error) {
+      console.warn("[psa/cert] spec target harvest failed", { specId, error: error.message });
+    }
+  } catch (error) {
+    console.warn("[psa/cert] spec target harvest threw", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 async function writeSnapshot(params: {
   supabase: SupabaseClient;
   cert: string;
@@ -196,6 +247,8 @@ export async function GET(req: Request) {
       fetchedAt,
       data: freshData,
     });
+
+    await harvestSpecTarget({ supabase, data: freshData });
 
     await logLookup({
       supabase,

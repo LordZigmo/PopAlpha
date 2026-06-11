@@ -37,6 +37,10 @@
       "schedule": "25 2,8,14,20 * * *"
     },
     {
+      "path": "/api/cron/snapshot-psa-pop",
+      "schedule": "50 7 * * *"
+    },
+    {
       "path": "/api/cron/refresh-card-embeddings",
       "schedule": "30 9 * * *"
     },

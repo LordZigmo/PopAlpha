@@ -157,6 +157,15 @@ struct MultiLineChartView: View {
     /// Adds per-series "from start" + "24h" deltas to the scrub readout.
     var showChangeDetails: Bool = false
     var height: CGFloat = 160
+    /// Draws dashed bound lines at the window's high and low with value
+    /// labels (dollars in absolute mode, % in indexed) — mirrors
+    /// `InteractiveChartView.showsBounds` so the overlay chart and the
+    /// single-line chart read identically. The plot insets vertically to
+    /// make room; replaces the corner axis labels.
+    var showsBounds: Bool = false
+
+    /// Vertical room reserved for the bound lines + labels.
+    private var plotInset: CGFloat { showsBounds ? 16 : 0 }
 
     @State private var scrubbing = false
     @State private var scrubFraction: Double = 0
@@ -181,7 +190,11 @@ struct MultiLineChartView: View {
         VStack(alignment: .leading, spacing: 10) {
             chart(m)
                 .frame(height: height)
-                .overlay(alignment: .topLeading) { axisLabels(m) }
+                .overlay(alignment: .topLeading) {
+                    // Bounds mode carries its own high/low labels on the
+                    // dashed lines; the corner axis labels would double up.
+                    if !showsBounds { axisLabels(m) }
+                }
                 .overlay(alignment: .top) {
                     if scrubbing, !m.isEmpty { readoutCard(m) }
                 }
@@ -204,8 +217,14 @@ struct MultiLineChartView: View {
             } else {
                 ZStack {
                     gridLines(h: h, w: w)
+                    if showsBounds {
+                        boundsOverlay(m, w: w, h: h)
+                    }
                     if m.scale == .indexed, m.minVal <= 100, m.maxVal >= 100 {
                         baseline100(m, w: w, h: h)
+                    }
+                    ForEach(m.series) { s in
+                        seriesFill(s, m: m, w: w, h: h)
                     }
                     ForEach(m.series) { s in
                         seriesLine(s, m: m, w: w, h: h)
@@ -232,18 +251,82 @@ struct MultiLineChartView: View {
         }
     }
 
+    /// Y position honoring the bounds inset — values map into the inset
+    /// plot band so the dashed high/low lines sit exactly on the extremes.
+    private func yPos(_ value: Double, m: MultiSeriesChartModel, h: CGFloat) -> CGFloat {
+        plotInset + m.y(value: value, height: h - plotInset * 2)
+    }
+
     private func seriesLine(_ s: MultiSeriesChartModel.Series, m: MultiSeriesChartModel, w: CGFloat, h: CGFloat) -> some View {
         let base = s.points.first?.price ?? 0
         return Path { path in
             for (i, p) in s.points.enumerated() {
                 let pt = CGPoint(
                     x: m.x(tsMs: p.tsMs, width: w),
-                    y: m.y(value: MultiSeriesChartModel.transform(price: p.price, base: base, scale: m.scale), height: h)
+                    y: yPos(MultiSeriesChartModel.transform(price: p.price, base: base, scale: m.scale), m: m, h: h)
                 )
                 if i == 0 { path.move(to: pt) } else { path.addLine(to: pt) }
             }
         }
         .stroke(s.color, style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+    }
+
+    /// Soft gradient fill under each series — the same visual language as
+    /// the single-line chart's fill, kept faint so overlapping series
+    /// blend instead of muddying.
+    private func seriesFill(_ s: MultiSeriesChartModel.Series, m: MultiSeriesChartModel, w: CGFloat, h: CGFloat) -> some View {
+        let base = s.points.first?.price ?? 0
+        let floorY = h - plotInset
+        return Path { path in
+            guard let first = s.points.first else { return }
+            path.move(to: CGPoint(x: m.x(tsMs: first.tsMs, width: w), y: floorY))
+            for p in s.points {
+                path.addLine(to: CGPoint(
+                    x: m.x(tsMs: p.tsMs, width: w),
+                    y: yPos(MultiSeriesChartModel.transform(price: p.price, base: base, scale: m.scale), m: m, h: h)
+                ))
+            }
+            path.addLine(to: CGPoint(x: m.x(tsMs: s.points.last!.tsMs, width: w), y: floorY))
+            path.closeSubpath()
+        }
+        .fill(
+            LinearGradient(
+                colors: [s.color.opacity(0.10), .clear],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+    }
+
+    /// Dashed hairlines at the window's high and low with value labels —
+    /// dollars in absolute mode, signed % in indexed mode.
+    private func boundsOverlay(_ m: MultiSeriesChartModel, w: CGFloat, h: CGFloat) -> some View {
+        let topY = plotInset
+        let bottomY = h - plotInset
+        return ZStack(alignment: .topLeading) {
+            Path { path in
+                path.move(to: CGPoint(x: 0, y: topY))
+                path.addLine(to: CGPoint(x: w, y: topY))
+            }
+            .stroke(PA.Colors.hairline(0.18), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+
+            Path { path in
+                path.move(to: CGPoint(x: 0, y: bottomY))
+                path.addLine(to: CGPoint(x: w, y: bottomY))
+            }
+            .stroke(PA.Colors.hairline(0.18), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+
+            Text(m.scale == .indexed ? fmtSignedPct(m.maxVal - 100) : fmtUSD(m.maxVal))
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(PA.Colors.muted)
+                .offset(x: 2, y: topY - 14)
+
+            Text(m.scale == .indexed ? fmtSignedPct(m.minVal - 100) : fmtUSD(m.minVal))
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(PA.Colors.muted)
+                .offset(x: 2, y: bottomY + 3)
+        }
+        .allowsHitTesting(false)
     }
 
     private func gridLines(h: CGFloat, w: CGFloat) -> some View {
@@ -258,7 +341,7 @@ struct MultiLineChartView: View {
     }
 
     private func baseline100(_ m: MultiSeriesChartModel, w: CGFloat, h: CGFloat) -> some View {
-        let y = m.y(value: 100, height: h)
+        let y = yPos(100, m: m, h: h)
         return Path { path in
             path.move(to: CGPoint(x: 0, y: y))
             path.addLine(to: CGPoint(x: w, y: y))
@@ -282,7 +365,7 @@ struct MultiLineChartView: View {
                     let base = s.points.first?.price ?? 0
                     let pt = CGPoint(
                         x: m.x(tsMs: s.points[i].tsMs, width: w),
-                        y: m.y(value: MultiSeriesChartModel.transform(price: s.points[i].price, base: base, scale: m.scale), height: h)
+                        y: yPos(MultiSeriesChartModel.transform(price: s.points[i].price, base: base, scale: m.scale), m: m, h: h)
                     )
                     Circle()
                         .fill(s.color)

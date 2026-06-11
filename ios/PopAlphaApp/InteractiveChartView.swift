@@ -8,6 +8,10 @@ struct InteractiveChartView: View {
     let direction: ChangeDirection
     var lineWidth: CGFloat = 2
     var height: CGFloat = 120
+    /// Draws dashed bound lines at the window's high and low with dollar
+    /// labels — the technical "range" read. The plot is inset vertically
+    /// to make room, so leave this off for compact sparkline uses.
+    var showsBounds: Bool = false
 
     @State private var scrubbing = false
     @State private var scrubIndex: Int?
@@ -87,16 +91,23 @@ struct InteractiveChartView: View {
                     let range = maxVal - minVal
                     let step = w / CGFloat(data.count - 1)
                     let flat = range <= 0
+                    // Bounds mode insets the plot so the high/low labels fit
+                    // above and below the dashed lines without clipping.
+                    let inset: CGFloat = (showsBounds && !flat) ? 16 : 0
+                    let plotH = h - inset * 2
                     let points: [CGPoint] = data.enumerated().map { i, val in
                         CGPoint(
                             x: CGFloat(i) * step,
                             y: flat
                                 ? h * 0.5
-                                : h - ((CGFloat(val - minVal) / CGFloat(range)) * h)
+                                : inset + plotH - ((CGFloat(val - minVal) / CGFloat(range)) * plotH)
                         )
                     }
 
                     ZStack {
+                        if showsBounds, !flat {
+                            boundsOverlay(minVal: minVal, maxVal: maxVal, topY: inset, bottomY: h - inset, width: w)
+                        }
                         // Fill gradient
                         fillPath(points: points, height: h)
                         // Line
@@ -215,6 +226,42 @@ struct InteractiveChartView: View {
                 .frame(width: 16, height: 16)
                 .position(point)
         }
+    }
+
+    // MARK: - High/Low Bounds
+
+    /// Dashed hairlines at the window's high and low with dollar labels
+    /// (high above its line, low below) — anchored top-leading so the
+    /// labels track the inset positions without measuring text.
+    private func boundsOverlay(minVal: Double, maxVal: Double, topY: CGFloat, bottomY: CGFloat, width: CGFloat) -> some View {
+        ZStack(alignment: .topLeading) {
+            Path { path in
+                path.move(to: CGPoint(x: 0, y: topY))
+                path.addLine(to: CGPoint(x: width, y: topY))
+            }
+            .stroke(PA.Colors.hairline(0.18), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+
+            Path { path in
+                path.move(to: CGPoint(x: 0, y: bottomY))
+                path.addLine(to: CGPoint(x: width, y: bottomY))
+            }
+            .stroke(PA.Colors.hairline(0.18), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+
+            Text(Self.formatBound(maxVal))
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(PA.Colors.muted)
+                .offset(x: 2, y: topY - 14)
+
+            Text(Self.formatBound(minVal))
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(PA.Colors.muted)
+                .offset(x: 2, y: bottomY + 3)
+        }
+        .allowsHitTesting(false)
+    }
+
+    private static func formatBound(_ val: Double) -> String {
+        val >= 1000 ? String(format: "$%.0f", val) : String(format: "$%.2f", val)
     }
 
     // MARK: - Chart Paths

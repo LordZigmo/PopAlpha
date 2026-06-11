@@ -22,10 +22,21 @@ struct PersonalizedInsightCardView: View {
 
     private static let purpleBorder = Color(red: 0.752, green: 0.517, blue: 0.988)     // #C084FC
     private static let purpleAccent = Color(red: 0.659, green: 0.333, blue: 0.969)     // #A855F7
-    private static let purpleText = Color(red: 0.961, green: 0.949, blue: 1.0)         // #F5F3FF
-    private static let purpleMuted = Color(red: 0.914, green: 0.835, blue: 1.0)        // #E9D5FF
-    private static let purpleHeading = Color(red: 0.847, green: 0.706, blue: 0.996)    // #D8B4FE
-    private static let purpleGlow = Color(red: 0.659, green: 0.333, blue: 0.969)
+    // Text tones adapt per scheme: the container is now the same liquid
+    // glass as the market brief, which renders LIGHT in light mode — the
+    // old fixed near-white lavenders would wash out on it.
+    private static let purpleText = Color(
+        light: Color(red: 0.227, green: 0.063, blue: 0.439),    // #3A1070 deep violet
+        dark:  Color(red: 0.961, green: 0.949, blue: 1.0)       // #F5F3FF
+    )
+    private static let purpleMuted = Color(
+        light: Color(red: 0.427, green: 0.227, blue: 0.690),    // #6D3AB0
+        dark:  Color(red: 0.914, green: 0.835, blue: 1.0)       // #E9D5FF
+    )
+    private static let purpleHeading = Color(
+        light: Color(red: 0.494, green: 0.133, blue: 0.808),    // #7E22CE
+        dark:  Color(red: 0.847, green: 0.706, blue: 0.996)     // #D8B4FE
+    )
 
     var body: some View {
         guardedContent
@@ -87,23 +98,10 @@ struct PersonalizedInsightCardView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Self.purpleAccent.opacity(0.12))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(alignment: .leading) {
-            // Inset rounded rail — sits inside the rounded corners
-            // rather than trying to trace them.
-            Capsule()
-                .fill(Self.purpleAccent)
-                .frame(width: 3)
-                .padding(.vertical, 10)
-                .padding(.leading, 2)
-        }
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Self.purpleBorder.opacity(0.35), lineWidth: 1)
-        )
-        .shadow(color: Self.purpleGlow.opacity(0.28), radius: 14, x: 0, y: 0)
-        .shadow(color: .black.opacity(0.24), radius: 30, x: 0, y: 18)
+        // Same liquid-glass container as the market brief (aiBriefCard /
+        // AIBriefCard), tinted purple — the two cards read as siblings of
+        // one component family instead of two different design systems.
+        .liquidGlassSurface(accent: Self.purpleAccent)
     }
 
     private var insight: CollectorInsight? { response?.collectorInsight }
@@ -200,24 +198,28 @@ struct PersonalizedInsightCardView: View {
         .padding(.top, 2)
     }
 
+    /// Full-card gloss, mirroring the locked market brief: the overlay
+    /// wraps the ENTIRE card — header, preview line, and rows — so the
+    /// frost runs edge-to-edge and hugs the container's continuous
+    /// corners, with a single unlock CTA. No readable inner region.
     private var lockedContent: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            header
+        LockedPreviewOverlay(
+            ctaText: "Unlock Pro Insights",
+            cornerRadius: PA.Layout.panelRadius,
+            onTap: {
+                AnalyticsService.shared.capture(.collectorInsightUnlockTapped, properties: ["slug": canonicalSlug])
+                showPaywall = true
+            }
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                header
 
-            Text("Preview: Pro compares this card against your collecting style, recent activity, and taste signals.")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(Self.purpleText)
-                .lineSpacing(3)
-                .fixedSize(horizontal: false, vertical: true)
+                Text("Preview: Pro compares this card against your collecting style, recent activity, and taste signals.")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(Self.purpleText)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
 
-            LockedPreviewOverlay(
-                ctaText: "Unlock Pro Insights",
-                blurRadius: 5,
-                onTap: {
-                    AnalyticsService.shared.capture(.collectorInsightUnlockTapped, properties: ["slug": canonicalSlug])
-                    showPaywall = true
-                }
-            ) {
                 VStack(alignment: .leading, spacing: 8) {
                     lockedPreviewRow("Style match analysis")
                     lockedPreviewRow("Why it fits or stretches your profile")
@@ -226,24 +228,10 @@ struct PersonalizedInsightCardView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 2)
             }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .liquidGlassSurface(accent: Self.purpleAccent)
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Self.purpleAccent.opacity(0.12))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(alignment: .leading) {
-            Capsule()
-                .fill(Self.purpleAccent)
-                .frame(width: 3)
-                .padding(.vertical, 10)
-                .padding(.leading, 2)
-        }
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Self.purpleBorder.opacity(0.35), lineWidth: 1)
-        )
-        .shadow(color: Self.purpleGlow.opacity(0.28), radius: 14, x: 0, y: 0)
-        .shadow(color: .black.opacity(0.24), radius: 30, x: 0, y: 18)
     }
 
     private func lockedPreviewRow(_ text: String) -> some View {
