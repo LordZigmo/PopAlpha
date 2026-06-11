@@ -2,9 +2,11 @@
 --
 -- supersedes: 20260611231500_prune_old_data_time_budgeted.sql
 -- (body diffed against that definition: identical sections, identical
--- retention windows, key columns, loop structure, downsample headroom
--- gate, and budget_exhausted flag — ONLY the table order changed, plus
--- one new index outside the function.)
+-- retention windows, loop structure, downsample headroom gate, and
+-- budget_exhausted flag. Two deltas: the table ORDER changed, and the
+-- provider_ingests filter column is fixed from created_at — which does
+-- not exist; see section 9 — to ingested_at. Plus one new index outside
+-- the function.)
 --
 -- Operating the 2026-06-11 drain surfaced a referential-action
 -- amplification the table order steps straight into:
@@ -225,12 +227,21 @@ begin
   --    fires SET NULL into price_snapshots; cheap now that
   --    price_snapshots_ingest_id_idx exists, but keep the amplified
   --    tables at the back as defense in depth.
+  --
+  --    Column fix (codex P1 on PR #223): every prior definition since
+  --    20260413100000 filtered on provider_ingests.created_at, a column
+  --    that DOES NOT EXIST (the table has ingested_at). plpgsql resolves
+  --    columns at execution, so any call that reached this section threw
+  --    42703 and rolled back the ENTIRE prune — the nightly job can
+  --    never have completed past this point. This, compounded by the
+  --    payload SET NULL amplification, is the real origin of the
+  --    "retention silently lost for months" incident.
   _table_total := 0; _loops := 0;
   while clock_timestamp() <= _deadline and _loops < _max_loops_per_table loop
     delete from public.provider_ingests
     where  id in (
       select id from public.provider_ingests
-      where  created_at < now() - interval '30 days'
+      where  ingested_at < now() - interval '30 days'
       limit  _chunk_limit
     );
     get diagnostics _deleted = row_count;
