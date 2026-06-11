@@ -226,3 +226,108 @@ export const __private__ = {
   normalizePayload,
   parseCertificate,
 };
+
+// ---------------------------------------------------------------------------
+// Spec population (pop report) — GET /publicapi/pop/GetPSASpecPopulation/{specID}
+// Returns the full grade distribution for one spec (card+variety): Auth,
+// Grade1..Grade10 including half grades and qualifiers. Powers the
+// snapshot-psa-pop cron; one call per spec against the shared daily quota.
+
+const SPEC_POPULATION_ENDPOINT_TEMPLATE = "/publicapi/pop/GetPSASpecPopulation/{specID}";
+
+export type SpecPopulationResponse = {
+  specId: number;
+  description: string | null;
+  /** PSAPop grade-distribution object verbatim (Grade1..Grade10, halves, qualifiers). */
+  pop: Record<string, unknown> | null;
+  total: number | null;
+  auth: number | null;
+  raw: unknown;
+};
+
+function asInt(value: unknown): number | null {
+  if (typeof value === "number" && Number.isInteger(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isInteger(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+export async function getSpecPopulation(specId: number): Promise<SpecPopulationResponse> {
+  const token = process.env.PSA_ACCESS_TOKEN;
+  if (!token) {
+    throw new Error("Missing PSA_ACCESS_TOKEN env var (server-only).");
+  }
+  if (!Number.isInteger(specId) || specId <= 0) {
+    throw new Error(`Invalid PSA specId: ${specId}`);
+  }
+
+  const baseUrl = (process.env.PSA_BASE_URL ?? DEFAULT_PSA_BASE_URL).replace(/\/$/, "");
+  const url = `${baseUrl}${SPEC_POPULATION_ENDPOINT_TEMPLATE.replace("{specID}", String(specId))}`;
+  let backoffMs = INITIAL_BACKOFF_MS;
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+        },
+        cache: "no-store",
+      });
+
+      if (response.status === 429 && attempt < MAX_ATTEMPTS) {
+        const retryAfterHeader = response.headers.get("retry-after");
+        const retryAfterSeconds = retryAfterHeader ? Number.parseInt(retryAfterHeader, 10) : NaN;
+        const retryDelayMs = Number.isFinite(retryAfterSeconds)
+          ? Math.max(retryAfterSeconds, 1) * 1000
+          : backoffMs;
+
+        await sleep(retryDelayMs);
+        backoffMs *= 2;
+        continue;
+      }
+
+      if (!response.ok) {
+        const bodySnippet = (await response.text()).slice(0, 500);
+        throw new Error(
+          `PSA pop request failed for spec ${specId}: HTTP ${response.status}. Response: ${bodySnippet}`
+        );
+      }
+
+      const raw = (await response.json()) as Record<string, unknown>;
+      const pop =
+        raw && typeof raw.PSAPop === "object" && raw.PSAPop !== null
+          ? (raw.PSAPop as Record<string, unknown>)
+          : null;
+
+      return {
+        specId,
+        description: asString(raw?.Description),
+        pop,
+        total: asInt(pop?.Total),
+        auth: asInt(pop?.Auth),
+        raw,
+      };
+    } catch (error) {
+      lastError = error;
+
+      // 404 = unknown/retired spec; retrying won't change the answer.
+      if (String(lastError).includes("HTTP 404")) break;
+
+      if (attempt >= MAX_ATTEMPTS) {
+        break;
+      }
+
+      await sleep(backoffMs);
+      backoffMs *= 2;
+    }
+  }
+
+  throw new Error(
+    `PSA pop request failed for spec ${specId} after ${MAX_ATTEMPTS} attempts: ${String(lastError)}`
+  );
+}
