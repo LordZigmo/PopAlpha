@@ -56,6 +56,15 @@ diffing. Every day our snapshot cron runs is moat accrued.
   is not wired into CI and carries pre-existing drift
   (`resolveScrydexDailyRequestBudget` 347 vs expected 330). Fix the drift,
   wire into CI.
+- **Prune starvation / DB size** — `in progress` (2026-06-11): the old
+  prune_old_data() deleted one 5k chunk per table per night; pipeline
+  volume outran it and `provider_normalized_observations` hit 32 GB
+  (~half the DB), `ingest_runs` (4.4 GB) had no retention. Fixed with a
+  time-budgeted looping prune (`20260611231500`). Remaining ops: drain
+  the backlog (`/api/cron/prune-old-data?loops=200` repeatedly), then
+  off-peak `VACUUM FULL provider_normalized_observations` to reclaim
+  disk, and REINDEX CONCURRENTLY on price_history_points (8 GB indexes
+  over 2 GB table).
 - **Scrydex credit-burn telemetry** — `backlog`: surface daily credit
   consumption vs the 50k/month budget so drains/catchups can't surprise us.
 - **Drain counter semantics** — `backlog`: `write-provider-timeseries`

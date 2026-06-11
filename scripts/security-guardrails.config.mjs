@@ -1197,6 +1197,8 @@ export const PHASE2_REFERENCE_AND_PSA_INTERNAL_TABLES = [
   "psa_cert_lookup_logs",
   "psa_certificates",
   "psa_seed_certs",
+  "psa_spec_pop_snapshots",
+  "psa_spec_targets",
   "realized_sales_backtest_snapshots",
 ];
 
@@ -1659,6 +1661,10 @@ export const INTERNAL_NO_GRANT_OBJECTS = [
   "psa_cert_snapshots",
   "psa_certificates",
   "psa_seed_certs",
+  // PSA population snapshot pipeline (PR #221) — server-only ingest leg:
+  // RLS deny-all, the snapshot cron writes via service role.
+  "psa_spec_pop_snapshots",
+  "psa_spec_targets",
   "realized_sales_backtest_snapshots",
   "scan_correction_pairs",
   "scan_eval_images",
