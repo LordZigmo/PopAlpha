@@ -428,9 +428,12 @@ struct ProfileTabView: View {
                         Image("PopAlphaLogoTransparent")
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            // Fill most of the 80pt circle — at 40pt the
-                            // mascot read as a dot, not an avatar.
-                            .frame(width: 64, height: 64)
+                            // Fill the 80pt circle — the PNG carries its
+                            // own transparent margins, so anything under
+                            // ~76pt still read as a small badge rather
+                            // than an avatar (40pt originally, 64pt on
+                            // first pass — both too timid).
+                            .frame(width: 76, height: 76)
                             .opacity(0.7)
                     )
             }
@@ -469,9 +472,12 @@ struct ProfileTabView: View {
                         Image("PopAlphaLogoTransparent")
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            // Fill most of the 80pt circle — at 40pt the
-                            // mascot read as a dot, not an avatar.
-                            .frame(width: 64, height: 64)
+                            // Fill the 80pt circle — the PNG carries its
+                            // own transparent margins, so anything under
+                            // ~76pt still read as a small badge rather
+                            // than an avatar (40pt originally, 64pt on
+                            // first pass — both too timid).
+                            .frame(width: 76, height: 76)
                             .opacity(0.7)
                     )
             }
