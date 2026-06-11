@@ -798,11 +798,12 @@ private struct TopBar: View {
             // a legend.
             marketTogglePill
 
-            // Full modern wordmark (same asset the launch screen uses)
-            // so the top of the app reads as PopAlpha at a glance.
-            // Rendered raw (no template tint) so it matches the splash
-            // exactly — native white on the homepage's dark chrome.
-            Image("LaunchLogo")
+            // Full modern wordmark. Appearance-aware imageset: black
+            // horizontal lockup in light mode (the launch screen's white
+            // wordmark was invisible on light chrome), the launch-screen
+            // white PNG in dark mode so dark still matches the splash.
+            // Rendered raw (no template tint) — the mascot is full-color.
+            Image("HeaderLogo")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(height: 26)

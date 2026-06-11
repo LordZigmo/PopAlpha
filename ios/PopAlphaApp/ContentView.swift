@@ -428,7 +428,9 @@ struct ProfileTabView: View {
                         Image("PopAlphaLogoTransparent")
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            .frame(width: 40, height: 40)
+                            // Fill most of the 80pt circle — at 40pt the
+                            // mascot read as a dot, not an avatar.
+                            .frame(width: 64, height: 64)
                             .opacity(0.7)
                     )
             }
@@ -467,7 +469,9 @@ struct ProfileTabView: View {
                         Image("PopAlphaLogoTransparent")
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            .frame(width: 40, height: 40)
+                            // Fill most of the 80pt circle — at 40pt the
+                            // mascot read as a dot, not an avatar.
+                            .frame(width: 64, height: 64)
                             .opacity(0.7)
                     )
             }
