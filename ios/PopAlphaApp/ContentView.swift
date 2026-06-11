@@ -107,6 +107,7 @@ struct ContentView: View {
                 .tag(AppTab.profile)
         }
         .tint(PA.Colors.accent)
+        .minimizingTabBar()
         // App Review compliance modifiers — these were applied on PR #30
         // and inadvertently dropped by the SearchTabView extraction
         // commit (a782f51). Restored here so light/dark, offline banner,
@@ -293,6 +294,13 @@ struct ContentView: View {
     }
 
     private func configureTabBarAppearance() {
+        // iOS 26+ renders the tab bar as floating Liquid Glass (blurred,
+        // morphing, Instagram-style). Forcing the legacy opaque appearance
+        // below suppresses that entirely, so the override is legacy-only;
+        // on glass, selected tint comes from .tint() on the TabView and
+        // unselected items use the system glass styling.
+        if #available(iOS 26.0, *) { return }
+
         let appearance = UITabBarAppearance()
         appearance.configureWithOpaqueBackground()
         appearance.backgroundColor = UIColor(PA.Colors.surface)
@@ -310,6 +318,23 @@ struct ContentView: View {
 
         UITabBar.appearance().standardAppearance = appearance
         UITabBar.appearance().scrollEdgeAppearance = appearance
+    }
+}
+
+// MARK: - Liquid Glass tab bar
+
+private extension View {
+    /// Instagram-style minimizing tab bar: the iOS 26 Liquid Glass bar
+    /// shrinks out of the way on scroll-down and restores on scroll-up.
+    /// No-op on earlier OSes, which keep the legacy opaque bar from
+    /// configureTabBarAppearance().
+    @ViewBuilder
+    func minimizingTabBar() -> some View {
+        if #available(iOS 26.0, *) {
+            self.tabBarMinimizeBehavior(.onScrollDown)
+        } else {
+            self
+        }
     }
 }
 
