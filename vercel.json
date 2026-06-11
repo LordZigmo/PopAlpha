@@ -129,7 +129,7 @@
       "schedule": "15 4 * * *"
     },
     {
-      "path": "/api/cron/prune-old-data",
+      "path": "/api/cron/prune-old-data?loops=100",
       "schedule": "40 3 * * *"
     },
     {

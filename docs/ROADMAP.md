@@ -56,15 +56,28 @@ diffing. Every day our snapshot cron runs is moat accrued.
   is not wired into CI and carries pre-existing drift
   (`resolveScrydexDailyRequestBudget` 347 vs expected 330). Fix the drift,
   wire into CI.
-- **Prune starvation / DB size** — `in progress` (2026-06-11): the old
-  prune_old_data() deleted one 5k chunk per table per night; pipeline
-  volume outran it and `provider_normalized_observations` hit 32 GB
-  (~half the DB), `ingest_runs` (4.4 GB) had no retention. Fixed with a
-  time-budgeted looping prune (`20260611231500`). Remaining ops: drain
-  the backlog (`/api/cron/prune-old-data?loops=200` repeatedly), then
-  off-peak `VACUUM FULL provider_normalized_observations` to reclaim
-  disk, and REINDEX CONCURRENTLY on price_history_points (8 GB indexes
-  over 2 GB table).
+- **Prune starvation / DB size** — `shipped` (2026-06-11): root cause was
+  worse than starvation — every prune_old_data() since 20260413 filtered
+  provider_ingests on a column that never existed (created_at vs
+  ingested_at), so any call reaching that section threw 42703 and rolled
+  back the ENTIRE nightly prune; payload SET NULL fan-out (~119 indexed
+  obs updates per payload row) compounded it once backlogs grew. Fixed
+  across 20260611231500 (time-budgeted looping prune) and 20260612003000
+  (observations-first order, ingested_at fix, payload gate,
+  price_snapshots.ingest_id index). Backlog drained 2026-06-11 on a
+  temporary XL compute bump: 9.40M observations, 1.00M ingest_runs,
+  60.9k payloads (+ ~7.8M provider_observation_matches via FK cascade —
+  matches needs no retention policy of its own). VACUUM FULL + REINDEX
+  reclaim: **DB 71 GB -> 33 GB**; observations 32 GB -> 5.2 GB,
+  payloads 5.9 -> 1.0 GB, ingest_runs 4.4 -> 1.8 GB,
+  price_history_points 10 -> 5.3 GB. Nightly cron now runs ?loops=100:
+  measured inflow is ~430k obs/day, so the old loops=10 default
+  (100k/night cap) would have silently re-starved. Verify the nightly
+  prune log shows budget_exhausted=false and small per-table numbers;
+  if provider_observation_matches bloat matters later, VACUUM FULL it
+  (~5 GB reclaimable, was left in place 2026-06-11). Supabase
+  provisioned disk does NOT auto-shrink — reduce in Dashboard ->
+  Database -> Disk after confirming steady state.
 - **Scrydex credit-burn telemetry** — `backlog`: surface daily credit
   consumption vs the 50k/month budget so drains/catchups can't surprise us.
 - **Drain counter semantics** — `backlog`: `write-provider-timeseries`
