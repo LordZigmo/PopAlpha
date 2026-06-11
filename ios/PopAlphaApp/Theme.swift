@@ -9,11 +9,13 @@ import UIKit
 // via UITraitCollection — no per-view branching required, just stop
 // forcing the app into .dark.
 
-private extension Color {
+extension Color {
     /// Returns a color that resolves against the current trait collection
     /// at render time, so it auto-flips when the user switches between
     /// light and dark mode (Settings → Display & Brightness, or system
-    /// schedule). All adaptive PA.Colors entries are built from this.
+    /// schedule). All adaptive PA.Colors entries are built from this;
+    /// internal (not private) so component-local accent palettes — e.g.
+    /// Collector Insight's purples — can adapt the same way.
     init(light: Color, dark: Color) {
         self = Color(UIColor { trait in
             trait.userInterfaceStyle == .dark
@@ -416,11 +418,16 @@ struct LiquidGlassSurface: ViewModifier {
     private var accentGradientColors: [Color] {
         switch colorScheme {
         case .light:
+            // 2026-06-11: dialed way down from 0.28/0.10/0.22/0.08 — at
+            // those values the wash read as a "blue shimmer" over the
+            // homepage cards in light mode instead of tinted glass. Light
+            // mode now leans on the material itself with only a whisper
+            // of accent chroma; dark mode is untouched.
             return [
-                accent.opacity(0.28),
                 accent.opacity(0.10),
-                accent.opacity(0.22),
-                accent.opacity(0.08)
+                accent.opacity(0.04),
+                accent.opacity(0.08),
+                accent.opacity(0.03)
             ]
         case .dark:
             // The original PR #86 values (0.55 / 0.22 / 0.45 / 0.18)
@@ -469,9 +476,14 @@ struct LiquidGlassSurface: ViewModifier {
         // the accent-tinted base below, the highlight area looks like
         // a brighter glint of the same chroma — exactly how a real
         // reflection on tinted glass behaves.
+        // In light mode the accent-colored sweep is the main "blue
+        // shimmer" offender — over a light material even a low peak
+        // reads as a moving colored band. Cut it to a third so the
+        // sweep registers as glass catching light, not a blue glint.
+        let peak = colorScheme == .light ? shineIntensity * 0.35 : shineIntensity
         return [
             .init(color: accent.opacity(0), location: max(center - halfWidth, 0)),
-            .init(color: accent.opacity(shineIntensity), location: center),
+            .init(color: accent.opacity(peak), location: center),
             .init(color: accent.opacity(0), location: min(center + halfWidth, 1))
         ]
     }

@@ -172,12 +172,16 @@ struct CardDetailView: View {
     /// is marketPrice (14-day median). One dominant printing is resolved per
     /// (grader, grade) — see the tie-break in the loader (#192 grader-split).
     @State private var gradedCardMetricsByBucket: [String: GradedCardMetricRow] = [:]
-    /// Per-bucket price history for the active grader, overlaid as the
-    /// "Grade Performance" comparison chart. Indexed by default so momentum
-    /// is comparable across the PSA 10 → PSA 7 price gap; the %/$ toggle
-    /// flips to absolute dollars.
+    /// Per-bucket price history for the active grader, overlaid on the
+    /// MAIN chart when "All" is selected in the grade pills (mirrors the
+    /// finish pills' overlay). Absolute dollars by default — the chart
+    /// reads as the market's actual grade ladder; the %/$ toggle flips
+    /// to indexed momentum across the PSA 10 → PSA 7 price gap.
     @State private var gradePerfSeries: [GradePerfDatum] = []
-    @State private var gradePerfScale: MultiSeriesChartModel.Scale = .indexed
+    @State private var gradePerfScale: MultiSeriesChartModel.Scale = .absolute
+    /// True → the graded chart overlays every grade bucket; tapping a
+    /// grade pill (or the wheel) isolates that bucket's line.
+    @State private var showAllGrades = true
     /// RAW variant overlay — every printing (finishes + editions + stamps)
     /// charted together; the finish pills set selectedPrintingId, which
     /// isolates one line (nil = All → normalized overlay of every finish).
@@ -1111,13 +1115,11 @@ struct CardDetailView: View {
                 }
             }
 
-            // 7. Chart section — supporting evidence after the read.
+            // 7. Chart section — supporting evidence after the read. In
+            //    graded mode the chart carries the grade pills + "All"
+            //    overlay (the old separate Grade Performance section was
+            //    folded into the main chart, 2026-06-11).
             chartSection
-
-            // 7b. Grade Performance — overlay every grade of the active grader
-            //     so the user can compare which grade is moving quicker.
-            //     Self-gates to graded mode with ≥2 buckets of history.
-            gradePerformanceSection
 
             // 8. Personalized insight ("How this fits your style") — secondary
             // differentiated layer; renders its own fallback when signal is thin.
@@ -1418,6 +1420,12 @@ struct CardDetailView: View {
                 variantSelectPills
             }
 
+            // Grade pills — GRADED mode's mirror of the finish pills. Shown
+            // once ≥2 buckets have chartable history for the active grader.
+            if selectedPriceMode.isGraded, gradePerfSeries.count >= 2 {
+                gradeSelectPills
+            }
+
             // Interactive chart
             ZStack {
                 chartContent
@@ -1579,14 +1587,18 @@ struct CardDetailView: View {
 
     private static let gradePerfOrder = ["G10_PERFECT", "G10", "G9_5", "G9", "G8", "LE_7"]
 
+    /// Grade colors follow the standard loot-rarity ladder so the chart
+    /// ranks itself at a glance: a perfect 10 is mythic red, a 10 is
+    /// legendary gold, then epic purple → rare blue → uncommon green →
+    /// common gray as the grade descends.
     private func gradePerfColor(_ bucket: String) -> Color {
         switch bucket {
-        case "G10_PERFECT": return Color(red: 0.957, green: 0.447, blue: 0.714)
-        case "G10":         return Color(red: 0.204, green: 0.827, blue: 0.600)
-        case "G9_5":        return Color(red: 0.376, green: 0.647, blue: 0.980)
-        case "G9":          return Color(red: 0.659, green: 0.545, blue: 0.980)
-        case "G8":          return Color(red: 0.984, green: 0.749, blue: 0.141)
-        case "LE_7":        return Color(red: 0.984, green: 0.443, blue: 0.522)
+        case "G10_PERFECT": return Color(red: 0.937, green: 0.267, blue: 0.267)   // mythic red
+        case "G10":         return Color(red: 1.000, green: 0.800, blue: 0.149)   // legendary gold
+        case "G9_5":        return Color(red: 0.659, green: 0.333, blue: 0.969)   // epic purple
+        case "G9":          return Color(red: 0.231, green: 0.510, blue: 0.965)   // rare blue
+        case "G8":          return Color(red: 0.133, green: 0.773, blue: 0.369)   // uncommon green
+        case "LE_7":        return PA.Colors.neutral                              // common gray
         default:            return PA.Colors.neutral
         }
     }
@@ -1603,34 +1615,44 @@ struct CardDetailView: View {
         }
     }
 
-    @ViewBuilder
-    private var gradePerformanceSection: some View {
-        if selectedPriceMode.isGraded, gradePerfSeries.count >= 2 {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Grade Performance")
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(PA.Colors.text)
-                        Text("\(selectedGradingAgency) grades · \(gradePerfScale == .indexed ? "indexed to window start" : "observed prices")")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(PA.Colors.muted)
-                    }
-                    Spacer()
-                    gradePerfScaleToggle
-                }
+    /// The currently isolated grade bucket (nil when not in graded mode).
+    private var activeGradeBucket: String? {
+        if case let .graded(_, bucket) = selectedPriceMode { return bucket }
+        return nil
+    }
 
-                MultiLineChartView(
-                    series: gradePerfSeries.map {
-                        MultiLineSeriesInput(id: $0.id, label: $0.label, color: $0.color, points: $0.points)
-                    },
-                    scale: gradePerfScale,
-                    showChangeDetails: false,
-                    height: 150
-                )
+    /// Grade select pills — the GRADED-mode mirror of the finish pills.
+    /// "All" overlays every grade bucket on the main chart (loot-rarity
+    /// colors rank the ladder); tapping a grade isolates its line and
+    /// drives the headline price, exactly like tapping a finish. The $/%
+    /// scale toggle rides the row only while the overlay is showing.
+    private var gradeSelectPills: some View {
+        HStack(spacing: 8) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    variantPill("All", isActive: showAllGrades) { showAllGrades = true }
+                    ForEach(gradePerfSeries) { series in
+                        variantPill(
+                            series.label,
+                            isActive: !showAllGrades && activeGradeBucket == series.id,
+                            dot: series.color
+                        ) {
+                            showAllGrades = false
+                            // Route through the same state the wheel uses so
+                            // the wheel, pills, metrics, and chart stay in
+                            // lockstep (the wheel's onChange applies the mode).
+                            if selectedGradeBucket != series.id {
+                                selectedGradeBucket = series.id
+                            } else {
+                                applyGradedSelection()
+                            }
+                        }
+                    }
+                }
             }
-            .padding(16)
-            .glassSurface()
+            if showAllGrades {
+                gradePerfScaleToggle
+            }
         }
     }
 
@@ -1781,10 +1803,20 @@ struct CardDetailView: View {
 
     @ViewBuilder
     private var chartContent: some View {
-        if !selectedPriceMode.isGraded, hasVariantOverlay {
+        if selectedPriceMode.isGraded, showAllGrades, gradePerfSeries.count >= 2 {
+            // "All" grades → the whole grade ladder on one graph, in
+            // observed dollars by default (the %/$ toggle flips to
+            // indexed momentum). Loot-rarity colors rank the lines.
+            MultiLineChartView(
+                series: gradePerfSeries.map { MultiLineSeriesInput(id: $0.id, label: $0.label, color: $0.color, points: $0.points) },
+                scale: gradePerfScale,
+                showChangeDetails: true,
+                height: 140
+            )
+        } else if !selectedPriceMode.isGraded, hasVariantOverlay {
             if let sel = selectedPrintingId, let one = variantSeries.first(where: { $0.id == sel }) {
                 // A specific finish is selected → isolate its line.
-                InteractiveChartView(data: one.points.map(\.price), timestamps: one.points.map(\.ts), direction: variantDirection(one.points), lineWidth: 2, height: 140)
+                InteractiveChartView(data: one.points.map(\.price), timestamps: one.points.map(\.ts), direction: variantDirection(one.points), lineWidth: 2, height: 140, showsBounds: true)
             } else {
                 // "All" → every finish overlaid on a normalized (indexed) scale, so a
                 // low-dollar Reverse Holo stays visible beside a high-dollar Holo.
@@ -1796,7 +1828,7 @@ struct CardDetailView: View {
                 )
             }
         } else {
-            InteractiveChartView(data: activeChartPrices, timestamps: activeChartTimestamps, direction: chartDirection, lineWidth: 2, height: 140)
+            InteractiveChartView(data: activeChartPrices, timestamps: activeChartTimestamps, direction: chartDirection, lineWidth: 2, height: 140, showsBounds: true)
         }
     }
 
@@ -2784,6 +2816,9 @@ struct CardDetailView: View {
                 }
                 gradePill(title: "Graded", selected: selectedPriceMode.isGraded) {
                     PAHaptics.selection()
+                    // Entering graded mode always opens on the full grade
+                    // ladder — the overlay is the read; a pill isolates.
+                    showAllGrades = true
                     applyGradedSelection()
                 }
             }
@@ -2832,6 +2867,9 @@ struct CardDetailView: View {
                         .clipped()
                         .onChange(of: selectedGradeBucket) {
                             PAHaptics.selection()
+                            // Choosing a specific grade (wheel or chart pill —
+                            // both route through this state) isolates its line.
+                            showAllGrades = false
                             applyGradedSelection()
                         }
                     }
