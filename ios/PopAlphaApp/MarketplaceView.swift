@@ -130,12 +130,15 @@ struct MarketplaceView: View {
         // toggle shouldn't reintroduce placeholders either.
         let rails: [[HomepageCardDTO]]
         if market == .jp {
+            // EN-mode momentum is intentionally absent: MarketPulseSection
+            // hides the EN .momentum tab (breakouts covers it), so those
+            // thumbs can't render after a flip.
             rails = [
                 board.marketWatch ?? [],
                 board.topMovers.d7, board.topMovers.h24,
                 board.breakouts ?? [],
                 board.unusualVolume ?? [],
-                board.biggestDrops.d7,
+                board.biggestDrops.d7, board.biggestDrops.h24,
                 board.midMovers ?? [],
                 board.budgetMovers ?? [],
             ]
@@ -145,7 +148,9 @@ struct MarketplaceView: View {
                 board.japaneseTopMovers?.d7 ?? [],
                 board.japaneseTopMovers?.h24 ?? [],
                 board.japaneseBiggestDrops?.d7 ?? [],
+                board.japaneseBiggestDrops?.h24 ?? [],
                 board.japaneseMomentum?.d7 ?? [],
+                board.japaneseMomentum?.h24 ?? [],
                 board.japaneseMidMovers ?? [],
                 board.japaneseBudgetMovers ?? [],
             ]
