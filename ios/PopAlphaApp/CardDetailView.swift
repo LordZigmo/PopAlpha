@@ -371,19 +371,6 @@ struct CardDetailView: View {
         return "\(label) · \(formatYahooJpObservedAt(asOf))"
     }
 
-    /// Suppress the change-percent badge when the hero is showing a
-    /// JP-scraper price (Yahoo! or Snkrdunk). The change columns track
-    /// the Scrydex market_price, not the JP-derived median, so showing
-    /// the delta would be misleading.
-    private var suppressHeroChangeBadge: Bool {
-        isJapaneseCard && selectJpPriceSource(
-            yahooJpPrice: cardMetrics?.yahooJpPrice,
-            yahooJpSampleCount: cardMetrics?.yahooJpSampleCount,
-            snkrdunkPrice: cardMetrics?.snkrdunkPrice,
-            snkrdunkSampleCount: cardMetrics?.snkrdunkSampleCount
-        ).price != nil
-    }
-
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(spacing: 0) {
@@ -1272,7 +1259,7 @@ struct CardDetailView: View {
                     // Scrydex market_price, not the Yahoo!-derived median,
                     // so showing a Scrydex delta next to a Yahoo! price
                     // would imply causality that doesn't exist.
-                    if !selectedPriceMode.isGraded && !suppressHeroChangeBadge && !isAbundantNearMintHeroPrice {
+                    if !selectedPriceMode.isGraded && !isAbundantNearMintHeroPrice {
                         HStack(spacing: 4) {
                             Image(systemName: heroChange.direction.arrowSymbol)
                                 .font(.system(size: 12, weight: .bold))
