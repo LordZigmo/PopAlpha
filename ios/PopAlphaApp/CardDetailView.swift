@@ -2396,6 +2396,23 @@ struct CardDetailView: View {
         // Match the front-page AI brief container (AIBriefCard) so the two
         // read as the same component.
         .liquidGlassSurface(accent: detailAccent)
+        // Opaque dark base under the translucent glass — the dark look
+        // depends on dark content behind the material, which a light
+        // page doesn't provide (fill resolves dark via the pin below).
+        // Ambient-dark keeps .clear so the detail page's accent glow
+        // still bleeds through the material as designed. `colorScheme`
+        // here reads the AMBIENT scheme — the property resolves outside
+        // the pin.
+        .background(
+            RoundedRectangle(cornerRadius: PA.Layout.panelRadius, style: .continuous)
+                .fill(colorScheme == .light ? PA.Colors.background : Color.clear)
+        )
+        // Pin the summary panel to its dark-theme rendering in BOTH
+        // appearances, matching AIBriefCard (owner request 2026-06-12:
+        // "make the AI briefs the same colors as the dark theme
+        // version"). Placed BEFORE .sheet so the paywall keeps the
+        // user's appearance — only the panel itself is pinned.
+        .environment(\.colorScheme, .dark)
         .sheet(isPresented: $showMarketSummaryPaywall) {
             PaywallView(
                 context: .generic,
