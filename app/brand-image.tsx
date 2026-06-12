@@ -2,22 +2,20 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ImageResponse } from "next/og";
 
-const logoSvg = readFileSync(
-  join(process.cwd(), "public/brand/popalpha-icon.svg"),
-  "utf8",
-);
-
-const logoDataUrl = `data:image/svg+xml;base64,${Buffer.from(logoSvg).toString("base64")}`;
-
 // The standard PopAlpha app icon (the mascot) — copied from the iOS AppIcon to
 // public/brand/popalpha-app-icon.png. Rendered full-bleed for the web favicon /
 // apple-touch icon so the browser tab + home-screen icon match the iOS app.
+// Also the only mascot art OG surfaces may use — popalpha-icon.svg is the
+// retired old logo (owner, 2026-06-12).
 const appIconPng = readFileSync(
   join(process.cwd(), "public/brand/popalpha-app-icon.png"),
 );
 const appIconDataUrl = `data:image/png;base64,${appIconPng.toString("base64")}`;
 
 function LogoFrame({ size }: { size: number }) {
+  // The app icon carries its own dark background, so it renders
+  // full-bleed inside the frame — the border + shadow stay as the
+  // social-card treatment.
   return (
     <div
       style={{
@@ -28,15 +26,15 @@ function LogoFrame({ size }: { size: number }) {
         justifyContent: "center",
         borderRadius: Math.round(size * 0.24),
         border: "1px solid rgba(255,255,255,0.12)",
-        background: "rgba(0,0,0,0.44)",
         boxShadow: "0 28px 64px rgba(0,0,0,0.35)",
       }}
     >
       <img
         alt="PopAlpha logo"
-        src={logoDataUrl}
-        width={Math.round(size * 0.8)}
-        height={Math.round(size * 0.8)}
+        src={appIconDataUrl}
+        width={size}
+        height={size}
+        style={{ borderRadius: Math.round(size * 0.24) }}
       />
     </div>
   );
