@@ -274,6 +274,23 @@ async function main() {
     e.conflictNote = `conflict-demoted: ${e.best.snkrdunk_product_code} also claimed by ${d.winnerSlug} (score ${(d.winnerScore ?? 0).toFixed(2)} vs ${(e.best.score ?? 0).toFixed(2)})`;
   }
 
+  // --matched-only opts out of review rows entirely: the pass-1 filter ran on
+  // INPUT status, but a conflict loser's dbStatus just became NEEDS_REVIEW —
+  // re-apply the filter so the flag's contract holds in colliding batches
+  // (Codex P3 on this PR).
+  if (opts.matchedOnly) {
+    const before = entries.length;
+    for (let i = entries.length - 1; i >= 0; i--) {
+      if (entries[i].dbStatus !== "MATCHED") {
+        entries.splice(i, 1);
+        skipped += 1;
+      }
+    }
+    if (entries.length < before) {
+      log(`--matched-only: skipped ${before - entries.length} conflict-demoted row(s)`);
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Pass 2: load the existing map once (when credentials allow), then apply
   // the idempotent re-persist rules row by row.
