@@ -300,10 +300,15 @@ struct CardDetailView: View {
     /// steadier 3-day median that the newest point already folds into — two
     /// distinct values, one per line, neither competing for the hero spot.
     /// Because cardMetrics becomes the per-printing row once a finish is
-    /// selected, both track the chosen finish. nil for JP (its hero comes from
-    /// JP-native sold sources), graded (separate path), low-dollar cards, and
-    /// when no median is available.
+    /// selected, both track the chosen finish. JP renders its own 14-day
+    /// median (or low-sample observation count); nil for graded mode
+    /// (separate path), low-dollar EN cards, and when no median is available.
     private var medianSublineText: String? {
+        // Graded mode first, for EVERY language: the graded hero comes from
+        // the graded metric rows (a separate fetch), so any RAW-basis median
+        // below it would be a basis mismatch in the subline. No graded
+        // subline exists today — show none rather than a wrong-basis one.
+        guard !selectedPriceMode.isGraded else { return nil }
         // JP: the blended 14-day median (jp_display_price) sits under the freshest
         // hero (jp_latest_price). JP sold data is ~weekly, so the window is 14d
         // (not the EN 3d). nil when the card has no qualifying JP series.
@@ -325,9 +330,7 @@ struct CardDetailView: View {
             let f = median >= 1000 ? String(format: "$%.0f", median) : String(format: "$%.2f", median)
             return "14-day median: \(f)"
         }
-        // Graded's 14-day median lives on the selected graded metric row (a
-        // separate fetch), not the RAW cardMetrics — see gradedMedianSublineText.
-        guard !selectedPriceMode.isGraded, !isAbundantNearMintHeroPrice else { return nil }
+        guard !isAbundantNearMintHeroPrice else { return nil }
         guard let median = cardMetrics?.marketPrice, median > 0 else { return nil }
         let formatted = median >= 1000 ? String(format: "$%.0f", median) : String(format: "$%.2f", median)
         return "3-day median: \(formatted)"
