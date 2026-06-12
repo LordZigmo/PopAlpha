@@ -122,6 +122,14 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
     private let engine: PopAlphaVisionEngine
 
     private var isSessionConfigured = false
+    /// Intent flag, sessionQueue-confined: true while the UI wants live
+    /// frames (set on creation/appear, cleared on disappear). Lets
+    /// configuration completion start the session itself instead of
+    /// depending on `viewDidAppear` ordering — a session that finished
+    /// configuring after the appearance callback used to stay stopped
+    /// FOREVER with no error ("Starting camera…" black screen,
+    /// real-device 2026-06-12).
+    private var shouldBeRunning = false
     private var hasInstalledConverter = false
     private let cameraPosition: AVCaptureDevice.Position = .back
     /// Most recent pixel buffer the video output produced. Held so a
@@ -164,6 +172,15 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
 
         configureCameraAccess()
         registerSessionObservers()
+        // Creation IS intent to run — this VC only exists while the
+        // scanner UI is on screen. Don't rely solely on viewDidAppear
+        // to start the session: if appearance callbacks fire before
+        // configuration completes (or get swallowed by the SwiftUI
+        // container), the old flow left a configured session stopped
+        // forever. startSessionIfNeeded sets the intent flag; actual
+        // start happens whenever configuration finishes, on the same
+        // serial queue. viewWillDisappear still stops cleanly.
+        startSessionIfNeeded()
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -265,17 +282,28 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
         }
     }
 
+    /// Breadcrumb for the "Starting camera…" diagnostic readout — a
+    /// session that silently never starts is otherwise invisible.
+    private func noteSessionDiagnostic(_ state: String) {
+        Task { @MainActor [weak viewModel] in
+            viewModel?.noteSessionDiagnostic(state)
+        }
+    }
+
     private func configureCameraAccess() {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:
+            noteSessionDiagnostic("permission ok — configuring")
             configureSessionIfNeeded()
         case .notDetermined:
+            noteSessionDiagnostic("awaiting camera permission")
             AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
                 guard let self else { return }
                 guard granted else {
                     self.reportCameraSetupFailure(Self.cameraDeniedMessage)
                     return
                 }
+                self.noteSessionDiagnostic("permission granted — configuring")
                 self.configureSessionIfNeeded()
                 self.startSessionIfNeeded()
             }
@@ -292,21 +320,27 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
                 return
             }
 
-            self.captureSession.beginConfiguration()
-            self.captureSession.sessionPreset = .high
+            // The begin/commit transaction lives in its own scope so the
+            // deferred commitConfiguration() fires BEFORE anything after
+            // the block — startRunning() inside an open configuration
+            // transaction starts a session whose input/output additions
+            // haven't been applied yet (running but frameless).
+            let configured: Bool = {
+                self.captureSession.beginConfiguration()
+                self.captureSession.sessionPreset = .high
 
-            defer {
-                self.captureSession.commitConfiguration()
-            }
+                defer {
+                    self.captureSession.commitConfiguration()
+                }
 
-            guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: self.cameraPosition),
-                  let input = try? AVCaptureDeviceInput(device: device),
-                  self.captureSession.canAddInput(input) else {
-                self.reportCameraSetupFailure(Self.cameraUnavailableMessage)
-                return
-            }
+                guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: self.cameraPosition),
+                      let input = try? AVCaptureDeviceInput(device: device),
+                      self.captureSession.canAddInput(input) else {
+                    self.reportCameraSetupFailure(Self.cameraUnavailableMessage)
+                    return false
+                }
 
-            self.captureSession.addInput(input)
+                self.captureSession.addInput(input)
             // Configure focus / exposure / white-balance for the scanner's
             // actual use case: a small, close-up, mostly-stationary card
             // ~10 inches from the lens. AVCapture's default focus mode is
@@ -334,7 +368,7 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
 
             guard self.captureSession.canAddOutput(self.videoOutput) else {
                 self.reportCameraSetupFailure(Self.cameraUnavailableMessage)
-                return
+                return false
             }
 
             self.captureSession.addOutput(self.videoOutput)
@@ -343,7 +377,26 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
                 outputConnection.videoRotationAngle = 0
             }
 
+            return true
+            }()
+
+            guard configured else { return }
+
             self.isSessionConfigured = true
+            self.noteSessionDiagnostic("session configured")
+
+            // Start immediately if the UI already asked for frames —
+            // this is the path that fixes "configured after the
+            // appearance callback ⇒ never started" (black placeholder
+            // forever). Runs strictly AFTER commitConfiguration (the
+            // transaction block above has ended), on the same serial
+            // queue, so no race with the start/stop intents.
+            if self.shouldBeRunning, !self.captureSession.isRunning {
+                self.captureSession.startRunning()
+                self.noteSessionDiagnostic(
+                    self.captureSession.isRunning ? "session running" : "startRunning returned but session not running"
+                )
+            }
 
             DispatchQueue.main.async {
                 self.updatePreviewOrientation()
@@ -353,16 +406,21 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
 
     private func startSessionIfNeeded() {
         sessionQueue.async {
+            self.shouldBeRunning = true
             guard self.isSessionConfigured, !self.captureSession.isRunning else {
                 return
             }
 
             self.captureSession.startRunning()
+            self.noteSessionDiagnostic(
+                self.captureSession.isRunning ? "session running" : "startRunning returned but session not running"
+            )
         }
     }
 
     private func stopSession() {
         sessionQueue.async {
+            self.shouldBeRunning = false
             guard self.captureSession.isRunning else {
                 return
             }

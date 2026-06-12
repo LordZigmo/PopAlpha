@@ -43,6 +43,23 @@ public final class ScannerViewModel: ObservableObject, PopAlphaVisionEngineDeleg
     /// denial, so no frame arrives and `firstFrameRendered` never flips).
     @Published public private(set) var cameraSetupFailure: String?
 
+    /// Last camera-session lifecycle breadcrumb ("session configured",
+    /// "session running", …) reported by ScannerCameraViewController.
+    /// Exists because a session that configures but never delivers a
+    /// frame is INVISIBLE — no error fires, firstFrameRendered never
+    /// flips, and the user just sees "Starting camera…" forever
+    /// (real-device 2026-06-12). The placeholder surfaces this string
+    /// after a few seconds so a stuck camera reports WHERE it stopped
+    /// instead of being a black mystery.
+    @Published public private(set) var sessionDiagnostic: String?
+
+    /// Append-style setter for `sessionDiagnostic` (last write wins —
+    /// it's a breadcrumb, not a log). Safe from any thread via the
+    /// caller wrapping in a MainActor task.
+    public func noteSessionDiagnostic(_ state: String) {
+        sessionDiagnostic = state
+    }
+
     /// Vision-normalized bounding box of the current live candidate (origin bottom-left, 0–1 range),
     /// or nil when the engine has no active candidate. Updated every frame the candidate is visible.
     @Published public private(set) var candidateBoundingBox: CGRect?

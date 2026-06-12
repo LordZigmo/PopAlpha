@@ -1,3 +1,4 @@
+import AVFoundation
 import Combine
 import SwiftUI
 import UIKit
@@ -386,26 +387,11 @@ struct ScannerTabView: View {
     // (commit 997445c).
 
     private var cameraStartingPlaceholder: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-            VStack(spacing: 14) {
-                Image(systemName: "viewfinder")
-                    .font(.system(size: 56, weight: .light))
-                    .foregroundStyle(.white.opacity(0.45))
-                Text("Starting camera…")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.6))
-                ProgressView()
-                    .progressViewStyle(.circular)
-                    .tint(.white.opacity(0.55))
-                    .padding(.top, 6)
-            }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Starting camera")
+        CameraStartingPlaceholder(diagnostic: scanner.sessionDiagnostic)
     }
 
     // MARK: - Init-error overlay
+
 
     private func initErrorOverlay(message: String) -> some View {
         VStack(spacing: 10) {
@@ -1194,6 +1180,12 @@ final class ScannerHost: ObservableObject {
     /// 1-3s AVCaptureSession HAL startup on cold launch.
     @Published private(set) var firstFrameRendered: Bool = false
 
+    /// Mirrors `ScannerViewModel.sessionDiagnostic` — the camera
+    /// session's last lifecycle breadcrumb. Shown on the placeholder
+    /// once startup runs long, so a camera that never produces frames
+    /// reports WHERE it stopped instead of spinning silently.
+    @Published private(set) var sessionDiagnostic: String?
+
     // MARK: - Zero-tap identify state
 
     @Published private(set) var lastMatch: ScanMatch?
@@ -1395,6 +1387,9 @@ final class ScannerHost: ObservableObject {
                 }
                 if self.candidateBoundingBox != vm.candidateBoundingBox {
                     self.candidateBoundingBox = vm.candidateBoundingBox
+                }
+                if self.sessionDiagnostic != vm.sessionDiagnostic {
+                    self.sessionDiagnostic = vm.sessionDiagnostic
                 }
                 if self.firstFrameRendered != vm.firstFrameRendered {
                     self.firstFrameRendered = vm.firstFrameRendered
@@ -2002,6 +1997,66 @@ extension ScanMatch {
             imageURL: mirroredPrimaryImageUrl.flatMap { URL(string: $0) },
             confidenceScore: Int((similarity * 100).rounded())
         )
+    }
+}
+
+// MARK: - Camera-starting placeholder view
+
+/// "Starting camera…" overlay with a self-arming diagnostic readout.
+/// Visual is intentionally restrained (viewfinder glyph, label,
+/// spinner — commit 997445c). After 4s without a first frame it
+/// additionally shows the camera permission state and the session's
+/// last lifecycle breadcrumb — a session that configures but never
+/// delivers frames is otherwise indistinguishable from a black screen
+/// (real-device 2026-06-12), and this line is what turns the next
+/// stuck-camera report into a diagnosis instead of a mystery.
+private struct CameraStartingPlaceholder: View {
+    let diagnostic: String?
+    @State private var showDiagnostic = false
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            VStack(spacing: 14) {
+                Image(systemName: "viewfinder")
+                    .font(.system(size: 56, weight: .light))
+                    .foregroundStyle(.white.opacity(0.45))
+                Text("Starting camera…")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.6))
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .tint(.white.opacity(0.55))
+                    .padding(.top, 6)
+                if showDiagnostic {
+                    Text(diagnosticLine)
+                        .font(.system(size: 11, weight: .regular, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.45))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 28)
+                        .padding(.top, 10)
+                        .transition(.opacity)
+                }
+            }
+        }
+        .task {
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            withAnimation(.easeIn(duration: 0.3)) { showDiagnostic = true }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Starting camera")
+    }
+
+    private var diagnosticLine: String {
+        let permission: String
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized: permission = "granted"
+        case .notDetermined: permission = "not determined"
+        case .denied: permission = "denied"
+        case .restricted: permission = "restricted"
+        @unknown default: permission = "unknown"
+        }
+        return "camera permission: \(permission) · session: \(diagnostic ?? "no state reported")"
     }
 }
 
