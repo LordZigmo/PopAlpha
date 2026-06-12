@@ -133,8 +133,9 @@ marginal cost. The keepwarm cron is retired — do not bring it back.
 by design, until the composite-failover PR. The
 `check-embedder-health` cron (hourly, minute 12) probes `/health`
 and fails the run loudly on any non-healthy answer — unreachable,
-ok=false, or model_version mismatch — so the Vercel cron dashboard
-is the watchdog. Expect it RED until the PC cutover completes; that
+ok=false, model_version mismatch, or missing endpoint/token config
+(the same `hasModalSiglipConfig()` gate the identify route uses) —
+so the Vercel cron dashboard is the watchdog. Expect it RED until the PC cutover completes; that
 red is correct (the embedder really is down).
 
 ## Monitoring

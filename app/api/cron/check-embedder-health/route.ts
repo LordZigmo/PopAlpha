@@ -26,7 +26,10 @@
 
 import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/auth/require";
-import { IMAGE_EMBEDDER_MODEL_VERSION_SIGLIP } from "@/lib/ai/image-embedder";
+import {
+  hasModalSiglipConfig,
+  IMAGE_EMBEDDER_MODEL_VERSION_SIGLIP,
+} from "@/lib/ai/image-embedder";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -45,14 +48,22 @@ export async function GET(req: Request) {
     });
   }
 
+  // Mirror the identify route's config gate: hasModalSiglipConfig()
+  // requires BOTH the endpoint URL and the token. A missing token
+  // means the identify route rejects every scan (503) even though
+  // the unauthenticated /health probe would still answer — the
+  // watchdog must go red in that state too.
   const base = process.env.MODAL_SIGLIP_ENDPOINT_URL?.trim();
-  if (!base) {
+  if (!base || !hasModalSiglipConfig()) {
+    const missing =
+      ["MODAL_SIGLIP_ENDPOINT_URL", "MODAL_SIGLIP_TOKEN"]
+        .filter((key) => !process.env[key]?.trim())
+        .join(", ") || "MODAL_SIGLIP_* config";
     return NextResponse.json(
       {
         ok: false,
         healthy: false,
-        reason:
-          "IMAGE_EMBEDDER_VARIANT=modal-siglip but MODAL_SIGLIP_ENDPOINT_URL is unset",
+        reason: `IMAGE_EMBEDDER_VARIANT=modal-siglip but ${missing} unset — the identify route rejects all scans in this state`,
       },
       { status: 500 },
     );
