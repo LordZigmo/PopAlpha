@@ -5,6 +5,15 @@
  *
  * Provider pipelines now refresh touched cards inline with targeted rollups;
  * this endpoint remains the periodic full-dataset backstop.
+ *
+ * Failure contract: every step runs regardless of earlier step failures
+ * (each is independent — maximum progress per tick), but ANY step failure
+ * makes the response ok:false / 500 with the per-step errors in the body
+ * and a console.error for log retention. A swallowed step error here is
+ * the documented silent-fallback shape (docs/external-api-failure-modes.md;
+ * 4th near-miss found 2026-06-11: jpPriceChangesError rode inside ok:true,
+ * unlogged — a sustained JP populator outage would have rotted every JP
+ * change badge with zero signal).
  */
 
 import { NextResponse } from "next/server";
@@ -19,10 +28,15 @@ export async function GET(req: Request) {
   if (!auth.ok) return auth.response;
 
   const supabase = dbAdmin();
-  const { data, error } = await supabase.rpc("refresh_card_metrics");
 
-  if (error) {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  let result: unknown = null;
+  let resultError: string | null = null;
+  try {
+    const { data, error } = await supabase.rpc("refresh_card_metrics");
+    if (error) resultError = error.message;
+    else result = data;
+  } catch (err) {
+    resultError = err instanceof Error ? err.message : String(err);
   }
 
   let confidenceResult: unknown = null;
@@ -76,16 +90,32 @@ export async function GET(req: Request) {
     jpPriceChangesError = err instanceof Error ? err.message : String(err);
   }
 
-  return NextResponse.json({
-    ok: true,
-    result: data,
-    confidence: confidenceResult,
-    confidenceError,
-    realizedBacktest: realizedBacktestResult,
-    realizedBacktestError,
-    priceChanges: priceChangesResult,
-    priceChangesError,
-    jpPriceChanges: jpPriceChangesResult,
-    jpPriceChangesError,
-  });
+  const stepErrors = [
+    resultError ? `refreshCardMetrics: ${resultError}` : null,
+    confidenceError ? `confidence: ${confidenceError}` : null,
+    realizedBacktestError ? `realizedBacktest: ${realizedBacktestError}` : null,
+    priceChangesError ? `priceChanges: ${priceChangesError}` : null,
+    jpPriceChangesError ? `jpPriceChanges: ${jpPriceChangesError}` : null,
+  ].filter((e): e is string => e !== null);
+
+  if (stepErrors.length > 0) {
+    console.error("[cron/refresh-card-metrics] step failures:", stepErrors.join("; "));
+  }
+
+  return NextResponse.json(
+    {
+      ok: stepErrors.length === 0,
+      result,
+      resultError,
+      confidence: confidenceResult,
+      confidenceError,
+      realizedBacktest: realizedBacktestResult,
+      realizedBacktestError,
+      priceChanges: priceChangesResult,
+      priceChangesError,
+      jpPriceChanges: jpPriceChangesResult,
+      jpPriceChangesError,
+    },
+    { status: stepErrors.length > 0 ? 500 : 200 },
+  );
 }
