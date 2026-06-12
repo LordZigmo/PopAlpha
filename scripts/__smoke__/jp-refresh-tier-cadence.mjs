@@ -14,6 +14,7 @@ import {
   JP_WARM_RANK_CAP,
   JP_HOT_SCORE_FLOOR,
   JP_WARM_SCORE_FLOOR,
+  JP_SNK_OWNERSHIP_FRESHNESS_HOURS,
 } from "../../lib/jp/refresh-cadence.mjs";
 
 let failures = 0;
@@ -72,6 +73,19 @@ const warmDaily = JP_WARM_RANK_CAP / (Math.min(snk.warm, yah.warm) / 24);
 check(
   "hot + warm caps fit inside 90% of a day's tick budget",
   hotDaily + warmDaily <= 0.9 * DAILY_TICK_BUDGET,
+);
+
+// Snkrdunk-ownership freshness window: must comfortably exceed the snkrdunk
+// hot cadence (or healthy daily ownership flaps Yahoo back to daily), and must
+// not exceed the snkrdunk-covered Yahoo cadence (or a dead snkrdunk series
+// could go unnoticed longer than Yahoo's own re-check).
+check(
+  "snk ownership freshness >= 2x snkrdunk hot cadence",
+  JP_SNK_OWNERSHIP_FRESHNESS_HOURS >= 2 * snk.hot,
+);
+check(
+  "snk ownership freshness <= snkrdunk-covered yahoo cadence",
+  JP_SNK_OWNERSHIP_FRESHNESS_HOURS <= yah.hotSnkrdunkCovered,
 );
 
 // Sanity on the assignment knobs.

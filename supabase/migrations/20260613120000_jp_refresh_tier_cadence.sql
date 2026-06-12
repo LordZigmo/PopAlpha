@@ -339,18 +339,33 @@ as $$
       case coalesce(cc.jp_refresh_tier, 'unknown')
         when 'hot' then
           case
-            -- "Snkrdunk owns the daily series" must mean the CANONICAL RAW
-            -- row specifically — compute_jp_card_price_changes consumes only
-            -- canonical-level RAW history, so a graded- or per-printing-only
-            -- Snkrdunk presence cannot form 24h pairs and must not throttle
-            -- Yahoo's RAW cadence (Codex P2 on this PR).
+            -- "Snkrdunk owns the daily series" must be DEMONSTRATED, not
+            -- inferred from row existence. The load-bearing predicate is the
+            -- observed_at freshness check: it self-heals every mode where a
+            -- canonical RAW Snkrdunk row exists but the series is not
+            -- actually being produced — product_code NULL (the snkrdunk scan
+            -- can't select it), low-sample/transient suppression parking,
+            -- capacity starvation — because in all of them observed_at ages
+            -- past the window and Yahoo automatically takes the daily RAW
+            -- cadence back. 96h = the snkrdunk hot cadence (24h) with slack
+            -- for missed ticks (mirrored as JP_SNK_OWNERSHIP_FRESHNESS_HOURS
+            -- in lib/jp/refresh-cadence.mjs; smoke-asserted >= 2x hot).
+            -- grade/printing/code/price predicates are belt-and-braces on
+            -- top (canonical RAW series only — compute_jp_card_price_changes
+            -- consumes nothing else; both Codex P2s on this PR).
+            -- Rollout transient: pre-tier rows carry up to 7d-old
+            -- observed_at, so hot∩snk cards get Yahoo daily for the first
+            -- ~2-3 days until Snkrdunk's hot cadence catches up — fail-safe
+            -- direction, absorbed by the overdue-ratio ordering.
             when exists (
               select 1
               from public.snkrdunk_card_prices sp
               where sp.canonical_slug = y.canonical_slug
                 and sp.grade = 'RAW'
                 and sp.printing_id is null
+                and sp.snkrdunk_product_code is not null
                 and sp.price_usd is not null
+                and sp.observed_at >= now() - interval '96 hours'
             )
             then interval '96 hours'
             else interval '24 hours'
