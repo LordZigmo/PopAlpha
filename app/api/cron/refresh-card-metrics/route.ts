@@ -28,10 +28,15 @@ export async function GET(req: Request) {
   if (!auth.ok) return auth.response;
 
   const supabase = dbAdmin();
-  const { data, error } = await supabase.rpc("refresh_card_metrics");
 
-  if (error) {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  let result: unknown = null;
+  let resultError: string | null = null;
+  try {
+    const { data, error } = await supabase.rpc("refresh_card_metrics");
+    if (error) resultError = error.message;
+    else result = data;
+  } catch (err) {
+    resultError = err instanceof Error ? err.message : String(err);
   }
 
   let confidenceResult: unknown = null;
@@ -86,6 +91,7 @@ export async function GET(req: Request) {
   }
 
   const stepErrors = [
+    resultError ? `refreshCardMetrics: ${resultError}` : null,
     confidenceError ? `confidence: ${confidenceError}` : null,
     realizedBacktestError ? `realizedBacktest: ${realizedBacktestError}` : null,
     priceChangesError ? `priceChanges: ${priceChangesError}` : null,
@@ -99,7 +105,8 @@ export async function GET(req: Request) {
   return NextResponse.json(
     {
       ok: stepErrors.length === 0,
-      result: data,
+      result,
+      resultError,
       confidence: confidenceResult,
       confidenceError,
       realizedBacktest: realizedBacktestResult,
