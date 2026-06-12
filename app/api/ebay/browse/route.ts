@@ -104,11 +104,16 @@ const JUNK_LISTING_PATTERNS = [
   /\brepacks?\b/,
 ];
 
-function isJunkListingTitle(title: string, canonicalPhrase: string): boolean {
-  // Each pattern is waived when the card's own name contains it, so a
-  // hypothetical card actually named "Mystery ..." keeps its listings.
+function isJunkListingTitle(title: string, requestedPhrases: string[]): boolean {
+  // Each pattern is waived (per pattern) when the requested card's own
+  // name OR set name contains it: a card actually named "Mystery ..."
+  // keeps its listings, and so do singles from sets like 化石の秘密 —
+  // which this repo's JP glossary renders as "Mystery of the Fossils",
+  // a phrase legitimate listing titles repeat (codex P2 on PR #241).
   return JUNK_LISTING_PATTERNS.some(
-    (pattern) => pattern.test(title) && !pattern.test(canonicalPhrase)
+    (pattern) =>
+      pattern.test(title) &&
+      !requestedPhrases.some((phrase) => phrase && pattern.test(phrase))
   );
 }
 
@@ -129,7 +134,9 @@ function evaluateRequestedCard(
   const nameTokens = buildNameTokens(input.canonicalName);
   if (!canonicalPhrase || nameTokens.length === 0) return { matches: false, score: 0 };
   if (!title.includes(canonicalPhrase)) return { matches: false, score: 0 };
-  if (isJunkListingTitle(title, canonicalPhrase)) return { matches: false, score: 0 };
+  if (isJunkListingTitle(title, [canonicalPhrase, normalizedPhrase(input.setName)])) {
+    return { matches: false, score: 0 };
+  }
   if (mentionsDifferentSet(title, input.setName)) return { matches: false, score: 0 };
 
   let score = 100;
