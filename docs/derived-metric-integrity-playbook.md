@@ -6,7 +6,7 @@ This is not an external-API issue (no API failed) and not an ingestion issue (in
 
 **Audience:** anyone writing or reviewing SQL functions that populate `card_metrics`, `variant_metrics`, `public_card_metrics`, or any other materialized derived-metric table.
 
-**Last updated:** 2026-05-01 — initial entry after the Top Movers `+139% 24h` incident on a sparse vintage card.
+**Last updated:** 2026-06-11 — added the JP two-writer clobber incident and Rule 3 (one writer per row; the partition predicate is part of the contract).
 
 ---
 
@@ -44,6 +44,47 @@ When the rule fails, the column is `NULL`. Every downstream consumer already fil
 
 ---
 
+## Incident — 2026-06-11: JP change badges blank/flapping — two uncoordinated writers on `change_pct_24h/7d`
+
+**Symptom (reported 2026-06-10):** JP-language cards showed a market price but a blank, flapping, or wrong-basis 24h/7d change badge; EN cards showed both. The badge looked right for a stretch, then degraded — on a cycle.
+
+**Root cause:** `card_metrics.change_pct_24h/7d` on canonical RAW rows had TWO uncoordinated writers:
+
+1. `compute_jp_card_price_changes()` ([`20260520140000_compute_jp_card_price_changes.sql`](../supabase/migrations/20260520140000_compute_jp_card_price_changes.sql)) — the intended owner for JP-language slugs. JP-native deltas from `jp_card_price_history` (Yahoo JP + Snkrdunk, JPY basis). Runs every 12h via `refresh-card-metrics`.
+2. `refresh_price_changes_core()` — the EN populator. PR #147 (migration `20260531120000`) switched its `changes` CTE to a LEFT-JOINed `canonical_scope` over ALL canonical RAW rows with **no language filter**, so for JP rows it wrote computed NULLs (no fresh Scrydex points) or Scrydex-basis values — the US-reflection series, ~100× off the displayed JP-native price.
+
+The targeted wrapper path (`refresh_price_changes_for_cards` via batch-refresh-pipeline-rollups, twice-hourly, fed by Scrydex ingests — 11k of 13k JP slugs have incidental Scrydex rows) out-called the JP populator ~500:1. The 12h JP tick repaired; the twice-hourly EN path re-clobbered. Hence the flapping.
+
+**Measured blast radius (2026-06-11):** 592 of 3,092 JP slugs with 7d support held NULL mid-cycle; 1,685 of 3,027 JP 24h values were Scrydex-basis residue; 2,887 of 3,025 JP-native values were exactly 0 — that last group is the *expected* degenerate, not residue (see below).
+
+**Fix (PR #230, commit `24f90e5`, migration [`20260612014500_refresh_price_changes_core_excludes_jp.sql`](../supabase/migrations/20260612014500_refresh_price_changes_core_excludes_jp.sql), verified in prod 2026-06-12):** `canonical_scope` now excludes slugs with `canonical_cards.language = 'JP'` — the EXACT predicate `compute_jp_card_price_changes()` scopes by, so the two writers partition with no gap and no overlap (slugs missing from `canonical_cards`, or with NULL language, stay EN-managed). A one-shot `compute_jp_card_price_changes()` repair ran at apply time. Post-verification: Scrydex residue = 0; 2,648 / 3,446 priced JP cards carry a JP-native change.
+
+**Diagnostic signature of two-writer churn** — this is how you spot the class, on any derived column:
+
+1. A value that is correct right after one cron tick and degrades on a *different* cadence (here: 12h repair vs. twice-hourly clobber).
+2. `pg_stat_statements` call-count asymmetry between the suspected writers (~500:1 here).
+3. Values whose **basis** doesn't match the displayed price — e.g. a change computed on a $1.02 series under a ¥-native $102 display price.
+
+**Degenerate ≠ residue:** a single point in the baseline window → exactly 0% change is EXPECTED behavior at sparse scrape cadence, not a bug. Distinguish it from cross-writer residue by checking `jp_card_price_history` support within 14d:
+
+```sql
+-- Cross-writer residue: JP rows holding a change with no JP history to back it. Expect 0.
+SELECT COUNT(*) FROM card_metrics cm
+JOIN canonical_cards cc ON cc.slug = cm.canonical_slug AND cc.language = 'JP'
+WHERE cm.printing_id IS NULL AND cm.grade = 'RAW'
+  AND (cm.change_pct_24h IS NOT NULL OR cm.change_pct_7d IS NOT NULL)
+  AND NOT EXISTS (
+    SELECT 1 FROM jp_card_price_history h
+    WHERE h.canonical_slug = cm.canonical_slug AND h.grade = 'RAW'
+      AND h.recorded_at >= now() - interval '14 days');
+```
+
+**Vocabulary-drift risk (open follow-up):** the partition rests on the literal `language = 'JP'` on an **unconstrained text column** (prod vocabulary is strictly EN/JP today: 23,513 / 20,709). A matcher writing `'JA'` or lowercase `'jp'` would silently route those cards to the EN writer — same bug, new spelling. Hardening (a shared `is_jp_canonical()` helper or a CHECK constraint) is flagged but NOT yet shipped.
+
+**Companion changes (landed 2026-06-12):** PR #231 retired the iOS client-side badge-suppression guards (they existed only because the basis was wrong); PR #233 added `jp_refresh_tier` + `scan_*_refresh_candidates` RPCs so hot JP cards (rank-capped at 500 + viewed force-include; 577 at rollout) scrape daily and true 24h pairs can exist (at the old flat weekly cadence only ~107 of 5,349 slugs ever had one). Yahoo's hot throttle requires *demonstrated* Snkrdunk ownership — a canonical RAW row observed within 96h — so code-null/suppressed/starved Snkrdunk rows hand the daily cadence back to Yahoo automatically. Still queued: a JP display-basis change (`jp_display_price`-median series, the EN #147 pattern) so the badge basis matches the displayed price series exactly.
+
+---
+
 ## Diagnostic shortcut
 
 When a user reports an implausible %-change on a card (`/c/[slug]`, homepage rails, search, AI brief), run this against the variant's `provider_card_id`:
@@ -65,7 +106,7 @@ Cross-check `pg_stat_statements` for `refresh_price_changes` recent-call timesta
 
 ---
 
-## The two rules (internalize these)
+## The three rules (internalize these)
 
 ### Rule 1 — A window-named column must enforce its window
 
@@ -86,6 +127,10 @@ If no observation falls in the band, emit NULL.
 
 Don't invent a number. The whole stack is already wired to skip NULLs (`IS NOT NULL` filters, `nullsFirst: false` orderings, conditional rendering on the iOS side). Adding JS-layer guards because the SQL source lies is whack-a-mole — fix the contract at the source.
 
+### Rule 3 — One writer per row; the partition predicate is part of the contract
+
+`card_metrics.change_pct_24h/7d` on canonical RAW rows is partitioned by `canonical_cards.language`: `'JP'` rows are written ONLY by `compute_jp_card_price_changes()`; everything else ONLY by `refresh_price_changes_core()`. Any new writer, or any scope change to either function, must preserve this partition — grep BOTH function bodies (latest migration, per the latest-body rule in MEMORY) before touching either. A scope widened "for completeness" (the no-language-filter LEFT JOIN in PR #147) is exactly how a second writer sneaks in: each writer is individually correct, and the row is wrong most of the time.
+
 ---
 
 ## Code-review checklist for new derived-metric SQL
@@ -98,6 +143,7 @@ When reviewing any migration that adds or modifies a function populating a deriv
 3. **Is there a NULL-out branch for insufficient data?** What happens when only one observation exists in the relevant window? Two? Confirm the function returns NULL, not zero, not the latest price, not a stale fallback.
 4. **Is the function idempotent on bad rows?** If row R was populated with a bad value yesterday and today the function runs again with the new tolerance band, will it overwrite R with NULL? It should. Watch out for `INSERT ... ON CONFLICT DO NOTHING` patterns that leave stale rows alive.
 5. **Do downstream consumers handle NULL?** Grep for the column name across `app/api/`, `lib/data/`, `lib/ai/`, `ios/PopAlphaApp/`. Any caller treating NULL as 0 reintroduces the bug at the consumer layer.
+6. **Does another function already write this column?** `git grep -l 'change_pct_24h' supabase/migrations/` (or the column in question) and find every `UPDATE`/`INSERT` writer. If there are two, their scopes must partition *exactly* — same predicate, one side negated. "Mostly disjoint" means the row flaps on whichever writer runs more often.
 
 ---
 
@@ -118,7 +164,9 @@ If the audit turns up a column populated with a "≤ cutoff, take the latest" pa
 
 ## Cross-references
 
-- Fix migrations: `supabase/migrations/20260501010000_refresh_price_changes_time_anchored_baseline.sql`, `supabase/migrations/20260501010100_compute_daily_top_movers_outlier_cap.sql`
+- Fix migrations (2026-05-01 incident): `supabase/migrations/20260501010000_refresh_price_changes_time_anchored_baseline.sql`, `supabase/migrations/20260501010100_compute_daily_top_movers_outlier_cap.sql`
+- Fix migration (2026-06-11 incident): `supabase/migrations/20260612014500_refresh_price_changes_core_excludes_jp.sql` (PR #230); the two partitioned writers: `supabase/migrations/20260520140000_compute_jp_card_price_changes.sql` (JP) and `refresh_price_changes_core()` latest body (find via the latest-body grep — it gets redefined often)
+- Clobber transport path (the cadence side of the 2026-06-11 incident): `docs/ingestion-pipeline-playbook.md` rollup-drain sections (`refresh_price_changes_for_cards` via `pending_rollups`)
 - Predecessor RPC (the buggy one): `supabase/migrations/20260303115000_refresh_price_changes_no_lock_timeout.sql`
 - Related but distinct concern: `docs/external-api-failure-modes.md` (silent fallbacks; that's "the API died and we returned ok:true" — this doc is "the data was honest and the derivation lied").
 - Consumer-layer floors that did NOT save us: `lib/data/homepage.ts` (`MIN_MOVER_CHANGE_PCT`, `MIN_MOVER_SNAPSHOT_COUNT_30D`).
