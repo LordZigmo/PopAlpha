@@ -136,17 +136,17 @@ private struct RootView: View {
                     // iOS 17+ lazy-instantiates tab bodies — the
                     // prewarm Task in ScannerHost.init() never fired
                     // until the user navigated to the Scanner tab,
-                    // defeating the whole purpose. Calling shared
-                    // orchestrator + OCR prewarm at App-task time
-                    // gates only the heavy offline model work on the
-                    // offline-scanner feature flag (server-routed
-                    // launches still get local OCR warmed).
+                    // defeating the whole purpose. Warming the cheap
+                    // local OCR at App-task time absorbs that cost up
+                    // front for every launch.
                     //
-                    // .utility priority so this competes minimally
-                    // with the active tab's UI work. ScannerHost
-                    // still triggers a redundant .startIfNeeded()
-                    // when it inits — idempotent guard makes that a
-                    // no-op the second time around.
+                    // startIfNeeded() is now CHEAP-ONLY (local OCR). The
+                    // heavy offline model load is intentionally NOT
+                    // warmed here — at launch it starved camera bring-up
+                    // and blacked out the scanner preview. It warms
+                    // instead from ScannerHost's first-frame transition,
+                    // once the camera is live. .utility priority so this
+                    // competes minimally with the active tab's UI work.
                     await OfflineScannerWarmup.startIfNeeded()
                 }
                 .onChange(of: scenePhase) { _, newPhase in
