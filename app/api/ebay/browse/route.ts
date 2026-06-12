@@ -218,6 +218,29 @@ export async function GET(req: Request) {
   }
 }
 
+// eBay Partner Network affiliate decoration. Inert until
+// EBAY_EPN_CAMPAIGN_ID is set in the environment — listings ship with
+// plain URLs and start monetizing the moment the env var lands, no
+// client (web or iOS) change required. mkrid 711-53200-19255-0 is the
+// EPN rotation ID for ebay.com; toolid 10001 marks a custom link.
+const EPN_CAMPAIGN_ID = process.env.EBAY_EPN_CAMPAIGN_ID?.trim() || null;
+
+function withAffiliateParams(rawUrl: string): string {
+  if (!rawUrl || !EPN_CAMPAIGN_ID) return rawUrl;
+  try {
+    const url = new URL(rawUrl);
+    url.searchParams.set("mkcid", "1");
+    url.searchParams.set("mkrid", "711-53200-19255-0");
+    url.searchParams.set("siteid", "0");
+    url.searchParams.set("campid", EPN_CAMPAIGN_ID);
+    url.searchParams.set("toolid", "10001");
+    url.searchParams.set("mkevt", "1");
+    return url.toString();
+  } catch {
+    return rawUrl;
+  }
+}
+
 function mapBrowseItem(item: EbayBrowseItem) {
   const shipping = item.shippingOptions?.[0]?.shippingCost;
   return {
@@ -235,7 +258,7 @@ function mapBrowseItem(item: EbayBrowseItem) {
           currency: shipping.currency ?? "USD",
         }
       : null,
-    itemWebUrl: item.itemWebUrl ?? "",
+    itemWebUrl: withAffiliateParams(item.itemWebUrl ?? ""),
     image: item.image?.imageUrl ?? null,
     condition: item.condition ?? null,
     endTime: item.itemEndDate ?? null,
