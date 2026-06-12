@@ -1,5 +1,19 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { ImageResponse } from "next/og";
 import { dbPublic } from "@/lib/db";
+import { resolveDisplayedMarketPrice } from "@/lib/pricing/displayed-market-price";
+
+// Brand assets inlined as data URLs (satori fetches remote URLs, but the
+// local filesystem is faster and deploy-atomic). Same pattern as
+// app/brand-image.tsx.
+const mascotSvg = readFileSync(
+  join(process.cwd(), "public/brand/popalpha-icon.svg"),
+  "utf8",
+);
+const mascotDataUrl = `data:image/svg+xml;base64,${Buffer.from(mascotSvg).toString("base64")}`;
+const wordmarkPng = readFileSync(join(process.cwd(), "public/brand/popalpha-modern-white.png"));
+const wordmarkDataUrl = `data:image/png;base64,${wordmarkPng.toString("base64")}`;
 
 // Per-card OpenGraph image. Replaces the previous behavior where
 // generateMetadata in this route's page.tsx exposed the raw card
@@ -75,10 +89,12 @@ export default async function CardOpenGraphImage({
 
   let canonical: CanonicalRow | null = null;
   let printing: PrintingRow | null = null;
+  let marketPrice: number | null = null;
+  let marketPriceAsOf: string | null = null;
 
   try {
     const supabase = dbPublic();
-    const [canonicalRes, printingsRes] = await Promise.all([
+    const [canonicalRes, printingsRes, metricsRes] = await Promise.all([
       supabase
         .from("canonical_cards")
         .select("slug, canonical_name, set_name, card_number")
@@ -89,9 +105,18 @@ export default async function CardOpenGraphImage({
         .select("id, finish, image_url, mirrored_image_url")
         .eq("canonical_slug", slug)
         .returns<PrintingRow[]>(),
+      supabase
+        .from("public_card_metrics")
+        .select("market_price, market_price_as_of")
+        .eq("canonical_slug", slug)
+        .eq("grade", "RAW")
+        .is("printing_id", null)
+        .maybeSingle<{ market_price: number | null; market_price_as_of: string | null }>(),
     ]);
     canonical = canonicalRes.data ?? null;
     printing = pickPrintingForOg(printingsRes.data ?? []);
+    marketPrice = metricsRes.data?.market_price ?? null;
+    marketPriceAsOf = metricsRes.data?.market_price_as_of ?? null;
   } catch {
     // Fall through to the brand fallback below — never let an OG
     // generation error 500; link previews degrade gracefully but
@@ -105,6 +130,17 @@ export default async function CardOpenGraphImage({
   const setLine = [canonical?.set_name, canonical?.card_number ? `#${canonical.card_number}` : null]
     .filter(Boolean)
     .join(" · ");
+
+  // Same honest classification as the page hero: a confident dollar
+  // figure only when the price is current; "last sold" labeling for
+  // recent-stale; no chip at all rather than a misleading one.
+  const display = resolveDisplayedMarketPrice({ marketPrice, marketPriceAsOf });
+  const priceText =
+    display.kind === "live" || display.kind === "abundant" || display.kind === "stale_recent"
+      ? `$${display.price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+      : null;
+  const priceEyebrow =
+    display.kind === "stale_recent" ? `LAST SOLD · ${display.ageLabel.toUpperCase()}` : "MARKET PRICE";
 
   return new ImageResponse(
     (
@@ -201,23 +237,12 @@ export default async function CardOpenGraphImage({
               maxWidth: 660,
             }}
           >
-            <div
-              style={{
-                display: "flex",
-                alignSelf: "flex-start",
-                borderRadius: 999,
-                border: "1px solid rgba(255,255,255,0.12)",
-                background: "rgba(255,255,255,0.05)",
-                padding: "8px 14px",
-                fontSize: 16,
-                fontWeight: 700,
-                letterSpacing: "0.18em",
-                textTransform: "uppercase",
-                color: "#9EDCF2",
-              }}
-            >
-              PopAlpha
-            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              alt="PopAlpha"
+              src={wordmarkDataUrl}
+              style={{ width: 234, height: 52, objectFit: "contain", objectPosition: "left" }}
+            />
 
             <div
               style={{
@@ -245,6 +270,55 @@ export default async function CardOpenGraphImage({
             ) : null}
           </div>
         </div>
+
+        {/* Price chip — overlays the card art's lower-right edge, the
+            mascot sits beside the figure (owner spec: card + price
+            overlay in front + logo next to it). Rendered only when the
+            price classification is confident. */}
+        {priceText ? (
+          <div
+            style={{
+              position: "absolute",
+              left: 300,
+              bottom: 88,
+              display: "flex",
+              alignItems: "center",
+              gap: 18,
+              padding: "18px 28px",
+              borderRadius: 26,
+              background: "rgba(5,12,24,0.93)",
+              border: "1px solid rgba(0,180,216,0.45)",
+              boxShadow: "0 24px 64px rgba(0,0,0,0.6)",
+            }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img alt="" src={mascotDataUrl} width={62} height={62} />
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <div
+                style={{
+                  display: "flex",
+                  fontSize: 16,
+                  fontWeight: 700,
+                  letterSpacing: "0.16em",
+                  color: "#9EDCF2",
+                }}
+              >
+                {priceEyebrow}
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  fontSize: 50,
+                  fontWeight: 800,
+                  letterSpacing: "-0.03em",
+                  color: "#FFFFFF",
+                }}
+              >
+                {priceText}
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {/* Bottom-right footer */}
         <div
