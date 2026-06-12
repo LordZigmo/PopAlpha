@@ -112,3 +112,40 @@ the accumulated eval corpus (user_correction rows in
 `scan_eval_images` are labeled positive pairs). Plan to collect ~500
 labeled scans before starting that project; we're at 12 as of this
 doc.
+
+## 2026-06-12 cron redesign (claim-based; mislabeled-vector repair)
+
+The sections above predate the SigLIP-2 cutover; mechanics that
+changed:
+
+- **The cron now embeds via the ACTIVE embedder** (`getImageEmbedder()`
+  — home-GPU SigLIP as of 2026-06), not a hardcoded Replicate CLIP
+  client. The old version embedded with CLIP while stamping rows with
+  the env-resolved active tag, so under `modal-siglip` it wrote
+  CLIP-space vectors labeled siglip2 into the live candidate pool.
+  Backend and tag now come from the same factory call and cannot
+  disagree. Per-variant marginal cost on the home GPU is ~$0 (the
+  "~$14 per variant" Replicate figure above is historical).
+- **Claim-based scheduling replaced the query-param cursor.** The old
+  scheduled run restarted at the top of the catalog every 5 minutes
+  and never advanced (and re-embedded the same first ~32 slugs via
+  Replicate whenever their hashes mismatched — the May 2026 churn).
+  Work is now "mirrored slugs where any expected variant row at
+  (crop_type='full', model_version=active) is missing **or
+  hash-stale**", in slug order — the expected source_hash is
+  recomputed in SQL (`extensions.digest`, pgcrypto) and
+  parity-checked against `hashForVariant()` every run (drift refuses
+  to run rather than re-embedding the catalog in a loop). New cards,
+  model cutovers, recipe bumps, and mirrored-URL changes all backfill
+  automatically; `?cursor=` remains for manual drains.
+- **`?reset=1` one-shot repair**: deletes all augment rows under the
+  active model_version (catalog rows, art crops, and user-correction
+  anchors survive) so scheduled runs rebuild them cleanly. Still
+  required for the 2026-04/05 era repair even though the claim
+  catches stale hashes — the old cron computed source_hash with the
+  ACTIVE tag while embedding via CLIP, so those rows carry
+  correct-looking hashes over wrong-space vectors, which no hash
+  comparison can detect. Run once after the home-GPU cutover (~2.4k
+  rows; rebuild takes a few hours of cron ticks at maxCards=32).
+- Hash lookups are scoped to the active `model_version` (previously
+  nondeterministic when CLIP rollback rows coexist with SigLIP rows).
