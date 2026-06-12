@@ -250,8 +250,12 @@ struct PersonalizedInsightCardView: View {
                 RoundedRectangle(cornerRadius: PA.Layout.panelRadius, style: .continuous)
                     .fill(colorScheme == .light ? PA.Colors.background : Color.clear)
             )
-            .environment(\.colorScheme, .dark)
         }
+        // Pin the OVERLAY too — its frost material and CTA chrome sit
+        // outside the inner pin and were rendering their light variants
+        // over the dark panel (codex P2 on PR #253). The paywall sheet
+        // attaches at `body`, outside this pin.
+        .environment(\.colorScheme, .dark)
     }
 
     private func lockedPreviewRow(_ text: String) -> some View {
