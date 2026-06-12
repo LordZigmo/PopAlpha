@@ -517,7 +517,6 @@ export const INTERNAL_ROUTE_TRUST_CONTRACTS = {
   "cron/refresh-jp-price-display": cronSecretRoute("cron/internal automation"),
   "cron/augment-card-image-embeddings": cronSecretRoute("cron/internal automation"),
   "cron/embed-card-art-crops": cronSecretRoute("cron/internal automation"),
-  "cron/keepwarm-image-embedder": cronSecretRoute("cron/internal automation"),
   "cron/refresh-card-metrics": cronSecretRoute("cron/internal automation"),
   "cron/batch-refresh-pipeline-rollups": cronSecretRoute("cron/internal automation"),
   "cron/refresh-derived-signals": cronSecretRoute("cron/internal automation"),

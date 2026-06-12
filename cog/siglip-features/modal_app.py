@@ -1,6 +1,14 @@
 """
 Modal deployment for SigLIP-2 image feature extraction.
 
+STATUS (2026-06-12): RETIRED as the primary embedder — replaced by
+home_server.py on the home GPU after the June 2026 credit-burn
+incident: the keepwarm cron (every 4 min) plus scaledown_window=900
+kept the T4 warm 24/7 (~$15/day), the workspace was disabled on
+credit exhaustion (~06-07), and the server scan path went down.
+Kept as an emergency-redeploy reference. If redeploying, do NOT
+reinstate a keepwarm cron, and read the corrected cost notes below.
+
 Provides a public HTTP endpoint that mirrors the Cog model's API
 (`{"inputs": "url1\\nurl2\\n..."}` → `[{"input": str, "embedding":
 list[float] | None, "error"?: str}]`) so the existing Replicate-style
@@ -48,11 +56,16 @@ API contract:
     Response 401: {"detail": "unauthorized"}
     Response 400: {"detail": "..."} — malformed body, etc.
 
-Cost reality (T4 at $0.000725/sec on Modal):
-    - Cold start (with snapshot): ~3-5s ≈ $0.002-0.004 each
-    - Inference per image: ~50ms ≈ $0.00004 each
-    - 5min idle keep-warm: free between calls
-    - Steady state at 100 scans/day: <$5/month
+Cost reality (CORRECTED 2026-06-12 — the original figures here were
+wrong and contributed to the credit burn):
+    - Published T4 rate: $0.000164/sec (~$0.59/hr), plus CPU/memory.
+      There is NO discounted idle tier — a warm-but-idle container
+      bills the full rate, so "idle keep-warm" is never free.
+    - A 24/7-warm T4 ≈ $425/mo. Any heartbeat shorter than
+      scaledown_window (e.g. a 4-min cron vs the 900s window below)
+      IS the 24/7 case — the container never sleeps.
+    - Scale-to-zero economics stay cheap only if nothing pings it:
+      cold start ~3-5s ≈ $0.001, inference ~50ms ≈ $0.00001/image.
 """
 
 import os
@@ -95,14 +108,15 @@ secret = modal.Secret.from_name("siglip2-features-token", required_keys=["MODAL_
     gpu="T4",
     image=image,
     secrets=[secret],
-    # Keep one container warm 15min after last request. The "warm
-    # window" trades GPU idle cost (~$0.13/hr) against the cold-start
-    # latency hit on the next request. Real-device session pattern:
-    # users scan 10-30 cards in a single sitting, often with 2-5min
-    # gaps between cards while they reach for the next one. A 5min
-    # scaledown produced occasional mid-session cold starts (one
-    # 24.9s scan in session 5 was the cold-start tax). 15min covers
-    # the typical scanning session without significant idle cost.
+    # Keep one container warm 15min after last request, to cover the
+    # real-device session pattern (10-30 cards per sitting, 2-5min
+    # gaps; a 5min scaledown produced a 24.9s mid-session cold start).
+    # CORRECTION 2026-06-12: the "~$0.13/hr idle" assumption that
+    # justified this window was wrong — warm-idle bills the FULL T4
+    # rate (~$0.59/hr). Combined with the (now-retired) 4-min
+    # keepwarm cron, this window meant the container NEVER slept and
+    # burned ~$15/day. If this app is ever redeployed, nothing may
+    # ping it more often than this window.
     scaledown_window=900,
     # enable_memory_snapshot lets Modal serialize the loaded model
     # state to disk, then restore it on cold start in ~1-3s vs
