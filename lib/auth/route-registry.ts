@@ -95,6 +95,7 @@ export const CRON_ROUTES = [
   "cron/import-pricecharting",
   "cron/check-pricecharting-freshness",
   "cron/check-scrydex-raw-liveness",
+  "cron/check-jp-source-divergence",
   "cron/snapshot-psa-pop",
   "admin/cleanup/delete-thumb-overlay-augs",
 ];

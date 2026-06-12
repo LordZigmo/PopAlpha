@@ -543,6 +543,7 @@ export const INTERNAL_ROUTE_TRUST_CONTRACTS = {
   "cron/import-pricecharting": cronSecretRoute("cron/internal automation"),
   "cron/check-pricecharting-freshness": cronSecretRoute("cron/internal automation"),
   "cron/check-scrydex-raw-liveness": cronSecretRoute("cron/internal automation"),
+  "cron/check-jp-source-divergence": cronSecretRoute("cron/internal automation"),
   "cron/snapshot-psa-pop": cronSecretRoute("cron/internal automation"),
 };
 
@@ -927,6 +928,15 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
     expectedSignals: ["service_role_client"],
     usesServiceRole: true,
     notes: "Idempotent. Dry-run by default (read-only); pass --apply to write. Writes only to snkrdunk_product_map columns mapping_status / reviewed_at / reviewed_by. The era windows for setCodes the matcher's setCodeEra() doesn't cover are hardcoded in EXTENDED_ERA_OVERRIDES — sourced from the Snkrdunk product names themselves (which include the human-readable set name) and Bulbapedia for ambiguous cases.",
+  }),
+  "scripts/jp-mapping-quarantine.mjs": operationalScript({
+    classification: "service_role_import",
+    executionMode: "manual_import",
+    intendedCaller: "trusted operator quarantining a confirmed-wrong JP source mapping: flips snkrdunk_product_map.mapping_status to REJECTED (stamping reviewed_at/reviewed_by) and DELETEs the slug's stale price rows from snkrdunk_card_prices / yahoo_jp_card_prices / jp_card_price_history, which a status flip alone never cleans up (latest-price tables are UPSERT-keyed and never expire; history poisons the 14d jp_display_price median).",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+    notes: "Idempotent. Dry-run by default (read-only counts); pass --apply to write. Targets come from --slugs/--map-ids CLI args — nothing hardcoded. Writes: snkrdunk_product_map (mapping_status/reviewed_at/reviewed_by, skipping rows already REJECTED) + DELETEs scoped to the targeted canonical_slugs (and source column for jp_card_price_history). Born from the 2026-06-11 Latias mismap incident; see the script header.",
   }),
   "scripts/persist-snkrdunk-matches.mjs": operationalScript({
     classification: "service_role_import",
