@@ -464,10 +464,17 @@ struct CardDetailView: View {
             .padding(.trailing, 20)
             .padding(.bottom, 20)
             // Ride down into the corner the minimized bar vacates so the
-            // stack bottoms out level with the bottom-leading pill; back
-            // up when the bar re-expands. Spring roughly matches the
-            // system bar's own minimize animation.
-            .offset(y: tabBarLikelyMinimized ? 56 : 0)
+            // "+" centers level with the bottom-leading pill; back up
+            // when the bar re-expands. 79pt is measured, not eyeballed
+            // (pixel scan, iPhone 17 Pro Max / iOS 26.3): the resting
+            // "+" center sits 20 (padding) + 83 (tab bar + home-
+            // indicator safe area) + 28 (radius) = 131pt above the
+            // physical bottom; the minimized pill centers ~52pt up.
+            // Both are safe-area-anchored constants on Dynamic-Island
+            // devices, so the 79pt delta is device-independent there.
+            // Spring roughly matches the system bar's own minimize
+            // animation.
+            .offset(y: tabBarLikelyMinimized ? 79 : 0)
             .animation(.spring(response: 0.35, dampingFraction: 0.85), value: tabBarLikelyMinimized)
         }
         .overlay(alignment: .top) {
