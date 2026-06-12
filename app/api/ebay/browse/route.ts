@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import { getEbayAppAccessToken, getEbayBaseUrl } from "@/lib/ebay/api";
+import {
+  isJunkListingTitle,
+  normalizeListingText as normalizeTitle,
+} from "@/lib/ebay/listing-junk-filter";
 
 export const runtime = "nodejs";
 
@@ -28,14 +32,6 @@ function parseLimit(raw: string | null): number {
 
 function normalizeQuery(raw: string): string {
   return raw.replace(/\s+/g, " ").trim();
-}
-
-function normalizeTitle(value: string | null | undefined): string {
-  return String(value ?? "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 function buildNameTokens(name: string): string[] {
@@ -106,6 +102,9 @@ function evaluateRequestedCard(
   const nameTokens = buildNameTokens(input.canonicalName);
   if (!canonicalPhrase || nameTokens.length === 0) return { matches: false, score: 0 };
   if (!title.includes(canonicalPhrase)) return { matches: false, score: 0 };
+  if (isJunkListingTitle(title, [canonicalPhrase, normalizedPhrase(input.setName)])) {
+    return { matches: false, score: 0 };
+  }
   if (mentionsDifferentSet(title, input.setName)) return { matches: false, score: 0 };
 
   let score = 100;

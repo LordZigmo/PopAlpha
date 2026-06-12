@@ -36,6 +36,9 @@ jobs:
       - name: Pricing display tests
         run: npm run test:pricing-display
 
+      - name: eBay junk-filter tests
+        run: npm run test:ebay-filter
+
       - name: Build
         run: npm run build
 
