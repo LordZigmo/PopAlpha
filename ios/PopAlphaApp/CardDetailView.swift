@@ -435,6 +435,16 @@ struct CardDetailView: View {
                 addedToPortfolioBanner
             }
         }
+        // Outermost on purpose so the scroll viewport AND the floating
+        // buttons opt out together. No inline text input exists on this
+        // screen (the bug-report TextField lives in a system alert
+        // window), so nothing here should ever keyboard-avoid. Without
+        // this, a keyboard summoned mid-flow — e.g. the share-to-
+        // iMessage compose — inset the bottom safe area by ~⅓ screen,
+        // floating the FABs to mid-screen and, when the inset failed to
+        // clear on return from the share sheet, leaving a giant dead
+        // void under the last section (owner report 2026-06-12).
+        .ignoresSafeArea(.keyboard)
         .alert("Sign in to save \(activeCard.name)?", isPresented: $showSignInPromptForAdd) {
             Button("Sign In") {
                 AuthService.shared.signIn()
@@ -2590,11 +2600,15 @@ struct CardDetailView: View {
                         .frame(maxWidth: .infinity, alignment: .center)
                         .padding(.vertical, 10)
                 } else {
-                    VStack(spacing: 0) {
-                        ForEach(Array(ebayListings.prefix(5).enumerated()), id: \.element.id) { index, listing in
-                            ebayListingRow(listing)
-                            if index < min(ebayListings.count, 5) - 1 {
-                                Divider().overlay(PA.Colors.border.opacity(0.6))
+                    // Horizontal photo-first carousel (owner spec
+                    // 2026-06-12, replacing the old 5-row text list):
+                    // the seller's photo is the point — it shows what's
+                    // actually for sale. Lazy so off-screen listing
+                    // images don't fetch until scrolled into view.
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        LazyHStack(alignment: .top, spacing: 10) {
+                            ForEach(ebayListings.prefix(12)) { listing in
+                                ebayListingCard(listing)
                             }
                         }
                     }
@@ -2612,50 +2626,50 @@ struct CardDetailView: View {
         .task(id: activeCard.id) { await loadEbayListings() }
     }
 
-    private func ebayListingRow(_ listing: EbayListing) -> some View {
+    /// One carousel tile: the seller's photo on top (the part that tells
+    /// you what's actually being sold), then total ask, title, condition.
+    /// Fixed tile width + reserved 2-line title keep the row height
+    /// uniform across tiles.
+    private func ebayListingCard(_ listing: EbayListing) -> some View {
         Button {
             guard let url = URL(string: listing.itemWebUrl) else { return }
             PAHaptics.tap()
             openURL(url)
         } label: {
-            HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 6) {
                 LazyImage(url: listing.image.flatMap(URL.init(string:))) { state in
                     if let image = state.image {
                         image.resizable().aspectRatio(contentMode: .fill)
                     } else {
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
                             .fill(PA.Colors.surfaceSoft)
                     }
                 }
-                .frame(width: 40, height: 56)
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .frame(width: 124, height: 165)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(listing.title)
-                        .font(.system(size: 13, weight: .medium))
+                if let total = listing.totalAsk {
+                    Text(total, format: .currency(code: listing.price?.currency ?? "USD"))
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
                         .foregroundStyle(PA.Colors.text)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
+                }
+
+                Text(listing.title)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(PA.Colors.textSecondary)
+                    .lineLimit(2, reservesSpace: true)
+                    .multilineTextAlignment(.leading)
+
+                HStack(spacing: 3) {
                     if let condition = listing.condition, !condition.isEmpty {
                         Text(condition)
-                            .font(.system(size: 11))
-                            .foregroundStyle(PA.Colors.textSecondary)
-                    }
-                }
-                Spacer(minLength: 8)
-
-                VStack(alignment: .trailing, spacing: 2) {
-                    if let total = listing.totalAsk {
-                        Text(total, format: .currency(code: listing.price?.currency ?? "USD"))
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
-                            .foregroundStyle(PA.Colors.text)
                     }
                     Image(systemName: "arrow.up.right")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(PA.Colors.muted)
                 }
+                .font(.system(size: 10))
+                .foregroundStyle(PA.Colors.muted)
             }
-            .padding(.vertical, 10)
+            .frame(width: 124, alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

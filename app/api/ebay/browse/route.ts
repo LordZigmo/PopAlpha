@@ -89,6 +89,29 @@ function mentionsDifferentSet(title: string, setName: string | null): boolean {
   });
 }
 
+// Lottery-style listings — mystery packs/boxes/bags, grab bags, repacks,
+// oripa (JP random-pull packs), fukubukuro "lucky bags" — advertise the
+// chase card's name + number in the title, so they sail through the
+// name/number relevance gates below while not actually selling this
+// card. Patterns run against normalizeTitle output (lowercased,
+// punctuation collapsed to spaces), word-bounded to avoid swallowing
+// real card names like "Mysterious Treasures".
+const JUNK_LISTING_PATTERNS = [
+  /\bmystery\b/,
+  /\bgrab bags?\b/,
+  /\boripa\b/,
+  /\blucky bags?\b/,
+  /\brepacks?\b/,
+];
+
+function isJunkListingTitle(title: string, canonicalPhrase: string): boolean {
+  // Each pattern is waived when the card's own name contains it, so a
+  // hypothetical card actually named "Mystery ..." keeps its listings.
+  return JUNK_LISTING_PATTERNS.some(
+    (pattern) => pattern.test(title) && !pattern.test(canonicalPhrase)
+  );
+}
+
 function evaluateRequestedCard(
   item: ReturnType<typeof mapBrowseItem>,
   input: {
@@ -106,6 +129,7 @@ function evaluateRequestedCard(
   const nameTokens = buildNameTokens(input.canonicalName);
   if (!canonicalPhrase || nameTokens.length === 0) return { matches: false, score: 0 };
   if (!title.includes(canonicalPhrase)) return { matches: false, score: 0 };
+  if (isJunkListingTitle(title, canonicalPhrase)) return { matches: false, score: 0 };
   if (mentionsDifferentSet(title, input.setName)) return { matches: false, score: 0 };
 
   let score = 100;
