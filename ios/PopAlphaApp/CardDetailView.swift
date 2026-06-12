@@ -464,6 +464,12 @@ struct CardDetailView: View {
         // under it (owner report 2026-06-12). The back/share buttons
         // carry their own Liquid Glass capsules, so they stay legible
         // over content without the band.
+        // The band had a SECOND source beyond the scroll-edge effect:
+        // the navigation bar's own background appearance (this screen
+        // uses real ToolbarItems for back/share, so a bar exists, and
+        // the system paints its background once content scrolls under
+        // it — the white bar persisted on device, build 20260618).
+        // The modifier hides both layers, iOS 26 only.
         .modifier(HideTopScrollEdgeEffect())
         .modifier(TabBarMinimizeMirror(
             minimized: $tabBarLikelyMinimized,
@@ -495,10 +501,13 @@ struct CardDetailView: View {
             // physical bottom; the minimized pill centers ~52pt up.
             // Both are safe-area-anchored constants on Dynamic-Island
             // devices, so the 75pt delta is device-independent there.
-            // Spring roughly matches the system bar's own minimize
-            // animation.
+            // Spring tuned to track the system bar's minimize: the
+            // first cut (response 0.35 / damping 0.85) read as "the +
+            // is a little slow compared to the navigation bar" on
+            // device (owner, build 20260618) — the system's own bar
+            // animation is snappier and settles with less bounce.
             .offset(y: tabBarLikelyMinimized ? 75 : 0)
-            .animation(.spring(response: 0.35, dampingFraction: 0.85), value: tabBarLikelyMinimized)
+            .animation(.spring(response: 0.26, dampingFraction: 0.9), value: tabBarLikelyMinimized)
         }
         .overlay(alignment: .top) {
             if showAddedBanner {
@@ -3498,16 +3507,23 @@ private struct TabBarMinimizeMirror: ViewModifier {
     }
 }
 
-// MARK: - Scroll-edge effect suppression
+// MARK: - Top bar chrome suppression
 
-/// Hides the iOS 26 top scroll-edge effect on the card detail scroll
-/// view — see the call site comment in `CardDetailView.body`. No-op
-/// before iOS 26, where pushed views don't draw the Liquid Glass edge
-/// band.
+/// Hides BOTH iOS 26 layers that paint a band across the status/
+/// toolbar area when content scrolls under it: the top scroll-edge
+/// effect AND the navigation bar's own background appearance — see
+/// the call site comment in `CardDetailView.body`. Strictly no-op
+/// before iOS 26: the legacy bar keeps its background there because
+/// the back/share buttons have no system Liquid Glass capsules on
+/// older OSes (their custom circles were removed in favor of the
+/// iOS 26 system chrome), so bare icons over content would lose
+/// legibility.
 private struct HideTopScrollEdgeEffect: ViewModifier {
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
-            content.scrollEdgeEffectHidden(true, for: .top)
+            content
+                .scrollEdgeEffectHidden(true, for: .top)
+                .toolbarBackground(.hidden, for: .navigationBar)
         } else {
             content
         }
