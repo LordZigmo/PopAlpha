@@ -370,7 +370,6 @@
 				AA00000100000000000000F2 /* Sources */,
 				AA00000100000000000000D1 /* Frameworks */,
 				AA00000100000000000000F3 /* Resources */,
-				AA00000100000000000000FA /* Set Build Number */,
 			);
 			buildRules = (
 			);
@@ -441,50 +440,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
-
-/* Begin PBXShellScriptBuildPhase section */
-		AA00000100000000000000FA /* Set Build Number */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputPaths = (
-			);
-			name = "Set Build Number (date.time)";
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "plist=\"${TARGET_BUILD_DIR}/${INFOPLIST_PATH}\"
-# Build number = YYYYMMDD.HHMM, floored at CURRENT_PROJECT_VERSION so
-# an honest date stamp can never drop BELOW the configured floor.
-# That floor is how we climb back above a manually-injected future-
-# dated build already on TestFlight (20260615) without waiting on the
-# calendar: set CURRENT_PROJECT_VERSION to the floor and every build
-# is >= it. Once real time passes the floor date, today's date wins.
-day=\"$(date +%Y%m%d)\"
-hm=\"$(date +%H%M)\"
-floor=\"${CURRENT_PROJECT_VERSION%%.*}\"
-[ -z \"$floor\" ] && floor=0
-if [ \"$day\" -lt \"$floor\" ]; then
-  bn=\"${floor}.${hm}\"
-else
-  bn=\"${day}.${hm}\"
-fi
-if [ -f \"$plist\" ]; then
-  /usr/libexec/PlistBuddy -c \"Set :CFBundleVersion $bn\" \"$plist\"
-  echo \"note: CFBundleVersion stamped to $bn\"
-else
-  msg=\"Set Build Number: Info.plist not found at $plist; CFBundleVersion NOT stamped, would fall back to CURRENT_PROJECT_VERSION=${CURRENT_PROJECT_VERSION}. This silent no-op is what stuck 8 builds at 20260604.\"
-  if [ \"${CONFIGURATION}\" = \"Release\" ]; then
-    echo \"error: $msg\" >&2
-    exit 1
-  fi
-  echo \"warning: $msg\" >&2
-fi
-";
-		};
-/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		AA00000100000000000000F2 /* Sources */ = {
@@ -715,7 +670,7 @@ fi
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = PopAlphaApp/PopAlphaApp.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 20260616;
+				CURRENT_PROJECT_VERSION = 20260617;
 				DEVELOPMENT_ASSET_PATHS = "\"PopAlphaApp/Preview Content\"";
 				DEVELOPMENT_TEAM = SR5AZXDJC3;
 				ENABLE_PREVIEWS = YES;
@@ -753,7 +708,7 @@ fi
 				CODE_SIGN_ENTITLEMENTS = PopAlphaApp/PopAlphaApp.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 20260616;
+				CURRENT_PROJECT_VERSION = 20260617;
 				DEVELOPMENT_ASSET_PATHS = "\"PopAlphaApp/Preview Content\"";
 				DEVELOPMENT_TEAM = SR5AZXDJC3;
 				ENABLE_PREVIEWS = YES;
