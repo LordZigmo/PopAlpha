@@ -178,11 +178,13 @@ struct MarketHeroCard: View {
 
 // MARK: - Market Scan Strip (authed)
 //
-// Slim variant rendered between the AI Brief and the For-You rail when
-// the user is signed in. Scan stays one tap away even though the user
-// already sees the Scan tab in the bottom nav — the expert called this
-// out as a discoverability win for new collectors who haven't yet
-// internalized the tab order.
+// Slim variant rendered for SIGNED-OUT (guest) users, between the AI
+// Brief and the Movers section. Scan stays one tap away even though the
+// Scan tab is in the bottom nav — a discoverability win for new
+// collectors who haven't yet internalized the tab order. (Audience
+// flipped 2026-06-12: it previously rendered for signed-in users, but
+// the new-collector rationale fits guests, who are the ones still
+// learning the app.)
 
 struct MarketScanStrip: View {
     let onScan: () -> Void
@@ -266,7 +268,7 @@ struct MarketScanStrip: View {
         .background(PA.Colors.background)
 }
 
-#Preview("Market Scan Strip — authed") {
+#Preview("Market Scan Strip — guest") {
     MarketScanStrip(onScan: {}, onSeeMovers: {})
         .padding()
         .background(PA.Colors.background)

@@ -18,22 +18,22 @@ import Nuke
 //   1. TopBar
 //   2. MarketHeroCard       — "The fastest way to understand a Pokémon card."
 //   3. AIBriefCard          — editorial market read
-//   4. MarketPulseSection   — movers (data-gated)
-//   5. SignInPromoCard      — "Make PopAlpha yours" (moved down from top)
-//   6. ForYouRail           — falls back to "POPULAR WITH COLLECTORS"
-//   7. CommunitySection
-//   8. Footer
+//   4. MarketScanStrip      — slim "Scan a card" reminder (guests only)
+//   5. MarketPulseSection   — movers (data-gated)
+//   6. SignInPromoCard      — "Make PopAlpha yours" (moved down from top)
+//   7. ForYouRail           — falls back to "POPULAR WITH COLLECTORS"
+//   8. CommunitySection
+//   9. Footer
 //
 // Section order — authed (signed-in):
 //
 //   1. TopBar
 //   2. PersonalPulseSection — Watchlist · Portfolio · Style chips
 //   3. AIBriefCard          — personalized market read
-//   4. MarketScanStrip      — slim "Scan a card" reminder
-//   5. ForYouRail           — "FOR YOU"
-//   6. MarketPulseSection   — movers (data-gated)
-//   7. CommunitySection     — "COLLECTORS LIKE YOU" when style known
-//   8. Footer
+//   4. ForYouRail           — "FOR YOU"
+//   5. MarketPulseSection   — movers (data-gated)
+//   6. CommunitySection     — "COLLECTORS LIKE YOU" when style known
+//   7. Footer
 //
 // Data ownership:
 //   • MarketplaceView owns ALL homepage fetches: KPI stats, /me,
@@ -292,19 +292,31 @@ struct MarketplaceView: View {
         )
             .padding(.horizontal, PA.Layout.sectionPadding)
 
-        // 3. Movers FIRST for guests — they don't have a personalized
+        // 3. Compact scan strip — a one-tap "Scan a card" nudge for new
+        //    collectors who haven't yet internalized the bottom-nav tab
+        //    order. Shown to guests (not authed): the audience was flipped
+        //    2026-06-12 to match the strip's own discoverability rationale
+        //    — new/logged-out users are the ones who benefit from the
+        //    reminder; signed-in users already know where Scan lives.
+        MarketScanStrip(
+            onScan: { handleScanCTA() },
+            onSeeMovers: { handleSeeMoversCTA(proxy: proxy) }
+        )
+        .padding(.horizontal, PA.Layout.sectionPadding)
+
+        // 4. Movers FIRST for guests — they don't have a personalized
         //    profile yet, so the broad market read carries more weight
         //    than a curated rail.
         moversSection
 
-        // 4. Sign-in promo — moved down from the top of screen. By now
+        // 5. Sign-in promo — moved down from the top of screen. By now
         //    the guest has seen the value prop and a market read; the
         //    ask lands as "make this yours" rather than "log in to use
         //    the app."
         SignInPromoCard()
             .padding(.horizontal, PA.Layout.sectionPadding)
 
-        // 5. ForYou rail — eyebrow falls back to "POPULAR WITH COLLECTORS".
+        // 6. ForYou rail — eyebrow falls back to "POPULAR WITH COLLECTORS".
         if let data {
             ForYouRail(
                 signalBoard: data.signalBoard,
@@ -314,12 +326,12 @@ struct MarketplaceView: View {
             )
         }
 
-        // 6. Community
+        // 7. Community
         if let community, !(community.trending.isEmpty && community.mostSaved.isEmpty && community.friendsAdded.isEmpty) {
             CommunitySection(data: community, styleLabel: styleLabel)
         }
 
-        // 7. Footer
+        // 8. Footer
         if let asOf = data?.asOf {
             footer(asOf: asOf)
         }
@@ -344,17 +356,7 @@ struct MarketplaceView: View {
         )
             .padding(.horizontal, PA.Layout.sectionPadding)
 
-        // 3. Compact scan strip — keeps scan one tap away even though
-        //    the Scan tab is in the bottom nav. New collectors haven't
-        //    yet internalized the tab order, so a visible CTA on the
-        //    home tab is still a discoverability win.
-        MarketScanStrip(
-            onScan: { handleScanCTA() },
-            onSeeMovers: { handleSeeMoversCTA(proxy: proxy) }
-        )
-        .padding(.horizontal, PA.Layout.sectionPadding)
-
-        // 4. ForYou rail — first because the user has a profile.
+        // 3. ForYou rail — first because the user has a profile.
         if let data {
             ForYouRail(
                 signalBoard: data.signalBoard,
@@ -364,16 +366,16 @@ struct MarketplaceView: View {
             )
         }
 
-        // 5. Movers
+        // 4. Movers
         moversSection
 
-        // 6. Community — eyebrow becomes "COLLECTORS LIKE YOU" when
+        // 5. Community — eyebrow becomes "COLLECTORS LIKE YOU" when
         //    style label is known (handled inside the section).
         if let community, !(community.trending.isEmpty && community.mostSaved.isEmpty && community.friendsAdded.isEmpty) {
             CommunitySection(data: community, styleLabel: styleLabel)
         }
 
-        // 7. Footer
+        // 6. Footer
         if let asOf = data?.asOf {
             footer(asOf: asOf)
         }
