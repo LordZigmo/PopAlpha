@@ -4,13 +4,19 @@
  * Identifies a single Pokemon card from a just-captured image. Used by
  * the iOS scanner's zero-tap recognition flow: client POSTs the JPEG
  * it captured when its Vision rectangle detector stabilized on a card,
- * server embeds it with the same CLIP model used to build the
- * reference index, runs a language-filtered pgvector kNN, and returns
- * the top matches with a confidence tier.
+ * server embeds it with the ACTIVE embedder (getImageEmbedder — the
+ * same model that built the reference index; home-GPU SigLIP as of
+ * 2026-06), runs a language-filtered pgvector kNN against Supabase,
+ * and returns the top matches with a confidence tier.
  *
  * Trust tier: PUBLIC. The app is freemium; scanning is a core funnel.
- * No rate limit in this PR — call-volume telemetry will inform whether
- * we need one later.
+ * Abuse posture: per-IP burst limiter (60/min, in-memory sliding
+ * window — the lib/rate-limit pattern shared with the other public
+ * writes) + 3MB payload cap. Each anonymous request costs an embedder
+ * GPU call, two Storage uploads, and two pgvector kNNs, and the
+ * embedder now lives on a home box — burst control is mandatory, not
+ * optional. Throttles emit structured logs only (no PostHog), so an
+ * attacker can't bill our analytics.
  *
  * Request:
  *   POST /api/scan/identify?language=EN&limit=5
@@ -50,6 +56,13 @@ import {
 } from "@/lib/ai/image-crops";
 import { getPostHogClient } from "@/lib/posthog-server";
 import { enqueueScanForReview } from "@/lib/scan/review-queue";
+import { createRateLimiter } from "@/lib/rate-limit";
+import {
+  getPublicWriteIp,
+  hashPublicWriteValue,
+  logPublicWriteEvent,
+  retryAfterSeconds,
+} from "@/lib/public-write";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -57,6 +70,24 @@ export const maxDuration = 30;
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
 const DEFAULT_LIMIT = 5;
 const MAX_LIMIT = 10;
+
+// 60 scans/min per IP per instance: a human multi-scan session peaks
+// at ~20-30/min, so this never touches real users (even two devices
+// behind one NAT), while capping a dumb hammer at ~1 req/s/instance.
+const ipBurstLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 60 });
+
+function rateLimitResponse(retryAfterMs: number) {
+  return new NextResponse(
+    JSON.stringify({ ok: false, error: "Too many scans. Please try again shortly." }),
+    {
+      status: 429,
+      headers: {
+        "Content-Type": "application/json",
+        "Retry-After": String(retryAfterSeconds(retryAfterMs)),
+      },
+    },
+  );
+}
 
 /**
  * Confidence tiers calibrated from baseline-eval data (run id
@@ -520,6 +551,27 @@ export async function POST(req: Request) {
   const startedAt = Date.now();
   const actorKey = req.headers.get("x-pa-actor-key");
   const clientPlatform = req.headers.get("x-pa-client-platform");
+
+  // Burst control first — before body hashing, resize, Storage, or
+  // the embedder see a single byte. Structured log only: PostHog
+  // events per throttled request would let an abuser run up our
+  // analytics bill.
+  const ip = getPublicWriteIp(req);
+  const ipBurst = ipBurstLimiter(ip);
+  if (!ipBurst.allowed) {
+    logPublicWriteEvent("warn", {
+      surface: "scan_identify",
+      route: "/api/scan/identify",
+      outcome: "throttled",
+      reason: "ip_burst",
+      access: "anon_or_authenticated",
+      ipHash: hashPublicWriteValue(ip),
+      clientPlatform: clientPlatform ?? null,
+      retryAfterSec: retryAfterSeconds(ipBurst.retryAfterMs),
+      requestMs: Date.now() - startedAt,
+    });
+    return rateLimitResponse(ipBurst.retryAfterMs);
+  }
 
   // Parsed up-front so all failure paths — including pre-body
   // validation — can include language_filter in their PostHog event.

@@ -51,7 +51,10 @@ npm run eval:run
 ```
 
 Defaults: point at `https://popalpha.ai`, run every image in the corpus,
-throttle 300ms between requests.
+throttle 1100ms between requests (sized against the identify route's
+60/min per-IP burst limit; 429s retry automatically honoring
+Retry-After, so a throttled request can never land in the scoreboard
+as a failure).
 
 Useful flags:
 

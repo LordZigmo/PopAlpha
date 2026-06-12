@@ -600,9 +600,9 @@ export const PUBLIC_WRITE_ROUTE_CONTRACTS = {
     access: "anon_or_authenticated",
     methods: ["POST"],
     writeType: "append_only_telemetry_plus_storage_upload_plus_vector_lookup",
-    abuseControls: ["payload_size_limit_3mb", "structured_logging"],
+    abuseControls: ["ip_burst", "payload_size_limit_3mb", "structured_logging"],
     dbContract:
-      "uploads uploaded JPEG to Supabase Storage card-images bucket under scan-uploads/<sha256>.jpg (keyed by image hash — idempotent), passes the resulting public URL to Replicate for embedding, runs readonly pgvector kNN against Neon card_image_embeddings, and inserts a single telemetry row into public.scan_identify_events via dbAdmin(). Only the sha256 hash is stored in telemetry.",
+      "uploads uploaded JPEG to Supabase Storage card-images bucket under scan-uploads/<sha256>.jpg (keyed by image hash — idempotent), embeds it via the ACTIVE embedder (getImageEmbedder — home-GPU SigLIP as of 2026-06; image sent as base64 data-URI, no URL fetch), runs readonly pgvector kNN against Supabase card_image_embeddings, and inserts a single telemetry row into public.scan_identify_events via dbAdmin(). Only the sha256 hash is stored in telemetry.",
     recommendedAction:
       "keep telemetry writes append-only; never expose scan_identify_events to anon/authenticated readers without a privacy review. Add a bucket lifecycle rule to auto-delete scan-uploads/* objects after a short TTL when volume warrants.",
   },
