@@ -72,13 +72,15 @@ struct AIBriefCard: View {
     /// copy.
     @Environment(\.market) private var market
 
-    /// Reads .dark unconditionally on this card since 2026-06-12: the
-    /// brief is pinned to its dark-theme rendering in both appearances
-    /// (see the .environment(\.colorScheme, .dark) on the container).
-    /// The light-mode branches below are kept for the day the pin is
-    /// lifted; they are currently inert. (History: 2026-06-11 owner
-    /// feedback neutralized the brief's light-mode accents; 2026-06-12
-    /// owner asked for the dark look everywhere instead.)
+    /// AMBIENT scheme. @Environment on this struct resolves from the
+    /// parent environment — the .environment(\.colorScheme, .dark) pin
+    /// applied inside body does NOT affect it (codex P2 on PR #253).
+    /// Used ONLY to gate the opaque dark base to ambient-light; all
+    /// interior styling uses the dark-theme arm unconditionally since
+    /// the card is pinned dark in both appearances. (History:
+    /// 2026-06-11 owner feedback neutralized the brief's light-mode
+    /// accents; 2026-06-12 owner asked for the dark look everywhere on
+    /// this card instead.)
     @Environment(\.colorScheme) private var colorScheme
 
     // Placeholder copy used only when the /api/homepage/ai-brief cache is
@@ -246,23 +248,16 @@ struct AIBriefCard: View {
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
-                // Neutral chip in light mode — the accent wash was part
-                // of the "blue around the brief" the owner flagged; the
-                // accent stays in dark where the tinted glass is the look.
-                .background(
-                    colorScheme == .light
-                        ? Color.black.opacity(0.05)
-                        : market.accent.opacity(0.12)
-                )
+                // Dark-theme styling unconditionally: this card is
+                // pinned dark, and `colorScheme` here is the AMBIENT
+                // scheme (resolved before the pin), so branching on it
+                // would re-introduce light-mode internals inside the
+                // dark panel (codex P2 on PR #253).
+                .background(market.accent.opacity(0.12))
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .stroke(
-                            colorScheme == .light
-                                ? Color.black.opacity(0.08)
-                                : market.accent.opacity(0.2),
-                            lineWidth: 0.5
-                        )
+                        .stroke(market.accent.opacity(0.2), lineWidth: 0.5)
                 )
 
                 Spacer()
@@ -333,13 +328,15 @@ struct AIBriefCard: View {
         // Pin the brief to its dark-theme rendering in BOTH appearances
         // (owner request 2026-06-12: "make the AI briefs the same colors
         // as the dark theme version"). Forcing the trait here resolves
-        // every adaptive color inside — the liquid-glass accent wash,
-        // tinted border/bloom, text, the base fill above, and the
-        // colorScheme branches below (whose light arms are now inert on
-        // this card). This is a deliberate pivot from 2026-06-11's
-        // "kill the blue in light mode": that neutralization stands for
-        // ordinary surfaces; the AI brief is now a branded always-dark
-        // panel instead.
+        // every adaptive color in the subtree — the liquid-glass accent
+        // wash, tinted border/bloom, text, and the base fill above.
+        // NOTE: it does NOT reach this struct's own @Environment
+        // properties (resolved from the parent environment), which is
+        // why the chip/strip styling uses the dark arms unconditionally
+        // instead of branching (codex P2 on PR #253). This is a
+        // deliberate pivot from 2026-06-11's "kill the blue in light
+        // mode": that neutralization stands for ordinary surfaces; the
+        // AI brief is now a branded always-dark panel instead.
         .environment(\.colorScheme, .dark)
         // Route taps on linkified set/card names in the brief prose.
         .environment(\.openURL, OpenURLAction(handler: handleBriefLink))
@@ -409,13 +406,9 @@ struct AIBriefCard: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        // Neutral in light (see colorScheme doc note above); accent
-        // tint only on dark's tinted glass.
-        .background(
-            colorScheme == .light
-                ? Color.black.opacity(0.04)
-                : market.accent.opacity(0.08)
-        )
+        // Dark-theme tint unconditionally — see the takeaway chip note:
+        // `colorScheme` is ambient, the card is pinned dark.
+        .background(market.accent.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
