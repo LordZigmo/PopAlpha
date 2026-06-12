@@ -69,6 +69,10 @@ The targeted wrapper path (`refresh_price_changes_for_cards` via batch-refresh-p
 
 ```sql
 -- Cross-writer residue: JP rows holding a change with no JP history to back it. Expect 0.
+-- The NOT EXISTS must mirror compute_jp_card_price_changes' EXACT history scope
+-- (canonical-level RAW with positive price_jpy — 20260520140000 lines 181-185 /
+-- stale-wipe 301-306); looser predicates count per-printing or jpy-less rows as
+-- "support" and under-report residue.
 SELECT COUNT(*) FROM card_metrics cm
 JOIN canonical_cards cc ON cc.slug = cm.canonical_slug AND cc.language = 'JP'
 WHERE cm.printing_id IS NULL AND cm.grade = 'RAW'
@@ -76,6 +80,8 @@ WHERE cm.printing_id IS NULL AND cm.grade = 'RAW'
   AND NOT EXISTS (
     SELECT 1 FROM jp_card_price_history h
     WHERE h.canonical_slug = cm.canonical_slug AND h.grade = 'RAW'
+      AND h.printing_id IS NULL
+      AND h.price_jpy IS NOT NULL AND h.price_jpy > 0
       AND h.recorded_at >= now() - interval '14 days');
 ```
 
