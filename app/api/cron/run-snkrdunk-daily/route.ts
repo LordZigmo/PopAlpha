@@ -68,7 +68,6 @@ const JPY_TO_USD = (() => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_JPY_TO_USD_RATE;
 })();
 const MIN_SAMPLE_COUNT = 3;
-const REFRESH_AFTER_HOURS = 24 * 7; // 7 days
 const DEADLINE_RESERVE_MS = 30_000;
 const SCRAPE_PAGES = 4; // most cards have ≤2 pages; 4 is safe upper bound
 // Low-sample codes (Snkrdunk returns listings but < MIN_SAMPLE_COUNT sold per
@@ -78,8 +77,6 @@ const SCRAPE_PAGES = 4; // most cards have ≤2 pages; 4 is safe upper bound
 // Park ~monthly: still catches a card that later gains liquidity.
 const NONPRODUCTIVE_RETRY_HOURS = 24 * 30;
 const TRANSIENT_RETRY_HOURS = 6;
-const CANDIDATE_SCAN_PAGE_SIZE = 1000;
-const MAX_STALE_PRICE_SCAN_ROWS = 5000;
 const SNKRDUNK_ROUTE = "/api/cron/run-snkrdunk-daily";
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -95,6 +92,14 @@ type SnkrdunkInitialCandidateRow = {
   canonical_slug: string;
   snkrdunk_product_code: string;
   tier: number;
+};
+
+type SnkrdunkRefreshCandidateRow = {
+  canonical_slug: string;
+  printing_id: string | null;
+  snkrdunk_product_code: string;
+  observed_at: string | null;
+  tier: string;
 };
 
 type SnkrdunkProcessResult =
@@ -143,16 +148,14 @@ async function loadInitialSnkrdunkCandidates(
 
 /**
  * Pick the N Snkrdunk-tracked cards most in need of refresh: mapped
- * products with no successful price row first, then existing
- * snkrdunk_card_prices rows whose observed_at is null OR older than
- * REFRESH_AFTER_HOURS. Group by snkrdunk_product_code so we re-fetch
- * each product at most once per tick even if it has multiple grade rows.
+ * products with no successful price row first (initial-coverage, capped
+ * share), then priced products past their jp_refresh_tier cadence via
+ * scan_snkrdunk_refresh_candidates (overdue-ratio ordered).
  */
 async function pickRefreshCandidates(
   supabase: ReturnType<typeof dbAdmin>,
   limit: number,
 ): Promise<RefreshCandidate[]> {
-  const cutoffIso = new Date(Date.now() - REFRESH_AFTER_HOURS * 60 * 60 * 1000).toISOString();
   const nonproductiveCutoffIso = new Date(Date.now() - NONPRODUCTIVE_RETRY_HOURS * 60 * 60 * 1000).toISOString();
   const transientCutoffIso = new Date(Date.now() - TRANSIENT_RETRY_HOURS * 60 * 60 * 1000).toISOString();
   const [recentNonproductive, recentTransient] = await Promise.all([
@@ -179,59 +182,41 @@ async function pickRefreshCandidates(
     limit: initialBudget,
   });
 
-  // Dedupe by snkrdunk_product_code (one re-fetch covers all grade rows
-  // for that product). Prefer the PER-PRINTING row (printing_id != null)
-  // as the candidate when both per-printing AND canonical-rollup rows
-  // exist for the same product.
-  //
-  // Why the per-printing row needs to win (Codex P2 on PR #50):
-  // The matcher in lib/jp/snkrdunk-matcher.mjs emits BOTH a per-printing
-  // observation and a canonical-rollup observation whenever printingId is
-  // set, so picking the per-printing row as the candidate refreshes both
-  // rows in one pass. Picking the canonical row instead would leave the
-  // candidate.printing_id at null, degrade processCard to the
-  // "no printing_id known" path (which for multi-printing cards stays at
-  // null because card_printings has >1 row), and the matcher then writes
-  // only the canonical row — the stale per-printing row remains stale
-  // and gets re-selected every tick.
-  //
-  // This is compounded by the public_card_metrics view's COALESCE order:
-  // it prefers snk_specific (the stale per-printing row) over
-  // snk_canonical (the fresh canonical fallback), so the user sees
-  // stale prices even though we just "refreshed."
   const byProduct = new Map<string, RefreshCandidate>();
   for (const candidate of initialCandidates) {
     byProduct.set(candidate.snkrdunk_product_code, candidate);
   }
-  for (
-    let from = 0;
-    byProduct.size < limit && from < MAX_STALE_PRICE_SCAN_ROWS;
-    from += CANDIDATE_SCAN_PAGE_SIZE
-  ) {
-    const { data, error } = await supabase
-      .from("snkrdunk_card_prices")
-      .select("canonical_slug, printing_id, snkrdunk_product_code, observed_at")
-      .or(`observed_at.is.null,observed_at.lt.${cutoffIso}`)
-      .not("snkrdunk_product_code", "is", null)
-      .order("observed_at", { ascending: true, nullsFirst: true })
-      .range(from, from + CANDIDATE_SCAN_PAGE_SIZE - 1);
-    if (error) throw new Error(`stale-snkrdunk scan: ${error.message}`);
 
-    const rows = (data ?? []) as RefreshCandidate[];
+  // Tier-cadence stale refresh: scan_snkrdunk_refresh_candidates replaces the
+  // old flat-7d-cutoff paging loop. Per-tier cadence lives in the RPC
+  // (mirrored in lib/jp/refresh-cadence.mjs): hot 24h / warm 72h /
+  // sparse+unknown 168h (= the old flat behavior, fail-open) / dormant 720h,
+  // with due rows ordered by overdue ratio ((now - observed_at) / cadence) so
+  // a capacity shortfall drifts every tier proportionally instead of starving
+  // the tail. The dedupe-by-product-code with the PER-PRINTING row preferred
+  // (Codex P2 on PR #50: the per-printing candidate refreshes both the
+  // per-printing and canonical rows in one pass; the canonical candidate
+  // strands the per-printing row stale) also lives in the RPC. Initial
+  // candidates can't collide with refresh candidates (no price row vs price
+  // row), but keep the has-check so initial-coverage always wins a slot.
+  const refreshBudget = Math.max(0, limit - byProduct.size);
+  if (refreshBudget > 0) {
+    const { data, error } = await supabase.rpc("scan_snkrdunk_refresh_candidates", {
+      p_limit: refreshBudget,
+      p_suppressed: [...suppressedSourceKeys],
+    });
+    if (error) throw new Error(`scan_snkrdunk_refresh_candidates: ${error.message}`);
+
+    const rows = (data ?? []) as SnkrdunkRefreshCandidateRow[];
     for (const row of rows) {
       if (!row.snkrdunk_product_code) continue;
-      if (suppressedSourceKeys.has(row.snkrdunk_product_code)) continue;
-      const existing = byProduct.get(row.snkrdunk_product_code);
-      if (!existing) {
-        byProduct.set(row.snkrdunk_product_code, row);
-      } else if (existing.printing_id == null && row.printing_id != null) {
-        // Prefer the per-printing row — see comment above
-        byProduct.set(row.snkrdunk_product_code, row);
-      }
-    }
-
-    if (rows.length < CANDIDATE_SCAN_PAGE_SIZE) {
-      break;
+      if (byProduct.has(row.snkrdunk_product_code)) continue;
+      byProduct.set(row.snkrdunk_product_code, {
+        canonical_slug: row.canonical_slug,
+        printing_id: row.printing_id,
+        snkrdunk_product_code: row.snkrdunk_product_code,
+        observed_at: row.observed_at,
+      });
     }
   }
 
@@ -445,7 +430,7 @@ export async function GET(req: Request) {
       ok: true,
       runId,
       mode: "no-work",
-      reason: `no snkrdunk_card_prices rows stale (>${REFRESH_AFTER_HOURS}h)`,
+      reason: "no snkrdunk_card_prices rows past tier cadence",
       elapsedMs,
     };
     await completeJpIngestionRun(supabase, runId, {
