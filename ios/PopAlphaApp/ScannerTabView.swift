@@ -1303,31 +1303,22 @@ final class ScannerHost: ObservableObject {
             self.initError = error.localizedDescription
         }
 
-        // Fire-and-forget pre-warm. Real-device 2026-05-05 measured
-        // 7.7s for the first scan after launch (vs 226ms steady state)
-        // because the orchestrator was lazy-instantiated on first tap
-        // — runSetup() (catalog + CoreML model load), the first
-        // ensureFp16Scratch (17.7M Float16→Float in Swift), and Vision
-        // text recognition warmup all stacked onto the user's first
-        // capture. Doing the work here at ScannerHost-init time means
-        // the scanner is warm before the user ever taps. Gated on the
-        // premium toggle so free-tier users don't pay the model-load
-        // cost.
+        // Fire-and-forget pre-warm of the CHEAP scanner costs only:
+        // local Vision/OCR and the Vision rectangle detector (first
+        // tap_detect measured 672ms cold vs ~15ms steady — 2026-05-05).
         //
-        // Priority: .utility (background-tier). Earlier we used
-        // default priority and the user reported a 5s black scanner
-        // page on launch — camera-session startup was contending for
-        // compute with prewarm's CoreML inference and catalog parse.
-        // Dropping to .utility lets iOS scheduler give camera setup
-        // priority so frames arrive faster, even if prewarm itself
-        // takes slightly longer wall-clock. Net UX win: black screen
-        // shorter, first scan still warm by the time user taps.
+        // The HEAVY offline work (catalog parse + 177 MB CoreML SigLIP
+        // load + fp16 scratch) is deliberately NOT here anymore: run at
+        // launch it starved camera bring-up and left the preview black
+        // (2026-05-05 "5s black page"; 2026-06-12 "black forever" once
+        // offline-first re-enabled it). It now warms from the
+        // first-frame transition in bind() — i.e. only once the camera
+        // is already delivering frames, so the model load can never
+        // race the preview. If the user scans before that warmup
+        // finishes, the first scan blocks on the in-flight setupTask,
+        // same documented fallback as before.
         //
-        // Idempotent: prewarm internally calls ensureReady which is
-        // idempotent, and the dummy-embed + dummy-knn pass is cheap.
-        // If the user starts scanning before prewarm completes, the
-        // first scan will block on the in-flight setupTask the same
-        // way it does today — strictly no worse than before.
+        // .utility priority so this competes minimally with active UI.
         Task(priority: .utility) { [weak self] in
             await self?.prewarmIfPossible()
         }
@@ -1345,11 +1336,12 @@ final class ScannerHost: ObservableObject {
     nonisolated private func prewarmIfPossible() async {
         // Read the engine off main once so the rest runs nonisolated.
         let engine: PopAlphaVisionEngine? = await MainActor.run { self.viewModel?.visionEngine }
-        // Two parallel warm tasks:
-        //   - App-level warmup (OCR, and offline orchestrator when
-        //     enabled). Idempotent — if PopAlphaApp.body.task already
-        //     fired this, second call is a no-op via the dispatchOnce-
-        //     style guards inside OfflineScannerWarmup.
+        // Two parallel warm tasks (both CHEAP — the heavy offline model
+        // is warmed later, from the first-frame transition in bind()):
+        //   - App-level local OCR warmup. Idempotent — if
+        //     PopAlphaApp.body.task already fired this, the second call
+        //     is a no-op via the dispatchOnce-style guard inside
+        //     OfflineScannerWarmup.
         //   - Vision rectangle: VNDetectRectanglesRequest. Real-device
         //     2026-05-05 saw the FIRST tap_detect call take 672ms vs
         //     ~10-20ms steady state. Pre-warming absorbs that cost.
@@ -1406,6 +1398,19 @@ final class ScannerHost: ObservableObject {
                 }
                 if self.firstFrameRendered != vm.firstFrameRendered {
                     self.firstFrameRendered = vm.firstFrameRendered
+                    // The camera is now live (first frame rendered).
+                    // THIS is the safe moment to warm the heavy offline
+                    // model — deferring it until here keeps the 177 MB
+                    // CoreML load from starving camera bring-up and
+                    // blacking out the preview (2026-06-12 regression
+                    // when offline-first re-enabled the launch-time
+                    // load). No-op when the offline flag is off or the
+                    // model is already warmed.
+                    if vm.firstFrameRendered {
+                        Task(priority: .utility) {
+                            await OfflineScannerWarmup.startOfflineModelIfEnabled()
+                        }
+                    }
                 }
                 if let failure = vm.cameraSetupFailure, self.initError == nil {
                     self.initError = failure

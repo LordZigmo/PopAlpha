@@ -13,14 +13,15 @@
 //   ran AFTER the user opened the scanner — exactly the window we
 //   were trying to absorb the cost in front of.
 //
-// This namespace's `startIfNeeded()` is called from:
-//   - PopAlphaApp.body.task (priority .utility) — fires at app launch,
-//     so the local OCR cost and, when enabled, the 9s catalog+model+
-//     SigLIP load run while the user is on the homepage / market /
-//     portfolio.
-//   - ScannerHost.init() — redundant fallback in case the App-level
-//     trigger somehow doesn't fire (test runners, future refactor).
-//     The dispatchOnce guard makes the second call a no-op.
+// Two-stage warmup, split so the heavy work can never race the camera:
+//   - `startIfNeeded()` — CHEAP local OCR pass only. Called from
+//     PopAlphaApp.body.task at app launch and from ScannerHost.init()
+//     (idempotent). Safe anywhere; never touches the CoreML model.
+//   - `startOfflineModelIfEnabled()` — the HEAVY catalog + 177MB SigLIP
+//     load. Called from ScannerHost's first-frame transition ONLY, so
+//     it runs after the camera preview is already live. Running it at
+//     launch starved camera bring-up and blacked out the preview
+//     (2026-05-05 "5s black page"; 2026-06-12 "black forever").
 
 import Foundation
 import OSLog
@@ -36,14 +37,30 @@ enum OfflineScannerWarmup {
     private static let localStarted = AtomicBool(initialValue: false)
     private static let offlineStarted = AtomicBool(initialValue: false)
 
-    /// Fire-and-forget warmup. Always warms the cheap local OCR state;
-    /// conditionally warms the offline orchestrator when the feature
-    /// flag is enabled. .utility priority so it competes minimally
-    /// with active UI work.
+    /// Cheap warmup only — one Vision/OCR recognition pass. Safe to
+    /// call at app launch AND at scanner-tab activation because it
+    /// never triggers the heavy CoreML model load, so it can't contend
+    /// with camera bring-up. The offline model is warmed separately,
+    /// AFTER the camera renders its first frame, via
+    /// `startOfflineModelIfEnabled()`.
     static func startIfNeeded() async {
-        async let warmLocal: Void = startLocalWarmupIfNeeded()
-        async let warmOffline: Void = startOfflineWarmupIfNeeded()
-        _ = await (warmLocal, warmOffline)
+        await startLocalWarmupIfNeeded()
+    }
+
+    /// Heavy offline warmup: catalog parse + 177 MB CoreML SigLIP load
+    /// + dummy embed + dummy kNN (fp16 scratch expansion). This is the
+    /// work that starved camera startup and blacked out the scanner
+    /// preview when it ran during launch — real-device 2026-05-05 "5s
+    /// black scanner page", then 2026-06-12 "black FOREVER" once
+    /// offline-first shipped (#257) and this path ran on every launch
+    /// again after 3 weeks dormant. Call ONLY after the camera has
+    /// produced its first frame: the preview is live by then, so the
+    /// model load competes for Neural Engine / CPU *behind* a visible
+    /// viewfinder instead of in front of a black one. No-op when the
+    /// offline flag is off or the model is already warmed (dispatchOnce
+    /// guard), so it's safe to call on every first-frame transition.
+    static func startOfflineModelIfEnabled() async {
+        await startOfflineWarmupIfNeeded()
     }
 
     private static func startLocalWarmupIfNeeded() async {
