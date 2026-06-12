@@ -16,7 +16,17 @@ import Foundation
 
 enum FeatureFlags {
     static let isSocialEnabled = false
-    // Accuracy sprint mode: keep scanner identification server/model-first
-    // until the centrally trained model hits the target first-try rate.
-    static let isOfflineScannerEnabled = false
+    // Offline-first restored 2026-06-12 while the server embedder
+    // migrates to the self-hosted home GPU (the Modal workspace is
+    // retired and the replacement isn't online yet) — with this
+    // false, EVERY scan rides the dead server path and the scanner
+    // is fully down. true = EN scans identify on-device (~300ms);
+    // JP scans and offline-failure fallthrough still use the server.
+    //
+    // The previous state (false, set 2026-05-21) was the accuracy
+    // sprint's deliberate "server/model-first until the centrally
+    // trained model hits the target first-try rate" — flipping back
+    // to false is that thread's call once the home-GPU embedder is
+    // live and healthy.
+    static let isOfflineScannerEnabled = true
 }

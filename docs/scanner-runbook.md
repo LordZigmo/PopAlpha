@@ -129,8 +129,11 @@ marginal cost. The keepwarm cron is retired — do not bring it back.
 - `tailscale funnel --bg` persists across reboots once set.
 
 **Failure mode:** box or Funnel down → the identify route returns
-502 "Embedder failure" and scans fail VISIBLY — no silent fallback,
-by design, until the composite-failover PR. The
+502 "Embedder failure" and server-routed scans fail VISIBLY — no
+silent fallback, by design, until the composite-failover PR. (As of
+2026-06-12 `FeatureFlags.isOfflineScannerEnabled = true`, so EN
+scans identify on-device and only JP scans, offline fallthrough,
+corrections, and crons depend on the server embedder.) The
 `check-embedder-health` cron (hourly, minute 12) probes `/health`
 and fails the run loudly on any non-healthy answer — unreachable,
 ok=false, model_version mismatch, or missing endpoint/token config
