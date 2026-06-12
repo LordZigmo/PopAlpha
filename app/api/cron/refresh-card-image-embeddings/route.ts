@@ -39,7 +39,7 @@ import {
 } from "@/lib/ai/card-image-embeddings";
 import {
   getImageEmbedder,
-  hasReplicateConfig,
+  hasImageEmbedderConfig,
   ImageEmbedderConfigError,
   ImageEmbedderRuntimeError,
 } from "@/lib/ai/image-embedder";
@@ -92,9 +92,12 @@ export async function GET(req: Request) {
     );
   }
 
-  if (!hasReplicateConfig()) {
+  // Gate on the ACTIVE embedder's config, not Replicate's: with
+  // IMAGE_EMBEDDER_VARIANT=modal-siglip this cron must keep working
+  // even if the Replicate rollback creds are dropped post-CLIP-prune.
+  if (!hasImageEmbedderConfig()) {
     return NextResponse.json(
-      { ok: false, error: "Missing REPLICATE_API_TOKEN or REPLICATE_CLIP_MODEL_VERSION." },
+      { ok: false, error: "Active image embedder is not configured (check IMAGE_EMBEDDER_VARIANT + its env)." },
       { status: 500 },
     );
   }

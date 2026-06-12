@@ -112,3 +112,34 @@ the accumulated eval corpus (user_correction rows in
 `scan_eval_images` are labeled positive pairs). Plan to collect ~500
 labeled scans before starting that project; we're at 12 as of this
 doc.
+
+## 2026-06-12 cron redesign (claim-based; mislabeled-vector repair)
+
+The sections above predate the SigLIP-2 cutover; mechanics that
+changed:
+
+- **The cron now embeds via the ACTIVE embedder** (`getImageEmbedder()`
+  — home-GPU SigLIP as of 2026-06), not a hardcoded Replicate CLIP
+  client. The old version embedded with CLIP while stamping rows with
+  the env-resolved active tag, so under `modal-siglip` it wrote
+  CLIP-space vectors labeled siglip2 into the live candidate pool.
+  Backend and tag now come from the same factory call and cannot
+  disagree. Per-variant marginal cost on the home GPU is ~$0 (the
+  "~$14 per variant" Replicate figure above is historical).
+- **Claim-based scheduling replaced the query-param cursor.** The old
+  scheduled run restarted at the top of the catalog every 5 minutes
+  and never advanced (and re-embedded the same first ~32 slugs via
+  Replicate whenever their hashes mismatched — the May 2026 churn).
+  Work is now "mirrored slugs with fewer than
+  `AUGMENTATION_VARIANTS.length` rows at (0 < variant_index < 10000,
+  crop_type='full', model_version=active)", in slug order. New cards
+  and model cutovers backfill automatically; `?cursor=` remains for
+  manual drains.
+- **`?reset=1` one-shot repair**: deletes all augment rows under the
+  active model_version (catalog rows, art crops, and user-correction
+  anchors survive) so scheduled runs rebuild them cleanly. Run once
+  after the home-GPU cutover to purge the mislabeled/stale-hash rows
+  from the CLIP-stamping era (~2.4k rows; rebuild takes a few hours
+  of cron ticks at maxCards=32).
+- Hash lookups are scoped to the active `model_version` (previously
+  nondeterministic when CLIP rollback rows coexist with SigLIP rows).
