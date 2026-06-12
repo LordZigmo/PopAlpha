@@ -307,9 +307,10 @@ grant execute on function public.scan_snkrdunk_refresh_candidates(int, text[]) t
 -- =============================================================================
 -- 5. scan_yahoo_refresh_candidates — tier-cadence stale scan
 --    Replaces run-yahoo-jp-daily's loadStaleYahooSlugs paging loop. Hot cards
---    already covered by a Snkrdunk price row refresh at 96h here (Snkrdunk
---    owns their daily series — double-scraping the same card daily on both
---    sources would waste ~190 Yahoo slots/day); Yahoo-only hot cards get 24h.
+--    already covered by a CANONICAL RAW Snkrdunk price refresh at 96h here
+--    (Snkrdunk owns their daily RAW series — double-scraping the same card
+--    daily on both sources would waste ~190 Yahoo slots/day); Yahoo-only hot
+--    cards get 24h.
 -- =============================================================================
 
 create or replace function public.scan_yahoo_refresh_candidates(
@@ -338,10 +339,17 @@ as $$
       case coalesce(cc.jp_refresh_tier, 'unknown')
         when 'hot' then
           case
+            -- "Snkrdunk owns the daily series" must mean the CANONICAL RAW
+            -- row specifically — compute_jp_card_price_changes consumes only
+            -- canonical-level RAW history, so a graded- or per-printing-only
+            -- Snkrdunk presence cannot form 24h pairs and must not throttle
+            -- Yahoo's RAW cadence (Codex P2 on this PR).
             when exists (
               select 1
               from public.snkrdunk_card_prices sp
               where sp.canonical_slug = y.canonical_slug
+                and sp.grade = 'RAW'
+                and sp.printing_id is null
                 and sp.price_usd is not null
             )
             then interval '96 hours'
