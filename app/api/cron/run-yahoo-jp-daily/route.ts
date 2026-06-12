@@ -146,14 +146,19 @@ async function loadStaleYahooSlugs(
 }
 
 /**
- * Initial-coverage candidates: JP-language cards with >=1 MATCHED
- * provider_card_map and no Yahoo! RAW price row yet, never-attempted (no
- * YAHOO_JP jp_ingestion_attempts row for the slug) first (tier 1), then
- * attempted-but-still-no-price (tier 2), excluding the suppressed slugs.
- * The ordering, no-price exclusion, suppression filter, slug dedupe, and
- * limit all happen server-side in scan_yahoo_initial_candidates so we no
- * longer page the matched-JP universe + load scraped/attempted membership
- * Sets per page.
+ * Initial-coverage candidates: JP-language cards with no Yahoo! RAW price
+ * row yet — every JP card gets one first-pass attempt (attempt-once-then-
+ * park; misses are parked via the NONPRODUCTIVE/TRANSIENT suppression
+ * below). Never-attempted (no YAHOO_JP jp_ingestion_attempts row) first:
+ * cards with a MATCHED provider_card_map row (tier 1) ahead of unmapped
+ * ones (tier 2), then attempted-but-still-no-price (tier 3), excluding the
+ * suppressed slugs. The old MATCHED-mapping WHERE-gate was removed in
+ * migration 20260613210000 (it permanently excluded 5,526 mostly-vintage
+ * JP cards that the evidence says convert well); the mapping now only
+ * orders tiers. The ordering, no-price exclusion, suppression filter, slug
+ * dedupe, and limit all happen server-side in
+ * scan_yahoo_initial_candidates so we no longer page the matched-JP
+ * universe + load scraped/attempted membership Sets per page.
  *
  * Why an RPC (and not chained PostgREST embeds): applying `.eq`/`.is` to a
  * `!left`-embedded to-many relation makes PostgREST drop the left-join NULL
