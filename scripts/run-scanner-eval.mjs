@@ -10,8 +10,11 @@
 //   --endpoint <url>     Where to POST scans. Default https://popalpha.ai.
 //   --language <EN|JP>   Which slice of the eval set to run. Default runs all.
 //   --sources <csv>      Optional comma-separated captured_source filter.
-//   --throttle-ms <n>    Gap between requests (default 300) so we don't
-//                        hammer Replicate while we're rate-limited.
+//   --throttle-ms <n>    Gap between requests (default 1100). The identify
+//                        route enforces a 60/min per-IP burst limit and the
+//                        whole run is one IP, so the default stays under
+//                        ~55/min even when the embedder responds instantly.
+//                        429s are additionally retried with Retry-After.
 //   --notes "<text>"     Free-form annotation on the run row.
 //   --perfect-ocr        Send GROUND-TRUTH card_number AND set_hint to the
 //                        route. Simulates a flawless OCR layer; exercises
@@ -83,34 +86,53 @@ async function identify({ endpoint, bytes, language, cardNumber, setHint }) {
   if (cardNumber) url.searchParams.set("card_number", cardNumber);
   if (setHint) url.searchParams.set("set_hint", setHint);
 
-  const startedAt = Date.now();
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "image/jpeg",
-      // Tag eval traffic so scan_identify_events telemetry can
-      // segment it out of real user analytics.
-      "X-PA-Client-Platform": "scanner-eval",
-    },
-    body: bytes,
-  });
-  const duration = Date.now() - startedAt;
+  // The route enforces a per-IP burst limit (60/min) and the whole
+  // eval run comes from one IP. The default --throttle-ms stays under
+  // that cap, and this loop additionally honors Retry-After on 429 so
+  // a throttled request waits and retries instead of persisting a
+  // bogus "Too many scans" row into the scoreboard.
+  const MAX_RATE_LIMIT_RETRIES = 5;
+  for (let attempt = 0; ; attempt++) {
+    const startedAt = Date.now();
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "image/jpeg",
+        // Tag eval traffic so scan_identify_events telemetry can
+        // segment it out of real user analytics.
+        "X-PA-Client-Platform": "scanner-eval",
+      },
+      body: bytes,
+    });
+    const duration = Date.now() - startedAt;
 
-  const bodyText = await response.text();
-  let parsed = null;
-  try {
-    parsed = bodyText ? JSON.parse(bodyText) : null;
-  } catch {
-    parsed = null;
+    if (response.status === 429 && attempt < MAX_RATE_LIMIT_RETRIES) {
+      const retryAfterSec = Number.parseInt(response.headers.get("retry-after") ?? "", 10);
+      const waitMs = Number.isFinite(retryAfterSec) && retryAfterSec > 0
+        ? retryAfterSec * 1000 + 250
+        : 2_000;
+      await response.text().catch(() => {});
+      console.warn(`  rate-limited (429); waiting ${waitMs}ms before retry ${attempt + 1}/${MAX_RATE_LIMIT_RETRIES}`);
+      await sleep(waitMs);
+      continue;
+    }
+
+    const bodyText = await response.text();
+    let parsed = null;
+    try {
+      parsed = bodyText ? JSON.parse(bodyText) : null;
+    } catch {
+      parsed = null;
+    }
+
+    return {
+      status: response.status,
+      ok: response.ok,
+      duration,
+      body: parsed,
+      rawBody: bodyText,
+    };
   }
-
-  return {
-    status: response.status,
-    ok: response.ok,
-    duration,
-    body: parsed,
-    rawBody: bodyText,
-  };
 }
 
 function accumulate(acc, key, field) {
@@ -131,7 +153,9 @@ async function main() {
     typeof args.sources === "string"
       ? args.sources.split(",").map((s) => s.trim()).filter(Boolean)
       : null;
-  const throttleMs = Number.parseInt(args["throttle-ms"] ?? "300", 10);
+  // Default sized against the identify route's 60/min per-IP limit —
+  // 1100ms ⇒ ≤ ~55 req/min even with a zero-latency embedder.
+  const throttleMs = Number.parseInt(args["throttle-ms"] ?? "1100", 10);
   const notes = typeof args.notes === "string" ? args.notes : null;
   // Pass each anchor's GROUND-TRUTH card_number to the route as the
   // ?card_number= filter. Simulates a perfect OCR result and measures
