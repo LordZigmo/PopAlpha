@@ -374,6 +374,36 @@ struct CardDetailView: View {
         return "\(label) · \(formatYahooJpObservedAt(asOf))"
     }
 
+    // MARK: - Minimized-tab-bar FAB tracking
+
+    /// Mirrors the iOS 26 Liquid Glass tab bar's minimize state. The bar
+    /// shrinks into the bottom-leading pill on scroll-down but never
+    /// releases its safe-area inset, so without this the FAB stack keeps
+    /// hovering at full-bar height beside a corner-hugging pill — visibly
+    /// uneven (owner report 2026-06-12). iOS 26.3 ships no public "is the
+    /// bar minimized" signal (the SDK has only the tabBarMinimizeBehavior
+    /// setter), so TabBarMinimizeMirror (bottom of file) reproduces the
+    /// system's observed triggers — ~110pt of downward travel to
+    /// minimize; back-at-top or a presentation to re-expand — and
+    /// resets for the presentations we own. Unobservable re-expansions
+    /// (ShareLink's sheet, tapping the pill itself) desync until the
+    /// next top/presentation.
+    @State private var tabBarLikelyMinimized = false
+
+    /// True while any presentation this view owns is up. The system
+    /// re-expands the minimized bar when a presentation appears, so the
+    /// mirror resets on this flipping true — otherwise the FAB stack
+    /// would sit low over an expanded bar after the dismissal. Computed
+    /// here (not inline in body) to keep body's expression cheap for
+    /// the type-checker.
+    private var ownedPresentationActive: Bool {
+        showBugCategoryDialog
+            || showBugNoteAlert
+            || showCorrectionSheet
+            || showSignInPromptForAdd
+            || autoAddError != nil
+    }
+
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(spacing: 0) {
@@ -412,6 +442,10 @@ struct CardDetailView: View {
             }
         }
         .coordinateSpace(name: "scroll")
+        .modifier(TabBarMinimizeMirror(
+            minimized: $tabBarLikelyMinimized,
+            presentationActive: ownedPresentationActive
+        ))
         .background(PA.Colors.background)
         .overlay(alignment: .bottomTrailing) {
             // Stacked floating actions, both stay in place during scroll.
@@ -429,6 +463,12 @@ struct CardDetailView: View {
             }
             .padding(.trailing, 20)
             .padding(.bottom, 20)
+            // Ride down into the corner the minimized bar vacates so the
+            // stack bottoms out level with the bottom-leading pill; back
+            // up when the bar re-expands. Spring roughly matches the
+            // system bar's own minimize animation.
+            .offset(y: tabBarLikelyMinimized ? 56 : 0)
+            .animation(.spring(response: 0.35, dampingFraction: 0.85), value: tabBarLikelyMinimized)
         }
         .overlay(alignment: .top) {
             if showAddedBanner {
@@ -3281,5 +3321,102 @@ fileprivate extension MarketCard {
             primaryImageUrl: imageURL?.absoluteString,
             score: nil
         )
+    }
+}
+
+// MARK: - Minimized-tab-bar scroll mirror
+
+/// Drives `CardDetailView.tabBarLikelyMinimized`, mirroring
+/// `.tabBarMinimizeBehavior(.onScrollDown)` (ContentView). No-op before
+/// iOS 26, where the legacy opaque bar never minimizes.
+///
+/// There is no public "is the bar minimized" state, so this mirrors the
+/// behavior reverse-engineered via held-drag probes on the iPhone 17
+/// Pro Max simulator (iOS 26.3, 2026-06-12):
+///
+///   • MINIMIZE on cumulative downward travel (~82–137pt observed,
+///     fires mid-gesture even while the finger is still down; speed
+///     doesn't matter).
+///   • RE-EXPAND only at (essentially) the top, or when a presentation
+///     appears. NO scroll gesture restores the bar mid-page — slow
+///     up-drags of 82/150/225pt (held AND released) and a ~340pt fast
+///     up-flick all left it minimized; every frame where it had
+///     re-expanded turned out to be at-top or post-presentation.
+///
+/// A naive direction mirror moved the FAB a beat before the bar
+/// (owner: "there's kind of a delay between the two"); matching the
+/// real triggers means both animations start on the same gesture
+/// moment. Known unobservable hole: tapping the minimized pill itself
+/// expands the bar with no signal we can see — the FAB stays low until
+/// the next top/presentation. If an iOS update retunes the system,
+/// retune `minimizeAfterDown`.
+private struct TabBarMinimizeMirror: ViewModifier {
+    @Binding var minimized: Bool
+    /// CardDetailView.ownedPresentationActive — the system re-expands
+    /// the bar when a presentation appears, so this flipping true
+    /// resets the mirror.
+    var presentationActive: Bool
+
+    /// Per-tick bookkeeping lives in a reference box so writes don't
+    /// invalidate the view — onScrollGeometryChange fires every frame.
+    private final class Tracker {
+        /// Signed displacement since the last direction change, in
+        /// points. Positive = scrolling down.
+        var run: CGFloat = 0
+    }
+
+    @State private var tracker = Tracker()
+
+    /// Mid-point of the observed 82–137pt system band.
+    private static let minimizeAfterDown: CGFloat = 110
+
+    private struct Probe: Equatable {
+        var offset: CGFloat
+        var maxOffset: CGFloat
+    }
+
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content
+                .onScrollGeometryChange(for: Probe.self) { geometry in
+                    Probe(
+                        offset: geometry.contentOffset.y + geometry.contentInsets.top,
+                        maxOffset: max(
+                            0,
+                            geometry.contentSize.height + geometry.contentInsets.top
+                                + geometry.contentInsets.bottom - geometry.containerSize.height
+                        )
+                    )
+                } action: { oldProbe, newProbe in
+                    // Clamp into the scrollable range so top/bottom
+                    // rubber-banding contributes no displacement — a
+                    // top bounce must not over-count and a bottom
+                    // bounce must not look like upward travel.
+                    let oldY = min(max(oldProbe.offset, 0), newProbe.maxOffset)
+                    let newY = min(max(newProbe.offset, 0), newProbe.maxOffset)
+                    // ≤8pt is "essentially at the top" — the only scroll
+                    // position where the system re-expands the bar.
+                    if newY <= 8 {
+                        tracker.run = 0
+                        if minimized { minimized = false }
+                        return
+                    }
+                    let delta = newY - oldY
+                    guard delta != 0 else { return }
+                    if (delta > 0) != (tracker.run > 0) { tracker.run = 0 }
+                    tracker.run += delta
+                    if tracker.run > Self.minimizeAfterDown, !minimized {
+                        minimized = true
+                    }
+                }
+                .onChange(of: presentationActive) { _, active in
+                    if active {
+                        tracker.run = 0
+                        minimized = false
+                    }
+                }
+        } else {
+            content
+        }
     }
 }
