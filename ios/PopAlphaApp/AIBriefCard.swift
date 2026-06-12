@@ -316,15 +316,11 @@ struct AIBriefCard: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        // washOpacity 0: no cyan wash in the surface — full strength
-        // composited to a teal panel, and the owner wants the brief to
-        // be the dark theme's BASE color (near-black navy). The accent
-        // survives on the border rim, bloom, shine, and text.
-        .liquidGlassSurface(accent: market.accent, washOpacity: 0)
-        // The liquid glass is translucent (ultraThinMaterial) and gets
-        // its depth from dark content behind it — on the light homepage
-        // there is none, so paint the dark-theme page color as an
-        // opaque base (resolves dark via the pin below).
+        .liquidGlassSurface(accent: market.accent)
+        // The liquid glass is translucent (ultraThinMaterial + accent
+        // wash) and gets its depth from dark content behind it — on the
+        // light homepage there is none, so paint the dark-theme page
+        // color as an opaque base (resolves dark via the pin below).
         // Ambient-dark keeps .clear: the page is already dark there and
         // an opaque base would block the glow-through the material is
         // designed for. `colorScheme` reads the AMBIENT scheme — the

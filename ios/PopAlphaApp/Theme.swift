@@ -346,15 +346,6 @@ struct LiquidGlassSurface: ViewModifier {
     /// rather than a defined corner hotspot.
     var shineIntensity: Double = 0.08
 
-    /// Scales the interior accent wash (0 = no chroma in the surface;
-    /// 1 = the standard tinted glass). The border rim, bloom shadow,
-    /// and shine are NOT scaled — at 0 the panel interior is the plain
-    /// dark glass while the accent survives on the edges. Added
-    /// 2026-06-12 for the AI brief panels: the owner wants them the
-    /// dark theme's BASE color (near-black navy), not the teal that
-    /// the full-strength cyan wash composites to.
-    var washOpacity: Double = 1.0
-
     /// The accent wash is dialed back in light mode so that small
     /// accent-colored labels (eg. `MarketHeroCard`'s "POPALPHA"
     /// eyebrow, `AIBriefCard`'s timestamp) keep WCAG-readable contrast
@@ -447,9 +438,6 @@ struct LiquidGlassSurface: ViewModifier {
 
     /// Accent-wash stops. Dark mode runs hot (rich tinted glass);
     /// light mode runs cool to preserve small-text contrast.
-    /// `washOpacity` scales every stop — at 0 the interior is plain
-    /// glass (the light-mode white sheen is kept regardless; it carries
-    /// no chroma).
     private var accentGradientColors: [Color] {
         switch colorScheme {
         case .light:
@@ -474,17 +462,17 @@ struct LiquidGlassSurface: ViewModifier {
             // could mask. These flatter, monotonic-ish stops keep the
             // rich tinted-glass feel while smoothing out the two peaks.
             return [
-                accent.opacity(0.38 * washOpacity),
-                accent.opacity(0.30 * washOpacity),
-                accent.opacity(0.32 * washOpacity),
-                accent.opacity(0.22 * washOpacity)
+                accent.opacity(0.38),
+                accent.opacity(0.30),
+                accent.opacity(0.32),
+                accent.opacity(0.22)
             ]
         @unknown default:
             return [
-                accent.opacity(0.40 * washOpacity),
-                accent.opacity(0.16 * washOpacity),
-                accent.opacity(0.32 * washOpacity),
-                accent.opacity(0.12 * washOpacity)
+                accent.opacity(0.40),
+                accent.opacity(0.16),
+                accent.opacity(0.32),
+                accent.opacity(0.12)
             ]
         }
     }
@@ -540,14 +528,8 @@ extension View {
     func liquidGlassSurface(
         accent: Color,
         radius: CGFloat = PA.Layout.panelRadius,
-        shineIntensity: Double = 0.08,
-        washOpacity: Double = 1.0
+        shineIntensity: Double = 0.08
     ) -> some View {
-        modifier(LiquidGlassSurface(
-            accent: accent,
-            radius: radius,
-            shineIntensity: shineIntensity,
-            washOpacity: washOpacity
-        ))
+        modifier(LiquidGlassSurface(accent: accent, radius: radius, shineIntensity: shineIntensity))
     }
 }

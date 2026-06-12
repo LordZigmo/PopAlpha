@@ -2395,9 +2395,7 @@ struct CardDetailView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         // Match the front-page AI brief container (AIBriefCard) so the two
         // read as the same component.
-        // washOpacity 0 matches AIBriefCard: the summary surface is the
-        // dark theme's base color, accent on edges/text only.
-        .liquidGlassSurface(accent: detailAccent, washOpacity: 0)
+        .liquidGlassSurface(accent: detailAccent)
         // Opaque dark base under the translucent glass — the dark look
         // depends on dark content behind the material, which a light
         // page doesn't provide (fill resolves dark via the pin below).
