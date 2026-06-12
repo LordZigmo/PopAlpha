@@ -78,6 +78,11 @@ function parseArgs(argv) {
     // Behavior
     skipIfFresherThanHours: 24,
     pages: 4, // most Snkrdunk products have ≤2 pages; 4 is safe upper bound
+    // PRODUCTIVE floor — decides the low-sample STATUS only, not the write.
+    // Since the write/park split (option E, 2026-06-12) all observations with
+    // >= MIN_WRITE_SAMPLE_COUNT sold samples persist with their true
+    // sample_count; see processCard. Mirrors MIN_PRODUCTIVE_SAMPLE_COUNT in
+    // app/api/cron/run-snkrdunk-daily/route.ts.
     minSampleCount: 3,
     dryRun: false,
     interCardDelayMs: 2000, // polite default — Snkrdunk's robots.txt asks us not to crawl /en/v1/
@@ -306,6 +311,16 @@ async function writeSnkrdunkPrice(supabase, slug, payload) {
   return { mode: "upserted" };
 }
 
+// Write gate — mirrors MIN_WRITE_SAMPLE_COUNT in
+// app/api/cron/run-snkrdunk-daily/route.ts (option E of the JP
+// display-policy design, 2026-06-12). Any grade bucket with at least one
+// sold sample persists with its TRUE sample_count; opts.minSampleCount
+// (--min-sample=, default 3) is the PRODUCTIVE floor that only decides the
+// low-sample status. Display stays floored at sample_count >= 3 downstream
+// (refresh_jp_price_display, migration 20260613150000; and
+// compute_jp_card_price_changes, migration 20260614120000).
+const MIN_WRITE_SAMPLE_COUNT = 1;
+
 async function processCard(supabase, pair, opts) {
   const { slug, productCode } = pair;
   // Trim "SW---" prefix to recover the trading-card-id
@@ -334,9 +349,13 @@ async function processCard(supabase, pair, opts) {
     printingId,
   });
 
-  // Filter to observations that meet the min-sample threshold
-  const writableObs = agg.priceObservations.filter((o) => o.count >= opts.minSampleCount);
+  // Write/park split: WRITE everything with >= MIN_WRITE_SAMPLE_COUNT sold
+  // samples; opts.minSampleCount is the PRODUCTIVE floor that only decides
+  // the low-sample status (parking/counters), mirroring the cron route.
+  const writableObs = agg.priceObservations.filter((o) => o.count >= MIN_WRITE_SAMPLE_COUNT);
+  const productiveObs = writableObs.filter((o) => o.count >= opts.minSampleCount);
   if (writableObs.length === 0) {
+    // Zero sold samples in every grade — nothing to persist.
     return {
       slug,
       productCode,
@@ -345,23 +364,31 @@ async function processCard(supabase, pair, opts) {
       accepted: agg.accepted,
       droppedConditions: agg.droppedConditions,
       minRequired: opts.minSampleCount,
+      rowsWritten: 0,
     };
   }
 
   const observedAt = new Date().toISOString();
 
-  // For dry-run AND ok-status, pick the canonical RAW row as the
-  // "summary" observation surfaced in the per-card log line.
+  // For dry-run AND ok-status, pick the canonical RAW row as the "summary"
+  // observation surfaced in the per-card log line. Prefer rows that met the
+  // PRODUCTIVE floor so an ok-status summary never headlines a 1-2-sample
+  // price; fall back to writable rows only for the dry-run preview of a
+  // would-be-low-sample card (a real run reports low-sample, no summary).
+  const summaryPool = productiveObs.length > 0 ? productiveObs : writableObs;
   const summaryObs =
-    writableObs.find((o) => o.grade === "RAW" && o.printing_id === null) ??
-    writableObs.find((o) => o.grade === "RAW") ??
-    writableObs[0];
+    summaryPool.find((o) => o.grade === "RAW" && o.printing_id === null) ??
+    summaryPool.find((o) => o.grade === "RAW") ??
+    summaryPool[0];
 
   if (opts.dryRun) {
     return {
       slug,
       productCode,
       status: "dry-run",
+      // What a real run would have classified this card as (the parking /
+      // counter decision), independent of the rows it would write.
+      wouldBeStatus: productiveObs.length === 0 ? "low-sample" : "ok",
       scraped: agg.inputCount,
       accepted: agg.accepted,
       droppedConditions: agg.droppedConditions,
@@ -394,6 +421,23 @@ async function processCard(supabase, pair, opts) {
     }
   } catch (err) {
     return { slug, productCode, status: "write-failed", reason: err.message };
+  }
+
+  // Status gate, decoupled from the write gate: the 1-2-sample rows were
+  // persisted above (write happens FIRST — option E reorder), but a card
+  // where NO grade reached the productive floor still classifies as
+  // "low-sample" so operator counters mirror the cron route's semantics.
+  if (productiveObs.length === 0) {
+    return {
+      slug,
+      productCode,
+      status: "low-sample",
+      scraped: agg.inputCount,
+      accepted: agg.accepted,
+      droppedConditions: agg.droppedConditions,
+      minRequired: opts.minSampleCount,
+      rowsWritten,
+    };
   }
 
   return {
