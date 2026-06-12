@@ -90,12 +90,48 @@ export async function GET(req: Request) {
     jpPriceChangesError = err instanceof Error ? err.message : String(err);
   }
 
+  // JP display liveness probe. The metrics GC exempts rows bearing
+  // jp_display_price (20260613220000), so a dead refresh-jp-price-display
+  // cron leaves stale JP prices visible indefinitely. The weekly
+  // check-jp-source-divergence carries the same check for operator context,
+  // but weekly detection of a 48h condition is up to a 9-day blind spot
+  // (Codex P2 on the tiered-display PR) — THIS route's 12h cadence is the
+  // primary alarm. jp_display_price_as_of has exactly one writer (the
+  // display cron), so the global max is the liveness signal; no language
+  // join needed.
+  const JP_DISPLAY_STALE_HOURS = 48;
+  let jpDisplayStalenessError: string | null = null;
+  try {
+    const { data: liveRows, error: liveErr } = await supabase
+      .from("card_metrics")
+      .select("jp_display_price_as_of")
+      .not("jp_display_price_as_of", "is", null)
+      .order("jp_display_price_as_of", { ascending: false })
+      .limit(1);
+    if (liveErr) {
+      jpDisplayStalenessError = `probe failed: ${liveErr.message}`;
+    } else {
+      const newest = liveRows?.[0]?.jp_display_price_as_of as string | undefined;
+      const ageHours = newest
+        ? (Date.now() - new Date(newest).getTime()) / 3_600_000
+        : Number.POSITIVE_INFINITY;
+      if (ageHours > JP_DISPLAY_STALE_HOURS) {
+        jpDisplayStalenessError = newest
+          ? `newest jp_display_price_as_of is ${Math.round(ageHours)}h old (threshold ${JP_DISPLAY_STALE_HOURS}h) — is refresh-jp-price-display running?`
+          : "no jp_display_price_as_of rows at all — is refresh-jp-price-display running?";
+      }
+    }
+  } catch (err) {
+    jpDisplayStalenessError = err instanceof Error ? err.message : String(err);
+  }
+
   const stepErrors = [
     resultError ? `refreshCardMetrics: ${resultError}` : null,
     confidenceError ? `confidence: ${confidenceError}` : null,
     realizedBacktestError ? `realizedBacktest: ${realizedBacktestError}` : null,
     priceChangesError ? `priceChanges: ${priceChangesError}` : null,
     jpPriceChangesError ? `jpPriceChanges: ${jpPriceChangesError}` : null,
+    jpDisplayStalenessError ? `jpDisplayStaleness: ${jpDisplayStalenessError}` : null,
   ].filter((e): e is string => e !== null);
 
   if (stepErrors.length > 0) {
@@ -114,6 +150,7 @@ export async function GET(req: Request) {
       priceChanges: priceChangesResult,
       priceChangesError,
       jpPriceChanges: jpPriceChangesResult,
+      jpDisplayStalenessError,
       jpPriceChangesError,
     },
     { status: stepErrors.length > 0 ? 500 : 200 },

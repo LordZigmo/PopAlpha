@@ -30,6 +30,17 @@
  * in-process from rows already fetched (plus a bounded canonical_cards name
  * lookup), informational only — it never trips the alert.
  *
+ * Second check (20260614150000): JP display staleness. The card_metrics GC
+ * exemption (20260613220000) ties JP metric-row survival to the hourly
+ * refresh-jp-price-display cron — a dead display cron leaves exempted rows
+ * showing a stale price indefinitely, and this codebase has had three
+ * silent-fallback incidents where a dead pipeline kept reporting ok
+ * (docs/external-api-failure-modes.md). max(jp_display_price_as_of) across
+ * the canonical JP RAW display rows goes stale if EITHER the display cron
+ * or every JP scrape source dies; > 48h trips the same fail-loud 500 via
+ * separate payload fields (displayStale, displayStalenessHours) so the two
+ * alarms stay distinguishable.
+ *
  * Auth: Authorization: Bearer <CRON_SECRET>
  */
 
@@ -57,6 +68,12 @@ const DIVERGENCE_RATIO_THRESHOLD = 5;
 // filter rollback) long before it approaches audit-era levels. Tune as the
 // post-#237 steady state becomes known.
 const ALERT_DIVERGENT_COUNT = 60;
+// JP display staleness threshold. jp_display_price_as_of is day-truncated
+// (the 14d median's freshest day), so a healthy hourly display cron plus
+// daily JP scrapes keep the global max under ~24h (prod baseline
+// 2026-06-12: ~7h). 48h therefore means a fully missed day plus slack —
+// the display cron or every JP source has been dead for a day or more.
+const JP_DISPLAY_STALE_THRESHOLD_HOURS = 48;
 
 const PAGE_SIZE = 1000;
 const TOP_OFFENDER_LIMIT = 20;
@@ -107,6 +124,27 @@ async function fetchLatestRawRollups(
   return rows;
 }
 
+// Freshest jp_display_price_as_of among the canonical JP RAW display rows —
+// the rows public_card_metrics serves and the GC exemption protects. Only
+// refresh_jp_price_display (hourly, 40 * * * *) writes the column, over the
+// whole JP set per tick, so the global max tracks the freshest displayed
+// day; order-by + limit 1 IS max() in PostgREST terms.
+async function fetchNewestJpDisplayAsOf(
+  supabase: ReturnType<typeof dbAdmin>,
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("card_metrics")
+    .select("jp_display_price_as_of")
+    .eq("grade", "RAW")
+    .is("printing_id", null)
+    .not("jp_display_price_as_of", "is", null)
+    .order("jp_display_price_as_of", { ascending: false })
+    .limit(1)
+    .returns<{ jp_display_price_as_of: string }[]>();
+  if (error) throw new Error(`card_metrics: ${error.message}`);
+  return data?.[0]?.jp_display_price_as_of ?? null;
+}
+
 export async function GET(req: Request) {
   const auth = await requireCron(req);
   if (!auth.ok) return auth.response;
@@ -117,9 +155,10 @@ export async function GET(req: Request) {
     // 1. Latest RAW canonical-level rollups from both sources. These tables
     //    are UPSERT-in-place (one row per slug+printing+grade), so the row
     //    IS the latest observation.
-    const [yahooRows, snkrdunkRows] = await Promise.all([
+    const [yahooRows, snkrdunkRows, newestJpDisplayAsOf] = await Promise.all([
       fetchLatestRawRollups(supabase, "yahoo_jp_card_prices", YAHOO_MIN_SAMPLE_COUNT),
       fetchLatestRawRollups(supabase, "snkrdunk_card_prices", SNKRDUNK_MIN_SAMPLE_COUNT),
+      fetchNewestJpDisplayAsOf(supabase),
     ]);
 
     // 2. Join per slug, compute greatest/least ratio.
@@ -170,8 +209,23 @@ export async function GET(req: Request) {
     //    identical latest Yahoo (price_usd, sample_count) pair.
     const fanOutCensus = await computeYahooFanOutCensus(supabase, yahooRows);
 
+    // 5. JP display staleness. The GC exemption keeps JP rows alive only
+    //    while jp_display_price is set, and only the hourly display cron
+    //    maintains that column — a dead cron must not be silent (three
+    //    prior silent-fallback incidents). Zero displayable rows (or an
+    //    unparseable timestamp) is itself the alarm condition: the
+    //    metric-row unlock guarantees thousands of displaying rows.
+    const newestJpDisplayMs =
+      newestJpDisplayAsOf === null ? Number.NaN : new Date(newestJpDisplayAsOf).getTime();
+    const displayStalenessHours = Number.isFinite(newestJpDisplayMs)
+      ? Math.round(((Date.now() - newestJpDisplayMs) / 3_600_000) * 10) / 10
+      : null;
+    const displayStale =
+      displayStalenessHours === null || displayStalenessHours > JP_DISPLAY_STALE_THRESHOLD_HOURS;
+
     const divergentCount = offenders.length;
-    const alert = divergentCount > ALERT_DIVERGENT_COUNT;
+    const divergenceAlert = divergentCount > ALERT_DIVERGENT_COUNT;
+    const alert = divergenceAlert || displayStale;
     const payload = {
       ok: !alert,
       divergentCount,
@@ -182,8 +236,14 @@ export async function GET(req: Request) {
       snkrdunkMinSampleCount: SNKRDUNK_MIN_SAMPLE_COUNT,
       topOffenders,
       fanOutCensus,
-      remediation: alert
+      displayStale,
+      displayStalenessHours,
+      displayStaleThresholdHours: JP_DISPLAY_STALE_THRESHOLD_HOURS,
+      remediation: divergenceAlert
         ? "Verify the top offenders (snkrdunkName vs the canonical card), then quarantine confirmed mismaps with scripts/jp-mapping-quarantine.mjs --slugs=<...> --source=<snkrdunk|yahoo_jp|both> --apply. Yahoo-side offenders also need the PR #237 number-mismatch filter live or they re-contaminate hourly."
+        : null,
+      displayRemediation: displayStale
+        ? "JP display prices have not advanced in over 48h. Check the refresh-jp-price-display cron (hourly, 40 * * * *) and the Yahoo!/Snkrdunk scrape crons — the card_metrics GC exemption keeps stale JP prices visible until the display cron refreshes or clears them."
         : null,
     };
 
