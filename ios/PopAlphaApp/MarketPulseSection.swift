@@ -347,37 +347,49 @@ struct MarketPulseSection: View {
 
     private var categoryTabs: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 ForEach(visibleCategories) { cat in
                     let tabColor = brandedColor(cat)
+                    let isSelected = category == cat
                     Button {
                         withAnimation(.easeInOut(duration: 0.18)) {
                             category = cat
                             PAHaptics.selection()
                         }
                     } label: {
-                        Text(cat.label)
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(
-                                category == cat ? tabColor : PA.Colors.textSecondary
-                            )
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 7)
-                            .background(
-                                Capsule().fill(
-                                    category == cat
-                                        ? tabColor.opacity(0.14)
-                                        : PA.Colors.hairline(0.03)
+                        // Selected = SOLID adaptive-text-color capsule
+                        // with background-tone label + a category-color
+                        // dot — the same high-contrast treatment as the
+                        // 24H/7D window toggle (guaranteed legible in
+                        // both themes; a branded fill fails contrast on
+                        // gold/cyan in light mode). Design feedback
+                        // 2026-06-12: the old 14%-tint selected state
+                        // read as cramped sameness across the strip.
+                        HStack(spacing: 5) {
+                            if isSelected {
+                                Circle()
+                                    .fill(tabColor)
+                                    .frame(width: 6, height: 6)
+                            }
+                            Text(cat.label)
+                                .font(.system(size: 12, weight: isSelected ? .bold : .semibold))
+                                .foregroundStyle(
+                                    isSelected ? PA.Colors.background : PA.Colors.textSecondary
                                 )
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(
+                            Capsule().fill(
+                                isSelected ? PA.Colors.text : PA.Colors.hairline(0.03)
                             )
-                            .overlay(
-                                Capsule().stroke(
-                                    category == cat
-                                        ? tabColor.opacity(0.38)
-                                        : PA.Colors.hairline(0.08),
-                                    lineWidth: 1
-                                )
+                        )
+                        .overlay(
+                            Capsule().stroke(
+                                isSelected ? Color.clear : PA.Colors.hairline(0.08),
+                                lineWidth: 1
                             )
+                        )
                     }
                     .buttonStyle(.plain)
                 }

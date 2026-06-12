@@ -154,7 +154,7 @@ struct MoverSection<TrailingAccessory: View>: View {
     }
 }
 
-// MARK: - Featured Mover Card (96pt)
+// MARK: - Featured Mover Card (~104pt)
 //
 // Exposed as `internal` for reuse by MarketPulseSection / ForYouRail.
 
@@ -165,9 +165,12 @@ struct FeaturedMoverCard: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            // Image
+            // Image — trimmed from 72×100 (design feedback 2026-06-12:
+            // the featured card dominated the page, reading as "one
+            // featured card plus a list" instead of a market dashboard;
+            // keep the featured treatment, lose a fifth of the bulk).
             thumbnail
-                .frame(width: 72, height: 100)
+                .frame(width: 60, height: 84)
 
             // Right side
             VStack(alignment: .leading, spacing: 6) {
@@ -224,7 +227,7 @@ struct FeaturedMoverCard: View {
                 }
             }
         }
-        .padding(12)
+        .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(PA.Gradients.cardSurface)
         .clipShape(RoundedRectangle(cornerRadius: PA.Layout.cardRadius, style: .continuous))

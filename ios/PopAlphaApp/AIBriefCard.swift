@@ -154,11 +154,14 @@ struct AIBriefCard: View {
         let styleValue: String       // first row's bold value
         let actionLabel: String      // second row's label
         let actionValue: String      // second row's bold value
-        /// True for guests, where the first row should read as an
-        /// example rather than a real profile.
-        let isExample: Bool
     }
 
+    /// Authed-only copy — guests get `guestSignInRow` instead (one
+    /// direct prompt + a real Sign In button; owner spec 2026-06-12).
+    /// The previous two-row guest strip ("EXAMPLE STYLE /
+    /// Modern-focused" + "PERSONALIZE / Sign in to make this yours")
+    /// read as unclear filler. AuthService is observable, so the strip
+    /// swaps to these rows the moment sign-in completes.
     private var personalizationCopy: PersonalizationCopy {
         let focusSet = brief?.focusSet?.trimmingCharacters(in: .whitespaces)
         let actionValue: String
@@ -168,30 +171,19 @@ struct AIBriefCard: View {
             actionValue = "Browse today's movers"
         }
 
-        if !auth.isAuthenticated {
-            return PersonalizationCopy(
-                styleLabel: "Example style",
-                styleValue: "Modern-focused",
-                actionLabel: "Personalize",
-                actionValue: "Sign in to make this yours",
-                isExample: true
-            )
-        }
         if let styleLabel, !styleLabel.isEmpty {
             return PersonalizationCopy(
                 styleLabel: "Your style",
                 styleValue: styleLabel,
                 actionLabel: "Best next",
-                actionValue: actionValue,
-                isExample: false
+                actionValue: actionValue
             )
         }
         return PersonalizationCopy(
             styleLabel: "Your style",
             styleValue: "Building profile",
             actionLabel: "Best next",
-            actionValue: "Tap cards you like to teach the model",
-            isExample: false
+            actionValue: "Tap cards you like to teach the model"
         )
     }
 
@@ -388,20 +380,24 @@ struct AIBriefCard: View {
     // a separate panel. Layout stays tight (under 50pt total height).
 
     private var personalizationStrip: some View {
-        let copy = personalizationCopy
-        return VStack(alignment: .leading, spacing: 6) {
-            personalizationRow(
-                eyebrow: copy.styleLabel,
-                value: copy.styleValue,
-                icon: "scope",
-                isMuted: copy.isExample
-            )
-            personalizationRow(
-                eyebrow: copy.actionLabel,
-                value: copy.actionValue,
-                icon: "arrow.right.circle.fill",
-                isMuted: copy.isExample
-            )
+        Group {
+            if auth.isAuthenticated {
+                let copy = personalizationCopy
+                VStack(alignment: .leading, spacing: 6) {
+                    personalizationRow(
+                        eyebrow: copy.styleLabel,
+                        value: copy.styleValue,
+                        icon: "scope"
+                    )
+                    personalizationRow(
+                        eyebrow: copy.actionLabel,
+                        value: copy.actionValue,
+                        icon: "arrow.right.circle.fill"
+                    )
+                }
+            } else {
+                guestSignInRow
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
@@ -412,11 +408,47 @@ struct AIBriefCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
+    /// Guest strip: one direct prompt + a real Sign In button (owner
+    /// spec 2026-06-12: "Sign in to personalize your daily brief").
+    /// Routes through the app-wide chooser (`AuthService.signIn()`),
+    /// same as every shortcut Sign In button. Once authenticated the
+    /// observable auth flips `personalizationStrip` to the style rows,
+    /// so the prompt removes itself.
+    private var guestSignInRow: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "person.crop.circle.badge.checkmark")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(market.accent)
+                .accessibilityHidden(true)
+            Text("Sign in to personalize your daily brief")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(PA.Colors.text)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+            Spacer(minLength: 8)
+            Button {
+                PAHaptics.tap()
+                AuthService.shared.signIn()
+            } label: {
+                Text("Sign In")
+                    .font(.system(size: 12, weight: .bold))
+                    // Pinned dark, so this resolves near-black on the
+                    // accent capsule — same contrast pairing as
+                    // PrimarySignInButton.
+                    .foregroundStyle(PA.Colors.background)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(market.accent))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Sign in to personalize your daily brief")
+        }
+    }
+
     private func personalizationRow(
         eyebrow: String,
         value: String,
-        icon: String,
-        isMuted: Bool
+        icon: String
     ) -> some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
@@ -424,14 +456,21 @@ struct AIBriefCard: View {
                 .foregroundStyle(market.accent)
                 .frame(width: 10)
                 .accessibilityHidden(true)
+            // textSecondary (not muted) + full-contrast values: this
+            // strip EXPLAINS personalization, so it must be readable on
+            // the pinned dark glass (design feedback, 2026-06-12 —
+            // "the gray text … is a little low-contrast"). minWidth
+            // keeps the two authed rows column-aligned while letting a
+            // longer one-row guest eyebrow take the space it needs.
             Text(eyebrow.uppercased())
                 .font(.system(size: 9, weight: .semibold))
                 .tracking(1.2)
-                .foregroundStyle(PA.Colors.muted)
-                .frame(width: 80, alignment: .leading)
+                .foregroundStyle(PA.Colors.textSecondary)
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(minWidth: 80, alignment: .leading)
             Text(value)
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(isMuted ? PA.Colors.textSecondary : PA.Colors.text)
+                .foregroundStyle(PA.Colors.text)
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
             Spacer(minLength: 0)
