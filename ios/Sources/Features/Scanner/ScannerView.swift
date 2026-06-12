@@ -320,21 +320,27 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
                 return
             }
 
-            self.captureSession.beginConfiguration()
-            self.captureSession.sessionPreset = .high
+            // The begin/commit transaction lives in its own scope so the
+            // deferred commitConfiguration() fires BEFORE anything after
+            // the block — startRunning() inside an open configuration
+            // transaction starts a session whose input/output additions
+            // haven't been applied yet (running but frameless).
+            let configured: Bool = {
+                self.captureSession.beginConfiguration()
+                self.captureSession.sessionPreset = .high
 
-            defer {
-                self.captureSession.commitConfiguration()
-            }
+                defer {
+                    self.captureSession.commitConfiguration()
+                }
 
-            guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: self.cameraPosition),
-                  let input = try? AVCaptureDeviceInput(device: device),
-                  self.captureSession.canAddInput(input) else {
-                self.reportCameraSetupFailure(Self.cameraUnavailableMessage)
-                return
-            }
+                guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: self.cameraPosition),
+                      let input = try? AVCaptureDeviceInput(device: device),
+                      self.captureSession.canAddInput(input) else {
+                    self.reportCameraSetupFailure(Self.cameraUnavailableMessage)
+                    return false
+                }
 
-            self.captureSession.addInput(input)
+                self.captureSession.addInput(input)
             // Configure focus / exposure / white-balance for the scanner's
             // actual use case: a small, close-up, mostly-stationary card
             // ~10 inches from the lens. AVCapture's default focus mode is
@@ -362,7 +368,7 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
 
             guard self.captureSession.canAddOutput(self.videoOutput) else {
                 self.reportCameraSetupFailure(Self.cameraUnavailableMessage)
-                return
+                return false
             }
 
             self.captureSession.addOutput(self.videoOutput)
@@ -371,14 +377,20 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
                 outputConnection.videoRotationAngle = 0
             }
 
+            return true
+            }()
+
+            guard configured else { return }
+
             self.isSessionConfigured = true
             self.noteSessionDiagnostic("session configured")
 
             // Start immediately if the UI already asked for frames —
             // this is the path that fixes "configured after the
             // appearance callback ⇒ never started" (black placeholder
-            // forever). Same serial queue, so no race with the
-            // start/stop intents.
+            // forever). Runs strictly AFTER commitConfiguration (the
+            // transaction block above has ended), on the same serial
+            // queue, so no race with the start/stop intents.
             if self.shouldBeRunning, !self.captureSession.isRunning {
                 self.captureSession.startRunning()
                 self.noteSessionDiagnostic(
