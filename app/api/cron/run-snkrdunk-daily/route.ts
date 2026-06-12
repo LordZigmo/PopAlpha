@@ -67,14 +67,36 @@ const JPY_TO_USD = (() => {
   const parsed = raw != null ? Number.parseFloat(raw) : NaN;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_JPY_TO_USD_RATE;
 })();
-const MIN_SAMPLE_COUNT = 3;
+// Write/park split (option E of the JP display-policy design, 2026-06-12).
+// Formerly a single MIN_SAMPLE_COUNT = 3 that gated the WRITE: a scrape
+// returning 1-2 sold samples per grade wrote nothing — the observation
+// was destroyed at scrape time. The split decouples the two decisions:
+//
+// MIN_WRITE_SAMPLE_COUNT (write gate): any grade bucket with >= 1 sold
+// sample is persisted to snkrdunk_card_prices and appended to
+// jp_card_price_history with its TRUE sample_count. Mirrors
+// run-yahoo-jp-daily, which has always written from sample_count=1 on
+// the principle that consumers decide trust via sample_count. Low-sample
+// rows do NOT display: refresh_jp_price_display floors at
+// sample_count >= 3 (migration 20260613150000), and
+// compute_jp_card_price_changes gains the same floor in migration
+// 20260614120000_compute_jp_changes_sample_floor.sql shipped alongside
+// this split.
+const MIN_WRITE_SAMPLE_COUNT = 1;
+// MIN_PRODUCTIVE_SAMPLE_COUNT (status/parking gate): unchanged "why 3"
+// reasoning — a scrape where no grade bucket reaches 3 sold samples
+// rarely yields a DISPLAYABLE price, so it still classifies as
+// "low-sample" and parks for NONPRODUCTIVE_RETRY_HOURS. Keeps the
+// PR #209 capacity protection byte-identical.
+const MIN_PRODUCTIVE_SAMPLE_COUNT = 3;
 const DEADLINE_RESERVE_MS = 30_000;
 const SCRAPE_PAGES = 4; // most cards have ≤2 pages; 4 is safe upper bound
-// Low-sample codes (Snkrdunk returns listings but < MIN_SAMPLE_COUNT sold per
-// grade) never yield a price, so re-probing them weekly just burns the scarce
-// initial-coverage slots. ~2,804 matched codes are low-sample vs ~2,853 never
-// scraped (2026-06-08) — re-admitting the former every 7d starved the latter.
-// Park ~monthly: still catches a card that later gains liquidity.
+// Low-sample codes (Snkrdunk returns listings but < MIN_PRODUCTIVE_SAMPLE_COUNT
+// sold per grade) never yield a displayable price, so re-probing them weekly
+// just burns the scarce initial-coverage slots. ~2,804 matched codes are
+// low-sample vs ~2,853 never scraped (2026-06-08) — re-admitting the former
+// every 7d starved the latter. Park ~monthly: still catches a card that
+// later gains liquidity.
 const NONPRODUCTIVE_RETRY_HOURS = 24 * 30;
 const TRANSIENT_RETRY_HOURS = 6;
 const SNKRDUNK_ROUTE = "/api/cron/run-snkrdunk-daily";
@@ -104,7 +126,10 @@ type SnkrdunkRefreshCandidateRow = {
 
 type SnkrdunkProcessResult =
   | { slug: string; status: "ok"; rowsWritten: number; price: number | null; sampleCount: number }
-  | { slug: string; status: "low-sample"; rawCount: number }
+  // low-sample can still WRITE rows (1-2-sample observations persist with
+  // their true sample_count; the >= 3 floor lives downstream in the display
+  // refresher). status stays "low-sample" so parking semantics are unchanged.
+  | { slug: string; status: "low-sample"; rawCount: number; rowsWritten: number }
   | { slug: string; status: "scrape-failed"; reason: string }
   | { slug: string; status: "write-failed"; reason: string };
 
@@ -283,11 +308,16 @@ async function processCard(
     printingId,
   });
   const writableObs = agg.priceObservations.filter(
-    (o: { count: number }) => o.count >= MIN_SAMPLE_COUNT,
+    (o: { count: number }) => o.count >= MIN_WRITE_SAMPLE_COUNT,
   );
+  const productiveObs = writableObs.filter(
+    (o: { count: number }) => o.count >= MIN_PRODUCTIVE_SAMPLE_COUNT,
+  );
+  const rawObs = agg.priceObservations.find((o: { grade: string }) => o.grade === "RAW");
   if (writableObs.length === 0) {
-    const rawObs = agg.priceObservations.find((o: { grade: string }) => o.grade === "RAW");
-    return { slug, status: "low-sample", rawCount: rawObs?.count ?? 0 };
+    // Zero sold samples in every grade — nothing to persist. Classification
+    // and parking identical to the pre-split behavior.
+    return { slug, status: "low-sample", rawCount: rawObs?.count ?? 0, rowsWritten: 0 };
   }
 
   const observedAt = new Date().toISOString();
@@ -327,8 +357,11 @@ async function processCard(
 
     // Append the same observation to jp_card_price_history so
     // compute_jp_card_price_changes() (migration 20260520140000) can
-    // derive 24h/7d deltas for the JP homepage rails. Mirrors the
-    // pipeline-script writer in scripts/run-snkrdunk-pipeline.mjs.
+    // derive 24h/7d deltas for the JP homepage rails. 1-2-sample rows
+    // append too (the tiered-display work needs the history) but are
+    // excluded from the delta math by the sample_count >= 3 floor in
+    // migration 20260614120000. Mirrors the pipeline-script writer in
+    // scripts/run-snkrdunk-pipeline.mjs.
     // Non-fatal — the latest-price upsert above is the homepage's
     // source of truth; a missed history row just means a slightly
     // staler baseline next tick.
@@ -358,12 +391,27 @@ async function processCard(
     }
   }
 
+  // Status/parking gate, decoupled from the write gate: the 1-2-sample rows
+  // were persisted above (write happens FIRST now — option E reorder), but a
+  // scrape where NO grade reached MIN_PRODUCTIVE_SAMPLE_COUNT still reports
+  // "low-sample", so the NONPRODUCTIVE_RETRY_HOURS parking, the suppression
+  // scan in pickRefreshCandidates, and the jp_ingestion_runs lowSample
+  // counter are all byte-identical to the pre-split behavior (PR #209
+  // capacity protection).
+  if (productiveObs.length === 0) {
+    return { slug, status: "low-sample", rawCount: rawObs?.count ?? 0, rowsWritten };
+  }
+
+  // Summary picked from PRODUCTIVE observations only, so an ok-status
+  // attempt row keeps surfacing a price that met the >= 3 floor — a
+  // 1-sample RAW row must not become the attempt's headline price just
+  // because it now gets written.
   const summaryObs =
-    writableObs.find((o: { grade: string; printing_id: string | null }) =>
+    productiveObs.find((o: { grade: string; printing_id: string | null }) =>
       o.grade === "RAW" && o.printing_id === null,
     ) ??
-    writableObs.find((o: { grade: string }) => o.grade === "RAW") ??
-    writableObs[0];
+    productiveObs.find((o: { grade: string }) => o.grade === "RAW") ??
+    productiveObs[0];
   return {
     slug,
     status: "ok",
