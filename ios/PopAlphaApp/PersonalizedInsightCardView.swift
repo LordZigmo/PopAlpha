@@ -20,6 +20,10 @@ struct PersonalizedInsightCardView: View {
     @State private var didLogLockedView = false
     @State private var didLogInsightView = false
 
+    /// AMBIENT scheme (resolves outside the dark pin below) — gates the
+    /// opaque dark base to light mode only, same pattern as AIBriefCard.
+    @Environment(\.colorScheme) private var colorScheme
+
     private static let purpleBorder = Color(red: 0.752, green: 0.517, blue: 0.988)     // #C084FC
     private static let purpleAccent = Color(red: 0.659, green: 0.333, blue: 0.969)     // #A855F7
     // Text tones adapt per scheme: the container is now the same liquid
@@ -102,6 +106,16 @@ struct PersonalizedInsightCardView: View {
         // AIBriefCard), tinted purple — the two cards read as siblings of
         // one component family instead of two different design systems.
         .liquidGlassSurface(accent: Self.purpleAccent)
+        // Same always-dark treatment as the AI brief panels (owner,
+        // 2026-06-12): opaque dark base in ambient-light only, then pin
+        // the trait so the purple glass + lavender text render exactly
+        // as the dark theme does. The paywall sheet hangs off `body`,
+        // outside this pin.
+        .background(
+            RoundedRectangle(cornerRadius: PA.Layout.panelRadius, style: .continuous)
+                .fill(colorScheme == .light ? PA.Colors.background : Color.clear)
+        )
+        .environment(\.colorScheme, .dark)
     }
 
     private var insight: CollectorInsight? { response?.collectorInsight }
@@ -231,7 +245,17 @@ struct PersonalizedInsightCardView: View {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .liquidGlassSurface(accent: Self.purpleAccent)
+            // Same always-dark treatment as the unlocked card above.
+            .background(
+                RoundedRectangle(cornerRadius: PA.Layout.panelRadius, style: .continuous)
+                    .fill(colorScheme == .light ? PA.Colors.background : Color.clear)
+            )
         }
+        // Pin the OVERLAY too — its frost material and CTA chrome sit
+        // outside the inner pin and were rendering their light variants
+        // over the dark panel (codex P2 on PR #253). The paywall sheet
+        // attaches at `body`, outside this pin.
+        .environment(\.colorScheme, .dark)
     }
 
     private func lockedPreviewRow(_ text: String) -> some View {

@@ -2291,8 +2291,26 @@ struct CardDetailView: View {
     // inside the card, the left rail is inset so it sits cleanly within
     // the rounded corners rather than tracing them.
 
-    @ViewBuilder
     private var aiBriefSection: some View {
+        // Group exists so the paywall sheet can attach HERE — outside
+        // both the dark pins (panel + locked overlay), so PaywallView
+        // keeps the user's appearance. It previously hung off
+        // aiBriefCard, which sits INSIDE the locked overlay's pin
+        // (codex P2 ×2 on PR #253).
+        Group {
+            aiBriefSectionBody
+        }
+        .sheet(isPresented: $showMarketSummaryPaywall) {
+            PaywallView(
+                context: .generic,
+                surface: "card_detail_market_summary_teaser",
+                personalization: .init(cardName: activeCard.name, cardChangePct: heroChange.pct)
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var aiBriefSectionBody: some View {
         if let profile = cardProfile {
             if premiumGate.canRevealAnalysis(slug: activeCard.id) {
                 aiBriefCard {
@@ -2348,6 +2366,11 @@ struct CardDetailView: View {
                 aiBriefLockedPreview(profile)
             }
         }
+        // Pin the OVERLAY too — its frost material and CTA chrome sit
+        // outside aiBriefCard's pin and were rendering their light
+        // variants over the dark panel (codex P2 on PR #253). The
+        // paywall sheet attaches at aiBriefSection, outside this pin.
+        .environment(\.colorScheme, .dark)
     }
 
     /// Free-budget banner under the unlocked brief: "You've used X of 3
@@ -2399,13 +2422,23 @@ struct CardDetailView: View {
         // Match the front-page AI brief container (AIBriefCard) so the two
         // read as the same component.
         .liquidGlassSurface(accent: detailAccent)
-        .sheet(isPresented: $showMarketSummaryPaywall) {
-            PaywallView(
-                context: .generic,
-                surface: "card_detail_market_summary_teaser",
-                personalization: .init(cardName: activeCard.name, cardChangePct: heroChange.pct)
-            )
-        }
+        // Opaque dark base under the translucent glass — the dark look
+        // depends on dark content behind the material, which a light
+        // page doesn't provide (fill resolves dark via the pin below).
+        // Ambient-dark keeps .clear so the detail page's accent glow
+        // still bleeds through the material as designed. `colorScheme`
+        // here reads the AMBIENT scheme — the property resolves outside
+        // the pin.
+        .background(
+            RoundedRectangle(cornerRadius: PA.Layout.panelRadius, style: .continuous)
+                .fill(colorScheme == .light ? PA.Colors.background : Color.clear)
+        )
+        // Pin the summary panel to its dark-theme rendering in BOTH
+        // appearances, matching AIBriefCard (owner request 2026-06-12:
+        // "make the AI briefs the same colors as the dark theme
+        // version"). The paywall sheet attaches at aiBriefSection,
+        // outside this pin.
+        .environment(\.colorScheme, .dark)
     }
 
     private func aiBriefHeader(chip: String?) -> some View {
