@@ -34,6 +34,10 @@ export type MarketPriceDisplayState =
   | "SIGNAL_LOWER"
   | "PUBLIC_ONLY"
   | "PRICECHARTING_SINGLE_SOURCE"
+  // Thin JP series (max in-window sample_count < 3): price shown under the
+  // single-source trust grammar (confidence 30, low-confidence, no change
+  // badge). 20260614150000.
+  | "JP_LOW_SAMPLE"
   | "UNDER_REVIEW"
   | "NO_RELIABLE_PRICE";
 
@@ -195,6 +199,7 @@ function isMarketPriceDisplayState(value: string | null | undefined): value is M
     || value === "SIGNAL_LOWER"
     || value === "PUBLIC_ONLY"
     || value === "PRICECHARTING_SINGLE_SOURCE"
+    || value === "JP_LOW_SAMPLE"
     || value === "UNDER_REVIEW"
     || value === "NO_RELIABLE_PRICE";
 }
