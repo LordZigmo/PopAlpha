@@ -130,16 +130,22 @@ changed:
   scheduled run restarted at the top of the catalog every 5 minutes
   and never advanced (and re-embedded the same first ~32 slugs via
   Replicate whenever their hashes mismatched — the May 2026 churn).
-  Work is now "mirrored slugs with fewer than
-  `AUGMENTATION_VARIANTS.length` rows at (0 < variant_index < 10000,
-  crop_type='full', model_version=active)", in slug order. New cards
-  and model cutovers backfill automatically; `?cursor=` remains for
-  manual drains.
+  Work is now "mirrored slugs where any expected variant row at
+  (crop_type='full', model_version=active) is missing **or
+  hash-stale**", in slug order — the expected source_hash is
+  recomputed in SQL (`extensions.digest`, pgcrypto) and
+  parity-checked against `hashForVariant()` every run (drift refuses
+  to run rather than re-embedding the catalog in a loop). New cards,
+  model cutovers, recipe bumps, and mirrored-URL changes all backfill
+  automatically; `?cursor=` remains for manual drains.
 - **`?reset=1` one-shot repair**: deletes all augment rows under the
   active model_version (catalog rows, art crops, and user-correction
-  anchors survive) so scheduled runs rebuild them cleanly. Run once
-  after the home-GPU cutover to purge the mislabeled/stale-hash rows
-  from the CLIP-stamping era (~2.4k rows; rebuild takes a few hours
-  of cron ticks at maxCards=32).
+  anchors survive) so scheduled runs rebuild them cleanly. Still
+  required for the 2026-04/05 era repair even though the claim
+  catches stale hashes — the old cron computed source_hash with the
+  ACTIVE tag while embedding via CLIP, so those rows carry
+  correct-looking hashes over wrong-space vectors, which no hash
+  comparison can detect. Run once after the home-GPU cutover (~2.4k
+  rows; rebuild takes a few hours of cron ticks at maxCards=32).
 - Hash lookups are scoped to the active `model_version` (previously
   nondeterministic when CLIP rollback rows coexist with SigLIP rows).

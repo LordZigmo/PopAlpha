@@ -11,11 +11,13 @@
  * keyed by (canonical_slug, variant_index, crop_type, model_version).
  *
  * Claim-based — no cursor watermark to persist: a slug is work iff
- * its count of (variant_index > 0, crop_type='full', model_version =
- * active) rows is below AUGMENTATION_VARIANTS.length. New cards and
- * model cutovers (new tag ⇒ everything missing) backfill
- * automatically; a fully-augmented catalog makes the scheduled run a
- * cheap indexed no-op scan.
+ * any of its AUGMENTATION_VARIANTS rows at (crop_type='full',
+ * model_version=active) is MISSING or has a STALE source_hash (the
+ * expected hash is computed in SQL via pgcrypto, parity-checked
+ * against hashForVariant() every run). New cards, model cutovers,
+ * recipe bumps, and mirrored-URL changes all backfill automatically;
+ * a fully-current catalog makes the scheduled run a cheap indexed
+ * no-op scan.
  *
  * History (2026-06-12 redesign): the previous version instantiated
  * the Replicate CLIP embedder directly while stamping rows with the
@@ -32,9 +34,13 @@
  *                   applies past it)
  *   ?reset=1        delete ALL augment rows under the active
  *                   model_version so scheduled claim runs rebuild
- *                   them cleanly — the one-shot repair for the
- *                   mislabeled-vector / stale-hash rows described
- *                   above. Run it AFTER the embedder is healthy.
+ *                   them cleanly. Still REQUIRED for the 2026-04/05
+ *                   era repair even though the claim catches stale
+ *                   hashes: the old cron computed source_hash with
+ *                   the ACTIVE tag while embedding via CLIP, so those
+ *                   rows carry correct-looking hashes over wrong-
+ *                   space vectors — undetectable by hash comparison.
+ *                   Run it once AFTER the embedder is healthy.
  *   ?backfill=1     one-shot TCG Pocket is_digital_only flag pass
  *
  * Idempotency: source_hash = sha256(model_version + recipe version +
@@ -176,32 +182,76 @@ export async function GET(req: Request) {
   let failed = 0;
   let lastSlug: string | null = cursor || null;
 
-  // Claim: mirrored cards with fewer than the full set of augment
-  // rows under the active model_version. canonical_cards and
-  // card_image_embeddings live in the same database (Supabase — the
-  // POSTGRES_URL pool), so this is one indexed query: the inner
-  // count probes the embeddings PK (canonical_slug, variant_index,
-  // crop_type, model_version) per candidate slug.
+  // PARITY SELF-CHECK: the claim query below recomputes the expected
+  // source_hash in SQL (extensions.digest). If that expression ever
+  // drifts from hashForVariant() — string assembly, encoding, or
+  // function semantics — every row looks permanently stale and the
+  // cron re-embeds the catalog in an endless loop. Verify agreement
+  // on a synthetic input each run and refuse to proceed on drift.
+  const probe = {
+    modelVersion: embedder.modelVersion,
+    recipeId: "parity-probe",
+    mirroredUrl: "https://parity.probe/img.jpg",
+  };
+  const parity = await sql.query<{ h: string }>(
+    `select encode(extensions.digest($1 || chr(10) || $2 || chr(10) || $3 || chr(10) || $4, 'sha256'), 'hex') as h`,
+    [probe.modelVersion, AUGMENTATION_RECIPE_VERSION, probe.recipeId, probe.mirroredUrl],
+  );
+  if (parity.rows[0]?.h !== hashForVariant(probe)) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          "SQL/JS source_hash parity check failed — the claim query's digest expression and hashForVariant() have drifted; refusing to run.",
+      },
+      { status: 500 },
+    );
+  }
+
+  // Claim: mirrored cards where any augment variant row under the
+  // active model_version is missing or hash-stale. canonical_cards
+  // and card_image_embeddings live in the same database (Supabase —
+  // the POSTGRES_URL pool), so this is one indexed query: the left
+  // join probes the embeddings PK (canonical_slug, variant_index,
+  // crop_type, model_version) per candidate slug × variant, and the
+  // digest recomputes the expected source_hash so recipe bumps and
+  // mirrored-URL changes are claimed without any cursor/watermark.
   const claim = await sql.query<CanonicalRow>(
     `
+      with variants as (
+        select * from unnest($4::int[], $5::text[]) as v(variant_index, recipe_id)
+      )
       select c.slug, c.canonical_name, c.language, c.set_name, c.card_number, c.variant,
              c.mirrored_primary_image_url, c.primary_image_url
       from canonical_cards c
       where c.mirrored_primary_image_url is not null
         and ($2 = '' or c.slug > $2)
-        and (
-          select count(*)
-          from card_image_embeddings e
-          where e.canonical_slug = c.slug
-            and e.variant_index > 0
-            and e.variant_index < 10000
-            and e.crop_type = 'full'
-            and e.model_version = $1
-        ) < $3
+        and exists (
+          select 1
+          from variants v
+          left join card_image_embeddings e
+            on e.canonical_slug = c.slug
+           and e.variant_index = v.variant_index
+           and e.crop_type = 'full'
+           and e.model_version = $1
+          where e.canonical_slug is null
+             or e.source_hash <> encode(
+                  extensions.digest(
+                    $1 || chr(10) || $3 || chr(10) || v.recipe_id || chr(10) || c.mirrored_primary_image_url,
+                    'sha256'
+                  ), 'hex')
+        )
       order by c.slug
-      limit $4
+      limit $6
     `,
-    [embedder.modelVersion, cursor, AUGMENTATION_VARIANTS.length, maxCards],
+    [
+      embedder.modelVersion,
+      cursor,
+      AUGMENTATION_RECIPE_VERSION,
+      AUGMENTATION_VARIANTS.map((v) => v.index),
+      AUGMENTATION_VARIANTS.map((v) => v.recipeId),
+      maxCards,
+    ],
   );
   const rows = claim.rows;
   const processed = rows.length;
@@ -340,7 +390,7 @@ export async function GET(req: Request) {
     failed,
     last_slug: lastSlug,
     max_cards: maxCards,
-    claim_mode: "missing-variant-rows",
+    claim_mode: "missing-or-stale-variant-rows",
     recipe_version: AUGMENTATION_RECIPE_VERSION,
     model_version: embedder.modelVersion,
     variants_per_card: AUGMENTATION_VARIANTS.length,
