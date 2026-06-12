@@ -121,6 +121,9 @@ struct CardDetailView: View {
     @Environment(\.dismiss) private var dismiss
     /// Opens eBay listing URLs in the user's browser (section 12).
     @Environment(\.openURL) private var openURL
+    /// Light mode drops the ambient accent glow behind the card art
+    /// (owner: keep the clean drop shadow, lose the blue bloom).
+    @Environment(\.colorScheme) private var colorScheme
     @StateObject private var premiumGate = PremiumGate.shared
     @State private var showCorrectionSheet = false
     @State private var showMarketSummaryPaywall = false
@@ -406,14 +409,19 @@ struct CardDetailView: View {
             .background(alignment: .top) {
                 // Accent glow — centered on card, bleeds into content below.
                 // Switches to JP-red for Japanese cards so the entire view
-                // reads as JP-themed at a glance.
-                Ellipse()
-                    .fill(detailAccent)
-                    .opacity(0.25)
-                    .blur(radius: 120)
-                    .frame(width: 380, height: 500)
-                    .offset(y: 180)
-                    .allowsHitTesting(false)
+                // reads as JP-themed at a glance. Dark mode only: on light
+                // chrome the bloom read as a blue smear behind the card
+                // (owner feedback 2026-06-11); the neutral drop shadows
+                // carry the depth there.
+                if colorScheme == .dark {
+                    Ellipse()
+                        .fill(detailAccent)
+                        .opacity(0.25)
+                        .blur(radius: 120)
+                        .frame(width: 380, height: 500)
+                        .offset(y: 180)
+                        .allowsHitTesting(false)
+                }
             }
         }
         .coordinateSpace(name: "scroll")
