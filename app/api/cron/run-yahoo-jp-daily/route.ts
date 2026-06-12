@@ -53,27 +53,33 @@ export const runtime = "nodejs";
 export const maxDuration = 300; // Vercel hobby/pro tick ceiling
 
 const DEFAULT_BATCH_SIZE = 50;
-// Reserve ~60% of each batch for stale-refresh (freshness) and cap
-// initial-coverage at ~40% (breadth). #163 made initial-coverage return a full
+// Reserve most of each batch for stale-refresh (freshness) and cap
+// initial-coverage (breadth). #163 made initial-coverage return a full
 // batch of never-attempted slugs; left unbounded it consumed the whole budget
 // and starved the stale-refresh path, so the 4k+ already-priced JP cards never
 // re-scraped and their displayed prices went stale. This run is deadline-bound
 // (halts at the ~270s reserve before clearing a 50-card batch), so capping
 // initial keeps the stale-refresh slugs within reach of the deadline too.
-const STALE_REFRESH_BUDGET_RATIO = 0.6;
+// 0.6 -> 0.75 with the tier-cadence change: the hot tier's daily Yahoo
+// refresh demand (~250 Yahoo-only hot cards/day + warm/sparse) needs ~38
+// slots/tick; initial-coverage keeps ~12/tick (~288/day), which cycles the
+// parked unpriced tail on roughly the same ~monthly cadence as its 30d
+// NONPRODUCTIVE parking below.
+const STALE_REFRESH_BUDGET_RATIO = 0.75;
 const INTER_CARD_DELAY_MS = 4000;
 // Yahoo's sold archive is sparse for long-tail JP cards. Store even a
 // single matched RAW sale; consumers can use sample_count to decide
 // whether to surface the price as high-confidence.
 const MIN_SAMPLE_COUNT = 1;
 const MIN_MATCH_SCORE = 0.5;
-const REFRESH_AFTER_HOURS = 24 * 7; // 7 days — refresh cards older than this
 const HALT_AFTER_CONSECUTIVE_SCRAPE_FAILS = 5; // tick exits early; next hour retries
 const DEADLINE_RESERVE_MS = 30_000; // stop new cards if <30s left so the response can flush
-const NONPRODUCTIVE_RETRY_HOURS = 24 * 7; // low-sample/no-query cards rotate out for a week
+// Low-sample/no-query slugs rarely become productive week-over-week;
+// re-probing them weekly burned the scarce initial-coverage slots that fund
+// the hot tier's daily cadence. Park ~monthly — same tradeoff PR #209 made
+// for Snkrdunk; still catches a card that later gains liquidity.
+const NONPRODUCTIVE_RETRY_HOURS = 24 * 30;
 const TRANSIENT_RETRY_HOURS = 6; // scrape/write failures get a shorter cooldown
-const CANDIDATE_SCAN_PAGE_SIZE = 1000;
-const MAX_STALE_PRICE_SCAN_ROWS = 5000;
 const YAHOO_ROUTE = "/api/cron/run-yahoo-jp-daily";
 const BASE_CARD_SELECT = "slug,canonical_name,canonical_name_native,set_name,set_name_native,card_number,year,language";
 
@@ -106,44 +112,37 @@ type YahooProcessResult =
   | { slug: string; status: "write-failed"; reason: string }
   | { slug: string; status: "no-query"; reason: string };
 
+type YahooRefreshCandidateRow = {
+  canonical_slug: string;
+  observed_at: string | null;
+  tier: string;
+};
+
+/**
+ * Tier-cadence stale refresh: scan_yahoo_refresh_candidates replaces the old
+ * flat-7d-cutoff paging loop. Per-tier cadence lives in the RPC (mirrored in
+ * lib/jp/refresh-cadence.mjs): Yahoo-only hot 24h / Snkrdunk-covered hot 96h
+ * (Snkrdunk owns that card's daily series) / warm 96h / sparse 288h /
+ * dormant 720h / unknown 168h (= the old flat behavior, fail-open). Due rows
+ * are ordered by overdue ratio ((now - observed_at) / cadence) so a capacity
+ * shortfall drifts every tier proportionally instead of starving the tail.
+ * Slug dedupe, suppression, and the limit all happen server-side.
+ */
 async function loadStaleYahooSlugs(
   supabase: ReturnType<typeof dbAdmin>,
   input: {
-    cutoffIso: string;
     suppressedSlugs: Set<string>;
     limit: number;
   },
 ): Promise<string[]> {
-  const staleSlugs: string[] = [];
-  const seen = new Set<string>();
+  const { data, error } = await supabase.rpc("scan_yahoo_refresh_candidates", {
+    p_limit: input.limit,
+    p_suppressed: [...input.suppressedSlugs],
+  });
+  if (error) throw new Error(`scan_yahoo_refresh_candidates: ${error.message}`);
 
-  for (
-    let from = 0;
-    staleSlugs.length < input.limit && from < MAX_STALE_PRICE_SCAN_ROWS;
-    from += CANDIDATE_SCAN_PAGE_SIZE
-  ) {
-    const { data, error } = await supabase
-      .from("yahoo_jp_card_prices")
-      .select("canonical_slug,observed_at")
-      .eq("grade", "RAW")
-      .lt("observed_at", input.cutoffIso)
-      .order("observed_at", { ascending: true, nullsFirst: true })
-      .range(from, from + CANDIDATE_SCAN_PAGE_SIZE - 1);
-    if (error) throw new Error(`stale-price scan: ${error.message}`);
-
-    const rows = data ?? [];
-    for (const row of rows) {
-      const slug = row.canonical_slug;
-      if (!slug || seen.has(slug) || input.suppressedSlugs.has(slug)) continue;
-      seen.add(slug);
-      staleSlugs.push(slug);
-      if (staleSlugs.length >= input.limit) break;
-    }
-
-    if (rows.length < CANDIDATE_SCAN_PAGE_SIZE) break;
-  }
-
-  return staleSlugs;
+  const rows = (data ?? []) as YahooRefreshCandidateRow[];
+  return rows.map((row) => row.canonical_slug);
 }
 
 /**
@@ -181,26 +180,14 @@ async function loadInitialYahooSlugs(
 }
 
 /**
- * Pick the N JP cards most in need of refresh. The query unions:
- *   • Cards with no yahoo_jp_card_prices row at all (NULL observed_at) —
- *     never been attempted, highest priority.
- *   • Cards with no price row but an older non-productive attempt —
- *     retried only after untouched cards have first pass coverage.
- *   • Cards with observed_at > REFRESH_AFTER_HOURS old.
- * Both filtered to JP-language + at least one MATCHED provider_card_map
- * (so we don't burn requests on cards Scrydex has zero observations
- * for, which strongly correlates with cards Yahoo! has no data for
- * either).
- *
- * Order: NULL observed_at first (initial fetches prioritized), then
- * oldest observed_at.
+ * Pick the N JP cards most in need of refresh:
+ *   • Initial-coverage (capped share): unscraped matched cards via
+ *     scan_yahoo_initial_candidates.
+ *   • Tier-cadence refresh (the rest): priced cards past their
+ *     jp_refresh_tier cadence via scan_yahoo_refresh_candidates,
+ *     overdue-ratio ordered.
  */
 async function pickRefreshCandidates(supabase: ReturnType<typeof dbAdmin>, limit: number): Promise<CardRow[]> {
-  // Reverse-engineer: fetch slugs of cards that need refresh by joining
-  // canonical_cards with provider_card_map (matched only) and LEFT-
-  // joining yahoo_jp_card_prices to find old/missing rows. Doing it
-  // as a single RPC would be cleaner but pure REST works for v0.
-  const cutoffIso = new Date(Date.now() - REFRESH_AFTER_HOURS * 60 * 60 * 1000).toISOString();
   const nonproductiveCutoffIso = new Date(Date.now() - NONPRODUCTIVE_RETRY_HOURS * 60 * 60 * 1000).toISOString();
   const transientCutoffIso = new Date(Date.now() - TRANSIENT_RETRY_HOURS * 60 * 60 * 1000).toISOString();
   const [recentNonproductive, recentTransient] = await Promise.all([
@@ -224,7 +211,6 @@ async function pickRefreshCandidates(supabase: ReturnType<typeof dbAdmin>, limit
   const initialBudget = Math.max(1, limit - Math.ceil(limit * STALE_REFRESH_BUDGET_RATIO));
   const [staleSlugs, initialFetchSlugs] = await Promise.all([
     loadStaleYahooSlugs(supabase, {
-      cutoffIso,
       suppressedSlugs,
       limit,
     }),
@@ -448,7 +434,7 @@ export async function GET(req: Request) {
       ok: true,
       runId,
       mode: "no-work",
-      reason: `no JP cards stale (>${REFRESH_AFTER_HOURS}h) or unscraped`,
+      reason: "no JP cards past tier cadence or unscraped",
       elapsedMs,
     };
     await completeJpIngestionRun(supabase, runId, {
