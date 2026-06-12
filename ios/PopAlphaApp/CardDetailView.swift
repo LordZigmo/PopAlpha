@@ -458,6 +458,13 @@ struct CardDetailView: View {
             }
         }
         .coordinateSpace(name: "scroll")
+        // No scroll-edge band under the nav buttons: iOS 26's default
+        // top scroll-edge effect rendered as a hard white bar across
+        // the status/toolbar area in light mode once content scrolled
+        // under it (owner report 2026-06-12). The back/share buttons
+        // carry their own Liquid Glass capsules, so they stay legible
+        // over content without the band.
+        .modifier(HideTopScrollEdgeEffect())
         .modifier(TabBarMinimizeMirror(
             minimized: $tabBarLikelyMinimized,
             presentationActive: ownedPresentationActive
@@ -3485,6 +3492,22 @@ private struct TabBarMinimizeMirror: ViewModifier {
                         minimized = false
                     }
                 }
+        } else {
+            content
+        }
+    }
+}
+
+// MARK: - Scroll-edge effect suppression
+
+/// Hides the iOS 26 top scroll-edge effect on the card detail scroll
+/// view — see the call site comment in `CardDetailView.body`. No-op
+/// before iOS 26, where pushed views don't draw the Liquid Glass edge
+/// band.
+private struct HideTopScrollEdgeEffect: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.scrollEdgeEffectHidden(true, for: .top)
         } else {
             content
         }
