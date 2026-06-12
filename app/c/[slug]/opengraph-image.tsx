@@ -6,12 +6,11 @@ import { resolveDisplayedMarketPrice } from "@/lib/pricing/displayed-market-pric
 
 // Brand assets inlined as data URLs (satori fetches remote URLs, but the
 // local filesystem is faster and deploy-atomic). Same pattern as
-// app/brand-image.tsx.
-const mascotSvg = readFileSync(
-  join(process.cwd(), "public/brand/popalpha-icon.svg"),
-  "utf8",
-);
-const mascotDataUrl = `data:image/svg+xml;base64,${Buffer.from(mascotSvg).toString("base64")}`;
+// app/brand-image.tsx. The mascot is the standard app icon — the same
+// asset the favicon/apple-touch icon renders (PR #161) — NOT the retired
+// popalpha-icon.svg.
+const mascotPng = readFileSync(join(process.cwd(), "public/brand/popalpha-app-icon.png"));
+const mascotDataUrl = `data:image/png;base64,${mascotPng.toString("base64")}`;
 const wordmarkPng = readFileSync(join(process.cwd(), "public/brand/popalpha-modern-white.png"));
 const wordmarkDataUrl = `data:image/png;base64,${wordmarkPng.toString("base64")}`;
 
@@ -29,12 +28,14 @@ const wordmarkDataUrl = `data:image/png;base64,${wordmarkPng.toString("base64")}
 //
 // Layout (1200x630, the standard OG canvas):
 //   ┌──────────────────────────────────────────────────────────────┐
-//   │                                                              │
+//   │                                             [PopAlpha mark]  │
 //   │   [Card image, 63:88, fit to ~480px tall]   <Card name>      │
-//   │                                              <Set · #N>      │
-//   │                                                              │
-//   │                                            PopAlpha · ai     │
+//   │                                             <Set · #N>       │
+//   │                                             [🪪 MARKET PRICE] │
+//   │                                            popalpha.ai       │
 //   └──────────────────────────────────────────────────────────────┘
+// The price chip lives in the right text column, left-aligned with the
+// title — it must not overlap the card art (owner spec 2026-06-12).
 
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
@@ -268,57 +269,62 @@ export default async function CardOpenGraphImage({
                 {setLine}
               </div>
             ) : null}
+
+            {/* Price chip — sits in the text column, left edge aligned
+                with the title (owner spec 2026-06-12: no longer overlaps
+                the card art). Rendered only when the price classification
+                is confident. */}
+            {priceText ? (
+              <div
+                style={{
+                  display: "flex",
+                  alignSelf: "flex-start",
+                  alignItems: "center",
+                  gap: 18,
+                  marginTop: 8,
+                  padding: "18px 28px",
+                  borderRadius: 26,
+                  background: "rgba(5,12,24,0.93)",
+                  border: "1px solid rgba(0,180,216,0.45)",
+                  boxShadow: "0 24px 64px rgba(0,0,0,0.6)",
+                }}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  alt=""
+                  src={mascotDataUrl}
+                  width={62}
+                  height={62}
+                  style={{ borderRadius: 14 }}
+                />
+                <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      fontSize: 16,
+                      fontWeight: 700,
+                      letterSpacing: "0.16em",
+                      color: "#9EDCF2",
+                    }}
+                  >
+                    {priceEyebrow}
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      fontSize: 50,
+                      fontWeight: 800,
+                      letterSpacing: "-0.03em",
+                      color: "#FFFFFF",
+                    }}
+                  >
+                    {priceText}
+                  </div>
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
-
-        {/* Price chip — overlays the card art's lower-right edge, the
-            mascot sits beside the figure (owner spec: card + price
-            overlay in front + logo next to it). Rendered only when the
-            price classification is confident. */}
-        {priceText ? (
-          <div
-            style={{
-              position: "absolute",
-              left: 300,
-              bottom: 88,
-              display: "flex",
-              alignItems: "center",
-              gap: 18,
-              padding: "18px 28px",
-              borderRadius: 26,
-              background: "rgba(5,12,24,0.93)",
-              border: "1px solid rgba(0,180,216,0.45)",
-              boxShadow: "0 24px 64px rgba(0,0,0,0.6)",
-            }}
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img alt="" src={mascotDataUrl} width={62} height={62} />
-            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              <div
-                style={{
-                  display: "flex",
-                  fontSize: 16,
-                  fontWeight: 700,
-                  letterSpacing: "0.16em",
-                  color: "#9EDCF2",
-                }}
-              >
-                {priceEyebrow}
-              </div>
-              <div
-                style={{
-                  display: "flex",
-                  fontSize: 50,
-                  fontWeight: 800,
-                  letterSpacing: "-0.03em",
-                  color: "#FFFFFF",
-                }}
-              >
-                {priceText}
-              </div>
-            </div>
-          </div>
-        ) : null}
 
         {/* Bottom-right footer */}
         <div
