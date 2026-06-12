@@ -325,7 +325,6 @@ export async function generateMetadata({
   const title = buildCanonicalCardMetadataTitle(canonical);
   const description = buildCanonicalCardMetadataDescription(canonical, null, selectedPrinting);
   const canonicalPath = `/c/${encodeURIComponent(slug)}`;
-  const primaryImageUrl = selectedPrinting?.image_url ?? null;
 
   return {
     title,
@@ -339,16 +338,16 @@ export async function generateMetadata({
       url: canonicalPath,
       siteName: "PopAlpha",
       type: "website",
-      images: [
-        ...(primaryImageUrl ? [{ url: primaryImageUrl, alt: canonical.canonical_name }] : []),
-        { url: "/opengraph-image", alt: "PopAlpha" },
-      ],
+      // No explicit images: the per-card opengraph-image.tsx file
+      // convention supplies og:image/twitter:image. An explicit array
+      // here OVERRIDES the file route (measured on prod 2026-06-11 —
+      // scrapers were getting the raw 63:88 portrait scan and cropping
+      // it to "half a card" in iMessage).
     },
     twitter: {
       card: "summary_large_image",
       title,
       description,
-      images: primaryImageUrl ? [primaryImageUrl] : ["/twitter-image"],
     },
   };
 }
