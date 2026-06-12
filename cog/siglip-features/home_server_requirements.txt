@@ -1,0 +1,15 @@
+# Python deps for cog/siglip-features/home_server.py (home GPU embedder).
+#
+# torch is installed SEPARATELY with the platform-correct CUDA wheel:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu124
+# (see https://pytorch.org/get-started/locally/ if the installed NVIDIA
+#  driver wants a different CUDA series; plain `pip install torch` gives
+#  the CPU-only build, which also works — just slower.)
+#
+# Other versions pinned to match modal_app.py's known-good image.
+fastapi==0.115.0
+uvicorn==0.30.6
+transformers==4.49.0
+Pillow==10.4.0
+sentencepiece==0.2.0
+protobuf==4.25.5
