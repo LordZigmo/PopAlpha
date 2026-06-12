@@ -95,9 +95,14 @@ function mentionsDifferentSet(title: string, setName: string | null): boolean {
 // name/number relevance gates below while not actually selling this
 // card. Patterns run against normalizeTitle output (lowercased,
 // punctuation collapsed to spaces), word-bounded to avoid swallowing
-// real card names like "Mysterious Treasures".
+// real card names like "Mysterious Treasures". "mystery" requires a
+// concrete lottery noun — bare \bmystery\b dropped real singles whose
+// titles carry it as metadata, e.g. "Pokémon Mystery Dungeon … Promo"
+// (codex P2 #3 on PR #241). Deliberate tradeoff: a noun-less title
+// like "MYSTERY read description" now slips through; every observed
+// real lottery listing uses one of these nouns.
 const JUNK_LISTING_PATTERNS = [
-  /\bmystery\b/,
+  /\bmystery (packs?|box(es)?|bags?|grabs?|bundles?|lots?|pulls?|chase)\b/,
   /\bgrab bags?\b/,
   /\boripa\b/,
   /\blucky bags?\b/,
