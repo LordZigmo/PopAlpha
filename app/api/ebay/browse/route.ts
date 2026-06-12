@@ -105,16 +105,24 @@ const JUNK_LISTING_PATTERNS = [
 ];
 
 function isJunkListingTitle(title: string, requestedPhrases: string[]): boolean {
-  // Each pattern is waived (per pattern) when the requested card's own
-  // name OR set name contains it: a card actually named "Mystery ..."
-  // keeps its listings, and so do singles from sets like 化石の秘密 —
-  // which this repo's JP glossary renders as "Mystery of the Fossils",
-  // a phrase legitimate listing titles repeat (codex P2 on PR #241).
-  return JUNK_LISTING_PATTERNS.some(
-    (pattern) =>
-      pattern.test(title) &&
-      !requestedPhrases.some((phrase) => phrase && pattern.test(phrase))
-  );
+  // Strip the requested card/set phrases out of the title and test the
+  // junk patterns on the residual text. The requested wording itself
+  // can then never trip a pattern — a single from 化石の秘密 (rendered
+  // "Mystery of the Fossils" by this repo's JP glossary, and repeated
+  // verbatim by legitimate listings) survives — while a standalone
+  // lottery term in the SAME title still fires: "Mystery of the
+  // Fossils MYSTERY PACK chase" reduces to "mystery pack chase".
+  // (Codex P2 ×2 on PR #241: phrase-level waivers first dropped legit
+  // mystery-set singles, then leaked lottery packs for mystery-named
+  // requests.) All inputs are in normalizeTitle space, so plain
+  // substring removal is exact.
+  let residual = title;
+  for (const phrase of requestedPhrases) {
+    if (!phrase) continue;
+    residual = residual.split(phrase).join(" ");
+  }
+  residual = residual.replace(/\s+/g, " ").trim();
+  return JUNK_LISTING_PATTERNS.some((pattern) => pattern.test(residual));
 }
 
 function evaluateRequestedCard(
