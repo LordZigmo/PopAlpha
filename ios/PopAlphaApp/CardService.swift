@@ -1090,11 +1090,8 @@ struct HomepageCardDTO: Decodable, Hashable {
     /// override the Scrydex USD reflection with the Yahoo!JP / Snkrdunk
     /// native price when a JP source qualifies on sample count.
     var marketPrice: Double?
-    /// Mutable for the same reason — Scrydex-derived change/window
-    /// percentages don't describe a JP-source price baseline, so the
-    /// JP transform clears them rather than show a misleading delta.
-    var changePct: Double?
-    var changeWindow: String?            // "24H" | "7D"
+    let changePct: Double?
+    let changeWindow: String?            // "24H" | "7D"
     let confidenceScore: Int?
     let lowConfidence: Bool?
     let marketStrengthScore: Int?
@@ -1178,8 +1175,10 @@ struct HomepageCardDTO: Decodable, Hashable {
         guard let jpPrice = pick.price else { return self }
         var copy = self
         copy.marketPrice = jpPrice
-        copy.changePct = nil
-        copy.changeWindow = nil
+        // changePct/changeWindow pass through: for JP cards the server
+        // computes them from the same Yahoo!JP/Snkrdunk series as this
+        // price (compute_jp_card_price_changes), so the delta matches
+        // the JP baseline shown.
         return copy
     }
 }
