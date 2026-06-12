@@ -465,6 +465,15 @@ struct CardDetailView: View {
         // carry their own Liquid Glass capsules, so they stay legible
         // over content without the band.
         .modifier(HideTopScrollEdgeEffect())
+        // …and the band has a SECOND source: the navigation bar's own
+        // background appearance, which the system paints across the
+        // status/toolbar area when content scrolls under a non-hidden
+        // bar (this screen uses real ToolbarItems for back/share, so
+        // the bar exists). scrollEdgeEffectHidden alone didn't remove
+        // it — the white bar persisted on device (owner re-report,
+        // build 20260618). Hiding the toolbar BACKGROUND kills that
+        // layer while keeping the buttons and their system capsules.
+        .toolbarBackground(.hidden, for: .navigationBar)
         .modifier(TabBarMinimizeMirror(
             minimized: $tabBarLikelyMinimized,
             presentationActive: ownedPresentationActive
