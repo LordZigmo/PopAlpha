@@ -1,5 +1,6 @@
 import SwiftUI
 import OSLog
+import Nuke
 
 // MARK: - Marketplace (home screen)
 //
@@ -112,6 +113,61 @@ struct MarketplaceView: View {
     /// strip below TopBar. Computed `market` projects to the enum.
     @AppStorage(Market.storageKey) private var marketRaw: String = Market.en.rawValue
     private var market: Market { Market(rawValue: marketRaw) ?? .en }
+
+    /// Warms the OTHER market's rail thumbnails into Nuke's shared
+    /// cache (the same pipeline LazyImage reads). The homepage payload
+    /// carries both markets' rails in one response, so the EN↔JP
+    /// toggle's data is instant — the ~2s of placeholder cards on a
+    /// fresh install (owner report 2026-06-12) was purely cold
+    /// thumbnail downloads. Held as @State so the prefetcher (a class)
+    /// keeps a stable identity across body re-evaluations.
+    @State private var offMarketPrefetcher = ImagePrefetcher()
+
+    private func prefetchOffMarketThumbs() {
+        guard let board = data?.signalBoard else { return }
+        // The rails the user lands on first after a flip, lead rail
+        // first. Both windows for the windowed rails — the 24H/7D
+        // toggle shouldn't reintroduce placeholders either.
+        let rails: [[HomepageCardDTO]]
+        if market == .jp {
+            rails = [
+                board.marketWatch ?? [],
+                board.topMovers.d7, board.topMovers.h24,
+                board.breakouts ?? [],
+                board.unusualVolume ?? [],
+                board.biggestDrops.d7,
+                board.midMovers ?? [],
+                board.budgetMovers ?? [],
+            ]
+        } else {
+            rails = [
+                board.japanese ?? [],
+                board.japaneseTopMovers?.d7 ?? [],
+                board.japaneseTopMovers?.h24 ?? [],
+                board.japaneseBiggestDrops?.d7 ?? [],
+                board.japaneseMomentum?.d7 ?? [],
+                board.japaneseMidMovers ?? [],
+                board.japaneseBudgetMovers ?? [],
+            ]
+        }
+        var seen = Set<String>()
+        var urls: [URL] = []
+        for card in rails.joined() {
+            guard
+                let raw = card.displayThumbUrl,
+                seen.insert(raw).inserted,
+                let url = URL(string: raw)
+            else { continue }
+            urls.append(url)
+            // Cap the warm-up: enough to cover everything above the
+            // fold on every tab, without slurping the whole catalog.
+            if urls.count >= 48 { break }
+        }
+        guard !urls.isEmpty else { return }
+        // Nuke skips anything already cached, so repeat calls (pull-to-
+        // refresh, auth flips) only fetch what's actually missing.
+        offMarketPrefetcher.startPrefetching(with: urls)
+    }
 
     var body: some View {
         NavigationStack {
@@ -705,6 +761,10 @@ struct MarketplaceView: View {
                 // cancellation sentinel — data arrived, no need for
                 // the fallback error.
                 self.cancellationSentinelArmed = false
+                // Warm the other market's thumbnails now that the rails
+                // are known, so the EN↔JP toggle swaps with images
+                // already local instead of ~2s of placeholder cards.
+                self.prefetchOffMarketThumbs()
             }
         } catch is CancellationError {
             // Cooperative-cancellation error from Swift Concurrency —
