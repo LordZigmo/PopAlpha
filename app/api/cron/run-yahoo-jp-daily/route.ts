@@ -106,8 +106,8 @@ type CardRow = {
 };
 
 type YahooProcessResult =
-  | { slug: string; status: "ok"; yahoo_jp_price: number; yahoo_jp_price_jpy: number; rawCount: number; rowsWritten: number; perPrintingRows: number }
-  | { slug: string; status: "low-sample"; rawCount: number }
+  | { slug: string; status: "ok"; yahoo_jp_price: number; yahoo_jp_price_jpy: number; rawCount: number; rowsWritten: number; perPrintingRows: number; numberMismatchExcluded: number }
+  | { slug: string; status: "low-sample"; rawCount: number; numberMismatchExcluded: number }
   | { slug: string; status: "scrape-failed"; reason: string }
   | { slug: string; status: "write-failed"; reason: string }
   | { slug: string; status: "no-query"; reason: string };
@@ -288,9 +288,10 @@ async function processCard(supabase: ReturnType<typeof dbAdmin>, card: CardRow):
     minScore: MIN_MATCH_SCORE,
     printings,
   });
+  const numberMismatchExcluded: number = result.numberMismatchExcluded ?? 0;
   const rawObs = result.priceObservations.find((o: { grade: string }) => o.grade === "RAW");
   if (!rawObs || rawObs.count < MIN_SAMPLE_COUNT) {
-    return { slug: card.slug, status: "low-sample" as const, rawCount: rawObs?.count ?? 0 };
+    return { slug: card.slug, status: "low-sample" as const, rawCount: rawObs?.count ?? 0, numberMismatchExcluded };
   }
 
   const observedAt = new Date().toISOString();
@@ -374,6 +375,7 @@ async function processCard(supabase: ReturnType<typeof dbAdmin>, card: CardRow):
     rawCount: rawObs.count,
     rowsWritten,
     perPrintingRows: writableObs.filter((o) => o.printing_id != null).length,
+    numberMismatchExcluded,
   };
 }
 
@@ -460,6 +462,7 @@ export async function GET(req: Request) {
   let scrapeFailedCount = 0;
   let writeFailedCount = 0;
   let noQueryCount = 0;
+  let numberMismatchExcludedTotal = 0;
   let consecutiveScrapeFails = 0;
   let processed = 0;
   let haltReason: string | null = null;
@@ -477,6 +480,9 @@ export async function GET(req: Request) {
     const attemptStartedAt = Date.now();
     const result = await processCard(supabase, card);
     processed += 1;
+    if ("numberMismatchExcluded" in result) {
+      numberMismatchExcludedTotal += result.numberMismatchExcluded;
+    }
     if (result.status === "ok") {
       okCount += 1;
       consecutiveScrapeFails = 0;
@@ -503,9 +509,14 @@ export async function GET(req: Request) {
       sampleCount: "rawCount" in result ? result.rawCount : null,
       reason: "reason" in result ? result.reason : null,
       elapsedMs: Date.now() - attemptStartedAt,
-      metadata: "perPrintingRows" in result
-        ? { perPrintingRows: result.perPrintingRows, priceJpy: result.yahoo_jp_price_jpy }
-        : {},
+      metadata: {
+        ...("perPrintingRows" in result
+          ? { perPrintingRows: result.perPrintingRows, priceJpy: result.yahoo_jp_price_jpy }
+          : {}),
+        ...("numberMismatchExcluded" in result && result.numberMismatchExcluded > 0
+          ? { numberMismatchExcluded: result.numberMismatchExcluded }
+          : {}),
+      },
     });
 
     // Politeness inter-card delay (skipped on the last card)
@@ -542,6 +553,7 @@ export async function GET(req: Request) {
     scrapeFailed: scrapeFailedCount,
     writeFailed: writeFailedCount,
     noQuery: noQueryCount,
+    numberMismatchExcluded: numberMismatchExcludedTotal,
     haltReason,
     elapsedMs,
     elapsedSec: Math.round(elapsedMs / 1000),

@@ -388,6 +388,7 @@ async function processCard(supabase, card, opts) {
     minScore: opts.minScore,
     printings,
   });
+  const numberMismatchExcluded = result.numberMismatchExcluded ?? 0;
   const rawObs = result.priceObservations.find((o) => o.grade === "RAW");
   if (!rawObs || rawObs.count < opts.minSampleCount) {
     return {
@@ -398,6 +399,7 @@ async function processCard(supabase, card, opts) {
       accepted: result.accepted,
       rawCount: rawObs?.count ?? 0,
       minRequired: opts.minSampleCount,
+      numberMismatchExcluded,
     };
   }
 
@@ -425,6 +427,7 @@ async function processCard(supabase, card, opts) {
       scraped: result.inputCount,
       accepted: result.accepted,
       rawCount: rawObs.count,
+      numberMismatchExcluded,
       yahoo_jp_price_jpy: yenMedian,
       yahoo_jp_price: usdMedian,
       yahoo_jp_observed_at: observedAt,
@@ -466,6 +469,7 @@ async function processCard(supabase, card, opts) {
     rawCount: rawObs.count,
     rowsWritten,
     perPrintingRows: writableObs.filter((o) => o.printing_id != null).length,
+    numberMismatchExcluded,
     yahoo_jp_price_jpy: yenMedian,
     yahoo_jp_price: usdMedian,
     write_mode: writeResult?.mode ?? "noop",
@@ -561,6 +565,7 @@ async function main() {
   let scrapeFailedCount = 0;
   let writeFailedCount = 0;
   let noQueryCount = 0;
+  let numberMismatchExcludedCount = 0;
   let processed = 0;
   let halted = false;
   let haltReason = null;
@@ -599,6 +604,7 @@ async function main() {
       else if (result.status === "scrape-failed") scrapeFailedCount += 1;
       else if (result.status === "write-failed") writeFailedCount += 1;
       else if (result.status === "no-query") noQueryCount += 1;
+      numberMismatchExcludedCount += result.numberMismatchExcluded ?? 0;
     }
 
     // Health gate — auto-halt if signals indicate Yahoo! is pushing back.
@@ -619,7 +625,7 @@ async function main() {
       const remaining = cards.length - processed;
       const remMin = Math.round(remaining / Math.max(0.1, processed / sec) / 60);
       const sum = health.summary();
-      console.log(`[yahoo-jp-pipeline] HEALTH ${processed}/${cards.length} ok=${okCount} low-sample=${lowSampleCount} scrape-fail=${scrapeFailedCount} write-fail=${writeFailedCount} | window-fail-rate=${(sum.scrapeFailRate * 100).toFixed(1)}% zero-match-rate=${(sum.zeroMatchRate * 100).toFixed(1)}% | ETA ${remMin}min`);
+      console.log(`[yahoo-jp-pipeline] HEALTH ${processed}/${cards.length} ok=${okCount} low-sample=${lowSampleCount} scrape-fail=${scrapeFailedCount} write-fail=${writeFailedCount} number-mismatch-excluded=${numberMismatchExcludedCount} | window-fail-rate=${(sum.scrapeFailRate * 100).toFixed(1)}% zero-match-rate=${(sum.zeroMatchRate * 100).toFixed(1)}% | ETA ${remMin}min`);
     }
 
     // Politeness inter-batch delay
@@ -630,7 +636,7 @@ async function main() {
 
   const elapsedSec = Math.round((Date.now() - startedAt) / 1000);
   console.log("");
-  console.log(`[yahoo-jp-pipeline] ${halted ? "HALTED" : "DONE"} in ${elapsedSec}s: ${okCount} written, ${lowSampleCount} low-sample, ${scrapeFailedCount} scrape-failed, ${writeFailedCount} write-failed, ${noQueryCount} no-query`);
+  console.log(`[yahoo-jp-pipeline] ${halted ? "HALTED" : "DONE"} in ${elapsedSec}s: ${okCount} written, ${lowSampleCount} low-sample, ${scrapeFailedCount} scrape-failed, ${writeFailedCount} write-failed, ${noQueryCount} no-query, ${numberMismatchExcludedCount} number-mismatch-excluded`);
   if (halted) {
     console.log(`[yahoo-jp-pipeline] HALT REASON: ${haltReason}`);
     process.exit(2);
