@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import { getEbayAppAccessToken, getEbayBaseUrl } from "@/lib/ebay/api";
+import {
+  isJunkListingTitle,
+  normalizeListingText as normalizeTitle,
+} from "@/lib/ebay/listing-junk-filter";
 
 export const runtime = "nodejs";
 
@@ -28,14 +32,6 @@ function parseLimit(raw: string | null): number {
 
 function normalizeQuery(raw: string): string {
   return raw.replace(/\s+/g, " ").trim();
-}
-
-function normalizeTitle(value: string | null | undefined): string {
-  return String(value ?? "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 function buildNameTokens(name: string): string[] {
@@ -87,47 +83,6 @@ function mentionsDifferentSet(title: string, setName: string | null): boolean {
     const normalized = phrase.replace(/\s+/g, " ").trim();
     return normalized.length > anchor.length && normalized !== requestedSet;
   });
-}
-
-// Lottery-style listings — mystery packs/boxes/bags, grab bags, repacks,
-// oripa (JP random-pull packs), fukubukuro "lucky bags" — advertise the
-// chase card's name + number in the title, so they sail through the
-// name/number relevance gates below while not actually selling this
-// card. Patterns run against normalizeTitle output (lowercased,
-// punctuation collapsed to spaces), word-bounded to avoid swallowing
-// real card names like "Mysterious Treasures". "mystery" requires a
-// concrete lottery noun — bare \bmystery\b dropped real singles whose
-// titles carry it as metadata, e.g. "Pokémon Mystery Dungeon … Promo"
-// (codex P2 #3 on PR #241). Deliberate tradeoff: a noun-less title
-// like "MYSTERY read description" now slips through; every observed
-// real lottery listing uses one of these nouns.
-const JUNK_LISTING_PATTERNS = [
-  /\bmystery (packs?|box(es)?|bags?|grabs?|bundles?|lots?|pulls?|chase)\b/,
-  /\bgrab bags?\b/,
-  /\boripa\b/,
-  /\blucky bags?\b/,
-  /\brepacks?\b/,
-];
-
-function isJunkListingTitle(title: string, requestedPhrases: string[]): boolean {
-  // Strip the requested card/set phrases out of the title and test the
-  // junk patterns on the residual text. The requested wording itself
-  // can then never trip a pattern — a single from 化石の秘密 (rendered
-  // "Mystery of the Fossils" by this repo's JP glossary, and repeated
-  // verbatim by legitimate listings) survives — while a standalone
-  // lottery term in the SAME title still fires: "Mystery of the
-  // Fossils MYSTERY PACK chase" reduces to "mystery pack chase".
-  // (Codex P2 ×2 on PR #241: phrase-level waivers first dropped legit
-  // mystery-set singles, then leaked lottery packs for mystery-named
-  // requests.) All inputs are in normalizeTitle space, so plain
-  // substring removal is exact.
-  let residual = title;
-  for (const phrase of requestedPhrases) {
-    if (!phrase) continue;
-    residual = residual.split(phrase).join(" ");
-  }
-  residual = residual.replace(/\s+/g, " ").trim();
-  return JUNK_LISTING_PATTERNS.some((pattern) => pattern.test(residual));
 }
 
 function evaluateRequestedCard(
