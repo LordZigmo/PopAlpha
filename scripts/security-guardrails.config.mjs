@@ -945,7 +945,7 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
     requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
     expectedSignals: ["service_role_client"],
     usesServiceRole: true,
-    notes: "Writes only to snkrdunk_product_map. Skips status='low-confidence'/'no-tc-results'/'no-query'. Conflicts on snkrdunk_product_code (two canonicals mapping to one Snkrdunk product) are logged and skipped — operator inspects.",
+    notes: "Writes only to snkrdunk_product_map. Skips status='low-confidence'/'no-tc-results'/'no-query'. Conflicts on snkrdunk_product_code (two canonicals mapping to one Snkrdunk product): higher score wins (tie: better number match); the loser persists as NEEDS_REVIEW with a conflict note instead of being dropped (2026-06 recall batch; requires the partial product-code unique index migration 20260614090000). Idempotent re-persist: reviewed/REJECTED/MATCHED rows immutable, NR→MATCHED upgrades only. Also accepts the offline re-scorer's JSONL (scripts/rescore-snkrdunk-jsonl.mjs).",
   }),
   "scripts/perfect-order-coverage.mjs": operationalScript({
     classification: "service_role_diagnostic",
