@@ -335,7 +335,7 @@ actor CardService {
         } ?? ("printing_id", "is", "null")
         let data = try await Supabase.query(
             table: "public_card_metrics",
-            select: "canonical_slug,market_price,market_price_as_of,latest_price,latest_price_as_of,jp_latest_price,jp_latest_price_as_of,jp_display_price,jp_display_price_as_of,change_pct_24h,change_pct_7d,market_confidence_score,market_low_confidence,market_price_display_state,market_blend_policy,median_7d,median_30d,low_30d,high_30d,active_listings_7d,snapshot_count_30d,yahoo_jp_price,yahoo_jp_price_jpy,yahoo_jp_sample_count,yahoo_jp_observed_at,snkrdunk_price,snkrdunk_sample_count,snkrdunk_observed_at,snkrdunk_product_code,canonical_name_native,set_name_native,language",
+            select: "canonical_slug,market_price,market_price_as_of,latest_price,latest_price_as_of,jp_latest_price,jp_latest_price_as_of,jp_display_price,jp_display_price_as_of,jp_display_sample_count,change_pct_24h,change_pct_7d,market_confidence_score,market_low_confidence,market_price_display_state,market_blend_policy,median_7d,median_30d,low_30d,high_30d,active_listings_7d,snapshot_count_30d,yahoo_jp_price,yahoo_jp_price_jpy,yahoo_jp_sample_count,yahoo_jp_observed_at,snkrdunk_price,snkrdunk_sample_count,snkrdunk_observed_at,snkrdunk_product_code,canonical_name_native,set_name_native,language",
             filters: [
                 ("canonical_slug", "eq", slug),
                 ("grade", "eq", "RAW"),
@@ -808,7 +808,8 @@ struct CardMetricsResult: Decodable {
     /// migration 20260602040000). The blended Snkrdunk+Yahoo sold-listing series:
     /// jpLatestPrice = freshest trusted (sample_count>=3) point, jpDisplayPrice =
     /// 14-day median. Only set on JP cards. The JP detail hero reads jpLatestPrice
-    /// and the sub-line shows jpDisplayPrice ("14-day median"). Kept separate from
+    /// and the sub-line shows jpDisplayPrice ("14-day median" when the basis is
+    /// trusted; see jpDisplaySampleCount for the thin tier). Kept separate from
     /// the Scrydex-semantics latestPrice/marketPrice so the two never collide.
     /// (No digit boundaries in these names, so .convertFromSnakeCase maps them
     /// cleanly — unlike the 24H/7D fields below.)
@@ -816,6 +817,16 @@ struct CardMetricsResult: Decodable {
     let jpLatestPriceAsOf: String?
     let jpDisplayPrice: Double?
     let jpDisplayPriceAsOf: String?
+    /// Thin-tier attribution (migration 20260614150000, PR #248): the MAX
+    /// in-window sample_count behind the displayed JP price. >= 3 on the
+    /// trusted tier, 1-2 on the thin tier (which also gets confidence 30 /
+    /// market_price_display_state JP_LOW_SAMPLE and hard-nulled changes),
+    /// nil when nothing displays (cleared alongside jpDisplayPrice).
+    /// Clients branch on < 3: the detail subline must not claim "median"
+    /// for a 1-2-sample basis. Integer in the view; PostgREST serializes
+    /// bare ints (verified live 2026-06-12). No digit boundaries, so
+    /// .convertFromSnakeCase maps it cleanly like jpDisplayPrice above.
+    let jpDisplaySampleCount: Int?
     // NOTE: trailing letter is UPPERCASE (24H/7D/30D) on purpose. The decoder
     // uses .convertFromSnakeCase, which capitalizes the char after a digit:
     // `change_pct_24h` -> `changePct24H`, `median_7d` -> `median7D`. With

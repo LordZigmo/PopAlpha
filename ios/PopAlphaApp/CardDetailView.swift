@@ -309,6 +309,19 @@ struct CardDetailView: View {
         // (not the EN 3d). nil when the card has no qualifying JP series.
         if isJapaneseCard {
             guard let median = cardMetrics?.jpDisplayPrice, median > 0 else { return nil }
+            // Thin tier (server PR #248): rows whose 14d window held only
+            // 1-2-sample observations still display (confidence 30 /
+            // JP_LOW_SAMPLE, changes hard-nulled server-side), but calling
+            // a 1-2-point basis a "median" would overstate it. State the
+            // observation count instead — "observed", not "sold on", because
+            // observation time ≠ sale time. The server writes the count for
+            // every displayed row, so a nil count here (stale pre-#248 cache)
+            // safely keeps the trusted wording for what was a trusted-only
+            // population. >= 3 rows are bit-identical to before.
+            if let samples = cardMetrics?.jpDisplaySampleCount, samples < 3 {
+                let noun = samples == 1 ? "sale" : "sales"
+                return "Based on \(samples) \(noun) observed in the last 14 days"
+            }
             let f = median >= 1000 ? String(format: "$%.0f", median) : String(format: "$%.2f", median)
             return "14-day median: \(f)"
         }
@@ -2131,11 +2144,22 @@ struct CardDetailView: View {
         }
     }
 
-    /// Derives a user-facing Confidence label from the numeric score
-    /// attached to the card. Falls back to a muted em-dash when the
-    /// signal isn't loaded yet.
+    /// Derives a user-facing Confidence label from the numeric score.
+    /// Prefers the FETCHED metrics row over the navigation stub: search /
+    /// scan / language-toggle entry builds MarketCard with
+    /// confidenceScore nil, which left this tile stuck on "—" even after
+    /// public_card_metrics landed. Canonical row first — per-printing rows
+    /// are usually PUBLIC_ONLY/low-confidence and shouldn't downgrade the
+    /// card-level tile when a finish pill is tapped (same precedence as
+    /// heroChange's changeSource). Thin-tier JP rows (server PR #248)
+    /// carry market_confidence_score 30 and now honestly read "Low".
+    /// Falls back to a muted em-dash when nothing has loaded yet.
     private var confidenceDescriptor: (label: String, tone: DetailTone) {
-        guard let score = activeCard.confidenceScore else { return ("—", .muted) }
+        let fetchedScore = canonicalMetrics?.marketConfidenceScore
+            ?? cardMetrics?.marketConfidenceScore
+        guard let score = fetchedScore ?? activeCard.confidenceScore else {
+            return ("—", .muted)
+        }
         if score >= 85 { return ("High", .accent) }
         if score >= 70 { return ("Solid", .accent) }
         if score >= 55 { return ("Watch", .neutral) }
