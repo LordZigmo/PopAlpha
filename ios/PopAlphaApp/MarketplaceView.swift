@@ -124,21 +124,29 @@ struct MarketplaceView: View {
     @State private var offMarketPrefetcher = ImagePrefetcher()
 
     private func prefetchOffMarketThumbs() {
-        guard let board = data?.signalBoard else { return }
+        guard let payload = data else { return }
+        let board = payload.signalBoard
         // The rails the user lands on first after a flip, lead rail
         // first. Both windows for the windowed rails — the 24H/7D
-        // toggle shouldn't reintroduce placeholders either.
+        // toggle shouldn't reintroduce placeholders either — plus the
+        // FALLBACK lists MarketPulseSection.cards(for:) can actually
+        // render (codex P2 ×2 on PR #256): EN .movers falls back to
+        // window-momentum then highConfidenceMovers when the filtered
+        // top movers run thin (documented-sparse on 7D), .breakouts
+        // falls back to momentum, and .unusual falls back to
+        // highConfidenceMovers. A warm-up that skips the fallbacks
+        // still shows placeholders exactly when the primary rails are
+        // at their sparsest.
         let rails: [[HomepageCardDTO]]
         if market == .jp {
-            // EN-mode momentum is intentionally absent: MarketPulseSection
-            // hides the EN .momentum tab (breakouts covers it), so those
-            // thumbs can't render after a flip.
             rails = [
                 board.marketWatch ?? [],
                 board.topMovers.d7, board.topMovers.h24,
                 board.breakouts ?? [],
                 board.unusualVolume ?? [],
                 board.biggestDrops.d7, board.biggestDrops.h24,
+                board.momentum.d7, board.momentum.h24,
+                payload.highConfidenceMovers,
                 board.midMovers ?? [],
                 board.budgetMovers ?? [],
             ]
