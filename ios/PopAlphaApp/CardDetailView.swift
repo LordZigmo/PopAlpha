@@ -465,16 +465,16 @@ struct CardDetailView: View {
             .padding(.bottom, 20)
             // Ride down into the corner the minimized bar vacates so the
             // "+" centers level with the bottom-leading pill; back up
-            // when the bar re-expands. 79pt is measured, not eyeballed
+            // when the bar re-expands. 75pt is measured, not eyeballed
             // (pixel scan, iPhone 17 Pro Max / iOS 26.3): the resting
             // "+" center sits 20 (padding) + 83 (tab bar + home-
-            // indicator safe area) + 28 (radius) = 131pt above the
+            // indicator safe area) + 24 (radius) = 127pt above the
             // physical bottom; the minimized pill centers ~52pt up.
             // Both are safe-area-anchored constants on Dynamic-Island
-            // devices, so the 79pt delta is device-independent there.
+            // devices, so the 75pt delta is device-independent there.
             // Spring roughly matches the system bar's own minimize
             // animation.
-            .offset(y: tabBarLikelyMinimized ? 79 : 0)
+            .offset(y: tabBarLikelyMinimized ? 75 : 0)
             .animation(.spring(response: 0.35, dampingFraction: 0.85), value: tabBarLikelyMinimized)
         }
         .overlay(alignment: .top) {
@@ -2172,9 +2172,12 @@ struct CardDetailView: View {
             handleAddTap()
         } label: {
             Image(systemName: "plus")
-                .font(.system(size: 24, weight: .bold))
+                .font(.system(size: 21, weight: .bold))
                 .foregroundStyle(PA.Colors.background)
-                .frame(width: 56, height: 56)
+                // 48pt matches the iOS 26 minimized tab pill (measured
+                // 47.7pt capsule) so the two corner controls read as
+                // equal weights (owner request 2026-06-12).
+                .frame(width: 48, height: 48)
                 .background(detailAccent)
                 .clipShape(Circle())
                 .shadow(color: detailAccent.opacity(0.4), radius: 12, x: 0, y: 4)
