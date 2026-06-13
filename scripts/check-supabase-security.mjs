@@ -117,10 +117,14 @@ const publicTables = runLinkedDbQuery(
 
 const publicViews = runLinkedDbQuery(
   `
+  -- relkind 'm' included: public_jp_price_coverage became a
+  -- MATERIALIZED view (20260615090000); excluding matviews would both
+  -- fail the existence check for it and silently drop an anon-readable
+  -- object out of grant auditing.
   select c.relname as view_name
   from pg_class c
   join pg_namespace n on n.oid = c.relnamespace
-  where c.relkind = 'v'
+  where c.relkind in ('v', 'm')
     and n.nspname = 'public'
   order by c.relname;
   `,
@@ -173,11 +177,27 @@ const publicSequences = runLinkedDbQuery(
 
 const objectGrants = runLinkedDbQuery(
   `
+  -- information_schema.role_table_grants excludes MATERIALIZED views,
+  -- so their grants are unioned in from pg_class.relacl directly —
+  -- otherwise an anon-readable matview (public_jp_price_coverage,
+  -- 20260615090000) silently exits the grant audit.
   select table_name as object_name, grantee, privilege_type
   from information_schema.role_table_grants
   where table_schema = 'public'
     and grantee in ('anon', 'authenticated')
-  order by table_name, grantee, privilege_type;
+  union all
+  select
+    c.relname as object_name,
+    pg_get_userbyid(a.grantee) as grantee,
+    a.privilege_type
+  from pg_class c
+  join pg_namespace n on n.oid = c.relnamespace
+  cross join lateral aclexplode(coalesce(c.relacl, '{}'::aclitem[])) a
+  where c.relkind = 'm'
+    and n.nspname = 'public'
+    and a.grantee <> 0
+    and pg_get_userbyid(a.grantee) in ('anon', 'authenticated')
+  order by object_name, grantee, privilege_type;
   `,
   { label: "public object grants" },
 );
