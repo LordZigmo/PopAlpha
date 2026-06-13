@@ -1,6 +1,17 @@
 {
   "images" : [
     {
+      "filename" : "launch-logo-light.png",
+      "idiom" : "universal",
+      "scale" : "3x"
+    },
+    {
+      "appearances" : [
+        {
+          "appearance" : "luminosity",
+          "value" : "dark"
+        }
+      ],
       "filename" : "launch-logo.png",
       "idiom" : "universal",
       "scale" : "3x"
