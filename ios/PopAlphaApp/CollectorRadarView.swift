@@ -93,23 +93,30 @@ struct CollectorRadarView: View {
             // Data polygon — stroke
             ctx.stroke(fill, with: .color(accentColor), style: StrokeStyle(lineWidth: 1.5, lineJoin: .round))
 
-            // Data-point dots — each tinted with its axis color so the
-            // vertices key into their badges. Slightly larger (radius 4)
-            // so the colors register at a glance.
+            // Data-point dots — each tinted with its axis color (radius 4)
+            // so the vertices key into their badges. SKIP any dot still
+            // overlapping the center anchor: a genuinely-empty axis sits at
+            // the origin, and EVERY axis sits at the origin during the first
+            // frames of the draw-in animation (display scales by
+            // dataProgress, which starts at 0). Drawing a tinted dot there
+            // would bleed a colored ring around the cyan center — exactly
+            // the "purple above center" we're fixing. It appears the moment
+            // it expands clear of the anchor.
+            let centerR: Double = 4
+            let dotR: Double = 4
             for (i, axis) in axes.enumerated() {
-                let pt = point(i, radius: r * display(profile[keyPath: axis.value]))
-                let dot = Path(ellipseIn: CGRect(x: pt.x - 4, y: pt.y - 4, width: 8, height: 8))
+                let rad = r * display(profile[keyPath: axis.value])
+                guard rad > centerR + dotR else { continue }
+                let pt = point(i, radius: rad)
+                let dot = Path(ellipseIn: CGRect(x: pt.x - dotR, y: pt.y - dotR, width: dotR * 2, height: dotR * 2))
                 ctx.fill(dot, with: .color(axis.tint))
             }
 
-            // Center origin anchor — ALWAYS the default graph color, drawn
-            // ON TOP of the vertex dots so a zero-value axis (whose vertex
-            // collapses onto the center) can never make the middle of the
-            // chart read as that axis's tint. With the display() floor any
-            // nonzero axis is already lifted off-center, so this only ever
-            // covers a genuinely-empty axis. The faint ring reads it as an
-            // intentional anchor rather than a stray point.
-            let centerR: Double = 3.5
+            // Center origin anchor — ALWAYS the default graph color. Because
+            // the loop above skips any vertex within centerR+dotR of the
+            // middle, no axis tint is ever near the center, so it reads as
+            // the graph color (#00B4D8) regardless of any zero/near-zero
+            // axis. Faint ring marks it as an intentional anchor.
             let centerDot = Path(ellipseIn: CGRect(x: cx - centerR, y: cy - centerR, width: centerR * 2, height: centerR * 2))
             ctx.fill(centerDot, with: .color(accentColor))
             ctx.stroke(centerDot, with: .color(.white.opacity(0.25)), lineWidth: 0.75)
