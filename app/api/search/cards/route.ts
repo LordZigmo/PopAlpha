@@ -177,17 +177,42 @@ export async function GET(req: Request) {
   }
 
   const canonicalRows = dedupeBySlug([...directRows, ...aliasCanonicalRows]);
-  const jpPriceCoverageBySlug = await loadJpPriceCoverageMap(
-    supabase,
-    canonicalRows.map((row) => row.canonical_slug),
-  );
 
-  const cards = buildSearchCardResults({
+  // Rank FIRST, decorate prices after — and only for the ranked
+  // results. Ranking needs no prices, and canonicalRows can be ~500
+  // wide while only RESULT_LIMIT (100) ship, so loading coverage for
+  // everything paid for up to 5 sequential 100-slug view queries per
+  // search. public_jp_price_coverage does not push the slug predicate
+  // into its subquery — every lookup materializes the full ~20.7k-row
+  // view (~1.2s measured on prod, 2026-06-12) — so each avoided chunk
+  // is real seconds. Post-reorder a search pays at most ONE chunk.
+  const rankedCards = buildSearchCardResults({
     canonicalRows,
     aliasRows,
     query: normalized,
     limit: RESULT_LIMIT,
-  }).map((card) => ({
+  });
+
+  // Fail-soft: price decoration must never take search down. Under
+  // load the coverage view intermittently exceeds the DB statement
+  // timeout; before this, the loader's throw 500'd the whole search
+  // (observed in prod 2026-06-12, "Error: public_jp_price_coverage:
+  // …"). Results with a missing price beat no results — null price
+  // is honest, a 500 is not.
+  let jpPriceCoverageBySlug: Awaited<ReturnType<typeof loadJpPriceCoverageMap>>;
+  try {
+    jpPriceCoverageBySlug = await loadJpPriceCoverageMap(
+      supabase,
+      rankedCards.map((card) => card.canonical_slug),
+    );
+  } catch (err) {
+    console.error(
+      `[search/cards] price decoration failed — serving results without prices: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    jpPriceCoverageBySlug = new Map();
+  }
+
+  const cards = rankedCards.map((card) => ({
     id: card.canonical_slug,
     name: card.canonical_name,
     set: card.set_name,
