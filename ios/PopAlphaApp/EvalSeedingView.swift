@@ -393,13 +393,37 @@ struct EvalSeedingView: View {
 
     // MARK: - Save
 
+    // The correction flow ships in Release; the freshPhoto seeding path
+    // is a DEBUG-only admin tool, so it keeps its operator wording (incl.
+    // the raw-slug confirmation, which is useful when seeding ground truth).
+    private var saveLabel: String {
+        switch mode {
+        case .freshPhoto: "Save to eval corpus"
+        case .correction: "Submit correction"
+        }
+    }
+
+    private var savingLabel: String {
+        switch mode {
+        case .freshPhoto: "Saving…"
+        case .correction: "Submitting…"
+        }
+    }
+
+    private func successLabel(_ slug: String) -> String {
+        switch mode {
+        case .freshPhoto: "Saved — \(slug)"
+        case .correction: "Thanks — this helps improve scanning"
+        }
+    }
+
     private var saveButton: some View {
         Button {
             Task { await save() }
         } label: {
             HStack {
                 if isSaving { ProgressView().tint(PA.Colors.background) }
-                Text(isSaving ? "Saving…" : "Save to eval corpus")
+                Text(isSaving ? savingLabel : saveLabel)
                     .font(.system(size: 15, weight: .semibold))
             }
             .frame(maxWidth: .infinity)
@@ -419,7 +443,7 @@ struct EvalSeedingView: View {
             HStack(spacing: 8) {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(PA.Colors.positive)
-                Text("Saved — \(slug)")
+                Text(successLabel(slug))
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(PA.Colors.text)
             }
