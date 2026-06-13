@@ -130,6 +130,28 @@ export async function GET(req: Request) {
         : Promise.resolve({ data: [] as PrintingMetaRow[], error: null }),
     ]);
 
+    // LOUD degradation: every consumer below reads `.data ?? []`, so a
+    // failed batch query silently degrades a feature with zero log
+    // evidence — exactly how the portfolio chart vanished during the
+    // 2026-06-12 statement-timeout storm (the price-history query timed
+    // out → empty sparkline → chart hidden, nothing logged). Behavior
+    // stays the same (each feature degrades independently rather than
+    // failing the whole overview), but the degradation is now visible
+    // in runtime logs and attributable to its query.
+    const batchErrors: Array<[string, { error: { message: string } | null }]> = [
+      ["canonical_cards", cardsResult],
+      ["card_printings(images)", imagesResult],
+      ["public_price_history_canonical(sparkline)", historyResult],
+      ["card_printings(meta)", printingMetaResult],
+    ];
+    for (const [label, result] of batchErrors) {
+      if (result.error) {
+        console.error(
+          `[portfolio/overview] batch query failed — degrading without ${label}: ${result.error.message}`,
+        );
+      }
+    }
+
     // Build lookup maps
     const cardMap = new Map<string, CardRow>();
     for (const c of (cardsResult.data ?? []) as CardRow[]) {
