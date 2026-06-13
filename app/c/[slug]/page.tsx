@@ -121,6 +121,9 @@ import { GRADED_PROVIDERS, GRADE_BUCKETS, type GradeBucket } from "@/lib/cards/d
 
 const GRADED_SOURCES = GRADED_PROVIDERS;
 
+const SNAPSHOT_COLUMNS =
+  "active_listings_7d, median_7d, median_30d, trimmed_median_30d, low_30d, high_30d, market_price, market_price_as_of, market_price_display_state, recent_market_signal_usd, recent_market_signal_as_of, recent_market_signal_delta_pct, recent_market_signal_direction, market_confidence_score, market_low_confidence, market_blend_policy, market_provenance, volatility_30d, snapshot_count_30d, yahoo_jp_price, yahoo_jp_price_jpy, yahoo_jp_sample_count, snkrdunk_price, snkrdunk_sample_count";
+
 type ViewMode = "RAW" | "GRADED";
 
 type GradedAvailabilityRow = {
@@ -684,7 +687,7 @@ export default async function CanonicalCardPage({
       (["RAW", "PSA9", "PSA10"] as const).map((g) => {
         const q = supabase
           .from("public_card_metrics")
-          .select("active_listings_7d, median_7d, median_30d, trimmed_median_30d, low_30d, high_30d, market_price, market_price_as_of, market_price_display_state, recent_market_signal_usd, recent_market_signal_as_of, recent_market_signal_delta_pct, recent_market_signal_direction, market_confidence_score, market_low_confidence, market_blend_policy, market_provenance, volatility_30d, snapshot_count_30d, yahoo_jp_price, yahoo_jp_price_jpy, yahoo_jp_sample_count, snkrdunk_price, snkrdunk_sample_count")
+          .select(SNAPSHOT_COLUMNS)
           .eq("canonical_slug", slug)
           .eq("grade", g);
         const effectivePrintingId = g === "RAW" ? rawMetricsPrintingIdForQuery : gradedPrintingIdForQuery;
@@ -736,7 +739,7 @@ export default async function CanonicalCardPage({
       .maybeSingle<RawParityRow>(),
     getCardViewSnapshot(slug, 14),
   ]);
-  const [relatedCarousels, cardPulseSnapshot, portfolioContext] = await Promise.all([
+  const [relatedCarousels, cardPulseSnapshot, portfolioContext, cardLevelRawSnapResult] = await Promise.all([
     getRelatedCardCarousels({
       slug,
       canonicalName: canonical.canonical_name,
@@ -783,8 +786,23 @@ export default async function CanonicalCardPage({
       userId: user?.id ?? null,
       canonicalSlug: slug,
     }),
+    // Card-level (printing_id IS NULL) raw row for the variant-stable native
+    // sections (Details / Native Sources / Market Intelligence). The RAW
+    // variant picker switches client-side without a server rerun, so those
+    // sections must not be tied to a single printing's row. When no explicit
+    // printing is selected, rawSnap is already the card-level row — reuse it.
+    rawMetricsPrintingIdForQuery == null
+      ? Promise.resolve(rawSnap)
+      : supabase
+          .from("public_card_metrics")
+          .select(SNAPSHOT_COLUMNS)
+          .eq("canonical_slug", slug)
+          .eq("grade", "RAW")
+          .is("printing_id", null)
+          .maybeSingle<SnapshotRow>(),
   ]);
   const currentCardPulse = cardPulseSnapshot.cards[0] ?? null;
+  const cardLevelRawSnap = cardLevelRawSnapResult.data ?? null;
 
   const gradeSnapMap = {
     RAW: rawSnap.data,
@@ -1041,11 +1059,14 @@ export default async function CanonicalCardPage({
     { href: "#related-set", label: "From This Set" },
     { href: "#related-pokemon", label: "From This Pokémon" },
   ];
-  // iOS-parity card-level context. Market Intelligence reflects the active
-  // selection (falls back to the raw card row); JP native sources live on the
-  // raw row (JP pricing is raw-anchored) and the panel self-hides for EN cards.
-  const intelSnap = snapshotData ?? rawSnap.data ?? null;
-  const jpSnap = rawSnap.data ?? null;
+  // iOS-parity card-level context. RAW mode switches variants client-side (no
+  // server rerun), so these sections anchor to the card-level row to stay
+  // consistent with — rather than stale against — the displayed variant. GRADED
+  // mode switches grade via navigation, so the graded snapshot is correct there.
+  // JP native sources are canonical-slug-level, so always card-level (self-hides
+  // for EN cards).
+  const intelSnap = viewMode === "GRADED" ? (snapshotData ?? cardLevelRawSnap) : cardLevelRawSnap;
+  const jpSnap = cardLevelRawSnap;
   const commonTailSections = (
     <>
       <CardViewPing canonicalSlug={slug} />
