@@ -169,6 +169,48 @@ export async function GET(req: Request) {
     throw err;
   }
 
+  // Skip the whole tick when the embedder is down. Without this gate,
+  // every scheduled run claimed slugs, uploaded augmented images, then
+  // waited out the embed timeout per variant against a dead endpoint —
+  // 504ing at maxDuration every 5 minutes (observed 2026-06-12 during
+  // the Modal-workspace outage / home-GPU migration window) and
+  // re-claiming the same slugs forever. A 3s /health probe (the same
+  // surface check-embedder-health uses; deliberately NOT an embed
+  // call) costs nothing when healthy and saves a 300s burn when not.
+  // Only the modal-siglip variant exposes /health; other variants
+  // proceed ungated as before.
+  if (process.env.IMAGE_EMBEDDER_VARIANT?.trim() === "modal-siglip") {
+    const healthBase = process.env.MODAL_SIGLIP_ENDPOINT_URL?.trim();
+    if (healthBase) {
+      const probeController = new AbortController();
+      const probeTimer = setTimeout(() => probeController.abort(), 3_000);
+      try {
+        const probe = await fetch(`${healthBase.replace(/\/+$/, "")}/health`, {
+          signal: probeController.signal,
+          cache: "no-store",
+        });
+        const body = probe.ok
+          ? ((await probe.json().catch(() => null)) as { ok?: boolean } | null)
+          : null;
+        if (!body?.ok) {
+          return NextResponse.json({
+            ok: true,
+            skipped: "embedder_unhealthy",
+            detail: `health probe HTTP ${probe.status}`,
+          });
+        }
+      } catch (err) {
+        return NextResponse.json({
+          ok: true,
+          skipped: "embedder_unreachable",
+          detail: err instanceof Error ? err.message : String(err),
+        });
+      } finally {
+        clearTimeout(probeTimer);
+      }
+    }
+  }
+
   const maxCards = parseMaxCards(searchParams.get("maxCards"));
   const cursor = searchParams.get("cursor") ?? "";
 
