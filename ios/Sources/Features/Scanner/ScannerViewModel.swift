@@ -92,6 +92,19 @@ public final class ScannerViewModel: ObservableObject, PopAlphaVisionEngineDeleg
     /// same instant. Nil on simulator (no camera).
     public var fullFrameCapturer: (@Sendable () -> UIImage?)?
 
+    /// Installed by `ScannerCameraViewController` so the SwiftUI layer
+    /// — which reliably knows tab visibility — can drive the capture
+    /// session across tab switches. UIKit appearance callbacks proved
+    /// unreliable inside the SwiftUI tab containment on iOS 26: the
+    /// session stopped on leave (viewWillDisappear fired) but never
+    /// restarted on return (viewDidAppear didn't), freezing the
+    /// preview on its retained last frame until force-quit
+    /// (real-device 2026-06-12). Both closures are idempotent — they
+    /// map to guarded start/stop on the session queue, so redundant
+    /// calls from whichever callbacks DO fire are no-ops.
+    public var requestSessionStart: (() -> Void)?
+    public var requestSessionStop: (() -> Void)?
+
     /// Hook the app layer installs to replace the on-device CoreML
     /// classifier with a network identifier (e.g. /api/scan/identify).
     /// When non-nil, the stability-gated captured UIImage is handed to

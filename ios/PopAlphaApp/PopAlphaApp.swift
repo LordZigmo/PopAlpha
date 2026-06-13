@@ -101,6 +101,20 @@ extension UINavigationController: @retroactive UIGestureRecognizerDelegate {
 private struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var showSplash = true
+    /// Same stored appearance ContentView applies (ContentView:115) —
+    /// but SplashScreenView sits ABOVE ContentView in this ZStack,
+    /// outside that modifier's subtree, so without applying it here
+    /// the splash follows the SYSTEM scheme even when the user chose
+    /// light/dark in-app. Applied on the ZStack so the splash and the
+    /// app resolve the same scheme from frame one. (The static
+    /// UILaunchScreen frame is rendered by iOS before the process
+    /// runs and can only follow the system scheme — its assets are
+    /// appearance-aware, which covers the dominant follow-system
+    /// case.)
+    @AppStorage(AppearanceMode.storageKey) private var appearanceRaw: String = AppearanceMode.system.rawValue
+    private var appearance: AppearanceMode {
+        AppearanceMode(rawValue: appearanceRaw) ?? .system
+    }
 
     var body: some View {
         ZStack {
@@ -169,5 +183,6 @@ private struct RootView: View {
                     .zIndex(1)
             }
         }
+        .preferredColorScheme(appearance.colorScheme)
     }
 }

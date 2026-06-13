@@ -82,6 +82,17 @@ struct ScannerTabView: View {
                 if let viewModel = scanner.viewModel {
                     ScannerView(viewModel: viewModel)
                         .ignoresSafeArea()
+                        // SwiftUI is the visibility source of truth for
+                        // tab switches — the camera VC's own UIKit
+                        // appearance callbacks stop the session on
+                        // leave but don't reliably fire on return in
+                        // this containment (preview froze on the last
+                        // frame until force-quit, 2026-06-12). First
+                        // appearance: the closure may not be installed
+                        // yet — harmless, initial start is owned by the
+                        // VC's viewDidLoad intent.
+                        .onAppear { viewModel.requestSessionStart?() }
+                        .onDisappear { viewModel.requestSessionStop?() }
                 } else {
                     Color.black.ignoresSafeArea()
                 }

@@ -181,6 +181,17 @@ private final class ScannerCameraViewController: UIViewController, AVCaptureVide
         // start happens whenever configuration finishes, on the same
         // serial queue. viewWillDisappear still stops cleanly.
         startSessionIfNeeded()
+        // SwiftUI-driven resume/stop: tab switches reliably fire the
+        // wrapper's onAppear/onDisappear even when this VC's UIKit
+        // appearance callbacks don't (which froze the preview on its
+        // last frame after returning to the tab). Idempotent on both
+        // ends, so double-delivery with the UIKit callbacks is fine.
+        viewModel?.requestSessionStart = { [weak self] in
+            self?.startSessionIfNeeded()
+        }
+        viewModel?.requestSessionStop = { [weak self] in
+            self?.stopSession()
+        }
     }
 
     override func viewDidAppear(_ animated: Bool) {

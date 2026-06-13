@@ -6,6 +6,15 @@ import SwiftUI
 // transition from iOS-rendered launch frame to SwiftUI is seamless.
 // Self-dismisses by flipping the `isActive` binding after a brief hold
 // and exit animation.
+//
+// Light/dark parity comes from the ASSETS, not this code: both
+// LaunchBackground (#F7F7F7 light / #0D1016 dark — light matches the
+// homepage PA.Colors.background) and LaunchLogo (black wordmark light /
+// white wordmark dark, same 840×182@3x canvas) carry appearance
+// variants, and the same two names drive the static frame. RootView
+// applies the user's stored AppearanceMode to this view so an in-app
+// light/dark override wins over the system scheme here, exactly like
+// the homepage.
 struct SplashScreenView: View {
     @Binding var isActive: Bool
     @State private var logoScale: CGFloat = 1.0
