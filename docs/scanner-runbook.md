@@ -89,6 +89,16 @@ needed no catalog re-embed.
 
 ## Self-hosted embedder (home GPU) — setup + ops
 
+> **Cutover LIVE 2026-06-13.** Active box: `zigmo` (RTX 4070), public
+> via Tailscale Funnel at `https://zigmo.tail44d10b.ts.net` →
+> `127.0.0.1:8788`. Vercel `MODAL_SIGLIP_ENDPOINT_URL` points at that
+> Funnel URL; token in `cog/siglip-features/.siglip_token.txt`
+> (gitignored). Verified end-to-end with a production scan
+> (base-4-charizard, sim 0.9958). Runs from a Python 3.11 venv at
+> `cog/siglip-features/venv`; relaunches at logon via a Startup-folder
+> shortcut + `start_home_server.bat`. The `check-embedder-health` cron
+> should now read GREEN.
+
 Primary since 2026-06-12, replacing Modal. Why: the keepwarm cron
 (every 4 min) plus `scaledown_window=900` kept Modal's T4 warm 24/7
 (~$15/day — the entire $100/mo credit pool in ~7 days, for near-zero
