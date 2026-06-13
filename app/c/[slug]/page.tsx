@@ -15,6 +15,7 @@ import CanonicalCardFloatingHero from "@/components/canonical-card-floating-hero
 import CanonicalCardContextRail from "@/components/canonical-card/CanonicalCardContextRail";
 import CardModeToggle from "@/components/card-mode-toggle";
 import { CardDetailsGrid, JpNativeSources, MarketIntelligenceSection } from "@/components/card-detail-sections";
+import CardViewPing from "@/components/card-view-ping";
 import CollapsibleSection from "@/components/collapsible-section";
 import FriendActivitySection from "@/components/friend-activity-section";
 import ReportCardIssue from "@/components/report-card-issue";
@@ -1048,6 +1049,8 @@ export default async function CanonicalCardPage({
   const jpSnap = rawSnap.data ?? null;
   const commonTailSections = (
     <>
+      <CardViewPing canonicalSlug={slug} />
+
       <CardDetailsGrid
         setName={canonical.set_name}
         setHref={canonicalSetHref}
