@@ -29,8 +29,14 @@ public struct GlassMorphScannerOverlay: ScannerOverlay {
         let tint = isScanning ? Color.cyan.opacity(0.95) : Color.mint.opacity(0.95)
 
         ZStack {
+            // Clear fill — the framing guide is borders + corner
+            // accents only. The previous .ultraThinMaterial fill
+            // frosted the exact region the user aims the card at,
+            // leaving the live card grey and blurred in the
+            // viewfinder (owner report 2026-06-12: "you should be
+            // able to see the card clearly").
             RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .fill(.ultraThinMaterial.opacity(0.72))
+                .fill(Color.clear)
                 .overlay(
                     RoundedRectangle(cornerRadius: 28, style: .continuous)
                         .strokeBorder(.white.opacity(0.28), lineWidth: 1.2)
