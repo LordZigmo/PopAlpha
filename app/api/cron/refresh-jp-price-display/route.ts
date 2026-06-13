@@ -59,5 +59,30 @@ export async function GET(req: Request) {
     );
   }
 
-  return NextResponse.json({ ok: true, result: data, maxCards, elapsedMs });
+  // public_jp_price_coverage is a MATERIALIZED view (20260615090000) —
+  // refresh it right after the display writer so the snapshot picks up
+  // this tick's jp_display changes plus yahoo (:26) / snkrdunk (:36)
+  // writes from earlier in the hour. Plain refresh holds a ~1-2.5s
+  // exclusive lock; readers fail-soft through it. Fails LOUD on error
+  // (a silently stale snapshot would quietly freeze search/card-page
+  // JP prices — the silent-fallback failure class this repo keeps
+  // getting burned by).
+  const refreshStartedAt = Date.now();
+  const { error: coverageError } = await supabase.rpc("refresh_jp_price_coverage");
+  const coverageRefreshMs = Date.now() - refreshStartedAt;
+
+  if (coverageError) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: `jp display refreshed but coverage snapshot refresh failed: ${coverageError.message}`,
+        maxCards,
+        elapsedMs,
+        coverageRefreshMs,
+      },
+      { status: 500 },
+    );
+  }
+
+  return NextResponse.json({ ok: true, result: data, maxCards, elapsedMs, coverageRefreshMs });
 }

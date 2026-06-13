@@ -39,6 +39,10 @@ function latestViewDefinition(viewName) {
   const needles = [
     `create or replace view public.${viewName}`,
     `create view public.${viewName}`,
+    // 20260615090000 converted the view to a MATERIALIZED view (same
+    // name/body/grants) so per-slug lookups stop materializing the
+    // full ~20.7k rows; the contract applies to its body identically.
+    `create materialized view public.${viewName}`,
   ];
   for (const filename of listMigrationFiles().toReversed()) {
     const fullPath = path.join(MIGRATIONS_DIR, filename);
