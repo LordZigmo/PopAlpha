@@ -96,7 +96,7 @@ type SnapshotRow = {
   market_confidence_score: number | null;
   market_low_confidence: boolean | null;
   market_blend_policy: string | null;
-  market_provenance: string | null;
+  market_provenance: unknown;
   volatility_30d: number | null;
   snapshot_count_30d: number | null;
   yahoo_jp_price: number | null;

@@ -57,8 +57,18 @@ function volatilityBand(cvPct: number | null | undefined): { label: string; tone
   return { label: `High · ${pct}%`, tone: "warning" };
 }
 
-function priceSourceLabel(provenance: string | null | undefined, blendPolicy: string | null | undefined): string | null {
-  const raw = String(provenance ?? blendPolicy ?? "").trim().toUpperCase();
+function priceSourceLabel(provenance: unknown, blendPolicy: string | null | undefined): string | null {
+  // market_provenance is a jsonb object (not a string) — String()-ing it
+  // directly yields "[object Object]". Pull a source hint from it safely;
+  // the plain-string blend_policy is the primary signal.
+  let provenanceHint: string | null = null;
+  if (typeof provenance === "string") {
+    provenanceHint = provenance;
+  } else if (provenance && typeof provenance === "object") {
+    const selected = (provenance as Record<string, unknown>).selectedProvider;
+    if (typeof selected === "string") provenanceHint = selected;
+  }
+  const raw = String(blendPolicy ?? provenanceHint ?? "").trim().toUpperCase();
   if (!raw || raw === "NO_PRICE") return null;
   if (raw.includes("YAHOO")) return "Yahoo! Auctions JP";
   if (raw.includes("SNKRDUNK")) return "Snkrdunk";
@@ -194,7 +204,7 @@ export function MarketIntelligenceSection({
   confidenceScore,
   sampleCount30d,
 }: {
-  marketProvenance: string | null;
+  marketProvenance: unknown;
   marketBlendPolicy: string | null;
   marketPriceAsOf: string | null;
   median7d: number | null;
