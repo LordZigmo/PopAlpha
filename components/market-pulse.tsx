@@ -65,9 +65,15 @@ export default function MarketPulse({
   const [bearish, setBearish] = useState(initialBearish);
   const [userVote, setUserVote] = useState(initialUserVote);
 
-  const [now, setNow] = useState(Date.now());
+  // `now` stays null for SSR and the first client render so the countdown
+  // text node is byte-identical on both sides. Seeding it with Date.now()
+  // here desyncs by the SSR→hydration latency (the countdown renders to the
+  // second), tripping a React #418 hydration mismatch on every card-page
+  // load. We populate it after mount, then tick once a second.
+  const [now, setNow] = useState<number | null>(null);
 
   useEffect(() => {
+    setNow(Date.now());
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
@@ -76,7 +82,7 @@ export default function MarketPulse({
   const bullishPct = total > 0 ? (bullish / total) * 100 : 50;
   const bearishPct = total > 0 ? (bearish / total) * 100 : 50;
   const hasVoted = userVote !== null;
-  const countdown = formatCountdown(resolvesAt, now);
+  const countdown = now === null ? null : formatCountdown(resolvesAt, now);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

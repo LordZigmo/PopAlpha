@@ -61,12 +61,17 @@ function formatAsOf(value: string | null | undefined): string | null {
   if (!value) return null;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return null;
-  return date.toLocaleString("en-US", {
+  // Pin to UTC so the server (UTC) and client (viewer's local TZ) render the
+  // identical string — a tz-relative toLocaleString here is a second source of
+  // React #418 hydration mismatches for any non-UTC visitor. Matches the
+  // UTC-pinned pattern already used in view-history-chart.tsx.
+  return `${date.toLocaleString("en-US", {
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
-  });
+    timeZone: "UTC",
+  })} UTC`;
 }
 
 function formatSignalScore(value: number | null | undefined): string {
