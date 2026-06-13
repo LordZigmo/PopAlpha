@@ -198,7 +198,28 @@ final class MultiScanSession: ObservableObject {
     private func loadPrice(for entryId: UUID, slug: String) {
         Task { [weak self] in
             let metrics = try? await CardService.shared.fetchCardMetrics(slug: slug)
-            let price = metrics?.marketPrice
+            // Mirror the CardDetailView Near-Mint hero resolver EXACTLY
+            // so the scanner price (flash overlay + tray row) matches
+            // the hero the user lands on after tapping in. Raw
+            // metrics.marketPrice is the 14-day median; the hero prefers
+            // the freshest latest_price (EN) or the blended trusted JP
+            // point (jp_latest_price / per-source pick) — keying off
+            // marketPrice made the scanner show a different number than
+            // the card page (owner report 2026-06-13). activeCardPrice/
+            // chartFallbackPrice are detail-view-only fallback tiers the
+            // scanner has no equivalent for, so pass 0/nil.
+            let price = selectNearMintHeroPrice(
+                isJapaneseCard: slug.hasSuffix("-jp"),
+                latestPrice: metrics?.latestPrice,
+                marketPrice: metrics?.marketPrice,
+                jpLatestPrice: metrics?.jpLatestPrice,
+                activeCardPrice: 0,
+                chartFallbackPrice: nil,
+                yahooJpPrice: metrics?.yahooJpPrice,
+                yahooJpSampleCount: metrics?.yahooJpSampleCount,
+                snkrdunkPrice: metrics?.snkrdunkPrice,
+                snkrdunkSampleCount: metrics?.snkrdunkSampleCount
+            )
             await MainActor.run {
                 guard let self else { return }
                 guard let idx = self.entries.firstIndex(where: { $0.id == entryId }) else {
