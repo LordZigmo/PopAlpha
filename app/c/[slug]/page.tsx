@@ -104,7 +104,6 @@ type SnapshotRow = {
   yahoo_jp_price_jpy: number | null;
   yahoo_jp_sample_count: number | null;
   snkrdunk_price: number | null;
-  snkrdunk_price_jpy: number | null;
   snkrdunk_sample_count: number | null;
 };
 
@@ -685,7 +684,7 @@ export default async function CanonicalCardPage({
       (["RAW", "PSA9", "PSA10"] as const).map((g) => {
         const q = supabase
           .from("public_card_metrics")
-          .select("active_listings_7d, median_7d, median_30d, trimmed_median_30d, low_30d, high_30d, market_price, market_price_as_of, market_price_display_state, recent_market_signal_usd, recent_market_signal_as_of, recent_market_signal_delta_pct, recent_market_signal_direction, market_confidence_score, market_low_confidence, market_blend_policy, market_provenance, volatility_30d, snapshot_count_30d, yahoo_jp_price, yahoo_jp_price_jpy, yahoo_jp_sample_count, snkrdunk_price, snkrdunk_price_jpy, snkrdunk_sample_count")
+          .select("active_listings_7d, median_7d, median_30d, trimmed_median_30d, low_30d, high_30d, market_price, market_price_as_of, market_price_display_state, recent_market_signal_usd, recent_market_signal_as_of, recent_market_signal_delta_pct, recent_market_signal_direction, market_confidence_score, market_low_confidence, market_blend_policy, market_provenance, volatility_30d, snapshot_count_30d, yahoo_jp_price, yahoo_jp_price_jpy, yahoo_jp_sample_count, snkrdunk_price, snkrdunk_sample_count")
           .eq("canonical_slug", slug)
           .eq("grade", g);
         const effectivePrintingId = g === "RAW" ? rawMetricsPrintingIdForQuery : gradedPrintingIdForQuery;
@@ -1064,7 +1063,6 @@ export default async function CanonicalCardPage({
         yahooPriceJpy={jpSnap?.yahoo_jp_price_jpy ?? null}
         yahooSamples={jpSnap?.yahoo_jp_sample_count ?? null}
         snkrdunkPrice={jpSnap?.snkrdunk_price ?? null}
-        snkrdunkPriceJpy={jpSnap?.snkrdunk_price_jpy ?? null}
         snkrdunkSamples={jpSnap?.snkrdunk_sample_count ?? null}
       />
 

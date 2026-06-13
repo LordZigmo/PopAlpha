@@ -153,14 +153,12 @@ export function JpNativeSources({
   yahooPriceJpy,
   yahooSamples,
   snkrdunkPrice,
-  snkrdunkPriceJpy,
   snkrdunkSamples,
 }: {
   yahooPrice: number | null;
   yahooPriceJpy: number | null;
   yahooSamples: number | null;
   snkrdunkPrice: number | null;
-  snkrdunkPriceJpy: number | null;
   snkrdunkSamples: number | null;
 }) {
   const hasYahoo = yahooPrice != null && Number.isFinite(yahooPrice);
@@ -168,8 +166,12 @@ export function JpNativeSources({
   // Self-hide for EN cards (both null) — same gate iOS uses.
   if (!hasYahoo && !hasSnkrdunk) return null;
 
+  // Yahoo auctions are natively in yen, so the JPY is real. Snkrdunk's feed
+  // serves USD directly and its `price_jpy` is an FX-derived approximation
+  // (not a listed yen value) — so we omit it rather than imply a native price,
+  // matching iOS (which sets Snkrdunk jpy: nil).
   const yahooMeta = [fmtJpy(yahooPriceJpy), yahooSamples ? `n=${yahooSamples}` : null].filter(Boolean).join(" · ");
-  const snkrdunkMeta = [fmtJpy(snkrdunkPriceJpy), snkrdunkSamples ? `n=${snkrdunkSamples}` : null].filter(Boolean).join(" · ");
+  const snkrdunkMeta = snkrdunkSamples ? `n=${snkrdunkSamples}` : "";
 
   return (
     <GroupedSection title="Native Sources">
