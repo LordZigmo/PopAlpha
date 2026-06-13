@@ -148,10 +148,13 @@ struct PortfolioView: View {
                 .transition(.opacity)
                 .animation(.easeInOut(duration: 0.25), value: showLoadingSkeleton)
             }
-            .navigationTitle("Portfolio")
+            // No "Portfolio" title and no header band — the value graph
+            // is the top of the page now. Same iOS-26 deband as
+            // CardDetailView; the + button keeps its own accent circle and
+            // floats over content. (.inline display mode keeps the empty
+            // bar compact so the trailing + doesn't get large-title layout.)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(PA.Colors.surface, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+            .modifier(HideTopScrollEdgeEffect())
             .toolbar {
                 if auth.isAuthenticated {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -333,35 +336,36 @@ struct PortfolioView: View {
     private var portfolioContent: some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(spacing: 28) {
-                // 1. Collector identity — the type is pinned to the TOP
-                // of the page so the signed-in layout matches the
-                // logged-out PortfolioDemoView (identity → hero → radar →
-                // insights). Gated on the same freemium threshold as the
-                // analytics sections below; the radar + AI feed follow the
-                // hero. Renders as its own CollectorIdentityCard (the same
-                // surface the demo uses) rather than reverting to the
-                // merged-into-radar header.
-                if hasFullAnalysis, let identity = overview?.toIdentity() {
-                    CollectorIdentityCard(profile: identity)
-                }
-
-                // 2. Hero — totals, P&L, sparkline.
+                // 1. Hero — the portfolio VALUE GRAPH leads the page.
+                // The graph is the hero's second element, directly under
+                // the compact $value + P&L headline, so it sits at the top
+                // (graph-on-top per the 2026-06-13 portfolio redesign).
+                // The $value/P&L/stats stay coupled to the graph via the
+                // hero's shared scrub state — they travel together.
                 PortfolioHeroView(
                     summary: summary,
                     selectedWindow: $selectedWindow,
                     costBasisGap: costBasisGap
                 )
 
-                // 3. Below-threshold users see the unlock progress
-                // teaser instead of the analytics sections.
+                // 2. Collector identity / type card, directly beneath the
+                // graph. Gated on the same freemium threshold as the radar
+                // below. Renders as its own CollectorIdentityCard (the same
+                // surface the demo uses).
+                if hasFullAnalysis, let identity = overview?.toIdentity() {
+                    CollectorIdentityCard(profile: identity)
+                }
+
+                // 3. Below-threshold users see the unlock progress teaser
+                // instead of the analytics sections (mutually exclusive
+                // with the identity/radar, which are hasFullAnalysis-gated).
                 if !hasFullAnalysis {
                     InsightsUnlockProgress(cardsAdded: positions.count)
                 }
 
-                // 4. Collector radar + AI insights. The identity/type
-                // card renders at the TOP of the page (above the hero);
-                // the radar + insights follow here. Evolution lives at the
-                // bottom of the page.
+                // 4. Collector radar + AI insights — beneath the hero and
+                // the collector-type card (graph → type → radar). Evolution
+                // lives at the bottom of the page.
                 //
                 // Gating layers:
                 //   - hasFullAnalysis (>= 3 cards) is the freemium
@@ -374,8 +378,8 @@ struct PortfolioView: View {
                 if hasFullAnalysis {
                     if premiumGate.isPro {
                         // Radar only — the collector type renders as its
-                        // own card at the top of the page (matching the
-                        // demo), so no merged identity header here.
+                        // own card just above this (matching the demo), so
+                        // no merged identity header here.
                         if let radar = overview?.radarProfile {
                             CollectorRadarCard(
                                 profile: radar,
@@ -393,8 +397,8 @@ struct PortfolioView: View {
                         }
                     } else {
                         // Free w/ 3+ cards: the identity/type card already
-                        // renders at the top of the page, so only the
-                        // locked radar teaser shows here.
+                        // renders just above, so only the locked radar
+                        // teaser shows here.
                         CollectorRadarLockedCard(portfolioValue: summary.totalValue, cardCount: summary.cardCount)
                     }
                 }

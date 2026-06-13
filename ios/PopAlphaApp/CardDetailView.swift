@@ -3511,14 +3511,14 @@ private struct TabBarMinimizeMirror: ViewModifier {
 
 /// Hides BOTH iOS 26 layers that paint a band across the status/
 /// toolbar area when content scrolls under it: the top scroll-edge
-/// effect AND the navigation bar's own background appearance — see
-/// the call site comment in `CardDetailView.body`. Strictly no-op
-/// before iOS 26: the legacy bar keeps its background there because
-/// the back/share buttons have no system Liquid Glass capsules on
-/// older OSes (their custom circles were removed in favor of the
-/// iOS 26 system chrome), so bare icons over content would lose
+/// effect AND the navigation bar's own background appearance. Shared
+/// by CardDetailView (back/share buttons float over content) and
+/// PortfolioView (the titleless bar keeps only the floating + button).
+/// Strictly no-op before iOS 26: the legacy bar keeps its background
+/// there because those screens' buttons have no system Liquid Glass
+/// capsules on older OSes, so bare chrome over content would lose
 /// legibility.
-private struct HideTopScrollEdgeEffect: ViewModifier {
+struct HideTopScrollEdgeEffect: ViewModifier {
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
             content

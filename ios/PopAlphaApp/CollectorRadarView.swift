@@ -69,7 +69,16 @@ struct CollectorRadarView: View {
             // emphasis (ordering is preserved).
             //   0.10 -> 0.32, 0.25 -> 0.50, 0.50 -> 0.71, 1.0 -> 1.0
             func display(_ raw: Double) -> Double {
-                sqrt(max(0, raw)) * dataProgress
+                let v = max(0, raw)
+                guard v > 0 else { return 0 }   // a truly empty axis sits at the center
+                // Floor so a small-but-nonzero category plots clearly OFF
+                // the center anchor — the user has a little of a type, so
+                // show it rather than burying it as a smudge at the origin —
+                // while it stays the smallest point on the chart. Only lifts
+                // values whose sqrt is below the floor (~raw < 0.026); larger
+                // values keep the sqrt emphasis curve unchanged.
+                let minRadius = 0.16
+                return max(minRadius, sqrt(v)) * dataProgress
             }
 
             // Data polygon — fill
@@ -92,6 +101,18 @@ struct CollectorRadarView: View {
                 let dot = Path(ellipseIn: CGRect(x: pt.x - 4, y: pt.y - 4, width: 8, height: 8))
                 ctx.fill(dot, with: .color(axis.tint))
             }
+
+            // Center origin anchor — ALWAYS the default graph color, drawn
+            // ON TOP of the vertex dots so a zero-value axis (whose vertex
+            // collapses onto the center) can never make the middle of the
+            // chart read as that axis's tint. With the display() floor any
+            // nonzero axis is already lifted off-center, so this only ever
+            // covers a genuinely-empty axis. The faint ring reads it as an
+            // intentional anchor rather than a stray point.
+            let centerR: Double = 3.5
+            let centerDot = Path(ellipseIn: CGRect(x: cx - centerR, y: cy - centerR, width: centerR * 2, height: centerR * 2))
+            ctx.fill(centerDot, with: .color(accentColor))
+            ctx.stroke(centerDot, with: .color(.white.opacity(0.25)), lineWidth: 0.75)
         }
         .overlay(labelsOverlay)
         .task {
