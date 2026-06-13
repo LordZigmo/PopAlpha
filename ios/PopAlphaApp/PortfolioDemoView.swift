@@ -18,13 +18,15 @@ struct PortfolioDemoView: View {
                 VStack(spacing: 28) {
                     previewBadge
 
-                    CollectorIdentityCard(profile: Self.demoIdentity)
-
+                    // Graph → collector type → radar, matching the
+                    // signed-in PortfolioView order (2026-06-13 redesign).
                     PortfolioHeroView(
                         summary: Self.demoSummary,
                         selectedWindow: .constant(.day),
                         costBasisGap: nil
                     )
+
+                    CollectorIdentityCard(profile: Self.demoIdentity)
 
                     CollectorRadarCard(profile: Self.demoRadar)
 

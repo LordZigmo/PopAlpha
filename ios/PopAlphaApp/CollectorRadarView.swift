@@ -69,7 +69,16 @@ struct CollectorRadarView: View {
             // emphasis (ordering is preserved).
             //   0.10 -> 0.32, 0.25 -> 0.50, 0.50 -> 0.71, 1.0 -> 1.0
             func display(_ raw: Double) -> Double {
-                sqrt(max(0, raw)) * dataProgress
+                let v = max(0, raw)
+                guard v > 0 else { return 0 }   // a truly empty axis sits at the center
+                // Floor so a small-but-nonzero category plots clearly OFF
+                // the center anchor — the user has a little of a type, so
+                // show it rather than burying it as a smudge at the origin —
+                // while it stays the smallest point on the chart. Only lifts
+                // values whose sqrt is below the floor (~raw < 0.026); larger
+                // values keep the sqrt emphasis curve unchanged.
+                let minRadius = 0.16
+                return max(minRadius, sqrt(v)) * dataProgress
             }
 
             // Data polygon — fill
@@ -84,14 +93,33 @@ struct CollectorRadarView: View {
             // Data polygon — stroke
             ctx.stroke(fill, with: .color(accentColor), style: StrokeStyle(lineWidth: 1.5, lineJoin: .round))
 
-            // Data-point dots — each tinted with its axis color so the
-            // vertices key into their badges. Slightly larger (radius 4)
-            // so the colors register at a glance.
+            // Data-point dots — each tinted with its axis color (radius 4)
+            // so the vertices key into their badges. SKIP any dot still
+            // overlapping the center anchor: a genuinely-empty axis sits at
+            // the origin, and EVERY axis sits at the origin during the first
+            // frames of the draw-in animation (display scales by
+            // dataProgress, which starts at 0). Drawing a tinted dot there
+            // would bleed a colored ring around the cyan center — exactly
+            // the "purple above center" we're fixing. It appears the moment
+            // it expands clear of the anchor.
+            let centerR: Double = 4
+            let dotR: Double = 4
             for (i, axis) in axes.enumerated() {
-                let pt = point(i, radius: r * display(profile[keyPath: axis.value]))
-                let dot = Path(ellipseIn: CGRect(x: pt.x - 4, y: pt.y - 4, width: 8, height: 8))
+                let rad = r * display(profile[keyPath: axis.value])
+                guard rad > centerR + dotR else { continue }
+                let pt = point(i, radius: rad)
+                let dot = Path(ellipseIn: CGRect(x: pt.x - dotR, y: pt.y - dotR, width: dotR * 2, height: dotR * 2))
                 ctx.fill(dot, with: .color(axis.tint))
             }
+
+            // Center origin anchor — ALWAYS the default graph color. Because
+            // the loop above skips any vertex within centerR+dotR of the
+            // middle, no axis tint is ever near the center, so it reads as
+            // the graph color (#00B4D8) regardless of any zero/near-zero
+            // axis. Faint ring marks it as an intentional anchor.
+            let centerDot = Path(ellipseIn: CGRect(x: cx - centerR, y: cy - centerR, width: centerR * 2, height: centerR * 2))
+            ctx.fill(centerDot, with: .color(accentColor))
+            ctx.stroke(centerDot, with: .color(.white.opacity(0.25)), lineWidth: 0.75)
         }
         .overlay(labelsOverlay)
         .task {
