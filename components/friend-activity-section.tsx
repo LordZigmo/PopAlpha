@@ -42,7 +42,10 @@ export default function FriendActivitySection({
   canonicalSlug: string;
   isSignedIn: boolean;
 }) {
-  const [data, setData] = useState<CardFriendActivity | null>(null);
+  // Cache the result keyed by the slug it belongs to, so a previous card's
+  // activity is never shown for the current card during in-app /c/[slug]
+  // navigation (the response is guarded at render time, below).
+  const [fetched, setFetched] = useState<{ slug: string; data: CardFriendActivity } | null>(null);
 
   useEffect(() => {
     if (!isSignedIn) return;
@@ -50,15 +53,21 @@ export default function FriendActivitySection({
     void fetch(`/api/activity/card?slug=${encodeURIComponent(canonicalSlug)}`)
       .then((response) => (response.ok ? response.json() : null))
       .then((payload) => {
-        if (!cancelled && payload && payload.ok) setData(payload as CardFriendActivity);
+        if (cancelled) return;
+        setFetched(payload && payload.ok ? { slug: canonicalSlug, data: payload as CardFriendActivity } : null);
       })
       .catch(() => {
-        /* friend activity is best-effort; stay hidden on failure */
+        // best-effort; stay hidden on failure
+        if (!cancelled) setFetched(null);
       });
     return () => {
       cancelled = true;
     };
   }, [canonicalSlug, isSignedIn]);
+
+  // Only trust data that belongs to the slug being rendered right now — until
+  // the new fetch resolves, a stale previous-card result reads as absent.
+  const data = fetched && fetched.slug === canonicalSlug ? fetched.data : null;
 
   if (!isSignedIn || !data) return null;
   const recent = data.recent.slice(0, 3);

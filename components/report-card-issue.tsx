@@ -17,20 +17,29 @@ const CATEGORIES = [
 export default function ReportCardIssue({
   canonicalSlug,
   cardName,
+  setName,
+  cardNumber,
 }: {
   canonicalSlug: string;
   cardName: string;
+  setName: string | null;
+  cardNumber: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const [sent, setSent] = useState(false);
 
   function submit(category: string) {
     try {
+      // Match the native iOS bug_reported keys (slug / set_name / card_number /
+      // source: "card_detail") so web + iOS submissions land in the same
+      // PostHog insight; platform stays distinguishable via posthog's $lib.
       posthog.capture("bug_reported", {
         category,
-        canonical_slug: canonicalSlug,
+        slug: canonicalSlug,
         card_name: cardName,
-        surface: "web_card_detail",
+        set_name: setName,
+        card_number: cardNumber,
+        source: "card_detail",
       });
     } catch {
       /* analytics is best-effort */

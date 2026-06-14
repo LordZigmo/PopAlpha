@@ -1128,7 +1128,12 @@ export default async function CanonicalCardPage({
         emptyMessage="No other tracked cards from this Pokémon yet."
       />
 
-      <ReportCardIssue canonicalSlug={slug} cardName={canonical.canonical_name} />
+      <ReportCardIssue
+        canonicalSlug={slug}
+        cardName={canonical.canonical_name}
+        setName={canonical.set_name}
+        cardNumber={canonical.card_number}
+      />
     </>
   );
 
