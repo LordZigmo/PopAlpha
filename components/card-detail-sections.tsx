@@ -57,29 +57,37 @@ function volatilityBand(cvPct: number | null | undefined): { label: string; tone
   return { label: `High · ${pct}%`, tone: "warning" };
 }
 
-function priceSourceLabel(provenance: unknown, blendPolicy: string | null | undefined): string | null {
-  // market_provenance is a jsonb object (not a string) — String()-ing it
-  // directly yields "[object Object]". Pull a source hint from it safely;
-  // the plain-string blend_policy is the primary signal.
-  let provenanceHint: string | null = null;
-  if (typeof provenance === "string") {
-    provenanceHint = provenance;
-  } else if (provenance && typeof provenance === "object") {
-    const selected = (provenance as Record<string, unknown>).selectedProvider;
-    if (typeof selected === "string") provenanceHint = selected;
-  }
-  const raw = String(blendPolicy ?? provenanceHint ?? "").trim().toUpperCase();
-  if (!raw || raw === "NO_PRICE") return null;
+function feedLabelFromToken(token: string | null | undefined): string | null {
+  const raw = String(token ?? "").trim().toUpperCase();
   if (raw.includes("YAHOO")) return "Yahoo! Auctions JP";
   if (raw.includes("SNKRDUNK")) return "Snkrdunk";
   if (raw.includes("PRICECHARTING")) return "PriceCharting";
   if (raw.includes("SCRYDEX") || raw.includes("POKEMON_TCG")) return "Scrydex";
-  if (raw.includes("BLEND") || raw.includes("CORROBORATED")) return "Blended sources";
-  // Humanize an unknown policy token rather than show a raw enum.
-  return raw
-    .split(/[_\s]+/)
-    .map((w) => (w ? w[0] + w.slice(1).toLowerCase() : w))
-    .join(" ");
+  return null;
+}
+
+function priceSourceLabel(provenance: unknown, blendPolicy: string | null | undefined): string | null {
+  // "Price Source" must name the actual data FEED — never an internal trust /
+  // confidence policy. market_blend_policy is dominated by trust-state enums
+  // (POPALPHA_MARKET_CONFIDENT / _LOW_CONFIDENCE / _QUARANTINED / _SINGLE_SOURCE,
+  // NO_PRICE / NO_RELIABLE_PRICE, OUTLIER_SUPPRESSED) that are NOT sources, so
+  // accept only feed-named tokens and otherwise derive the feed from the
+  // provenance source mix. Anything we can't resolve to a feed is omitted
+  // rather than shown as a raw/humanized enum.
+  const provObj = provenance && typeof provenance === "object" ? (provenance as Record<string, unknown>) : null;
+  const selectedProvider = provObj && typeof provObj.selectedProvider === "string" ? provObj.selectedProvider : null;
+  const sourceMix = provObj && provObj.sourceMix && typeof provObj.sourceMix === "object"
+    ? (provObj.sourceMix as Record<string, unknown>)
+    : null;
+  const scrydexWeight = sourceMix && typeof sourceMix.scrydexWeight === "number" ? sourceMix.scrydexWeight : 0;
+
+  return (
+    feedLabelFromToken(selectedProvider) ??
+    feedLabelFromToken(blendPolicy) ??
+    // Blended PopAlpha rows carry a trust-state policy, not a feed name — name
+    // the underlying feed when the source mix tells us, else omit the row.
+    (scrydexWeight > 0 ? "Scrydex" : null)
+  );
 }
 
 const TONE_TEXT: Record<Tone, string> = {
