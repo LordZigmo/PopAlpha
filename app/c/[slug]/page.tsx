@@ -1062,10 +1062,13 @@ export default async function CanonicalCardPage({
   // iOS-parity card-level context. RAW mode switches variants client-side (no
   // server rerun), so these sections anchor to the card-level row to stay
   // consistent with — rather than stale against — the displayed variant. GRADED
-  // mode switches grade via navigation, so the graded snapshot is correct there.
-  // JP native sources are canonical-slug-level, so always card-level (self-hides
-  // for EN cards).
-  const intelSnap = viewMode === "GRADED" ? (snapshotData ?? cardLevelRawSnap) : cardLevelRawSnap;
+  // mode switches grade via navigation; use the graded bucket's own snapshot and
+  // do NOT fall back to RAW — buckets that snapshotGradeForSelection doesn't map
+  // (G8 / G9_5 / LE_7 / G10_PERFECT → null snapshotData) leave Details / Market
+  // Intelligence empty rather than show raw liquidity/source/median under a
+  // graded selection. JP native sources are canonical-slug-level, so always
+  // card-level (self-hides for EN cards).
+  const intelSnap = viewMode === "GRADED" ? snapshotData : cardLevelRawSnap;
   const jpSnap = cardLevelRawSnap;
   const commonTailSections = (
     <>
