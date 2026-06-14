@@ -1131,7 +1131,10 @@ export default async function CanonicalCardPage({
         emptyMessage="No other tracked cards from this Pokémon yet."
       />
 
+      {/* key by slug: remounts on in-app /c/[slug] navigation so the
+          open/sent UI state resets per card (it persists otherwise). */}
       <ReportCardIssue
+        key={slug}
         canonicalSlug={slug}
         cardName={canonical.canonical_name}
         setName={canonical.set_name}
