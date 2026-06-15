@@ -7,7 +7,6 @@ import CanonicalCardFloatingHero from "@/components/canonical-card-floating-hero
 import CardMarketIntelClient from "@/components/card-market-intel-client";
 import CardModeToggle from "@/components/card-mode-toggle";
 import { Pill } from "@/components/ios-grouped-ui";
-import MarketPulse from "@/components/market-pulse";
 import PersonalizedCardInsight from "@/components/personalized-card-insight";
 import PopAlphaScoutPreview from "@/components/popalpha-scout-preview";
 import type { FinishGroup } from "@/lib/cards/detail-types";
@@ -17,10 +16,7 @@ import {
   formatPriceDisplay,
   resolveDisplayedMarketPrice,
 } from "@/lib/pricing/displayed-market-price";
-import {
-  priceObservationActivityLabel,
-  priceObservationDensityLabel,
-} from "@/lib/pricing/price-observation-density";
+import { priceObservationDensityLabel } from "@/lib/pricing/price-observation-density";
 
 type RawCardMarketSurfaceProps = {
   canonicalSlug: string;
@@ -39,12 +35,6 @@ type RawCardMarketSurfaceProps = {
   scoutUpdatedAt: string | null;
   isPro: boolean;
   personalizedVariantRef: string | null;
-  currentCardPulse: {
-    bullishVotes: number;
-    bearishVotes: number;
-    userVote: "up" | "down" | null;
-    resolvesAt: number | null;
-  } | null;
   children?: ReactNode;
 };
 
@@ -74,13 +64,6 @@ function formatAsOf(value: string | null | undefined): string | null {
   })} UTC`;
 }
 
-function formatSignalScore(value: number | null | undefined): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) return "Forming";
-  const abs = Math.abs(value);
-  const formatted = abs >= 10 ? abs.toFixed(0) : abs.toFixed(1);
-  return `${value > 0 ? "+" : value < 0 ? "-" : ""}${formatted}%`;
-}
-
 function rarityColor(rarity: string | null): { label: string; color: string; borderColor: string; bgColor: string } | null {
   if (!rarity) return null;
   const normalized = rarity.toLowerCase();
@@ -107,39 +90,6 @@ function updatePrintingParam(nextPrintingId: string) {
   window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
-function DerivedMetricTile({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone: "positive" | "negative" | "neutral";
-}) {
-  const toneClass = tone === "positive"
-    ? "border-emerald-400/12 bg-emerald-400/[0.04] text-emerald-100"
-    : tone === "negative"
-      ? "border-red-400/12 bg-red-400/[0.04] text-red-100"
-      : "border-white/[0.06] bg-white/[0.03] text-[#F0F0F0]";
-
-  const subToneClass = tone === "positive"
-    ? "text-emerald-200/70"
-    : tone === "negative"
-      ? "text-red-200/70"
-      : "text-[#777]";
-
-  return (
-    <div className={`rounded-[20px] border px-4 py-3 backdrop-blur-sm ${toneClass}`}>
-      <p className={`text-[11px] font-semibold uppercase tracking-[0.12em] ${subToneClass}`}>
-        {label}
-      </p>
-      <p className="mt-1 text-[18px] font-semibold tracking-[-0.02em]">
-        {value}
-      </p>
-    </div>
-  );
-}
-
 export default function RawCardMarketSurface({
   canonicalSlug,
   canonicalName,
@@ -157,7 +107,6 @@ export default function RawCardMarketSurface({
   scoutUpdatedAt,
   isPro,
   personalizedVariantRef,
-  currentCardPulse,
   children,
 }: RawCardMarketSurfaceProps) {
   const [userPrintingId, setUserPrintingId] = useState<string | null>(null);
@@ -241,13 +190,6 @@ export default function RawCardMarketSurface({
     : "#6B6B6B";
   const rarityInfo = rarityColor(activeVariant?.rarity ?? null);
   const marketStatus = marketStatusSignal(activeVariant?.activeListings7d ?? null);
-  const trendMetricValue = showPriceChange ? formatSignalScore(priceChangePct) : "Stale";
-  const activityMetric = priceObservationActivityLabel(activeVariant?.activeListings7d ?? null);
-  const valueMetricValue = edgeLabel && edgeFormatted
-    ? `${edgeFormatted} ${edgeLabel}`
-    : fairValue != null
-      ? `Fair ${formatUsdCompact(fairValue)}`
-      : "Forming";
 
   function handleVariantChange(nextPrintingId: string) {
     setUserPrintingId(nextPrintingId);
@@ -387,24 +329,6 @@ export default function RawCardMarketSurface({
             isPro={isPro}
           />
 
-          <section className="mt-6 mb-6 grid gap-2 sm:grid-cols-3">
-            <DerivedMetricTile
-              label="Trend"
-              value={trendMetricValue}
-              tone={displayedPriceChangePct != null ? (displayedPriceChangePct > 0 ? "positive" : displayedPriceChangePct < 0 ? "negative" : "neutral") : "neutral"}
-            />
-            <DerivedMetricTile
-              label="Activity"
-              value={activityMetric.label}
-              tone={activityMetric.tone === "warning" ? "neutral" : activityMetric.tone}
-            />
-            <DerivedMetricTile
-              label="Value"
-              value={valueMetricValue}
-              tone={edgePercent != null ? (edgePercent < -1 ? "positive" : edgePercent > 1 ? "negative" : "neutral") : "neutral"}
-            />
-          </section>
-
           <CardMarketIntelClient
             variants={variants}
             finishGroups={finishGroups}
@@ -412,20 +336,6 @@ export default function RawCardMarketSurface({
             selectedWindow={selectedWindow}
             onVariantChange={handleVariantChange}
           />
-
-          {currentCardPulse ? (
-            <MarketPulse
-              canonicalSlug={canonicalSlug}
-              cardName={canonicalName}
-              setName={setName}
-              imageUrl={activeVariant?.imageUrl ?? null}
-              changePct={displayedPriceChangePct}
-              bullishVotes={currentCardPulse.bullishVotes}
-              bearishVotes={currentCardPulse.bearishVotes}
-              userVote={currentCardPulse.userVote}
-              resolvesAt={currentCardPulse.resolvesAt}
-            />
-          ) : null}
 
           {children}
         </div>

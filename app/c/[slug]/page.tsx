@@ -14,13 +14,15 @@ import { clerkEnabled } from "@/lib/auth/clerk-enabled";
 import CanonicalCardFloatingHero from "@/components/canonical-card-floating-hero";
 import CanonicalCardContextRail from "@/components/canonical-card/CanonicalCardContextRail";
 import CardModeToggle from "@/components/card-mode-toggle";
-import CardViewTracker from "@/components/card-view-tracker";
+import { CardDetailsGrid, JpNativeSources, MarketIntelligenceSection } from "@/components/card-detail-sections";
+import CardViewPing from "@/components/card-view-ping";
 import CollapsibleSection from "@/components/collapsible-section";
+import FriendActivitySection from "@/components/friend-activity-section";
+import ReportCardIssue from "@/components/report-card-issue";
 import EbayListings from "@/components/ebay-listings";
 import GradedGradeHistoryChart from "@/components/graded-grade-history-chart";
-import { GroupedSection, Pill, SegmentedControl, StatStripItem } from "@/components/ios-grouped-ui";
+import { GroupedSection, Pill, SegmentedControl } from "@/components/ios-grouped-ui";
 import CanonicalCardShell from "@/components/layout/CanonicalCardShell";
-import MarketPulse from "@/components/market-pulse";
 import MarketSummaryCard, { loadRawCardMarketVariants } from "@/components/market-summary-card";
 import PersonalizedCardInsight from "@/components/personalized-card-insight";
 import PopAlphaScoutPreview from "@/components/popalpha-scout-preview";
@@ -52,10 +54,7 @@ import {
   formatPriceDisplay,
   resolveDisplayedMarketPrice,
 } from "@/lib/pricing/displayed-market-price";
-import {
-  priceObservationActivityLabel,
-  priceObservationDensityLabel,
-} from "@/lib/pricing/price-observation-density";
+import { priceObservationDensityLabel } from "@/lib/pricing/price-observation-density";
 import { resolveSnapshotTrust } from "@/lib/pricing/snapshot-trust";
 import { isPhysicalPokemonSet } from "@/lib/sets/physical";
 
@@ -98,6 +97,14 @@ type SnapshotRow = {
   market_confidence_score: number | null;
   market_low_confidence: boolean | null;
   market_blend_policy: string | null;
+  market_provenance: unknown;
+  volatility_30d: number | null;
+  snapshot_count_30d: number | null;
+  yahoo_jp_price: number | null;
+  yahoo_jp_price_jpy: number | null;
+  yahoo_jp_sample_count: number | null;
+  snkrdunk_price: number | null;
+  snkrdunk_sample_count: number | null;
 };
 
 type HoldingQtyRow = {
@@ -113,6 +120,9 @@ const DEFAULT_BACK_HREF = "/search";
 import { GRADED_PROVIDERS, GRADE_BUCKETS, type GradeBucket } from "@/lib/cards/detail-types";
 
 const GRADED_SOURCES = GRADED_PROVIDERS;
+
+const SNAPSHOT_COLUMNS =
+  "active_listings_7d, median_7d, median_30d, trimmed_median_30d, low_30d, high_30d, market_price, market_price_as_of, market_price_display_state, recent_market_signal_usd, recent_market_signal_as_of, recent_market_signal_delta_pct, recent_market_signal_direction, market_confidence_score, market_low_confidence, market_blend_policy, market_provenance, volatility_30d, snapshot_count_30d, yahoo_jp_price, yahoo_jp_price_jpy, yahoo_jp_sample_count, snkrdunk_price, snkrdunk_sample_count";
 
 type ViewMode = "RAW" | "GRADED";
 
@@ -522,13 +532,6 @@ function resolveRawDisplayPrice(params: {
   };
 }
 
-function formatSignalScore(value: number | null | undefined): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) return "Forming";
-  const abs = Math.abs(value);
-  const formatted = abs >= 10 ? abs.toFixed(0) : abs.toFixed(1);
-  return `${value > 0 ? "+" : value < 0 ? "-" : ""}${formatted}%`;
-}
-
 function RelatedCarouselSection({
   title,
   cards,
@@ -684,7 +687,7 @@ export default async function CanonicalCardPage({
       (["RAW", "PSA9", "PSA10"] as const).map((g) => {
         const q = supabase
           .from("public_card_metrics")
-          .select("active_listings_7d, median_7d, median_30d, trimmed_median_30d, low_30d, high_30d, market_price, market_price_as_of, market_price_display_state, recent_market_signal_usd, recent_market_signal_as_of, recent_market_signal_delta_pct, recent_market_signal_direction, market_confidence_score, market_low_confidence, market_blend_policy")
+          .select(SNAPSHOT_COLUMNS)
           .eq("canonical_slug", slug)
           .eq("grade", g);
         const effectivePrintingId = g === "RAW" ? rawMetricsPrintingIdForQuery : gradedPrintingIdForQuery;
@@ -736,7 +739,7 @@ export default async function CanonicalCardPage({
       .maybeSingle<RawParityRow>(),
     getCardViewSnapshot(slug, 14),
   ]);
-  const [relatedCarousels, cardPulseSnapshot, portfolioContext] = await Promise.all([
+  const [relatedCarousels, cardPulseSnapshot, portfolioContext, cardLevelRawSnapResult] = await Promise.all([
     getRelatedCardCarousels({
       slug,
       canonicalName: canonical.canonical_name,
@@ -783,8 +786,23 @@ export default async function CanonicalCardPage({
       userId: user?.id ?? null,
       canonicalSlug: slug,
     }),
+    // Card-level (printing_id IS NULL) raw row for the variant-stable native
+    // sections (Details / Native Sources / Market Intelligence). The RAW
+    // variant picker switches client-side without a server rerun, so those
+    // sections must not be tied to a single printing's row. When no explicit
+    // printing is selected, rawSnap is already the card-level row — reuse it.
+    rawMetricsPrintingIdForQuery == null
+      ? Promise.resolve(rawSnap)
+      : supabase
+          .from("public_card_metrics")
+          .select(SNAPSHOT_COLUMNS)
+          .eq("canonical_slug", slug)
+          .eq("grade", "RAW")
+          .is("printing_id", null)
+          .maybeSingle<SnapshotRow>(),
   ]);
   const currentCardPulse = cardPulseSnapshot.cards[0] ?? null;
+  const cardLevelRawSnap = cardLevelRawSnapResult.data ?? null;
 
   const gradeSnapMap = {
     RAW: rawSnap.data,
@@ -1017,21 +1035,6 @@ export default async function CanonicalCardPage({
 
   const rarityInfo = selectedPrinting ? rarityColor(selectedPrinting.rarity) : null;
   const canonicalSetHref = setHref(canonical.set_name);
-  const selectedGradedReference = selectedSnapshotGrade && selectedSnapshotGrade !== "RAW"
-    ? gradeSnapMap[selectedSnapshotGrade]?.median_7d ?? null
-    : null;
-  const rawReference = gradeSnapMap.RAW?.median_7d ?? null;
-  const gradedPremiumPct = selectedGradedReference != null && rawReference != null && rawReference > 0
-    ? ((selectedGradedReference - rawReference) / rawReference) * 100
-    : null;
-  const gradedProviderCards = gradedVariantRefsForActiveBucket.map((entry) => {
-    const latestUsd = latestGradedPriceUsdByVariantRef.get(entry.variantRef);
-    return {
-      key: entry.provider,
-      label: providerLabel(entry.provider),
-      value: latestUsd != null ? formatUsdCompact(latestUsd) : "Forming",
-    };
-  });
   // Per-grade price history for the active grader, across every bucket that
   // has data — powers the "Grade Performance" multi-line overlay so users can
   // see which grade is moving quicker. Only loaded in GRADED mode.
@@ -1049,39 +1052,55 @@ export default async function CanonicalCardPage({
         return [];
       })
     : [];
-  const trendMetricValue = showPriceChange ? formatSignalScore(priceChangePct) : "Stale";
-  const activityMetric = priceObservationActivityLabel(snapshotData?.active_listings_7d ?? null);
   const scoutMarketPrice = viewMode === "RAW" && !showPriceChange ? null : displayPrimaryPrice;
-  const valueMetricValue = edgeLabel && edgeFormatted
-    ? `${edgeFormatted} ${edgeLabel}`
-    : fairValue != null
-      ? `Fair ${formatUsdCompact(fairValue)}`
-      : "Forming";
-  const rawPulseSnapshot = currentCardPulse
-    ? {
-        bullishVotes: currentCardPulse.bullishVotes,
-        bearishVotes: currentCardPulse.bearishVotes,
-        userVote: currentCardPulse.userVote,
-        resolvesAt: cardPulseSnapshot.weekEndsAt,
-      }
-    : null;
   const sectionLinks = [
     { href: "#content", label: "Overview" },
-    { href: "#card-views", label: "Views" },
     { href: "#live-listings", label: "Listings" },
     { href: "#related-set", label: "From This Set" },
     { href: "#related-pokemon", label: "From This Pokémon" },
   ];
+  // iOS-parity card-level context. RAW mode switches variants client-side (no
+  // server rerun), so these sections anchor to the card-level row to stay
+  // consistent with — rather than stale against — the displayed variant. GRADED
+  // mode switches grade via navigation; use the graded bucket's own snapshot and
+  // do NOT fall back to RAW — buckets that snapshotGradeForSelection doesn't map
+  // (G8 / G9_5 / LE_7 / G10_PERFECT → null snapshotData) leave Details / Market
+  // Intelligence empty rather than show raw liquidity/source/median under a
+  // graded selection. JP native sources are canonical-slug-level, so always
+  // card-level (self-hides for EN cards).
+  const intelSnap = viewMode === "GRADED" ? snapshotData : cardLevelRawSnap;
+  const jpSnap = cardLevelRawSnap;
   const commonTailSections = (
     <>
-      <div id="card-views" className="scroll-mt-20 pt-4 sm:pt-5">
-        <CardViewTracker
-          canonicalSlug={slug}
-          initialTotalViews={viewSnapshot.totalViews}
-          initialSeries={viewSnapshot.series}
-          locked
-        />
-      </div>
+      <CardViewPing canonicalSlug={slug} />
+
+      <CardDetailsGrid
+        setName={canonical.set_name}
+        setHref={canonicalSetHref}
+        cardNumber={canonical.card_number}
+        confidenceScore={intelSnap?.market_confidence_score ?? null}
+        activeListings7d={intelSnap?.active_listings_7d ?? null}
+      />
+
+      <JpNativeSources
+        yahooPrice={jpSnap?.yahoo_jp_price ?? null}
+        yahooPriceJpy={jpSnap?.yahoo_jp_price_jpy ?? null}
+        yahooSamples={jpSnap?.yahoo_jp_sample_count ?? null}
+        snkrdunkPrice={jpSnap?.snkrdunk_price ?? null}
+        snkrdunkSamples={jpSnap?.snkrdunk_sample_count ?? null}
+      />
+
+      <FriendActivitySection canonicalSlug={slug} isSignedIn={Boolean(user)} />
+
+      <MarketIntelligenceSection
+        marketProvenance={intelSnap?.market_provenance ?? null}
+        marketBlendPolicy={intelSnap?.market_blend_policy ?? null}
+        marketPriceAsOf={intelSnap?.market_price_as_of ?? null}
+        median7d={intelSnap?.median_7d ?? null}
+        volatilityCvPct={intelSnap?.volatility_30d ?? null}
+        confidenceScore={intelSnap?.market_confidence_score ?? null}
+        sampleCount30d={intelSnap?.snapshot_count_30d ?? null}
+      />
 
       <div id="live-listings" className="scroll-mt-20">
         <CollapsibleSection title="Live eBay Listings" defaultOpen={false} badge={<Pill label="Live" tone="neutral" size="small" />}>
@@ -1110,6 +1129,16 @@ export default async function CanonicalCardPage({
         title="From This Pokémon"
         cards={relatedCarousels.fromPokemon}
         emptyMessage="No other tracked cards from this Pokémon yet."
+      />
+
+      {/* key by slug: remounts on in-app /c/[slug] navigation so the
+          open/sent UI state resets per card (it persists otherwise). */}
+      <ReportCardIssue
+        key={slug}
+        canonicalSlug={slug}
+        cardName={canonical.canonical_name}
+        setName={canonical.set_name}
+        cardNumber={canonical.card_number}
       />
     </>
   );
@@ -1160,7 +1189,6 @@ export default async function CanonicalCardPage({
           scoutUpdatedAt={scoutUpdatedAt}
           isPro={userIsPro}
           personalizedVariantRef={personalizedVariantRef}
-          currentCardPulse={rawPulseSnapshot}
         >
           {commonTailSections}
         </RawCardMarketSurface>
@@ -1264,39 +1292,6 @@ export default async function CanonicalCardPage({
             </div>
           </div>
 
-          {viewMode === "GRADED" && activeProvider && availableProviders.length > 0 ? (
-            <div className="mb-6 rounded-[20px] border border-[#1E1E1E] bg-[#101010] px-4 py-4 sm:px-5">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Pill label={activeBucket ? `${gradeBucketLabel(activeBucket)} Grade Board` : "Graded Market"} tone="metallic" />
-                  <span className="text-[13px] text-[#6B6B6B]">Latest grader prices we actually have</span>
-                </div>
-                {selectedGradedReference != null ? (
-                  <span className="text-[24px] font-bold tracking-[-0.03em] text-[#F0F0F0]">
-                    {formatUsdCompact(selectedGradedReference)}
-                  </span>
-                ) : (
-                  <span className="text-[14px] font-semibold text-[#6B6B6B]">Market forming</span>
-                )}
-              </div>
-              <div className="mt-4 flex flex-wrap gap-4 sm:gap-6">
-                {gradedProviderCards.map((item) => (
-                  <StatStripItem key={item.key} label={item.label} value={item.value} />
-                ))}
-                {rawReference != null ? (
-                  <StatStripItem label="Raw Ref" value={formatUsdCompact(rawReference)} />
-                ) : null}
-                {gradedPremiumPct != null ? (
-                  <StatStripItem
-                    label="Grade Premium"
-                    value={`${gradedPremiumPct > 0 ? "+" : ""}${Math.abs(gradedPremiumPct) >= 10 ? gradedPremiumPct.toFixed(0) : gradedPremiumPct.toFixed(1)}%`}
-                    tone={gradedPremiumPct >= 0 ? "positive" : "negative"}
-                  />
-                ) : null}
-              </div>
-            </div>
-          ) : null}
-
           {viewMode === "GRADED" && activeProvider && gradedGradeSeries.length > 0 ? (
             <GradedGradeHistoryChart
               series={gradedGradeSeries}
@@ -1322,24 +1317,6 @@ export default async function CanonicalCardPage({
           variantRef={personalizedVariantRef}
           isPro={userIsPro}
         />
-
-        <section className="mt-6 mb-6 grid gap-2 sm:grid-cols-3">
-          <DerivedMetricTile
-            label="Trend"
-            value={trendMetricValue}
-            tone={displayPriceChangePct != null ? (displayPriceChangePct > 0 ? "positive" : displayPriceChangePct < 0 ? "negative" : "neutral") : "neutral"}
-          />
-          <DerivedMetricTile
-            label="Activity"
-            value={activityMetric.label}
-            tone={activityMetric.tone === "warning" ? "neutral" : activityMetric.tone}
-          />
-          <DerivedMetricTile
-            label="Value"
-            value={valueMetricValue}
-            tone={edgePercent != null ? (edgePercent < -1 ? "positive" : edgePercent > 1 ? "negative" : "neutral") : "neutral"}
-          />
-        </section>
 
         {/* ── Market Summary (enlarged chart) ──────────────────────────────── */}
         <MarketSummaryCard
@@ -1379,60 +1356,11 @@ export default async function CanonicalCardPage({
         </GroupedSection>
         ) : null}
 
-        {/* ── Market Pulse ─────────────────────────────────────────────────
-            Community sentiment vote — stub data, wire to DB later. */}
-        {currentCardPulse ? (
-          <MarketPulse
-            canonicalSlug={slug}
-            cardName={canonical.canonical_name}
-            setName={canonical.set_name}
-            imageUrl={selectedPrinting?.image_url ?? null}
-            changePct={vm?.change_7d_pct ?? null}
-            bullishVotes={currentCardPulse.bullishVotes}
-            bearishVotes={currentCardPulse.bearishVotes}
-            userVote={currentCardPulse.userVote}
-            resolvesAt={cardPulseSnapshot.weekEndsAt}
-          />
-        ) : null}
-
               {commonTailSections}
             </div>
           </div>
         </>
       )}
     </CanonicalCardShell>
-  );
-}
-
-function DerivedMetricTile({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone: "positive" | "negative" | "neutral";
-}) {
-  const toneClass = tone === "positive"
-    ? "border-emerald-400/12 bg-emerald-400/[0.04] text-emerald-100"
-    : tone === "negative"
-      ? "border-red-400/12 bg-red-400/[0.04] text-red-100"
-      : "border-white/[0.06] bg-white/[0.03] text-[#F0F0F0]";
-
-  const subToneClass = tone === "positive"
-    ? "text-emerald-200/70"
-    : tone === "negative"
-      ? "text-red-200/70"
-      : "text-[#777]";
-
-  return (
-    <div className={`rounded-[20px] border px-4 py-3 backdrop-blur-sm ${toneClass}`}>
-      <p className={`text-[11px] font-semibold uppercase tracking-[0.12em] ${subToneClass}`}>
-        {label}
-      </p>
-      <p className="mt-1 text-[18px] font-semibold tracking-[-0.02em]">
-        {value}
-      </p>
-    </div>
   );
 }
