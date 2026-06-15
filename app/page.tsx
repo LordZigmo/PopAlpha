@@ -9,6 +9,8 @@ import Reveal from "@/components/landing/reveal";
 import LandingHero from "@/components/landing/landing-hero";
 import { appStoreHref } from "@/lib/marketing/app-store";
 import { clerkEnabled } from "@/lib/auth/clerk-enabled";
+import JsonLd from "@/components/compare/json-ld";
+import { organizationSchema, webSiteSchema } from "@/lib/seo/schema";
 
 export const revalidate = 3600;
 
@@ -32,6 +34,7 @@ export default async function Home() {
         showSignIn={false}
         logoPriority
       />
+      <JsonLd data={[organizationSchema(), webSiteSchema()]} />
 
       <LandingHero />
       <HowItWorks />

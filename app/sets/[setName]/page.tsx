@@ -15,6 +15,8 @@ import {
   resolveDisplayedMarketPrice,
 } from "@/lib/pricing/displayed-market-price";
 import { isPhysicalPokemonSet } from "@/lib/sets/physical";
+import JsonLd from "@/components/compare/json-ld";
+import { breadcrumbSchema } from "@/lib/compare/schema";
 
 type CanonicalRow = {
   slug: string;
@@ -370,7 +372,15 @@ export default async function SetBrowserPage({ params }: { params: Promise<{ set
   }));
 
   return (
-    <PageShell backHref="/sets">
+    <>
+      <JsonLd
+        data={breadcrumbSchema([
+          { name: "Home", path: "/" },
+          { name: "Pokémon Sets", path: "/sets" },
+          { name: decodedSetName, path: `/sets/${encodeURIComponent(decodedSetName)}` },
+        ])}
+      />
+      <PageShell backHref="/sets">
       <div className="px-5 py-8 sm:px-8">
         <div className="mb-5 flex items-baseline gap-3">
           <h1 className="text-app text-xl font-semibold">{decodedSetName}</h1>
@@ -560,6 +570,7 @@ export default async function SetBrowserPage({ params }: { params: Promise<{ set
           </div>
         </section>
       </div>
-    </PageShell>
+      </PageShell>
+    </>
   );
 }

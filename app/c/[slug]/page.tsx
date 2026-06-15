@@ -57,6 +57,10 @@ import {
 import { priceObservationDensityLabel } from "@/lib/pricing/price-observation-density";
 import { resolveSnapshotTrust } from "@/lib/pricing/snapshot-trust";
 import { isPhysicalPokemonSet } from "@/lib/sets/physical";
+import JsonLd from "@/components/compare/json-ld";
+import { breadcrumbSchema, faqPageSchema } from "@/lib/compare/schema";
+import { cardProductSchema } from "@/lib/seo/schema";
+import { buildCardSeoContent } from "@/lib/seo/card-content";
 
 type CanonicalCardRow = {
   slug: string;
@@ -288,29 +292,22 @@ function buildCanonicalCardMetadataTitle(canonical: CanonicalCardRow): string {
     canonical.card_number ? `#${canonical.card_number}` : null,
   ].filter(Boolean);
 
-  return `${identityBits.join(" · ")} | PopAlpha`;
+  return `${identityBits.join(" · ")} — Price & Value | PopAlpha`;
 }
 
 function buildCanonicalCardMetadataDescription(
   canonical: CanonicalCardRow,
   cardProfile: CardProfileSummary | null,
-  selectedPrinting: CardPrintingRow | null,
 ): string {
   const profileSummary = cardProfile?.summary_short?.trim();
   if (profileSummary) return profileSummary;
 
-  const identityBits = [
-    canonical.set_name ? `from ${canonical.set_name}` : null,
-    canonical.card_number ? `#${canonical.card_number}` : null,
-    canonical.year ? String(canonical.year) : null,
-  ].filter(Boolean);
-  const printingLabel = selectedPrinting ? printingOptionLabel(selectedPrinting) : null;
-  const subjectLabel = canonical.subject?.trim() ? `${canonical.subject.trim()} collectors` : "card collectors";
+  const setBit = canonical.set_name ? ` from ${canonical.set_name}` : "";
+  const numBit = canonical.card_number ? ` (#${canonical.card_number})` : "";
+  const subject = canonical.subject?.trim();
+  const audience = subject ? ` Built for ${subject} collectors.` : "";
 
-  return [
-    `Track ${canonical.canonical_name}${identityBits.length > 0 ? ` ${identityBits.join(" · ")}` : ""} on PopAlpha.`,
-    printingLabel ? `${printingLabel} pricing, market signals, and collector context for ${subjectLabel}.` : `Pricing, market signals, and collector context for ${subjectLabel}.`,
-  ].join(" ");
+  return `How much is ${canonical.canonical_name}${setBit}${numBit} worth? See its current market price, PSA & CGC graded values, 30-day price history, and live listings on PopAlpha.${audience}`;
 }
 
 export async function generateMetadata({
@@ -319,7 +316,7 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  const { canonical, printings } = await getCanonicalCardPageBaseData(slug);
+  const { canonical } = await getCanonicalCardPageBaseData(slug);
 
   if (!canonical) {
     return {
@@ -331,9 +328,8 @@ export async function generateMetadata({
     };
   }
 
-  const selectedPrinting = chooseDefaultPrinting(printings);
   const title = buildCanonicalCardMetadataTitle(canonical);
-  const description = buildCanonicalCardMetadataDescription(canonical, null, selectedPrinting);
+  const description = buildCanonicalCardMetadataDescription(canonical, null);
   const canonicalPath = `/c/${encodeURIComponent(slug)}`;
 
   return {
@@ -1035,6 +1031,60 @@ export default async function CanonicalCardPage({
 
   const rarityInfo = selectedPrinting ? rarityColor(selectedPrinting.rarity) : null;
   const canonicalSetHref = setHref(canonical.set_name);
+
+  // ── SEO / GEO: honest structured data + crawlable answer copy ──────────────
+  // Classify the canonical RAW market price independently of the interactive
+  // RAW/GRADED toggle so the Product schema + visible copy describe the card's
+  // base (ungraded) market value consistently on every variant of the URL —
+  // including ?printing= variants, which all canonicalise to /c/[slug]. Use the
+  // card-level raw row (printing_id IS NULL) for price and the default printing
+  // for image/rarity, so the Product, offer, and copy never change when a
+  // specific printing is selected. Price is honesty-gated the same way the OG
+  // image is: only "live"/"abundant"/"stale_recent" classifications publish a number.
+  const seoPrinting = chooseDefaultPrinting(printings);
+  const seoPriceDisplay = resolveDisplayedMarketPrice({
+    marketPrice: cardLevelRawSnap?.market_price ?? null,
+    marketPriceAsOf: cardLevelRawSnap?.market_price_as_of ?? null,
+  });
+  const seoContent = buildCardSeoContent({
+    name: canonical.canonical_name,
+    setName: canonical.set_name,
+    cardNumber: canonical.card_number,
+    year: canonical.year,
+    rarity: seoPrinting?.rarity ?? null,
+    subject: canonical.subject,
+    priceDisplay: seoPriceDisplay,
+  });
+  const cardJsonLd = [
+    cardProductSchema({
+      name: [
+        canonical.canonical_name,
+        canonical.set_name,
+        canonical.card_number ? `#${canonical.card_number}` : null,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      slug,
+      description: buildCanonicalCardMetadataDescription(canonical, null),
+      imageUrl: seoPrinting?.image_url ?? null,
+      setName: canonical.set_name,
+      cardNumber: canonical.card_number,
+      rarity: seoPrinting?.rarity ?? null,
+      year: canonical.year,
+      offerPrice: seoContent.offerPrice,
+    }),
+    breadcrumbSchema([
+      { name: "Home", path: "/" },
+      ...(canonical.set_name
+        ? [{ name: canonical.set_name, path: `/sets/${encodeURIComponent(canonical.set_name)}` }]
+        : []),
+      { name: canonical.canonical_name, path: `/c/${encodeURIComponent(slug)}` },
+    ]),
+    ...(seoContent.faq.length > 0 ? [faqPageSchema(seoContent.faq)] : []),
+    // cardProductSchema returns null when no honest offer is publishable
+    // (stale_old / no_market) — drop it rather than emit an invalid Product.
+  ].filter((block): block is Record<string, unknown> => block !== null);
+
   // Per-grade price history for the active grader, across every bucket that
   // has data — powers the "Grade Performance" multi-line overlay so users can
   // see which grade is moving quicker. Only loaded in GRADED mode.
@@ -1101,6 +1151,22 @@ export default async function CanonicalCardPage({
         confidenceScore={intelSnap?.market_confidence_score ?? null}
         sampleCount30d={intelSnap?.snapshot_count_30d ?? null}
       />
+
+      <GroupedSection title="About this card">
+        <div className="space-y-4 text-[15px] leading-relaxed text-[#B8B8B8]">
+          <p>{seoContent.introSentence}</p>
+          {seoContent.faq.length > 0 ? (
+            <div className="space-y-3 border-t border-[#1A1A1A] pt-3">
+              {seoContent.faq.map((item) => (
+                <div key={item.question}>
+                  <h3 className="text-[14px] font-semibold text-[#E5E5E5]">{item.question}</h3>
+                  <p className="mt-0.5 text-[14px] text-[#9A9A9A]">{item.answer}</p>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </GroupedSection>
 
       <div id="live-listings" className="scroll-mt-20">
         <CollapsibleSection title="Live eBay Listings" defaultOpen={false} badge={<Pill label="Live" tone="neutral" size="small" />}>
@@ -1170,7 +1236,9 @@ export default async function CanonicalCardPage({
   );
 
   return (
-    <CanonicalCardShell backHref={backHref} rightRail={contextRail}>
+    <>
+      <JsonLd data={cardJsonLd} />
+      <CanonicalCardShell backHref={backHref} rightRail={contextRail}>
       {viewMode === "RAW" ? (
         <RawCardMarketSurface
           canonicalSlug={slug}
@@ -1361,6 +1429,7 @@ export default async function CanonicalCardPage({
           </div>
         </>
       )}
-    </CanonicalCardShell>
+      </CanonicalCardShell>
+    </>
   );
 }
