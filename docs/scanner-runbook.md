@@ -89,6 +89,16 @@ needed no catalog re-embed.
 
 ## Self-hosted embedder (home GPU) — setup + ops
 
+> **Cutover LIVE 2026-06-13.** Active box: `zigmo` (RTX 4070), public
+> via Tailscale Funnel at `https://zigmo.tail44d10b.ts.net` →
+> `127.0.0.1:8788`. Vercel `MODAL_SIGLIP_ENDPOINT_URL` points at that
+> Funnel URL; token in `cog/siglip-features/.siglip_token.txt`
+> (gitignored). Verified end-to-end with a production scan
+> (base-4-charizard, sim 0.9958). Runs from a Python 3.11 venv at
+> `cog/siglip-features/venv`; relaunches at logon via a Startup-folder
+> shortcut + `start_home_server.bat`. The `check-embedder-health` cron
+> should now read GREEN.
+
 Primary since 2026-06-12, replacing Modal. Why: the keepwarm cron
 (every 4 min) plus `scaledown_window=900` kept Modal's T4 warm 24/7
 (~$15/day — the entire $100/mo credit pool in ~7 days, for near-zero
@@ -127,6 +137,30 @@ marginal cost. The keepwarm cron is retired — do not bring it back.
   `python <repo>\cog\siglip-features\home_server.py` (working dir =
   that folder) so reboots and Windows Updates self-heal.
 - `tailscale funnel --bg` persists across reboots once set.
+
+**Storm / power-cut resilience (2026-06-13):** an unexpected shutdown
+must self-heal with NO one logged in. Five links in the chain:
+1. **PC powers back on** when mains returns — a BIOS/UEFI setting
+   ("Restore on AC Power Loss" / "AC Power Recovery" → *Power On*).
+   Not software-settable; set it in BIOS. Without it the box stays
+   off after an outage.
+2. **Server starts before login** — the `start_home_server.bat`
+   launcher is registered as an **At-Startup task running as SYSTEM**
+   (`register-startup-task.ps1`, run elevated). SYSTEM has FullControl
+   on the HF cache + token file (verified), so it needs no password
+   and no logged-in user. A logon Startup-folder shortcut is kept as a
+   secondary; the launcher is idempotent (curls `/health` and exits if
+   already serving) so the two can't double-bind 8788.
+3. **Model loads offline** — launcher sets `HF_HOME` +
+   `HF_HUB_OFFLINE=1`; the ~1.4GB weights are pre-cached, so a
+   post-storm internet hiccup can't block startup.
+4. **Tailscale + Funnel resume** — the `Tailscale` service is
+   Automatic and the funnel config persists in tailscaled state; both
+   come back on boot with no action.
+5. **Crash recovery** — the launcher runs the server in a restart loop
+   (relaunch 5s after any exit).
+For brownouts/brief outages, a small UPS bridges the gap and allows a
+graceful shutdown — recommended but optional.
 
 **Failure mode:** box or Funnel down → the identify route returns
 502 "Embedder failure" and server-routed scans fail VISIBLY — no

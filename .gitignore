@@ -78,6 +78,10 @@ data/finetune-*/
 # Supabase local temp
 .supabase/
 
+# Home SigLIP embedder (local-only runtime state on the GPU box)
+cog/siglip-features/venv/
+cog/siglip-features/.siglip_token.txt
+
 .vercel
 .env*.local
 
