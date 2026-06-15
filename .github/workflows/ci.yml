@@ -39,6 +39,9 @@ jobs:
       - name: eBay junk-filter tests
         run: npm run test:ebay-filter
 
+      - name: SEO honesty-gate tests
+        run: npm run test:seo
+
       - name: Build
         run: npm run build
 
