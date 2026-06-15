@@ -801,6 +801,15 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
     expectedSignals: ["service_role_client"],
     usesServiceRole: true,
   }),
+  "scripts/normalize-sealed-set-names.mjs": operationalScript({
+    classification: "service_role_backfill",
+    executionMode: "manual_backfill",
+    intendedCaller:
+      "trusted operator normalizing SEALED-product set_name code prefixes to the canonical card set name and rebuilding search_doc/search_doc_norm",
+    requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+  }),
   "scripts/backfill-set-summaries.mjs": operationalScript({
     classification: "service_role_backfill",
     executionMode: "manual_backfill",
