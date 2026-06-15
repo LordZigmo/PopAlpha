@@ -66,13 +66,20 @@ async function main() {
   }
 
   // 3. Which stripped names actually exist as a non-SEALED (card) set name?
-  const { data: cleanRows, error: cleanErr } = await supabase
-    .from("canonical_cards")
-    .select("set_name")
-    .neq("variant", "SEALED")
-    .in("set_name", strippedNames);
-  if (cleanErr) throw cleanErr;
-  const cleanSetNames = new Set((cleanRows ?? []).map((r) => r.set_name));
+  // Per-name existence probe (limit 1) — a single `.in(...)` would return every
+  // card in those sets (thousands of rows) and silently truncate at PostgREST's
+  // 1000-row cap, which could drop a set name and skip its sealed rows.
+  const cleanSetNames = new Set();
+  for (const name of strippedNames) {
+    const { data: hit, error: hitErr } = await supabase
+      .from("canonical_cards")
+      .select("set_name")
+      .neq("variant", "SEALED")
+      .eq("set_name", name)
+      .limit(1);
+    if (hitErr) throw hitErr;
+    if ((hit?.length ?? 0) > 0) cleanSetNames.add(name);
+  }
 
   // 4. Build the updates — only where a clean target exists.
   const updates = [];
