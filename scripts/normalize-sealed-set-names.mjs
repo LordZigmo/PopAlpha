@@ -84,7 +84,9 @@ async function main() {
     const { data: hit, error: hitErr } = await supabase
       .from("canonical_cards")
       .select("set_name")
-      .neq("variant", "SEALED")
+      // "non-SEALED" must include NULL variants — `variant != 'SEALED'` is NULL
+      // (excluded) for NULL rows, so use a null-safe OR (≈ IS DISTINCT FROM).
+      .or("variant.is.null,variant.neq.SEALED")
       .eq("set_name", name)
       .limit(1);
     if (hitErr) throw hitErr;
