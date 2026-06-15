@@ -21,6 +21,16 @@
  *   the change is reversible from the inventory.
  * - Idempotent: re-running is a no-op once prefixes are stripped.
  *
+ * Denormalized set_name caches (verified against prod):
+ * - The renamed rows are all variant='SEALED' and have ZERO overlap with the
+ *   scanner index (card_image_embeddings), daily_top_movers, and card_printings
+ *   — sealed products aren't embedded / traded as singles — so this rename does
+ *   not stale those caches.
+ * - set_summary_snapshots holds set-level rows keyed by set_name; the prefixed
+ *   sealed entries (~51) are orphaned by the rename. The daily
+ *   refresh-set-summaries cron reconciles them; for an immediate refresh run
+ *   `node scripts/backfill-set-summaries.mjs` after --apply.
+ *
  * Usage:
  *   node scripts/normalize-sealed-set-names.mjs            # dry-run
  *   node scripts/normalize-sealed-set-names.mjs --apply    # write to prod
