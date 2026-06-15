@@ -1035,19 +1035,23 @@ export default async function CanonicalCardPage({
   // ── SEO / GEO: honest structured data + crawlable answer copy ──────────────
   // Classify the canonical RAW market price independently of the interactive
   // RAW/GRADED toggle so the Product schema + visible copy describe the card's
-  // base (ungraded) market value consistently on every variant of the URL. The
-  // price is honesty-gated the same way the OG image is: only "live"/"abundant"/
-  // "stale_recent" classifications publish a number.
+  // base (ungraded) market value consistently on every variant of the URL —
+  // including ?printing= variants, which all canonicalise to /c/[slug]. Use the
+  // card-level raw row (printing_id IS NULL) for price and the default printing
+  // for image/rarity, so the Product, offer, and copy never change when a
+  // specific printing is selected. Price is honesty-gated the same way the OG
+  // image is: only "live"/"abundant"/"stale_recent" classifications publish a number.
+  const seoPrinting = chooseDefaultPrinting(printings);
   const seoPriceDisplay = resolveDisplayedMarketPrice({
-    marketPrice: rawSnap.data?.market_price ?? null,
-    marketPriceAsOf: rawSnap.data?.market_price_as_of ?? null,
+    marketPrice: cardLevelRawSnap?.market_price ?? null,
+    marketPriceAsOf: cardLevelRawSnap?.market_price_as_of ?? null,
   });
   const seoContent = buildCardSeoContent({
     name: canonical.canonical_name,
     setName: canonical.set_name,
     cardNumber: canonical.card_number,
     year: canonical.year,
-    rarity: selectedPrinting?.rarity ?? null,
+    rarity: seoPrinting?.rarity ?? null,
     subject: canonical.subject,
     priceDisplay: seoPriceDisplay,
   });
@@ -1062,10 +1066,10 @@ export default async function CanonicalCardPage({
         .join(" · "),
       slug,
       description: buildCanonicalCardMetadataDescription(canonical, null),
-      imageUrl: selectedPrinting?.image_url ?? null,
+      imageUrl: seoPrinting?.image_url ?? null,
       setName: canonical.set_name,
       cardNumber: canonical.card_number,
-      rarity: selectedPrinting?.rarity ?? null,
+      rarity: seoPrinting?.rarity ?? null,
       year: canonical.year,
       offerPrice: seoContent.offerPrice,
     }),
@@ -1077,7 +1081,9 @@ export default async function CanonicalCardPage({
       { name: canonical.canonical_name, path: `/c/${encodeURIComponent(slug)}` },
     ]),
     ...(seoContent.faq.length > 0 ? [faqPageSchema(seoContent.faq)] : []),
-  ];
+    // cardProductSchema returns null when no honest offer is publishable
+    // (stale_old / no_market) — drop it rather than emit an invalid Product.
+  ].filter((block): block is Record<string, unknown> => block !== null);
 
   // Per-grade price history for the active grader, across every bucket that
   // has data — powers the "Grade Performance" multi-line overlay so users can

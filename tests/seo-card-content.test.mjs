@@ -86,16 +86,13 @@ function base(overrides = {}) {
 
 // ── Product schema honesty + shape ───────────────────────────────────────────
 
-// offerPrice null → no `offers` key at all
+// offerPrice null → omit the whole Product block (Google requires offers/review/rating)
 {
   const s = cardProductSchema({
     name: "X", slug: "x", description: "d", imageUrl: null,
     setName: "S", cardNumber: "1", rarity: "Common", year: 2024, offerPrice: null,
   });
-  assert.equal(s["@type"], "Product");
-  assert.equal(s.offers, undefined, "no offer price → omit offers entirely");
-  assert.equal(s.image, undefined, "null image → omit image");
-  assert.ok(Array.isArray(s.additionalProperty) && s.additionalProperty.length === 4);
+  assert.equal(s, null, "no publishable offer → cardProductSchema returns null");
 }
 
 // offerPrice present → AggregateOffer in USD, rounded to 2dp; valid http image kept

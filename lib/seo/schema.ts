@@ -31,7 +31,18 @@ export type CardProductSchemaInput = {
   offerPrice: number | null;
 };
 
-export function cardProductSchema(input: CardProductSchemaInput): JsonLdObject {
+export function cardProductSchema(input: CardProductSchemaInput): JsonLdObject | null {
+  const price =
+    input.offerPrice != null && Number.isFinite(input.offerPrice) && input.offerPrice > 0
+      ? Math.round(input.offerPrice * 100) / 100
+      : null;
+
+  // Google's Product snippet requires one of offers / review / aggregateRating.
+  // We have no review corpus, so without an honest, publishable price there is
+  // nothing valid to assert — omit the Product entirely rather than emit one that
+  // would only generate "missing offers" warnings across the sparse/stale long tail.
+  if (price === null) return null;
+
   const base = getSiteUrl();
   const additionalProperty = [
     input.setName ? { "@type": "PropertyValue", name: "Set", value: input.setName } : null,
@@ -48,22 +59,18 @@ export function cardProductSchema(input: CardProductSchemaInput): JsonLdObject {
     category: "Pokémon Trading Card",
     brand: { "@type": "Brand", name: "Pokémon" },
     url: `${base}/c/${encodeURIComponent(input.slug)}`,
-  };
-
-  if (isHttpUrl(input.imageUrl)) schema.image = input.imageUrl;
-  if (additionalProperty.length > 0) schema.additionalProperty = additionalProperty;
-
-  if (input.offerPrice != null && Number.isFinite(input.offerPrice) && input.offerPrice > 0) {
-    const price = Math.round(input.offerPrice * 100) / 100;
     // AggregateOffer (not Offer): PopAlpha aggregates observed market value across
     // sources and does NOT sell cards, so there is no seller/availability to claim.
-    schema.offers = {
+    offers: {
       "@type": "AggregateOffer",
       priceCurrency: "USD",
       lowPrice: price,
       highPrice: price,
-    };
-  }
+    },
+  };
+
+  if (isHttpUrl(input.imageUrl)) schema.image = input.imageUrl;
+  if (additionalProperty.length > 0) schema.additionalProperty = additionalProperty;
 
   return schema;
 }
