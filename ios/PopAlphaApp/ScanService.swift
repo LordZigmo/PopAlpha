@@ -279,6 +279,43 @@ enum ScanService {
         )
     }
 
+    /// Fire-and-forget telemetry for a correction submit ATTEMPT (Phase 0.2).
+    /// Emits `scanner_correction_submitted` on every attempt — success OR
+    /// failure — so PostHog reflects ACTUAL collection. This is distinct from
+    /// `scanner_multi_mode_row_corrected`, which fires on a tray reassign
+    /// regardless of whether the server submit landed (that mismatch is why
+    /// PostHog showed 18 "corrections" while only 1 pair reached the DB).
+    /// Call from a MainActor context (matches existing analytics usage).
+    static func logCorrectionTelemetry(
+        surface: String,
+        toSlug: String,
+        predicted: ScanCorrectionPredictedMetadata?,
+        response: ScanCorrectionResponse?,
+        errorMessage: String?,
+    ) {
+        var props: [String: Any] = [
+            "surface": surface,
+            "to_slug": toSlug,
+            "ok": response?.ok ?? false,
+        ]
+        if let response {
+            if let value = response.correctionPairLogged { props["correction_pair_logged"] = value }
+            if let value = response.skipped { props["skipped"] = value }
+            if let value = response.imageHash { props["image_hash"] = value }
+        }
+        if let predicted {
+            if let value = predicted.fromSlug { props["from_slug"] = value }
+            if let value = predicted.confidence { props["confidence"] = value }
+            if let value = predicted.winningPath { props["winning_path"] = value }
+            if let value = predicted.source { props["source"] = value }
+        }
+        if let errorMessage {
+            props["errored"] = true
+            props["error"] = errorMessage
+        }
+        AnalyticsService.shared.captureRaw("scanner_correction_submitted", properties: props)
+    }
+
     /// Promotes a freshly-picked photo into the eval corpus as ground
     /// truth — no prior scan required. Base64-encodes the JPEG into a
     /// JSON body so we don't need multipart plumbing on the client.

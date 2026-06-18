@@ -1700,10 +1700,13 @@ final class ScannerHost: ObservableObject {
             self.lastSource = usedOffline ? "offline" : "network"
             self.lastTriggerSource = triggerSource
             self.lastCorrectionMetadata = correctionMetadata
-            // Retain JPEG-source UIImage only for offline scans —
-            // online scans already uploaded to scan-uploads/<hash>.jpg
-            // so the correction-via-hash path works without it.
-            self.lastScanImage = usedOffline ? image : nil
+            // Retain the JPEG-source UIImage for EVERY scan so a user
+            // correction can submit the image to /api/scan/correction
+            // regardless of online/offline (Phase 0.1). Previously this was
+            // nil for online scans, which silently dropped every online
+            // correction. Held only until the next scan / picker dismiss /
+            // detail pop via clearLastMatch() — ~1-2 MB, transient.
+            self.lastScanImage = image
             // Multi-scan correction needs bytes for every row (the
             // picker's correction-promote path is gated on
             // `if let bytes = scanImage`). Retain regardless of
