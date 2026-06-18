@@ -1,11 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useRef, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import AppStoreBadge from "@/components/landing/app-store-badge";
 import PhoneFrame from "@/components/landing/phone-frame";
-import { WAITLIST_ANCHOR } from "@/lib/marketing/app-store";
 
 const EASE = [0.16, 1, 0.3, 1] as const;
 
@@ -51,7 +49,7 @@ export default function LandingHero() {
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#22D3EE] opacity-75" />
               <span className="relative inline-flex h-2 w-2 rounded-full bg-[#22D3EE]" />
             </span>
-            Coming soon to iPhone
+            Live on the App Store
           </span>
 
           <h1 className="mt-6 text-[clamp(2.6rem,5.4vw,4.6rem)] font-semibold leading-[0.98] tracking-[-0.045em] text-white">
@@ -68,12 +66,6 @@ export default function LandingHero() {
 
           <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row sm:gap-4 lg:justify-start">
             <AppStoreBadge size="lg" data-cta="hero" />
-            <Link
-              href={WAITLIST_ANCHOR}
-              className="inline-flex h-14 items-center justify-center rounded-2xl border border-white/12 bg-white/[0.04] px-6 text-[15px] font-semibold text-white backdrop-blur-xl transition-all duration-300 hover:border-white/25 hover:bg-white/[0.07]"
-            >
-              Join the waitlist
-            </Link>
           </div>
 
           <div className="mt-7 flex flex-wrap items-center justify-center gap-2 lg:justify-start">

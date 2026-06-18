@@ -10,7 +10,7 @@ import { SpeedInsights } from "@vercel/speed-insights/next";
 import { clerkEnabled, assertClerkConfigured } from "@/lib/auth/clerk-enabled";
 
 const siteUrl = getSiteUrl();
-const description = "PopAlpha is the iPhone app for Pok\u00e9mon collectors. Snap any card to identify it instantly, follow market intelligence on movers and breakouts, track your portfolio, and get push alerts on live signals. Join the waitlist.";
+const description = "PopAlpha is the iPhone app for Pok\u00e9mon collectors. Snap any card to identify it instantly, follow market intelligence on movers and breakouts, track your portfolio, and get push alerts on live signals. Download free on the App Store.";
 const title = "PopAlpha \u2014 Pok\u00e9mon Card Intelligence on iPhone";
 
 export const metadata: Metadata = {

@@ -99,7 +99,7 @@ export default function CompareIndexPage() {
       <ComparisonCta
         cta={{
           heading: "📲 Try the free Pokémon card scanner",
-          body: "Unlimited free scanning plus English and Japanese card prices and AI market summaries. Join the waitlist and we'll email you when iPhone access opens.",
+          body: "Unlimited free scanning plus English and Japanese card prices and AI market summaries. Download PopAlpha free on the App Store.",
         }}
       />
     </CompareShell>

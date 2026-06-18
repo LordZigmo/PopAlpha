@@ -152,7 +152,7 @@ export default function JapanesePricesPage() {
       <ComparisonCta
         cta={{
           heading: "📲 Check Japanese card prices on PopAlpha",
-          body: "Free scanning with market-native Japanese pricing from Yahoo! Auctions Japan and Snkrdunk. Join the waitlist and we'll email you when iPhone access opens.",
+          body: "Free scanning with market-native Japanese pricing from Yahoo! Auctions Japan and Snkrdunk. Download PopAlpha free on the App Store.",
         }}
       />
       <CompareCrossLinks
