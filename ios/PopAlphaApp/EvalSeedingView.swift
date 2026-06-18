@@ -560,6 +560,16 @@ struct EvalSeedingView: View {
                     )
                     responseOK = r.ok
                     responseError = r.error
+                    let correctedSlug = card.canonicalSlug
+                    await MainActor.run {
+                        ScanService.logCorrectionTelemetry(
+                            surface: "detail",
+                            toSlug: correctedSlug,
+                            predicted: predicted,
+                            response: r,
+                            errorMessage: nil,
+                        )
+                    }
                 } else {
                     // Online-scan path with no bytes available —
                     // fall back to the admin promote endpoint so

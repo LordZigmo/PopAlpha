@@ -492,6 +492,7 @@ struct ScanPickerSheet: View {
             let slug = match.slug
             let lang = scanLanguage
             let store = onCorrectionSubmitted
+            let predicted = correctionMetadata
             Task.detached {
                 do {
                     let result = try await ScanService.submitCorrection(
@@ -499,16 +500,33 @@ struct ScanPickerSheet: View {
                         canonicalSlug: slug,
                         language: lang,
                         notes: "picker-sheet-select",
-                        predicted: correctionMetadata,
+                        predicted: predicted,
                     )
-                    if result.ok {
+                    await MainActor.run {
+                        ScanService.logCorrectionTelemetry(
+                            surface: "picker",
+                            toSlug: slug,
+                            predicted: predicted,
+                            response: result,
+                            errorMessage: nil,
+                        )
                         // Trigger an anchor sync so the next scan can
                         // see this correction. Non-blocking; the picker
                         // dismiss has already navigated.
-                        await MainActor.run { store?() }
+                        if result.ok { store?() }
                     }
                 } catch {
-                    Logger.scan.debug("scan correction submit failed (picker): \(error.localizedDescription, privacy: .public)")
+                    let message = error.localizedDescription
+                    await MainActor.run {
+                        ScanService.logCorrectionTelemetry(
+                            surface: "picker",
+                            toSlug: slug,
+                            predicted: predicted,
+                            response: nil,
+                            errorMessage: message,
+                        )
+                    }
+                    Logger.scan.debug("scan correction submit failed (picker): \(message, privacy: .public)")
                 }
             }
         }
@@ -554,6 +572,7 @@ struct ScanPickerSheet: View {
             let slug = result.canonicalSlug
             let lang = scanLanguage
             let store = onCorrectionSubmitted
+            let predicted = correctionMetadata
             Task.detached {
                 do {
                     let r = try await ScanService.submitCorrection(
@@ -561,13 +580,30 @@ struct ScanPickerSheet: View {
                         canonicalSlug: slug,
                         language: lang,
                         notes: "picker-sheet-search-select",
-                        predicted: correctionMetadata,
+                        predicted: predicted,
                     )
-                    if r.ok {
-                        await MainActor.run { store?() }
+                    await MainActor.run {
+                        ScanService.logCorrectionTelemetry(
+                            surface: "search",
+                            toSlug: slug,
+                            predicted: predicted,
+                            response: r,
+                            errorMessage: nil,
+                        )
+                        if r.ok { store?() }
                     }
                 } catch {
-                    Logger.scan.debug("scan correction submit failed (search): \(error.localizedDescription, privacy: .public)")
+                    let message = error.localizedDescription
+                    await MainActor.run {
+                        ScanService.logCorrectionTelemetry(
+                            surface: "search",
+                            toSlug: slug,
+                            predicted: predicted,
+                            response: nil,
+                            errorMessage: message,
+                        )
+                    }
+                    Logger.scan.debug("scan correction submit failed (search): \(message, privacy: .public)")
                 }
             }
         }
