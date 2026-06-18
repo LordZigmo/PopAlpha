@@ -552,23 +552,40 @@ struct EvalSeedingView: View {
                     // promote endpoint here too which 401'd for non-
                     // admins AND triggered an auth teardown that
                     // signed them out of their own session.
-                    let r = try await ScanService.submitCorrection(
-                        image: bytes,
-                        canonicalSlug: card.canonicalSlug,
-                        notes: notesValue,
-                        predicted: predicted,
-                    )
-                    responseOK = r.ok
-                    responseError = r.error
                     let correctedSlug = card.canonicalSlug
-                    await MainActor.run {
-                        ScanService.logCorrectionTelemetry(
-                            surface: "detail",
-                            toSlug: correctedSlug,
+                    do {
+                        let r = try await ScanService.submitCorrection(
+                            image: bytes,
+                            canonicalSlug: card.canonicalSlug,
+                            notes: notesValue,
                             predicted: predicted,
-                            response: r,
-                            errorMessage: nil,
                         )
+                        responseOK = r.ok
+                        responseError = r.error
+                        await MainActor.run {
+                            ScanService.logCorrectionTelemetry(
+                                surface: "detail",
+                                toSlug: correctedSlug,
+                                predicted: predicted,
+                                response: r,
+                                errorMessage: nil,
+                            )
+                        }
+                    } catch {
+                        // Emit failure telemetry for parity with the picker/
+                        // search surfaces, then rethrow so the outer catch
+                        // keeps the existing save-failure UX.
+                        let message = error.localizedDescription
+                        await MainActor.run {
+                            ScanService.logCorrectionTelemetry(
+                                surface: "detail",
+                                toSlug: correctedSlug,
+                                predicted: predicted,
+                                response: nil,
+                                errorMessage: message,
+                            )
+                        }
+                        throw error
                     }
                 } else {
                     // Online-scan path with no bytes available —
