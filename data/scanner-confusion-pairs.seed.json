@@ -12,6 +12,7 @@
   "pair_count": 18,
   "dropped_invalid_to": 0,
   "dropped_no_op": 0,
+  "dropped_invalid_from": 0,
   "high_confidence_wrong_count": 4,
   "pairs": [
     { "from_slug": "base-43-abra", "to_slug": "chaos-rising-88-froakie", "from_in_catalog": true, "occurrences": 1, "confidences": { "medium": 1 }, "first_seen": "2026-06-13", "last_seen": "2026-06-13", "distinct_users": 1 },

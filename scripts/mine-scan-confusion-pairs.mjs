@@ -168,6 +168,7 @@ function aggregate(rows, validSlugs) {
   const byPair = new Map();
   let droppedInvalidTo = 0;
   let droppedNoOp = 0;
+  let droppedInvalidFrom = 0;
   for (const r of rows) {
     const from = r.from_slug || null;
     const to = r.to_slug || null;
@@ -177,12 +178,16 @@ function aggregate(rows, validSlugs) {
     // a confusion pair -- training the same catalog card as both anchor
     // positive and its own hard negative would be harmful. Drop it.
     if (from && from === to) { droppedNoOp += 1; continue; }
-    const key = `${from ?? ""}|${to}`;
+    // Hard negatives need catalog art for from_slug. A stale/renamed/missing
+    // from_slug can't supply pixels for Phase 1, so drop it rather than poison
+    // the dataset or inflate pair_count. Counted separately as diagnostics.
+    if (!from || !validSlugs.has(from)) { droppedInvalidFrom += 1; continue; }
+    const key = `${from}|${to}`;
     if (!byPair.has(key)) {
       byPair.set(key, {
         from_slug: from,
         to_slug: to,
-        from_in_catalog: from ? validSlugs.has(from) : false,
+        from_in_catalog: true,
         occurrences: 0,
         confidences: {},
         first_seen: r.d,
@@ -200,7 +205,7 @@ function aggregate(rows, validSlugs) {
   const pairs = [...byPair.values()]
     .map((p) => ({ ...p, distinct_users: p.distinct_users.size }))
     .sort((a, b) => b.occurrences - a.occurrences);
-  return { pairs, droppedInvalidTo, droppedNoOp };
+  return { pairs, droppedInvalidTo, droppedNoOp, droppedInvalidFrom };
 }
 
 async function main() {
@@ -222,17 +227,14 @@ async function main() {
 
   const allSlugs = rows.flatMap((r) => [r.from_slug, r.to_slug]);
   const validSlugs = await loadValidSlugs(supabase, allSlugs);
-  const { pairs, droppedInvalidTo, droppedNoOp } = aggregate(rows, validSlugs);
+  const { pairs, droppedInvalidTo, droppedNoOp, droppedInvalidFrom } = aggregate(rows, validSlugs);
 
   const highWrong = pairs.filter((p) => (p.confidences.high ?? 0) > 0);
   console.log(
-    `Confusion pairs: ${pairs.length} (events=${rows.length}, dropped-invalid-to=${droppedInvalidTo}, dropped-no-op=${droppedNoOp}, high-confidence-wrong=${highWrong.length})`,
+    `Confusion pairs: ${pairs.length} (events=${rows.length}, dropped-invalid-to=${droppedInvalidTo}, dropped-no-op=${droppedNoOp}, dropped-invalid-from=${droppedInvalidFrom}, high-confidence-wrong=${highWrong.length})`,
   );
   for (const p of pairs.slice(0, 15)) {
-    console.log(
-      `  ${p.from_slug ?? "(none)"} -> ${p.to_slug}  x${p.occurrences}` +
-        `${p.from_in_catalog ? "" : "  [from NOT in catalog]"}`,
-    );
+    console.log(`  ${p.from_slug} -> ${p.to_slug}  x${p.occurrences}`);
   }
 
   const payload = {
@@ -249,6 +251,7 @@ async function main() {
     pair_count: pairs.length,
     dropped_invalid_to: droppedInvalidTo,
     dropped_no_op: droppedNoOp,
+    dropped_invalid_from: droppedInvalidFrom,
     high_confidence_wrong_count: highWrong.length,
     pairs,
   };
