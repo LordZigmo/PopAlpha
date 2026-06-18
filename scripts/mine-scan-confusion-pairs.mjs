@@ -167,10 +167,16 @@ async function loadValidSlugs(supabase, slugs) {
 function aggregate(rows, validSlugs) {
   const byPair = new Map();
   let droppedInvalidTo = 0;
+  let droppedNoOp = 0;
   for (const r of rows) {
     const from = r.from_slug || null;
     const to = r.to_slug || null;
     if (!to || !validSlugs.has(to)) { droppedInvalidTo += 1; continue; }
+    // No-op "correction": the tray Edit picker still offers the current top
+    // match, so a user can re-pick the slug the model already had. That's not
+    // a confusion pair -- training the same catalog card as both anchor
+    // positive and its own hard negative would be harmful. Drop it.
+    if (from && from === to) { droppedNoOp += 1; continue; }
     const key = `${from ?? ""}|${to}`;
     if (!byPair.has(key)) {
       byPair.set(key, {
@@ -194,7 +200,7 @@ function aggregate(rows, validSlugs) {
   const pairs = [...byPair.values()]
     .map((p) => ({ ...p, distinct_users: p.distinct_users.size }))
     .sort((a, b) => b.occurrences - a.occurrences);
-  return { pairs, droppedInvalidTo };
+  return { pairs, droppedInvalidTo, droppedNoOp };
 }
 
 async function main() {
@@ -216,11 +222,11 @@ async function main() {
 
   const allSlugs = rows.flatMap((r) => [r.from_slug, r.to_slug]);
   const validSlugs = await loadValidSlugs(supabase, allSlugs);
-  const { pairs, droppedInvalidTo } = aggregate(rows, validSlugs);
+  const { pairs, droppedInvalidTo, droppedNoOp } = aggregate(rows, validSlugs);
 
   const highWrong = pairs.filter((p) => (p.confidences.high ?? 0) > 0);
   console.log(
-    `Confusion pairs: ${pairs.length} (events=${rows.length}, dropped-invalid-to=${droppedInvalidTo}, high-confidence-wrong=${highWrong.length})`,
+    `Confusion pairs: ${pairs.length} (events=${rows.length}, dropped-invalid-to=${droppedInvalidTo}, dropped-no-op=${droppedNoOp}, high-confidence-wrong=${highWrong.length})`,
   );
   for (const p of pairs.slice(0, 15)) {
     console.log(
@@ -242,6 +248,7 @@ async function main() {
     event_count: rows.length,
     pair_count: pairs.length,
     dropped_invalid_to: droppedInvalidTo,
+    dropped_no_op: droppedNoOp,
     high_confidence_wrong_count: highWrong.length,
     pairs,
   };
