@@ -379,6 +379,13 @@ export const PRIVILEGED_PACKAGE_SCRIPT_CONTRACTS = {
     requiredTrustInputs: ["SUPABASE_SERVICE_ROLE_KEY"],
     expectedCommandFragments: ["scripts/export-finetune-dataset.mjs"],
   }),
+  "scanner:confusion-pairs": packageScriptContract({
+    target: "scripts/mine-scan-confusion-pairs.mjs",
+    intendedCaller: "trusted operator materializing scanner confusion pairs (from_slug -> to_slug) from the PostHog scanner_multi_mode_row_corrected event into a catalog-validated hard-negative dataset",
+    trustModel: "service_role_read_only_export",
+    requiredTrustInputs: ["POSTHOG_PERSONAL_API_KEY", "SUPABASE_SERVICE_ROLE_KEY"],
+    expectedCommandFragments: ["scripts/mine-scan-confusion-pairs.mjs"],
+  }),
   "scan-eval:convert-heic": packageScriptContract({
     target: "scripts/convert-scan-eval-heic.mjs",
     intendedCaller: "trusted operator one-shot back-converting HEIC objects in scan_eval/<hash>.jpg to JPEG so they're decodable by Replicate's CLIP backend (paired with the resizeForUpload + promote-route HEIC handling in 0d81bc1)",
@@ -1105,6 +1112,15 @@ export const OPERATIONAL_SCRIPT_TRUST_CONTRACTS = {
     expectedSignals: ["service_role_client"],
     usesServiceRole: true,
     notes: "Read-only against Supabase + Storage. Writes JSONL + downloaded anchor JPEGs to a local out-dir; never mutates DB or Storage. Accompanies docs/scanner-finetune-runbook.md.",
+  }),
+  "scripts/mine-scan-confusion-pairs.mjs": operationalScript({
+    classification: "service_role_diagnostic",
+    executionMode: "manual_diagnostic",
+    intendedCaller: "trusted operator materializing scanner confusion pairs (from_slug -> to_slug) from the PostHog scanner_multi_mode_row_corrected event into a catalog-validated dataset for Stage D hard-negative mining",
+    requiredTrustInputs: ["POSTHOG_PERSONAL_API_KEY", "SUPABASE_SERVICE_ROLE_KEY"],
+    expectedSignals: ["service_role_client"],
+    usesServiceRole: true,
+    notes: "Read-only: SELECTs canonical_cards to validate slugs and reads PostHog via the query API. Writes a local JSON dataset to data/; never mutates DB or Storage. Bridge for the Phase 0 correction flywheel; pairs with export-finetune-dataset.mjs.",
   }),
   "scripts/dump-catalog-pool.mjs": operationalScript({
     classification: "service_role_diagnostic",
