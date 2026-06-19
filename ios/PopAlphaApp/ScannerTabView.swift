@@ -34,6 +34,11 @@ struct ScannerTabView: View {
     /// sheet. The sheet's onDismiss presents sign-in, and the
     /// isAuthenticated onChange auto-runs the bulk import once they're in.
     @State private var pendingMultiScanImport = false
+    /// Error from a deferred import that ran AFTER sign-in. By then the
+    /// review sheet (which owns its own footer error) is gone, so a failed
+    /// or partial import is surfaced here as an alert; the tray is retained
+    /// for retry.
+    @State private var multiScanDeferredError: String?
     @StateObject private var premiumGate = PremiumGate.shared
     @StateObject private var multiScanSession = MultiScanSession()
 
@@ -343,6 +348,20 @@ struct ScannerTabView: View {
                     correctionPickerSheet(for: ref.id)
                 }
             }
+            // Deferred-import outcome (after sign-in) when the review sheet
+            // is no longer up to show its own footer error.
+            .alert(
+                "Add to portfolio",
+                isPresented: Binding(
+                    get: { multiScanDeferredError != nil },
+                    set: { if !$0 { multiScanDeferredError = nil } }
+                ),
+                presenting: multiScanDeferredError,
+            ) { _ in
+                Button("OK", role: .cancel) {}
+            } message: { msg in
+                Text(msg)
+            }
             .onChange(of: scanner.lastMatch) { _, newValue in
                 handleIdentifyResult(newValue)
             }
@@ -374,15 +393,13 @@ struct ScannerTabView: View {
                 pendingMultiScanImport = false
                 Task {
                     let outcome = await submitMultiScanBatch()
-                    if outcome != nil {
-                        // Failed after sign-in — re-open the (retained) tray
-                        // so the user can retry; opening it re-pauses.
-                        showMultiScanSheet = true
-                    } else if scanner.multiScanMode {
-                        // Imported — the scanner was held paused for the
-                        // sign-in handoff, so resume it now.
-                        scanner.resumeScanning()
-                    }
+                    // Surface a failed/partial deferred import: the sheet's
+                    // own footer error is gone with the dismissed sheet, so
+                    // alert instead. The tray is retained on failure for
+                    // retry. Resume either way — the scanner was held paused
+                    // for the sign-in handoff.
+                    if outcome != nil { multiScanDeferredError = outcome }
+                    if scanner.multiScanMode { scanner.resumeScanning() }
                 }
             }
             // Canceled sign-in: the sheet closed without authenticating
