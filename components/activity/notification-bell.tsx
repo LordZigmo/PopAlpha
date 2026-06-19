@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Bell } from "lucide-react";
 import Link from "next/link";
 import type { NotificationItem } from "@/lib/activity/types";
+import ActorAvatar from "./actor-avatar";
 
 function formatTime(value: string): string {
   const date = new Date(value);
@@ -117,9 +118,11 @@ export default function NotificationBell() {
                   className={`flex items-start gap-3 border-b border-[#1E1E1E] px-4 py-3 last:border-b-0 ${!n.read ? "bg-[#00B4D8]/[0.04]" : ""}`}
                 >
                   <Link href={`/u/${n.actor.handle}`} className="shrink-0">
-                    <div className="flex h-7 w-7 items-center justify-center rounded-full bg-white/[0.06] text-[11px] font-semibold text-white">
-                      {n.actor.handle.slice(0, 1).toUpperCase()}
-                    </div>
+                    <ActorAvatar
+                      avatarUrl={n.actor.avatar_url}
+                      avatarInitial={n.actor.handle.slice(0, 1).toUpperCase()}
+                      size={28}
+                    />
                   </Link>
                   <div className="min-w-0 flex-1">
                     <p className="text-[13px] leading-5 text-[#D4D4D4]">

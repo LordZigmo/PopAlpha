@@ -4,6 +4,7 @@ import { useState, useCallback } from "react";
 import { MessageCircle, Send } from "lucide-react";
 import type { ActivityComment } from "@/lib/activity/types";
 import Link from "next/link";
+import ActorAvatar from "./actor-avatar";
 
 function formatTime(value: string): string {
   const date = new Date(value);
@@ -69,7 +70,7 @@ export default function ActivityComments({
           ...prev,
           {
             id: data.id,
-            author: { id: "", handle: "you" },
+            author: { id: "", handle: "you", avatar_url: null },
             body,
             created_at: data.created_at ?? new Date().toISOString(),
           },
@@ -101,8 +102,12 @@ export default function ActivityComments({
 
           {comments.map((c) => (
             <div key={c.id} className="flex gap-2">
-              <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white/[0.06] text-[10px] font-semibold text-white">
-                {c.author.handle.slice(0, 1).toUpperCase()}
+              <div className="mt-0.5">
+                <ActorAvatar
+                  avatarUrl={c.author.avatar_url}
+                  avatarInitial={c.author.handle.slice(0, 1).toUpperCase()}
+                  size={20}
+                />
               </div>
               <div className="min-w-0">
                 <p className="text-[12px] leading-5">

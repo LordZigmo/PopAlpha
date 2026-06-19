@@ -16,12 +16,28 @@ actor ActivityService {
     struct ActivityActor: Decodable, Hashable {
         let id: String
         let handle: String
-        let avatarInitial: String
+        // Feed actors carry avatar_initial; comment authors / notification
+        // actors omit it. Optional so all three decode through this one type.
+        let avatarInitial: String?
+        // PopAlpha-stored avatar (app_users.profile_image_url); nil → monogram.
+        let avatarUrl: String?
+
+        /// Monogram initial — server-provided for feed actors, otherwise
+        /// derived from the handle.
+        var initial: String {
+            if let avatarInitial, !avatarInitial.isEmpty { return avatarInitial }
+            return String(handle.prefix(1)).uppercased()
+        }
+
+        var avatarURL: URL? {
+            avatarUrl.flatMap(URL.init(string:))
+        }
     }
 
     struct ActivityTargetUser: Decodable, Hashable {
         let id: String
         let handle: String
+        let avatarUrl: String?
     }
 
     struct ActivityFeedItem: Decodable, Identifiable, Hashable {
@@ -243,7 +259,12 @@ actor ActivityService {
         let userId = AuthService.shared.currentUserId ?? ""
         return ActivityComment(
             id: id,
-            author: ActivityActor(id: userId, handle: handle, avatarInitial: String(handle.prefix(1)).uppercased()),
+            author: ActivityActor(
+                id: userId,
+                handle: handle,
+                avatarInitial: String(handle.prefix(1)).uppercased(),
+                avatarUrl: AuthService.shared.currentImageURL
+            ),
             body: body,
             createdAt: createdAt
         )

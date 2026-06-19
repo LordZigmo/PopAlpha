@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require";
 import { createServerSupabaseUserClient } from "@/lib/db/user";
 import type { ActivityFeedItem, CardFriendActivity } from "@/lib/activity/types";
+import { fetchActorProfiles } from "@/lib/activity/actors";
 
 export const runtime = "nodejs";
 
@@ -57,24 +58,18 @@ export async function GET(req: Request) {
 
   const rows = recentEvents ?? [];
 
-  // Hydrate actor handles
+  // Hydrate actor identity (handle + avatar) via the shared helper
   const actorIds = [...new Set(rows.map((r: { actor_id: string }) => r.actor_id))];
-  const { data: actors } = actorIds.length > 0
-    ? await db.from("app_users").select("clerk_user_id, handle").in("clerk_user_id", actorIds)
-    : { data: [] };
-
-  const actorMap = new Map<string, string>();
-  for (const a of (actors ?? []) as { clerk_user_id: string; handle: string | null }[]) {
-    if (a.handle) actorMap.set(a.clerk_user_id, a.handle);
-  }
+  const actorMap = await fetchActorProfiles(db, actorIds);
 
   type EventRow = { id: number; actor_id: string; event_type: string; canonical_slug: string | null; metadata: Record<string, unknown>; created_at: string };
 
   const recent: ActivityFeedItem[] = rows.map((e: EventRow) => {
-    const handle = actorMap.get(e.actor_id) ?? "collector";
+    const actorProfile = actorMap.get(e.actor_id);
+    const handle = actorProfile?.handle ?? "collector";
     return {
       id: e.id,
-      actor: { id: e.actor_id, handle, avatar_initial: handle.slice(0, 1).toUpperCase() },
+      actor: { id: e.actor_id, handle, avatar_initial: handle.slice(0, 1).toUpperCase(), avatar_url: actorProfile?.avatarUrl ?? null },
       event_type: e.event_type as ActivityFeedItem["event_type"],
       canonical_slug: e.canonical_slug,
       card_name: (e.metadata.card_name as string | null) ?? null,
