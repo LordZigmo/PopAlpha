@@ -129,12 +129,11 @@ struct NotificationView: View {
     private func notificationRow(_ notification: ActivityService.NotificationItem) -> some View {
         HStack(alignment: .top, spacing: 12) {
             ZStack {
-                Text(notification.actor.avatarInitial)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(PA.Colors.text)
-                    .frame(width: 36, height: 36)
-                    .background(PA.Colors.surfaceSoft)
-                    .clipShape(Circle())
+                ActorAvatarView(
+                    url: notification.actor.avatarURL,
+                    initial: notification.actor.initial,
+                    size: 36
+                )
 
                 if !notification.read {
                     Circle()

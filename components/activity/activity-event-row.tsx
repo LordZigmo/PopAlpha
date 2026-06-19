@@ -5,6 +5,7 @@ import Image from "next/image";
 import type { ActivityFeedItem } from "@/lib/activity/types";
 import ActivityLikeButton from "./activity-like-button";
 import ActivityComments from "./activity-comments";
+import ActorAvatar from "./actor-avatar";
 
 function formatTime(value: string): string {
   const date = new Date(value);
@@ -114,9 +115,11 @@ export default function ActivityEventRow({ item }: { item: ActivityFeedItem }) {
       <div className="flex gap-3">
         {/* Avatar */}
         <Link href={`/u/${item.actor.handle}`} className="shrink-0">
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-white/[0.06] text-[14px] font-semibold text-white">
-            {item.actor.avatar_initial}
-          </div>
+          <ActorAvatar
+            avatarUrl={item.actor.avatar_url}
+            avatarInitial={item.actor.avatar_initial}
+            size={36}
+          />
         </Link>
 
         {/* Content */}

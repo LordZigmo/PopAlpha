@@ -27,11 +27,15 @@ export type ActivityActor = {
   id: string;
   handle: string;
   avatar_initial: string;
+  // PopAlpha-stored avatar (app_users.profile_image_url); null → render the
+  // avatar_initial monogram instead.
+  avatar_url: string | null;
 };
 
 export type ActivityTargetUser = {
   id: string;
   handle: string;
+  avatar_url: string | null;
 };
 
 export type ActivityFeedItem = {
@@ -60,7 +64,7 @@ export type ActivityFeedResponse = {
 
 export type ActivityComment = {
   id: number;
-  author: { id: string; handle: string };
+  author: { id: string; handle: string; avatar_url: string | null };
   body: string;
   created_at: string;
 };
@@ -77,7 +81,7 @@ export type NotificationType = "like" | "comment" | "follow";
 export type NotificationItem = {
   id: number;
   type: NotificationType;
-  actor: { id: string; handle: string };
+  actor: { id: string; handle: string; avatar_url: string | null };
   event_id: number | null;
   event_type: ActivityEventType | null;
   read: boolean;

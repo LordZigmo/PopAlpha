@@ -22,12 +22,7 @@ struct ActivityEventCell: View {
             Button {
                 onHandleTap?(item.actor.handle)
             } label: {
-                Text(item.actor.avatarInitial)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(PA.Colors.text)
-                    .frame(width: 36, height: 36)
-                    .background(PA.Colors.surfaceSoft)
-                    .clipShape(Circle())
+                ActorAvatarView(url: item.actor.avatarURL, initial: item.actor.initial, size: 36)
             }
             .buttonStyle(.plain)
 
@@ -152,5 +147,43 @@ struct ActivityEventCell: View {
         }
         .padding(PA.Layout.cardPadding)
         .glassSurface()
+    }
+}
+
+// MARK: - Actor Avatar
+
+/// Avatar for activity surfaces (feed, notifications, profile headers):
+/// the user's PopAlpha-stored picture when set, otherwise a handle-initial
+/// monogram. Mirrors the web `ActorAvatar` fallback so both platforms render
+/// the same person identically.
+struct ActorAvatarView: View {
+    let url: URL?
+    let initial: String
+    var size: CGFloat = 36
+
+    var body: some View {
+        Group {
+            if let url {
+                LazyImage(url: url) { state in
+                    if let image = state.image {
+                        image.resizable().aspectRatio(contentMode: .fill)
+                    } else {
+                        monogram
+                    }
+                }
+            } else {
+                monogram
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+    }
+
+    private var monogram: some View {
+        Text(initial)
+            .font(.system(size: size * 0.4, weight: .semibold))
+            .foregroundStyle(PA.Colors.text)
+            .frame(width: size, height: size)
+            .background(PA.Colors.surfaceSoft)
     }
 }

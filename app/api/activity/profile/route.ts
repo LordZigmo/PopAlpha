@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require";
 import { createServerSupabaseUserClient } from "@/lib/db/user";
 import type { ActivityFeedItem, ActivityFeedResponse } from "@/lib/activity/types";
+import { fetchActorProfiles } from "@/lib/activity/actors";
 import { isBlockedEitherWay } from "@/lib/moderation/blocked-users";
 
 export const runtime = "nodejs";
@@ -73,9 +74,9 @@ export async function GET(req: Request) {
   const slugs = [...new Set(pageRows.filter((e: { canonical_slug: string | null }) => e.canonical_slug).map((e: { canonical_slug: string | null }) => e.canonical_slug!))];
   const targetIds = [...new Set(pageRows.filter((e: { target_user_id: string | null }) => e.target_user_id).map((e: { target_user_id: string | null }) => e.target_user_id!))];
 
-  const [actorRes, targetsRes, cardsRes, imagesRes, myLikesRes, likesRes, commentsRes] = await Promise.all([
-    db.from("app_users").select("clerk_user_id, handle").eq("clerk_user_id", targetUserId),
-    targetIds.length > 0 ? db.from("app_users").select("clerk_user_id, handle").in("clerk_user_id", targetIds) : Promise.resolve({ data: [] }),
+  const [actorMap, targetProfileMap, cardsRes, imagesRes, myLikesRes, likesRes, commentsRes] = await Promise.all([
+    fetchActorProfiles(db, [targetUserId]),
+    fetchActorProfiles(db, targetIds),
     slugs.length > 0 ? db.from("canonical_cards").select("slug, canonical_name, set_name").in("slug", slugs) : Promise.resolve({ data: [] }),
     slugs.length > 0
       ? db.from("card_printings").select("canonical_slug, image_url").in("canonical_slug", slugs).eq("language", "EN").not("image_url", "is", null).limit(slugs.length)
@@ -85,11 +86,9 @@ export async function GET(req: Request) {
     db.from("activity_comments").select("event_id").in("event_id", eventIds),
   ]);
 
-  const actorHandle = ((actorRes.data ?? []) as { handle: string | null }[])[0]?.handle ?? "collector";
-  const targetMap = new Map<string, string>();
-  for (const t of (targetsRes.data ?? []) as { clerk_user_id: string; handle: string | null }[]) {
-    if (t.handle) targetMap.set(t.clerk_user_id, t.handle);
-  }
+  const actorProfile = actorMap.get(targetUserId);
+  const actorHandle = actorProfile?.handle ?? "collector";
+  const actorAvatarUrl = actorProfile?.avatarUrl ?? null;
 
   const cardMap = new Map<string, { name: string; set_name: string | null }>();
   for (const c of (cardsRes.data ?? []) as { slug: string; canonical_name: string; set_name: string | null }[]) {
@@ -116,16 +115,22 @@ export async function GET(req: Request) {
 
   const items: ActivityFeedItem[] = pageRows.map((e: EventRow) => {
     const card = e.canonical_slug ? cardMap.get(e.canonical_slug) : null;
-    const targetHandle = e.target_user_id ? targetMap.get(e.target_user_id) : null;
+    const targetProfile = e.target_user_id ? targetProfileMap.get(e.target_user_id) : null;
+    const targetHandle = targetProfile?.handle ?? null;
     return {
       id: e.id,
-      actor: { id: e.actor_id, handle: actorHandle, avatar_initial: actorHandle.slice(0, 1).toUpperCase() },
+      actor: {
+        id: e.actor_id,
+        handle: actorHandle,
+        avatar_initial: actorHandle.slice(0, 1).toUpperCase(),
+        avatar_url: actorAvatarUrl,
+      },
       event_type: e.event_type as ActivityFeedItem["event_type"],
       canonical_slug: e.canonical_slug,
       card_name: card?.name ?? (e.metadata.card_name as string | null) ?? null,
       card_image_url: e.canonical_slug ? imageMap.get(e.canonical_slug) ?? null : null,
       set_name: card?.set_name ?? (e.metadata.set_name as string | null) ?? null,
-      target_user: e.target_user_id && targetHandle ? { id: e.target_user_id, handle: targetHandle } : null,
+      target_user: e.target_user_id && targetHandle ? { id: e.target_user_id, handle: targetHandle, avatar_url: targetProfile?.avatarUrl ?? null } : null,
       metadata: e.metadata,
       created_at: e.created_at,
       like_count: likeCountMap.get(e.id) ?? 0,

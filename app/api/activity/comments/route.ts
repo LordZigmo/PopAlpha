@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/auth/require";
 import { createServerSupabaseUserClient } from "@/lib/db/user";
 import { emitNotification } from "@/lib/activity/emit";
 import type { ActivityComment } from "@/lib/activity/types";
+import { fetchActorProfiles } from "@/lib/activity/actors";
 import { getBlockedUserIds } from "@/lib/moderation/blocked-users";
 import { validateUserContent } from "@/lib/moderation/keyword-blocklist";
 
@@ -46,20 +47,14 @@ export async function GET(req: Request) {
   }
 
   const authorIds = [...new Set((rows ?? []).map((r: { author_id: string }) => r.author_id))];
-  const { data: authors } = authorIds.length > 0
-    ? await db.from("app_users").select("clerk_user_id, handle").in("clerk_user_id", authorIds)
-    : { data: [] };
-
-  const authorMap = new Map<string, string>();
-  for (const a of (authors ?? []) as { clerk_user_id: string; handle: string | null }[]) {
-    if (a.handle) authorMap.set(a.clerk_user_id, a.handle);
-  }
+  const authorMap = await fetchActorProfiles(db, authorIds);
 
   const comments: ActivityComment[] = (rows ?? []).map((r: { id: number; author_id: string; body: string; created_at: string }) => ({
     id: r.id,
     author: {
       id: r.author_id,
-      handle: authorMap.get(r.author_id) ?? "collector",
+      handle: authorMap.get(r.author_id)?.handle ?? "collector",
+      avatar_url: authorMap.get(r.author_id)?.avatarUrl ?? null,
     },
     body: r.body,
     created_at: r.created_at,

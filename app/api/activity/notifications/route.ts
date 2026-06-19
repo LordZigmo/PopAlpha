@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require";
 import { createServerSupabaseUserClient } from "@/lib/db/user";
 import type { NotificationItem, NotificationsResponse } from "@/lib/activity/types";
+import { fetchActorProfiles } from "@/lib/activity/actors";
 import { getBlockedUserIds } from "@/lib/moderation/blocked-users";
 
 export const runtime = "nodejs";
@@ -61,16 +62,9 @@ export async function GET(req: Request) {
   const hasMore = allRows.length > limit;
   const pageRows = hasMore ? allRows.slice(0, limit) : allRows;
 
-  // Hydrate actor handles
+  // Hydrate actor identity (handle + avatar) via the shared helper
   const actorIds = [...new Set(pageRows.map((r: { actor_id: string }) => r.actor_id))];
-  const { data: actors } = actorIds.length > 0
-    ? await db.from("app_users").select("clerk_user_id, handle").in("clerk_user_id", actorIds)
-    : { data: [] };
-
-  const actorMap = new Map<string, string>();
-  for (const a of (actors ?? []) as { clerk_user_id: string; handle: string | null }[]) {
-    if (a.handle) actorMap.set(a.clerk_user_id, a.handle);
-  }
+  const actorMap = await fetchActorProfiles(db, actorIds);
 
   // Hydrate event types for notifications with event_id
   const eventIds = pageRows
@@ -99,7 +93,8 @@ export async function GET(req: Request) {
     type: r.type as NotificationItem["type"],
     actor: {
       id: r.actor_id,
-      handle: actorMap.get(r.actor_id) ?? "collector",
+      handle: actorMap.get(r.actor_id)?.handle ?? "collector",
+      avatar_url: actorMap.get(r.actor_id)?.avatarUrl ?? null,
     },
     event_id: r.event_id,
     event_type: r.event_id ? (eventTypeMap.get(r.event_id) as NotificationItem["event_type"]) ?? null : null,
