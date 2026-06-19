@@ -862,7 +862,13 @@ struct ProfileTabView: View {
             let longest = max(uiImage.size.width, uiImage.size.height)
             let scale = longest > target ? target / longest : 1
             let newSize = CGSize(width: uiImage.size.width * scale, height: uiImage.size.height * scale)
-            let renderer = UIGraphicsImageRenderer(size: newSize)
+            // Force scale = 1 so the output is truly `newSize` *pixels*. The
+            // default renderer uses the device screen scale (2x/3x), which would
+            // make a "512pt" target a 1024–1536px image — bloating the upload
+            // and defeating the size guard before POST /api/profile/avatar.
+            let format = UIGraphicsImageRendererFormat.default()
+            format.scale = 1
+            let renderer = UIGraphicsImageRenderer(size: newSize, format: format)
             let resized = renderer.image { _ in
                 uiImage.draw(in: CGRect(origin: .zero, size: newSize))
             }
