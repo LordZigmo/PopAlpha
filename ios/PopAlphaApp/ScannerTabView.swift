@@ -30,6 +30,15 @@ struct ScannerTabView: View {
     @State private var showPickerSheet = false
     @State private var showPaywallSheet = false
     @State private var showMultiScanSheet = false
+    /// Set when a signed-out user taps "Add to portfolio" from the review
+    /// sheet. The sheet's onDismiss presents sign-in, and the
+    /// isAuthenticated onChange auto-runs the bulk import once they're in.
+    @State private var pendingMultiScanImport = false
+    /// Error from a deferred import that ran AFTER sign-in. By then the
+    /// review sheet (which owns its own footer error) is gone, so a failed
+    /// or partial import is surfaced here as an alert; the tray is retained
+    /// for retry.
+    @State private var multiScanDeferredError: String?
     @StateObject private var premiumGate = PremiumGate.shared
     @StateObject private var multiScanSession = MultiScanSession()
 
@@ -313,7 +322,14 @@ struct ScannerTabView: View {
                 // cards.
                 PaywallView(context: .scanner, surface: paywallSurface)
             }
-            .sheet(isPresented: $showMultiScanSheet) {
+            .sheet(isPresented: $showMultiScanSheet, onDismiss: {
+                // If a guest tapped Add, we dismissed this sheet to hand off
+                // to sign-in (it can't stack on top of the review sheet).
+                // Now that it's fully dismissed, present sign-in.
+                if pendingMultiScanImport {
+                    AuthService.shared.signIn()
+                }
+            }) {
                 MultiScanReviewSheet(
                     session: multiScanSession,
                     onDismiss: { showMultiScanSheet = false },
@@ -332,6 +348,20 @@ struct ScannerTabView: View {
                     correctionPickerSheet(for: ref.id)
                 }
             }
+            // Deferred-import outcome (after sign-in) when the review sheet
+            // is no longer up to show its own footer error.
+            .alert(
+                "Add to portfolio",
+                isPresented: Binding(
+                    get: { multiScanDeferredError != nil },
+                    set: { if !$0 { multiScanDeferredError = nil } }
+                ),
+                presenting: multiScanDeferredError,
+            ) { _ in
+                Button("OK", role: .cancel) {}
+            } message: { msg in
+                Text(msg)
+            }
             .onChange(of: scanner.lastMatch) { _, newValue in
                 handleIdentifyResult(newValue)
             }
@@ -346,9 +376,50 @@ struct ScannerTabView: View {
             .onChange(of: showMultiScanSheet) { _, isPresented in
                 if isPresented {
                     scanner.viewModel?.pauseForExternalCapture()
-                } else if scanner.multiScanMode {
+                } else if scanner.multiScanMode && !pendingMultiScanImport {
+                    // Don't resume while a deferred sign-in is in flight:
+                    // a card left in frame would append hidden tray entries
+                    // during sign-in that then auto-submit. The deferred-
+                    // import / cancel handlers below resume the scanner.
                     scanner.resumeScanning()
                 }
+            }
+            // Deferred multi-scan import: when a guest signs in after
+            // tapping "Add to portfolio", auto-run the bulk import. The
+            // tray is retained on failure, so re-open the review sheet for
+            // a retry. Mirrors CardDetailView's single-card deferred add.
+            .onChange(of: AuthService.shared.isAuthenticated) { wasAuthed, isAuthed in
+                guard pendingMultiScanImport, !wasAuthed, isAuthed else { return }
+                pendingMultiScanImport = false
+                Task {
+                    let outcome = await submitMultiScanBatch()
+                    // Surface a failed/partial deferred import: the sheet's
+                    // own footer error is gone with the dismissed sheet, so
+                    // alert instead. The tray is retained on failure for
+                    // retry. Resume either way — the scanner was held paused
+                    // for the sign-in handoff.
+                    if outcome != nil { multiScanDeferredError = outcome }
+                    if scanner.multiScanMode { scanner.resumeScanning() }
+                }
+            }
+            // Canceled sign-in: the sheet closed without authenticating
+            // while an import was pending. Drop the pending intent (so an
+            // ordinary later dismissal doesn't re-prompt, and a future
+            // unrelated auth flip doesn't run a stale import) and resume the
+            // scanner we held paused for the handoff.
+            // A deferred multi-scan import is abandoned when the sign-in flow
+            // settles SIGNED OUT — the chooser is dismissed without picking a
+            // provider, OR an OAuth/email attempt finishes without
+            // authenticating (including canceling the Google/Apple UI, which
+            // AuthService treats as a no-op and only flips isSigningIn back).
+            // Both surface as showSignInSheet / isSigningIn transitions;
+            // resolveAbandonedMultiScanImport() handles them uniformly.
+            // Success is handled by the isAuthenticated onChange above.
+            .onChange(of: AuthService.shared.showSignInSheet) { _, _ in
+                resolveAbandonedMultiScanImport()
+            }
+            .onChange(of: AuthService.shared.isSigningIn) { _, _ in
+                resolveAbandonedMultiScanImport()
             }
             // Pause Vision detection for the paywall's lifetime when
             // we're in multi-mode. The crown is optional, but if the
@@ -1098,6 +1169,16 @@ struct ScannerTabView: View {
     /// `Void` and only logged failures, leaving the user with a
     /// visually-unchanged tray and no explanation).
     private func submitMultiScanBatch() async -> String? {
+        // Guests: defer the import behind sign-in instead of erroring out.
+        // Dismiss the review sheet (the global sign-in sheet can't stack on
+        // top of it); its onDismiss presents sign-in, and the
+        // isAuthenticated onChange auto-runs this import once they're in.
+        // The tray (multiScanSession.entries) persists across the trip.
+        if !AuthService.shared.isAuthenticated {
+            pendingMultiScanImport = true
+            showMultiScanSheet = false
+            return nil
+        }
         do {
             let summary = try await multiScanSession.submit()
             AnalyticsService.shared.captureRaw(
@@ -1119,6 +1200,26 @@ struct ScannerTabView: View {
             Logger.scan.debug("multi-scan submit failed: \(error.localizedDescription)")
             PAHaptics.selection()
             return "Couldn't add — \(error.localizedDescription)"
+        }
+    }
+
+    /// Clears a pending multi-scan import (and resumes the scanner) once the
+    /// sign-in flow has settled SIGNED OUT — the guest dismissed the chooser
+    /// without picking a provider, or an OAuth/email attempt finished without
+    /// authenticating (including canceling the Google/Apple UI). Deferred one
+    /// runloop so signInWith*'s spawned Task has flipped isSigningIn before we
+    /// judge; otherwise a provider handoff (sheet dismissed before the flag
+    /// flips) would read as a cancel and drop the import. Success runs the
+    /// import via the isAuthenticated onChange instead.
+    private func resolveAbandonedMultiScanImport() {
+        guard pendingMultiScanImport else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            guard pendingMultiScanImport,
+                  !AuthService.shared.isAuthenticated,
+                  !AuthService.shared.isSigningIn,
+                  !AuthService.shared.showSignInSheet else { return }
+            pendingMultiScanImport = false
+            if scanner.multiScanMode { scanner.resumeScanning() }
         }
     }
 
