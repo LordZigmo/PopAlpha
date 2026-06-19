@@ -17,7 +17,7 @@ export type BreakdownSection = {
 export type CtaCopy = {
   heading: string;
   body: string;
-  /** Optional secondary link. Unused while the app is waitlist-only. */
+  /** Optional secondary link. Currently unused. */
   secondary?: {
     label: string;
     href: string;

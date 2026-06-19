@@ -12,8 +12,7 @@ type AppStoreBadgeProps = {
 /**
  * Apple "Download on the App Store" badge, rendered as crisp inline SVG so it
  * stays sharp at any size and inherits our dark theme. Destination is driven by
- * `lib/marketing/app-store` — a real apps.apple.com link once live, the waitlist
- * anchor until then.
+ * `lib/marketing/app-store` — the live apps.apple.com listing.
  */
 export default function AppStoreBadge({
   size = "lg",

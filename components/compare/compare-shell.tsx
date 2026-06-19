@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { appStoreHref } from "@/lib/marketing/app-store";
 
 // Shared minimalist frame for every marketing comparison page: a light wordmark
 // header, a single narrow column, and an optional footnote line. No app rails.
@@ -24,10 +25,12 @@ export default function CompareShell({
           />
         </Link>
         <Link
-          href="#waitlist"
+          href={appStoreHref}
+          target="_blank"
+          rel="noopener noreferrer"
           className="text-[14px] text-[#8A8A8E] transition-colors hover:text-white"
         >
-          Join waitlist
+          Get the app
         </Link>
       </header>
 

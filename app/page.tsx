@@ -2,7 +2,6 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@clerk/nextjs/server";
 import SiteHeader from "@/components/site-header";
-import WaitlistForm from "@/components/landing/waitlist-form";
 import AppStoreBadge from "@/components/landing/app-store-badge";
 import PhoneFrame from "@/components/landing/phone-frame";
 import Reveal from "@/components/landing/reveal";
@@ -304,7 +303,7 @@ function WhyPopAlpha() {
 function FinalCta() {
   return (
     <section
-      id="waitlist"
+      id="download"
       className="relative scroll-mt-24 overflow-hidden border-t border-white/[0.05] bg-[linear-gradient(180deg,#070A12_0%,#05060A_100%)]"
     >
       <div className="pointer-events-none absolute inset-0">
@@ -317,16 +316,12 @@ function FinalCta() {
             Know what your cards are worth.
           </h2>
           <p className="mx-auto mt-5 max-w-[520px] text-[17px] leading-[1.6] text-[#B5BEC9]">
-            PopAlpha is launching soon on iPhone. Get the app free, or drop your email and
-            we&rsquo;ll tell you the moment it&rsquo;s ready.
+            PopAlpha is free on iPhone. Download it on the App Store and start scanning in
+            seconds.
           </p>
 
           <div className="mt-9 flex justify-center">
             <AppStoreBadge size="lg" data-cta="final" />
-          </div>
-
-          <div className="mt-8">
-            <WaitlistForm variant="final" />
           </div>
         </Reveal>
       </div>

@@ -65,7 +65,7 @@ const POPALPHA_VS_COLLECTR: ComparisonEntry = {
     },
     {
       feature: "📱 Platform",
-      popalpha: "iPhone app (early access) + live web market",
+      popalpha: "iPhone app + live web market",
       competitor: "Mobile apps",
     },
     {
@@ -93,7 +93,7 @@ const POPALPHA_VS_COLLECTR: ComparisonEntry = {
       heading: "💸 Pricing and access",
       paragraphs: [
         "PopAlpha's card scanning, price lookups, and a small portfolio are free. A Pro subscription — monthly or yearly, with a 7-day free trial — unlocks deeper market analytics, collector insights, and price alerts.",
-        "The PopAlpha scanner app is currently in early access on iPhone via the waitlist, while the live web market (prices, signals, and set summaries) is available now in any browser.",
+        "The PopAlpha scanner app is live on the App Store for iPhone, and the web market (prices, signals, and set summaries) works in any browser.",
       ],
     },
   ],
@@ -111,7 +111,7 @@ const POPALPHA_VS_COLLECTR: ComparisonEntry = {
     {
       question: "Is PopAlpha available on Android?",
       answer:
-        "Not yet. The scanner app is iPhone-only today and currently in early access via the waitlist. The PopAlpha web market — prices, signals, and set summaries — works in any browser in the meantime.",
+        "Not yet. The scanner app is iPhone-only today, and it's live on the App Store. The PopAlpha web market — prices, signals, and set summaries — works in any browser in the meantime.",
     },
     {
       question: "Should I use PopAlpha or Collectr?",
@@ -121,7 +121,7 @@ const POPALPHA_VS_COLLECTR: ComparisonEntry = {
   ],
   cta: {
     heading: "📲 Ready to try the free Pokémon card scanner?",
-    body: "Unlimited free scanning plus English and Japanese card prices and AI market summaries. Join the waitlist and we'll email you when iPhone access opens.",
+    body: "Unlimited free scanning plus English and Japanese card prices and AI market summaries. Download PopAlpha free on the App Store.",
   },
   related: [
     "popalpha-vs-pricecharting",
@@ -185,7 +185,7 @@ const POPALPHA_VS_PRICECHARTING: ComparisonEntry = {
     },
     {
       feature: "📱 Platform",
-      popalpha: "iPhone app (early access) + live web",
+      popalpha: "iPhone app + live web",
       competitor: "Primarily web",
     },
     {
@@ -239,7 +239,7 @@ const POPALPHA_VS_PRICECHARTING: ComparisonEntry = {
   ],
   cta: {
     heading: "📲 Scan a card, see its market price",
-    body: "Free unlimited scanning with English and Japanese prices, AI summaries, and market signals. Join the waitlist and we'll email you when iPhone access opens.",
+    body: "Free unlimited scanning with English and Japanese prices, AI summaries, and market signals. Download PopAlpha free on the App Store.",
   },
   related: [
     "popalpha-vs-collectr",
@@ -272,7 +272,7 @@ const BEST_FREE_TCG_SCANNER: ComparisonEntry = {
         "Unlimited free scanning — identifying cards is never paywalled",
         "English pricing from PopAlpha market feeds, plus market-native Japanese prices (Yahoo! Auctions Japan, Snkrdunk)",
         "Daily AI market brief and per-card summaries (3 free, then Pro)",
-        "iPhone app in early access, with a live web market today",
+        "iPhone app, with a live web market too",
       ],
     },
     {
@@ -361,7 +361,7 @@ const BEST_FREE_TCG_SCANNER: ComparisonEntry = {
   ],
   cta: {
     heading: "📲 Try the free Pokémon card scanner",
-    body: "Unlimited free scanning plus English and Japanese card prices and AI market summaries. Join the waitlist and we'll email you when iPhone access opens.",
+    body: "Unlimited free scanning plus English and Japanese card prices and AI market summaries. Download PopAlpha free on the App Store.",
   },
   related: [
     "popalpha-vs-collectr",
@@ -486,7 +486,7 @@ const BEST_POKEMON_CARD_PRICE_APP: ComparisonEntry = {
   ],
   cta: {
     heading: "📲 Get Pokémon prices the moment you scan",
-    body: "Free scanning with English and Japanese market prices, freshness labels, and daily signals. Join the waitlist and we'll email you when iPhone access opens.",
+    body: "Free scanning with English and Japanese market prices, freshness labels, and daily signals. Download PopAlpha free on the App Store.",
   },
   related: [
     "popalpha-vs-collectr",
