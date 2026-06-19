@@ -357,7 +357,11 @@ struct ScannerTabView: View {
             .onChange(of: showMultiScanSheet) { _, isPresented in
                 if isPresented {
                     scanner.viewModel?.pauseForExternalCapture()
-                } else if scanner.multiScanMode {
+                } else if scanner.multiScanMode && !pendingMultiScanImport {
+                    // Don't resume while a deferred sign-in is in flight:
+                    // a card left in frame would append hidden tray entries
+                    // during sign-in that then auto-submit. The deferred-
+                    // import / cancel handlers below resume the scanner.
                     scanner.resumeScanning()
                 }
             }
@@ -370,8 +374,27 @@ struct ScannerTabView: View {
                 pendingMultiScanImport = false
                 Task {
                     let outcome = await submitMultiScanBatch()
-                    if outcome != nil { showMultiScanSheet = true }
+                    if outcome != nil {
+                        // Failed after sign-in — re-open the (retained) tray
+                        // so the user can retry; opening it re-pauses.
+                        showMultiScanSheet = true
+                    } else if scanner.multiScanMode {
+                        // Imported — the scanner was held paused for the
+                        // sign-in handoff, so resume it now.
+                        scanner.resumeScanning()
+                    }
                 }
+            }
+            // Canceled sign-in: the sheet closed without authenticating
+            // while an import was pending. Drop the pending intent (so an
+            // ordinary later dismissal doesn't re-prompt, and a future
+            // unrelated auth flip doesn't run a stale import) and resume the
+            // scanner we held paused for the handoff.
+            .onChange(of: AuthService.shared.showSignInSheet) { wasShown, isShown in
+                guard wasShown, !isShown, pendingMultiScanImport,
+                      !AuthService.shared.isAuthenticated else { return }
+                pendingMultiScanImport = false
+                if scanner.multiScanMode { scanner.resumeScanning() }
             }
             // Pause Vision detection for the paywall's lifetime when
             // we're in multi-mode. The crown is optional, but if the
