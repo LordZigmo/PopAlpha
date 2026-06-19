@@ -876,12 +876,17 @@ struct ProfileTabView: View {
             PAHaptics.success()
             await loadProfile()
         } catch {
-            profileEditError = "Upload failed. Check your connection and try again."
+            // Prefer the server's reason (unsupported format, too large, …);
+            // fall back to a connection-oriented message for transport errors.
+            profileEditError = (error as? APIError)?.serverMessage
+                ?? "Upload failed. Check your connection and try again."
         }
     }
 
-    /// Validates + saves a new handle. Mirrors the server's rule so an
-    /// invalid handle is caught before the round-trip.
+    /// Saves a new handle. A cheap length/charset pre-check avoids an obvious
+    /// round-trip; the server is authoritative for the rest (no leading/trailing
+    /// or double underscores, reserved names, uniqueness) and its specific
+    /// message is surfaced rather than mirroring — and drifting from — its rules.
     private func saveHandle() async {
         let trimmed = handleDraft.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         handleDraft = ""
@@ -901,8 +906,10 @@ struct ProfileTabView: View {
             PAHaptics.success()
             await loadProfile()
         } catch {
-            // The server rejects taken handles — surface a useful message.
-            profileEditError = "That handle is taken or invalid. Try another."
+            // Show the server's specific reason (reserved, underscore rules,
+            // already taken, …) when it sent one; otherwise a generic fallback.
+            profileEditError = (error as? APIError)?.serverMessage
+                ?? "That handle is taken or invalid. Try another."
         }
     }
 }
