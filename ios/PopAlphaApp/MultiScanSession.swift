@@ -81,6 +81,14 @@ final class MultiScanSession: ObservableObject {
     /// same card — they'd naturally take longer than 3s between).
     private let autoDetectDedupeWindow: TimeInterval = 3.0
 
+    /// Minimum wall-clock gap between successive auto-detect appends,
+    /// independent of slug. The slug-dedupe window only catches re-reads of
+    /// the SAME card; a slight hand-shift can produce a fresh stable
+    /// rectangle with a slightly different read that bypasses it and fires
+    /// again within ~0.5s. This floor makes multi-scan feel like "one card
+    /// per second" and gives the user time to move to the next card.
+    private let autoDetectMinInterval: TimeInterval = 1.0
+
     /// Sum of (marketPriceUsd × quantity) across entries with a loaded
     /// price. Loading entries contribute 0; the running total fills in
     /// as price fetches resolve.
@@ -104,6 +112,17 @@ final class MultiScanSession: ObservableObject {
             return false
         }
         return Date().timeIntervalSince(last.scannedAt) < autoDetectDedupeWindow
+    }
+
+    /// Returns true when the caller should skip an auto-detect append
+    /// because the most recent entry landed less than `autoDetectMinInterval`
+    /// ago — a wall-clock floor that throttles rapid re-fires regardless of
+    /// slug. Like the dedupe check it derives from `entries.last`, so any
+    /// path that removes the most-recent entry (clear, swipe-delete, submit)
+    /// naturally re-arms. Auto-detect only; tap/library bypass it.
+    func shouldThrottleAutoDetect() -> Bool {
+        guard let last = entries.last else { return false }
+        return Date().timeIntervalSince(last.scannedAt) < autoDetectMinInterval
     }
 
     /// Append a card produced by `runIdentify`. Caller has already

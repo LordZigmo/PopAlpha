@@ -799,9 +799,15 @@ struct ScannerTabView: View {
                 // defeating the dedupe-tray logic the rectangle path
                 // already has.
                 // (Codex P2 review on PR #111.)
+                // Plus a wall-clock floor (shouldThrottleAutoDetect): the
+                // slug-dedupe above misses a hand-shift that yields a fresh
+                // rectangle + slightly different read, so throttle ANY auto
+                // append to ~1/sec — cards shouldn't fire before the user
+                // moves their hand to the next one. (2026-06-18)
                 if (scanner.lastTriggerSource == "auto"
                     || scanner.lastTriggerSource == "auto_saliency"),
-                   multiScanSession.shouldDedupeAutoDetect(slug: match.slug) {
+                   multiScanSession.shouldDedupeAutoDetect(slug: match.slug)
+                       || multiScanSession.shouldThrottleAutoDetect() {
                     scanner.clearLastMatch()
                     scanner.resumeScanning()
                     return
