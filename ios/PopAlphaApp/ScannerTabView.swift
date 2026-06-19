@@ -390,23 +390,19 @@ struct ScannerTabView: View {
             // ordinary later dismissal doesn't re-prompt, and a future
             // unrelated auth flip doesn't run a stale import) and resume the
             // scanner we held paused for the handoff.
-            .onChange(of: AuthService.shared.showSignInSheet) { wasShown, isShown in
-                guard wasShown, !isShown, pendingMultiScanImport else { return }
-                // The sheet closes the instant the user taps Google/Apple —
-                // BEFORE signInWith*'s Task flips isSigningIn — so we can't
-                // judge cancel-vs-OAuth-handoff synchronously (doing so would
-                // drop the pending import for the default OAuth providers).
-                // Re-check next runloop: a genuine cancel leaves us signed
-                // out with no auth attempt in flight, whereas an OAuth handoff
-                // has isSigningIn=true by now (and success sets isAuthenticated,
-                // handled above).
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    guard pendingMultiScanImport,
-                          !AuthService.shared.isAuthenticated,
-                          !AuthService.shared.isSigningIn else { return }
-                    pendingMultiScanImport = false
-                    if scanner.multiScanMode { scanner.resumeScanning() }
-                }
+            // A deferred multi-scan import is abandoned when the sign-in flow
+            // settles SIGNED OUT — the chooser is dismissed without picking a
+            // provider, OR an OAuth/email attempt finishes without
+            // authenticating (including canceling the Google/Apple UI, which
+            // AuthService treats as a no-op and only flips isSigningIn back).
+            // Both surface as showSignInSheet / isSigningIn transitions;
+            // resolveAbandonedMultiScanImport() handles them uniformly.
+            // Success is handled by the isAuthenticated onChange above.
+            .onChange(of: AuthService.shared.showSignInSheet) { _, _ in
+                resolveAbandonedMultiScanImport()
+            }
+            .onChange(of: AuthService.shared.isSigningIn) { _, _ in
+                resolveAbandonedMultiScanImport()
             }
             // Pause Vision detection for the paywall's lifetime when
             // we're in multi-mode. The crown is optional, but if the
@@ -1187,6 +1183,26 @@ struct ScannerTabView: View {
             Logger.scan.debug("multi-scan submit failed: \(error.localizedDescription)")
             PAHaptics.selection()
             return "Couldn't add — \(error.localizedDescription)"
+        }
+    }
+
+    /// Clears a pending multi-scan import (and resumes the scanner) once the
+    /// sign-in flow has settled SIGNED OUT — the guest dismissed the chooser
+    /// without picking a provider, or an OAuth/email attempt finished without
+    /// authenticating (including canceling the Google/Apple UI). Deferred one
+    /// runloop so signInWith*'s spawned Task has flipped isSigningIn before we
+    /// judge; otherwise a provider handoff (sheet dismissed before the flag
+    /// flips) would read as a cancel and drop the import. Success runs the
+    /// import via the isAuthenticated onChange instead.
+    private func resolveAbandonedMultiScanImport() {
+        guard pendingMultiScanImport else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            guard pendingMultiScanImport,
+                  !AuthService.shared.isAuthenticated,
+                  !AuthService.shared.isSigningIn,
+                  !AuthService.shared.showSignInSheet else { return }
+            pendingMultiScanImport = false
+            if scanner.multiScanMode { scanner.resumeScanning() }
         }
     }
 
