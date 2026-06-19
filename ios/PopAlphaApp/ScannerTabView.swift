@@ -391,10 +391,22 @@ struct ScannerTabView: View {
             // unrelated auth flip doesn't run a stale import) and resume the
             // scanner we held paused for the handoff.
             .onChange(of: AuthService.shared.showSignInSheet) { wasShown, isShown in
-                guard wasShown, !isShown, pendingMultiScanImport,
-                      !AuthService.shared.isAuthenticated else { return }
-                pendingMultiScanImport = false
-                if scanner.multiScanMode { scanner.resumeScanning() }
+                guard wasShown, !isShown, pendingMultiScanImport else { return }
+                // The sheet closes the instant the user taps Google/Apple —
+                // BEFORE signInWith*'s Task flips isSigningIn — so we can't
+                // judge cancel-vs-OAuth-handoff synchronously (doing so would
+                // drop the pending import for the default OAuth providers).
+                // Re-check next runloop: a genuine cancel leaves us signed
+                // out with no auth attempt in flight, whereas an OAuth handoff
+                // has isSigningIn=true by now (and success sets isAuthenticated,
+                // handled above).
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    guard pendingMultiScanImport,
+                          !AuthService.shared.isAuthenticated,
+                          !AuthService.shared.isSigningIn else { return }
+                    pendingMultiScanImport = false
+                    if scanner.multiScanMode { scanner.resumeScanning() }
+                }
             }
             // Pause Vision detection for the paywall's lifetime when
             // we're in multi-mode. The crown is optional, but if the
