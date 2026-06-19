@@ -14,6 +14,7 @@ function toProfilePayload(user: Awaited<ReturnType<typeof ensureAppUser>>) {
     created_at: user.created_at,
     profile_bio: user.profile_bio,
     profile_banner_url: user.profile_banner_url,
+    profile_image_url: user.profile_image_url,
   };
 }
 
