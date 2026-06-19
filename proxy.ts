@@ -13,6 +13,7 @@
 // (bump 6: admin/cleanup/delete-thumb-overlay-augs — 2026-04-29)
 // (bump 7: cards/[slug]/ladder — 2026-05-18)
 // (bump 8: Pro-gate card profile AI routes — 2026-05-25)
+// (bump 9: profile/avatar upload route — 2026-06-19)
 
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse, type NextRequest } from "next/server";
@@ -39,7 +40,7 @@ const USER_SET = new Set(USER_ROUTES);
 // deploy — registry-only changes were skipping middleware rebuild and
 // admin/cleanup/delete-thumb-overlay-augs returned 404 from the
 // "unknown" branch despite being registered.
-const _ROUTE_REGISTRY_BUNDLE_REV = "2026-05-25-card-profile-pro-gates";
+const _ROUTE_REGISTRY_BUNDLE_REV = "2026-06-19-profile-avatar";
 void _ROUTE_REGISTRY_BUNDLE_REV;
 const ALL_ROUTE_KEYS = [
   ...PUBLIC_ROUTES,

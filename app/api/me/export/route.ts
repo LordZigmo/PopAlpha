@@ -26,7 +26,7 @@ export async function GET(req: Request) {
       postsRes,
     ] = await Promise.all([
       db.from("app_users")
-        .select("clerk_user_id, handle, profile_bio, profile_banner_url, activity_visibility, profile_visibility, notify_price_alerts, notify_weekly_digest, notify_product_updates, created_at")
+        .select("clerk_user_id, handle, profile_bio, profile_banner_url, profile_image_url, activity_visibility, profile_visibility, notify_price_alerts, notify_weekly_digest, notify_product_updates, created_at")
         .eq("clerk_user_id", uid)
         .maybeSingle(),
 

@@ -23,6 +23,7 @@ export type AppUser = {
   onboarding_completed_at: string | null;
   profile_bio: string | null;
   profile_banner_url: string | null;
+  profile_image_url: string | null;
   notify_price_alerts: boolean;
   notify_weekly_digest: boolean;
   notify_product_updates: boolean;
@@ -36,7 +37,7 @@ export type AppUser = {
 };
 
 const APP_USER_SELECT =
-  "clerk_user_id, handle, handle_norm, created_at, onboarding_completed_at, profile_bio, profile_banner_url, notify_price_alerts, notify_weekly_digest, notify_product_updates, notification_delivery_hour, notification_delivery_minute, notification_delivery_timezone, profile_visibility";
+  "clerk_user_id, handle, handle_norm, created_at, onboarding_completed_at, profile_bio, profile_banner_url, profile_image_url, notify_price_alerts, notify_weekly_digest, notify_product_updates, notification_delivery_hour, notification_delivery_minute, notification_delivery_timezone, profile_visibility";
 
 /**
  * Upsert an app_users row for the given Clerk user.
@@ -137,6 +138,7 @@ export async function updateAppProfile(
     handleNorm?: string;
     profileBio?: string | null;
     profileBannerUrl?: string | null;
+    profileImageUrl?: string | null;
     notifyPriceAlerts?: boolean;
     notifyWeeklyDigest?: boolean;
     notifyProductUpdates?: boolean;
@@ -153,6 +155,7 @@ export async function updateAppProfile(
   if (typeof updates.handleNorm === "string") payload.handle_norm = updates.handleNorm;
   if ("profileBio" in updates) payload.profile_bio = updates.profileBio ?? null;
   if ("profileBannerUrl" in updates) payload.profile_banner_url = updates.profileBannerUrl ?? null;
+  if ("profileImageUrl" in updates) payload.profile_image_url = updates.profileImageUrl ?? null;
   if (typeof updates.notifyPriceAlerts === "boolean") payload.notify_price_alerts = updates.notifyPriceAlerts;
   if (typeof updates.notifyWeeklyDigest === "boolean") payload.notify_weekly_digest = updates.notifyWeeklyDigest;
   if (typeof updates.notifyProductUpdates === "boolean") payload.notify_product_updates = updates.notifyProductUpdates;

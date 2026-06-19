@@ -42,6 +42,12 @@ export const DBADMIN_ALLOWED_FILES = [
   // dbAdmin is required for the Storage upload + corpus upsert. Anchor
   // stays the primary success path; corpus seeding is best-effort.
   "app/api/scan/correction/route.ts",
+  // 2026-06-19: user avatar upload. Writes the image to the public
+  // card-images bucket (Storage upload is RLS-locked to service-role) and
+  // persists only the compact public URL. The storage key is derived from the
+  // authenticated user's id, so a user can only ever overwrite their own
+  // avatar; the DB write stays on the per-user (RLS) client.
+  "app/api/profile/avatar/route.ts",
   "app/api/webhooks/apple/notifications/route.ts",
   // 2026-05-16 (Phase C-2): card detail's market-summary surface queries
   // the latest scrydex observation's metadata.scrydexAskingPriceUsd to
@@ -72,6 +78,7 @@ export const DBADMIN_ALLOWED_ROUTE_KEYS = [
   "personalization/events",
   "personalization/explanation",
   "personalization/profile",
+  "profile/avatar",
   "portfolio/overview",
   "portfolio/activity",
   "pro/signals",

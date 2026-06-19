@@ -176,6 +176,7 @@ export const USER_ROUTES = [
   "settings",
   "profile",
   "profile/banner",
+  "profile/avatar",
   "profile/follow",
   "profile/posts",
   "profile/posts/[id]",
