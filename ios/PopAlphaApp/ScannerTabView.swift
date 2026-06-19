@@ -30,6 +30,10 @@ struct ScannerTabView: View {
     @State private var showPickerSheet = false
     @State private var showPaywallSheet = false
     @State private var showMultiScanSheet = false
+    /// Set when a signed-out user taps "Add to portfolio" from the review
+    /// sheet. The sheet's onDismiss presents sign-in, and the
+    /// isAuthenticated onChange auto-runs the bulk import once they're in.
+    @State private var pendingMultiScanImport = false
     @StateObject private var premiumGate = PremiumGate.shared
     @StateObject private var multiScanSession = MultiScanSession()
 
@@ -313,7 +317,14 @@ struct ScannerTabView: View {
                 // cards.
                 PaywallView(context: .scanner, surface: paywallSurface)
             }
-            .sheet(isPresented: $showMultiScanSheet) {
+            .sheet(isPresented: $showMultiScanSheet, onDismiss: {
+                // If a guest tapped Add, we dismissed this sheet to hand off
+                // to sign-in (it can't stack on top of the review sheet).
+                // Now that it's fully dismissed, present sign-in.
+                if pendingMultiScanImport {
+                    AuthService.shared.signIn()
+                }
+            }) {
                 MultiScanReviewSheet(
                     session: multiScanSession,
                     onDismiss: { showMultiScanSheet = false },
@@ -348,6 +359,18 @@ struct ScannerTabView: View {
                     scanner.viewModel?.pauseForExternalCapture()
                 } else if scanner.multiScanMode {
                     scanner.resumeScanning()
+                }
+            }
+            // Deferred multi-scan import: when a guest signs in after
+            // tapping "Add to portfolio", auto-run the bulk import. The
+            // tray is retained on failure, so re-open the review sheet for
+            // a retry. Mirrors CardDetailView's single-card deferred add.
+            .onChange(of: AuthService.shared.isAuthenticated) { wasAuthed, isAuthed in
+                guard pendingMultiScanImport, !wasAuthed, isAuthed else { return }
+                pendingMultiScanImport = false
+                Task {
+                    let outcome = await submitMultiScanBatch()
+                    if outcome != nil { showMultiScanSheet = true }
                 }
             }
             // Pause Vision detection for the paywall's lifetime when
@@ -1098,6 +1121,16 @@ struct ScannerTabView: View {
     /// `Void` and only logged failures, leaving the user with a
     /// visually-unchanged tray and no explanation).
     private func submitMultiScanBatch() async -> String? {
+        // Guests: defer the import behind sign-in instead of erroring out.
+        // Dismiss the review sheet (the global sign-in sheet can't stack on
+        // top of it); its onDismiss presents sign-in, and the
+        // isAuthenticated onChange auto-runs this import once they're in.
+        // The tray (multiScanSession.entries) persists across the trip.
+        if !AuthService.shared.isAuthenticated {
+            pendingMultiScanImport = true
+            showMultiScanSheet = false
+            return nil
+        }
         do {
             let summary = try await multiScanSession.submit()
             AnalyticsService.shared.captureRaw(
