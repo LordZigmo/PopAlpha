@@ -632,6 +632,12 @@ export const PUBLIC_WRITE_ROUTE_CONTRACTS = {
 };
 
 export const PUBLIC_CALLABLE_FUNCTION_CONTRACTS = {
+  "get_actor_profiles(text[])": {
+    roles: ["anon", "authenticated"],
+    writeType: "read_only_lookup",
+    recommendedAction:
+      "read-only lookup of the PUBLIC profile slice (handle + avatar only — no private columns); anon execute is intentional so logged-out surfaces (public profile / card pages) can show avatars. Never add private columns to this function.",
+  },
   "get_canonical_raw_daily_freshness_monitors(integer[])": {
     roles: ["anon", "authenticated"],
     writeType: "read_only_monitor_lookup",
