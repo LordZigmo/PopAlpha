@@ -1,5 +1,6 @@
 import SwiftUI
 import NukeUI
+import PhotosUI
 import StoreKit
 
 struct ContentView: View {
@@ -357,6 +358,13 @@ struct ProfileTabView: View {
     // request inbox, same pattern as the enjoyment gate's feedback path.
     @State private var showFeatureRequestAlert = false
     @State private var featureRequestText = ""
+    // Profile editing — tap the avatar to pick a new photo, tap the @handle
+    // to rename. Both write through ProfileService and refresh in place.
+    @State private var avatarPickerItem: PhotosPickerItem?
+    @State private var avatarUploading = false
+    @State private var showHandleEditor = false
+    @State private var handleDraft = ""
+    @State private var profileEditError: String?
 
     var body: some View {
         NavigationStack {
@@ -526,27 +534,47 @@ struct ProfileTabView: View {
 
     private var profileContent: some View {
         VStack(spacing: 24) {
-            // Avatar — Google profile picture if available, monogram fallback
-            ZStack {
-                Circle()
-                    .stroke(PA.Colors.accent.opacity(0.3), lineWidth: 2)
-                    .frame(width: 88, height: 88)
+            // Avatar — tap to pick a new photo. PopAlpha-stored avatar wins,
+            // then the Google/Clerk picture, then a monogram. A camera badge
+            // signals it's editable; an overlay shows while the upload is
+            // in flight.
+            PhotosPicker(selection: $avatarPickerItem, matching: .images, photoLibrary: .shared()) {
+                ZStack {
+                    Circle()
+                        .stroke(PA.Colors.accent.opacity(0.3), lineWidth: 2)
+                        .frame(width: 88, height: 88)
 
-                if let urlString = auth.currentImageURL, let url = URL(string: urlString) {
-                    LazyImage(url: url) { state in
-                        if let image = state.image {
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                        } else {
-                            monogramAvatar
-                        }
+                    avatarImage
+                        .frame(width: 80, height: 80)
+                        .clipShape(Circle())
+
+                    if avatarUploading {
+                        Circle()
+                            .fill(Color.black.opacity(0.45))
+                            .frame(width: 80, height: 80)
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .tint(.white)
                     }
-                    .frame(width: 80, height: 80)
-                    .clipShape(Circle())
-                } else {
-                    monogramAvatar
+
+                    // Camera badge, bottom-trailing.
+                    Image(systemName: "camera.fill")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(PA.Colors.background)
+                        .frame(width: 26, height: 26)
+                        .background(PA.Colors.accent)
+                        .clipShape(Circle())
+                        .overlay(Circle().stroke(PA.Colors.background, lineWidth: 2))
+                        .offset(x: 30, y: 30)
+                        .accessibilityHidden(true)
                 }
+            }
+            .buttonStyle(.plain)
+            .disabled(avatarUploading)
+            .accessibilityLabel("Change profile photo")
+            .onChange(of: avatarPickerItem) { _, newItem in
+                guard let newItem else { return }
+                Task { await handleAvatarPick(newItem) }
             }
 
             VStack(spacing: 4) {
@@ -554,9 +582,23 @@ struct ProfileTabView: View {
                     .font(.system(size: 22, weight: .bold))
                     .foregroundStyle(PA.Colors.text)
 
-                Text("@\(profile?.handle ?? displayHandle)")
-                    .font(PA.Typography.cardSubtitle)
-                    .foregroundStyle(PA.Colors.muted)
+                // Tap the @handle to rename. A pencil hints it's editable.
+                Button {
+                    PAHaptics.tap()
+                    handleDraft = profile?.handle ?? displayHandle
+                    showHandleEditor = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("@\(profile?.handle ?? displayHandle)")
+                            .font(PA.Typography.cardSubtitle)
+                            .foregroundStyle(PA.Colors.muted)
+                        Image(systemName: "pencil")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(PA.Colors.accent)
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Edit handle, currently @\(profile?.handle ?? displayHandle)")
 
                 if let bio = profile?.profileBio, !bio.isEmpty {
                     Text(bio)
@@ -626,6 +668,30 @@ struct ProfileTabView: View {
         } message: {
             Text("You'll need to sign back in to see your watchlist, portfolio, and notifications.")
         }
+        // Rename the collector handle. Validation mirrors the server
+        // (PATCH /api/profile): 3–20 chars, lowercase letters/numbers/underscore.
+        .alert("Edit Handle", isPresented: $showHandleEditor) {
+            TextField("handle", text: $handleDraft)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled(true)
+            Button("Save") { Task { await saveHandle() } }
+            Button("Cancel", role: .cancel) { handleDraft = "" }
+        } message: {
+            Text("3–20 characters: lowercase letters, numbers, and underscores.")
+        }
+        // Surfaces avatar-upload / handle-save failures so a tap that
+        // silently fails doesn't leave the user guessing.
+        .alert(
+            "Couldn't update profile",
+            isPresented: Binding(
+                get: { profileEditError != nil },
+                set: { if !$0 { profileEditError = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { profileEditError = nil }
+        } message: {
+            Text(profileEditError ?? "Please try again.")
+        }
     }
 
     // MARK: - Sign Out CTA
@@ -678,6 +744,26 @@ struct ProfileTabView: View {
                     .font(.system(size: 28, weight: .bold))
                     .foregroundStyle(PA.Colors.accent)
             )
+    }
+
+    /// Avatar image: PopAlpha-stored picture wins, then the Google/Clerk
+    /// picture, then a monogram. Used as the PhotosPicker label.
+    @ViewBuilder
+    private var avatarImage: some View {
+        if let urlString = profile?.profileImageUrl ?? auth.currentImageURL,
+           let url = URL(string: urlString) {
+            LazyImage(url: url) { state in
+                if let image = state.image {
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } else {
+                    monogramAvatar
+                }
+            }
+        } else {
+            monogramAvatar
+        }
     }
 
     private func profileStat(value: String, label: String) -> some View {
@@ -751,6 +837,86 @@ struct ProfileTabView: View {
             // Silently fail — profile tab still shows cached/default data
         }
         isLoading = false
+    }
+
+    /// Picked-photo → downscale → JPEG → base64 data URL → upload. We resize
+    /// to 512px and re-encode at 0.8 quality so the request stays small (well
+    /// under the route's cap) and the stored avatar is web/feed-friendly.
+    private func handleAvatarPick(_ item: PhotosPickerItem) async {
+        avatarUploading = true
+        defer {
+            avatarUploading = false
+            // Allow re-picking the same photo later.
+            avatarPickerItem = nil
+        }
+        do {
+            guard
+                let data = try await item.loadTransferable(type: Data.self),
+                let uiImage = UIImage(data: data)
+            else {
+                profileEditError = "That image couldn't be read. Try another photo."
+                return
+            }
+
+            let target: CGFloat = 512
+            let longest = max(uiImage.size.width, uiImage.size.height)
+            let scale = longest > target ? target / longest : 1
+            let newSize = CGSize(width: uiImage.size.width * scale, height: uiImage.size.height * scale)
+            // Force scale = 1 so the output is truly `newSize` *pixels*. The
+            // default renderer uses the device screen scale (2x/3x), which would
+            // make a "512pt" target a 1024–1536px image — bloating the upload
+            // and defeating the size guard before POST /api/profile/avatar.
+            let format = UIGraphicsImageRendererFormat.default()
+            format.scale = 1
+            let renderer = UIGraphicsImageRenderer(size: newSize, format: format)
+            let resized = renderer.image { _ in
+                uiImage.draw(in: CGRect(origin: .zero, size: newSize))
+            }
+            guard let jpeg = resized.jpegData(compressionQuality: 0.8) else {
+                profileEditError = "That image couldn't be processed. Try another photo."
+                return
+            }
+
+            let dataUrl = "data:image/jpeg;base64,\(jpeg.base64EncodedString())"
+            _ = try await ProfileService.shared.uploadAvatar(dataUrl: dataUrl)
+            PAHaptics.success()
+            await loadProfile()
+        } catch {
+            // Prefer the server's reason (unsupported format, too large, …);
+            // fall back to a connection-oriented message for transport errors.
+            profileEditError = (error as? APIError)?.serverMessage
+                ?? "Upload failed. Check your connection and try again."
+        }
+    }
+
+    /// Saves a new handle. A cheap length/charset pre-check avoids an obvious
+    /// round-trip; the server is authoritative for the rest (no leading/trailing
+    /// or double underscores, reserved names, uniqueness) and its specific
+    /// message is surfaced rather than mirroring — and drifting from — its rules.
+    private func saveHandle() async {
+        let trimmed = handleDraft.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        handleDraft = ""
+        guard !trimmed.isEmpty else { return }
+
+        let valid = trimmed.range(of: "^[a-z0-9_]{3,20}$", options: .regularExpression) != nil
+        guard valid else {
+            profileEditError = "Handles must be 3–20 characters: lowercase letters, numbers, and underscores."
+            return
+        }
+        // No-op if unchanged.
+        guard trimmed != (profile?.handle ?? displayHandle) else { return }
+
+        do {
+            try await ProfileService.shared.updateProfile(handle: trimmed, bio: nil)
+            auth.setLocalHandle(trimmed)
+            PAHaptics.success()
+            await loadProfile()
+        } catch {
+            // Show the server's specific reason (reserved, underscore rules,
+            // already taken, …) when it sent one; otherwise a generic fallback.
+            profileEditError = (error as? APIError)?.serverMessage
+                ?? "That handle is taken or invalid. Try another."
+        }
     }
 }
 

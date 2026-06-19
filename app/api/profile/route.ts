@@ -103,8 +103,6 @@ export async function PATCH(req: Request) {
   await ensureAppUser(auth.userId);
 
   const rawHandle = typeof body.handle === "string" ? body.handle : "";
-  const bio = typeof body.profileBio === "string" ? body.profileBio.trim() : "";
-  const nextBio = bio ? bio.slice(0, 280) : null;
   let handle: string | undefined;
   let handleNorm: string | undefined;
 
@@ -117,12 +115,27 @@ export async function PATCH(req: Request) {
     handleNorm = result.normalized;
   }
 
+  // Partial update: only touch a field the client actually sent. Handle was
+  // already optional; make profile_bio behave the same so a handle-only edit
+  // (e.g. the iOS profile screen's @handle rename) doesn't clobber an existing
+  // bio. An omitted `profileBio` means "leave unchanged"; an explicit "" means
+  // "clear it".
+  const updates: {
+    handle?: string;
+    handleNorm?: string;
+    profileBio?: string | null;
+  } = {};
+  if (handle !== undefined) {
+    updates.handle = handle;
+    updates.handleNorm = handleNorm;
+  }
+  if ("profileBio" in body) {
+    const bio = typeof body.profileBio === "string" ? body.profileBio.trim() : "";
+    updates.profileBio = bio ? bio.slice(0, 280) : null;
+  }
+
   try {
-    const updated = await updateAppProfile(auth.userId, {
-      handle,
-      handleNorm,
-      profileBio: nextBio,
-    });
+    const updated = await updateAppProfile(auth.userId, updates);
 
     if (!updated) {
       return NextResponse.json({ ok: false, error: "That handle is already taken." }, { status: 409 });

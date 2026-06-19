@@ -254,4 +254,20 @@ enum APIError: LocalizedError {
             return "Decode error: \(msg)"
         }
     }
+
+    /// The server's `{ "error": "..." }` message when this is an `.httpError`
+    /// whose body carries one. Lets user-facing surfaces show the specific,
+    /// authoritative reason (e.g. "That handle is reserved.") instead of a raw
+    /// HTTP/JSON dump — and without the client having to mirror (and drift
+    /// from) the server's validation rules.
+    var serverMessage: String? {
+        guard case let .httpError(_, body) = self else { return nil }
+        guard
+            let data = body.data(using: .utf8),
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let message = object["error"] as? String,
+            !message.isEmpty
+        else { return nil }
+        return message
+    }
 }

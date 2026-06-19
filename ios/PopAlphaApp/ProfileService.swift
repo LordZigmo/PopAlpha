@@ -19,6 +19,7 @@ actor ProfileService {
         let createdAt: String
         let profileBio: String?
         let profileBannerUrl: String?
+        let profileImageUrl: String?
     }
 
     struct ProfilePost: Decodable, Identifiable {
@@ -95,6 +96,26 @@ actor ProfileService {
             body: body,
             decoder: decoder
         )
+    }
+
+    /// Upload a new avatar (base64 data URL) and return the stored public URL.
+    /// The server resizes/stores in object storage and persists a compact URL.
+    func uploadAvatar(dataUrl: String) async throws -> String {
+        try AuthService.shared.requireAuth()
+
+        struct AvatarResponse: Decodable {
+            let ok: Bool
+            let imageUrl: String?
+        }
+        let response: AvatarResponse = try await APIClient.post(
+            path: "/api/profile/avatar",
+            body: ["dataUrl": dataUrl],
+            decoder: decoder
+        )
+        guard response.ok, let url = response.imageUrl else {
+            throw URLError(.badServerResponse)
+        }
+        return url
     }
 
     // MARK: - Follow System

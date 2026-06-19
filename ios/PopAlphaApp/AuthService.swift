@@ -543,6 +543,14 @@ final class AuthService {
         }
     }
 
+    /// Update the cached handle right after the user changes it on the profile
+    /// screen so app-wide reads (e.g. displayName) reflect it immediately,
+    /// without waiting for the next profile/auth refresh.
+    @MainActor
+    func setLocalHandle(_ handle: String) {
+        currentHandle = handle
+    }
+
     // MARK: - Clerk Readiness
 
     /// Spin until Clerk's background load (environment + client) finishes
