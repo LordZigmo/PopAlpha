@@ -208,7 +208,11 @@ struct SettingsView: View {
 
     private func appIconTile(_ option: AppIconOption) -> some View {
         let isSelected = currentAppIcon == option
-        let locked = !premiumGate.isPro
+        // The stock (default) icon is ALWAYS selectable — it's not a paid
+        // asset, and a lapsed-Pro user whose alternate icon is still active at
+        // the OS level must be able to restore it without resubscribing. Only
+        // the paid alternates are Pro-gated.
+        let locked = !premiumGate.isPro && option != .defaultIcon
         return Button {
             if locked {
                 PAHaptics.tap()
@@ -227,28 +231,32 @@ struct SettingsView: View {
                         .overlay(
                             RoundedRectangle(cornerRadius: 13, style: .continuous)
                                 .stroke(
-                                    isSelected && !locked ? PA.Colors.accent : PA.Colors.border,
-                                    lineWidth: isSelected && !locked ? 2.5 : 1
+                                    isSelected ? PA.Colors.accent : PA.Colors.border,
+                                    lineWidth: isSelected ? 2.5 : 1
                                 )
                         )
-                        .opacity(locked ? 0.45 : 1)
+                        // Dim only gated tiles that aren't the active icon.
+                        .opacity(locked && !isSelected ? 0.45 : 1)
 
-                    if locked {
-                        Image(systemName: "lock.fill")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(.white)
-                            .shadow(color: .black.opacity(0.5), radius: 2)
-                    } else if isSelected {
+                    // The active icon always shows its checkmark (even a still-
+                    // active alternate after Pro lapses); other gated tiles show
+                    // the lock.
+                    if isSelected {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 18))
                             .foregroundStyle(PA.Colors.accent)
                             .background(Circle().fill(PA.Colors.background).frame(width: 16, height: 16))
                             .offset(x: 22, y: 22)
+                    } else if locked {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(.white)
+                            .shadow(color: .black.opacity(0.5), radius: 2)
                     }
                 }
                 Text(option.displayName)
-                    .font(.system(size: 11, weight: isSelected && !locked ? .semibold : .regular))
-                    .foregroundStyle(isSelected && !locked ? PA.Colors.text : PA.Colors.muted)
+                    .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
+                    .foregroundStyle(isSelected ? PA.Colors.text : PA.Colors.muted)
                     .lineLimit(1)
             }
             .frame(width: 72)
