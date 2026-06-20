@@ -273,6 +273,13 @@ public_signal_policy as (
     -- own freshest+median). One value per spot, never a competing basis.
     case
       when p.public_market_price is null then null
+      -- Cheap diverged floor: the freshest snapshot (p.latest_price) is the
+      -- Scrydex daily point, which when PriceCharting is the LOWER source is
+      -- NOT the floor we surfaced. Clients (iOS CardDetailView, web market
+      -- pulse) prefer latest_price over market_price for the hero, so pin
+      -- latest to the floor here or they'd render the higher source. MUST
+      -- precede the generic EN-RAW latest fallback.
+      when p.is_en_raw and p.cheap_diverged_floor then p.public_market_price
       when p.is_en_raw then coalesce(p.latest_price, p.public_market_price)
       -- Graded hero = freshest sold point, falling back to the 14d-median headline.
       when p.grade <> 'RAW' then coalesce(p.latest_price, p.public_market_price)
@@ -281,6 +288,8 @@ public_signal_policy as (
     end as public_latest_price,
     case
       when p.public_market_price is null then null
+      -- Cheap diverged floor: as_of of the surfaced floor, matching the price above.
+      when p.is_en_raw and p.cheap_diverged_floor then p.public_market_price_as_of
       when p.is_en_raw then coalesce(p.latest_price_as_of, p.public_market_price_as_of)
       when p.grade <> 'RAW' then coalesce(p.latest_price_as_of, p.public_market_price_as_of)
       when p.canonical_language = 'JP' and p.grade = 'RAW' then coalesce(p.jp_latest_price_as_of, p.public_market_price_as_of)

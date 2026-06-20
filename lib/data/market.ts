@@ -442,8 +442,13 @@ export function resolveCanonicalMarketPulse(
     recentMarketSignalDeltaPct,
     recentMarketSignalDirection,
     sourceMix: {
+      // Read the Scrydex weight from the provenance's OWN scrydexWeight, not
+      // publicInputWeight. They diverge for rows with a public price but no
+      // Scrydex corroboration — single-source PriceCharting and the cheap
+      // diverged floor (scrydexWeight 0, publicInputWeight 1). Mapping from
+      // publicInputWeight reported those as Scrydex-backed (weight 1).
       scrydexWeight: marketPrice !== null && !jpNativeSource
-        ? (provenanceSourceMix?.publicInputWeight ?? 1)
+        ? (provenanceSourceMix?.scrydexWeight ?? 1)
         : 0,
       ...(provenanceSourceMix?.publicInputWeight !== undefined
         ? { publicInputWeight: provenanceSourceMix.publicInputWeight }
