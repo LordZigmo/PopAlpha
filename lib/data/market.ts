@@ -23,6 +23,10 @@ export type MarketBlendPolicy =
   | "SNKRDUNK_PRIMARY"
   | "POPALPHA_MARKET_CONFIDENT"
   | "POPALPHA_MARKET_SINGLE_SOURCE"
+  // EN-RAW cheap diverged floor: two sources disagree but the card is
+  // low-dollar (greatest <= $2), so we surface the conservative lower price at
+  // confidence 25, low-confidence, no change badge. 20260620120000.
+  | "POPALPHA_MARKET_CHEAP_DIVERGED_FLOOR"
   | "POPALPHA_MARKET_LOW_CONFIDENCE"
   | "POPALPHA_MARKET_QUARANTINED"
   | "NO_RELIABLE_PRICE"
@@ -34,6 +38,9 @@ export type MarketPriceDisplayState =
   | "SIGNAL_LOWER"
   | "PUBLIC_ONLY"
   | "PRICECHARTING_SINGLE_SOURCE"
+  // EN-RAW cheap diverged floor (see POPALPHA_MARKET_CHEAP_DIVERGED_FLOOR).
+  // 20260620120000.
+  | "PRICECHARTING_CHEAP_DIVERGED"
   // Thin JP series (max in-window sample_count < 3): price shown under the
   // single-source trust grammar (confidence 30, low-confidence, no change
   // badge). 20260614150000.
@@ -187,6 +194,7 @@ function isMarketBlendPolicy(value: string | null | undefined): value is MarketB
     || value === "SNKRDUNK_PRIMARY"
     || value === "POPALPHA_MARKET_CONFIDENT"
     || value === "POPALPHA_MARKET_SINGLE_SOURCE"
+    || value === "POPALPHA_MARKET_CHEAP_DIVERGED_FLOOR"
     || value === "POPALPHA_MARKET_LOW_CONFIDENCE"
     || value === "POPALPHA_MARKET_QUARANTINED"
     || value === "NO_RELIABLE_PRICE"
@@ -199,6 +207,7 @@ function isMarketPriceDisplayState(value: string | null | undefined): value is M
     || value === "SIGNAL_LOWER"
     || value === "PUBLIC_ONLY"
     || value === "PRICECHARTING_SINGLE_SOURCE"
+    || value === "PRICECHARTING_CHEAP_DIVERGED"
     || value === "JP_LOW_SAMPLE"
     || value === "UNDER_REVIEW"
     || value === "NO_RELIABLE_PRICE";
