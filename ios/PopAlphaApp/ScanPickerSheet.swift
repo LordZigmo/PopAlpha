@@ -489,46 +489,19 @@ struct ScanPickerSheet: View {
         // the kNN anchor; admin curation of the eval corpus stays on
         // the testtube/EvalSeedingView path.
         if let bytes = scanImage {
-            let slug = match.slug
-            let lang = scanLanguage
-            let store = onCorrectionSubmitted
-            let predicted = correctionMetadata
-            Task.detached {
-                do {
-                    let result = try await ScanService.submitCorrection(
-                        image: bytes,
-                        canonicalSlug: slug,
-                        language: lang,
-                        notes: "picker-sheet-select",
-                        predicted: predicted,
-                    )
-                    await MainActor.run {
-                        ScanService.logCorrectionTelemetry(
-                            surface: "picker",
-                            toSlug: slug,
-                            predicted: predicted,
-                            response: result,
-                            errorMessage: nil,
-                        )
-                        // Trigger an anchor sync so the next scan can
-                        // see this correction. Non-blocking; the picker
-                        // dismiss has already navigated.
-                        if result.ok { store?() }
-                    }
-                } catch {
-                    let message = error.localizedDescription
-                    await MainActor.run {
-                        ScanService.logCorrectionTelemetry(
-                            surface: "picker",
-                            toSlug: slug,
-                            predicted: predicted,
-                            response: nil,
-                            errorMessage: message,
-                        )
-                    }
-                    Logger.scan.debug("scan correction submit failed (picker): \(message, privacy: .public)")
-                }
-            }
+            // Routes through the coordinator: fires now if signed in, else
+            // queues + presents sign-in and lands the correction right after
+            // (guests aren't silently dropped). Telemetry + anchor-sync happen
+            // inside the coordinator.
+            ScanCorrectionCoordinator.shared.submit(
+                image: bytes,
+                slug: match.slug,
+                language: scanLanguage,
+                notes: "picker-sheet-select",
+                predicted: correctionMetadata,
+                surface: "picker",
+                onSuccess: onCorrectionSubmitted,
+            )
         }
 
         #if DEBUG
@@ -569,43 +542,17 @@ struct ScanPickerSheet: View {
         // notes there for why we stopped hitting the admin promote
         // endpoint from the picker.
         if let bytes = scanImage {
-            let slug = result.canonicalSlug
-            let lang = scanLanguage
-            let store = onCorrectionSubmitted
-            let predicted = correctionMetadata
-            Task.detached {
-                do {
-                    let r = try await ScanService.submitCorrection(
-                        image: bytes,
-                        canonicalSlug: slug,
-                        language: lang,
-                        notes: "picker-sheet-search-select",
-                        predicted: predicted,
-                    )
-                    await MainActor.run {
-                        ScanService.logCorrectionTelemetry(
-                            surface: "search",
-                            toSlug: slug,
-                            predicted: predicted,
-                            response: r,
-                            errorMessage: nil,
-                        )
-                        if r.ok { store?() }
-                    }
-                } catch {
-                    let message = error.localizedDescription
-                    await MainActor.run {
-                        ScanService.logCorrectionTelemetry(
-                            surface: "search",
-                            toSlug: slug,
-                            predicted: predicted,
-                            response: nil,
-                            errorMessage: message,
-                        )
-                    }
-                    Logger.scan.debug("scan correction submit failed (search): \(message, privacy: .public)")
-                }
-            }
+            // Coordinator handles signed-in vs guest (queue + sign-in + resume),
+            // telemetry, and anchor-sync. See handlePickerPick.
+            ScanCorrectionCoordinator.shared.submit(
+                image: bytes,
+                slug: result.canonicalSlug,
+                language: scanLanguage,
+                notes: "picker-sheet-search-select",
+                predicted: correctionMetadata,
+                surface: "search",
+                onSuccess: onCorrectionSubmitted,
+            )
         }
 
         #if DEBUG

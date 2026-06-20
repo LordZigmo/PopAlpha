@@ -441,6 +441,13 @@ struct ScannerTabView: View {
             // tray is retained on failure, so re-open the review sheet for
             // a retry. Mirrors CardDetailView's single-card deferred add.
             .onChange(of: AuthService.shared.isAuthenticated) { wasAuthed, isAuthed in
+                // Land any guest scan correction queued before sign-in. Runs on
+                // a genuine sign-in transition, independent of the multi-scan
+                // import handoff below. (Covers picker + detail corrections —
+                // ScannerTabView stays mounted while a card detail is pushed.)
+                if !wasAuthed && isAuthed {
+                    ScanCorrectionCoordinator.shared.flushPendingAfterSignIn()
+                }
                 guard pendingMultiScanImport, !wasAuthed, isAuthed else { return }
                 pendingMultiScanImport = false
                 Task {
@@ -1264,14 +1271,20 @@ struct ScannerTabView: View {
     /// flips) would read as a cancel and drop the import. Success runs the
     /// import via the isAuthenticated onChange instead.
     private func resolveAbandonedMultiScanImport() {
-        guard pendingMultiScanImport else { return }
+        // Run when EITHER deferred action is parked: a pending multi-scan
+        // import OR a queued guest correction awaiting sign-in.
+        guard pendingMultiScanImport || ScanCorrectionCoordinator.shared.hasPending else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            guard pendingMultiScanImport,
-                  !AuthService.shared.isAuthenticated,
+            guard !AuthService.shared.isAuthenticated,
                   !AuthService.shared.isSigningIn,
                   !AuthService.shared.showSignInSheet else { return }
-            pendingMultiScanImport = false
-            if scanner.multiScanMode { scanner.resumeScanning() }
+            // Sign-in flow settled SIGNED OUT → abandon both deferred actions
+            // so neither fires on an unrelated later sign-in.
+            ScanCorrectionCoordinator.shared.discardPendingIfGuest()
+            if pendingMultiScanImport {
+                pendingMultiScanImport = false
+                if scanner.multiScanMode { scanner.resumeScanning() }
+            }
         }
     }
 

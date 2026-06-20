@@ -544,6 +544,27 @@ struct EvalSeedingView: View {
                     predictedSlug.map { "model predicted \($0)" }
                 ].compactMap { $0 }.joined(separator: " | ")
                 let notesValue = augmentedNotes.isEmpty ? nil : augmentedNotes
+                // Guest: corrections require sign-in (the endpoint is
+                // requireUser — keeps the training corpus accountable). Rather
+                // than fail in this modal, hand off to the coordinator, which
+                // presents sign-in and lands the correction right after
+                // (the scanner view's auth onChange flushes it). Optimistic
+                // confirmation + dismiss; the correction is captured, not lost.
+                if !AuthService.shared.isAuthenticated, let bytes = scanImage {
+                    await MainActor.run {
+                        ScanCorrectionCoordinator.shared.submit(
+                            image: bytes,
+                            slug: card.canonicalSlug,
+                            language: .en,
+                            notes: notesValue,
+                            predicted: predicted,
+                            surface: "detail",
+                        )
+                        saveResult = .success(card.canonicalSlug)
+                        PAHaptics.success()
+                    }
+                    return
+                }
                 if let bytes = scanImage {
                     // User-gated correction: hits /api/scan/correction
                     // which only writes the kNN anchor (no eval-corpus
