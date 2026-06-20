@@ -1,0 +1,16 @@
+-- Make get_actor_profiles' anon access explicit and reproducible.
+--
+-- The original migration (20260619140000_get_actor_profiles_rpc.sql) granted
+-- execute only to `authenticated`. On this project the function ALSO ended up
+-- executable by `anon` via Supabase's default privileges (which grant EXECUTE
+-- on new public functions to anon directly) — and that anon access is desired:
+-- get_actor_profiles returns ONLY the public profile slice (handle + avatar,
+-- no private columns), so logged-out surfaces (public profile / card pages)
+-- can show avatars.
+--
+-- Grant execute to anon EXPLICITLY so the exposure is intentional and
+-- reproducible on a fresh database (not reliant on default privileges), and so
+-- the checked-in migrations match the [anon, authenticated] schema-guardrails
+-- contract in scripts/security-guardrails.config.mjs. Idempotent: a no-op on
+-- prod where anon already holds execute.
+grant execute on function public.get_actor_profiles(text[]) to anon;
