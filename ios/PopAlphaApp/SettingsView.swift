@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - Settings View (Apple App Store compliant)
 
@@ -34,6 +35,11 @@ struct SettingsView: View {
     @State private var showPaywallSheet = false
     @StateObject private var premiumGate = PremiumGate.shared
 
+    // App Icon (Pro perk). The live truth is UIApplication.alternateIconName;
+    // currentAppIcon mirrors it for the UI and is synced on appear.
+    @State private var currentAppIcon: AppIconOption = .defaultIcon
+    @State private var appIconError: String?
+
     // Appearance — same @AppStorage key as ContentView so the picker
     // here drives the live `.preferredColorScheme(...)` at the root.
     @AppStorage(AppearanceMode.storageKey) private var appearanceRaw: String = AppearanceMode.system.rawValue
@@ -45,6 +51,12 @@ struct SettingsView: View {
     }
 
     private var auth: AuthService { AuthService.shared }
+
+    /// Marketing version from the bundle (e.g. "1.1.0"), so the About row never
+    /// drifts from MARKETING_VERSION. Falls back gracefully if absent.
+    private var appVersionString: String {
+        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "—"
+    }
 
     var body: some View {
         ZStack {
@@ -62,6 +74,15 @@ struct SettingsView: View {
         .toolbarBackground(.visible, for: .navigationBar)
         .task {
             await loadSettings()
+        }
+        .onAppear { syncCurrentAppIcon() }
+        .alert("Couldn't change the app icon", isPresented: .init(
+            get: { appIconError != nil },
+            set: { if !$0 { appIconError = nil } }
+        )) {
+            Button("OK") { appIconError = nil }
+        } message: {
+            Text(appIconError ?? "")
         }
         .alert("Delete Account?", isPresented: $showDeleteConfirmation) {
             Button("Cancel", role: .cancel) {}
@@ -142,6 +163,129 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - App Icon (Pro perk)
+
+    @ViewBuilder
+    private var appIconSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Text("App Icon")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(PA.Colors.muted)
+                if !premiumGate.isPro {
+                    Image(systemName: "crown.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(PA.Colors.gold)
+                        .accessibilityLabel("Pro feature")
+                }
+                Spacer()
+            }
+            .padding(.horizontal, PA.Layout.sectionPadding)
+            .padding(.bottom, 8)
+
+            VStack(alignment: .leading, spacing: 0) {
+                if !premiumGate.isPro {
+                    Text("Personalize your home screen with PopAlpha Pro.")
+                        .font(PA.Typography.caption)
+                        .foregroundStyle(PA.Colors.muted)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 12)
+                }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 14) {
+                        ForEach(AppIconOption.allCases) { option in
+                            appIconTile(option)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 14)
+                }
+            }
+            .glassSurface(radius: PA.Layout.panelRadius)
+            .padding(.horizontal, PA.Layout.sectionPadding)
+        }
+    }
+
+    private func appIconTile(_ option: AppIconOption) -> some View {
+        let isSelected = currentAppIcon == option
+        let locked = !premiumGate.isPro
+        return Button {
+            if locked {
+                PAHaptics.tap()
+                showPaywallSheet = true
+            } else {
+                applyAppIcon(option)
+            }
+        } label: {
+            VStack(spacing: 6) {
+                ZStack {
+                    Image("AppIconPreview-\(option.assetSuffix)")
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 60, height: 60)
+                        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                                .stroke(
+                                    isSelected && !locked ? PA.Colors.accent : PA.Colors.border,
+                                    lineWidth: isSelected && !locked ? 2.5 : 1
+                                )
+                        )
+                        .opacity(locked ? 0.45 : 1)
+
+                    if locked {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(.white)
+                            .shadow(color: .black.opacity(0.5), radius: 2)
+                    } else if isSelected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 18))
+                            .foregroundStyle(PA.Colors.accent)
+                            .background(Circle().fill(PA.Colors.background).frame(width: 16, height: 16))
+                            .offset(x: 22, y: 22)
+                    }
+                }
+                Text(option.displayName)
+                    .font(.system(size: 11, weight: isSelected && !locked ? .semibold : .regular))
+                    .foregroundStyle(isSelected && !locked ? PA.Colors.text : PA.Colors.muted)
+                    .lineLimit(1)
+            }
+            .frame(width: 72)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(option.displayName) app icon\(isSelected ? ", selected" : "")\(locked ? ", Pro feature, locked" : "")")
+    }
+
+    /// Apply an alternate icon. Optimistically updates the selection and
+    /// reverts on failure. setAlternateIconName's completion runs off the main
+    /// actor, so state writes hop back. iOS shows its own confirmation alert.
+    private func applyAppIcon(_ option: AppIconOption) {
+        guard UIApplication.shared.supportsAlternateIcons else { return }
+        let target = option.alternateIconName
+        guard UIApplication.shared.alternateIconName != target else {
+            currentAppIcon = option
+            return
+        }
+        let previous = currentAppIcon
+        currentAppIcon = option
+        PAHaptics.tap()
+        UIApplication.shared.setAlternateIconName(target) { error in
+            Task { @MainActor in
+                if let error {
+                    currentAppIcon = previous
+                    appIconError = error.localizedDescription
+                } else {
+                    PAHaptics.success()
+                }
+            }
+        }
+    }
+
+    private func syncCurrentAppIcon() {
+        currentAppIcon = AppIconOption.from(alternateIconName: UIApplication.shared.alternateIconName)
+    }
+
     // MARK: - Content
 
     private var settingsContent: some View {
@@ -187,6 +331,13 @@ struct SettingsView: View {
                         selection: appearanceBinding,
                         options: AppearanceMode.allCases
                     ) { /* persisted via @AppStorage; no server sync */ }
+                }
+
+                // App Icon — a Pro perk. Device-level (no auth/server sync);
+                // gated on premiumGate.isPro. Hidden entirely if the device
+                // doesn't support alternate icons (iPad-only edge cases).
+                if UIApplication.shared.supportsAlternateIcons {
+                    appIconSection
                 }
 
                 if auth.isAuthenticated {
@@ -358,7 +509,7 @@ struct SettingsView: View {
 
                 // About
                 settingsSection("About") {
-                    infoRow(icon: "info.circle", title: "Version", value: "1.0.0")
+                    infoRow(icon: "info.circle", title: "Version", value: appVersionString)
 
                     Divider().background(PA.Colors.border).padding(.leading, 44)
 
@@ -753,4 +904,57 @@ extension ProfileVisibility: CustomStringConvertible {
 
 extension ActivityVisibility: CustomStringConvertible {
     var description: String { label }
+}
+
+// MARK: - App Icon options
+//
+// Each case maps to an asset-catalog App Icon set (the alternate icon name iOS
+// resolves via setAlternateIconName) and a preview imageset ("AppIconPreview-…")
+// for the Settings thumbnail. `.defaultIcon` is the primary AppIcon (nil
+// alternate name). Set names must match the .appiconset folder names and the
+// ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES build setting.
+
+enum AppIconOption: String, CaseIterable, Identifiable {
+    case defaultIcon
+    case alphaBlack
+    case alphaWhite
+    case holoAlpha
+    case impressionistAlpha
+    case japanese
+    case tileAlpha
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .defaultIcon: return "Default"
+        case .alphaBlack: return "Alpha Black"
+        case .alphaWhite: return "Alpha White"
+        case .holoAlpha: return "Holo"
+        case .impressionistAlpha: return "Impressionist"
+        case .japanese: return "Japanese"
+        case .tileAlpha: return "Tile"
+        }
+    }
+
+    /// Asset-catalog alternate App Icon set name; nil = primary icon.
+    var alternateIconName: String? {
+        switch self {
+        case .defaultIcon: return nil
+        case .alphaBlack: return "AlphaBlack"
+        case .alphaWhite: return "AlphaWhite"
+        case .holoAlpha: return "HoloAlpha"
+        case .impressionistAlpha: return "ImpressionistAlpha"
+        case .japanese: return "Japanese"
+        case .tileAlpha: return "TileAlpha"
+        }
+    }
+
+    /// Suffix for the "AppIconPreview-<suffix>" imageset used in Settings.
+    var assetSuffix: String { alternateIconName ?? "Default" }
+
+    static func from(alternateIconName name: String?) -> AppIconOption {
+        guard let name else { return .defaultIcon }
+        return AppIconOption.allCases.first { $0.alternateIconName == name } ?? .defaultIcon
+    }
 }
