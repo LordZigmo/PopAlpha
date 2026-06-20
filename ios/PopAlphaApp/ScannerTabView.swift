@@ -27,6 +27,10 @@ import OSLog
 
 struct ScannerTabView: View {
     @State private var navigateToCard: MarketCard?
+    // Early-stage scanner note: sets expectations and nudges corrections.
+    // Persisted dismissed-once via @AppStorage so it guides new users without
+    // nagging forever.
+    @AppStorage("scannerEarlyNoteDismissed") private var earlyNoteDismissed = false
     @State private var showPickerSheet = false
     @State private var showPaywallSheet = false
     @State private var showMultiScanSheet = false
@@ -186,6 +190,54 @@ struct ScannerTabView: View {
                         .padding(.trailing, 16)
                     }
                     Spacer()
+                }
+
+                // Early-scanner note — top-center, frosted, dismissible. Tap
+                // to dismiss (persisted). Lives above the full-screen shutter
+                // but only the banner itself is hit-testable, so taps elsewhere
+                // still capture. Sets expectations and nudges corrections —
+                // "every correction helps future users."
+                if !earlyNoteDismissed && scanner.initError == nil {
+                    VStack {
+                        Button {
+                            PAHaptics.tap()
+                            withAnimation(.easeOut(duration: 0.2)) { earlyNoteDismissed = true }
+                        } label: {
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: "sparkles")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(PA.Colors.accent)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("The scanner is still learning.")
+                                        .font(.system(size: 12.5, weight: .semibold))
+                                        .foregroundStyle(.white)
+                                    Text("If a card comes back wrong, tap the correct one — every correction trains it for future collectors.")
+                                        .font(.system(size: 12, weight: .regular))
+                                        .foregroundStyle(.white.opacity(0.9))
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    Text("Tap to dismiss")
+                                        .font(.system(size: 10.5, weight: .medium))
+                                        .foregroundStyle(.white.opacity(0.55))
+                                        .padding(.top, 1)
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            .multilineTextAlignment(.leading)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 11)
+                            .frame(maxWidth: 330)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .stroke(.white.opacity(0.12), lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 110)
+                        Spacer()
+                    }
+                    .transition(.opacity)
                 }
 
                 // Bottom-right multi-scan toggle. Pinned 92pt above
