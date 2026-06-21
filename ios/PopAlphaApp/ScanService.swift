@@ -389,3 +389,116 @@ enum ScanServiceError: LocalizedError {
         }
     }
 }
+
+// MARK: - Scan Correction Coordinator
+//
+// Corrections require a signed-in user: /api/scan/correction is requireUser
+// because it feeds the kNN anchor AND the training corpus, so writes must be
+// accountable (created_by) and non-anonymous to prevent model poisoning.
+// Rather than silently drop a guest's correction (a 401), this coordinator
+// queues it, presents sign-in, and lands it the moment they authenticate —
+// flushed by the scanner view's isAuthenticated onChange. Mirrors the
+// add-to-portfolio sign-in-then-resume flow so "every correction helps" holds
+// for guests too (after a one-time sign-in), without opening an anonymous
+// write path.
+@MainActor
+final class ScanCorrectionCoordinator {
+    static let shared = ScanCorrectionCoordinator()
+    private init() {}
+
+    private struct Pending {
+        let image: UIImage
+        let slug: String
+        let language: ScanLanguage
+        let notes: String?
+        let predicted: ScanCorrectionPredictedMetadata?
+        let surface: String
+        let onSuccess: (() -> Void)?
+    }
+    private var queue: [Pending] = []
+
+    /// True while a guest correction is parked awaiting sign-in — lets a modal
+    /// surface (the detail correction sheet) show an optimistic confirmation.
+    var hasPending: Bool { !queue.isEmpty }
+
+    /// Submit a correction. Signed in → fires now (fire-and-forget +
+    /// telemetry). Guest → queues it and presents sign-in;
+    /// flushPendingAfterSignIn() lands it after auth.
+    func submit(
+        image: UIImage,
+        slug: String,
+        language: ScanLanguage,
+        notes: String?,
+        predicted: ScanCorrectionPredictedMetadata?,
+        surface: String,
+        onSuccess: (() -> Void)? = nil,
+    ) {
+        let pending = Pending(
+            image: image,
+            slug: slug,
+            language: language,
+            notes: notes,
+            predicted: predicted,
+            surface: surface,
+            onSuccess: onSuccess,
+        )
+        if AuthService.shared.isAuthenticated {
+            fire(pending)
+        } else {
+            queue.append(pending)
+            AuthService.shared.signIn()
+        }
+    }
+
+    /// Land any queued corrections once the user is authenticated. Idempotent;
+    /// safe to call from any auth onChange site.
+    func flushPendingAfterSignIn() {
+        guard AuthService.shared.isAuthenticated, !queue.isEmpty else { return }
+        let pending = queue
+        queue.removeAll()
+        for item in pending { fire(item) }
+    }
+
+    /// Drop queued corrections when a sign-in attempt ends without auth
+    /// (cancel / OAuth fail) so they don't fire on an unrelated later sign-in.
+    func discardPendingIfGuest() {
+        guard !AuthService.shared.isAuthenticated else { return }
+        queue.removeAll()
+    }
+
+    private func fire(_ pending: Pending) {
+        let onSuccess = pending.onSuccess
+        Task.detached {
+            do {
+                let response = try await ScanService.submitCorrection(
+                    image: pending.image,
+                    canonicalSlug: pending.slug,
+                    language: pending.language,
+                    notes: pending.notes,
+                    predicted: pending.predicted,
+                )
+                await MainActor.run {
+                    ScanService.logCorrectionTelemetry(
+                        surface: pending.surface,
+                        toSlug: pending.slug,
+                        predicted: pending.predicted,
+                        response: response,
+                        errorMessage: nil,
+                    )
+                    if response.ok { onSuccess?() }
+                }
+            } catch {
+                let message = error.localizedDescription
+                await MainActor.run {
+                    ScanService.logCorrectionTelemetry(
+                        surface: pending.surface,
+                        toSlug: pending.slug,
+                        predicted: pending.predicted,
+                        response: nil,
+                        errorMessage: message,
+                    )
+                }
+            }
+        }
+    }
+}
