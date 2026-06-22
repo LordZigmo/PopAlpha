@@ -369,6 +369,10 @@ struct MultiScanReviewSheet: View {
                     Spacer(minLength: 0)
                     priceText(entry)
                 }
+                // Finish picker — only when the card has a real choice.
+                if entry.availablePrintings.count >= 2 {
+                    finishMenu(for: entry)
+                }
             }
 
             HStack(spacing: 6) {
@@ -405,6 +409,51 @@ struct MultiScanReviewSheet: View {
         .onTapGesture {
             detailEntryId = entry.id
         }
+    }
+
+    /// Compact per-row finish picker. The Menu intercepts its own tap, so it
+    /// doesn't trigger the row's detail-navigation gesture (same as the qty
+    /// Stepper). nil printingId = "Default" (canonical printing).
+    private func finishMenu(for entry: MultiScanEntry) -> some View {
+        let label = entry.availablePrintings
+            .first { $0.id == entry.printingId }?.pickerLabel ?? "Default"
+        return Menu {
+            Button {
+                session.updatePrinting(entryId: entry.id, printingId: nil)
+            } label: {
+                if entry.printingId == nil {
+                    Label("Default", systemImage: "checkmark")
+                } else {
+                    Text("Default")
+                }
+            }
+            ForEach(entry.availablePrintings) { printing in
+                Button {
+                    session.updatePrinting(entryId: entry.id, printingId: printing.id)
+                } label: {
+                    if entry.printingId == printing.id {
+                        Label(printing.pickerLabel, systemImage: "checkmark")
+                    } else {
+                        Text(printing.pickerLabel)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 9))
+                Text(label)
+                    .font(.system(size: 11, weight: .medium))
+                    .lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+            }
+            .foregroundStyle(entry.printingId == nil ? Color.secondary : Color.accentColor)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(Color.secondary.opacity(0.12)))
+        }
+        .buttonStyle(.plain)
     }
 
     private func setLine(for entry: MultiScanEntry) -> String {

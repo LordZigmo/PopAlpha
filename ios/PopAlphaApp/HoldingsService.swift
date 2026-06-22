@@ -37,7 +37,8 @@ actor HoldingsService {
         pricePaidUsd: Double? = nil,
         acquiredOn: String? = nil,
         venue: String? = nil,
-        certNumber: String? = nil
+        certNumber: String? = nil,
+        printingId: String? = nil
     ) async throws {
         try AuthService.shared.requireAuth()
 
@@ -50,6 +51,10 @@ actor HoldingsService {
         if let acquiredOn { body["acquired_on"] = acquiredOn }
         if let venue { body["venue"] = venue }
         if let certNumber { body["cert_number"] = certNumber }
+        // nil printingId → server stores NULL → portfolio prices off the
+        // canonical preferred printing (today's behavior). A non-nil value
+        // pins the lot to the specific finish the user picked.
+        if let printingId { body["printing_id"] = printingId }
 
         let _: SimpleOKResponse = try await APIClient.post(
             path: "/api/holdings",

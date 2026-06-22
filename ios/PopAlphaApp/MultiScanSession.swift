@@ -37,6 +37,10 @@ struct MultiScanEntry: Identifiable, Equatable {
     var quantity: Int = 1
     var grade: String = "RAW"
     var printingId: String? = nil
+    /// Finishes for this row's card, loaded async alongside price/image.
+    /// The row's finish menu only appears when there's a real choice
+    /// (count >= 2); nil printingId means "Default" (canonical printing).
+    var availablePrintings: [CardPrintingOption] = []
     /// Loaded async via CardService.fetchCardMetrics. Nil = still
     /// loading or unknown. Drives the per-row price label and the
     /// running tray total.
@@ -151,6 +155,7 @@ final class MultiScanSession: ObservableObject {
         entries.append(entry)
         loadPrice(for: entry.id, slug: match.slug)
         loadImage(for: entry.id, urlString: match.mirroredPrimaryImageUrl)
+        loadPrintings(for: entry.id, slug: match.slug)
     }
 
     func remove(at offsets: IndexSet) {
@@ -164,6 +169,13 @@ final class MultiScanSession: ObservableObject {
     func updateQuantity(entryId: UUID, qty: Int) {
         guard let idx = entries.firstIndex(where: { $0.id == entryId }) else { return }
         entries[idx].quantity = max(1, min(99, qty))
+    }
+
+    /// Pin (or clear, with nil) the finish for a row. The bulk-add
+    /// submission threads this through as `printing_id`.
+    func updatePrinting(entryId: UUID, printingId: String?) {
+        guard let idx = entries.firstIndex(where: { $0.id == entryId }) else { return }
+        entries[idx].printingId = printingId
     }
 
     /// Replace the matched card on an existing entry (per-row
@@ -182,8 +194,13 @@ final class MultiScanSession: ObservableObject {
         entries[idx].match = newMatch
         entries[idx].marketPriceUsd = nil
         entries[idx].cachedImage = nil
+        // The corrected card has its own finishes; the prior selection is
+        // meaningless for the new slug.
+        entries[idx].printingId = nil
+        entries[idx].availablePrintings = []
         loadPrice(for: entryId, slug: newMatch.slug)
         loadImage(for: entryId, urlString: newMatch.mirroredPrimaryImageUrl)
+        loadPrintings(for: entryId, slug: newMatch.slug)
     }
 
     func clear() {
@@ -213,6 +230,20 @@ final class MultiScanSession: ObservableObject {
     }
 
     // MARK: - Internal
+
+    /// Fetch this row's finishes so the tray can offer a finish menu. Same
+    /// fire-and-forget pattern as loadPrice/loadImage. fetchPrintings is
+    /// EN-only, so JP rows get an empty list (no menu) — matching
+    /// CardDetailView. The class is @MainActor, so the Task body resumes on
+    /// the main actor and can mutate `entries` directly.
+    private func loadPrintings(for entryId: UUID, slug: String) {
+        Task { [weak self] in
+            let printings = (try? await CardService.shared.fetchPrintings(slug: slug)) ?? []
+            guard let self else { return }
+            guard let idx = self.entries.firstIndex(where: { $0.id == entryId }) else { return }
+            self.entries[idx].availablePrintings = printings
+        }
+    }
 
     private func loadPrice(for entryId: UUID, slug: String) {
         Task { [weak self] in
