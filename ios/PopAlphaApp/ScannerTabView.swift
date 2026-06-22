@@ -900,6 +900,19 @@ struct ScannerTabView: View {
     private func handleIdentifyResult(_ match: ScanMatch?) {
         guard let match else { return }
 
+        // The review tray (and the correction picker nested in it) is an
+        // exclusive activity: while it's open the user is correcting/removing
+        // rows, so a late/in-flight scan result must NOT append to the tray or
+        // re-arm the camera behind the modal. Drop it and stay paused — the
+        // sheet's dismiss handler resumes scanning. This is the belt to the
+        // pauseForExternalCapture() in the showMultiScanSheet onChange: it
+        // closes the race where a frame already in flight when the sheet opened
+        // resolves a moment later and fires an append.
+        if showMultiScanSheet || correctingEntry != nil {
+            scanner.clearLastMatch()
+            return
+        }
+
         // Multi-scan mode short-circuits the single-mode routing for
         // HIGH/MEDIUM: every confident-enough scan appends to the tray
         // and the scanner re-arms immediately. LOW continues to re-arm
