@@ -74,9 +74,12 @@ jp as (
          canonical_name, card_number, slug
   from public.canonical_cards where language = 'JP' and primary_image_url is not null
 ),
-en_in as (select p.en_set_code ec, p.jp_set_code jc, e.canonical_name cn, e.card_number num, e.slug
+-- cn = the production matcher's name key (normalizePairingName = trim+lower),
+-- so this seed and the weekly cron agree on what's a unique/ambiguous name and
+-- never disagree about a pairing later.
+en_in as (select p.en_set_code ec, p.jp_set_code jc, lower(btrim(e.canonical_name)) cn, e.card_number num, e.slug
           from en e join pairs p on p.en_set_code = e.set_code),
-jp_in as (select p.en_set_code ec, p.jp_set_code jc, j.canonical_name cn, j.card_number num, j.slug
+jp_in as (select p.en_set_code ec, p.jp_set_code jc, lower(btrim(j.canonical_name)) cn, j.card_number num, j.slug
           from jp j join pairs p on p.jp_set_code = j.set_code),
 -- unique name on each side
 en_nu as (select ec, jc, cn, max(slug) slug from en_in group by ec, jc, cn having count(*) = 1),
