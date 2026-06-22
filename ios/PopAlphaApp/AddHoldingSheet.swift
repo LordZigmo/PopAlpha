@@ -271,9 +271,14 @@ struct AddHoldingSheet: View {
         selectedPrintingId = nil
         availablePrintings = []
         guard let slug = selectedCard?.canonicalSlug else { return }
-        if let printings = try? await CardService.shared.fetchPrintings(slug: slug) {
-            availablePrintings = printings
-        }
+        guard let printings = try? await CardService.shared.fetchPrintings(slug: slug) else { return }
+        // The card may have changed (or been cleared) while the fetch was in
+        // flight — .task(id:) cancels cooperatively but the network await can
+        // still resolve. Only write if this fetch is still for the selected
+        // card, else B would show A's pills and saveHolding would pair B's slug
+        // with A's printing_id.
+        guard selectedCard?.canonicalSlug == slug else { return }
+        availablePrintings = printings
     }
 
     // MARK: - Grade
