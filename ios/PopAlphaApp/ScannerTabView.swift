@@ -908,7 +908,13 @@ struct ScannerTabView: View {
         // pauseForExternalCapture() in the showMultiScanSheet onChange: it
         // closes the race where a frame already in flight when the sheet opened
         // resolves a moment later and fires an append.
-        if showMultiScanSheet || correctingEntry != nil {
+        // pendingMultiScanImport covers the guest sign-in handoff: submitting
+        // the tray sets it true and closes the sheet (so showMultiScanSheet is
+        // already false), and the sheet's onChange intentionally does NOT
+        // resume the scanner during sign-in. Without it, a frame in flight when
+        // the sheet closed could append an unreviewed row + re-arm, and the
+        // deferred bulk-import would then submit that row on auth success.
+        if showMultiScanSheet || correctingEntry != nil || pendingMultiScanImport {
             scanner.clearLastMatch()
             return
         }
