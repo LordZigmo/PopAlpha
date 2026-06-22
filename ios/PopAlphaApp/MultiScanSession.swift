@@ -175,7 +175,14 @@ final class MultiScanSession: ObservableObject {
     /// submission threads this through as `printing_id`.
     func updatePrinting(entryId: UUID, printingId: String?) {
         guard let idx = entries.firstIndex(where: { $0.id == entryId }) else { return }
+        guard entries[idx].printingId != printingId else { return }
         entries[idx].printingId = printingId
+        // Price is printing-specific (Holo vs Reverse Holo price differently),
+        // so the canonical price loaded on append is wrong for the chosen
+        // finish. Clear and reload keyed to the new printing so the row label
+        // and the tray total match the holding this row will actually create.
+        entries[idx].marketPriceUsd = nil
+        loadPrice(for: entryId, slug: entries[idx].match.slug, printingId: printingId)
     }
 
     /// Replace the matched card on an existing entry (per-row
@@ -251,9 +258,9 @@ final class MultiScanSession: ObservableObject {
         }
     }
 
-    private func loadPrice(for entryId: UUID, slug: String) {
+    private func loadPrice(for entryId: UUID, slug: String, printingId: String? = nil) {
         Task { [weak self] in
-            let metrics = try? await CardService.shared.fetchCardMetrics(slug: slug)
+            let metrics = try? await CardService.shared.fetchCardMetrics(slug: slug, printingId: printingId)
             // Mirror the CardDetailView Near-Mint hero resolver EXACTLY
             // so the scanner price (flash overlay + tray row) matches
             // the hero the user lands on after tapping in. Raw
@@ -289,6 +296,10 @@ final class MultiScanSession: ObservableObject {
                 // triggered fetch) isn't overwritten by the
                 // late-arriving old fetch.
                 guard self.entries[idx].match.slug == slug else { return }
+                // Finish-stale guard: a price fetched for a previously-selected
+                // finish must not overwrite the current one if the user switched
+                // finishes (or corrected the row) while it was in flight.
+                guard self.entries[idx].printingId == printingId else { return }
                 self.entries[idx].marketPriceUsd = price
             }
         }
