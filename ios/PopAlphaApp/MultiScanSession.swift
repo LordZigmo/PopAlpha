@@ -241,6 +241,12 @@ final class MultiScanSession: ObservableObject {
             let printings = (try? await CardService.shared.fetchPrintings(slug: slug)) ?? []
             guard let self else { return }
             guard let idx = self.entries.firstIndex(where: { $0.id == entryId }) else { return }
+            // Stale-fetch guard (mirrors loadPrice, Codex P2 on PR #101): if the
+            // row was reassigned after this request started, the entry's current
+            // match.slug diverges from the slug we fetched. Drop the result so a
+            // late old-slug fetch can't overwrite the corrected card's finishes
+            // (which the reassign-triggered fetch already loaded).
+            guard self.entries[idx].match.slug == slug else { return }
             self.entries[idx].availablePrintings = printings
         }
     }
