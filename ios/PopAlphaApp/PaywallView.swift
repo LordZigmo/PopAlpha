@@ -1079,15 +1079,27 @@ struct PaywallView: View {
     /// sign-in can't trigger a surprise purchase, and record the abandonment.
     private func onSignInForPurchaseDismissed() {
         guard pendingPurchaseAfterSignIn else { return }
-        // OAuth (Google/Apple) dismisses this sheet immediately while sign-in
-        // is still in flight — isSigningIn distinguishes that from a real
-        // cancel, so we don't drop a purchase that's about to resume.
-        if AuthService.shared.isAuthenticated || AuthService.shared.isSigningIn { return }
-        pendingPurchaseAfterSignIn = false
-        var cancelProps = paywallEventProps
-        cancelProps["product_id"] = selectedProductID
-        cancelProps["reason"] = "signin_abandoned"
-        AnalyticsService.shared.capture(.paywallPurchaseFailed, properties: cancelProps)
+        // Choosing an OAuth provider (Google/Apple) dismisses this sheet
+        // synchronously while AuthService sets `isSigningIn` inside a spawned
+        // Task — so at dismiss time BOTH isAuthenticated and isSigningIn can
+        // still be false even though OAuth is about to start. Deciding
+        // abandonment now would race that Task: we'd clear the pending intent
+        // and the later auth flip wouldn't resume the purchase. Defer a beat so
+        // the terminal state has settled, then abandon ONLY if it's a real
+        // cancel: not authed (else onChange resumed it), not mid-OAuth, and the
+        // sheet wasn't re-presented by a second Subscribe tap.
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            guard pendingPurchaseAfterSignIn,
+                  !showSignInForPurchase,
+                  !AuthService.shared.isAuthenticated,
+                  !AuthService.shared.isSigningIn else { return }
+            pendingPurchaseAfterSignIn = false
+            var cancelProps = paywallEventProps
+            cancelProps["product_id"] = selectedProductID
+            cancelProps["reason"] = "signin_abandoned"
+            AnalyticsService.shared.capture(.paywallPurchaseFailed, properties: cancelProps)
+        }
     }
 
     private func restoreTapped() async {
