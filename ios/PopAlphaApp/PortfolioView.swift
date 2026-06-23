@@ -822,6 +822,10 @@ struct HoldingsListView: View {
                     PortfolioCardGridCell(
                         position: position,
                         metadata: position.canonicalSlug.flatMap { metadata?[$0] },
+                        marketPrice: position.marketOnlyPrice(
+                            positionPrices: positionPrices,
+                            slugPrice: position.canonicalSlug.flatMap { metadata?[$0]?.marketPrice }
+                        ),
                         onTap: { onTapCard(position) }
                     )
                 }
