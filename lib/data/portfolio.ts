@@ -30,9 +30,15 @@ export function lookupHoldingPrice(
 ): number | undefined {
   const bucket = normalizeHoldingGrade(grade);
   if (printingId) {
-    const scoped = priceMap.get(`${slug}::${printingId}::${bucket}`)
-      ?? priceMap.get(`${slug}::${printingId}::RAW`);
-    if (scoped != null) return scoped;
+    // Graded tier first (printing-specific → canonical), THEN raw tier
+    // (printing-specific → canonical). A graded slab must never fall back to a
+    // raw price while ANY graded price exists — a PSA 10 Reverse Holo tracks
+    // the canonical PSA 10 far better than the card's raw price. For a RAW
+    // holding the bucket IS RAW, so this collapses to printing-RAW → canonical-RAW.
+    return priceMap.get(`${slug}::${printingId}::${bucket}`)
+      ?? priceMap.get(`${slug}::${bucket}`)
+      ?? priceMap.get(`${slug}::${printingId}::RAW`)
+      ?? priceMap.get(`${slug}::RAW`);
   }
   return priceMap.get(`${slug}::${bucket}`) ?? priceMap.get(`${slug}::RAW`);
 }
