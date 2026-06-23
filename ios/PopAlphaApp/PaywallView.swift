@@ -288,6 +288,17 @@ struct PaywallView: View {
             let isTrialOffer = showsTrialCopy(forProductID: selectedProductID)
             Task { await performPurchase(product: product, isTrialOffer: isTrialOffer) }
         }
+        .onChange(of: AuthService.shared.isSigningIn) { wasSigningIn, isSigningInNow in
+            // The sign-in attempt finished (true→false). If it settled signed-
+            // out — OAuth/Apple cancelled or failed — clear the pending intent
+            // here, the moment it's known, rather than leaving it dangling for
+            // the next auth transition to pick up. The shared guard skips the
+            // success case (isAuthenticated already flipped) and mid-email-retry
+            // (sheet still open). Pairs with the dismiss-time check, which
+            // covers a chooser cancel where isSigningIn never went true.
+            guard wasSigningIn, !isSigningInNow else { return }
+            abandonPendingPurchaseIfSettledSignedOut()
+        }
     }
 
     /// Common properties carried on every paywall_* PostHog event.
@@ -1082,24 +1093,33 @@ struct PaywallView: View {
         // Choosing an OAuth provider (Google/Apple) dismisses this sheet
         // synchronously while AuthService sets `isSigningIn` inside a spawned
         // Task — so at dismiss time BOTH isAuthenticated and isSigningIn can
-        // still be false even though OAuth is about to start. Deciding
-        // abandonment now would race that Task: we'd clear the pending intent
-        // and the later auth flip wouldn't resume the purchase. Defer a beat so
-        // the terminal state has settled, then abandon ONLY if it's a real
-        // cancel: not authed (else onChange resumed it), not mid-OAuth, and the
-        // sheet wasn't re-presented by a second Subscribe tap.
+        // still be false even though OAuth is about to start. Deciding now
+        // would race that Task. Defer a beat so the state has settled; this
+        // covers the chooser-cancel path (isSigningIn never went true). The OAuth
+        // cancel/fail path settles later and is caught by the isSigningIn observer.
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 700_000_000)
-            guard pendingPurchaseAfterSignIn,
-                  !showSignInForPurchase,
-                  !AuthService.shared.isAuthenticated,
-                  !AuthService.shared.isSigningIn else { return }
-            pendingPurchaseAfterSignIn = false
-            var cancelProps = paywallEventProps
-            cancelProps["product_id"] = selectedProductID
-            cancelProps["reason"] = "signin_abandoned"
-            AnalyticsService.shared.capture(.paywallPurchaseFailed, properties: cancelProps)
+            abandonPendingPurchaseIfSettledSignedOut()
         }
+    }
+
+    /// Drop a pending purchase intent (and record the abandonment) once the
+    /// sign-in attempt has definitively ended signed-out. Safe to call from
+    /// multiple settle points — the dismiss-time deferral and the isSigningIn
+    /// observer — because the guards make it idempotent: whichever fires first
+    /// clears `pendingPurchaseAfterSignIn`, the other no-ops. Skips the success
+    /// case (auth already flipped → onChange resumed the purchase), an in-flight
+    /// OAuth attempt, and a sheet re-presented by a second Subscribe tap.
+    private func abandonPendingPurchaseIfSettledSignedOut() {
+        guard pendingPurchaseAfterSignIn,
+              !showSignInForPurchase,
+              !AuthService.shared.isAuthenticated,
+              !AuthService.shared.isSigningIn else { return }
+        pendingPurchaseAfterSignIn = false
+        var cancelProps = paywallEventProps
+        cancelProps["product_id"] = selectedProductID
+        cancelProps["reason"] = "signin_abandoned"
+        AnalyticsService.shared.capture(.paywallPurchaseFailed, properties: cancelProps)
     }
 
     private func restoreTapped() async {
