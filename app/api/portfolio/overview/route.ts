@@ -316,11 +316,36 @@ export async function GET(req: Request) {
     // sparkline backfills graded holdings' historical curve with their
     // slug's RAW price (price_history is RAW-only); a known approximation
     // for graded holders, bounded by Phase 4's eventual graded analytics.
-    const sparkline = computeSparkline(
-      (historyResult.data ?? []) as PriceHistoryRow[],
-      holdings,
-      slugRawPriceMap,
-    );
+    let historyRows = (historyResult.data ?? []) as PriceHistoryRow[];
+
+    // Fallback: on a fresh/preview DB (or right after the migration, before the
+    // backfill/cron populates the rollup) canonical_price_daily is empty, which
+    // would blank the chart even though the old view still has 30 days of data.
+    // Only fall back when the rollup is GLOBALLY empty (a cheap probe) — so a
+    // steady-state user whose own holdings simply have no price history doesn't
+    // pay the slow view scan. Once the rollup is populated this never fires.
+    if (historyRows.length === 0) {
+      const { data: probe } = await pub
+        .from("public_canonical_price_daily")
+        .select("canonical_slug")
+        .limit(1);
+      if (!probe || probe.length === 0) {
+        const { data: viewRows } = await pub
+          .from("public_price_history_canonical")
+          .select("canonical_slug, ts, price")
+          .in("canonical_slug", slugs)
+          .not("variant_ref", "ilike", "%::GRADED::%")
+          .eq("source_window", "snapshot")
+          .eq("currency", "USD")
+          .gte("ts", thirtyDaysAgo)
+          .order("ts", { ascending: true })
+          .limit(2000);
+        historyRows = ((viewRows ?? []) as Array<{ canonical_slug: string; ts: string; price: number }>)
+          .map((r) => ({ canonical_slug: r.canonical_slug, day: r.ts.slice(0, 10), price: r.price }));
+      }
+    }
+
+    const sparkline = computeSparkline(historyRows, holdings, slugRawPriceMap);
 
     // 4. Compute summary
     let totalValue = 0;
