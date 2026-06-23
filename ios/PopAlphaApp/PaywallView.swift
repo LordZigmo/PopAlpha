@@ -101,15 +101,23 @@ struct PaywallView: View {
     // MARK: - Sign-in gate
     //
     // Apple subscriptions must attach to a PopAlpha account: /api/iap/verify
-    // requires an authenticated user, so a guest purchase 401s and is never
-    // recorded server-side (the user ends up Pro on-device but invisible to
-    // hasPro() checks). We therefore require sign-in BEFORE handing off to
-    // StoreKit. `pendingPurchaseAfterSignIn` remembers the user was mid-
-    // subscribe so the purchase auto-resumes the instant auth lands (see the
-    // isAuthenticated onChange) — the gate feels like one continuous flow
-    // rather than "sign in, then tap Subscribe again."
-    @State private var showSignInForPurchase = false
-    @State private var pendingPurchaseAfterSignIn = false
+    // requires an authenticated user, so a guest purchase OR restore 401s and
+    // is never recorded server-side (the user ends up Pro on-device but
+    // invisible to hasPro() checks). We therefore require sign-in BEFORE
+    // handing off to StoreKit for BOTH paths. `pendingSignInAction` remembers
+    // which action the user was mid-flow on so it auto-resumes the instant auth
+    // lands (see the isAuthenticated onChange) — the gate feels like one
+    // continuous flow rather than "sign in, then tap again."
+    @State private var showSignInGate = false
+    @State private var pendingSignInAction: PendingSignInAction? = nil
+
+    /// The StoreKit handoff a signed-out user initiated, deferred until sign-in
+    /// completes. `.purchase` captures the tapped product so a later selection
+    /// change can't redirect the resumed buy.
+    private enum PendingSignInAction: Equatable {
+        case purchase(productID: String)
+        case restore
+    }
 
     // MARK: - Trial offer state machine
     //
@@ -270,23 +278,28 @@ struct PaywallView: View {
             guard !didCompletePurchase else { return }
             AnalyticsService.shared.capture(.paywallDismissed, properties: paywallEventProps)
         }
-        // Sign-in required before purchase (guest-purchase gate). Presented
+        // Sign-in required before purchase/restore (guest gate). Presented
         // locally — NOT via AuthService.signIn()'s global sheet — so it stacks
         // ABOVE the paywall instead of appearing behind it.
-        .sheet(isPresented: $showSignInForPurchase, onDismiss: onSignInForPurchaseDismissed) {
+        .sheet(isPresented: $showSignInGate, onDismiss: onSignInGateDismissed) {
             SignInSheet(startingPhase: .chooser)
         }
         .onChange(of: AuthService.shared.isAuthenticated) { _, isAuthedNow in
-            // Auth landed while a purchase was waiting on it → resume the exact
-            // purchase the user tapped. Guarded by the pending flag so an
+            // Auth landed while a StoreKit action was waiting on it → resume the
+            // exact action the user tapped. Guarded by the pending action so an
             // unrelated sign-in (e.g. a cold-launch session restore) can never
-            // trigger a surprise StoreKit sheet.
-            guard isAuthedNow, pendingPurchaseAfterSignIn else { return }
-            pendingPurchaseAfterSignIn = false
-            showSignInForPurchase = false
-            guard let product = store.products[selectedProductID] else { return }
-            let isTrialOffer = showsTrialCopy(forProductID: selectedProductID)
-            Task { await performPurchase(product: product, isTrialOffer: isTrialOffer) }
+            // trigger a surprise purchase/restore.
+            guard isAuthedNow, let action = pendingSignInAction else { return }
+            pendingSignInAction = nil
+            showSignInGate = false
+            switch action {
+            case .purchase(let productID):
+                guard let product = store.products[productID] else { return }
+                let isTrialOffer = showsTrialCopy(forProductID: productID)
+                Task { await performPurchase(product: product, isTrialOffer: isTrialOffer) }
+            case .restore:
+                Task { await performRestore() }
+            }
         }
         .onChange(of: AuthService.shared.isSigningIn) { wasSigningIn, isSigningInNow in
             // The sign-in attempt finished (true→false). If it settled signed-
@@ -297,7 +310,7 @@ struct PaywallView: View {
             // (sheet still open). Pairs with the dismiss-time check, which
             // covers a chooser cancel where isSigningIn never went true.
             guard wasSigningIn, !isSigningInNow else { return }
-            abandonPendingPurchaseIfSettledSignedOut()
+            abandonPendingSignInActionIfSettledSignedOut()
         }
     }
 
@@ -1010,9 +1023,10 @@ struct PaywallView: View {
         guard AuthService.shared.isAuthenticated else {
             var gateProps = paywallEventProps
             gateProps["product_id"] = selectedProductID
+            gateProps["intent"] = "purchase"
             AnalyticsService.shared.capture(.paywallSignInRequired, properties: gateProps)
-            pendingPurchaseAfterSignIn = true
-            showSignInForPurchase = true
+            pendingSignInAction = .purchase(productID: selectedProductID)
+            showSignInGate = true
             return
         }
 
@@ -1085,11 +1099,11 @@ struct PaywallView: View {
     }
 
     /// Sign-in sheet closed. If the user authenticated, the isAuthenticated
-    /// onChange already resumed the purchase. If they backed out (still not
-    /// authed and not mid-OAuth), drop the pending intent so a later unrelated
-    /// sign-in can't trigger a surprise purchase, and record the abandonment.
-    private func onSignInForPurchaseDismissed() {
-        guard pendingPurchaseAfterSignIn else { return }
+    /// onChange already resumed the action. If they backed out (still not
+    /// authed and not mid-OAuth), drop the pending action so a later unrelated
+    /// sign-in can't trigger a surprise purchase/restore, and record it.
+    private func onSignInGateDismissed() {
+        guard pendingSignInAction != nil else { return }
         // Choosing an OAuth provider (Google/Apple) dismisses this sheet
         // synchronously while AuthService sets `isSigningIn` inside a spawned
         // Task — so at dismiss time BOTH isAuthenticated and isSigningIn can
@@ -1099,30 +1113,54 @@ struct PaywallView: View {
         // cancel/fail path settles later and is caught by the isSigningIn observer.
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 700_000_000)
-            abandonPendingPurchaseIfSettledSignedOut()
+            abandonPendingSignInActionIfSettledSignedOut()
         }
     }
 
-    /// Drop a pending purchase intent (and record the abandonment) once the
-    /// sign-in attempt has definitively ended signed-out. Safe to call from
-    /// multiple settle points — the dismiss-time deferral and the isSigningIn
-    /// observer — because the guards make it idempotent: whichever fires first
-    /// clears `pendingPurchaseAfterSignIn`, the other no-ops. Skips the success
-    /// case (auth already flipped → onChange resumed the purchase), an in-flight
-    /// OAuth attempt, and a sheet re-presented by a second Subscribe tap.
-    private func abandonPendingPurchaseIfSettledSignedOut() {
-        guard pendingPurchaseAfterSignIn,
-              !showSignInForPurchase,
+    /// Drop a pending sign-in action once the attempt has definitively ended
+    /// signed-out. Safe to call from multiple settle points — the dismiss-time
+    /// deferral and the isSigningIn observer — because the guards make it
+    /// idempotent: whichever fires first clears `pendingSignInAction`, the other
+    /// no-ops. Skips the success case (auth already flipped → onChange resumed
+    /// it), an in-flight OAuth attempt, and a sheet re-presented by a second tap.
+    private func abandonPendingSignInActionIfSettledSignedOut() {
+        guard let action = pendingSignInAction,
+              !showSignInGate,
               !AuthService.shared.isAuthenticated,
               !AuthService.shared.isSigningIn else { return }
-        pendingPurchaseAfterSignIn = false
-        var cancelProps = paywallEventProps
-        cancelProps["product_id"] = selectedProductID
-        cancelProps["reason"] = "signin_abandoned"
-        AnalyticsService.shared.capture(.paywallPurchaseFailed, properties: cancelProps)
+        pendingSignInAction = nil
+        // Only the purchase funnel cares about gate abandonment; a restore that
+        // never completes isn't a lost sale, so don't pollute the failure metric.
+        if case .purchase(let productID) = action {
+            var cancelProps = paywallEventProps
+            cancelProps["product_id"] = productID
+            cancelProps["reason"] = "signin_abandoned"
+            AnalyticsService.shared.capture(.paywallPurchaseFailed, properties: cancelProps)
+        }
     }
 
     private func restoreTapped() async {
+        errorMessage = nil
+        pendingMessage = nil
+        // Same guest gap as Subscribe: a signed-out restore flips gate.isPro
+        // locally and dismisses as success while /api/iap/verify 401s, leaving
+        // the entitlement unattached server-side. Require sign-in first; the
+        // restore resumes automatically once auth lands (isAuthenticated onChange).
+        guard AuthService.shared.isAuthenticated else {
+            var gateProps = paywallEventProps
+            gateProps["intent"] = "restore"
+            AnalyticsService.shared.capture(.paywallSignInRequired, properties: gateProps)
+            pendingSignInAction = .restore
+            showSignInGate = true
+            return
+        }
+        await performRestore()
+    }
+
+    /// Runs the StoreKit restore + post-restore analytics. Split out of
+    /// `restoreTapped` so the sign-in gate can re-enter it directly once auth
+    /// lands.
+    private func performRestore() async {
         errorMessage = nil
         pendingMessage = nil
         await store.restorePurchases()
