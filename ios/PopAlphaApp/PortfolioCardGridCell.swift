@@ -8,6 +8,9 @@ import NukeUI
 struct PortfolioCardGridCell: View {
     let position: Position
     var metadata: APICardMetadata? = nil
+    /// Per-copy market price resolved by the parent (finish+grade specific when
+    /// available, else slug-level canonical). Falls back to `metadata` when nil.
+    var marketPrice: Double? = nil
     var onTap: (() -> Void)? = nil
 
     private var displayName: String {
@@ -15,7 +18,7 @@ struct PortfolioCardGridCell: View {
     }
 
     private var marketValue: Double? {
-        guard let price = metadata?.marketPrice else { return nil }
+        guard let price = marketPrice ?? metadata?.marketPrice else { return nil }
         return price * Double(position.totalQty)
     }
 

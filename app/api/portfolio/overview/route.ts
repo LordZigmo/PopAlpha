@@ -333,6 +333,21 @@ export async function GET(req: Request) {
       totalCostBasis += h.price_paid_usd * qty;
     }
 
+    // Per-position prices so the iOS "Your Cards" list values, sorts, and
+    // badges each position by its own finish+grade price instead of the
+    // slug-level canonical price in card_metadata (which would disagree with
+    // the printing-aware total above, and already showed RAW for graded). Keyed
+    // `${slug}::${printing_id ?? ""}::${grade}` — the holding's raw grade string,
+    // not the bucket — so the client builds the key from data it already has and
+    // the server owns the bucket normalization inside lookupHoldingPrice.
+    const positionPrices: Record<string, number> = {};
+    for (const h of holdings) {
+      const key = `${h.canonical_slug}::${h.printing_id ?? ""}::${h.grade}`;
+      if (key in positionPrices) continue;
+      const price = lookupHoldingPrice(priceMap, h.canonical_slug, h.grade, h.printing_id);
+      if (price != null) positionPrices[key] = price;
+    }
+
     const pnlAmount = totalValue - totalCostBasis;
     const pnlPct = totalCostBasis > 0 ? Math.round((pnlAmount / totalCostBasis) * 1000) / 10 : null;
 
@@ -354,6 +369,7 @@ export async function GET(req: Request) {
         summary,
         sparkline,
         card_metadata: cardMetadata,
+        position_prices: positionPrices,
         top_holdings: computeTopHoldings(holdings, cardMap, priceMap, changeMap, imageMap),
       });
     }
@@ -384,6 +400,7 @@ export async function GET(req: Request) {
       summary,
       sparkline,
       card_metadata: cardMetadata,
+      position_prices: positionPrices,
       identity,
       composition,
       top_holdings: topHoldings,
