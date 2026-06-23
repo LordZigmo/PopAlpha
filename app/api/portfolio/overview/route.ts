@@ -256,7 +256,10 @@ export async function GET(req: Request) {
       holdings.map((h) => h.printing_id).filter(Boolean) as string[],
     )];
     if (printingPriceIds.length > 0) {
-      const printingBuckets = new Set<GradeBucket>();
+      // Always include RAW: lookupHoldingPrice falls a graded finish-pinned
+      // holding back to the printing's RAW price (tier 3) before canonical RAW,
+      // so the printing's RAW row must be fetched even when no RAW lot is held.
+      const printingBuckets = new Set<GradeBucket>(["RAW"]);
       for (const h of holdings) {
         if (h.printing_id) printingBuckets.add(normalizeHoldingGrade(h.grade));
       }
