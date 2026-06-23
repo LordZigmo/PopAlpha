@@ -63,9 +63,12 @@ type ImageRow = {
   mirrored_thumb_url: string | null;
 };
 
+// Rows from public_canonical_price_daily (one RAW snapshot per slug per day).
+// `day` is a 'YYYY-MM-DD' string; computeSparkline buckets by day, so it maps
+// straight onto the `ts` field it expects.
 type PriceHistoryRow = {
   canonical_slug: string;
-  ts: string;
+  day: string;
   price: number;
 };
 
@@ -115,14 +118,18 @@ export async function GET(req: Request) {
         .eq("language", "EN")
         .not("image_url", "is", null)
         .limit(slugs.length * 3),
-      pub.from("public_price_history_canonical")
-        .select("canonical_slug, ts, price")
+      // Sparkline source: pre-rolled one-RAW-snapshot-per-day table (via its
+      // anon-readable view) keyed (canonical_slug, day). Replaces the ~14s cold
+      // scan of public_price_history_canonical (per-row
+      // preferred_canonical_raw_printing + regex + uuid-cast over all-time
+      // history); this is a bounded index range scan. The RAW/printing/currency
+      // filters are baked into refresh_canonical_price_daily, so they're gone
+      // from here.
+      pub.from("public_canonical_price_daily")
+        .select("canonical_slug, day, price")
         .in("canonical_slug", slugs)
-        .not("variant_ref", "ilike", "%::GRADED::%")
-        .eq("source_window", "snapshot")
-        .eq("currency", "USD")
-        .gte("ts", thirtyDaysAgo)
-        .order("ts", { ascending: true })
+        .gte("day", thirtyDaysAgo.slice(0, 10))
+        .order("day", { ascending: true })
         .limit(2000),
       printingIds.length > 0
         ? pub.from("card_printings")
@@ -142,7 +149,7 @@ export async function GET(req: Request) {
     const batchErrors: Array<[string, { error: { message: string } | null }]> = [
       ["canonical_cards", cardsResult],
       ["card_printings(images)", imagesResult],
-      ["public_price_history_canonical(sparkline)", historyResult],
+      ["canonical_price_daily(sparkline)", historyResult],
       ["card_printings(meta)", printingMetaResult],
     ];
     for (const [label, result] of batchErrors) {
@@ -428,10 +435,12 @@ function computeSparkline(
 ): number[] {
   if (history.length === 0) return [];
 
-  // Bucket prices by day, keeping the latest price per slug per day.
+  // Bucket prices by day, keeping the latest price per slug per day. The rollup
+  // already yields one row per slug per day, so this bucket is a pass-through
+  // (the per-day dedup happened in refresh_canonical_price_daily).
   const dayBuckets = new Map<string, Map<string, number>>();
   for (const row of history) {
-    const day = row.ts.slice(0, 10);
+    const day = row.day;
     if (!dayBuckets.has(day)) dayBuckets.set(day, new Map());
     dayBuckets.get(day)!.set(row.canonical_slug, row.price);
   }
