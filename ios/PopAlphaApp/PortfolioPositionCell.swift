@@ -6,6 +6,10 @@ import NukeUI
 struct PortfolioPositionCell: View {
     let position: Position
     var metadata: APICardMetadata? = nil
+    /// Per-copy market price resolved by the parent (finish+grade specific when
+    /// available, else slug-level canonical). When nil, falls back to
+    /// `metadata?.marketPrice` so callers that don't pass it keep working.
+    var marketPrice: Double? = nil
     /// Optional accolade — "Largest holding", "Best performer", etc.
     /// Computed at the parent level by ranking all positions, then
     /// surfaced inline next to the grade so users see *why* a card
@@ -61,7 +65,7 @@ struct PortfolioPositionCell: View {
     }
 
     private var marketValue: Double? {
-        guard let price = metadata?.marketPrice else { return nil }
+        guard let price = marketPrice ?? metadata?.marketPrice else { return nil }
         return price * Double(position.totalQty)
     }
 

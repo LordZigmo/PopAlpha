@@ -166,6 +166,11 @@ struct PortfolioOverviewResponse: Decodable {
     let summary: APISummary?
     let sparkline: [Double]?
     let cardMetadata: [String: APICardMetadata]?
+    /// Per-position market price keyed by `${slug}::${printingId ?? ""}::${grade}`
+    /// so a finish-pinned (or graded) position is valued at its own price rather
+    /// than the slug-level canonical price in `cardMetadata`. Looked up via
+    /// `Position.marketOnlyPrice`.
+    let positionPrices: [String: Double]?
     let identity: APIIdentity?
     let composition: APIComposition?
     let topHoldings: [APITopHolding]?

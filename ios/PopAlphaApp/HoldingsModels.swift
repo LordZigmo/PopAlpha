@@ -191,6 +191,24 @@ struct Position: Identifiable, Hashable {
         knownCostQty > 0 ? costBasis / Double(knownCostQty) : 0
     }
 
+    /// Key into the overview's `positionPrices` map. Mirrors the server's
+    /// `${slug}::${printing_id ?? ""}::${grade}`. All lots in a position share
+    /// one (printingId ?? slug, grade) bucket, so lots.first is representative.
+    var positionPriceKey: String? {
+        guard let slug = canonicalSlug else { return nil }
+        return "\(slug)::\(lots.first?.printingId ?? "")::\(grade)"
+    }
+
+    /// Per-copy MARKET price for this position: the finish+grade-specific
+    /// server price when available, else the slug-level canonical price.
+    /// Returns nil when neither exists (callers either fall back to avgCost
+    /// for ranking, or render cost basis instead) — deliberately no cost
+    /// fallback so a card with no market signal still reads as "no price".
+    func marketOnlyPrice(positionPrices: [String: Double]?, slugPrice: Double?) -> Double? {
+        if let key = positionPriceKey, let p = positionPrices?[key] { return p }
+        return slugPrice
+    }
+
     var formattedAvgCost: String {
         allCostsUnknown ? "—" : "$\(String(format: "%.2f", avgCost))"
     }

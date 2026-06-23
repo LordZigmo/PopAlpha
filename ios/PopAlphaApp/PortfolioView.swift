@@ -82,7 +82,7 @@ struct PortfolioView: View {
         struct Scored { let id: String; let value: Double; let changePct: Double }
         let scored: [Scored] = positions.map { p in
             let meta = p.canonicalSlug.flatMap { overview?.cardMetadata?[$0] }
-            let price = meta?.marketPrice ?? p.avgCost
+            let price = p.marketOnlyPrice(positionPrices: overview?.positionPrices, slugPrice: meta?.marketPrice) ?? p.avgCost
             return Scored(
                 id: p.id,
                 value: price * Double(p.totalQty),
@@ -234,6 +234,7 @@ struct PortfolioView: View {
                 HoldingsListView(
                     positions: positions,
                     metadata: overview?.cardMetadata,
+                    positionPrices: overview?.positionPrices,
                     descriptors: positionDescriptors,
                     onTapCard: { position in selectedCard = cardFor(position: position) },
                     onEditLot: { lot in editingLot = lot },
@@ -253,7 +254,8 @@ struct PortfolioView: View {
     }
 
     private func positionValue(_ p: Position) -> Double {
-        let price = p.canonicalSlug.flatMap { overview?.cardMetadata?[$0]?.marketPrice } ?? p.avgCost
+        let slugPrice = p.canonicalSlug.flatMap { overview?.cardMetadata?[$0]?.marketPrice }
+        let price = p.marketOnlyPrice(positionPrices: overview?.positionPrices, slugPrice: slugPrice) ?? p.avgCost
         return price * Double(p.totalQty)
     }
 
@@ -288,6 +290,10 @@ struct PortfolioView: View {
                     PortfolioPositionCell(
                         position: position,
                         metadata: position.canonicalSlug.flatMap { overview?.cardMetadata?[$0] },
+                        marketPrice: position.marketOnlyPrice(
+                            positionPrices: overview?.positionPrices,
+                            slugPrice: position.canonicalSlug.flatMap { overview?.cardMetadata?[$0]?.marketPrice }
+                        ),
                         descriptor: descriptors[position.id],
                         onTap: { selectedCard = cardFor(position: position) },
                         onLotTap: { lot in editingLot = lot }
@@ -657,6 +663,7 @@ struct PortfolioView: View {
 struct HoldingsListView: View {
     let positions: [Position]
     let metadata: [String: APICardMetadata]?
+    let positionPrices: [String: Double]?
     let descriptors: [String: String]
     let onTapCard: (Position) -> Void
     let onEditLot: (HoldingRow) -> Void
@@ -672,6 +679,7 @@ struct HoldingsListView: View {
     init(
         positions: [Position],
         metadata: [String: APICardMetadata]?,
+        positionPrices: [String: Double]?,
         descriptors: [String: String],
         onTapCard: @escaping (Position) -> Void,
         onEditLot: @escaping (HoldingRow) -> Void,
@@ -679,6 +687,7 @@ struct HoldingsListView: View {
     ) {
         self.positions = positions
         self.metadata = metadata
+        self.positionPrices = positionPrices
         self.descriptors = descriptors
         self.onTapCard = onTapCard
         self.onEditLot = onEditLot
@@ -687,7 +696,8 @@ struct HoldingsListView: View {
     }
 
     private func value(_ p: Position) -> Double {
-        let price = p.canonicalSlug.flatMap { metadata?[$0]?.marketPrice } ?? p.avgCost
+        let slugPrice = p.canonicalSlug.flatMap { metadata?[$0]?.marketPrice }
+        let price = p.marketOnlyPrice(positionPrices: positionPrices, slugPrice: slugPrice) ?? p.avgCost
         return price * Double(p.totalQty)
     }
 
@@ -745,6 +755,10 @@ struct HoldingsListView: View {
             PortfolioPositionCell(
                 position: position,
                 metadata: position.canonicalSlug.flatMap { metadata?[$0] },
+                marketPrice: position.marketOnlyPrice(
+                    positionPrices: positionPrices,
+                    slugPrice: position.canonicalSlug.flatMap { metadata?[$0]?.marketPrice }
+                ),
                 descriptor: descriptors[position.id],
                 onTap: { onTapCard(position) },
                 onLotTap: { onEditLot($0) }
