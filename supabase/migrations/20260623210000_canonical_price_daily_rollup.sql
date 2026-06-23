@@ -78,54 +78,70 @@ set statement_timeout = 0
 set lock_timeout = 0
 as $$
 declare
-  v_cutoff timestamptz := now() - make_interval(days => greatest(p_days, 1));
+  -- Day-aligned window (full days) so the source scan, the stale-row delete,
+  -- and the route's day-based read all agree on the same day boundaries.
+  v_cutoff_day date := current_date - greatest(p_days, 1);
   v_upserted int := 0;
+  v_deleted int := 0;
 begin
-  with src as (
-    select distinct on (ph.canonical_slug, date_trunc('day', ph.ts))
-      ph.canonical_slug,
-      date_trunc('day', ph.ts)::date as day,
-      ph.price,
-      ph.ts,
-      ph.variant_ref,
-      ph.printing_id
-    from public.price_history_points ph
-    where ph.ts >= v_cutoff                          -- HARD ts bound: index-scannable, the whole point
-      and ph.provider in ('SCRYDEX', 'POKEMON_TCG_API')
-      and ph.source_window = 'snapshot'
-      and ph.currency = 'USD'
-      and ph.price > 0
-      and ph.printing_id is not null
-      and ph.variant_ref like '%::RAW'
-      and ph.variant_ref not ilike '%::GRADED::%'
-      and split_part(ph.variant_ref, '::', 1) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-      and split_part(ph.variant_ref, '::', 1)::uuid = ph.printing_id
-      and ph.printing_id = public.preferred_canonical_raw_printing(ph.canonical_slug)
-      and (p_canonical_slugs is null or ph.canonical_slug = any(p_canonical_slugs))
-    order by
-      ph.canonical_slug,
-      date_trunc('day', ph.ts),
-      abs(extract(epoch from (ph.created_at - ph.ts))) asc,   -- original same-day capture beats later backfill
-      ph.ts desc                                              -- tie -> latest ts of the day
-  ),
-  upsert as (
-    insert into public.canonical_price_daily
-      (canonical_slug, day, price, ts, variant_ref, printing_id, refreshed_at)
-    select s.canonical_slug, s.day, s.price, s.ts, s.variant_ref, s.printing_id, now()
-    from src s
-    on conflict (canonical_slug, day) do update set
-      price        = excluded.price,
-      ts           = excluded.ts,
-      variant_ref  = excluded.variant_ref,
-      printing_id  = excluded.printing_id,
-      refreshed_at = excluded.refreshed_at
-    where public.canonical_price_daily.price       is distinct from excluded.price
-       or public.canonical_price_daily.ts          is distinct from excluded.ts
-       or public.canonical_price_daily.variant_ref is distinct from excluded.variant_ref
-       or public.canonical_price_daily.printing_id is distinct from excluded.printing_id
-    returning 1
-  )
-  select count(*) into v_upserted from upsert;
+  -- Materialize the authoritative set for the refreshed window ONCE, so the
+  -- stale-row delete and the upsert agree and price_history_points is scanned a
+  -- single time. ON COMMIT DROP — the RPC runs in its own transaction.
+  create temp table _cpd_src on commit drop as
+  select distinct on (ph.canonical_slug, date_trunc('day', ph.ts))
+    ph.canonical_slug,
+    date_trunc('day', ph.ts)::date as day,
+    ph.price,
+    ph.ts,
+    ph.variant_ref,
+    ph.printing_id
+  from public.price_history_points ph
+  where ph.ts >= v_cutoff_day::timestamptz         -- HARD ts bound: index-scannable, the whole point
+    and ph.provider in ('SCRYDEX', 'POKEMON_TCG_API')
+    and ph.source_window = 'snapshot'
+    and ph.currency = 'USD'
+    and ph.price > 0
+    and ph.printing_id is not null
+    and ph.variant_ref like '%::RAW'
+    and ph.variant_ref not ilike '%::GRADED::%'
+    and split_part(ph.variant_ref, '::', 1) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+    and split_part(ph.variant_ref, '::', 1)::uuid = ph.printing_id
+    and ph.printing_id = public.preferred_canonical_raw_printing(ph.canonical_slug)
+    and (p_canonical_slugs is null or ph.canonical_slug = any(p_canonical_slugs))
+  order by
+    ph.canonical_slug,
+    date_trunc('day', ph.ts),
+    abs(extract(epoch from (ph.created_at - ph.ts))) asc,   -- original same-day capture beats later backfill
+    ph.ts desc;                                             -- tie -> latest ts of the day
+
+  -- Drop rollup rows in the refreshed scope that no longer qualify in source
+  -- (preferred_canonical_raw_printing() changed, or a bad price_history_points
+  -- row was removed). Without this they'd serve an obsolete price/printing until
+  -- the 40-day retention prune, diverging from the view this mirrors.
+  delete from public.canonical_price_daily cpd
+  where cpd.day >= v_cutoff_day
+    and (p_canonical_slugs is null or cpd.canonical_slug = any(p_canonical_slugs))
+    and not exists (
+      select 1 from _cpd_src s
+      where s.canonical_slug = cpd.canonical_slug and s.day = cpd.day
+    );
+  get diagnostics v_deleted = row_count;
+
+  insert into public.canonical_price_daily
+    (canonical_slug, day, price, ts, variant_ref, printing_id, refreshed_at)
+  select s.canonical_slug, s.day, s.price, s.ts, s.variant_ref, s.printing_id, now()
+  from _cpd_src s
+  on conflict (canonical_slug, day) do update set
+    price        = excluded.price,
+    ts           = excluded.ts,
+    variant_ref  = excluded.variant_ref,
+    printing_id  = excluded.printing_id,
+    refreshed_at = excluded.refreshed_at
+  where public.canonical_price_daily.price       is distinct from excluded.price
+     or public.canonical_price_daily.ts          is distinct from excluded.ts
+     or public.canonical_price_daily.variant_ref is distinct from excluded.variant_ref
+     or public.canonical_price_daily.printing_id is distinct from excluded.printing_id;
+  get diagnostics v_upserted = row_count;
 
   -- Retention: keep ~40 days (the route reads 30 + downsample headroom). Only on
   -- a full refresh — a targeted single-slug refresh shouldn't trigger a global
@@ -134,7 +150,7 @@ begin
     delete from public.canonical_price_daily where day < (current_date - 40);
   end if;
 
-  return jsonb_build_object('ok', true, 'upserted', v_upserted, 'days', p_days);
+  return jsonb_build_object('ok', true, 'upserted', v_upserted, 'deleted', v_deleted, 'days', p_days);
 end;
 $$;
 
