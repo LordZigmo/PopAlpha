@@ -35,10 +35,13 @@ struct SearchResultCell: View {
 
             // Card info
             VStack(alignment: .leading, spacing: 4) {
-                Text(card.canonicalName)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(PA.Colors.text)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(card.canonicalName)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(PA.Colors.text)
+                        .lineLimit(1)
+                    CardLanguagePill(isJapanese: card.isJapanese)
+                }
 
                 HStack(spacing: 6) {
                     if let setName = card.setName {
@@ -113,10 +116,13 @@ struct SearchSuggestionCell: View {
             }
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(card.canonicalName)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(PA.Colors.text)
-                    .lineLimit(1)
+                HStack(spacing: 5) {
+                    Text(card.canonicalName)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(PA.Colors.text)
+                        .lineLimit(1)
+                    CardLanguagePill(isJapanese: card.isJapanese)
+                }
 
                 HStack(spacing: 4) {
                     if let setName = card.setName {
@@ -144,5 +150,27 @@ struct SearchSuggestionCell: View {
         RoundedRectangle(cornerRadius: 4, style: .continuous)
             .fill(PA.Colors.surfaceSoft)
             .frame(width: 32, height: 45)
+    }
+}
+
+// MARK: - Language Pill
+
+/// Small EN/JP badge on search results so a JP printing isn't tapped by
+/// mistake. Blue = English, red = Japanese. Text + color (not color alone) so
+/// it's unambiguous for colorblind users.
+struct CardLanguagePill: View {
+    let isJapanese: Bool
+
+    var body: some View {
+        Text(isJapanese ? "JP" : "EN")
+            .font(.system(size: 10, weight: .heavy))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(
+                Capsule().fill(isJapanese ? Color.red : Color.blue)
+            )
+            .fixedSize()
+            .accessibilityLabel(isJapanese ? "Japanese card" : "English card")
     }
 }
