@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { requireUser } from "@/lib/auth/require";
 import { ensureAppUser } from "@/lib/data/app-user";
 import { verifyAndDecodeTransaction, VerificationException } from "@/lib/iap/jws-verify";
@@ -25,8 +25,35 @@ export const runtime = "nodejs";
  * keyed by original_transaction_id.
  */
 export async function POST(req: Request) {
+  const posthog = getPostHogClient();
+  // posthog-node batches sends; on serverless the function can freeze after
+  // returning the response and before the batch flushes, silently dropping
+  // the event. after() runs once the response is sent (the platform keeps the
+  // function alive for it), guaranteeing delivery of whatever we capture below.
+  after(async () => {
+    await posthog.flush().catch(() => {});
+  });
+
   const auth = await requireUser(req);
-  if (!auth.ok) return auth.response;
+  if (!auth.ok) {
+    // Guest purchase. The iOS client granted the entitlement locally and fired
+    // paywall_subscribed, but with no signed-in user there's no account to
+    // attach the subscription to. Previously this returned 401 with NO event,
+    // so the failure was invisible (client fires, server stays silent) — that
+    // discrepancy is exactly what hid this bug. Emit a failure event keyed on
+    // the device actor so it's diagnosable. The durable fix is client-side:
+    // gate the purchase on sign-in (see PaywallView).
+    const actorKey = req.headers.get("x-pa-actor-key")?.trim();
+    posthog.capture({
+      distinctId: actorKey && actorKey.length > 0 ? actorKey : "anonymous",
+      event: "subscription_verification_failed",
+      properties: {
+        reason: "unauthenticated",
+        platform: req.headers.get("x-pa-client-platform") ?? "unknown",
+      },
+    });
+    return auth.response;
+  }
 
   let body: { jwsRepresentation?: unknown };
   try {
@@ -42,8 +69,6 @@ export async function POST(req: Request) {
       { status: 400 },
     );
   }
-
-  const posthog = getPostHogClient();
 
   let payload;
   try {

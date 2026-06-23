@@ -230,8 +230,8 @@ public final class PremiumStore: ObservableObject {
             // the same purchase on every launch.
             await transaction.finish()
             await refreshStatus()
-            await syncEntitlementToServer(jws: verificationResult.jwsRepresentation)
-            return .success
+            let serverVerify = await syncEntitlementToServer(jws: verificationResult.jwsRepresentation)
+            return .success(serverVerified: serverVerify)
         case .userCancelled:
             return .userCancelled
         case .pending:
@@ -263,18 +263,38 @@ public final class PremiumStore: ObservableObject {
     // the user. The endpoint is idempotent on original_transaction_id, so
     // calling it on every purchase + restore is safe.
     //
-    // Failures are logged but never surface to the UI — the user already
-    // has the entitlement locally and the App Store Server Notifications
-    // V2 webhook keeps the row fresh on renewals/cancels independently.
+    // Failures don't block the UI — the user already has the entitlement
+    // locally and the ASSN V2 webhook keeps the row fresh on renewals/cancels
+    // independently. But the result IS returned now so the caller can fire a
+    // telemetry signal: a silently-swallowed verify failure is exactly the
+    // guest-purchase gap this path used to hide.
 
-    private func syncEntitlementToServer(jws: String) async {
+    @discardableResult
+    private func syncEntitlementToServer(jws: String) async -> ServerVerifyResult {
         do {
             let response = try await APIClient.verifyPurchase(jws: jws)
-            if !(response.ok && (response.isPro ?? false)) {
-                Logger.api.warning("[premium] /api/iap/verify ok=\(response.ok) isPro=\(String(describing: response.isPro)) error=\(response.error ?? "nil")")
+            if response.ok && (response.isPro ?? false) {
+                return .verified
             }
+            if response.ok {
+                // Server verified the receipt but doesn't consider the user
+                // Pro (e.g. a lapsed/expired transaction). Distinct from a
+                // hard failure — surfaced to telemetry, not an error.
+                Logger.api.warning("[premium] /api/iap/verify ok but not pro isPro=\(String(describing: response.isPro))")
+                return .notEntitled
+            }
+            Logger.api.warning("[premium] /api/iap/verify ok=false error=\(response.error ?? "nil")")
+            return .failed(reason: response.error ?? "server_not_ok")
+        } catch APIError.unauthorized {
+            // 401 — no signed-in user to attach the subscription to. The
+            // guest-purchase gap: StoreKit granted Pro locally but the server
+            // can't record it. The caller turns this into a loud telemetry
+            // signal rather than swallowing it.
+            Logger.api.warning("[premium] /api/iap/verify unauthorized — purchase made while signed out?")
+            return .unauthorized
         } catch {
             Logger.api.warning("[premium] /api/iap/verify failed: \(error.localizedDescription)")
+            return .failed(reason: error.localizedDescription)
         }
     }
 
@@ -361,7 +381,32 @@ public enum PremiumStatus: Equatable, Sendable {
 }
 
 public enum PurchaseOutcome: Equatable, Sendable {
-    case success
+    /// Purchase + local entitlement succeeded. `serverVerified` reports
+    /// whether the backend /api/iap/verify call also recorded the
+    /// subscription — `.verified` is the happy path; anything else means the
+    /// user is Pro on-device but the server doesn't know yet, so the caller
+    /// fires a telemetry event rather than letting it pass silently.
+    case success(serverVerified: ServerVerifyResult)
     case userCancelled
     case pending  // parental approval, etc.
+}
+
+/// Outcome of the server-side receipt verification POST. The local StoreKit
+/// entitlement is authoritative for UI regardless; this only reflects whether
+/// the backend acknowledged and recorded the subscription against a user.
+public enum ServerVerifyResult: Equatable, Sendable {
+    case verified                // server confirmed + recorded Pro
+    case unauthorized            // 401 — no signed-in user (guest purchase)
+    case notEntitled             // server responded ok but not Pro
+    case failed(reason: String)  // network / decode / other error
+
+    /// Short, low-cardinality tag for analytics properties.
+    public var telemetryReason: String {
+        switch self {
+        case .verified:     return "verified"
+        case .unauthorized: return "unauthorized"
+        case .notEntitled:  return "not_entitled"
+        case .failed:       return "failed"
+        }
+    }
 }
