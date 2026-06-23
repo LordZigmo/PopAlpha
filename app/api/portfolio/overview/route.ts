@@ -13,6 +13,7 @@ import {
   computeRadarProfile,
   computeBadges,
   isGraded,
+  lookupHoldingPrice,
 } from "@/lib/data/portfolio";
 import { normalizeHoldingGrade, type GradeBucket } from "@/lib/holdings/grade-normalize";
 import { resolveCardImage } from "@/lib/images/resolve";
@@ -246,6 +247,48 @@ export async function GET(req: Request) {
       }
     }
 
+    // Printing-scoped prices for holdings that pinned a specific finish.
+    // Keyed `${slug}::${printing_id}::${bucket}` so lookupHoldingPrice values a
+    // Reverse Holo / stamped / edition holding at its own price, falling back
+    // to the canonical (printing-NULL) price when no per-printing metrics row
+    // exists. Bounded by the user's 120-row holdings limit.
+    const printingPriceIds = [...new Set(
+      holdings.map((h) => h.printing_id).filter(Boolean) as string[],
+    )];
+    if (printingPriceIds.length > 0) {
+      const printingBuckets = new Set<GradeBucket>();
+      for (const h of holdings) {
+        if (h.printing_id) printingBuckets.add(normalizeHoldingGrade(h.grade));
+      }
+      const { data: printingMetricRows, error: printingMetricErr } = await pub
+        .from("public_card_metrics")
+        .select("canonical_slug, printing_id, grade, market_price, median_7d, median_30d, trimmed_median_30d")
+        .in("canonical_slug", slugs)
+        .in("printing_id", printingPriceIds)
+        .in("grade", [...printingBuckets]);
+      if (printingMetricErr) throw new Error(printingMetricErr.message);
+      for (const row of (printingMetricRows ?? []) as Array<{
+        canonical_slug: string;
+        printing_id: string | null;
+        grade: string;
+        market_price: number | null;
+        median_7d: number | null;
+        median_30d: number | null;
+        trimmed_median_30d: number | null;
+      }>) {
+        if (!row.printing_id) continue;
+        // Same fallback chain as the graded canonical rows above: market_price
+        // is populated for RAW, null for graded buckets (median_* carries those).
+        const price = row.market_price
+          ?? row.median_7d
+          ?? row.median_30d
+          ?? row.trimmed_median_30d;
+        if (price != null) {
+          priceMap.set(`${row.canonical_slug}::${row.printing_id}::${row.grade}`, price);
+        }
+      }
+    }
+
     // Build per-slug card metadata for the iOS positions list
     const cardMetadata: Record<string, CardMetadata> = {};
     for (const slug of slugs) {
@@ -281,9 +324,7 @@ export async function GET(req: Request) {
       cardCount += qty;
       if (isGraded(h.grade)) gradedCount += qty; else rawCount += qty;
 
-      const bucket = normalizeHoldingGrade(h.grade);
-      const price = priceMap.get(`${h.canonical_slug}::${bucket}`)
-        ?? priceMap.get(`${h.canonical_slug}::RAW`)
+      const price = lookupHoldingPrice(priceMap, h.canonical_slug, h.grade, h.printing_id)
         ?? h.price_paid_usd;
       totalValue += price * qty;
       totalCostBasis += h.price_paid_usd * qty;

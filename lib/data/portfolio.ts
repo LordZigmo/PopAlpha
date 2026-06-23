@@ -13,14 +13,27 @@ import { normalizeHoldingGrade } from "@/lib/holdings/grade-normalize";
  * Each lookup tries the holding's own bucket first and falls back to RAW so
  * a graded holding without a per-bucket card_metrics row still contributes
  * its slug's RAW price rather than dropping to zero.
+ *
+ * Printing convention (2026-06): a holding may pin a specific finish via
+ * `printing_id`. When present, the lookup prefers a printing-scoped key
+ * `${slug}::${printingId}::${bucket}` (populated by the overview route from
+ * the per-printing card_metrics rows) so a Reverse Holo / stamped / edition
+ * holding is valued at its own price, falling back to the canonical
+ * (printing-NULL) price when no per-printing row exists.
  */
 
-function lookupHoldingPrice(
+export function lookupHoldingPrice(
   priceMap: Map<string, number>,
   slug: string,
   grade: string,
+  printingId?: string | null,
 ): number | undefined {
   const bucket = normalizeHoldingGrade(grade);
+  if (printingId) {
+    const scoped = priceMap.get(`${slug}::${printingId}::${bucket}`)
+      ?? priceMap.get(`${slug}::${printingId}::RAW`);
+    if (scoped != null) return scoped;
+  }
   return priceMap.get(`${slug}::${bucket}`) ?? priceMap.get(`${slug}::RAW`);
 }
 
@@ -70,6 +83,7 @@ type HoldingInput = {
   qty: number;
   grade: string;
   price_paid_usd: number;
+  printing_id?: string | null;
 };
 
 type CardMeta = {
@@ -119,7 +133,7 @@ export function computeAttributes(
       if (num != null) { gradeSum += num * qty; gradeCount += qty; }
     }
 
-    const marketPrice = lookupHoldingPrice(priceMap, h.canonical_slug, h.grade) ?? h.price_paid_usd;
+    const marketPrice = lookupHoldingPrice(priceMap, h.canonical_slug, h.grade, h.printing_id) ?? h.price_paid_usd;
     const positionValue = marketPrice * qty;
     holdingValues.push(positionValue);
     totalValue += positionValue;
@@ -252,7 +266,7 @@ export function computeComposition(
   for (const h of holdings) {
     const meta = cardMap.get(h.canonical_slug);
     const era = classifyEra(meta?.year ?? null);
-    const price = lookupHoldingPrice(priceMap, h.canonical_slug, h.grade) ?? h.price_paid_usd;
+    const price = lookupHoldingPrice(priceMap, h.canonical_slug, h.grade, h.printing_id) ?? h.price_paid_usd;
     const val = price * (h.qty || 1);
 
     eraValues[era] = (eraValues[era] || 0) + val;
@@ -447,7 +461,7 @@ export function computeRadarProfile(
     if (isTasteRarity(printMeta?.rarity)) tasteQty += qty;
     if (isChaseRarity(printMeta?.rarity)) chaseRarityQty += qty;
 
-    const price = lookupHoldingPrice(priceMap, h.canonical_slug, h.grade) ?? 0;
+    const price = lookupHoldingPrice(priceMap, h.canonical_slug, h.grade, h.printing_id) ?? 0;
     if (price >= 500) grailQty += qty;
 
     if (isPopularCharacter(meta?.subject)) popularCharacterQty += qty;
@@ -559,7 +573,7 @@ function buildBadgeContext(
 
     if (isGraded(h.grade)) gradedQty += qty;
 
-    const price = lookupHoldingPrice(priceMap, h.canonical_slug, h.grade) ?? 0;
+    const price = lookupHoldingPrice(priceMap, h.canonical_slug, h.grade, h.printing_id) ?? 0;
     if (price >= 500) grailCount += qty;
   }
 
@@ -687,11 +701,14 @@ export function computeTopHoldings(
   changeMap: Map<string, number>,
   imageMap: Map<string, string>,
 ): TopHoldingResult[] {
-  // Group by slug+grade, sum qty
-  const groups = new Map<string, { slug: string; grade: string; qty: number; cost: number }>();
+  // Group by slug+printing+grade, sum qty. printing_id is part of the key so
+  // a Reverse Holo (or other finish) is a distinct position from the canonical
+  // print of the same card+grade and is valued at its own price.
+  const groups = new Map<string, { slug: string; grade: string; printingId: string | null; qty: number; cost: number }>();
   for (const h of holdings) {
-    const key = `${h.canonical_slug}::${h.grade}`;
-    const g = groups.get(key) ?? { slug: h.canonical_slug, grade: h.grade, qty: 0, cost: 0 };
+    const printingId = h.printing_id ?? null;
+    const key = `${h.canonical_slug}::${printingId ?? ""}::${h.grade}`;
+    const g = groups.get(key) ?? { slug: h.canonical_slug, grade: h.grade, printingId, qty: 0, cost: 0 };
     g.qty += h.qty;
     g.cost += h.price_paid_usd * h.qty;
     groups.set(key, g);
@@ -699,7 +716,7 @@ export function computeTopHoldings(
 
   const enriched: EnrichedHolding[] = [...groups.values()].map((g) => {
     const meta = cardMap.get(g.slug);
-    const mp = lookupHoldingPrice(priceMap, g.slug, g.grade) ?? 0;
+    const mp = lookupHoldingPrice(priceMap, g.slug, g.grade, g.printingId) ?? 0;
     return {
       canonical_slug: g.slug,
       qty: g.qty,
