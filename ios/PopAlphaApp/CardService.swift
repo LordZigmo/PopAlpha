@@ -963,6 +963,26 @@ struct CardPrintingOption: Decodable, Identifiable, Hashable {
         }
     }
 
+    /// Disambiguating label for the add-to-portfolio / multi-scan finish
+    /// pickers. finishLabel alone collides when a card has e.g. a 1st-Edition
+    /// and an Unlimited print of the same finish, or a stamped variant, so
+    /// fold in the stamp and (non-default) edition. UNLIMITED is the implicit
+    /// default and stays unlabeled to keep the common pill short.
+    var pickerLabel: String {
+        var parts: [String] = [finishLabel]
+        if let stamp, !stamp.isEmpty {
+            parts.append(CardPrintingOption.stampLabel(stamp))
+        }
+        if let edition, !edition.isEmpty, edition.uppercased() != "UNLIMITED" {
+            parts.append(
+                edition.split(separator: "_")
+                    .map { $0.prefix(1).uppercased() + $0.dropFirst().lowercased() }
+                    .joined(separator: " ")
+            )
+        }
+        return parts.joined(separator: " · ")
+    }
+
     static func stampLabel(_ stamp: String) -> String {
         switch stamp.uppercased() {
         case "POKE_BALL_PATTERN":   return "Poké Ball"

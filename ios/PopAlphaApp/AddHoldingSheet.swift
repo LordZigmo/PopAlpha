@@ -22,6 +22,12 @@ struct AddHoldingSheet: View {
     @State private var isGraded: Bool = false
     @State private var selectedGrade: GradeOption = .psa10
     @State private var quantity = 1
+    /// Finishes/printings for the selected card. Populated by loadPrintings.
+    /// The finish picker only renders when there's a real choice (>= 2).
+    @State private var availablePrintings: [CardPrintingOption] = []
+    /// nil → "Default" (canonical preferred printing). A specific id pins the
+    /// lot to that finish.
+    @State private var selectedPrintingId: String?
     @State private var pricePaid = ""
     @State private var acquiredDate: Date = Date()
     @State private var venue = ""
@@ -59,6 +65,12 @@ struct AddHoldingSheet: View {
                     VStack(spacing: 20) {
                         cardSearchSection
                         if selectedCard != nil {
+                            // Only a meaningful choice when the card has 2+
+                            // printings; single-printing cards skip the picker
+                            // and price off their sole printing.
+                            if availablePrintings.count >= 2 {
+                                finishSection
+                            }
                             gradeSection
                             quantitySection
                             priceSection
@@ -77,6 +89,12 @@ struct AddHoldingSheet: View {
                     }
                     .padding(PA.Layout.sectionPadding)
                     .padding(.bottom, 100)
+                }
+                // Fetch finishes whenever the selected card changes (fires on
+                // appear for a preselected card, and resets to nil/[] when the
+                // card is cleared).
+                .task(id: selectedCard?.canonicalSlug) {
+                    await loadPrintings()
                 }
             }
             .navigationTitle("Add to Collection")
@@ -203,6 +221,64 @@ struct AddHoldingSheet: View {
         }
         .padding(12)
         .glassSurface(radius: 12)
+    }
+
+    // MARK: - Finish
+
+    private var finishSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Finish")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(PA.Colors.muted)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    finishPill(title: "Default", selected: selectedPrintingId == nil) {
+                        PAHaptics.selection()
+                        selectedPrintingId = nil
+                    }
+                    ForEach(availablePrintings) { printing in
+                        finishPill(
+                            title: printing.pickerLabel,
+                            selected: selectedPrintingId == printing.id
+                        ) {
+                            PAHaptics.selection()
+                            selectedPrintingId = printing.id
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func finishPill(title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(selected ? PA.Colors.background : PA.Colors.text)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(selected ? PA.Colors.accent : PA.Colors.surfaceSoft)
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Loads the selected card's printings and resets the picker. Always
+    /// clears first so a card swap can't carry the prior card's selection.
+    /// Failure / single-printing leaves the picker hidden (count < 2).
+    private func loadPrintings() async {
+        selectedPrintingId = nil
+        availablePrintings = []
+        guard let slug = selectedCard?.canonicalSlug else { return }
+        guard let printings = try? await CardService.shared.fetchPrintings(slug: slug) else { return }
+        // The card may have changed (or been cleared) while the fetch was in
+        // flight — .task(id:) cancels cooperatively but the network await can
+        // still resolve. Only write if this fetch is still for the selected
+        // card, else B would show A's pills and saveHolding would pair B's slug
+        // with A's printing_id.
+        guard selectedCard?.canonicalSlug == slug else { return }
+        availablePrintings = printings
     }
 
     // MARK: - Grade
@@ -432,7 +508,8 @@ struct AddHoldingSheet: View {
                 pricePaidUsd: parsedPrice,
                 acquiredOn: dateStr,
                 venue: venue.isEmpty ? nil : venue,
-                certNumber: certToSend
+                certNumber: certToSend,
+                printingId: selectedPrintingId
             )
             PAHaptics.success()
             onAdded?()
