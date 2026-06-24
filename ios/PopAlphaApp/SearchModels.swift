@@ -21,6 +21,12 @@ struct SearchCardResult: Codable, Identifiable, Hashable {
         guard let num = cardNumber else { return nil }
         return "#\(num)"
     }
+
+    /// JP vs EN, from the canonical-slug suffix — the same signal the EN/JP
+    /// toggle and price resolver use (CardDetailView, MultiScanSession). JP
+    /// canonical slugs end in `-jp`; EN slugs don't. Drives the search-result
+    /// language pill so a JP printing isn't tapped by mistake.
+    var isJapanese: Bool { canonicalSlug.hasSuffix("-jp") }
 }
 
 struct SearchResponse: Decodable {
